@@ -8,11 +8,15 @@
  * (packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts) runs the
  * same script with its own list.
  */
+import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   BUILD,
   SKIP,
+  globToRegExp,
+  hermeticEnv,
   makeRepo,
   parseIgnoreCommand,
   readIgnoreCommand,
@@ -54,6 +58,8 @@ describe('ops Vercel ignore step (#3591, #3594)', () => {
         '.nvmrc',
       ]),
     )
+    // #3681 added `!` excludes for the frontend only; the console's list has none.
+    expect(watched.filter((entry: string) => entry.startsWith('!'))).toEqual([])
   })
 
   it('skips when nothing the console builds from changed since the last deployment', () => {
@@ -169,6 +175,103 @@ describe('ops Vercel ignore step (#3591, #3594)', () => {
       }
     })
 
+    // The first build log after #3601 (PR #3622's first preview, #3594) read
+    // "no merge base with dev found (none in the clone, and fetching dev failed
+    // or shares no commit)": these cases cover each cause it lumped together.
+    const withClone = (opts: { withOrigin?: boolean; depth?: number }, body: (dir: string) => void) => {
+      const dir = r.shallowClone(opts)
+      try {
+        body(dir)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }
+
+    it('fetches dev from the public repository URL when the clone has no origin', () => {
+      r.commit('packages/ops/src/a.ts') // on dev, before the branch
+      r.git('checkout', '-q', '-b', 'feature')
+      r.commit('docs/guide.md')
+      const url = { IGNORE_BUILD_DEV_URL: `file://${r.repo}` }
+      withClone({ depth: 3 }, (dir) => expect(r.run({ ...preview(), ...url }, dir)).toBe(SKIP))
+      r.commit('packages/ops/src/b.ts')
+      withClone({ depth: 3 }, (dir) => expect(r.run({ ...preview(), ...url }, dir)).toBe(BUILD))
+    })
+
+    it('falls back to the public repository URL when fetching from origin fails', () => {
+      r.git('checkout', '-q', '-b', 'feature')
+      r.commit('docs/guide.md')
+      withClone({ withOrigin: true, depth: 3 }, (dir) => {
+        execFileSync('git', ['remote', 'set-url', 'origin', `file://${dir}-gone`], { cwd: dir, env: hermeticEnv() })
+        expect(r.run({ ...preview(), IGNORE_BUILD_DEV_URL: `file://${r.repo}` }, dir)).toBe(SKIP)
+      })
+    })
+
+    it('derives that URL from Vercel\'s GitHub owner and slug', () => {
+      r.git('checkout', '-q', '-b', 'feature')
+      r.commit('docs/guide.md')
+      // Map the derived https URL onto the local repository, so the test
+      // proves the exact URL the script asks for without the network.
+      const mapped = {
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: `url.file://${r.repo}.insteadOf`,
+        GIT_CONFIG_VALUE_0: 'https://github.com/acme/haven.git',
+      }
+      const vercel = { VERCEL_GIT_PROVIDER: 'github', VERCEL_GIT_REPO_OWNER: 'acme', VERCEL_GIT_REPO_SLUG: 'haven' }
+      withClone({ depth: 3 }, (dir) => expect(r.run({ ...preview(), ...vercel, ...mapped }, dir)).toBe(SKIP))
+      // Another provider gets no URL, and says so.
+      withClone({ depth: 3 }, (dir) => {
+        const { status, log } = r.runLog({ ...preview(), ...vercel, ...mapped, VERCEL_GIT_PROVIDER: 'gitlab' }, dir)
+        expect(status).toBe(BUILD)
+        expect(log).toContain("no origin remote, and no public repository URL (provider 'gitlab', owner 'acme', slug 'haven')")
+      })
+    })
+
+    it('deepens the clone once when the shallow histories share no commit', () => {
+      r.commit('packages/ops/src/a.ts') // on dev, before the branch
+      r.git('checkout', '-q', '-b', 'feature')
+      r.commit('docs/guide.md')
+      r.commit('docs/more.md')
+      // Depth 1: the clone holds the tip alone, so dev's fetched history and
+      // the clone meet nowhere until the branch side is deepened.
+      withClone({ withOrigin: true, depth: 1 }, (dir) => expect(r.run(preview(), dir)).toBe(SKIP))
+      r.commit('packages/ops/src/b.ts')
+      withClone({ withOrigin: true, depth: 1 }, (dir) => expect(r.run(preview(), dir)).toBe(BUILD))
+    })
+
+    it('deepens from the public repository URL when that is the source that answered', () => {
+      r.commit('packages/ops/src/a.ts') // on dev, before the branch
+      r.git('checkout', '-q', '-b', 'feature')
+      r.commit('docs/guide.md')
+      r.commit('docs/more.md')
+      const url = { IGNORE_BUILD_DEV_URL: `file://${r.repo}` }
+      withClone({ depth: 1 }, (dir) => expect(r.run({ ...preview(), ...url }, dir)).toBe(SKIP))
+    })
+
+    it('ignores an override URL git would read as an option', () => {
+      r.git('checkout', '-q', '-b', 'feature')
+      r.commit('docs/guide.md')
+      withClone({ depth: 1 }, (dir) => {
+        const { status, log } = r.runLog({ ...preview(), IGNORE_BUILD_DEV_URL: '--upload-pack=touch /tmp/x' }, dir)
+        expect(status).toBe(BUILD)
+        expect(log).toContain('no public repository URL')
+      })
+    })
+
+    it('names the step that failed when it cannot find a merge base', () => {
+      r.git('checkout', '-q', '-b', 'feature')
+      r.commit('docs/guide.md')
+      withClone({ depth: 1 }, (dir) => {
+        const { status, log } = r.runLog(preview(), dir)
+        expect(status).toBe(BUILD)
+        expect(log).toContain('no dev ref in the clone, no origin remote, and no public repository URL')
+      })
+      withClone({ depth: 1 }, (dir) => {
+        const { status, log } = r.runLog({ ...preview(), IGNORE_BUILD_DEV_URL: `file://${r.repo}-gone` }, dir)
+        expect(status).toBe(BUILD)
+        expect(log).toContain(`fetching dev failed from: file://${r.repo}-gone`)
+      })
+    })
+
     it('never applies to the dev or main branches, whose deployments must never be stale', () => {
       r.commit('docs/guide.md')
       expect(r.run(preview('dev'))).toBe(BUILD)
@@ -191,5 +294,66 @@ describe('ops Vercel ignore step (#3591, #3594)', () => {
     expect(r.run({ VERCEL_GIT_PREVIOUS_SHA: deployed, OPS_FORCE_BUILD: '0' })).toBe(SKIP)
     // The other project's force variable does not force this one.
     expect(r.run({ VERCEL_GIT_PREVIOUS_SHA: deployed, FRONTEND_FORCE_BUILD: '1' })).toBe(SKIP)
+  })
+})
+
+describe('exclude entries, on a synthetic watch list (#3681)', () => {
+  let s: ReturnType<typeof makeRepo>
+  const withList = (watchContent: string) => {
+    s = makeRepo({ project: 'ops', command: ignoreCommand, watchContent })
+    return s
+  }
+  afterEach(() => s?.cleanup())
+
+  it('a `!` glob excludes matching files under an include, and only those', () => {
+    const t = withList('packages/ops\n!packages/ops/**/__tests__/**\n')
+    const deployed = t.commit('packages/ops/src/a.ts')
+    t.commit('packages/ops/src/__tests__/setup.ts') // not test-named: the __tests__ glob alone excludes it
+    expect(t.run({ VERCEL_GIT_PREVIOUS_SHA: deployed })).toBe(SKIP)
+    t.commit('packages/ops/src/__testsx/a.ts')
+    expect(t.run({ VERCEL_GIT_PREVIOUS_SHA: deployed })).toBe(BUILD)
+  })
+
+  it.each([
+    ['a bare `!`', 'packages/ops\n!\n'],
+    ['a `!` followed by whitespace', 'packages/ops\n! packages/ops/a\n'],
+    ['excludes only', '!packages/ops/**/__tests__/**\n'],
+  ])('builds on %s, which would otherwise skip every change', (_name, list) => {
+    const t = withList(list)
+    const deployed = t.commit('packages/backend/a.ts')
+    t.commit('packages/ops/src/__tests__/b.ts') // each malformed list would skip this
+    expect(t.run({ VERCEL_GIT_PREVIOUS_SHA: deployed })).toBe(BUILD)
+  })
+})
+
+/**
+ * #3681: every push to any branch used to create a haven-ops deployment, a
+ * skipped one included, and skipped deployments count toward Vercel Hobby's
+ * daily cap. A preview of the console cannot sign in anyway
+ * (docs/operations/ops-console.md), so only `dev`, its Production Branch,
+ * deploys. Vercel deploys a branch when ANY `true` rule matches it.
+ */
+describe('ops Vercel project deploys from dev only (#3681)', () => {
+  const config = JSON.parse(readFileSync(join(PACKAGE_ROOT, 'vercel.json'), 'utf8'))
+  const rules = Object.entries(config.git?.deploymentEnabled ?? {}) as Array<[string, boolean]>
+  // Vercel deploys a branch that matches no rule, so the `**: false` rule is
+  // what keeps a feature branch from deploying.
+  const deploys = (branch: string) => {
+    const matched = rules.filter(([glob]) => globToRegExp(glob).test(branch))
+    return matched.length === 0 || matched.some(([, on]) => on === true)
+  }
+
+  it('turns every branch off and dev on', () => {
+    expect(config.git.deploymentEnabled).toEqual({ '**': false, dev: true })
+  })
+
+  it.each([
+    ['dev', true],
+    ['main', false],
+    ['feat/1234-x', false],
+    ['release/0.5.0', false],
+    ['development', false],
+  ])('branch %s deploys: %s', (branch, expected) => {
+    expect(deploys(branch)).toBe(expected)
   })
 })

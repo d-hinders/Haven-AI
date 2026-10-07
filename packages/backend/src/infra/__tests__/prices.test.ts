@@ -56,8 +56,8 @@ describe('the per-test cache reset itself (#2620)', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(GOOD))
     const { getTokenPrice } = await freshPrices()
 
-    await getTokenPrice('USDC.e')
-    await getTokenPrice('USDC.e')
+    await getTokenPrice('USDC')
+    await getTokenPrice('USDC')
     // ONE network call for two reads — the module-level cache is live, which is
     // the thing the reset has to undo.
     expect(fetchSpy).toHaveBeenCalledTimes(1)
@@ -68,7 +68,7 @@ describe('the per-test cache reset itself (#2620)', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(GOOD))
     const { getTokenPrice } = await freshPrices()
 
-    await getTokenPrice('USDC.e')
+    await getTokenPrice('USDC')
     // If the reset were a no-op, the entry cached one test earlier would still
     // be inside its 60 s TTL and this would be 0.
     expect(fetchSpy).toHaveBeenCalledTimes(1)
@@ -93,7 +93,7 @@ describe('fetchTokenPrices cache poisoning guard', () => {
 
     await expect(fetchTokenPrices()).rejects.toThrow(/no usable prices/)
 
-    const price = await getTokenPrice('USDC.e')
+    const price = await getTokenPrice('USDC')
     expect(price.sek).toBe(10.5)
     // Two real network attempts: the degraded one was never cached.
     expect(fetchSpy).toHaveBeenCalledTimes(2)
@@ -119,5 +119,19 @@ describe('fetchTokenPrices cache poisoning guard', () => {
     expect([...quoted].sort()).toEqual(
       SUPPORTED_LEDGER_CURRENCIES.map((c) => c.toLowerCase()).sort(),
     )
+  })
+})
+
+describe('prices cover only supported chains (#3669)', () => {
+  it('quotes Base tokens and none of the history-only Gnosis ones (USDC.e, EURe, xDAI)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(GOOD))
+    const { fetchTokenPrices } = await freshPrices()
+
+    const map = await fetchTokenPrices()
+
+    expect(Object.keys(map)).toContain('USDC')
+    for (const gnosisOnly of ['USDC.e', 'EURe', 'xDAI']) {
+      expect(Object.keys(map)).not.toContain(gnosisOnly)
+    }
   })
 })

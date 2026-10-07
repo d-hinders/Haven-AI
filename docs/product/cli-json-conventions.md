@@ -28,7 +28,7 @@ decision instead of the inconsistency.
 | **`wallets balances`** | camelCase — the one command that re-maps |
 | a **prepared-action** result (grant, revoke) | CLI-chosen snake keys spread over the backend's object |
 | **`activity export`** | the body inside an `{ "ok": true, … }` wrapper under `--json` — snake_case headers for csv, a verifikat file for sie |
-| **any failure** | `{ "ok": false, "error": { "code", "message", "hint"? } }` |
+| **any failure** | `{ "ok": false, "error": { "code", "message", "hint"? } }` — a command may add its own typed fields beside these (`feedback submit`'s secret-check refusal adds `layer`/`reason`, #3597) |
 | the **on-disk credential file** | `account_address`, possibly still `safe_address` on an old install |
 
 ## Why the split stays
@@ -262,7 +262,12 @@ Every command that fails returns the same shape, whatever it was doing:
 ```
 
 `hint` is optional. This is the shape an agent parses most often, so it is worth
-branching on `ok` before anything else.
+branching on `ok` before anything else. A command MAY add its own typed
+fields beside `code`/`message`/`hint` when a free-text hint is not enough to
+branch on — `feedback submit`'s secret-check refusal adds `layer` (which of
+the four checks refused) and `reason` (#3597); `output.ts`'s `failure()`
+spreads them BEFORE the shared fields, so a command's own fields can never
+shadow `code`, `message` or `hint`.
 
 Re-verified 2026-09-30 (weekly docs audit #3413, at dev `5b5bd059`). No claim
 needed rewriting. `npm run lint:vocabulary` exits green at this head with the
@@ -280,3 +285,11 @@ the `safe_address` permanent fallback in the connector's doctor
 commits since the last verification touched no envelope: `#3415` changed
 upgrade-hint TEXT only, and the 0.7.0-alpha.0 release bump is the version
 constant.
+
+**#3597 (2026-10-02).** `feedback submit`'s secret-check refusal is the
+first command to add typed fields (`layer`, `reason`) beside the shared
+failure shape — the two paragraphs above now say a command may do this, and
+that the shared fields always win (`output.ts`'s `failure()` spreads a
+command's `extra` BEFORE `code`/`message`/`hint`, not after). No other
+envelope in this document changed. `last-verified` is not bumped: this is a
+scoped addition, not a re-read of the whole document.

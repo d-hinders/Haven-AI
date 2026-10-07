@@ -3,7 +3,7 @@
 import { ChevronRight, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useRef } from 'react'
-import { getChainConfig } from '@/lib/chains'
+import { resolveChainOrNull } from '@/lib/chains'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import type { SmartAccount } from '@/context/AuthContext'
@@ -76,7 +76,7 @@ export default function DashboardActionPickerModal({
                     )}
                   </div>
                   <p className="text-xs text-[var(--v2-ink-3)] mt-1">
-                    {getChainConfig(account.chain_id).name}
+                    {resolveChainOrNull(account.chain_id)?.name ?? `Chain ${account.chain_id}`}
                   </p>
                 </div>
                 <Icon icon={ChevronRight} className="w-4 h-4 text-[var(--v2-ink-3)] flex-shrink-0" />

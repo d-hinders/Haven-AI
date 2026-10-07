@@ -65,7 +65,6 @@ const GUARDED_FILES = [
   'packages/frontend/src/app/signup/page.tsx',
   'packages/frontend/src/components/UsingYourAgentInfo.tsx',
   'packages/frontend/src/components/EditAgentModal.tsx',
-  'packages/frontend/src/components/connect-agent/ReviewStep.tsx',
   'packages/frontend/src/app/(authenticated)/agents/[agentId]/AgentDetailClient.tsx',
   'packages/frontend/src/lib/agent-handoff.ts',
   'packages/frontend/src/lib/agent-skill-bundle.ts',

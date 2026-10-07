@@ -20,7 +20,6 @@ covers:
   - packages/frontend/src/components/brand/AppIconArtwork.tsx
   - packages/frontend/src/app/page.tsx
   - packages/frontend/src/app/how-it-works/**
-  - packages/frontend/src/app/protocols/**
   - packages/frontend/src/app/developers/**
   - packages/frontend/src/app/for-agents/**
   - packages/frontend/src/app/(authenticated)/design-system/**
@@ -29,6 +28,8 @@ covers:
   - packages/frontend/src/components/sidebar/**
   - packages/frontend/src/components/TopBar.tsx
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
+  - packages/frontend/src/components/haven/BudgetMeter.tsx
+  - packages/frontend/src/components/haven/ApprovalRequiredBanner.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
   - packages/frontend/src/components/transactions/**
   - packages/frontend/src/components/haven/LabelChip.tsx
@@ -94,7 +95,7 @@ covers:
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
-last-verified: "2026-10-02"
+last-verified: "2026-10-06"
 ---
 
 # Haven Design System
@@ -104,15 +105,21 @@ last-verified: "2026-10-02"
 > census intentionally keeps a one-member anti-vacuity floor. This note covers
 > the affected references only; the rest of this document was not re-read.
 
+> Re-verified 2026-10-06 for #3701: § Arrows' expected-output table was retired
+> (the shell pipeline's output had drifted from the table pasted beside it) and
+> the comment-aware allowlist test is named the check of record instead. This
+> note covers § Arrows and the § Icons pointer to it only; the rest of this
+> document was not re-read.
+
 This is the source of truth for Haven's current light visual language. Companion to the product UX guide (`docs/product/README.md`, which documents product doctrine, vocabulary, and IA — those rules **still apply**). If older docs mention a dark app surface system, **this document supersedes them**.
 
-The production authenticated app and `/design-system` are the live references for product UX. The production marketing routes are the live references for marketing UX: `/`, `/how-it-works`, `/protocols/x402`, and `/protocols/mpp`. When in doubt, open the live route, inspect the element, and match the system here.
+The production authenticated app and `/design-system` are the live references for product UX. The production marketing routes are the live references for marketing UX: `/`, `/how-it-works`, `/how-it-works/protocols`, `/developers` and `/for-agents`. When in doubt, open the live route, inspect the element, and match the system here.
 
 ---
 
 ## 1. Tokens
 
-All tokens live as CSS custom properties at `:root` in `packages/frontend/src/app/globals.css`. Core color, radius, and shadow tokens are mirrored in `packages/frontend/tailwind.config.js` so they are usable as `bg-bg`, `text-ink`, `border-border`, `shadow-card`, etc. Since [#1945](https://github.com/d-hinders/Haven-AI/issues/1945) that mirror covers the **whole** elevation scale — raised cards and popovers were the two tiers still missing, which is exactly why their call sites reached for the arbitrary-value form that turned out to paint nothing (§ Shadows). Typography utilities, the modal backdrop and the brand gradient remain CSS variables/classes only, deliberately: the first is a set of composite classes and the last two have no Tailwind utility family to join.
+All tokens live as CSS custom properties at `:root` in `packages/ui/src/tokens.css` (moved from the dashboard's `globals.css` in #3508 so the dashboard and the ops console read one palette). Core color, radius, and shadow tokens are mirrored in the shared Tailwind preset `packages/ui/tailwind.preset.js`, which `packages/frontend/tailwind.config.js` and the ops console's config consume, so they are usable as `bg-bg`, `text-ink`, `border-border`, `shadow-card`, etc. Since [#1945](https://github.com/d-hinders/Haven-AI/issues/1945) that mirror covers the **whole** elevation scale — raised cards and popovers were the two tiers still missing, which is exactly why their call sites reached for the arbitrary-value form that turned out to paint nothing (§ Shadows). Typography utilities, the modal backdrop and the brand gradient remain CSS variables/classes only, deliberately: the first is a set of composite classes and the last two have no Tailwind utility family to join.
 
 **Every colour token has a dark value ([#2927](https://github.com/d-hinders/Haven-AI/issues/2927)).** The tables below carry a dark column alongside the light value. Mechanically: the light palette is the bare `:root` block; the dark values are re-declared in TWO byte-identical blocks —
 
@@ -259,7 +266,7 @@ modifier (`/75`), or the arbitrary form when the exact value matters (`/[0.78]`)
 
 ### Chain identity
 
-`--v2-chain-*` (Base, testnet, a legacy Gnosis token that historical rows still use, plus `NetworkPill`'s sky/amber soft-pill scale) tells networks apart in `NetworkPill` and `NetworkSwitcher`. These are **identity** colours — deliberately outside the semantic rule above. Never reuse a chain colour to carry success/warning meaning, and never route money tone through them. Live swatches on `/design-system` → "Colour tokens".
+`--v2-chain-*` (Base, testnet, plus `NetworkPill`'s sky/amber soft-pill scale) tells networks apart in `NetworkPill` and `NetworkSwitcher`. These are **identity** colours — deliberately outside the semantic rule above. Never reuse a chain colour to carry success/warning meaning, and never route money tone through them. Live swatches on `/design-system` → "Colour tokens".
 
 ### Radii
 
@@ -483,7 +490,7 @@ band gains nothing from a filter — and an opaque band gives the OS-drawn statu
 glyphs a fixed backdrop instead of one that drifts with the page, which is why
 `SafeAreaBand` defaults to `bg-bg`. Where the bar's own background is
 translucent by design the band should match it rather than invent a second
-colour: the marketing `SiteHeader` passes `bg-transparent` so its dark-section
+colour: the public site's `Header` passes `bg-transparent` so its dark-section
 tint shows through. That is a real exception to *opaque*, and not one to
 *unfiltered*.
 
@@ -528,7 +535,7 @@ The general point, since it will recur: when a dead style rule comes back to lif
 
 Font: Inter (already loaded via `next/font/google` in `app/layout.tsx`, in both `packages/frontend` and `packages/ops` (#3584)). Optional later: switch headings to Inter Display.
 
-Authenticated app pages use compact product typography utilities from `globals.css`:
+Authenticated app pages use compact product typography utilities from `@haven_ai/ui/type.css` (`packages/ui/src/type.css`, #3611), which both the dashboard and the ops console import after their own `globals.css`; `.v2-tabular` (tabular numerals) lives there too. Before #3611 these rules lived only in the dashboard's `globals.css`, so the ui primitives that use them styled nothing in the ops console:
 
 | Utility | Size / line-height | Weight | Tracking | Use |
 |---|---:|---:|---:|---|
@@ -585,15 +592,26 @@ Use `components/ui/PageHeader.tsx` on authenticated pages instead of hand-rolled
 - Optional uppercase eyebrow.
 - One compact h1 using `.v2-text-h1`.
 - Optional subtitle using `.v2-text-body`.
+- Optional quiet metadata line under the subtitle (`meta`): `v2-text-meta` in
+  ink-3, for the "My account · Base · Created … · Last activity …" register on
+  detail pages ([#3692](https://github.com/d-hinders/Haven-AI/issues/3692)).
+  It wraps as text alongside the header actions at phone width — the #2821
+  390 px header regression is the constraint it is designed against — because
+  a quiet identity line is text that can break, not a control that must stay
+  whole.
+  Additive — a `PageHeader` without `meta` renders exactly as before.
 - Right-side actions that wrap on narrow viewports — and **stack onto their own
   row below `sm`**, which is right for a row of labelled buttons and wrong for a
   single icon-only control.
 - `inlineActions` keeps the actions on the title's row at every width
   ([#2821](https://github.com/d-hinders/Haven-AI/issues/2821)). Reach for it
-  when the slot holds one icon-only control: on agent detail it holds the kebab
-  alone — the `StatusBadge` beside it renders `null` while the agent is active —
-  and the stacked row was a lone bordered icon, left-aligned, belonging visually
-  to nothing.
+  when the slot holds one icon-only control: on agent detail it once held the
+  kebab alone — the `StatusBadge` beside it renders `null` while the agent is
+  active — and the stacked row was a lone bordered icon, left-aligned, belonging
+  visually to nothing. Since [#3694](https://github.com/d-hinders/Haven-AI/issues/3694)
+  Pause or Resume sits beside the kebab, so agent detail inlines only for the
+  one state with a lone kebab left (an archived agent that was never revoked);
+  two controls take the default stacking, as one row under the title.
 
   It is a **prop, not a `Children.count`**. Counting tells you how many nodes
   there are, not whether they are icon-only, and a caller wrapping its actions
@@ -601,6 +619,49 @@ Use `components/ui/PageHeader.tsx` on authenticated pages instead of hand-rolled
   the primitive owns what to do about it.
 
 Do not use marketing hero typography for normal authenticated pages.
+
+### Detail-page section rule (#3692)
+
+On an **entity detail page** — an agent or an account — the page is a stack of
+labelled sections, and every section is assembled the same way. The rule is
+scoped to entity detail pages: not list pages, not settings, not modals (a
+modal keeps its own callout vocabulary — see #3690's in-modal neutral callout,
+which this rule does not touch).
+
+- Each section's heading (`v2-text-h3`) and its one-line description sit
+  **above** its `Card`, not inside it. The card holds the content — rows,
+  `Card.Section` groups and their dividers — so the card can load, swap or be
+  replaced without moving its heading, and a skimming reader gets every section
+  name from the heading scan alone. (This retires the mix the agent page had:
+  "Agent budgets" was headed from inside its card while "Recent activity" was
+  headed from above — epic #3691's later slices apply the rule there.)
+- State banners (`ApprovalRequiredBanner`) do not scatter through the page.
+  They stack in ONE slot directly under the `PageHeader`, ordered by severity:
+  `danger` first (the next action cannot be undone), then `warning` (something
+  needs attention — a half-revoked credential, stranded funds, an exhausted
+  budget), then `neutral` (informational — paused, snapshot reads). Within a
+  tone, the banner that asks the user for a decision comes first. The slot
+  opens the page on the thing that needs doing, before any content card.
+- The `PageHeader`'s own `meta` line (above) carries the entity's quiet
+  identity row — account, network, created, last activity — so the section
+  headings below stay about their sections.
+
+### BudgetMeter (#3692)
+
+`components/haven/BudgetMeter` is the ONE progress bar for a budget
+measurement — "how much of a delegation's own period is spent". An `h-1.5`
+`--v2-surface-2` track with a `--v2-brand` fill; `role="progressbar"` with the
+full ARIA contract (`aria-valuemin`, `aria-valuemax`, `aria-valuenow`,
+`aria-label`). It takes `usedPercent` — **clamped to 0–100**, so an overdrawn
+or malformed read can never push the fill past its track or the ARIA value
+outside its own declared range — and a `label`; an optional `caption` slot
+renders the "1.20 of 3.00 USDC used · refills …" line. The label row above the
+bar (token value, percentage) belongs to the caller: it is the caller's tabular
+typography, not part of the measurement. The fill is a token surface colour,
+never a series colour — a budget bar measures one delegation against its own
+period, it is not a category to be keyed against a legend. Recorded on
+`/design-system` → *BudgetMeter*; the analytics agents table renders through
+it.
 
 ### Buttons
 
@@ -650,8 +711,8 @@ rather than repeated per entry:
   (Through #1829 this section claimed the icon "slides 2px on hover via wrapper
   `group-hover:gap-2`". It never did: `Button` sets no `group` class and no call site wraps
   one. `group-hover:gap-2` is real, but it belongs to three hand-rolled marketing link
-  affordances — `app/page.tsx:299`, `:320`, `app/protocols/page.tsx:80` — none of which are
-  `Button`s. Corrected in #1830.)
+  affordances on the legacy landing and protocols pages (both retired by the site
+  switch-over, #3579) — none of which were `Button`s. Corrected in #1830.)
 
 **Busy state: no spinner, no `loading` prop (#2871).** An action in flight
 disables its button and swaps the label to `Verbing…` — `Preparing…`,
@@ -701,7 +762,7 @@ its *text* colour on hover (`ink-2` → `ink`), pinned by
 That difference has a shipped consequence, and it is the rule to take from it: **tertiary
 needs surrounding structure to be legible as pressable.** It works inside a dialog's action
 row or at the end of a card, where position tells you it is a control. It fails in running
-content — `connect-agent/SetupStates.tsx:219` records the case where a tertiary button
+content — `connect-agent/SetupStates.tsx:234` records the case where a tertiary button
 "rendered as stray bold text in the middle of a checklist rather than a control", and was
 changed to ghost for the border alone while keeping secondary weight. Reach for ghost when
 the control has to announce itself; tertiary when its context already has.
@@ -760,9 +821,10 @@ grep -rn "rounded-md font-medium tracking-tight" src --include='*.tsx' \
   | grep -v 'src/components/ui/Button.tsx'
 ```
 
-**Clean output today is 1 line** — the surviving `BrandBandButton` primitive at
-`components/marketing/BrandBandButton.tsx:75`. More than 1 is a new hand-copy;
-zero means the scanner lost its last live subject. The retired investor page was
+**Clean output today is 2 lines** — the surviving `BrandBandButton` primitive at
+`components/marketing/BrandBandButton.tsx:75`, and the home hero's CTA at
+`components/marketing/site/home/HeroCta.tsx:20` (#3574). More than 2 is a new
+hand-copy; zero means the scanner lost its live subjects. The retired investor page was
 the second member until #2468 deleted it.
 
 It was **4** until [#1867](https://github.com/d-hinders/Haven-AI/issues/1867), and the two
@@ -1472,34 +1534,8 @@ Standard rhythm:
 Sections alternate background:
 - Default: white (`--v2-bg`)
 - Surface band: `bg-[var(--v2-surface)] border-t border-[var(--v2-border)]`
-- Color band: see below
 
-### Hero (light section)
-
-Anatomy on every marketing page:
-1. **`HeroBackdrop`** — soft mesh of four blurred radial blobs (indigo, pink, cyan, amber) at ~0.3‑0.5 opacity, plus a fine dotted grid masked to fade out. Set `position: absolute inset-0` inside a `relative overflow-hidden` section. Hero content wrapper must be `relative` so it sits above.
-2. **Eyebrow pill** — `border border-[var(--v2-border)] bg-white/80 backdrop-blur`, with a pulsing brand dot.
-3. **Headline** — see typography. **One** phrase highlighted with the brand gradient (`bg-clip-text text-transparent`). Period after the gradient is plain ink. Line break with `<br />` for rhythm.
-4. **Lede** — short, ≤ 2 sentences.
-5. **CTA pair** — primary + ghost.
-6. **Optional right column** — flow card (homepage) or omitted (subpages).
-
-### Color band (dark indigo, used sparingly)
-
-Used for **one** mid‑page section per long page (currently the homepage Agent rules band) and the **bottom CTA**. Recipe:
-
-```css
-background:
-  radial-gradient(ellipse 80% 60% at 20% 0%, rgba(124,58,237,0.55) 0%, transparent 60%),
-  radial-gradient(ellipse 70% 70% at 100% 100%, rgba(236,72,153,0.45) 0%, transparent 55%),
-  linear-gradient(180deg, #1e1b4b 0%, #2e2a78 100%);
-```
-
-Plus a low‑opacity dotted texture masked from the centre. White text, eyebrow in `text-pink-300`, secondary text `text-white/75`. Metric tiles use `bg-white/[0.04]` with `gap-px` on a `bg-white/10` parent for hairline grid lines.
-
-**Bottom CTA band variant** is a brighter brand gradient (`#4f46e5 → #4338ca` with a pink wash) — bolder, used only for the conversion ask.
-
-**Limit:** at most one mid‑page color band + the bottom CTA band per page. Don't bookend or sandwich.
+The public site's own grounds, navy and indigo bands included, are `SiteSection`'s (§ Public site below).
 
 ### Code blocks (`CodeBlock`)
 
@@ -1507,20 +1543,11 @@ Dark code on light page (Stripe pattern). `bg-[var(--v2-surface-code)]` (#0b1120
 
 Long lines scroll sideways by default. Pass `wrap` for a **single-line copy command** whose tail matters, so it wraps at phone width instead of hiding it (`whitespace-pre-wrap [overflow-wrap:anywhere]`; the `/releases` update command, whose `--doctor` was clipped at 390px, #3434). Never wrap multi-line code samples: re-flowing them breaks their indentation.
 
-### Flow card (`FlowCard`, homepage hero)
-
-Animated, cycling state machine showing one payment lifecycle (Intent → Policy → Settled). CSS‑only animation, no framer‑motion. Soft brand glow behind shifts to green when settled. Includes status pill in footer with brand pulse → success. Pattern is reusable for other "live" demos in the app.
-
-### Step list (`StepList`)
-
-3‑column grid on desktop, hairline `gap-px` on `bg-[var(--v2-border)]` parent (faux dividers via background bleed‑through). Number in brand color, title in ink, body in ink‑2.
-
-
 ### Public site
 
-The redesigned public website (epic [#3572](https://github.com/d-hinders/Haven-AI/issues/3572)) is built from the approved mockup in [`docs/product/site-mockup/`](site-mockup/README.md), whose README lists the decided deviations. Its components live in `packages/frontend/src/components/marketing/site/`, beside the legacy marketing components above, which they replace page by page. Until the switch-over slice (#3579), the sections above describe what production renders and this one describes what the new site renders.
+The public website (epic [#3572](https://github.com/d-hinders/Haven-AI/issues/3572)) was built from an approved mockup, and since the switch-over (#3579) the production routes are its design reference, as for every marketing page. The mockup and its README of decided deviations were deleted with the switch-over; code comments that cite `site.css:<line>`, `index.html:<line>` or another mockup file refer to `docs/product/site-mockup/` as it stood at commit `caed1ffb` (`git show caed1ffb:docs/product/site-mockup/<file>`). Its components live in `packages/frontend/src/components/marketing/site/`; `Section` above is the one older marketing *page-layout* component still in use (`/demo`, `/releases`); `BrandBandButton` and `TrailingArrow` are shared with the new site.
 
-**The gate.** `isNewSiteVisible()` (`src/lib/site-gate.ts`) decides at build time which site renders: on outside production, off in production, and on in the CI e2e build through `NEXT_PUBLIC_HAVEN_SITE_PREVIEW=1`. `SiteHeader` and `SiteFooter` branch on it, so every page that renders them shows the new chrome wherever it is on: `/`, `/how-it-works`, `/protocols`, `/protocols/x402`, `/protocols/mpp`, `/demo` and `/releases`. Only `/demo` and `/releases` have visual baselines in this slice; the others change content in their own slices. It is a pure function over inlined `NEXT_PUBLIC_` values, so it answers the same in server and client components and makes no page dynamic. While it exists, a legacy marketing page or component is not edited except to sit behind it. The variable and how to see the new site locally are in [`dev-environment.md`](../operations/dev-environment.md#next_public_haven_site_preview--the-redesigned-public-site-3573).
+**No gate.** Until the switch-over a build-time gate (`isNewSiteVisible()`, `NEXT_PUBLIC_HAVEN_SITE_PREVIEW`) kept production on the legacy pages while the site was built in slices. #3579 removed it with the legacy pages: every public route renders the new site in every build, and the three `/protocols*` routes and `/demo/x402` redirect permanently to `/how-it-works/protocols` (`next.config.ts`).
 
 **Section grounds (`SiteSection`).** Four, from the mockup:
 
@@ -1537,17 +1564,17 @@ The redesigned public website (epic [#3572](https://github.com/d-hinders/Haven-A
 
 **Product frame (`ProductFrame`).** A picture of a Haven screen: `Card` at `raised` elevation with a 14px radius, and a `Card.Header` bar holding an environment chip and the screen name. Because it is the product's own surface, it shows the dark UI in the dark theme. Its body is `inert`, and controls inside it are `FrameControl` spans, never buttons or links: a frame illustrates the product, it does not operate it.
 
-**Page building blocks (`site/blocks.tsx`, #3576).** The mockup's recurring pieces, each drawn with theme tokens on a themed ground and fixed colours on a fixed one: `SiteHero` (the compact navy hero, with an optional breadcrumb; it is `data-v2-dark-section`, so pair it with `Header overlay`), `SiteSplit` and `SiteCopy` (the two-column text-and-picture rhythm, stacking below 900px), `PaymentFlow` (a numbered payment as a real ordered list), `AgentBudgetRow` and `FramePill` (frame contents), `SiteCode` (a fixed-navy terminal block), `NavyCard` (a card on the navy band) and `SideCard` (a protocol card), plus the small text helpers `SiteLede`, `SiteTextLink`, `SiteCtaRow` and `CodePrompt`. A page that needs one of these takes it from here rather than restating the classes.
+**Page building blocks (`site/blocks.tsx`, #3576).** The mockup's recurring pieces, each drawn with theme tokens on a themed ground and fixed colours on a fixed one: `SiteHero` (the compact navy hero, with an optional breadcrumb; it is `data-v2-dark-section`, so pair it with `Header overlay`), `SiteSplit` and `SiteCopy` (the two-column text-and-picture rhythm, stacking below 900px), `PaymentFlow` (a numbered payment as a real ordered list), `AgentBudgetRow` and `FramePill` (frame contents), `SiteCode` (a fixed-navy terminal block), `NavyCard` (a card on the navy band) and `SideCard` (a protocol card), plus the small text helpers `SiteLede`, `SiteTextLink`, `SiteCtaRow` (stacks full-width below `sm`) and `CodePrompt`. A page that needs one of these takes it from here rather than restating the classes.
 
-**Header and footer.** The header carries only entries whose page exists. It is sticky and in the flow by default (`/demo`, `/releases`); `overlay` is the mockup's form for a page with a navy hero — absolutely positioned, transparent over the hero, and not sticky. Its tone follows what it sits over, never the theme: theme ink on the page's own ground, or fixed white ink on a fixed navy ground over a dark band, where the logo mark becomes a solid white tile with navy ink (`HavenMark tone="onNavy"`, as the mockup draws it). It keeps the installed-app `SafeAreaBand`. The footer's legal line reads "© {year} Haven Labs". It has no `href="#"` and no entry without a destination; Contact, Privacy and Terms return only with their pages.
+**Header and footer.** The header carries only entries whose page exists. It is sticky and in the flow by default (`/demo`, `/releases`); `overlay` is the mockup's form for a page with a navy hero — absolutely positioned, transparent over the hero, and not sticky. Its tone follows what it sits over, never the theme: theme ink on the page's own ground, or fixed white ink on a fixed navy ground over a dark band, where the logo mark becomes a solid white tile with navy ink (`HavenMark tone="onNavy"`, as the mockup draws it). It keeps the installed-app `SafeAreaBand`. Below `md` the inline nav is hidden (as the mockup hid it below 820px), so a menu button discloses the same `SITE_NAV` entries in a solid panel under the bar, over the page rather than pushing it down (#3579). It is a disclosure, not a dialog: `aria-expanded`/`aria-controls`, no focus trap; Escape closes it and returns focus to the button, and a press outside the header, following an entry or widening past `md` closes it. The footer's legal line reads "© {year} Haven Labs". It has no `href="#"` and no entry without a destination; Contact, Privacy and Terms return only with their pages.
 
 ---
 
 ## 4. Motion
 
 - **No entrance animations on first paint.** Respect `prefers-reduced-motion`.
-- **Allowed:** hover transitions (≤200ms), toast enter/exit transitions, the cycling flow card on the homepage hero, the pulsing brand dot in eyebrow pills and "live" indicators, hover lift on cards.
-- **Allowed on the public site** (`components/marketing/site/**`, #3575): in-view animation loops **inside a product frame or mini card** — the home page's hero payment loop, how-it-works cards and accounting feed, each cycling the mockup's choreography only while its region is in view and the tab is visible, resetting to the section's settled state between cycles — and the enforcement receipt's **row-by-row assembly, replaying on each entry**. A public-site loop shows its settled state under `prefers-reduced-motion: reduce`, never shifts layout, never announces (no live region, no inserted or removed text; the animated frames are hidden from assistive technology), and confirms with text and a check icon in the success colour — never a pill or a button.
+- **Allowed:** hover transitions (≤200ms), toast enter/exit transitions, the pulsing brand dot in eyebrow pills and "live" indicators, hover lift on cards.
+- **Allowed on the public site** (`components/marketing/site/**`, #3575): in-view animation loops **inside a product frame or mini card** — the home page's hero payment loop, the how-it-works cards (step 3's terminal printing its lines among them) and the accounting feed, each cycling the mockup's choreography only while its region is in view and the tab is visible, resetting to the section's settled state between cycles — the developers band's **402-session transcript** (#3684), its lines revealing one step at a time to the full transcript, on the same in-view-and-visible gate — and the enforcement receipt's **row-by-row assembly, replaying on each entry**. A public-site loop shows its settled state under `prefers-reduced-motion: reduce`, never shifts layout, never announces (no live region, no inserted or removed text; the animated frames are hidden from assistive technology — the two terminals, step 3's connector terminal and the developers transcript, stay real content: their reveals are opacity-only, so the full text is readable at every moment), and confirms with text and a check icon in the success colour — never a pill or a button.
 - **Banned everywhere:** staggered fade‑ups, page‑level animated blobs, shimmer on text, parallax, and entrance animation on first paint outside the allowances above — nothing animates on first paint above the fold except inside the hero product frame.
 
 ---
@@ -1624,7 +1651,7 @@ Clean output of the census today is **`UNCLASSIFIED: 0`** and **`OFF-SCALE: 0`**
 
 ### Arrows
 
-- **The marketing exemption in the first bullet covers this whole section, including these arrow rules.** `components/brand`, `components/marketing`, the landing page, `/protocols` and `/how-it-works` are intentionally bespoke and exempt from every icon rule here (#874). The authoritative list is `MARKETING_SURFACES` in `packages/frontend/scripts/design-lint.mjs` — read it there; this sentence is a pointer, not a copy.
+- **The marketing exemption in the first bullet covers this whole section, including these arrow rules.** `components/brand`, `components/marketing`, the landing page, `/how-it-works`, `/developers` and `/for-agents` are intentionally bespoke and exempt from every icon rule here (#874). The authoritative list is `MARKETING_SURFACES` in `packages/frontend/scripts/design-lint.mjs` — read it there; this sentence is a pointer, not a copy.
 - **In a gated surface, an arrow that is an affordance comes from lucide.** A control's trailing arrow (`Button`'s `trailingIcon`, which renders lucide `ArrowRight` for you), a list/row chevron, a disclosure marker, anything that animates (`ErrorBoundary`'s `group-open:rotate-90`, `AgentPanel`'s removed-agents toggle). Never a raw glyph — it cannot be rotated, sized on the icon scale, or stroked at 1.5, and it lands wherever the label's typeface puts it rather than where the icon system does.
 - **Exactly one gated file may render a raw arrow:** `components/haven/TransactionMovement.tsx`, the `From <a> → To <b>` movement line (the one-file allowlist is pinned by [`packages/frontend/src/__tests__/design-system-arrows-allowlist.test.ts`](../../packages/frontend/src/__tests__/design-system-arrows-allowlist.test.ts), #2680). The glyph joins two operands the way a colon would — `aria-hidden`, on the text baseline at the run's own size and weight, with the words `From` and `To` carrying the direction. A lucide glyph would sit at a fixed pixel size beside text it must match, and since #1774 it is nested *inside* the `From` half to stop it wrapping alone, so there is no separable icon slot to fill. **Every other raw arrow in a gated surface is a defect**, whatever it is called.
 
@@ -1636,13 +1663,13 @@ Clean output of the census today is **`UNCLASSIFIED: 0`** and **`OFF-SCALE: 0`**
 
   Each version was better and each hid the same hole one level down. The list above **is** the rule; the reasoning is only why that one file is on it. Adding a second entry is a design-system decision, not a call-site one.
 
-  **Check it over the arrow RANGES, not a list of spellings** — an enumeration only ever catches the glyph that already burned you:
+  **Check it over the arrow RANGES, not a list of spellings** — an enumeration only ever catches the glyph that already burned you. The pipeline below is kept as an **illustration** of that subtlety; the check of record is the comment-aware test named further down:
 
   ```sh
   git ls-files packages/frontend/src/app packages/frontend/src/components \
     | grep -E '\.tsx?$' \
     | grep -v -e 'components/brand/' -e 'components/marketing/' -e 'src/app/page.tsx' \
-              -e 'src/app/protocols/' -e 'src/app/how-it-works/' \
+              -e 'src/app/how-it-works/' -e 'src/app/developers/' -e 'src/app/for-agents/' \
     | grep -v -e '__tests__' -e '\.test\.' -e '\.spec\.' \
     | xargs perl -CSD -ne 'print "$ARGV:$.: $_" if /[\x{2190}-\x{21FF}\x{2794}-\x{27BF}\x{27F0}-\x{27FF}\x{2900}-\x{297F}\x{2B00}-\x{2BFF}]|&[a-zA-Z]*arr[a-zA-Z]*;/; close ARGV if eof' \
     | grep -vE ':[0-9]+: *(//|\*|/\*|\{/\*)'
@@ -1654,22 +1681,15 @@ Clean output of the census today is **`UNCLASSIFIED: 0`** and **`OFF-SCALE: 0`**
 
   **Why `perl` and not `rg` or a glyph list.** `\x{…}` ranges are explicit and locale-independent, and `perl` is present on macOS and Linux by default. The first draft of this check used `rg`; on the machine that wrote it `rg` was a **shell function**, so pasting the command into a plain shell printed `command not found` — and an empty result reads exactly like a clean one. A check you have not run from a clean shell is not a check.
 
-  **What this check CANNOT see** — state it, so nobody trusts a clean result past its reach:
+  **What this check CANNOT see** — state it, so nobody trusts a clean result past its reach. This applies to the comment-aware test just as much: it also decides from source text, so none of these holes is closed by masking comments:
 
   - **Numeric character references** — `&#8594;`, `&#x2192;`.
   - **String escapes** — `{'\u2192'}` or a glyph built by concatenation. No source-text search can catch these.
   - **Runtime data** — a glyph arriving from the API, or from i18n values rather than the JSX beside them. (Checked at the time of writing: the `lib/` translation data holds no arrows, but that is a fact about today, not a guarantee.)
 
-  A clean run means "no arrow spelled the obvious ways", never "no arrows".
+  A clean run means "no arrow spelled the obvious ways", never "no arrows" — of the pipeline and of the test alike.
 
-  **What it returns today: 5 lines, and every one of them is expected** ([#1857](https://github.com/d-hinders/Haven-AI/issues/1857) cleared the debt this table used to hold):
-
-  | Line | Why it is there |
-  |---|---|
-  | `components/haven/TransactionMovement.tsx:55` | The **one allowlisted raw arrow** — the `From <a> → To <b>` movement glyph described above |
-  | `components/haven/TransactionMovement.tsx:38`, `components/connect-agent/SetupStates.tsx:163`, `components/connect-agent/WaitingForConnector.tsx:100` and `:115` | **Continuation lines of multi-line `{/* … */}` JSX comments.** The check strips a comment line by its *opening* delimiter, which a continuation line does not carry, so a line-based search cannot tell them from markup. Four false positives is the price of not parsing JSX, and it is the right price |
-
-  So the check's clean state is **5, not 0**. A run returning more than 5 has found a new defect; a run returning fewer means an expected line moved and the table above is stale.
+  **The check of record is [`packages/frontend/src/__tests__/design-system-arrows-allowlist.test.ts`](../../packages/frontend/src/__tests__/design-system-arrows-allowlist.test.ts) (#2680), not a count from this pipeline.** The pipeline above stays as an **illustration** of why a source-text arrow search is subtle — ranges instead of spellings, comment stripping by prefix — and this section deliberately attaches **no** expected output to it: no count, no line set, no "more than N means a new defect" rule. Its output includes comment lines that render no arrow — continuations of multi-line `{/* … */}` comments, and `//` comments that trail code rather than start the line — so its result changes shape whenever a gated file gains or loses a comment, which is exactly how a pasted table here went stale. The test implements the same rule comment-aware instead: it masks comments the way the language defines them, pins the one-file allowlist to the repo tree, and turns red the moment a raw arrow appears in any other gated file. A green test is the rule holding; a pipeline run is a sketch, not a verdict.
 
   **The allowlist stays at one file — it does not go to zero (decided in [#1857](https://github.com/d-hinders/Haven-AI/issues/1857)).** Now that the ten defects are gone, the allowlist is the only thing standing between this rule and a zero-hit rule, so it is worth saying why it stays rather than letting it look like leftover debt. Greppability does not decide it: `expected set` and `empty set` are equally machine-checkable, and the entry is keyed by *file*, not line number, so it does not rot when `TransactionMovement` is edited. What decides it is the rendering. Converting that site would put a stroked 14px lucide glyph **inside a sentence**, at a fixed pixel size on a baseline it does not share with the text either side of it — and since [#1774](https://github.com/d-hinders/Haven-AI/issues/1774) the glyph is nested *inside* the `From` half to stop it wrapping alone, so there is no separable icon slot to put an `<Icon>` in. #1840 judged that a worse rendering; #1857 re-read the site and agrees. Emptying the allowlist would therefore be a **design-system decision that changes what `TransactionMovement` renders**, not a call-site cleanup, and it would have to widen this section explicitly rather than let the list quietly reach zero.
 
@@ -1867,11 +1887,11 @@ element-scoped capture clips the very thing it photographs (#1873).
 
 | Concern | Production location |
 |---|---|
-| Tokens | CSS vars in `packages/frontend/src/app/globals.css` at `:root`; core aliases in `packages/frontend/tailwind.config.js` |
-| Header/Footer | `packages/frontend/src/components/marketing/SiteHeader.tsx`, `SiteFooter.tsx` |
+| Tokens | CSS vars in `packages/ui/src/tokens.css` at `:root` (#3508); core aliases in the shared preset `packages/ui/tailwind.preset.js` |
+| Header/Footer | `packages/frontend/src/components/marketing/site/Header.tsx`, `Footer.tsx` |
 | UI primitives | `packages/frontend/src/components/ui/Button.tsx`, `Card.tsx`, `CodeBlock.tsx`, `InlineAlert.tsx`, `Input.tsx`, `Modal.tsx`, `PageHeader.tsx`, `Skeleton.tsx`, `Toast.tsx`, `Tooltip.tsx` |
-| Marketing components | `packages/frontend/src/components/marketing/Section.tsx`, `StepList.tsx`, `HeroBackdrop.tsx`, `FlowCard.tsx`, `ProtocolPlayground.tsx`, `BrandBandButton.tsx` |
-| Marketing pages | `packages/frontend/src/app/page.tsx`, `app/how-it-works/page.tsx`, `app/protocols/*/page.tsx` |
+| Marketing components | `packages/frontend/src/components/marketing/site/**` (the public site), `marketing/Section.tsx`, `BrandBandButton.tsx`, `TrailingArrow.tsx` |
+| Marketing pages | `packages/frontend/src/app/page.tsx`, `app/how-it-works/page.tsx`, `app/how-it-works/protocols/page.tsx`, `app/developers/page.tsx`, `app/for-agents/page.tsx` |
 | Authenticated shell | `packages/frontend/src/components/sidebar/Sidebar.tsx`, `packages/frontend/src/components/TopBar.tsx`, authenticated routes under `packages/frontend/src/app/(authenticated)` |
 | Live product reference | `packages/frontend/src/app/(authenticated)/design-system/page.tsx` |
 | App entity cards | `packages/frontend/src/components/ui/entityCardStyles.ts` shared by Accounts and Agents; linked cards use a stretched semantic name link with sibling controls above its overlay |

@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { SiteCtaRow } from '../blocks'
 import { SiteSection, SITE_TYPE } from '../SiteSection'
 import { Header } from '../Header'
 import { Footer } from '../Footer'
@@ -6,27 +7,32 @@ import { BrandBandButton } from '@/components/marketing/BrandBandButton'
 import { HeroCta } from './HeroCta'
 import { AnimatedHeroFrame } from './AnimatedHeroFrame'
 import { AnimatedAccountingFrame } from './AnimatedAccountingFrame'
+import { AnimatedDevTerminal } from './AnimatedDevTerminal'
 import { AnimatedPasskeyMiniCard, AnimatedBudgetMiniCard, AnimatedConnectorTerminal } from './HowItWorksAnimated'
 import { AnimatedRefusalReceipt } from './AnimatedRefusalReceipt'
 
 /**
- * The redesigned home page's nine sections (mockup
- * `docs/product/site-mockup/index.html`), in both themes (#3574), with the
- * mockup's motion on the four animated regions (#3575).
+ * The redesigned home page's seven sections, in both themes (#3574), with the
+ * mockup's motion on the five animated regions (#3575, #3684). The order
+ * follows a buyer's questions rather than the pitch (owner decisions of
+ * 2026-10-06, #3676; mockup V17, artifact version `1791276240-c0f5`): hero,
+ * how it works, spending limits, accounting, developers, three questions,
+ * closing band. The problem points moved to the top of How it works;
+ * why-now and Why Haven left the page.
  *
  * Every animated region renders its settled state here unless its loop is
  * running: the controllers (`AnimatedHeroFrame`, `AnimatedPasskeyMiniCard`,
  * `AnimatedBudgetMiniCard`, `AnimatedConnectorTerminal`,
- * `AnimatedAccountingFrame`, `AnimatedRefusalReceipt`) pass no state under
- * reduced motion, out of view, or before their loop starts, so the settled
- * markup below — slice 2's, in `HeroAgentsFrame`, `StepMiniCards`,
- * `ConnectorTerminal`, `AccountingFrame`, `RefusalReceipt` — is what renders.
+ * `AnimatedDevTerminal`, `AnimatedAccountingFrame`,
+ * `AnimatedRefusalReceipt`) pass no state under reduced motion, out of
+ * view, or before their loop starts, so the settled markup below — slice
+ * 2's, in `HeroAgentsFrame`, `StepMiniCards`, `ConnectorTerminal`,
+ * `DevTerminal`, `AccountingFrame`, `RefusalReceipt` — is what renders.
  * This file stays a server component; only the controllers are client
- * components. Headings and body
- * copy follow the committed mockup except the epic's decided deviations,
- * each marked where it applies:
+ * components. Headings and body copy follow the mockup except the epic's
+ * decided deviations, each marked where it applies:
  *
- * - "Talk to the founders" is removed (decisions 8), with no replacement.
+ * - "Talk to the founders" is removed (decision 8), with no replacement.
  * - Step 3 names the clients the connector supports (decision 13), and its
  *   terminal is a short storytelling script that keeps the connector
  *   command's published prefix (#3644) — the mockup's bare one-liner exits
@@ -34,19 +40,12 @@ import { AnimatedRefusalReceipt } from './AnimatedRefusalReceipt'
  *   (`packages/connect/src/args.ts:256`).
  * - Step 1's account wording replaces the mockup's account-kind phrase that
  *   `docs/product/copy-guidelines.md` bans; the sentence keeps its meaning.
- * - The "Why now" band describes Stripe's MPP as next, never as live
- *   (decision 4) — the mockup's present tense pre-dates that decision.
- * - "Agents already buy inference, data and gift cards over x402" keeps the
- *   two categories with a live, checkable merchant story (inference and
- *   data APIs) and drops gift cards, which had no current source to cite.
- *
- * Claims, with their sources (the PR carries the full list): the x402
- * Foundation launched under the Linux Foundation with Coinbase, Visa,
- * Mastercard, Stripe, Google, AWS and Cloudflare among its members (Linux
- * Foundation, 2026-07-14); stablecoins settled roughly $390B in real-world
- * payments in 2025 (McKinsey & Artemis Analytics, published 2026-02-18);
- * Stripe, Coinbase and Cloudflare ship agent wallets (Cloudflare Wallets,
- * 2026-08; Stripe and Coinbase agent-commerce launches through 2026).
+ * - The spending-limits band says the budget message in plain words, with no
+ *   chain or mechanism vocabulary (#3676 decision 3). That decision covers
+ *   this band only; How it works keeps its own security section. The band's
+ *   claim is scoped to payments from the user's account, as
+ *   `docs/product/copy-guidelines.md` requires: a leaked key can still move a
+ *   balance already in the agent's own wallet, which How it works discloses.
  */
 
 /** 1 — Hero with product frame (navy; the header renders overlay over it). */
@@ -82,14 +81,14 @@ export function HomeHero() {
           </h1>
           <p className={`${SITE_TYPE.lede} mt-[22px]`}>Each agent gets its own budget. You keep custody.</p>
 
-          <div className="mt-8 flex flex-wrap gap-3">
+          <SiteCtaRow>
             <HeroCta href="/signup" variant="solid" trailingArrow>
               Create your account
             </HeroCta>
             <HeroCta href="/how-it-works" variant="ghost">
               See how it works
             </HeroCta>
-          </div>
+          </SiteCtaRow>
 
           {/*
             Addressed to agents, server-rendered, real page content (#2521).
@@ -117,55 +116,7 @@ export function HomeHero() {
   )
 }
 
-/** 2 — The problem (white ground). */
-export function HomeProblem() {
-  const points = [
-    {
-      n: '01',
-      title: 'Agents hit a paywall and stop',
-      body: 'A per-use fee, an API that needs an account, a checkout. The workflow stalls until someone steps in.',
-    },
-    {
-      n: '02',
-      title: 'Cards and API keys were not built for agents',
-      body: 'Handing them to an agent means unbounded authority and no way to say what it may buy.',
-    },
-    {
-      n: '03',
-      title: 'Nobody can tell which agent bought what',
-      body: 'Finance sees a provider total, attributed to agents in a spreadsheet after the money is gone.',
-    },
-  ]
-  return (
-    <SiteSection id="problem" aria-labelledby="problem-heading">
-      <div className="grid grid-cols-1 gap-12 md:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-        <div>
-          <div className={SITE_TYPE.eyebrow}>The problem, as it shows up</div>
-          <h2 id="problem-heading" className={SITE_TYPE.h2}>
-            Autonomy ends at the point of payment.
-          </h2>
-          <p className={`${SITE_TYPE.lede} mt-[18px]`}>
-            Agents plan, browse and call APIs on their own, right up to the moment something costs
-            money.
-          </p>
-        </div>
-        <div className="grid gap-[22px] md:pt-2">
-          {points.map((point) => (
-            <div key={point.n} className="grid grid-cols-[28px_1fr] gap-4">
-              <span className={`pt-[5px] text-[12px] text-[var(--v2-ink-3)] ${SITE_TYPE.mono}`}>{point.n}</span>
-              <div>
-                <h3 className={`${SITE_TYPE.h3} mb-1.5`}>{point.title}</h3>
-                <p className="text-[15.5px] text-[var(--v2-ink-2)]">{point.body}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </SiteSection>
-  )
-}
-
-/** 3 — How it works: three steps with settled-state minis (tint ground). */
+/** 2 — How it works: three steps with settled-state minis (tint ground). */
 export function HomeHowItWorks() {
   return (
     <SiteSection id="how" aria-labelledby="how-heading" ground="tint">
@@ -219,7 +170,90 @@ export function HomeHowItWorks() {
   )
 }
 
-/** 4 — Developers band (navy): the developer surface and a real 402 flow. */
+/**
+ * 3 — Spending limits band (navy): the budget message in plain words, receipt
+ * right (mockup V17, artifact version `1791276240-c0f5`, `index.html:155-179`).
+ */
+export function HomeSpendingLimits() {
+  const facts = [
+    {
+      title: 'Your money stays yours',
+      body: 'Funds stay in an account only you control. Haven never holds them.',
+    },
+    {
+      title: 'The limit holds even if Haven doesn’t',
+      body: 'The budget is enforced by your account itself, not by a setting we could change or lose.',
+    },
+    {
+      title: 'Change it whenever you like',
+      body: 'Raise, lower or revoke a budget at any time, or pause the agent. If an agent’s credential leaks, it still cannot spend your account past its budget.',
+    },
+  ]
+  return (
+    <SiteSection id="enforce" aria-labelledby="enforce-heading" ground="navy">
+      <div className="grid grid-cols-1 items-center gap-14 lg:grid-cols-2">
+        <div>
+          <div className={SITE_TYPE.eyebrow}>Spending limits</div>
+          <h2 id="enforce-heading" className={SITE_TYPE.h2}>
+            An agent can only spend what its budget allows.
+          </h2>
+          <p className={`${SITE_TYPE.lede} mt-[18px]`}>
+            Every payment from your account is checked against the agent’s budget before anything
+            is paid. Over the limit, it is refused: nothing is charged, and nothing waits for your
+            approval.
+          </p>
+          <div className="mt-9 grid gap-[22px]">
+            {facts.map((fact) => (
+              <div key={fact.title} className="grid grid-cols-[22px_1fr] gap-3.5">
+                <span
+                  aria-hidden
+                  className="grid h-[22px] w-[22px] place-items-center rounded-full border border-[rgba(255,255,255,0.12)] text-[12px] text-[#a5b4fc]"
+                >
+                  ✓
+                </span>
+                <div>
+                  <h3 className="mb-1 text-[16px] font-semibold tracking-[-0.01em] leading-[1.3] text-white [font-family:var(--font-site-display)]">
+                    {fact.title}
+                  </h3>
+                  <p className="text-[15px] text-[rgba(255,255,255,0.72)]">{fact.body}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div aria-hidden="true">
+          <AnimatedRefusalReceipt />
+        </div>
+      </div>
+    </SiteSection>
+  )
+}
+
+/** 4 — Accounting (white): feed frame left, copy right. */
+export function HomeAccounting() {
+  return (
+    <SiteSection id="accounting" aria-labelledby="accounting-heading">
+      <div className="grid grid-cols-1 items-center gap-14 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+        <div aria-hidden="true" className="min-w-0">
+          <AnimatedAccountingFrame />
+        </div>
+        <div>
+          <div className={SITE_TYPE.eyebrow}>Accounting</div>
+          <h2 id="accounting-heading" className={SITE_TYPE.h2}>
+            Every payment appears in your bookkeeping tool.
+          </h2>
+          <p className={`${SITE_TYPE.lede} mt-[18px]`}>
+            Each purchase lands in your accounting tool as a draft supplier invoice with the
+            evidence attached. Fortnox today, more connectors coming.
+          </p>
+        </div>
+      </div>
+    </SiteSection>
+  )
+}
+
+/** 5 — Developers band (navy): the developer surface and a real 402 flow. */
 export function HomeDevelopers() {
   const entries = [
     {
@@ -260,198 +294,51 @@ export function HomeDevelopers() {
           </div>
         </div>
 
-        <div
-          className={`overflow-x-auto rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.04)] p-[18px_20px] text-[13px] leading-[1.7] text-[#e6e9ff] ${SITE_TYPE.mono}`}
-          style={{ padding: '18px 20px' }}
-        >
-          <pre className="whitespace-pre">
-            <span className="text-[rgba(230,233,255,0.5)]"># An agent hits a paywall</span>
-            {'\n'}GET https://api.example/v1/enrich{'\n'}
-            <span className="text-[rgba(230,233,255,0.5)]">← 402 Payment Required · 0.30 USDC</span>
-            {'\n\n'}
-            <span className="text-[rgba(230,233,255,0.5)]">
-              {'# Haven quotes it against the agent’s budget,\n# the agent signs locally, Haven relays'}
-            </span>
-            {'\n'}
-            <span className="text-[#a5b4fc]">haven_quote_x402</span>
-            {'   → within budget · 214.00 used of 250.00\n'}
-            <span className="text-[#a5b4fc]">haven_sign_x402</span>
-            {'    → signed on the agent’s machine\n'}
-            <span className="text-[#a5b4fc]">haven_pay_x402</span>
-            {'     → settled on Base · receipt issued\n\n'}
-            <span className="text-[rgba(230,233,255,0.5)]">← 200 OK</span>
-            {'\n'}
-            <span className="text-[rgba(230,233,255,0.5)]">
-              {'# Receipt: which agent, what it bought,\n# which policy allowed it, on-chain proof'}
-            </span>
-          </pre>
-        </div>
+        {/* The 402 session (mockup V19, artifact version `1791288451-c24e`,
+            `index.html:212-227`): the transcript prints line by line while
+            the loop runs (#3684) and settles to the full transcript — the
+            band's slice-2 block, kept to 27 characters a line so it fits a
+            320px phone without a sideways scroller (owner, #3579). */}
+        <AnimatedDevTerminal />
       </div>
     </SiteSection>
   )
 }
 
-/** 5 — Accounting (white): feed frame left, copy right. */
-export function HomeAccounting() {
-  return (
-    <SiteSection id="accounting" aria-labelledby="accounting-heading">
-      <div className="grid grid-cols-1 items-center gap-14 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-        <div aria-hidden="true" className="min-w-0">
-          <AnimatedAccountingFrame />
-        </div>
-        <div>
-          <div className={SITE_TYPE.eyebrow}>Accounting</div>
-          <h2 id="accounting-heading" className={SITE_TYPE.h2}>
-            Every payment appears in your bookkeeping tool.
-          </h2>
-          <p className={`${SITE_TYPE.lede} mt-[18px]`}>
-            Each purchase lands in your accounting tool as a draft supplier invoice with the
-            evidence attached. Fortnox today, more connectors coming.
-          </p>
-        </div>
-      </div>
-    </SiteSection>
-  )
-}
-
-/** 6 — Why now (tint): the ecosystem, three cards. */
-export function HomeWhyNow() {
-  const cards = [
+/**
+ * 6 — Three questions (white, with the mockup's hairline top border): mockup
+ * V17, artifact version `1791276240-c0f5`, `index.html:231-241`; the cards
+ * stack to one column at and below 900px, as `.faq-grid` does.
+ */
+export function HomeQuestions() {
+  const questions = [
     {
-      title: 'Agents now have a machine payment protocol',
-      body: 'x402 gives agents a native way to pay today, and Stripe’s MPP is next. The x402 Foundation launched under the Linux Foundation with Coinbase, Visa, Mastercard, Stripe, Google, AWS and Cloudflare among its members.',
-      src: undefined,
+      q: 'Do you hold my money?',
+      a: 'No. Funds stay in an account only you control. Haven prepares payments within the budgets you set and cannot move money on its own.',
     },
     {
-      title: 'The rails are scaling',
-      body: 'Stablecoins settled roughly $390B in real-world payments in 2025. Agents already buy inference and data over x402.',
-      src: 'Settlement figure: McKinsey, 2025',
+      q: 'Which agents work with Haven?',
+      a: 'Any agent that can run a command: Claude, Codex, Cursor or any other agent harness. One command connects it, and you approve its budget with your passkey.',
     },
     {
-      title: 'The buy side is still open',
-      body: 'Stripe, Coinbase and Cloudflare ship agent wallets locked to their own rails. The neutral control plane for the payer is the layer left to build.',
-      src: undefined,
+      q: 'What can an agent pay for?',
+      a: 'Anything sold over x402 today: APIs, data, compute, paywalled content. Every purchase gets a receipt and lands in your bookkeeping tool.',
     },
   ]
   return (
-    <SiteSection id="why-now" aria-labelledby="why-now-heading" ground="tint">
-      <div className={SITE_TYPE.eyebrow}>Why now</div>
-      <h2 id="why-now-heading" className={SITE_TYPE.h2}>
-        The rails for agent payments are being built right now.
+    <SiteSection id="faq" aria-labelledby="faq-heading" className="border-t border-[var(--v2-border)]">
+      <div className={SITE_TYPE.eyebrow}>Three questions</div>
+      <h2 id="faq-heading" className={SITE_TYPE.h2}>
+        The things people ask before they sign up.
       </h2>
-      <div className="mt-11 grid grid-cols-1 gap-5 md:grid-cols-3">
-        {cards.map((card) => (
+      <div className="mt-11 grid grid-cols-1 gap-5 min-[901px]:grid-cols-3">
+        {questions.map((item) => (
           <div
-            key={card.title}
+            key={item.q}
             className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-6 shadow-card"
           >
-            <h3 className={`${SITE_TYPE.h3} mb-2.5`}>{card.title}</h3>
-            <p className="text-[15px] text-[var(--v2-ink-2)]">{card.body}</p>
-            {card.src && <span className="mt-3 block text-[12px] text-[var(--v2-ink-3)]">{card.src}</span>}
-          </div>
-        ))}
-      </div>
-    </SiteSection>
-  )
-}
-
-/** 7 — Enforcement band (navy): on-chain refusal, receipt right. */
-export function HomeEnforcement() {
-  const facts = [
-    {
-      title: 'Provably non-custodial',
-      body: 'Funds stay in an account only you control. Haven never holds them.',
-    },
-    {
-      title: 'Nothing for an agent to leak',
-      body: 'An agent’s credential cannot move money on its own. Rotate it in one step.',
-    },
-    {
-      title: 'An exit that needs no Haven',
-      body: 'Inspect and revoke every budget with only your wallet and a public RPC.',
-    },
-  ]
-  return (
-    <SiteSection id="enforce" aria-labelledby="enforce-heading" ground="navy">
-      <div className="grid grid-cols-1 items-center gap-14 lg:grid-cols-2">
-        <div>
-          <div className={SITE_TYPE.eyebrow}>Enforced on-chain</div>
-          <h2 id="enforce-heading" className={SITE_TYPE.h2}>
-            An over-budget payment reverts automatically.
-          </h2>
-          <p className={`${SITE_TYPE.lede} mt-[18px]`}>
-            Budgets are enforced on-chain at execution time, even if Haven itself were compromised
-            or offline.
-          </p>
-          <div className="mt-9 grid gap-[22px]">
-            {facts.map((fact) => (
-              <div key={fact.title} className="grid grid-cols-[22px_1fr] gap-3.5">
-                <span
-                  aria-hidden
-                  className="grid h-[22px] w-[22px] place-items-center rounded-full border border-[rgba(255,255,255,0.12)] text-[12px] text-[#a5b4fc]"
-                >
-                  ✓
-                </span>
-                <div>
-                  <h3 className="mb-1 text-[16px] font-semibold tracking-[-0.01em] leading-[1.3] text-white [font-family:var(--font-site-display)]">
-                    {fact.title}
-                  </h3>
-                  <p className="text-[15px] text-[rgba(255,255,255,0.72)]">{fact.body}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div aria-hidden="true">
-          <AnimatedRefusalReceipt />
-        </div>
-      </div>
-    </SiteSection>
-  )
-}
-
-/** 8 — Why Haven (white): four cards. */
-export function HomeWhyHaven() {
-  const cards = [
-    {
-      k: 'Bring your own agent',
-      title: 'Any agent, any harness',
-      body: 'MCP-native. Every new agent platform is one more place your budgets already work.',
-    },
-    {
-      k: 'Rail-neutral',
-      title: 'x402 today, MPP next, whatever wins after',
-      body: 'One policy and audit layer, whichever rail carries the payment. Neutrality is a position no rail owner can take.',
-    },
-    {
-      k: 'Accountability',
-      title: 'From agent identity to the books',
-      body: 'Agent identities, receipts, policy outcomes and accounting export, with Fortnox live. Every payment explains itself.',
-    },
-    {
-      k: 'Focus',
-      title: 'Their feature, our product',
-      body: 'Controlled agent spending is our entire roadmap. Custody stays with you, provable for anyone who wants proof.',
-    },
-  ]
-  return (
-    <SiteSection id="why-haven" aria-labelledby="why-haven-heading">
-      <div className={SITE_TYPE.eyebrow}>Why Haven</div>
-      <h2 id="why-haven-heading" className={SITE_TYPE.h2}>
-        Any agent. Any rail. Every payment accounted for.
-      </h2>
-      <div className="mt-11 grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
-        {cards.map((card) => (
-          <div
-            key={card.k}
-            className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-6 shadow-card"
-          >
-            <div className="mb-2.5 text-[12px] font-semibold uppercase tracking-[0.08em] text-[var(--v2-brand)]">
-              {card.k}
-            </div>
-            <h3 className={`${SITE_TYPE.h3} mb-2`}>{card.title}</h3>
-            <p className="text-[15px] text-[var(--v2-ink-2)]">{card.body}</p>
+            <h3 className={`${SITE_TYPE.h3} mb-2.5`}>{item.q}</h3>
+            <p className="text-[15px] text-[var(--v2-ink-2)]">{item.a}</p>
           </div>
         ))}
       </div>
@@ -460,7 +347,7 @@ export function HomeWhyHaven() {
 }
 
 /**
- * 9 — Closing band (indigo). "Talk to the founders" is removed (decision 8):
+ * 7 — Closing band (indigo). "Talk to the founders" is removed (decision 8):
  * one CTA remains, and the facts line carries the positioning sentences.
  */
 export function HomeClosing() {
@@ -472,11 +359,11 @@ export function HomeClosing() {
       <p className={`${SITE_TYPE.lede} mx-auto mt-[18px] text-center`}>
         One passkey, one budget, one command. Nothing spends without your signature.
       </p>
-      <div className="mt-8 flex flex-wrap justify-center gap-3">
+      <SiteCtaRow center>
         <BrandBandButton href="/signup" trailingArrow>
           Create your account
         </BrandBandButton>
-      </div>
+      </SiteCtaRow>
       <div className="mt-9 flex flex-wrap justify-center gap-x-5 gap-y-2 text-[13px] text-[rgba(255,255,255,0.7)]">
         <span className="before:mr-2 before:inline-block before:h-1.5 before:w-1.5 before:rounded-full before:bg-[rgba(255,255,255,0.4)] before:align-[1px]">
           Built in Stockholm
@@ -490,7 +377,7 @@ export function HomeClosing() {
 }
 
 /**
- * The assembled new home, in the mockup's order. Exported for the page's gate
+ * The assembled new home, in the mockup's V17 order (#3676). Exported for the page's gate
  * branch and for the tests that assert over the rendered page.
  */
 export function NewSiteHome() {
@@ -500,13 +387,11 @@ export function NewSiteHome() {
       <Header overlay />
       <main>
         <HomeHero />
-        <HomeProblem />
         <HomeHowItWorks />
-        <HomeDevelopers />
+        <HomeSpendingLimits />
         <HomeAccounting />
-        <HomeWhyNow />
-        <HomeEnforcement />
-        <HomeWhyHaven />
+        <HomeDevelopers />
+        <HomeQuestions />
         <HomeClosing />
       </main>
       <Footer />

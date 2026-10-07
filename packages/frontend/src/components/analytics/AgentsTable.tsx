@@ -14,6 +14,7 @@ import {
 import type { AnalyticsCurrency } from '@/lib/analytics-format'
 import { agentStatusPresentation } from '@/lib/payment-status'
 import { useState } from 'react'
+import { BudgetMeter } from '@/components/haven'
 import { Card } from '@/components/ui/Card'
 import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -92,34 +93,24 @@ function BudgetCell({ agent }: { agent: AnalyticsAgentRow }) {
               </span>
               <span className="v2-tabular text-xs text-[var(--v2-ink-3)]">{used}%</span>
             </div>
-            <div
-              role="progressbar"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={used}
-              aria-label={`${budget.token} budget used`}
-              className="mt-1 h-1.5 rounded-full bg-[var(--v2-surface-2)] overflow-hidden"
-            >
-              <div
-                // The fill is a token surface colour, never a series colour: a
-                // budget bar is a measurement of one delegation against its own
-                // period, not a category to be keyed against a legend.
-                className="h-full rounded-full bg-[var(--v2-brand)]"
-                style={{ width: `${used}%` }}
-              />
-            </div>
-            <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-              <span title={new Date(budget.period_end).toLocaleString()}>
-                resets {formatBudgetResetDate(budget.period_end)}
-              </span>
-              {/* When the on-chain read failed the endpoint says so, and the
-                  page must say it too: "200 of 250" read from a stale
-                  snapshot is not the same claim as "200 of 250" read from the
-                  chain, and a reader comparing this cell against the agent's
-                  budget screen needs to know which of the two they are
-                  looking at. */}
-              {!budget.remaining_from_chain && ' · read from Haven’s last snapshot'}
-            </p>
+            <BudgetMeter
+              usedPercent={used}
+              label={`${budget.token} budget used`}
+              caption={
+                <>
+                  <span title={new Date(budget.period_end).toLocaleString()}>
+                    resets {formatBudgetResetDate(budget.period_end)}
+                  </span>
+                  {/* When the on-chain read failed the endpoint says so, and the
+                      page must say it too: "200 of 250" read from a stale
+                      snapshot is not the same claim as "200 of 250" read from the
+                      chain, and a reader comparing this cell against the agent's
+                      budget screen needs to know which of the two they are
+                      looking at. */}
+                  {!budget.remaining_from_chain && ' · read from Haven’s last snapshot'}
+                </>
+              }
+            />
           </div>
         )
       })}

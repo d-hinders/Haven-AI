@@ -3,6 +3,14 @@ import type { ReactNode } from 'react'
 export type PageHeaderProps = {
   title: string
   subtitle?: ReactNode
+  /**
+   * A quiet metadata line under the subtitle, in `v2-text-meta` / ink-3 —
+   * the "My account · Base · Created … · Last activity …" register (#3692).
+   * Optional and additive: callers that pass no `meta` render exactly as
+   * before. Wraps alongside the header actions at phone width — the #2821
+   * 390 px header regression is the case this slot is designed against.
+   */
+  meta?: ReactNode
   eyebrow?: string
   actions?: ReactNode
   /**
@@ -26,6 +34,7 @@ export type PageHeaderProps = {
 export function PageHeader({
   title,
   subtitle,
+  meta,
   eyebrow,
   actions,
   inlineActions = false,
@@ -44,6 +53,7 @@ export function PageHeader({
         {subtitle && (
           <p className="mt-2 v2-text-body text-[var(--v2-ink-2)] max-w-2xl">{subtitle}</p>
         )}
+        {meta && <p className="mt-2 v2-text-meta text-[var(--v2-ink-3)] max-w-2xl">{meta}</p>}
       </div>
       {actions && (
         <div className="flex flex-wrap items-center gap-2 flex-shrink-0">{actions}</div>

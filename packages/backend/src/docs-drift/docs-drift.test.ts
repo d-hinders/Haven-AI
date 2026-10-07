@@ -3,7 +3,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { openapiSpec } from '../openapi/spec.js'
-import { getChain, SUPPORTED_CHAIN_IDS } from '../domain/chains.js'
+import { getChain, isKnownChain, SUPPORTED_CHAIN_IDS } from '../domain/chains.js'
 
 /**
  * Documentation drift tests (Phase 2 of the docs-quality system, epic #642).
@@ -59,7 +59,20 @@ describe('CLAUDE.md API surface table matches the OpenAPI spec', () => {
 
 describe('CLAUDE.md chain claims match the chains registry', () => {
   it('only references chain IDs that are actually supported', () => {
-    const referenced = [...CLAUDE_MD.matchAll(/chain ID (\d+)/g)].map((m) => Number(m[1]))
+    // #3669: ids CLAUDE.md names as "… (chain ID N) is not a Haven network" are
+    // the history-only chains — checked the other way round: KNOWN to the
+    // registry (history still renders) and NOT supported.
+    const notANetwork = [
+      ...CLAUDE_MD.replace(/\s+/g, ' ').matchAll(/\(chain ID (\d+)\) is not a Haven network/g),
+    ].map((m) => Number(m[1]))
+    expect(notANetwork).toContain(100)
+    for (const id of notANetwork) {
+      expect(isKnownChain(id), `chain ${id} is named not-a-network but is not known`).toBe(true)
+      expect(SUPPORTED_CHAIN_IDS, `CLAUDE.md says chain ${id} is not a Haven network`).not.toContain(id)
+    }
+    const referenced = [...CLAUDE_MD.matchAll(/chain ID (\d+)/g)]
+      .map((m) => Number(m[1]))
+      .filter((id) => !notANetwork.includes(id))
     expect(referenced.length).toBeGreaterThan(0)
     for (const id of referenced) {
       expect(

@@ -528,7 +528,7 @@ export async function mockHavenApi(page: Page) {
           '',
           'npx -y @haven_ai/connect@alpha --setup hv_setup_e2e123 --api https://api.haven.example --ack-local-tools --runtime claude-code',
           '',
-          'Network access is expected: this command downloads the npm package and contacts the Haven API, so if your environment is sandboxed, run it with network access enabled or request network access escalation; that changes the execution environment, not the command, and is not a third command modification.',
+          'Network access is expected: this command downloads the npm package and contacts the Haven API, so if your environment is sandboxed, run it with network access enabled or request network access escalation; that changes the execution environment, not the command, and is not a command modification.',
           '',
           'Do not print private keys, API keys, credential file contents, or config secrets in chat or logs.',
           '',
@@ -537,7 +537,7 @@ export async function mockHavenApi(page: Page) {
           'If you are an AI agent running this command yourself rather than a human pasting it, you should append --json: the connector then emits one machine-readable, secret-free result object on stdout with progress on stderr, and returns promptly instead of blocking while it waits for the budget approval.',
           "When a --json outcome reports approval.required: true, your first action must be to relay the approval instruction to me in your own reply — if the outcome carries approval.url, give me that link; otherwise tell me to return to Haven and approve this agent's budget — before verifying the connection, restarting anything, or any other step. Never build that link yourself: relay the one the outcome gave you or none at all. Any restart the outcome asks for is a separate instruction to give me afterwards, once the approval is done.",
           'If the connector refuses with wiring_collision, this machine is already wired to a different agent: relay that refusal to me with the superseded_agent_ids and suggested_name it carries, and let me choose whether to replace the existing wiring or add this agent alongside it. Never pick for me by adding --replace or --name yourself.',
-          'Only two changes to the command above are permitted, and no others: appending --json, and — only if the connector refuses because it could not determine the agent runtime — re-running it once with --runtime <name> added, naming the harness you are running in, using one of the values that refusal lists. Never invent a runtime name and never change anything else.',
+          'Only three changes to the command above are permitted, and no others: appending --json; re-running it once with --runtime <name> added, only if the connector refuses because it could not determine the agent runtime, naming the harness you are running in and using one of the values that refusal lists; and re-running it once with the one flag I chose added, only after I have answered a wiring_collision relay — --name <the suggested_name or a name I gave> to add alongside, or --replace to replace — keeping any change already made. If that re-run is refused too, relay the refusal to me and stop. Never invent a runtime name and never change anything else.',
           '',
           // #2486: kept line-for-line equal to the backend's `buildSetupPrompt`
           // by a parity test in packages/backend/src/routes/__tests__/
@@ -718,26 +718,40 @@ export async function mockHavenApi(page: Page) {
       return
     }
     if (method === 'GET' && path.startsWith('/agents/') && path.endsWith('/delegations')) {
+      // #3693 (corrected body): the remaining-this-period fields travel ONLY
+      // when the caller asks (?include=remaining) — fixture parity with the
+      // route's opt-in contract.
+      const includeRemaining = url.searchParams.get('include') === 'remaining'
       const forTestAgent = path === `/agents/${testAgent.id}/delegations`
+      const rows = forTestAgent
+        ? [
+            {
+              id: 'delegation-e2e',
+              chain_id: testSafe.chain_id,
+              token_address: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
+              recipient_address: null,
+              delegation_hash: `0x${'4d'.repeat(32)}`,
+              version: 1,
+              status: 'active',
+              budget_atomic: '250000000',
+              period_seconds: 43_200 * 60,
+              start_date: '2026-05-02T10:00:00.000Z',
+              expires_at: Math.floor(Date.UTC(2027, 4, 2) / 1000),
+              created_at: '2026-05-02T10:00:00.000Z',
+            },
+          ]
+        : []
       await fulfillJson(route, {
-        delegations: forTestAgent
-          ? [
-              {
-                id: 'delegation-e2e',
-                chain_id: testSafe.chain_id,
-                token_address: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
-                recipient_address: null,
-                delegation_hash: `0x${'4d'.repeat(32)}`,
-                version: 1,
-                status: 'active',
-                budget_atomic: '250000000',
-                period_seconds: 43_200 * 60,
-                start_date: '2026-05-02T10:00:00.000Z',
-                expires_at: Math.floor(Date.UTC(2027, 4, 2) / 1000),
-                created_at: '2026-05-02T10:00:00.000Z',
-              },
-            ]
-          : [],
+        delegations: includeRemaining
+          ? rows.map((r) => ({
+              ...r,
+              // The fixture's single row is active: a mid-period read with the
+              // budget mostly intact, refilling one period after start_date.
+              ...(r.status === 'active'
+                ? { remaining_atomic: '187500000', remaining_from_chain: true, period_end: new Date(Date.parse(r.start_date) + r.period_seconds * 1000).toISOString() }
+                : { remaining_atomic: null, remaining_from_chain: null, period_end: null }),
+            }))
+          : rows,
       })
       return
     }

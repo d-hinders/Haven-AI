@@ -46,6 +46,29 @@
   transform: none;
 }
 
+/* The developers transcript's line reveal (mockup V19, artifact version
+   `1791288451-c24e`, site.css:361-369). Unlike the step 3 pair above, the
+   transition sits on BOTH states (inside the gate below), so a line fades
+   in as it appears and fades out at the cycle reset instead of popping.
+   The lines stay inline-level — the reveal is opacity-only, no transform. */
+.dline {
+  opacity: 0;
+}
+.dlineOn {
+  opacity: 1;
+}
+
+/* The transcript's block cursor (site.css:361-369). Static geometry only;
+   the blink is gated below. */
+.dcursor {
+  display: inline-block;
+  width: 7px;
+  height: 13px;
+  margin-left: 4px;
+  vertical-align: -2px;
+  background: #e6e9ff;
+}
+
 /* The confirmation: text with a check icon in the success colour — never a
    pill or a button (site.css:346). The entrance animation is gated below. */
 .confirm {
@@ -121,6 +144,21 @@
     transition:
       opacity 0.45s,
       transform 0.45s;
+  }
+  /* The developers transcript's lines fade both ways (mockup V19
+     site.css:361-369): on both states, so the reset fades out too. */
+  .dline,
+  .dlineOn {
+    transition: opacity 0.35s;
+  }
+  /* The transcript's cursor blink (mockup V19 site.css:361-369). */
+  .dcursor {
+    animation: devcursor 1s steps(2, end) infinite;
+  }
+  @keyframes devcursor {
+    50% {
+      opacity: 0;
+    }
   }
   /* The receipt's refusal lands last (site.css:338, keyframes :339-340). */
   .refusalBox {

@@ -2,10 +2,6 @@
  * `/developers` and `/for-agents` visual regression (#3577, epic #3572) — the
  * redesigned For developers and For agents pages.
  *
- * This harness builds with the site gate on (`NEXT_PUBLIC_HAVEN_SITE_PREVIEW=1`,
- * `src/lib/site-gate.ts`), so both routes render the new pages here; with the
- * gate off both 404.
- *
  * Desktop and mobile in the light theme, plus desktop in the dark theme: the
  * white and tinted sections and the package table take their dark forms,
  * the navy and indigo bands stay fixed. Baselines are Linux-rendered by the
@@ -19,6 +15,7 @@
  */
 import { expect, test } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
+import { expectCtaRowsFillColumn } from './support/cta-rows'
 import { THEME_STORAGE_KEY } from '../src/lib/theme-bootstrap'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports.
@@ -104,6 +101,10 @@ test.describe('/developers and /for-agents visual regression', () => {
           const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth)
           const clientWidth = await page.evaluate(() => document.documentElement.clientWidth)
           expect(scrollWidth, 'horizontal scroll on mobile').toBeLessThanOrEqual(clientWidth + 1)
+
+          // Stacked CTA rows span the column: each button is as wide as its
+          // row (#3685), on both pages.
+          await expectCtaRowsFillColumn(page)
         }
 
         await page.evaluate(() => document.fonts.ready)

@@ -517,9 +517,9 @@ already-configured machine behaves as follows (characterized in
     refuses with `wiring_collision` — nothing written, token still unused —
     naming the superseded agent ids and the two flags that resolve it. The
     refusal is written as a **relay instruction**: an agent running the
-    dashboard's command may append only `--json` (and `--runtime` after a
-    runtime refusal), so it must hand the choice to its user rather than add
-    a flag itself, and re-run only with the flag the user picks.
+    dashboard's command must hand the choice to its user rather than add a
+    flag itself. The setup prompt then permits one re-run with the flag the
+    user picks (#3689), on top of `--json` and a `--runtime` retry.
   - **`--replace`** is the unattended answer "yes, replace". `--name <slug>`
     installs alongside. Passing both is a usage error — they contradict.
 - **Replacing re-points the bare pair, then retires the previous directory

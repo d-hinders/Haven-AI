@@ -99,7 +99,6 @@
      Base carries both a brand dot (#0052FF) and a softer sky pill — unifying
      the two into one Base hue is a deliberate follow-up, not done here. */
   --v2-chain-base: #0052ff; /* NetworkSwitcher solid dot — Coinbase Base blue */
-  --v2-chain-gnosis: #3e9b8f; /* NetworkSwitcher solid dot — Gnosis teal */
   --v2-chain-testnet: #f59e0b; /* Base Sepolia — amber, flags a testnet (dot, both surfaces) */
   /* NetworkPill soft-pill — Base (sky family) */
   --v2-chain-base-dot: #0ea5e9;
@@ -148,26 +147,6 @@
 
   /* Hero surface wash — replaces the inline lavender gradient on DashboardHero. */
   --v2-surface-hero: linear-gradient(90deg, #F7F5FF 0%, #F3F0FF 55%, #F8F6FF 100%);
-
-  /*
-   * Marketing canvas wash (#3139) — the ground HeroBackdrop paints UNDER the
-   * hero ink on the five marketing routes. GROUND-classified like the
-   * --v2-surface-hero above: the ink sits ON it, so it is a gradient and
-   * lives outside the THEME_TOKENS colour table (the parity test does not
-   * see gradient-valued tokens). Light byte-preserves the wash the marketing
-   * surface has always painted; the dark form mirrors the #2929 hero-wash
-   * stops so theme ink keeps its measured contrast. Byte-identical in both
-   * dark blocks.
-   */
-  --v2-marketing-canvas-wash: linear-gradient(180deg, rgba(255, 255, 255, 0.88) 0%, rgba(255, 255, 255, 0.96) 72%, #ffffff 100%);
-
-  /*
-   * Marketing dot-grid ink (#3139). The HeroBackdrop dot texture is painted
-   * in the ground's own ink: the page ink at low alpha in light, a light dot
-   * at low alpha in dark. Colour-valued (rgba), so it is registered in
-   * THEME_TOKENS and carried by both dark blocks byte-identically.
-   */
-  --v2-marketing-dot: rgba(26, 31, 54, 0.08);
 
   /* Semantic gradient fills for progress / allowance bars. Replace ad-hoc
      `from-indigo-500 to-violet-500` style classes. */
@@ -437,7 +416,6 @@
     --v2-inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 
     --v2-chain-base: #3395ff;
-    --v2-chain-gnosis: #3e9b8f;
     --v2-chain-testnet: #fbbf24;
     --v2-chain-base-dot: #0ea5e9;
     --v2-chain-base-fg: #7dd3fc;
@@ -463,21 +441,6 @@
      * both dark blocks.
      */
     --v2-surface-hero: linear-gradient(90deg, #1a1f2e 0%, #191d2c 55%, #1b1e2e 100%);
-
-    /*
-     * Marketing canvas wash (#3139) — dark form. See the light :root block for
-     * the classification. Stops mirror the #2929 hero-wash ground so the
-     * marketing ink scale keeps its measured contrast on every stop and mesh
-     * composite (ink ≥ 8.6:1, ink-2 ≥ 5:1). Byte-identical in both dark blocks.
-     */
-    --v2-marketing-canvas-wash: linear-gradient(180deg, rgba(26, 31, 46, 0.88) 0%, rgba(25, 29, 44, 0.96) 72%, #191d2c 100%);
-
-    /*
-     * Marketing dot-grid ink (#3139) — dark form. See the light :root block.
-     * A light dot at low alpha, in the ground's own ink. Byte-identical in
-     * both dark blocks.
-     */
-    --v2-marketing-dot: rgba(212, 220, 236, 0.07);
 
     --v2-table-header-bg: #191d26;
     --v2-table-header-ink: #97a3b6;
@@ -573,7 +536,6 @@
   --v2-inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 
   --v2-chain-base: #3395ff;
-  --v2-chain-gnosis: #3e9b8f;
   --v2-chain-testnet: #fbbf24;
   --v2-chain-base-dot: #0ea5e9;
   --v2-chain-base-fg: #7dd3fc;
@@ -599,21 +561,6 @@
    * both dark blocks.
    */
   --v2-surface-hero: linear-gradient(90deg, #1a1f2e 0%, #191d2c 55%, #1b1e2e 100%);
-
-  /*
-   * Marketing canvas wash (#3139) — dark form. See the light :root block for
-   * the classification. Stops mirror the #2929 hero-wash ground so the
-   * marketing ink scale keeps its measured contrast on every stop and mesh
-   * composite (ink ≥ 8.6:1, ink-2 ≥ 5:1). Byte-identical in both dark blocks.
-   */
-  --v2-marketing-canvas-wash: linear-gradient(180deg, rgba(26, 31, 46, 0.88) 0%, rgba(25, 29, 44, 0.96) 72%, #191d2c 100%);
-
-  /*
-   * Marketing dot-grid ink (#3139) — dark form. See the light :root block.
-   * A light dot at low alpha, in the ground's own ink. Byte-identical in
-   * both dark blocks.
-   */
-  --v2-marketing-dot: rgba(212, 220, 236, 0.07);
 
   --v2-table-header-bg: #191d26;
   --v2-table-header-ink: #97a3b6;

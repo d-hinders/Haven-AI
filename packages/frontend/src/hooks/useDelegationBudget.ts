@@ -90,6 +90,14 @@ export interface DelegationBudget {
   merchant_id?: string | null
   merchant_slug?: string | null
   merchant_name?: string | null
+  /**
+   * #3693: remaining-this-period for ACTIVE rows. `remaining_from_chain: false`
+   * means the on-chain read failed and `remaining_atomic` is the full budget.
+   * All three are null for non-active rows.
+   */
+  remaining_atomic?: string | null
+  remaining_from_chain?: boolean | null
+  period_end?: string | null
 }
 
 interface BuildResponse {
@@ -198,7 +206,20 @@ async function signTyped(
 export function useDelegationBudget(
   agentId: string,
   chainId: number,
-  { enabled = true }: { enabled?: boolean } = {},
+  {
+    enabled = true,
+    includeRemaining = false,
+  }: {
+    enabled?: boolean
+    /**
+     * #3695: ask `GET /agents/:id/delegations` for remaining-this-period
+     * (`?include=remaining`, #3693). Off by default: that read costs a chain
+     * RPC per active row server-side, this hook polls, and only the agent
+     * page's budget card renders the figure. The other callers (connect,
+     * remove, fund-merchant, edit) keep the plain, poller-cheap read.
+     */
+    includeRemaining?: boolean
+  } = {},
 ) {
   const [budgets, setBudgets] = useState<DelegationBudget[] | null>(null)
   const [signers, setSigners] = useState<AccountSigners | null>(null)
@@ -264,7 +285,12 @@ export function useDelegationBudget(
       if (!silent) manualBudgetsReloadInFlight.current += 1
       const mine = ++budgetsGeneration.current
       try {
-        const res = await api.get<{ delegations: DelegationBudget[] }>(`/agents/${agentId}/delegations`)
+        // #3693 (corrected body): remaining-this-period is OPT-IN, per caller
+        // (#3695) — the plain read is the poller-cheap shape (no chain RPC
+        // server-side).
+        const res = await api.get<{ delegations: DelegationBudget[] }>(
+          `/agents/${agentId}/delegations${includeRemaining ? '?include=remaining' : ''}`,
+        )
         if (mine !== budgetsGeneration.current) return // a newer read has since started (F4)
         // `?? []` — an absent key must degrade, not crash the route (#3093).
         setBudgets(res.delegations ?? [])
@@ -284,7 +310,7 @@ export function useDelegationBudget(
         if (!silent) manualBudgetsReloadInFlight.current -= 1
       }
     },
-    [agentId, enabled],
+    [agentId, enabled, includeRemaining],
   )
 
   // The signer set feeds pickSigningPath (#1086): the DEVICE picks which of

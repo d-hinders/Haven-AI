@@ -115,7 +115,7 @@ export interface ManifestChainEntry {
   id: number
   name: string
   explorer_url: string
-  /** The chain's USDC-family token contract (USDC, or USDC.e on Gnosis). */
+  /** The chain's USDC-family token contract (USDC on every supported chain). */
   usdc_address: string
   /**
    * Whether the chain is a testnet (#2709). Derived from the registry, never
@@ -183,8 +183,9 @@ export const HUMAN_ONLY_STEPS = ['signup_and_passkey', 'fund', 'approve_budget']
  * ALL chain facts come from `@haven_ai/core`'s CHAIN_REGISTRY — no chain
  * literals here, so the manifest can never name a chain, explorer or token
  * address the registry does not. The USDC address is the chain's USDC-family
- * token from the registry: USDC on the Base chains, USDC.e (bridged) on
- * Gnosis.
+ * token from the registry: USDC on the Base chains. The `USDC.e` lookup
+ * below is a defensive fallback for a backend that still lists a history-only
+ * chain (Gnosis, #3634) as supported; it is not a live path.
  *
  * Returns null if the chain is not in the registry — the static `deployable`
  * half still reports the id, and a null is an honest answer rather than a

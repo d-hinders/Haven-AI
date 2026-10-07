@@ -10,6 +10,8 @@ function normalizeTokenSymbol(symbol: string | null | undefined): string {
   return symbol?.trim().toUpperCase().replace(/[^A-Z0-9]/g, '') ?? ''
 }
 
+// EURe / xDAI / USDC.e stay here for HISTORY display only: Gnosis (100) is no
+// longer offered (#3634) but its persisted rows still format.
 function defaultFractionDigits(symbol: string | null | undefined): number | undefined {
   const normalized = normalizeTokenSymbol(symbol)
   if (normalized === 'ETH') return 4

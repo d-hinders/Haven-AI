@@ -122,7 +122,7 @@ const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 // ── Types ─────────────────────────────────────────────────────────
 
 interface CreatePaymentBody {
-  token: string    // e.g. "USDC.e", "xDAI", "EURe"
+  token: string    // e.g. "USDC", "ETH"
   amount: string   // human-readable, e.g. "25.50"
   to: string       // recipient address
   idempotency_key?: string

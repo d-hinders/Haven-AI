@@ -13,6 +13,7 @@
  *     are covered in packages/ops/src/__tests__/vercel-ignore-build.test.ts;
  *     these are the frontend's own.
  */
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -20,6 +21,7 @@ import { ALLOWLIST } from '../../../scripts/serve-docs.mjs'
 import {
   BUILD,
   SKIP,
+  isWatched as isWatchedBy,
   makeRepo,
   parseIgnoreCommand,
   readIgnoreCommand,
@@ -30,9 +32,9 @@ const FRONTEND = join(__dirname, '..', '..', '..')
 const ignoreCommand: string = readIgnoreCommand(FRONTEND)
 const { forceVariable, watched } = parseIgnoreCommand(ignoreCommand) as { forceVariable: string; watched: string[] }
 
-/** Whether `path` (repo-relative) falls under a watched entry, as a git pathspec would match it. */
+/** Whether a change to `path` (repo-relative) rebuilds the site: an include matches it and no `!` exclude does. */
 function isWatched(path: string): boolean {
-  return watched.some((entry) => path === entry || path.startsWith(`${entry}/`))
+  return isWatchedBy(watched, path)
 }
 
 describe('frontend Vercel ignore step — the watched list covers every build input (#3594)', () => {
@@ -88,6 +90,39 @@ describe('frontend Vercel ignore step — the watched list covers every build in
     for (const path of ['package.json', 'package-lock.json', '.nvmrc']) {
       expect(isWatched(path), path).toBe(true)
     }
+  })
+
+  it('excludes only tests and screenshots, never a file the build reads (#3681)', () => {
+    expect(watched.filter((entry) => entry.startsWith('!'))).toEqual([
+      '!packages/frontend/e2e/**',
+      '!packages/**/__tests__/**',
+      '!packages/**/*.test.*',
+    ])
+    for (const path of [
+      'packages/frontend/src/app/page.tsx',
+      'packages/frontend/src/lib/testing.ts',
+      'packages/frontend/next.config.ts',
+      'packages/frontend/playwright.config.ts',
+      'packages/ui/src/Button.tsx',
+      'packages/core/src/chains.ts',
+    ]) {
+      expect(isWatched(path), path).toBe(true)
+    }
+  })
+
+  it('no file the build reads imports an excluded one (#3681)', () => {
+    const root = join(FRONTEND, '..', '..')
+    const files = execFileSync('git', ['ls-files', 'packages/frontend/src', 'packages/frontend/scripts', 'packages/frontend/next.config.ts', 'packages/ui/src', 'packages/core/src'], {
+      cwd: root,
+      encoding: 'utf8',
+    })
+      .split('\n')
+      .filter((path) => /\.(tsx?|mjs|js)$/.test(path) && isWatched(path))
+    expect(files.length).toBeGreaterThan(100)
+    const offenders = files.filter((path) =>
+      /(?:from|import|import\(|require\()\s*['"][^'"]*(?:\/e2e\/|__tests__|\.test)[^'"]*['"]/.test(readFileSync(join(root, path), 'utf8')),
+    )
+    expect(offenders).toEqual([])
   })
 
   it('keeps the ignore command short: Vercel caps its length, so the list lives in the watch file', () => {
@@ -151,10 +186,58 @@ describe('frontend Vercel ignore step — the rule (#3594)', () => {
     }
   })
 
-  it('a backend-only PR spends no deployment on its first preview (case j)', () => {
+  it('a backend-only PR spends no build on its first preview (case j; the skipped deployment still counts toward the cap, #3681)', () => {
     r.git('checkout', '-q', '-b', 'feat/y')
     r.commit('packages/backend/src/routes/payments.ts')
     expect(r.run({ VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'feat/y' })).toBe(SKIP)
+  })
+
+  it('skips when only Playwright screenshots or specs changed (#3681)', () => {
+    const deployed = r.commit('packages/frontend/src/app/page.tsx')
+    r.commit('packages/frontend/e2e/visual/home.spec.ts-snapshots/home-chromium-linux.png')
+    r.commit('packages/frontend/e2e/visual/home.spec.ts')
+    expect(r.run({ VERCEL_GIT_PREVIOUS_SHA: deployed })).toBe(SKIP)
+  })
+
+  it('skips when only unit tests changed, in the frontend, ui or core (#3681)', () => {
+    const deployed = r.commit('packages/frontend/src/app/page.tsx')
+    r.commit('packages/frontend/src/components/__tests__/Header.test.tsx')
+    r.commit('packages/ui/src/__tests__/Button.test.tsx')
+    r.commit('packages/core/src/chains.test.ts')
+    r.commit('packages/frontend/src/__tests__/setup.ts') // not test-named: excluded by the __tests__ glob alone
+    expect(r.run({ VERCEL_GIT_PREVIOUS_SHA: deployed })).toBe(SKIP)
+  })
+
+  it('builds when a test changed alongside a page (#3681)', () => {
+    const deployed = r.commit('packages/frontend/src/app/page.tsx')
+    r.commit('packages/frontend/src/components/__tests__/Header.test.tsx')
+    r.commit('packages/frontend/src/app/page.tsx')
+    expect(r.run({ VERCEL_GIT_PREVIOUS_SHA: deployed })).toBe(BUILD)
+  })
+
+  it('a PR that changes only tests spends no build on its first preview (#3681)', () => {
+    r.git('checkout', '-q', '-b', 'feat/t')
+    r.commit('packages/frontend/e2e/visual/home.spec.ts-snapshots/home-chromium-linux.png')
+    r.commit('packages/frontend/src/lib/__tests__/x.test.ts')
+    expect(r.run({ VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'feat/t' })).toBe(SKIP)
+  })
+
+  it.each([
+    'packages/frontend/e2e/a/b.png',
+    'packages/frontend/e2e.ts',
+    'packages/frontend/src/__tests__/a.ts',
+    'packages/frontend/src/a/__tests__/b/c.tsx',
+    'packages/ui/src/x.test.ts',
+    'packages/frontend/src/lib/testing.ts',
+    'packages/frontend/src/app/page.tsx',
+    'packages/frontendx/a.ts',
+    // `*` must stay inside one directory (glob magic): without it git's `*`
+    // crosses `/` and `*.test.*` would exclude this real source file.
+    'packages/frontend/src/a.test.d/b.ts',
+  ])('the harness and the script agree on %s (#3681)', (path) => {
+    const deployed = r.commit('packages/backend/a.ts')
+    r.commit(path)
+    expect(r.run({ VERCEL_GIT_PREVIOUS_SHA: deployed })).toBe(isWatched(path) ? BUILD : SKIP)
   })
 
   it('FRONTEND_FORCE_BUILD=1 builds an unchanged commit (case h)', () => {

@@ -3,11 +3,11 @@ import { describe, expect, it } from 'vitest'
 import { HavenMark } from '../HavenMark'
 
 /**
- * What each tone draws (#3586). `brand` and `inverse` are pinned as they were
- * before `onNavy` existed: the legacy header production renders uses `inverse`
- * (`marketing/SiteHeader.tsx`), so adding a tone must not move either.
+ * What each tone draws (#3586). `brand` is pinned as it was before `onNavy`
+ * existed, so adding a tone must not move it. The legacy header's translucent
+ * tone left with that header (#3579, retired by #3658).
  */
-function draw(tone?: 'brand' | 'inverse' | 'onNavy') {
+function draw(tone?: 'brand' | 'onNavy') {
   const { container } = render(<HavenMark tone={tone} />)
   const rect = container.querySelector('rect')!
   const path = container.querySelector('path')!
@@ -22,10 +22,6 @@ describe('HavenMark tones', () => {
   it('brand (the default): the brand tile with a white H', () => {
     expect(draw()).toEqual({ tile: 'fill-[var(--v2-brand)]', tileStroke: '0', ink: 'white' })
     expect(draw('brand')).toEqual(draw())
-  })
-
-  it('inverse: a translucent white tile with a white H, unchanged', () => {
-    expect(draw('inverse')).toEqual({ tile: 'fill-white/20 stroke-white/30', tileStroke: '1', ink: 'white' })
   })
 
   it("onNavy: the mockup's solid white tile with a navy H and no border", () => {

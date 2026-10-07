@@ -23,6 +23,21 @@ describe('getProvider — no JSON-RPC batching (dRPC free plan)', () => {
   })
 })
 
+describe('getProvider — history-only and unknown chains have no provider (#3671)', () => {
+  it('refuses Gnosis (100) and an unknown chain, every time, before anything is built or cached', () => {
+    for (const id of [100, 999999]) {
+      expect(() => getProvider(id)).toThrow(`Unsupported chain for RPC: ${id}`)
+      // A second call throws too: nothing was cached by the first.
+      expect(() => getProvider(id)).toThrow(`Unsupported chain for RPC: ${id}`)
+    }
+  })
+
+  it('still builds the supported chains', () => {
+    expect(getProvider(8453)).toBe(getProvider(8453))
+    expect(getProvider(84532)).not.toBe(getProvider(8453))
+  })
+})
+
 describe('getRelayer — per-chain key (#640 deploy/exec path)', () => {
   it('uses the per-chain key for Base Sepolia and the global key for Base mainnet', () => {
     // Base Sepolia deploy/exec is submitted by its dedicated, isolated relayer…

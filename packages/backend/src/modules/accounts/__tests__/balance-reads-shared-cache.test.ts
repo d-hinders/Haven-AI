@@ -55,6 +55,7 @@ vi.mock('../../../infra/prices.js', () => ({
 
 import balanceRoutes from '../../../routes/balances.js'
 import { fetchPortfolioForAccount, isPortfolioUnpriceable } from '../index.js'
+import { fetchBalanceReads } from '../balance-reads.js'
 
 // Chain 84532 (Base Sepolia) registry: ETH native + USDC.
 const CHAIN = 84532
@@ -218,32 +219,36 @@ describe('shared balance-read cache (#3460)', () => {
   })
 
   it('an unpriceable portfolio over CLEAN reads does not evict the shared cache (#3460)', async () => {
-    // Chain 100's tokens are never priced successfully anywhere in this
-    // file, so no #3297 last-good quote exists for them (the ordering
-    // constraint portfolio-unpriceable.test.ts documents) — an empty price
-    // map makes the portfolio unpriceable while every balance read
-    // SUCCEEDS.
+    // Both supported chains hold only ETH and USDC, and the tests above price
+    // both successfully, so the #3297 last-good quote (keyed by symbol, never
+    // reset — the ordering constraint portfolio-unpriceable.test.ts documents)
+    // already exists in this module instance. A FRESH module graph has none:
+    // with an empty price map every held token is unpriceable while every
+    // balance read SUCCEEDS. (#3671: this used to lean on chain 100's
+    // never-priced tokens, which no longer have a read path.)
+    vi.resetModules()
+    const fresh = await import('../index.js')
+    const freshReads = await import('../balance-reads.js')
     const addr = account(7)
     mockFetchTokenPrices.mockResolvedValue({})
 
-    const unpriceable = await fetchPortfolioForAccount(100, addr)
+    const unpriceable = await fresh.fetchPortfolioForAccount(CHAIN, addr)
     expect(unpriceable.totalUsd).toBe(0)
-    expect(isPortfolioUnpriceable(unpriceable)).toBe(true)
+    expect(fresh.isPortfolioUnpriceable(unpriceable)).toBe(true)
     expect(mockNativeReads).toHaveBeenCalledTimes(1)
 
     // The reads were good and STAY cached — the next portfolio call
-    // re-prices the same reads (bounded by the price backoff), and /balances
-    // is unaffected: no new reads, no degradation markers.
-    const again = await fetchPortfolioForAccount(100, addr)
-    expect(isPortfolioUnpriceable(again)).toBe(true)
+    // re-prices the same reads (bounded by the price backoff), and the shared
+    // read-set is unaffected: no new reads, the cached native read intact.
+    const again = await fresh.fetchPortfolioForAccount(CHAIN, addr)
+    expect(fresh.isPortfolioUnpriceable(again)).toBe(true)
     expect(mockNativeReads).toHaveBeenCalledTimes(1)
 
-    mockFindAccountOwnership.mockResolvedValue({
-      rows: [{ id: 'safe-1', chain_id: 100 }],
-    })
-    const res = await getBalances(addr, 100)
+    // The shared cache is read directly — the same read-set the route serves
+    // from.
+    const reads = await freshReads.fetchBalanceReads(CHAIN, addr)
     expect(mockNativeReads).toHaveBeenCalledTimes(1)
-    expect(res.json().balances[0].balanceFreshness).toBeUndefined()
-    expect(res.json().balances[0].balance).toBe('1000000000000000000')
+    expect(reads.native.status).toBe('fulfilled')
+    expect((reads.native as PromiseFulfilledResult<bigint>).value.toString()).toBe('1000000000000000000')
   })
 })

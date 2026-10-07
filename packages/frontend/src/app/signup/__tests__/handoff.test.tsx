@@ -12,9 +12,9 @@ import userEvent from '@testing-library/user-event'
  * call must carry the `agent` marker while the redirect keeps `/agents`.
  * `postAuthDestination` routes an account-holding user straight to `next`.
  *
- * Run twice: against the legacy branch (gate off — today's screen, where the
- * behaviour already worked) and against the redesigned shell (gate on) — the
- * reshell must not have changed where the hand-off lands.
+ * It once ran twice, against the legacy screen and the redesigned shell, to
+ * prove the reshell did not move where the hand-off lands; since the
+ * switch-over (#3579) the shell is the only screen.
  */
 
 const mockPush = vi.fn()
@@ -100,13 +100,8 @@ describe('SignupPage agent hand-off (#2522, #3578)', () => {
     vi.unstubAllEnvs()
   })
 
-  it('routes the agent link through the legacy branch (gate off)', async () => {
-    await fillAndSubmit()
-  })
-
-  it('routes the agent link through the redesigned shell (gate on)', async () => {
+  it('routes the agent link through the sign-up form, in a production-shaped environment', async () => {
     vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', '')
-    vi.stubEnv('NEXT_PUBLIC_HAVEN_SITE_PREVIEW', '1')
     await fillAndSubmit()
   })
 })

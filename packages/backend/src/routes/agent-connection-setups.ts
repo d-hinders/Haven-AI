@@ -1281,10 +1281,12 @@ function buildSetupPrompt(command: string, apiUrl: string): string {
     AGENT_WIRING_COLLISION_RELAY_SENTENCE,
     // #1719: the old sentence said appending --json was the ONLY permitted
     // change, which forbade the one retry the connector now asks an agent for
-    // by name. Exactly two changes are permitted, and the second is bounded to
-    // a value the refusal itself listed — an agent must never invent a runtime
-    // name, because the name selects which app gets an API key and a signing
-    // key written into it.
+    // by name. The second permitted change is bounded to a value the refusal
+    // itself listed — an agent must never invent a runtime name, because the
+    // name selects which app gets an API key and a signing key written into
+    // it. #3689 added a third: after the user answers a wiring_collision relay,
+    // one re-run with the flag THEY chose (--name or --replace), never one the
+    // agent picks.
     AGENT_COMMAND_MODIFICATION_SENTENCE,
     '',
     // #1545: "budget" is the connect flow's one name for the approval gate —
@@ -1441,7 +1443,6 @@ function appLogSafeError(err: unknown): void {
 
 function networkName(chainId: number): string {
   if (chainId === 8453) return 'Base'
-  if (chainId === 100) return 'Gnosis'
   return `Chain ${chainId}`
 }
 

@@ -55,9 +55,12 @@ Signed delegation + caveat enforcers -> On-chain agent budget enforcement
 API auth is identity. Signature is authority. On-chain delegation state is enforcement.
 
 Haven runs **one live on-chain policy rail**: the **delegation rail** (epic #821).
-Funds move account→recipient directly — no funding leg, **no approval queue**, and a
-payment outside the budget, recipient pin or expiry **reverts during gas estimation**
-rather than queueing for a human.
+Direct payments and erc7710 x402 settlement move funds account→recipient directly,
+with no funding leg (the EIP-3009 x402 fallback funds the agent's delegate first, by
+redeeming the same delegation); there is **no approval queue**. A payment over
+the budget is normally refused by Haven's budget pre-check (a typed `403`), and
+one outside the recipient pin or expiry — or over budget when that read fails
+open — **reverts during gas estimation**, rather than queueing for a human.
 
 The **legacy Safe + AllowanceModule rail is RETIRED** (epic #1440), not frozen: nothing can
 enter it, nothing on it can spend, and its execution machinery is deleted. The closure
@@ -133,15 +136,14 @@ Edit `.env` and fill in the required values:
 |---|---|---|
 | `DATABASE_URL` | Yes | PostgreSQL connection string (default works with Docker) |
 | `JWT_SECRET` | Yes | Secret for dashboard auth tokens; use a long random string in production |
-| `RPC_URL` | No | Chain 100 only; unused by the delegation rail. Legacy Gnosis Chain RPC still read by `config.ts` (default: `https://rpc.gnosischain.com`) |
 | `RPC_URL_BASE` | No | Base RPC (default: `https://mainnet.base.org`) |
 | `RELAYER_PRIVATE_KEY` | Yes for on-chain execution | EOA private key that pays gas for relayed transactions; it cannot access user funds |
-| `GNOSISSCAN_API_KEY` | No | Chain 100 only; unused by the delegation rail. Legacy Gnosis explorer key still read by `config.ts` |
+| `GNOSISSCAN_API_KEY` | No | History only (decision (c), #3635): the chain-100 explorer history read; nothing runs on Gnosis |
 | `BASESCAN_API_KEY` | No | Base explorer API key when using an Etherscan-style Base source; Base currently defaults to Blockscout for transactions |
 | `COINGECKO_API_KEY` | No | Token price lookups |
 | `FRONTEND_URL` | No | Backend CORS/link base (default: `http://localhost:3000`) |
 | `NEXT_PUBLIC_API_URL` | No | Frontend backend URL override (default through local rewrite: `http://localhost:3001`) |
-| `NEXT_PUBLIC_HAVEN_MCP_URL` | No | Hosted MCP URL shown in connect-agent snippets |
+| `HAVEN_HOSTED_MCP_URL` | Outside production (local dev can skip it with `--local`) | Backend: the hosted MCP URL handed to the connector and dashboard (falls back to `NEXT_PUBLIC_HAVEN_MCP_URL`, then to the production-only default) |
 | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | No | WalletConnect project id; injected wallet connectors can still work without it |
 
 **Setting up the relayer wallet:**

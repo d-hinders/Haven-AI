@@ -13,7 +13,7 @@ covers:
   - packages/backend/src/infra/repositories/ops-access-log.ts
   - packages/backend/src/config/ops.ts
   - packages/backend/scripts/ops-readonly-role.ts
-last-verified: "2026-10-02"
+last-verified: "2026-10-06"
 ---
 
 # Ops console
@@ -32,9 +32,10 @@ read those settings from the repo — every one of them is in
 
 **It is:**
 
-- a read-only surface: platform overview, customer search, one customer's
-  record, the chain's view beside the database's, system health, and a
-  reveal of the few allowlisted fields the backend permits;
+- a read-only surface: platform overview, the last 7 days of customer
+  feedback (#3602), customer search, one customer's record, the chain's view
+  beside the database's, system health, and a reveal of the few allowlisted
+  fields the backend permits;
 - audited end to end: every sign-in that reaches a GitHub identity (allowed
   or refused), every data read and every reveal writes one `ops_access_log`
   row through the backend's MAIN pool before the response is sent — a write
@@ -118,13 +119,27 @@ repo — record what you actually entered on the issue when you do them.
    (`haven-ops.vercel.app` if the name is free, otherwise a suffixed or
    added `*.vercel.app` domain). Steps 3 and 5 need that exact origin.
 
+**Deploys from `dev` only (#3681).** `packages/ops/vercel.json` sets
+`git.deploymentEnabled` to `{ "**": false, "dev": true }`: a push to any other
+branch creates no console deployment at all. Vercel deploys a branch when any
+`true` rule matches it, so `dev` matches and nothing else does. Previews could
+never sign in (below), and every push used to spend one deployment of the
+Hobby plan's 100-a-day cap on this project even when the Ignored Build Step
+skipped it, because a skipped deployment still counts toward the cap. To
+review a console change before merge, run it locally
+(`npm run dev -w @haven/ops`).
+
 **Ignored Build Step.** `packages/ops/vercel.json` runs the shared
 `scripts/vercel/ignore-build.sh` (#3594), passing it `OPS_FORCE_BUILD` and
 the watch file `scripts/vercel/watch/ops.txt`, which lists the paths the
 console is built from: `packages/ops`, `packages/ui`, `packages/core`,
 `scripts/docs`, `tsconfig.base.json` and the root install inputs
 (`package.json`, `package-lock.json`, `.nvmrc`). The list lives in a file so
-the command stays under Vercel's length cap. The haven-ai-frontend project
+the command stays under Vercel's length cap. A line starting with `!` is an
+exclude glob (`**` crosses directories): a change only to files it matches
+counts as unchanged. The script builds on a bare `!` or a list of excludes
+alone (#3681); the ops list has none, the frontend's excludes tests and
+screenshots. The haven-ai-frontend project
 runs the same script with its own watch file
 (`docs/operations/dev-environment.md`). The script skips a build only when
 nothing watched changed since the commit this project last **deployed**
@@ -135,11 +150,14 @@ Vercel's shallow clone, or git errors. Any `VERCEL_ENV` other than
 the `dev` or `main` branch. A preview with no earlier deployment (a PR
 branch's first push) instead compares the branch with its merge base with
 `dev`. Vercel clones the deployed branch alone, so the script first fetches
-`dev`'s recent history from `origin`; it skips only when that yields a merge
-base and nothing watched changed on the branch, and builds on any failure.
-So a frontend-only PR can skip its ops preview, while an ops PR always gets
-one. Whether the fetch succeeds inside Vercel's build is not yet observed:
-the build log's `vercel ignore-build:` line says which branch the rule took. The rule
+`dev`'s recent history. It tries `origin`, then the repository's public
+GitHub URL. If the shallow histories share no commit, it deepens the clone
+once. The first log after #3601 could not tell a failed fetch from a missing
+shared commit, so the script covers both (#3594). It skips only when that yields a merge base and nothing watched
+changed on the branch, and builds on any failure. The build log's
+`vercel ignore-build:` line names the step that failed. Since #3681 no PR
+branch deploys the console, so this preview path is unused here; the frontend
+project still takes it. The rule
 never compares against the newest commit's parent: that form (#3580)
 stranded the #3581 fix, whose own build was lost to the cap, behind later
 frontend-only commits (#3591). If a console change still is not live, use
@@ -150,8 +168,7 @@ Deployments → Create Deployment with the fix's commit on `dev`.
 build time, but nothing in git changed, so the ignore step skips. Set the
 project environment variable `OPS_FORCE_BUILD` to `1` in the **Production**
 scope only, redeploy the latest `dev` deployment, then delete
-`OPS_FORCE_BUILD`; left in place it makes every production push build (and
-in the Preview scope, every preview). Two consequences of the watched list:
+`OPS_FORCE_BUILD`; left in place it makes every production push build. Two consequences of the watched list:
 
 - The **frontend** project rebuilds on `packages/ui` changes through its own
   watch file, `scripts/vercel/watch/frontend.txt`, which its test checks
@@ -160,7 +177,9 @@ in the Preview scope, every preview). Two consequences of the watched list:
   `scripts/docs`. (It can still rebuild the frontend, which serves the docs
   its `serve-docs.mjs` ALLOWLIST names — that project's watch file lists them.)
 
-**Previews cannot sign in, by design.** A per-PR preview's Vercel origin is
+**Previews cannot sign in, by design.** Since #3681 there are none (the
+console deploys from `dev` only), and the rule below stays the reason not to
+re-enable them. A per-PR preview's Vercel origin is
 not in any backend's `OPS_REDIRECT_ORIGINS`, so the sign-in round trip
 refuses it (`return_to is not an allowed ops origin`). Keep the Preview
 scope's `NEXT_PUBLIC_OPS_ENVIRONMENTS` free of the `prod` key — the app
@@ -273,7 +292,8 @@ second branch:
 - Sign-in itself requires the GitHub account to have 2FA enabled; the
   backend refuses `two_factor_enabled: false`.
 - Per-PR previews never hold a sign-in path, so a leaked preview link is
-  inert.
+  inert. Since #3681 the console deploys from `dev` only, so no new ones
+  are created; the preview defences stay as defence in depth.
 
 ## Querying the audit log
 

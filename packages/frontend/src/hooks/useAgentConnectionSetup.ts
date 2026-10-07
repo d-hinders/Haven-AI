@@ -14,14 +14,14 @@ import {
   useAgentConnectionSetupStatus,
   type AgentConnectionSetupStatusResponse,
 } from '@/hooks/useAgentConnectionSetupStatus'
-import { getChainConfig, getChainTokens, DEFAULT_CHAIN_ID, SUPPORTED_CHAIN_IDS } from '@/lib/chains'
+import { getChainConfig, resolveChainOrNull, getChainTokens, DEFAULT_CHAIN_ID, SUPPORTED_CHAIN_IDS } from '@/lib/chains'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { budgetPeriodLabel } from '@/lib/budget-period'
 import { isIncompleteMoneyInput, validateMoneyInput } from '@/lib/money-input'
 
 // ── Flow types ─────────────────────────────────────────────────────
 
-export type SetupStep = 'details' | 'policy' | 'review' | 'connect'
+export type SetupStep = 'details' | 'policy' | 'connect'
 
 export type CopyKind = 'prompt' | 'command' | 'manual'
 
@@ -173,8 +173,7 @@ export function headerSubtitle(step: SetupStep, status: string | undefined, appr
   // A subtitle that names an action the step does not offer is worse than a
   // vague one, and this was the last place the removed picker still spoke.
   if (step === 'details') return 'Name the agent and describe what it does'
-  if (step === 'policy') return 'Set agent budget and approval boundaries'
-  return 'Review before creating the local setup prompt'
+  return 'Set the agent budget and create the setup prompt'
 }
 
 // `install_status` is required on the status response, but callers hold it as
@@ -377,7 +376,7 @@ export function useAgentConnectionSetup({
   const chainId = selectedAccount?.chain_id ?? activeAccount?.chain_id ?? DEFAULT_CHAIN_ID
   // #1069: branch the final step on the account's rail — see
   const walletName = selectedAccount?.name ?? activeAccount?.name ?? 'Selected Haven wallet'
-  const walletNetworkName = getChainConfig(chainId).name
+  const walletNetworkName = resolveChainOrNull(chainId)?.name ?? `Chain ${chainId}`
   // A setup created in THIS session wins over a resumed id: the user who just
   // clicked through the wizard is looking at their own new setup, not at
   // whatever id happened to be in the URL that opened the page.
@@ -442,7 +441,6 @@ export function useAgentConnectionSetup({
   // the add-then-continue two-step are gone. The pinned token:
   const budgetToken =
     tokenOptions.find((token) => token.symbol === 'USDC') ??
-    tokenOptions.find((token) => token.symbol === 'USDC.e') ??
     tokenOptions[0]
 
   // The draft budget derives LIVE from the amount/reset inputs. `allowances`
@@ -512,7 +510,7 @@ export function useAgentConnectionSetup({
   useEscapeToClose(open, handleClose, { enabled: !creating && !manualCreating })
 
   const hasMultipleAccounts = userAccounts.length > 1
-  const setupSteps: SetupStep[] = ['details', 'policy', 'review', 'connect']
+  const setupSteps: SetupStep[] = ['details', 'policy', 'connect']
   const currentStepIndex = setupSteps.indexOf(step)
   const { resetPeriodOptions } = railBudgetRules(allowances.length)
   const addAmountValidation =
@@ -680,10 +678,13 @@ export function useAgentConnectionSetup({
     switchChain({ chainId: approvalChainId })
   }
 
-  function restartFromReview(options?: { clearCancelled?: boolean }) {
+  // #3688: the review step is merged into the policy step — "restart" puts
+  // the owner back on the budget step with their inputs kept, where
+  // "Create a new setup" would re-run the create that already failed.
+  function restartFromPolicy(options?: { clearCancelled?: boolean }) {
     setSetup(null)
     if (options?.clearCancelled) setCancelled(false)
-    setStep('review')
+    setStep('policy')
   }
 
   return {
@@ -722,7 +723,7 @@ export function useAgentConnectionSetup({
     issuePassport,
     setIssuePassport,
     handleAddAmountChange,
-    // Review step
+    // Setup creation
     creating,
     createError,
     handleCreateSetup,
@@ -755,7 +756,7 @@ export function useAgentConnectionSetup({
     handleCreateManualCredential,
     handleContinueAfterManualCredential,
     handleCancelSetup,
-    restartFromReview,
+    restartFromPolicy,
     // Approval context for the live delegation rail.
     approvalWalletLabel,
     approvalChainId,

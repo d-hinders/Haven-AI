@@ -15,8 +15,28 @@
 
 export const CLIENT_RELEASE_DATA = {
   "@haven_ai/sdk": {
-    "released_version": "0.8.0-alpha.0",
+    "released_version": "0.8.1-alpha.0",
     "notes": [
+      {
+        "version": "0.8.1-alpha.0",
+        "date": "2026-10-07",
+        "summary": "The setup prompt's command-modification rule permits a third change: the re-run a wiring_collision refusal asks for. (+1 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "The setup prompt's command-modification rule permits a third change: the re-run a ",
+            "code": false
+          },
+          {
+            "text": "wiring_collision",
+            "code": true
+          },
+          {
+            "text": " refusal asks for. (+1 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.8.0-alpha.0",
         "date": "2026-10-05",
@@ -48,52 +68,24 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.7.0-alpha.0",
-        "date": "2026-09-29",
-        "summary": "listReceiptsPage({ compact: true }). Drops each row's challengePayload, selectedPayment and protocolReceiptPayload, which echo the merchant's 402 challenge, the selected option and the merchant's response verbatim. Includes a breaking change. (+14 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "listReceiptsPage({ compact: true })",
-            "code": true
-          },
-          {
-            "text": ". Drops each row's ",
-            "code": false
-          },
-          {
-            "text": "challengePayload",
-            "code": true
-          },
-          {
-            "text": ", ",
-            "code": false
-          },
-          {
-            "text": "selectedPayment",
-            "code": true
-          },
-          {
-            "text": " and ",
-            "code": false
-          },
-          {
-            "text": "protocolReceiptPayload",
-            "code": true
-          },
-          {
-            "text": ", which echo the merchant's 402 challenge, the selected option and the merchant's response verbatim. Includes a breaking change. (+14 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/signer": {
-    "released_version": "0.8.0-alpha.0",
+    "released_version": "0.8.1-alpha.0",
     "notes": [
+      {
+        "version": "0.8.1-alpha.0",
+        "date": "2026-10-07",
+        "summary": "README: the network-calls section names every sign-context read.",
+        "summary_segments": [
+          {
+            "text": "README: the network-calls section names every sign-context read.",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.8.0-alpha.0",
         "date": "2026-10-05",
@@ -129,68 +121,24 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.7.0-alpha.0",
-        "date": "2026-09-29",
-        "summary": "haven_sign signs sub-budget opens and closes. { sub_budget_id } alone fetches the pending sub-budget's sign context (GET /sub-budgets/:id/sign-context, purpose open or close). (+3 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "haven_sign",
-            "code": true
-          },
-          {
-            "text": " signs sub-budget opens and closes. ",
-            "code": false
-          },
-          {
-            "text": "{ sub_budget_id }",
-            "code": true
-          },
-          {
-            "text": " alone fetches the pending sub-budget's sign context (",
-            "code": false
-          },
-          {
-            "text": "GET /sub-budgets/:id/sign-context",
-            "code": true
-          },
-          {
-            "text": ", ",
-            "code": false
-          },
-          {
-            "text": "purpose",
-            "code": true
-          },
-          {
-            "text": " ",
-            "code": false
-          },
-          {
-            "text": "open",
-            "code": true
-          },
-          {
-            "text": " or ",
-            "code": false
-          },
-          {
-            "text": "close",
-            "code": true
-          },
-          {
-            "text": "). (+3 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/mcp": {
-    "released_version": "0.8.0-alpha.0",
+    "released_version": "0.8.1-alpha.0",
     "notes": [
+      {
+        "version": "0.8.1-alpha.0",
+        "date": "2026-10-07",
+        "summary": "No changes to this package in this release.",
+        "summary_segments": [
+          {
+            "text": "No changes to this package in this release.",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.8.0-alpha.0",
         "date": "2026-10-05",
@@ -230,60 +178,48 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.7.0-alpha.0",
-        "date": "2026-09-29",
-        "summary": "haven_list_receipts accepts compact: true. Each row then leaves out challengePayload, selectedPayment and protocolReceiptPayload, the merchant's payload echoes. Includes a breaking change. (+5 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "haven_list_receipts",
-            "code": true
-          },
-          {
-            "text": " accepts ",
-            "code": false
-          },
-          {
-            "text": "compact: true",
-            "code": true
-          },
-          {
-            "text": ". Each row then leaves out ",
-            "code": false
-          },
-          {
-            "text": "challengePayload",
-            "code": true
-          },
-          {
-            "text": ", ",
-            "code": false
-          },
-          {
-            "text": "selectedPayment",
-            "code": true
-          },
-          {
-            "text": " and ",
-            "code": false
-          },
-          {
-            "text": "protocolReceiptPayload",
-            "code": true
-          },
-          {
-            "text": ", the merchant's payload echoes. Includes a breaking change. (+5 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/connect": {
-    "released_version": "0.8.0-alpha.0",
+    "released_version": "0.8.1-alpha.0",
     "notes": [
+      {
+        "version": "0.8.1-alpha.0",
+        "date": "2026-10-07",
+        "summary": "README: the wiring_collision relay names the re-run the setup prompt now permits. After the user answers the relay, the dashboard's setup prompt lets an agent re-run once with the flag the user chose (--name or --replace).",
+        "summary_segments": [
+          {
+            "text": "README: the ",
+            "code": false
+          },
+          {
+            "text": "wiring_collision",
+            "code": true
+          },
+          {
+            "text": " relay names the re-run the setup prompt now permits. After the user answers the relay, the dashboard's setup prompt lets an agent re-run once with the flag the user chose (",
+            "code": false
+          },
+          {
+            "text": "--name",
+            "code": true
+          },
+          {
+            "text": " or ",
+            "code": false
+          },
+          {
+            "text": "--replace",
+            "code": true
+          },
+          {
+            "text": ").",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.8.0-alpha.0",
         "date": "2026-10-05",
@@ -299,28 +235,44 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.7.0-alpha.0",
-        "date": "2026-09-29",
-        "summary": "--repair cannot land on a different agent.",
-        "summary_segments": [
-          {
-            "text": "--repair",
-            "code": true
-          },
-          {
-            "text": " cannot land on a different agent.",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/cli": {
-    "released_version": "0.8.0-alpha.0",
+    "released_version": "0.8.1-alpha.0",
     "notes": [
+      {
+        "version": "0.8.1-alpha.0",
+        "date": "2026-10-07",
+        "summary": "haven feedback submit \"<text>\". A one-way feedback/bug-report channel to Haven for a signed-in user and the agent working in their terminal — needs haven login, 4000 characters (code points) or fewer, several unquoted words are joined into one text like contacts add's own free-text argument.",
+        "summary_segments": [
+          {
+            "text": "haven feedback submit \"<text>\"",
+            "code": true
+          },
+          {
+            "text": ". A one-way feedback/bug-report channel to Haven for a signed-in user and the agent working in their terminal — needs ",
+            "code": false
+          },
+          {
+            "text": "haven login",
+            "code": true
+          },
+          {
+            "text": ", 4000 characters (code points) or fewer, several unquoted words are joined into one text like ",
+            "code": false
+          },
+          {
+            "text": "contacts add",
+            "code": true
+          },
+          {
+            "text": "'s own free-text argument.",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.8.0-alpha.0",
         "date": "2026-10-05",
@@ -344,42 +296,6 @@ export const CLIENT_RELEASE_DATA = {
           },
           {
             "text": "chain 84532",
-            "code": true
-          },
-          {
-            "text": ". (+1 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
-      },
-      {
-        "version": "0.7.0-alpha.0",
-        "date": "2026-09-29",
-        "summary": "The bundled agent runbook runs the CLI command the manifest serves. It had told an agent to build npx @haven_ai/cli@<channel> from packages.cli.channel, which serves the full spec, so the command came out as npx @haven_ai/cli@@haven_ai/cli@dev. (+1 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "The bundled agent runbook runs the CLI command the manifest serves. It had told an agent to build ",
-            "code": false
-          },
-          {
-            "text": "npx @haven_ai/cli@<channel>",
-            "code": true
-          },
-          {
-            "text": " from ",
-            "code": false
-          },
-          {
-            "text": "packages.cli.channel",
-            "code": true
-          },
-          {
-            "text": ", which serves the full spec, so the command came out as ",
-            "code": false
-          },
-          {
-            "text": "npx @haven_ai/cli@@haven_ai/cli@dev",
             "code": true
           },
           {

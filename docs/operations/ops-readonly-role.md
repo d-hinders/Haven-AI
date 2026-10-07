@@ -10,7 +10,7 @@ covers:
   - packages/backend/src/routes/ops.ts
   - packages/backend/src/infra/repositories/ops-reads.ts
   - packages/backend/src/domain/redact-vendor-secrets.ts
-last-verified: "2026-10-01"
+last-verified: "2026-10-06"
 ---
 
 # Ops console read-only database role
@@ -104,6 +104,7 @@ present:
 | `outbound_txs.error` | Same |
 | `agent_passports.last_error` | Same |
 | `agent_passports.revocation_last_error` | Same |
+| `feedback.text` | Same — the CLI feedback channel's message column (#3597), read by the console's Feedback page (#3602) |
 
 It is one transaction and idempotent. No status, amount or other column
 changes. The real-DB parity test pins the regexes to the JavaScript helper.

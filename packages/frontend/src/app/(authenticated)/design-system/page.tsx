@@ -70,6 +70,7 @@ import {
   BalanceFreshnessIndicator,
   WhenBalanceDegraded,
   BudgetAmountRow,
+  BudgetMeter,
 } from '@/components/haven'
 
 /**
@@ -111,7 +112,6 @@ const TOKEN_USE: Record<string, string> = {
   'series-6': 'Chart series 6: the sixth agent; a seventh wraps to 1.',
   'modal-backdrop': 'Modal scrim.',
   'chain-base': 'Base identity dot.',
-  'chain-gnosis': 'Gnosis identity dot.',
   'chain-testnet': 'Testnet flag colour.',
   'chain-base-dot': 'NetworkPill Base dot (sky family).',
   'chain-base-fg': 'NetworkPill Base text.',
@@ -386,7 +386,7 @@ export default function DesignSystemPage() {
               + a lucide glyph), or a hand-rolled address slice (use{' '}
               <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">&lt;Address&gt;</code>) — each exempts
               its own primitive's home file. Marketing/landing surfaces (brand, marketing, the landing page,
-              protocols and how-it-works) are intentionally bespoke and exempt; the
+              how-it-works, developers and for-agents) are intentionally bespoke and exempt; the
               product app and this page stay fully gated. Existing debt lives in a shrink-only baseline
               (<code className="rounded bg-[var(--v2-surface)] px-1 text-xs">design-lint-baseline.json</code>) —
               counts may only go down. Route colours through{' '}
@@ -479,7 +479,7 @@ export default function DesignSystemPage() {
             </p>
             <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
               <code className="rounded bg-[var(--v2-surface)] px-1">--v2-chain-*</code> tells networks
-              apart (Base, Gnosis, testnet) in <code className="rounded bg-[var(--v2-surface)] px-1">NetworkPill</code>{' '}
+              apart (Base, testnet) in <code className="rounded bg-[var(--v2-surface)] px-1">NetworkPill</code>{' '}
               and <code className="rounded bg-[var(--v2-surface)] px-1">NetworkSwitcher</code>. These are{' '}
               <span className="font-medium text-[var(--v2-ink)]">identity</span> colours, deliberately outside the
               semantic rules — never reuse a chain colour for success/warning meaning, and never route money
@@ -488,7 +488,6 @@ export default function DesignSystemPage() {
             <div className="mt-3 flex flex-wrap items-center gap-4">
               {[
                 { label: 'Base', dot: 'var(--v2-chain-base)' },
-                { label: 'Gnosis', dot: 'var(--v2-chain-gnosis)' },
                 { label: 'Testnet', dot: 'var(--v2-chain-testnet)' },
               ].map((chain) => (
                 <span key={chain.label} className="inline-flex items-center gap-1.5 text-xs text-[var(--v2-ink-2)]">
@@ -659,7 +658,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Typography"
-        description="The type ramp lives in globals.css as v2-text-* utility classes (size + leading + weight + tracking in one class). Rule: page and section headings go through the ramp; within components, body copy uses Tailwind's text-sm and metadata uses text-xs — those two map to the ramp's body and meta steps. Ad-hoc pixel sizes (text-[Npx]) are off-system; the design-lint gate blocks new ones."
+        description="The type ramp lives in @haven_ai/ui/type.css as v2-text-* utility classes (size + leading + weight + tracking in one class). Rule: page and section headings go through the ramp; within components, body copy uses Tailwind's text-sm and metadata uses text-xs — those two map to the ramp's body and meta steps. Ad-hoc pixel sizes (text-[Npx]) are off-system; the design-lint gate blocks new ones."
       >
         <Card hover={false} className="space-y-4 p-5">
           {[
@@ -1459,14 +1458,16 @@ export default function DesignSystemPage() {
               </DropdownMenuTrigger>
               <DropdownMenuContent>
                 <DropdownMenuItem onSelect={() => toast.info('Edit agent')}>Edit agent</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => toast.info('Update budget')}>Update budget</DropdownMenuItem>
-                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => toast.info('Manage labels')}>Manage labels</DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => toast.info('Payment credentials')}>
                   Payment credentials
                 </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => toast.info('Replace signing key')}>
+                  Replace signing key
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem tone="danger" onSelect={() => toast.error('Remove (demo only)')}>
-                  Remove agent
+                  Remove agent…
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -2363,48 +2364,37 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
-        title="Card with action footer (manage pattern)"
-        description="When a card has both content and contextual actions, use `AgentRulesSummary`'s `footer` slot (or any card with a `border-t` action row) instead of a separate aside card. Keeps related actions adjacent to the data they affect and avoids empty right-rail real estate."
+        title="Section with a collapsed add (manage pattern)"
+        description="How a detail-page section manages a list (#3695, the agent page's Spending section). The heading and one-line description sit ABOVE the card; each row carries its own actions (Edit, Stop) beside the thing they change; and once one item exists, adding another is a collapsed control that opens the form in place — never a permanent second form competing with the rows. With no item yet, the form is the section's content. This replaced the action-footer pattern, whose buttons sat away from the data they affected."
       >
-        <AgentRulesSummary
-          title="Agent budget"
-          description="What this agent can spend, where the money comes from, and how you stay in control."
-          items={[
-            {
-              label: 'Agent name',
-              value: 'Research assistant',
-              helper: 'Connected via Haven credential.',
-            },
-            {
-              label: 'Spend from',
-              value: 'Operating wallet on Base',
-              helper: 'Payments come from this Haven account only.',
-            },
-            {
-              label: 'Budget',
-              value: '250 USDC per day',
-              helper: 'Payments within budget run automatically. Larger payments are declined by the agent rules.',
-            },
-          ]}
-          footer={
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs text-[var(--v2-ink-3)]">
-                Pause the agent or remove its budget if you need to stop access.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="ghost" size="sm">
-                  Update budget
-                </Button>
-                <Button variant="ghost" size="sm">
-                  Pause agent
-                </Button>
-                <Button variant="danger" size="sm">
-                  Revoke agent budget
-                </Button>
+        <div>
+          <h3 className="v2-text-h3 text-[var(--v2-ink)]">Spending</h3>
+          <p className="mt-0.5 mb-3 text-sm text-[var(--v2-ink-muted)]">
+            What this agent can spend each period. Budgets are enforced on-chain: a payment over budget is declined before any money moves.
+          </p>
+          <Card hover={false} className="p-5 md:p-6">
+            <div className="flex items-start justify-between gap-3 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-[var(--v2-ink)]">250 USDC per week</p>
+                <p className="truncate text-xs text-[var(--v2-ink-muted)]">to any recipient</p>
+                <div className="mt-2 max-w-sm">
+                  <BudgetMeter
+                    usedPercent={25}
+                    label="USDC budget used"
+                    caption="62.5 of 250 USDC used this period · refills in 3 days"
+                  />
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                <Button size="sm" variant="ghost">Edit</Button>
+                <Button size="sm" variant="ghost">Stop</Button>
               </div>
             </div>
-          }
-        />
+            <div className="mt-3">
+              <Button size="sm" variant="ghost">Add budget</Button>
+            </div>
+          </Card>
+        </div>
       </Section>
 
       <Section
@@ -2870,14 +2860,69 @@ export default function DesignSystemPage() {
         </div>
       </Section>
 
+      <Section
+        title="BudgetMeter"
+        description="How much of a delegation's own period is spent — the ONE progress bar for a budget measurement (#3692). An h-1.5 `--v2-surface-2` track with a `--v2-brand` fill and a progressbar ARIA contract. `usedPercent` is clamped to 0–100, `label` is the accessible name, and an optional `caption` slot carries the “1.20 of 3.00 USDC used · refills …” line. The label row above the bar belongs to the caller — it is the caller's tabular typography, not part of the measurement."
+      >
+        <div className="max-w-md space-y-6">
+          <div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="v2-tabular text-xs font-medium text-[var(--v2-ink)]">
+                1.20 of 3.00 USDC
+              </span>
+              <span className="v2-tabular text-xs text-[var(--v2-ink-3)]">40%</span>
+            </div>
+            <BudgetMeter usedPercent={40} label="USDC budget used" caption="Refills in 12 days" />
+            <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
+              The analytics agents table renders exactly this shape — its “resets …” line is the
+              caption slot.
+            </p>
+          </div>
+          <div>
+            <BudgetMeter usedPercent={100} label="ETH budget used" />
+            <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
+              Exhausted — clamped at 100. A malformed or overdrawn read can never push the fill
+              past the track or the ARIA value outside its own declared range.
+            </p>
+          </div>
+          <div>
+            <BudgetMeter usedPercent={0} label="USDC budget used" caption="Nothing spent yet" />
+            <p className="mt-2 text-xs text-[var(--v2-ink-3)]">Untouched — clamped at 0.</p>
+          </div>
+        </div>
+      </Section>
+
+      <Section
+        title="PageHeader meta"
+        description="The quiet metadata line under the subtitle (#3692): `v2-text-meta` in ink-3, for the “My account · Base · Created … · Last activity …” register on detail pages. Shown here WITH actions, because the constraint it is designed against is the #2821 phone-width header: at 390 px the meta line wraps as text while the actions keep their row. Optional and additive — a PageHeader without `meta` renders exactly as before."
+      >
+        <div className="max-w-2xl">
+          <PageHeader
+            title="Ampersand"
+            subtitle="Research agent connected through the Haven credential."
+            meta="My account · Base · Created 2 months ago · Last activity 3 minutes ago"
+            actions={
+              <>
+                <Button variant="tertiary" size="sm">
+                  Pause agent
+                </Button>
+                <Button variant="ghost" size="sm" aria-label="More actions">
+                  ⋮
+                </Button>
+              </>
+            }
+          />
+        </div>
+      </Section>
+
       <Modal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        title="Confirm agent budget"
-        subtitle="Review the agent budget before connecting this agent."
+        title="Set agent budget"
+        subtitle="Set the budget this agent may spend."
         showCloseButton
         width="lg"
-        headerAccessory={<StepProgress totalSteps={4} currentStep={2} />}
+        headerAccessory={<StepProgress totalSteps={3} currentStep={1} />}
         footer={
           <>
             <Button variant="ghost" onClick={() => setModalOpen(false)}>

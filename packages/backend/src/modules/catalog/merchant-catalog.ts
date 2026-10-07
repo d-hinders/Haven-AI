@@ -147,7 +147,7 @@ function collectPayTo(payload: unknown): string | undefined {
   return payTo
 }
 
-const TOKEN_DECIMALS: Record<string, number> = { USDC: 6, EURe: 18 }
+const TOKEN_DECIMALS: Record<string, number> = { USDC: 6 }
 
 function formatPriceDisplay(atomic: string, assetSymbol: string): string {
   const decimals = TOKEN_DECIMALS[assetSymbol] ?? 6
@@ -174,8 +174,6 @@ function assetSymbol(asset: string | undefined): string {
   if (!asset.startsWith('0x')) return asset
   const known: Record<string, string> = {
     '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': 'USDC',
-    '0x2a22f9c3b484c3629090feed35f17ff8f88f76f0': 'USDC.e',
-    '0xcb444e90d8198415266c6a2724b7900fb12fc56e': 'EURe',
   }
   return known[asset.toLowerCase()] ?? 'USDC'
 }

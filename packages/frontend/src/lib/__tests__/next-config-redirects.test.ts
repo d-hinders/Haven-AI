@@ -1,3 +1,4 @@
+import { getPathMatch } from 'next/dist/shared/lib/router/utils/path-match'
 import { describe, expect, it } from 'vitest'
 
 /**
@@ -53,5 +54,47 @@ describe('next.config redirects (#3024)', () => {
       destination: '/marketplace/:path*',
       permanent: true,
     })
+  })
+
+  // #3579: the protocol pages retired with the site switch-over.
+  it.each(['/protocols', '/protocols/x402', '/protocols/mpp'])(
+    'answers a permanent redirect from %s to /how-it-works/protocols',
+    async (source) => {
+      const config = (await import('../../../next.config')).default
+      const redirects = await config(PHASE as never).redirects!()
+      expect(redirects.find((r) => r.source === source)).toMatchObject({
+        source,
+        destination: '/how-it-works/protocols',
+        permanent: true,
+      })
+    },
+  )
+
+  it('sends /demo/x402 to /how-it-works/protocols in one hop', async () => {
+    const config = (await import('../../../next.config')).default
+    const redirects = await config(PHASE as never).redirects!()
+    const demoX402 = redirects.find((r) => r.source === '/demo/x402')
+    expect(demoX402).toMatchObject({ destination: '/how-it-works/protocols', permanent: true })
+    // One hop: the destination is not itself a redirect source.
+    expect(redirects.find((r) => r.source === demoX402!.destination)).toBeUndefined()
+  })
+
+  it('leaves /demo and /demo.md alone: no redirect rule matches either', async () => {
+    const config = (await import('../../../next.config')).default
+    const redirects = await config(PHASE as never).redirects!()
+    // Next's OWN matcher (the one its router applies to `redirects()`), not a
+    // hand-rolled regex: a `/demo/:path*` source matches `/demo` itself, which
+    // an approximation of path-to-regexp gets wrong (haven-reviewer, #3579).
+    const matches = (source: string, path: string) =>
+      getPathMatch(source, { removeUnnamedParams: true, strict: true })(path) !== false
+    for (const path of ['/demo', '/demo.md']) {
+      const matching = redirects.filter((r) => matches(r.source, path))
+      expect(matching, `${path} matched ${matching.map((r) => r.source).join(', ')}`).toEqual([])
+    }
+    // Positive controls: the matcher finds the real /demo/x402 rule, and a
+    // catch-all under /demo — the likeliest regression — would match /demo.
+    expect(redirects.filter((r) => matches(r.source, '/demo/x402'))).toHaveLength(1)
+    expect(matches('/demo/:path*', '/demo')).toBe(true)
+    expect(matches('/demo(.*)', '/demo.md')).toBe(true)
   })
 })

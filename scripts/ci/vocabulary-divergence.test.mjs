@@ -755,7 +755,8 @@ test('the shipped map declares every envelope the shipped CLI emits', () => {
   // grant/revoke preparation pair, `agents connect --run` (whose entire result
   // is built into a local const and passed to a helper), and the two export
   // `meta` literals, whose keys the output layer spreads into the wrapper.
-  assert.equal(Object.keys(cli).length, 17)
+  // #3597 adds the eighteenth: `feedback submit` (`{ ok: true, ...result }`).
+  assert.equal(Object.keys(cli).length, 18)
   const withoutOk = Object.entries(cli)
     .filter(([, keys]) => !keys.includes('ok'))
     .map(([fn]) => fn)

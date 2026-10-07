@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
-import { SiteHeader } from '@/components/marketing/SiteHeader'
-import { SiteFooter } from '@/components/marketing/SiteFooter'
+import { Header } from '@/components/marketing/site/Header'
+import { Footer } from '@/components/marketing/site/Footer'
 import { Section } from '@/components/marketing/Section'
 import { buildManifest, type ManifestPackageEntry } from '@/lib/capability-manifest'
 import { PackageCard } from './PackageCard'
@@ -44,7 +44,7 @@ export default async function ReleasesPage() {
 
   return (
     <>
-      <SiteHeader />
+      <Header />
 
       <section className="max-w-6xl mx-auto px-6 pt-20 md:pt-28 pb-10">
         <div className="max-w-3xl">
@@ -89,7 +89,7 @@ export default async function ReleasesPage() {
         </div>
       </Section>
 
-      <SiteFooter />
+      <Footer />
     </>
   )
 }

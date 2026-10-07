@@ -2,10 +2,6 @@
  * `/how-it-works` and `/how-it-works/protocols` visual regression (#3576,
  * epic #3572) — the redesigned How it works page and its protocols sub-page.
  *
- * This harness builds with the site gate on (`NEXT_PUBLIC_HAVEN_SITE_PREVIEW=1`,
- * `src/lib/site-gate.ts`), so both routes render the new pages here; with the
- * gate off `/how-it-works` is the legacy page and the sub-page 404s.
- *
  * Desktop and mobile in the light theme, plus desktop in the dark theme: the
  * white and tinted sections and the product frames take their dark forms,
  * the navy and indigo bands stay fixed. Baselines are Linux-rendered by the
@@ -17,6 +13,7 @@
  */
 import { expect, test } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
+import { expectCtaRowsFillColumn } from './support/cta-rows'
 import { THEME_STORAGE_KEY } from '../src/lib/theme-bootstrap'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports.
@@ -37,6 +34,7 @@ const PAGES = [
     baseline: 'how-it-works',
     h1: 'From an empty account to an agent that pays for what it needs.',
     h2s: [
+      'Autonomy ends at the point of payment.',
       'An account only you control.',
       'A budget per agent, not a card for all of them.',
       'One command wires any agent in.',
@@ -98,6 +96,10 @@ test.describe('/how-it-works visual regression', () => {
           const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth)
           const clientWidth = await page.evaluate(() => document.documentElement.clientWidth)
           expect(scrollWidth, 'horizontal scroll on mobile').toBeLessThanOrEqual(clientWidth + 1)
+
+          // Stacked CTA rows span the column: each button is as wide as its
+          // row (#3685), the protocols teaser and the closing band alike.
+          await expectCtaRowsFillColumn(page)
         }
 
         await page.evaluate(() => document.fonts.ready)

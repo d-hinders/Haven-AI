@@ -59,9 +59,10 @@ import { describe, expect, it } from 'vitest'
 const FRONTEND = resolve(__dirname, '../..')
 // The palette moved to @haven_ai/ui (#3508): tokens.css and the Tailwind
 // preset now live in packages/ui, imported by the app layout before
-// globals.css. globals.css itself keeps the classes that CONSUME tokens
-// (.v2-modal-backdrop, .v2-scroll-edge-cue), so the reader control below
-// spans both files.
+// globals.css. globals.css keeps the dashboard-only classes that CONSUME
+// tokens (.v2-modal-backdrop, .v2-scroll-edge-cue; the type ramp moved to
+// @haven_ai/ui/type.css in #3611), so the reader control below spans both
+// files.
 const UI = resolve(FRONTEND, '..')
 const css = readFileSync(join(UI, 'ui/src/tokens.css'), 'utf8')
 const appCss = readFileSync(join(FRONTEND, 'src/app/globals.css'), 'utf8')

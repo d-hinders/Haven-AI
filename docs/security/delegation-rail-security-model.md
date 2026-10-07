@@ -66,7 +66,7 @@ covers:
   - packages/backend/src/modules/ops/**
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
-last-verified: "2026-10-01"
+last-verified: "2026-10-06"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -1381,8 +1381,14 @@ document was not re-read for it, and `last-verified` is not bumped. The
 app's Vercel ignore-build step (#3591; since #3594 a script shared with
 the dashboard's Vercel project, each with its own watch file) decides
 only *when* the console or the dashboard redeploys, from what changed since
-its last deployment; it moves no authority either, and the same scope note
-holds. The console's CI render
+its last deployment. That includes a PR's first preview fetching `dev` from
+the repository's public URL, which is read-only and needs no credential. It
+moves no authority either, and the same scope note holds. Since #3681 the
+console deploys from `dev` only (`git.deploymentEnabled`), so no per-PR
+console preview exists, and the dashboard's watch file excludes tests and
+Playwright baselines; they decide only whether the console deploys and
+whether the dashboard builds, move
+no authority, and the same scope note holds. The console's CI render
 smoke (#3583) only proves, in a browser, that the console renders under that
 CSP and that the CSP refuses an un-nonced inline script; it moves no
 authority, and the same scope note holds.
@@ -1425,6 +1431,38 @@ authority, and the same scope note holds.
 > and fail the strict equality. No route, read, reveal or ops-auth file
 > changes, so the no-rail-authority claim above holds verbatim. Scope of this
 > re-read: this section only; `last-verified` is not bumped.
+
+> **Re-verified #3602 (2026-10-06, console Feedback page):** the change adds
+> one read route (`GET /ops/feedback` in `routes/ops.ts`) and one allowlisted
+> reveal field (`feedback.text`) to the surface this section describes.
+> Re-read against the paragraph above: the new route sits behind the same
+> `opsAuth` bearer hook (no new auth path), reads only the read-only
+> Postgres role's newly granted `feedback` columns, writes its
+> `ops_access_log` row before answering, and masks every field server-side —
+> the unmasked message text still leaves only through the audited
+> `POST /ops/reveal`, which returns that one column after the same
+> audit-first write, and an expired row (`expires_at > NOW()`) answers 404
+> like a missing one. `POST /ops/reveal` still only reads one allowlisted
+> column and records the read first; no route under `/ops` moves funds,
+> signs, redeems, changes a signer, delegation or credential, or acts as a
+> user, so the no-rail-authority claim holds verbatim. Scope of this re-read:
+> the ops-console section above and the files this change touches
+> (`routes/ops.ts`, `modules/ops/**`, `infra/repositories/ops-*.ts`,
+> `infra/ops-readonly-role.ts`); the invariant, custody, redemption and
+> settlement sections were NOT re-read (the diff touches no file that
+> implements them). `last-verified` is bumped for exactly this coverage.
+
+> **Re-verified #3611 (2026-10-06, console type ramp):** the change touches
+> `packages/ops/src/app/layout.tsx` (one more stylesheet import,
+> `@haven_ai/ui/type.css`, the type ramp and `v2-tabular` moved verbatim out
+> of the dashboard's `globals.css`), adds a test under
+> `packages/ops/src/__tests__/`, and adds a local-only computed-style probe
+> to the screenshot script (`packages/ops/scripts/screenshot.mjs`). Plain
+> CSS bundled at build time from a workspace package: no script, no network
+> origin, so the CSP is unchanged.
+> No client method, read, reveal, sign-in navigation or backend file
+> changes, so the no-rail-authority claim above holds verbatim. Scope of
+> this re-read: this section only; `last-verified` is not bumped.
 
 ## 9. Owner CLI sessions — the device-code login (#2526)
 
@@ -1761,8 +1799,9 @@ signer imports:
   AMENDMENT of the §10 one-delegation-per-redeem invariant — never a silent
   loosening: the allowlist grows from "exactly one or two links" (#3329) to
   "exactly one, two or three" with every link's shape pinned, issuance stays
-  owner-governed (decision log 2026-09-27: the owner co-signs each sub-budget;
-  A's delegate key only signs within the owner-approved envelope), and a
+  owner-governed (decision log 2026-09-27, 2026-10-01: the owner issues each
+  sub-budget from the dashboard session, with no owner signature; A's
+  delegate key only signs within the owner-approved envelope), and a
   sub-budget child can only **narrow** what its parent's caveats already
   allow — periodAmount ≤ the parent's on the same window, expiry ≤ the
   parent's, recipient pin never unpinned — so the three-link chain is never
@@ -1770,6 +1809,11 @@ signer imports:
   authority-reducing `disableDelegation` UserOp for a sub-budget child
   (`assertOwnSubBudgetCloseUserOp`), byte-shape-identical to the task
   budget's.
+
+  > **Corrected (#3645, 2026-10-05):** the issuance parenthetical above said
+  > the owner "co-signs" each sub-budget; the owner's act is a
+  > dashboard-session call with no owner signature (decision log
+  > 2026-10-01). `last-verified` is not bumped.
 
 - **The x402 buyer tax declaration (#3427)** — a new EIP-712 shape, signed
   in-process by the SDK's `HavenClient` through a builder on the
@@ -2159,6 +2203,14 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > text, copy-only) and #3524 (compact `haven_send`/`haven_pay` results), were
 > re-verified where they merged. Nothing else in this document was re-verified.
 
+> **Re-verified (0.8.1-alpha.0 release, 2026-10-07):** the release bump's only
+> covered-file edit is the `SIGNER_VERSION` literal in `packages/signer/src/tools.ts`
+> (`0.8.1-alpha.0`). No signing check, refusal or allowlist moves in that edit.
+> The range changes no file under `packages/signer/src` (`git log
+> origin/main..origin/dev -- packages/signer/src` at `03e07aca` is empty); the
+> signer's only shipped change is its README's network-calls section (#3662,
+> documentation). Nothing else in this document was re-verified.
+
 > **Re-verified #3331 frontend (2026-09-27, round 2 review fixes):** this diff
 > touches `hooks/useDelegationBudget.ts` only. `reload`/`reloadSigners` read
 > `/agents/{id}/delegations` and `/agents/{id}/account-signers`, neither
@@ -2277,6 +2329,15 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > gate run unchanged. The rest of this document was not re-read for it, and
 > `last-verified` is not bumped.
 
+> **Re-verified unchanged (#3669, 2026-10-06, backend supported vs known chains):**
+> - **Supported narrows.** The backend's supported set narrows to 8453 and 84532. Gnosis (100) becomes known and history-only: no deploy, relayer, monitor or ingest runs on it.
+> - **The rail drops Gnosis.** `VIEM_CHAINS` drops Gnosis. The rail itself already refused chain 100 through `DELEGATION_RAIL_CHAIN_IDS`.
+> - **Chiado now fails closed.** Chiado (10200) leaves the mainnet gate's testnet list, so it is classified value-bearing. The §7 recommendation logic is unchanged.
+> - **Receipt-key check widens.** The passport receipt-key boot check now compares against every configured relayer key.
+> - **Nothing else moves.** No delegation shape, caveat, signer, allowlist or redemption guard in this document moves.
+>
+> The rest of this document was not re-read for it, and `last-verified` is not bumped.
+
 > **#3542 (2026-10-01).** Re-verified unchanged except the archive guard
 > above. The archive guard and the account-delete guard
 > (`HAS_LIVE_DELEGATIONS_FOR_ACCOUNT_SQL`) now count `replaced` rows as live,
@@ -2327,4 +2388,73 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > path changes: `client.ts`'s role here is
 > a verbatim copy of a value it neither computes nor validates. The rest of
 > this document was not re-read for it, and `last-verified` is not bumped.
+
+> **#3597 (2026-10-02).** This diff touches one file in this document's
+> coverage list, `packages/backend/src/middleware/owner-cli.ts` —
+> `OWNER_CLI_ALLOWED_ROUTES` gains two entries for the CLI feedback channel:
+> `POST /feedback` (writes one row under the caller's own `user_id`; no
+> delegation, no agent, no account authority) and `GET
+> /accounts/hybrid/{address}/signers` — the FIRST signer-set READ this
+> allow-list has ever granted an owner_cli session (`GET
+> /agents/{id}/account-signers`, the agent-scoped twin, is NOT on the list).
+> It returns the owner's account address, chain_id, `owner_address` and each
+> passkey's `key_id`/`x`/`y`/`created_at` — public key material only,
+> ownership-scoped by `user_id` (`resolveOwnedHybridAccount`) — nothing
+> secret, no signer-set CHANGE. Neither entry grants a SIGNATURE step,
+> a key rotation, a signer-set write, a delegation activation or anything
+> that moves funds — the `owner-cli-route-census.test.ts` independent-opinion
+> check (the `forbidden` pattern list, including the `^/accounts` and
+> `signers?` patterns this file's own comment names) still refuses every
+> authority-shaped path by construction; the new GET survives it only
+> through a named, commented exemption for this one read. No signature, key,
+> delegation graph, caveat enforcer or on-chain redemption path changes. The
+> rest of this document was not re-read for it, and `last-verified` is not
+> bumped.
+
+> **Re-verified #3693 (2026-10-06, delegations remaining-this-period):** the
+> covered file this diff touches is `routes/agent-delegations.ts` — its
+> `GET /agents/:id/delegations` list response gains three per-row fields for
+> ACTIVE delegations (`remaining_atomic`, `remaining_from_chain`,
+> `period_end`; null on non-active rows) — OPT-IN via a single allowlisted
+> query parameter, `?include=remaining` (anything else is a 400 from the
+> enforced request schema before the handler runs): without it the response
+> is the plain lifecycle list, byte-identical to the pre-#3693 shape, and
+> neither the json fetch nor the chain read runs. The enrichment is
+> answered by the EXISTING
+> `readRemainingBudget` chain read the analytics budget views already use,
+> now fed the row's signed delegation fetched server-side via
+> `listDelegationJsonByIds` and excluded from the response as before
+> (asserted). This is a read-only enrichment of data the owner could already
+> read on-chain: the reader signs nothing, prepares nothing and redeems
+> nothing; a failed or rejected read answers the FULL budget with
+> `remaining_from_chain: false` (the conservative bound) and still 200; the
+> reads run bounded (the analytics worker pool, four in flight) under the
+> reader's existing timeouts. No route, role, ceremony or validation shape
+> changes — the optional `include` parameter only chooses whether the
+> display enrichment runs — and the Owner-Signature Invariant above is
+> untouched — nothing here activates, revokes, rekeys or redeems anything.
+> The verification entry for the two `satisfied-by` contract docs this
+> change also covers is
+> `docs/regulatory/casp-changelog/2026-10-06-3693.md`. Scope of this
+> re-read: the delegation-list route paragraphs of this section and the
+> files this change touches (`routes/agent-delegations.ts`,
+> `infra/chain/delegation-budget-reader.ts`,
+> `infra/repositories/delegation-budgets.ts`); `last-verified` already reads
+> 2026-10-06 and the date is accurate for this re-read.
+
+> **Re-verified #3695 (2026-10-06, Spending section):** the covered file this
+> diff touches is `hooks/useDelegationBudget.ts`, on its READ path only: the
+> `?include=remaining` enrichment becomes a per-caller opt-in
+> (`includeRemaining`, default off). #3693 had every caller of the hook ask
+> for it; now only the agent page's budget card does, so the other callers
+> (connect approval, remove, superseded-agent, fund-merchant, edit) go back to
+> the plain lifecycle list and no longer trigger the server-side chain read on
+> each poll. Which delegations are listed, and every build, activate, edit and
+> revoke call, are unchanged — no signing path, ceremony or refusal moves, and
+> budget, recipient and expiry stay enforced on-chain by the caveat
+> enforcers. The card renders the remaining figure as display only ("used this
+> period"); a failed chain read (`remaining_from_chain: false`) is shown as
+> unread, never as a measurement. Scope of this note: the hook's read path.
+> Nothing else in this document was re-read for it, and `last-verified` is not
+> bumped.
 

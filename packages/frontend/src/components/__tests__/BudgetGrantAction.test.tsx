@@ -122,3 +122,26 @@ describe('BudgetGrantAction (#1073)', () => {
     ).toMatch(/import BudgetGrantAction from '\.\.\/BudgetGrantAction'/)
   })
 })
+
+// #3695: a page form that opened in place carries its Cancel in the submit
+// row, after the grant button, without taking the modal-footer shape.
+describe('BudgetGrantAction trailingAction (#3695)', () => {
+  it('renders after the grant button in the same row and keeps the helper', () => {
+    renderAction({ helper: 'One signature.', trailingAction: <button type="button">Cancel</button> })
+    const grantButton = screen.getByRole('button', { name: 'Approve budget' })
+    const cancel = screen.getByRole('button', { name: 'Cancel' })
+    expect(cancel.parentElement).toBe(grantButton.parentElement)
+    expect(grantButton.compareDocumentPosition(cancel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByText('One signature.')).toBeTruthy()
+    // Page shape kept: the grant button is not stretched like a modal footer's.
+    expect(grantButton.className).not.toContain('flex-1')
+  })
+
+  it('is ignored when a leadingAction already makes this a modal footer', () => {
+    renderAction({
+      leadingAction: <button type="button">Close</button>,
+      trailingAction: <button type="button">Cancel</button>,
+    })
+    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
+  })
+})

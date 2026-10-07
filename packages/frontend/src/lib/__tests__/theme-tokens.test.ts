@@ -24,8 +24,9 @@ import { THEME_TOKENS, CONTRAST_PAIRS, contrastTable } from '../theme-tokens'
  * (`rgb`/`rgba`/`hsl`/`hsla`/`oklch`/`oklab`/`lab`/`lch`/`hwb`/`color`/
  * `color-mix`). Composite values (shadows, gradients, `env()` insets,
  * `calc()`) are NOT colour-valued — a shadow contains rgba() but is not a
- * colour — which is exactly how the 39-token inventory arises: the 20 hex
- * tokens with `-rgb` twins, plus the 19 twin-less whole-value colours.
+ * colour — which is exactly how the 45-token inventory arises: the 26 hex
+ * tokens with `-rgb` twins, plus the 19 twin-less whole-value colours
+ * (measured with this detector on the #3658 branch).
  */
 
 // The palette moved to @haven_ai/ui (#3508): tokens.css lives in
@@ -51,7 +52,8 @@ describe('the three palette blocks of globals.css', () => {
 
   it('every colour-valued token in :root is redeclared in both dark blocks', () => {
     const lightColours = colourValued(blocks.light)
-    expect(lightColours.length).toBeGreaterThanOrEqual(39)
+    // 44 since #3670 removed --v2-chain-gnosis (45 after #3658/#3674).
+    expect(lightColours.length).toBeGreaterThanOrEqual(44)
     for (const darkName of ['mediaDark', 'explicitDark'] as const) {
       const dark = blocks[darkName]
       for (const name of lightColours) {

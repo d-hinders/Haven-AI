@@ -1,6 +1,6 @@
 {
   "name": "@haven_ai/cli",
-  "version": "0.8.0-alpha.0",
+  "version": "0.8.1-alpha.0",
   "description": "Haven CLI — a terminal-native, scriptable parallel to the dashboard (login, read, and backend-only management) for budgeted, non-custodial agent payments.",
   "type": "module",
   "bin": {
@@ -37,6 +37,8 @@
     "access": "public"
   },
   "devDependencies": {
+    "@noble/hashes": "1.8.0",
+    "@scure/bip39": "1.6.0",
     "tsup": "^8.0.0",
     "typescript": "^5.6.0",
     "vitest": "^3.2.4"

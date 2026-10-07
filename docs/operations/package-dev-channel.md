@@ -79,6 +79,24 @@ unchanged and is not described here — see
 [`../contributing/branch-and-release-flow.md`](../contributing/branch-and-release-flow.md)
 and the `release` skill.
 
+> **Re-verified unchanged (#3689, 2026-10-06, the wiring_collision re-run clause):**
+> - **What changed.** Comments only in `routes/agent-connection-setups.ts` and `connect/src/runtime.ts`: both now say the setup prompt permits a third command change — after the user answers a `wiring_collision` relay, one re-run with the `--name` or `--replace` flag the user chose. The connector command the route builds, and the refusal the connector emits, are unchanged.
+> - **What did not.** No dist-tag, channel or `HAVEN_CONNECTOR_CHANNEL` behaviour moves, and the `--replace` / `--name` guidance in The loop still holds.
+>
+> The rest of this document was not re-read for it, and `last-verified` is not bumped.
+
+> **Re-verified unchanged (#3669, 2026-10-06, backend supported vs known chains):**
+> - **What changed.** `routes/agent-connection-setups.ts` loses its chain-100 network-name branch. A setup can only be approved on a delegation-rail account (Base or Base Sepolia), so the only visible change is that a historic chain-100 setup row's `network` reads "Chain 100" instead of "Gnosis". No connector-handed command changes.
+> - **What did not.** No dist-tag, channel or `HAVEN_CONNECTOR_CHANNEL` behaviour moves.
+>
+> The rest of this document was not re-read for it, and `last-verified` is not bumped.
+
+> **Re-verified unchanged (#3671, 2026-10-06, `RPC_URL` removed):**
+> - **What changed.** `config.ts` drops `rpcUrl` (the Gnosis-only `RPC_URL` variable). No connector, dist-tag or channel variable is touched.
+> - **What did not.** No dist-tag, channel or `HAVEN_CONNECTOR_CHANNEL` behaviour moves.
+>
+> The rest of this document was not re-read for it, and `last-verified` is not bumped.
+
 > **Re-verified unchanged (#3267, 2026-09-24, the Safe-era identifier rename):**
 > this doc is coupled through `routes/agent-connection-setups.ts` and
 > `middleware/retired-safe-names.ts`. The route's change is one internal
@@ -234,6 +252,20 @@ and the `release` skill.
 >   commits. The bump's own diff touches none of them.
 > - **Live dist-tags read during this release.** `dev` =
 >   `0.0.0-dev.202610051128.d0e0c97`, below `alpha`/`latest` = `0.7.0-alpha.0`.
+>
+> `last-verified` is not bumped.
+
+> **Re-verification (0.8.1-alpha.0 release, 2026-10-07):** coupled because the
+> bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), now
+> `0.8.0-alpha.0` → `0.8.1-alpha.0`, a PATCH step. `HAVEN_CONNECTOR_CHANNEL`
+> stays `alpha`.
+> - **Publish path.** Re-measured at `origin/dev` `03e07aca`: `git log
+>   origin/main..origin/dev` over `publish.yml`, `release-channel.mjs`,
+>   `release-snapshot-version.mjs` and `release-version-order.mjs` returns **0**
+>   commits. The bump's own diff touches none of them.
+> - **Live dist-tags read during this release** (registry over HTTP). `dev` =
+>   `0.0.0-dev.202610061536.ad3de49`, below `alpha`/`latest` = `0.8.0-alpha.0`
+>   for all five packages.
 >
 > `last-verified` is not bumped.
 

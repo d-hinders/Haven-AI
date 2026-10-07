@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.8.1-alpha.0 — 2026-10-07
+
 ## 0.8.0-alpha.0 — 2026-10-05
 
 - **`haven_get_task_budget` reads one task budget by id, whatever its status (#3518).** `haven_get_agent` lists only live task budgets (closing, plus unexpired pending and open), each with its `status` and `isExpired`; closed and expired ones are read with the new tool. `haven_get_allowances` rows carry each budget's scope (`recipientAddress`, `merchantId`, `delegationHash`, `reservedHavenAtomic`). A new tool name changes this runtime's tool list, so a client that pins tool consent will ask once after updating. No update needed.

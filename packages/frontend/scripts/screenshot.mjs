@@ -1905,6 +1905,21 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
     }
   }
   if (pathname.startsWith('/agents/') && pathname.endsWith('/delegations')) {
+    // #3693 (corrected body): remaining-this-period travels ONLY when the
+    // caller asks — fixture parity with the route's opt-in
+    // `?include=remaining` contract. The enrichment is computed from the row
+    // itself (three quarters left, refilling one period after start_date).
+    const includeRemaining = new URLSearchParams(apiPath.split('?')[1] ?? '').get('include') === 'remaining'
+    const withRemaining = (rows) => (includeRemaining
+      ? rows.map((r) => (r.status === 'active'
+          ? {
+              ...r,
+              remaining_atomic: (BigInt(r.budget_atomic) * 3n / 4n).toString(),
+              remaining_from_chain: true,
+              period_end: new Date(Date.parse(r.start_date) + r.period_seconds * 1000).toISOString(),
+            }
+          : { ...r, remaining_atomic: null, remaining_from_chain: null, period_end: null }))
+      : rows)
     // #2106: the delegation rail's actual spend authority, as
     // `GET /agents/:id/delegations` returns it. The agent's budget card
     // renders this on a `delegator_hybrid` account instead of the retired
@@ -1913,8 +1928,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
     // AllowedCalldataEnforcer caveat) and open — or the rendered review never
     // sees the branch that was wrong.
     if (pathname === `/agents/agent-research/delegations`) {
-      return {
-        delegations: [{
+      return { delegations: withRemaining([{
           id: 'dlg-1', chain_id: FIXTURE_ACCOUNT.chain_id,
           token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
           recipient_address: ADDR.merchant,
@@ -1924,12 +1938,11 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
           start_date: '2026-06-02T10:00:00.000Z',
           expires_at: Math.floor(Date.UTC(2027, 5, 2) / 1000),
           created_at: '2026-06-02T10:00:00.000Z',
-        }],
+        }]),
       }
     }
     if (pathname === `/agents/agent-retired/delegations`) {
-      return {
-        delegations: [{
+      return { delegations: withRemaining([{
           id: 'dlg-2', chain_id: FIXTURE_ACCOUNT.chain_id,
           token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
           recipient_address: null,
@@ -1939,15 +1952,14 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
           start_date: '2026-05-18T10:00:00.000Z',
           expires_at: Math.floor(Date.UTC(2027, 4, 18) / 1000),
           created_at: '2026-05-18T10:00:00.000Z',
-        }],
+        }]),
       }
     }
     // #3542: the budget delegations the two half-revoked agents still hold.
     // `status: 'active'` on a REVOKED agent is the defect itself — the route
     // has no status filter, so it serves the row, and revoke-all targets it.
     if (pathname === `/agents/agent-half-revoked/delegations`) {
-      return {
-        delegations: [{
+      return { delegations: withRemaining([{
           id: 'dlg-half-1', chain_id: FIXTURE_ACCOUNT.chain_id,
           token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
           recipient_address: null,
@@ -1957,12 +1969,11 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
           start_date: '2026-05-20T10:00:00.000Z',
           expires_at: Math.floor(Date.UTC(2027, 4, 20) / 1000),
           created_at: '2026-05-20T10:00:00.000Z',
-        }],
+        }]),
       }
     }
     if (pathname === `/agents/agent-half-removed/delegations`) {
-      return {
-        delegations: [{
+      return { delegations: withRemaining([{
           id: 'dlg-half-2', chain_id: FIXTURE_ACCOUNT.chain_id,
           token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
           recipient_address: null,
@@ -1972,7 +1983,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
           start_date: '2026-04-12T10:00:00.000Z',
           expires_at: Math.floor(Date.UTC(2027, 3, 12) / 1000),
           created_at: '2026-04-12T10:00:00.000Z',
-        }],
+        }]),
       }
     }
     return { delegations: [] }
@@ -2851,11 +2862,39 @@ const BACKUP_RECOVERY_STAGES = {
  *               `httpError(500)` rather than a cleverer payload.
  *   loading     the fetch stays pending. The skeleton has to hold the card's
  *               shape, which is a claim only a render can settle.
+ *   two-budgets two ACTIVE budgets (#3695) — each row's meter and caption,
+ *               the grant form collapsed behind "Add budget", and (shot
+ *               after clicking it) the form opened in place.
  */
+const AGENT_BUDGET_TWO_ROWS = [
+  {
+    id: 'dlg-abc-1', chain_id: FIXTURE_ACCOUNT.chain_id,
+    token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    recipient_address: null,
+    delegation_hash: '0x' + '6a'.repeat(32),
+    version: 1, status: 'active',
+    budget_atomic: '250000000', period_seconds: 604_800,
+    start_date: '2026-06-02T10:00:00.000Z',
+    expires_at: Math.floor(Date.UTC(2027, 5, 2) / 1000),
+    created_at: '2026-06-02T10:00:00.000Z',
+  },
+  {
+    id: 'dlg-abc-2', chain_id: FIXTURE_ACCOUNT.chain_id,
+    token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    recipient_address: ADDR.merchant,
+    delegation_hash: '0x' + '6b'.repeat(32),
+    version: 1, status: 'active',
+    budget_atomic: '20000000', period_seconds: 86_400,
+    start_date: '2026-06-02T10:00:00.000Z',
+    expires_at: Math.floor(Date.UTC(2027, 5, 2) / 1000),
+    created_at: '2026-06-02T10:00:00.000Z',
+  },
+]
 const AGENT_BUDGET_STAGES = {
   'no-budget': { kind: 'ok', delegations: [] },
   'load-error': { kind: 'error' },
   loading: { kind: 'pending' },
+  'two-budgets': { kind: 'ok', delegations: AGENT_BUDGET_TWO_ROWS },
 }
 
 let agentBudgetStage = 'no-budget'
@@ -3014,7 +3053,6 @@ function connectorRepairHintScenarios() {
       await dialog.getByLabel('Agent name').fill('Research agent')
       await dialog.getByRole('button', { name: 'Set agent budget' }).click()
       await dialog.getByPlaceholder('Amount').fill('25')
-      await dialog.getByRole('button', { name: 'Review agent budget' }).click()
       await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
 
       await dialog.getByRole('button', { name: 'Approve budget' }).waitFor({ timeout: 30_000 })
@@ -3199,6 +3237,9 @@ function setAuthApiStage(next) {
   authApiStage = next
 }
 
+/** GET counter for the `connect-agent-focus` poll hold (#3687). */
+const connectAgentFocusGets = { count: 0 }
+
 export const SCENARIOS = {
   'auth-shell-states': {
     description:
@@ -3260,21 +3301,32 @@ export const SCENARIOS = {
       await gotoAuth('/login')
       setAuthApiStage('error')
       await fillLogin()
-      await page.getByRole('button', { name: 'Log in', exact: true }).click()
+      await page.getByRole('button', { name: 'Sign in', exact: true }).click()
       await page.getByText('Invalid email or password.').waitFor({ timeout: 20_000 })
       await shootCard('login-api-error')
+
+      // ── sign-in: client validation (#3660) ───────────────────────────────
+      // The inline field errors: `a@b` is a valid `type=email` value, so no
+      // browser bubble would ever fire for it, and the empty password proves
+      // the second field's error renders independently of the first.
+      await gotoAuth('/login')
+      await page.getByLabel('Email').fill('a@b')
+      await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+      await page.getByText('Enter a valid email address.').waitFor({ timeout: 20_000 })
+      await page.getByText('Enter your password.').waitFor({ timeout: 20_000 })
+      await shootCard('login-validation')
 
       // ── sign-in: in-flight submit ────────────────────────────────────────
       await gotoAuth('/login')
       setAuthApiStage('loading')
       await fillLogin()
-      await page.getByRole('button', { name: 'Log in', exact: true }).click()
-      await page.getByRole('button', { name: 'Logging in...' }).waitFor({ timeout: 20_000 })
+      await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+      await page.getByRole('button', { name: 'Signing in...' }).waitFor({ timeout: 20_000 })
       await shootCard('login-loading')
 
       // ── sign-in: the registered banner ───────────────────────────────────
       await gotoAuth('/login?registered=1')
-      await page.getByText('Account created. Log in to continue.').waitFor({ timeout: 20_000 })
+      await page.getByText('Account created. Sign in to continue.').waitFor({ timeout: 20_000 })
       await shootCard('login-registered')
 
       // ── sign-up: client validation (email rule + confirm mismatch) ──────
@@ -3887,7 +3939,6 @@ export const SCENARIOS = {
       await connect.getByLabel('Agent name').fill('New agent')
       await connect.getByRole('button', { name: 'Set agent budget' }).click()
       await connect.getByPlaceholder('Amount').fill('25')
-      await connect.getByRole('button', { name: 'Review agent budget' }).click()
       await connect.getByRole('button', { name: 'Create setup prompt' }).click()
       await connect.getByText(/This setup replaced /).waitFor({ timeout: 30_000 })
 
@@ -4019,6 +4070,43 @@ export const SCENARIOS = {
 
       await card.scrollIntoViewIfNeeded()
       await shoot(card, 'card')
+    },
+  },
+  'design-system-chain-identity': {
+    description:
+      'The Chain identity block on /design-system — the --v2-chain-* swatches after #3670 removed the Gnosis token',
+    // Element capture for the same reason as design-system-buttons: the page
+    // is far past Chromium's full-page surface cap, and this block sits below it.
+    api() {
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/design-system`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      const label = page.getByText('Chain identity', { exact: true })
+      await label.waitFor({ timeout: 20_000 })
+      // The bordered sub-block that owns the label: label, copy and swatches.
+      const block = page.locator('div.border-t', { has: label }).last()
+      await block.scrollIntoViewIfNeeded()
+      await shoot(block, 'block')
+    },
+  },
+  'transactions-detail-network': {
+    description:
+      'The /transactions detail drawer for the first fixture row — its Network row now renders the NetworkPill (#3670)',
+    api() {
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/transactions`, { waitUntil: 'domcontentloaded', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      const select = page.locator('button[data-row-select]').first()
+      await select.waitFor({ timeout: 30_000 })
+      await select.click()
+      const drawer = page.getByRole('dialog').first()
+      await drawer.waitFor({ timeout: 20_000 })
+      await drawer.getByText('Network', { exact: true }).waitFor({ timeout: 20_000 })
+      await shoot(drawer, 'drawer')
     },
   },
   /**
@@ -4259,16 +4347,16 @@ export const SCENARIOS = {
   },
   'passport-reanchoring': {
     description:
-      'Agent Passport card during the re-key window (#1699) — the anchor names the retired key while standing stays Active',
+      'Agent Passport row in the Identity and settings card during the re-key window (#1699) — the anchor names the retired key while standing stays Active',
     // No URL reaches this: `re_anchoring` is a transient backend state between
     // the retire and the re-issue, so nothing a route-based capture can wait
     // for produces it. Without a fixture the state has ZERO rendered evidence,
     // which is precisely the gap #1894's design pass found on the neighbouring
     // re-key flow and #1890 had to close afterwards. Cheaper to seed it here.
     //
-    // What a reviewer is judging: whether the card keeps the two layers apart
+    // What a reviewer is judging: whether the row keeps the two layers apart
     // when they DISAGREE. Standing is `active` and the anchor is behind, so a
-    // card that collapsed them would have to pick one and would be wrong
+    // badge that collapsed them would have to pick one and would be wrong
     // either way — "Issued" claims a retired key's credential is current,
     // "Revoking…" tells the owner a live agent lost its authority.
     api(apiPath) {
@@ -4285,7 +4373,7 @@ export const SCENARIOS = {
             agentId: FIXTURE_AGENTS[0].id, standing: 'active', anchor: 're_anchoring',
             attestationUid: '0x' + '22'.repeat(32),
             // False on purpose, and it is an assertion rather than a default:
-            // `chainLagging` is the REVOKED-agent warning, and a card that
+            // `chainLagging` is the REVOKED-agent warning, and a row that
             // showed "treat the agent as revoked now" here would invert the
             // meaning of the whole state.
             chainLagging: false, revocationConfirmedAt: null,
@@ -4301,19 +4389,76 @@ export const SCENARIOS = {
       })
       await dismissMobileSidebar(page, vp)
 
-      const heading = page.getByRole('heading', { name: 'Agent Passport' })
+      // #3697: the passport is a ROW inside the "Identity and settings" card,
+      // not a standalone card — capture the card that holds it.
+      const heading = page.getByRole('heading', { name: 'Identity and settings' })
       await heading.waitFor({ timeout: 15_000 })
-      const card = page.locator('div.rounded-\\[10px\\]', { has: heading })
-
-      // Wait for the BADGE and the NOTE, not just the heading. The heading
-      // renders in the loading skeleton and the load-error branch too, so
-      // waiting on it alone would happily accept either as the evidence —
-      // the same trap the Backup & recovery scenario documents above.
+      // The heading sits ABOVE the card (#3692's section rule: heading, then
+      // card), so the Card root cannot be located by containing it — that
+      // locator resolves to nothing and every wait below silently times out.
+      // The card is the one that CONTAINS the passport row.
+      const card = page.locator('div.rounded-\\[10px\\]', {
+        has: page.getByTestId('agent-passport-row'),
+      })
+      // Wait for the passport ROW's badge and note, not just the section
+      // heading. The row's own heading renders in the loading skeleton and the
+      // load-error branch too, so waiting on it alone would happily accept
+      // either as the evidence — the same trap the Backup & recovery scenario
+      // documents above.
+      await card.getByText('Agent Passport').waitFor({ timeout: 15_000 })
       await card.getByText('Updating on-chain').waitFor({ timeout: 15_000 })
       await card.getByText(/signing key was replaced/).waitFor({ timeout: 15_000 })
 
-      await card.scrollIntoViewIfNeeded()
-      await shoot(card, 'card')
+      // Shoot the SECTION (heading + card), not the Card root: the reviewer
+      // judges the title AND the card, and the title sits above the card by
+      // design (#3692) — a card-only capture would crop it off.
+      const section = page.getByTestId('identity-settings-section')
+      await section.scrollIntoViewIfNeeded()
+      await shoot(section, 'card')
+    },
+  },
+  'identity-settings-not-issued': {
+    description:
+      'The Identity and settings card with the passport NOT issued — the opt-in row and the Backup & recovery pointer, no tax row (flag off)',
+    // No URL reaches a clean not-issued capture of the card: agent-research
+    // carries an anchored passport, so the only fixture agent without one is
+    // the revoked one — which is exactly the state worth photographing, since
+    // a revoked agent shows the row WITHOUT the issue action.
+    api(apiPath) {
+      if (apiPath === '/agents/agent-retired/passport') {
+        return { passport: null, standing: null }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/agents/agent-retired`, {
+        waitUntil: 'networkidle',
+        timeout: 30_000,
+      })
+      await dismissMobileSidebar(page, vp)
+
+      const heading = page.getByRole('heading', { name: 'Identity and settings' })
+      await heading.waitFor({ timeout: 15_000 })
+      // Same #3692 geometry: the heading is above the card, so the Card root
+      // is the one that CONTAINS the passport row.
+      const card = page.locator('div.rounded-\\[10px\\]', {
+        has: page.getByTestId('agent-passport-row'),
+      })
+      // Both rows: the passport row reads its opt-in state, the backup row
+      // carries the account pointer. The tax row must NOT render (the shared
+      // fixture answers /user/company-details with a 404 — flag off).
+      await card.getByText('Not issued').waitFor({ timeout: 15_000 })
+      await card.getByText(/This agent has no passport/).waitFor({ timeout: 15_000 })
+      await card.getByText(/Managed on /).waitFor({ timeout: 15_000 })
+      await card.getByText('Tax declaration').waitFor({ state: 'detached', timeout: 5_000 }).catch(() => {
+        throw new Error('tax row rendered with the flag off — the visibility rule broke')
+      })
+
+      // Shoot the SECTION (heading + card) for the same reason as above: the
+      // title is part of the evidence.
+      const section = page.getByTestId('identity-settings-section')
+      await section.scrollIntoViewIfNeeded()
+      await shoot(section, 'card')
     },
   },
   'replace-signing-key': {
@@ -4499,9 +4644,107 @@ export const SCENARIOS = {
       await shoot(dialog, 'confirmation')
     },
   },
+  // #3687: where focus lands in the Connect agent modal. Open → the caret is in
+  // *Agent name* (its focus ring is the evidence); a step change → the step
+  // region holds focus with NO ring; Back → the caret is in the name input
+  // again. Each shot asserts the focus target first, so a capture of the wrong
+  // state fails the run instead of photographing it.
+  'connect-agent-focus': {
+    description:
+      'Connect agent modal focus: name input on open, step region after a step change, name input after Back, and held across a 10 s poll on /agents and /dashboard (#3687)',
+    // Counts every fixture-answered GET, so a hold can prove a poll actually
+    // landed while it waited — a wait that saw no poll proves nothing. A
+    // module-level counter, not `this`: the runner wraps each scenario object.
+    api(apiPath, method) {
+      if (method === 'GET') connectAgentFocusGets.count += 1
+      // The dashboard's Connect agent button renders only in the empty
+      // connected-agents card. Reachable: an account whose agents are all
+      // disconnected (`hasAnyAgents` true → "No connected agents right now").
+      if (apiPath === '/dashboard/overview') return { ...FIXTURE_OVERVIEW, agents: [] }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      const scenario = connectAgentFocusGets
+      // The reported defect: focus jumped to the Close X on the 10 s poll's
+      // re-render. Hold past one poll interval and require the focused element
+      // to be the same node afterwards, with at least one GET seen meanwhile.
+      const holdAcrossPoll = async (where) => {
+        await page.evaluate(() => { window.__focusBeforeHold = document.activeElement })
+        const before = scenario.count
+        await page.waitForTimeout(11_000)
+        const polled = scenario.count - before
+        const same = await page.evaluate(() => document.activeElement === window.__focusBeforeHold)
+        if (polled === 0) throw new Error(`connect-agent-focus: no GET during the ${where} hold — nothing re-rendered`)
+        if (!same) throw new Error(`connect-agent-focus: focus moved during the ${where} hold (${polled} GETs)`)
+        console.log(`connect-agent-focus: [${vp.name}] ${where} focus held across ${polled} GET(s) in 11 s`)
+      }
+
+      // The harness's 390px context is a narrow DESKTOP window: a fine pointer,
+      // no touch. Turn touch emulation on for the mobile shots so they render
+      // the coarse-pointer branch — the input deliberately NOT focused, because
+      // the phone keyboard would cover the dialog — and fail if it did not take.
+      // Before `goto`: the modal reads the pointer once, when it mounts.
+      const wantCoarse = vp.name === 'mobile'
+      if (wantCoarse) {
+        const cdp = await page.context().newCDPSession(page)
+        await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 })
+      }
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 30_000 })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByRole('button', { name: 'Connect agent', exact: true }).first().click()
+      const dialog = page.getByRole('dialog')
+      const name = dialog.getByLabel('Agent name')
+      await name.waitFor({ timeout: 10_000 })
+      const coarse = await page.evaluate(() => window.matchMedia('(pointer: coarse)').matches)
+      if (coarse !== wantCoarse) {
+        throw new Error(`connect-agent-focus: (pointer: coarse) is ${coarse} on ${vp.name}, expected ${wantCoarse}`)
+      }
+      const nameFocused = () => name.evaluate((el) => el === document.activeElement)
+      if ((await nameFocused()) === coarse) {
+        throw new Error(`connect-agent-focus: name input focus=${!coarse} expected on ${coarse ? 'coarse' : 'fine'} pointer`)
+      }
+      await shoot(dialog, 'open')
+
+      await name.pressSequentially('Research agent')
+      await holdAcrossPoll('/agents')
+      await dialog.getByRole('button', { name: 'Set agent budget' }).click()
+      await dialog.getByPlaceholder('Amount').waitFor({ timeout: 10_000 })
+      const inRegion = await page.evaluate(
+        () => document.activeElement?.getAttribute('tabindex') === '-1' && !!document.activeElement.closest('[role="dialog"]'),
+      )
+      if (!inRegion) throw new Error('connect-agent-focus: focus is not on the step region after Set agent budget')
+      await shoot(dialog, 'policy')
+      // A field that is NOT the initial-focus target: on a fine pointer the old
+      // re-run re-focused *Agent name* itself, which masked the jump there.
+      await dialog.getByPlaceholder('Amount').click()
+      await dialog.getByPlaceholder('Amount').pressSequentially('25')
+      await holdAcrossPoll('/agents budget step')
+
+      await dialog.getByRole('button', { name: 'Back' }).click()
+      await name.waitFor({ timeout: 10_000 })
+      // Park the pointer off the dialog: Cancel now sits where Back was clicked,
+      // and a resting cursor would photograph its hover fill.
+      await page.mouse.move(0, 0)
+      if ((await nameFocused()) === coarse) {
+        throw new Error('connect-agent-focus: wrong focus target after Back')
+      }
+      await shoot(dialog, 'back')
+
+      // The dashboard entry point passes an inline onClose and polls too.
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 30_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByRole('button', { name: 'Connect agent', exact: true }).first().click()
+      const dashName = page.getByRole('dialog').getByLabel('Agent name')
+      await dashName.waitFor({ timeout: 10_000 })
+      await page.getByRole('dialog').getByLabel(/Description/).click()
+      await page.getByRole('dialog').getByLabel(/Description/).pressSequentially('Pays for research APIs')
+      await holdAcrossPoll('/dashboard')
+    },
+  },
   'connect-agent': {
     description:
-      'Connect agent modal, step 4, at each connection stage (starting → slow → recovery)',
+      'Connect agent modal, step 3, at each connection stage (starting → slow → recovery)',
     // The setup is PINNED at awaiting_connection for the whole run. The e2e
     // fixture deliberately flips to connected_local after the first status
     // read, which would end the waiting screen before it can be captured.
@@ -4585,7 +4828,7 @@ export const SCENARIOS = {
       const dialog = page.getByRole('dialog')
       await dialog.getByLabel('Agent name').fill('Research agent')
 
-      // Steps 1-3 are captured too: they carry form controls (description
+      // Steps 1-2 are captured too: they carry form controls (description
       // Textarea, the local-MCP and Agent Passport Checkboxes) that no other
       // capture reaches. Disclosures are opened first — a control nobody can
       // see is a control nobody reviewed (#1410).
@@ -4602,8 +4845,6 @@ export const SCENARIOS = {
       await dialog.getByPlaceholder('Amount').fill('25')
       await shoot(dialog, 'step2-policy')
 
-      await dialog.getByRole('button', { name: 'Review agent budget' }).click()
-      await shoot(dialog, 'step3-review')
 
       await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
       await dialog.getByText('Connect your agent').waitFor({ timeout: 30_000 })
@@ -4649,7 +4890,7 @@ export const SCENARIOS = {
     },
   },
   'connect-agent-approve': {
-    description: 'Connect agent modal, step 4, manual credential fallback at the owner-signed approval rail (#2472)',
+    description: 'Connect agent modal, step 3, manual credential fallback at the owner-signed approval rail (#2472)',
     // The third pin the other two connect scenarios cannot hold: `connect-agent`
     // pins awaiting_connection for its whole run and `connect-agent-approved`
     // pins active, so the screen BETWEEN them — where the user actually grants
@@ -4729,7 +4970,6 @@ export const SCENARIOS = {
       await dialog.getByLabel('Agent name').fill('Research agent')
       await dialog.getByRole('button', { name: 'Set agent budget' }).click()
       await dialog.getByPlaceholder('Amount').fill('25')
-      await dialog.getByRole('button', { name: 'Review agent budget' }).click()
       await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
 
       // Confirmed by the money-authority action itself, not a bare timeout — a
@@ -4812,7 +5052,7 @@ export const SCENARIOS = {
     'Could not load recovery balance',
   ),
   'connect-agent-approved': {
-    description: 'Connect agent modal, step 4, the APPROVED ending (#1394)',
+    description: 'Connect agent modal, step 3, the APPROVED ending (#1394)',
     // Separate scenario rather than a stage of `connect-agent`: that one pins
     // the setup at awaiting_connection for its whole run, which is what makes
     // the three waiting stages capturable at all. The ending needs the
@@ -4881,7 +5121,6 @@ export const SCENARIOS = {
       await dialog.getByLabel('Agent name').fill('Research agent')
       await dialog.getByRole('button', { name: 'Set agent budget' }).click()
       await dialog.getByPlaceholder('Amount').fill('25')
-      await dialog.getByRole('button', { name: 'Review agent budget' }).click()
       await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
 
       // Confirmed by the sentence this issue exists to produce, not by a bare
@@ -4989,7 +5228,6 @@ export const SCENARIOS = {
           await dialog.getByLabel('Agent name').fill('Research agent')
           await dialog.getByRole('button', { name: 'Set agent budget' }).click()
           await dialog.getByPlaceholder('Amount').fill('25')
-          await dialog.getByRole('button', { name: 'Review agent budget' }).click()
           await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
 
           // Waited on by the sentence each variant exists to produce, never a
@@ -5439,12 +5677,28 @@ export const SCENARIOS = {
     /** Exposed so the fixture-contract test can pin each stage (#1409). */
     stage: setAgentBudgetStage,
     api(apiPath) {
+      // A scenario hook sees the request PATH only (the router strips the
+      // query before calling `api()`), so `?include=remaining` is not visible
+      // here. The budget card is the one caller of this path on the page and
+      // it always asks (#3695), so the remaining fields are served
+      // unconditionally — the shared fixture, which does see the query,
+      // keeps the opt-in contract.
       if (apiPath === `/agents/agent-research/delegations`) {
         const stage = AGENT_BUDGET_STAGES[agentBudgetStage]
         if (stage.kind === 'error') return httpError(500)
         // Long enough to capture, short enough not to stall the run.
         if (stage.kind === 'pending') return delayedHttp(20_000, { delegations: [] })
-        return { delegations: stage.delegations }
+        // Two different usage levels, so the two meters are told apart in
+        // the capture.
+        const usedShare = [1n, 3n]
+        return {
+          delegations: stage.delegations.map((r, i) => ({
+            ...r,
+            remaining_atomic: (BigInt(r.budget_atomic) * (4n - usedShare[i % 2]) / 4n).toString(),
+            remaining_from_chain: true,
+            period_end: new Date(Date.parse(r.start_date) + r.period_seconds * 1000).toISOString(),
+          })),
+        }
       }
       // The agent's own `allowances` is a VIEW over active delegations
       // (#1090), so a no-budget agent whose allowances still listed a token
@@ -5466,7 +5720,7 @@ export const SCENARIOS = {
       // wrong state under the right name.
       setAgentBudgetStage('no-budget')
 
-      const heading = page.getByRole('heading', { name: 'Agent budgets' })
+      const heading = page.getByRole('heading', { name: 'Spending' })
 
       const settle = async (navigate) => {
         await navigate()
@@ -5483,8 +5737,10 @@ export const SCENARIOS = {
         }),
       )
 
-      const card = page.locator('div.rounded-\\[10px\\]', { has: heading })
-      const emptyCopy = card.getByText(/No budget yet/)
+      // #3695: the heading sits ABOVE the card, so the capture target is the
+      // section holding both.
+      const card = page.locator('section', { has: heading })
+      const emptyCopy = card.getByText('Set its first budget')
       const errorCopy = card.getByText(/could not load this agent.s current budgets/)
       const setBudget = card.getByRole('button', { name: 'Set budget' })
 
@@ -5521,6 +5777,22 @@ export const SCENARIOS = {
       await refuseIfPresent(emptyCopy, 'agent-budget-card · loading · empty copy')
       await card.scrollIntoViewIfNeeded()
       await shoot(card, 'loading')
+
+      // ── two budgets (#3695) ───────────────────────────────────────────────
+      // Collapsed first: the form must NOT be on screen, the meters must be.
+      await openStage('two-budgets')
+      const addBudget = card.getByRole('button', { name: 'Add budget' })
+      await addBudget.waitFor({ timeout: 15_000 })
+      await card.getByRole('progressbar').nth(1).waitFor({ timeout: 15_000 })
+      await refuseIfPresent(setBudget, 'agent-budget-card · two-budgets · form open before Add budget')
+      await card.scrollIntoViewIfNeeded()
+      await shoot(card, 'two-budgets')
+
+      // ...then the form opened in place.
+      await addBudget.click()
+      await setBudget.waitFor({ timeout: 15_000 })
+      await card.scrollIntoViewIfNeeded()
+      await shoot(card, 'form-open')
     },
   },
   // 'send-review' (#1856) is DELETED with its subject (#1989, epic #1440): it

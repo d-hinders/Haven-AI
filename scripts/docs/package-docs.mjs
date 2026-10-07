@@ -120,6 +120,9 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/signer/src/**', 'packages/sdk/src/edge.ts', 'packages/sdk/src/edge-imports.test.ts'],
+    // #3645: EDITED, scope = the network-call paragraph (the task- and
+    // sub-budget sign-context reads and the X-Haven-Client header), verified
+    // against src/sign-context.ts. Nothing else re-verified. Prior:
     // #3506: EDITED, scope = the haven_sign table row ({ sub_budget_id } form,
     // its result shape, and the "Signs only" list now naming the task-budget
     // child, the sub-budget child and the task/sub-budget close UserOps) and the handshake-derivation sentence (task + sub-budget
@@ -426,7 +429,10 @@ export const GOVERNED_PACKAGE_DOCS = [
     // `routes/payments.ts` — `over-budget-refused` is now refused at the period
     // pre-check (typed 403), so no live leg watches the enforcer revert. Scope:
     // those rows, that paragraph and the "Still uncovered" note.
-    'last-verified': '2026-09-30',
+    // #3655: the balances-check paragraphs re-read against the automatic CDP
+    // Base Sepolia faucet exception, including the API-key-only/no-wallet-secret
+    // credential boundary. Other QA scenario prose was not re-read.
+    'last-verified': '2026-10-05',
   },
   {
     doc: 'packages/demo-merchant-mcp/README.md',

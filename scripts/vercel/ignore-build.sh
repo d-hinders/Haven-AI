@@ -8,7 +8,10 @@
 # <FORCE_VARIABLE> names an environment variable that, set to 1, forces one
 # build. <watch file> is a repo-relative file (scripts/vercel/watch/*.txt)
 # listing, one per line, the repo-relative paths the project is built from;
-# `#` starts a comment. Paths may not contain whitespace (the list is
+# `#` starts a comment. A line starting with `!` is an EXCLUDE: a glob
+# (`**` crosses directories) naming files under a watched path that the
+# deployed site never reads, such as tests, so a change to them alone skips
+# (#3681). Paths may not contain whitespace (the list is
 # word-split); the harness refuses such an entry. The list lives in a file, not in vercel.json, so the
 # ignoreCommand stays short. Each project's test reads the same file.
 #
@@ -19,7 +22,9 @@
 # deployment cap, a failed build) the change never deployed (#3591).
 #
 # It skips ONLY when it can prove nothing watched changed. Anything uncertain
-# builds: a wasted build costs one deployment, a wrong skip leaves a stale site.
+# builds: a wasted build costs build minutes, a wrong skip leaves a stale site.
+# (A skip saves minutes, not deployments: a skipped deployment still counts
+# toward Vercel's daily cap, #3681.)
 #
 #   - Previous deployment known and in the clone: skip iff nothing watched
 #     changed since it.
@@ -27,8 +32,11 @@
 #     PR's first preview): skip iff a merge base with dev can be found and
 #     nothing watched changed on the branch since it. Vercel's clone holds the
 #     deployed branch only, so when no dev ref is present the script fetches
-#     dev's recent history from origin first; if that fails, or the shallow
-#     histories still share no commit, it builds.
+#     dev's recent history: from origin, else from the repository's public
+#     GitHub URL (Vercel's clone may carry no usable origin, #3594). If the
+#     shallow histories share no commit it deepens the clone once from its
+#     shallow boundary. If all of that fails it builds, and its log line names
+#     the step that failed.
 #   - No previous deployment otherwise (production, an unset or empty
 #     VERCEL_ENV, or the dev and main branches, whose deployments are the dev
 #     host and production): build.
@@ -63,15 +71,38 @@ if [ -z "$WATCHED" ]; then
   echo "vercel ignore-build: watch file ${watch_file} lists no paths; building." >&2
   exit 1
 fi
+# An empty exclude (`!` alone) excludes the whole repository, and a list of
+# excludes alone watches everything else; either would make every build skip or
+# build for the wrong reason, so both build (#3681).
+has_include=
+for path in $WATCHED; do
+  case "$path" in
+    '!')
+      echo "vercel ignore-build: watch file ${watch_file} has an empty exclude; building." >&2
+      exit 1
+      ;;
+    '!'*) ;;
+    *) has_include=1 ;;
+  esac
+done
+if [ -z "$has_include" ]; then
+  echo "vercel ignore-build: watch file ${watch_file} lists only excludes; building." >&2
+  exit 1
+fi
 
 # `:(top)` pathspecs: Vercel runs this from the project's Root Directory
 # (packages/<project>), where a relative pathspec would match nothing and
-# always skip.
+# always skip. An `!` entry becomes an exclude glob, which git applies after
+# the includes: a path is watched when an include matches it and no exclude
+# does.
 watched_unchanged() {
   base=$1
   set --
   for path in $WATCHED; do
-    set -- "$@" ":(top)$path"
+    case "$path" in
+      '!'*) set -- "$@" ":(top,exclude,glob)${path#!}" ;;
+      *) set -- "$@" ":(top)$path" ;;
+    esac
   done
   git diff --quiet "$base" HEAD -- "$@"
 }
@@ -87,22 +118,78 @@ if [ "$force_value" = "1" ]; then
   exit 1
 fi
 
-# The merge base of HEAD with dev, or nothing. Tries the refs the clone has,
-# then one shallow fetch of dev from origin (Vercel clones the deployed branch
-# alone), which never prompts and gives up on a stalled connection. Any failure
-# yields nothing, and the caller builds.
-merge_base_with_dev() {
+# A fetch that never prompts and gives up on a stalled connection.
+quiet_fetch() {
+  GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND='ssh -o BatchMode=yes -o ConnectTimeout=20' \
+    git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 \
+    fetch -q --no-tags "$@" >/dev/null 2>&1
+}
+
+# Where dev can be fetched from, one per line: the clone's origin, then the
+# repository's public GitHub URL from Vercel's system variables. The first
+# build log after #3601 (PR #3622's first preview) could not tell a failed
+# fetch from histories that share no commit, so the script now addresses
+# both and logs which one it hit. The repository is public, so the URL needs
+# no credentials. IGNORE_BUILD_DEV_URL replaces that URL; it is a test hook
+# (the tests point it at a local repository), and a value with whitespace or
+# a leading `-` is ignored rather than handed to git. A non-GitHub provider
+# gets no URL.
+dev_sources() {
+  if git remote get-url origin >/dev/null 2>&1; then
+    echo origin
+  fi
+  if [ -n "${IGNORE_BUILD_DEV_URL:-}" ]; then
+    case "$IGNORE_BUILD_DEV_URL" in
+      -* | *[[:space:]]*) ;;
+      *) echo "$IGNORE_BUILD_DEV_URL" ;;
+    esac
+  elif [ -n "${VERCEL_GIT_REPO_OWNER:-}" ] && [ -n "${VERCEL_GIT_REPO_SLUG:-}" ] &&
+    { [ -z "${VERCEL_GIT_PROVIDER:-}" ] || [ "${VERCEL_GIT_PROVIDER}" = github ]; }; then
+    echo "https://github.com/${VERCEL_GIT_REPO_OWNER}/${VERCEL_GIT_REPO_SLUG}.git"
+  fi
+}
+
+# Sets `base` to the merge base of HEAD with dev and returns 0, or sets `why`
+# to the step that failed and returns 1 (the caller builds). Tries the refs the
+# clone has, then one shallow fetch of dev from each source in turn, then, if
+# the shallow histories share no commit, one deepening from the source that
+# answered. Whether `--deepen` extends HEAD's shallow boundary when only dev
+# is fetched differs between git versions (git 2.43 does, CI's newer git did
+# not), so it fetches the deployed branch ($1) alongside dev, and falls back
+# to dev alone when that fails (a fork PR, or a branch deleted since).
+find_dev_base() {
+  base=''
+  why=''
   for candidate in origin/dev dev; do
     if git rev-parse -q --verify "${candidate}^{commit}" >/dev/null 2>&1; then
-      git merge-base HEAD "$candidate" 2>/dev/null && return 0
+      base=$(git merge-base HEAD "$candidate" 2>/dev/null) && [ -n "$base" ] && return 0
     fi
   done
-  if git remote get-url origin >/dev/null 2>&1 &&
-    GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND='ssh -o BatchMode=yes -o ConnectTimeout=20' \
-      git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 \
-      fetch -q --no-tags --depth=200 origin "+refs/heads/dev:refs/remotes/origin/dev" >/dev/null 2>&1; then
-    git merge-base HEAD origin/dev 2>/dev/null && return 0
+  sources=$(dev_sources)
+  if [ -z "$sources" ]; then
+    why="no dev ref in the clone, no origin remote, and no public repository URL (provider '${VERCEL_GIT_PROVIDER:-unset}', owner '${VERCEL_GIT_REPO_OWNER:-unset}', slug '${VERCEL_GIT_REPO_SLUG:-unset}')"
+    return 1
   fi
+  fetched=''
+  for source in $sources; do
+    if quiet_fetch --depth=200 "$source" "+refs/heads/dev:refs/remotes/origin/dev"; then
+      fetched=$source
+      break
+    fi
+  done
+  if [ -z "$fetched" ]; then
+    why="fetching dev failed from: $(echo $sources)"
+    return 1
+  fi
+  base=$(git merge-base HEAD origin/dev 2>/dev/null) && [ -n "$base" ] && return 0
+  if { [ -n "$1" ] &&
+    quiet_fetch --deepen=200 "$fetched" "+refs/heads/dev:refs/remotes/origin/dev" "+refs/heads/$1:refs/remotes/ignore-build/branch"; } ||
+    quiet_fetch --deepen=200 "$fetched" "+refs/heads/dev:refs/remotes/origin/dev"; then
+    base=$(git merge-base HEAD origin/dev 2>/dev/null) && [ -n "$base" ] && return 0
+    why="dev fetched from ${fetched}, but it shares no commit with the clone even after deepening it"
+    return 1
+  fi
+  why="dev fetched from ${fetched}, but it shares no commit with the shallow clone, and deepening failed"
   return 1
 }
 
@@ -114,9 +201,8 @@ if [ -z "$prev" ]; then
     echo "vercel ignore-build: no previous deployment recorded (env '${VERCEL_ENV:-unset}', branch '${ref:-unset}'); building."
     exit 1
   fi
-  base=$(merge_base_with_dev) || base=""
-  if [ -z "$base" ]; then
-    echo "vercel ignore-build: first preview of '${ref:-unset}' and no merge base with dev found (none in the clone, and fetching dev failed or shares no commit); building."
+  if ! find_dev_base "$ref"; then
+    echo "vercel ignore-build: first preview of '${ref:-unset}' and no merge base with dev found (${why}); building."
     exit 1
   fi
   if watched_unchanged "$base"; then

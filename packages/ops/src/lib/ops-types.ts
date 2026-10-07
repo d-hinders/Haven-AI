@@ -11,6 +11,7 @@ import type { ApiSchema } from '@haven_ai/core'
 
 export type OpsMe = ApiSchema<'OpsSession'>
 export type OpsOverview = ApiSchema<'OpsOverview'>
+export type OpsFeedbackList = ApiSchema<'OpsFeedbackList'>
 export type OpsSearchResponse = ApiSchema<'OpsSearchResponse'>
 export type OpsUserDetail = ApiSchema<'OpsUserDetail'>
 export type OpsOnchainView = ApiSchema<'OpsOnchainView'>

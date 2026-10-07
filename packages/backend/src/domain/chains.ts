@@ -3,8 +3,7 @@
  *
  * The per-chain FACTS (identity, explorer URLs, passkey, token data) live in
  * `@haven_ai/core` (#986) — ONE definition shared with the backend. This
- * module adds what only the backend knows: RPC URLs and
- * explorer API credentials from `config.ts`, the explorer API provider
+ * module adds what only the backend knows: explorer API credentials from `config.ts`, the explorer API provider
  * selection, and the backend's token Record representation (keyed
  * `USDCE`-style, native first — the balances API iterates in this order).
  *
@@ -15,7 +14,6 @@ import { config } from '../config.js'
 import {
   CHAIN_REGISTRY,
   getChainData,
-  isRegisteredChain,
   type CoreChainConfig,
   type CoreTokenConfig,
 } from '@haven_ai/core'
@@ -36,7 +34,6 @@ export interface ChainConfig {
   name: string
   shortName: string
   nativeCurrency: { name: string; symbol: string; decimals: number }
-  rpcUrl: string
   explorerUrl: string        // e.g. https://gnosisscan.io
   explorerApiUrl: string     // e.g. https://api.etherscan.io/v2/api
   explorerApiKey: string     // empty allowed for Blockscout
@@ -54,13 +51,12 @@ export interface ChainConfig {
 
 // ── Backend-only environment wiring per chain ─────────────────────
 //
-// RPC URLs and explorer API access are environment concerns (config.ts), and
+// Explorer API access is an environment concern (config.ts), and
 // the explorer API provider choice is a backend integration detail:
 // Blockscout v2 is used for Base because the v1 tokentx endpoint consistently
 // times out (HTTP 524) on Base, and Etherscan V2 requires a paid plan.
 
 interface BackendChainEnv {
-  rpcUrl: string
   explorerApiUrl: string
   explorerApiKey: string
   explorerApiProvider: ExplorerApiProvider
@@ -68,23 +64,29 @@ interface BackendChainEnv {
 
 const CHAIN_ENV: Record<number, BackendChainEnv> = {
   100: {
-    rpcUrl: config.rpcUrl,
     explorerApiUrl: 'https://api.etherscan.io/v2/api',
     explorerApiKey: config.gnosisscanApiKey,
     explorerApiProvider: 'etherscan-v2',
   },
   8453: {
-    rpcUrl: config.rpcUrlBase,
     explorerApiUrl: 'https://base.blockscout.com/api/v2',
     explorerApiKey: '',
     explorerApiProvider: 'blockscout-v2',
   },
   84532: {
-    rpcUrl: config.rpcUrlBaseSepolia,
     explorerApiUrl: 'https://base-sepolia.blockscout.com/api/v2',
     explorerApiKey: '',
     explorerApiProvider: 'blockscout-v2',
   },
+}
+
+/**
+ * RPC wiring is SUPPORTED-chains only (#3671). Chain 100 (Gnosis) is known for
+ * history and has no RPC read path, so it is deliberately absent here.
+ */
+const SUPPORTED_RPC_URLS: Record<number, string> = {
+  8453: config.rpcUrlBase,
+  84532: config.rpcUrlBaseSepolia,
 }
 
 // ── Construction from the shared registry ─────────────────────────
@@ -117,7 +119,6 @@ function buildChainConfig(core: CoreChainConfig): ChainConfig {
     name: core.name,
     shortName: core.shortName,
     nativeCurrency: core.nativeCurrency,
-    rpcUrl: env.rpcUrl,
     explorerUrl: core.explorerUrl,
     explorerApiUrl: env.explorerApiUrl,
     explorerApiKey: env.explorerApiKey,
@@ -134,7 +135,38 @@ const CHAINS: Record<number, ChainConfig> = Object.fromEntries(
   Object.values(CHAIN_REGISTRY).map((core) => [core.chainId, buildChainConfig(core)]),
 )
 
-export const SUPPORTED_CHAIN_IDS = Object.keys(CHAINS).map(Number)
+/**
+ * Every chain whose FACTS Haven can resolve — the KNOWN set. It includes
+ * history-only chains (Gnosis, 100), so persisted rows, explorer links and the
+ * explorer history read keep resolving through `getChain`.
+ */
+export const KNOWN_CHAIN_IDS: readonly number[] = Object.keys(CHAINS).map(Number)
+
+/**
+ * The chains Haven RUNS on — explicit, not derived from the registry keys
+ * (decision (c), #3635; epic #3634). Chain 100 (Gnosis) is known but
+ * history-only and read-only: it is deliberately absent here. The runtime loops
+ * (prices, relayer monitor, the bump loop via deploys) and discovery skip it,
+ * and balances, portfolio, receive and the delegate-balance read refuse it.
+ * Payments and budget grants refuse it upstream, through the retired-rail 410
+ * and `DELEGATION_RAIL_CHAIN_IDS`. Lives in the backend
+ * (not core) because core's registry is also the frontend's known set (#3671).
+ */
+export const SUPPORTED_CHAIN_IDS: readonly number[] = [8453, 84532]
+
+for (const id of SUPPORTED_CHAIN_IDS) {
+  if (!CHAINS[id]) {
+    throw new Error(`chains: supported chain ${id} is not in the known registry`)
+  }
+  if (!(id in SUPPORTED_RPC_URLS)) {
+    throw new Error(`chains: supported chain ${id} has no RPC wiring`)
+  }
+}
+
+/** Known to the registry (history may render) — NOT necessarily supported. */
+export function isKnownChain(chainId: number): boolean {
+  return Object.prototype.hasOwnProperty.call(CHAINS, chainId)
+}
 
 export function getChain(chainId: number): ChainConfig {
   const chain = CHAINS[chainId]
@@ -175,7 +207,20 @@ export function getExplorerUrl(
 }
 
 export function isSupportedChain(chainId: number): boolean {
-  return isRegisteredChain(chainId)
+  return SUPPORTED_CHAIN_IDS.includes(chainId)
+}
+
+/**
+ * The configured (dedicated) RPC URL for a SUPPORTED chain. A known but
+ * history-only chain (Gnosis, 100) and an unknown id both throw: no code path
+ * may open an RPC connection to a chain Haven no longer runs on (#3671,
+ * decision (c) of #3635).
+ */
+export function rpcUrlForChain(chainId: number): string {
+  if (!isSupportedChain(chainId)) {
+    throw new Error(`Unsupported chain for RPC: ${chainId}`)
+  }
+  return SUPPORTED_RPC_URLS[chainId]
 }
 
 /**
@@ -193,7 +238,7 @@ export function isDeployableChain(chainId: number): boolean {
 /** The chains this environment serves deploys on — for the frontend picker. */
 export function deployableChainIds(): number[] {
   const allow = config.deployChainIds
-  return allow.length === 0 ? SUPPORTED_CHAIN_IDS : allow.filter(isSupportedChain)
+  return allow.length === 0 ? [...SUPPORTED_CHAIN_IDS] : allow.filter(isSupportedChain)
 }
 
 // ── Helpers ───────────────────────────────────────────────────────

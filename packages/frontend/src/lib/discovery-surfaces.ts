@@ -38,9 +38,11 @@
 export const PUBLIC_SURFACES = [
   '/',
   '/how-it-works',
-  '/protocols',
-  '/protocols/x402',
-  '/protocols/mpp',
+  // #3579: the redesigned site's routes. The three retired `/protocols*`
+  // pages redirect to `/how-it-works/protocols` (next.config.ts).
+  '/how-it-works/protocols',
+  '/developers',
+  '/for-agents',
   '/402',
   '/402.md',
   '/for-agents.md',

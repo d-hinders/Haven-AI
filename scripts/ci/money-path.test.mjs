@@ -420,6 +420,87 @@ describe('money-path list stays in one piece', () => {
     )
   })
 
+  test('the budget-scope period pre-check is RUNTIME money-path — a change to it gates promotion (#3649)', () => {
+    // The #1892 shape inside the backend. The #2099 fail-open period pre-check
+    // lived inline in modules/x402/delegation-authorize.ts (matched by
+    // modules/x402/**) until #3616 created modules/budget-scope/ and #3617
+    // deleted the inline copy. PR #3622 (#3616) then touched only the new
+    // module and carried no money-path label. Runtime, not control: both x402
+    // authorize legs and POST /payments decide through it inside the deployed
+    // backend, so a green money-flow run does exercise it. The labeler and
+    // SKILL.md pins read the UNION of both lists, so without this test the
+    // glob could drift into controlGlobs silently. Mutation: move the glob to
+    // controlGlobs (or drop it) and this fails by name.
+    const runtime = loadMoneyPathGlobs()
+    for (const f of ['packages/backend/src/modules/budget-scope/precheck.ts', 'packages/backend/src/modules/budget-scope/resolver.ts']) {
+      assert.ok(
+        moneyPathFiles([f], runtime).length === 1,
+        `${f} must be matched by a RUNTIME money-path glob — it decides whether a payment ` +
+          'fits the remaining budget, and the money-flow harness exercises it (#3649)',
+      )
+    }
+  })
+
+  test('the task-budget and sub-budget families, their SDK guards and the three payments decision files are RUNTIME money-path (#3661)', () => {
+    // The question #3649 left open. These BUILD child delegations (the task
+    // child, the sub-budget parent-child and the A→B grant that hands spend
+    // authority to another agent), run the pre-sign refusals, build the exact
+    // bytes the local signer signs for a direct payment, settle the fate of a
+    // submitted payment whose UserOp may have landed, decide whether a
+    // confirmed x402 payment may be re-signed (agent-payment-status.ts), and
+    // check budget children before the local signer signs (the SDK guards,
+    // the #3283 rule). Mutation: move any of the ten globs to controlGlobs (or
+    // drop it) and this fails by name.
+    const runtime = loadMoneyPathGlobs()
+    for (const f of [
+      'packages/backend/src/modules/task-budgets/task-budget-delegation.ts',
+      'packages/backend/src/modules/task-budgets/task-budget-cap.ts',
+      'packages/backend/src/modules/sub-budgets/sub-budget-delegation.ts',
+      'packages/backend/src/modules/sub-budgets/sub-budget-service.ts',
+      'packages/backend/src/routes/task-budgets.ts',
+      'packages/backend/src/routes/sub-budgets.ts',
+      'packages/backend/src/routes/agent-sub-budgets.ts',
+      'packages/backend/src/modules/payments/direct-sign-context.ts',
+      'packages/backend/src/modules/payments/submission-reconciler.ts',
+      'packages/backend/src/modules/payments/agent-payment-status.ts',
+      'packages/sdk/src/task-budget-guards.ts',
+      'packages/sdk/src/sub-budget-guards.ts',
+    ]) {
+      assert.ok(
+        moneyPathFiles([f], runtime).length === 1,
+        `${f} must be matched by a RUNTIME money-path glob — it builds or decides spend ` +
+          'authority and the money-flow harness exercises it (#3661)',
+      )
+    }
+  })
+
+  test('the deliberately off-list neighbours stay off — scope a glob down, do not widen to the module (#3661)', () => {
+    // #3661 chose FILE-level globs for modules/payments/: the rest of the
+    // module is the refusal record (which by design cannot change the
+    // refusal it records, #2945/#3053), receipt assembly and prepare-failure
+    // reporting, and
+    // routes/agent-task-budgets.ts is GET only. A `modules/payments/**`
+    // glob would also put each of these in the CASP doc's `covers:` via the
+    // #1899 pin, so every edit would owe a shard. If one of them starts
+    // deciding spend, move it onto the list here with its reason; do not
+    // delete the entry to make a wider glob pass.
+    const all = [...loadMoneyPathGlobs(), ...loadMoneyPathControlGlobs()]
+    const offList = [
+      'packages/backend/src/routes/agent-task-budgets.ts',
+      'packages/backend/src/modules/payments/refuse.ts',
+      'packages/backend/src/modules/payments/refusal-ledger.ts',
+      'packages/backend/src/modules/payments/receipt.ts',
+      'packages/backend/src/modules/payments/prepare-failure.ts',
+    ]
+    const tracked = new Set(trackedFiles())
+    for (const f of offList) assert.ok(tracked.has(f), `${f} no longer exists — drop it from this list`)
+    assert.deepEqual(
+      offList.filter((f) => moneyPathFiles([f], all).length > 0),
+      [],
+      'a money-path glob now matches a file #3661 deliberately left off the list (#3661)',
+    )
+  })
+
   test('every package-wide glob in the CASP perimeter doc is on the money-path list, or named here as doc-only (#3098)', () => {
     // The FOURTH copy, read in the OTHER direction. The test above this
     // block's #1899 twin asks "is every money-path file in `covers:`?" and
@@ -447,15 +528,16 @@ describe('money-path list stays in one piece', () => {
       // only packages/sdk/src/signer.ts (the signing schemes), the #3271
       // binding check (userop-binding) and the signing-surface guard moved in
       // by #3283 (delegate-account, direct-payment-guard, redemption-guard,
-      // settlement-child) are spend authority, and those files ARE on the
-      // runtime list; the rest is transport.
+      // settlement-child), joined by the task/sub-budget guards (#3661), are
+      // spend authority, and those files ARE on the runtime list; the rest is
+      // transport.
       // The doc covers all four because the CASP perimeter question (does
       // Haven hold or move funds?) still applies to what they ship. Widening
       // any of these to `globs` is an owner decision: every SDK/connector/CLI/
       // local-runtime PR would then owe a covering QA run.
       // A DOC_ONLY entry whose files are ALL on the list is stale and fails
       // below — an exclusion must exclude something.
-      ['packages/sdk/src/**', 'client library; only signer.ts, userop-binding.ts and the #3283 signing guard are on the runtime list — see #3098'],
+      ['packages/sdk/src/**', 'client library; only signer.ts, userop-binding.ts, the #3283 signing guard and the #3661 budget guards are on the runtime list — see #3098'],
       ['packages/cli/src/**', 'client CLI; not deployed by Haven — see #3098'],
       ['packages/connect/src/**', 'the dashboard\'s connector, runs on the user\'s machine — see #3098'],
       ['packages/mcp/src/**', 'the local MCP runtime, runs in the agent\'s process — see #3098'],

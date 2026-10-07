@@ -42,7 +42,7 @@ import { TrailingArrow } from '@/components/marketing/TrailingArrow'
  *    premise (`ring-white/80` offset onto `--v2-brand`) is wrong.
  *
  * `components/marketing/` is where the design system already puts exactly this
- * class of component (`Section`, `StepList`, `HeroBackdrop`, `FlowCard`), and
+ * class of component (`Section`, the redesigned site's blocks under `site/`), and
  * those surfaces are deliberately bespoke and design-lint-exempt (#874).
  *
  * ── The focus ring ───────────────────────────────────────────────────────────

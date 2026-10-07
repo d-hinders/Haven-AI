@@ -105,7 +105,9 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
    capability: an authenticated READ of a payment's exact signing context from
    Haven by `payment_id` (`GET /x402/:id/sign-context` for an x402 intent;
    since #3271 `GET /payments/:id/sign-context` for a direct payment, fetched
-   when the x402 route answers `409 sign_context_unavailable`), using the agent
+   when the x402 route answers `409 sign_context_unavailable`), or by
+   `task_budget_id` / `sub_budget_id` (`GET /task-budgets/:id/sign-context`,
+   `GET /sub-budgets/:id/sign-context`, #3329/#3330), using the agent
    identity (`identity.json`) the connector stores next to the signer
    credential. This exists because the alternative byte source is a language
    model re-emitting multi-KB EIP-712 payloads between tool calls — runtimes

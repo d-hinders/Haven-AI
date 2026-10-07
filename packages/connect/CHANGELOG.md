@@ -15,6 +15,12 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.8.1-alpha.0 — 2026-10-07
+
+### Changed
+
+- **README: the `wiring_collision` relay names the re-run the setup prompt now permits (#3689).** After the user answers the relay, the dashboard's setup prompt lets an agent re-run once with the flag the user chose (`--name` or `--replace`). The README said the prompt allowed only `--json` and `--runtime`. Documentation only; the connector's behaviour and its refusal text are unchanged. No update needed.
+
 ## 0.8.0-alpha.0 — 2026-10-05
 
 ### Fixed

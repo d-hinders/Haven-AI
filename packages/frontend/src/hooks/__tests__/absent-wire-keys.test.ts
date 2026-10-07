@@ -76,6 +76,18 @@ describe('array wire keys default to [] when the response omits them (#3093)', (
     await waitFor(() => expect(result.current.budgets).toEqual([]))
   })
 
+  // #3695: remaining-this-period is a per-caller opt-in. The default read
+  // stays plain (no chain RPC server-side); the agent page's card asks.
+  it('useDelegationBudget: asks for remaining only when the caller opts in (#3695)', async () => {
+    mockApiGet.mockImplementation((url: string) =>
+      Promise.resolve(url.endsWith('/account-signers') ? { account_address: ADDRESS, chain_id: 84532, owner_address: null, passkeys: [] } : { delegations: [] }),
+    )
+    const { result } = renderHook(() => useDelegationBudget('agent-1', 84532, { includeRemaining: true }))
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalledWith('/agents/agent-1/delegations?include=remaining'))
+    await waitFor(() => expect(result.current.budgets).toEqual([]))
+    expect(mockApiGet).not.toHaveBeenCalledWith('/agents/agent-1/delegations')
+  })
+
   it('useDelegationBudget: the signer set without passkeys degrades (pickSigningPath reads .length in render)', async () => {
     mockApiGet.mockImplementation((url: string) =>
       Promise.resolve(url.endsWith('/account-signers') ? { account_address: ADDRESS, chain_id: 84532, owner_address: null } : { delegations: [] }),

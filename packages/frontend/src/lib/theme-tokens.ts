@@ -16,7 +16,7 @@
  *     plain node) and the same test cross-checks the two paths against each
  *     other, so neither can drift alone.
  *
- * Scope note: exactly the 39 colour-valued tokens — the 20 with `-rgb`
+ * Scope note: exactly the 45 colour-valued tokens — the 26 with `-rgb`
  * channel twins are listed by their hex form (the channel form is pinned to
  * the hex by `design-token-alpha.test.ts`); `--v2-safe-*` (env() lengths),
  * the shadows/gradients and every non-colour token are out of scope here.
@@ -60,9 +60,6 @@ export const THEME_TOKENS: TokenSpec[] = [
   { name: 'danger', light: '#b42318', dark: '#f87171' },
   { name: 'danger-soft', light: '#fef2f2', dark: '#3a1512' },
   { name: 'modal-backdrop', light: 'rgba(26, 31, 54, 0.66)', dark: 'rgba(0, 0, 0, 0.6)' },
-  // Marketing chrome (#3139) — the dot-grid texture ink of the hero backdrop.
-  // The canvas wash beside it is a gradient and lives outside this table.
-  { name: 'marketing-dot', light: 'rgba(26, 31, 54, 0.08)', dark: 'rgba(212, 220, 236, 0.07)' },
   // Categorical data-viz series (#2948) — the ordered set the chart primitives
   // paint from. Measured ≥3:1 on their theme's grounds (see CONTRAST_PAIRS).
   { name: 'series-1', light: '#4f46e5', dark: '#8f8ef5' },
@@ -73,7 +70,6 @@ export const THEME_TOKENS: TokenSpec[] = [
   { name: 'series-6', light: '#a01a63', dark: '#e878b5' },
   // Chain identity — pills flip to translucent-border-on-deep-fill.
   { name: 'chain-base', light: '#0052ff', dark: '#3395ff' },
-  { name: 'chain-gnosis', light: '#3e9b8f', dark: '#3e9b8f' },
   { name: 'chain-testnet', light: '#f59e0b', dark: '#fbbf24' },
   { name: 'chain-base-dot', light: '#0ea5e9', dark: '#0ea5e9' },
   { name: 'chain-base-fg', light: '#0369a1', dark: '#7dd3fc' },

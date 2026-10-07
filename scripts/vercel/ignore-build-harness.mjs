@@ -54,20 +54,67 @@ export function readWatchFile(watchFile) {
   for (const entry of entries) {
     if (/\s/.test(entry)) throw new Error(`${watchFile}: entry "${entry}" contains whitespace; the script word-splits the list`)
   }
+  // The harness models excludes as `*` / `?` / `**` globs only. git also
+  // excludes everything under a wildcard-free exclude and reads `[...]` as a
+  // class, which this model would call watched while the script skips it, so
+  // both are refused rather than modelled (#3681 review).
+  for (const entry of entries.filter((e) => e.startsWith('!'))) {
+    if (!/[*?]/.test(entry) || /[[\]]/.test(entry)) {
+      throw new Error(`${watchFile}: exclude "${entry}" must use * or ** and no [ ]; the harness cannot model it`)
+    }
+  }
+  // An exclude-only list would make git watch EVERYTHING but the excludes.
+  if (!entries.some((entry) => !entry.startsWith('!'))) throw new Error(`${watchFile}: lists no include entry`)
   return entries
+}
+
+/**
+ * A git `glob` pathspec as a RegExp: `**` crosses directories (a leading
+ * `**\/` and an inner `/**\/` may match none), `*` and `?` stay inside one.
+ */
+export function globToRegExp(glob) {
+  let out = ''
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i]
+    if (glob.startsWith('**/', i)) {
+      out += '(?:.*/)?'
+      i += 2
+    } else if (glob.startsWith('**', i)) {
+      out += '.*'
+      i += 1
+    } else if (c === '*') out += '[^/]*'
+    else if (c === '?') out += '[^/]'
+    else out += c.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+  }
+  return new RegExp(`^${out}$`)
+}
+
+/**
+ * Whether a change to `path` (repo-relative) rebuilds the project under the
+ * `watched` list, as the script's pathspecs decide it: an include entry (a
+ * path prefix) matches it and no `!` exclude glob does (#3681).
+ */
+export function isWatched(watched, path) {
+  const includes = watched.filter((entry) => !entry.startsWith('!'))
+  const excludes = watched.filter((entry) => entry.startsWith('!')).map((entry) => globToRegExp(entry.slice(1)))
+  return (
+    includes.some((entry) => path === entry || path.startsWith(`${entry}/`)) &&
+    !excludes.some((re) => re.test(path))
+  )
 }
 
 /**
  * The environment every git and sh spawn gets: no inherited `GIT_*` (a git
  * hook exports GIT_DIR / GIT_INDEX_FILE, which would point these commands at
  * the HOST repository), no global or system git config, and no VERCEL_* or
- * *_FORCE_BUILD variable unless a test sets one. The GIT_* filter is the one
+ * *_FORCE_BUILD or IGNORE_BUILD_DEV_URL variable unless a test sets one. The
+ * GIT_* filter is the one
  * scripts/ci/money-path-classify.test.mjs uses.
  */
 export function hermeticEnv(extra = {}) {
   const env = { ...process.env }
   for (const key of Object.keys(env)) {
-    if (/^(GIT_|VERCEL_)/.test(key) || /_FORCE_BUILD$/.test(key)) delete env[key]
+    if (/^(GIT_|VERCEL_)/.test(key) || /_FORCE_BUILD$/.test(key) || key === 'IGNORE_BUILD_DEV_URL') delete env[key]
   }
   return Object.assign(env, { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }, extra)
 }
@@ -75,8 +122,10 @@ export function hermeticEnv(extra = {}) {
 /**
  * A throwaway repository on branch `dev` with the shared script committed and
  * one unrelated commit. `run` executes `command` from `packages/<project>`.
+ * `watchContent`, when given, replaces the project's real watch file, so the
+ * script's general behaviour can be tested on a synthetic list.
  */
-export function makeRepo({ project, command }) {
+export function makeRepo({ project, command, watchContent = /** @type {string | undefined} */ (undefined) }) {
   const repo = mkdtempSync(join(tmpdir(), `${project}-ignore-`))
   const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', env: hermeticEnv() }).trim()
   git('init', '-q', '-b', 'dev')
@@ -96,7 +145,8 @@ export function makeRepo({ project, command }) {
   mkdirSync(join(repo, 'scripts', 'vercel', 'watch'), { recursive: true })
   copyFileSync(SCRIPT_SOURCE, join(repo, SCRIPT_IN_REPO))
   const { watchFile } = parseIgnoreCommand(command)
-  copyFileSync(join(REPO_ROOT, watchFile), join(repo, watchFile))
+  if (watchContent === undefined) copyFileSync(join(REPO_ROOT, watchFile), join(repo, watchFile))
+  else writeFileSync(join(repo, watchFile), watchContent)
   // The project's Root Directory must exist in every clone, shallow ones
   // included, so the seed commit carries a file in it.
   commit(`packages/${project}/vercel.json`, '{}')
@@ -111,11 +161,24 @@ export function makeRepo({ project, command }) {
     return spawnSync('sh', ['-c', command], { cwd: join(root, 'packages', project), env: hermeticEnv(env) }).status ?? -1
   }
 
+  /** `run`, plus the step's combined log, for the cases that pin what it says. */
+  const runLog = (vars = {}, root = repo) => {
+    const env = {}
+    for (const [key, value] of Object.entries(vars)) if (value !== undefined) env[key] = value
+    const result = spawnSync('sh', ['-c', command], {
+      cwd: join(root, 'packages', project),
+      env: hermeticEnv(env),
+      encoding: 'utf8',
+    })
+    return { status: result.status ?? -1, log: `${result.stdout ?? ''}${result.stderr ?? ''}` }
+  }
+
   /**
    * A shallow clone (default depth 1) of the repo's current branch, for the
    * missing-commit cases. Like Vercel's, it holds that branch only. Unless
-   * `withOrigin` is set the `origin` remote is removed, so the script's fetch
-   * of dev cannot happen either.
+   * `withOrigin` is set the `origin` remote is removed, so the script can
+   * fetch dev only from a public-URL source the test supplies
+   * (`IGNORE_BUILD_DEV_URL`, or Vercel's owner and slug variables).
    */
   const shallowClone = ({ withOrigin = false, depth = 1 } = {}) => {
     const dir = mkdtempSync(join(tmpdir(), `${project}-ignore-shallow-`))
@@ -125,7 +188,7 @@ export function makeRepo({ project, command }) {
   }
 
   const cleanup = () => rmSync(repo, { recursive: true, force: true })
-  return { repo, git, commit, run, shallowClone, cleanup }
+  return { repo, git, commit, run, runLog, shallowClone, cleanup }
 }
 
 export { rmSync }

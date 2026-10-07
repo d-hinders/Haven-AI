@@ -15,6 +15,13 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.8.1-alpha.0 — 2026-10-07
+
+### Added
+
+- **The setup prompt's command-modification rule permits a third change: the re-run a `wiring_collision` refusal asks for (#3689).** `AGENT_COMMAND_MODIFICATION_SENTENCE` allowed only `--json` and one `--runtime` retry, so after a user answered a collision relay with "add alongside" or "replace", the prompt that authorised the command forbade the `--name` / `--replace` re-run the connector told the agent to make, and an agent harness could block it. The agent may now re-run once with the one flag its user chose, keeping any earlier change; a refused re-run is relayed, never retried. It never picks the flag itself. `AGENT_NETWORK_ACCESS_SENTENCE` now ends "not a command modification", and the bundled runbook calls the rule "the command-modification rule". Text-only change to the copies `haven guide` / `/for-agents.md` serve and the setup prompt; no SDK method, no API change. No update needed.
+- **The bundled agent runbook's "If something breaks" section names `haven feedback submit "<text>"` (#3597).** It needs `haven login`, and the sentence repeats the rule never to put a credential in that text. Text-only addition to the copy `haven guide` / `/for-agents.md` serve; no SDK method, no API change. No update needed.
+
 ## 0.8.0-alpha.0 — 2026-10-05
 
 ### Fixed

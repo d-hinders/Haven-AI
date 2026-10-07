@@ -1,12 +1,6 @@
 /**
- * `/` visual regression, GATE-ON build (#3574).
- *
- * This harness's webServer sets `NEXT_PUBLIC_HAVEN_SITE_PREVIEW=1`
- * (playwright.config.ts, #3573), so `/` here IS the new page: the nine
- * sections of the redesigned home, static. With the gate off (production
- * until slice 7) the route renders the legacy page, whose own look is pinned
- * by nothing — accepted for this slice per epic #3572's e2e rule, the same
- * accepted residual the retargeted focus spec carries.
+ * `/` visual regression (#3574): the seven sections of the home page, static
+ * (#3676 reordered them product-first).
  *
  * Desktop and mobile in the light theme, plus desktop in the dark theme:
  * white and tinted sections and the product frames take their dark forms;
@@ -17,6 +11,7 @@
  */
 import { expect, test } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
+import { expectCtaRowsFillColumn } from './support/cta-rows'
 import { THEME_STORAGE_KEY } from '../src/lib/theme-bootstrap'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports.
@@ -42,11 +37,12 @@ test.describe('/ (new home) visual regression', () => {
     testInfo.project.name === 'chromium-desktop-dark' ? 'dark' : 'light'
 
   test.beforeEach(async ({ page }, testInfo) => {
-    // The baselines are the SETTLED page (slice 2, #3574). This slice added
-    // the mockup's loops (#3575); every one falls back to its settled state
-    // under `prefers-reduced-motion: reduce` (home-motion.test.tsx asserts
-    // it), so the capture emulates reduce and no loop can run into a
-    // baseline — belt to `animations: 'disabled'`'s braces.
+    // The baselines are the SETTLED page (slice 2, #3574). The slices since
+    // added the mockup's loops (#3575, #3684): every one falls back to its
+    // settled state under `prefers-reduced-motion: reduce`
+    // (home-motion.test.tsx asserts it), so the capture emulates reduce and
+    // no loop can run into a baseline — belt to `animations: 'disabled'`'s
+    // braces.
     await page.emulateMedia({ reducedMotion: 'reduce' })
     if (schemeOf(testInfo) === 'dark') {
       await page.addInitScript((themeKey: string) => {
@@ -74,15 +70,13 @@ test.describe('/ (new home) visual regression', () => {
         page.getByRole('heading', { level: 1, name: 'Give your agent a budget, not your credit card.' }),
       ).toBeVisible({ timeout: ANCHOR_TIMEOUT_MS })
 
-      // The nine sections, in the mockup's order.
+      // The six sections that follow the h1, in the mockup's V17 order (#3676).
       for (const heading of [
-        'Autonomy ends at the point of payment.',
         'Three steps. Your agent pays for what it needs, within a budget you set.',
-        'Bring your own agent. Bring your own harness.',
+        'An agent can only spend what its budget allows.',
         'Every payment appears in your bookkeeping tool.',
-        'The rails for agent payments are being built right now.',
-        'An over-budget payment reverts automatically.',
-        'Any agent. Any rail. Every payment accounted for.',
+        'Bring your own agent. Bring your own harness.',
+        'The things people ask before they sign up.',
         'Give your agent a budget.',
       ]) {
         await expect(page.getByRole('heading', { name: heading })).toHaveCount(1)
@@ -93,6 +87,10 @@ test.describe('/ (new home) visual regression', () => {
         const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth)
         const clientWidth = await page.evaluate(() => document.documentElement.clientWidth)
         expect(scrollWidth, 'horizontal scroll on mobile').toBeLessThanOrEqual(clientWidth + 1)
+
+        // Stacked CTA rows span the column: each button is as wide as its
+        // row (#3685), hero and closing band alike.
+        await expectCtaRowsFillColumn(page)
       }
 
       // The step 3 terminal wraps, never scrolls sideways (#3644), at every
@@ -103,6 +101,17 @@ test.describe('/ (new home) visual regression', () => {
       })
       expect(terminal, 'step 3 terminal rendered').not.toBeNull()
       expect(terminal!.scrollWidth, 'step 3 terminal scrolls sideways').toBeLessThanOrEqual(terminal!.clientWidth + 1)
+
+      // The developers transcript wraps too (#3684): its longest line is 27
+      // characters, which fits the block even at 320px.
+      const devTerminal = await page.evaluate(() => {
+        const node = document.querySelector('[data-dev-terminal]')
+        return node ? { scrollWidth: node.scrollWidth, clientWidth: node.clientWidth } : null
+      })
+      expect(devTerminal, 'developers terminal rendered').not.toBeNull()
+      expect(devTerminal!.scrollWidth, 'developers terminal scrolls sideways').toBeLessThanOrEqual(
+        devTerminal!.clientWidth + 1,
+      )
 
       await page.evaluate(() => document.fonts.ready)
       await page.waitForLoadState('networkidle')

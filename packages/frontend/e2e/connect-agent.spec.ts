@@ -30,7 +30,6 @@ test.describe('Connect agent setup acceptance', () => {
     await dialog.getByLabel('Agent name').fill('Research Agent')
     await dialog.getByRole('button', { name: 'Set agent budget' }).click()
     await dialog.getByPlaceholder('Amount').fill('10')
-    await dialog.getByRole('button', { name: 'Review agent budget' }).click()
     await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
 
     await expect(dialog.getByText('Connect your agent')).toBeVisible()
@@ -56,7 +55,7 @@ test.describe('Connect agent setup acceptance', () => {
     await expect(dialog.getByText(/Local connection verified/i)).toBeVisible()
     await expect(dialog.getByText('Verification details')).toHaveCount(0)
     await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible()
-    // #2264: the DELEGATION-rail step 4 (`DelegationApprovalStep`) is a signed
+    // #2264: the DELEGATION-rail step 3 (`DelegationApprovalStep`) is a signed
     // budget grant: the primary
     // action NAMES what it grants (#1684), which is the assertion worth having
     // on the screen that confers spend authority.

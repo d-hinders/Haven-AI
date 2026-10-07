@@ -16,14 +16,14 @@
  * it is marked; an operator row can be too). Stated in PR #3087.
  */
 import { getFaucetUrl, isRegisteredChain } from '@haven_ai/core'
-import { ALL_CHAINS, getChainConfig } from '@/lib/chains'
+import { ALL_CHAINS, resolveChainOrNull } from '@/lib/chains'
 import { getTokenDecimals, humanAmountToAtomic } from '@/lib/allowance-format'
 import type { CatalogEntry, Merchant } from '@/hooks/useCatalog'
 
 /**
  * Resolve a catalog entry's `network` to a chain id. The field is heterogeneous
  * — it arrives as a CAIP-2 id (`eip155:8453`) or a chain short-name (`base`,
- * `base-sepolia`, `gnosis`) — so handle both. Returns `undefined` for unknown /
+ * `base-sepolia`, and `gnosis` for history-only chain 100) — so handle both. Returns `undefined` for unknown /
  * null networks (those only ever show under "All networks").
  */
 export function networkToChainId(network: string | null | undefined): number | undefined {
@@ -50,11 +50,7 @@ export function categoryLabel(category: string): string {
 }
 
 export function chainName(chainId: number): string {
-  try {
-    return getChainConfig(chainId).name
-  } catch {
-    return `Chain ${chainId}`
-  }
+  return resolveChainOrNull(chainId)?.name ?? `Chain ${chainId}`
 }
 
 /**

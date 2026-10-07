@@ -4,9 +4,10 @@ import styles from './motion.module.css'
 import { RECEIPT_ROW_STAGGER_MS } from './motion-timings'
 
 /**
- * The enforcement band's refused-payment receipt (mockup
- * `index.html:241-251`), settled state: every field rendered, the refusal
- * box at the bottom. Decorative — the band wraps it in `aria-hidden`.
+ * The spending-limits band's refused-payment receipt (mockup V17, artifact
+ * version `1791276240-c0f5`, `index.html:166-177`), settled state: every
+ * field rendered, the refusal box at the bottom. Decorative — the band wraps
+ * it in `aria-hidden`. The refusal line is the plain-words copy of #3676.
  *
  * The component owns the receipt's markup and nothing else (#3575): slice
  * 3's `AnimatedRefusalReceipt` drives the mockup's assembly animation by
@@ -79,7 +80,7 @@ export function RefusalReceipt({ state }: { state?: ReceiptAssemblyState } = {})
           <b className="font-semibold text-[#ffb4ad]">Refused: over budget</b>
           <br />
           <span className="text-[rgba(255,255,255,0.72)]">
-            Reverted on-chain at execution. Nothing moved, nothing queued for review.
+            Nothing was paid. Nothing is waiting for your approval.
           </span>
         </div>
       </div>

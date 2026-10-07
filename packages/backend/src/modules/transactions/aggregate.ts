@@ -47,7 +47,7 @@ import {
   type RawInternalTx,
   type RawNormalTx,
 } from '../../infra/explorer-api.js'
-import { getChain } from '../../domain/chains.js'
+import { getChain, isSupportedChain } from '../../domain/chains.js'
 import { formatTokenValue } from '../../domain/tokens.js'
 import { createCache } from '../../platform/cache.js'
 import { toBlockNumber, toCanonicalAddress, toUnixSeconds } from './normalize.js'
@@ -144,18 +144,22 @@ export async function fetchAccountTransactions({
     // inbound to the account's address is upserted idempotently on
     // (chain, hash, account). The live explorer read stays the wire's source; the
     // index is the matching substrate.
-    void ingestInboundTransfers(
-      {
-        id: accountId,
-        userId: (await findInboundOwnerUserId(accountId)) ?? '',
-        accountAddress,
-        chainId,
-      },
-      erc20.rows,
-      log,
-    ).catch((err: unknown) => {
-      log.warn({ err, accountId, chainId }, 'Inbound transfer ingest pass failed')
-    })
+    // Decision (c), #3635: chain 100 is known but history-only — read-only, so
+    // no `inbound_transfers` write is attempted for it (the history read stays).
+    if (isSupportedChain(chainId)) {
+      void ingestInboundTransfers(
+        {
+          id: accountId,
+          userId: (await findInboundOwnerUserId(accountId)) ?? '',
+          accountAddress,
+          chainId,
+        },
+        erc20.rows,
+        log,
+      ).catch((err: unknown) => {
+        log.warn({ err, accountId, chainId }, 'Inbound transfer ingest pass failed')
+      })
+    }
 
     const normalTxs = normal.rows
     const internalTxs = internal.rows

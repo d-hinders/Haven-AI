@@ -69,7 +69,7 @@ Run the prompt's version, not this one: the token is one-time, the API URL is th
 - If you are an AI agent running this command yourself rather than a human pasting it, you should append --json: the connector then emits one machine-readable, secret-free result object on stdout with progress on stderr, and returns promptly instead of blocking while it waits for the budget approval.
 - When a --json outcome reports approval.required: true, your first action must be to relay the approval instruction to me in your own reply — if the outcome carries approval.url, give me that link; otherwise tell me to return to Haven and approve this agent's budget — before verifying the connection, restarting anything, or any other step. Never build that link yourself: relay the one the outcome gave you or none at all. Any restart the outcome asks for is a separate instruction to give me afterwards, once the approval is done.
 - If you ran the command without --json, the connector waits for the approval itself and prints its next steps when it finishes: relay the budget-approval instruction to me — the approval link if those steps printed one, otherwise that you need to return to Haven and approve this agent's budget — only if those printed next steps still ask for it. If they report the budget as already approved, there is nothing for me to approve.
-- Only two changes to the command above are permitted, and no others: appending --json, and — only if the connector refuses because it could not determine the agent runtime — re-running it once with --runtime <name> added, naming the harness you are running in, using one of the values that refusal lists. Never invent a runtime name and never change anything else.
+- Only three changes to the command above are permitted, and no others: appending --json; re-running it once with --runtime <name> added, only if the connector refuses because it could not determine the agent runtime, naming the harness you are running in and using one of the values that refusal lists; and re-running it once with the one flag I chose added, only after I have answered a wiring_collision relay — --name <the suggested_name or a name I gave> to add alongside, or --replace to replace — keeping any change already made. If that re-run is refused too, relay the refusal to me and stop. Never invent a runtime name and never change anything else.
 - Do not print private keys, API keys, credential file contents, or config secrets in chat or logs.
 
 If the approval wait times out, nothing is lost — your agent is registered and the budget is still waiting to be approved. Send your user the `approval.url` your run reported, or, if it carried none, ask them to finish it in that same Haven tab. The outcome carries no setup id, so never assemble an approval link out of parts — relay the whole one it gave you or none at all.
@@ -82,7 +82,7 @@ Call `haven_get_agent`, one of the Haven MCP tools the connector wires into your
 - `needs_approval` — the connector finished, nobody approved yet. Ask your user again, in their Haven tab; there is no queue to wait in.
 - `revoked` — the credential is not active; ask your user to create a new agent.
 
-`ready` covers hosted identity and the budget only, not your local signer. Check that with `npx -y @haven_ai/connect@<channel> --doctor`, the same tag your prompt named — a separate command, so the two-changes rule does not bind it.
+`ready` covers hosted identity and the budget only, not your local signer. Check that with `npx -y @haven_ai/connect@<channel> --doctor`, the same tag your prompt named — a separate command, so the command-modification rule does not bind it.
 
 ## If you cannot open a browser
 
@@ -91,6 +91,8 @@ Nothing here needs you to. Steps 1-3 — account, funding, budget — are links:
 ## If something breaks
 
 If a Haven result carries `client_update`, that client is out of date: run its `upgrade_command` as given, then any repair line it prints, then retry. `required: true` means payments are refused until you do. What changed: [/releases](/releases).
+
+Something else wrong? `haven feedback submit "<text>"` sends it to Haven — it needs `haven login` first. Never put a credential in that text: no API key, no delegate key, no session token, no recovery phrase.
 
 ## Vocabulary
 

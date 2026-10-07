@@ -13,6 +13,14 @@ Haven connects agents through MCP (hosted, keyless) plus a local signer. Payment
 - [Something broke — an update may be needed](/releases): what changed in each Haven client package, the minimum this deployment accepts, and how to update
 - [Dashboard](/): create an account (one passkey prompt), create an agent, set its budget, get the connector command
 
+## For people
+
+The same material as web pages, for the human you are working for:
+
+- [For agents](/for-agents): the runbook above as a page, with the commands an agent runs and what its user does
+- [For developers](/developers): the connector, the local signer and the npm packages, with the payment flow end to end
+- [How it works](/how-it-works): from an empty account to an agent paying within its budget; [the protocols](/how-it-works/protocols) covers x402 and Stripe MPP
+
 ## Packages (npm)
 
 - [@haven_ai/connect](https://www.npmjs.com/package/@haven_ai/connect): one-command local connector — installs the MCP runtime, generates the agent signing key locally

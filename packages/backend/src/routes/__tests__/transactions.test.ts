@@ -391,6 +391,23 @@ describe('transaction routes', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('accepts a chain_id=100 history filter — known to the registry, history-only (#3669)', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    stubEmptyTransactionFetch()
+    vi.spyOn(pool, 'query').mockResolvedValue({ rows: [] } as never)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/transactions/${ACCOUNT_ADDRESS}?chain_id=100`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    // Past the chain gate and into the ownership lookup (no such account here),
+    // not the 400 an unknown chain gets.
+    expect(response.statusCode).toBe(403)
+    expect(response.json().error).not.toMatch(/Unsupported chain/)
+  })
+
   it('does not fall back to another chain when requested transaction chain is not owned', async () => {
     const token = signToken({ sub: 'user-1', email: 'test@example.com' })
     const fetchMock = stubEmptyTransactionFetch()

@@ -1,5 +1,6 @@
 'use client'
 
+import type { Ref } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { type AgentConnectionSetupFlow } from '@/hooks/useAgentConnectionSetup'
 import { Button } from '../ui/Button'
@@ -17,11 +18,20 @@ import { Textarea } from '../ui/Textarea'
  *
  * #1411: no rhythm of its own — the vertical gap between fields comes from
  * the shared `flex flex-col gap-5` wrapper ConnectAgentModal renders around
- * whichever of steps 1-3 is current (the same 20px rhythm step 4's shell
+ * whichever of steps 1-2 is current (the same 20px rhythm step 3's shell
  * body carries), not a local `space-y-*`. This component's root is a
  * Fragment so every field is a direct sibling in that flex column.
+ *
+ * `nameInputRef` is how ConnectAgentModal puts the caret in *Agent name* on
+ * open and on Back (#3687).
  */
-export function DetailsStep({ flow }: { flow: AgentConnectionSetupFlow }) {
+export function DetailsStep({
+  flow,
+  nameInputRef,
+}: {
+  flow: AgentConnectionSetupFlow
+  nameInputRef?: Ref<HTMLInputElement>
+}) {
   return (
     <>
       <div>
@@ -29,6 +39,7 @@ export function DetailsStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           Agent name
         </label>
         <Input
+          ref={nameInputRef}
           id="connect-agent-name"
           value={flow.name}
           onChange={(event) => flow.setName(event.target.value)}

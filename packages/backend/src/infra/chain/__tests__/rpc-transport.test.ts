@@ -18,7 +18,7 @@ const endpoints = vi.hoisted(() => ({
 }))
 
 vi.mock('../../../domain/chains.js', () => ({
-  getChain: () => ({ rpcUrl: endpoints.dedicated }),
+  rpcUrlForChain: () => endpoints.dedicated,
 }))
 vi.mock('../../../config.js', () => ({
   PUBLIC_RPC_BASE: 'https://mainnet.base.org',
@@ -156,11 +156,6 @@ describe('rpcEndpoints — order and de-duplication (#3255)', () => {
       'https://second-mainnet.example',
       'https://mainnet.base.org',
     ])
-  })
-
-  it('gives a chain with no public node here just its dedicated endpoint', () => {
-    endpoints.dedicated = 'https://rpc.gnosischain.com'
-    expect(rpcEndpoints(100)).toEqual(['https://rpc.gnosischain.com'])
   })
 })
 

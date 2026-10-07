@@ -476,6 +476,26 @@ const health = {
   generated_at: GENERATED_AT,
 }
 
+const feedback = {
+  feedback: [
+    {
+      id: '3d9e1f2a-7c4b-4e8d-9a1f-6b5c2e8d7a3f',
+      email: 'da•••@gmail.com',
+      text: '142 characters',
+      created_at: '2026-10-01T19:42:00.000Z',
+      expires_at: '2026-10-08T19:42:00.000Z',
+    },
+    {
+      id: '8c2b6d4e-1a9f-4c3b-8e7d-5f1a9b2c3d4e',
+      email: 'gr•••@proton.me',
+      text: '58 characters',
+      created_at: '2026-10-01T08:15:00.000Z',
+      expires_at: '2026-10-08T08:15:00.000Z',
+    },
+  ],
+  generated_at: GENERATED_AT,
+}
+
 const docHealth = {
   generatedAt: GENERATED_AT,
   unverifiedDays: 90,
@@ -506,16 +526,38 @@ const docHealth = {
  * harness registers them with `page.route`, so NOTHING here can reach a
  * real backend even if the console had a bug in its URL building — the
  * registry origin is a `.invalid` host and only these patterns answer.
+ *
+ * The reveal answer branches on the request body (#3602): a `feedback`
+ * reveal returns that message's text, anything else the customer page's
+ * email reveal. The feedback text is a fixture string, masked nowhere —
+ * it is the ONE unmasked shape this file serves for feedback, as
+ * `POST /ops/reveal` serves, and it names no customer.
  */
 export function fixtureRoutes() {
   return [
     [`${FIXTURE_BACKEND_ORIGIN}/ops/me`, 200, me],
     [`${FIXTURE_BACKEND_ORIGIN}/ops/overview`, 200, overview],
+    [`${FIXTURE_BACKEND_ORIGIN}/ops/feedback`, 200, feedback],
     [`${FIXTURE_BACKEND_ORIGIN}/ops/search*`, 200, search],
     [`${FIXTURE_BACKEND_ORIGIN}/ops/users/${FIXTURE_USER_ID}/onchain`, 200, onchainView],
     [`${FIXTURE_BACKEND_ORIGIN}/ops/users/${FIXTURE_USER_ID}`, 200, userDetail],
     [`${FIXTURE_BACKEND_ORIGIN}/ops/health`, 200, health],
-    [`${FIXTURE_BACKEND_ORIGIN}/ops/reveal`, 200, { target_type: 'user', target_id: FIXTURE_USER_ID, field: 'email', value: 'daniel@fixture.example' }],
+    [
+      `${FIXTURE_BACKEND_ORIGIN}/ops/reveal`,
+      200,
+      (request) => {
+        const body = typeof request.postData() === 'string' ? JSON.parse(request.postData()) : {}
+        if (body.target_type === 'feedback' && body.field === 'text') {
+          return {
+            target_type: 'feedback',
+            target_id: body.target_id ?? feedback.feedback[0].id,
+            field: 'text',
+            value: 'The export button does nothing on mobile Safari after a budget change — desktop works fine.',
+          }
+        }
+        return { target_type: 'user', target_id: FIXTURE_USER_ID, field: 'email', value: 'daniel@fixture.example' }
+      },
+    ],
     ['**/ops-doc-health.json', 200, docHealth],
   ]
 }

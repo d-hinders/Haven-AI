@@ -232,3 +232,29 @@ describe('TaxDeclarationToggle interaction', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })
+
+describe('TaxDeclarationToggle row wrapper (#3697)', () => {
+  beforeEach(() => {
+    mockUseCompanyDetails.mockReturnValue({ status: 'ready', details: VIES_VALID_ROW })
+  })
+
+  it('renders inside a Card.Section divided row — the divider travels WITH the toggle', () => {
+    // The wrapper IS the divider owner: when the visibility rule hides the
+    // toggle, the wrapper (and its hairline) disappear with it — the page
+    // test pins the no-orphan-divider case from the outside; this pins the
+    // visible case's own geometry (the closeout's style-assertion rule).
+    render(
+      <TaxDeclarationToggle
+        agentId="agent-1"
+        taxDeclarationEnabled={false}
+        onAgentsChanged={() => {}}
+      />,
+    )
+    const row = screen.getByTestId('tax-declaration-row')
+    // `Card.Section divided` geometry: hairline top border + per-child
+    // dividers, no card chrome of its own (no radius, no shadow).
+    expect(row.parentElement?.className).toContain('border-t')
+    expect(row.parentElement?.className).toContain('divide-y')
+    expect(row.parentElement?.className).not.toContain('rounded')
+  })
+})

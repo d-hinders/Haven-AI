@@ -89,6 +89,7 @@ describe('How it works', () => {
       'From an empty account to an agent that pays for what it needs.',
     )
     expect(within(main).getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'Autonomy ends at the point of payment.',
       'An account only you control.',
       'A budget per agent, not a card for all of them.',
       'One command wires any agent in.',
@@ -225,21 +226,14 @@ describe('Protocols', () => {
   })
 })
 
-describe('the site gate', () => {
-  it('serves /how-it-works/protocols only with the gate on', async () => {
+describe('the routes (no gate since the switch-over, #3579)', () => {
+  it('serves /how-it-works/protocols in a production-shaped build (unit-test default)', async () => {
     const { default: Protocols } = await import('@/app/how-it-works/protocols/page')
-    // Unit tests run with the gate off: no environment name counts as production.
-    expect(() => Protocols()).toThrow('NEXT_NOT_FOUND')
-    vi.stubEnv('NEXT_PUBLIC_HAVEN_SITE_PREVIEW', '1')
     expect(() => Protocols()).not.toThrow()
   })
 
-  it('renders the legacy /how-it-works with the gate off and the new page with it on', async () => {
+  it('renders the redesigned /how-it-works', async () => {
     const { default: HowItWorks } = await import('@/app/how-it-works/page')
-    const legacy = render(<HowItWorks />)
-    expect(legacy.container.textContent).not.toContain('From an empty account to an agent')
-    legacy.unmount()
-    vi.stubEnv('NEXT_PUBLIC_HAVEN_SITE_PREVIEW', '1')
     render(<HowItWorks />)
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(
       'From an empty account to an agent that pays for what it needs.',

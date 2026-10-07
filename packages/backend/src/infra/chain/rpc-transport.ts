@@ -14,8 +14,8 @@
  *   3. the public node (`PUBLIC_RPC_BASE` / `PUBLIC_RPC_BASE_SEPOLIA`).
  *
  * De-duplicated in that order, so an unset dedicated variable (which already
- * resolves to the public node) does not list the public node twice. Chains
- * with no public node here (Gnosis, chain 100) get their one endpoint.
+ * resolves to the public node) does not list the public node twice. A chain
+ * with no second provider or public node configured gets its one endpoint.
  *
  * ## What falls through and what does not
  *
@@ -75,7 +75,7 @@ import {
   PUBLIC_RPC_BASE,
   PUBLIC_RPC_BASE_SEPOLIA,
 } from '../../config.js'
-import { getChain } from '../../domain/chains.js'
+import { rpcUrlForChain } from '../../domain/chains.js'
 
 /**
  * The optional second provider per chain (`RPC_URL_BASE_FALLBACK` /
@@ -96,7 +96,7 @@ function publicRpcUrl(chainId: number): string {
 
 /** The endpoints `rpcTransport` tries, in order, de-duplicated. */
 export function rpcEndpoints(chainId: number): string[] {
-  const ordered = [getChain(chainId).rpcUrl, secondaryRpcUrl(chainId), publicRpcUrl(chainId)]
+  const ordered = [rpcUrlForChain(chainId), secondaryRpcUrl(chainId), publicRpcUrl(chainId)]
   return [...new Set(ordered.filter((url) => url !== ''))]
 }
 

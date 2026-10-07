@@ -40,6 +40,7 @@ import { createOpsAuth, opsOperatorOf } from '../middleware/ops-auth.js'
 import {
   buildOpsOnchainView,
   buildOpsOverview,
+  buildOpsFeedbackList,
   buildOpsUserDetail,
   buildOpsHealth,
   detectOpsSearchKey,
@@ -274,6 +275,18 @@ export default async function opsRoutes(app: FastifyInstance, opts: OpsRoutesOpt
     const done = await dataRead(request, reply, (db) => buildOpsOverview(db, opts.now), () => ({
       action: 'view',
       targetType: 'overview',
+    }))
+    if (!done) return reply
+    return reply.headers(NO_STORE).send(done.result)
+  })
+
+  // GET /ops/feedback — the last 7 days of CLI feedback (#3602), masked. The
+  // message text is a character count here; its unmasked value leaves only
+  // through POST /ops/reveal (target_type 'feedback', field 'text'), audited.
+  app.get('/feedback', { onRequest: opsAuth }, async (request, reply) => {
+    const done = await dataRead(request, reply, (db) => buildOpsFeedbackList(db, opts.now), () => ({
+      action: 'view',
+      targetType: 'feedback',
     }))
     if (!done) return reply
     return reply.headers(NO_STORE).send(done.result)

@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useContacts } from '@/hooks/useContacts'
 import { useChainScope } from '@/hooks/useActiveChain'
-import { getChainConfig } from '@/lib/chains'
+import { resolveChainOrNull } from '@/lib/chains'
 import { useTransactionFilters } from '@/hooks/useTransactionFilters'
 import { useTransactionsFeed } from '@/hooks/useTransactionsFeed'
 import { Select } from '@/components/ui/Select'
@@ -89,11 +89,7 @@ function hasCsvRecords(csv: string): boolean {
 }
 
 function chainName(chainId: number): string {
-  try {
-    return getChainConfig(chainId).name
-  } catch {
-    return `Chain ${chainId}`
-  }
+  return resolveChainOrNull(chainId)?.name ?? `Chain ${chainId}`
 }
 
 export default function TransactionsClient() {

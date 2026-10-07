@@ -51,7 +51,7 @@ import { tombstonesDirForCredentialRoot } from './tombstone.js'
 import { assertSupportedNodeVersion } from './local-mcp-runtime.js'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 
-export const CONNECTOR_VERSION = '0.8.0-alpha.0'
+export const CONNECTOR_VERSION = '0.8.1-alpha.0'
 
 /** #3303: the `X-Haven-Client` value every Haven API request from this connector carries. */
 export const CONNECTOR_CLIENT_IDENTITY = `@haven_ai/connect/${CONNECTOR_VERSION}`
@@ -1178,12 +1178,12 @@ function supersededIds(collision: WiringCollision): string {
  * #2551: the decision at the conflict. `--replace` answers it for an
  * unattended run; a human at a TTY is asked; every other run is refused with
  * a typed error that is itself a RELAY instruction — the dashboard's setup
- * prompt permits an agent exactly two changes to the command (`--json`, and
- * `--runtime` after a `runtime_undetermined` refusal), so the refusal tells
- * the agent to hand the choice to its user rather than to add a flag it is
- * not allowed to add. Never a default: replacing retires a working agent's
- * local key material, and installing alongside changes the server names
- * every host sees.
+ * prompt permits an agent `--json`, `--runtime` after a `runtime_undetermined`
+ * refusal, and — only once the user has answered this refusal — one re-run
+ * with the flag the user chose (#3689), so the refusal tells the agent to hand
+ * the choice to its user rather than to add a flag on its own initiative.
+ * Never a default: replacing retires a working agent's local key material,
+ * and installing alongside changes the server names every host sees.
  */
 async function resolveWiringCollision(
   collision: WiringCollision,

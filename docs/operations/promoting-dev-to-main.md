@@ -146,9 +146,7 @@ so this is a rule to point at rather than a question to ask the release runner.
       `CREATE INDEX CONCURRENTLY`, so the deploy's `IF NOT EXISTS` is a no-op,
       or use a low-traffic deployment window.
 - [ ] **No dev-only config leaks into prod:** production leaves
-      `NEXT_PUBLIC_HAVEN_ENV` unset (no `DEV` badge) and
-      `NEXT_PUBLIC_HAVEN_SITE_PREVIEW` unset (it would publish the half-built
-      redesigned site while #3572 is open), and keeps its own
+      `NEXT_PUBLIC_HAVEN_ENV` unset (no `DEV` badge), and keeps its own
       secrets / relayer key / RPCs (these live on the platforms, not in code —
       just confirm nothing dev-specific was hardcoded).
 - [ ] **Sweep recovery floor:** set the production backend's
@@ -231,9 +229,10 @@ so this is a rule to point at rather than a question to ask the release runner.
 
       | Variable | Chain | Unset means |
       |---|---|---|
-      | `RPC_URL` | Gnosis (100) | shared public `https://rpc.gnosischain.com` |
       | `RPC_URL_BASE` | Base **mainnet** (8453) | shared public `https://mainnet.base.org` — **real money** |
       | `RPC_URL_BASE_SEPOLIA` | Base Sepolia (84532) | shared public `https://sepolia.base.org` |
+
+      *(The Gnosis-only `RPC_URL` was removed in #3671; the paragraph below is the #2615 record.)*
 
       **`RPC_URL` alone does not configure Base.** It reads like "RPC is
       configured" in a variable list and covers Gnosis only — chain 100, which

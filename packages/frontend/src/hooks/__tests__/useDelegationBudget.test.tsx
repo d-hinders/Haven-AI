@@ -1104,7 +1104,8 @@ describe('useDelegationBudget visible-only polling (#2732)', () => {
       await vi.advanceTimersByTimeAsync(10_000)
     })
 
-    // The tick fetched only budgets (the device signer set is NOT polled).
+    // The tick fetched only budgets (the device signer set is NOT polled),
+    // and it asked for the OPT-IN remaining enrichment (corrected #3693).
     expect(mockGet.mock.calls.length).toBe(callsAfterMount + 1)
     expect(mockGet.mock.calls[callsAfterMount][0]).toContain('/delegations')
     expect(result.current.budgets).toEqual([])

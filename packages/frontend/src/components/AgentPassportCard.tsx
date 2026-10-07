@@ -3,7 +3,7 @@
 /**
  * Agent Passport status on the agent detail page (#1072, epic #970).
  *
- * Issuance is opt-in and asynchronous, so this card renders the two-layer
+ * Issuance is opt-in and asynchronous, so this renders the two-layer
  * truth honestly: `standing` (active / suspended / revoked, DB-authoritative,
  * live) alongside `anchor` (not_anchored / anchored / re_anchoring /
  * revocation_pending / revoked_onchain, the on-chain lag). Never collapse the
@@ -22,12 +22,17 @@
  * Status display only, no revoke control: #973 shipped revocation as
  * automatic and derived (agent revoke -> passport revoke), so there is
  * nothing here for a button to do.
+ *
+ * #3697: this is a ROW in the agent page's "Identity and settings" card, not
+ * a standalone Card — the caller owns the card and the dividers between rows,
+ * so every state below (loading, load error, issued, not issued) renders
+ * inside one padded row block. `data-testid="agent-passport-row"` is the
+ * layout contract the page tests select on.
  */
 
 import { useAgentPassport, type PassportAnchorState } from '@/hooks/useAgentPassport'
-import { getExplorerUrl } from '@/lib/chains'
+import { getExplorerUrlOrNull } from '@/lib/chains'
 import { timeAgo } from '@/lib/format'
-import { Card } from './ui/Card'
 import { Button } from './ui/Button'
 import { StatusBadge, type StatusTone } from './ui/StatusBadge'
 import { Skeleton } from './ui/Skeleton'
@@ -71,15 +76,18 @@ function standingBadge(standing: 'active' | 'suspended' | 'revoked' | 'unknown')
   return { label: 'Unknown', tone: 'neutral' }
 }
 
+/** The row's shared geometry — the divided-row padding the card's rows align on. */
+const ROW_CLASS = 'px-4 py-4 md:px-6 md:py-5'
+
 export default function AgentPassportCard({ agentId, agentRevoked = false }: Props) {
   const { passport, standing, loading, loadError, issuing, issueError, issuePassport, refetch } = useAgentPassport(agentId)
 
   if (loading && !passport && !standing) {
     return (
-      <Card hover={false} className="mt-6 p-5 md:p-6">
+      <div data-testid="agent-passport-row" className={ROW_CLASS} role="status" aria-label="Loading passport status">
         <Skeleton variant="text" className="h-5 w-32" />
         <Skeleton className="mt-3 h-16 rounded-lg" />
-      </Card>
+      </div>
     )
   }
 
@@ -88,8 +96,8 @@ export default function AgentPassportCard({ agentId, agentRevoked = false }: Pro
   // offer a retry.
   if (loadError && !passport && !standing) {
     return (
-      <Card hover={false} className="mt-6 p-5 md:p-6">
-        <h2 className="text-base font-semibold text-[var(--v2-ink)]">Agent Passport</h2>
+      <div data-testid="agent-passport-row" className={ROW_CLASS}>
+        <h3 className="text-base font-semibold text-[var(--v2-ink)]">Agent Passport</h3>
         <p className="mt-2 text-sm text-[var(--v2-ink-muted)]">
           Couldn&apos;t load passport status.{' '}
           <button
@@ -100,7 +108,7 @@ export default function AgentPassportCard({ agentId, agentRevoked = false }: Pro
             Try again
           </button>
         </p>
-      </Card>
+      </div>
     )
   }
 
@@ -109,13 +117,13 @@ export default function AgentPassportCard({ agentId, agentRevoked = false }: Pro
   // gated to a specific chain (currently Base Sepolia only) that can differ
   // from the account's chain.
   const explorerHref =
-    passport?.tx_hash ? getExplorerUrl(passport.chain_id, 'tx', passport.tx_hash) : null
+    passport?.tx_hash ? getExplorerUrlOrNull(passport.chain_id, 'tx', passport.tx_hash) : null
 
   return (
-    <Card hover={false} className="mt-6 p-5 md:p-6">
+    <div data-testid="agent-passport-row" className={ROW_CLASS}>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-[var(--v2-ink)]">Agent Passport</h2>
+          <h3 className="text-base font-semibold text-[var(--v2-ink)]">Agent Passport</h3>
           <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
             A signed record that this agent was issued by Haven, bound to this wallet, and
             revocable at any time.
@@ -127,7 +135,7 @@ export default function AgentPassportCard({ agentId, agentRevoked = false }: Pro
       </div>
 
       {passport ? (
-        <Card.Section className="mt-4 -mb-1 py-4">
+        <div className="mt-4">
           <dl className="grid gap-3 text-sm sm:grid-cols-2">
             {standing ? (
               <div>
@@ -191,7 +199,7 @@ export default function AgentPassportCard({ agentId, agentRevoked = false }: Pro
               key until it is reissued. The agent stays active the whole time.
             </p>
           ) : null}
-        </Card.Section>
+        </div>
       ) : (
         <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-[var(--v2-ink-2)]">
@@ -207,6 +215,6 @@ export default function AgentPassportCard({ agentId, agentRevoked = false }: Pro
       )}
 
       {issueError ? <p className="mt-3 text-xs text-[var(--v2-danger)]">{issueError}</p> : null}
-    </Card>
+    </div>
   )
 }

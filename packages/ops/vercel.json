@@ -4,6 +4,9 @@
   "installCommand": "npm ci --no-audit --no-fund",
   "buildCommand": "npm run build",
   "ignoreCommand": "sh \"$(git rev-parse --show-toplevel)/scripts/vercel/ignore-build.sh\" OPS_FORCE_BUILD scripts/vercel/watch/ops.txt",
+  "git": {
+    "deploymentEnabled": { "**": false, "dev": true }
+  },
   "headers": [
     {
       "source": "/(.*)",

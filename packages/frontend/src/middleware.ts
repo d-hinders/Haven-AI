@@ -88,9 +88,8 @@ export const config = {
     // linked step files it lists.
     '/.well-known/agent-skills/index.json',
     '/agent-skills/:path*',
-    // #3577: the two new public pages, observed like the funnel pages above.
-    // Not advertised anywhere (no PUBLIC_SURFACES entry, no sitemap line):
-    // a matcher OBSERVES a fetch, it does not ADVERTISE a surface.
+    // #3577: the For developers and For agents pages, observed like the
+    // funnel pages above (advertised in PUBLIC_SURFACES since #3579).
     '/developers',
     '/for-agents',
   ],

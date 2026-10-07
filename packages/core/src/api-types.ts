@@ -262,6 +262,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/ops/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The last 7 days of CLI feedback, masked, one page.
+         * @description The console’s Feedback page (#3602): messages sent with `haven feedback submit` (#3597), newest first, capped at 50. Only unexpired rows are listed (every feedback read filters expires_at > now(); retention is 7 days). The message text is masked to a character count — no content — and the submitter’s email is masked; the unmasked text leaves only through POST /ops/reveal (target_type feedback, field text), audited. Reads through the read-only ops database role and writes one audit row before answering; a failed audit write answers 503 with nothing returned. Returns 404 while the deployment has no read-only ops database configured.
+         */
+        get: operations["getOpsFeedback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ops/search": {
         parameters: {
             query?: never;
@@ -682,7 +702,7 @@ export type paths = {
         };
         /**
          * List an agent's budget delegations with lifecycle status.
-         * @description Every grant the agent has, newest first, including pending (built but not owner-signed), replaced and revoked rows — the dashboard renders exactly what is and isn't live (#802). The signed delegation object itself is deliberately NOT in the list: it is api_key_hash-class data returned only by the explicit flows that need it.
+         * @description Every grant the agent has, newest first, including pending (built but not owner-signed), replaced and revoked rows — the dashboard renders exactly what is and isn't live (#802). Without the include parameter the response is the plain lifecycle list, byte-identical to the pre-#3693 shape. With include=remaining, ACTIVE rows additionally carry the on-chain remaining-this-period figure: remaining_atomic, remaining_from_chain and period_end (#3693); non-active rows carry null for all three. The route is polled every 10 s, so the chain reads behind those fields run only when asked for. The signed delegation object itself is deliberately NOT in the list: it is api_key_hash-class data returned only by the explicit flows that need it.
          */
         get: operations["listAgentDelegations"];
         put?: never;
@@ -2183,7 +2203,7 @@ export type paths = {
         };
         /**
          * PUBLIC: which chains this deployment serves.
-         * @description Two different lists, and the difference matters: `supported` is every chain the code knows, while `deployable` is the subset this environment will actually provision accounts on (#679). Onboarding pickers must offer `deployable`, not `supported`, or they will offer a chain the deployment refuses. No authentication — it is configuration, not data.
+         * @description Two different lists, and the difference matters: `supported` is every chain Haven runs on (Base and Base Sepolia; Gnosis is history-only and not listed), while `deployable` is the subset this environment will actually provision accounts on (#679). Onboarding pickers must offer `deployable`, not `supported`, or they will offer a chain the deployment refuses. No authentication — it is configuration, not data.
          */
         get: operations["getChains"];
         put?: never;
@@ -3387,6 +3407,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit feedback or a bug report from the CLI.
+         * @description `haven feedback submit "<text>"` (#3597). User JWT only — no agent API key, no anonymous caller. Retention is 7 days; there is no reader route yet (the founders-only ops console read is #3602). The backend re-runs the CLI's own secret-check layers 1 (labelled secrets), 3 (key-backed-address derivation, against this database) and 4 (recovery phrases) before writing, and refuses with `text_refused` + a `reason` when one matches — the CLI's own check already refuses before sending, so this is the backstop for a caller that bypasses it.
+         */
+        post: operations["submitFeedback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/contacts/{id}": {
         parameters: {
             query?: never;
@@ -3610,6 +3650,12 @@ export type components = {
             merchant_slug: string | null;
             /** @description That merchant’s display name, or null. */
             merchant_name: string | null;
+            /** @description Atomic units the on-chain caveat enforcer will still allow this period, read for ACTIVE rows — present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. When remaining_from_chain is false the read failed and this is the full budget. null for non-active rows when included. */
+            remaining_atomic?: string | null;
+            /** @description Present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. False means the on-chain read failed and remaining_atomic is the budget, exactly as readRemainingBudget reports it. null for non-active rows when included. */
+            remaining_from_chain?: boolean | null;
+            /** @description Present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. When the current period refills (ISO 8601), computed the same way as the analytics budget views. Still the PERIOD boundary when the delegation expires earlier — the row expires_at then shows the earlier expiry. null for non-active rows when included. */
+            period_end?: string | null;
         };
         MerchantFundingTarget: {
             /** @description CAIP-2, e.g. "eip155:84532". */
@@ -3713,6 +3759,17 @@ export type components = {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        Feedback: {
+            /** Format: uuid */
+            id: string;
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description Retention is 7 days from `created_at` (#3597).
+             */
+            expires_at: string;
         };
         CatalogEntryMerchant: {
             /** Format: uuid */
@@ -4253,12 +4310,29 @@ export type components = {
             /** Format: date-time */
             generated_at: string;
         };
+        OpsFeedbackList: {
+            feedback: components["schemas"]["OpsFeedback"][];
+            /** Format: date-time */
+            generated_at: string;
+        };
+        OpsFeedback: {
+            /** Format: uuid */
+            id: string;
+            /** @description The submitter, masked. */
+            email: string;
+            /** @description The masked message: a character count only. The unmasked text leaves only through POST /ops/reveal (target_type feedback, field text). */
+            text: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            expires_at: string;
+        };
         OpsRevealRequest: {
             /** @enum {string} */
-            target_type: "user";
+            target_type: "user" | "feedback";
             target_id: string;
             /** @enum {string} */
-            field: "email" | "name";
+            field: "email" | "name" | "text";
         };
         OpsRevealResponse: {
             target_type: string;
@@ -6746,6 +6820,71 @@ export interface operations {
             };
         };
     };
+    getOpsFeedback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The masked feedback page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsFeedbackList"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The ops console (or its read-only database) is not configured. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The read could not be audited, so nothing was returned. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
     searchOps: {
         parameters: {
             query: {
@@ -8787,7 +8926,10 @@ export interface operations {
     };
     listAgentDelegations: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Opt-in enrichment. remaining: each ACTIVE delegation carries the on-chain remaining-this-period fields (remaining_atomic, remaining_from_chain, period_end); non-active rows carry them as null. Anything outside the enum is refused with the 400 envelope before the handler runs. */
+                include?: "remaining";
+            };
             header?: never;
             path: {
                 id: components["parameters"]["AgentId"];
@@ -15957,7 +16099,7 @@ export interface operations {
                     "application/json": {
                         /** @description Chains this environment will provision on. */
                         deployable: number[];
-                        /** @description Chains the code knows about at all. */
+                        /** @description Chains Haven runs on (Base and Base Sepolia). History-only chains such as Gnosis are not listed. */
                         supported: number[];
                     };
                 };
@@ -21556,6 +21698,62 @@ export interface operations {
             };
             /** @description Error response */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    submitFeedback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    text: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Stored. The response never echoes the text back. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Feedback"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

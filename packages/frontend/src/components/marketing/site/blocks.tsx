@@ -134,7 +134,11 @@ export function SiteTextLink({ href, children }: { href: string; children: React
 
 /** The CTA row under a heading (mockup `.cta-row`). */
 export function SiteCtaRow({ children, center = false }: { children: ReactNode; center?: boolean }) {
-  return <div className={`mt-8 flex flex-wrap gap-3 ${center ? 'justify-center' : ''}`}>{children}</div>
+  return (
+    <div className={`mt-8 flex flex-col sm:flex-row sm:flex-wrap gap-3 ${center ? 'justify-center' : ''}`}>
+      {children}
+    </div>
+  )
 }
 
 type FlowTone = 'neutral' | 'warning' | 'brand' | 'success'

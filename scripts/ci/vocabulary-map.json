@@ -437,6 +437,11 @@
         "keys": "agent_id, delegation_hash, status (spread over the prepared backend response)",
         "reason": "Revocation preparation: CLI-chosen snake keys spread over a whole backend response. Neither a plain envelope nor a plain pass-through, and invisible to an `{ ok: true` census."
       },
+      "cmdFeedbackSubmit": {
+        "convention": "snake",
+        "keys": "ok",
+        "reason": "Hybrid envelope (#3597): the CLI's only literal key is a bare `ok`, spread over the backend's POST /feedback response, so the emitted JSON also carries that response's snake_case `id`, `created_at` and `expires_at`."
+      },
       "cmdAgentsConnect": {
         "convention": "snake",
         "keys": "setup_id, approval_url, connector_command, connector_exit_code, outcome, relay",

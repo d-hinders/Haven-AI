@@ -7,7 +7,7 @@ import { useId, useState, type FormEvent, type MouseEvent } from 'react'
 import { useContacts, type Contact } from '@/hooks/useContacts'
 import { useContactChains } from '@/hooks/useContactChains'
 import { useChainScope } from '@/hooks/useActiveChain'
-import { getChainConfig } from '@/lib/chains'
+import { resolveChainOrNull } from '@/lib/chains'
 import { ApiRequestError } from '@/lib/api'
 import { isValidAddress } from '@/lib/format'
 import { Address } from '@/components/haven'
@@ -19,12 +19,11 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
 
-// Per-chain dot colour for the "Used on" badges (Base blue, Gnosis teal,
-// Base Sepolia amber to flag the testnet).
+// Per-chain dot colour for the "Used on" badges (Base blue, Base Sepolia amber
+// to flag the testnet; any other chain falls back to neutral grey).
 const CHAIN_DOT: Record<number, string> = {
   8453: 'var(--v2-chain-base)',
   84532: 'var(--v2-chain-testnet)',
-  100: 'var(--v2-chain-gnosis)',
 }
 
 function chainDotColor(chainId: number): string {
@@ -32,11 +31,7 @@ function chainDotColor(chainId: number): string {
 }
 
 function chainName(chainId: number): string {
-  try {
-    return getChainConfig(chainId).name
-  } catch {
-    return `Chain ${chainId}`
-  }
+  return resolveChainOrNull(chainId)?.name ?? `Chain ${chainId}`
 }
 
 function ContactIcon() {

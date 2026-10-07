@@ -76,6 +76,13 @@ covers:
 last-verified: "2026-10-02"
 ---
 
+> **Re-verified #3669 (2026-10-06, backend supported vs known chains):**
+> - **The wire value narrows.** `GET /chains` and discovery `chains.supported` now list 8453 and 84532 only; chain 100 leaves. No key or field is removed.
+> - **History filters keep working.** `GET /transactions` still accepts a `chainId=100` history filter, through the new known-chain gate.
+> - **No contract moves.** No MCP tool, schema, expected-context version or consent hash moves. No installed runtime reads `supported` to pay; the SDK already refuses chain 100 (#3638).
+>
+> `last-verified` stays 2026-10-02. Nothing else in this document was re-verified.
+
 > **Re-verified #3638 (2026-10-05, SDK networks and explorer links):** the SDK's
 > x402 network and token tables drop chain 100. The public `selectPaymentOption`
 > no longer selects an `eip155:100` option (the payment paths already refused one
@@ -564,9 +571,8 @@ last-verified: "2026-10-02"
 > (`NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID`, a fixed synthetic literal so the Add
 > funds modal's visual baselines render the onramp variant; see
 > `docs/operations/dev-environment.md` § `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID`
-> in the Playwright builds; #3573 added one more such line,
-> `NEXT_PUBLIC_HAVEN_SITE_PREVIEW: '1'`, which turns the redesigned public
-> site's gate on — same document, § `NEXT_PUBLIC_HAVEN_SITE_PREVIEW`).
+> in the Playwright builds; #3573 added one more such line, the redesigned
+> public site's preview flag, and #3579 removed it again with the gate).
 > Frontend-only CI wiring: no tool is added, renamed
 > or re-shaped, no description text changes, no schema or argument changes, and
 > the runtime-skew and consent-hash contracts are untouched. `last-verified` is
@@ -1935,6 +1941,27 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > **Re-read, not rubber-stamped:** the Node floor and the Codex and Claude Code
 > rows are unchanged. `last-verified` is not bumped.
 
+> **Re-verification (0.8.1-alpha.0 release, 2026-10-07):** the manifest table
+> above is re-pinned by the bump to `0.8.1-alpha.0` for `connect`, `mcp`, `sdk`
+> and `signer`, with `SDK_VERSION` rewritten beside it. The step from
+> `0.8.0-alpha.0` is **PATCH**: nothing in the range narrows or removes a
+> published surface.
+>
+> **Surfaces this release moves:**
+> - **CLI.** A new command, `haven feedback submit` (#3597), with a local secret
+>   check before any request, and one agent-runbook line pointing at it. Additive.
+> - **Setup-prompt text.** The SDK's `AGENT_COMMAND_MODIFICATION_SENTENCE` permits
+>   the one user-chosen `--name`/`--replace` re-run after a `wiring_collision`
+>   relay (#3689). Text only; no SDK method or API change.
+> - **Not moved.** The tool set and tool arguments on both runtimes (no change
+>   under `packages/mcp/src` or `packages/mcp-server/src` in the range; the
+>   bump rewrites only their version literals), the signer (no change under `packages/signer/src`),
+>   and the consent hashes. `CLIENT_COMPAT` is unchanged: `@haven_ai/signer`
+>   `min_version` stays `0.6.0-alpha.0`.
+>
+> **Re-read, not rubber-stamped:** the Node floor and the Codex and Claude Code
+> rows are unchanged. `last-verified` is not bumped.
+
 > **Re-verification (0.7.0-alpha.0 release, 2026-09-29):** the manifest table
 > above is re-pinned by the bump to `0.7.0-alpha.0` for `connect`, `mcp`, `sdk`
 > and `signer`, with `SDK_VERSION` rewritten beside it. The step from the
@@ -2181,10 +2208,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.8.0-alpha.0` |
-| `@haven_ai/mcp` | `0.8.0-alpha.0` |
-| `@haven_ai/sdk` | `0.8.0-alpha.0` |
-| `@haven_ai/signer` | `0.8.0-alpha.0` |
+| `@haven_ai/connect` | `0.8.1-alpha.0` |
+| `@haven_ai/mcp` | `0.8.1-alpha.0` |
+| `@haven_ai/sdk` | `0.8.1-alpha.0` |
+| `@haven_ai/signer` | `0.8.1-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 
@@ -2486,12 +2513,14 @@ key, no credential, and the token still unused — the resolve is not what
 consumes it. The check reads only the local credential root, in the doctor's
 own terms: `retired`, `orphaned`, `parked` and **named** directories never
 trigger it, and a `--name` run is never asked, because a named pair displaces
-nothing (#1695). Two things it deliberately is not. It is not a third
-permitted change to the dashboard's command: the setup prompt still allows an
-agent exactly `--json` and, after a runtime refusal, `--runtime`, and the
-refusal's own message says so — *relay this to your user; do not add a flag
-yourself* — which is why the two artifacts do not contradict even though the
-prompt does not name this case.
+nothing (#1695). Two things it deliberately is not. It is not a flag an
+agent may add on its own initiative: the refusal's own message says *relay
+this to your user; do not add a flag yourself*, and the setup prompt agrees.
+Since #3689 the prompt names this case: once the user has answered the relay,
+the agent may re-run once with the one flag the user chose (`--name` or
+`--replace`), keeping `--json` and any `--runtime` already added. Before
+#3689 the prompt allowed only `--json` and the runtime retry, so it forbade
+the re-run the refusal asked for.
 
 **A connector run invoked by `haven agents connect --run` (#2527) adds exactly
 `--json` and nothing else** (pinned by
@@ -2609,7 +2638,9 @@ configured — restart guidance including `/restart` for gateway users,
 `hermes mcp list` / `hermes mcp test`, and the `pip install mcp` fallback —
 which is both later and better placed. The one line without a connector
 counterpart, "do not run `hermes mcp add`", is subsumed by the prompt's
-universal rule that only two changes to the command are permitted.
+universal rule limiting which changes to the command are permitted (two at
+the time; three since #3689, which added the user-chosen `--name`/`--replace`
+re-run after a `wiring_collision`).
 
 **OpenClaw needed a published connector, and now has one.** The `openclaw`
 alias lives in `runtime-registry.ts`, and `npx @haven_ai/connect@alpha`
@@ -3058,7 +3089,7 @@ Read it as an argument-name mismatch, not an out-of-date package. Two things
 worth knowing before you reach for an upgrade:
 
 - **The affected tools are a declared list — and since #2353's switch that
-  list is 21 of the 23 (#2972 added `haven_report_settlement_evidence` to both counts).** It is `STRICT_INPUT_TOOLS`, which since #2807 lives
+  list is every hosted tool except the two `{}`-schema reads (`haven_get_agent`, `haven_get_allowances`); it read "21 of the 23" until #3645 re-measured 25 of 27.** It is `STRICT_INPUT_TOOLS`, which since #2807 lives
   in the hosted server's contracts module (`src/tools/contracts.ts`, behind
   the `tools.ts` facade). It began (#2312) with the money-path
   tools that read from the payment record rather than from arguments, #2348
@@ -4929,3 +4960,11 @@ to call next in structured fields, and those fields are typed end to end
 > descriptions are exactly what this document pins, and all three moved in
 > this diff. Scope of this note: those tools and reads. Nothing else in
 > this document was re-verified.
+
+> **Re-verification (#3597, 2026-10-02):** `packages/sdk/src/agent-guidance.ts`
+> is covered by this doc and was touched — the bundled agent runbook's "If
+> something breaks" section gained one paragraph naming
+> `haven feedback submit "<text>"`. Text-only: no tool, no schema, no
+> version-skew surface and no consent-hash input changed. `last-verified`
+> stays 2026-10-02 (already bumped by an earlier same-day change). Scope of
+> this note: that one file. Nothing else in this document was re-verified.

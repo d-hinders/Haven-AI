@@ -24,8 +24,7 @@
  *
  * Desktop and mobile in the light theme, plus desktop in the dark theme
  * (#3573): the page wears the redesigned public header and footer, which
- * follow the visitor's theme, in the build this harness serves (the site
- * gate is on there — `src/lib/site-gate.ts`). Baselines are Linux-rendered by
+ * follow the visitor's theme. Baselines are Linux-rendered by
  * the *Update visual baselines* dispatch, never locally (frontend playbook §4).
  */
 import { expect, test } from '@playwright/test'

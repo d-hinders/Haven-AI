@@ -6,9 +6,9 @@ covers:
   - docs/regulatory/casp-risk-guardrails.md
   - packages/frontend/src/app/page.tsx
   - packages/frontend/src/app/how-it-works/**
-  - packages/frontend/src/app/protocols/**
   - packages/frontend/src/app/developers/**
   - packages/frontend/src/app/for-agents/**
+  - packages/frontend/src/components/marketing/site/**
   - packages/frontend/src/app/onboarding/**
   - packages/frontend/src/app/login/page.tsx
   - packages/frontend/src/app/signup/page.tsx
@@ -709,27 +709,16 @@ The overall copy should make Haven feel like a safe, modern, agent-native financ
 The following shipped strings do not meet this guide and are not approved
 precedents:
 
-- The homepage says that if a credential leaks "your funds stay exactly where
-  they were" (`app/page.tsx:41`), which contradicts the disclosure required
-  above: a leaked private signing key controls funds already held in the agent
-  wallet, and rotation does not recover them.
-
-  **Re-based by #2246, and two of the three surfaces this bullet named are
-  off it.** It previously read "The homepage, `UsingYourAgentInfo.tsx`, and the
-  protocol marketing pages use absolute rules/credential claims or say or imply
-  that Haven gives users a private key or signs and settles payments."
-  `UsingYourAgentInfo.tsx` is off it because #2246 **fixed** it — both
-  avoid-listed phrases are gone, and both are now literals in the copy lint's
-  `BANNED` list, so the entry is enforced rather than remembered. The
-  **protocol marketing pages** are off it because the claim was not true when
-  checked: the only `signs and settles` under `app/protocols/**` is
-  `x402/page.tsx:12`, "Client signs and settles on‑chain", where the client is
-  the actor and the sentence is correct — it was measured as the false positive
-  that kept the wider phrase out of `BANNED`. What survives is the homepage
-  sentence above, quoted with its line, and it is a different defect from the
-  two the bullet used to conflate with it. NOT re-verified here: whether the
-  homepage or the protocol pages carry *other* absolute rules/credential claims
-  — that is a claim about prose, and this pass only measured the two phrases.
+- **Resolved by the site switch-over (#3579):** the legacy homepage saying that if a credential leaks "your funds stay
+  exactly where they were", which contradicted the disclosure required above
+  (a leaked private signing key controls funds already held in the agent
+  wallet, and rotation does not recover them). That page was deleted by
+  #3579, and the redesigned home does not carry the sentence
+  (`git grep -n "stay exactly where" -- packages/frontend/src` finds only an
+  unrelated comment in `Sidebar.tsx`). The entry's earlier history — #2246 fixing
+  `UsingYourAgentInfo.tsx`, and the protocol marketing pages' "Client signs
+  and settles on‑chain" measured as a correct sentence, not a defect — is in
+  this file's git history; those pages were retired by #3579 too.
 - The "payment evidence document" rule above is not yet reflected in the
   strings that remain: the generated underlag PDF is titled `'HAVEN
   PAYMENT RECEIPT (underlag)'` in

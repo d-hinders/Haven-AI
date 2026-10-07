@@ -517,6 +517,10 @@ describe('machine payment routes', () => {
           recipient_address: null,
           merchant_id: null,
           reserved_haven_atomic: '0',
+          // #3731: the remaining was NOT read live (no delegation_json row —
+          // the same fallback path #1145 takes on an RPC failure), so the
+          // coverage answer is null, never fabricated from the fallback.
+          funds_cover_remaining: null,
           onchain: {
             amount: '10000000',
             spent: '0',

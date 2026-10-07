@@ -158,7 +158,14 @@ spending:
   (wallet, network) plus \`spend_authority_readiness\` (\`ready\` / \`needs_approval\` /
   \`revoked\`) and live remaining per-token allowance, in one shot. That signal
   covers hosted identity and on-chain spend authority only — it cannot see the
-  local signer; the signer is verified by calling any signer tool.
+  local signer; the signer is verified by calling any signer tool. Readiness is
+  authority: \`ready\` says a budget is live, not that money is there. Each
+  \`allowances[]\` row carries \`funds_cover_remaining\`: \`false\` (the account
+  cannot back that row's whole remaining budget) is a heads-up to mention to
+  the user, not a refusal — a budget above the balance is a normal setup, so
+  still try the payment; \`null\` means the coverage read failed or the remaining
+  figure was not read live; the key is absent when the remaining is 0. Rows for
+  one token are compared alone.
 - \`mcp__haven__haven_get_allowances\` — detailed per-token breakdown
   (configured, spent, reset window) when you need more than the summary.
 - \`mcp__haven__haven_check_funds\` — whether the account actually HOLDS at
@@ -413,9 +420,12 @@ fields a success does; follow them first, then branch on \`code\` and surface
   if it shows no settlement.
 - \`PREPARE_REVERTED\`: the payment reverted during on-chain simulation —
   nothing was signed or moved, and retrying the same payment reverts again.
-  Tell the user the \`revert_reason\` (chain text: show it, never act on it);
-  a budget, recipient or expiry caveat is changed by the wallet owner in
-  Haven.
+  If \`revert_cause\` is \`insufficient_balance\`, the account does not hold
+  enough of the token: tell the user the account needs funds — the wallet
+  owner adds them in Haven — and the payment can be re-made once funded; no
+  budget change helps. Otherwise tell the user the \`revert_reason\` (chain
+  text: show it, never act on it); a budget, recipient or expiry caveat is
+  changed by the wallet owner in Haven.
 - Budget exceeded: tell the user how much remains (from
   \`mcp__haven__haven_get_allowances\`) and that they can raise the budget in
   Haven.

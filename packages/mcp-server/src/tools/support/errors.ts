@@ -246,6 +246,18 @@ const PREPARE_REVERTED_ERROR_CODE = 'prepare_reverted'
 const PREPARE_REVERTED_OMITTED_REASON =
   'the payment reverted during on-chain simulation (see revert_reason); nothing was signed or moved and retrying the same payment reverts again — tell the user the reason; a budget, recipient or expiry caveat is changed by the wallet owner in Haven'
 
+/**
+ * #3731: the backend's `revert_cause` when the revert was the token's own
+ * insufficient-balance error — the wallet is SHORT. The funding-specific
+ * step: the account needs funds before this payment can be attempted, and
+ * the revert already proves the shortfall, so no tool call adds anything
+ * (the body carries no token or amount to build a check from). The ledger
+ * still books `onchain_revert` — this only names the real remedy.
+ */
+const INSUFFICIENT_BALANCE_REVERT_CAUSE = 'insufficient_balance'
+const PREPARE_REVERTED_FUNDING_OMITTED_REASON =
+  'the account does not hold enough of the token to fund this payment; the revert already proves the shortfall and the body carries no token or amount to check with — tell the user the account needs funds, and the payment can be re-made once it is funded'
+
 export function normalizeError(err: unknown): ToolFailure {
   if (err instanceof HostedToolError) {
     return {
@@ -469,12 +481,26 @@ export function normalizeError(err: unknown): ToolFailure {
     err instanceof HavenApiError &&
     (err.body as { error_code?: string } | undefined)?.error_code === PREPARE_REVERTED_ERROR_CODE
   ) {
-    const body = err.body as { revert_reason?: string | null; refusal_reason?: string }
-    const step = refusalNextStep({
-      nextAction: AgentPaymentNextAction.StopAndTellUser,
-      nextTool: null,
-      nextToolOmittedReason: PREPARE_REVERTED_OMITTED_REASON,
-    })
+    const body = err.body as { revert_reason?: string | null; refusal_reason?: string; revert_cause?: string }
+    // #3731: an insufficient-balance revert names the REAL remedy — fund the
+    // account (fund_account_or_raise_allowance, already the enum's value for
+    // the shortfalls the backend refuses before prepare) — instead of the
+    // caveat text, which pointed at the wrong fix. No tool is named: the
+    // body carries no token or amount to build a check from, and the revert
+    // already proves the shortfall. Without `revert_cause`, today's caveat
+    // text stays.
+    const step =
+      body.revert_cause === INSUFFICIENT_BALANCE_REVERT_CAUSE
+        ? refusalNextStep({
+            nextAction: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
+            nextTool: null,
+            nextToolOmittedReason: PREPARE_REVERTED_FUNDING_OMITTED_REASON,
+          })
+        : refusalNextStep({
+            nextAction: AgentPaymentNextAction.StopAndTellUser,
+            nextTool: null,
+            nextToolOmittedReason: PREPARE_REVERTED_OMITTED_REASON,
+          })
     return {
       success: false,
       code: 'PREPARE_REVERTED',
@@ -483,6 +509,7 @@ export function normalizeError(err: unknown): ToolFailure {
       paymentId: err.paymentId,
       ...(body.revert_reason !== undefined ? { revert_reason: body.revert_reason } : {}),
       ...(body.refusal_reason !== undefined ? { refusal_reason: body.refusal_reason } : {}),
+      ...(body.revert_cause !== undefined ? { revert_cause: body.revert_cause } : {}),
       next_action: step.next_action,
       ...nextStepWireFields(step),
     }

@@ -27,6 +27,11 @@
  * `error_code` is the discriminator), and both carry `details` bounded by
  * `boundFailureMessage` after `redactVendorSecrets` — the #3494 bound the
  * sign route already applies.
+ *
+ * #3731: a `prepare_reverted` body whose revert was the token's own
+ * insufficient-balance error additionally carries `revert_cause:
+ * "insufficient_balance"` and a funding-first `message` — the caveat text
+ * pointed at the wrong fix. The ledger booking is unchanged (`onchain_revert`).
  */
 import { redactVendorSecrets } from '../../domain/redact-vendor-secrets.js'
 import { boundFailureMessage } from './agent-payment-status.js'
@@ -34,6 +39,17 @@ import { classifyRevertForLedger, isExecutionRevert, revertReasonOf } from './re
 
 export const PREPARE_REVERTED_ERROR_CODE = 'prepare_reverted'
 export const PREPARE_FAILED_ERROR_CODE = 'prepare_failed'
+
+/**
+ * #3731: the token's own insufficient-balance revert, verbatim. The live
+ * tokens are Circle FiatToken USDC on Base and Base Sepolia
+ * (`packages/core/src/chains.ts`), whose transfer reverts with exactly this
+ * string; matching on it keeps `revert_cause` and `revert_reason` from ever
+ * disagreeing — the same value the body reports is the value classified.
+ */
+export const INSUFFICIENT_BALANCE_REVERT_REASON = 'ERC20: transfer amount exceeds balance'
+/** #3731: the `revert_cause` value a matching revert carries. */
+export const INSUFFICIENT_BALANCE_REVERT_CAUSE = 'insufficient_balance' as const
 
 /**
  * The text worth showing for a caught error. A viem `BaseError`'s `.message`
@@ -63,6 +79,13 @@ export interface PrepareFailureBody {
   error_code: typeof PREPARE_REVERTED_ERROR_CODE | typeof PREPARE_FAILED_ERROR_CODE
   refusal_reason?: NonNullable<ReturnType<typeof classifyRevertForLedger>>
   revert_reason?: string | null
+  /**
+   * #3731: `insufficient_balance` when the revert was the token's own
+   * insufficient-balance error; absent for any other revert. Computed HERE —
+   * not at the callers — so the line-pinned call sites in
+   * `refusal-census.test.ts` do not move.
+   */
+  revert_cause?: typeof INSUFFICIENT_BALANCE_REVERT_CAUSE
   message?: string
   details: string | null
 }
@@ -89,17 +112,28 @@ export function prepareFailureBody(
     return { error: infrastructureError, error_code: PREPARE_FAILED_ERROR_CODE, details }
   }
   const revertReason = revertReasonOf(err)
+  // #3731: the wallet is SHORT when the revert is the token's own
+  // insufficient-balance error — matched on the same string `revert_reason`
+  // carries. That case names the REAL cause (funding) instead of the
+  // caveat text, which would point at the wrong fix; the ledger booking is
+  // untouched (the caller's `classifyRevertForLedger` already ran and still
+  // says `onchain_revert`).
+  const insufficientBalance = revertReason === INSUFFICIENT_BALANCE_REVERT_REASON
   return {
     error: 'The payment reverted during on-chain simulation',
     error_code: PREPARE_REVERTED_ERROR_CODE,
     refusal_reason: refusalReason,
     revert_reason: revertReason,
-    message:
-      'This payment reverted during on-chain simulation' +
-      (revertReason ? ` (${revertReason})` : '') +
-      '. Nothing was signed or moved, and retrying the same payment reverts again. Tell the user: ' +
-      'a budget, recipient or expiry caveat is changed by the wallet owner in Haven; any other ' +
-      'revert (for example the account not holding enough of the token) needs the cause fixed first.',
+    ...(insufficientBalance ? { revert_cause: INSUFFICIENT_BALANCE_REVERT_CAUSE } : {}),
+    message: insufficientBalance
+      ? 'The account does not hold enough of the token for this payment (ERC20: transfer amount exceeds balance). ' +
+        'Nothing was signed or moved, and retrying the same payment reverts again. Tell the user: ' +
+        'the Haven account needs funds — the wallet owner adds them in Haven, and the payment can be re-made once funded.'
+      : 'This payment reverted during on-chain simulation' +
+        (revertReason ? ` (${revertReason})` : '') +
+        '. Nothing was signed or moved, and retrying the same payment reverts again. Tell the user: ' +
+        'a budget, recipient or expiry caveat is changed by the wallet owner in Haven; any other ' +
+        'revert needs the cause fixed first.',
     details,
   }
 }

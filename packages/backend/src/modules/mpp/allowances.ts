@@ -19,6 +19,7 @@ import { listDelegationJsonByIds } from '../../infra/repositories/delegation-bud
 import { sumOpenReservedAtomic } from '../../infra/repositories/task-budgets.js'
 import { sumOpenReservedForBudgetDelegation } from '../../infra/repositories/sub-budgets.js'
 import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.js'
+import { getChainClient } from '../../infra/chain/index.js'
 import { toCanonicalAddress } from '../transactions/index.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import type { MppHandlerResult } from './types.js'
@@ -81,6 +82,42 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
       }),
     )
     const remainingById = new Map(remainingByIdEntries)
+
+    // #3731: whether the account's balance can back each row's WHOLE remaining
+    // period budget — one `balanceOf` read per DISTINCT token, then
+    // `balance >= remaining` compared per ROW. `false` means the treasury
+    // cannot back that row's whole remaining budget; it does NOT mean the
+    // next payment will fail (a budget larger than the balance is a normal
+    // setup — an owner may top up weekly) and it is not a refusal: the
+    // descriptions say to mention it to the user and still try. Only the
+    // boolean is exposed, never the balance — the same posture
+    // `balance-coverage.ts` applies to `covered`. `null`: the chain read
+    // failed, or the row's remaining was not read live (`fromChain` false —
+    // the #1145 fallback figure cannot answer a holdings question), per the
+    // `delegateCanFund` honesty rule (#1521). A remaining of 0 omits the key
+    // entirely: `balance >= 0` would be a vacuous true. Rows are compared
+    // ALONE — several rows for one token (open + pinned, #3518) do not add
+    // up, so two `true` rows do not mean both are backed at once.
+    const tokensToRead = new Map<string, string>()
+    for (const b of budgets) {
+      const remaining = remainingById.get(b.id)
+      if (remaining?.fromChain && remaining.remainingAtomic !== '0') {
+        tokensToRead.set(b.token_address.toLowerCase(), b.token_address)
+      }
+    }
+    const balancesByToken = new Map<string, bigint | null>()
+    await Promise.all(
+      [...tokensToRead.values()].map(async (tokenAddress) => {
+        try {
+          const chainClient = getChainClient('ethers')
+          const balance = await chainClient.getTokenBalance(agent.chain_id, tokenAddress, agent.account_address)
+          balancesByToken.set(tokenAddress.toLowerCase(), balance)
+        } catch {
+          // Unverifiable, never fabricated into false (#1521's rule).
+          balancesByToken.set(tokenAddress.toLowerCase(), null)
+        }
+      }),
+    )
 
     return {
       statusCode: 200,
@@ -151,6 +188,18 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
           // reports 0 rather than a negative.
           const spent = BigInt(b.budget_atomic) - BigInt(remainingAtomic)
           const spentAtomic = (spent > 0n ? spent : 0n).toString()
+          // #3731: undefined = omit the key (remaining 0 — `balance >= 0`
+          // would be a vacuous true); null = unverifiable (the balance read
+          // failed, or `remaining` was not read live, the #1145 fallback —
+          // a fallback figure cannot answer a holdings question); otherwise
+          // `balance >= remaining` for THIS row alone.
+          const balance = fromChain && remainingAtomic !== '0' ? balancesByToken.get(b.token_address.toLowerCase()) : undefined
+          const fundsCoverRemaining: boolean | null | undefined =
+            remainingAtomic === '0'
+              ? undefined
+              : !fromChain || balance === undefined || balance === null
+                ? null
+                : balance >= BigInt(remainingAtomic)
           return {
             id: b.id,
             // #3319: checksummed at the response boundary like the
@@ -176,6 +225,17 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
             // the authoritative one and a reservation releases without any
             // chain event.
             reserved_haven_atomic: reservedAtomic,
+            // #3731: the holdings answer for THIS row's remaining budget —
+            // true when the account holds at least the row's whole remaining
+            // period budget, false when it does not (a heads-up to mention to
+            // the user, never a refusal: a budget above the balance is a
+            // normal setup), null when the balance read failed or the
+            // remaining figure was not read live (`onchain.remaining_is_from_chain`
+            // false). Absent when `onchain.remaining` is 0 — `balance >= 0`
+            // would be a vacuous true. Only the boolean rides the wire; the
+            // balance itself never does (the #3126 posture). Each row is
+            // compared ALONE: rows for one token do not add up.
+            ...(fundsCoverRemaining === undefined ? {} : { funds_cover_remaining: fundsCoverRemaining }),
             onchain: {
               amount: b.budget_atomic,
               spent: spentAtomic,

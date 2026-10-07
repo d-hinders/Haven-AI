@@ -15,6 +15,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Added
+
+- **`HavenAllowance.fundsCoverRemaining` — whether the account's balance can back that row's whole remaining budget (#3731).** Every `allowances[]` row on `getAllowances()`, `getAgentSummary()` and the `get_agent`/`get_allowances` tools now carries the field: `false` means the account cannot back that row's WHOLE remaining period budget — a heads-up to mention to the user, never a refusal and never proof the next payment fails (a budget above the balance is a normal setup; an owner may top up weekly); `null` means unverifiable (the chain read failed, or the remaining figure was not read live); the key is absent on the wire when the remaining is 0. Rows for one token are compared alone — two `true` rows do not mean both are backed at once. Never a balance figure. `spend_authority_readiness` keeps its value set: `ready` stays an authority signal, unchanged by coverage. Any non-boolean wire value (including an absent one on an older backend) maps to `null`, never `undefined`.
+
 ### Changed
 
 - **The haven-pay skill's leaked-credential guidance names the real remedies (#3722).** It used to tell the agent to have the user "pause or revoke" the agent; neither ends a leaked key's on-chain authority (pause blocks payments through Haven only, and revoke is a status flip). The section, now headed "If the credential may have leaked", says: Replace signing key (the old budget is revoked on-chain and a new one issued), or Stop budget / Remove agent… to stop all spending, and that the signing key also controls funds already in the agent wallet, which ending the budget does not recover. Text-only; no method or type changed. No update needed.
@@ -23,6 +27,7 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 ### Fixed
 
 - **`verifyPaymentReceipt` accepts the receipt endpoint's wrapped response as-is (#3723).** `GET /payments/{id}/receipt` (and `HavenClient.getReceipt`) return `{ receipt, verification }`, but the verifier looked for `authorization` at the top level, so passing that response unchanged answered `not_a_signed_receipt`. When the top level carries no `authorization` and `.receipt` is a non-null object, the bundle inside is verified — one level only, no recursion. The wrapper's `verification` is never read (it is Haven's own self-check, not offline evidence), and a `haven_list_receipts` row — bare or wrapped — still answers `not_a_signed_receipt`.
+- **"ready means you can pay" copy corrected, and an underfunded prepare is no longer misdiagnosed as a caveat revert (#3731).** The bundled guidance (runbook § How to verify, the skill bundle, the setup prompt) now says readiness is authority: `ready` says a budget is live, not that money is there, and `funds_cover_remaining: false` is a heads-up to mention, not a refusal. The `PREPARE_REVERTED` guidance gains a funding branch: when the failure body carries `revert_cause: "insufficient_balance"` (the token's own `ERC20: transfer amount exceeds balance` revert — the wallet is short), tell the user the account needs funds and the payment can be re-made once funded; only for any other revert does the caveat text apply. Text-only; no API shape changes beyond the new field.
 
 ### Added
 

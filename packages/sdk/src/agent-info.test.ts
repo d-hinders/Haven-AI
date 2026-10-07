@@ -225,6 +225,9 @@ describe('agent info helpers', () => {
         configuredAmount: '10000',
         resetPeriodMin: 60,
         isResetPending: false,
+        // #3731: the stub body carries no coverage field — mapped to null,
+        // never undefined.
+        fundsCoverRemaining: null,
       }],
       taskBudgets: [],
       pendingSubBudgetSignatures: [], // #3506
@@ -262,7 +265,107 @@ describe('agent info helpers', () => {
     expect(compact.resetPeriodMin).toBe(full.resetPeriodMin)
     expect(compact.isResetPending).toBe(full.onchain.isResetPending)
     // A client that wants the id AND a display amount can use either read alone.
-    expect(Object.keys(compact).sort()).toEqual(['configuredAmount', 'id', 'isResetPending', 'remainingAtomic', 'remainingDisplay', 'resetPeriodMin', 'tokenAddress', 'tokenSymbol'])
+    expect(Object.keys(compact).sort()).toEqual(['configuredAmount', 'fundsCoverRemaining', 'id', 'isResetPending', 'remainingAtomic', 'remainingDisplay', 'resetPeriodMin', 'tokenAddress', 'tokenSymbol'])
+    // #3731: the new key's provenance — the SAME projection rule as the eight
+    // original keys, asserted separately per the #3128 invariant's amendment:
+    // the compact row is a projection of the detailed read, never a second
+    // source.
+    expect(compact.fundsCoverRemaining).toBe(full.fundsCoverRemaining)
+    expect(full.fundsCoverRemaining).toBeNull() // the stub body carries no field
+  })
+
+  it('#3731: a malformed row (no coverage field at all) maps fundsCoverRemaining to null — never undefined', async () => {
+    // A stub that answers a row WITHOUT the field (an empty per-row body, the
+    // packages/mcp tools.test.ts stub pattern): the SDK must answer
+    // "unverifiable" (null), not "no key".
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url)
+      if (u.endsWith('/machine-payments/agent')) return agentResponse('active')
+      if (u.endsWith('/machine-payments/allowances')) {
+        return new Response(
+          JSON.stringify({
+            agent_id: 'agent-1',
+            account_address: '0xSafe',
+            delegate_address: '0xDelegate',
+            chain_id: 8453,
+            allowances: [{
+              id: 'a1', token_address: USDC_BASE, token_symbol: 'USDC', configured_amount: '10000', reset_period_min: 60,
+              onchain: { amount: '10000', spent: '2500', remaining: '7500', effective_spent: '2500', reset_time_min: 60, last_reset_min: 100, nonce: 7, is_reset_pending: false },
+            }],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )
+      }
+      throw new Error(`unexpected fetch: ${u}`)
+    })
+    const haven = new HavenClient({ apiKey: 'k', baseUrl })
+    const detailed = await haven.getAllowances()
+    expect(detailed.allowances).toHaveLength(1)
+    expect(detailed.allowances[0].fundsCoverRemaining).toBeNull()
+    expect('fundsCoverRemaining' in detailed.allowances[0]).toBe(true)
+  })
+
+  it('#3731: boolean wire values map through; anything else maps to null', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url)
+      if (u.endsWith('/machine-payments/agent')) return agentResponse('active')
+      if (u.endsWith('/machine-payments/allowances')) {
+        return new Response(
+          JSON.stringify({
+            agent_id: 'agent-1',
+            account_address: '0xSafe',
+            delegate_address: '0xDelegate',
+            chain_id: 8453,
+            allowances: [
+              { id: 'a1', token_address: USDC_BASE, token_symbol: 'USDC', configured_amount: '10000', reset_period_min: 60, funds_cover_remaining: true, onchain: { amount: '10000', spent: '2500', remaining: '7500', effective_spent: '2500', reset_time_min: 60, last_reset_min: 100, nonce: 7, is_reset_pending: false } },
+              { id: 'a2', token_address: USDC_BASE, token_symbol: 'USDC', configured_amount: '10000', reset_period_min: 60, funds_cover_remaining: false, onchain: { amount: '10000', spent: '2500', remaining: '7500', effective_spent: '2500', reset_time_min: 60, last_reset_min: 100, nonce: 7, is_reset_pending: false } },
+              { id: 'a3', token_address: USDC_BASE, token_symbol: 'USDC', configured_amount: '10000', reset_period_min: 60, funds_cover_remaining: 'yes', onchain: { amount: '10000', spent: '2500', remaining: '7500', effective_spent: '2500', reset_time_min: 60, last_reset_min: 100, nonce: 7, is_reset_pending: false } },
+              { id: 'a4', token_address: USDC_BASE, token_symbol: 'USDC', configured_amount: '10000', reset_period_min: 60, funds_cover_remaining: null, onchain: { amount: '10000', spent: '2500', remaining: '7500', effective_spent: '2500', reset_time_min: 60, last_reset_min: 100, nonce: 7, is_reset_pending: false } },
+              { id: 'a5', token_address: USDC_BASE, token_symbol: 'USDC', configured_amount: '10000', reset_period_min: 60, onchain: { amount: '10000', spent: '2500', remaining: '0', effective_spent: '2500', reset_time_min: 60, last_reset_min: 100, nonce: 7, is_reset_pending: false } },
+            ],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )
+      }
+      throw new Error(`unexpected fetch: ${u}`)
+    })
+    const haven = new HavenClient({ apiKey: 'k', baseUrl })
+    const detailed = await haven.getAllowances()
+    expect(detailed.allowances.map((a) => a.fundsCoverRemaining)).toEqual([true, false, null, null, null])
+    // Never undefined — an absent key on the wire still lands as null.
+    for (const a of detailed.allowances) expect('fundsCoverRemaining' in a).toBe(true)
+  })
+
+  it('#3731: spend_authority_readiness is UNCHANGED by coverage — false coverage is still ready (characterization)', async () => {
+    // The #3128 invariant's value set survives: readiness is AUTHORITY, and a
+    // funds_cover_remaining: false row must not downgrade it to anything.
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url)
+      if (u.endsWith('/machine-payments/agent')) return agentResponse('active')
+      if (u.endsWith('/machine-payments/allowances')) {
+        return new Response(
+          JSON.stringify({
+            agent_id: 'agent-1',
+            account_address: '0xSafe',
+            delegate_address: '0xDelegate',
+            chain_id: 8453,
+            allowances: [{
+              id: 'a1', token_address: USDC_BASE, token_symbol: 'USDC', configured_amount: '10000', reset_period_min: 60,
+              funds_cover_remaining: false,
+              onchain: { amount: '10000', spent: '2500', remaining: '7500', effective_spent: '2500', reset_time_min: 60, last_reset_min: 100, nonce: 7, is_reset_pending: false },
+            }],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )
+      }
+      if (u.includes('/task-budgets')) return new Response(JSON.stringify({ task_budgets: [] }), { status: 200, headers: { 'content-type': 'application/json' } })
+      throw new Error(`unexpected fetch: ${u}`)
+    })
+    const haven = new HavenClient({ apiKey: 'k', baseUrl })
+    const summary = await haven.getAgentSummary()
+    expect(summary.spend_authority_readiness).toBe('ready')
+    expect(summary.readiness).toBe('ready')
+    expect(summary.allowances[0].fundsCoverRemaining).toBe(false)
   })
 
   it('#3128: listReceiptsPage maps total / has_more / next_cursor, and listReceipts stays the bare first-page array', async () => {
@@ -694,6 +797,9 @@ const mappedAllowances = {
     tokenSymbol: 'USDC',
     configuredAmount: '10000',
     resetPeriodMin: 60,
+    // #3731: the stub body carries no coverage field — mapped to null, never
+    // undefined.
+    fundsCoverRemaining: null,
     remainingDisplay: '0.0075 USDC', // #3128 — derived by the same function as the bootstrap summary
     onchain: {
       amount: '10000',

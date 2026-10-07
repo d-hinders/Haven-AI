@@ -50,6 +50,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   let dryRun = false
   let unwireDir: string | undefined
   let replace = false
+  let bare = false
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
@@ -104,6 +105,12 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       // refuses without it, instead of overwriting by default (#1569) and
       // warning afterwards (#1688).
       replace = true
+    } else if (arg === '--bare') {
+      // #3737 owner decision 2: the bare pair is reached only EXPLICITLY now —
+      // a default setup derives its slug from the agent's display name, so
+      // `--bare` is the human opt-in to the legacy unnamed pair (and the
+      // wiring_collision relay keeps describing it). --replace implies it.
+      bare = true
     } else if (arg === '--name') {
       // Validated HERE, before any credential or config write can happen —
       // the slug is immutable once wired (#1694 owner decision), so a bad one
@@ -136,20 +143,32 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     return { options: options as ConnectOptions, help, json, doctor, repair, tombstone, rekey }
   }
 
-  if (replace) {
+  if (replace || bare) {
     // #2551: refuse rather than silently discard (the #1681 finding-2 rule).
     // --replace answers one question — "this bare-pair setup collides with an
-    // existing agent; overwrite?" — which only a --setup run ever asks.
+    // existing agent; overwrite?" — which only a --setup run ever asks. --bare
+    // is the same scope (#3737): it chooses a wiring for a new setup and does
+    // nothing for the stored-state subcommands.
     if (rekeyPhase || tombstoneDir || unwire || doctor || repair || pruneSignerRuntimes) {
-      throw new Error('--replace belongs to a --setup run: it says what to do when the bare haven / haven-signer pair is already wired to another agent.')
+      throw new Error(`${replace ? '--replace' : '--bare'} belongs to a --setup run: it says what to do when the bare haven / haven-signer pair is already wired to another agent.`)
     }
-    if (options.serverName) {
+    // `--bare --replace` is allowed and redundant: --replace already implies
+    // the bare pair (owner decision 2), so saying both changes nothing.
+    if (bare && options.serverName) {
       throw new Error(
-        '--replace and --name contradict each other: --replace overwrites the bare haven / haven-signer wiring, ' +
-          '--name installs alongside it under its own pair. Pass one of them.',
+        '--bare and --name contradict each other: --bare wires the bare haven / haven-signer pair, ' +
+          '--name installs a named haven-<slug> pair. Pass one of them.',
       )
     }
-    options.replaceExistingWiring = true
+    if (replace) {
+      if (options.serverName) {
+        throw new Error(
+          '--replace and --name contradict each other: --replace overwrites the bare haven / haven-signer wiring, ' +
+            '--name installs alongside it under its own pair. Pass one of them.',
+        )
+      }
+      options.replaceExistingWiring = true
+    }
   }
 
   // #3123 review: these guards sit ABOVE the --rekey early return so the
@@ -259,6 +278,15 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     throw new Error('Missing --api <Haven API URL>.')
   }
 
+  // #3737: the DEFAULT setup names its pair from the agent's display name, so
+  // adding an agent never targets the bare pair and never has to ask
+  // replace-vs-alongside. Only an explicit --name, --bare or --replace
+  // bypasses the derivation. Deliberately set only on the setup path — the
+  // stored-state subcommands above returned already.
+  if (!options.serverName && !bare && !replace) {
+    options.deriveServerName = true
+  }
+
   options.apiBaseUrl = options.apiBaseUrl.replace(/\/+$/, '')
   return { options: options as ConnectOptions, help, json, doctor, repair, tombstone, rekey }
 }
@@ -287,13 +315,19 @@ export function helpText(): string {
     '  --replace                  When this machine is already wired to a different Haven agent on the bare',
     '                             haven / haven-signer pair, re-point that pair at the new agent and retire the',
     '                             previous agent directory locally (tombstoned, local key files removed).',
-    '                             Nothing is revoked — use Remove agent… on the Haven agent page. Without',
-    '                             this flag a non-interactive run REFUSES such a collision (wiring_collision)',
-    '                             and an interactive terminal is asked; --name installs alongside instead.',
+    '                             Nothing is revoked — use Remove agent… on the Haven agent page. Implies',
+    '                             the bare pair. Without it (or --bare) a non-interactive run REFUSES such a',
+    '                             collision (wiring_collision) and an interactive terminal is asked.',
+    '  --bare                     Wire the bare haven / haven-signer pair. Without --name a setup now names',
+    '                             its pair from the agent\'s display name (haven-<slug> /',
+    '                             haven-signer-<slug>, de-collided against this machine, ending -dev on a',
+    '                             non-production backend), so adding an agent never has to displace anyone;',
+    '                             --bare is the explicit opt-in to the unnamed pair. --name overrides it.',
     '  --name <slug>              Wiring slug for a NAMED agent: writes haven-<slug> / haven-signer-<slug>',
     '                             MCP entries and stores credentials at ~/.haven/agents/<slug>/, so several',
     '                             agents can run side by side in one runtime. 1-32 lowercase letters, digits,',
-    '                             single hyphens; immutable once wired. Omit for the bare haven / haven-signer pair.',
+    '                             single hyphens; immutable once wired. Without it the pair is named from the',
+    '                             agent\'s display name; --bare wires the bare haven / haven-signer pair.',
     '  --ack-local-tools          Write the one-time local Haven tools acknowledgement during setup.',
     '  --ack-signer               Backward-compatible alias for --ack-local-tools.',
     '  --local                    Advanced: install the fully-local Haven MCP (no hosted dependency).',

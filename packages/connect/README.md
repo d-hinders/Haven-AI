@@ -499,12 +499,24 @@ already-configured machine behaves as follows (characterized in
   consumed setup when Connect resolves it (or, in a rare concurrent-run race,
   at registration). The key pair minted for the attempt exists only in memory
   and is discarded. Start a fresh connection from the Haven dashboard instead.
-- **Running a fresh setup on a configured machine** writes the new agent's
-  credentials into its own directory under `~/.haven/agents/<agent-id>/`,
+- **Running a fresh setup on a configured machine writes the new agent's
+  credentials into its own directory under `~/.haven/agents/<slug-or-id>/`,
   alongside the previous agent's directory, which stays byte-identical.
-  Nothing is rotated, revoked, or deleted locally.
+  Nothing is rotated, revoked, or deleted locally.**
+- **A default setup names its pair from the agent's display name
+  ([#3737](https://github.com/d-hinders/Haven-AI/issues/3737)) and never
+  collides.** Without `--name`, `--bare` or `--replace`, the connector derives
+  the slug itself (`proposeServerSlug`: slugified display name, `agent`
+  fallback, numeric suffix when taken) and wires `haven-<slug>` /
+  `haven-signer-<slug>` — de-collided against **every** directory under the
+  credential root (retired and key-removed ones included, so a slug freed by
+  `--unwire` is never reused), and marked `-dev` on a non-production backend
+  (Base Sepolia or any chain that is not Base mainnet 8453; an explicit
+  `--name` is used verbatim and never altered). Nothing is displaced, so
+  nothing is asked. `--bare` opts back into the unnamed pair.
 - **A bare re-run over a live previous agent is a decision, not a default
-  ([#2551](https://github.com/d-hinders/Haven-AI/issues/2551)).** Before
+  ([#2551](https://github.com/d-hinders/Haven-AI/issues/2551)).** Only a run
+  that targets the bare pair — `--bare`, or `--replace` — can collide; before
   minting a key or registering, Connect scans the credential root for a
   bare-pair directory that still holds a usable key — the same reading
   `--doctor` classifies as `wired` or `superseded`; `retired`, `orphaned`,
@@ -521,7 +533,9 @@ already-configured machine behaves as follows (characterized in
     flag itself. The setup prompt then permits one re-run with the flag the
     user picks (#3689), on top of `--json` and a `--runtime` retry.
   - **`--replace`** is the unattended answer "yes, replace". `--name <slug>`
-    installs alongside. Passing both is a usage error — they contradict.
+    installs alongside. `--bare` is the human opt-in to the unnamed pair and
+    refuses with `--name`. Passing `--replace --name` is a usage error — they
+    contradict.
 - **Replacing re-points the bare pair, then retires the previous directory
   locally.** Connect owns the `haven` and `haven-signer` entries (and the
   managed Codex/Hermes equivalents) and re-points them at the new agent's
@@ -568,15 +582,17 @@ As above, `<channel>` is a placeholder like the rest of this line: take the
 package from the setup response's `connector_package`
 and add `--name` to the command the dashboard gave you.
 
-| | Without `--name` | With `--name research` |
-|---|---|---|
-| MCP entries | `haven`, `haven-signer` | `haven-research`, `haven-signer-research` |
-| Credentials | `~/.haven/agents/<agent-id>/` | `~/.haven/agents/research/` |
+| | Default (no `--name`) | `--name research` | `--bare` |
+|---|---|---|---|
+| MCP entries | `haven-<slug>`, `haven-signer-<slug>` (slug from the agent's display name, `-dev`-marked on a non-production backend) | `haven-research`, `haven-signer-research` | `haven`, `haven-signer` |
+| Credentials | `~/.haven/agents/<slug>/` | `~/.haven/agents/research/` | `~/.haven/agents/<agent-id>/` |
 
 A writer only ever touches the pair it owns, so adding a named agent cannot
-disturb the bare pair or another named one. Omitting `--name` is byte-identical
-to how the connector behaved before named pairs existed, so nothing already
-wired needs changing.
+disturb the bare pair or another named one. **`--bare` wires the bare pair
+byte-identically to how the connector behaved before named pairs existed**, so
+nothing already wired needs changing — it is the one flag (besides
+`--replace`) that reaches the unnamed pair, and it cannot be combined with
+`--name`.
 
 The slug is **1–32 lowercase letters, digits and single hyphens**, validated
 before anything is written, and **immutable once wired** — it is the server name
@@ -615,6 +631,14 @@ npx -y @haven_ai/connect@<channel> --rekey [--name research]
 npx -y @haven_ai/connect@<channel> --rekey-finish --api-key sk_agent_... \
   --runtime claude-code [--name research]
 ```
+
+**No `--name` needed when exactly one live agent is on the machine.** Since
+[#3737](https://github.com/d-hinders/Haven-AI/issues/3737), `--rekey` without
+`--name` selects the sole agent directory that still holds a stored API key —
+tombstoned and key-removed directories left by `--unwire` do not count — and
+the printed phase-two command carries that agent's exact `--name` when it has
+one. With **several** live agents it refuses and lists them, so you must pass
+`--name <slug>`; a bare agent needs no `--name`, exactly as before.
 
 **Phase one prints the exact phase-two command — prefer it over the line above.**
 Since [#2423](https://github.com/d-hinders/Haven-AI/issues/2423) the connector

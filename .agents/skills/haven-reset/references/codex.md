@@ -2,20 +2,20 @@
 
 Use this procedure only when the active client is Codex CLI or Codex Desktop and the user explicitly requested a reset.
 
-Haven's connector writes Codex MCP configuration to `~/.codex/config.toml`. Current published configuration uses `haven` and `haven_signer`.
+Haven's connector writes Codex MCP configuration to `~/.codex/config.toml`. A pre-#3737 setup uses `haven` and `haven_signer`; a default setup now names the pair from the agent's display name — `haven-<slug>` and `haven-signer-<slug>` ([#3737](https://github.com/d-hinders/Haven-AI/issues/3737)) — so a reset must enumerate every Haven pair, not only the bare names.
 
 ## Reset
 
 1. If `~/.codex/config.toml` exists, create a timestamped backup before mutation.
-2. Inspect `codex mcp list` and the config for `haven`, `haven_signer`, and any stale `haven-signer` entry.
-3. Remove only entries that exist, using the supported command:
+2. Inspect `codex mcp list` and the config for `haven`, `haven_signer`, every named pair (`haven-<slug>`, `haven-signer-<slug>`), and any stale `haven-signer` entry.
+3. Remove only entries that exist, using the supported command — one command per entry, exactly as the listing names it:
 
    ```bash
    codex mcp remove haven
    codex mcp remove haven_signer
    ```
 
-   If the listing contains a stale `haven-signer`, remove that exact name too.
+   Then remove every named pair the listing showed, e.g. `codex mcp remove haven-research` and `codex mcp remove haven-signer-research`. If the listing contains a stale `haven-signer`, remove that exact name too. A reset that removes only the bare names leaves named pairs live.
 4. Delete `~/.haven` — but **not before** the tombstone step. This procedure does not
    restate it: follow [SKILL.md](../SKILL.md) *Required Sequence* step 4, which
    enumerates the real agent directories (never a path built from an agent id — a
@@ -29,7 +29,7 @@ Haven's connector writes Codex MCP configuration to `~/.codex/config.toml`. Curr
 
 ## Verify
 
-1. Confirm `~/.codex/config.toml` has no `[mcp_servers.haven]`, `[mcp_servers.haven_signer]`, stale `[mcp_servers.haven-signer]`, or descendant table.
+1. Confirm `~/.codex/config.toml` has no `[mcp_servers.haven]`, `[mcp_servers.haven_signer]`, no named-pair tables (`[mcp_servers.haven-<slug>]`, `[mcp_servers.haven-signer-<slug>]`, or their descendants), and no stale `[mcp_servers.haven-signer]`.
 2. Confirm `~/.haven` holds no live credential material — `identity.json`,
    `signer.json` and runtime files gone from every agent directory. A retired
    directory that still holds `bin/haven-signer.mjs` and `TOMBSTONE.json` is
@@ -65,7 +65,7 @@ Do not continue unless every relevant scope is clean.
    against it.
 
 3. Verify the new `~/.haven/agents/<id>/signer.json` contains `x402_binding_signer`. If missing, report the likely deployed backend configuration fault; do not patch it manually.
-4. Confirm `codex mcp list` shows `haven` and `haven_signer` connected and the signer tools are available.
+4. Confirm `codex mcp list` shows the agent's pair — `haven-<slug>` and `haven-signer-<slug>` on a named-by-default setup, `haven` and `haven_signer` on older installs — connected and the signer tools are available.
 5. Run a small real payment only after separate explicit authorization. Confirm signing and settlement without manual intervention.
 
 Stop and report the failing command and output when any phase fails.

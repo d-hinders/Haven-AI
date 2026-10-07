@@ -41,7 +41,9 @@ import {
   type InstalledClientHint,
 } from './installed-clients.js'
 import {
+  deriveServerSlug,
   detectWiringCollision,
+  listTakenDirectoryNames,
   promptWiringCollisionResolution,
   type WiringCollision,
   type WiringCollisionResolution,
@@ -52,6 +54,16 @@ import { assertSupportedNodeVersion } from './local-mcp-runtime.js'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 
 export const CONNECTOR_VERSION = '0.8.1-alpha.0'
+
+/**
+ * #3737 owner decision 4: the derived slug marks NON-production backends
+ * (`<slug>-dev`); production gets the plain slug. Production is Base
+ * mainnet, chain id 8453 — 84532 is Base Sepolia. Any other or unknown
+ * chain id counts as non-production: an unmarked slug on a dev backend is
+ * the exact confusion this exists to remove, while a `-dev` mark on an
+ * exotic chain is merely cosmetic.
+ */
+const PRODUCTION_CHAIN_ID = 8453
 
 /** #3303: the `X-Haven-Client` value every Haven API request from this connector carries. */
 export const CONNECTOR_CLIENT_IDENTITY = `@haven_ai/connect/${CONNECTOR_VERSION}`
@@ -79,6 +91,19 @@ export interface ConnectOptions {
   environmentLabel?: string
   /** #1696: wiring slug for a named MCP pair + slug-keyed credential dir. */
   serverName?: string
+  /**
+   * #3737: derive the wiring slug from the agent's display name and install
+   * a NAMED pair (`haven-<slug>` / `haven-signer-<slug>`) instead of the bare
+   * one. The CLI passes this by default so that adding an agent never
+   * targets the bare pair and therefore never has to ask replace-vs-
+   * alongside; the LIBRARY keeps today's bare behaviour when neither
+   * `serverName` nor this option is set, so existing programmatic callers
+   * are unchanged. An explicit `serverName` always wins over derivation.
+   * The derived slug de-collides against EVERY directory name under the
+   * credential root, marks non-production backends with a `-dev` suffix
+   * (owner decision 4), and is refused nothing — it never displaces anyone.
+   */
+  deriveServerName?: boolean
   /**
    * #2551: when the bare pair on this machine is already wired to a different
    * agent with a live key, replace it — re-point `haven` / `haven-signer` at
@@ -230,6 +255,16 @@ export interface ConnectOutcome {
    * answer and the one that silently repoints a saved session.
    */
   server_name_rebound_from?: { server_name: string; agent_id: string; api_url: string; bound_at: string; backend_changed: boolean }
+  /**
+   * #3737, additive within schema_version 1: the hosted MCP server name this
+   * run actually wired — `haven-<slug>` for a named run (derived or
+   * explicit), bare `haven` for a `--bare` / `--replace` run. The mirror of
+   * what `mcpServerName` reported to the backend at register and what the
+   * completion text names, carried structurally so a `--json` caller can
+   * verify `hermes mcp test <name>` without parsing prose. Always present on
+   * a completed run; absent on `failedConnectOutcome`, which wired nothing.
+   */
+  server_name?: string
   /**
    * #2091, additive within schema_version 1: `message` is the redacted human
    * refusal (automation used to get code + next_action and nothing to act
@@ -561,9 +596,33 @@ async function executeConnect(
   // pair coexists with the bare one) and is never asked; the bare-pair run is
   // what the #1569 remove-first install would otherwise resolve by silently
   // overwriting, with the #1688 heads-up arriving after the fact.
+  //
+  // #3737: a DERIVED-slug run (`deriveServerName`, which the CLI now passes
+  // by default) also displaces nothing — it names its own pair from the
+  // agent's display name and never asks. The bare pair, and with it the
+  // replace-vs-alongside question, is reached only through an explicit
+  // `--bare` / `--replace` (owner decision 2): a default run without a name
+  // used to be the one action that could silently overwrite or refuse, and
+  // now it simply adds an agent.
   let serverName = options.serverName
   let replacing: WiringCollision | undefined
-  if (!serverName) {
+  if (!serverName && options.deriveServerName) {
+    // The widest `taken` set — every directory name under the credential
+    // root, retired and key-removed ones included — so a slug freed by
+    // `--unwire` is never handed out again (`deriveServerSlug`'s contract).
+    const taken = await listTakenDirectoryNames(options.credentialsDir)
+    const nonProduction = setup.haven_wallet.chain_id !== PRODUCTION_CHAIN_ID
+    serverName = deriveServerSlug(setup.agent.name, taken, nonProduction)
+    // Belt and braces: the derivation guarantees availability, but this is
+    // the same two-layer check the explicit `--name` path applies above.
+    await assertServerSlugAvailable(serverName, options.credentialsDir)
+    const derivedNames = serverNamesFor(serverName)
+    log(
+      `Naming this agent's MCP pair from its display name: ${derivedNames.hosted} / ${derivedNames.signer}. ` +
+        'Nothing was displaced; to wire the bare haven / haven-signer pair instead, re-run with --bare, ' +
+        'or choose the name yourself with --name <slug>.',
+    )
+  } else if (!serverName) {
     const collision = await detectWiringCollision({
       credentialsDir: options.credentialsDir,
       agentName: setup.agent.name,
@@ -996,6 +1055,9 @@ async function executeConnect(
     runtimeInstall,
     delegateAddress: registration.delegate_address,
     hostedMcpUrl: registration.hosted_mcp_url,
+    // #3737: the resolved name — derived, explicit, or the bare pair — rides
+    // the machine-readable outcome alongside the prose completion text.
+    serverName,
     supersededAgentIds,
     supersededAgentsRetiredLocally,
     ...(replacing ? { retiredAgentIds } : {}),
@@ -1030,6 +1092,8 @@ export function completionOutcome(input: {
   runtimeInstall: RuntimeInstallResult
   delegateAddress: string
   hostedMcpUrl?: string
+  /** #3737: the resolved wiring slug; absent means the bare pair. */
+  serverName?: string
   supersededAgentIds?: readonly string[]
   /** #2551: only a replace run sets these; see the outcome fields' doc comments. */
   supersededAgentsRetiredLocally?: boolean
@@ -1100,6 +1164,9 @@ export function completionOutcome(input: {
     // #3122: always emitted on a completed run (empty list included), for the
     // same reason as superseded_agent_ids above.
     existing_agents_before_write: input.existingAgentsBeforeWrite ?? [],
+    // #3737: the resolved hosted server name — always present on a completed
+    // run, bare pair included, so a caller never has to parse the prose.
+    server_name: serverNamesFor(input.serverName).hosted,
     ...(input.serverNameReboundFrom ? { server_name_rebound_from: input.serverNameReboundFrom } : {}),
     ...(input.setupChallengeExpiresAt ? { setup_challenge_expires_at: input.setupChallengeExpiresAt } : {}),
     ...(runtimeInstall.errorCode

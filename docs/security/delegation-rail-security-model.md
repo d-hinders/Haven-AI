@@ -2497,3 +2497,15 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > entry for the verifier, and that re-read; `last-verified` is bumped for exactly
 > this coverage.
 
+> **#3747 re-verification (2026-10-07, outbound network policy only).**
+> #3747 added the hosted merchant-egress policy, which touches
+> `packages/sdk/src/client.ts` (an optional `merchantEgress` config and a
+> getter) — on this contract's cover list. The change is network policy on
+> the hosted server's own outbound connections only: it gates WHERE a
+> request may connect, never whether money moves and never who may spend.
+> No new spender, no new authority grant, no new spend path, no mutation of
+> a signed payment intent (a refusal is pre-signing or post-relay), and the
+> on-chain allowance and caveat stack remain the only spend authority (Red
+> Line #4) — the hosted server stays keyless and the policy touches no key
+> material. Scope of this note: the client.ts egress wiring; `last-verified`
+> is not re-stamped (it already reads 2026-10-07) — this block is the scope.

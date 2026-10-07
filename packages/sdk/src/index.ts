@@ -243,6 +243,28 @@ export {
 export type { X402RetryTarget } from './x402-retry-target.js'
 
 export {
+  MERCHANT_EGRESS_REFUSED_CODE,
+  MERCHANT_EGRESS_RESPONSE_CAP_CODE,
+  HOSTED_DISCOVERY_TIMEOUT_MS,
+  HOSTED_EGRESS_TIMEOUTS,
+  HOSTED_MAX_RESPONSE_BYTES,
+  HOSTED_MAX_GET_REDIRECTS,
+  MerchantEgressRefusedError,
+  MerchantEgressResponseCapError,
+  assertPublicHttpsMerchantUrl,
+  isPublicHttpsMerchantUrl,
+  publicHttpsMerchantUrlRefusal,
+  readBodyCapped,
+  strictMerchantEgressPolicy,
+} from './merchant-egress.js'
+export type {
+  MerchantEgressPolicy,
+  MerchantEgressRefusalReason,
+  MerchantEgressTimeouts,
+  MerchantEgressUse,
+} from './merchant-egress.js'
+
+export {
   SWEEP_BASE_CHAIN_ID,
   SWEEP_BASE_USDC_ADDRESS,
   SWEEP_BASE_SEPOLIA_CHAIN_ID,

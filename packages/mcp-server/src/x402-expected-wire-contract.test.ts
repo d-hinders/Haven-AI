@@ -56,6 +56,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createToolHandlers as createHostedHandlers, type ToolPayload } from './tools.js'
+import { fixtureMerchantEgress } from './test-support/hosted-mcp.js'
 import { createHostedHavenClient } from './server.js'
 
 /**
@@ -220,7 +221,7 @@ interface WireQuote {
  */
 async function hostedQuote(rail: 'delegation' | 'legacy'): Promise<WireQuote> {
   stubHavenApi(await backendAuthorizeBody(rail))
-  const haven = createHostedHavenClient({ apiKey: 'sk_agent_test', baseUrl: 'https://haven.test' })
+  const haven = createHostedHavenClient({ apiKey: 'sk_agent_test', merchantEgress: fixtureMerchantEgress(), baseUrl: 'https://haven.test' })
   const hosted = createHostedHandlers(haven)
   return ok<WireQuote>(
     // #1272: this file proves the agent-relayed byte transport, which is now

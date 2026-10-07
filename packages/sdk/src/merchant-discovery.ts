@@ -19,30 +19,53 @@
  * behavior is byte-identical to the pre-move mcp-server copy; the #1271
  * contract tests in packages/mcp-server/src/tools.test.ts pass unmodified
  * against this moved implementation.
+ *
+ * #3747: an optional egress policy tightens the SAME budgets when the caller
+ * carries one (`inputUrl` must pass `assertUrl` before anything connects,
+ * and the document is read with the cap enforced WHILE reading, never after
+ * buffering). Without `egress`, behaviour is byte-identical to before.
  */
+import { readBodyCapped, type MerchantEgressPolicy } from './merchant-egress.js'
+
 export const MERCHANT_DISCOVERY_PATHS = ['/.well-known/haven-demo-merchant', '/'] as const
 export const DISCOVERY_MAX_BYTES = 64 * 1024
 
-export async function discoverMerchantMcpUrl(inputUrl: string): Promise<string | null> {
+export async function discoverMerchantMcpUrl(
+  inputUrl: string,
+  egress?: MerchantEgressPolicy,
+): Promise<string | null> {
   let input: URL
   try {
     input = new URL(inputUrl)
   } catch {
     return null
   }
+  const timeoutMs = egress?.timeouts?.discovery ?? 5_000
+  // Discovery reads a fixed-path JSON document, never a merchant payload: its
+  // own 64 KB cap stays the ceiling even when the policy's body cap is larger.
+  const readCap = Math.min(egress?.maxResponseBytes ?? DISCOVERY_MAX_BYTES, DISCOVERY_MAX_BYTES)
   for (const path of MERCHANT_DISCOVERY_PATHS) {
     try {
-      const res = await globalThis.fetch(`${input.origin}${path}`, {
+      const url = `${input.origin}${path}`
+      if (egress) egress.assertUrl(url)
+      const res = await globalThis.fetch(url, {
         method: 'GET',
         headers: { accept: 'application/json' },
         redirect: 'error',
-        signal: AbortSignal.timeout(5_000),
+        signal: AbortSignal.timeout(timeoutMs),
       })
       if (!res.ok) continue
-      const contentLength = Number(res.headers.get('content-length') ?? 0)
-      if (contentLength > DISCOVERY_MAX_BYTES) continue
-      const text = await res.text()
-      if (text.length > DISCOVERY_MAX_BYTES) continue
+      let text: string
+      if (egress) {
+        // #3747: cap enforced WHILE reading — a discovery document that never
+        // ends cannot hold the read open past the cap.
+        text = await readBodyCapped(res, readCap)
+      } else {
+        const contentLength = Number(res.headers.get('content-length') ?? 0)
+        if (contentLength > DISCOVERY_MAX_BYTES) continue
+        text = await res.text()
+        if (text.length > DISCOVERY_MAX_BYTES) continue
+      }
       const doc = JSON.parse(text) as { mcp_url?: unknown }
       if (typeof doc.mcp_url !== 'string') continue
       const resolved = new URL(doc.mcp_url)

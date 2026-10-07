@@ -21,6 +21,7 @@ import {
   HavenApiError,
   X402UnexpectedStatusError,
   HavenClient,
+  MerchantEgressRefusedError,
   discoverMerchantMcpUrl,
   isSecureX402RetryTarget,
   sameUrl,
@@ -29,7 +30,7 @@ import {
 } from '@haven_ai/sdk'
 import { MCP_TRANSPORT_CASE_HINT } from '../contracts.js'
 import { signerCompatibilityNotice } from './signer-compat.js'
-import { HostedToolError, paymentWindowExpiredErrorFor } from './errors.js'
+import { HostedToolError, egressRefusalBeforeIntent, paymentWindowExpiredErrorFor } from './errors.js'
 import { refusalNextStep } from './guidance.js'
 
 /**
@@ -219,6 +220,16 @@ export async function quoteMcpToolCall(
   // cannot differ in scheme from an input this line admitted (a re-check
   // there was a guard no test could fail; round 2 of the same review).
   assertSecureMerchantUrl(merchantUrl)
+  // #3747: the hosted egress policy runs at QUOTE time — a bad target (an IP
+  // literal, localhost, a single-label or internal name) is refused before
+  // any intent exists, so it can never be refused only after funding.
+  if (haven.merchantEgress) {
+    try {
+      haven.merchantEgress.assertUrl(merchantUrl)
+    } catch (err) {
+      throw egressRefusalBeforeIntent(err)
+    }
+  }
   // This is an MCP-tool purchase, so always negotiate the Streamable-HTTP
   // lifecycle before its unpaid tools/call — exact MCP endpoints can use any
   // same-origin path, not only `/mcp`. A base URL that cannot establish a
@@ -235,7 +246,7 @@ export async function quoteMcpToolCall(
     const notReady = merchantNotReadyErrorFor(probeErr)
     if (notReady) throw notReady
     if (!isMerchantEndpointMiss(probeErr)) throw probeErr
-    const discovered = await discoverMerchantMcpUrl(merchantUrl)
+    const discovered = await discoverMerchantMcpUrl(merchantUrl, haven.merchantEgress)
     // Trailing-slash/case echoes of the input are "same URL" — spend the one
     // retry only on a genuinely different endpoint.
     if (!discovered || sameUrl(discovered, merchantUrl)) {

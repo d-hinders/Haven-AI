@@ -132,6 +132,9 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   isX402PaymentWindowExpired: { module: 'errors', slices: ['s2809', 's2810', 's2811', 's2812'] },
   paymentWindowExpiredError: { module: 'errors', slices: ['s2809', 's2810', 's2811', 's2812'] },
   paymentWindowExpiredErrorFor: { module: 'errors', slices: ['s2809', 's2810', 's2811', 's2812'] },
+  // #3747: the hosted refusal for a pre-intent merchant-egress refusal, used
+  // by the quote/prepare seams in mcp-context and plain-http-x402.
+  egressRefusalBeforeIntent: { module: 'errors', slices: ['s2809', 's2810', 's2811', 's2812'] },
   // tools/support/guidance.ts — agent guidance and purchase summaries.
   buildAgentGuidance: { module: 'guidance', slices: ['s2809', 's2810', 's2811', 's2812'] },
   buildPurchaseSummary: { module: 'guidance', slices: ['s2810', 's2812'] },
@@ -439,6 +442,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'paymentWindowExpiredError',
     'paymentWindowExpiredErrorFor',
     'normalizeError',
+    'egressRefusalBeforeIntent', // #3747
   ],
   guidance: [
     'buildAgentGuidance',

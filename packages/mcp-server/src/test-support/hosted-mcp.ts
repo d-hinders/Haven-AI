@@ -15,7 +15,7 @@
  * fixture rather than cloning it.
  */
 import { beforeEach, afterEach, vi } from 'vitest'
-import { HavenClient } from '@haven_ai/sdk'
+import { HavenClient, HOSTED_EGRESS_TIMEOUTS, HOSTED_MAX_GET_REDIRECTS, HOSTED_MAX_RESPONSE_BYTES, assertPublicHttpsMerchantUrl, type MerchantEgressPolicy } from '@haven_ai/sdk'
 import {
   createToolHandlers,
   type HostedToolName,
@@ -175,6 +175,24 @@ export function keylessClient(): HavenClient {
 /** Clear the recorded-call buffer (auto-reset by the installed beforeEach). */
 export function clearCalls(): void {
   calls = []
+}
+
+/**
+ * #3747: the fixture egress policy — the strict hosted policy with ONE
+ * exemption, the shared `https://merchant.test` origin the wire-contract and
+ * integration fixtures stub. Everything else still goes through the real
+ * strict check, so a test that wanders off the fixture origin still refuses.
+ */
+export function fixtureMerchantEgress(): MerchantEgressPolicy {
+  return {
+    assertUrl(url: string) {
+      if (new URL(url).origin === 'https://merchant.test') return
+      assertPublicHttpsMerchantUrl(url)
+    },
+    maxResponseBytes: HOSTED_MAX_RESPONSE_BYTES,
+    maxGetRedirects: HOSTED_MAX_GET_REDIRECTS,
+    timeouts: { ...HOSTED_EGRESS_TIMEOUTS },
+  }
 }
 
 /** Install the shared per-test lifecycle: reset calls, unstub after each. */

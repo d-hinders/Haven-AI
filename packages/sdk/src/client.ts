@@ -125,6 +125,8 @@ import {
   mcpSettlementFromToolResult,
   mcpToolResultOf,
 } from './mcp-merchant-transport.js'
+import type { MerchantEgressPolicy } from './merchant-egress.js'
+import { MerchantEgressResponseCapError } from './merchant-egress.js'
 import { AccountReads, mapSubBudget, mapTaskBudget } from './account-reads.js'
 import { DelegateSweepApi } from './delegate-sweep.js'
 import {
@@ -222,6 +224,7 @@ export class HavenClient {
   private readonly accountReads: AccountReads
   private readonly delegateSweep: DelegateSweepApi
   private readonly x402Wallet: string | undefined
+  private readonly egressPolicy: MerchantEgressPolicy | undefined
   private readonly merchantTransport: McpMerchantTransport
   private readonly confirmationTimeout: number
   private readonly pollingInterval: number
@@ -254,6 +257,16 @@ export class HavenClient {
   /** Delegate address derived from the private key (if provided) */
   readonly delegateAddress: string | undefined
 
+  /**
+   * #3747: the merchant-egress policy this client enforces on every merchant
+   * request, or `undefined` when none was configured (default SDK behaviour).
+   * Hosted tool seams read this to run the SAME policy at quote/prepare time,
+   * so a bad target is refused before funding, not only at the wire.
+   */
+  get merchantEgress(): MerchantEgressPolicy | undefined {
+    return this.egressPolicy
+  }
+
   constructor(config: HavenClientConfig) {
     this.delegateKey = config.delegateKey
     this.havenApi = new HavenApiTransport(config)
@@ -269,7 +282,8 @@ export class HavenClient {
       buildExplorerUrl: (chainId, hash) => buildExplorerUrl(chainId, hash),
     })
     this.x402Wallet = config.x402Wallet
-    this.merchantTransport = new McpMerchantTransport({ merchantTimeout: config.merchantTimeout })
+    this.egressPolicy = config.merchantEgress
+    this.merchantTransport = new McpMerchantTransport({ merchantTimeout: config.merchantTimeout, egress: config.merchantEgress })
     // #1756 moved the 90 s literal to `types.ts` so the delegate sweep shares
     // this number rather than choosing a fourth one. Same value, same default.
     this.confirmationTimeout = config.confirmationTimeout ?? DEFAULT_CONFIRMATION_TIMEOUT_MS
@@ -1326,7 +1340,7 @@ export class HavenClient {
   ): Promise<X402Quote> {
     const initialInit = withX402Wallet(init, x402PayerAddress(this.delegateAddress, this.x402Wallet))
     const request = snapshotX402Request(url, initialInit)
-    const response = await this.merchantTransport.fetch(url, initialInit)
+    const response = await this.merchantTransport.fetch(url, initialInit, this.merchantTransport.budgetFor('quote'))
 
     if (response.status !== 402) {
       // #3118: a merchant on the official x402 MCP profile answers HTTP 200
@@ -1348,7 +1362,10 @@ export class HavenClient {
       let body: unknown
       try {
         body = await response.clone().json()
-      } catch {
+      } catch (err) {
+        // #3747: a mid-read egress cap refusal is a refusal, not a
+        // "body was not JSON" — never launder it into a bare status.
+        if (err instanceof MerchantEgressResponseCapError) throw err
         body = undefined
       }
       // #1300: typed, so consumers key on the class instead of message text.
@@ -1585,7 +1602,7 @@ export class HavenClient {
       if (!url) {
         throw new HavenApiError('x402 resume requires the original URL or a captured request snapshot.', 400)
       }
-      const response = await this.merchantTransport.fetch(url, initialInit)
+      const response = await this.merchantTransport.fetch(url, initialInit, this.merchantTransport.budgetFor('quote'))
       if (response.status !== 402) {
         throw new HavenApiError('Expected the original x402 request to return HTTP 402 before resuming.', 400)
       }
@@ -1643,7 +1660,7 @@ export class HavenClient {
     if (mcpSessionId) requestInit = this.merchantTransport.withSessionHeaders(requestInit, mcpSessionId)
 
     // 1. Make the original request
-    const response = await this.merchantTransport.fetch(url, requestInit)
+    const response = await this.merchantTransport.fetch(url, requestInit, this.merchantTransport.budgetFor('quote'))
 
     // 2. Not a 402 — return as-is (collapsing SSE for MCP sessions), unless
     //    it is a native MCP payment-required tool result (#3118): the
@@ -1672,7 +1689,10 @@ export class HavenClient {
       // 3. Parse x402 payment requirements
       try {
         paymentRequired = await parsePaymentRequiredResponse(response)
-      } catch {
+      } catch (err) {
+        // #3747: a mid-read egress cap refusal must not read as "not a
+        // standard x402 response" — surface it.
+        if (err instanceof MerchantEgressResponseCapError) throw err
         // Not a standard x402 402 response — return it unchanged.
         return response
       }

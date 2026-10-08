@@ -11798,12 +11798,13 @@ export const openapiSpec = {
           mcpCallContext: {
             type: 'object',
             description:
-              '#1307: the merchant MCP-tool call this quote was made against (haven_pay_mcp_tool). Persisted so GET /x402/{id}/merchant-call-context can rehydrate it at settle/complete time.',
+              '#1307: the merchant MCP-tool call this quote was made against (haven_pay_mcp_tool / haven_prepare_catalog_purchase). Persisted so GET /x402/{id}/merchant-call-context can rehydrate it at settle/complete time. #3781: catalogName carries Haven\'s own catalog row name when the purchase came from a catalog entry — display only, never merchant content.',
             required: ['merchantUrl', 'toolName'],
             properties: {
               merchantUrl: { type: 'string', format: 'uri' },
               toolName: { type: 'string', minLength: 1 },
               arguments: { type: 'object', additionalProperties: true },
+              catalogName: { type: 'string', minLength: 1 },
               mcpTransport: {
                 type: 'object',
                 required: ['handshakeRequired', 'source'],
@@ -11845,6 +11846,10 @@ export const openapiSpec = {
           merchant_url: { type: 'string', format: 'uri' },
           tool_name: { type: 'string' },
           arguments: { type: 'object', additionalProperties: true },
+          // #3781: Haven's own catalog row name, when the purchase came from a
+          // catalog entry — the settle leg's first-tier purchase label.
+          // Absent on a direct haven_pay_mcp_tool purchase.
+          catalog_name: { type: 'string', minLength: 1 },
           mcp_transport: {
             type: 'object',
             properties: {

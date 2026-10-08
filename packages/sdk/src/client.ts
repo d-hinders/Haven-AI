@@ -2078,10 +2078,12 @@ export class HavenClient {
   /**
    * GET /x402/:id/merchant-call-context — the settle-leg twin of #1263's
    * sign-context fetch (#1307). Re-serves the stored merchant MCP-tool call
-   * context (merchant_url, tool_name, arguments, mcp_transport) recorded at
-   * quote time, so `haven_settle_mcp_tool` / `haven_complete_mcp_tool` can
-   * omit those fields and let Haven rehydrate them by payment_id instead of
-   * the caller re-threading them. Throws `HavenApiError` (404 unknown/foreign
+   * context (merchant_url, tool_name, arguments, mcp_transport — and the
+   * catalog row name #3781 added, when the purchase came from a catalog
+   * entry) recorded at quote time, so `haven_settle_mcp_tool` /
+   * `haven_complete_mcp_tool` can omit those fields and let Haven rehydrate
+   * them by payment_id instead of the caller re-threading them. Throws
+   * `HavenApiError` (404 unknown/foreign
    * payment_id, 409 no stored context, 410 expired) — the caller decides the
    * fallback (re-send the full context explicitly).
    */
@@ -2094,6 +2096,9 @@ export class HavenClient {
       merchantUrl: raw.merchant_url,
       toolName: raw.tool_name,
       arguments: raw.arguments ?? {},
+      // #3781: the catalog row name rides the same blob; absent on a direct
+      // haven_pay_mcp_tool purchase.
+      ...(raw.catalog_name ? { catalogName: raw.catalog_name } : {}),
       ...(raw.mcp_transport
         ? {
             mcpTransport: {

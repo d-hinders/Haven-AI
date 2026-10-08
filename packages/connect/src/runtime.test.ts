@@ -2806,7 +2806,7 @@ describe('runConnect terminal outcome record (#2173)', () => {
       expect(outcome.activation.instruction).toContain('keeps acting as the previous agent (agent-prod) until it is restarted')
       expect(outcome.activation.instruction).toContain('use Remove agent\u2026 on the Haven agent page')
       // A cross-backend rebind says where that agent lives.
-      expect(outcome.activation.instruction).toContain('on the backend it was created on, not this one')
+      expect(outcome.activation.instruction).toContain('(agent-prod is on the backend it was created on, not this one)')
       // S2: the retired holder has NO stored key, so it is not "live" — the
       // pre-write list is the keyed subset, never every directory.
       expect(outcome.existing_agents_before_write).toEqual([])
@@ -3307,6 +3307,20 @@ describe('existing-agent wiring collision at setup (#2551)', () => {
     // itself names the displaced agent.
     expect(result.outcome).not.toHaveProperty('server_name_rebound_from')
     expect(result.outcome.activation.instruction).toContain('keeps acting as the previous agent (agent-old) until it is restarted')
+  })
+
+  it('#3772: a --replace displacing several bare directories names every previous agent, in the plural', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-3772-replace-many-'))
+    await seedDir(root, 'agent-a-uuid', liveBare('agent-a'))
+    await seedDir(root, 'agent-b-uuid', liveBare('agent-b'))
+    const h = harness(root)
+
+    const result = await runConnect({ ...baseOptions(root), replaceExistingWiring: true }, h.deps)
+
+    const instruction = result.outcome.activation.instruction
+    expect(instruction).toMatch(/keeps acting as the previous agents \((agent-a, agent-b|agent-b, agent-a)\) until it is restarted/)
+    expect(instruction).toContain('they may still be active in Haven')
+    expect(instruction).toContain('it ends their live budgets')
   })
 
   it('--replace does NOT retire the prior directory when the runtime install ended with an errorCode', async () => {

@@ -2969,10 +2969,12 @@ first write, with the account each spends from; a subset of
 `superseded_agent_ids`, which also names key-less and tombstoned directories)
 and `server_name_rebound_from`
 (only when the run took a server name over from another directory's local
-`mcp-server-binding.json`, with `backend_changed`; since #3772 such a run's
-`activation.instruction` also says that a session already running keeps acting
-as that previous agent until it is restarted, and that the agent may still be
-active in Haven — text appended to an existing string field, no new key); and since #2528, also
+`mcp-server-binding.json`, with `backend_changed`; since #3772, when a run
+re-points wiring another agent held — such a rebind, or any `--replace` — and
+its install completed, `activation.instruction` also says that a session
+already running keeps acting as the previous agent(s) until it is restarted,
+and that they may still be active in Haven — text appended to an existing
+string field, no new key); and since #2528, also
 additive, `approval.url` — the absolute link to
 this setup's budget approval, echoed from the register response and present
 only when `approval.required` is true AND the backend is new enough to return

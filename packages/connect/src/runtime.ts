@@ -1050,7 +1050,6 @@ async function executeConnect(
   }
 
   printNextSteps(runtimeInstall, log, approval, registration.approval_url)
-  if (reboundFrom) log(staleSessionNotice(reboundFrom.agent_id))
 
   const outcome = completionOutcome({
     runtimeInstall,
@@ -1065,6 +1064,18 @@ async function executeConnect(
     ...(Object.keys(retirementMirrorErrors).length > 0 ? { retirementMirrorErrors } : {}),
     existingAgentsBeforeWrite: existingAgents.map((a) => ({ agent_id: a.agentId, account_address: a.accountAddress })),
     ...(reboundFrom ? { serverNameReboundFrom: reboundFrom } : {}),
+    // #3772: only when this run actually re-pointed the wiring (an install that
+    // failed wrote nothing, and on --replace left the old agent's wiring as the
+    // only working one). A --replace names every displaced agent even when no
+    // binding record exists (pre-0.4.0 wiring, or a failed best-effort write).
+    ...(!runtimeInstall.errorCode && (replacing || reboundFrom)
+      ? {
+          staleSession: {
+            agentIds: [...new Set([...(replacing?.superseded.map((entry) => entry.agentId) ?? []), ...(reboundFrom ? [reboundFrom.agent_id] : [])])],
+            backendChanged: reboundFrom?.backend_changed ?? false,
+          },
+        }
+      : {}),
     setupChallengeExpiresAt: setup.challenge.expires_at,
     approvalRequired: registration.agent_status === 'pending_approval',
     approvalUrl: registration.approval_url,
@@ -1097,10 +1108,13 @@ async function executeConnect(
  * Connect revokes nothing in Haven (a replace retires the old directory
  * locally only), so the previous agent may still be able to spend.
  */
-export function staleSessionNotice(previousAgentId: string): string {
+export function staleSessionNotice(previousAgentIds: readonly string[], backendChanged: boolean): string {
+  const one = previousAgentIds.length === 1
   return (
-    `Any session that was already running keeps acting as the previous agent (${previousAgentId}) until it is restarted, ` +
-    'and that agent may still be active in Haven: if it should no longer spend, use Remove agent\u2026 on the Haven agent page (it ends its live budgets).'
+    `Any session that was already running keeps acting as the previous agent${one ? '' : 's'} (${previousAgentIds.join(', ')}) until it is restarted, ` +
+    `and ${one ? 'that agent' : 'they'} may still be active in Haven` +
+    (backendChanged ? ' (on the backend it was created on, not this one)' : '') +
+    `: if ${one ? 'it' : 'they'} should no longer spend, use Remove agent\u2026 on the Haven agent page (it ends ${one ? 'its' : 'their'} live budgets).`
   )
 }
 export function completionOutcome(input: {
@@ -1120,6 +1134,8 @@ export function completionOutcome(input: {
   approvalUrl?: string
   existingAgentsBeforeWrite?: ReadonlyArray<{ agent_id: string; account_address: string | null }>
   serverNameReboundFrom?: ConnectOutcome['server_name_rebound_from']
+  /** #3772: set only when this run re-pointed wiring another agent held. */
+  staleSession?: { agentIds: readonly string[]; backendChanged: boolean }
 }): ConnectOutcome {
   const { runtimeInstall } = input
   const manualSetup = runtimeInstall.errorCode === 'manual_runtime_setup_required'
@@ -1144,7 +1160,9 @@ export function completionOutcome(input: {
         // #3772: a rebind changes which agent the server name means, but a
         // session that is already running keeps the config it loaded — it
         // goes on acting as the previous agent, which Connect never revokes.
-        (input.serverNameReboundFrom ? ` ${staleSessionNotice(input.serverNameReboundFrom.agent_id)}` : ''),
+        (input.staleSession && input.staleSession.agentIds.length > 0
+          ? ` ${staleSessionNotice(input.staleSession.agentIds, input.staleSession.backendChanged)}`
+          : ''),
     },
     next_action: nextAction,
     approval: {

@@ -17,7 +17,7 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
-- **A rebind or `--replace` now warns that an open session keeps acting as the previous agent (#3772).** The connector re-points the MCP server name on disk, but a client that is already running keeps the entries it loaded at start-up, and Connect revokes nothing in Haven. When the run took a server name over from another agent, the outcome's `activation.instruction` (and the human output) now says so, names the previous agent, and points at **Remove agent…** on the Haven agent page. Text only; no field, flag or behaviour changes. No update needed.
+- **A rebind or `--replace` now warns that an open session keeps acting as the previous agent (#3772).** The connector re-points the MCP server name on disk, but a client that is already running keeps the entries it loaded at start-up, and Connect revokes nothing in Haven. When a run re-points wiring another agent held (a `--replace`, including pre-0.4.0 wiring with no binding record, or a rebind) and the install completed, the outcome's `activation.instruction` now says so, names every previous agent, and points at **Remove agent…** on the Haven agent page. A failed install says nothing of the kind: it wrote no wiring. Text only; no field, flag or behaviour changes. No update needed.
 
 - **The installed skill splits the step after a plain-HTTP merchant retry by scheme (#3774).** EIP-3009 reports with `haven_report_x402_outcome`; erc7710 records the merchant's settlement with `haven_report_settlement_evidence`, and a refused erc7710 retry is checked with `haven_get_payment_status` before any re-quote. An already installed `SKILL.md` stays stale until reinstalled. No update needed.
 

@@ -2805,7 +2805,8 @@ describe('runConnect terminal outcome record (#2173)', () => {
       // previous agent, in both the --json instruction and the human log.
       expect(outcome.activation.instruction).toContain('keeps acting as the previous agent (agent-prod) until it is restarted')
       expect(outcome.activation.instruction).toContain('use Remove agent\u2026 on the Haven agent page')
-      expect(logs.some((l) => l.includes('keeps acting as the previous agent (agent-prod)'))).toBe(true)
+      // A cross-backend rebind says where that agent lives.
+      expect(outcome.activation.instruction).toContain('on the backend it was created on, not this one')
       // S2: the retired holder has NO stored key, so it is not "live" — the
       // pre-write list is the keyed subset, never every directory.
       expect(outcome.existing_agents_before_write).toEqual([])
@@ -3301,6 +3302,11 @@ describe('existing-agent wiring collision at setup (#2551)', () => {
     expect(output).toMatch(/Retired previous agent agent-old locally/)
     expect(output).toMatch(/NOT revoked/)
     expect(output).not.toMatch(/keeps acting as them/)
+    // #3772 review S2: a bare directory with NO binding record (pre-0.4.0
+    // wiring) still gets the stale-session sentence in --json — the replace
+    // itself names the displaced agent.
+    expect(result.outcome).not.toHaveProperty('server_name_rebound_from')
+    expect(result.outcome.activation.instruction).toContain('keeps acting as the previous agent (agent-old) until it is restarted')
   })
 
   it('--replace does NOT retire the prior directory when the runtime install ended with an errorCode', async () => {
@@ -3317,6 +3323,9 @@ describe('existing-agent wiring collision at setup (#2551)', () => {
     expect(result.outcome.superseded_agents_retired_locally).toBe(false)
     expect(result.outcome.retired_agent_ids).toEqual([])
     expect(h.logs.join('\n')).toMatch(/were NOT retired/)
+    // #3772 review S1: the install wrote nothing, so a restart moves no session
+    // off the old agent — and that agent's wiring may be the only working one.
+    expect(result.outcome.activation.instruction).not.toContain('keeps acting as the previous agent')
   })
 
   it('REGRESSION (review): retired_agent_ids names only the collision set — a coexisting NAMED agent is listed as superseded but never retired', async () => {

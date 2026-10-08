@@ -108,6 +108,33 @@ last-verified: "2026-10-08"
 >   Bitrefill SIWX recovery steps; both byte-pinned copies edited
 >   identically).
 
+> **#3769 (2026-10-08, the guided catalog path accepts per-call arguments and
+> an HTTP call shape):** `haven_prepare_catalog_purchase` gains one OPTIONAL
+> input, `arguments`. A catalog row that declares `tool_arguments_schema` (a
+> JSON Schema the row carries; migration 107 pins Soundside `create_text`'s,
+> tightened to require prompt-or-messages) accepts caller `arguments` — merged
+> over the row's pinned `tool_arguments` and validated against the schema
+> BEFORE the merchant probe, refused `INVALID_CATALOG_ARGUMENTS` (400) when
+> they violate it; a row WITHOUT a schema is a fixed SKU and now REFUSES
+> caller `arguments` with `INVALID_INPUT` (the old drop-in-silence hardened
+> into a refusal). The strict-input mis-key census moved from `arguments` to
+> `tool_name` for this tool. Discovery entries additively carry
+> `tool_arguments_schema` / `http_method` / `body_type` / `body_example`
+> (absent on an older backend), and an http row's `haven_quote_x402` hint now
+> carries `method`/`body` when the row declares them.
+> - **Additive, not re-shaping.** No tool is added or renamed; `arguments` is
+>   optional, so an existing caller's payload is unchanged and an older local
+>   MCP is unaffected (the input lives on the hosted surface only).
+> - **Version skew is safe in both directions.** An old BACKEND sends no
+>   `tool_arguments_schema`, every row reads schema-less, and `arguments`
+>   refuses — the pre-#3769 contract. An old hosted server ignores the new
+>   backend fields and keeps quoting with the row's pinned arguments. The
+>   consent hash covers tool names, not inputs (per the #3771 note below), so
+>   it does not move.
+> - **The refusals are pre-intent.** Both argument refusals run before the
+>   live quote, so no merchant is contacted and no payment exists on an
+>   invalid call — the same position the cap refusals already hold.
+>
 > **Re-verified #3781 (2026-10-08, the catalog tier of the purchase label):**
 > a settled purchase that came from a catalog entry now reports the catalog
 > row's name as the purchase label, not the `<merchant host> <tool_name>`
@@ -135,6 +162,7 @@ last-verified: "2026-10-08"
 > `last-verified` stays 2026-10-08. Nothing else in this document was
 > re-verified.
 
+>
 > **#3768 (2026-10-08, merchant-issued credentials are withheld from the settled `result`):**
 > a settled `haven_settle_mcp_tool` / `haven_complete_mcp_tool` response no longer
 > forwards merchant-issued bearer credentials to the agent verbatim. Prod QA

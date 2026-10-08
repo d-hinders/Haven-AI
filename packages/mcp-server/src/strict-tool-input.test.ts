@@ -183,7 +183,12 @@ const SMUGGLED_KEY: Record<StrictInputToolName, string> = {
   // new tool, same class as the pay tools' crossover key.
   haven_check_funds: 'maxAmountHuman',
   haven_quote_mcp_tool: 'max_amount',
-  haven_prepare_catalog_purchase: 'arguments',
+  // #3769: `arguments` is a DECLARED key on the catalog prepare now (a row
+  // with an argument schema accepts it, validated; a fixed-SKU row refuses it
+  // at the handler with INVALID_INPUT, not the strict-input parse). The
+  // natural mis-key is tool_name — it always comes from the row, never from
+  // the call.
+  haven_prepare_catalog_purchase: 'tool_name',
   haven_quote_catalog_purchase: 'max_amount',
   haven_resume_x402_payment: 'payment_header',
   haven_get_payment_status: 'tx_hash',

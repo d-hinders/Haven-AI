@@ -128,7 +128,12 @@ const mcpTransportArg = z
  */
 export type DiscoveryHint =
   | { suggested_tool: 'haven_quote_catalog_purchase'; suggested_arguments: { catalog_id: string } }
-  | { suggested_tool: 'haven_quote_x402'; suggested_arguments: { url: string } }
+  // #3769: a plain-HTTP row that declares a method/body carries them in the
+  // hint — the arguments must remain VERBATIM-acceptable by
+  // haven_quote_x402's schema (url, method, headers, body), which already
+  // takes all three; a GET-only hint for a POST-declared resource is what
+  // made the Anchor rows unbuyable as listed.
+  | { suggested_tool: 'haven_quote_x402'; suggested_arguments: { url: string; method?: string; body?: string } }
   | { suggested_tool_omitted_reason: string }
 
 /** One `haven_discover_tools` entry on the hosted surface (wire-shaped). */
@@ -142,6 +147,14 @@ export type DiscoveryEntry = {
   protocol: string
   tool_name: string | null
   tool_arguments: Record<string, unknown> | null
+  // #3769: how a purchase calls this row. `tool_arguments_schema` present
+  // means haven_prepare_catalog_purchase accepts a validated `arguments`;
+  // null/absent means fixed-SKU. The HTTP shape feeds the quote hint above.
+  // Absent (not merely null) when the backend predates #3769.
+  tool_arguments_schema?: Record<string, unknown> | null
+  http_method?: string | null
+  body_type?: string | null
+  body_example?: Record<string, unknown> | null
   price_display: string | null
   price_atomic: string | null
   price_is_indicative: true
@@ -324,9 +337,15 @@ export const toolSchemas = {
   },
   haven_prepare_catalog_purchase: {
     // #1306: the guided path — starts from a curated catalog row instead of a
-    // hand-copied merchant_url/tool_name/tool_arguments. Chain-scoped to this
-    // agent for free by the backend's /catalog/:id SQL (#1299).
+    // hand-copied merchant_url/tool_name. Chain-scoped to this agent for free
+    // by the backend's /catalog/:id SQL (#1299).
     catalog_id: z.string().min(1),
+    // #3769: per-call arguments, accepted ONLY on a row that declares an
+    // argument schema (validated against it before the merchant is
+    // contacted — an invalid call is refused before any payment exists).
+    // A row without a schema is a fixed SKU and REFUSES arguments; the
+    // merchant_url and tool_name still always come from the row.
+    arguments: z.record(z.string(), z.unknown()).optional(),
     // A cap is REQUIRED on this tool, as on haven_pay_mcp_tool — this is the
     // guided path, so there is no cap_warning softness
     // here. Give it in EITHER spelling; both are enforced against the LIVE
@@ -919,11 +938,12 @@ export const STRICT_INPUT_TOOLS = {
     'price. A cap sent here used to be dropped in silence, so the quote came back looking ' +
     'capped when nothing had checked it.',
   haven_prepare_catalog_purchase:
-    'The merchant URL, tool name and tool arguments come from the catalog row that ' +
-    'catalog_id names, never from arguments — a merchant_url, tool_name or arguments sent ' +
-    'here used to be dropped in silence while the purchase proceeded against the catalog ' +
-    'row. The cap is max_amount_human or max_amount (exactly one), and the replay key is ' +
-    'idempotency_key (snake_case), not idempotencyKey.',
+    'The merchant URL and tool name come from the catalog row that catalog_id names, never from ' +
+    'arguments. A row that DECLARES an argument schema also accepts `arguments` for its per-call ' +
+    'tool — they are validated against the row schema and refused, before any contact or payment, ' +
+    'when they do not satisfy it. A row without a schema is a fixed SKU: its arguments are the ' +
+    "row's own and `arguments` sent here is REFUSED, not dropped. The cap is max_amount_human or " +
+    'max_amount (exactly one), and the replay key is idempotency_key (snake_case), not idempotencyKey.',
   haven_quote_catalog_purchase:
     'Everything about the merchant call comes from the catalog row that catalog_id names, ' +
     'and a quote takes no cap — a max_amount, tool_name or arguments sent here used to be ' +

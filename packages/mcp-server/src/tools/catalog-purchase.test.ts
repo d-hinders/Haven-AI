@@ -39,6 +39,7 @@ import {
   installSharedFixtureLifecycle,
   mintPaymentHeaders,
   ok,
+  fail,
   recordedCalls,
   stubFetch,
   type RouteDefinition,
@@ -176,6 +177,68 @@ describe('haven_discover_tools', () => {
     expect(result.data[0].suggested_tool).toBe('haven_quote_catalog_purchase')
     expect(result.data[0].suggested_arguments).toEqual({ catalog_id: 'cat_1' })
     expect(result.data[0].tool_arguments).toEqual({ prompt: 'hello' })
+  })
+
+  it('carries the declared HTTP call shape in the row and the hint — a POST-declared resource is never suggested GET-only (#3769)', async () => {
+    stubFetch({
+      'GET /catalog': {
+        status: 200,
+        body: {
+          entries: [
+            {
+              id: 'cat_anchor', name: 'Anchor — token price', description: 'Per-call token price', category: 'data',
+              resource_url: 'https://api.anchor-x402.test/v1/price/token', rail: 'x402', protocol: 'http',
+              tool_name: null, tool_arguments: null, tool_arguments_schema: null,
+              http_method: 'POST', body_type: 'json', body_example: { symbol: 'BTC' },
+              price_display: '$0.001 USDC', price_atomic: '1000', asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+              network: 'base', status: 'active', verified_at: '2026-10-08T13:00:00.000Z',
+            },
+            {
+              id: 'cat_soundside', name: 'Soundside — text generation', description: 'Per-call text', category: 'media',
+              resource_url: 'https://mcp.soundside.test/mcp', rail: 'x402', protocol: 'mcp',
+              tool_name: 'create_text', tool_arguments: null,
+              tool_arguments_schema: { type: 'object', properties: { prompt: { type: 'string' } }, required: ['prompt'] },
+              http_method: null, body_type: null, body_example: null,
+              price_display: '$0.01 USDC', price_atomic: '10000', asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+              network: 'base', status: 'active', verified_at: '2026-10-08T13:00:00.000Z',
+            },
+          ],
+        },
+      },
+    })
+
+    const result = ok<Array<{
+      id: string
+      suggested_tool?: string
+      suggested_arguments?: Record<string, unknown>
+      tool_arguments_schema?: Record<string, unknown> | null
+      http_method?: string | null
+      body_type?: string | null
+      body_example?: Record<string, unknown> | null
+    }>>(await handlers().haven_discover_tools({}))
+
+    const anchor = result.data.find((e) => e.id === 'cat_anchor')!
+    // The hint carries the DECLARED call shape, verbatim-acceptable by
+    // haven_quote_x402 (url, method, headers?, body).
+    expect(anchor.suggested_arguments).toEqual({
+      url: 'https://api.anchor-x402.test/v1/price/token',
+      method: 'POST',
+      body: '{"symbol":"BTC"}',
+    })
+    expect(() => parseStrict('haven_quote_x402', anchor.suggested_arguments)).not.toThrow()
+    expect(anchor.http_method).toBe('POST')
+    expect(anchor.body_type).toBe('json')
+    expect(anchor.body_example).toEqual({ symbol: 'BTC' })
+
+    const soundside = result.data.find((e) => e.id === 'cat_soundside')!
+    // The argument schema is what tells the agent prepare accepts `arguments`
+    // — and WHICH ones it needs.
+    expect(soundside.tool_arguments_schema).toEqual({
+      type: 'object',
+      properties: { prompt: { type: 'string' } },
+      required: ['prompt'],
+    })
+    expect(soundside.http_method).toBeNull()
   })
 
   it('carries the merchant wire-shaped when the backend sends one, and omits it when it does not (#3078)', async () => {
@@ -488,6 +551,83 @@ describe('haven_prepare_catalog_purchase', () => {
     'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
     'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
   }
+
+  // #3769: a row that declares an argument schema accepts caller `arguments`,
+  // merged over the row's pinned ones and validated BEFORE the merchant is
+  // contacted. `{}` — or anything missing a required key — is refused with
+  // no probe and no payment.
+  const SCHEMA_ROW = {
+    ...CATALOG_ENTRY_RESPONSE,
+    tool_arguments: { max_tokens: 100 },
+    tool_arguments_schema: {
+      type: 'object',
+      properties: { prompt: { type: 'string' } },
+      required: ['prompt'],
+    },
+  }
+  const schemaRowRoutes = {
+    ...baseRoutes,
+    'GET /catalog/cat_1': { status: 200, body: SCHEMA_ROW },
+  }
+
+  it('accepts arguments on a schema-declaring row: merged over the pinned preset and carried into the probe (#3769)', async () => {
+    stubFetch({
+      ...schemaRowRoutes,
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
+    })
+
+    const result = ok<{ arguments: Record<string, unknown> }>(
+      await handlers().haven_prepare_catalog_purchase({
+        catalog_id: 'cat_1',
+        max_amount: '2000000',
+        arguments: { prompt: 'Write a haiku about stablecoins' },
+      }),
+    )
+    // The response reports the RESOLVED call, not the row preset alone.
+    expect(result.data.arguments).toEqual({ max_tokens: 100, prompt: 'Write a haiku about stablecoins' })
+    // And the live merchant probe carried exactly that. (The /mcp captures
+    // include the SDK's initialize; match the tools/call envelope.)
+    const probe = recordedCalls().find(
+      (c) => c.url === 'http://merchant.test/mcp' && (c.body as { method?: string } | undefined)?.method === 'tools/call',
+    )
+    expect(probe).toBeDefined()
+    const probeBody = probe!.body as { params: { arguments: Record<string, unknown> } }
+    expect(probeBody.params.arguments).toEqual({ max_tokens: 100, prompt: 'Write a haiku about stablecoins' })
+  })
+
+  it('refuses `{}` on a schema-declaring row before any payment exists (#3769)', async () => {
+    stubFetch(schemaRowRoutes)
+
+    const payload = fail(
+      await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000', arguments: {} }),
+    )
+    expect(payload.code).toBe('INVALID_CATALOG_ARGUMENTS')
+    expect(payload.statusCode).toBe(400)
+    expect(payload.message).toMatch(/tool_arguments_schema|argument schema|satisfy/i)
+    // Refused at step 1b: the catalog read is the ONLY network call. No
+    // merchant probe, no intent, nothing paid.
+    expect(recordedCalls()).toHaveLength(1)
+    expect(recordedCalls()[0].url).toBe('http://haven.test/catalog/cat_1')
+  })
+
+  it('refuses caller arguments on a fixed-SKU row (no declared schema) (#3769)', async () => {
+    // baseRoutes' CATALOG_ENTRY_RESPONSE carries tool_arguments but NO
+    // tool_arguments_schema — the CloudNest shape.
+    stubFetch(baseRoutes)
+
+    const payload = fail(
+      await handlers().haven_prepare_catalog_purchase({
+        catalog_id: 'cat_1',
+        max_amount: '2000000',
+        arguments: { tier: '1tb' },
+      }),
+    )
+    expect(payload.code).toBe('INVALID_INPUT')
+    expect(payload.statusCode).toBe(400)
+    expect(payload.message).toMatch(/fixed-SKU/)
+    expect(recordedCalls()).toHaveLength(1)
+  })
 
   it('success (delegation rail, sufficient budget): loads catalog, quotes live, creates the intent, returns the compact ready-to-sign shape + catalog fields + allowance block', async () => {
     stubFetch({

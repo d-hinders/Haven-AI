@@ -373,6 +373,19 @@ which the bridge selects before the open budget. The budget would then fund
 payments to any merchant. `agent_delegations.merchant_id` is a label, not a
 caveat, so the authority is still the signed caveat stack and nothing else.
 
+> **Re-verified #3769 (2026-10-08):** #3769 adds an `http_method`
+> correction column to the catalog verifier's success UPDATE — the same
+> statement that records `merchant_catalog.pay_to`. The payTo contract above
+> is unchanged: `pay_to` is still written AS SEEN from the challenge (never
+> COALESCEd), still collected only across `accepts[]` options on the recorded
+> network, still refused when the options disagree, and the advertised-method
+> correction never applies to an MCP row (an `http`-protocol guard). A row's
+> `http_method` says how the verifier PROBES the resource; it feeds no budget
+> pin, no caveat, and no authority path. Scope of this re-read: this section
+> (Merchant-locked budgets) and the `merchant-catalog.ts`/`merchants.ts`
+> coverage it names; the rest of the document was not re-read for it, and
+> `last-verified` stays 2026-10-08.
+
 Two limits are deliberate:
 - **Slot sharing.** A merchant-locked budget and a plain budget pinned to the
   same address share one `(agent, token, recipient)` slot. Activating either

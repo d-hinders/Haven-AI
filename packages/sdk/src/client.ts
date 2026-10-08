@@ -195,6 +195,18 @@ function mapCatalogEntry(entry: RawCatalogEntry): HavenCatalogEntry {
     protocol: entry.protocol,
     toolName: entry.tool_name,
     toolArguments: entry.tool_arguments ?? null,
+    // #3769: call semantics. Conditional spread like `merchant` — a backend
+    // predating #3769 leaves the fields absent, never null-but-present, so a
+    // fixture's exact object shape does not grow keys. Present on the wire
+    // means the row was read post-#3769 and null means "not declared".
+    ...(entry.tool_arguments_schema !== undefined
+      ? {
+          toolArgumentsSchema: entry.tool_arguments_schema ?? null,
+          httpMethod: entry.http_method ?? null,
+          bodyType: entry.body_type ?? null,
+          bodyExample: entry.body_example ?? null,
+        }
+      : {}),
     priceDisplay: entry.price_display,
     priceAtomic: entry.price_atomic,
     asset: entry.asset,

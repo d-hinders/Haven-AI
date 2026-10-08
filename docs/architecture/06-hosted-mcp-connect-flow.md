@@ -203,7 +203,8 @@ erc7710 direct settlement (delegation rail + merchant advertises it)
 haven_quote_x402 / haven_pay_x402_quote
   → haven_sign                         (signs the SETTLEMENT CHILD)
   → haven_submit { settlement_scheme: "erc7710" }  → payment_header
-  → merchant retry
+  → merchant retry  → haven_report_settlement_evidence { payment_id, settlement_tx_hash }
+                                       (#3774: the next_tool after the erc7710 haven_submit)
 ```
 
 > **Re-verified (#3475 follow-up, 2026-09-30, passage only).** The added

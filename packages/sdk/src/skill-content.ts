@@ -299,7 +299,8 @@ wallet signs in as the wallet that paid, moving no funds. NEVER follow a
 redirect with \`SIGN-IN-WITH-X\` (or a resulting session token) attached; if
 the final origin differs, re-sign there. On THIS path Haven never sends the
 paid request (it sends only unpaid probes):
-\`mcp__haven-signer__haven_sign_x402\` returns both
+on the **EIP-3009** scheme (the pay result names
+\`mcp__haven-signer__haven_sign_x402\`), that tool returns both
 \`signature\` and \`payment_header\`; relay \`signature\` with
 \`mcp__haven__haven_submit\`, then retry the paywalled URL yourself with
 \`payment_header\`. Do not pass that call's \`x402_binding\` to
@@ -315,7 +316,19 @@ failed purchase reads as complete for fifteen minutes. If the merchant's
 call: Haven decodes it, verifies the settlement on-chain, and the receipt then
 shows the merchant's settlement, not only the funding transaction. Call
 \`mcp__haven__haven_report_settlement_evidence\` only when the outcome answer
-names it as the next step. (The SDK's own
+names it as the next step. On the **erc7710** scheme (the pay result says
+\`settlement_scheme: "erc7710"\`), sign with \`mcp__haven-signer__haven_sign\`,
+then \`mcp__haven__haven_submit\` with \`settlement_scheme: "erc7710"\`
+returns the \`payment_header\`; retry the merchant yourself with it as
+\`PAYMENT-SIGNATURE\` only, then record the merchant's settlement with
+\`mcp__haven__haven_report_settlement_evidence\`: \`payment_id\` plus
+\`settlement_tx_hash\`, the \`transaction\` in the merchant's base64
+\`PAYMENT-RESPONSE\` (decode it). \`mcp__haven__haven_report_x402_outcome\`
+does not apply on erc7710 — there is no Haven funding transaction to anchor it
+to, so it refuses while the payment is unconfirmed. If the merchant refuses an erc7710 retry, do not re-quote at once: it
+may already have redeemed the authorization, so check
+\`mcp__haven__haven_get_payment_status\` after the payment window and re-quote
+only if it shows no settlement. (The SDK's own
 \`haven_pay_x402\` tool does perform the merchant retry itself; that tool is
 not part of the hosted MCP surface.) On this SDK path, when the owner opted the
 agent in, the paid EIP-3009 retry also carries the agent-signed buyer tax

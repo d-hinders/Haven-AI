@@ -1203,8 +1203,7 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   // haven_sign_x402's inline header, but it is still the AGENT's retry, which is exactly why its
   // outcome has nowhere to go without this call.
   'On the funding-leg (EIP-3009) shape ONLY, report what the merchant answered to your retry with',
-  'haven_report_x402_outcome. Nothing to report on erc7710: there confirmed already means the',
-  'merchant settled.',
+  'haven_report_x402_outcome. On erc7710 use haven_report_settlement_evidence instead.',
   // #3617: the owner chose to delete the dead sub_budget_id forwarding rather
   // than declare the argument, so say where a sub-budget pays instead.
   'Sub-budgets (sub_budget_id) pay only through the local MCP\'s haven_pay_x402 tools.',

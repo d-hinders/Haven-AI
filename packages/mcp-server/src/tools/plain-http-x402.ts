@@ -111,6 +111,69 @@ import {
 // compared, and a literal `false` there read as "the merchant agrees with what
 // you quoted" (haven-reviewer on #3112).
 /**
+ * #3774: `haven_report_x402_outcome` anchors a report to a Haven FUNDING
+ * transaction, which an erc7710 payment never has — the merchant settles by
+ * redeeming the delegation chain itself, so the intent stays `submitted` and
+ * the SDK refuses it (`HavenPaymentStateError`, which surfaced as a generic
+ * `API_ERROR`, dropping any folded evidence). Mapped HERE, from
+ * `err.state.settlementScheme`, to a typed refusal naming the tool that DOES
+ * record an erc7710 settlement, with the caller's own hash carried over.
+ * An eip3009 payment whose funding is unconfirmed keeps the existing
+ * status-read refusal (returns null). An erc7710 `rejected` outcome is
+ * verify-then-act (#2987): read the status after the payment window and
+ * re-quote only if it shows no settlement. No delegate balance to sweep.
+ */
+function erc7710OutcomeRefusal(
+  err: unknown,
+  args: Record<string, any>,
+  evidence: { settlementTxHash: string } | null,
+): HostedToolError | null {
+  if (!(err instanceof HavenPaymentStateError)) return null
+  const state = err.state as { settlementScheme?: string | null; status?: string; paymentId?: string }
+  if (state.settlementScheme !== 'erc7710' || state.status === 'confirmed') return null
+  const paymentId = state.paymentId ?? args.payment_id
+  if (args.outcome === 'rejected') {
+    return new HostedToolError({
+      code: 'ERC7710_OUTCOME_NOT_REPORTABLE',
+      // Verify-then-act, as paid-mcp-completion's erc7710 refusal (#2987): a
+      // rejected retry does not prove the merchant never redeemed the
+      // single-use settlement authorization it held, so "re-quote now"
+      // could pay twice.
+      message:
+        `Payment ${paymentId} is an erc7710 payment: the merchant settles it by redeeming the delegation ` +
+        'itself, so there is no Haven funding transaction for this report to anchor to. Nothing was ' +
+        'written. There is no delegate balance to sweep on this scheme. Haven has NOT observed a ' +
+        'settlement, but the merchant held a single-use settlement authorization valid for up to the ' +
+        'payment window (typically 300s) and may have redeemed it before refusing: check the payment ' +
+        'status after that window and re-quote only if it shows no settlement.',
+      statusCode: 409,
+      paymentId,
+      nextStep: refusalNextStep({
+        nextAction: AgentPaymentNextAction.CheckStatusLater,
+        ...paymentStatusHandoff(paymentId),
+      }),
+    })
+  }
+  return new HostedToolError({
+    code: 'ERC7710_REPORT_SETTLEMENT_EVIDENCE',
+    message:
+      `Payment ${paymentId} is an erc7710 payment, which has no Haven funding transaction for this report ` +
+      "to anchor to. Record the merchant's settlement with haven_report_settlement_evidence instead: pass " +
+      "settlement_tx_hash (the transaction from the merchant's PAYMENT-RESPONSE). Nothing was written.",
+    statusCode: 409,
+    paymentId,
+    nextStep: refusalNextStep({
+      nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+      nextTool: 'haven_report_settlement_evidence',
+      nextArguments: {
+        payment_id: paymentId,
+        ...(evidence ? { settlement_tx_hash: evidence.settlementTxHash } : {}),
+      },
+    }),
+  })
+}
+
+/**
  * #3101: the handoff after a reported outcome — sweep on a rejection; on
  * acceptance, nothing follows UNLESS `offerSettlementEvidence` is true.
  *
@@ -343,7 +406,24 @@ const X402_STORED_CHALLENGE_MAX_BYTES = 65_536
 /** The SDK's derived-key bucket (`X402_IDEMPOTENCY_BUCKET_MS`), same width. */
 const REQUEST_MODE_KEY_BUCKET_MS = 300_000
 
-function probeRefusal(code: string, message: string): HostedToolError {
+/**
+ * #3774: each probe refusal states what actually happened — the egress-policy
+ * wording only where that policy refused (a redirect). A probe that SUCCEEDED
+ * and found nothing payable says so, not that it could not be made.
+ */
+const PROBE_REFUSAL_REASONS = {
+  redirect: 'the merchant request could not be probed under the egress policy; nothing was created, so there is nothing to resume',
+  timeout: 'the merchant did not answer the unpaid probe in time; nothing was created, so there is nothing to resume',
+  transport: 'the unpaid probe to the merchant failed in transit; nothing was created, so there is nothing to resume',
+  responseTooLarge: 'the merchant answered the unpaid probe with more data than an x402 challenge holds; nothing was created, so there is nothing to resume',
+  notPaymentRequired: 'the merchant answered the unpaid probe without a 402, so there is nothing to pay; nothing was created',
+  unreadableChallenge: 'the merchant answered 402, but not with an x402 challenge Haven can read; nothing was created',
+  noPayableOption: "the merchant's 402 offers no payment option Haven can settle; nothing was created",
+  challengeTooLarge: "the merchant's x402 challenge is too large for Haven to store, and request mode pays only from the stored copy; nothing was created",
+} as const
+type ProbeRefusalReason = keyof typeof PROBE_REFUSAL_REASONS
+
+function probeRefusal(code: string, message: string, why: ProbeRefusalReason): HostedToolError {
   return new HostedToolError({
     code,
     message: `${message} Nothing was funded or signed, and no payment was created.`,
@@ -351,8 +431,7 @@ function probeRefusal(code: string, message: string): HostedToolError {
     nextStep: refusalNextStep({
       nextAction: AgentPaymentNextAction.StopAndTellUser,
       nextTool: null,
-      nextToolOmittedReason:
-        'the merchant request could not be probed under the egress policy; nothing was created, so there is nothing to resume',
+      nextToolOmittedReason: PROBE_REFUSAL_REASONS[why],
     }),
   })
 }
@@ -411,7 +490,7 @@ export async function probeX402Challenge(
   try {
     policy.assertUrl(rawUrl)
   } catch (err) {
-    throw egressRefusalBeforeIntent(err)
+    throw egressRefusalBeforeIntent(err, 'url')
   }
   const url = new URL(rawUrl)
   const timeoutMs = policy.timeouts?.quote ?? X402_REQUEST_PROBE_TIMEOUT_MS
@@ -428,6 +507,7 @@ export async function probeX402Challenge(
       throw probeRefusal(
         'X402_PROBE_REDIRECT_REFUSED',
         `The merchant answered the unpaid request with HTTP ${response.status} (a redirect). Request mode does not follow redirects: re-call with the final https URL.`,
+        'redirect',
       )
     }
     bytes = await readBounded(response, maxBytes)
@@ -437,6 +517,7 @@ export async function probeX402Challenge(
       throw probeRefusal(
         'X402_PROBE_TIMEOUT',
         `The merchant did not answer the unpaid request within ${Math.round(timeoutMs / 1000)} s.`,
+        'timeout',
       )
     }
     const cause = (err as { cause?: { message?: string } })?.cause?.message ?? ''
@@ -444,17 +525,20 @@ export async function probeX402Challenge(
       throw probeRefusal(
         'X402_PROBE_REDIRECT_REFUSED',
         'The merchant answered the unpaid request with a redirect. Request mode does not follow redirects: re-call with the final https URL.',
+        'redirect',
       )
     }
     throw probeRefusal(
       'X402_PROBE_FAILED',
       `The unpaid request to ${url.origin} failed: ${(err as Error)?.message ?? String(err)}.`,
+      'transport',
     )
   }
   if (bytes === null) {
     throw probeRefusal(
       'X402_PROBE_TOO_LARGE',
       `The merchant's answer to the unpaid request is larger than ${maxBytes} bytes, too large to be an x402 challenge.`,
+      'responseTooLarge',
     )
   }
   if (response.status !== 402) {
@@ -462,6 +546,7 @@ export async function probeX402Challenge(
       'X402_PROBE_NOT_PAYMENT_REQUIRED',
       `The merchant answered the unpaid request with HTTP ${response.status}, not 402 Payment Required, so there is nothing to pay. ` +
         'Check the url, method, headers and body (Content-Type: application/json for a JSON API).',
+      'notPaymentRequired',
     )
   }
   try {
@@ -472,6 +557,7 @@ export async function probeX402Challenge(
     throw probeRefusal(
       'X402_PROBE_NOT_PAYMENT_REQUIRED',
       'The merchant answered 402, but not with an x402 challenge Haven can read.',
+      'unreadableChallenge',
     )
   }
 }
@@ -498,6 +584,7 @@ function noPayableOptionRefusal(accepts: unknown[]): HostedToolError {
       (offered.length ? ` (it offered only ${offered.map((s) => `'${s}'`).join(', ')}; Haven pays only the 'exact' scheme)` : '') +
       '. For a request with a body, this often means the body or its Content-Type was missing or invalid: ' +
       're-call with the full request (method, body, and Content-Type: application/json for a JSON API).',
+    'noPayableOption',
   )
 }
 
@@ -885,6 +972,7 @@ export function createPlainHttpX402Handlers(
             throw probeRefusal(
               'X402_CHALLENGE_TOO_LARGE',
               `The merchant's x402 challenge is larger than ${X402_STORED_CHALLENGE_MAX_BYTES} bytes, too large for Haven to store, and request mode builds the payment only from the stored copy.`,
+              'challengeTooLarge',
             )
           }
           derivedKey = args.idempotency_key ? undefined : requestModeIdempotencyKey(payReq)
@@ -921,7 +1009,7 @@ export function createPlainHttpX402Handlers(
           try {
             haven.merchantEgress.assertUrl(retryTarget.url)
           } catch (err) {
-            throw egressRefusalBeforeIntent(err)
+            throw egressRefusalBeforeIntent(err, 'url')
           }
         }
         // #1351: shape-check the cap before the funding intent. In
@@ -1334,12 +1422,16 @@ export function createPlainHttpX402Handlers(
         // anything is written — a malformed or self-contradictory call
         // refuses here and leaves no partial record.
         const evidence = resolveSettlementEvidence(args)
-        const report = await haven.reportX402MerchantOutcome({
-          paymentId: args.payment_id,
-          outcome: args.outcome,
-          merchantStatus: args.merchant_status,
-          ...(args.merchant_body ? { merchantBody: args.merchant_body } : {}),
-        })
+        const report = await haven
+          .reportX402MerchantOutcome({
+            paymentId: args.payment_id,
+            outcome: args.outcome,
+            merchantStatus: args.merchant_status,
+            ...(args.merchant_body ? { merchantBody: args.merchant_body } : {}),
+          })
+          .catch((err: unknown) => {
+            throw erc7710OutcomeRefusal(err, args, evidence) ?? err
+          })
         // #3727: on an accepted outcome, record the folded evidence through
         // the SAME seam `haven_report_settlement_evidence` uses — one call
         // replaces the follow-up. Deliberately BEFORE the status re-read

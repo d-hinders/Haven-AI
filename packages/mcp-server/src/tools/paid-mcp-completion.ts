@@ -990,7 +990,7 @@ export function createPaidMcpCompletionHandlers(
           try {
             haven.merchantEgress.assertUrl(merchantContext.merchantUrl)
           } catch (err) {
-            throw egressRefusalBeforeIntent(err)
+            throw egressRefusalBeforeIntent(err, 'merchant_url')
           }
         }
         // Fast path: fund (relay the signature) then deliver the merchant header

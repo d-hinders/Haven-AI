@@ -119,9 +119,9 @@ import {
  * `err.state.settlementScheme`, to a typed refusal naming the tool that DOES
  * record an erc7710 settlement, with the caller's own hash carried over.
  * An eip3009 payment whose funding is unconfirmed keeps the existing
- * status-read refusal (returns null). An erc7710 `rejected` outcome stops:
- * the merchant never redeemed the chain, so nothing moved and there is
- * nothing to report or sweep.
+ * status-read refusal (returns null). An erc7710 `rejected` outcome is
+ * verify-then-act (#2987): read the status after the payment window and
+ * re-quote only if it shows no settlement. No delegate balance to sweep.
  */
 function erc7710OutcomeRefusal(
   err: unknown,

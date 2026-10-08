@@ -3652,6 +3652,10 @@ These are hosted surface changes. The local runtime has no twins: its `haven_sub
   - The skill text splits the post-retry step by scheme.
   - An older skill still teaches `haven_report_x402_outcome` on erc7710; that call now gets a refusal that names the right tool.
 
+### erc7710 refusal wording on settle/complete (#3784)
+
+Hosted text only. The `haven_settle_mcp_tool` description and the server instructions no longer say an erc7710 merchant refusal moved nothing; they say there is nothing to sweep, check `haven_get_payment_status` after the payment window, and re-quote only if unsettled — the next step the settle refusal returns for a generic merchant refusal (a merchant that reported it is not ready gets stop-and-tell-user, and the served text is the more cautious of the two). The `haven_complete_mcp_tool` description drops its erc7710 clause for "erc7710 settles via `haven_settle_mcp_tool`". No tool, schema, refusal code or consent-hash change; a connected client sees the new text on its next `tools/list` / initialize.
+
 ### Detecting skew before a payment (#1155)
 
 Every row above is a *post-quote* symptom: the agent found out by trying to pay.

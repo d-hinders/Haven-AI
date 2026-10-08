@@ -100,6 +100,31 @@ last-verified: "2026-10-08"
 >   skill's plain-HTTP settlement guidance now points at
 >   `haven_report_x402_outcome`'s `payment_response`, #3727).
 
+> **Re-verified #3771 (2026-10-08, purchase_summary.product fallback):** a
+> settled result whose merchant payload names no product — no
+> `structuredContent.summary` — no longer leaves `purchase_summary.product`
+> null: it falls back to the Haven-derived `<merchant host> <tool_name>` label
+> built from facts the settle call already holds — the merchant URL the
+> resolved call context was resolved against and the tool that was called
+> (`purchaseFallbackLabel`, `packages/mcp-server/src/tools/paid-mcp-completion.ts`);
+> a URL that will not parse (or none) falls back to the tool name alone.
+> Both settled arms pass it — erc7710 AND EIP-3009, through
+> `haven_settle_mcp_tool` and `haven_complete_mcp_tool` — and
+> `agent_summary.product` carries the same label via
+> `buildPurchaseSummary`'s `fallbackProduct` input.
+> - **The merchant's `product_name` still wins.** The fallback only fills the
+>   gap when the merchant's result carries none; #1349 is otherwise untouched —
+>   `invoice_id`, money, status and hashes keep their existing sources, and
+>   merchant content still sets no display field beyond `product_name`.
+> - **No contract moves.** No tool is added, renamed or re-shaped, no argument
+>   or input schema changes, and the version-skew and consent-hash contracts
+>   do not move: response payloads are not a skew axis and the consent hash
+>   covers tool names, not their inputs or responses. An older build without
+>   the fallback still reports `product: null` — only less informative.
+>
+> `last-verified` stays 2026-10-08. Nothing else in this document was
+> re-verified.
+
 > **Re-verified (2026-10-07, hosted agent identity before tool dispatch):**
 > - **Every hosted tool call reads the agent first.** `buildHostedMcpServer` runs `requireAgentIdentity` (`packages/mcp-server/src/tools/identity-gate.ts`) before a tool's handler. A 401 on that read refuses with `code: AGENT_IDENTITY_UNVERIFIED`, `next_action: stop_and_tell_user` and a `next_tool_omitted_reason`. Any other failure is relayed through `normalizeError` as before, so `agent_pending_approval` and `agent_paused` keep their backend reason. The handler does not run either way.
 > - **Two exemptions.** `haven_verify_receipt` makes no request. `haven_sweep_delegate` calls only the sweep routes the backend keeps open to revoked and paused keys, so sweep recovery is unchanged.
@@ -399,7 +424,9 @@ last-verified: "2026-10-08"
 > is what an agent acts on, pinned by a source scan in
 > `response-prose.test.ts`); `agent_summary.product` on the settled erc7710
 > arms reports the merchant's product name with the tool name as fallback
-> (value change, field and shape unchanged); and the delegation-rail
+> (value change, field and shape unchanged; since #3771 that fallback is the
+> Haven-derived `<merchant host> <tool_name>` label — see Re-verified #3771);
+> and the delegation-rail
 > `allowance` block `haven_pay_x402_quote` has carried since #3476 moved
 > VERBATIM to `support/allowance-block.ts` and is now attached to
 > `haven_pay_mcp_tool`'s successful results too — an optional additive field
@@ -3460,7 +3487,9 @@ On a successful hosted settle (#1349), agents report from the compact
 `agent_summary.purchase_summary` rather than parsing the merchant's raw
 `result`. This is a backward-compatible reporting extension only: Haven state
 sets status and payment fields, while product/invoice metadata comes from the
-merchant and `settlement_tx_hash` is only an optional merchant PAYMENT-RESPONSE
+merchant — `product` falling back, since #3771, to the Haven-derived
+`<merchant host> <tool_name>` label when the merchant names none (Re-verified
+#3771) — and `settlement_tx_hash` is only an optional merchant PAYMENT-RESPONSE
 receipt reference. Missing values are explicit; it changes neither signing nor
 runtime compatibility.
 

@@ -79,6 +79,7 @@ covers:
 last-verified: "2026-10-08"
 ---
 
+
 > **#3778 (2026-10-08, optional bounded `delivery_reference` on the x402
 > outcome and settle surfaces):** `haven_report_x402_outcome`,
 > `haven_complete_mcp_tool` and `haven_settle_mcp_tool` accept an optional
@@ -106,6 +107,33 @@ last-verified: "2026-10-08"
 >   "Reporting after a purchase" section gained the relay rule and the
 >   Bitrefill SIWX recovery steps; both byte-pinned copies edited
 >   identically).
+
+> **Re-verified #3781 (2026-10-08, the catalog tier of the purchase label):**
+> a settled purchase that came from a catalog entry now reports the catalog
+> row's name as the purchase label, not the `<merchant host> <tool_name>`
+> label a direct pay gets. `haven_prepare_catalog_purchase` persists the
+> row's `name` as optional `catalogName` on the stored `mcp_call_context`
+> (both scheme branches — one shared object); `POST /x402`'s enforced request
+> schema accepts the optional key (previously refused outright under
+> `additionalProperties: false`); `GET /x402/{id}/merchant-call-context`
+> re-serves it snake_case as `catalog_name`; and the settle leg prefers the
+> rehydrated `catalogName` over the host+tool label in `purchaseFallbackLabel`
+> (`packages/mcp-server/src/tools/paid-mcp-completion.ts`).
+> - **Precedence is unchanged, and #1349 with it.** The merchant's
+>   `product_name` still wins in both cases; the catalog name is only the
+>   first tier of the Haven-derived gap filler. A direct
+>   `haven_pay_mcp_tool` purchase carries no `catalogName` and keeps the
+>   host+tool label (#3771 pinned) — and a catalog row is Haven's own data,
+>   so the tier stays Haven-derived, never merchant content.
+> - **No contract moves.** No tool is added, renamed or re-shaped; the new
+>   schema key is optional, additive, `minLength: 1`, and refused nowhere it
+>   worked before; the endpoint response gains one optional key under its
+>   existing closed schema; no migration (the context is a JSONB blob), and
+>   the version-skew, consent-hash and expected-context contracts do not
+>   move. An older settle leg simply ignores the extra rehydrated key.
+>
+> `last-verified` stays 2026-10-08. Nothing else in this document was
+> re-verified.
 
 > **#3768 (2026-10-08, merchant-issued credentials are withheld from the settled `result`):**
 > a settled `haven_settle_mcp_tool` / `haven_complete_mcp_tool` response no longer

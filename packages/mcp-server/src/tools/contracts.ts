@@ -1141,7 +1141,7 @@ const QUOTE_MCP_TOOL_DESCRIPTION = composeDescription({
     'Informational only — reserves nothing. Use it to tell the user the current price before choosing a cap. ' +
     'merchant_url may be exact or a base URL (one bounded same-origin discovery attempt; the response echoes the resolved endpoint).',
   nextActionGuidance:
-    'Next: choose a cap (or cap at this quote) and call haven_pay_mcp_tool. Not a price reservation.',
+    'Next: choose a cap (or cap at this quote) and call haven_pay_mcp_tool.',
 })
 
 // #1299 (chain-scoped catalog 404s), #1306 (guided path), #1450/#1547
@@ -1165,7 +1165,7 @@ const QUOTE_CATALOG_PURCHASE_DESCRIPTION = composeDescription({
   behavior:
     'Informational only. Use before haven_prepare_catalog_purchase to choose a cap — and always when the user stated no cap (cap at this quoted amount, never an invented number). Catalog prices are indicative; amount/amount_atomic here are the live merchant quote. A degraded row without MCP metadata: use haven_pay_mcp_tool manually instead.',
   nextActionGuidance:
-    'Next: haven_prepare_catalog_purchase with catalog_id and exactly one cap. Not a price reservation.',
+    'Next: haven_prepare_catalog_purchase with catalog_id and exactly one cap.',
 })
 
 const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
@@ -1360,7 +1360,7 @@ const GET_TASK_BUDGET_DESCRIPTION = [
   'Read one task budget by id, any status.',
   'Returns { task_budget } with status (pending | open | closing | closed), isExpired, maxDisplay, recipientAddress, label and expiresAt —',
   'the check to run after a close or submit refusal says to re-check the budget\'s status.',
-  'haven_get_agent lists live task budgets only; this reads any one, closed or expired included.',
+  'haven_get_agent lists live task budgets only.',
 ].join(' ')
 
 const CHECK_FUNDS_DESCRIPTION = [

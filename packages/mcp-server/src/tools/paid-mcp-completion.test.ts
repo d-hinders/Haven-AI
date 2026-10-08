@@ -128,6 +128,37 @@ describe('haven_settle_mcp_tool', () => {
     expect(recordedCalls().some((call) => call.url.endsWith('/payments/pay_x402/sign'))).toBe(true)
   })
 
+  it('#3778: a credential-shaped delivery_reference is refused BEFORE the funding relay', async () => {
+    // The wire is armed to CONFIRM a relay: if the refusal ever moved past
+    // the assert, the signature would be submitted and this test would see
+    // the funding call. Refusal means no money moved and no merchant call.
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = new HavenClient({ apiKey: '«reda...…»', baseUrl: 'http://haven.test' })
+    const spy = vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({ status: 200, ok: true, body: {} })
+
+    const payload = await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_x402',
+      signature: SIG,
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: { prompt: 'Hello' },
+      payment_header: VALID_PAYMENT_HEADER_REF.v1,
+      // 16 chars, mixed case, digits — the gift-card code shape the shared
+      // recognizer refuses (the same value shape the report-path test pins).
+      delivery_reference: 'aB3xK9mQ2pL7vR4t',
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe('DELIVERY_REFERENCE_REFUSED')
+    expect(payload.statusCode).toBe(400)
+    expect(payload.message).toMatch(/Nothing was written/)
+    // Refused BEFORE the funding relay: no signature submission ever left.
+    expect(recordedCalls().some((call) => call.url.includes('/payments/pay_x402/sign'))).toBe(false)
+    expect(spy).not.toHaveBeenCalled()
+  })
+
   it.each([
     ['malformed base64', 'not-a-payment-header'],
     ['oversized header', 'A'.repeat(65_540)],

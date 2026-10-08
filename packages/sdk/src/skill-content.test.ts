@@ -532,3 +532,35 @@ describe('#3774: the step after the merchant retry is split by scheme', () => {
     expect(HAVEN_SKILL_MD).toMatch(/do not re-quote at once/)
   })
 })
+
+describe('#3778: the relay rule for delivered codes and credentials', () => {
+  // Sliced the #3735 way: the section's own heading up to the next heading,
+  // so every assertion is about THIS section and not a phrase elsewhere.
+  const start = HAVEN_SKILL_MD.indexOf('### Relay a delivered code or credential to the owner — immediately, verbatim')
+  const end = HAVEN_SKILL_MD.indexOf('## If the credential may have leaked')
+  const section = HAVEN_SKILL_MD.slice(start, end)
+
+  it('has its own section between the outcome-report guidance and the leak guidance', () => {
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+  })
+
+  it('pins the relay rule: immediate, verbatim and complete, never paraphrased or withheld', () => {
+    expect(section).toContain('### Relay a delivered code or credential to the owner — immediately, verbatim')
+    expect(section).toContain('relay it to the user\nin your next message, verbatim and complete')
+    expect(section).toContain('Never paraphrase, truncate,\nsummarize or withhold it')
+    expect(section).toMatch(/a code relayed "later" is a code the session may lose/)
+  })
+
+  it('pins the delivery_reference NON-SECRET pointer rule and its refusal signal', () => {
+    expect(section).toContain('Haven deliberately does not store it.')
+    expect(section).toContain('Report only the NON-SECRET pointer with')
+    expect(section).toContain('delivery_reference — merchant, product, value, order id')
+    expect(section).toMatch(/A value shaped like a code, token or key is refused there/)
+    expect(section).toMatch(/its only safe path is\nto the owner/)
+  })
+
+  it('pins the Bitrefill SIWX recovery line', () => {
+    expect(section).toContain('the\ndocumented recovery is a SIWX sign-in on bitrefill.com from the same wallet\nthat paid, or a Bitrefill support ticket quoting the invoice id.')
+  })
+})

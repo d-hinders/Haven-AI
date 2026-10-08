@@ -72,8 +72,8 @@ export function deliveryReferenceLooksLikeSecret(value: string): boolean {
   }
   // Hyphen-grouped uppercase code (gift-card shape): >= 3 uniform 4-6 char
   // groups, at least two of which contain a digit. "ORD-2026-10-08-001" does
-  // not fire — its 3-char group fails the uniformity test; variable-length
-  // order segments stay readable.
+  // not fire — its 3-char group fails the uniformity test, and ids with
+  // variable-length segments are not uniform by design.
   if (GROUPED_CODE_RE.test(trimmed)) {
     const groups = trimmed.split('-')
     if (groups.length >= 3 && groups.every((g) => g.length >= 4 && g.length <= 6)) {

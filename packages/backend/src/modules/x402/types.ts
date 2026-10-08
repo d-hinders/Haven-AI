@@ -16,6 +16,13 @@ export interface X402McpCallContextInput {
   toolName: string
   arguments?: Record<string, unknown>
   mcpTransport?: { handshakeRequired: boolean; source: 'path' | 'bazaar' }
+  /**
+   * #3781: Haven's own catalog row name, when the purchase came from a
+   * catalog entry (`haven_prepare_catalog_purchase`). Display only — the
+   * settle leg reports it as the purchase label's first tier. Never merchant
+   * content (#1349): the catalog is Haven's own data.
+   */
+  catalogName?: string
 }
 
 export interface X402AuthorizeBody {

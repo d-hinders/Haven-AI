@@ -21,7 +21,8 @@ import { toCanonicalAddress } from '../modules/transactions/index.js'
 export default async function agentActivityRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
 
-  // GET /agents/:id/activity — paginated payment + approval history
+  // GET /agent-activity/:id/activity — paginated payment + MCP tool-call
+  // history (#2055: the approval half is gone with the table).
   app.get<{
     Params: { id: string }
     Querystring: { limit?: string; offset?: string }
@@ -63,7 +64,16 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           amount: p.amount_human,
           to: toCanonicalAddress(p.to_address),
           status: p.status,
+          // #3763: `tx_hash` keeps its FUNDING meaning (Haven's sponsored
+          // UserOp, account → delegate). The merchant's settlement travels
+          // beside it, named, when one is recorded — and `explorer_url`
+          // headlines it: the merchant names the settlement, so the
+          // activity feed links the SAME transaction the merchant shows,
+          // falling back to the funding leg when nothing is recorded.
           tx_hash: p.tx_hash,
+          funding_tx_hash: p.tx_hash,
+          settlement_tx_hash: p.settlement_tx_hash,
+          settlement_scheme: p.settlement_scheme,
           payment_id: p.id,
           payment_proof_status: p.payment_proof_status,
           payment_flow_status: lifecycle.paymentFlowStatus,
@@ -76,7 +86,14 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           account_id: p.account_id,
           account_address: toCanonicalAddress(p.account_address),
           account_name: p.account_name,
-          explorer_url: p.tx_hash ? getExplorerUrl(p.chain_id, 'tx', p.tx_hash) : null,
+          // #3763: headlines the settlement when one is recorded, else the
+          // funding leg. Null exactly when both are null — for a payment
+          // row that means tx_hash is null (settlement implies a confirmed
+          // funding), which keeps the spec's "null when no transaction"
+          // contract honest under its new wording.
+          explorer_url: (p.settlement_tx_hash ?? p.tx_hash)
+            ? getExplorerUrl(p.chain_id, 'tx', (p.settlement_tx_hash ?? p.tx_hash) as string)
+            : null,
           // #799: which on-chain mechanism moved the money, and (session rail)
           // WHICH period-session the intent was pinned to — makes the #769
           // lazy rollover observable to the owner without DB access.
@@ -149,7 +166,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
     },
   )
 
-  // GET /activity/feed — all agents combined activity feed
+  // GET /agent-activity/feed — all agents combined activity feed
   app.get<{
     Querystring: { limit?: string; offset?: string }
   }>('/feed', async (request) => {
@@ -196,7 +213,14 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           amount: p.amount_human,
           to: toCanonicalAddress(p.to_address),
           status: p.status,
+          // #3763: `tx_hash` keeps its FUNDING meaning (Haven's sponsored
+          // UserOp, account → delegate). The merchant's settlement travels
+          // beside it, named, when one is recorded — see the per-agent
+          // handler above for the explorer_url headline rule.
           tx_hash: p.tx_hash,
+          funding_tx_hash: p.tx_hash,
+          settlement_tx_hash: p.settlement_tx_hash,
+          settlement_scheme: p.settlement_scheme,
           payment_id: p.id,
           payment_proof_status: p.payment_proof_status,
           payment_flow_status: lifecycle.paymentFlowStatus,
@@ -209,7 +233,14 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           account_id: p.account_id,
           account_address: toCanonicalAddress(p.account_address),
           account_name: p.account_name,
-          explorer_url: p.tx_hash ? getExplorerUrl(p.chain_id, 'tx', p.tx_hash) : null,
+          // #3763: headlines the settlement when one is recorded, else the
+          // funding leg. Null exactly when both are null — for a payment
+          // row that means tx_hash is null (settlement implies a confirmed
+          // funding), which keeps the spec's "null when no transaction"
+          // contract honest under its new wording.
+          explorer_url: (p.settlement_tx_hash ?? p.tx_hash)
+            ? getExplorerUrl(p.chain_id, 'tx', (p.settlement_tx_hash ?? p.tx_hash) as string)
+            : null,
           // #799: which on-chain mechanism moved the money, and (session rail)
           // WHICH period-session the intent was pinned to — makes the #769
           // lazy rollover observable to the owner without DB access.

@@ -39,7 +39,12 @@ test.describe('transaction history — x402 display + detail panel', () => {
     // reach), which is why the same spec passed in CI. Scoping to the table
     // binds the assertion to the row and makes it immune to the page title
     // in either environment.
-    await expect(page.getByRole('table').getByText('Agent payment')).toBeVisible()
+    // #3763: the fixture now serves TWO agent-payment rows (recorded +
+    // unrecorded eip3009 settlement, so the visual baseline photographs both
+    // states) — the bare locator would strict-mode-violate on the pair. The
+    // row under test is the FIRST one (the recorded state): the click below
+    // already anchors on `.first()`, so the assertion and the open agree.
+    await expect(page.getByRole('table').getByText('Agent payment').first()).toBeVisible()
     await expect(page.getByRole('button', { name: 'Export CSV' })).toBeEnabled()
 
     // Clicking the row opens the per-type detail panel.

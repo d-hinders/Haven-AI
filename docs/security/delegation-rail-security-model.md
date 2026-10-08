@@ -67,7 +67,7 @@ covers:
   - packages/backend/src/modules/ops/**
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
-last-verified: "2026-10-07"
+last-verified: "2026-10-08"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -2552,3 +2552,16 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > re-probing a merchant. It creates, signs and authorizes nothing; no
 > delegation, caveat, signer set or custody path moves. The rest of this
 > document was not re-read for it, and `last-verified` is not bumped.
+
+> **Re-verified unchanged (#3763, 2026-10-08, history read model):** this
+> diff touches the transactions/agent-activity read model
+> (`modules/transactions/`, `infra/repositories/transaction-history.ts`,
+> `infra/repositories/agent-activity.ts`) and `openapi/spec.ts` so the
+> dashboard's history views headline the EIP-3009 settlement hash the agent
+> reported (#3475) instead of linking the funding leg as "the" payment. It
+> reads `machine_metadata` it never wrote and writes nothing; no delegation,
+> caveat, enforcer, signer set, budget or custody path moves, and no signing
+> input is touched — `hash`/`tx_hash` keep their funding meaning everywhere,
+> so no consumer can be tricked into treating a displayed link as an
+> authority change. The rest of this document was not re-read for it, and
+> `last-verified` is bumped to 2026-10-08 for exactly this coverage.

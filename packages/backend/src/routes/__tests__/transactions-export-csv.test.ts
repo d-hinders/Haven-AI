@@ -379,12 +379,15 @@ describe('GET /transactions/export.csv', () => {
     const response = await get('?fresh=1')
     const { header, records } = parseCsv(response.body.slice(1))
 
-    // The two appended columns carry the DELIBERATE branch: the file reports
+    // The appended columns carry the DELIBERATE branch: the file reports
     // in fixed SEK (the accounting semantics this export exists for), while
     // the reader can still see which currency the user's dashboard feed
     // converts in — which does NOT move the amounts here. The amounts
-    // themselves stay in amount_sek, untouched.
-    expect(header.slice(-2)).toEqual(['reporting_currency', 'converted_currency'])
+    // themselves stay in amount_sek, untouched. #3763 appends ONE more
+    // column after them — the merchant's settlement hash, empty on rows
+    // without a recorded settlement — so the currency pair no longer ends
+    // the header, but its own indices are untouched (append-only contract).
+    expect(header.slice(-3)).toEqual(['reporting_currency', 'converted_currency', 'settlement_tx_hash'])
     for (const record of records) {
       expect(record[header.indexOf('reporting_currency')]).toBe('SEK')
       expect(record[header.indexOf('converted_currency')]).toBe('EUR')

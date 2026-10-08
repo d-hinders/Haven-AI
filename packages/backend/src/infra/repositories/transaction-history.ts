@@ -112,7 +112,17 @@ export interface X402PaymentIntentRow {
   fx_source: string | null
   /** `machine_payment_evidence.fx_rates` (migration 082); pg hands back parsed JSONB. (#3127) */
   fx_rates: Record<string, number> | null
+  /** `machine_metadata.settlement_scheme` (#1705). */
   settlement_scheme: string | null
+  /**
+   * #3763: `machine_metadata.merchant_settlement_tx_hash` — the merchant's
+   * own delegate → merchant settlement transaction, recorded only when an
+   * agent reported it and it verified on-chain (#3475). `null` on every row
+   * that has none: the SDK's default evidence post reports the FUNDING hash,
+   * which the writer refuses (`LOWER(tx_hash) <> LOWER($1)`), so many
+   * eip3009 payments legitimately never get one.
+   */
+  settlement_tx_hash: string | null
   confirmed_at: string | null
   created_at: string
 }
@@ -333,6 +343,7 @@ export const FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL = `SELECT pi.id,
             mpe.fx_source AS fx_source,
             mpe.fx_rates AS fx_rates,
             pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
+            pi.machine_metadata->>'merchant_settlement_tx_hash' AS settlement_tx_hash,
             mpre.event_type AS payment_reconciliation_event_type,
             pi.confirmed_at,
             pi.created_at

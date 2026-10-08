@@ -544,13 +544,18 @@ Money and risk clarity:
   detection is not exact on every provider, and the reason lives in the code.
 - Use `Payment sent` (neutral), `Received payment`, and `Agent payment by [agent name]` before using technical transaction language. `Payment sent by you` is reserved for human-initiated payments only (#2097); a transaction with no attribution renders as `Payment sent` with an explicit unknown initiator — never `You`.
 - For x402 payments, collapse the historical Safe-to-agent funding step into
-  one merchant-facing row such as `Agent payment by [agent name]`. Live
-  delegation-rail x402 payments have no funding leg; the row still represents
-  the agent payment, while any legacy Safe funding is historical only. The row
-  title deliberately does NOT name the protocol (#2357): `x402` rides on the
-  detail drawer's section heading, and the row's `From -> To` line carries the
-  resource hostname, so an x402 row and an ordinary agent payment read the same
-  at the title and are told apart by those two surfaces.
+  one merchant-facing row such as `Agent payment by [agent name]`. On the
+  eip3009 bridge the funding leg is REAL and present on every payment (#946):
+  the account funds the agent's delegate key first, then the delegate pays
+  the merchant from the agent's signed authorization. The row still
+  represents the agent payment — but the detail drawer names the funding leg
+  ("Funding from your account") and headlines the merchant settlement when
+  one is recorded, saying "Merchant settlement · Not recorded" when it is
+  not (#3763). Scheme-less/legacy rows keep the single-transaction read. The
+  row title deliberately does NOT name the protocol (#2357): `x402` rides on
+  the detail drawer's section heading, and the row's `From -> To` line
+  carries the resource hostname, so an x402 row and an ordinary agent payment
+  read the same at the title and are told apart by those two surfaces.
 - Show the money path as a compact `From [wallet/counterparty] -> To [wallet/counterparty]` line instead of repeating wallet, initiator, and counterparty in a separate metadata row.
 - Keep amount in its own cell **at `md` and up**; date and the external-details
   link are separate columns or controls. Below `md` the amount column collapses

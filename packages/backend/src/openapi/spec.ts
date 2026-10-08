@@ -109,6 +109,25 @@ const transactionBaseProperties = {
   },
   activityType: { type: 'string', enum: ['delegate_sweep'] },
   agentName: { type: 'string' },
+  // #3763: the two EIP-3009 legs, named. `hash` keeps its FUNDING meaning —
+  // repurposing it would split one payment into two rows and move the
+  // CSV/CLI export key and the React keys — so the legs travel beside it.
+  // `fundingTxHash` restates the funding hash explicitly (Haven's sponsored
+  // UserOp, account → delegate); `settlementTxHash` is the merchant's own
+  // delegate → merchant transaction, present ONLY when an agent reported it
+  // and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`).
+  // Null is "not recorded", never "failed": the SDK's default evidence post
+  // reports the funding hash, which the writer refuses, so many eip3009
+  // payments legitimately never get one. Populated only on x402-synthesized
+  // rows — explorer-derived rows carry null (they name no payment legs).
+  fundingTxHash: {
+    type: ['string', 'null'],
+    description: '#3763: the EIP-3009 funding leg (same value as `hash`) — null on rows that are not synthesized x402 payments.',
+  },
+  settlementTxHash: {
+    type: ['string', 'null'],
+    description: '#3763: the merchant settlement transaction when one is recorded (#3475); null otherwise — "not recorded", never "failed". Null on non-x402 rows.',
+  },
   // #2097: backend-recorded initiator classification — never derived
   // in the frontend. `agent` = row carries agent attribution (confirmed
   // x402 intents, delegate sweeps, raw transfers matched to a
@@ -840,7 +859,19 @@ const activityPayment = {
     amount: { type: ['string', 'null'] },
     to: { type: ['string', 'null'] },
     status: { type: ['string', 'null'] },
-    tx_hash: { type: ['string', 'null'] },
+    // #3763: `tx_hash` keeps its FUNDING meaning (Haven's sponsored UserOp,
+    // account → delegate); the merchant's settlement travels beside it,
+    // named.
+    tx_hash: { type: ['string', 'null'], description: 'The FUNDING transaction on the eip3009 bridge — Haven’s sponsored UserOp (account → delegate).' },
+    funding_tx_hash: { type: ['string', 'null'], description: '#3763: the EIP-3009 funding leg, named — same value as `tx_hash`.' },
+    settlement_tx_hash: {
+      type: ['string', 'null'],
+      description: '#3763: the merchant’s settlement transaction (delegate → merchant) when an agent reported one and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`). Null is "not recorded", never "failed" — the SDK’s default evidence post reports the funding hash, which the writer refuses, so many eip3009 payments legitimately never get one.',
+    },
+    settlement_scheme: {
+      type: ['string', 'null'],
+      description: '#3763: which settlement branch moved the money — `eip3009` or `erc7710` — read from the intent’s `machine_metadata`; null when none was recorded.',
+    },
     payment_id: { type: 'string' },
     payment_proof_status: { type: ['string', 'null'] },
     payment_flow_status: { type: ['string', 'null'], description: 'Derived from the payment lifecycle.' },
@@ -853,7 +884,7 @@ const activityPayment = {
     account_id: { type: ['string', 'null'] },
     account_address: { type: ['string', 'null'] },
     account_name: { type: ['string', 'null'] },
-    explorer_url: { type: ['string', 'null'], description: 'Null exactly when tx_hash is null.' },
+    explorer_url: { type: ['string', 'null'], description: '#3763: the merchant settlement transaction when one is recorded, else the funding transaction; null exactly when the payment has no transaction at all (`tx_hash` null and nothing recorded).' },
     execution_rail: { type: ['string', 'null'], description: 'Which on-chain mechanism moved the money (#799).' },
     delegation_hash: { type: ['string', 'null'], description: 'Which delegation authorized a delegation-rail payment (#829).' },
     confirmed_at: { type: ['string', 'null'] },

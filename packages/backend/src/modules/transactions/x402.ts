@@ -50,7 +50,13 @@ export async function fetchConfirmedX402Transactions(
     })
 
     return {
+      // #3763: `hash` keeps its FUNDING meaning (the twin-collapse and the
+      // CSV/CLI export key both read it); the two legs travel as named
+      // fields — `fundingTxHash` the same value spelled out, and
+      // `settlementTxHash` the merchant's transaction when one is recorded.
       hash: row.tx_hash,
+      fundingTxHash: row.tx_hash,
+      settlementTxHash: row.settlement_tx_hash,
       type: 'erc20',
       from: toCanonicalAddress(row.account_address),
       to: toCanonicalAddress(merchantAddress),

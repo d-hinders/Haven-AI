@@ -1002,7 +1002,6 @@ export const LOAD_RECEIPT_UNDERLAG_SOURCE_SQL = `SELECT mpe.tx_hash, mpe.chain_i
      FROM machine_payment_evidence mpe
      LEFT JOIN payment_intents pi ON pi.id = mpe.payment_intent_id
      WHERE mpe.id = $1 AND mpe.user_id = $2`
-
 export interface UnderlagSourceRow {
   tx_hash: string | null
   chain_id: number | null
@@ -1028,4 +1027,41 @@ export async function loadReceiptUnderlagSource(
     userId,
   ])
   return result.rows[0] ?? null
+}
+
+// ── Booked-hash pin (#3767 B2) ────────────────────────────────────────────────
+//
+// What the accounting surfaces book for a payment is decided ONCE, at its
+// first feed claim, and frozen here — so a settlement recorded AFTER the pin
+// (or between two attempts) can never change the bytes a retry renders. That
+// is what keeps Accounted's idempotency key (which derives from the
+// paymentId) from going terminal on a re-file with different bytes.
+//
+// Storage is `payment_intents.machine_metadata` JSONB — deliberately no
+// migration and no `accounting_feed_syncs` column (the latter would put the
+// change under CODEOWNERS for a fact that lives with the payment, not with
+// one destination's ledger row).
+
+export const PIN_ACCOUNTING_BOOKED_TX_SQL = `UPDATE payment_intents
+     SET machine_metadata = COALESCE(machine_metadata, '{}'::jsonb) || jsonb_build_object(
+           'accounting_booked_tx_hash', LOWER($2::text),
+           'accounting_booked_tx_kind', $3::text)
+     WHERE id = $1
+       AND machine_metadata->>'accounting_booked_tx_hash' IS NULL
+     RETURNING id`
+
+/**
+ * Pin the hash (and its `settlement` | `funding` label) a feed push will
+ * render, on the payment's FIRST claim only. First-writer-wins: a pin that
+ * already exists is never replaced, which is exactly the guarantee the
+ * stable-bytes acceptance rests on. True when this call wrote the pin.
+ */
+export async function pinAccountingBookedTx(
+  paymentIntentId: string,
+  txHash: string,
+  kind: 'settlement' | 'funding',
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query(PIN_ACCOUNTING_BOOKED_TX_SQL, [paymentIntentId, txHash, kind])
+  return result.rows.length > 0
 }

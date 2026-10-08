@@ -145,6 +145,9 @@ describeDb('Accounted document feed on the real database (#3018)', () => {
       fxAt: '2026-09-10T09:30:00.000Z',
       receiptRef: 'receipt-1',
       merchantReceipt: null,
+      txHash: null,
+      txHashIsFunding: false,
+      fundingTxHash: null,
       suggestedAccount: '6540',
     })
     expect(replay).toEqual({ externalRef: DOC_REF, status: 'pushed' })
@@ -192,6 +195,9 @@ describeDb('Accounted document feed on the real database (#3018)', () => {
       fxAt: '2026-09-10T09:30:00.000Z',
       receiptRef: 'receipt-1',
       merchantReceipt: null,
+      txHash: null,
+      txHashIsFunding: false,
+      fundingTxHash: null,
       suggestedAccount: '6540',
     })
     expect(refused.status).toBe('skipped')

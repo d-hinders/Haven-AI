@@ -29,13 +29,21 @@ export interface FortnoxVoucher {
 /**
  * Map a settled entry to a balanced Fortnox voucher. Returns null when the entry
  * has no book-time SEK value (unbookable) — same rule as the SIE exporter.
+ *
+ * #3767: the description carries the BOOKED hash (same rule as the SIE
+ * exporter) — the verified merchant settlement when recorded or pinned, else
+ * the funding hash labelled as funding. Retired rails carry no booked hash
+ * and render exactly as before.
  */
 export function toFortnoxVoucher(entry: AccountingEntry): FortnoxVoucher | null {
   const lines = buildBookingLines(entry)
   if (!lines) return null
 
-  const description =
+  const base =
     entry.counterparty.name ?? entry.counterparty.address ?? entry.resourceUrl ?? 'Agent payment'
+  const description = entry.bookedTxHash
+    ? `${base} (Tx ${entry.bookedTxHash}${entry.bookedTxHashIsFunding ? ', funding leg' : ''})`
+    : base
 
   return {
     VoucherSeries: FORTNOX_VOUCHER_SERIES,

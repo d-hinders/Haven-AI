@@ -6,6 +6,13 @@ function entry(over: Partial<AccountingEntry> = {}): AccountingEntry {
   return {
     paymentId: 'pi1',
     txHash: '0xabc',
+    bookedTxHash: null,
+    bookedTxHashIsFunding: false,
+    fundingTxHash: null,
+    settlementScheme: null,
+    verifiedSettlementTxHash: null,
+    pinnedBookedTxHash: null,
+    pinnedBookedTxKind: null,
     chainId: 8453,
     settledAt: '2026-06-19T10:00:00.000Z',
     direction: 'out',
@@ -104,5 +111,44 @@ describe('sieExporter', () => {
   it('uses the default expense account for an unknown category (non-reverse)', () => {
     const { content } = sieExporter.export([entry({ vatTreatment: 'none', category: 'something-weird' })], OPTS)
     expect(content).toContain('#TRANS 6540 {}')
+  })
+})
+
+/** #3767: the #VER text names the same transaction the Haven UI does. */
+describe('sieExporter #3767 booked hash', () => {
+  const SETTLEMENT = `0x${'5e'.repeat(32)}`
+  const FUNDING = `0x${'f1'.repeat(32)}`
+
+  function entryWith(over: Record<string, unknown>) {
+    return entry(over as Partial<AccountingEntry>)
+  }
+
+  it('shows the verified settlement hash in the #VER text', () => {
+    const { content } = sieExporter.export(
+      [entryWith({ bookedTxHash: SETTLEMENT, bookedTxHashIsFunding: false, fundingTxHash: FUNDING })],
+      OPTS,
+    )
+    expect(content).toContain(`(Tx ${SETTLEMENT})`)
+  })
+
+  it('labels a funding fallback booking as a funding leg', () => {
+    const { content } = sieExporter.export(
+      [entryWith({ bookedTxHash: FUNDING, bookedTxHashIsFunding: true, fundingTxHash: null })],
+      OPTS,
+    )
+    expect(content).toContain(`(Tx ${FUNDING}, funding leg)`)
+  })
+
+  it('CONTROL: the two hashes are distinct strings', () => {
+    expect(SETTLEMENT).not.toBe(FUNDING)
+  })
+
+  it('retired rails render exactly as before — no booked hash, no suffix', () => {
+    const { content } = sieExporter.export(
+      [entryWith({ bookedTxHash: null, bookedTxHashIsFunding: false, fundingTxHash: null })],
+      OPTS,
+    )
+    expect(content).toContain('#VER "A" 1 20260619 "Soundside"')
+    expect(content).not.toContain('Tx ')
   })
 })

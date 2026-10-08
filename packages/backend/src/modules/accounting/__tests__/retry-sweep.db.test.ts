@@ -23,6 +23,9 @@
  * `mockImplementation` — never the one-shot form `lint:db-mocks` counts.
  */
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest'
+import { randomUUID } from 'node:crypto'
+
+const FUNDING_TX = `0x${'f1'.repeat(32)}`
 
 const { mocks } = vi.hoisted(() => ({
   mocks: { accountingFeedAvailable: vi.fn(async () => true), buildAccountingEntryForPayment: vi.fn() },
@@ -275,5 +278,92 @@ describeDb('accounting retry sweep on the real ledger (#2866)', () => {
     expect(await sweep(at(0))).toMatchObject({ considered: 1, skipped: 1, pushed: 0 })
     expect(connector.attempted).toEqual([])
     expect(await row(userId, 'pay-fx')).toMatchObject({ status: 'failed', attempts: 1 })
+  })
+
+  /** A real eip3009 intent with NO settlement recorded and no sync row (#3767 second selection). */
+  async function seedUnfedEip3009(userId: string, confirmedAgoMs: number): Promise<string> {
+    const agent = await db.query<{ id: string }>(
+      `INSERT INTO agents (user_id, name) VALUES ($1, 'sweep eip3009') RETURNING id`,
+      [userId],
+    )
+    const id = randomUUID()
+    await db.query(
+      `INSERT INTO payment_intents
+         (id, agent_id, user_id, account_address, chain_id, token_symbol, token_address, to_address,
+          amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
+          status, tx_hash, confirmed_at, expires_at, source, payment_rail, execution_rail,
+          machine_metadata, x402_resource_url, payment_resource_url, merchant_address,
+          x402_merchant_address, delegation_hash, created_at)
+       VALUES ($1, $2, $3, $4, 8453, 'USDC', $5, $5,
+               '1000', '0.001', '0x00000000000000000000000000000000000000d1', 0, $6,
+               'confirmed', $7, NOW() - ($8::float8 * interval '1 millisecond'), NOW() + interval '10 minutes',
+               'x402', 'x402', 'eip3009',
+               '{"settlement_scheme":"eip3009"}'::jsonb,
+               'https://merchant.example/api', 'https://merchant.example/api', $5, $5, $9,
+               NOW() - ($8::float8 * interval '1 millisecond'))`,
+      [
+        id, agent.rows[0].id, userId,
+        `0x${String(++seq).padStart(40, 'c')}`,  // account address ($4)
+        `0x${String(seq).padStart(40, 'a')}`,    // token / merchant address ($5, 20-byte)
+        `0x${String(seq).padStart(64, '3')}`,    // sign hash ($6)
+        FUNDING_TX,                              // funding tx ($7)
+        confirmedAgoMs,                          // confirmed_at / created_at ($8)
+        `0x${String(seq).padStart(64, 'b')}`,    // delegation hash ($9)
+      ],
+    )
+    // The evidence row the second selection reads from — recorded, never fed.
+    await db.query(
+      `INSERT INTO machine_payment_evidence
+         (payment_intent_id, agent_id, user_id, rail, proof_status, tx_hash, chain_id,
+          resource_url, payer_address, settlement_address, token_symbol, token_address,
+          amount_raw, amount_human, confirmed_at, amount_sek, fx_rates)
+       VALUES ($1, $2, $3, 'x402', 'payment_confirmed', $4, 8453,
+               'https://merchant.example/api',
+               '0x00000000000000000000000000000000000000f1',
+               '0x00000000000000000000000000000000000000aa',
+               'USDC', '0x0000000000000000000000000000000000000002',
+               '1000', '0.001',
+               NOW() - ($5::float8 * interval '1 millisecond'), '10.42', '{"SEK":10.42}'::jsonb)`,
+      [id, agent.rows[0].id, userId, FUNDING_TX, confirmedAgoMs],
+    )
+    return id
+  }
+
+  it('#3767: a not-fed eip3009 payment with NO sync row is fed once the window passes — and pinned on the fresh claim', async () => {
+    const userId = await seedUser()
+    await seedConnection(userId)
+    connector.connect(userId)
+    // The entry builder mirrors what the real one derives: eip3009, no
+    // verified settlement, funding hash booked, funding confirmed outside
+    // the grace window (the orchestrator's wall-clock check agrees with the
+    // sweep's injected clock, which is anchored to NOW).
+    mocks.buildAccountingEntryForPayment.mockImplementation(async (_u: string, paymentId: string) => ({
+      ...accountingEntry(paymentId),
+      settlementScheme: 'eip3009',
+      verifiedSettlementTxHash: null,
+      pinnedBookedTxHash: null,
+      pinnedBookedTxKind: null,
+      bookedTxHash: FUNDING_TX,
+      bookedTxHashIsFunding: true,
+      fundingTxHash: null,
+      settledAt: new Date(NOW.getTime() - 20 * 60_000).toISOString(),
+    }))
+    const outside = await seedUnfedEip3009(userId, 20 * 60_000)
+    const inside = await seedUnfedEip3009(userId, 1_000)
+
+    const result = await sweep(at(0))
+    expect(result).toMatchObject({ considered: 1, pushed: 1 })
+    expect(connector.attempted).toEqual([outside])
+
+    // The fresh claim PINNED the funding hash on the real intent row.
+    const pinned = await db.query<{ metadata: Record<string, string> }>(
+      `SELECT machine_metadata AS metadata FROM payment_intents WHERE id = $1`,
+      [outside],
+    )
+    expect(pinned.rows[0].metadata.accounting_booked_tx_hash).toBe(FUNDING_TX)
+    expect(pinned.rows[0].metadata.accounting_booked_tx_kind).toBe('funding')
+
+    // The inside-window payment was never considered and has no sync row.
+    expect(await getSyncState(userId, 'memory', inside)).toBeNull()
   })
 })

@@ -244,7 +244,7 @@ describeDb('backfill choice and per-connection settings (#2867)', () => {
       await seedConnection(userId, 'memory')
       await db.query(`UPDATE accounting_connections SET settings = settings || '{"auto_feed":"maybe"}' WHERE user_id = $1`, [userId])
       // MUTATION TARGET: a ::boolean cast throws "invalid input syntax" here and takes every user's tick down.
-      await expect(listDueRetrySyncs(new Date(), 200)).resolves.toBeInstanceOf(Array)
+      await expect(listDueRetrySyncs(new Date(), 15, 200)).resolves.toBeInstanceOf(Array)
     })
   })
 
@@ -292,12 +292,12 @@ describeDb('backfill choice and per-connection settings (#2867)', () => {
         [userId, paymentId],
       )
       // Positive control: due with the default setting.
-      expect((await listDueRetrySyncs(new Date(), 200)).map((r) => r.payment_id)).toEqual([paymentId])
+      expect((await listDueRetrySyncs(new Date(), 15, 200)).map((r) => r.payment_id)).toEqual([paymentId])
       await updateConnectionSettings(userId, 'memory', { auto_feed: false })
       // MUTATION TARGET (the `auto_feed` predicate in LIST_DUE_RETRY_SYNCS_SQL).
-      expect(await listDueRetrySyncs(new Date(), 200)).toEqual([])
+      expect(await listDueRetrySyncs(new Date(), 15, 200)).toEqual([])
       await updateConnectionSettings(userId, 'memory', { auto_feed: true })
-      expect((await listDueRetrySyncs(new Date(), 200)).map((r) => r.payment_id)).toEqual([paymentId])
+      expect((await listDueRetrySyncs(new Date(), 15, 200)).map((r) => r.payment_id)).toEqual([paymentId])
     })
   })
 

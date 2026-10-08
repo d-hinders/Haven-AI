@@ -293,6 +293,7 @@ export type EvidenceRecordOutcome =
 
 export async function recordMachinePaymentEvidenceBase(
   intent: MachinePaymentEvidenceSource,
+  opts: { suppressFeed?: boolean } = {},
 ): Promise<EvidenceRecordOutcome> {
   const rail = railForPayment(intent)
   // Nothing to record: evidence is a protocol-payment concept, and callers on
@@ -393,7 +394,16 @@ export async function recordMachinePaymentEvidenceBase(
   // Auto-feed the settled payment into the user's accounting tool (#491/#499).
   // Fire-and-forget + idempotent: never blocks or delays settlement, inert
   // unless the hosted reporting feed is available for this user.
-  feedSettledPaymentBestEffort(intent.user_id, intent.id)
+  //
+  // #3767 (B1): a caller that will write MORE evidence after this row — the
+  // #3475 settlement branch, which records the verified merchant settlement
+  // hash RIGHT AFTER this call — suppresses the fire here and fires the feed
+  // itself once its write has landed. Firing here would push the funding
+  // hash milliseconds before the settlement is written, and the feed would
+  // book a payment whose settlement hash it cannot yet see.
+  if (!opts.suppressFeed) {
+    feedSettledPaymentBestEffort(intent.user_id, intent.id)
+  }
 
   return { status: 'recorded' }
 }
@@ -516,17 +526,28 @@ export async function attachMachinePaymentEvidence(
     }
     // The base row first: if it cannot exist (no resource URL), refuse before
     // the hash is committed rather than commit it and answer "not found".
-    const base = await recordMachinePaymentEvidenceBase(payment)
+    // #3767 (B1): the feed fire inside the base call is SUPPRESSED — this
+    // branch is about to write the verified settlement hash below, and the
+    // feed must see it (or the expired window) when it fires, never push the
+    // funding hash ahead of that write. Fired once, after the outcome, below.
+    const base = await recordMachinePaymentEvidenceBase(payment, { suppressFeed: true })
     if (base.status === 'failed' && base.reason === 'missing_resource_url') throw new Error('resource_missing')
     if (base.status !== 'recorded') throw new Error(`evidence_base_${base.reason}`)
     const settled = await observeEip3009MerchantSettlement(payment, input.txHash)
     if (settled.outcome === 'unverified') {
+      // Nothing was fed: the evidence row exists, but the settlement report
+      // was refused — the feed fires on the next evidence call, Sync now,
+      // the backfill, or the retry sweep's #3767 second selection.
       throw new SettlementReportRefusal(
         settled.retryable ? 'settlement_unobservable' : 'settlement_unverified',
         'eip3009',
         settled.reason,
       )
     }
+    // The settlement write has landed (or, for the defensively-handled
+    // not_applicable — unreachable behind isFundedEip3009Payment above — the
+    // base row is written and the feed's own gates apply). Fire ONCE.
+    feedSettledPaymentBestEffort(payment.user_id, payment.id)
     if (settled.outcome === 'recorded') {
       return findEvidenceForIntent<MachinePaymentEvidenceRow>(payment.id, input.agentId)
     }

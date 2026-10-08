@@ -10,6 +10,7 @@ import {
   type Executor,
 } from '../../infra/repositories/accounting-feed-syncs.js'
 import { LEADER_LOCK_KEYS, runIfLeader } from '../../platform/leader-lock.js'
+import { merchantReportGraceMin } from '../../domain/merchant-report-grace.js'
 import { feedSettledPayment, type FeedOutcome } from './feed-orchestrator.js'
 import { ProviderError } from './provider.js'
 import { ACCOUNTING_EVENT } from './ops-signals.js'
@@ -20,11 +21,13 @@ import { ACCOUNTING_EVENT } from './ops-signals.js'
  * Until this slice a failed push was retried only at the next settlement
  * (fire-and-forget) or when the user pressed "Sync now". The sweep is the
  * third path: every few minutes (`HAVEN_ACCOUNTING_RETRY_SWEEP_INTERVAL_MS`)
- * it selects the `failed` / `skipped` / stale-`pending` sync rows whose
- * connection is `connected` and whose backoff has elapsed, and feeds each one
+ * it selects the `failed` / `skipped` / stale-`pending` sync rows — and,
+ * since #3767, eip3009 evidence rows that have NO sync row yet because their
+ * pre-claim deferral expired while nothing else touched them — whose
+ * connection is `connected` and whose window has elapsed, and feeds each one
  * through the SAME `feedSettledPayment` the settlement hook uses — so the
- * dedup ledger, the degraded-destination skip, the feed-from floor and the
- * FX gate all apply unchanged.
+ * dedup ledger, the degraded-destination skip, the feed-from floor, the
+ * pre-claim deferral and the FX gate all apply unchanged.
  *
  * ## The shape (review decisions, 2026-09-11)
  *
@@ -209,7 +212,7 @@ export async function runRetrySweep(deps: RetrySweepDeps = {}): Promise<RetrySwe
   const sleep = deps.sleep ?? realSleep
   const feed = deps.feed ?? feedSettledPayment
 
-  const rows = await listDueRetrySyncs(now(), RETRY_SWEEP_BATCH, deps.db)
+  const rows = await listDueRetrySyncs(now(), merchantReportGraceMin, RETRY_SWEEP_BATCH, deps.db)
   result.considered = rows.length
 
   // Group by connection, preserving the query's order (oldest row first).
@@ -236,7 +239,7 @@ export async function runRetrySweep(deps: RetrySweepDeps = {}): Promise<RetrySwe
     const pacer = new RequestPacer(() => now().getTime(), sleep)
     for (let i = 0; i < group.length; i++) {
       const row = group[i]
-      if (row.status === 'pending') {
+      if (row.status === 'pending' && row.id !== null) {
         // A claim whose owner died: release it (attempts untouched) so the
         // orchestrator's re-claim below can take it. If it is no longer a
         // stale pending — the owner finished after all — leave it alone.

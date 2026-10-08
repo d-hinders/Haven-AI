@@ -17,6 +17,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
+- **The local x402 tools report the merchant's EIP-3009 settlement hash (#3764, reaches stdio only after the next release).** `haven_pay_x402`, `haven_pay_x402_quote`, `haven_resume_x402_payment` and `haven_pay_mcp_tool` now post the merchant's own settlement transaction — parsed from the paid answer's `PAYMENT-RESPONSE` (or `_meta`) — as a second evidence report right after the funding one, so the receipt shows the transaction the merchant shows. One attempt, no backoff, and it can never change the tool's own answer: a missing, malformed, zero, or funding-equal hash posts nothing. Hosted delivery picks this up on deploy; stdio serves it once `@haven_ai/mcp` pins the SDK release that carries it (see `docs/operations/mcp-runtime-compatibility.md`).
+
 - **A funding-first `PREPARE_REVERTED` failure (#3731, hosted behaviour — reaches stdio only after the next release).** When a prepare revert was the token's own insufficient-balance error, the hosted failure now carries `revert_cause: "insufficient_balance"` and answers `next_action: fund_account_or_raise_allowance` with a funding-specific reason — the account needs funds, not a caveat change; the revert already proves the shortfall, so no check tool is named. Any other revert keeps today's caveat text and stop step, and the refusal ledger is unchanged (still `onchain_revert`). The hosted runtime picks the backend change up on deploy; stdio serves it once `@haven_ai/mcp` pins the SDK release that carries it (see `docs/operations/mcp-runtime-compatibility.md`).
 
 ### Added

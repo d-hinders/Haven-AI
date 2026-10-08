@@ -78,6 +78,28 @@ covers:
 last-verified: "2026-10-07"
 ---
 
+> **#3764 (2026-10-08, the SDK reports the merchant's EIP-3009 settlement hash):**
+> on an accepted merchant answer to a payment WITH a funding leg, the SDK now
+> posts the merchant's own settlement transaction (parsed from
+> `PAYMENT-RESPONSE`, or the native MCP profile's
+> `result._meta["x402/payment-response"]`) as a SECOND
+> `/machine-payments/evidence` report right after the funding one — so Haven
+> records the transaction the merchant shows
+> (`machine_metadata.merchant_settlement_tx_hash`, #3475). Exactly one
+> attempt, no backoff; nothing is posted when the hash is missing, malformed,
+> the zero marker, or the funding hash in any letter case. The hosted eip3009
+> tools (`haven_complete_mcp_tool`, `haven_settle_mcp_tool`) map the report's
+> outcome to next steps (retryable → `haven_report_settlement_evidence` with
+> the hash prefilled; refused → no tool).
+> - **Hosted delivery picks this up on deploy.**
+> - **Local MCP users need an `@haven_ai/mcp` release** and **connect users an
+>   `@haven_ai/connect` release** — both pin `@haven_ai/sdk` exactly
+>   (`packages/mcp/package.json:57`, `packages/connect/package.json:58`), so
+>   upgrading the SDK alone does nothing for them.
+> - **An already installed `SKILL.md` stays stale until reinstalled** (the
+>   skill's plain-HTTP settlement guidance now points at
+>   `haven_report_x402_outcome`'s `payment_response`, #3727).
+
 > **Re-verified (2026-10-07, hosted agent identity before tool dispatch):**
 > - **Every hosted tool call reads the agent first.** `buildHostedMcpServer` runs `requireAgentIdentity` (`packages/mcp-server/src/tools/identity-gate.ts`) before a tool's handler. A 401 on that read refuses with `code: AGENT_IDENTITY_UNVERIFIED`, `next_action: stop_and_tell_user` and a `next_tool_omitted_reason`. Any other failure is relayed through `normalizeError` as before, so `agent_pending_approval` and `agent_paused` keep their backend reason. The handler does not run either way.
 > - **Two exemptions.** `haven_verify_receipt` makes no request. `haven_sweep_delegate` calls only the sweep routes the backend keeps open to revoked and paused keys, so sweep recovery is unchanged.

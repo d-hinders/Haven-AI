@@ -150,7 +150,7 @@ import {
 import { X402FundingLeg, sameX402TaskBudget, type FundingLegExpectation } from './x402-funding-leg.js'
 import { X402Erc7710 } from './x402-erc7710.js'
 import { toolError, toolX402PaymentRequired, x402ToolReceipt } from './tool-adapter.js'
-import { MerchantCompletion, isZeroSettlementTxHash, parseMerchantSettlement } from './merchant-completion.js'
+import { MerchantCompletion, isZeroSettlementTxHash, isWellFormedSettlementTxHash, parseMerchantSettlement } from './merchant-completion.js'
 import type { EvidenceReportOutcome, X402MerchantOutcome, X402MerchantOutcomeReport } from './merchant-completion.js'
 
 const DEFAULT_POLLING_INTERVAL = 3_000
@@ -1805,10 +1805,23 @@ export class HavenClient {
      * the erc7710 branch and no (or a zero) merchant-reported settlement hash.
      * The hosted erc7710 settle/complete gate reads this to decide whether
      * `settled: true` is honest; the 3009 branch's `settled: true` does not
-     * need it — see `paid-mcp-completion.ts` for why.
+     * need it — see `paid-mcp-completion.ts` for why. #3764: this stays the
+     * FUNDING/anchor outcome; the merchant's own EIP-3009 settlement is a
+     * second report with its own outcome — `settlementEvidenceOutcome` below.
      */
     evidenceOutcome?: EvidenceReportOutcome
-  }> {
+    /**
+     * #3764: what the SECOND evidence report — the merchant's own EIP-3009
+     * settlement transaction, posted AFTER the funding report through the
+     * same endpoint — learned, when one was made. `undefined` when there was
+     * nothing to report: no funding leg (erc7710 keeps its single settlement
+     * report — its anchor IS the merchant's hash), the merchant named no
+     * hash, or the hash was malformed, the zero marker, or the funding hash
+     * in any letter case. ONE attempt, no backoff (D2) — a retryable answer
+     * is the hosted tools' handoff problem, never a client-side wait.
+     */
+    settlementEvidenceOutcome?: EvidenceReportOutcome
+  }>{
     const evidenceContext = await this.merchantCompletion.resolveCompletionContext({
       paymentId: input.paymentId,
       url: input.url,
@@ -1880,6 +1893,9 @@ export class HavenClient {
     // the `return` — `undefined` on the refusal branch and whenever there was
     // no hash to report at all.
     let evidenceOutcome: EvidenceReportOutcome | undefined
+    // #3764: the merchant-settlement report's outcome — `undefined` whenever
+    // nothing was posted. Assigned in the accepted branch below.
+    let settlementEvidenceOutcome: EvidenceReportOutcome | undefined
 
     if (!merchantAccepted) {
       // #1508: both evidence surfaces below require a txHash — the backend
@@ -1952,6 +1968,39 @@ export class HavenClient {
           protocolReceiptHeader,
         })
       }
+
+      // #3764 (D3 — funding first, settlement second): on a payment WITH a
+      // funding leg, the merchant's own settlement transaction — the same
+      // `PAYMENT-RESPONSE` / `_meta` receipt the funding report above carries
+      // as its protocol payload — is a SECOND evidence report through the
+      // same endpoint, so Haven records the transaction the merchant shows
+      // (`machine_metadata.merchant_settlement_tx_hash`, #3475). The backend
+      // verifies the delegate → merchant transfer on-chain and creates its
+      // own idempotent base row, so a refused FUNDING report does not gate
+      // this one — it runs whenever the funding leg exists. Gated the way
+      // the backend compares: well-formed, non-zero, and different from the
+      // funding hash CASE-INSENSITIVELY (a checksummed copy of the funding
+      // hash is not a settlement). A zero or malformed hash is skipped
+      // client-side — the backend could only refuse it. When the merchant
+      // named no hash, nothing is posted: inventing an anchor client-side is
+      // what the backend's on-chain verification exists to prevent (#2117
+      // above still holds). ONE attempt, no backoff (D2); the outcome rides
+      // the result for the hosted tools to map (D1).
+      if (!input.noFundingLeg) {
+        const settlementCandidate = settlement.settlementTxHash
+        if (
+          settlementCandidate &&
+          isWellFormedSettlementTxHash(settlementCandidate) &&
+          !isZeroSettlementTxHash(settlementCandidate) &&
+          fundingTxHash &&
+          settlementCandidate.toLowerCase() !== fundingTxHash.toLowerCase()
+        ) {
+          settlementEvidenceOutcome = await this.merchantCompletion.reportSettlementEvidenceOnce(
+            evidenceContext.paymentId,
+            settlementCandidate,
+          )
+        }
+      }
       // #956: the hosted-MCP completion path is a successful paid retry too —
       // capture the merchant's receipt exactly like the local flow does.
       await this.merchantCompletion.reportMerchantReceipt(evidenceContext.paymentId, surfaced)
@@ -1964,6 +2013,7 @@ export class HavenClient {
       // #3155 review S3: a transaction beside a rejection is not a settlement.
       settlementTxHash: merchantAccepted ? (settlement.settlementTxHash ?? undefined) : undefined,
       evidenceOutcome,
+      settlementEvidenceOutcome,
     }
   }
 

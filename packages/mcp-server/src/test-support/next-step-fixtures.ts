@@ -47,8 +47,13 @@ const HOSTED = (name: string) => ({
  * request-mode call whose idempotency_key already has an intent, before any
  * probe — erc7710 awaiting signature, eip3009 awaiting signature, and past
  * the signing step — one full call site each.
+ * #3764 adds ONE: `haven_complete_mcp_tool`'s conditional settlement-evidence
+ * arm — a retryable or refused merchant-settlement report rides its own
+ * `buildAgentGuidance` (the recorded arm answers with no guidance at all,
+ * byte-for-byte the pre-#3764 shape). `haven_settle_mcp_tool`'s eip3009
+ * settled arm keeps its single site, now fed by `settlementEvidenceHandoff`.
  */
-export const EMISSION_SITE_COUNT = 29
+export const EMISSION_SITE_COUNT = 30
 /**
  * Fixtures for those sites: the held-hash site has two branches, the three
  * null-id sites share one helper, the report-outcome accepted site has two
@@ -61,8 +66,10 @@ export const EMISSION_SITE_COUNT = 29
  * `eip3009ConfirmedReplayResponse`'s done-state and
  * funded-awaiting-merchant-remedy branches, one fixture each. #3739 adds
  * three (request mode's replay-before-probe arms), one fixture each.
+ * #3764 adds two (the complete handler's settlement-evidence conditional
+ * arm: retryable with the hash prefilled, refused with no tool), one each.
  */
-export const EMISSION_FIXTURE_COUNT = 33
+export const EMISSION_FIXTURE_COUNT = 35
 
 export const EMISSION_SITES = [
   { site: 'catalog-purchase.ts prepare erc7710', action: AgentPaymentNextAction.SignAndSubmitPayment, tool: 'haven_sign', args: { payment_id: 'pay_1' }, expect: { ...SIGNER('haven_sign'), next_arguments: { payment_id: 'pay_1' } } },
@@ -118,6 +125,14 @@ export const EMISSION_SITES = [
   // #3527: guidance.ts's eip3009ConfirmedReplayResponse — the EIP-3009 twin of the erc7710 settled-replay answer, shared by haven_prepare_catalog_purchase step 9 and haven_pay_mcp_tool's 3009 branch.
   { site: 'guidance.ts eip3009 confirmed replay: merchant leg verified/reported (no tool)', action: AgentPaymentNextAction.None, tool: null, reason: 'this idempotency_key already funded this payment and the merchant leg is recorded; there is nothing left to sign or pay', expect: { next_tool_omitted_reason: 'this idempotency_key already funded this payment and the merchant leg is recorded; there is nothing left to sign or pay' } },
   { site: 'guidance.ts eip3009 confirmed replay: funded-awaiting-merchant (poll status)', action: AgentPaymentNextAction.RetryOriginalX402Request, tool: 'haven_get_payment_status', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_get_payment_status'), next_arguments: { payment_id: 'pay_1' } } },
+  // #3764: paid-mcp-completion.ts's complete/settle eip3009 mapping of the
+  // merchant settlement evidence — ONE literal emission in the complete
+  // handler (the retryable/refused conditional arm; the recorded arm answers
+  // the pre-#3764 shape with no guidance at all), and the settle arm's
+  // existing site now reads the same helper. The retryable arm names the
+  // report tool with the hash prefilled; the refused one names no tool.
+  { site: 'paid-mcp-completion.ts complete eip3009: settlement evidence retryable (hash prefilled)', action: AgentPaymentNextAction.None, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1', settlement_tx_hash: `0x${'a'.repeat(64)}` }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1', settlement_tx_hash: `0x${'a'.repeat(64)}` } } },
+  { site: 'paid-mcp-completion.ts complete eip3009: settlement evidence refused (no tool, reason)', action: AgentPaymentNextAction.None, tool: null, reason: 'the merchant settlement hash was refused: it does not match this payment on-chain — do not re-report the same hash', expect: { next_tool_omitted_reason: 'the merchant settlement hash was refused: it does not match this payment on-chain — do not re-report the same hash' } },
 ] as const
 
 

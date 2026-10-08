@@ -261,12 +261,24 @@ describe('task budgets API (#3329)', () => {
     expect(res.json().task_budgets).toHaveLength(1)
   })
 
-  it('#3518: GET /?status=live asks the repository for live rows only (closing, or unexpired pending/open)', async () => {
+  it('#3518, #3773: GET /?status=live asks the repository for unexpired pending/open/closing rows only', async () => {
     mockDb({ list: [taskBudgetRow({ status: 'open' })] })
     const res = await app.inject({ method: 'GET', url: '/task-budgets?status=live' })
     expect(res.statusCode).toBe(200)
     const listSql = mockQuery.mock.calls.map(([sql]) => String(sql)).find((sql) => /FROM agent_task_budgets/.test(sql))
-    expect(listSql).toMatch(/status = 'closing' OR \(status IN \('pending', 'open'\) AND expires_at > \$2\)/)
+    expect(listSql).toMatch(/status IN \('pending', 'open', 'closing'\) AND expires_at > \$2/)
+  })
+
+  // #3773: the live FILTER dropping an expired closing row must not take the
+  // read-by-id with it — haven_get_task_budget still answers the row, with
+  // its own expiry caveat marking it terminal (is_expired true).
+  it('#3773: GET /:id on an expired closing row still answers, terminal (is_expired true)', async () => {
+    mockDb({ taskBudget: taskBudgetRow({ status: 'closing', expires_at: String(Math.floor(Date.now() / 1000) - 10) }) })
+    const res = await app.inject({ method: 'GET', url: '/task-budgets/tb-1' })
+    expect(res.statusCode).toBe(200)
+    const row = res.json().task_budget
+    expect(row.status).toBe('closing')
+    expect(row.is_expired).toBe(true)
   })
 
   it('#3501: GET / enriches an open row with the on-chain spent/remaining, atomic and display', async () => {

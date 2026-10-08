@@ -104,10 +104,13 @@ export async function findForAgent(
 export interface ListForAgentOptions {
   /**
    * 'open' = status open AND not expired (the default the routes use).
-   * 'live' (#3518) = every row an agent can still act on: closing rows
-   * always (a close signature may be owed), pending and open rows while not
-   * expired. Closed and expired rows — which nothing ever moves out of
-   * 'open' — stay out, so the read is bounded by live work, not history.
+   * 'live' (#3518) = every row an agent can still act on: pending, open and
+   * closing rows while not expired. An expired closing row stays out (#3773):
+   * `prepareTaskBudgetClose` treats an expired open/closing row as a trivial
+   * close (#3329 finding N2(c)) — no close signature can be owed on it, so
+   * it is dead work, not live work. Closed rows and expired rows — which
+   * nothing ever moves out of 'open' — stay out too, so the read is bounded
+   * by live work, not history.
    */
   status?: 'open' | 'live' | 'all'
   nowSec?: number
@@ -133,7 +136,7 @@ export async function listForAgent(
     const result = await executor.query<TaskBudgetRow>(
       `SELECT ${SELECT_COLUMNS} FROM agent_task_budgets
        WHERE agent_id = $1
-         AND (status = 'closing' OR (status IN ('pending', 'open') AND expires_at > $2))
+         AND status IN ('pending', 'open', 'closing') AND expires_at > $2
        ORDER BY created_at DESC`,
       [agentId, nowSec],
     )

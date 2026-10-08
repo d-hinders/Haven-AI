@@ -207,17 +207,53 @@ export async function feedSettledPayment(userId: string, paymentId: string, opts
   // keeps Accounted's paymentId-derived idempotency key from going terminal
   // on a re-file with different bytes. Only eip3009 can change under us
   // (erc7710/retired rows book an immutable hash), so only eip3009 pins.
-  if (claim.fresh && entry.settlementScheme === 'eip3009' && entry.bookedTxHash) {
-    try {
-      await pinAccountingBookedTx(
-        paymentId,
-        entry.bookedTxHash,
-        entry.bookedTxHashIsFunding ? 'funding' : 'settlement',
+  //
+  // A RE-CLAIM (fresh: false) of a row with NO pin is a payment whose first
+  // render predates this feature: that render booked the FUNDING hash (the
+  // old behaviour), so the retry must too — a settlement recorded between the
+  // pre-deploy failure and this re-claim would otherwise re-book the
+  // settlement hash over the funding hash the first render used, and a
+  // re-file with different bytes is terminal `IDEMPOTENCY_KEY_REUSE` on
+  // Accounted if the first file landed. Such a re-claim therefore books AND
+  // pins FUNDING. That is safe for every no-pin re-claim shape: a pre-deploy
+  // `failed` row rendered funding; a pin-write-failure row never rendered
+  // (the push is refused before it); a pre-deploy `skipped` row never
+  // rendered either — and CLAIM_SYNC_RECLAIM_FAILED_SQL re-claims skipped
+  // rows beside failed ones without saying which, so no discriminator is
+  // taken (nothing to keep on either). A row that ever rendered under THIS
+  // build always carries its pin: a re-claim WITH a pin already reads it
+  // back through the entry and takes neither arm.
+  let pushTx = tx
+  if (entry.settlementScheme === 'eip3009' && entry.bookedTxHash) {
+    if (claim.fresh) {
+      try {
+        await pinAccountingBookedTx(
+          paymentId,
+          entry.bookedTxHash,
+          entry.bookedTxHashIsFunding ? 'funding' : 'settlement',
+        )
+      } catch (err) {
+        const reason = `booked-hash pin failed: ${err instanceof Error ? err.message : String(err)}`
+        await markFailed(userId, provider, paymentId, reason)
+        return { outcome: 'failed', reason }
+      }
+    } else if (entry.pinnedBookedTxHash == null) {
+      // Book the funding hash — what the first render used — and pin it, so
+      // this retry and every later one render the same bytes.
+      pushTx = toFeedTransaction(
+        { ...entry, bookedTxHash: entry.txHash, bookedTxHashIsFunding: true, fundingTxHash: null },
+        {
+          connectionSuggestedAccount: destination.settings.suggestedAccount,
+          ledgerCurrency: destination.ledgerCurrency,
+        },
       )
-    } catch (err) {
-      const reason = `booked-hash pin failed: ${err instanceof Error ? err.message : String(err)}`
-      await markFailed(userId, provider, paymentId, reason)
-      return { outcome: 'failed', reason }
+      try {
+        await pinAccountingBookedTx(paymentId, entry.txHash, 'funding')
+      } catch (err) {
+        const reason = `booked-hash pin failed: ${err instanceof Error ? err.message : String(err)}`
+        await markFailed(userId, provider, paymentId, reason)
+        return { outcome: 'failed', reason }
+      }
     }
   }
 
@@ -231,7 +267,7 @@ export async function feedSettledPayment(userId: string, paymentId: string, opts
   const { connector } = destination
 
   try {
-    const result = await connector.pushTransaction(userId, tx)
+    const result = await connector.pushTransaction(userId, pushTx)
     if (result.status === 'pushed') {
       await markPushed(userId, connector.provider, paymentId, result.externalRef, result.note ?? null)
       // #2862/#2865 POST-push: a finding about the GRANT (the attachment step

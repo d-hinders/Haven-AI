@@ -158,4 +158,55 @@ describeDb('booked-hash pin: stable bytes across attempts (#3767 B2)', () => {
     // The retry did NOT go through IDEMPOTENCY_KEY_REUSE: attempts is 2, status pushed.
     expect(await getSyncState(userId, 'memory', id)).toMatchObject({ status: 'pushed', attempts: 2 })
   })
+
+  it('a pre-deploy failed row keeps the funding hash it first rendered, even with a settlement recorded since', async () => {
+    const userId = await seedUserAndConnection()
+    const { id, funding } = await seedUnfedEip3009(userId)
+    const SETTLEMENT = `0x${'6e'.repeat(32)}`
+
+    // The row failed BEFORE this feature deployed: a failed sync row exists,
+    // but no pin (pins did not exist then), and the first render booked the
+    // FUNDING hash — the old behaviour. The verified settlement was recorded
+    // AFTER that failure, so the post-deploy retry re-claims (fresh: false)
+    // with a recorded settlement and no pin: exactly the race window.
+    await db.query(
+      `INSERT INTO accounting_feed_syncs (user_id, provider, payment_id, status, attempts, error)
+       VALUES ($1, 'memory', $2, 'failed', 1, 'memory request failed (HTTP 500)')`,
+      [userId, id],
+    )
+    await db.query(
+      `UPDATE payment_intents
+         SET machine_metadata = machine_metadata || jsonb_build_object('merchant_settlement_tx_hash', $2::text)
+       WHERE id = $1`,
+      [id, SETTLEMENT],
+    )
+
+    class Recording extends InMemoryConnector {
+      readonly pushes: FeedTransaction[] = []
+      override async pushTransaction(u: string, tx: FeedTransaction) {
+        this.pushes.push(tx)
+        return super.pushTransaction(u, tx)
+      }
+    }
+    const connector = new Recording()
+    connector.connect(userId)
+    registerConnector(connector)
+
+    await expect(feedSettledPayment(userId, id)).resolves.toMatchObject({ outcome: 'pushed' })
+    expect(connector.pushes).toHaveLength(1)
+    // The re-claim re-books the FUNDING hash the first render used — never
+    // the settlement recorded since — and pins it for every later attempt.
+    expect(connector.pushes[0]!.txHash).toBe(funding)
+    expect(connector.pushes[0]!.txHashIsFunding).toBe(true)
+    expect(connector.pushes[0]!.txHash).not.toBe(SETTLEMENT)
+
+    const { rows } = await db.query<{ machine_metadata: Record<string, string> }>(
+      `SELECT machine_metadata FROM payment_intents WHERE id = $1`,
+      [id],
+    )
+    expect(rows[0].machine_metadata.accounting_booked_tx_hash).toBe(funding)
+    expect(rows[0].machine_metadata.accounting_booked_tx_kind).toBe('funding')
+
+    expect(await getSyncState(userId, 'memory', id)).toMatchObject({ status: 'pushed', attempts: 2 })
+  })
 })

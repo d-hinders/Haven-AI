@@ -198,7 +198,11 @@ payment status uses), the payment is pushed once under the FUNDING hash, and
 the payment's first claim (`pinAccountingBookedTx`), so a settlement that lands
 between two attempts never changes the bytes a retry renders — that is what
 keeps a `paymentId`-derived idempotency key from going terminal on a re-file
-with different bytes (Accounted). `erc7710` payments are one transaction whose
+with different bytes (Accounted). A re-claim of a row with NO pin (a pre-deploy
+`failed`/`skipped` row) books and pins FUNDING — the hash the first render
+used — instead of letting a settlement recorded since re-book over it; a row
+that ever rendered under this build always carries its pin. `erc7710` payments
+are one transaction whose
 hash already is the settlement: they are never deferred and `txHashIsFunding`
 is always false. Retired rails carry `txHash: null` and render exactly as they
 did before this contract existed.

@@ -404,7 +404,7 @@ pushed row (#498), or the `exhausted:` prefix once the sweep has given up.
 | `failed`, `error` starts `exhausted:` | the sweep gave up at attempt 8; the last reason follows the prefix; `accounting.sync.exhausted` was logged | fix the cause, then **Sync now** — the cap bounds the sweep, not the human; a manual sync re-claims the row |
 | `pending` | claimed and in flight, or a crashed in-flight push | wait; the sweep releases a `pending` older than 15 min to `failed` (attempts untouched) and re-feeds it. Do not edit the row |
 | `skipped` | a connector skip with the reason preserved (`not_connected`, `no_ledger_amount` — `no_sek_amount` on rows recorded before #2877, `not_outbound`), `connection needs_reauthorisation: …`, or `scope refused before the invoice was created: …` | fix the named cause (usually: the user reconnects); the sweep retries skipped rows like failed ones — but NOT while the connection is not `connected`. Sync now also re-claims them |
-| *(no row)* | the hook never ran (feed off, not entitled, no destination, `auto_feed = false`), the payment predates `feed_from`, FX was not ready, or the payment never produced an evidence row (settlement-side, above) | read `GET /accounting/feed/status`; **Sync now** or the backfill feeds it once the cause is gone |
+| *(no row)* | the hook never ran (feed off, not entitled, no destination, `auto_feed = false`), the payment predates `feed_from`, FX was not ready, the payment never produced an evidence row (settlement-side, above), or (#3767) an eip3009 payment is inside the merchant-report grace with no verified settlement recorded — the pre-claim deferral writes no row and burns no attempt | read `GET /accounting/feed/status`; the #3767 deferral self-recovers — the sweep's second selection feeds it once the window passes or the settlement is recorded; for the other causes, **Sync now** or the backfill feeds it once the cause is gone |
 
 **On-call read, per user:**
 
@@ -531,6 +531,32 @@ replaced, so a settlement recorded between two attempts cannot change the
 bytes a destination already saw — the retry re-pushes the identical
 transaction rather than an `IDEMPOTENCY_KEY_REUSE` refusal. A pin failure
 fails the push without attempting it, so the retry re-runs the whole claim.
+
+**A re-claim of a row with no pin keeps the funding hash.** A `failed` (or
+`skipped`) sync row that predates this feature re-claims with `fresh: false`
+and no pin — but its first render booked the FUNDING hash, the old behaviour.
+Rather than let a settlement recorded between that failure and the re-claim
+re-book the settlement hash over it (a different-byte re-file, terminal
+`IDEMPOTENCY_KEY_REUSE` on Accounted if the first file landed), such a
+re-claim books and pins FUNDING — `feedSettledPayment` overrides the entry to
+the funding hash before the push. A row that ever rendered under this build
+always carries its pin and is untouched by this arm; skipped rows and
+pin-write-failure rows never rendered, so funding is harmless there
+(`booked-hash.db.test.ts` covers the race window on the real database).
+
+**How QA exercises the wait.** `MERCHANT_REPORT_GRACE_MIN_OVERRIDE` takes a
+short non-zero value (integer minutes, 0–`MERCHANT_REPORT_GRACE_MIN`) ONLY on
+the Base Sepolia QA deployment — `resolveMerchantReportGraceMin`
+(`domain/merchant-report-grace.ts`) refuses the boot anywhere except
+`HAVEN_DEPLOY_CHAIN_IDS=84532`. With e.g. `MERCHANT_REPORT_GRACE_MIN_OVERRIDE=1`
+on the QA backend: an eip3009 payment whose settlement is not yet recorded
+shows NO sync row on `/accounting` (no *Not fed* badge on Transactions, no
+attempt burned), and one sweep tick after the minute passes the sweep's second
+selection feeds it — under the settlement hash if recorded, else the funding
+hash labelled as funding. Dev pins the override at 0
+(`.env.dev.example`) so nothing defers there; production keeps the 15-minute
+default (leave the override unset outside the deterministic QA scenario —
+see `agent-qa.md` § `x402-delegation-3009-grace-resume`).
 
 **The sweep's second selection.** The due query gained a UNION arm for
 payments that have an evidence row but NO sync row yet (evidence recorded

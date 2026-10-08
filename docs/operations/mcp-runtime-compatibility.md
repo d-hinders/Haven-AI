@@ -80,6 +80,34 @@ last-verified: "2026-10-08"
 ---
 
 
+> **#3778 (2026-10-08, optional bounded `delivery_reference` on the x402
+> outcome and settle surfaces):** `haven_report_x402_outcome`,
+> `haven_complete_mcp_tool` and `haven_settle_mcp_tool` accept an optional
+> `delivery_reference` (≤ 512 chars) — the NON-SECRET pointer to a delivered
+> good ("Bik Bok 5 SEK, order 6ac7…"). On an accepted outcome it is recorded
+> on the `machine_payment_evidence` row (migration 107) and surfaces on the
+> receipt (`haven_list_receipts` / `POST /machine-payments/evidence` echo),
+> the transaction detail drawer, and the activity feed, so the owner can see
+> that a deliverable EXISTS and where to recover it — closing the #3778 gap
+> where the only copy of a purchased redemption code lived in the agent's
+> session context.
+> - **Credential-shaped values are refused at three layers:** the tool
+>   handlers (pre-write for the report; pre-funding for settle), the backend
+>   semantic layer (`attachMachinePaymentEvidence` → 400
+>   `delivery_reference_refused`), and the shared recognizer in
+>   `@haven_ai/core` (`deliveryReferenceError`: JWTs, long hex/base64 token
+>   material, grouped uppercase gift-card codes). Deliberately conservative —
+>   order ids and invoice references pass; the relay of the secret itself
+>   stays the skill's rule, not a stored field. Rejected outcomes record no
+>   reference (nothing was delivered).
+> - **Hosted delivery picks this up on deploy**; local MCP/connect users
+>   need an `@haven_ai/mcp` / `@haven_ai/connect` release (both pin the SDK
+>   exactly), as with #3764.
+> - **An already installed `SKILL.md` stays stale until reinstalled** (its
+>   "Reporting after a purchase" section gained the relay rule and the
+>   Bitrefill SIWX recovery steps; both byte-pinned copies edited
+>   identically).
+
 > **#3769 (2026-10-08, the guided catalog path accepts per-call arguments and
 > an HTTP call shape):** `haven_prepare_catalog_purchase` gains one OPTIONAL
 > input, `arguments`. A catalog row that declares `tool_arguments_schema` (a

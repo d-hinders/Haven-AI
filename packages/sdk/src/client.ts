@@ -1806,6 +1806,15 @@ export class HavenClient {
      * no-funding-leg path through both.
      */
     noFundingLeg?: boolean
+    /**
+     * #3778: the optional NON-SECRET delivery pointer ("Bik Bok 5 SEK, order
+     * 6ac7…") threaded from haven_settle_mcp_tool / haven_complete_mcp_tool.
+     * Recorded on the evidence row when the merchant accepted, so the owner's
+     * receipt and dashboard show a deliverable exists and where to recover
+     * it. Never the deliverable itself — credential-shaped values are refused
+     * by the backend's semantic layer.
+     */
+    deliveryReference?: string
   }): Promise<{
     status: number
     ok: boolean
@@ -1978,6 +1987,9 @@ export class HavenClient {
           paymentProofHeader: input.paymentHeader,
           protocolReceiptHeaderName,
           protocolReceiptHeader,
+          // #3778: the delivery pointer rides the accepted arm's evidence
+          // report — a rejection delivered nothing to point at.
+          ...(input.deliveryReference ? { deliveryReference: input.deliveryReference } : {}),
         })
       }
 
@@ -2043,6 +2055,8 @@ export class HavenClient {
     outcome: X402MerchantOutcome
     merchantStatus: number
     merchantBody?: string
+    /** #3778: the optional NON-SECRET delivery pointer — see `reportMerchantOutcome`. */
+    deliveryReference?: string
   }): Promise<X402MerchantOutcomeReport> {
     return await this.merchantCompletion.reportMerchantOutcome(input)
   }

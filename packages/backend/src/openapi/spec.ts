@@ -128,6 +128,15 @@ const transactionBaseProperties = {
     type: ['string', 'null'],
     description: '#3763: the merchant settlement transaction when one is recorded (#3475); null otherwise — "not recorded", never "failed". Null on non-x402 rows.',
   },
+  // #3778: the NON-SECRET delivery pointer an agent reported with an accepted
+  // x402 outcome ("Bik Bok 5 SEK, order 6ac7…") — the owner's proof that a
+  // deliverable EXISTS and where to recover it. Never the deliverable itself:
+  // credential-shaped values are refused before the row is written.
+  deliveryReference: {
+    type: ['string', 'null'],
+    description:
+      '#3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write.',
+  },
   // #2097: backend-recorded initiator classification — never derived
   // in the frontend. `agent` = row carries agent attribution (confirmed
   // x402 intents, delegate sweeps, raw transfers matched to a
@@ -879,6 +888,11 @@ const activityPayment = {
     source: { type: 'string', description: "Falls back to 'direct'." },
     x402_resource_url: { type: ['string', 'null'] },
     x402_merchant_address: { type: ['string', 'null'] },
+    delivery_reference: {
+      type: ['string', 'null'],
+      description:
+        '#3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write.',
+    },
     chain_id: { type: ['integer', 'null'] },
     token_address: { type: ['string', 'null'] },
     account_id: { type: ['string', 'null'] },
@@ -12476,6 +12490,11 @@ export const openapiSpec = {
           protocolReceiptHeaderName: { type: 'string' },
           protocolReceiptHeader: { type: 'string' },
           protocolReceiptPayload: { type: 'object', additionalProperties: true },
+          // #3778: the NON-SECRET delivery pointer. Bounded here; the
+          // secret-shape refusal is semantic (`modules/mpp/evidence.ts`,
+          // `@haven_ai/core`'s `deliveryReferenceError`) because "looks like
+          // a credential" is not a JSON-Schema statement.
+          deliveryReference: { type: 'string', maxLength: 512 },
         },
         additionalProperties: false,
       },

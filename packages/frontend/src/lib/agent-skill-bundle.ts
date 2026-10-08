@@ -475,6 +475,24 @@ merchant it came from and never echo or log it.
 Do not call \`haven_get_agent\` or \`haven_get_allowances\` again just to
 report a purchase you already made.
 
+### Relay a delivered code or credential to the owner — immediately, verbatim
+
+If a merchant response carries what the user PAID FOR — a redemption code, gift
+card PIN, license key, voucher, or any other credential — relay it to the user
+in your next message, verbatim and complete. Never paraphrase, truncate,
+summarize or withhold it: a code relayed "later" is a code the session may lose
+(compaction, crash, disconnect) and a purchase the owner can never redeem.
+Haven deliberately does not store it. Report only the NON-SECRET pointer with
+your outcome (delivery_reference — merchant, product, value, order id) so the
+owner's receipt and dashboard show a deliverable exists and where to recover
+it. A value shaped like a code, token or key is refused there — that refusal is
+your signal that you are holding the secret itself, and its only safe path is
+to the owner.
+
+If a Bitrefill purchase's code was lost before it reached the user, the
+documented recovery is a SIWX sign-in on bitrefill.com from the same wallet
+that paid, or a Bitrefill support ticket quoting the invoice id.
+
 ## If the credential may have leaked
 
 If this agent's credential may have leaked, tell the user to open the agent in

@@ -105,7 +105,8 @@ import * as agentTaxDeclarationOptIn from './103_agent_tax_declaration_opt_in.js
 import * as opsAccessLog from './104_ops_access_log.js'
 import * as submissionReconcileExpressionIndex from './105_submission_reconcile_expression_index.js'
 import * as feedback from './106_feedback.js'
-import * as catalogCallSemantics from './107_catalog_call_semantics.js'
+import * as catalogCallSemantics from './108_catalog_call_semantics.js'
+import * as deliveryReference from './107_delivery_reference.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -270,5 +271,6 @@ export const migrations: Migration[] = [
   opsAccessLog,
   submissionReconcileExpressionIndex,
   feedback,
+  deliveryReference,
   catalogCallSemantics,
 ]

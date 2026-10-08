@@ -48,7 +48,7 @@ export interface CatalogRow {
    * #3769: the JSON Schema a per-call MCP tool's caller arguments must
    * satisfy (`haven_prepare_catalog_purchase` validates against it). NULL on
    * a fixed-SKU row — caller arguments are refused there. Optional because a
-   * test fixture may predate migration 107.
+   * test fixture may predate migration 108.
    */
   tool_arguments_schema?: Record<string, unknown> | null
   /**

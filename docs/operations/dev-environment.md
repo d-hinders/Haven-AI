@@ -539,7 +539,7 @@ Isolation rules that are non-negotiable for a payments product:
  > **Re-verified #3769 (2026-10-08):** the catalog verifier
  > (`modules/catalog/merchant-catalog.ts`) now probes a plain-HTTP row with
  > the row's DECLARED method and body example (`http_method`/`body_type`/
- > `body_example`, migration 107) instead of a hardcoded GET, and a challenge
+ > `body_example`, migration 108) instead of a hardcoded GET, and a challenge
  > that structurally advertises its own method (`resource.method` on the 402)
  > is written back onto the row's `http_method` in the same success UPDATE —
  > one more COALESCE'd column beside the #3331 `pay_to` write. The claims

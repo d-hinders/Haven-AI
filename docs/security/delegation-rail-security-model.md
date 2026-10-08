@@ -594,6 +594,29 @@ chain.
 > about authority, custody or signing changes. Scope of this note: that one
 > CASE predicate. Nothing else in this document was re-verified.
 
+> **Re-verified unchanged (#3778, 2026-10-08 — the optional `delivery_reference`
+> delivery pointer):** this diff touched two files in this document's coverage
+> list, `packages/sdk/src/client.ts` and
+> `packages/backend/src/infra/repositories/transaction-history.ts`, and none of
+> their authority, custody or signing surfaces. On `client.ts` the change rides
+> the same seam #3764's note scopes — the ACCEPTED arm's
+> `/machine-payments/evidence` report — plus the `reportMerchantOutcome`
+> pass-through: one new OPTIONAL `deliveryReference` input (≤ 512 chars, the
+> NON-SECRET pointer to a delivered good), spread into the evidence payload
+> only when present. It authorizes nothing, produces or consumes no signature,
+> and no spend decision reads its value; when the caller supplies a
+> credential-shaped value the tool refuses pre-write (report) / pre-funding
+> (settle) — declining a write the caller opted into by sending the field, not
+> narrowing any previously-allowed path (the field did not exist before). On
+> `transaction-history.ts` the change is one nullable column added to
+> `X402PaymentIntentRow` and its SELECT (`mpe.delivery_reference AS
+> delivery_reference`) — the same read-only projection class the #2871 note
+> scopes: inside the existing `pi.user_id = $N` + `us.id = ANY($N)` tenant
+> scoping, no writer, no authority and no spend path implicated. The dashboard
+> surfaces that read the projection display the pointer; they decide nothing.
+> Scope of this note: those two files. Nothing else in this document was
+> re-verified.
+
 > **Re-verified unchanged (#3781, 2026-10-08 — the catalog tier of the
 > purchase label):** this diff touched one file in this document's coverage
 > list, `packages/sdk/src/client.ts`, and none of its authority, custody or

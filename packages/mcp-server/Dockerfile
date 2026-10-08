@@ -5,12 +5,18 @@ WORKDIR /app
 
 # Install dependencies for the workspace slice the server needs.
 COPY package.json package-lock.json* tsconfig.base.json ./
+COPY packages/core/package.json ./packages/core/
 COPY packages/sdk/package.json ./packages/sdk/
 COPY packages/mcp-server/package.json ./packages/mcp-server/
 
-RUN npm ci --workspace=packages/mcp-server --workspace=packages/sdk --include-workspace-root
+RUN npm ci --workspace=packages/mcp-server --workspace=packages/sdk --workspace=packages/core --include-workspace-root
 
-# Build SDK first (mcp-server consumes its built output).
+# Build core first (mcp-server consumes its built output — #3778 moved
+# DELIVERY_REFERENCE_MAX_LENGTH there; see also the backend Dockerfile).
+COPY packages/core ./packages/core
+RUN npm run build -w packages/core
+
+# Build SDK next (mcp-server consumes its built output too).
 COPY packages/sdk ./packages/sdk
 RUN npm run build -w packages/sdk
 
@@ -27,12 +33,14 @@ ENV NODE_ENV=production
 
 # Production dependencies only.
 COPY package.json package-lock.json* ./
+COPY packages/core/package.json ./packages/core/
 COPY packages/sdk/package.json ./packages/sdk/
 COPY packages/mcp-server/package.json ./packages/mcp-server/
 
-RUN npm ci --workspace=packages/mcp-server --workspace=packages/sdk --include-workspace-root --omit=dev
+RUN npm ci --workspace=packages/mcp-server --workspace=packages/sdk --workspace=packages/core --include-workspace-root --omit=dev
 
 # Compiled output.
+COPY --from=builder /app/packages/core/dist ./packages/core/dist
 COPY --from=builder /app/packages/sdk/dist ./packages/sdk/dist
 COPY --from=builder /app/packages/mcp-server/dist ./packages/mcp-server/dist
 

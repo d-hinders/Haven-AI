@@ -1,6 +1,6 @@
 import type { PoolClient } from 'pg'
 
-export const version = '107_catalog_call_semantics'
+export const version = '108_catalog_call_semantics'
 
 /**
  * #3769 — catalog rows can declare HOW a purchase calls the merchant:

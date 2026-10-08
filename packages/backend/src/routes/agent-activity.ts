@@ -81,6 +81,9 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           source: p.source ?? 'direct',
           x402_resource_url: p.x402_resource_url,
           x402_merchant_address: toCanonicalAddress(p.x402_merchant_address),
+          // #3778: the non-secret delivery pointer, when one was reported —
+          // the owner's "a deliverable exists" signal on the activity row.
+          delivery_reference: p.delivery_reference ?? null,
           chain_id: p.chain_id,
           token_address: toCanonicalAddress(p.token_address),
           account_id: p.account_id,
@@ -228,6 +231,9 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           source: p.source ?? 'direct',
           x402_resource_url: p.x402_resource_url,
           x402_merchant_address: toCanonicalAddress(p.x402_merchant_address),
+          // #3778: the non-secret delivery pointer, when one was reported —
+          // the owner's "a deliverable exists" signal on the activity row.
+          delivery_reference: p.delivery_reference ?? null,
           chain_id: p.chain_id,
           token_address: toCanonicalAddress(p.token_address),
           account_id: p.account_id,

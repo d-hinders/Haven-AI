@@ -5582,6 +5582,7 @@ export type components = {
             protocolReceiptPayload?: {
                 [key: string]: unknown;
             };
+            deliveryReference?: string;
         };
         MachinePaymentReconciliationEventRequest: {
             /** Format: uuid */
@@ -5716,6 +5717,8 @@ export type components = {
             fundingTxHash?: string | null;
             /** @description #3763: the merchant settlement transaction when one is recorded (#3475); null otherwise — "not recorded", never "failed". Null on non-x402 rows. */
             settlementTxHash?: string | null;
+            /** @description #3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write. */
+            deliveryReference?: string | null;
             /**
              * @description Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: reserved — nothing populates it today. `unknown`: outbound raw transfer with no matched intent. Absent for inbound (`direction: in`) rows.
              * @enum {string}
@@ -5806,6 +5809,8 @@ export type components = {
             fundingTxHash?: string | null;
             /** @description #3763: the merchant settlement transaction when one is recorded (#3475); null otherwise — "not recorded", never "failed". Null on non-x402 rows. */
             settlementTxHash?: string | null;
+            /** @description #3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write. */
+            deliveryReference?: string | null;
             /**
              * @description Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: reserved — nothing populates it today. `unknown`: outbound raw transfer with no matched intent. Absent for inbound (`direction: in`) rows.
              * @enum {string}
@@ -15627,6 +15632,8 @@ export interface operations {
                             source?: string;
                             x402_resource_url?: string | null;
                             x402_merchant_address?: string | null;
+                            /** @description #3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write. */
+                            delivery_reference?: string | null;
                             chain_id?: number | null;
                             token_address?: string | null;
                             account_id?: string | null;
@@ -15814,6 +15821,8 @@ export interface operations {
                             source?: string;
                             x402_resource_url?: string | null;
                             x402_merchant_address?: string | null;
+                            /** @description #3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write. */
+                            delivery_reference?: string | null;
                             chain_id?: number | null;
                             token_address?: string | null;
                             account_id?: string | null;

@@ -57,6 +57,18 @@ export {
   type MachinePaymentLifecycle,
 } from './machine-payment-lifecycle.js'
 
+// #3778 — the delivery_reference guard: shared semantic validator for the
+// non-secret delivery pointer agents report with an x402 outcome. Refuses
+// credential-shaped values (JWTs, API-key tokens, grouped gift codes) from
+// being persisted; the secret relay itself stays the skill's rule. Every
+// accepting surface (mcp-server contracts, sdk client, backend evidence)
+// imports this one definition.
+export {
+  DELIVERY_REFERENCE_MAX_LENGTH,
+  deliveryReferenceError,
+  deliveryReferenceLooksLikeSecret,
+} from './delivery-reference.js'
+
 // Agent label palette (#3167) — the one colour list the label API validates
 // and the dashboard renders. Pure data; see the module header.
 export {

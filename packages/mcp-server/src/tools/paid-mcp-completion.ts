@@ -586,8 +586,8 @@ export async function deliverMerchantPayment(
     // it rather than re-deriving "which scheme is this" a second way.
     if (options?.noFundingLeg) {
       // On erc7710 the signature IS the settlement child (#1456): there is no
-      // funding leg, so a merchant refusal at this point means NOTHING moved
-      // — no delegate balance to strand, nothing to sweep. The eip3009
+      // funding leg, so a merchant refusal at this point strands no delegate
+      // balance — nothing to sweep. The eip3009
       // guidance below is false here and would tell the agent to "reconcile"
       // a balance that was never created. Say what is true instead.
       // #2987 review: the categorical "nothing moved, re-quote" is only

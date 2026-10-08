@@ -1141,7 +1141,7 @@ const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
   behavior:
     'Pass payment_id and payment_header (from haven_x402_sign_header); merchant_url/tool_name/arguments/mcp_transport are optional — Haven rehydrates them by payment_id. Call only after haven_submit confirmed funding. The header is a signed, single-use, amount/merchant/nonce-bound authorization — not a key. ' +
     'On a settled x402 payment the allowance block reports the canonical names remainingAtomic / remainingDisplay / resetPeriodMin / tokenSymbol / tokenAddress (the SAME names and values haven_get_agent reports) beside the deprecated snake_case spellings (remaining_atomic, remaining_display, token_symbol, token_address, reset_period), kept for a deprecation window. ' +
-    'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true) when funding expired first; MERCHANT_REJECTED_AFTER_FUNDING on eip3009 means stranded delegate funds — recover with haven_sweep_delegate; on erc7710 (no funding leg) nothing moved, so re-quote instead.',
+    'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true) when funding expired first; MERCHANT_REJECTED_AFTER_FUNDING on eip3009 means stranded delegate funds — recover with haven_sweep_delegate. erc7710 settles via haven_settle_mcp_tool.',
   nextActionGuidance: 'On success no further Haven tool is needed — return the merchant result to the user.',
 })
 
@@ -1152,7 +1152,7 @@ const SETTLE_MCP_TOOL_DESCRIPTION = composeDescription({
     'Pass payment_id, signature, and (EIP-3009 shape only) payment_header; merchant/tool fields are optional — rehydrated by payment_id. If funding does not confirm it returns { payment_id, settled: false, funding_status } without contacting the merchant. Echoes payment_id on every outcome for reconciliation via haven_list_receipts / haven_get_payment_status. ' +
     'On a settled x402 payment the allowance block reports the canonical names remainingAtomic / remainingDisplay / resetPeriodMin / tokenSymbol / tokenAddress (the SAME names and values haven_get_agent reports) beside the deprecated snake_case spellings (remaining_atomic, remaining_display, token_symbol, token_address, reset_period), kept for a deprecation window. ' +
     'settled:true only after on-chain verification, never a merchant 2xx; unverified: settled:false, SETTLEMENT_UNCONFIRMED, null settlement_tx_hash. ' +
-    'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true); MERCHANT_REJECTED_AFTER_FUNDING on eip3009 — stranded funds, recover with haven_sweep_delegate; on erc7710 (no funding leg) nothing moved, so re-quote instead.',
+    'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true); MERCHANT_REJECTED_AFTER_FUNDING on eip3009 — stranded funds, recover with haven_sweep_delegate; erc7710: nothing to sweep — check haven_get_payment_status after the window; re-quote only if unsettled.',
   nextActionGuidance: 'On success no further Haven tool is needed — return the merchant result to the user.',
 })
 

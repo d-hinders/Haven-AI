@@ -2270,8 +2270,10 @@ sub-budget half of that sum walks grant → parent-child → the budget
 delegation's hash (`SUM_OPEN_RESERVED_FOR_BUDGET_DELEGATION_SQL`) —
 `sumOpenReservedForParent` keys on the parent-child row's OWN hash and
 would answer 0 here. `GET /task-budgets?status=live` (and the MCP/SDK reads
-over it) list closing rows always and unexpired pending and open rows, each
-with its `status` (closed and expired rows omitted; `status=all` still
+over it) list unexpired pending, open, and closing rows, each
+with its `status` (closed rows and every expired row omitted — an
+expired `closing` row owes no close signature, since the close would
+be trivial #3329 N2(c) / #3773; `status=all` still
 answers every row), and
 `GET /task-budgets/:id` is the read-by-id the MCP
 `haven_get_task_budget` surfaces — the status check a close refusal's

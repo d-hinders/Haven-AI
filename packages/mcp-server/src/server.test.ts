@@ -114,6 +114,8 @@ describe('buildHostedMcpServer', () => {
     expect(HOSTED_INSTRUCTIONS).toContain('Never invent headroom')
     // The failure mode is safe-by-construction, and the instructions say so.
     expect(HOSTED_INSTRUCTIONS).toMatch(/re-quote and confirm/i)
+    expect(HOSTED_INSTRUCTIONS).not.toContain('moves nothing')
+    expect(HOSTED_INSTRUCTIONS).toMatch(/haven_get_payment_status after the payment window and re-quote only if unsettled/)
 
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
     const server = buildHostedMcpServer(haven)
@@ -277,6 +279,17 @@ describe('buildHostedMcpServer', () => {
     )
     expect(byName.get('haven_settle_mcp_tool')).toContain('no further Haven tool is needed')
     expect(byName.get('haven_complete_mcp_tool')).toContain('no further Haven tool is needed')
+    // A refused erc7710 settle is verify-then-act: the merchant may already
+    // have redeemed its single-use authorization, so "nothing moved,
+    // re-quote" could pay twice. Complete has no erc7710 path at all.
+    for (const name of ['haven_settle_mcp_tool', 'haven_complete_mcp_tool']) {
+      expect(byName.get(name)).not.toMatch(/nothing moved|re-quote instead/)
+      expect(byName.get(name)).toContain('haven_sweep_delegate')
+    }
+    expect(byName.get('haven_settle_mcp_tool')).toMatch(
+      /erc7710: nothing to sweep — check haven_get_payment_status after the window; re-quote only if unsettled/,
+    )
+    expect(byName.get('haven_complete_mcp_tool')).toContain('erc7710 settles via haven_settle_mcp_tool')
 
     await client.close()
     await server.close()

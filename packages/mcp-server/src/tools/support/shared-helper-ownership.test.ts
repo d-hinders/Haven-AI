@@ -222,6 +222,12 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // EvidenceReportOutcome rather than a merchant HTTP result. Single-slice,
   // same module.
   classifySettlementEvidenceReport: { module: 'paid-mcp-completion', slices: ['s2812'] },
+  // #3768: merchant-credential redaction over the agent-facing `result` — the
+  // recognizer and its two replacement markers. Single-slice (only this
+  // capability's settle/complete arms forward a merchant result), same module.
+  redactMerchantCredentials: { module: 'paid-mcp-completion', slices: ['s2812'] },
+  MERCHANT_CREDENTIAL_WITHHELD: { module: 'paid-mcp-completion', slices: ['s2812'] },
+  MERCHANT_JWT_REDACTED: { module: 'paid-mcp-completion', slices: ['s2812'] },
   // tools/support/quote-response.ts — quote responses + status predicates.
   buildMcpToolQuoteResponse: { module: 'quote-response', slices: ['s2810', 's2811'] },
   isPendingApproval: { module: 'quote-response', slices: ['s2809', 's2810', 's2811', 's2812'] },
@@ -527,6 +533,10 @@ const HELPER_HOST_MODULE_EXPORTS: Record<string, string[]> = {
     'preflightMcpPaymentHeader',
     'classifyErc7710Settlement',
     'classifySettlementEvidenceReport',
+    // #3768: merchant-credential redaction over the agent-facing `result`.
+    'redactMerchantCredentials',
+    'MERCHANT_CREDENTIAL_WITHHELD',
+    'MERCHANT_JWT_REDACTED',
   ],
 }
 

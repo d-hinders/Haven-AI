@@ -25,6 +25,7 @@ import {
   countEvidenceReceiptsForAgent,
   receiptCursorResolvesForAgent,
   resolveReconciliationForPayment,
+  setEvidenceDeliveryReference,
   upsertEvidenceBase,
   type IntentSettlementFields,
 } from '../../infra/repositories/machine-payments.js'
@@ -45,6 +46,7 @@ import { withParties } from '../../openapi/party-model.js'
 import { toCanonicalAddress } from '../transactions/index.js'
 import type { EvidenceBody, MppHandlerResult } from './types.js'
 import { isZeroSettlementTxHash } from '@haven_ai/sdk'
+import { deliveryReferenceError } from '@haven_ai/core'
 
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/
 
@@ -127,6 +129,14 @@ export interface AttachMachinePaymentEvidenceInput {
   protocolReceiptHeaderName?: string
   protocolReceiptHeader?: string
   protocolReceiptPayload?: Record<string, unknown>
+  /**
+   * #3778: the optional NON-SECRET delivery pointer. Validated here (the one
+   * semantic layer every caller funnels through) — a secret-shaped value is
+   * refused before anything is written, exactly like the other cross-field
+   * guards. The MCP layer refuses earlier still (fail-fast, pre-funding);
+   * this is the defense in depth for direct SDK/API callers.
+   */
+  deliveryReference?: string
 }
 
 export interface MachinePaymentEvidenceRow {
@@ -157,6 +167,7 @@ export interface MachinePaymentEvidenceRow {
   protocol_receipt_header: string | null
   protocol_receipt_payload: Record<string, unknown> | null
   merchant_status: number | null
+  delivery_reference: string | null
   confirmed_at: string | null
   amount_sek: string | null
   fx_rate_sek: string | null
@@ -473,6 +484,14 @@ export async function attachMachinePaymentEvidence(
   ) {
     throw new Error('merchant_status_invalid')
   }
+  // #3778: the delivery reference is validated BEFORE anything is written —
+  // the same fail-closed ordering every other cross-field guard here uses. A
+  // secret-shaped value never reaches the row, on any branch below.
+  const normalizedDeliveryReference = input.deliveryReference?.trim()
+  if (normalizedDeliveryReference) {
+    const referenceError = deliveryReferenceError(normalizedDeliveryReference)
+    if (referenceError) throw new Error('delivery_reference_refused')
+  }
 
   let payment = await findProtocolPaymentForEvidence(input.agentId, input.paymentId)
   if (!payment) return null
@@ -548,6 +567,13 @@ export async function attachMachinePaymentEvidence(
     // not_applicable — unreachable behind isFundedEip3009Payment above — the
     // base row is written and the feed's own gates apply). Fire ONCE.
     feedSettledPaymentBestEffort(payment.user_id, payment.id)
+    // #3778: this branch returns without reaching the attach below, so a
+    // delivery reference supplied with the settlement report is recorded on
+    // the (already-existing) base row directly. Validated above, before the
+    // hash was verified — nothing is written when the value is refused.
+    if (normalizedDeliveryReference) {
+      await setEvidenceDeliveryReference(payment.id, input.agentId, normalizedDeliveryReference)
+    }
     if (settled.outcome === 'recorded') {
       return findEvidenceForIntent<MachinePaymentEvidenceRow>(payment.id, input.agentId)
     }
@@ -588,6 +614,7 @@ export async function attachMachinePaymentEvidence(
     protocolReceiptHeader: cleanHeaderValue(input.protocolReceiptHeader),
     protocolReceiptPayload: normalizeJson(input.protocolReceiptPayload),
     merchantStatus: input.merchantStatus ?? null,
+    deliveryReference: normalizedDeliveryReference || null,
   })
 
   if (evidence) {
@@ -792,6 +819,11 @@ export function mapEvidence(row: MachinePaymentEvidenceRow) {
       // at the read surfaces instead (SDK type doc, tool description).
       protocol_receipt_payload: row.protocol_receipt_payload,
       merchant_status: row.merchant_status,
+      // #3778: the non-secret delivery pointer, echoed on the receipt — the
+      // owner's "a deliverable exists and here is the pointer to it" field.
+      // Written only from validated input (see `attachMachinePaymentEvidence`),
+      // never the merchant body.
+      delivery_reference: row.delivery_reference ?? null,
       confirmed_at: row.confirmed_at,
       created_at: row.created_at,
       updated_at: row.updated_at,
@@ -876,6 +908,8 @@ export async function attachEvidenceHandler(
       protocolReceiptHeaderName: body.protocolReceiptHeaderName,
       protocolReceiptHeader: body.protocolReceiptHeader,
       protocolReceiptPayload: body.protocolReceiptPayload,
+      // #3778: the optional non-secret delivery pointer.
+      deliveryReference: body.deliveryReference,
     })
 
     if (!evidence) {
@@ -968,6 +1002,20 @@ export async function attachEvidenceHandler(
     }
     if (marker === 'merchant_status_invalid') {
       return { statusCode: 400, body: { error: 'merchantStatus must be an HTTP status code' } }
+    }
+    // #3778: a secret-shaped delivery reference never reaches the row. The
+    // wording says WHY it was refused (shape, not length) and what to send
+    // instead, mirroring `deliveryReferenceError`'s message intent.
+    if (marker === 'delivery_reference_refused') {
+      return {
+        statusCode: 400,
+        body: {
+          error:
+            'deliveryReference refused: the value is shaped like a credential (a code, token or key), ' +
+            'not like a delivery reference. Report the non-secret pointer instead (merchant, product, ' +
+            'value, order id) and relay the secret itself to the owner directly.',
+        },
+      }
     }
 
     throw err

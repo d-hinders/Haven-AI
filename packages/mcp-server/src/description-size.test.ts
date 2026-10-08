@@ -415,11 +415,23 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * bytes (+441, two identical 220.5-byte sentences on disjoint descriptions);
  * the mean pin: 29,230 / 28 = 1043.9285…, pinned at the two-decimal ceiling
  * (1043.93). Shrink-only from here.
+ *
+ * **Re-derived — round 24, #3778 (2026-10-08).** Three descriptions gain the
+ * delivery_reference sentence (#3778's acceptance criteria require the tools
+ * to say what the field is and that credential shapes are refused):
+ * `haven_report_x402_outcome`, `haven_complete_mcp_tool` and
+ * `haven_settle_mcp_tool` (+716 bytes total, three near-identical ~235-byte
+ * sentences on disjoint descriptions). The copy IS the deliverable — the
+ * field is new and the refusal rule is the agent's only signal that the
+ * secret must be relayed, never stored — so trimming it would cut the
+ * contract the issue exists to state. No tool was added — 28 holds.
+ * Measured: 29,946 UTF-8 bytes; the mean pin: 29,946 / 28 = 1069.5 exactly,
+ * pinned at that value. Shrink-only from here.
  */
-const MAX_TOTAL_BYTES = 29_230
-// Mean pin: round 23 (block above): 29,230 / 28 = 1043.9285…, pinned at the
-// two-decimal ceiling (1043.93). Shrink-only from here.
-const MAX_MEAN_BYTES = 1043.93
+const MAX_TOTAL_BYTES = 29_946
+// Mean pin: round 24 (block above): 29,946 / 28 = 1069.5 exactly. Shrink-only
+// from here.
+const MAX_MEAN_BYTES = 1069.5
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

@@ -118,6 +118,7 @@ describeDb('receipts name funding_tx_hash / settlement_tx_hash (#2998)', () => {
       protocolReceiptHeader: 'receipt-1',
       protocolReceiptPayload: JSON.stringify({ transaction: settlementHash }),
       merchantStatus: 200,
+      deliveryReference: null,
     })
 
     const [receipt] = (await listReceipts(agent.agentId, 10))!.receipts
@@ -158,6 +159,7 @@ describeDb('receipts name funding_tx_hash / settlement_tx_hash (#2998)', () => {
       protocolReceiptHeader: 'receipt-1',
       protocolReceiptPayload: JSON.stringify({ transaction: zeroHash }),
       merchantStatus: 200,
+      deliveryReference: null,
     })
 
     const [receipt] = (await listReceipts(agent.agentId, 10))!.receipts

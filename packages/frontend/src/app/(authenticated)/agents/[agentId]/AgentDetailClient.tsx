@@ -143,6 +143,7 @@ function activityToTransaction(
     source: item.source as AggregatedTransaction['source'],
     x402ResourceUrl: item.x402_resource_url ?? null,
     x402MerchantAddress: item.x402_merchant_address ?? null,
+    deliveryReference: item.delivery_reference ?? null,
     chainId: item.chain_id ?? 0,
     accountId: item.account_id ?? '',
     accountAddress: item.account_address ?? '',

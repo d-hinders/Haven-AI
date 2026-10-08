@@ -50,7 +50,9 @@ const ADDITIVE_SINCE_BASE = new Set([
   'total', 'has_more', 'next_cursor','parties', 'funding_tx_hash', 'settlement_tx_hash',
   'settlement_scheme', 'merchant_settlement_recorded',
   // #3564: additive outcome-pending visibility on the machine-payment status.
-  'submission_outcome_pending'])
+  'submission_outcome_pending',
+  // #3778: additive non-secret delivery pointer on the receipts read.
+  'delivery_reference'])
 
 function stripParties(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stripParties)

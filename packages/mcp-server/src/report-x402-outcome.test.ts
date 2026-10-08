@@ -110,6 +110,28 @@ describe('haven_report_x402_outcome', () => {
     expect(recordedCalls().some((c) => c.url.endsWith('/machine-payments/reconciliation-events'))).toBe(false)
   })
 
+  it('#3778: a credential-shaped delivery_reference is refused with NO evidence write', async () => {
+    // The refusal is a PRE-WRITE ordering guarantee: the code-shaped pointer
+    // ('aB3xK9mQ2pL7vR4t' — the same shape the settle-path test pins) never
+    // reaches the evidence resolution, so nothing is recorded anywhere.
+    stubFetch(HAPPY_ROUTES)
+    const payload = fail(
+      await handlers().haven_report_x402_outcome({
+        payment_id: 'pay_x402',
+        outcome: 'accepted',
+        merchant_status: 200,
+        delivery_reference: 'aB3xK9mQ2pL7vR4t',
+      }),
+    )
+    expect(payload.code).toBe('DELIVERY_REFERENCE_REFUSED')
+    expect(payload.statusCode).toBe(400)
+    expect(payload.message).toMatch(/Nothing was written/)
+    // No evidence write — and no reconciliation event either: the refusal
+    // lands before the report resolves anything, so NOTHING is recorded.
+    expect(recordedCalls().some((c) => c.url.endsWith('/machine-payments/evidence'))).toBe(false)
+    expect(recordedCalls().some((c) => c.url.endsWith('/machine-payments/reconciliation-events'))).toBe(false)
+  })
+
   it('NEVER contacts the merchant — the keyless property this path exists to protect', async () => {
     // The load-bearing assertion of the whole slice. Haven records what the
     // agent says; it must not "verify it for you", because verifying means

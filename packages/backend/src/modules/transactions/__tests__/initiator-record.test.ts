@@ -59,6 +59,7 @@ const RAW_TWIN = {
 const X402_ROW: X402PaymentIntentRow = {
   id: 'pi-1',
   tx_hash: '0xabc',
+  delivery_reference: null,
   agent_id: 'agent-1',
   agent_name: 'Alice',
   account_id: 'safe-1',

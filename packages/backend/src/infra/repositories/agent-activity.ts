@@ -71,6 +71,8 @@ export interface ActivityPaymentRow {
   payment_resource_url: string | null
   merchant_address: string | null
   payment_proof_status: string | null
+  /** `machine_payment_evidence.delivery_reference` (migration 107, #3778). */
+  delivery_reference: string | null
   payment_reconciliation_event_type: string | null
   execution_rail: string | null
   delegation_hash: string | null
@@ -107,6 +109,7 @@ export const LIST_AGENT_PAYMENTS_SQL = `SELECT pi.id,
               COALESCE(pi.payment_resource_url, pi.x402_resource_url) AS x402_resource_url,
               COALESCE(pi.merchant_address, pi.x402_merchant_address) AS x402_merchant_address,
               mpe.proof_status AS payment_proof_status,
+              mpe.delivery_reference AS delivery_reference,
               pi.payment_rail,
               pi.payment_resource_url,
               pi.merchant_address,
@@ -173,6 +176,7 @@ export const LIST_FEED_PAYMENTS_SQL = `SELECT pi.id,
               COALESCE(pi.payment_resource_url, pi.x402_resource_url) AS x402_resource_url,
               COALESCE(pi.merchant_address, pi.x402_merchant_address) AS x402_merchant_address,
               mpe.proof_status AS payment_proof_status,
+              mpe.delivery_reference AS delivery_reference,
               pi.payment_rail,
               pi.payment_resource_url,
               pi.merchant_address,

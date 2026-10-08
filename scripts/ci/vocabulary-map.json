@@ -273,7 +273,8 @@
       "fxRates": "#3127: the row's own book-time rate map (machine_payment_evidence.fx_rates, migration 082) -- one rate per supported ledger currency frozen at settlement. The receipt carries the settled figures themselves and does not restate the capture.",
       "accounting": "Accounting-feed sync state joined by paymentId (#2870).",
       "timestamp": "The row's non-null unix-seconds SORT KEY: the block timestamp on explorer rows, `confirmed_at ?? created_at` on x402-synthesized rows. Its counterpart for 'when did this settle' is `confirmedAt` (paired above, #3132); on the JSON rows the fallback is marked by `timestampSource` -- the CSV export's settled_at projection of it is not (see the settled-at reason).",
-      "timestampSource": "#3132: which column produced `timestamp` ('block' | 'confirmed_at' | 'created_at') -- the mark that turns the sort key's fallback from a silent substitution into a stated one. A receipt has no sort-key fallback to mark."
+      "timestampSource": "#3132: which column produced `timestamp` ('block' | 'confirmed_at' | 'created_at') -- the mark that turns the sort key's fallback from a silent substitution into a stated one. A receipt has no sort-key fallback to mark.",
+      "deliveryReference": "#3778: the NON-SECRET pointer to a delivered good (machine_payment_evidence.delivery_reference, migration 107) -- what was bought and where to recover it, on the transaction detail drawer and the activity feed. No receipt counterpart: the SDK receipt is the settlement's own protocol proof and does not restate the delivery pointer, and the write-side echo lives on the evidence POST, not the receipt surface (mapPaymentReceipt is untouched). Credential-shaped values are refused at the handler, semantic and recognizer layers."
     }
   },
   "cliConventions": {

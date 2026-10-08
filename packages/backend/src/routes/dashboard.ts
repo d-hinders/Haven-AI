@@ -339,6 +339,8 @@ export default async function dashboardRoutes(
           source: tx.source,
           x402ResourceUrl: tx.x402ResourceUrl,
           x402MerchantAddress: tx.x402MerchantAddress,
+          // #3778: the non-secret delivery pointer, when one was reported.
+          deliveryReference: tx.deliveryReference ?? null,
         }),
       ),
     }

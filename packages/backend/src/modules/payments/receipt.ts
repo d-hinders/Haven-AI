@@ -47,6 +47,15 @@ export interface PaymentReceiptRow extends Partial<BuyerJoinColumns> {
    * null (direct / retired rails / rows without the metadata).
    */
   settlement_scheme?: string | null
+  /**
+   * #3770: the owning agent's evidence-only delivery verdict, joined from
+   * `machine_payment_delivery_reports`. Null while unreported; additive on
+   * the receipt (`payment.deliveryQuality`) and ignored by the verifier,
+   * which reads only `authorization`.
+   */
+  delivery_quality?: string | null
+  delivery_note?: string | null
+  delivery_reported_at?: string | null
 }
 
 /**
@@ -108,6 +117,18 @@ export function buildPaymentReceipt(row: PaymentReceiptRow): PaymentReceipt {
         chainId: row.chain_id,
         settledAt: row.confirmed_at,
         resourceUrl: row.resource_url,
+        // #3770: additive — the agent's own delivery verdict, when reported.
+        // `verifyPaymentReceipt` reads only `authorization`, so this changes
+        // nothing about what a signature covers (same rule as `parties`).
+        // camelCase like the rest of the bundle; null while unreported.
+        deliveryQuality:
+          row.delivery_quality == null
+            ? null
+            : {
+                quality: row.delivery_quality as 'ok' | 'unusable' | 'partial',
+                note: row.delivery_note ?? null,
+                reportedAt: row.delivery_reported_at ?? null,
+              },
       },
       {
         account_address: row.account_address,

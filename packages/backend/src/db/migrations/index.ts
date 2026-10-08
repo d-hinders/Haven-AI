@@ -107,6 +107,7 @@ import * as submissionReconcileExpressionIndex from './105_submission_reconcile_
 import * as feedback from './106_feedback.js'
 import * as catalogCallSemantics from './108_catalog_call_semantics.js'
 import * as deliveryReference from './107_delivery_reference.js'
+import * as machinePaymentDeliveryReports from './109_machine_payment_delivery_reports.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -273,4 +274,5 @@ export const migrations: Migration[] = [
   feedback,
   deliveryReference,
   catalogCallSemantics,
+  machinePaymentDeliveryReports,
 ]

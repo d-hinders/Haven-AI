@@ -176,6 +176,7 @@ export const ROUTE_MODULE_BY_OPERATION: Readonly<Record<string, string>> = Objec
   "POST /machine-payments/send": "routes/machine-payments.ts",
   "POST /machine-payments/sweep/prepare": "routes/machine-payments.ts",
   "POST /machine-payments/sweep/submit": "routes/machine-payments.ts",
+  "POST /machine-payments/{id}/delivery-quality": "routes/machine-payments.ts",
   "POST /machine-payments/{id}/merchant-receipt": "routes/machine-payments.ts",
   "POST /ops/reveal": "routes/ops.ts",
   "POST /organizations": "routes/agent-organizations.ts",

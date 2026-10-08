@@ -66,6 +66,20 @@ export interface PaymentReceipt {
     chainId: number
     settledAt: string | null
     resourceUrl: string | null
+    /**
+     * #3770: the paying agent's own evidence-only verdict on what the
+     * merchant DELIVERED (`ok` / `unusable` / `partial`, plus a bounded
+     * note). Additive and OPTIONAL: a server from before #3770 emits
+     * neither, and `null` means the agent has not reported. Ignored by
+     * `verifyPaymentReceipt`, which reads only `authorization` — the same
+     * rule `parties` follows. Evidence only: it never changes what the
+     * payment itself is, and `settled`/amounts are untouched by a report.
+     */
+    deliveryQuality?: {
+      quality: 'ok' | 'unusable' | 'partial'
+      note: string | null
+      reportedAt: string | null
+    } | null
   }
   /** The agent's cryptographic authorisation — what makes the receipt verifiable. */
   authorization: {

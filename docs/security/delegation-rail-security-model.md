@@ -617,6 +617,21 @@ chain.
 > Scope of this note: those two files. Nothing else in this document was
 > re-verified.
 
+> **Re-verified unchanged (#3770, 2026-10-08 — the delivery-quality report):**
+> this diff touched two files in this document's coverage list,
+> `packages/sdk/src/receipt.ts` and `packages/sdk/src/client.ts`, and none of
+> its authority, custody or signing surfaces. `receipt.ts`'s `payment` block
+> gains one OPTIONAL additive field, `deliveryQuality` — the paying agent's
+> own evidence-only verdict (`ok` / `unusable` / `partial` + note) on what a
+> settled payment DELIVERED — and `verifyPaymentReceipt` still reads only
+> `authorization`, so nothing a signature covers moves (the same rule
+> `parties` follows); `client.ts` gains `reportDeliveryQuality`, a plain POST
+> relay to the backend's agent-scoped report route, which writes a verdict to
+> a new evidence table only and never touches `payment_intents` — `settled`,
+> `tx_hash`, amounts and status are untouched, no signature is produced or
+> consumed, and no spend decision reads the report. Haven holds no new key,
+> grant or credential because of it. Scope of this note: those two files.
+>
 > **Re-verified unchanged (#3781, 2026-10-08 — the catalog tier of the
 > purchase label):** this diff touched one file in this document's coverage
 > list, `packages/sdk/src/client.ts`, and none of its authority, custody or

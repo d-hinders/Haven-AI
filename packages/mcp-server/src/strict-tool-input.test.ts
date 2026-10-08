@@ -51,6 +51,9 @@ import {
 /** Minimum valid arguments for each strict tool, plus the undeclared key to smuggle. */
 const VALID_ARGS: Record<StrictInputToolName, Record<string, unknown>> = {
   haven_report_x402_outcome: { payment_id: 'pay_x402', outcome: 'rejected', merchant_status: 402 },
+  // #3770: reaches the handler (the stubbed Haven answers `{}` and the loop
+  // tolerates what it reads off that).
+  haven_report_delivery_quality: { payment_id: 'pay_1', quality: 'unusable' },
   haven_report_settlement_evidence: {
     payment_id: 'pay_7710',
     settlement_tx_hash: '0x' + 'ab'.repeat(32),
@@ -148,6 +151,9 @@ const OFFLINE_TOOLS: Partial<Record<StrictInputToolName, string>> = {
  */
 const SMUGGLED_KEY: Record<StrictInputToolName, string> = {
   haven_report_x402_outcome: 'tx_hash',
+  // #3770: a money field this tool deliberately does not take — the amount
+  // is the payment record's, not the report's.
+  haven_report_delivery_quality: 'amount',
   // #2972: `rail` is one of the fields this tool reads from the payment's
   // own record (STRICT_INPUT_TOOLS.haven_report_settlement_evidence), not an
   // invented key.
@@ -619,7 +625,7 @@ describe('#2348 — the crossover keys are the LOCAL surface\'s real spellings',
     ]) {
       expect(Object.keys(STRICT_INPUT_TOOLS)).toContain(tool)
     }
-    expect(Object.keys(STRICT_INPUT_TOOLS)).toHaveLength(26)
+    expect(Object.keys(STRICT_INPUT_TOOLS)).toHaveLength(27)
     // And the two deliberate exclusions, as a literal list for the same reason.
     expect(Object.keys(PERMISSIVE_INPUT_TOOLS).sort()).toEqual(
       ['haven_get_agent', 'haven_get_allowances'],

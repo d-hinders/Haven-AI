@@ -68,6 +68,7 @@ const PINNED_TOOL_NAMES: readonly HostedToolName[] = [
   'haven_pay_x402_quote',
   'haven_resume_x402_payment',
   'haven_report_x402_outcome',
+  'haven_report_delivery_quality',
   'haven_report_settlement_evidence',
   'haven_get_payment_status',
   'haven_get_resume_state',

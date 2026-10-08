@@ -2086,6 +2086,22 @@ export class HavenClient {
   }
 
   /**
+   * #3770: record the agent's evidence-only delivery verdict on a settled
+   * payment — `ok`, `unusable` or `partial`, with a bounded note. The
+   * receipt reads (`haven_list_receipts` / `haven_get_receipt`) then carry
+   * it beside the payment. Moves no money and never changes `settled`;
+   * another agent's payment is refused (404), an unsettled one refused
+   * (409).
+   */
+  async reportDeliveryQuality(input: {
+    paymentId: string
+    quality: 'ok' | 'unusable' | 'partial'
+    note?: string
+  }): Promise<{ payment_id: string; quality: string; note: string | null; updated_at: string }> {
+    return await this.merchantCompletion.reportDeliveryQuality(input)
+  }
+
+  /**
    * GET /x402/:id/merchant-call-context — the settle-leg twin of #1263's
    * sign-context fetch (#1307). Re-serves the stored merchant MCP-tool call
    * context (merchant_url, tool_name, arguments, mcp_transport — and the

@@ -8084,6 +8084,62 @@ export const openapiSpec = {
         },
       },
     },
+    '/machine-payments/{id}/delivery-quality': {
+      post: {
+        tags: ['Machine payments'],
+        operationId: 'reportDeliveryQuality',
+        summary: 'Record the agent’s evidence-only delivery verdict for a settled payment.',
+        description:
+          '#3770 — lets the agent that made a payment say what the merchant DELIVERED: "ok", "unusable" or "partial", with an optional bounded note (max 2000 characters). ' +
+          'Evidence only: it moves no money, never alters any money field, and never changes the payment — `settled` stays the on-chain fact it already was. ' +
+          'Only the paying agent can report (another agent’s payment is 404), and only once the payment is settled (409 otherwise). ' +
+          'A re-report replaces the same agent’s earlier verdict; it never touches another agent’s report. ' +
+          'The receipt reads (`GET /receipts` rows and the signed receipt bundle) carry the verdict beside the payment once recorded.',
+        security: [{ AgentApiKey: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+            description: 'The payment id (intent) the verdict is about.',
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/MachinePaymentDeliveryQualityRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Verdict recorded.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['payment_id', 'quality', 'note', 'updated_at'],
+                  properties: {
+                    payment_id: uuid,
+                    quality: { type: 'string', enum: ['ok', 'unusable', 'partial'] },
+                    note: { type: ['string', 'null'] },
+                    updated_at: isoDateTime,
+                  },
+                  additionalProperties: false,
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': agentAuthForbidden,
+          '404': errorResponse,
+          '409': errorResponse,
+        },
+      },
+    },
     '/machine-payments/{id}/merchant-receipt': {
       post: {
         tags: ['Machine payments'],
@@ -12455,6 +12511,12 @@ export const openapiSpec = {
           challenge_id: { type: ['string', 'null'] },
           idempotency_key: { type: ['string', 'null'] },
           merchant_status: { type: ['integer', 'null'] },
+          // #3770: the paying agent's evidence-only delivery verdict, when
+          // reported. Nullable = not reported; never gates anything and the
+          // payment itself is unchanged.
+          delivery_quality: { type: ['string', 'null'], enum: ['ok', 'unusable', 'partial', null] },
+          delivery_note: { type: ['string', 'null'] },
+          delivery_reported_at: { type: ['string', 'null'], format: 'date-time' },
           confirmed_at: { anyOf: [isoDateTime, { type: 'null' }] },
           created_at: isoDateTime,
           updated_at: isoDateTime,
@@ -12495,6 +12557,19 @@ export const openapiSpec = {
           // `@haven_ai/core`'s `deliveryReferenceError`) because "looks like
           // a credential" is not a JSON-Schema statement.
           deliveryReference: { type: 'string', maxLength: 512 },
+        },
+        additionalProperties: false,
+      },
+      // #3770: the delivery-quality report body. `note` is a plain string —
+      // the 2000-char bound is the MODULE's semantic refusal (400 with a
+      // named reason), and the DB CHECK (migration 109) is the backstop; the
+      // shape check states only the shape.
+      MachinePaymentDeliveryQualityRequest: {
+        type: 'object',
+        required: ['quality'],
+        properties: {
+          quality: { type: 'string', enum: ['ok', 'unusable', 'partial'] },
+          note: { type: 'string' },
         },
         additionalProperties: false,
       },

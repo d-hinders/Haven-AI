@@ -486,6 +486,17 @@ merchant it came from and never echo or log it.
 Do not call \`haven_get_agent\` or \`haven_get_allowances\` again just to
 report a purchase you already made.
 
+**When the delivered output was unusable, say so.** If a paid call returned
+an error body, empty content, or gibberish — anything the user cannot use —
+record it with \`mcp__haven__haven_report_delivery_quality\`:
+\`payment_id\`, \`quality\` (\`"ok"\` when the output served its purpose,
+\`"unusable"\` when it was paid but could not be used, \`"partial"\` when
+only part of it was usable), and an optional \`note\` (max 2000 characters)
+saying what was wrong. It is evidence only: it moves no money, never changes
+\`settled\` or any money field, and works only on your own settled
+payments — another agent's payment is refused. A re-report replaces your
+earlier verdict; the receipt then carries it beside the payment, so the
+owner does not read a junk delivery as a success.
 ### Relay a delivered code or credential to the owner — immediately, verbatim
 
 If a merchant response carries what the user PAID FOR — a redemption code, gift

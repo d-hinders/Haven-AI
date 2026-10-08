@@ -201,6 +201,15 @@ export interface MachinePaymentEvidenceRow {
    * on-chain (`modules/x402/eip3009-settlement-evidence.ts`). Null until one is.
    */
   verified_merchant_settlement_tx_hash?: string | null
+  /**
+   * #3770: the calling agent's evidence-only delivery verdict, joined from
+   * `machine_payment_delivery_reports` (LIST_EVIDENCE_RECEIPTS_SQL). Null
+   * while the agent has reported nothing — it never gates anything and
+   * never changes the payment.
+   */
+  delivery_quality?: string | null
+  delivery_note?: string | null
+  delivery_reported_at?: string | null
   /** #3332: joined from `owner_company_details` on `user_id` — `OWNER_COMPANY_DETAILS_JOIN_COLUMNS`. */
   buyer_legal_name?: string | null
   buyer_country?: string | null
@@ -819,6 +828,13 @@ export function mapEvidence(row: MachinePaymentEvidenceRow) {
       // at the read surfaces instead (SDK type doc, tool description).
       protocol_receipt_payload: row.protocol_receipt_payload,
       merchant_status: row.merchant_status,
+      // #3770: the agent's own delivery verdict, when it reported one.
+      // Evidence-only — it never gates anything and the payment itself is
+      // unchanged; declared on the served schema (MachinePaymentReceipt) as
+      // nullable so absence reads as "not reported".
+      delivery_quality: row.delivery_quality ?? null,
+      delivery_note: row.delivery_note ?? null,
+      delivery_reported_at: row.delivery_reported_at ?? null,
       // #3778: the non-secret delivery pointer, echoed on the receipt — the
       // owner's "a deliverable exists and here is the pointer to it" field.
       // Written only from validated input (see `attachMachinePaymentEvidence`),

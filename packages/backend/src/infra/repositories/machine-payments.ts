@@ -383,6 +383,50 @@ export async function attachEvidenceProof<R extends QueryRow>(
   return result.rows[0] ?? null
 }
 
+// ── Delivery-quality reports (#3770) ─────────────────────────────────────────
+
+/**
+ * #3770: the agent's evidence-only verdict on what a settled payment
+ * DELIVERED. One row per (payment, agent); a re-report replaces the agent's
+ * own row (last write wins, never another agent's). Writes NOTHING on
+ * `payment_intents` — the report cannot touch `status`, `tx_hash`, any
+ * amount, or `settled`; it is a fact ABOUT the payment, recorded beside it.
+ */
+export const UPSERT_DELIVERY_QUALITY_SQL = `
+  INSERT INTO machine_payment_delivery_reports
+    (payment_intent_id, agent_id, user_id, quality, note)
+  VALUES ($1, $2, $3, $4, $5)
+  ON CONFLICT (payment_intent_id, agent_id)
+  DO UPDATE SET quality = EXCLUDED.quality, note = EXCLUDED.note, updated_at = NOW()
+  RETURNING quality, note, updated_at
+`
+
+export interface DeliveryQualityReportRow {
+  quality: 'ok' | 'unusable' | 'partial'
+  note: string | null
+  updated_at: string
+}
+
+export async function upsertDeliveryQualityReport(
+  input: {
+    paymentIntentId: string
+    agentId: string
+    userId: string
+    quality: DeliveryQualityReportRow['quality']
+    note: string | null
+  },
+  db: Executor = pool,
+): Promise<DeliveryQualityReportRow> {
+  const result = await db.query<DeliveryQualityReportRow>(UPSERT_DELIVERY_QUALITY_SQL, [
+    input.paymentIntentId,
+    input.agentId,
+    input.userId,
+    input.quality,
+    input.note,
+  ])
+  return result.rows[0]
+}
+
 /**
  * #3778: record the delivery reference on an EXISTING evidence row — the
  * #3475 eip3009 settlement branch of `attachMachinePaymentEvidence` returns
@@ -423,10 +467,14 @@ export const LIST_EVIDENCE_RECEIPTS_SQL = `SELECT e.*, pi.machine_metadata->>'se
               pi.machine_metadata->>'merchant_settlement_tx_hash' AS verified_merchant_settlement_tx_hash,
               pi.budget_delegation_hash,
               pi.delegate_address AS intent_delegate_address,
+              dq.quality AS delivery_quality,
+              dq.note AS delivery_note,
+              dq.updated_at AS delivery_reported_at,
               ${OWNER_COMPANY_DETAILS_JOIN_COLUMNS}
        FROM machine_payment_evidence e
        LEFT JOIN payment_intents pi ON pi.id = e.payment_intent_id
        LEFT JOIN owner_company_details ocd ON ocd.user_id = e.user_id
+       LEFT JOIN machine_payment_delivery_reports dq ON dq.payment_intent_id = e.payment_intent_id AND dq.agent_id = e.agent_id
        WHERE e.agent_id = $1
          AND ($3::uuid IS NULL OR (e.created_at, e.id) < (
            SELECT c.created_at, c.id FROM machine_payment_evidence c WHERE c.id = $3::uuid AND c.agent_id = $1

@@ -61,6 +61,7 @@ const boundary: ClientBoundary = {
     'precheckBudget',
     'quoteMcpX402',
     'quoteX402',
+    'reportDeliveryQuality', // #3770
     'reportSettlementEvidence',
     'reportX402MerchantOutcome',
     'resumeAuthorizedX402',
@@ -120,6 +121,8 @@ const boundary: ClientBoundary = {
     "async prepareX402Erc7710(paymentRequired: X402PaymentRequired, options: { resourceUrl?: string; delegationRail?: boolean; mcpCallContext?: X402McpCallContext; idempotencyKey?: string; taskBudgetId?: string; subBudgetId?: string; } = {}): Promise<{ paymentId: string; signData: SignData; settlement: Omit<X402Erc7710Settlement, 'paymentHeader'>; }>",
     "async quoteMcpX402(url: string, init?: RequestInit, options: X402AuthorizationOptions = {}): Promise<X402Quote>",
     "async quoteX402(url: string, init?: RequestInit, options: X402AuthorizationOptions = {}): Promise<X402Quote>",
+    // #3770: the delivery-quality report — evidence-only, moves no money.
+    "async reportDeliveryQuality(input: { paymentId: string; quality: 'ok' | 'unusable' | 'partial'; note?: string; }): Promise<{ payment_id: string; quality: string; note: string | null; updated_at: string; }>",
     "async resumeAuthorizedX402(input: ResumeAuthorizedX402Input): Promise<X402Receipt>",
     "async resumeX402Payment(input: ResumeX402PaymentInput | X402ResumeState): Promise<Response>",
     "async reportX402MerchantOutcome(input: { paymentId: string; outcome: X402MerchantOutcome; merchantStatus: number; merchantBody?: string; deliveryReference?: string; }): Promise<X402MerchantOutcomeReport>",

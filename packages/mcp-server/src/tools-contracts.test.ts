@@ -48,6 +48,8 @@ const HOSTED_TOOL_NAMES: readonly HostedToolName[] = [
   'haven_pay_x402_quote',
   'haven_resume_x402_payment',
   'haven_report_x402_outcome',
+  // #3770: the delivery-quality report.
+  'haven_report_delivery_quality',
   'haven_report_settlement_evidence',
   'haven_get_payment_status',
   'haven_get_resume_state',
@@ -66,10 +68,10 @@ const HOSTED_TOOL_NAMES: readonly HostedToolName[] = [
 ]
 
 describe('hosted tool contract surface (#2807 characterization)', () => {
-  it('advertises exactly the 28 hosted tool names, each exactly once', () => {
+  it('advertises exactly the 29 hosted tool names, each exactly once', () => {
     const schemaKeys = Object.keys(toolSchemas)
-    expect(schemaKeys).toHaveLength(28)
-    expect(new Set(schemaKeys).size).toBe(28)
+    expect(schemaKeys).toHaveLength(29)
+    expect(new Set(schemaKeys).size).toBe(29)
     expect([...schemaKeys].sort()).toEqual([...HOSTED_TOOL_NAMES].sort())
   })
 
@@ -191,12 +193,13 @@ describe('hosted tool contract surface (#2807 characterization)', () => {
 
   it('advertising and registration stay in 1:1 correspondence through the facade', () => {
     // Every advertised name is registrable and every registrable name is
-    // advertised — the invariant `server.ts`'s for-loop depends on.
+    // advertised — the invariant `server.ts`'s for-loop depends on. 29 since
+    // #3770 added haven_report_delivery_quality.
     const advertised = new Set(Object.keys(toolSchemas))
     for (const name of advertised) {
       expect(toolDescriptions[name as HostedToolName]).toBeTruthy()
       expect(toolInputSchema(name as HostedToolName)).toBeTruthy()
     }
-    expect(advertised.size).toBe(28)
+    expect(advertised.size).toBe(29)
   })
 })

@@ -703,6 +703,9 @@ describe('haven_prepare_catalog_purchase', () => {
       merchantUrl: 'http://merchant.test/mcp',
       toolName: 'create_text',
       arguments: { prompt: 'Hello' },
+      // #3781: the catalog row's name rides the persisted context so the
+      // settle leg can report the catalog tier of the purchase label.
+      catalogName: 'CloudNest 50GB',
     })
   })
 
@@ -1407,6 +1410,8 @@ describe('haven_prepare_catalog_purchase', () => {
         merchantUrl: 'http://merchant.test/mcp',
         toolName: 'create_text',
         arguments: { prompt: 'Hello' },
+        // #3781: the catalog tier rides BOTH scheme branches — same object.
+        catalogName: 'CloudNest 50GB',
       })
     })
 
@@ -2727,6 +2732,10 @@ describe('#2051 — cap binds the authorized option', () => {
         arguments: { prompt: 'Hello' },
         mcpTransport: { handshakeRequired: true, source: 'path' },
       })
+      // #3781: a DIRECT haven_pay_mcp_tool purchase has no catalog row — the
+      // persisted context carries no catalogName, so the settle leg keeps the
+      // <merchant host> <tool_name> label tier.
+      expect(x402Body()?.mcpCallContext).not.toHaveProperty('catalogName')
     })
 
     it('the erc7710 pay reason states merchant/tool/mcp_transport fields are optional at settle', async () => {

@@ -5175,7 +5175,7 @@ export type components = {
             /** @description #1058: the erc7710 challenge entry's extra.facilitatorAddresses — the facilitator pin carried into the settlement child delegation. */
             facilitatorAddresses?: string[];
             signature?: string;
-            /** @description #1307: the merchant MCP-tool call this quote was made against (haven_pay_mcp_tool). Persisted so GET /x402/{id}/merchant-call-context can rehydrate it at settle/complete time. */
+            /** @description #1307: the merchant MCP-tool call this quote was made against (haven_pay_mcp_tool / haven_prepare_catalog_purchase). Persisted so GET /x402/{id}/merchant-call-context can rehydrate it at settle/complete time. #3781: catalogName carries Haven's own catalog row name when the purchase came from a catalog entry — display only, never merchant content. */
             mcpCallContext?: {
                 /** Format: uri */
                 merchantUrl: string;
@@ -5183,6 +5183,7 @@ export type components = {
                 arguments?: {
                     [key: string]: unknown;
                 };
+                catalogName?: string;
                 mcpTransport?: {
                     handshakeRequired: boolean;
                     /** @enum {string} */
@@ -5207,6 +5208,7 @@ export type components = {
             arguments?: {
                 [key: string]: unknown;
             };
+            catalog_name?: string;
             mcp_transport?: {
                 handshake_required?: boolean;
                 /** @enum {string} */

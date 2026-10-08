@@ -902,6 +902,10 @@ export function createCatalogPurchaseHandlers(
             merchantUrl,
             toolName: entry.toolName,
             arguments: callArguments,
+            // #3781: Haven's own catalog row name rides the persisted context
+            // so the settle leg can report the catalog tier of the purchase
+            // label. Display only — never merchant content (#1349).
+            catalogName: entry.name,
             ...(quote.mcpTransport ? { mcpTransport: quote.mcpTransport } : {}),
           }
 

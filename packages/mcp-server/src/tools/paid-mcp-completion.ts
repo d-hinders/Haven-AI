@@ -95,6 +95,13 @@ export interface ResolvedMerchantCallContext {
   toolName: string
   toolArguments: Record<string, unknown>
   mcpTransport: X402McpTransport | undefined
+  /**
+   * #3781: the catalog row's name, when the purchase came from a catalog
+   * entry — null when the caller supplied the context explicitly (an explicit
+   * context has no catalog row) or the stored context carries none (a direct
+   * haven_pay_mcp_tool purchase). Display tier of the purchase label only.
+   */
+  catalogName: string | null
 }
 
 /** #3101: after an erc7710 settle whose merchant reported a hash — report it if the agent can, else poll. */
@@ -212,6 +219,9 @@ export async function resolveMerchantCallContext(
       merchantUrl: args.merchant_url,
       toolName: args.tool_name,
       toolArguments: (args.arguments as Record<string, unknown> | undefined) ?? {},
+      // #3781: an explicitly-threaded context has no catalog row behind it —
+      // the <merchant host> <tool_name> label applies.
+      catalogName: null,
       // #2282: parse the transport HERE, where the caller can still act on a
       // refusal, rather than deep inside the merchant call after funding.
       mcpTransport: parseMcpTransport(args.mcp_transport),
@@ -241,6 +251,10 @@ export async function resolveMerchantCallContext(
       merchantUrl: ctx.merchantUrl,
       toolName: ctx.toolName,
       toolArguments: ctx.arguments,
+      // #3781: the catalog tier — present only when the purchase came from a
+      // catalog entry (the stored context carries it); absent on a direct
+      // haven_pay_mcp_tool purchase.
+      catalogName: ctx.catalogName ?? null,
       mcpTransport: parseMcpTransport(
         ctx.mcpTransport ? serializeMcpTransport(ctx.mcpTransport) : undefined,
       ),
@@ -276,16 +290,22 @@ export async function resolveMerchantCallContext(
 
 /**
  * #3771: the Haven-derived purchase label for a settle whose merchant result
- * names no product: `<merchant host> <tool_name>`. Both halves are facts the
- * settle call already holds — the merchant URL the call context was resolved
- * against, and the tool that was called — never anything the MERCHANT's
- * response said (#1349: merchant content still sets no display field here
- * beyond the product_name it is explicitly allowed). A URL that will not
- * parse (or none) falls back to the tool name alone — still Haven-derived,
- * still non-null, so `purchase_summary.product` never reads null purely
- * because the merchant's payload was thin.
+ * names no product. #3781 added the FIRST tier: the catalog row's name, when
+ * the purchase came from a catalog entry (`haven_prepare_catalog_purchase` —
+ * Haven's own data, so it is a Haven-derived label, never merchant content
+ * #1349). Without one, the label is `<merchant host> <tool_name>` — both
+ * halves are facts the settle call already holds — the merchant URL the call
+ * context was resolved against, and the tool that was called. A URL that
+ * will not parse (or none) falls back to the tool name alone — still
+ * Haven-derived, still non-null, so `purchase_summary.product` never reads
+ * null purely because the merchant's payload was thin.
  */
-function purchaseFallbackLabel(merchantUrl: string | undefined, toolName: string): string {
+function purchaseFallbackLabel(
+  merchantUrl: string | undefined,
+  toolName: string,
+  catalogName: string | null | undefined = null,
+): string {
+  if (catalogName) return catalogName
   let host: string | null = null
   try {
     host = merchantUrl ? new URL(merchantUrl).host : null
@@ -1210,8 +1230,14 @@ export function createPaidMcpCompletionHandlers(
               allowance: summary7710.allowance,
               hasFundingLeg: false,
               // #3771: the merchant's product_name wins; this is only the gap
-              // filler when the result carries none.
-              fallbackProduct: purchaseFallbackLabel(merchantContext.merchantUrl, merchantContext.toolName),
+              // filler when the result carries none. #3781: the catalog row's
+              // name is the first tier of that filler when the purchase came
+              // from a catalog entry.
+              fallbackProduct: purchaseFallbackLabel(
+                merchantContext.merchantUrl,
+                merchantContext.toolName,
+                merchantContext.catalogName,
+              ),
             })
             return {
               payment_id: args.payment_id,
@@ -1386,8 +1412,13 @@ export function createPaidMcpCompletionHandlers(
           settlementTxHash: merchant.settlement_tx_hash,
           allowance,
           // #3771: same gap filler as the erc7710 settled arm — the merchant's
-          // own product_name still wins when the result carries one.
-          fallbackProduct: purchaseFallbackLabel(merchantContext.merchantUrl, merchantContext.toolName),
+          // own product_name still wins when the result carries one. #3781:
+          // the catalog row's name is the filler's first tier.
+          fallbackProduct: purchaseFallbackLabel(
+            merchantContext.merchantUrl,
+            merchantContext.toolName,
+            merchantContext.catalogName,
+          ),
         })
         // Pick explicit fields — don't spread the raw HTTP status/ok, which would
         // collide with the funding/payment-status meaning an agent expects here.

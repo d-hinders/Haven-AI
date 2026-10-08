@@ -594,6 +594,20 @@ chain.
 > about authority, custody or signing changes. Scope of this note: that one
 > CASE predicate. Nothing else in this document was re-verified.
 
+> **Re-verified unchanged (#3781, 2026-10-08 — the catalog tier of the
+> purchase label):** this diff touched one file in this document's coverage
+> list, `packages/sdk/src/client.ts`, and none of its authority, custody or
+> signing surfaces. `getX402MerchantCallContext` maps one new OPTIONAL
+> rehydrated field — the catalog row's name (`catalog_name` on the wire,
+> `catalogName` on the client type), persisted by
+> `haven_prepare_catalog_purchase` so the settle leg can report the catalog
+> tier of the purchase label. The field is display metadata from Haven's own
+> catalog row: it authorizes nothing, is never merchant content (#1349), and
+> is absent on a direct `haven_pay_mcp_tool` purchase. No signature is
+> produced or consumed, nothing becomes signable or refused differently, and
+> no spend decision reads it. Scope of this note: that one mapping.
+> Nothing else in this document was re-verified.
+
 > **Re-verified unchanged (#3764, 2026-10-08 — the SDK's own settlement-evidence
 > report):** this diff touched one file in this document's coverage list,
 > `packages/sdk/src/client.ts`, and none of its authority, custody or signing

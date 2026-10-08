@@ -106,6 +106,8 @@ export interface X402PaymentIntentRow {
   x402_merchant_address: string | null
   x402_resource_url: string | null
   payment_proof_status: string | null
+  /** `machine_payment_evidence.delivery_reference` (migration 107, #3778). */
+  delivery_reference: string | null
   payment_reconciliation_event_type: string | null
   amount_sek: string | null
   fx_rate_sek: string | null
@@ -338,6 +340,7 @@ export const FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL = `SELECT pi.id,
             pi.x402_merchant_address,
             pi.x402_resource_url,
             mpe.proof_status AS payment_proof_status,
+            mpe.delivery_reference AS delivery_reference,
             mpe.amount_sek AS amount_sek,
             mpe.fx_rate_sek AS fx_rate_sek,
             mpe.fx_source AS fx_source,

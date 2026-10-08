@@ -90,6 +90,7 @@ export async function fetchConfirmedX402Transactions(
       source: 'x402',
       x402ResourceUrl: row.x402_resource_url,
       x402MerchantAddress: toCanonicalAddress(row.x402_merchant_address),
+      deliveryReference: row.delivery_reference ?? null,
       chainId: row.chain_id,
       accountId: row.account_id,
       accountAddress: toCanonicalAddress(row.account_address),

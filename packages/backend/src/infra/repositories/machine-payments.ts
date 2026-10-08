@@ -332,6 +332,7 @@ function evidenceAttachSql(referenceColumn: 'payment_intent_id'): string {
          protocol_receipt_header = COALESCE($9, protocol_receipt_header),
          protocol_receipt_payload = COALESCE($10::JSONB, protocol_receipt_payload),
          merchant_status = COALESCE($11, merchant_status),
+         delivery_reference = COALESCE($12, delivery_reference),
          updated_at = NOW()
      WHERE ${referenceColumn} = $1
        AND agent_id = $2
@@ -352,6 +353,13 @@ export interface AttachEvidenceParams {
   protocolReceiptHeader: string | null
   protocolReceiptPayload: string | null
   merchantStatus: number | null
+  /**
+   * #3778: the optional NON-SECRET delivery pointer ("Bik Bok 5 SEK, order
+   * 6ac7…"). Validated upstream (`@haven_ai/core`'s `deliveryReferenceError`)
+   * — a secret-shaped value never reaches this write. COALESCE keeps the
+   * attach idempotent: a re-attach without one never clears a recorded one.
+   */
+  deliveryReference: string | null
 }
 
 export async function attachEvidenceProof<R extends QueryRow>(
@@ -370,8 +378,31 @@ export async function attachEvidenceProof<R extends QueryRow>(
     input.protocolReceiptHeader,
     input.protocolReceiptPayload,
     input.merchantStatus,
+    input.deliveryReference,
   ])
   return result.rows[0] ?? null
+}
+
+/**
+ * #3778: record the delivery reference on an EXISTING evidence row — the
+ * #3475 eip3009 settlement branch of `attachMachinePaymentEvidence` returns
+ * after the base write without reaching `attachEvidenceProof`, so a reference
+ * supplied with that report would otherwise be dropped. Scoped to the
+ * payment + agent exactly like every other evidence write; a row that does
+ * not exist (base write failed) is a no-op, matching that branch's swallow.
+ */
+export async function setEvidenceDeliveryReference(
+  paymentIntentId: string,
+  agentId: string,
+  deliveryReference: string,
+  db: Executor = pool,
+): Promise<void> {
+  await db.query(
+    `UPDATE machine_payment_evidence
+        SET delivery_reference = $3, updated_at = NOW()
+      WHERE payment_intent_id = $1 AND agent_id = $2`,
+    [paymentIntentId, agentId, deliveryReference],
+  )
 }
 
 // ── Receipts list + evidence echo (routes/machine-payments.ts) ───────────────

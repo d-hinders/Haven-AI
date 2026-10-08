@@ -79,6 +79,7 @@ import {
   type X402ResumeState,
 } from '@haven_ai/sdk'
 import { createHash, randomUUID } from 'node:crypto'
+import { deliveryReferenceError } from '@haven_ai/core'
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
 import { delegationAllowanceBlock } from './support/allowance-block.js'
@@ -240,6 +241,30 @@ type FoldedSettlementEvidence = {
 }
 
 const TX_HASH_PATTERN = /^0x[0-9a-fA-F]{64}$/
+
+/**
+ * #3778: refuse a credential-shaped `delivery_reference` BEFORE anything is
+ * written — the same fail-closed ordering `resolveSettlementEvidence` uses
+ * for the folded evidence. Inline here, not support/: each capability calls
+ * it once and the canonical shape rules live in `@haven_ai/core`
+ * (`deliveryReferenceError`) — this is only the refusal envelope, so a
+ * shared wrapper would be an ownership-map entry for two one-line calls.
+ */
+function assertDeliveryReference(
+  tool: HostedToolName,
+  args: Record<string, any>,
+): void {
+  const value = args.delivery_reference
+  if (value === undefined) return
+  const reason = deliveryReferenceError(String(value))
+  if (!reason) return
+  throw new HostedToolError({
+    code: 'DELIVERY_REFERENCE_REFUSED',
+    statusCode: 400,
+    paymentId: typeof args.payment_id === 'string' ? args.payment_id : undefined,
+    message: `${tool}: ${reason} Nothing was written.`,
+  })
+}
 
 function resolveSettlementEvidence(args: {
   settlement_tx_hash?: string
@@ -1418,6 +1443,10 @@ export function createPlainHttpX402Handlers(
     haven_report_x402_outcome: async (input) =>
       runTool(async () => {
         const args = parseStrict('haven_report_x402_outcome', input)
+        // #3778: refuse a credential-shaped delivery_reference BEFORE the
+        // evidence is resolved and nothing is written — same pre-write
+        // ordering as the evidence resolution below.
+        assertDeliveryReference('haven_report_x402_outcome', args)
         // #3727: resolve and validate the optional folded evidence BEFORE
         // anything is written — a malformed or self-contradictory call
         // refuses here and leaves no partial record.
@@ -1427,6 +1456,12 @@ export function createPlainHttpX402Handlers(
             paymentId: args.payment_id,
             outcome: args.outcome,
             merchantStatus: args.merchant_status,
+            // #3778: the validated non-secret delivery pointer — recorded on
+            // the evidence row (accepted outcomes only) so the owner's
+            // receipt and dashboard show a deliverable exists.
+            ...(args.delivery_reference
+              ? { deliveryReference: args.delivery_reference }
+              : {}),
             ...(args.merchant_body ? { merchantBody: args.merchant_body } : {}),
           })
           .catch((err: unknown) => {

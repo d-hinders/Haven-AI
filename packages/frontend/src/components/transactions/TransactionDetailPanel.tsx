@@ -183,6 +183,7 @@ export default function TransactionDetailPanel({
           {tx.x402MerchantAddress ? <DetailRow label="Merchant" value={addr(tx.x402MerchantAddress)} /> : null}
           {tx.agentName ? <DetailRow label="Agent" value={tx.agentName} /> : null}
           <DetailRow label="Amount" value={`${tx.valueFormatted} ${tx.asset}`} />
+          {tx.deliveryReference ? <DetailRow label="Delivered" value={tx.deliveryReference} /> : null}
           {tx.paymentId ? <DetailRow label="Payment ID" value={<span className="v2-tabular">{truncate(tx.paymentId)}</span>} /> : null}
           {tx.paymentProofStatus ? <DetailRow label="Proof" value={tx.paymentProofStatus} /> : null}
           {tx.settlementScheme ? (

@@ -52,6 +52,8 @@ export interface Transaction {
   source?: string
   x402ResourceUrl?: string | null
   x402MerchantAddress?: string | null
+  /** #3778: the non-secret delivery pointer reported with the x402 outcome. */
+  deliveryReference?: string | null
   paymentId?: string
   paymentProofStatus?: string | null
   paymentFlowStatus?: string | null

@@ -898,6 +898,8 @@ describe('machine payment routes', () => {
         protocol_receipt_header_name: 'Payment-Receipt',
         protocol_receipt_payload: { ok: true },
         merchant_status: 200,
+        // #3778: no reference reported for this seed — null, not absent.
+        delivery_reference: null,
         confirmed_at: '2026-05-15T12:00:00.000Z',
         created_at: '2026-05-15T12:00:01.000Z',
         updated_at: '2026-05-15T12:00:01.000Z',

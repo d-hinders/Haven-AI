@@ -156,7 +156,9 @@ function settlementEvidenceReason(outcome: EvidenceReportOutcome | undefined): s
     return (
       'Funding and merchant settlement both succeeded. Report the result to the user ' +
       'from agent_summary.purchase_summary; `result` is optional raw merchant evidence, ' +
-      'not Haven payment truth. The summary includes remaining allowance/budget when available.'
+      'not Haven payment truth. Merchant-issued credentials in `result` are withheld ' +
+      'unless this call passed include_merchant_credentials=true — never echo or log one. ' +
+      'The summary includes remaining allowance/budget when available.'
     )
   }
   if (outcome.outcome === 'retryable') {
@@ -291,6 +293,123 @@ function purchaseFallbackLabel(merchantUrl: string | undefined, toolName: string
     host = null
   }
   return host ? `${host} ${toolName}` : toolName
+}
+
+/**
+ * #3768 — redaction of MERCHANT-ISSUED credentials from the agent-facing
+ * `result`.
+ *
+ * A settled merchant tool result is forwarded to the agent's context, which is
+ * untrusted (prompt injection, transcripts, logs). Prod QA 2026-10-08 (payment
+ * `79084a5e`, Soundside `create_text`) showed a merchant result carrying two
+ * bearer credentials bound to the agent's delegate EOA inside
+ * `result.structuredContent` — an `x402_session_token` JWT and a `wallet_link`
+ * URL with an embedded JWT — reaching that context verbatim. The default is
+ * WITHHOLD (issue #3768, option 1): `deliverMerchantPayment` redacts before
+ * the result reaches any handler arm, and the settle/complete tools take an
+ * explicit `include_merchant_credentials: true` opt-in that returns the
+ * merchant body unredacted. This is a design decision, not a blanket strip of
+ * merchant sessions: a merchant session (Bitrefill `X-Access-Token`, #3728) is
+ * how an agent avoids paying per call, so the opt-in exists — but it is the
+ * agent's explicit act, never the default.
+ *
+ * What counts as a credential, deliberately conservative and mechanical:
+ *
+ *  1. A JWT-shaped string (three base64url segments joined by dots) — redacted
+ *     by SHAPE, whatever the key is named, including as a substring of a
+ *     longer string (a `wallet_link` URL keeps its shape, loses its token).
+ *  2. A string value under a credential-NAMED key — `*_token`, `*_link`,
+ *     `access_token`, `session` fields (the issue's enumeration), plus the
+ *     other bearer spellings (`secret`, `password`, `api_key`,
+ *     `authorization`, `bearer`, `credential`) — withheld whole, because an
+ *     opaque token a merchant mints is exactly the thing a JWT scan can miss.
+ *
+ * What is NEVER touched: money fields, `settled`/`delivered` markers,
+ * transaction hashes, URLs without embedded JWTs — anything that is not a
+ * string under a credential-named key or JWT-shaped. The same recognizer
+ * redacts the bounded `JSON.stringify` of the merchant body that the
+ * MERCHANT_REJECTED_AFTER_FUNDING refusals echo, so a credential cannot
+ * escape through an error message instead of the result.
+ */
+
+/** The replacement for a whole withheld credential value. */
+export const MERCHANT_CREDENTIAL_WITHHELD = '[merchant credential withheld by Haven]'
+/** The replacement for a JWT-shaped segment found inside a longer string. */
+export const MERCHANT_JWT_REDACTED = '[merchant JWT redacted]'
+
+/** One base64url JWT segment. 16+ chars keeps real-world non-JWTs (ids, versions) out. */
+const JWT_SEGMENT = '[A-Za-z0-9_-]{16,}'
+const IS_JWT = new RegExp(`^${JWT_SEGMENT}\\.${JWT_SEGMENT}\\.${JWT_SEGMENT}$`)
+const JWT_IN_STRING = new RegExp(`${JWT_SEGMENT}\\.${JWT_SEGMENT}\\.${JWT_SEGMENT}`, 'g')
+
+/**
+ * Credential-named keys, matched case-insensitively on a snake_case
+ * normalization (so camelCase `sessionToken` reads `session_token` too).
+ * `token` requires the exact or underscore form (a bare `token` IS matched,
+ * `sort_token`-style keys are too); `link` requires the `_link` suffix — a
+ * bare `link` is NOT a credential (a product link is not); `session` matches
+ * the issue's "session fields" enumeration.
+ */
+const CREDENTIAL_KEY = new RegExp(
+  [
+    '(^|_)(access_?token|refresh_?token|id_?token|session_?token|api_?key|apikey|secret|password|credential|authorization|bearer)(_|$)',
+    '(^|_)token$',
+    '_link$',
+    '(^|_)session(_|$)',
+  ].join('|'),
+  'i',
+)
+
+function isCredentialKey(key: string): boolean {
+  const normalized = key.replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+  return CREDENTIAL_KEY.test(normalized)
+}
+
+/** Maximum traversal depth — merchant bodies arrive via JSON.parse (acyclic); this is belt-and-braces. */
+const REDACTION_MAX_DEPTH = 24
+
+/**
+ * Redact merchant-issued credentials from a parsed merchant response body,
+ * returning a new structure (inputs are never mutated). JSON primitives pass
+ * through untouched; only credential-shaped strings change. When NOTHING in
+ * the body redacts, the input is returned by reference — a clean merchant
+ * body is forwarded exactly as the #1310 pass-through contract pins it, and
+ * only a body that actually carries a credential is rewritten.
+ */
+export function redactMerchantCredentials(value: unknown, depth = 0): unknown {
+  if (typeof value === 'string') return redactCredentialString('', value)
+  if (value === null || typeof value !== 'object') return value
+  if (depth >= REDACTION_MAX_DEPTH) return value
+  if (Array.isArray(value)) {
+    let changed = false
+    const out = value.map((item) => {
+      const redacted = redactMerchantCredentials(item, depth + 1)
+      if (redacted !== item) changed = true
+      return redacted
+    })
+    return changed ? out : value
+  }
+  let changed = false
+  const out: Record<string, unknown> = {}
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    const redacted =
+      typeof item === 'string' ? redactCredentialString(key, item) : redactMerchantCredentials(item, depth + 1)
+    if (redacted !== item) changed = true
+    out[key] = redacted
+  }
+  return changed ? out : value
+}
+
+function redactCredentialString(key: string, value: string): string {
+  if (IS_JWT.test(value)) return MERCHANT_CREDENTIAL_WITHHELD
+  if (key !== '' && isCredentialKey(key)) {
+    if (value.length === 0) return value
+    return MERCHANT_CREDENTIAL_WITHHELD
+  }
+  if (JWT_IN_STRING.test(value)) {
+    return value.replace(JWT_IN_STRING, MERCHANT_JWT_REDACTED)
+  }
+  return value
 }
 
 /**
@@ -610,14 +729,14 @@ export async function deliverMerchantPayment(
           `funds moved — the agent's budget is intact. Ignore this code's sweep guidance: there ` +
           `is no delegate balance to sweep. Re-quote` +
           (notReady.retryAfterS ? ` after approximately ${notReady.retryAfterS}s` : ' later') +
-          `. Merchant response: ${JSON.stringify(result.body).slice(0, 500)}`
+          `. Merchant response: ${JSON.stringify(redactMerchantCredentials(result.body)).slice(0, 500)}`
         : `Merchant refused to deliver the resource (${merchantHttp}). erc7710 has no ` +
           `funding leg, so there is no delegate balance to sweep — ignore this code's sweep ` +
           `guidance. Haven has NOT observed a settlement, but the merchant held a single-use ` +
           `settlement authorization valid for up to the payment window (typically 300s) and ` +
           `may have redeemed it before answering: check haven_get_payment_status after that ` +
           `window and re-quote only if it shows no settlement. ` +
-          `Merchant response: ${JSON.stringify(result.body).slice(0, 500)}`
+          `Merchant response: ${JSON.stringify(redactMerchantCredentials(result.body)).slice(0, 500)}`
       throw new HostedToolError({
         code: AgentPaymentFailureCode.MerchantRejectedAfterFunding,
         message,
@@ -647,7 +766,7 @@ export async function deliverMerchantPayment(
       message:
         `Merchant rejected the payment after funding (${merchantHttp}). ` +
         `The delegate wallet may hold stranded funds — reconcile with haven_sweep_delegate. ` +
-        `Merchant response: ${JSON.stringify(result.body).slice(0, 500)}`,
+        `Merchant response: ${JSON.stringify(redactMerchantCredentials(result.body)).slice(0, 500)}`,
       statusCode: merchantStatus,
       paymentId: args.payment_id,
       status: status?.status ?? 'merchant_rejected_after_funding',
@@ -665,7 +784,16 @@ export async function deliverMerchantPayment(
   return {
     status: result.status,
     ok: result.ok,
-    result: result.body,
+    // #3768: the agent-facing `result` carries merchant-issued credentials
+    // REDACTED unless the caller explicitly opted in
+    // (`include_merchant_credentials: true` on the settle/complete tool
+    // arguments — the flag rides `args` and both handler call sites forward
+    // it). Money fields, `settled`/`delivered` and hashes are untouched; the
+    // recognizer only rewrites credential-shaped strings. The refusal paths
+    // below redact unconditionally — an error echo never delivers a
+    // credential the caller paid nothing to receive.
+    result:
+      args?.include_merchant_credentials === true ? result.body : redactMerchantCredentials(result.body),
     // #2968: the response-level zero-hash ban. `settlementTxHash` here is the
     // MERCHANT's word (the PAYMENT-RESPONSE header, or since #3118 the native
     // MCP profile's `result._meta["x402/payment-response"]`), and the demo merchant's
@@ -1110,7 +1238,9 @@ export function createPaidMcpCompletionHandlers(
                 reason:
                   'Settled directly from the treasury through the budget delegation — no funding ' +
                   'leg, so the delegate wallet never held these funds and there is nothing to sweep. ' +
-                  'Report the result to the user from agent_summary.purchase_summary.',
+                  'Report the result to the user from agent_summary.purchase_summary. Merchant-issued ' +
+                  'credentials in `result` are withheld unless this call passed ' +
+                  'include_merchant_credentials=true — never echo or log one.',
                 summary: {
                   payment_id: args.payment_id,
                   status: summary7710.payment?.status ?? 'settled',

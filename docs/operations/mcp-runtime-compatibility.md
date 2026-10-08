@@ -44,6 +44,7 @@ covers:
   - scripts/verify-connect-bundle.mjs
   - scripts/README.md
   - packages/mcp-server/src/description-size.test.ts
+  - packages/mcp-server/src/log.ts
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/modules/x402/replay.ts
   - packages/backend/src/modules/mpp/budget-precheck.ts
@@ -77,6 +78,44 @@ covers:
   - packages/core/src/client-releases.data.ts
 last-verified: "2026-10-08"
 ---
+
+> **#3768 (2026-10-08, merchant-issued credentials are withheld from the settled `result`):**
+> a settled `haven_settle_mcp_tool` / `haven_complete_mcp_tool` response no longer
+> forwards merchant-issued bearer credentials to the agent verbatim. Prod QA
+> 2026-10-08 (payment `79084a5e`, Soundside `create_text`, Base mainnet) showed
+> `result.structuredContent` carrying an `x402_session_token` JWT and a
+> `wallet_link` URL with an embedded JWT — both bound to the agent's delegate
+> EOA — reaching the untrusted agent context as-is. `deliverMerchantPayment`
+> now redacts the merchant body before any handler arm returns it: JWT-shaped
+> strings are redacted by shape (including embedded in URLs), and string
+> values under credential-named keys (`*_token`, `*_link`, `access_token`,
+> `session`, plus `secret`/`password`/`api_key`/`authorization`/`bearer`/
+> `credential`) are withheld whole. The MERCHANT_REJECTED_AFTER_FUNDING
+> refusals' bounded `Merchant response:` echo redacts unconditionally.
+> - **The opt-in is explicit and per call:** `include_merchant_credentials:
+>   true` on either tool returns the merchant body unredacted — a merchant
+>   session (Bitrefill `X-Access-Token`, #3728) is how an agent avoids paying
+>   per call, so receiving a credential is the agent's deliberate act, never
+>   the default. Money fields, `settled`/`delivered` markers and transaction
+>   hashes are never touched by the recognizer.
+> - **The hosted surface picks this up on deploy**; no local-MCP or connect
+>   release is implicated (the local flow has the agent make the paid retry
+>   itself, so Haven never sees that result).
+> - **An already installed `SKILL.md` stays stale until reinstalled** (its
+>   "Reporting after a purchase" section now documents the withholding; both
+>   byte-pinned copies — `packages/sdk/src/skill-content.ts` and the frontend
+>   twin — were edited identically).
+> - **Persistence paths checked:** the evidence row
+>   (`attachMachinePaymentEvidence`) records status, challenge, proof and
+>   receipt headers — never a result body; the hosted access log
+>   (`packages/mcp-server/src/log.ts`) logs metadata only; the backend
+>   `agent_tool_invocations` audit extracts payment_id/next_action/error-code
+>   only, and its tool allowlist never included the settle/complete tools.
+>   Two body-bearing writes REMAIN verbatim by design, both bounded:
+>   reconciliation-event `retry_body` snippets (written only on a REJECTED
+>   retry, and only from that rejection body) and merchant `x-receipt-json`
+>   receipt documents (the merchant's own document, captured from headers).
+>   Neither is the settled tool result; flagged as accepted residual.
 
 > **#3764 (2026-10-08, the SDK reports the merchant's EIP-3009 settlement hash):**
 > on an accepted merchant answer to a payment WITH a funding leg, the SDK now

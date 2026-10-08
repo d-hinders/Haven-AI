@@ -183,6 +183,26 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
    `docs/product/accounting-connections.md`, and a CASP shard if the change
    touches a covered path (`docs/regulatory/casp-changelog/README.md`).
 
+## The hash a connector renders: the booked transaction (#3767)
+
+`FeedTransaction.txHash` is the hash the accounting surfaces **book** — the
+same transaction ID the Haven UI (#3763) and the block explorer show. On an
+EIP-3009 bridge payment that is the verified merchant settlement leg
+(`machine_metadata.merchant_settlement_tx_hash`, written only after on-chain
+verification); the funding leg rides along as `fundingTxHash` for the receipt
+PDF. When no verified settlement was recorded inside the merchant-report grace
+window (15 minutes, `domain/merchant-report-grace.ts` — the same clock the
+payment status uses), the payment is pushed once under the FUNDING hash, and
+`txHashIsFunding` is true — render that as a labelled funding reference
+(Fortnox: `Tx 0x… (funding leg).`). The booked hash and its label are PINNED on
+the payment's first claim (`pinAccountingBookedTx`), so a settlement that lands
+between two attempts never changes the bytes a retry renders — that is what
+keeps a `paymentId`-derived idempotency key from going terminal on a re-file
+with different bytes (Accounted). `erc7710` payments are one transaction whose
+hash already is the settlement: they are never deferred and `txHashIsFunding`
+is always false. Retired rails carry `txHash: null` and render exactly as they
+did before this contract existed.
+
 ## OAuth `state`, and why the callback consumes it
 
 `POST /accounting/connections/:provider/connect-url` signs a JWT: `sub`,

@@ -47,6 +47,18 @@ export interface FeedTransaction {
   fxAt: string | null
   /** The underlag to attach (verifiable receipt / evidence). */
   receiptRef: string
+  /**
+   * #3767: the transaction hash the accounting surfaces BOOK, matching
+   * #3763's Haven UI and the explorer: the verified merchant settlement when
+   * one is recorded (or pinned at the payment's first claim), else the
+   * eip3009 funding hash — labelled as funding by `txHashIsFunding`. Null on
+   * retired / legacy rails, whose rendering stays exactly as before.
+   */
+  txHash: string | null
+  /** True when `txHash` is the eip3009 FUNDING leg (the fallback after the window). */
+  txHashIsFunding: boolean
+  /** The funding leg, carried as secondary reference when a settlement hash is booked. */
+  fundingTxHash: string | null
   /** The merchant's own receipt when captured (#956) — attached as a second file. */
   merchantReceipt?: { url: string | null; inlineJson: unknown | null } | null
   /** A *suggestion* only (the user's per-merchant override) — never an asserted account. */
@@ -160,6 +172,10 @@ export function toFeedTransaction(
     fxSource: entry.fxSource,
     fxAt: toIso(entry.fxAt),
     receiptRef: entry.receiptRef,
+    // #3767: the booked hash + label, decided once in `toAccountingEntry`.
+    txHash: entry.bookedTxHash,
+    txHashIsFunding: entry.bookedTxHashIsFunding,
+    fundingTxHash: entry.fundingTxHash,
     merchantReceipt: entry.merchantReceipt ?? null,
     suggestedAccount: entry.account ?? opts.connectionSuggestedAccount ?? null,
   }

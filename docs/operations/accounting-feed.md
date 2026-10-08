@@ -500,6 +500,44 @@ failure, the others get no claim and no `attempts + 1`. A `Retry-After` is
 honoured as a courtesy when a provider sends one (Fortnox sends none), clamped
 to the 1 h cap.
 
+## The booked hash: wait, then push (#3767)
+
+Every accounting surface books ONE hash, decided once in `toAccountingEntry`
+(`modules/accounting/entry.ts`) and consumed everywhere — the feed
+transaction, the SIE `#VER` text, the legacy Fortnox voucher description and
+the receipt underlag PDF:
+
+- the **verified merchant settlement** (`machine_metadata.merchant_settlement_tx_hash`,
+  recorded and chain-verified by the #3475 evidence path) when one is recorded;
+- else the **funding hash, labelled as funding**.
+
+That is the same hash #3763 headlines in the Haven UI, so the books, the UI
+and the explorer name the same transaction.
+
+**The pre-claim deferral.** An eip3009 payment whose settlement is not yet
+recorded is not fed until `merchantReportGraceElapsed` says the
+#3763/#3764 merchant-report grace window (`merchantReportGraceMin` — the one
+resolved value, never a hard-coded copy) has passed, OR a settlement is
+recorded — whichever comes first. This applies to manual Sync now too: the
+window is about which transaction the books will carry forever, not about
+load. No sync row is written and no attempt is consumed while waiting. A
+settled-before-activation payment has no claim row at all — the #2867
+backfill owns that history, on the user's explicit choice.
+
+**The pin.** On the first successful claim the booked hash is written to
+`payment_intents.machine_metadata.accounting_booked_tx_hash[_kind]`
+(`PIN_ACCOUNTING_BOOKED_TX_SQL`). First-writer-wins: the pin is never
+replaced, so a settlement recorded between two attempts cannot change the
+bytes a destination already saw — the retry re-pushes the identical
+transaction rather than an `IDEMPOTENCY_KEY_REUSE` refusal. A pin failure
+fails the push without attempting it, so the retry re-runs the whole claim.
+
+**The sweep's second selection.** The due query gained a UNION arm for
+payments that have an evidence row but NO sync row yet (evidence recorded
+before the destination existed, or a previous feed that died before
+claiming): same connection/auto-feed/FX gates, eip3009 only, no recorded
+settlement, no pin, no sync row, and outside the same grace window.
+
 ## Ops signals: log events, counters, alert thresholds
 
 Four structured events (#2872), every line carrying `event`, so one grep —

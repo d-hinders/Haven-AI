@@ -27,6 +27,8 @@ const DATA = {
   resourceUrl: 'https://merchant.example/vpn',
   chainId: 84532,
   txHash: '0x' + 'cd'.repeat(32),
+  txHashIsFunding: false,
+  fundingTxHash: null,
   delegate: '0x' + 'ef'.repeat(20),
   signHash: '0x' + '12'.repeat(32),
   signature: '0x' + '34'.repeat(65),
@@ -48,6 +50,9 @@ const TX = {
   fxSource: 'riksbank',
   fxAt: '2026-07-15T09:30:00.000Z',
   receiptRef: 'evidence-1',
+  txHash: '0x' + 'cd'.repeat(32),
+  txHashIsFunding: false,
+  fundingTxHash: null,
   suggestedAccount: null,
 }
 
@@ -199,5 +204,40 @@ describe('underlag currency (#2877)', () => {
     const pdf = underlagFromData(DATA).pdf.toString('latin1')
     expect(pdf).toContain('Book value     10.42 SEK')
     expect(pdf).not.toContain('Haven SEK ref')
+  })
+})
+
+/** #3767: the PDF names the same transaction the Haven UI and exports do. */
+describe('receipt-underlag #3767 booked hash', () => {
+  const SETTLEMENT = '0x' + '5e'.repeat(32)
+  const FUNDING = '0x' + 'f1'.repeat(32)
+
+  it('a settlement booking shows the settlement hash, and the funding leg under it', () => {
+    const { pdf } = underlagFromData({ ...DATA, txHash: SETTLEMENT, txHashIsFunding: false, fundingTxHash: FUNDING })
+    const s = pdf.toString('latin1')
+    expect(s).toContain(`Tx hash        ${SETTLEMENT}`)
+    expect(s).toContain(`Funding tx     ${FUNDING}`)
+  })
+
+  it('a funding fallback booking labels the funding hash as the funding leg', () => {
+    const { pdf } = underlagFromData({ ...DATA, txHash: FUNDING, txHashIsFunding: true, fundingTxHash: null })
+    const s = pdf.toString('latin1')
+    expect(s).toContain(`Funding tx     ${FUNDING}`)
+    expect(s).not.toContain('Tx hash')
+    expect(s).not.toContain(SETTLEMENT)
+  })
+
+  it('CONTROL: the two hashes are distinct strings', () => {
+    expect(SETTLEMENT).not.toBe(FUNDING)
+  })
+
+  it('a retired rail keeps the legacy layout: the raw tx hash, unlabeled, no funding leg', () => {
+    // What loadReceiptUnderlag feeds for a scheme-less rail: booked hash
+    // null → the loader passes the raw `tx_hash` through (line `txHash: tx.txHash ?? row.tx_hash`).
+    const { pdf } = underlagFromData({ ...DATA, txHash: '0x' + 'cd'.repeat(32), txHashIsFunding: false, fundingTxHash: null })
+    const s = pdf.toString('latin1')
+    expect(s).toContain(`Tx hash        ${'0x' + 'cd'.repeat(32)}`)
+    expect(s).not.toContain('Funding tx')
+    expect(s).not.toContain(SETTLEMENT)
   })
 })

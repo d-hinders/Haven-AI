@@ -11,7 +11,7 @@ describe('feed-sync dedup ledger (#497)', () => {
   it('owns a fresh claim (insert wins via the unique constraint)', async () => {
     mockQuery.mockResolvedValueOnce({ rows: [{ id: 'x' }] }) // INSERT ... RETURNING id
     const res = await claimSync('u1', 'fortnox', 'pi1')
-    expect(res).toEqual({ owned: true, status: 'pending' })
+    expect(res).toEqual({ owned: true, status: 'pending', fresh: true })
     expect(mockQuery.mock.calls[0][0]).toContain('ON CONFLICT')
     expect(mockQuery.mock.calls[0][0]).toContain('DO NOTHING')
   })
@@ -22,7 +22,7 @@ describe('feed-sync dedup ledger (#497)', () => {
       .mockResolvedValueOnce({ rows: [] }) // re-claim UPDATE (status != 'failed') → none
       .mockResolvedValueOnce({ rows: [{ status: 'pushed', external_ref: 'fx1' }] }) // getSyncState
     const res = await claimSync('u1', 'fortnox', 'pi1')
-    expect(res).toEqual({ owned: false, status: 'pushed' })
+    expect(res).toEqual({ owned: false, status: 'pushed', fresh: false })
   })
 
   it('re-claims a previously failed payment for retry', async () => {
@@ -30,7 +30,7 @@ describe('feed-sync dedup ledger (#497)', () => {
       .mockResolvedValueOnce({ rows: [] }) // INSERT conflict
       .mockResolvedValueOnce({ rows: [{ id: 'x' }] }) // re-claim UPDATE on status='failed'
     const res = await claimSync('u1', 'fortnox', 'pi1')
-    expect(res).toEqual({ owned: true, status: 'pending' })
+    expect(res).toEqual({ owned: true, status: 'pending', fresh: false })
     // #1365: skipped rows are re-claimable exactly like failed ones.
     expect(mockQuery.mock.calls[1][0]).toContain("status IN ('failed', 'skipped')")
   })

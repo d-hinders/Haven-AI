@@ -41,13 +41,22 @@ function sieField(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
 }
 
+/**
+ * #3767: the #VER text carries the BOOKED hash — the verified merchant
+ * settlement when one is recorded (or pinned at the first claim), else the
+ * funding hash labelled as funding — so the pulled SIE export names the same
+ * transaction the Haven UI and the explorer do. Retired / legacy rails carry
+ * no booked hash and render exactly as before. SIE is a pulled surface: it
+ * shows whatever is recorded at export time.
+ */
 function verificationText(entry: AccountingEntry): string {
-  return (
+  const base =
     entry.counterparty.name ??
     entry.counterparty.address ??
     entry.resourceUrl ??
     'Agent payment'
-  )
+  if (!entry.bookedTxHash) return base
+  return `${base} (Tx ${entry.bookedTxHash}${entry.bookedTxHashIsFunding ? ', funding leg' : ''})`
 }
 
 export const sieExporter: LedgerExporter = {

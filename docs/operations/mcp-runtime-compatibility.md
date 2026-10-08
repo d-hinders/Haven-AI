@@ -5293,5 +5293,19 @@ to call next in structured fields, and those fields are typed end to end
 > dashboard's history/activity views and the CSV export. No tool is added,
 > renamed or re-shaped; no `haven_*` tool schema, description fragment or
 > failure envelope moves; the version-skew and consent-hash contracts do not
-> move. `last-verified` is bumped to 2026-10-08 for exactly this coverage.
+> `last-verified` is bumped to 2026-10-08 for exactly this coverage.
 > Nothing else in this document was re-verified.
+
+> **#3767 re-verification (2026-10-08, the merchant-report grace's home).** This
+> diff touches `modules/payments/agent-payment-status.ts`, a covered file: the
+> #2145 grace window's resolved value (`MERCHANT_REPORT_GRACE_MIN`, its QA
+> override and `merchantReportGraceElapsed`) moved to a domain leaf
+> (`domain/merchant-report-grace.ts`) and is re-exported from the status module
+> under the SAME names — the status module's answers, and every field they
+> carry, are byte-identical. The move exists so the accounting feed (#3767)
+> can wait out the SAME window on the SAME clock without importing the status
+> module (a module cycle). No tool is added, renamed or re-shaped; no
+> `haven_*` tool schema, description fragment or failure envelope moves; the
+> version-skew and consent-hash contracts do not move. `last-verified` stays
+> 2026-10-08 for exactly this coverage. Nothing else in this document was
+> re-verified.

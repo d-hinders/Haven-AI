@@ -40,7 +40,16 @@ export interface ReceiptUnderlagData {
   merchantAddress: string | null
   resourceUrl: string | null
   chainId: number | null
+  /**
+   * #3767: the hash the surface BOOKS — the verified merchant settlement when
+   * one is recorded (or pinned at the first claim), else the funding hash.
+   * `txHashIsFunding` labels the fallback; `fundingTxHash` is the secondary
+   * line shown beside a booked settlement. Null → the raw `tx_hash` renders
+   * as before (retired / legacy rails are unchanged).
+   */
   txHash: string | null
+  txHashIsFunding: boolean
+  fundingTxHash: string | null
   delegate: string | null
   signHash: string | null
   signature: string | null
@@ -119,7 +128,15 @@ export function underlagFromData(data: ReceiptUnderlagData): ReceiptUnderlag {
     '',
     'ON-CHAIN SETTLEMENT',
     `Chain id       ${data.chainId ?? 'n/a'}`,
-    `Tx hash        ${data.txHash ?? 'n/a'}`,
+    // #3767: the settlement hash is the "Tx hash" line (it is what the
+    // merchant and the explorer call the payment), with the funding leg kept
+    // as a secondary line in the same 15-column label style. When only the
+    // funding hash could be booked (no verified settlement within the
+    // window), the funding hash IS the line — labelled as funding.
+    ...(data.txHashIsFunding
+      ? [`Funding tx     ${data.txHash ?? 'n/a'}`]
+      : [`Tx hash        ${data.txHash ?? 'n/a'}`]),
+    ...(data.fundingTxHash ? [`Funding tx     ${data.fundingTxHash}`] : []),
     '',
     'AUTHORIZATION',
     `Delegate       ${data.delegate ?? 'n/a'}`,
@@ -130,8 +147,18 @@ export function underlagFromData(data: ReceiptUnderlagData): ReceiptUnderlag {
     'signature can be checked independently of Haven: fetch the receipt JSON',
     'from the Haven API and check it with verifyPaymentReceipt in the',
     '@haven_ai/sdk package. That confirms the delegate signature (verifiedOver',
-    'names which hash was signed) — the payment facts stay Haven-asserted and',
-    'settlement is proven only by the on-chain transaction above.',
+    ...(data.txHashIsFunding
+      ? [
+          // #3767: true when only the funding leg is shown — that transaction
+          // is NOT the settlement, so the old sentence would overclaim here.
+          'names which hash was signed) — the payment facts stay Haven-asserted. Only',
+          'the funding leg is shown above; the settlement itself is proven by the',
+          "merchant's own transaction, reported separately, not by this document.",
+        ]
+      : [
+          'names which hash was signed) — the payment facts stay Haven-asserted and',
+          'settlement is proven only by the on-chain transaction above.',
+        ]),
   ]
   return {
     // ASCII-only filename; Fortnox rejects exotic characters in metadata too.
@@ -243,7 +270,12 @@ export async function loadReceiptUnderlag(
     merchantAddress: tx.counterparty.address ?? row.merchant_address,
     resourceUrl: tx.resourceUrl,
     chainId: row.chain_id,
-    txHash: row.tx_hash,
+    // #3767: the BOOKED hash — the settlement when available/pinned, the
+    // funding hash labelled as funding after the window, null (raw
+    // `row.tx_hash`) on retired rails so their rendering never moves.
+    txHash: tx.txHash ?? row.tx_hash,
+    txHashIsFunding: tx.txHashIsFunding,
+    fundingTxHash: tx.fundingTxHash,
     delegate: row.delegate_address,
     signHash: row.sign_hash,
     signature: row.signature,

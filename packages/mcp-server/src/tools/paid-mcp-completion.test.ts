@@ -604,12 +604,16 @@ describe('haven_settle_mcp_tool', () => {
 
   /**
    * #3497 item 2, the tool-name fallback: a settled erc7710 response whose
-   * delivered result carries NO product metadata still reports a product —
-   * the tool name that called the merchant — and it agrees with
-   * purchase_summary's own absent product rather than inventing one there.
-   * (F1's twin above pins the merchant-name path; this pins the fallback.)
+   * delivered result carries NO product metadata still reports a product.
+   * #3771: `purchase_summary.product` no longer stays null in that case —
+   * it takes the Haven-derived `<merchant host> <tool_name>` label built
+   * from the settle call's own context — and `agent_summary.product` (which
+   * reads the same summary) carries the SAME label, so the two fields agree
+   * and the skill's "report from purchase_summary" instruction never hands
+   * an agent a null. (F1's twin above pins the merchant-name path; this
+   * pins the fallback — it fails if the fallback is removed.)
    */
-  it('falls back agent_summary.product to the tool name when the settled erc7710 result names no product', async () => {
+  it('falls back purchase_summary.product AND agent_summary.product to the Haven-derived host+tool label when the settled erc7710 result names no product', async () => {
     stubFetch({})
     const haven = keylessClient()
     vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(
@@ -657,8 +661,13 @@ describe('haven_settle_mcp_tool', () => {
     )
     const data = result.data as Record<string, any>
     expect(data.settled).toBe(true)
-    expect(data.agent_summary.product).toBe('buy_cloud_storage')
-    expect((data.agent_summary.purchase_summary as Record<string, unknown>).product).toBeNull()
+    // #3771: the Haven-derived label — the merchant HOST the settle was
+    // resolved against plus the tool that was called — fills the gap the
+    // merchant's payload leaves. Both fields agree on it.
+    expect(data.agent_summary.product).toBe('merchant.test buy_cloud_storage')
+    expect((data.agent_summary.purchase_summary as Record<string, unknown>).product).toBe(
+      'merchant.test buy_cloud_storage',
+    )
   })
 
   /**
@@ -1073,7 +1082,11 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
     expect(result.data.result).toBe(merchantResult)
     expect(result.data.agent_summary.purchase_summary).toMatchObject({
       status: 'settled',
-      product: null,
+      // #3771: an untrusted blob that merely CLAIMS payment names no product,
+      // but `product` is no longer null for that — the Haven-derived
+      // `<merchant host> <tool_name>` label from the settle context fills the
+      // gap. Nothing in the blob (its fake status/invoice_id) leaks through.
+      product: 'merchant.test create_text',
       asset: null,
       merchant: { address: null, resource_url: null },
       invoice_id: null,

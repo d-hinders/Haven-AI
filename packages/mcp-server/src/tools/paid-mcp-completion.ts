@@ -273,6 +273,27 @@ export async function resolveMerchantCallContext(
 }
 
 /**
+ * #3771: the Haven-derived purchase label for a settle whose merchant result
+ * names no product: `<merchant host> <tool_name>`. Both halves are facts the
+ * settle call already holds — the merchant URL the call context was resolved
+ * against, and the tool that was called — never anything the MERCHANT's
+ * response said (#1349: merchant content still sets no display field here
+ * beyond the product_name it is explicitly allowed). A URL that will not
+ * parse (or none) falls back to the tool name alone — still Haven-derived,
+ * still non-null, so `purchase_summary.product` never reads null purely
+ * because the merchant's payload was thin.
+ */
+function purchaseFallbackLabel(merchantUrl: string | undefined, toolName: string): string {
+  let host: string | null = null
+  try {
+    host = merchantUrl ? new URL(merchantUrl).host : null
+  } catch {
+    host = null
+  }
+  return host ? `${host} ${toolName}` : toolName
+}
+
+/**
  * Deliver the signed X-PAYMENT header to the merchant and shape the result.
  * Shared by haven_complete_mcp_tool (decomposed flow) and haven_settle_mcp_tool
  * (fast flow). Funding has already confirmed before this runs, so a non-2xx
@@ -1060,6 +1081,9 @@ export function createPaidMcpCompletionHandlers(
               settlementTxHash: merchant7710.settlement_tx_hash,
               allowance: summary7710.allowance,
               hasFundingLeg: false,
+              // #3771: the merchant's product_name wins; this is only the gap
+              // filler when the result carries none.
+              fallbackProduct: purchaseFallbackLabel(merchantContext.merchantUrl, merchantContext.toolName),
             })
             return {
               payment_id: args.payment_id,
@@ -1231,6 +1255,9 @@ export function createPaidMcpCompletionHandlers(
           fundingTxHash: funding.txHash ?? null,
           settlementTxHash: merchant.settlement_tx_hash,
           allowance,
+          // #3771: same gap filler as the erc7710 settled arm — the merchant's
+          // own product_name still wins when the result carries one.
+          fallbackProduct: purchaseFallbackLabel(merchantContext.merchantUrl, merchantContext.toolName),
         })
         // Pick explicit fields — don't spread the raw HTTP status/ok, which would
         // collide with the funding/payment-status meaning an agent expects here.

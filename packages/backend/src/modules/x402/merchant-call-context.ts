@@ -112,6 +112,11 @@ export async function getX402MerchantCallContext(
       merchant_url: stored.merchantUrl,
       tool_name: stored.toolName,
       arguments: stored.arguments ?? {},
+      // #3781: Haven's own catalog row name, when the purchase came from a
+      // catalog entry — the settle leg's first-tier purchase label. Absent on
+      // a direct haven_pay_mcp_tool purchase. Display only, never merchant
+      // content (#1349).
+      ...(stored.catalogName ? { catalog_name: stored.catalogName } : {}),
       // #2343: convert the NESTED object too, not just the top-level fields.
       // The stored blob is camelCase throughout (`X402McpCallContextInput`,
       // and `storedMcpCallContext` validates it by reading `merchantUrl` /

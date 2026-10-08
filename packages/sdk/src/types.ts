@@ -520,6 +520,13 @@ export interface X402McpCallContext {
   toolName: string
   arguments?: Record<string, unknown>
   mcpTransport?: X402McpTransport
+  /**
+   * #3781: Haven's own catalog row name, when the purchase came from a
+   * catalog entry — persisted with the context so a settle can report the
+   * catalog row's name as the display product. Optional — omit for a direct
+   * `haven_pay_mcp_tool` call. Haven-derived, never merchant content (#1349).
+   */
+  catalogName?: string
 }
 
 /**
@@ -532,6 +539,8 @@ export interface X402MerchantCallContext {
   toolName: string
   arguments: Record<string, unknown>
   mcpTransport?: X402McpTransport
+  /** #3781: the catalog row's name, when the purchase came from a catalog entry. */
+  catalogName?: string
 }
 
 /** @internal */
@@ -541,6 +550,7 @@ export interface RawX402MerchantCallContext {
   tool_name: string
   arguments?: Record<string, unknown>
   mcp_transport?: { handshake_required: boolean; source: 'path' | 'bazaar' }
+  catalog_name?: string
   error?: string
   error_code?: string
   status?: string

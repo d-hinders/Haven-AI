@@ -2631,6 +2631,9 @@ describe('x402 merchant-call-context by payment_id (#1307)', () => {
     expect(body.mcp_transport).toEqual({ handshake_required: true, source: 'path' })
     expect(typeof body.mcp_transport.handshake_required).toBe('boolean')
     expect('handshakeRequired' in body.mcp_transport).toBe(false)
+    // #3781: a DIRECT haven_pay_mcp_tool purchase has no catalog row — the
+    // key is absent, never null.
+    expect('catalog_name' in body).toBe(false)
     // #2343 (review): the OpenAPI schema for this endpoint ALWAYS declared the
     // correct snake_case nested shape with additionalProperties:false, and the
     // generated @haven_ai/core type always matched it. This one line would have
@@ -2664,6 +2667,33 @@ describe('x402 merchant-call-context by payment_id (#1307)', () => {
     expect(res.statusCode).toBe(200)
     expect('mcp_transport' in res.json()).toBe(false)
     expectMatchesSpec('GET', '/x402/{id}/merchant-call-context', res.json())
+  })
+
+  it('serves catalog_name when the purchase came from a catalog row (#3781)', async () => {
+    // The guided path persists the catalog row's name on the same JSONB blob;
+    // the endpoint re-serves it snake_case so the settle leg can report the
+    // catalog tier of the purchase label. Display only, never merchant
+    // content (#1349).
+    serveIntentRow([{
+      ...CALL_CONTEXT_ROW,
+      machine_metadata: {
+        ...CALL_CONTEXT_ROW.machine_metadata,
+        mcp_call_context: {
+          ...CALL_CONTEXT_ROW.machine_metadata.mcp_call_context,
+          catalogName: 'CloudNest 50GB',
+        },
+      },
+    }])
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/merchant-call-context`,
+      headers: { authorization: 'Bearer «redacted:sk_…»' },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.catalog_name).toBe('CloudNest 50GB')
+    expectMatchesSpec('GET', '/x402/{id}/merchant-call-context', body)
+    // Read-only: nothing was written.
+    expect(mockQuery.mock.calls.some((c) => /INSERT|UPDATE/i.test(String(c[0])))).toBe(false)
   })
 
   it('404s an unknown or foreign payment id (same answer on purpose)', async () => {

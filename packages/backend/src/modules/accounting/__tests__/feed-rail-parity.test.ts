@@ -136,7 +136,12 @@ async function settledEip3009(agentId: string, userId: string) {
     id, agentId, userId, PAYER, TOKEN, MERCHANT, AMOUNT_RAW,
     `0x${String(++seq).padStart(64, 'c')}`.slice(0, 66),
     'confirmed', FUNDING_TX, new Date().toISOString(), 'allowance',
-    JSON.stringify({ settlement_scheme: 'eip3009' }), RESOURCE, null, 200,
+    // #3767: a RECORDED (verified) settlement. The AC forbids this fixture from
+    // deferring its way out — no zero grace, no bypass — so the parity payment
+    // arrives the way #3764's SDK now delivers one: settlement hash already
+    // beside the funding hash, feedable immediately.
+    JSON.stringify({ settlement_scheme: 'eip3009', merchant_settlement_tx_hash: SETTLEMENT_TX }),
+    RESOURCE, null, 200,
   ])
   await recordMachinePaymentEvidenceBaseById(id, agentId)
   return id

@@ -156,9 +156,19 @@ export function feedDescription(tx: FeedTransaction): string {
       return null
     }
   })()
+  // #3767: the booked hash — the verified merchant settlement when one is
+  // recorded (or pinned at the first claim), else the funding hash labelled
+  // as funding. Placed BEFORE `Resource` on purpose: the 512-character slice
+  // cuts from the end, and the worst-case comment (455 chars today) would
+  // otherwise eat a hash appended after `Haven payment`.
+  const bookedTx = (() => {
+    if (!tx.txHash) return null
+    return tx.txHashIsFunding ? `Tx ${tx.txHash} (funding leg).` : `Tx ${tx.txHash}.`
+  })()
   const parts = [
     'Agent payment, already settled on-chain.',
     `Amount ${tx.amountAtomic} ${tx.token} atomic.`,
+    bookedTx,
     resourceHost ? `Resource ${resourceHost}.` : null,
     `Haven payment ${tx.paymentId}.`,
   ].filter(Boolean)

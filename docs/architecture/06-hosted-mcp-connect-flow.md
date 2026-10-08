@@ -22,7 +22,7 @@ covers:
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/modules/x402/authorize.ts
   - packages/frontend/src/components/connect-agent/WaitingForConnector.tsx
-last-verified: "2026-10-05"
+last-verified: "2026-10-08"
 ---
 
 # Haven — Hosted MCP Connect Flow And Edge-Signing Contract
@@ -214,6 +214,30 @@ haven_quote_x402 / haven_pay_x402_quote
 > itself now accepts a bare `payment_id` as a well-formed no-op when the
 > merchant returned no hash. `last-verified` unchanged — nothing else in this
 > file's scope was re-checked.
+
+**Merchant-issued credentials in the settled result
+([#3768](https://github.com/d-hinders/Haven-AI/issues/3768)).** The `result`
+both settle shapes return is the merchant's raw tool result, forwarded through
+the agent's untrusted context. Since the 2026-10-08 prod QA finding (payment
+`79084a5e`, Soundside `create_text`: an `x402_session_token` JWT and a
+`wallet_link` URL with an embedded JWT, both bound to the delegate EOA,
+delivered verbatim inside `result.structuredContent`), `deliverMerchantPayment`
+redacts the merchant body before any settled arm returns it — JWT-shaped
+strings by shape (including embedded in URLs), and values under
+credential-named keys (`*_token`, `*_link`, `access_token`, `session`, plus
+`secret`/`password`/`api_key`/`authorization`/`bearer`/`credential`) whole.
+`include_merchant_credentials: true` on
+`haven_settle_mcp_tool`/`haven_complete_mcp_tool` returns the body unredacted:
+a merchant session (Bitrefill `X-Access-Token`, #3728) is how an agent avoids
+paying per call, so receiving a credential is the agent's explicit act, never
+the default. Money fields, `settled`/`delivered` and hashes are untouched, and
+the refusal paths' bounded `Merchant response:` echo redacts unconditionally.
+Nothing in the persistence path stores a result body: the evidence row records
+status, challenge, proof and receipt headers only
+(`modules/mpp/evidence.ts`), the hosted access log is metadata-only
+(`packages/mcp-server/src/log.ts`), and the `agent_tool_invocations` audit
+persists extracted metadata — its tool allowlist never included the
+settle/complete tools.
 
 **Why the last EIP-3009 step exists at all
 ([#2292](https://github.com/d-hinders/Haven-AI/issues/2292)).** The two

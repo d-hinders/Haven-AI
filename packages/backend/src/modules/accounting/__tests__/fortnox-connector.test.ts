@@ -57,6 +57,9 @@ const TX = {
   fxAt: '2026-07-15T09:30:00.000Z',
   receiptRef: 'receipt-1',
   merchantReceipt: null as { url: string | null; inlineJson: unknown | null } | null,
+  txHash: null as string | null,
+  txHashIsFunding: false,
+  fundingTxHash: null as string | null,
   suggestedAccount: null as string | null,
 }
 
@@ -690,5 +693,62 @@ describe('getCompanyInfo (#2864)', () => {
     const err = await new FortnoxConnector(impl).getCompanyInfo(SECRETS).catch((e: Error) => e)
     expect(String((err as Error).message)).not.toContain('at-1')
     expect(String((err as Error).message)).toBe('Fortnox GET /companyinformation failed (HTTP 500: Internt fel. [2000000]).')
+  })
+})
+
+/** #3767: the comment names the transaction the surfaces booked — settlement first. */
+describe('feedDescription (#3767)', () => {
+  const SETTLEMENT = `0x${'5e'.repeat(32)}`
+  const FUNDING = `0x${'f1'.repeat(32)}`
+
+  function tx(over: Record<string, unknown> = {}) {
+    return {
+      paymentId: 'pi1', settledAt: '2026-10-08T10:00:00.000Z', direction: 'out' as const,
+      counterparty: { address: '0xabc', name: 'M' },
+      resourceUrl: 'https://example.test/r',
+      chainId: 84532,
+      txHash: SETTLEMENT, txHashIsFunding: false, fundingTxHash: FUNDING,
+      token: 'USDC', amountAtomic: '1000000',
+      receiptRef: 'receipt-1', merchantReceipt: null,
+      suggestedAccount: null,
+      ...over,
+    } as never
+  }
+
+  it('the booked Tx sits before Resource — the funding leg stays on the receipt, not the comment', () => {
+    const d = feedDescription(tx())
+    expect(d).toContain(`Tx ${SETTLEMENT}.`)
+    expect(d.indexOf('Tx ')!).toBeLessThan(d.indexOf('Resource')!)
+    expect(d).toContain('Resource example.test.')
+    expect(d.endsWith(`Haven payment pi1.`)).toBe(true)
+  })
+
+  it('labels a funding fallback booking as funding', () => {
+    const d = feedDescription(tx({ txHash: FUNDING, txHashIsFunding: true, fundingTxHash: null }))
+    expect(d).toContain(`Tx ${FUNDING} (funding leg).`)
+    expect(d).not.toContain('Funding tx')
+  })
+
+  it('keeps every character Fortnox-safe and inside the 512 limit at the worst case', () => {
+    const worst = tx({
+      txHash: `0x${'f'.repeat(66)}`, fundingTxHash: `0x${'f'.repeat(66)}`,
+      counterparty: { address: `0x${'a'.repeat(40)}`, name: 'W'.repeat(200) },
+      resourceUrl: 'https://r.example/' + 'x'.repeat(300),
+      receiptRef: 'e' + 'v'.repeat(300),
+    })
+    const d = feedDescription(worst)
+    expect(d.length).toBeLessThanOrEqual(512)
+    expect(d).toMatch(/^[A-Za-z0-9 ,.:+/@()#&=_-]*$/)
+  })
+
+  it('CONTROL: the settled hash and the funding hash are distinct strings', () => {
+    expect(SETTLEMENT).not.toBe(FUNDING)
+  })
+
+  it('a retired rail (no booked hash) renders without a Tx part — unchanged', () => {
+    const d = feedDescription(tx({ txHash: null, txHashIsFunding: false, fundingTxHash: null }))
+    expect(d).not.toContain('Tx ')
+    expect(d).not.toContain('Funding tx')
+    expect(d).toContain('Resource example.test.')
   })
 })

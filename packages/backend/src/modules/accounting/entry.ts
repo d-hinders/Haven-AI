@@ -87,6 +87,24 @@ export interface AccountingEntry {
   fxRates: LedgerRates | null
   /** Haven fee in SEK. Null until the fee ledger (#386) lands. */
   feeSek: string | null
+  /**
+   * #3767: the hash the accounting surfaces BOOK — the verified merchant
+   * settlement when one is recorded (or is pinned from the payment's first
+   * claim), else the funding hash, labelled as funding. Null on retired /
+   * legacy rails, whose rendering stays exactly as it was.
+   */
+  bookedTxHash: string | null
+  /** True when `bookedTxHash` is the eip3009 FUNDING leg (the fallback after the window). */
+  bookedTxHashIsFunding: boolean
+  /** The funding leg, shown as secondary reference when a settlement hash is booked (eip3009). */
+  fundingTxHash: string | null
+  /** `payment_intents.machine_metadata->>'settlement_scheme'`; null on scheme-less rows. */
+  settlementScheme: string | null
+  /** The on-chain-verified merchant settlement hash, read at entry-build time; null when none recorded. */
+  verifiedSettlementTxHash: string | null
+  /** The booked-hash pin written at the payment's first claim (#3767 B2); null when unpinned. */
+  pinnedBookedTxHash: string | null
+  pinnedBookedTxKind: 'settlement' | 'funding' | null
   /** Merchant category from the catalog; feeds the BAS account map. */
   category: string | null
   /** Explicit per-merchant BAS account override (P3); null = use the map. */
@@ -132,6 +150,64 @@ export interface AccountingEntrySourceRow {
   /** Merchant-issued receipt (LEFT JOIN merchant_receipts, #956). */
   merchant_receipt_url?: string | null
   merchant_receipt_json?: unknown
+  /**
+   * The intent-side fields (#3767). Optional in the TYPE only because test
+   * fixtures predate the join; the SQL always selects them (null without an
+   * intent row).
+   */
+  settlement_scheme?: string | null
+  /** The on-chain-verified merchant settlement hash (#3475), via the same join. */
+  verified_settlement_tx_hash?: string | null
+  /** The #3767 booked-hash pin, via the same join. */
+  pinned_booked_tx_hash?: string | null
+  pinned_booked_tx_kind?: string | null
+}
+
+/** A 0x-prefixed 32-byte transaction hash — the same recognizer evidence.ts applies. */
+const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/
+
+/**
+ * #3767: which hash the accounting surfaces book, and how it is labelled.
+ *
+ * - **erc7710** settles in ONE transaction (`tx_hash` IS the settlement) — it
+ *   is booked as before, never deferred (#3763's rule).
+ * - **eip3009** is a two-leg bridge: the verified merchant settlement
+ *   (`machine_metadata.merchant_settlement_tx_hash`, written only after
+ *   on-chain verification by `observeEip3009MerchantSettlement`) is THE
+ *   payment — the same hash #3763's Haven UI and the explorer headline. A
+ *   PINNED hash (written at the payment's first feed claim) wins over
+ *   anything recorded since, so retries render identical bytes (B2). With
+ *   neither, the funding hash is booked and LABELLED as funding.
+ * - **Retired / scheme-less rails are unchanged**: `bookedTxHash` null and
+ *   every rendering falls back to the raw `tx_hash`, exactly as before this
+ *   contract existed (characterization-tested).
+ */
+export function bookedHashForEntry(row: AccountingEntrySourceRow): {
+  bookedTxHash: string | null
+  bookedTxHashIsFunding: boolean
+  fundingTxHash: string | null
+} {
+  if (row.settlement_scheme === 'erc7710') {
+    return { bookedTxHash: row.tx_hash, bookedTxHashIsFunding: false, fundingTxHash: null }
+  }
+  if (row.settlement_scheme !== 'eip3009') {
+    return { bookedTxHash: null, bookedTxHashIsFunding: false, fundingTxHash: null }
+  }
+  if (row.pinned_booked_tx_hash && TX_HASH_RE.test(row.pinned_booked_tx_hash)) {
+    return {
+      bookedTxHash: row.pinned_booked_tx_hash.toLowerCase(),
+      bookedTxHashIsFunding: row.pinned_booked_tx_kind === 'funding',
+      fundingTxHash: null,
+    }
+  }
+  if (row.verified_settlement_tx_hash && TX_HASH_RE.test(row.verified_settlement_tx_hash)) {
+    return {
+      bookedTxHash: row.verified_settlement_tx_hash.toLowerCase(),
+      bookedTxHashIsFunding: false,
+      fundingTxHash: row.tx_hash,
+    }
+  }
+  return { bookedTxHash: row.tx_hash, bookedTxHashIsFunding: true, fundingTxHash: null }
 }
 
 /**
@@ -144,9 +220,20 @@ export interface AccountingEntrySourceRow {
  * time. It remains a flagged treatment the accountant confirms.
  */
 export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntry {
+  const booked = bookedHashForEntry(row)
   return {
     paymentId: row.payment_intent_id ?? row.approval_request_id ?? row.id,
     txHash: row.tx_hash,
+    bookedTxHash: booked.bookedTxHash,
+    bookedTxHashIsFunding: booked.bookedTxHashIsFunding,
+    fundingTxHash: booked.fundingTxHash,
+    settlementScheme: row.settlement_scheme ?? null,
+    verifiedSettlementTxHash: row.verified_settlement_tx_hash ?? null,
+    pinnedBookedTxHash: row.pinned_booked_tx_hash ?? null,
+    pinnedBookedTxKind:
+      row.pinned_booked_tx_kind === 'funding' || row.pinned_booked_tx_kind === 'settlement'
+        ? row.pinned_booked_tx_kind
+        : null,
     chainId: row.chain_id,
     settledAt: row.confirmed_at ?? row.created_at,
     direction: 'out',
@@ -187,6 +274,10 @@ const ENTRY_SOURCE_SQL = `
   mpe.merchant_address, mpe.payer_address, mpe.token_symbol, mpe.amount_raw, mpe.amount_human,
   mpe.amount_sek, mpe.fx_rate_sek, mpe.fx_source, mpe.fx_at, mpe.fx_rates,
   mpe.resource_url, mpe.confirmed_at, mpe.created_at,
+  pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
+  pi.machine_metadata->>'merchant_settlement_tx_hash' AS verified_settlement_tx_hash,
+  pi.machine_metadata->>'accounting_booked_tx_hash' AS pinned_booked_tx_hash,
+  pi.machine_metadata->>'accounting_booked_tx_kind' AS pinned_booked_tx_kind,
   mc.category AS category,
   mc.country AS country,
   mao.bas_account AS override_account,
@@ -194,6 +285,7 @@ const ENTRY_SOURCE_SQL = `
   mr.url AS merchant_receipt_url,
   mr.inline_json AS merchant_receipt_json
   FROM machine_payment_evidence mpe
+  LEFT JOIN payment_intents pi ON pi.id = mpe.payment_intent_id
   LEFT JOIN LATERAL (
     SELECT category, country FROM merchant_catalog
     WHERE resource_url = mpe.resource_url AND status != 'delisted'

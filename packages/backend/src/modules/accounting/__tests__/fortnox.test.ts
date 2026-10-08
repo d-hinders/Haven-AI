@@ -24,6 +24,13 @@ function entry(over: Partial<AccountingEntry> = {}): AccountingEntry {
   return {
     paymentId: 'pi1',
     txHash: '0xabc',
+    bookedTxHash: null,
+    bookedTxHashIsFunding: false,
+    fundingTxHash: null,
+    settlementScheme: null,
+    verifiedSettlementTxHash: null,
+    pinnedBookedTxHash: null,
+    pinnedBookedTxKind: null,
     chainId: 8453,
     settledAt: '2026-06-19T10:00:00.000Z',
     direction: 'out',

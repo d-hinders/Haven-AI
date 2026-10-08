@@ -47,6 +47,12 @@ export interface ClaimResult {
   owned: boolean
   /** The current status after the claim attempt (e.g. 'pushed' when a re-push is short-circuited). */
   status: SyncStatus | null
+  /**
+   * True when this call INSERTED the row — the payment's first claim ever
+   * (#3767). The booked-hash pin is written only on a fresh claim: a re-claim
+   * of a failed row must reuse the decision the first claim already pinned.
+   */
+  fresh: boolean
 }
 
 export const CLAIM_SYNC_INSERT_SQL = `INSERT INTO accounting_feed_syncs (user_id, provider, payment_id, status, attempts)
@@ -120,15 +126,15 @@ export async function claimSync(
 ): Promise<ClaimResult> {
   // Fresh claim — first writer wins via the unique constraint.
   const inserted = await db.query(CLAIM_SYNC_INSERT_SQL, [userId, provider, paymentId])
-  if (inserted.rows.length > 0) return { owned: true, status: 'pending' }
+  if (inserted.rows.length > 0) return { owned: true, status: 'pending', fresh: true }
 
   // Existing row — re-claim for retry only if it previously failed.
   const reclaimed = await db.query(CLAIM_SYNC_RECLAIM_FAILED_SQL, [userId, provider, paymentId])
-  if (reclaimed.rows.length > 0) return { owned: true, status: 'pending' }
+  if (reclaimed.rows.length > 0) return { owned: true, status: 'pending', fresh: false }
 
   // Already pushed, skipped, or in-flight pending — not ours.
   const state = await getSyncState(userId, provider, paymentId, db)
-  return { owned: false, status: state?.status ?? null }
+  return { owned: false, status: state?.status ?? null, fresh: false }
 }
 
 /** Mark a claim delivered — see the header for the `note` (#498) contract. */
@@ -314,7 +320,16 @@ export function retryBackoffMs(attempts: number): number {
 }
 
 /** What the sweep needs per due row — no `error`/`external_ref` payloads. */
-export type DueRetryRow = Pick<FeedSyncRow, 'id' | 'user_id' | 'provider' | 'payment_id' | 'status' | 'attempts'>
+export interface DueRetryRow {
+  /** Null on the #3767 second selection: the payment has NO sync row yet. */
+  id: string | null
+  user_id: string
+  provider: string
+  payment_id: string
+  /** Null on the #3767 second selection — never `pending`, so never released. */
+  status: SyncStatus | null
+  attempts: number
+}
 
 /**
  * Rows the sweep may touch, oldest first, grouped by connection. The JOIN
@@ -330,11 +345,13 @@ export type DueRetryRow = Pick<FeedSyncRow, 'id' | 'user_id' | 'provider' | 'pay
  *   $2 max attempts   RETRY_MAX_ATTEMPTS — the cap, rows at it are never due
  *   $3 base ms / $4 cap ms   the backoff curve
  *   $5 stale claim ms a `pending` row older than this is due (released first)
- *   $6 limit
+ *   $6 grace minutes  the #3767 deferral window (the resolved MERCHANT_REPORT_GRACE_MIN)
+ *   $7 limit
  *
  * MUTATION TARGETS (accounting-feed-syncs.test.ts): `c.status = 'connected'`
  * (the needs_reauthorisation test), `s.attempts < $2` (the cap test), the
- * backoff predicate (the "not before" test).
+ * backoff predicate (the "not before" test), the $6 grace predicate (the
+ * deferral-window test).
  *
  * #2867: a connection with `settings.auto_feed = false` is "manual only" —
  * the user asked that nothing be pushed unless they press Sync now, and the
@@ -342,8 +359,23 @@ export type DueRetryRow = Pick<FeedSyncRow, 'id' | 'user_id' | 'provider' | 'pay
  * are not enumerated at all (the same shape as a state-skipped row: they
  * wait until the cause is gone), so a tick never spends its batch on rows
  * it may not push. Absent key = true.
+ *
+ * #3767 SECOND SELECTION: a pre-claim-deferred eip3009 payment has NO sync
+ * row at all — the deferral returns before `claimSync` — so the first arm
+ * can never see it and, before #3767, it was only ever fed again through
+ * another evidence call, Sync now or the backfill. The second arm selects
+ * exactly those rows: eip3009 evidence with no sync row, FX-ready, behind
+ * the SAME `connected` / active-destination / `auto_feed` / `feed_from`
+ * gates, whose funding confirmation is older than the grace. `feedSettledPayment`
+ * re-checks the deferral before claiming, so a row the sweep catches inside
+ * the window (clock skew between this predicate and the entry read) is
+ * dropped there without a claim. The pin (`accounting_booked_tx_hash`) is
+ * excluded because a pinned payment has already been claimed once — its
+ * sync row exists and the first arm owns it.
  */
-export const LIST_DUE_RETRY_SYNCS_SQL = `SELECT s.id, s.user_id, s.provider, s.payment_id, s.status, s.attempts
+export const LIST_DUE_RETRY_SYNCS_SQL = `SELECT * FROM (
+     SELECT s.id, s.user_id, s.provider, s.payment_id, s.status::text AS status, s.attempts,
+            s.updated_at
      FROM accounting_feed_syncs s
      JOIN accounting_connections c ON c.user_id = s.user_id AND c.provider = s.provider
      WHERE c.status = 'connected' AND c.is_active_destination
@@ -354,8 +386,30 @@ export const LIST_DUE_RETRY_SYNCS_SQL = `SELECT s.id, s.user_id, s.provider, s.p
             AND s.updated_at + LEAST($3::float8 * power(2, LEAST(GREATEST(s.attempts, 1) - 1, 30)), $4::float8) * interval '1 millisecond' <= $1::timestamptz)
          OR (s.status = 'pending' AND s.updated_at + $5::float8 * interval '1 millisecond' <= $1::timestamptz)
        )
-     ORDER BY s.user_id, s.provider, s.updated_at ASC, s.id ASC
-     LIMIT $6`
+     UNION ALL
+     SELECT NULL::uuid AS id, mpe.user_id, c.provider,
+            COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT) AS payment_id,
+            NULL::text AS status, 0::int AS attempts,
+            COALESCE(mpe.confirmed_at, mpe.created_at) AS updated_at
+     FROM machine_payment_evidence mpe
+     JOIN payment_intents pi ON pi.id = mpe.payment_intent_id
+     JOIN accounting_connections c ON c.user_id = mpe.user_id AND c.is_active_destination
+     WHERE c.status = 'connected'
+       AND (c.settings -> 'auto_feed') IS DISTINCT FROM 'false'::jsonb
+       AND (c.feed_from IS NULL OR COALESCE(mpe.confirmed_at, mpe.created_at) >= c.feed_from)
+       AND (mpe.amount_sek IS NOT NULL OR mpe.fx_rates IS NOT NULL)
+       AND pi.machine_metadata->>'settlement_scheme' = 'eip3009'
+       AND pi.machine_metadata->>'merchant_settlement_tx_hash' IS NULL
+       AND pi.machine_metadata->>'accounting_booked_tx_hash' IS NULL
+       AND COALESCE(mpe.confirmed_at, mpe.created_at) + make_interval(mins => $6::int) <= $1::timestamptz
+       AND NOT EXISTS (
+         SELECT 1 FROM accounting_feed_syncs s2
+         WHERE s2.user_id = mpe.user_id AND s2.provider = c.provider
+           AND s2.payment_id = COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT)
+       )
+     ) due
+     ORDER BY due.user_id, due.provider, due.updated_at ASC, due.id ASC
+     LIMIT $7`
 
 /**
  * Release a stale in-flight claim so the normal re-claim can take it: the
@@ -414,6 +468,7 @@ export const COUNT_EXHAUSTED_SYNCS_SQL = `SELECT COUNT(*)::int AS n
 
 export async function listDueRetrySyncs(
   now: Date,
+  graceMinMinutes: number,
   limit: number,
   db: Executor = pool,
 ): Promise<DueRetryRow[]> {
@@ -423,6 +478,9 @@ export async function listDueRetrySyncs(
     RETRY_BACKOFF_BASE_MS,
     RETRY_BACKOFF_CAP_MS,
     STALE_PENDING_CLAIM_MS,
+    // #3767: the resolved deferral window, passed in by the caller (the sweep)
+    // so this repository does not depend on a module.
+    graceMinMinutes,
     limit,
   ])
   return result.rows

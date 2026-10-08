@@ -189,3 +189,66 @@ describe('address form on the accounting entry (#3129)', () => {
     expect(entry.treasuryAccount).toBe('0xtreasury')
   })
 })
+
+/** #3767: which hash the surfaces book — decided once here, consumed everywhere. */
+describe('the booked hash (#3767)', () => {
+  const FUNDING = `0x${'f1'.repeat(32)}`
+  const SETTLEMENT = `0x${'5e'.repeat(32)}`
+
+  it('books the verified merchant settlement, keeping the funding hash as secondary', () => {
+    const e = toAccountingEntry(
+      row({ tx_hash: FUNDING, settlement_scheme: 'eip3009', verified_settlement_tx_hash: SETTLEMENT, pinned_booked_tx_hash: null }),
+    )
+    expect(e.bookedTxHash).toBe(SETTLEMENT)
+    expect(e.bookedTxHashIsFunding).toBe(false)
+    expect(e.fundingTxHash).toBe(FUNDING)
+  })
+
+  it('labels the funding hash as funding when no settlement is recorded (the window passed)', () => {
+    const e = toAccountingEntry(row({ tx_hash: FUNDING, settlement_scheme: 'eip3009' }))
+    expect(e.bookedTxHash).toBe(FUNDING)
+    expect(e.bookedTxHashIsFunding).toBe(true)
+    expect(e.fundingTxHash).toBeNull()
+  })
+
+  it('the pin wins over a settlement recorded after the first claim — identical bytes on retries', () => {
+    const e = toAccountingEntry(
+      row({
+        tx_hash: FUNDING,
+        settlement_scheme: 'eip3009',
+        verified_settlement_tx_hash: SETTLEMENT,
+        pinned_booked_tx_hash: FUNDING,
+        pinned_booked_tx_kind: 'funding',
+      }),
+    )
+    expect(e.bookedTxHash).toBe(FUNDING)
+    expect(e.bookedTxHashIsFunding).toBe(true)
+    expect(e.fundingTxHash).toBeNull()
+  })
+
+  it('ignores a malformed pin or verified hash rather than booking it', () => {
+    const e = toAccountingEntry(
+      row({ tx_hash: FUNDING, settlement_scheme: 'eip3009', pinned_booked_tx_hash: 'not-a-hash', pinned_booked_tx_kind: 'funding' }),
+    )
+    expect(e.bookedTxHash).toBe(FUNDING)
+    expect(e.bookedTxHashIsFunding).toBe(true)
+  })
+
+  it('erc7710 books its own tx hash — it already IS the settlement', () => {
+    const e = toAccountingEntry(row({ tx_hash: FUNDING, settlement_scheme: 'erc7710' }))
+    expect(e.bookedTxHash).toBe(FUNDING)
+    expect(e.bookedTxHashIsFunding).toBe(false)
+    expect(e.fundingTxHash).toBeNull()
+  })
+
+  it('retired / scheme-less rails book nothing — their rendering is unchanged', () => {
+    for (const over of [{}, { settlement_scheme: null }, { settlement_scheme: 'mpp_demo' }]) {
+      const e = toAccountingEntry(row(over))
+      expect(e.bookedTxHash).toBeNull()
+      expect(e.bookedTxHashIsFunding).toBe(false)
+      expect(e.fundingTxHash).toBeNull()
+      // entry.txHash keeps its raw meaning for every consumer that reads it.
+      expect(e.txHash).toBe('0xabc')
+    }
+  })
+})

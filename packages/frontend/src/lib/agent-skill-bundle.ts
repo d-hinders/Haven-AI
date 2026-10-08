@@ -468,6 +468,10 @@ A settled \`mcp__haven__haven_settle_mcp_tool\` response carries
 in \`allowance\` — report the product, Haven-derived payment/transaction
 fields, and what is left from those fields directly. \`result\` is optional
 raw merchant evidence; never use it to decide whether the purchase was paid.
+Merchant-issued credentials in \`result\` (session tokens, wallet links) are
+withheld unless the settle or complete call passed
+\`include_merchant_credentials: true\` — if you receive one, use it with the
+merchant it came from and never echo or log it.
 Do not call \`haven_get_agent\` or \`haven_get_allowances\` again just to
 report a purchase you already made.
 

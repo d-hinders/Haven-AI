@@ -199,6 +199,19 @@ Accounted.
 
 ## What to include: the backfill choice
 
+### Which transaction hash the books carry (#3767)
+
+Every accounting surface — the Fortnox feed, the SIE export, the legacy
+Fortnox voucher and the receipt underlag PDF — names the same transaction:
+the **verified merchant settlement** when the merchant's settlement has been
+recorded and verified on-chain, otherwise the **funding transaction**,
+explicitly labelled as funding. This is the same hash the payment history in
+the Haven UI headlines. For EIP-3009 payments Haven waits a short window
+(the same one the payment status uses) for the merchant's settlement to be
+reported before feeding, and once a hash is booked it never changes — a
+settlement reported later cannot rewrite what your accounting system
+already received.
+
 Right after a connection that has not fed anything yet, Haven asks:
 
 - **Feed from now** (default) — only payments that settle from this moment on.

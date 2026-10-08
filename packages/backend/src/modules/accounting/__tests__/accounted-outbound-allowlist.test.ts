@@ -58,6 +58,9 @@ function tx() {
     fxAt: '2026-09-10T09:30:00.000Z',
     receiptRef: 'receipt-1',
     merchantReceipt: null,
+    txHash: null,
+    txHashIsFunding: false,
+    fundingTxHash: null,
     suggestedAccount: '6540',
   }
 }

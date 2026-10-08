@@ -93,6 +93,10 @@ function tx() {
     fxAt: '2026-09-10T09:30:00.000Z',
     receiptRef: 'receipt-1',
     merchantReceipt: null,
+    // #3767: null booked hash = retired/legacy rendering, unchanged.
+    txHash: null,
+    txHashIsFunding: false,
+    fundingTxHash: null,
     suggestedAccount: '6540',
   }
 }

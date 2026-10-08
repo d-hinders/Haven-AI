@@ -228,7 +228,7 @@ describeDb('scope-missing detection and re-consent (#2865)', () => {
     const second = await seedSettled(userId, agentId)
     expect(await feedSettledPayment(userId, second)).toEqual({ outcome: 'not_fed' })
     expect(await getSyncState(userId, 'fortnox', second)).toBeNull()
-    expect(await listDueRetrySyncs(later(), 200)).toEqual([])
+    expect(await listDueRetrySyncs(later(), 15, 200)).toEqual([])
 
     // Re-consent (Fortnox now honours the file connection), then the sweep.
     f.state.refuseFileConnection = false

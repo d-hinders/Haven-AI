@@ -31,8 +31,21 @@ covers:
   - packages/frontend/vercel.json
   - packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts
   - scripts/vercel/**
-last-verified: "2026-10-06"
+last-verified: "2026-10-08"
 ---
+
+> **Re-verified #3770 (2026-10-08, delivery-quality report):** this diff
+> touched one file in this document's coverage list,
+> `packages/backend/src/openapi/route-modules.generated.ts`, and none of this
+> document's mode/rollback/env semantics. The map gains exactly one operation —
+> `POST /machine-payments/{id}/delivery-quality` → `routes/machine-payments.ts`
+> — the agent's evidence-only verdict on what a settled payment DELIVERED
+> (#3770): it writes to the new `machine_payment_delivery_reports` table only,
+> never touches `payment_intents`, and is agent-scoped like the evidence
+> attach path. No route file is added or moved, `enforcedModules` is untouched
+> (`routes/machine-payments.ts` is already money-path), and `.env.dev.example`
+> gains no variable. Migration 107 follows the structural-down pattern (#1139).
+> Nothing else in this document was re-verified.
 
 > **Re-verified #3664 (2026-10-05):** `index.ts`'s `enforcedModules` comments
 > on the sub-budget routes no longer say "money-path-adjacent" —

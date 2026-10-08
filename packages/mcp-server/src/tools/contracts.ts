@@ -63,6 +63,7 @@ export type HostedToolName =
   | 'haven_pay_x402_quote'
   | 'haven_resume_x402_payment'
   | 'haven_report_x402_outcome'
+  | 'haven_report_delivery_quality'
   | 'haven_report_settlement_evidence'
   | 'haven_get_payment_status'
   | 'haven_get_resume_state'
@@ -510,6 +511,22 @@ export const toolSchemas = {
       .max(131072, 'payment_response is the raw base64 PAYMENT-RESPONSE header value; 128KB is far beyond any real header.')
       .optional(),
   },
+  haven_report_delivery_quality: {
+    // #3770: the delivery-quality report — the agent's evidence-only verdict
+    // on what a settled payment DELIVERED. Everything else about the payment
+    // (rail, amount, merchant, settled state) is read from Haven's own
+    // record, scoped to this agent, exactly like haven_report_x402_outcome;
+    // the report cannot say what it was about, only what came back. It
+    // moves no money and never changes `settled`.
+    payment_id: z.string().min(1),
+    quality: z.enum(['ok', 'unusable', 'partial'], {
+      required_error:
+        'quality is required: "ok" if the delivered output served its purpose, ' +
+        '"unusable" if it was paid but could not be used, "partial" if only part of it was usable.',
+    }),
+    // Bounded server-side (2000 chars) — a diagnostic note, not a receipt.
+    note: z.string().max(2000).optional(),
+  },
   haven_report_settlement_evidence: {
     // #2972: the remedy #2970's guidance could not name — an erc7710 agent
     // holding the merchant's real settlement transaction hash
@@ -800,6 +817,12 @@ export const STRICT_INPUT_TOOLS = {
   // and merchant are read from the payment's own record (scoped to this
   // agent), the same reason haven_report_x402_outcome is on this list.
   haven_report_settlement_evidence:
+    'The rail, amount and merchant are read from the payment record, scoped to this agent, ' +
+    'so a report cannot be pointed at a different payment or a different agent\'s payment.',
+  // #3770: takes exactly which payment and what the agent judged about its
+  // delivery — the payment's own facts are read from the record, scoped to
+  // this agent, the same reason the two report tools above are strict.
+  haven_report_delivery_quality:
     'The rail, amount and merchant are read from the payment record, scoped to this agent, ' +
     'so a report cannot be pointed at a different payment or a different agent\'s payment.',
   // The relay leg. Everything except which payment and which signature — the
@@ -1142,7 +1165,8 @@ const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
     'Pass payment_id and payment_header (from haven_x402_sign_header); merchant_url/tool_name/arguments/mcp_transport are optional — Haven rehydrates them by payment_id. Call only after haven_submit confirmed funding. The header is a signed, single-use, amount/merchant/nonce-bound authorization — not a key. ' +
     'On a settled x402 payment the allowance block reports the canonical names remainingAtomic / remainingDisplay / resetPeriodMin / tokenSymbol / tokenAddress (the SAME names and values haven_get_agent reports) beside the deprecated snake_case spellings (remaining_atomic, remaining_display, token_symbol, token_address, reset_period), kept for a deprecation window. ' +
     'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true) when funding expired first; MERCHANT_REJECTED_AFTER_FUNDING on eip3009 means stranded delegate funds — recover with haven_sweep_delegate; on erc7710 (no funding leg) nothing moved, so re-quote instead.',
-  nextActionGuidance: 'On success no further Haven tool is needed — return the merchant result to the user.',
+  nextActionGuidance:
+    'On success no further Haven tool is needed — return the merchant result to the user. If the delivered output was unusable or only partially usable, say so with haven_report_delivery_quality (evidence only; it moves no money).',
 })
 
 const SETTLE_MCP_TOOL_DESCRIPTION = composeDescription({
@@ -1153,7 +1177,8 @@ const SETTLE_MCP_TOOL_DESCRIPTION = composeDescription({
     'On a settled x402 payment the allowance block reports the canonical names remainingAtomic / remainingDisplay / resetPeriodMin / tokenSymbol / tokenAddress (the SAME names and values haven_get_agent reports) beside the deprecated snake_case spellings (remaining_atomic, remaining_display, token_symbol, token_address, reset_period), kept for a deprecation window. ' +
     'settled:true only after on-chain verification, never a merchant 2xx; unverified: settled:false, SETTLEMENT_UNCONFIRMED, null settlement_tx_hash. ' +
     'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true); MERCHANT_REJECTED_AFTER_FUNDING on eip3009 — stranded funds, recover with haven_sweep_delegate; on erc7710 (no funding leg) nothing moved, so re-quote instead.',
-  nextActionGuidance: 'On success no further Haven tool is needed — return the merchant result to the user.',
+  nextActionGuidance:
+    'On success no further Haven tool is needed — return the merchant result to the user. If the delivered output was unusable or only partially usable, say so with haven_report_delivery_quality (evidence only; it moves no money).',
 })
 
 // #3739: the shared nextActionGuidance ("Haven re-uses the captured request
@@ -1280,6 +1305,28 @@ const REPORT_X402_OUTCOME_DESCRIPTION = [
   'observed.',
 ].join(' ')
 
+// #3770: the delivery-quality report. A settled payment's `settled: true` is
+// an on-chain fact and cannot be revisited — but nothing else recorded what
+// the payment DELIVERED, so a paid call returning junk read as a success on
+// the receipt (the 2026-10-08 Soundside run: 0.01 USDC, `":**\n"` back).
+// This tool is the missing verdict: evidence-only, agent-scoped, and
+// deliberately NOT folded into haven_report_x402_outcome — that tool records
+// what a merchant ANSWERED to a retry (observed HTTP fact); this records
+// what the agent judged about what it GOT. Different claims, different
+// callers, near-disjoint arguments — same reasoning as #2292's split.
+const REPORT_DELIVERY_QUALITY_DESCRIPTION = [
+  'Record what a settled payment actually DELIVERED, when you are the agent that paid: quality',
+  '"ok" (the output served its purpose), "unusable" (paid but the output could not be used) or',
+  '"partial" (only part of it usable), plus an optional note (max 2000 chars) saying what was',
+  'wrong. Use it after a Haven-completed MCP purchase (haven_settle_mcp_tool /',
+  'haven_complete_mcp_tool) or a plain-HTTP retry whose output disappointed — especially when',
+  'a paid call returned an error body, empty content or gibberish, so the owner does not read',
+  'the receipt as a success. Evidence only: it moves no money, never changes settled or any',
+  'money field, and works only on your OWN settled payments (another agent\'s payment is',
+  'refused). A re-report replaces your earlier verdict; receipts and the dashboard carry it',
+  'beside the payment.',
+].join(' ')
+
 const SWEEP_DELEGATE_DESCRIPTION = [
   'Recover stranded USDC from the delegate wallet back to the Haven wallet, gaslessly. Use when a',
   'payment failed or expired after funding, or on nextAction=sweep_stranded_funds. Two keyless phases:',
@@ -1358,6 +1405,7 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_pay_x402_quote: PAY_X402_QUOTE_DESCRIPTION,
   haven_resume_x402_payment: RESUME_X402_DESCRIPTION,
   haven_report_x402_outcome: REPORT_X402_OUTCOME_DESCRIPTION,
+  haven_report_delivery_quality: REPORT_DELIVERY_QUALITY_DESCRIPTION,
   haven_report_settlement_evidence: composeDescription(sharedDescriptions.reportSettlementEvidence),
   haven_get_payment_status: composeDescription(sharedDescriptions.getPaymentStatus),
   haven_get_resume_state: composeDescription(sharedDescriptions.getResumeState),

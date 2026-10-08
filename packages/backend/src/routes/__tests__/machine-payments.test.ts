@@ -898,6 +898,11 @@ describe('machine payment routes', () => {
         protocol_receipt_header_name: 'Payment-Receipt',
         protocol_receipt_payload: { ok: true },
         merchant_status: 200,
+        // #3770: the agent has reported no delivery verdict here — null is
+        // "not reported", and it rides every receipt row.
+        delivery_quality: null,
+        delivery_note: null,
+        delivery_reported_at: null,
         confirmed_at: '2026-05-15T12:00:00.000Z',
         created_at: '2026-05-15T12:00:01.000Z',
         updated_at: '2026-05-15T12:00:01.000Z',

@@ -356,6 +356,25 @@ export class MerchantCompletion {
     }
   }
 
+  /**
+   * #3770: record the agent's evidence-only delivery verdict on a settled
+   * payment — `ok`, `unusable` or `partial`, with a bounded note. Moves no
+   * money and never changes `settled` or any money field; the receipt reads
+   * (`haven_list_receipts` / `haven_get_receipt`) then carry it beside the
+   * payment. Refuses another agent's payment (404) and an unsettled one
+   * (409) — a report requires a delivery that already happened.
+   */
+  async reportDeliveryQuality(input: {
+    paymentId: string
+    quality: 'ok' | 'unusable' | 'partial'
+    note?: string
+  }): Promise<{ payment_id: string; quality: string; note: string | null; updated_at: string }> {
+    return await this.post(`/machine-payments/${input.paymentId}/delivery-quality`, {
+      quality: input.quality,
+      ...(input.note !== undefined ? { note: input.note } : {}),
+    })
+  }
+
   async resolveCompletionContext(input: {
     paymentId: string
     url: string

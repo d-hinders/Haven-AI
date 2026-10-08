@@ -100,6 +100,30 @@ last-verified: "2026-10-08"
 >   skill's plain-HTTP settlement guidance now points at
 >   `haven_report_x402_outcome`'s `payment_response`, #3727).
 
+> **Re-verified #3770 (2026-10-08, delivery-quality report):** the hosted
+> surface gains one tool, `haven_report_delivery_quality { payment_id, quality,
+> note? }` — the agent's evidence-only verdict on what a settled payment
+> DELIVERED (`ok` / `unusable` / `partial`, note bounded at 2000). It joins
+> `PAID_MCP_COMPLETION_TOOLS` and `STRICT_INPUT_TOOLS`: the rail, amount and
+> merchant are read from the payment record scoped to the calling agent, so a
+> report cannot be pointed at another agent's payment (404) or an unsettled
+> one (409). The description-size ratchet re-measures at 29,863 bytes over 29
+> tools (mean pin 1029.76, shrink-only from here).
+> - **No consent-hash event.** The tool is hosted-only — the local signer's
+>   tool set, `SIGNER_CONSENT_SURFACE_VERSION` and the signer consent hash are
+>   untouched, and the signer and connect packages do not change.
+> - **Wording-only description edits.** `haven_complete_mcp_tool` and
+>   `haven_settle_mcp_tool` gain one next-action sentence naming the report;
+>   no input or output schema, argument, expected-context version or consent
+>   surface moves, and the strict-input count goes 26 → 27 with the same
+>   per-tool rationale as its siblings.
+> - **An older build keeps working.** Without the tool the agent simply has
+>   no way to record a verdict — exactly the #3770 gap — and nothing it could
+>   do before is refused or re-shaped.
+>
+> `last-verified` stays 2026-10-08. Nothing else in this document was
+> re-verified.
+
 > **Re-verified #3771 (2026-10-08, purchase_summary.product fallback):** a
 > settled result whose merchant payload names no product — no
 > `structuredContent.summary` — no longer leaves `purchase_summary.product`

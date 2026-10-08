@@ -3104,6 +3104,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/machine-payments/{id}/delivery-quality": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record the agent’s evidence-only delivery verdict for a settled payment.
+         * @description #3770 — lets the agent that made a payment say what the merchant DELIVERED: "ok", "unusable" or "partial", with an optional bounded note (max 2000 characters). Evidence only: it moves no money, never alters any money field, and never changes the payment — `settled` stays the on-chain fact it already was. Only the paying agent can report (another agent’s payment is 404), and only once the payment is settled (409 otherwise). A re-report replaces the same agent’s earlier verdict; it never touches another agent’s report. The receipt reads (`GET /receipts` rows and the signed receipt bundle) carry the verdict beside the payment once recorded.
+         */
+        post: operations["reportDeliveryQuality"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/machine-payments/{id}/merchant-receipt": {
         parameters: {
             query?: never;
@@ -5538,6 +5558,11 @@ export type components = {
             challenge_id?: string | null;
             idempotency_key?: string | null;
             merchant_status?: number | null;
+            /** @enum {string|null} */
+            delivery_quality?: "ok" | "unusable" | "partial" | null;
+            delivery_note?: string | null;
+            /** Format: date-time */
+            delivery_reported_at?: string | null;
             confirmed_at?: string | null;
             /** Format: date-time */
             created_at: string;
@@ -5568,6 +5593,11 @@ export type components = {
             protocolReceiptPayload?: {
                 [key: string]: unknown;
             };
+        };
+        MachinePaymentDeliveryQualityRequest: {
+            /** @enum {string} */
+            quality: "ok" | "unusable" | "partial";
+            note?: string;
         };
         MachinePaymentReconciliationEventRequest: {
             /** Format: uuid */
@@ -20487,6 +20517,113 @@ export interface operations {
             };
             /** @description Error response */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    reportDeliveryQuality: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The payment id (intent) the verdict is about. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachinePaymentDeliveryQualityRequest"];
+            };
+        };
+        responses: {
+            /** @description Verdict recorded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        payment_id: string;
+                        /** @enum {string} */
+                        quality: "ok" | "unusable" | "partial";
+                        note: string | null;
+                        /** Format: date-time */
+                        updated_at: string;
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Agent authenticated but not authorized to act (#1130): `agent_pending_approval` — the key is valid but the agent awaits its first budget grant in Haven; `agent_paused` — the owner paused API-initiated transactions. `detail` carries the operator action. Contrast 401, which means the key itself is unknown or revoked. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        detail?: string;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

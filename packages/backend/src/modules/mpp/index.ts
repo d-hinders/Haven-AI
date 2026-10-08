@@ -4,6 +4,7 @@
  * see the `no-deep-cross-module-import` dependency-cruiser rule in
  * `.dependency-cruiser.cjs`. Internal files (`rail-dispatch.ts`,
  * `challenge.ts`, `authorize.ts`, `send.ts`, `allowances.ts`, `evidence.ts`,
+ * `delivery-quality.ts`,
  * `merchant-receipt.ts`, `reconciliation.ts`, `sweep.ts`) are private.
  *
  * `routes/machine-payments.ts` keeps request validation, auth middleware
@@ -48,6 +49,13 @@ export {
   type MachinePaymentEvidenceSource,
 } from './evidence.js'
 export { handleMerchantReceiptCapture } from './merchant-receipt.js'
+export {
+  recordDeliveryQualityHandler,
+  DELIVERY_QUALITIES,
+  DELIVERY_QUALITY_NOTE_MAX,
+  isDeliveryQuality,
+  type DeliveryQuality,
+} from './delivery-quality.js'
 export {
   handleReconciliationEvent,
   RECONCILIATION_EVENT_TYPES,

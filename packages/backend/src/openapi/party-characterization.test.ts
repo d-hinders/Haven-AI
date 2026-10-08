@@ -44,13 +44,20 @@ function loadFixture(slug: string): { _base: string; body: unknown } {
  *   - `settlement_scheme` / `merchant_settlement_recorded` — #3475 follow-up,
  *     the additive `getAgentPaymentStatus` fields read from the same
  *     `machine_metadata` the party model already reads.
+ *   - `delivery_quality` / `delivery_note` / `delivery_reported_at` — #3770,
+ *     the agent's own evidence-only delivery verdict, joined from
+ *     `machine_payment_delivery_reports`; `mapEvidence` emits them (null
+ *     while unreported) and their real behaviour is pinned in
+ *     `modules/mpp/__tests__/delivery-quality.test.ts`.
  */
 const ADDITIVE_SINCE_BASE = new Set([
   // #3128: the receipts envelope gained page fields; the receipts themselves are unchanged.
   'total', 'has_more', 'next_cursor','parties', 'funding_tx_hash', 'settlement_tx_hash',
   'settlement_scheme', 'merchant_settlement_recorded',
   // #3564: additive outcome-pending visibility on the machine-payment status.
-  'submission_outcome_pending'])
+  'submission_outcome_pending',
+  // #3770: the delivery-quality verdict on the receipts the paying agent reads.
+  'delivery_quality', 'delivery_note', 'delivery_reported_at'])
 
 function stripParties(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stripParties)
@@ -131,6 +138,9 @@ describe('#2960 party-characterization replay (base 24a08ec3 → HEAD)', () => {
       parties: { treasury_account: string; delegate: string; delegate_account: string | null; merchant: string }
       funding_tx_hash: string | null
       settlement_tx_hash: string | null
+      delivery_quality: string | null
+      delivery_note: string | null
+      delivery_reported_at: string | null
     }
     expect(live.parties).toEqual({
       treasury_account: '0x3333333333333333333333333333333333333333', // == payer_address
@@ -141,6 +151,11 @@ describe('#2960 party-characterization replay (base 24a08ec3 → HEAD)', () => {
     // #2998: erc7710 has one transaction — it is the settlement, there is no funding leg.
     expect(live.funding_tx_hash).toBeNull()
     expect(live.settlement_tx_hash).toBe('0x' + 'cd'.repeat(32))
+    // #3770: the delivery verdict rides beside the payment — null while the
+    // agent has reported nothing, exactly the shape the fixture cannot carry.
+    expect(live.delivery_quality).toBeNull()
+    expect(live.delivery_note).toBeNull()
+    expect(live.delivery_reported_at).toBeNull()
   })
 
   it('rekeyed agent: receipts and status both show the delegate that PAID, not the agent row\'s current delegate', async () => {

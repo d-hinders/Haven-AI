@@ -900,6 +900,10 @@ export const PAID_MCP_COMPLETION_TOOLS = [
   'haven_complete_mcp_tool',
   'haven_settle_mcp_tool',
   'haven_report_settlement_evidence',
+  // #3770: the delivery-quality report lives beside the other reports —
+  // Haven-completed purchases are exactly the flow with no other feedback
+  // channel for "paid, but the output was unusable".
+  'haven_report_delivery_quality',
 ] as const satisfies readonly HostedToolName[]
 
 export type PaidMcpCompletionToolName = (typeof PAID_MCP_COMPLETION_TOOLS)[number]
@@ -1370,6 +1374,26 @@ export function createPaidMcpCompletionHandlers(
           outcome,
           observedStatus,
         )
+      }),
+
+    // #3770: the delivery-quality report. Evidence-only by contract — the
+    // handler relays the agent's verdict and nothing else; the backend
+    // scopes it to this agent (another agent's payment is 404), refuses an
+    // unsettled payment (409), and never touches the payment itself.
+    haven_report_delivery_quality: async (input) =>
+      runTool(async () => {
+        const args = parseStrict('haven_report_delivery_quality', input)
+        const report = await haven.reportDeliveryQuality({
+          paymentId: args.payment_id,
+          quality: args.quality,
+          ...(args.note !== undefined ? { note: args.note } : {}),
+        })
+        return {
+          payment_id: report.payment_id,
+          quality: report.quality,
+          ...(report.note !== null ? { note: report.note } : {}),
+          updated_at: report.updated_at,
+        }
       }),
   }
 }

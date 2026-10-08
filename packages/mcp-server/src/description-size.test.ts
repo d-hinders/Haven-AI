@@ -417,10 +417,16 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * PAYMENT_WINDOW_EXPIRED); the mean pin: 28,789 / 28 = 1028.1785…, pinned at
  * the two-decimal ceiling (1028.18). Shrink-only from here.
  */
-const MAX_TOTAL_BYTES = 28_789
-// Mean pin: round 22 (block above): 28,789 / 28 = 1028.1785…, pinned at the
-// two-decimal ceiling (1028.18). Shrink-only from here.
-const MAX_MEAN_BYTES = 1028.18
+const MAX_TOTAL_BYTES = 29_863
+// Mean pin: round 23 (#3770, 2026-10-08): `haven_report_delivery_quality`
+// joins the surface — the evidence-only delivery verdict a paid-but-unusable
+// delivery needs (issue #3770). The tool was ADDED, so the union tree
+// RE-MEASURES at 29,863 UTF-8 bytes (29 tools; the new description alone is
+// 817 of them, the rest is the pre-existing tree plus the settle/complete
+// next-step guidance that now names the report). 29,863 / 29 =
+// 1029.7586…, pinned at the two-decimal ceiling (1029.76). Shrink-only from
+// here.
+const MAX_MEAN_BYTES = 1029.76
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

@@ -105,6 +105,75 @@ function heldHashHandoff(canReport: boolean, paymentId: string, heldHash: string
 }
 
 /**
+ * #3764 (D1): the next-step handoff the hosted eip3009 tools derive from
+ * `completeX402MerchantCall`'s `settlementEvidenceOutcome` — the same three
+ * arms #3727's `evidenceHandoff` gives the plain-HTTP outcome report:
+ * recorded (or nothing posted) → no tool; retryable →
+ * `haven_report_settlement_evidence` with `payment_id` and the hash
+ * prefilled; refused → no tool, because re-reporting the same hash
+ * re-refuses. Spread at an emission's top level so `lint:next-steps` reads it
+ * as named.
+ */
+function settlementEvidenceHandoff(
+  outcome: EvidenceReportOutcome | undefined,
+  paymentId: string,
+  settlementTxHash: string | null,
+): HostedHandoff {
+  if (!outcome || outcome.outcome === 'confirmed') {
+    return { nextTool: null, nextToolOmittedReason: 'the purchase is settled; no Haven tool follows' }
+  }
+  if (outcome.outcome === 'retryable') {
+    return {
+      nextTool: 'haven_report_settlement_evidence',
+      nextArguments: {
+        payment_id: paymentId,
+        // A retryable answer can only follow a hash that was actually posted —
+        // well-formed and non-zero, which `settlement_tx_hash` echoes (zero
+        // collapses to null at the delivery boundary, but a zero hash never
+        // reaches the wire). The schema keeps the field optional: without it
+        // the report call is a defined no-op (#3475 follow-up), never a
+        // validation refusal in front of an agent.
+        ...(settlementTxHash ? { settlement_tx_hash: settlementTxHash } : {}),
+      },
+    }
+  }
+  return {
+    nextTool: null,
+    nextToolOmittedReason:
+      'the merchant settlement hash was refused: it does not match this payment on-chain — do not re-report the same hash',
+  }
+}
+
+/**
+ * #3764 (D1): the reason line that goes WITH `settlementEvidenceHandoff` —
+ * the recorded arm keeps the settled-purchase prose the eip3009 arm has said
+ * since #1308, the retryable one tells the agent the chain was not readable
+ * YET (mirror of #3727's `evidenceReason`), and the refused one says the hash
+ * is wrong, not that the purchase failed.
+ */
+function settlementEvidenceReason(outcome: EvidenceReportOutcome | undefined): string {
+  if (!outcome || outcome.outcome === 'confirmed') {
+    return (
+      'Funding and merchant settlement both succeeded. Report the result to the user ' +
+      'from agent_summary.purchase_summary; `result` is optional raw merchant evidence, ' +
+      'not Haven payment truth. The summary includes remaining allowance/budget when available.'
+    )
+  }
+  if (outcome.outcome === 'retryable') {
+    return (
+      'The purchase is complete and the merchant settlement was reported, but Haven could not ' +
+      'verify it on-chain just yet (the chain was unreachable or the transaction is not mined); ' +
+      'retry haven_report_settlement_evidence with the same hash.'
+    )
+  }
+  return (
+    'The purchase itself is complete — report the result to the user via ' +
+    'agent_summary.purchase_summary. The merchant settlement hash was refused: it does not match ' +
+    'this payment on-chain — do not re-report the same hash.'
+  )
+}
+
+/**
  * #3102 review: the eip3009 post-funding rejection reads its action from live
  * state. The tool must follow that action — a sweep named beside
  * `retry_original_x402_request` would race a late settlement. Unknown state
@@ -249,7 +318,14 @@ export async function deliverMerchantPayment(
   settlement_tx_hash: string | null
   /** #2970: what `haven.completeX402MerchantCall`'s evidence report learned, when it made one. */
   evidence_outcome?: EvidenceReportOutcome
-}> {
+  /**
+   * #3764: what the SECOND evidence report — the merchant's own EIP-3009
+   * settlement, posted after the funding report — learned, when one was made.
+   * `undefined` when nothing was posted (no funding leg, no merchant hash, a
+   * malformed/zero/equal-to-funding hash).
+   */
+  settlement_evidence_outcome?: EvidenceReportOutcome
+}>{
   // #1307: resolve merchant_url/tool_name/arguments/mcp_transport BEFORE
   // waiting on funding confirmation — a version-skew refusal (no stored
   // context) should surface immediately, not after a pointless wait.
@@ -584,6 +660,7 @@ export async function deliverMerchantPayment(
         ? result.settlementTxHash
         : null,
     evidence_outcome: result.evidenceOutcome,
+    settlement_evidence_outcome: result.settlementEvidenceOutcome,
   }
 }
 
@@ -826,7 +903,7 @@ export function createPaidMcpCompletionHandlers(
         // Both layers read their refusal text from STRICT_INPUT_TOOLS.
         const args = parseStrict('haven_complete_mcp_tool', input)
         // #2970 review: pick explicit fields rather than spreading
-        // `deliverMerchantPayment`'s result verbatim — that result now also
+        // `deliverMerchantPayment`'s result verbatim — that result also
         // carries `evidence_outcome` (which can be `{outcome:'refused',
         // statusCode:0}` on a transport failure) on BOTH schemes, and this
         // tool's contract (`COMPLETE_MCP_TOOL_DESCRIPTION`) never documented
@@ -837,6 +914,33 @@ export function createPaidMcpCompletionHandlers(
         // classify (see `deliverMerchantPayment`'s `noFundingLeg` gate — a
         // `submitted` erc7710 intent 409s here today, pre-existing).
         const delivered = await deliverMerchantPayment(haven, args)
+        // #3764 (D1): the funding outcome above is still dropped, but the
+        // merchant SETTLEMENT report's outcome IS mapped — the same three
+        // arms #3727's `evidenceHandoff` gives the plain-HTTP outcome report.
+        // On erc7710 (no funding leg) `settlement_evidence_outcome` is always
+        // undefined, so the recorded arm is a no-op and this stays byte-for-
+        // byte the pre-#3764 answer; on eip3009 a retryable report names the
+        // report tool with the hash prefilled, and a refused one names no
+        // tool with the reason.
+        if (delivered.settlement_evidence_outcome && delivered.settlement_evidence_outcome.outcome !== 'confirmed') {
+          return {
+            status: delivered.status,
+            ok: delivered.ok,
+            result: delivered.result,
+            settlement_tx_hash: delivered.settlement_tx_hash,
+            ...buildAgentGuidance({
+              nextAction: AgentPaymentNextAction.None,
+              ...settlementEvidenceHandoff(
+                delivered.settlement_evidence_outcome,
+                args.payment_id,
+                delivered.settlement_tx_hash,
+              ),
+              safeToContinue: true,
+              reason: settlementEvidenceReason(delivered.settlement_evidence_outcome),
+              summary: { payment_id: args.payment_id, status: 'settled' },
+            }),
+          }
+        }
         return {
           status: delivered.status,
           ok: delivered.ok,
@@ -1143,14 +1247,18 @@ export function createPaidMcpCompletionHandlers(
           // #1308: done — nothing left but reporting.
           ...buildAgentGuidance({
             nextAction: AgentPaymentNextAction.None,
-            // #3101 (decision 3): a done state names no tool and says so.
-            nextTool: null,
-            nextToolOmittedReason: 'the purchase is settled; no Haven tool follows',
+            // #3764 (D1): the settlement-evidence report's outcome maps the
+            // same three arms #3727's `evidenceHandoff` gives the plain-HTTP
+            // outcome report — recorded (or nothing posted) keeps "no tool
+            // follows", a retryable report names the report tool with the
+            // hash prefilled, a refused one names no tool and says why.
+            ...settlementEvidenceHandoff(
+              merchant.settlement_evidence_outcome,
+              args.payment_id,
+              merchant.settlement_tx_hash,
+            ),
             safeToContinue: true,
-            reason:
-              'Funding and merchant settlement both succeeded. Report the result to the user ' +
-              'from agent_summary.purchase_summary; `result` is optional raw merchant evidence, ' +
-              'not Haven payment truth. The summary includes remaining allowance/budget when available.',
+            reason: settlementEvidenceReason(merchant.settlement_evidence_outcome),
             summary: {
               payment_id: args.payment_id,
               status: 'settled',

@@ -1356,13 +1356,15 @@ describe('x402 helpers', () => {
     })
 
     expect(response.status).toBe(200)
-    expect(fetchMock).toHaveBeenCalledTimes(5)
+    // #3764: the settlement report is now a 6th call — funding evidence, then
+    // the merchant's settlement.
+    expect(fetchMock).toHaveBeenCalledTimes(6)
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/x402'))).toBe(false)
 
     const retryInit = fetchMock.mock.calls[3][1] as RequestInit
     const retryHeaders = new Headers(retryInit.headers)
     expect(retryHeaders.get('X-PAYMENT')).toBeTruthy()
-
+    // #3764: the FUNDING evidence post is unchanged...
     const evidenceInit = fetchMock.mock.calls[4][1] as RequestInit
     expect(JSON.parse(evidenceInit.body as string)).toMatchObject({
       paymentId: 'approval-123',
@@ -1373,6 +1375,14 @@ describe('x402 helpers', () => {
         transaction: settlementTxHash,
         network: accepted.network,
       },
+    })
+    // ...and the merchant's own settlement rides a SECOND post — the
+    // transaction the merchant shows, recorded beside the funding hash.
+    const settlementInit = fetchMock.mock.calls[5][1] as RequestInit
+    expect(JSON.parse(settlementInit.body as string)).toEqual({
+      paymentId: 'approval-123',
+      rail: 'x402',
+      txHash: settlementTxHash,
     })
   })
 
@@ -2490,5 +2500,108 @@ describe('non-exact-only refusal names the scheme and the likely cause (#3735)',
     expect(err.message).not.toContain('offered only')
     // Positive control: the same entry with a plain identifier IS echoed.
     expect(noCompatiblePaymentOptionError([{ ...accepted, scheme: 'upto' }]).message).toContain("offered only 'upto'")
+  })
+})
+
+// ── #3764: the LOCAL paid retry (`retryRequest`, reached by fetch /
+// payX402Quote / resumeX402Payment) reports the merchant's settlement hash —
+// the one it already copies onto the local receipt — through the same
+// evidence endpoint, one attempt, after the funding report. ──
+
+describe('#3764 — the local retry reports the merchant settlement beside the funding evidence', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const SETTLEMENT_TX = `0x${'cd'.repeat(32)}`
+  const FUNDING_TX = `0x${'ab'.repeat(32)}`
+
+  /** The #956 paid-flow mock sequence, with the retry headers as the knob. */
+  function settlementFlowMocks(retryHeaders: Record<string, string>) {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(paymentRequired), {
+      status: 402, headers: { 'Content-Type': 'application/json' },
+    }))
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      payment_id: 'pay_3764',
+      status: 'pending_signature',
+      chain_id: 8453,
+      account_address: safeAddress,
+      token: 'USDC', amount: '0.02', to: delegateAddress,
+      resource_url: paymentRequired.resource.url,
+      sign_data: { hash: userOpSignData.hash, signature_scheme: 'eip712_userop', typed_data: userOpTypedData, components: { payer_account: safeAddress }, instructions: 'sign' },
+    }), { status: 201 }))
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      payment_id: 'pay_3764', status: 'confirmed', tx_hash: FUNDING_TX, chain_id: 8453,
+      token: 'USDC', amount: '0.02', to: delegateAddress,
+    }), { status: 200 }))
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(X402_AGENT_RESPONSE), { status: 200 }))
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(X402_TAX_UNAVAILABLE), { status: 200 }))
+    fetchMock.mockResolvedValueOnce(new Response('paid content', { status: 200, headers: retryHeaders }))
+    fetchMock.mockResolvedValue(new Response('{}', { status: 200 }))
+    return { fetchMock }
+  }
+
+  function evidenceCalls(fetchMock: ReturnType<typeof settlementFlowMocks>['fetchMock']): Array<Record<string, unknown>> {
+    return fetchMock.mock.calls
+      .filter((c) => String(c[0]).endsWith('/machine-payments/evidence'))
+      .map((c) => JSON.parse((c[1] as RequestInit).body as string) as Record<string, unknown>)
+  }
+
+  it('an accepted retry whose merchant returned a well-formed settlement makes TWO evidence posts — funding first, then the settlement', async () => {
+    const { fetchMock } = settlementFlowMocks({
+      'PAYMENT-RESPONSE': btoa(JSON.stringify({ transaction: SETTLEMENT_TX })),
+    })
+    const haven = new HavenClient({
+      apiKey: 'test' as never, delegateKey: `0x${'01'.repeat(32)}`, baseUrl: 'https://haven.example',
+    })
+    const quote = await haven.quoteX402(paymentRequired.resource.url, { method: 'POST', body: '{}' })
+    const res = await haven.payX402Quote(quote)
+    expect(res.status).toBe(200)
+
+    const posts = evidenceCalls(fetchMock)
+    expect(posts).toHaveLength(2)
+    // FIRST: the funding report — the positional shape pinned at the #3475
+    // funding check above, unchanged.
+    expect(posts[0]).toMatchObject({ paymentId: 'pay_3764', rail: 'x402', txHash: FUNDING_TX, resourceUrl: paymentRequired.resource.url, merchantStatus: 200 })
+    // SECOND: the merchant's settlement, the minimal #3475 payload.
+    expect(posts[1]).toEqual({ paymentId: 'pay_3764', rail: 'x402', txHash: SETTLEMENT_TX })
+  })
+
+  it('a settlement equal to the funding hash in any letter case makes NO second post', async () => {
+    const { fetchMock } = settlementFlowMocks({
+      'PAYMENT-RESPONSE': btoa(JSON.stringify({ transaction: FUNDING_TX.slice(0, 2) + FUNDING_TX.slice(2).toUpperCase() })),
+    })
+    const haven = new HavenClient({
+      apiKey: 'test' as never, delegateKey: `0x${'01'.repeat(32)}`, baseUrl: 'https://haven.example',
+    })
+    const quote = await haven.quoteX402(paymentRequired.resource.url, { method: 'POST', body: '{}' })
+    await haven.payX402Quote(quote)
+
+    expect(evidenceCalls(fetchMock)).toHaveLength(1)
+  })
+
+  it('a malformed settlement hash makes NO second post', async () => {
+    const { fetchMock } = settlementFlowMocks({
+      'PAYMENT-RESPONSE': btoa(JSON.stringify({ transaction: '0xplain' })),
+    })
+    const haven = new HavenClient({
+      apiKey: 'test' as never, delegateKey: `0x${'01'.repeat(32)}`, baseUrl: 'https://haven.example',
+    })
+    const quote = await haven.quoteX402(paymentRequired.resource.url, { method: 'POST', body: '{}' })
+    await haven.payX402Quote(quote)
+
+    expect(evidenceCalls(fetchMock)).toHaveLength(1)
+  })
+
+  it('no settlement in the answer makes NO second post — nothing invented', async () => {
+    const { fetchMock } = settlementFlowMocks({})
+    const haven = new HavenClient({
+      apiKey: 'test' as never, delegateKey: `0x${'01'.repeat(32)}`, baseUrl: 'https://haven.example',
+    })
+    const quote = await haven.quoteX402(paymentRequired.resource.url, { method: 'POST', body: '{}' })
+    await haven.payX402Quote(quote)
+
+    expect(evidenceCalls(fetchMock)).toHaveLength(1)
   })
 })

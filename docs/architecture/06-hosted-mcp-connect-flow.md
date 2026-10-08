@@ -192,10 +192,12 @@ haven_quote_x402 / haven_pay_x402_quote
   → haven_submit                       (relays the FUNDING signature)
   → haven_x402_sign_header
   → merchant retry or haven_complete_mcp_tool
-  → haven_report_x402_outcome          (only when YOU did the retry)
-  → haven_report_settlement_evidence   (#3475 follow-up: only on an accepted outcome
-                                         with no settlement recorded yet, and only if the
-                                         merchant returned PAYMENT-RESPONSE.transaction)
+  → haven_report_x402_outcome          (only when YOU did the retry; pass the merchant's
+                                         PAYMENT-RESPONSE as payment_response on the SAME
+                                         call when it names a transaction — #3727)
+  (the SDK's own delivery — hosted complete/settle and the local paid retry —
+   reports the merchant settlement itself, #3764; haven_report_settlement_evidence
+   only when an outcome answer names it)
 
 erc7710 direct settlement (delegation rail + merchant advertises it)
 haven_quote_x402 / haven_pay_x402_quote

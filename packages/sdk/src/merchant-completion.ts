@@ -92,6 +92,19 @@ const EVIDENCE_RETRY_DELAYS_MS = [1_000, 2_000, 4_000]
 /** The backend's retryable refusal — see `modules/mpp/evidence.ts`. */
 const EVIDENCE_RETRYABLE_STATUS = 503
 
+/**
+ * #3764: the settlement shape the backend's eip3009 branch verifies — `0x` +
+ * exactly 64 hex characters. `parseMerchantSettlement` returns whatever string
+ * the receipt named, so a settlement report is gated on this before any post:
+ * a malformed value would only ever come back refused, and the funding
+ * report's anchor is never re-shaped to fit. Same recognizer the hosted
+ * tools' strict schemas declare (`contracts.ts`) and `plain-http-x402.ts`
+ * applies to a caller-supplied hash.
+ */
+export function isWellFormedSettlementTxHash(hash: string | null | undefined): boolean {
+  return typeof hash === 'string' && /^0x[0-9a-fA-F]{64}$/.test(hash)
+}
+
 export type PaymentPoster = <T>(path: string, body: Record<string, unknown>) => Promise<T>
 export type PaymentStatusReader = (paymentId: string) => Promise<PaymentStatusResult>
 export type AgentReader = () => Promise<{ delegateAddress?: string }>
@@ -278,6 +291,28 @@ export class MerchantCompletion {
       protocolReceiptHeaderName,
       protocolReceiptHeader,
     })
+
+    // #3764: the funding report above anchors Haven's row on the FUNDING tx.
+    // The merchant's OWN settlement transaction — parsed just above into the
+    // local receipt — is a SECOND report through the same evidence endpoint,
+    // exactly one attempt (D2), so the backend's #3475 branch can verify the
+    // delegate → merchant transfer and record it beside the funding hash.
+    // Gated like the hosted path: well-formed, non-zero, and DIFFERENT from
+    // the funding hash in any letter case (the backend compares
+    // case-insensitively — a checksummed copy of the funding hash is not a
+    // settlement). The outcome is swallowed by design (D1), exactly like the
+    // funding outcome on this path (#1620): the local receipt already shows
+    // the settlement (above), and nothing here may change the
+    // caller-visible result of a completed purchase.
+    const settlementCandidate = merchantSettlement.settlementTxHash
+    if (
+      settlementCandidate &&
+      isWellFormedSettlementTxHash(settlementCandidate) &&
+      !isZeroSettlementTxHash(settlementCandidate) &&
+      settlementCandidate.toLowerCase() !== receipt.txHash.toLowerCase()
+    ) {
+      await this.reportSettlementEvidenceOnce(receipt.paymentId, settlementCandidate)
+    }
 
     await this.reportMerchantReceipt(receipt.paymentId, retryResponse)
 
@@ -618,34 +653,44 @@ export class MerchantCompletion {
     // this for its side effect (the local retryRequest path, #1620) is
     // unaffected: the resolved value is simply ignored there.
     for (let attempt = 0; ; attempt += 1) {
-      try {
-        await this.post('/machine-payments/evidence', body)
-        return { outcome: 'confirmed' }
-      } catch (err) {
-        const statusCode = err instanceof HavenApiError ? err.statusCode : undefined
-        const retryable = statusCode === EVIDENCE_RETRYABLE_STATUS
-        if (!retryable) {
-          // #3529: the backend relays a refusal `reason` on the evidence 409/503
-          // body (modules/mpp/evidence.ts) — but ONLY on the eip3009
-          // settlement-report refusal (`SettlementReportRefusal`): a plain 409
-          // (settlement_unverified from the erc7710 seam, tx_hash_mismatch,
-          // payment_not_confirmed) and every pre-#3475 backend carry none. That
-          // presence IS the discriminator the hosted tool classifies on — a
-          // reason-bearing refusal can only come from a payment whose funding
-          // leg is already confirmed — so it is carried verbatim, and left
-          // absent (not empty) when the body has none.
-          const reason = refusalReasonFromBody(err)
-          return {
-            outcome: 'refused',
-            statusCode: statusCode ?? 0,
-            ...(reason ? { reason } : {}),
-          }
-        }
-        if (attempt >= EVIDENCE_RETRY_DELAYS_MS.length) {
-          return { outcome: 'retryable', statusCode }
-        }
-        await this.sleep(EVIDENCE_RETRY_DELAYS_MS[attempt])
+      const result = await this.postEvidenceOnce(body)
+      if (result.outcome !== 'retryable' || attempt >= EVIDENCE_RETRY_DELAYS_MS.length) {
+        return result
       }
+      await this.sleep(EVIDENCE_RETRY_DELAYS_MS[attempt])
+    }
+  }
+
+  /**
+   * ONE evidence attempt — the body of `reportEvidence`'s loop above, and the
+   * whole of the #3764 settlement report below. A 503 answers `retryable`
+   * immediately; the caller decides whether to sleep and re-attempt
+   * (`reportEvidence`) or hand the outcome to its consumer (#3764 D2).
+   */
+  private async postEvidenceOnce(body: Record<string, unknown>): Promise<EvidenceReportOutcome> {
+    try {
+      await this.post('/machine-payments/evidence', body)
+      return { outcome: 'confirmed' }
+    } catch (err) {
+      const statusCode = err instanceof HavenApiError ? err.statusCode : undefined
+      if (statusCode !== EVIDENCE_RETRYABLE_STATUS) {
+        // #3529: the backend relays a refusal `reason` on the evidence 409/503
+        // body (modules/mpp/evidence.ts) — but ONLY on the eip3009
+        // settlement-report refusal (`SettlementReportRefusal`): a plain 409
+        // (settlement_unverified from the erc7710 seam, tx_hash_mismatch,
+        // payment_not_confirmed) and every pre-#3475 backend carry none. That
+        // presence IS the discriminator the hosted tool classifies on — a
+        // reason-bearing refusal can only come from a payment whose funding
+        // leg is already confirmed — so it is carried verbatim, and left
+        // absent (not empty) when the body has none.
+        const reason = refusalReasonFromBody(err)
+        return {
+          outcome: 'refused',
+          statusCode: statusCode ?? 0,
+          ...(reason ? { reason } : {}),
+        }
+      }
+      return { outcome: 'retryable', statusCode }
     }
   }
 
@@ -689,6 +734,31 @@ export class MerchantCompletion {
       throw new HavenZeroSettlementHashError(paymentId)
     }
     return this.reportEvidence({
+      paymentId,
+      rail: 'x402',
+      txHash: settlementTxHash,
+    })
+  }
+
+  /**
+   * #3764: report the merchant's OWN EIP-3009 settlement transaction right
+   * after a completed purchase — the second leg of a payment that already has
+   * a funding-evidence row. Same endpoint and payload shape as
+   * `reportSettlementEvidence` above, but with #3764's D2 budget: exactly ONE
+   * attempt, no `EVIDENCE_RETRY_DELAYS_MS` backoff. The resource is already
+   * paid for and delivered, so a retryable answer must not stretch the
+   * completed purchase — the HOSTED tools hand the outcome to the agent
+   * (`settlementEvidenceOutcome` → `haven_report_settlement_evidence`), and
+   * the local caller swallows it by design (D1). Callers validate the hash
+   * before this call (well-formed, non-zero, different from the funding hash
+   * case-insensitively), so there is no client-side refusal here — the
+   * backend verifies on-chain and is the only judge.
+   */
+  async reportSettlementEvidenceOnce(
+    paymentId: string,
+    settlementTxHash: string,
+  ): Promise<EvidenceReportOutcome> {
+    return this.postEvidenceOnce({
       paymentId,
       rail: 'x402',
       txHash: settlementTxHash,

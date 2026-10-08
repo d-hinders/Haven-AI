@@ -21,6 +21,7 @@ import {
   ok,
   recordedCalls,
   stubFetch,
+  VALID_PAYMENT_HEADER_REF,
 } from './test-support/hosted-mcp.js'
 
 installSharedFixtureLifecycle()
@@ -2450,5 +2451,195 @@ describe('#2145: the hosted resume description gates on the live retry trigger',
     // as the next step. A revert to either earlier wording drops this literal.
     expect(description).toContain('Do NOT pass its x402_binding to')
     expect(description).toContain('haven_x402_sign_header')
+  })
+})
+
+// ── #3764: the hosted eip3009 tools map the merchant settlement evidence —
+// which `completeX402MerchantCall` now posts AFTER the funding report — the
+// same three arms #3727's evidenceHandoff gives the plain-HTTP outcome. ──
+
+describe('#3764 — the merchant settlement evidence maps to next steps (eip3009)', () => {
+  const SETTLEMENT = '0x' + 'cd'.repeat(32)
+  const SIG7710 = '0x' + '22'.repeat(65)
+  const GOODS = { jsonrpc: '2.0', id: 'x', result: { content: [{ type: 'text', text: 'goods' }] } }
+
+  function stubDelivery() {
+    // The eip3009 arms fund first; the delivery wait is not what these tests
+    // exercise.
+    return {
+      ensure: vi.spyOn(HavenClient.prototype as never, 'ensureFundingConfirmed').mockResolvedValue(undefined as never),
+    }
+  }
+
+  function mockDelivery(
+    haven: HavenClient,
+    settlementEvidenceOutcome: Record<string, unknown> | undefined,
+  ) {
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200,
+      ok: true,
+      body: GOODS,
+      settlementTxHash: SETTLEMENT,
+      evidenceOutcome: { outcome: 'confirmed' },
+      ...(settlementEvidenceOutcome ? { settlementEvidenceOutcome } : {}),
+    } as never)
+    vi.spyOn(haven, 'getPostPurchaseAllowanceSummary').mockResolvedValue({
+      allowance: null,
+      warnings: [],
+      payment: { status: 'settled' },
+    } as never)
+  }
+
+  it('haven_complete_mcp_tool names the report tool with the hash prefilled when the settlement report is retryable', async () => {
+    stubFetch({})
+    stubDelivery()
+    const haven = new HavenClient({ apiKey: 'test' as never, baseUrl: 'http://haven.test' })
+    mockDelivery(haven, { outcome: 'retryable', statusCode: 503 })
+
+    const res = ok<Record<string, any>>(
+      await createToolHandlers(haven).haven_complete_mcp_tool({
+        payment_id: 'pay_x402',
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: {},
+        payment_header: 'eyJ4IjoxfQ==',
+      }),
+    )
+
+    expect(res.data.next_tool).toBe('mcp__haven__haven_report_settlement_evidence')
+    expect(res.data.next_arguments).toEqual({ payment_id: 'pay_x402', settlement_tx_hash: SETTLEMENT })
+    expect(res.data.reason).toContain('not mined')
+    // The purchase answer itself is unchanged beside the guidance.
+    expect(res.data.settled).toBeUndefined()
+    expect(res.data.settlement_tx_hash).toBe(SETTLEMENT)
+  })
+
+  it('haven_complete_mcp_tool names NO tool when the settlement hash was refused — with the reason', async () => {
+    stubFetch({})
+    stubDelivery()
+    const haven = new HavenClient({ apiKey: 'test' as never, baseUrl: 'http://haven.test' })
+    mockDelivery(haven, { outcome: 'refused', statusCode: 409 })
+
+    const res = ok<Record<string, any>>(
+      await createToolHandlers(haven).haven_complete_mcp_tool({
+        payment_id: 'pay_x402',
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: {},
+        payment_header: 'eyJ4IjoxfQ==',
+      }),
+    )
+
+    expect(res.data.next_tool).toBeUndefined()
+    expect(res.data.next_tool_omitted_reason).toContain('do not re-report the same hash')
+    expect(res.data.reason).toContain('do not re-report the same hash')
+  })
+
+  it('haven_complete_mcp_tool answers the pre-#3764 shape — no guidance block — when the settlement was recorded (or never posted)', async () => {
+    stubFetch({})
+    stubDelivery()
+    const haven = new HavenClient({ apiKey: 'test' as never, baseUrl: 'http://haven.test' })
+    mockDelivery(haven, { outcome: 'confirmed' })
+
+    const res = ok<Record<string, any>>(
+      await createToolHandlers(haven).haven_complete_mcp_tool({
+        payment_id: 'pay_x402',
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: {},
+        payment_header: 'eyJ4IjoxfQ==',
+      }),
+    )
+
+    expect(res.data.next_tool).toBeUndefined()
+    expect(res.data.next_tool_omitted_reason).toBeUndefined()
+    expect(res.data.next_action).toBeUndefined()
+  })
+
+  it("haven_settle_mcp_tool's eip3009 settled arm names the report tool with the hash prefilled when the settlement report is retryable", async () => {
+    stubFetch({
+      'POST /payments/pay_7710/sign': { status: 200, body: { payment_id: 'pay_7710', status: 'confirmed', tx_hash: '0x' + 'ee'.repeat(32) } },
+    })
+    const haven = new HavenClient({ apiKey: 'test' as never, baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'submitSignature').mockResolvedValue({
+      status: 'confirmed',
+      txHash: '0x' + 'ee'.repeat(32),
+    } as never)
+    vi.spyOn(haven, 'ensureFundingConfirmed').mockResolvedValue(undefined as never)
+    mockDelivery(haven, { outcome: 'retryable', statusCode: 503 })
+
+    const res = ok<Record<string, any>>(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_7710',
+        signature: SIG7710,
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+        // A REAL minted header — the settle arm preflights it against the
+        // payment status before any funding is relayed.
+        payment_header: VALID_PAYMENT_HEADER_REF.v1,
+      }),
+    )
+
+    expect(res.data.settled).toBe(true)
+    expect(res.data.next_tool).toBe('mcp__haven__haven_report_settlement_evidence')
+    expect(res.data.next_arguments).toEqual({ payment_id: 'pay_7710', settlement_tx_hash: SETTLEMENT })
+    expect(res.data.reason).toContain('not mined')
+  })
+
+  it("haven_settle_mcp_tool's eip3009 settled arm names NO tool when the settlement hash was refused", async () => {
+    stubFetch({
+      'POST /payments/pay_7710/sign': { status: 200, body: { payment_id: 'pay_7710', status: 'confirmed', tx_hash: '0x' + 'ee'.repeat(32) } },
+    })
+    const haven = new HavenClient({ apiKey: 'test' as never, baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'submitSignature').mockResolvedValue({
+      status: 'confirmed',
+      txHash: '0x' + 'ee'.repeat(32),
+    } as never)
+    vi.spyOn(haven, 'ensureFundingConfirmed').mockResolvedValue(undefined as never)
+    mockDelivery(haven, { outcome: 'refused', statusCode: 409 })
+
+    const res = ok<Record<string, any>>(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_7710',
+        signature: SIG7710,
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+        payment_header: VALID_PAYMENT_HEADER_REF.v1,
+      }),
+    )
+
+    expect(res.data.settled).toBe(true)
+    expect(res.data.next_tool).toBeUndefined()
+    expect(res.data.next_tool_omitted_reason).toContain('do not re-report the same hash')
+  })
+
+  it("haven_settle_mcp_tool's eip3009 settled arm keeps the settled no-tool answer when the settlement was recorded", async () => {
+    stubFetch({
+      'POST /payments/pay_7710/sign': { status: 200, body: { payment_id: 'pay_7710', status: 'confirmed', tx_hash: '0x' + 'ee'.repeat(32) } },
+    })
+    const haven = new HavenClient({ apiKey: 'test' as never, baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'submitSignature').mockResolvedValue({
+      status: 'confirmed',
+      txHash: '0x' + 'ee'.repeat(32),
+    } as never)
+    vi.spyOn(haven, 'ensureFundingConfirmed').mockResolvedValue(undefined as never)
+    mockDelivery(haven, { outcome: 'confirmed' })
+
+    const res = ok<Record<string, any>>(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_7710',
+        signature: SIG7710,
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+        payment_header: VALID_PAYMENT_HEADER_REF.v1,
+      }),
+    )
+
+    expect(res.data.settled).toBe(true)
+    expect(res.data.next_tool).toBeUndefined()
+    expect(res.data.next_tool_omitted_reason).toBe('the purchase is settled; no Haven tool follows')
   })
 })

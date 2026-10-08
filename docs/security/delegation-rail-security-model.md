@@ -581,6 +581,25 @@ chain.
 > about authority, custody or signing changes. Scope of this note: that one
 > CASE predicate. Nothing else in this document was re-verified.
 
+> **Re-verified unchanged (#3764, 2026-10-08 — the SDK's own settlement-evidence
+> report):** this diff touched one file in this document's coverage list,
+> `packages/sdk/src/client.ts`, and none of its authority, custody or signing
+> surfaces. On an ACCEPTED merchant answer to a payment WITH a funding leg,
+> `completeX402MerchantCall` now posts the merchant's own settlement
+> transaction — already parsed from `PAYMENT-RESPONSE` since #3118 — as a
+> SECOND `/machine-payments/evidence` report right after the funding one
+> (#3764): one attempt, no backoff, gated on a well-formed, non-zero hash
+> different from the funding hash case-insensitively. This is a best-effort
+> evidence WRITE after the purchase completed, on the same #3475 seam the
+> backend verifies on-chain before recording — the SDK hands Haven a claim,
+> not an authority; nothing becomes signable or refused differently, no
+> signature is produced or consumed, and no spend decision reads the new
+> `settlementEvidenceOutcome` field (the hosted tools map it to agent
+> guidance; the local path swallows it by design). The local
+> `retryRequest` hook lives in `merchant-completion.ts`, outside this
+> document's coverage list. Scope of this note: that evidence path.
+> Nothing else in this document was re-verified.
+
 > **Re-verified unchanged (#3727, 2026-10-07 — the folded settlement evidence
 > and retry_headers):** this diff touched one file in this document's coverage
 > list, `packages/signer/src/tools.ts`, and none of its signing surfaces. The

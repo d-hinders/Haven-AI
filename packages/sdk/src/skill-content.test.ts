@@ -398,15 +398,21 @@ describe('onboarding and setup section (#2537)', () => {
 })
 
 describe('plain-HTTP settlement report (#3475)', () => {
-  it("tells the agent to hand the merchant's PAYMENT-RESPONSE transaction to haven_report_settlement_evidence", () => {
+  it("tells the agent to hand the merchant's PAYMENT-RESPONSE to haven_report_x402_outcome as payment_response (#3764)", () => {
     const start = HAVEN_SKILL_MD.indexOf('**Direct transfer / non-MCP paywall:**')
     const end = HAVEN_SKILL_MD.indexOf('**Catalog tool arguments:**')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const paragraph = HAVEN_SKILL_MD.slice(start, end)
+    // #3727 folded the settlement into the outcome report: the raw header rides
+    // `payment_response` on the SAME call — not a second tool.
     expect(paragraph).toContain('PAYMENT-RESPONSE')
+    expect(paragraph).toContain('payment_response')
+    expect(paragraph).toContain('mcp__haven__haven_report_x402_outcome')
+    expect(paragraph).toContain('SAME')
+    // The standalone evidence tool is named ONLY as the answer-driven remedy.
     expect(paragraph).toContain('mcp__haven__haven_report_settlement_evidence')
-    expect(paragraph).toContain('settlement_tx_hash')
+    expect(paragraph).toMatch(/haven_report_settlement_evidence[^.]*only when the outcome answer/)
   })
 })
 

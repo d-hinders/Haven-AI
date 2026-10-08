@@ -59,6 +59,7 @@ import {
   requireSettleableSelection,
 } from './support/cap-price.js'
 import { getUsableCatalogMcpEntry } from './support/catalog-entry.js'
+import { resolveCatalogCallArguments } from './support/catalog-arguments.js'
 import { HostedToolError, runTool } from './support/errors.js'
 import {
   buildAgentGuidance,
@@ -104,8 +105,21 @@ function discoveryHintFor(entry: {
   status: string
   toolName: string | null
   resourceUrl: string
+  // #3769: the row's declared HTTP call shape, carried into a
+  // haven_quote_x402 hint the tool accepts VERBATIM.
+  httpMethod?: string | null
+  bodyExample?: Record<string, unknown> | null
 }): DiscoveryHint {
-  if (entry.protocol !== 'mcp') return { suggested_tool: 'haven_quote_x402', suggested_arguments: { url: entry.resourceUrl } }
+  if (entry.protocol !== 'mcp') {
+    // #3769: a GET-only hint for a POST-declared resource described a call
+    // the merchant cannot answer usefully (Anchor's token price answers a
+    // GET 402 but its paid call is a POST with a {symbol} body). The hint
+    // carries the declared shape; a row that declares none stays GET-only.
+    const args: { url: string; method?: string; body?: string } = { url: entry.resourceUrl }
+    if (entry.httpMethod) args.method = entry.httpMethod
+    if (entry.bodyExample) args.body = JSON.stringify(entry.bodyExample)
+    return { suggested_tool: 'haven_quote_x402', suggested_arguments: args }
+  }
   if (entry.status === 'degraded') {
     return {
       suggested_tool_omitted_reason:
@@ -154,6 +168,19 @@ export function createCatalogPurchaseHandlers(
           protocol: entry.protocol,
           tool_name: entry.toolName,
           tool_arguments: entry.toolArguments,
+          // #3769: how a purchase calls this row. Wire-shaped snake_case,
+          // absent when the backend predates #3769 (the SDK fields are
+          // optional). `tool_arguments_schema` is what tells the agent a row
+          // accepts caller `arguments` on haven_prepare_catalog_purchase —
+          // and WHICH arguments it needs.
+          ...(entry.toolArgumentsSchema !== undefined
+            ? {
+                tool_arguments_schema: entry.toolArgumentsSchema,
+                http_method: entry.httpMethod ?? null,
+                body_type: entry.bodyType ?? null,
+                body_example: entry.bodyExample ?? null,
+              }
+            : {}),
           price_display: entry.priceDisplay,
           price_atomic: entry.priceAtomic,
           // Catalog price is a last-verified hint, NOT authoritative. Always
@@ -568,6 +595,18 @@ export function createCatalogPurchaseHandlers(
           // paid-preflight paths intentionally share this refusal contract.
           const entry = await getUsableCatalogMcpEntry(haven, args.catalog_id as string)
 
+          // 1b. #3769: resolve the merchant call arguments. A row that
+          // declares an argument schema accepts caller `arguments` (merged
+          // over the row's pinned ones and validated against the schema); a
+          // row without one is a fixed SKU and REFUSES caller arguments.
+          // Either refusal happens HERE, before step 2's quote — the
+          // pre-intent contract ("refused before any payment exists") holds
+          // for invalid arguments exactly as for an over-budget cap.
+          const callArguments = resolveCatalogCallArguments(
+            entry,
+            args.arguments as Record<string, unknown> | undefined,
+          )
+
           // 2. Run the LIVE quote against the catalog entry's own merchant —
           // the SAME probe haven_pay_mcp_tool uses, shared rather than
           // duplicated (#1306 review requirement). #1348: the Haven reads this
@@ -585,7 +624,9 @@ export function createCatalogPurchaseHandlers(
           const { quote, merchantUrl } = await quoteMcpToolCall(haven, {
             merchantUrl: entry.resourceUrl,
             toolName: entry.toolName,
-            toolArguments: entry.toolArguments ?? {},
+            // #3769: the resolved call arguments (row preset merged with the
+            // validated caller `arguments`), not the row preset alone.
+            toolArguments: callArguments,
             idempotencyKey: args.idempotency_key as string | undefined,
             // #3774: the catalog tools take no URL argument to correct.
             egressTarget: 'catalog',
@@ -860,7 +901,7 @@ export function createCatalogPurchaseHandlers(
           const catalogCallContext = {
             merchantUrl,
             toolName: entry.toolName,
-            arguments: entry.toolArguments ?? {},
+            arguments: callArguments,
             ...(quote.mcpTransport ? { mcpTransport: quote.mcpTransport } : {}),
           }
 
@@ -901,7 +942,7 @@ export function createCatalogPurchaseHandlers(
               token: priced.token,
               merchant_url: merchantUrl,
               tool_name: entry.toolName,
-              arguments: entry.toolArguments ?? {},
+              arguments: callArguments,
               ...(quote.mcpTransport
                 ? { mcp_transport: serializeMcpTransport(quote.mcpTransport) }
                 : {}),
@@ -984,7 +1025,7 @@ export function createCatalogPurchaseHandlers(
             token: quote.token,
             merchant_url: merchantUrl,
             tool_name: entry.toolName,
-            arguments: entry.toolArguments ?? {},
+            arguments: callArguments,
             ...(quote.mcpTransport ? { mcp_transport: serializeMcpTransport(quote.mcpTransport) } : {}),
             catalog_id: entry.id,
             catalog_name: entry.name,

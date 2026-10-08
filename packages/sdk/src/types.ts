@@ -2607,6 +2607,20 @@ export interface HavenCatalogEntry {
   protocol: 'http' | 'mcp'
   toolName: string | null
   toolArguments: Record<string, unknown> | null
+  /**
+   * #3769: the row's declared JSON Schema for a per-call MCP tool's caller
+   * arguments — `haven_prepare_catalog_purchase` validates an `arguments`
+   * input against it. NULL/absent on a fixed-SKU row, which refuses caller
+   * arguments. OPTIONAL on purpose: an installed SDK may face a backend
+   * predating #3769.
+   */
+  toolArgumentsSchema?: Record<string, unknown> | null
+  /** #3769: the HTTP method a plain-HTTP resource needs (null = GET). OPTIONAL like the schema above. */
+  httpMethod?: string | null
+  /** #3769: the body encoding of `bodyExample` — 'json' today. OPTIONAL like the schema above. */
+  bodyType?: string | null
+  /** #3769: an example body the row's discovery hint carries. OPTIONAL like the schema above. */
+  bodyExample?: Record<string, unknown> | null
   priceDisplay: string | null
   priceAtomic: string | null
   asset: string | null
@@ -2671,6 +2685,11 @@ export interface RawCatalogEntry {
   protocol: 'http' | 'mcp'
   tool_name: string | null
   tool_arguments: Record<string, unknown> | null
+  /** #3769: absent from a backend predating it; null when the row declares none. */
+  tool_arguments_schema?: Record<string, unknown> | null
+  http_method?: string | null
+  body_type?: string | null
+  body_example?: Record<string, unknown> | null
   price_display: string | null
   price_atomic: string | null
   asset: string | null

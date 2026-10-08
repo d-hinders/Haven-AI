@@ -709,12 +709,15 @@ Since #3100 each entry carries `suggested_tool` **and** `suggested_arguments`,
 spelled in that tool's own vocabulary and accepted by it verbatim — on the
 hosted surface an MCP entry points at the cap-free `haven_quote_catalog_purchase`
 `{ catalog_id }` (prepare requires a cap the server must never invent) and an
-HTTP entry at `haven_quote_x402 { url }`; the local runtime points at its pay
-tools with `{ merchant_url, tool_name, arguments }` (`arguments` only when the
-row carries them) / `{ url }`. A row the suggested tool would refuse — no
-`tool_name` on either surface, degraded on the hosted one — gets
-`suggested_tool_omitted_reason` instead of a hint. A hosted strict refusal
-names the declared keys and the declared alias of a rejected key
+HTTP entry at `haven_quote_x402 { url }` — with `method` and `body` added to
+the hint when the row declares them (#3769: a GET-only suggestion for a
+POST-declared resource described a call the merchant cannot answer usefully;
+`body` is the JSON string of the row's `body_example`); the local runtime
+points at its pay tools with `{ merchant_url, tool_name, arguments }`
+(`arguments` only when the row carries them) / `{ url }`. A row the suggested
+tool would refuse — no `tool_name` on either surface, degraded on the hosted
+one — gets `suggested_tool_omitted_reason` instead of a hint. A hosted strict
+refusal names the declared keys and the declared alias of a rejected key
 (`resource_url` → `url`, `id` → `catalog_id`; epic #3105, decision 5). The
 quote tool the hosted hint names carries no structured next step of its own
 yet — its description leads to prepare; slice #3102 closes that hop.
@@ -745,9 +748,17 @@ the two then refuses safely at the cap check and the agent re-confirms with
 the user. Guidance only: the cap stays required and its enforcement is
 unchanged.
 
-`haven_prepare_catalog_purchase({ catalog_id, max_amount_human | max_amount, idempotency_key? })`
+`haven_prepare_catalog_purchase({ catalog_id, max_amount_human | max_amount, arguments?, idempotency_key? })`
 starts a paid-MCP-tool purchase from a curated `merchant_catalog` row instead
-of a hand-copied `merchant_url` / `tool_name` / `tool_arguments`. It is a
+of a hand-copied `merchant_url` / `tool_name` / `tool_arguments`. A row that
+DECLARES an argument schema (`tool_arguments_schema`, #3769) accepts caller
+`arguments` for its per-call tool — merged over the row's pinned ones and
+validated against the schema BEFORE the merchant is contacted, so prepare with
+an invalid call (Soundside `create_text` with `{}`, whose merchant schema has
+no required clause of its own) refuses before any payment exists; a row
+WITHOUT a schema is a fixed SKU and refuses `arguments` outright (the
+CloudNest tiers). The merchant URL and tool name still always come from the
+row. It is a
 convenience and verification layer built entirely from EXISTING primitives —
 it composes, rather than duplicates, the `haven_pay_mcp_tool` internals: the
 quote probe with the #1271 discovery fallback is shared via one
@@ -787,8 +798,15 @@ Sequence:
    not have); a `degraded` MCP row or one missing `tool_name` names
    `haven_pay_mcp_tool` (with an explicit `merchant_url`/`tool_name`) as the
    manual fallback.
-3. Run the LIVE quote against the entry's own `resource_url` / `tool_name` /
-   `tool_arguments` — the shared probe, including the #1271 same-origin
+3. Resolve the call arguments (#3769) BEFORE the probe: a row with
+   `tool_arguments_schema` validates the caller `arguments` (merged over the
+   row's pinned `tool_arguments`) against it and refuses
+   `INVALID_CATALOG_ARGUMENTS` — no merchant is contacted and no payment
+   exists on an invalid call; a row without a schema refuses any caller
+   `arguments` with `INVALID_INPUT`. The resolved object is what the probe
+   carries and what the response's `arguments` reports.
+   Run the LIVE quote against the entry's own `resource_url` / `tool_name` /
+   resolved `arguments` — the shared probe, including the #1271 same-origin
    discovery fallback. **Round-trip budget (#1348):** the two Haven reads
    steps 5–6 need (agent, allowances) are independent of this probe, so they
    are DISPATCHED here and overlap the merchant leg — the slowest part of the

@@ -57,7 +57,9 @@ const ADDITIVE_SINCE_BASE = new Set([
   // #3564: additive outcome-pending visibility on the machine-payment status.
   'submission_outcome_pending',
   // #3770: the delivery-quality verdict on the receipts the paying agent reads.
-  'delivery_quality', 'delivery_note', 'delivery_reported_at'])
+  'delivery_quality', 'delivery_note', 'delivery_reported_at',
+  // #3778: additive non-secret delivery pointer on the receipts read.
+  'delivery_reference'])
 
 function stripParties(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stripParties)

@@ -3868,6 +3868,18 @@ export type components = {
             tool_arguments: {
                 [key: string]: unknown;
             } | null;
+            /** @description #3769: the JSON Schema a per-call MCP tool's caller arguments must satisfy — haven_prepare_catalog_purchase validates a caller `arguments` against it (and refuses arguments on a row that declares none, the fixed-SKU contract). Null on a fixed-SKU row or a row that declares no schema. */
+            tool_arguments_schema: {
+                [key: string]: unknown;
+            } | null;
+            /** @description #3769: the HTTP method a plain-HTTP x402 resource needs (e.g. "POST"). Null means GET. Only meaningful for `protocol: "http"` rows; the catalog verifier probes with the declared method and body. */
+            http_method: string | null;
+            /** @description #3769: the body encoding of `body_example` — "json" today. Null when the row declares no body. */
+            body_type: string | null;
+            /** @description #3769: an example request body the row's verifier probe and the discovery hint carry (the hint's `body` is its JSON string). Null when the row declares no body. */
+            body_example: {
+                [key: string]: unknown;
+            } | null;
             price_display: string | null;
             price_atomic: string | null;
             asset: string | null;
@@ -5595,6 +5607,7 @@ export type components = {
             protocolReceiptPayload?: {
                 [key: string]: unknown;
             };
+            deliveryReference?: string;
         };
         MachinePaymentDeliveryQualityRequest: {
             /** @enum {string} */
@@ -5734,6 +5747,8 @@ export type components = {
             fundingTxHash?: string | null;
             /** @description #3763: the merchant settlement transaction when one is recorded (#3475); null otherwise — "not recorded", never "failed". Null on non-x402 rows. */
             settlementTxHash?: string | null;
+            /** @description #3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write. */
+            deliveryReference?: string | null;
             /**
              * @description Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: reserved — nothing populates it today. `unknown`: outbound raw transfer with no matched intent. Absent for inbound (`direction: in`) rows.
              * @enum {string}
@@ -5824,6 +5839,8 @@ export type components = {
             fundingTxHash?: string | null;
             /** @description #3763: the merchant settlement transaction when one is recorded (#3475); null otherwise — "not recorded", never "failed". Null on non-x402 rows. */
             settlementTxHash?: string | null;
+            /** @description #3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write. */
+            deliveryReference?: string | null;
             /**
              * @description Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: reserved — nothing populates it today. `unknown`: outbound raw transfer with no matched intent. Absent for inbound (`direction: in`) rows.
              * @enum {string}
@@ -15645,6 +15662,8 @@ export interface operations {
                             source?: string;
                             x402_resource_url?: string | null;
                             x402_merchant_address?: string | null;
+                            /** @description #3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write. */
+                            delivery_reference?: string | null;
                             chain_id?: number | null;
                             token_address?: string | null;
                             account_id?: string | null;
@@ -15832,6 +15851,8 @@ export interface operations {
                             source?: string;
                             x402_resource_url?: string | null;
                             x402_merchant_address?: string | null;
+                            /** @description #3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write. */
+                            delivery_reference?: string | null;
                             chain_id?: number | null;
                             token_address?: string | null;
                             account_id?: string | null;

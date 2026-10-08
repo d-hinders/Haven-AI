@@ -1,7 +1,7 @@
 import type { PoolClient } from 'pg'
 
 /**
- * 107 — Agent-reported delivery-quality reports on settled payments (#3770).
+ * 109 — Agent-reported delivery-quality reports on settled payments (#3770).
  *
  * A settled payment's `settled: true` is an on-chain fact and never changes;
  * catalog health only ever proved PAYABILITY (a live 402 quote could be
@@ -23,7 +23,7 @@ import type { PoolClient } from 'pg'
  * an agent that re-judges its delivery re-reports, replacing its own row —
  * never another agent's (the route is agent-scoped).
  */
-export const version = '107_machine_payment_delivery_reports'
+export const version = '109_machine_payment_delivery_reports'
 
 export async function up(client: PoolClient): Promise<void> {
   await client.query(`

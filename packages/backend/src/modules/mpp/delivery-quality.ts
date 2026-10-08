@@ -28,7 +28,7 @@ export const DELIVERY_QUALITIES: readonly DeliveryQuality[] = ['ok', 'unusable',
 
 /**
  * The note bound. The module refuses over this BEFORE the write, so the
- * database CHECK (migration 107) is a second line of defence, not the
+ * database CHECK (migration 109) is a second line of defence, not the
  * refusal an agent sees.
  */
 export const DELIVERY_QUALITY_NOTE_MAX = 2000

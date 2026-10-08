@@ -218,6 +218,19 @@ existing filter. This surface only returns curated metadata and may yield zero
 or multiple entries. It never quotes, signs, or authorizes a payment, and
 catalog prices remain indicative rather than authoritative.
 
+Since #3769 the credentialed catalogue shapes also carry how a purchase CALLS
+a row: `tool_arguments_schema` (a JSON Schema the row's per-call tool
+arguments must satisfy — `haven_prepare_catalog_purchase` validates a caller
+`arguments` against it and refuses arguments on a row that declares none,
+the fixed-SKU contract), plus `http_method`, `body_type` and `body_example`
+for a plain-HTTP x402 resource (NULL = a GET with no body). The
+credential-less public shape still withholds them, as it withholds all
+call/price detail. The catalog verifier probes a plain-HTTP row with its
+declared method and body, and a challenge that structurally advertises its
+own method (a `resource.method` on the 402) corrects the row's
+`http_method` at refresh — the live 402 is authoritative for how the
+merchant is called.
+
 The sibling `POST /catalog/submit` is a public, unauthenticated self-service
 submission endpoint (epic #1717, #1711): it writes a queue row and returns an
 `id` plus a `verify_token`, and the request path makes **no outbound request of

@@ -128,6 +128,15 @@ const transactionBaseProperties = {
     type: ['string', 'null'],
     description: '#3763: the merchant settlement transaction when one is recorded (#3475); null otherwise — "not recorded", never "failed". Null on non-x402 rows.',
   },
+  // #3778: the NON-SECRET delivery pointer an agent reported with an accepted
+  // x402 outcome ("Bik Bok 5 SEK, order 6ac7…") — the owner's proof that a
+  // deliverable EXISTS and where to recover it. Never the deliverable itself:
+  // credential-shaped values are refused before the row is written.
+  deliveryReference: {
+    type: ['string', 'null'],
+    description:
+      '#3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write.',
+  },
   // #2097: backend-recorded initiator classification — never derived
   // in the frontend. `agent` = row carries agent attribution (confirmed
   // x402 intents, delegate sweeps, raw transfers matched to a
@@ -879,6 +888,11 @@ const activityPayment = {
     source: { type: 'string', description: "Falls back to 'direct'." },
     x402_resource_url: { type: ['string', 'null'] },
     x402_merchant_address: { type: ['string', 'null'] },
+    delivery_reference: {
+      type: ['string', 'null'],
+      description:
+        '#3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write.',
+    },
     chain_id: { type: ['integer', 'null'] },
     token_address: { type: ['string', 'null'] },
     account_id: { type: ['string', 'null'] },
@@ -9483,7 +9497,8 @@ export const openapiSpec = {
          */
         required: [
           'id', 'name', 'description', 'category', 'resource_url', 'rail', 'protocol', 'status',
-          'tool_name', 'tool_arguments', 'price_display', 'price_atomic', 'asset', 'network',
+          'tool_name', 'tool_arguments', 'tool_arguments_schema', 'http_method', 'body_type',
+          'body_example', 'price_display', 'price_atomic', 'asset', 'network',
           'asset_transfer_methods', 'verified_at', 'source', 'domain_verified', 'verified_payable',
           'merchant',
         ],
@@ -9508,6 +9523,25 @@ export const openapiSpec = {
             ],
             description:
               'Suggested MCP tool arguments for this catalog item, when the row represents a specific product variant. Agents should pass this object unchanged to the pay tool arguments field after confirming the live merchant quote.',
+          },
+          tool_arguments_schema: {
+            anyOf: [{ type: 'object', additionalProperties: true }, { type: 'null' }],
+            description:
+              '#3769: the JSON Schema a per-call MCP tool\'s caller arguments must satisfy — haven_prepare_catalog_purchase validates a caller `arguments` against it (and refuses arguments on a row that declares none, the fixed-SKU contract). Null on a fixed-SKU row or a row that declares no schema.',
+          },
+          http_method: {
+            anyOf: [{ type: 'string' }, { type: 'null' }],
+            description:
+              '#3769: the HTTP method a plain-HTTP x402 resource needs (e.g. "POST"). Null means GET. Only meaningful for `protocol: "http"` rows; the catalog verifier probes with the declared method and body.',
+          },
+          body_type: {
+            anyOf: [{ type: 'string' }, { type: 'null' }],
+            description: '#3769: the body encoding of `body_example` — "json" today. Null when the row declares no body.',
+          },
+          body_example: {
+            anyOf: [{ type: 'object', additionalProperties: true }, { type: 'null' }],
+            description:
+              '#3769: an example request body the row\'s verifier probe and the discovery hint carry (the hint\'s `body` is its JSON string). Null when the row declares no body.',
           },
           price_display: { anyOf: [{ type: 'string' }, { type: 'null' }] },
           price_atomic: { anyOf: [{ type: 'string' }, { type: 'null' }] },
@@ -12518,12 +12552,17 @@ export const openapiSpec = {
           protocolReceiptHeaderName: { type: 'string' },
           protocolReceiptHeader: { type: 'string' },
           protocolReceiptPayload: { type: 'object', additionalProperties: true },
+          // #3778: the NON-SECRET delivery pointer. Bounded here; the
+          // secret-shape refusal is semantic (`modules/mpp/evidence.ts`,
+          // `@haven_ai/core`'s `deliveryReferenceError`) because "looks like
+          // a credential" is not a JSON-Schema statement.
+          deliveryReference: { type: 'string', maxLength: 512 },
         },
         additionalProperties: false,
       },
       // #3770: the delivery-quality report body. `note` is a plain string —
       // the 2000-char bound is the MODULE's semantic refusal (400 with a
-      // named reason), and the DB CHECK (migration 107) is the backstop; the
+      // named reason), and the DB CHECK (migration 109) is the backstop; the
       // shape check states only the shape.
       MachinePaymentDeliveryQualityRequest: {
         type: 'object',

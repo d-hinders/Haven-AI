@@ -47,6 +47,7 @@
  * that rule executable lives in `tools/module-boundaries.test.ts`.
  */
 import { randomUUID } from 'node:crypto'
+import { deliveryReferenceError } from '@haven_ai/core'
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
@@ -289,6 +290,28 @@ export async function resolveMerchantCallContext(
 }
 
 /**
+ * #3778: refuse a credential-shaped `delivery_reference` BEFORE anything
+ * moves — on haven_settle_mcp_tool this runs before the funding relay, on
+ * haven_complete_mcp_tool before the merchant call, so a bad value can never
+ * reach the row OR spend. Inline here, not support/: each capability calls it
+ * once and the canonical shape rules live in `@haven_ai/core`
+ * (`deliveryReferenceError`) — this is only the refusal envelope, so a
+ * shared wrapper would be an ownership-map entry for two one-line calls.
+ */
+function assertDeliveryReference(tool: HostedToolName, args: Record<string, any>): void {
+  const value = args.delivery_reference
+  if (value === undefined) return
+  const reason = deliveryReferenceError(String(value))
+  if (!reason) return
+  throw new HostedToolError({
+    code: 'DELIVERY_REFERENCE_REFUSED',
+    statusCode: 400,
+    paymentId: typeof args.payment_id === 'string' ? args.payment_id : undefined,
+    message: `${tool}: ${reason} Nothing was written and no funding was relayed.`,
+  })
+}
+
+/**
  * #3771: the Haven-derived purchase label for a settle whose merchant result
  * names no product. #3781 added the FIRST tier: the catalog row's name, when
  * the purchase came from a catalog entry (`haven_prepare_catalog_purchase` —
@@ -495,6 +518,8 @@ export async function deliverMerchantPayment(
   // the context itself, pre-funding, and hands the result in. Resolving once
   // and passing it through also keeps the two calls from diverging (the stored
   // context could change, and a second GET is a second chance to disagree).
+  // (#3778: the delivery reference is refused in the HANDLERS, which know
+  // their own tool name and run before any submit — never here.)
   const context = options?.context ?? (await resolveMerchantCallContext(haven, args))
 
   // Wait for ≥1 on-chain confirmation of the funding tx BEFORE the merchant
@@ -533,6 +558,12 @@ export async function deliverMerchantPayment(
       paymentId: args.payment_id,
       paymentHeader: args.payment_header,
       mcpTransport: context.mcpTransport,
+      // #3778: the validated non-secret delivery pointer — recorded on the
+      // evidence row when the merchant accepted, so the owner's receipt and
+      // dashboard show a deliverable exists.
+      ...(args.delivery_reference
+        ? { deliveryReference: args.delivery_reference }
+        : {}),
       // #1508: the same flag that skips the funding wait above also has to
       // reach the SDK's completion gate, which is where the real refusal was.
       noFundingLeg: options?.noFundingLeg === true,
@@ -1075,6 +1106,9 @@ export function createPaidMcpCompletionHandlers(
         // `createToolHandlers` directly, where no MCP SDK validation runs.
         // Both layers read their refusal text from STRICT_INPUT_TOOLS.
         const args = parseStrict('haven_complete_mcp_tool', input)
+        // #3778: a credential-shaped delivery_reference is refused BEFORE the
+        // merchant call — nothing written, nothing called.
+        assertDeliveryReference('haven_complete_mcp_tool', args)
         // #2970 review: pick explicit fields rather than spreading
         // `deliverMerchantPayment`'s result verbatim — that result also
         // carries `evidence_outcome` (which can be `{outcome:'refused',
@@ -1125,6 +1159,9 @@ export function createPaidMcpCompletionHandlers(
     haven_settle_mcp_tool: async (input) =>
       runTool(async () => {
         const args = parseStrict('haven_settle_mcp_tool', input)
+        // #3778: a credential-shaped delivery_reference is refused BEFORE the
+        // funding relay — a bad value can never reach the row or move money.
+        assertDeliveryReference('haven_settle_mcp_tool', args)
         // ── #2282: the merchant-call context is resolved BEFORE anything is
         // submitted, on BOTH schemes. ──
         //

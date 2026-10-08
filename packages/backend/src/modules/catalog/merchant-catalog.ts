@@ -44,6 +44,22 @@ export interface CatalogRow {
    * challenge names none or disagrees with itself.
    */
   pay_to: string | null
+  /**
+   * #3769: the JSON Schema a per-call MCP tool's caller arguments must
+   * satisfy (`haven_prepare_catalog_purchase` validates against it). NULL on
+   * a fixed-SKU row — caller arguments are refused there. Optional because a
+   * test fixture may predate migration 108.
+   */
+  tool_arguments_schema?: Record<string, unknown> | null
+  /**
+   * #3769: the HTTP method a plain-HTTP x402 resource needs (e.g. 'POST').
+   * NULL means GET. Only meaningful for `protocol: 'http'` rows.
+   */
+  http_method?: string | null
+  /** #3769: the body encoding of `body_example` — 'json' today, NULL when none. */
+  body_type?: string | null
+  /** #3769: an example body the row's probe and discovery hint carry. */
+  body_example?: Record<string, unknown> | null
   created_at: string
   updated_at: string
 }
@@ -74,6 +90,14 @@ export interface ProbeResult {
    * Undefined for MPP and whenever there is no single well-formed one.
    */
   payTo?: string
+  /**
+   * #3769: an HTTP method the challenge itself advertises (a structured
+   * `resource.method` on the 402), when present. The live 402 is
+   * authoritative for how it is called, so `refreshCatalog` writes it back
+   * onto the row — a row declaring GET whose challenge says POST is
+   * corrected, not silently quoted with the wrong method.
+   */
+  advertisedMethod?: string
 }
 
 interface X402Accept {
@@ -185,7 +209,10 @@ function assetSymbol(asset: string | undefined): string {
  * header, MACHINE-PAYMENT-CHALLENGE header, or JSON body counts as verified.
  */
 export async function probeCatalogEntry(
-  entry: Pick<CatalogRow, 'resource_url' | 'protocol' | 'tool_name' | 'tool_arguments' | 'rail'>,
+  entry: Pick<
+    CatalogRow,
+    'resource_url' | 'protocol' | 'tool_name' | 'tool_arguments' | 'rail' | 'http_method' | 'body_type' | 'body_example'
+  >,
   fetchImpl: typeof fetch = fetch,
 ): Promise<ProbeResult> {
   let response: Response
@@ -202,7 +229,20 @@ export async function probeCatalogEntry(
         }),
       })
     } else {
-      response = await fetchImpl(entry.resource_url, { method: 'GET' })
+      // #3769: probe with the row's DECLARED call shape. The old GET-only
+      // probe verified a request the merchant cannot answer usefully —
+      // Anchor's POST price endpoint answers a GET 402 too (the challenge is
+      // method-agnostic), but the paid call the row leads to is a POST with
+      // a body, and that is the shape the verifier must exercise.
+      const method = (entry.http_method ?? 'GET').toUpperCase()
+      const init: RequestInit = { method }
+      // Only JSON bodies are declared today; a body_example on a GET/HEAD row
+      // is operator error and is simply not sent.
+      if (entry.body_example != null && (entry.body_type ?? 'json') === 'json' && method !== 'GET' && method !== 'HEAD') {
+        init.body = JSON.stringify(entry.body_example)
+        init.headers = { 'Content-Type': 'application/json' }
+      }
+      response = await fetchImpl(entry.resource_url, init)
     }
   } catch {
     return { ok: false }
@@ -243,6 +283,13 @@ export async function probeCatalogEntry(
   const accept = parseAccepts(payload)
   if (!accept) return { ok: false }
 
+  // #3769: a challenge that STRUCTUREDLY advertises its own method (a
+  // `resource.method` on the 402) — Anchor's challenge only describes the
+  // POST wrapper in its free-text resource description, which is never
+  // parsed; a structured declaration is the only machine-readable one.
+  const advertised = (payload as { resource?: { method?: unknown } })?.resource?.method
+  const advertisedMethod = typeof advertised === 'string' && advertised.trim() ? advertised.trim().toUpperCase() : undefined
+
   const atomic = (accept.maxAmountRequired ?? accept.amount)!
   const symbol = assetSymbol(accept.asset)
   return {
@@ -253,6 +300,7 @@ export async function probeCatalogEntry(
     network: accept.network,
     assetTransferMethods: collectAssetTransferMethods(payload),
     payTo: collectPayTo(payload),
+    ...(advertisedMethod ? { advertisedMethod } : {}),
   }
 }
 
@@ -286,6 +334,7 @@ export async function refreshCatalog(
              network = COALESCE($5, network),
              asset_transfer_methods = COALESCE($6, asset_transfer_methods),
              pay_to = $7,
+             http_method = COALESCE($8, http_method),
              status = 'active', verified_at = now(),
              consecutive_failures = 0, updated_at = now()
          WHERE id = $1`,
@@ -303,6 +352,12 @@ export async function refreshCatalog(
           // names. A rotation lands here as a different value, which is what
           // flags the budgets pinned to the old one as stale.
           result.payTo ?? null,
+          // #3769: a 402 that advertises its own method corrects the row —
+          // the live challenge is authoritative for how it is called (the
+          // same doctrine the price fields above follow). HTTP rows only: an
+          // MCP row's challenge never advertises one, and a stray value must
+          // not leak onto a row whose probe is a tools/call.
+          entry.protocol === 'http' ? (result.advertisedMethod ?? null) : null,
         ],
       )
     } else {

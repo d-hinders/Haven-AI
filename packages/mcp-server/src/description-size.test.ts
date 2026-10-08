@@ -422,13 +422,32 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * tree RE-MEASURES at 30,351 UTF-8 bytes (the new description alone is 817 of
  * them, the rest is the pre-existing tree plus the settle/complete
  * next-step guidance that now names the report). 30,351 / 29 =
- * 1046.5862…, pinned at the two-decimal ceiling (1046.59). Shrink-only from
- * here.
+ * 1046.5862…, pinned at the two-decimal ceiling (1046.59).
+ *
+ * **Re-derived — round 24, #3778 (2026-10-08).** Three descriptions gain the
+ * delivery_reference sentence (#3778's acceptance criteria require the tools
+ * to say what the field is and that credential shapes are refused):
+ * `haven_report_x402_outcome`, `haven_complete_mcp_tool` and
+ * `haven_settle_mcp_tool` (+716 bytes total, three near-identical ~235-byte
+ * sentences on disjoint descriptions). The copy IS the deliverable — the
+ * field is new and the refusal rule is the agent's only signal that the
+ * secret must be relayed, never stored — so trimming it would cut the
+ * contract the issue exists to state. No tool was added — 28 holds.
+ * Measured: 29,946 UTF-8 bytes; the mean pin: 29,946 / 28 = 1069.5 exactly,
+ * pinned at that value.
+ *
+ * **Re-derived — round 25, #3770 ∪ #3778 union (2026-10-08).** Both round-24
+ * growths landed together when the branches merged: #3770 added
+ * `haven_report_delivery_quality` (28 → 29) and #3778 grew three descriptions
+ * by +716. The union tree RE-MEASURES at 30,947 UTF-8 bytes (measured, not
+ * derived arithmetically — the same union discipline as rounds
+ * 5/16/19/20/21). 30,947 / 29 = 1067.1379…, pinned at the two-decimal
+ * ceiling (1067.14). Shrink-only from here.
  */
-const MAX_TOTAL_BYTES = 30_351
-// Mean pin: round 24 (#3770, block above): 30,351 / 29 = 1046.5862…, pinned
-// at the two-decimal ceiling (1046.59). Shrink-only from here.
-const MAX_MEAN_BYTES = 1046.59
+const MAX_TOTAL_BYTES = 30_947
+// Mean pin: round 25 (union block above): 30,947 / 29 = 1067.1379…, pinned
+// at the two-decimal ceiling (1067.14). Shrink-only from here.
+const MAX_MEAN_BYTES = 1067.14
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

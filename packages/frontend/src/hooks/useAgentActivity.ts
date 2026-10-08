@@ -54,6 +54,8 @@ export interface PaymentActivityItem {
   source?: string
   x402_resource_url?: string | null
   x402_merchant_address?: string | null
+  /** #3778: the non-secret delivery pointer reported with the x402 outcome. */
+  delivery_reference?: string | null
   chain_id?: number | null
   account_id?: string | null
   account_address?: string | null

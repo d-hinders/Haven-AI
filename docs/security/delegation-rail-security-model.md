@@ -373,6 +373,19 @@ which the bridge selects before the open budget. The budget would then fund
 payments to any merchant. `agent_delegations.merchant_id` is a label, not a
 caveat, so the authority is still the signed caveat stack and nothing else.
 
+> **Re-verified #3769 (2026-10-08):** #3769 adds an `http_method`
+> correction column to the catalog verifier's success UPDATE — the same
+> statement that records `merchant_catalog.pay_to`. The payTo contract above
+> is unchanged: `pay_to` is still written AS SEEN from the challenge (never
+> COALESCEd), still collected only across `accepts[]` options on the recorded
+> network, still refused when the options disagree, and the advertised-method
+> correction never applies to an MCP row (an `http`-protocol guard). A row's
+> `http_method` says how the verifier PROBES the resource; it feeds no budget
+> pin, no caveat, and no authority path. Scope of this re-read: this section
+> (Merchant-locked budgets) and the `merchant-catalog.ts`/`merchants.ts`
+> coverage it names; the rest of the document was not re-read for it, and
+> `last-verified` stays 2026-10-08.
+
 Two limits are deliberate:
 - **Slot sharing.** A merchant-locked budget and a plain budget pinned to the
   same address share one `(agent, token, recipient)` slot. Activating either
@@ -580,6 +593,29 @@ chain.
 > a priced row is collected into neither bucket. Nothing this document claims
 > about authority, custody or signing changes. Scope of this note: that one
 > CASE predicate. Nothing else in this document was re-verified.
+
+> **Re-verified unchanged (#3778, 2026-10-08 — the optional `delivery_reference`
+> delivery pointer):** this diff touched two files in this document's coverage
+> list, `packages/sdk/src/client.ts` and
+> `packages/backend/src/infra/repositories/transaction-history.ts`, and none of
+> their authority, custody or signing surfaces. On `client.ts` the change rides
+> the same seam #3764's note scopes — the ACCEPTED arm's
+> `/machine-payments/evidence` report — plus the `reportMerchantOutcome`
+> pass-through: one new OPTIONAL `deliveryReference` input (≤ 512 chars, the
+> NON-SECRET pointer to a delivered good), spread into the evidence payload
+> only when present. It authorizes nothing, produces or consumes no signature,
+> and no spend decision reads its value; when the caller supplies a
+> credential-shaped value the tool refuses pre-write (report) / pre-funding
+> (settle) — declining a write the caller opted into by sending the field, not
+> narrowing any previously-allowed path (the field did not exist before). On
+> `transaction-history.ts` the change is one nullable column added to
+> `X402PaymentIntentRow` and its SELECT (`mpe.delivery_reference AS
+> delivery_reference`) — the same read-only projection class the #2871 note
+> scopes: inside the existing `pi.user_id = $N` + `us.id = ANY($N)` tenant
+> scoping, no writer, no authority and no spend path implicated. The dashboard
+> surfaces that read the projection display the pointer; they decide nothing.
+> Scope of this note: those two files. Nothing else in this document was
+> re-verified.
 
 > **Re-verified unchanged (#3770, 2026-10-08 — the delivery-quality report):**
 > this diff touched two files in this document's coverage list,

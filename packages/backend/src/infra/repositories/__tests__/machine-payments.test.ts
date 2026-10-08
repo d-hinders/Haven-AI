@@ -192,6 +192,7 @@ describeDb('machine-payments repository (#1224)', () => {
       protocolReceiptHeader: 'receipt-1',
       protocolReceiptPayload: '{"invoice":1}',
       merchantStatus: 200,
+      deliveryReference: null,
     })
     expect(attached).not.toBeNull()
 
@@ -207,6 +208,7 @@ describeDb('machine-payments repository (#1224)', () => {
       protocolReceiptHeader: null, // COALESCE keeps receipt-1
       protocolReceiptPayload: null,
       merchantStatus: null,
+      deliveryReference: null,
     })
     expect(downgraded!.proof_status).toBe('protocol_receipt_attached')
     expect(downgraded!.protocol_receipt_header).toBe('receipt-1')
@@ -231,6 +233,7 @@ describeDb('machine-payments repository (#1224)', () => {
       protocolReceiptHeader: null,
       protocolReceiptPayload: null,
       merchantStatus: null,
+      deliveryReference: null,
     })
     expect(result).toBeNull()
     expect((await readEvidence(intentId))[0].payment_proof_header).toBeNull()

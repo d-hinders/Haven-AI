@@ -542,6 +542,16 @@ export class MerchantCompletion {
     outcome: X402MerchantOutcome
     merchantStatus: number
     merchantBody?: string
+    /**
+     * #3778: the optional NON-SECRET delivery pointer ("Bik Bok 5 SEK, order
+     * 6ac7…"). Recorded on the evidence row (accepted outcomes only) so the
+     * owner's receipt and dashboard show that a deliverable exists and where
+     * to recover it. Must never be the deliverable itself — the backend's
+     * semantic layer refuses credential-shaped values (JWTs, code tokens,
+     * keys), so a secret here is a 400, never a stored credential. Relay the
+     * secret to the owner directly; report only the pointer.
+     */
+    deliveryReference?: string
   }): Promise<X402MerchantOutcomeReport> {
     if (!Number.isInteger(input.merchantStatus) || input.merchantStatus < 100 || input.merchantStatus > 599) {
       throw new HavenApiError(
@@ -615,6 +625,9 @@ export class MerchantCompletion {
       txHash,
       resourceUrl,
       merchantStatus: input.merchantStatus,
+      // #3778: accepted outcomes only — a rejection delivered nothing, so
+      // there is no deliverable to point at.
+      ...(input.deliveryReference ? { deliveryReference: input.deliveryReference } : {}),
     })
     return { paymentId: status.paymentId, outcome: 'accepted', txHash, resourceUrl, recorded: 'evidence' }
   }
@@ -641,6 +654,13 @@ export class MerchantCompletion {
     paymentProofHeader?: string
     protocolReceiptHeaderName?: string
     protocolReceiptHeader?: string
+    /**
+     * #3778: the optional NON-SECRET delivery pointer, threaded from the
+     * hosted settle/complete path (`completeX402MerchantCall`). Written only
+     * on the accepted arm's evidence post; the backend refuses credential-
+     * shaped values, so a secret here is a 400, never a stored credential.
+     */
+    deliveryReference?: string
   }): Promise<EvidenceReportOutcome> {
     const body = {
         paymentId: input.paymentId,
@@ -657,6 +677,7 @@ export class MerchantCompletion {
         protocolReceiptPayload: input.protocolReceiptHeader
           ? parseProtocolReceiptHeader(input.protocolReceiptHeader)
           : undefined,
+        ...(input.deliveryReference ? { deliveryReference: input.deliveryReference } : {}),
     }
 
     // Still best-effort in the sense that matters — nothing here may change

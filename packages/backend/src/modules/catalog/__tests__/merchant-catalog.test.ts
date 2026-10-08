@@ -202,6 +202,66 @@ describe('probeCatalogEntry', () => {
     })
   })
 
+  it('probes a declared-POST row with its declared method and JSON body example (#3769)', async () => {
+    // The old GET-only probe verified a request the merchant cannot answer
+    // usefully: Anchor's token price answers a GET 402 (the challenge is
+    // method-agnostic) but its paid call is a POST with a {symbol} body.
+    const entry: Parameters<typeof probeCatalogEntry>[0] = {
+      ...X402_ENTRY,
+      http_method: 'POST',
+      body_type: 'json',
+      body_example: { symbol: 'BTC' },
+    }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, {
+      status: 402,
+      headers: { 'PAYMENT-REQUIRED': b64(X402_BODY) },
+    }))
+
+    const result = await probeCatalogEntry(entry, fetchMock as typeof fetch)
+    expect(result.ok).toBe(true)
+    expect(fetchMock).toHaveBeenCalledWith('https://api.merchant.example/paid', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol: 'BTC' }),
+    })
+  })
+
+  it('keeps the bare GET init when the row declares no method (#3769)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, {
+      status: 402,
+      headers: { 'PAYMENT-REQUIRED': b64(X402_BODY) },
+    }))
+
+    await probeCatalogEntry(X402_ENTRY, fetchMock as typeof fetch)
+    expect(fetchMock).toHaveBeenCalledWith('https://api.merchant.example/paid', { method: 'GET' })
+  })
+
+  it('reports a method the 402 itself advertises (#3769)', async () => {
+    const body = {
+      ...X402_BODY,
+      resource: { url: 'https://api.merchant.example/paid', method: 'POST' },
+    }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, {
+      status: 402,
+      headers: { 'PAYMENT-REQUIRED': b64(body) },
+    }))
+
+    const result = await probeCatalogEntry(X402_ENTRY, fetchMock as typeof fetch)
+    expect(result.ok).toBe(true)
+    expect(result.advertisedMethod).toBe('POST')
+  })
+
+  it('does not report an advertised method when the 402 carries none (#3769)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, {
+      status: 402,
+      headers: { 'PAYMENT-REQUIRED': b64(X402_BODY) },
+    }))
+
+    const result = await probeCatalogEntry(X402_ENTRY, fetchMock as typeof fetch)
+    expect(result.ok).toBe(true)
+    expect(result.advertisedMethod).toBeUndefined()
+  })
+
   it('verifies an Ampersend-shaped 402 whose resource.url is http:// — the probe never compares it (#3078)', async () => {
     // Ampersend's live 402 names its resource with an `http://` scheme while
     // the seeded row is `https://`; the probe reads scheme/network/asset/
@@ -334,7 +394,54 @@ describe('refreshCatalog', () => {
     const liveUpdate = queries.find(([sql, v]) => sql.includes(`status = 'active'`) && v?.[0] === 'cat-live')
     expect(liveUpdate?.[0]).toContain('consecutive_failures = 0')
     expect(liveUpdate?.[0]).toContain('asset_transfer_methods = COALESCE($6, asset_transfer_methods)')
-    expect(liveUpdate?.[1]).toEqual(['cat-live', '20000', '0.02 USDC', 'USDC', 'eip155:8453', 'eip3009', '0x' + '11'.repeat(20)])
+    // #3769: the trailing element is the advertised-method correction — null
+    // when the challenge advertises none (the common case) or on non-http rows.
+    expect(liveUpdate?.[0]).toContain('http_method = COALESCE($8, http_method)')
+    expect(liveUpdate?.[1]).toEqual(['cat-live', '20000', '0.02 USDC', 'USDC', 'eip155:8453', 'eip3009', '0x' + '11'.repeat(20), null])
+  })
+
+  // #3769: a 402 that structurally advertises its own method corrects the
+  // row — the live challenge is authoritative for how it is called.
+  it('writes a challenge-advertised method back onto an http row at refresh (#3769)', async () => {
+    const queries: Array<[string, unknown[] | undefined]> = []
+    const db = {
+      query: async (sql: string, values?: unknown[]) => {
+        queries.push([sql, values])
+        if (sql.startsWith('SELECT')) {
+          return { rows: [rowFor({ id: 'cat-method' })] }
+        }
+        return { rows: [] }
+      },
+    }
+    const body = { ...X402_BODY, resource: { url: 'https://api.merchant.example/paid', method: 'POST' } }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, { status: 402, headers: { 'PAYMENT-REQUIRED': b64(body) } }),
+    )
+
+    await refreshCatalog(db, fetchMock as typeof fetch)
+    const update = queries.find(([sql, v]) => sql.includes(`status = 'active'`) && v?.[0] === 'cat-method')
+    expect(update?.[1]?.[7]).toBe('POST')
+  })
+
+  it('never writes an advertised method onto an mcp row (#3769)', async () => {
+    const queries: Array<[string, unknown[] | undefined]> = []
+    const db = {
+      query: async (sql: string, values?: unknown[]) => {
+        queries.push([sql, values])
+        if (sql.startsWith('SELECT')) {
+          return { rows: [rowFor({ id: 'cat-mcp', protocol: 'mcp', tool_name: 'x' })] }
+        }
+        return { rows: [] }
+      },
+    }
+    const body = { ...X402_BODY, resource: { url: 'https://mcp.merchant.example/mcp', method: 'POST' } }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, { status: 402, headers: { 'PAYMENT-REQUIRED': b64(body) } }),
+    )
+
+    await refreshCatalog(db, fetchMock as typeof fetch)
+    const update = queries.find(([sql, v]) => sql.includes(`status = 'active'`) && v?.[0] === 'cat-mcp')
+    expect(update?.[1]?.[7]).toBeNull()
   })
 
   // #3331: pay_to is written AS SEEN — never COALESCEd — so a merchant that

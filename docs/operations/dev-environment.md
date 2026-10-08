@@ -546,9 +546,24 @@ Isolation rules that are non-negotiable for a payments product:
   ERC-7710 rail is enabled ([below](#enabling-the-erc-7710-rail-on-the-dev-demo-merchant)),
   reports `erc7710: false` and the build refuses a merchant-locked budget for
   it. The payTo itself arrives with the next catalog refresh after migration
-  101 deploys (see `docs/product/marketplace.md`); until then every offer
-  reads `unstated`.
-- **Owner company details (#3332)** — `HAVEN_OWNER_COMPANY_DETAILS` (strict
+ 101 deploys (see `docs/product/marketplace.md`); until then every offer
+ reads `unstated`.
+
+ > **Re-verified #3769 (2026-10-08):** the catalog verifier
+ > (`modules/catalog/merchant-catalog.ts`) now probes a plain-HTTP row with
+ > the row's DECLARED method and body example (`http_method`/`body_type`/
+ > `body_example`, migration 108) instead of a hardcoded GET, and a challenge
+ > that structurally advertises its own method (`resource.method` on the 402)
+ > is written back onto the row's `http_method` in the same success UPDATE —
+ > one more COALESCE'd column beside the #3331 `pay_to` write. The claims
+ > above about what the refresh records and when payTo arrives are unchanged:
+ > `pay_to` is still written as seen from the challenge, `asset_transfer_methods`
+ > is still scoped to `accepts[0]`'s network, and the probe is still read-only
+ > (it never pays, signs, or follows the challenge). Scope of this re-read:
+ > this bullet's catalog-verification paragraphs; nothing else in the
+ > document was re-read for it, and `last-verified` is bumped to 2026-10-08
+ > for exactly this coverage.
+ - **Owner company details (#3332)** — `HAVEN_OWNER_COMPANY_DETAILS` (strict
   boolean) gates `/user/company-details*`, the additive `parties.buyer`
   field on payment evidence/receipts, and the Settings → Company details
   screen. Dark by default; GET/PUT and POST vies-check answer 404 when off, and

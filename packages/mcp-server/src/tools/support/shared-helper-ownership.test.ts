@@ -404,6 +404,10 @@ const CAPABILITY_MODULES: readonly string[] = fs
  */
 const CAPABILITY_ALLOWED_IMPORTS = [
   '@haven_ai/sdk',
+  // #3778: @haven_ai/core — the shared kernel both the SDK-free surfaces and
+  // the capabilities import. The delivery_reference recognizer lives there
+  // (one definition across mcp-server, sdk consumers and the backend).
+  '@haven_ai/core',
   'zod',
   './contracts.js',
   './parsing.js',

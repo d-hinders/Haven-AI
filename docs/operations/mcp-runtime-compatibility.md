@@ -80,6 +80,61 @@ last-verified: "2026-10-08"
 ---
 
 
+> **#3778 (2026-10-08, optional bounded `delivery_reference` on the x402
+> outcome and settle surfaces):** `haven_report_x402_outcome`,
+> `haven_complete_mcp_tool` and `haven_settle_mcp_tool` accept an optional
+> `delivery_reference` (≤ 512 chars) — the NON-SECRET pointer to a delivered
+> good ("Bik Bok 5 SEK, order 6ac7…"). On an accepted outcome it is recorded
+> on the `machine_payment_evidence` row (migration 107) and surfaces on the
+> receipt (`haven_list_receipts` / `POST /machine-payments/evidence` echo),
+> the transaction detail drawer, and the activity feed, so the owner can see
+> that a deliverable EXISTS and where to recover it — closing the #3778 gap
+> where the only copy of a purchased redemption code lived in the agent's
+> session context.
+> - **Credential-shaped values are refused at three layers:** the tool
+>   handlers (pre-write for the report; pre-funding for settle), the backend
+>   semantic layer (`attachMachinePaymentEvidence` → 400
+>   `delivery_reference_refused`), and the shared recognizer in
+>   `@haven_ai/core` (`deliveryReferenceError`: JWTs, long hex/base64 token
+>   material, grouped uppercase gift-card codes). Deliberately conservative —
+>   order ids and invoice references pass; the relay of the secret itself
+>   stays the skill's rule, not a stored field. Rejected outcomes record no
+>   reference (nothing was delivered).
+> - **Hosted delivery picks this up on deploy**; local MCP/connect users
+>   need an `@haven_ai/mcp` / `@haven_ai/connect` release (both pin the SDK
+>   exactly), as with #3764.
+> - **An already installed `SKILL.md` stays stale until reinstalled** (its
+>   "Reporting after a purchase" section gained the relay rule and the
+>   Bitrefill SIWX recovery steps; both byte-pinned copies edited
+>   identically).
+
+> **#3769 (2026-10-08, the guided catalog path accepts per-call arguments and
+> an HTTP call shape):** `haven_prepare_catalog_purchase` gains one OPTIONAL
+> input, `arguments`. A catalog row that declares `tool_arguments_schema` (a
+> JSON Schema the row carries; migration 107 pins Soundside `create_text`'s,
+> tightened to require prompt-or-messages) accepts caller `arguments` — merged
+> over the row's pinned `tool_arguments` and validated against the schema
+> BEFORE the merchant probe, refused `INVALID_CATALOG_ARGUMENTS` (400) when
+> they violate it; a row WITHOUT a schema is a fixed SKU and now REFUSES
+> caller `arguments` with `INVALID_INPUT` (the old drop-in-silence hardened
+> into a refusal). The strict-input mis-key census moved from `arguments` to
+> `tool_name` for this tool. Discovery entries additively carry
+> `tool_arguments_schema` / `http_method` / `body_type` / `body_example`
+> (absent on an older backend), and an http row's `haven_quote_x402` hint now
+> carries `method`/`body` when the row declares them.
+> - **Additive, not re-shaping.** No tool is added or renamed; `arguments` is
+>   optional, so an existing caller's payload is unchanged and an older local
+>   MCP is unaffected (the input lives on the hosted surface only).
+> - **Version skew is safe in both directions.** An old BACKEND sends no
+>   `tool_arguments_schema`, every row reads schema-less, and `arguments`
+>   refuses — the pre-#3769 contract. An old hosted server ignores the new
+>   backend fields and keeps quoting with the row's pinned arguments. The
+>   consent hash covers tool names, not inputs (per the #3771 note below), so
+>   it does not move.
+> - **The refusals are pre-intent.** Both argument refusals run before the
+>   live quote, so no merchant is contacted and no payment exists on an
+>   invalid call — the same position the cap refusals already hold.
+>
 > **Re-verified #3781 (2026-10-08, the catalog tier of the purchase label):**
 > a settled purchase that came from a catalog entry now reports the catalog
 > row's name as the purchase label, not the `<merchant host> <tool_name>`
@@ -107,6 +162,7 @@ last-verified: "2026-10-08"
 > `last-verified` stays 2026-10-08. Nothing else in this document was
 > re-verified.
 
+>
 > **#3768 (2026-10-08, merchant-issued credentials are withheld from the settled `result`):**
 > a settled `haven_settle_mcp_tool` / `haven_complete_mcp_tool` response no longer
 > forwards merchant-issued bearer credentials to the agent verbatim. Prod QA

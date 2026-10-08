@@ -1,5 +1,5 @@
 /**
- * Real-Postgres proof for migration 107 — the delivery-quality reports
+ * Real-Postgres proof for migration 109 — the delivery-quality reports
  * table (#3770). No mocks — #1219's rule.
  *
  * Pins: the table, its unique (payment, agent) index and the agent listing
@@ -16,7 +16,7 @@ import {
   initDbHarness,
   resetDb,
 } from '../../../infra/__tests__/helpers/db-harness.js'
-import { down, up, version } from '../107_machine_payment_delivery_reports.js'
+import { down, up, version } from '../109_machine_payment_delivery_reports.js'
 
 async function run(step: typeof up): Promise<void> {
   const client = await db.connect()

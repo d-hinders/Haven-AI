@@ -308,15 +308,23 @@ function subBudgetSignHandoff(subBudgetId: string) {
  * #3774: the step after a successful `haven_submit { payment_id }`, by flow.
  * - Not confirmed yet → read the status; never "retry the merchant" before
  *   the funding leg confirms.
- * - x402 (the eip3009 funding leg) confirmed → the agent's own merchant retry
- *   with the signer's payment_header, then haven_report_x402_outcome.
+ * - x402 (the eip3009 funding leg) confirmed, with a stored merchant MCP call
+ *   context → the decomposed MCP-tool purchase (haven_pay_mcp_tool /
+ *   haven_prepare_catalog_purchase): haven_complete_mcp_tool makes the paid
+ *   call.
+ * - x402 confirmed, no stored context → plain HTTP: the agent's own merchant
+ *   retry with the signer's payment_header, then haven_report_x402_outcome.
+ * - x402 confirmed, context lookup unreadable → name both continuations.
  * - A direct payment confirmed → done.
  * - Status unreadable → read it.
  */
+export type SubmitX402Flow = 'mcp_tool' | 'plain_http' | 'unknown'
+
 function submitFollowUpHandoff(
   submitStatus: string,
   status: { rail: string } | null,
   paymentId: string,
+  x402Flow: SubmitX402Flow,
 ): { nextAction: AgentNextStep['next_action']; reason: string } & HostedHandoff {
   if (submitStatus !== 'confirmed' || status === null) {
     return {
@@ -329,7 +337,20 @@ function submitFollowUpHandoff(
           : 'The payment confirmed. Read its status with next_tool and follow its nextAction.',
     }
   }
-  if (status.rail === 'x402') {
+  if (status.rail === 'x402' && x402Flow === 'mcp_tool') {
+    return {
+      nextAction: AgentPaymentNextAction.RetryOriginalX402Request,
+      nextTool: 'haven_complete_mcp_tool',
+      nextArguments: { payment_id: paymentId },
+      reason:
+        'Funding confirmed. Call next_tool with next_arguments, adding payment_header: ' +
+        'the payment_header your local signer returned (haven_sign_x402 builds it with the signature; if you ' +
+        'signed with haven_sign, build it now with haven_x402_sign_header); Haven rehydrates the merchant tool call ' +
+        'from payment_id and makes the paid call. Do NOT retry the merchant yourself and do NOT ' +
+        'call haven_report_x402_outcome on this flow.',
+    }
+  }
+  if (status.rail === 'x402' && x402Flow === 'plain_http') {
     return {
       nextAction: AgentPaymentNextAction.RetryOriginalX402Request,
       nextTool: null,
@@ -337,9 +358,27 @@ function submitFollowUpHandoff(
         'the next step is your own HTTP retry of the merchant with the payment_header the signer returned; ' +
         'after it, report what the merchant answered with haven_report_x402_outcome',
       reason:
-        'Funding confirmed. Retry the ORIGINAL merchant request yourself with the payment_header ' +
-        'haven_sign_x402 returned (PAYMENT-SIGNATURE, and X-PAYMENT), then call ' +
+        'Funding confirmed. Retry the ORIGINAL merchant request yourself with ' +
+        'the payment_header your local signer returned (haven_sign_x402 builds it with the signature; if you ' +
+        'signed with haven_sign, build it now with haven_x402_sign_header) as PAYMENT-SIGNATURE, and X-PAYMENT; then call ' +
         'haven_report_x402_outcome with payment_id, outcome and merchant_status.',
+    }
+  }
+  if (status.rail === 'x402') {
+    return {
+      nextAction: AgentPaymentNextAction.RetryOriginalX402Request,
+      nextTool: null,
+      nextToolOmittedReason:
+        'Haven could not read whether this payment came from an MCP-tool purchase or a plain-HTTP ' +
+        'one, and the two continue with different tools; the reason names both',
+      reason:
+        'Funding confirmed. Take ' +
+        'the payment_header your local signer returned (haven_sign_x402 builds it with the signature; if you ' +
+        'signed with haven_sign, build it now with haven_x402_sign_header). If this payment came from haven_pay_mcp_tool or ' +
+        'haven_prepare_catalog_purchase, call haven_complete_mcp_tool with payment_id and that ' +
+        'payment_header. If it came from haven_pay_x402_quote, retry ' +
+        'the ORIGINAL merchant request yourself with it (PAYMENT-SIGNATURE, and ' +
+        'X-PAYMENT), then call haven_report_x402_outcome. Never do both.',
     }
   }
   return {
@@ -939,8 +978,8 @@ export function createStateDirectRecoveryHandlers(
               // explicitly that no resume call is involved here:
               // haven_resume_x402_payment recovers a funded-but-undelivered
               // eip3009 payment (#2145), a state erc7710 cannot enter — it has
-              // no funding leg — and nextTool is deliberately omitted because
-              // the next step is the agent's own HTTP retry, not a Haven tool.
+              // no funding leg. The agent's own HTTP retry comes first; the
+              // nextTool below is the Haven step after it.
               nextAction: AgentPaymentNextAction.RetryOriginalX402Request,
               // #3774: the Haven step AFTER the agent's own retry. On this
               // scheme the merchant settles by redeeming the chain itself, so
@@ -957,7 +996,10 @@ export function createStateDirectRecoveryHandlers(
                 '(x402 v2) to this payment_header, and ONLY that header name on this scheme. ' +
                 'Then call next_tool with next_arguments, adding settlement_tx_hash (the ' +
                 "`transaction` field of the merchant's base64 PAYMENT-RESPONSE header), so the " +
-                'payment is recorded as settled. ' +
+                'payment is recorded as settled. If the merchant refuses the retry, do NOT re-quote ' +
+                'at once: it may already have redeemed the authorization — check ' +
+                'haven_get_payment_status after the payment window and re-quote only if it shows no ' +
+                'settlement. ' +
                 'Do NOT call ' +
                 'haven_x402_sign_header: on this scheme Haven ' +
                 'assembled the header, there is nothing to build locally, and there is no funding ' +
@@ -978,15 +1020,33 @@ export function createStateDirectRecoveryHandlers(
         // them apart, so one status read decides the next step (no wire
         // change). A failed read degrades to "check status", never to a
         // merchant retry.
-        const statusRead = await haven.getPaymentStatus(args.payment_id).then(
-          (s) => s,
-          () => null,
-        )
+        // Read only once confirmed: an unconfirmed result gets the status
+        // step whatever the flow.
+        const statusRead =
+          result.status === 'confirmed'
+            ? await haven.getPaymentStatus(args.payment_id).then(
+                (s) => s,
+                () => null,
+              )
+            : null
+        // A confirmed x402 leg is either the decomposed MCP-tool purchase
+        // (which stored its merchant call context, #1307) or plain HTTP (which
+        // stores none: a 404/409). Any other failure leaves it unknown.
+        const x402Flow: SubmitX402Flow =
+          statusRead?.rail === 'x402'
+            ? await haven.getX402MerchantCallContext(args.payment_id).then(
+                (): SubmitX402Flow => 'mcp_tool',
+                (err: unknown): SubmitX402Flow =>
+                  err instanceof HavenApiError && (err.statusCode === 404 || err.statusCode === 409)
+                    ? 'plain_http'
+                    : 'unknown',
+              )
+            : 'unknown'
         return {
           status: result.status,
           tx_hash: result.txHash ?? null,
           ...buildAgentGuidance({
-            ...submitFollowUpHandoff(result.status, statusRead, args.payment_id),
+            ...submitFollowUpHandoff(result.status, statusRead, args.payment_id, x402Flow),
             safeToContinue: true,
             summary: { payment_id: args.payment_id, status: result.status },
           }),

@@ -808,13 +808,19 @@ describe('#3774 haven_report_x402_outcome on an erc7710 payment', () => {
     expect(payload.next_arguments).toEqual({ payment_id: 'pay_x402', settlement_tx_hash: TX_HASH })
   })
 
-  it('a rejected erc7710 retry stops: nothing moved, nothing to report or sweep', async () => {
+  it('a rejected erc7710 retry is verify-then-act: read the status, never re-quote at once, never sweep', async () => {
     stubFetch(ERC7710_SUBMITTED)
     const payload = fail(
       await handlers().haven_report_x402_outcome({ payment_id: 'pay_x402', outcome: 'rejected', merchant_status: 402 }),
     ) as unknown as Record<string, any>
     expect(payload.code).toBe('ERC7710_OUTCOME_NOT_REPORTABLE')
-    expect(payload.next_action).toBe('stop_and_tell_user')
+    // The merchant may already have redeemed its single-use authorization
+    // (#2987's precedent), so "nothing moved, re-quote" could pay twice.
+    expect(payload.next_action).toBe('check_status_later')
+    expect(payload.next_tool_name).toBe('haven_get_payment_status')
+    expect(payload.next_arguments).toEqual({ payment_id: 'pay_x402' })
+    expect(payload.message).toContain('re-quote only if it shows no settlement')
+    expect(payload.message).not.toMatch(/no funds moved/i)
     expect(JSON.stringify(payload)).not.toContain('haven_sweep_delegate')
   })
 

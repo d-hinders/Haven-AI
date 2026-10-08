@@ -135,17 +135,22 @@ function erc7710OutcomeRefusal(
   if (args.outcome === 'rejected') {
     return new HostedToolError({
       code: 'ERC7710_OUTCOME_NOT_REPORTABLE',
+      // Verify-then-act, as paid-mcp-completion's erc7710 refusal (#2987): a
+      // rejected retry does not prove the merchant never redeemed the
+      // single-use settlement authorization it held, so "re-quote now"
+      // could pay twice.
       message:
         `Payment ${paymentId} is an erc7710 payment: the merchant settles it by redeeming the delegation ` +
-        'itself, and a rejected retry means it never did, so no funds moved. There is nothing to report ' +
-        'and nothing to sweep. Nothing was written.',
+        'itself, so there is no Haven funding transaction for this report to anchor to. Nothing was ' +
+        'written. There is no delegate balance to sweep on this scheme. Haven has NOT observed a ' +
+        'settlement, but the merchant held a single-use settlement authorization valid for up to the ' +
+        'payment window (typically 300s) and may have redeemed it before refusing: check the payment ' +
+        'status after that window and re-quote only if it shows no settlement.',
       statusCode: 409,
       paymentId,
       nextStep: refusalNextStep({
-        nextAction: AgentPaymentNextAction.StopAndTellUser,
-        nextTool: null,
-        nextToolOmittedReason:
-          'a rejected erc7710 retry moved no funds, so nothing needs reporting or sweeping; re-quote if the user still wants the purchase',
+        nextAction: AgentPaymentNextAction.CheckStatusLater,
+        ...paymentStatusHandoff(paymentId),
       }),
     })
   }

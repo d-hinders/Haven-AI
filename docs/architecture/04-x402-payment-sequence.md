@@ -466,6 +466,9 @@ haven_submit          → { payment_id, signature, settlement_scheme: "erc7710" 
 agent retry           → PAYMENT-SIGNATURE: <payment_header>   (ONLY — #2341:
                         the header carries a delegation chain, and adding the
                         X-PAYMENT copy doubles it past Node's 16 KB ceiling)
+haven_report_settlement_evidence → { payment_id, settlement_tx_hash }  (#3774: the
+                        hosted next_tool after the erc7710 haven_submit; the hash
+                        is the `transaction` in the merchant's PAYMENT-RESPONSE)
 ```
 
 There is no `haven_submit` funding relay to confirm and **no

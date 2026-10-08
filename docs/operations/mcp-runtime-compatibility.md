@@ -3607,9 +3607,11 @@ These are hosted surface changes. The local runtime has no twins: its `haven_sub
 - **erc7710 `haven_submit`** names `haven_report_settlement_evidence` (`payment_id` prefilled) as the step after the agent's own retry, where it used to name no Haven tool.
 - **`haven_report_x402_outcome` on an unconfirmed erc7710 payment** now refuses with a typed code instead of `API_ERROR`. Clients that branched on `API_ERROR` from this tool see the new codes:
   - `ERC7710_REPORT_SETTLEMENT_EVIDENCE` names the evidence tool and carries the caller's hash;
-  - `ERC7710_OUTCOME_NOT_REPORTABLE` answers a `rejected` outcome: nothing moved, nothing to sweep.
-- **`haven_submit { payment_id }` success** now carries the next-step fields, keyed on one status read:
-  - x402 funding confirmed: retry the merchant, then `haven_report_x402_outcome`;
+  - `ERC7710_OUTCOME_NOT_REPORTABLE` answers a `rejected` outcome with `haven_get_payment_status`: the merchant may already have redeemed its authorization, so re-quote only if the status shows no settlement. There is no delegate balance to sweep.
+- **`haven_submit { payment_id }` success** now carries the next-step fields. Once confirmed, one status read picks the flow, and for x402 one merchant-call-context read picks the purchase type:
+  - x402 MCP-tool purchase (a stored call context): `haven_complete_mcp_tool` (`payment_id` prefilled);
+  - x402 plain HTTP (no stored context): retry the merchant, then `haven_report_x402_outcome`;
+  - x402 with the context read failing: both continuations, named in the reason;
   - direct confirmed: done;
   - anything else: `haven_get_payment_status`.
 
@@ -3617,7 +3619,7 @@ These are hosted surface changes. The local runtime has no twins: its `haven_sub
 - **Request-mode probe refusals** carry per-cause reasons.
 - **`MERCHANT_EGRESS_REFUSED`** names the calling tool's own argument (`url`, `merchant_url`, or "pick another catalog entry").
 - **Skew:**
-  - Text and next-step fields only; no tool, schema, version or consent-hash change.
+  - Text and next-step fields only; no tool, schema, version or consent-hash change. The server instructions and the `haven_pay_x402_quote` description now name `haven_report_settlement_evidence` after an erc7710 retry.
   - The skill text splits the post-retry step by scheme.
   - An older skill still teaches `haven_report_x402_outcome` on erc7710; that call now gets a refusal that names the right tool.
 

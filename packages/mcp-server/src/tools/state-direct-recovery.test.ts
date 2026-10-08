@@ -1685,10 +1685,12 @@ describe('#3774 haven_submit next steps', () => {
     expect(res.data.reason).not.toContain('X-PAYMENT')
   })
 
-  it('x402 eip3009 funding confirmed: retry the merchant with the signer header, then haven_report_x402_outcome', async () => {
+  it('x402 eip3009 plain-HTTP funding confirmed: retry the merchant with the signer header, then haven_report_x402_outcome', async () => {
     stubFetch({
       'POST /payments/pay_1/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xtx' } },
       'GET /machine-payments/pay_1/status': { status: 200, body: status({ rail: 'x402', settlement_scheme: 'eip3009' }) },
+      // Plain HTTP stores no merchant MCP call context.
+      'GET /x402/pay_1/merchant-call-context': { status: 409, body: { error: 'no stored context', error_code: 'no_merchant_call_context' } },
     })
     const res = ok(await handlers().haven_submit({ payment_id: 'pay_1', signature: SIG })) as { data: Record<string, any> }
     expect(res.data).toMatchObject({ status: 'confirmed', tx_hash: '0xtx' })
@@ -1696,6 +1698,38 @@ describe('#3774 haven_submit next steps', () => {
     expect(res.data.next_tool).toBeUndefined()
     expect(res.data.next_tool_omitted_reason).toContain('haven_report_x402_outcome')
     expect(res.data.reason).toContain('payment_header')
+    expect(res.data.reason).toContain('haven_x402_sign_header')
+    expect(res.data.reason).not.toContain('haven_complete_mcp_tool')
+  })
+
+  it('x402 MCP-tool purchase funding confirmed: names haven_complete_mcp_tool, never a self-retry or outcome report', async () => {
+    stubFetch({
+      'POST /payments/pay_1/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xtx' } },
+      'GET /machine-payments/pay_1/status': { status: 200, body: status({ rail: 'x402', settlement_scheme: 'eip3009' }) },
+      'GET /x402/pay_1/merchant-call-context': {
+        status: 200,
+        body: { payment_id: 'pay_1', merchant_url: 'https://merchant.example/mcp', tool_name: 'search', arguments: {} },
+      },
+    })
+    const res = ok(await handlers().haven_submit({ payment_id: 'pay_1', signature: SIG })) as { data: Record<string, any> }
+    expect(res.data.next_action).toBe(AgentPaymentNextAction.RetryOriginalX402Request)
+    expect(res.data.next_tool_name).toBe('haven_complete_mcp_tool')
+    expect(res.data.next_arguments).toEqual({ payment_id: 'pay_1' })
+    expect(res.data.reason).toContain('payment_header')
+    expect(res.data.reason).toContain('Do NOT retry the merchant yourself')
+  })
+
+  it('x402 with an unreadable call-context lookup names both continuations, never just one', async () => {
+    stubFetch({
+      'POST /payments/pay_1/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xtx' } },
+      'GET /machine-payments/pay_1/status': { status: 200, body: status({ rail: 'x402', settlement_scheme: 'eip3009' }) },
+      'GET /x402/pay_1/merchant-call-context': { status: 503, body: { error: 'down' } },
+    })
+    const res = ok(await handlers().haven_submit({ payment_id: 'pay_1', signature: SIG })) as { data: Record<string, any> }
+    expect(res.data.next_action).toBe(AgentPaymentNextAction.RetryOriginalX402Request)
+    expect(res.data.next_tool_name).toBeUndefined()
+    expect(res.data.reason).toContain('haven_complete_mcp_tool')
+    expect(res.data.reason).toContain('haven_report_x402_outcome')
   })
 
   it('direct payment confirmed: done, no merchant retry', async () => {
@@ -1712,13 +1746,14 @@ describe('#3774 haven_submit next steps', () => {
   it('not confirmed yet: read the status, and never "retry the merchant"', async () => {
     stubFetch({
       'POST /payments/pay_1/sign': { status: 200, body: { status: 'submitted' } },
-      'GET /machine-payments/pay_1/status': { status: 200, body: status({ rail: 'x402', status: 'submitted', tx_hash: null }) },
     })
     const res = ok(await handlers().haven_submit({ payment_id: 'pay_1', signature: SIG })) as { data: Record<string, any> }
     expect(res.data.next_action).toBe(AgentPaymentNextAction.CheckStatusLater)
     expect(res.data.next_tool_name).toBe('haven_get_payment_status')
     expect(res.data.next_arguments).toEqual({ payment_id: 'pay_1' })
     expect(res.data.reason).toContain('do NOT retry the merchant')
+    // No status read before confirmation.
+    expect(recordedCalls().some((c) => c.method === 'GET')).toBe(false)
   })
 
   it('an unreadable status degrades to a status read, never a merchant retry', async () => {

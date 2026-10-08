@@ -528,6 +528,7 @@ describe('#3774: the step after the merchant retry is split by scheme', () => {
   it('eip3009 reports the outcome; erc7710 records settlement evidence, and says the outcome report does not apply', () => {
     expect(HAVEN_SKILL_MD).toMatch(/\*\*EIP-3009\*\* scheme[\s\S]*?mcp__haven__haven_report_x402_outcome/)
     expect(HAVEN_SKILL_MD).toMatch(/\*\*erc7710\*\* scheme[\s\S]*?mcp__haven__haven_report_settlement_evidence/)
-    expect(HAVEN_SKILL_MD).toMatch(/`mcp__haven__haven_report_x402_outcome` does not\s+apply on erc7710/)
+    expect(HAVEN_SKILL_MD).toMatch(/`mcp__haven__haven_report_x402_outcome`\s+does not apply on erc7710/)
+    expect(HAVEN_SKILL_MD).toMatch(/do not re-quote at once/)
   })
 })

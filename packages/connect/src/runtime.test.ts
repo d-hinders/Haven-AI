@@ -2767,6 +2767,8 @@ describe('runConnect terminal outcome record (#2173)', () => {
       const { outcome } = await runInto(root)
       expect(outcome.existing_agents_before_write).toEqual([])
       expect(outcome).not.toHaveProperty('server_name_rebound_from')
+      // #3772: no rebind, so no stale-session warning in the instruction.
+      expect(outcome.activation.instruction).not.toContain('keeps acting as the previous agent')
     })
 
     it('writes a non-secret mcp-server-binding.json beside the outcome record: name → agent id, backend URL, bound-at; no key material', async () => {
@@ -2799,6 +2801,11 @@ describe('runConnect terminal outcome record (#2173)', () => {
       expect(outcome.server_name_rebound_from).toEqual({
         server_name: 'haven', agent_id: 'agent-prod', api_url: 'https://api.prod.haven.example', bound_at: '2026-09-17T09:00:00.000Z', backend_changed: true,
       })
+      // #3772: a running session keeps the old wiring — say so, naming the
+      // previous agent, in both the --json instruction and the human log.
+      expect(outcome.activation.instruction).toContain('keeps acting as the previous agent (agent-prod) until it is restarted')
+      expect(outcome.activation.instruction).toContain('use Remove agent\u2026 on the Haven agent page')
+      expect(logs.some((l) => l.includes('keeps acting as the previous agent (agent-prod)'))).toBe(true)
       // S2: the retired holder has NO stored key, so it is not "live" — the
       // pre-write list is the keyed subset, never every directory.
       expect(outcome.existing_agents_before_write).toEqual([])
@@ -2920,6 +2927,8 @@ describe('runConnect terminal outcome record (#2173)', () => {
       expect(notice).toContain('This run replaces that wiring, as you chose')
       expect(notice).not.toContain('rebinds it to a new agent')
       expect(outcome.server_name_rebound_from?.agent_id).toBe('agent-old')
+      // #3772: the exact field case — a replace leaves an open session on the old agent.
+      expect(outcome.activation.instruction).toContain('keeps acting as the previous agent (agent-old) until it is restarted')
       // The retired directory's record is released by the replace retirement.
       await expect(readFile(join(oldDir, 'mcp-server-binding.json'), 'utf8')).rejects.toThrow()
       expect(outcome.retired_agent_ids).toEqual(['agent-old'])

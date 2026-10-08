@@ -17,6 +17,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
+- **A rebind or `--replace` now warns that an open session keeps acting as the previous agent (#3772).** The connector re-points the MCP server name on disk, but a client that is already running keeps the entries it loaded at start-up, and Connect revokes nothing in Haven. When the run took a server name over from another agent, the outcome's `activation.instruction` (and the human output) now says so, names the previous agent, and points at **Remove agent…** on the Haven agent page. Text only; no field, flag or behaviour changes. No update needed.
+
 - **The installed skill splits the step after a plain-HTTP merchant retry by scheme (#3774).** EIP-3009 reports with `haven_report_x402_outcome`; erc7710 records the merchant's settlement with `haven_report_settlement_evidence`, and a refused erc7710 retry is checked with `haven_get_payment_status` before any re-quote. An already installed `SKILL.md` stays stale until reinstalled. No update needed.
 
 - **The skill's plain-HTTP settlement guidance is corrected (#3764).** The skill now tells plain-HTTP agents to pass the merchant's raw `PAYMENT-RESPONSE` header as `payment_response` on the SAME `haven_report_x402_outcome` call (#3727) — Haven decodes it, verifies the settlement on-chain, and the receipt shows the merchant's settlement — and to call `haven_report_settlement_evidence` only when the outcome answer names it as the next step. The SDK's own paid retry reports the merchant settlement itself (#3764). An already installed `SKILL.md` stays stale until reinstalled. No update needed.

@@ -1050,6 +1050,7 @@ async function executeConnect(
   }
 
   printNextSteps(runtimeInstall, log, approval, registration.approval_url)
+  if (reboundFrom) log(staleSessionNotice(reboundFrom.agent_id))
 
   const outcome = completionOutcome({
     runtimeInstall,
@@ -1088,6 +1089,20 @@ async function executeConnect(
   }
 }
 
+
+/**
+ * #3772: the warning a rebind owes the user. Connect re-points the server name
+ * on disk, but an MCP client that is already running keeps the entries it
+ * loaded at start-up, so that session goes on acting as the previous agent.
+ * Connect revokes nothing in Haven (a replace retires the old directory
+ * locally only), so the previous agent may still be able to spend.
+ */
+export function staleSessionNotice(previousAgentId: string): string {
+  return (
+    `Any session that was already running keeps acting as the previous agent (${previousAgentId}) until it is restarted, ` +
+    'and that agent may still be active in Haven: if it should no longer spend, use Remove agent\u2026 on the Haven agent page (it ends its live budgets).'
+  )
+}
 export function completionOutcome(input: {
   runtimeInstall: RuntimeInstallResult
   delegateAddress: string
@@ -1122,9 +1137,14 @@ export function completionOutcome(input: {
     probe: { result: runtimeInstall.probeResult },
     activation: {
       restart_required: runtimeInstall.restartRequired,
-      instruction: manualSetup
-        ? 'Finish the manual MCP setup using the secret-free references shown in normal Connect output, then start a fresh session.'
-        : runtimeProfile(runtimeInstall.runtime).activationInstruction,
+      instruction:
+        (manualSetup
+          ? 'Finish the manual MCP setup using the secret-free references shown in normal Connect output, then start a fresh session.'
+          : runtimeProfile(runtimeInstall.runtime).activationInstruction) +
+        // #3772: a rebind changes which agent the server name means, but a
+        // session that is already running keeps the config it loaded — it
+        // goes on acting as the previous agent, which Connect never revokes.
+        (input.serverNameReboundFrom ? ` ${staleSessionNotice(input.serverNameReboundFrom.agent_id)}` : ''),
     },
     next_action: nextAction,
     approval: {

@@ -771,3 +771,68 @@ describe('haven_report_x402_outcome', () => {
     })
   })
 })
+
+describe('#3774 haven_report_x402_outcome on an erc7710 payment', () => {
+  const ERC7710_SUBMITTED = {
+    ...HAPPY_ROUTES,
+    // A 200 status read (not the backend 409 the sibling test stubs), so the
+    // SDK's own anchor gate is what refuses — the path the QA run hit.
+    'GET /machine-payments/pay_x402/status': {
+      status: 200,
+      body: statusBody({ status: 'submitted', phase: 'payment_submitted', tx_hash: null, settlement_scheme: 'erc7710' }),
+    },
+  }
+
+  it('refuses with a typed code naming haven_report_settlement_evidence, writing nothing', async () => {
+    stubFetch(ERC7710_SUBMITTED)
+    const payload = fail(
+      await handlers().haven_report_x402_outcome({ payment_id: 'pay_x402', outcome: 'accepted', merchant_status: 200 }),
+    ) as unknown as Record<string, any>
+    expect(payload.code).toBe('ERC7710_REPORT_SETTLEMENT_EVIDENCE')
+    expect(payload.code).not.toBe('API_ERROR')
+    expect(payload.next_tool_name).toBe('haven_report_settlement_evidence')
+    expect(payload.next_arguments).toEqual({ payment_id: 'pay_x402' })
+    expect(recordedCalls().some((c) => c.method === 'POST')).toBe(false)
+  })
+
+  it('carries the folded settlement hash into next_arguments instead of discarding it', async () => {
+    stubFetch(ERC7710_SUBMITTED)
+    const payload = fail(
+      await handlers().haven_report_x402_outcome({
+        payment_id: 'pay_x402',
+        outcome: 'accepted',
+        merchant_status: 200,
+        settlement_tx_hash: TX_HASH,
+      }),
+    ) as unknown as Record<string, any>
+    expect(payload.next_arguments).toEqual({ payment_id: 'pay_x402', settlement_tx_hash: TX_HASH })
+  })
+
+  it('a rejected erc7710 retry stops: nothing moved, nothing to report or sweep', async () => {
+    stubFetch(ERC7710_SUBMITTED)
+    const payload = fail(
+      await handlers().haven_report_x402_outcome({ payment_id: 'pay_x402', outcome: 'rejected', merchant_status: 402 }),
+    ) as unknown as Record<string, any>
+    expect(payload.code).toBe('ERC7710_OUTCOME_NOT_REPORTABLE')
+    expect(payload.next_action).toBe('stop_and_tell_user')
+    expect(JSON.stringify(payload)).not.toContain('haven_sweep_delegate')
+  })
+
+  it('CONTROL: an unconfirmed eip3009 payment keeps the status-read refusal', async () => {
+    stubFetch({
+      ...HAPPY_ROUTES,
+      'GET /machine-payments/pay_x402/status': {
+        status: 200,
+        body: statusBody({ status: 'submitted', phase: 'payment_submitted', tx_hash: null, settlement_scheme: 'eip3009' }),
+      },
+    })
+    const payload = fail(
+      await handlers().haven_report_x402_outcome({ payment_id: 'pay_x402', outcome: 'accepted', merchant_status: 200 }),
+    ) as unknown as Record<string, any>
+    // Unchanged: the pre-#3774 refusal, whose next step is the status
+    // projection's own next_action (stateErrorNextStep), not the erc7710 remedy.
+    expect(payload.code).toBe('API_ERROR')
+    expect(payload.status).toBe('submitted')
+    expect(JSON.stringify(payload)).not.toContain('haven_report_settlement_evidence')
+  })
+})

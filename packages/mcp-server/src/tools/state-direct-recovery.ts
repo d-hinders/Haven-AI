@@ -37,6 +37,7 @@ import {
   resolveTokenFromAddress,
   verifyPaymentReceipt,
   x402RetryHeadersFor,
+  type AgentNextStep,
   type PaymentReceipt,
   type SweepAuthorization,
 } from '@haven_ai/sdk'
@@ -49,6 +50,7 @@ import {
   paymentStatusHandoff,
   refusalNextStep,
   taskBudgetNextStep,
+  type HostedHandoff,
 } from './support/guidance.js'
 import { directSignerCompatibilityNotice } from './support/signer-compat.js'
 import { atomicToDisplay, humanToAtomic, readMaxAmountCap } from './support/cap-price.js'
@@ -300,6 +302,52 @@ function subBudgetSignHandoff(subBudgetId: string) {
       'fetches the signing context itself. Then relay the signature with haven_submit, passing ' +
       'sub_budget_id (not payment_id).',
   })
+}
+
+/**
+ * #3774: the step after a successful `haven_submit { payment_id }`, by flow.
+ * - Not confirmed yet → read the status; never "retry the merchant" before
+ *   the funding leg confirms.
+ * - x402 (the eip3009 funding leg) confirmed → the agent's own merchant retry
+ *   with the signer's payment_header, then haven_report_x402_outcome.
+ * - A direct payment confirmed → done.
+ * - Status unreadable → read it.
+ */
+function submitFollowUpHandoff(
+  submitStatus: string,
+  status: { rail: string } | null,
+  paymentId: string,
+): { nextAction: AgentNextStep['next_action']; reason: string } & HostedHandoff {
+  if (submitStatus !== 'confirmed' || status === null) {
+    return {
+      nextAction: AgentPaymentNextAction.CheckStatusLater,
+      ...paymentStatusHandoff(paymentId),
+      reason:
+        submitStatus !== 'confirmed'
+          ? `The payment is ${submitStatus}, not confirmed yet. Read its status with next_tool and follow its ` +
+            'nextAction; do NOT retry the merchant until it confirms.'
+          : 'The payment confirmed. Read its status with next_tool and follow its nextAction.',
+    }
+  }
+  if (status.rail === 'x402') {
+    return {
+      nextAction: AgentPaymentNextAction.RetryOriginalX402Request,
+      nextTool: null,
+      nextToolOmittedReason:
+        'the next step is your own HTTP retry of the merchant with the payment_header the signer returned; ' +
+        'after it, report what the merchant answered with haven_report_x402_outcome',
+      reason:
+        'Funding confirmed. Retry the ORIGINAL merchant request yourself with the payment_header ' +
+        'haven_sign_x402 returned (PAYMENT-SIGNATURE, and X-PAYMENT), then call ' +
+        'haven_report_x402_outcome with payment_id, outcome and merchant_status.',
+    }
+  }
+  return {
+    nextAction: AgentPaymentNextAction.None,
+    nextTool: null,
+    nextToolOmittedReason: 'the direct payment is confirmed; no Haven tool follows',
+    reason: 'The payment is confirmed on-chain.',
+  }
 }
 
 export function createStateDirectRecoveryHandlers(
@@ -894,14 +942,22 @@ export function createStateDirectRecoveryHandlers(
               // no funding leg — and nextTool is deliberately omitted because
               // the next step is the agent's own HTTP retry, not a Haven tool.
               nextAction: AgentPaymentNextAction.RetryOriginalX402Request,
-              // #3101 (decision 3): the omission is stated, never silent.
-              nextTool: null,
-              nextToolOmittedReason:
-                'the next step is your own HTTP retry of the merchant with the payment_header above, not a Haven tool',
+              // #3774: the Haven step AFTER the agent's own retry. On this
+              // scheme the merchant settles by redeeming the chain itself, so
+              // the payment stays `submitted` until its settlement is
+              // recorded — haven_report_settlement_evidence records it (the
+              // backend's completion seam, #2092); haven_report_x402_outcome
+              // refuses here, as it anchors to a Haven funding transaction
+              // this scheme does not have.
+              nextTool: 'haven_report_settlement_evidence',
+              nextArguments: { payment_id: args.payment_id },
               safeToContinue: true,
               reason:
                 'Retry the ORIGINAL merchant request yourself, setting PAYMENT-SIGNATURE ' +
                 '(x402 v2) to this payment_header, and ONLY that header name on this scheme. ' +
+                'Then call next_tool with next_arguments, adding settlement_tx_hash (the ' +
+                "`transaction` field of the merchant's base64 PAYMENT-RESPONSE header), so the " +
+                'payment is recorded as settled. ' +
                 'Do NOT call ' +
                 'haven_x402_sign_header: on this scheme Haven ' +
                 'assembled the header, there is nothing to build locally, and there is no funding ' +
@@ -917,7 +973,24 @@ export function createStateDirectRecoveryHandlers(
           args.payment_id,
           args.signature,
         )
-        return { status: result.status, tx_hash: result.txHash ?? null }
+        // #3774: this return serves two flows — an x402 eip3009 funding leg and
+        // a direct haven_send / haven_pay — and the submit result cannot tell
+        // them apart, so one status read decides the next step (no wire
+        // change). A failed read degrades to "check status", never to a
+        // merchant retry.
+        const statusRead = await haven.getPaymentStatus(args.payment_id).then(
+          (s) => s,
+          () => null,
+        )
+        return {
+          status: result.status,
+          tx_hash: result.txHash ?? null,
+          ...buildAgentGuidance({
+            ...submitFollowUpHandoff(result.status, statusRead, args.payment_id),
+            safeToContinue: true,
+            summary: { payment_id: args.payment_id, status: result.status },
+          }),
+        }
       }),
 
     haven_get_payment_status: async (input) =>

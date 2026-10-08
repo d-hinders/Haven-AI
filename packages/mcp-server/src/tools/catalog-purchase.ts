@@ -587,6 +587,8 @@ export function createCatalogPurchaseHandlers(
             toolName: entry.toolName,
             toolArguments: entry.toolArguments ?? {},
             idempotencyKey: args.idempotency_key as string | undefined,
+            // #3774: the catalog tools take no URL argument to correct.
+            egressTarget: 'catalog',
           })
 
           // 3. Resolve the account's RAIL. A hard pre-intent refusal (#1319):
@@ -1084,6 +1086,8 @@ export function createCatalogPurchaseHandlers(
           merchantUrl: entry.resourceUrl,
           toolName: entry.toolName,
           toolArguments,
+          // #3774: no URL argument to correct here
+          egressTarget: 'catalog',
         })
         const agent = await agentPrefetch
         return buildMcpToolQuoteResponse({

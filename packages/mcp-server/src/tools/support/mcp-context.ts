@@ -193,6 +193,8 @@ export async function quoteMcpToolCall(
     toolName: string
     toolArguments: Record<string, unknown>
     idempotencyKey?: string
+    /** #3774: the catalog tools pass 'catalog' — they take no URL argument. */
+    egressTarget?: 'merchant_url' | 'catalog'
   },
 ): Promise<{ quote: X402Quote; merchantUrl: string }> {
   const envelope = {
@@ -230,7 +232,7 @@ export async function quoteMcpToolCall(
     try {
       haven.merchantEgress.assertUrl(merchantUrl)
     } catch (err) {
-      throw egressRefusalBeforeIntent(err)
+      throw egressRefusalBeforeIntent(err, input.egressTarget ?? 'merchant_url')
     }
   }
   assertSecureMerchantUrl(merchantUrl)

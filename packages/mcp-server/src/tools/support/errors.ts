@@ -24,6 +24,7 @@ import {
   MerchantEgressResponseCapError,
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
+  type AgentNextStep,
   type HavenClient,
   type NextStep,
 } from '@haven_ai/sdk'
@@ -266,7 +267,40 @@ const PREPARE_REVERTED_FUNDING_OMITTED_REASON =
  * policy pre-intent, so the sentence can say nothing was funded or signed
  * with certainty.
  */
-export function egressRefusalBeforeIntent(err: unknown): HostedToolError {
+/**
+ * #3774: which argument carried the refused URL, so the refusal names
+ * something the calling tool actually takes — `url` (the plain-HTTP x402
+ * tools), `merchant_url` (the MCP-tool purchase and settle tools), or a
+ * catalog entry (the catalog tools take only `catalog_id`, so there is no URL
+ * argument to correct; the remedy is another entry).
+ */
+export type EgressRefusalTarget = 'url' | 'merchant_url' | 'catalog'
+
+const EGRESS_REMEDY: Record<
+  EgressRefusalTarget,
+  { nextAction: AgentNextStep['next_action']; nextTool: null; nextToolOmittedReason: string }
+> = {
+  url: {
+    nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+    nextTool: null,
+    nextToolOmittedReason:
+      're-call with the merchant’s public https URL as url (no IP literals, no localhost or internal names); nothing was funded or signed',
+  },
+  merchant_url: {
+    nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+    nextTool: null,
+    nextToolOmittedReason:
+      're-call with the merchant’s public https URL as merchant_url (no IP literals, no localhost or internal names); nothing was funded or signed',
+  },
+  catalog: {
+    nextAction: AgentPaymentNextAction.StopAndTellUser,
+    nextTool: null,
+    nextToolOmittedReason:
+      'this catalog entry’s merchant URL is refused by the hosted egress policy, and no argument here can change it; pick another catalog entry. Nothing was funded or signed',
+  },
+}
+
+export function egressRefusalBeforeIntent(err: unknown, target: EgressRefusalTarget): HostedToolError {
   const refused = err instanceof MerchantEgressRefusedError
     ? err
     : new MerchantEgressRefusedError(String(err instanceof Error ? err.message : err), '', 'url_not_allowed', true)
@@ -274,12 +308,7 @@ export function egressRefusalBeforeIntent(err: unknown): HostedToolError {
     code: 'MERCHANT_EGRESS_REFUSED',
     message: `${refused.message} Nothing was funded or signed.`,
     statusCode: 400,
-    nextStep: refusalNextStep({
-      nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
-      nextTool: null,
-      nextToolOmittedReason:
-        're-call with the merchant’s public https URL as merchant_url / url (no IP literals, no localhost or internal names); nothing was funded or signed',
-    }),
+    nextStep: refusalNextStep(EGRESS_REMEDY[target]),
   })
 }
 

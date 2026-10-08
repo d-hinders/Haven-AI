@@ -533,3 +533,25 @@ describe('#3739 resume works for a payment created in request mode', () => {
     expect(resumed.data.tx_hash).toBe('0xfunded')
   })
 })
+
+describe('#3774 each request-mode refusal states what happened', () => {
+  it('a non-402 answer says the probe got no 402, not that the egress policy blocked it', async () => {
+    stubFetch({ 'GET /paid': { status: 200, body: { ok: true } } })
+    const res = fail(await fixtureHandlers().haven_pay_x402_quote({ url: MERCHANT_URL, max_amount_human: '2' })) as unknown as Record<string, any>
+    expect(res.next_tool_omitted_reason).toContain('without a 402')
+    expect(res.next_tool_omitted_reason).not.toContain('egress policy')
+  })
+
+  it('a 402 with no payable option says so', async () => {
+    stubMerchant({ ...CHALLENGE, accepts: [{ ...PAYMENT_REQUIRED.accepts[0], scheme: 'upto' }] })
+    const res = fail(await fixtureHandlers().haven_pay_x402_quote({ url: MERCHANT_URL, max_amount_human: '2' })) as unknown as Record<string, any>
+    expect(res.next_tool_omitted_reason).toContain('no payment option Haven can settle')
+  })
+
+  it('an egress refusal names url, the argument this tool takes — not merchant_url', async () => {
+    const res = fail(await handlers().haven_pay_x402_quote({ url: 'https://localhost/paid', max_amount_human: '2' })) as unknown as Record<string, any>
+    expect(res.code).toBe('MERCHANT_EGRESS_REFUSED')
+    expect(res.next_tool_omitted_reason).toContain('as url')
+    expect(res.next_tool_omitted_reason).not.toContain('merchant_url')
+  })
+})

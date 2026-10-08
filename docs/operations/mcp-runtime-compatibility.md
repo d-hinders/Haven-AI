@@ -3600,6 +3600,27 @@ Hosted only; the local `@haven_ai/mcp` runtime is unchanged (its one-shot
   - Older skill text still says to copy `payment_required` verbatim. That
     remains a valid mode.
 
+### Plain-HTTP x402 next steps after the merchant retry (#3774)
+
+These are hosted surface changes. The local runtime has no twins: its `haven_submit { payment_id }` refuses.
+
+- **erc7710 `haven_submit`** names `haven_report_settlement_evidence` (`payment_id` prefilled) as the step after the agent's own retry, where it used to name no Haven tool.
+- **`haven_report_x402_outcome` on an unconfirmed erc7710 payment** now refuses with a typed code instead of `API_ERROR`. Clients that branched on `API_ERROR` from this tool see the new codes:
+  - `ERC7710_REPORT_SETTLEMENT_EVIDENCE` names the evidence tool and carries the caller's hash;
+  - `ERC7710_OUTCOME_NOT_REPORTABLE` answers a `rejected` outcome: nothing moved, nothing to sweep.
+- **`haven_submit { payment_id }` success** now carries the next-step fields, keyed on one status read:
+  - x402 funding confirmed: retry the merchant, then `haven_report_x402_outcome`;
+  - direct confirmed: done;
+  - anything else: `haven_get_payment_status`.
+
+  `status` and `tx_hash` are unchanged.
+- **Request-mode probe refusals** carry per-cause reasons.
+- **`MERCHANT_EGRESS_REFUSED`** names the calling tool's own argument (`url`, `merchant_url`, or "pick another catalog entry").
+- **Skew:**
+  - Text and next-step fields only; no tool, schema, version or consent-hash change.
+  - The skill text splits the post-retry step by scheme.
+  - An older skill still teaches `haven_report_x402_outcome` on erc7710; that call now gets a refusal that names the right tool.
+
 ### Detecting skew before a payment (#1155)
 
 Every row above is a *post-quote* symptom: the agent found out by trying to pay.

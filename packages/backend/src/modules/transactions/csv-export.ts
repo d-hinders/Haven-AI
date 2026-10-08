@@ -65,6 +65,11 @@ export const TRANSACTION_CSV_COLUMNS = [
   // instead of both living in a header nobody can read.
   'reporting_currency',
   'converted_currency',
+  // #3763: appended at the END (the rule above — an importer keyed on column
+  // INDEX sees this shift once). `tx_hash` KEEPS its funding meaning, so the
+  // merchant's settlement rides as its own column: empty on every row that
+  // has no recorded settlement, and on all non-x402 rows.
+  'settlement_tx_hash',
 ] as const
 
 export type TransactionCsvColumn = (typeof TRANSACTION_CSV_COLUMNS)[number]
@@ -140,6 +145,10 @@ export function transactionCsvRow(
     // triple — metadata, not a conversion.
     reporting_currency: lookups.reportingCurrency,
     converted_currency: tx.convertedCurrency ?? '',
+    // #3763: empty on every row without a recorded settlement — never a
+    // copy of the funding hash (that would defeat the column's whole point)
+    // and never a placeholder promising a later record.
+    settlement_tx_hash: tx.settlementTxHash ?? '',
   }
 }
 

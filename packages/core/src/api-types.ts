@@ -5698,6 +5698,10 @@ export type components = {
             /** @enum {string} */
             activityType?: "delegate_sweep";
             agentName?: string;
+            /** @description #3763: the EIP-3009 funding leg (same value as `hash`) — null on rows that are not synthesized x402 payments. */
+            fundingTxHash?: string | null;
+            /** @description #3763: the merchant settlement transaction when one is recorded (#3475); null otherwise — "not recorded", never "failed". Null on non-x402 rows. */
+            settlementTxHash?: string | null;
             /**
              * @description Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: reserved — nothing populates it today. `unknown`: outbound raw transfer with no matched intent. Absent for inbound (`direction: in`) rows.
              * @enum {string}
@@ -5784,6 +5788,10 @@ export type components = {
             /** @enum {string} */
             activityType?: "delegate_sweep";
             agentName?: string;
+            /** @description #3763: the EIP-3009 funding leg (same value as `hash`) — null on rows that are not synthesized x402 payments. */
+            fundingTxHash?: string | null;
+            /** @description #3763: the merchant settlement transaction when one is recorded (#3475); null otherwise — "not recorded", never "failed". Null on non-x402 rows. */
+            settlementTxHash?: string | null;
             /**
              * @description Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: reserved — nothing populates it today. `unknown`: outbound raw transfer with no matched intent. Absent for inbound (`direction: in`) rows.
              * @enum {string}
@@ -15587,7 +15595,14 @@ export interface operations {
                             amount: string | null;
                             to: string | null;
                             status: string | null;
+                            /** @description The FUNDING transaction on the eip3009 bridge — Haven’s sponsored UserOp (account → delegate). */
                             tx_hash?: string | null;
+                            /** @description #3763: the EIP-3009 funding leg, named — same value as `tx_hash`. */
+                            funding_tx_hash?: string | null;
+                            /** @description #3763: the merchant’s settlement transaction (delegate → merchant) when an agent reported one and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`). Null is "not recorded", never "failed" — the SDK’s default evidence post reports the funding hash, which the writer refuses, so many eip3009 payments legitimately never get one. */
+                            settlement_tx_hash?: string | null;
+                            /** @description #3763: which settlement branch moved the money — `eip3009` or `erc7710` — read from the intent’s `machine_metadata`; null when none was recorded. */
+                            settlement_scheme?: string | null;
                             payment_id?: string;
                             payment_proof_status?: string | null;
                             /** @description Derived from the payment lifecycle. */
@@ -15603,7 +15618,7 @@ export interface operations {
                             account_id?: string | null;
                             account_address?: string | null;
                             account_name?: string | null;
-                            /** @description Null exactly when tx_hash is null. */
+                            /** @description #3763: the merchant settlement transaction when one is recorded, else the funding transaction; null exactly when the payment has no transaction at all (`tx_hash` null and nothing recorded). */
                             explorer_url?: string | null;
                             /** @description Which on-chain mechanism moved the money (#799). */
                             execution_rail?: string | null;
@@ -15767,7 +15782,14 @@ export interface operations {
                             amount: string | null;
                             to: string | null;
                             status: string | null;
+                            /** @description The FUNDING transaction on the eip3009 bridge — Haven’s sponsored UserOp (account → delegate). */
                             tx_hash?: string | null;
+                            /** @description #3763: the EIP-3009 funding leg, named — same value as `tx_hash`. */
+                            funding_tx_hash?: string | null;
+                            /** @description #3763: the merchant’s settlement transaction (delegate → merchant) when an agent reported one and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`). Null is "not recorded", never "failed" — the SDK’s default evidence post reports the funding hash, which the writer refuses, so many eip3009 payments legitimately never get one. */
+                            settlement_tx_hash?: string | null;
+                            /** @description #3763: which settlement branch moved the money — `eip3009` or `erc7710` — read from the intent’s `machine_metadata`; null when none was recorded. */
+                            settlement_scheme?: string | null;
                             payment_id?: string;
                             payment_proof_status?: string | null;
                             /** @description Derived from the payment lifecycle. */
@@ -15783,7 +15805,7 @@ export interface operations {
                             account_id?: string | null;
                             account_address?: string | null;
                             account_name?: string | null;
-                            /** @description Null exactly when tx_hash is null. */
+                            /** @description #3763: the merchant settlement transaction when one is recorded, else the funding transaction; null exactly when the payment has no transaction at all (`tx_hash` null and nothing recorded). */
                             explorer_url?: string | null;
                             /** @description Which on-chain mechanism moved the money (#799). */
                             execution_rail?: string | null;

@@ -244,7 +244,41 @@ export default function TransactionDetailPanel({
         {tx.tokenAddress ? <DetailRow label="Token address" value={addr(tx.tokenAddress)} /> : null}
         <DetailRow label="Account" value={addr(tx.accountAddress)} />
         <DetailRow label="Network" value={<NetworkPill chainId={tx.chainId} />} />
-        <DetailRow label="Transaction" value={<ExplorerLink chainId={tx.chainId} type="tx" value={tx.hash} />} />
+        {/*
+          #3763: on the eip3009 bridge one x402 purchase is TWO on-chain
+          transactions, and the merchant names the SETTLEMENT one. The detail
+          drawer headlines it when it is recorded, and names the funding leg
+          as the funding leg — never as "the" payment. Without a recorded
+          settlement it says so plainly: null is "not recorded", never
+          "failed" — the SDK's default evidence post reports the funding hash
+          (refused by the writer), so many eip3009 rows never get one, and the
+          copy must not promise a later record. The attribution wording states
+          only what the record proves: the hash was reported by the agent and
+          verified on-chain (#3475) — nothing here claims the merchant's own
+          books agree. erc7710 and scheme-less rows are one transaction and
+          keep the plain "Transaction" row.
+        */}
+        {tx.settlementScheme === 'eip3009' ? (
+          <>
+            {tx.settlementTxHash ? (
+              <DetailRow
+                label="Merchant settlement (reported by the agent, verified on-chain)"
+                value={<ExplorerLink chainId={tx.chainId} type="tx" value={tx.settlementTxHash} />}
+              />
+            ) : (
+              <DetailRow
+                label="Merchant settlement"
+                value={<span className="text-[var(--v2-ink-3)]">Not recorded</span>}
+              />
+            )}
+            <DetailRow
+              label="Funding from your account"
+              value={<ExplorerLink chainId={tx.chainId} type="tx" value={tx.fundingTxHash ?? tx.hash} />}
+            />
+          </>
+        ) : (
+          <DetailRow label="Transaction" value={<ExplorerLink chainId={tx.chainId} type="tx" value={tx.hash} />} />
+        )}
         <DetailRow label="Date" value={new Date(tx.timestamp * 1000).toLocaleString()} />
       </Section>
     </SidePanel>

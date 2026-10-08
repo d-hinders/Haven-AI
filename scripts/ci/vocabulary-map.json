@@ -262,6 +262,8 @@
       "agentName": "Attribution joined onto the history row. The receipt surface is agent-scoped already, so the agent is the principal rather than a field.",
       "initiatedBy": "#2097 initiator classification for any history row. Every receipt is agent-initiated by construction.",
       "settlementScheme": "eip3009 / erc7710 -- WHICH settlement branch moved the money (#1705). The three axes #1705 keeps unmerged are this, `source` (the payment protocol) and the ACCOUNT's `execution_rail` (account architecture) -- not the old receipt `rail` (removed by #3306), which was the same axis as `source`.",
+      "fundingTxHash": "#3763: the EIP-3009 funding leg, named -- Haven's sponsored UserOp (account -> delegate). Equal by copy to `hash` on the rows that carry it (the framing `to` uses), and a DIFFERENT CONCEPT from the receipt's fundingTxHash: there it is scheme-dependent (#2998), here it exists only on x402-synthesized rows and is null on every other row class (explorer-derived, sweeps), so no concept pair can claim convergence.",
+      "settlementTxHash": "#3763: the merchant's settlement transaction (delegate -> merchant) when an agent reported it and it verified on-chain (#3475); null is 'not recorded', never 'failed' -- the SDK's default evidence post reports the FUNDING hash, which the writer refuses, so many eip3009 rows legitimately never get one. Equal by copy to the receipt's settlementTxHash on rows that carry one, but only x402-synthesized rows carry the field at all, so it stays unpaired.",
       "amountSek": "Book-time SEK value (#463) for the accounting feed.",
       "fxRateSek": "The rate amountSek was struck at (#2871).",
       "fxSource": "Where that rate came from.",

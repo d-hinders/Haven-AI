@@ -41,6 +41,11 @@ function paymentRow(overrides: Record<string, unknown> = {}) {
     to_address: MERCHANT_ADDRESS,
     status: 'confirmed',
     tx_hash: TX_HASH,
+    // #3763: the merchant's settlement rides beside the funding hash. The
+    // default row has none — the common case the SDK's default evidence post
+    // produces (it reports the funding hash, which the writer refuses).
+    settlement_tx_hash: null,
+    settlement_scheme: null,
     source: 'x402',
     x402_resource_url: 'https://api.example.com/data',
     x402_merchant_address: MERCHANT_ADDRESS,
@@ -123,6 +128,91 @@ describe('agent activity routes', () => {
     )
     expect(paymentSql).toContain('pi.execution_rail')
     expect(paymentSql).not.toContain('session_permission_id')
+  })
+
+  // #3763: the settlement hash the agent reported (#3475) travels beside the
+  // funding one on BOTH routes — and `explorer_url` headlines the SETTLEMENT,
+  // the transaction the merchant names, falling back to the funding leg when
+  // nothing is recorded.
+  const SETTLEMENT_HASH = `0x${'22'.repeat(32)}`
+
+  it('#3763: /:id/activity headlines the recorded settlement in explorer_url and names both legs', async () => {
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT id FROM agents')) return { rows: [{ id: AGENT_ID }] }
+      if (sql.includes('FROM payment_intents pi')) {
+        return {
+          rows: [
+            paymentRow({ settlement_tx_hash: SETTLEMENT_HASH, settlement_scheme: 'eip3009' }),
+            // Same agent, no recorded settlement — the fallback state.
+            paymentRow({ id: 'payment-2', tx_hash: null, settlement_tx_hash: null }),
+          ],
+        }
+      }
+      if (sql.includes('FROM agent_tool_invocations')) return { rows: [] }
+      throw new Error(`Unexpected query: ${sql}`)
+    })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/agent-activity/${AGENT_ID}/activity`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const [settled, unrecorded] = response.json().activity
+    expect(settled).toMatchObject({
+      // `tx_hash` keeps its FUNDING meaning; the legs travel named.
+      tx_hash: TX_HASH,
+      funding_tx_hash: TX_HASH,
+      settlement_tx_hash: SETTLEMENT_HASH,
+      settlement_scheme: 'eip3009',
+    })
+    expect(settled.explorer_url).toContain(SETTLEMENT_HASH)
+    expect(settled.explorer_url).not.toContain(TX_HASH)
+    // No recorded settlement → the funding leg is the link, labelled by the
+    // fields (the route emits no copy of its own).
+    expect(unrecorded).toMatchObject({ tx_hash: null, settlement_tx_hash: null })
+    expect(unrecorded.explorer_url).toBeNull()
+    // The SELECT actually reads the metadata keys — a stale SQL shape would
+    // serve `undefined` here and fail the toMatchObject above.
+    const paymentSql = String(
+      mockQuery.mock.calls.find(([sql]) => String(sql).includes('FROM payment_intents pi'))?.[0],
+    )
+    expect(paymentSql).toContain('merchant_settlement_tx_hash')
+    expect(paymentSql).toContain('settlement_scheme')
+  })
+
+  it('#3763: /feed headlines the recorded settlement in explorer_url and names both legs', async () => {
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM agents')) {
+        return { rows: [{ id: AGENT_ID, name: 'Research agent' }] }
+      }
+      if (sql.includes('FROM payment_intents pi')) {
+        return { rows: [paymentRow({ settlement_tx_hash: SETTLEMENT_HASH, settlement_scheme: 'eip3009' })] }
+      }
+      if (sql.includes('FROM agent_tool_invocations')) return { rows: [] }
+      throw new Error(`Unexpected query: ${sql}`)
+    })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/agent-activity/feed',
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const payment = response.json().activity[0]
+    expect(payment).toMatchObject({
+      tx_hash: TX_HASH,
+      funding_tx_hash: TX_HASH,
+      settlement_tx_hash: SETTLEMENT_HASH,
+      settlement_scheme: 'eip3009',
+    })
+    expect(payment.explorer_url).toContain(SETTLEMENT_HASH)
+    const feedSql = String(
+      mockQuery.mock.calls.find(([sql]) => String(sql).includes('FROM payment_intents pi'))?.[0],
+    )
+    expect(feedSql).toContain('merchant_settlement_tx_hash')
   })
 
   // #2055: was "uses stored payment and approval Safe identity for a single

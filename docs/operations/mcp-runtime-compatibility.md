@@ -75,7 +75,7 @@ covers:
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-10-07"
+last-verified: "2026-10-08"
 ---
 
 > **Re-verified (2026-10-07, hosted agent identity before tool dispatch):**
@@ -5262,3 +5262,14 @@ to call next in structured fields, and those fields are typed end to end
 > (`x402-expected-wire-contract.test.ts`) runs green through the fixture
 > seam. Scope of this note: those two files' egress additions;
 > `last-verified` is bumped to 2026-10-07 for exactly this coverage.
+
+> **#3763 re-verification (2026-10-08, history read model only).** This diff
+> touches the transactions history read model (`modules/transactions/`,
+> `infra/repositories/transaction-history.ts`, `infra/repositories/agent-activity.ts`)
+> and `openapi/spec.ts`. It is display-only: the EIP-3009 settlement hash the
+> agent reported (#3475) is now surfaced beside the funding hash on the
+> dashboard's history/activity views and the CSV export. No tool is added,
+> renamed or re-shaped; no `haven_*` tool schema, description fragment or
+> failure envelope moves; the version-skew and consent-hash contracts do not
+> move. `last-verified` is bumped to 2026-10-08 for exactly this coverage.
+> Nothing else in this document was re-verified.

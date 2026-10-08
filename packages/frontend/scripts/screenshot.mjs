@@ -775,6 +775,13 @@ const T0 = Date.parse('2026-07-10T09:00:00.000Z') / 1000 // fixed anchor, in sec
 
 const tx = (i, over = {}) => ({
   hash: `0x${String(i).repeat(4).padStart(8, '0')}${'ab'.repeat(28)}`.slice(0, 66),
+  // #3763: the two EIP-3009 legs ride every row on the wire (nullable), so
+  // the dataset carries the keys everywhere and fills them on the eip3009
+  // rows below — the parity suite requires screenshot rows to carry every
+  // key the e2e fixture's `dashboardTransaction` has.
+  fundingTxHash: null,
+  settlementTxHash: null,
+  settlementScheme: null,
   type: 'erc20',
   from: FIXTURE_ACCOUNT.account_address,
   to: ADDR.recipient,
@@ -800,8 +807,16 @@ const tx = (i, over = {}) => ({
 // fourth state the capture has to show: an unfed row renders no badge.
 const accounting = (status, extra = {}) => ({ provider: 'fortnox', status, externalRef: null, error: null, ...extra })
 export const FIXTURE_TXS = [
+  // #3763: eip3009 WITH a recorded settlement — the drawer headlines it
+  // ("Merchant settlement (reported by the agent, verified on-chain)") and
+  // names the funding leg ("Funding from your account"). The
+  // `transactions-detail-network` capture photographs THIS row's drawer, so
+  // the regenerated evidence carries the recorded state's visible text.
   tx(1, {
     agentName: 'Research agent', source: 'x402', x402ResourceUrl: 'https://api.example.dev/reports',
+    settlementScheme: 'eip3009',
+    fundingTxHash: `0x${String(1).repeat(4).padStart(8, '0')}${'ab'.repeat(28)}`.slice(0, 66),
+    settlementTxHash: `0x${'22'.repeat(32)}`,
     paymentId: 'pay-1', accounting: accounting('pushed', { externalRef: 'fortnox:supplierinvoice:11' }),
   }),
   tx(2, { direction: 'in', from: ADDR.contact, to: FIXTURE_ACCOUNT.account_address, valueFormatted: '150.00', value: '150000000' }),
@@ -812,6 +827,21 @@ export const FIXTURE_TXS = [
     paymentId: 'pay-5', accounting: accounting('failed', { error: 'Fortnox answered 502 — will retry on the next sync' }),
   }),
   tx(6, { direction: 'in', from: ADDR.merchant, to: FIXTURE_ACCOUNT.account_address, valueFormatted: '75.50', value: '75500000' }),
+  // #3763: eip3009 WITHOUT a recorded settlement — the other state the
+  // acceptance requires visible text for. The drawer reads "Merchant
+  // settlement / Not recorded" (never a promise of a later record) and
+  // links the funding leg labelled as the funding leg; `hash` stays the
+  // funding hash, so the table link keeps pointing at the funding
+  // transaction. The `transactions-detail-settlement-unrecorded` capture
+  // photographs THIS row's drawer.
+  tx(7, {
+    agentName: 'Research agent', source: 'x402', x402ResourceUrl: 'https://api.example.dev/datasets',
+    settlementScheme: 'eip3009',
+    fundingTxHash: `0x${String(7).repeat(4).padStart(8, '0')}${'ab'.repeat(28)}`.slice(0, 66),
+    value: '1000000', valueFormatted: '1.00',
+    blockNumber: null,
+    paymentId: 'pay-7',
+  }),
 ]
 
 export const FIXTURE_AGENTS = [
@@ -4174,6 +4204,30 @@ export const SCENARIOS = {
       const drawer = page.getByRole('dialog').first()
       await drawer.waitFor({ timeout: 20_000 })
       await drawer.getByText('Network', { exact: true }).waitFor({ timeout: 20_000 })
+      await shoot(drawer, 'drawer')
+    },
+  },
+  // #3763: the second eip3009 state — the LAST fixture row carries NO
+  // recorded settlement, so its drawer reads "Merchant settlement / Not
+  // recorded" and names the funding leg. Photographed beside
+  // `transactions-detail-network` (the recorded state's drawer, same
+  // mechanism) so the reviewer evidence carries visible text for both.
+  'transactions-detail-settlement-unrecorded': {
+    description:
+      'The /transactions detail drawer for the unrecorded-settlement fixture row — "Merchant settlement / Not recorded" plus the funding leg, labelled (#3763)',
+    api() {
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/transactions`, { waitUntil: 'domcontentloaded', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      // Rows render sorted date-descending; the tx(7) row is the oldest.
+      const select = page.locator('button[data-row-select]').last()
+      await select.waitFor({ timeout: 30_000 })
+      await select.click()
+      const drawer = page.getByRole('dialog').first()
+      await drawer.waitFor({ timeout: 20_000 })
+      await drawer.getByText('Not recorded', { exact: true }).waitFor({ timeout: 20_000 })
       await shoot(drawer, 'drawer')
     },
   },

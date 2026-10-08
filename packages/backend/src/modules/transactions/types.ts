@@ -60,6 +60,29 @@ export interface Transaction {
   /** Book-time SEK value (P0 #463); null for non-machine / unpriced transactions. */
   amountSek?: string | null
   /**
+   * #3763: the EIP-3009 funding leg — Haven's sponsored UserOp that moved the
+   * price from the account to the agent's delegate key. Same value as `hash`
+   * (which KEEPS its funding meaning: repurposing it would split one payment
+   * into two rows and move the CSV/CLI export key and the React keys), named
+   * explicitly so a consumer can display both legs without guessing which
+   * hash is which. Populated only on x402-synthesized rows; every other row
+   * class (explorer-derived, sweeps) leaves it undefined.
+   */
+  fundingTxHash?: string | null
+  /**
+   * #3763: the merchant's settlement transaction — the delegate collecting
+   * from the agent's signed EIP-3009 authorization — recorded ONLY when an
+   * agent reported it and it verified on-chain (#3475,
+   * `machine_metadata.merchant_settlement_tx_hash`). The merchant shows this
+   * transaction; before #3763 the history views linked the funding leg as
+   * "the" payment instead. `null` is "not recorded", never "failed": the
+   * SDK's default evidence post reports the funding hash (refused by the
+   * writer), so many eip3009 payments legitimately never get one — the UI
+   * says so plainly rather than promising a later record. Populated only on
+   * x402-synthesized rows.
+   */
+  settlementTxHash?: string | null
+  /**
    * The book-time FX rate `amountSek` was struck at, and where it came from —
    * `machine_payment_evidence.fx_rate_sek` / `.fx_source` (#463, migration
    * 026), surfaced for the CSV export (#2871). Null wherever `amountSek` is:

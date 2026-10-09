@@ -62,6 +62,11 @@ interface Props {
    * issue exists to remove, so surface one wherever `ready` can be false.
    */
   notReadyAction?: ReactNode
+  /**
+   * Information shown above the control while it IS ready — the #1097
+   * cross-device heads-up (#3825). Never a gate: the button stays live.
+   */
+  readyHint?: ReactNode
   onGranted?: () => void
   className?: string
 }
@@ -78,6 +83,7 @@ export default function BudgetGrantAction({
   trailingAction,
   notReadyHint,
   notReadyAction,
+  readyHint,
   onGranted,
   className,
 }: Props) {
@@ -114,6 +120,8 @@ export default function BudgetGrantAction({
           {notReadyAction && <div className="mt-2">{notReadyAction}</div>}
         </div>
       )}
+
+      {ready && readyHint ? <div className="mb-3">{readyHint}</div> : null}
 
       {/*
         Cancelled is NOT an error state. Muted ink, no border, no danger token —

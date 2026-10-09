@@ -35,6 +35,7 @@ const { mockRevokeAll, mockBudgetState, mockBalanceState } = vi.hoisted(() => ({
     signersLoading: false,
     signersError: null as string | null,
     hasPasskeys: null as boolean | null,
+    passkeyElsewhere: false,
   },
   mockBalanceState: {
     balance: null as null | Record<string, unknown>,
@@ -58,6 +59,7 @@ vi.mock('@/hooks/useDelegationBudget', () => ({
     signersError: mockBudgetState.signersError,
     signersLoading: mockBudgetState.signersLoading,
     hasPasskeys: mockBudgetState.hasPasskeys,
+    passkeyElsewhere: mockBudgetState.passkeyElsewhere,
     reloadSigners: vi.fn(),
   }),
 }))
@@ -117,6 +119,7 @@ beforeEach(() => {
   mockBudgetState.signersLoading = false
   mockBudgetState.signersError = null
   mockBudgetState.hasPasskeys = null
+  mockBudgetState.passkeyElsewhere = false
   mockBalanceState.balance = null
   mockBalanceState.hasRecoverableUsdc = false
 })
@@ -484,6 +487,21 @@ describe('RemoveAgentDialog', () => {
 
   // #3845: the no-signer sentence offers a passkey only to an account that
   // has one enrolled (on any device); unknown keeps today's sentence.
+  // #3825: the removal signs on-chain — say before the ceremony that it may
+  // hand off to another device.
+  it('shows the cross-device hint when the signature is needed and the passkey is elsewhere', () => {
+    mockBudgetState.passkeyElsewhere = true
+    renderDialog(agentFixture())
+    expect(screen.getByText(/passkey may be on another device/)).toBeTruthy()
+  })
+
+  it('shows no cross-device hint when no signature is needed', () => {
+    mockBudgetState.passkeyElsewhere = true
+    mockBudgetState.budgets = []
+    renderDialog(agentFixture({ status: 'revoked' }))
+    expect(screen.queryByText(/passkey may be on another device/)).toBeNull()
+  })
+
   describe('the no-signer sentence follows the signer set (#3845)', () => {
     it('an account with no passkeys is told only to connect its owner wallet', () => {
       mockBudgetState.ready = false

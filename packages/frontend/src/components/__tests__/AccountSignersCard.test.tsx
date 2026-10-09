@@ -229,7 +229,7 @@ describe('AccountSignersCard (#888)', () => {
     expect(ownerRemove.disabled).toBe(true)
     // #3845: the row promises no passkeys the account does not have, and says
     // why Remove is unavailable.
-    expect(screen.queryByText(/your passkeys/)).toBeNull()
+    expect(screen.queryByText(/your passkeys become/)).toBeNull()
     expect(
       screen.getByText(
         "This wallet is the only way to approve this account, so it can't be removed until you add a backup.",
@@ -287,7 +287,7 @@ describe('AccountSignersCard (#888)', () => {
     )
     render(<AccountSignersCard {...PROPS} />)
     expect(screen.getByText(/Connect your account owner wallet/)).toBeTruthy()
-    // #3812: connect or switch here, not only from the header.
+    // #3812: connect or switch here (the header pill is gone since #3825).
     expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeTruthy()
   })
 
@@ -313,7 +313,7 @@ describe('AccountSignersCard (#888)', () => {
   })
 
   // ── #1679: credential naming — "Passkey · added {date}", never positional ──
-  it('labels every passkey row "Passkey · added {date}" and the EOA row "Wallet"', () => {
+  it('labels every passkey row "Passkey · added {date}" and the EOA row "Browser wallet"', () => {
     mockUseSigners.mockReturnValue(
       base({
         signers: {
@@ -330,9 +330,41 @@ describe('AccountSignersCard (#888)', () => {
     render(<AccountSignersCard {...PROPS} />)
     expect(screen.getByText('Passkey · added March 3, 2026')).toBeTruthy()
     expect(screen.getByText('Passkey · added May 10, 2026')).toBeTruthy()
-    expect(screen.getByText('Wallet')).toBeTruthy()
+    expect(screen.getByText('Browser wallet')).toBeTruthy()
     // The banned platform-brand label and role words never render as names:
     expect(document.body.textContent).not.toMatch(/Face ID \/ Touch ID|External owner/)
+  })
+
+  // #3825: who your signers are is Settings → Signers' job; the account card
+  // shows which signers approve THIS account, with no address or key id.
+  it('shows no owner address or passkey key id, and links to Settings → Signers', () => {
+    const owner = '0x' + 'ee'.repeat(20)
+    const keyId = '0x' + '11'.repeat(32)
+    mockUseSigners.mockReturnValue(
+      base({
+        signers: {
+          account_address: '0x' + 'aa'.repeat(20),
+          chain_id: 84532,
+          owner_address: owner,
+          passkeys: [{ key_id: keyId, x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
+        },
+      }),
+    )
+    render(<AccountSignersCard {...PROPS} />)
+    // Positive control: both signer rows rendered.
+    expect(screen.getByText('Browser wallet')).toBeTruthy()
+    expect(screen.getByText('Passkey · added March 3, 2026')).toBeTruthy()
+    // The key id never renders; the owner address only inside a CLOSED
+    // "Show address" disclosure (#3825 design review: the card asks for THE
+    // owner wallet, so the user must be able to tell which one).
+    expect(document.body.textContent ?? '').not.toMatch(/0x1111/i)
+    const details = screen.getByText('Show address').closest('details') as HTMLDetailsElement
+    expect(details.open).toBe(false)
+    expect(details.textContent).toContain(owner)
+    const outside = Array.from(document.body.querySelectorAll('p')).filter((p) => !p.closest('details'))
+    expect(outside.some((p) => /0xeeee/i.test(p.textContent ?? ''))).toBe(false)
+    const link = screen.getByRole('link', { name: /All your passkeys and wallets in Settings/ })
+    expect(link.getAttribute('href')).toBe('/settings#signers')
   })
 
   it('REGRESSION (#1679): after a recovery removes the original key, the surviving backup keeps ITS OWN label', () => {

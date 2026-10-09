@@ -691,6 +691,11 @@ export function useDelegationBudget(
     // (the ceremony can hand off to another one). Null until the set is read,
     // so a caller never drops a passkey clause on a guess.
     hasPasskeys: signers ? signers.passkeys.length > 0 : null,
+    // #3825: the #1097 cross-device heads-up, for the flows that sign
+    // through this hook (the global wallet menu that disclosed it is gone).
+    // #3825 design review: only when the PASSKEY will sign — with the owner
+    // wallet connected the EOA path signs and nothing hands off.
+    passkeyElsewhere: signingPath === 'passkey' && passkeyLikelyElsewhere(signers),
     reload,
     budgetsError,
     signersError,

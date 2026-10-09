@@ -187,8 +187,9 @@ interface PopoverProps {
    * the same as "we cannot tell you". The one outcome this rules out is toning
    * THIS louder than #1937's.
    *
-   * The #1097 "passkey may be on another device" hints in `AccountSignersCard`
-   * and `DelegationSendModal` are the nearest shipped precedent and are plain
+   * The #1097 "passkey may be on another device" hint (`PasskeyElsewhereHint`,
+   * on every owner-signing flow since #3825) is the nearest shipped precedent
+   * and is plain
    * muted text — but they are deliberately NOT leaned on as the argument. Their
    * fact is mild friction with the RIGHT credential (a device hop); this one is
    * a credential chosen by array position and never verified as the user's.
@@ -198,10 +199,12 @@ interface PopoverProps {
    * (owner decision 2026-08-26). `useActiveSigner` now resolves a
    * `delegator_passkey` for any non-empty hydrated signer set, mirroring
    * `pickSigningPath`'s precedence, so the marker-less user reaches this
-   * rendering for real — the state this block was built ahead of. Rendered
-   * evidence lives in `e2e/wallet-signer-offering.spec.ts`, which drives the
-   * app into the marker-less state through the real hydration path rather
-   * than forced props.
+   * rendering for real — the state this block was built ahead of. Since #3825
+   * the pill renders only in the connect flow's approval step, and only while
+   * NOT ready, so this popover state is no longer reachable from an app route:
+   * it is shown on `/design-system` (proof: `e2e/wallet-signing-credential-
+   * states.spec.ts`), and in the app the marker-less user gets the
+   * `PasskeyElsewhereHint` line on each signing flow instead.
    */
   signingWith?: { label: string; keyId: string; onThisDevice: boolean }
   unavailablePasskey?: boolean
@@ -499,7 +502,10 @@ export function WalletPopover({
         keyboard reachability is unchanged. Their `focus-visible:ring-2` paints
         OUTSIDE the border box (#1873) and is not clipped, because this box
         clips at its PADDING edge and `p-4` leaves 16px of gutter for a 2px
-        ring — measured in `wallet-popover-height-bound.spec.ts`, not assumed.
+        ring — measured (not assumed) by `wallet-popover-height-bound.spec.ts`
+        while the pill lived in the top bar (#2067). #3825 removed that spec
+        with the pill: no app route now opens the popover in its tallest
+        state, so the clamp is no longer re-measured end to end.
       */}
       <div className="relative flex min-h-0 flex-1 flex-col border-b border-[var(--v2-border)]">
         <div
@@ -671,8 +677,9 @@ export default function WalletButton({
     accountAddress: subjectAccountAddress,
     chainId: subjectAccount?.chain_id,
   })
-  // #2073: the same gate the action areas consult, so the header pill and the
-  // disabled action below it agree about whether a USEFUL wallet is connected.
+  // #2073: the same gate the action areas consult, so the pill and the
+  // disabled action beside it agree about whether a USEFUL wallet is connected.
+  // (Written when the pill lived in the header; #3825 moved it out.)
   // Before this, a hybrid account with the wrong wallet connected rendered a
   // normal connected pill up here while the action area said to connect the
   // owner wallet — the two surfaces silently disagreed.

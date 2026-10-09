@@ -17,6 +17,7 @@ import { getChainTokens } from '@/lib/chains'
 import { Modal } from './ui/Modal'
 import { Button } from './ui/Button'
 import WalletConnectAction from './WalletConnectAction'
+import PasskeyElsewhereHint from './PasskeyElsewhereHint'
 import { Input } from './ui/Input'
 import { useToast } from './ui/Toast'
 
@@ -125,17 +126,14 @@ export default function DelegationSendModal({ open, onClose, accountAddress, cha
             <p className="text-xs text-[var(--v2-ink-muted)]">
               Connect your account owner wallet to send.
             </p>
-            {/* #3812: connect or switch in place, not only from the header. */}
+            {/* #3812: connect or switch in place (the header pill is gone since #3825). */}
             <WalletConnectAction />
           </div>
         ) : null}
         {ready && passkeyElsewhere ? (
           // #1097: hint on a WORKING send — the ceremony may hand off to the
           // device that holds the passkey.
-          <p className="text-xs text-[var(--v2-ink-muted)]">
-            This account&apos;s passkey may be on another device — your browser will
-            guide you there when you approve.
-          </p>
+          <PasskeyElsewhereHint />
         ) : null}
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="ghost" onClick={onClose}>

@@ -9,6 +9,10 @@ import {
   updateUserName,
   updateUserWalletAddress,
 } from '../infra/repositories/users.js'
+import { listAccountsForUser } from '../infra/repositories/smart-accounts.js'
+import { listAccountPasskeys, passkeyEnrollmentDates } from '../infra/repositories/hybrid-signers.js'
+import { loadHybridOwnerConfig } from '../rails/hybrid-account-config.js'
+import { aggregateUserSigners, type AccountSignerSet } from '../domain/user-signers.js'
 
 /**
  * #2914 (naming epic #2906 phase 5, the contraction): these responses carry
@@ -119,6 +123,45 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
     // serves. The characterization test pins the fallback SHAPE (null row and
     // missing row both fall back), not the currency.
     return { currency_preference: (await findCurrencyPreference(sub)) ?? DEFAULT_TRANSACTION_CURRENCY }
+  })
+
+  // GET /user/signers (#3825) — every signer across the caller's live Hybrid
+  // DeleGator accounts (all chains), each listed once with the accounts it
+  // approves. Composes the same reads as GET /accounts/hybrid/:address/signers
+  // (owner config + enrollment dates); `listAccountsForUser` is already
+  // user-scoped and delegation-rail only, so retired Safe rows never appear.
+  // Read-only, public-key material only (key_id, never x/y).
+  app.get('/signers', async (request) => {
+    const { sub } = request.user as { sub: string }
+
+    const accounts = await listAccountsForUser(sub)
+    const sets: AccountSignerSet[] = []
+    for (const a of accounts) {
+      const owner = await loadHybridOwnerConfig(sub, a.account_address, a.chain_id)
+      if (!owner) {
+        // One unresolvable account must not fail the whole read.
+        request.log.warn(
+          { accountId: a.id, chainId: a.chain_id },
+          'user signers: account owner config could not be resolved; skipped',
+        )
+        continue
+      }
+      const dates = passkeyEnrollmentDates(await listAccountPasskeys(owner.accountId))
+      sets.push({
+        account: {
+          account_id: a.id,
+          account_address: a.account_address,
+          account_name: a.name ?? null,
+          chain_id: a.chain_id,
+        },
+        ownerAddress: owner.config.ownerAddress ?? null,
+        passkeys: (owner.config.passkeys ?? []).map((p) => ({
+          keyId: p.keyId,
+          createdAt: dates.get(p.keyId.toLowerCase()) ?? null,
+        })),
+      })
+    }
+    return { signers: aggregateUserSigners(sets) }
   })
 
   // PUT /user/preferences

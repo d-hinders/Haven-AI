@@ -8,6 +8,7 @@ import { useDelegationBudget, type GrantInput } from '@/hooks/useDelegationBudge
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { budgetPeriodLabel } from '@/lib/budget-period'
 import BudgetGrantAction from '../BudgetGrantAction'
+import PasskeyElsewhereHint from '../PasskeyElsewhereHint'
 import WalletButton from '../WalletButton'
 import { Button } from '../ui/Button'
 import { AgentRulesSummary } from '../haven'
@@ -56,7 +57,7 @@ export function DelegationApprovalStep({
   onSwitchChain: () => void
   isSwitchingChain: boolean
 }) {
-  const { grant, busy, ready } = useDelegationBudget(agentId, chainId)
+  const { grant, busy, ready, passkeyElsewhere } = useDelegationBudget(agentId, chainId)
   const [confirming, setConfirming] = useState(false)
   const [confirmFailed, setConfirmFailed] = useState(false)
   // Once the budget is signed the agent is live and spending — there is
@@ -194,6 +195,7 @@ export function DelegationApprovalStep({
               </Button>
             )
           }
+          readyHint={passkeyElsewhere ? <PasskeyElsewhereHint /> : undefined}
           notReadyHint={
             isWrongChain
               ? `This Haven wallet is on ${approvalChainName}. Switch networks to approve the budget.`

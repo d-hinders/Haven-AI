@@ -78,6 +78,49 @@ function gateBox(): HTMLElement | null {
   while (node && !node.contains(checkbox)) node = node.parentElement
   return node
 }
+
+// #3825: the cross-device heads-up, read beside the money-path re-key hook.
+describe('ReplaceSigningKeyModal cross-device hint (#3825)', () => {
+  it('shows the hint when the account has passkeys but none on this device', async () => {
+    mockUseActiveSigner.mockReturnValue(null)
+    mockApiGet.mockResolvedValue({
+      account_address: '0x9999999999999999999999999999999999999999',
+      chain_id: 8453,
+      owner_address: null,
+      passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+    })
+    mockOnDevice.mockReturnValue(false)
+    renderModal()
+    expect(await screen.findByText(/passkey may be on another device/)).toBeTruthy()
+  })
+
+  it('makes no signer read while the modal is closed (it stays mounted on the agent page)', async () => {
+    renderModal({ open: false })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(mockApiGet).not.toHaveBeenCalledWith(expect.stringContaining('/account-signers'))
+  })
+
+  it('shows no hint when the connected owner wallet will sign a mixed account', async () => {
+    mockUseActiveSigner.mockReturnValue(eoaSigner())
+    mockApiGet.mockResolvedValue({
+      account_address: '0x9999999999999999999999999999999999999999',
+      chain_id: 8453,
+      owner_address: '0x5555555555555555555555555555555555555555',
+      passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+    })
+    mockOnDevice.mockReturnValue(false)
+    renderModal()
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalled())
+    await new Promise((r) => setTimeout(r, 0))
+    expect(screen.queryByText(/passkey may be on another device/)).toBeNull()
+  })
+
+  it('shows no hint for a wallet-owned account with no passkeys', async () => {
+    renderModal()
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalled())
+    expect(screen.queryByText(/passkey may be on another device/)).toBeNull()
+  })
+})
 import { ApiRequestError } from '@/lib/api'
 
 // #3812: the in-flow connect/switch control reads wagmi and RainbowKit, which
@@ -647,7 +690,7 @@ describe('signing-path refusal — the one reason left (#1890)', () => {
   })
 
   // #3812: the refusal comes with its way out — connect or switch the owner
-  // wallet right here, since the header is no longer the only place to.
+  // wallet right here, since the header no longer carries a wallet pill (#3825).
   it('offers the owner wallet connect inside the refusal', async () => {
     mockUseActiveSigner.mockReturnValue(null)
     renderModal()

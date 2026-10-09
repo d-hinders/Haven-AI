@@ -1116,13 +1116,22 @@ short, and an icon-only square grows in both axes. Two rules generalise from it:
   announces as "button". Every collapsing state carries an explicit `aria-label` (plus a
   matching `title`, which is the pointer-hover mitigation for the lost label). jsdom
   applies no CSS, so a unit test that queries by role and name keeps passing on text the
-  real browser never renders — `e2e/mobile-nav-tap-target.mobile.spec.ts` measures the
-  rendered label width and the name together, and `WalletButton.test.tsx` asserts the
-  attribute rather than the name.
+  real browser never renders — `WalletButton.test.tsx` asserts the attribute rather than
+  the name. (`e2e/mobile-nav-tap-target.mobile.spec.ts` measured the rendered label width
+  and the name together until #3825 took the pill out of the top bar; the spec now
+  asserts the bar's right cluster holds no control at all.)
 
 A collapsed control also takes its neighbour's radius (`rounded-xl` here, the
 notification bell's), because two adjacent 40px squares in one 56px band read as a row
 only if they are the same shape.
+
+**Since [#3825](https://github.com/d-hinders/Haven-AI/issues/3825) the top bar carries
+no wallet pill.** Most users sign with a passkey, and a signer with a raw address on every
+screen is the wrong level of detail; signers have their own home in Settings → Signers,
+and every signing flow offers its own in-flow connect (#3812). `WalletButton` still
+renders in the connect flow's approval step, so the collapse rules above still describe
+it; the over-subscribed-bar argument is history. Below `lg` the bar's right cluster is
+now empty — the theme toggle lives in the More sheet there.
 
 **The former investor-briefing borrower was retired with the page in #2468.** The
 remaining borrowers and their guards are the live tap-target examples; do not infer a
@@ -1485,7 +1494,8 @@ A **known but not-preferred** fact, stated beside the thing it qualifies:
 icon-led label row (lucide `Info` at `h-3.5 w-3.5 flex-shrink-0`, `text-xs
 font-medium text-[var(--v2-ink-2)]`). One call site so far —
 `WalletButton.tsx`'s "No passkey enrolled on this device", shown in both states
-on `/design-system` → *Signing credential (wallet menu)*.
+on `/design-system` → *Signing credential (wallet menu)*; since #3825 that is the
+only place it renders (the pill no longer opens for a ready user).
 
 **Reach for it instead of a semantic tone when nothing has failed.** There is no
 `--v2-info` family, and `--v2-warning` is scoped to 402/pending-review, to
@@ -1497,7 +1507,7 @@ enumeration and is why the two read as contradicting each other until you check
 (#2764). So
 the honest options for "legible but not alarming" are this or plain muted text.
 Muted text is the right weight for mild friction — the #1097 "passkey may be on
-another device" hints in `AccountSignersCard` and `DelegationSendModal` are
+another device" hint (shown on every owner-signing flow since #3825) is
 deliberately unmarked. This marker is for the step above that: a fact the user
 would want to act on, on an authority-bearing surface.
 

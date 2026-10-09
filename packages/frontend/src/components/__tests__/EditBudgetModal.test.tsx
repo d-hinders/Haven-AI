@@ -10,7 +10,8 @@ vi.mock('@/components/WalletConnectAction', () => ({
   default: () => <button type="button">Connect wallet</button>,
 }))
 
-const { mockEditBudget, mockSignersError, mockReloadSigners, mockReady, mockSignersLoading } = vi.hoisted(() => ({
+const { mockEditBudget, mockSignersError, mockReloadSigners, mockReady, mockSignersLoading, mockPasskeyElsewhere } = vi.hoisted(() => ({
+  mockPasskeyElsewhere: vi.fn(() => false),
   mockReady: vi.fn(() => true),
   mockSignersLoading: vi.fn(() => false),
   mockEditBudget: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock('@/hooks/useDelegationBudget', () => ({
     signersLoading: mockSignersLoading(),
     signersError: mockSignersError(),
     reloadSigners: mockReloadSigners,
+    passkeyElsewhere: mockPasskeyElsewhere(),
   }),
 }))
 
@@ -61,6 +63,7 @@ beforeEach(() => {
   mockSignersError.mockReturnValue(false)
   mockReady.mockReturnValue(true)
   mockSignersLoading.mockReturnValue(false)
+  mockPasskeyElsewhere.mockReturnValue(false)
   mockReloadSigners.mockReset()
 })
 
@@ -132,6 +135,13 @@ describe('EditBudgetModal (#3166) — review', () => {
     mockSignersLoading.mockReturnValue(true)
     toReview()
     expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
+  })
+
+  it('a signable review whose passkey is elsewhere carries the cross-device hint (#3825)', () => {
+    mockPasskeyElsewhere.mockReturnValue(true)
+    toReview()
+    expect(screen.getByText(/passkey may be on another device/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Sign new budget' })).toBeEnabled()
   })
 
   it('a signable review offers no wallet connect', () => {

@@ -31,8 +31,9 @@ vi.mock('@/components/ui/Toast', () => ({
   useToast: () => ({ toast: { success: vi.fn(), error: vi.fn() } }),
 }))
 
+const { activeSigner } = vi.hoisted(() => ({ activeSigner: { current: null as unknown } }))
 vi.mock('@/lib/signer', () => ({
-  useActiveSigner: () => null,
+  useActiveSigner: () => activeSigner.current,
   // Read by `pickSigningPath` (#3812): no passkey marker on this device.
   hasPasskeyCredentialOnDevice: () => false,
   credentialIdFromKeyId: (keyId: string) => keyId,
@@ -232,6 +233,37 @@ describe('ReceivePanel (#3333)', () => {
       )
       expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
       expect((screen.getByRole('button', { name: 'Sign transfer' }) as HTMLButtonElement).disabled).toBe(false)
+      // #3825: the passkey is not marked on this device, so the ceremony may
+      // hand off — the #1097 line says so before Sign transfer.
+      await waitFor(() => expect(screen.getByText(/passkey may be on another device/)).toBeTruthy())
+    })
+
+    it('a mixed account with the owner wallet connected shows no cross-device hint — the wallet signs (#3825)', async () => {
+      const owner = '0x' + 'ee'.repeat(20)
+      activeSigner.current = { type: 'eoa', address: owner, walletClient: {} }
+      try {
+        await openHandoff(() =>
+          Promise.resolve({
+            account_address: ADDRESS,
+            chain_id: 8453,
+            owner_address: owner,
+            passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+          }),
+        )
+        expect((screen.getByRole('button', { name: 'Sign transfer' }) as HTMLButtonElement).disabled).toBe(false)
+        await new Promise((r) => setTimeout(r, 0))
+        expect(screen.queryByText(/passkey may be on another device/)).toBeNull()
+      } finally {
+        activeSigner.current = null
+      }
+    })
+
+    it('an owner-only account shows no cross-device hint (#3825)', async () => {
+      await openHandoff(() =>
+        Promise.resolve({ account_address: ADDRESS, chain_id: 8453, owner_address: '0x' + 'ee'.repeat(20), passkeys: [] }),
+      )
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeTruthy())
+      expect(screen.queryByText(/passkey may be on another device/)).toBeNull()
     })
 
     it('a signer response without a passkeys array does not crash the hand-off (#3093)', async () => {

@@ -1482,6 +1482,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/user/signers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the caller's signers across all of their accounts, each once.
+         * @description Every signer of the caller's live Hybrid DeleGator accounts on every chain, deduplicated: a passkey by `key_id` (one passkey sits on every chain's account), an owner wallet by address (always lowercase). Each lists the accounts it approves. Passkeys come first, ordered by `created_at` ascending (unknown last, then `key_id`); wallets follow, ordered by address. Each `accounts` list is ordered by chain then address. `created_at` is the earliest enrollment date known for the key, null when none is recorded. Public-key material only; an account whose signer configuration cannot be resolved is skipped.
+         */
+        get: operations["listUserSigners"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/user/preferences": {
         parameters: {
             query?: never;
@@ -13123,6 +13143,68 @@ export interface operations {
             };
             /** @description Always. The Safe rail is retired; the message names POST /accounts/hybrid. */
             410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listUserSigners: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The deduplicated signer list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        signers: ({
+                            /** @enum {string} */
+                            kind: "passkey";
+                            key_id: string;
+                            /** Format: date-time */
+                            created_at: string | null;
+                            accounts: {
+                                account_id: string;
+                                /** @example 0x1111111111111111111111111111111111111111 */
+                                account_address: string;
+                                account_name: string | null;
+                                chain_id: number;
+                            }[];
+                        } | {
+                            /** @enum {string} */
+                            kind: "wallet";
+                            /** @example 0x1111111111111111111111111111111111111111 */
+                            address: string;
+                            accounts: {
+                                account_id: string;
+                                /** @example 0x1111111111111111111111111111111111111111 */
+                                account_address: string;
+                                account_name: string | null;
+                                chain_id: number;
+                            }[];
+                        })[];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

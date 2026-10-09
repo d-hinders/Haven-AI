@@ -471,8 +471,8 @@ const ROUTES: ProductRoute[] = [
 
 /**
  * The capture would bake a mid-load frame into the baseline and then match it
- * forever. Borrowed verbatim in intent from
- * `wallet-button-collapsed-states.visual.spec.ts`.
+ * forever. (Borrowed in intent from the wallet-button pixel spec, removed with
+ * the top-bar pill in #3825.)
  */
 async function expectNoSkeletons(region: Locator, label: string) {
   await expect(

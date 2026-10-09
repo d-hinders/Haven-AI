@@ -109,7 +109,9 @@ export function WaitingForConnector({
         }
       : {
           id: 'copy',
-          state: 'active',
+          // On the server-credential path row 3 is the current step; this row
+          // keeps its (demoted) copy action but is not current.
+          state: manualInProgress ? 'pending' : 'active',
           title: 'Copy the setup prompt',
           children: (
             <>

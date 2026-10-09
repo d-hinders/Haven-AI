@@ -495,6 +495,11 @@ describe('the numbered step list on the waiting screen (#3832)', () => {
     const slot = container.querySelector('[aria-live="polite"]')
     expect(slot?.textContent).toMatch(/continue to wallet approval/i)
     expect(slot?.textContent).not.toMatch(/nothing else to click/i)
+    // One current step, and it is row 3 — the likeliest server-path state is
+    // credentials issued with the prompt never copied.
+    const current = container.querySelectorAll('[aria-current="step"]')
+    expect(current).toHaveLength(1)
+    expect(container.querySelectorAll('ol[aria-label="Connection steps"] > li')[2]).toBe(current[0])
   })
 
   it('on the server-credential path, recovery never says "do not approve" — and one cancel remains', () => {

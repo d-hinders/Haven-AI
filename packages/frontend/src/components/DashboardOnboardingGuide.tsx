@@ -102,7 +102,7 @@ export default function DashboardOnboardingGuide({
   // same object the CLI prints — so the card holds no second copy of the
   // minimum-useful constant (`@haven_ai/core` owns it; the endpoint reads it).
   // While the read is in flight or failed, the step keeps the general copy and
-  // stays actionable: the "Receive funds" CTA below does not depend on it.
+  // stays actionable: the "Deposit address" CTA below does not depend on it.
   const fundingToken = funding?.tokens.find((t) => t.minimum_useful_human !== null)
   const fundingBody = funding
     ? fundingToken

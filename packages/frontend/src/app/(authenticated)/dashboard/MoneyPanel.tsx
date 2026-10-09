@@ -196,10 +196,13 @@ export default function MoneyPanel({
   const summary = overview
     ? buildDashboardSummary({
         currency,
-        netSpend: spend?.d7.net[bucket] ?? 0,
-        payments: spend?.d7.payments ?? 0,
-        budgetStops: spend?.d7.budgetStops ?? 0,
-        distinctMerchants: spend?.d7.distinctMerchants ?? 0,
+        // Optional-chained one level past the wire type: a degraded fixture
+        // (#3808's backup-item tests) may carry a partial spend block, and a
+        // crash there would take the whole dashboard down with it.
+        netSpend: spend?.d7?.net[bucket] ?? 0,
+        payments: spend?.d7?.payments ?? 0,
+        budgetStops: spend?.d7?.budgetStops ?? 0,
+        distinctMerchants: spend?.d7?.distinctMerchants ?? 0,
         agents: (overview.agents ?? []).map(
           (agent): DashboardSummaryAgent => ({
             id: agent.id,
@@ -211,7 +214,9 @@ export default function MoneyPanel({
       })
     : null
 
-  const sparkPoints = spend ? balanceSparkPoints(spend.balance_by_day, currency) : []
+  const sparkPoints = spend?.balance_by_day
+    ? balanceSparkPoints(spend.balance_by_day, currency)
+    : []
 
   const perAgentSpend = (overview?.agents ?? [])
     .map((agent: DashboardAgentPreview) => ({
@@ -227,6 +232,15 @@ export default function MoneyPanel({
   const otherAgentValue = perAgentSpend
     .slice(topAgents.length)
     .reduce((sum, row) => sum + row.value, 0)
+
+  // Revoked agents' 30-day spend is inside the wire total but has no agent
+  // row to name it (#3807 review): surface the unattributed remainder as its
+  // own row so the breakdown always reconciles with the headline figure.
+  // A cent-level remainder is rounding, not a hidden agent — hold it back.
+  const attributedValue = perAgentSpend.reduce((sum, row) => sum + row.value, 0)
+  const unattributedValue =
+    d30 && perAgentSpend.length > 0 ? d30.net[bucket] - attributedValue : 0
+  const showUnattributed = d30 !== null && unattributedValue > 0.005
 
   return (
     <div className="space-y-6">
@@ -339,7 +353,8 @@ export default function MoneyPanel({
         three inline StatTiles carry the window's activity counts; the
         agent split names the top three plus the count of the rest (the wire
         carries every delegation-rail agent; revoked agents' spend is inside
-        the total but has no row to name).
+        the total and surfaces as the "Agents since removed" row so the
+        breakdown reconciles with the headline).
       */}
       {showSpending ? (
         <section className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card p-5">
@@ -376,6 +391,16 @@ export default function MoneyPanel({
                 </dt>
                 <dd className="v2-tabular shrink-0">
                   <Amount amount={otherAgentValue} currency={currency} />
+                </dd>
+              </div>
+            ) : null}
+            {showUnattributed ? (
+              <div className="flex items-baseline justify-between gap-4">
+                <dt className="min-w-0 truncate text-sm text-[var(--v2-ink-3)]">
+                  Agents since removed
+                </dt>
+                <dd className="v2-tabular shrink-0">
+                  <Amount amount={unattributedValue} currency={currency} approx={d30?.approx} />
                 </dd>
               </div>
             ) : null}

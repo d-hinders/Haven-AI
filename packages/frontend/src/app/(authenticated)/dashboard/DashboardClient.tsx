@@ -261,7 +261,7 @@ function TransactionsSection({
             title="No transactions yet"
             body={
               hasAccounts
-                ? 'Receive funds or make your first payment to start building activity here.'
+                ? 'Get your deposit address or make your first payment to start building activity here.'
                 : 'Create a Haven account to start tracking transactions.'
             }
             action={

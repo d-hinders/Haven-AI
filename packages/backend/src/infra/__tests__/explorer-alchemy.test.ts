@@ -121,6 +121,33 @@ describe('normal leg (category external)', () => {
   })
 })
 
+describe('capped reads stay one contiguous window', () => {
+  it('drops the uncapped direction\'s rows older than where the capped direction stopped', async () => {
+    // Outbound: busy — every page is full and offers another, so it caps at
+    // block 0x3e8 (1000). Inbound: sparse — one recent row and one a year old.
+    const fetchMock = vi.fn((_input: string | URL, init?: RequestInit) => {
+      const params = (JSON.parse(String(init?.body)) as Body).params[0]!
+      if (params.fromAddress) {
+        return rpcResult([transfer({ hash: '0xout', from: ACCOUNT, to: OTHER, blockNum: '0x3e8' })], 'more')
+      }
+      return rpcResult([
+        transfer({ hash: '0xin-recent', blockNum: '0x7d0' }), // 2000
+        transfer({ hash: '0xin-at-floor', blockNum: '0x3e8' }), // 1000, kept
+        transfer({ hash: '0xin-ancient', blockNum: '0xa' }), // 10, inside the gap
+      ])
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const leg = await fetchNormalTransactions(8453, ACCOUNT)
+
+    expect(leg.hasMore).toBe(true)
+    const hashes = leg.rows.map((r) => r.hash)
+    expect(hashes).toContain('0xin-recent')
+    expect(hashes).toContain('0xin-at-floor')
+    expect(hashes).not.toContain('0xin-ancient')
+  })
+})
+
 describe('ERC-20 leg (category erc20)', () => {
   it('maps token contract, symbol and decimals, and drops rows with no contract', async () => {
     vi.stubGlobal(

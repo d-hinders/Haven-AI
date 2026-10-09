@@ -8,7 +8,7 @@
   The new client is a read of public on-chain transfer history, mapped into the same row shapes the
   explorer legs already produce; it has no signer, relayer, delegation or settlement reach, and the
   key authenticates Haven to a data provider only, redacted from every error. Mutation-tested:
-  reading the rounded float amount instead of the exact hex value, or dropping the key redaction,
-  turns `explorer-alchemy.test.ts` red.
+  reading the rounded float amount instead of the exact hex value, dropping the key redaction, or
+  dropping the contiguous-window trim on a capped read turns `explorer-alchemy.test.ts` red.
 
   Perimeter unchanged. No new authority, signer or settlement path. Custody unchanged.

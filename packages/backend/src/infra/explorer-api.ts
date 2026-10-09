@@ -454,6 +454,15 @@ async function postAlchemy(
  * Both directions of one category, each walked by `pageKey` up to
  * `EXPLORER_MAX_PAGES` pages. `hasMore` when either direction still offered
  * a `pageKey` at the budget — the provider's own "more exist" signal.
+ *
+ * The two directions page independently, so a capped one stops at a more
+ * recent block than an uncapped one reaches. Concatenated as-is, the feed
+ * would hold the uncapped direction's old rows while silently missing the
+ * capped direction's rows of the same age — a gap in the MIDDLE, where
+ * `truncated` tells the reader only that older rows exist. So the result is
+ * trimmed to one contiguous window: nothing older than the oldest block any
+ * capped direction reached. That block itself is kept; a capped direction
+ * may hold only part of it, as a cursor-capped Blockscout read would.
  */
 async function fetchAlchemyTransfers(
   chainId: number,
@@ -462,9 +471,12 @@ async function fetchAlchemyTransfers(
   category: AlchemyCategory,
 ): Promise<{ transfers: AlchemyTransfer[]; hasMore: boolean }> {
   const transfers: AlchemyTransfer[] = []
-  let hasMore = false
+  // The newest "oldest block reached" across capped directions: the window floor.
+  let floor: bigint | null = null
+  let capped = false
   const directions: AlchemyDirection[] = ['fromAddress', 'toAddress']
   for (const direction of directions) {
+    const rows: AlchemyTransfer[] = []
     let pageKey: string | undefined
     let page = 0
     do {
@@ -479,13 +491,27 @@ async function fetchAlchemyTransfers(
         order: 'desc',
         ...(pageKey ? { pageKey } : {}),
       })
-      transfers.push(...(result.transfers ?? []))
+      rows.push(...(result.transfers ?? []))
       pageKey = result.pageKey || undefined
       page++
     } while (pageKey && page < EXPLORER_MAX_PAGES)
-    if (pageKey) hasMore = true
+    transfers.push(...rows)
+    if (pageKey) capped = true
+    if (pageKey && rows.length > 0) {
+      const oldest = rows.reduce((min, t) => {
+        const block = BigInt(hexToDecimal(t.blockNum))
+        return block < min ? block : min
+      }, BigInt(hexToDecimal(rows[0]!.blockNum)))
+      if (floor === null || oldest > floor) floor = oldest
+    }
   }
-  return { transfers, hasMore }
+  if (!capped) return { transfers, hasMore: false }
+  if (floor === null) return { transfers, hasMore: true }
+  const cutoff = floor
+  return {
+    transfers: transfers.filter((t) => BigInt(hexToDecimal(t.blockNum)) >= cutoff),
+    hasMore: true,
+  }
 }
 
 function alchemyBase(t: AlchemyTransfer) {

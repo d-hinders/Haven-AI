@@ -31,6 +31,8 @@ covers:
   - packages/frontend/src/components/haven/BudgetMeter.tsx
   - packages/frontend/src/components/haven/ApprovalRequiredBanner.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
+  - packages/frontend/src/components/haven/Amount.tsx
+  - packages/frontend/src/components/haven/AttentionList.tsx
   - packages/frontend/src/components/transactions/**
   - packages/frontend/src/components/haven/LabelChip.tsx
   - packages/frontend/src/__tests__/capture-viewports.test.ts

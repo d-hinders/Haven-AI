@@ -177,7 +177,13 @@ export function AreaChart(props: AreaChartProps) {
  * data table — a glanceable shape, whose data access is the summary sentence.
  * Below `MIN_CHARTABLE_DAYS` it renders a flat placeholder line of the same
  * height instead of `null`, so a layout that reserved the sparkline's box
- * does not jump on the first snapshot arriving. Gaps are breaks in the line,
+ * does not jump on the first snapshot arriving. The `chartable` floor counts
+ * points, not measured values, so a window of >= `MIN_CHARTABLE_DAYS` days
+ * where EVERY value is null reserves the box but draws nothing — an empty
+ * SVG of the correct dimensions, no placeholder line and no dot. That is
+ * accepted for #3805: a fully-missing window is a transient data gap, and
+ * the box stays quiet until a measured value arrives.
+ * Gaps are breaks in the line,
  * and there is no draw animation: a shape that redraws itself on every data
  * refresh is noise, not information.
  */

@@ -278,11 +278,13 @@ describeDb('payment_refusals repository (#2945)', () => {
     const fix = await seedFixtures()
     const otherAgent = await seedAgent(fix.userId)
 
-    // Agent A: one budget triple folded to a single row at attempts 3, plus
-    // one revert row → 2 refusals, 4 attempts. Agent B: 1 row, 1 attempt.
+    // Agent A: one budget triple folded to a single row at attempts 3, a
+    // second budget row on another resource, plus one revert row → 3
+    // refusals (rows, not reasons — #3815), 5 attempts. Agent B: 1 row, 1 attempt.
     await recordPaymentRefusal(refusalInput(fix, { resourceUrl: 'https://a.example/1' }))
     await recordPaymentRefusal(refusalInput(fix, { resourceUrl: 'https://a.example/1' }))
     await recordPaymentRefusal(refusalInput(fix, { resourceUrl: 'https://a.example/1' }))
+    await recordPaymentRefusal(refusalInput(fix, { resourceUrl: 'https://a.example/4' }))
     await recordPaymentRefusal(refusalInput(fix, { resourceUrl: 'https://a.example/2', reason: 'onchain_revert' }))
     await recordPaymentRefusal(refusalInput(fix, { agentId: otherAgent, resourceUrl: 'https://a.example/3' }))
 
@@ -295,8 +297,8 @@ describeDb('payment_refusals repository (#2945)', () => {
     // Ordered by attempts desc: the folded agent first.
     const folded = aggregates.find((a) => a.agent_id === fix.agentId)
     const other = aggregates.find((a) => a.agent_id === otherAgent)
-    expect(folded).toMatchObject({ refusals: 2, attempts: 4 })
-    expect(folded?.by_reason).toMatchObject({ delegation_budget_exceeded: 1, onchain_revert: 1 })
+    expect(folded).toMatchObject({ refusals: 3, attempts: 5 })
+    expect(folded?.by_reason).toMatchObject({ delegation_budget_exceeded: 2, onchain_revert: 1 })
     expect(other).toMatchObject({ refusals: 1, attempts: 1 })
 
     // The aggregate honours the same range contract as the list read.

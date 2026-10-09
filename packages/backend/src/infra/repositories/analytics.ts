@@ -68,14 +68,35 @@ export type { Executor }
  * kept as its own constant here because it is spliced into a JOIN clause
  * (`smart-accounts.ts`'s is spliced into a WHERE), so sharing one string
  * across both shapes would read as more coupling than the two files have.
+ *
+ * #3803: exported now — the dashboard repository's own spend/pace/refusal
+ * statements splice the same JOIN shape, and the dashboard file importing the
+ * one JOIN-clause spelling beats a third verbatim copy of the same filter.
  */
-const DELEGATION_RAIL_JOIN = `JOIN smart_accounts sa ON sa.id = a.account_id AND sa.account_type = 'delegator_hybrid'`
+export const DELEGATION_RAIL_JOIN = `JOIN smart_accounts sa ON sa.id = a.account_id AND sa.account_type = 'delegator_hybrid'`
 
 export interface DateRange {
   /** ISO timestamp, inclusive lower bound. */
   from: string
   /** ISO timestamp, exclusive upper bound. */
   to: string
+}
+
+/**
+ * #3803 — the #3755 netting FACTOR as one exported fragment. The ratio
+ * expression below already existed three times in this file (TOTALS_SPEND_SQL,
+ * BY_DAY_SPEND_SQL, PER_AGENT_SPEND_SQL); the dashboard overview's 7/30-day
+ * spend block needed the same netting against `delegate_sweeps`, and a fourth
+ * verbatim copy was the one thing the issue forbade. The three existing
+ * statements keep their inline copies (their text is pinned by db tests and
+ * PREPAREd by db-schema-smoke; rewriting them is behaviour-preserving but
+ * touches pinned SQL for no behavioural gain) — every NEW netting consumer
+ * takes this fragment, so the expression has exactly one canonical spelling
+ * going forward. `atomicExpr` is the group's confirmed atomic sum, `sweptExpr`
+ * the group's swept sum — both already window-scoped by the caller's CTEs.
+ */
+export function spendNetFactorSql(atomicExpr: string, sweptExpr: string): string {
+  return `CASE WHEN COALESCE(${atomicExpr}, 0) > 0 THEN 1 - LEAST(COALESCE(${sweptExpr}, 0) / ${atomicExpr}, 1) ELSE 1 END`
 }
 
 // ── Totals: spend + previous-period delta ───────────────────────────────────

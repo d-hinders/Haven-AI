@@ -16,6 +16,12 @@ covers:
 last-verified: "2026-10-06"
 ---
 
+> **Re-verified #3821 (2026-10-09):** only the *Deploys from `dev` only*
+> paragraph (the "Skipped - Not affected" residual) and the Ignored Build Step
+> paragraph changed — the frontend project takes the first-preview path for opt-in
+> `preview/*` branches only. Nothing else in this document was re-verified,
+> and `last-verified` is not bumped.
+
 # Ops console
 
 The private operations console (`@haven/ops`, epic #3507): a founders-only,
@@ -121,7 +127,9 @@ repo — record what you actually entered on the issue when you do them.
 
 **Deploys from `dev` only (#3681).** `packages/ops/vercel.json` sets
 `git.deploymentEnabled` to `{ "**": false, "dev": true }`: a push to any other
-branch creates no console deployment at all. Vercel deploys a branch when any
+branch creates no console build. Vercel may still record a "Skipped - Not
+affected" deployment, apparently from its monorepo skip (see
+[`dev-environment.md` § PR previews are opt-in](dev-environment.md#pr-previews-are-opt-in)). Vercel deploys a branch when any
 `true` rule matches it, so `dev` matches and nothing else does. Previews could
 never sign in (below), and every push used to spend one deployment of the
 Hobby plan's 100-a-day cap on this project even when the Ignored Build Step
@@ -147,7 +155,7 @@ nothing watched changed since the commit this project last **deployed**
 cannot be proven: the variable is unset or empty, the commit is missing from
 Vercel's shallow clone, or git errors. Any `VERCEL_ENV` other than
 `preview`, including none, counts as production, and so does a preview of
-the `dev` or `main` branch. A preview with no earlier deployment (a PR
+the `dev` or `main` branch. A preview with no earlier deployment (a
 branch's first push) instead compares the branch with its merge base with
 `dev`. Vercel clones the deployed branch alone, so the script first fetches
 `dev`'s recent history. It tries `origin`, then the repository's public
@@ -157,7 +165,7 @@ shared commit, so the script covers both (#3594). It skips only when that yields
 changed on the branch, and builds on any failure. The build log's
 `vercel ignore-build:` line names the step that failed. Since #3681 no PR
 branch deploys the console, so this preview path is unused here; the frontend
-project still takes it. The rule
+project takes it only for opt-in `preview/*` branches (#3821). The rule
 never compares against the newest commit's parent: that form (#3580)
 stranded the #3581 fix, whose own build was lost to the cap, behind later
 frontend-only commits (#3591). If a console change still is not live, use

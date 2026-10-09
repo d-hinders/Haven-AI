@@ -1481,13 +1481,15 @@ document was not re-read for it, and `last-verified` is not bumped. The
 app's Vercel ignore-build step (#3591; since #3594 a script shared with
 the dashboard's Vercel project, each with its own watch file) decides
 only *when* the console or the dashboard redeploys, from what changed since
-its last deployment. That includes a PR's first preview fetching `dev` from
+its last deployment. That includes a `preview/*` branch's first preview fetching `dev` from
 the repository's public URL, which is read-only and needs no credential. It
 moves no authority either, and the same scope note holds. Since #3681 the
 console deploys from `dev` only (`git.deploymentEnabled`), so no per-PR
-console preview exists, and the dashboard's watch file excludes tests and
-Playwright baselines; they decide only whether the console deploys and
-whether the dashboard builds, move
+console preview exists, and since #3821 the dashboard's
+`git.deploymentEnabled` map also limits which branches deploy. The dashboard's
+watch file excludes tests and Playwright baselines. The maps and watch files
+decide only whether each project deploys and
+builds, move
 no authority, and the same scope note holds. The console's CI render
 smoke (#3583) only proves, in a browser, that the console renders under that
 CSP and that the CSP refuses an un-nonced inline script; it moves no

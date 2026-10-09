@@ -3,5 +3,8 @@
   "framework": "nextjs",
   "installCommand": "npm ci --no-audit --no-fund",
   "buildCommand": "npm run build",
-  "ignoreCommand": "sh \"$(git rev-parse --show-toplevel)/scripts/vercel/ignore-build.sh\" FRONTEND_FORCE_BUILD scripts/vercel/watch/frontend.txt"
+  "ignoreCommand": "sh \"$(git rev-parse --show-toplevel)/scripts/vercel/ignore-build.sh\" FRONTEND_FORCE_BUILD scripts/vercel/watch/frontend.txt",
+  "git": {
+    "deploymentEnabled": { "**": false, "dev": true, "main": true, "preview/**": true }
+  }
 }

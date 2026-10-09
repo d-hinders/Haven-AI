@@ -48,7 +48,7 @@ production credentials, a mainnet RPC, or real funds.
 |---|---:|---:|---|
 | Seed the QA user, Hybrid account, agent, and budget delegation | Yes | No | First-time setup or identity replacement |
 | Deterministic money-flow QA (`qa-dev.yml`) | Yes | Yes | Local debugging or shared repeatable evidence |
-| Live deployed-UI smoke (`qa-live.yml`) | Yes | Yes | Verify a Vercel preview against the dev backend |
+| Live deployed-UI smoke (`qa-live.yml`) | Yes | Yes | Verify a deployed frontend (the `dev` host or an opt-in `preview/*` deployment) against the dev backend |
 | Exploratory agent/merchant QA (Layer 2b, `/qa-dev`) | Yes | No | Payment / MCP coverage that needs LLM judgment |
 | Browser UI exploration (Layer 3, `/qa-explore-ui`) | Yes | No | Dashboard UX / visual coverage that needs LLM judgment |
 
@@ -1437,7 +1437,8 @@ Required Actions secrets:
 - `QA_USER_EMAIL`
 - `QA_USER_PASSWORD`
 
-Run it against the current non-production Vercel preview:
+Run it against a non-production frontend: the `dev` host above, or an opt-in
+`preview/*` deployment ([`dev-environment.md` § PR previews are opt-in](dev-environment.md#pr-previews-are-opt-in)):
 
 ```bash
 gh workflow run qa-live.yml \

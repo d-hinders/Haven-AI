@@ -13,7 +13,9 @@ last-verified: "2026-08-26"
 # Dev testing with a wallet signer
 
 Passkeys are bound to the domain they were created on, so a passkey made on one
-PR preview is useless on the next. Enrol a wallet as a second signer once, and
+preview is useless on the next. (PR previews are opt-in since #3821: a branch
+gets one only under a `preview/` name, [`dev-environment.md` § PR previews are
+opt-in](dev-environment.md#pr-previews-are-opt-in).) Enrol a wallet as a second signer once, and
 the same dev account works on every preview link — you connect the wallet and
 sign with that instead.
 
@@ -35,7 +37,7 @@ which is production.)
 3. **Check the card now lists two ways to approve:** your wallet (labeled
    "Wallet"), and your passkey (labeled "Passkey · added {date}", #1679).
 
-## Testing on a PR preview
+## Testing on a preview
 
 1. **Sign in** with email + password — same account, same data, every preview
    points at the same dev backend.

@@ -67,7 +67,7 @@ covers:
   - packages/backend/src/modules/ops/**
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
-last-verified: "2026-10-08"
+last-verified: "2026-10-09"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -2645,3 +2645,31 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > so no consumer can be tricked into treating a displayed link as an
 > authority change. The rest of this document was not re-read for it, and
 > `last-verified` is bumped to 2026-10-08 for exactly this coverage.
+
+> **Re-verified #3802 (2026-10-09, expired budgets stop counting as active):**
+> this diff touches two files in this document's coverage list —
+> `infra/repositories/delegation-budgets.ts` and `routes/agent-delegations.ts`
+> — to stop presenting out-of-window grants as budgets. Every budget-VIEWING
+> read now requires the same validity window the payment path has enforced
+> since #1698 (`start_date <= now < expires_at`, against the DATABASE clock)
+> beside `status = 'active'`: ONE shared fragment (`delegationLiveWindowSql`)
+> joins `listActiveDelegations` (which feeds the dashboard, the agents routes
+> and the agent-facing allowances read), the analytics budget-remaining
+> slice, the three ops reads and the connect activation check; the
+> `GET /agents/:id/delegations` route applies the same window to its
+> already-fetched rows in JS, so an expired or future-dated row keeps its
+> bookkeeping `active` status but is enriched like every non-live grant (no
+> chain read, nulls). Nothing this document pins moves: no new grant,
+> signature, signer, key or custody path; the rows' status values and every
+> revoke/calldata-binding claim are untouched (the still-enabled sets those
+> span `pending`/`active`/`replaced` by status in their own queries, not
+> through these views); and the activation check plus the allowances read
+> only ever get NARROWER — an agent whose only budget expired now reports no
+> budget (readiness `needs_approval`) and can no longer activate through
+> connect, matching what the on-chain `TimestampEnforcer` already refuses
+> (Red Line #4: the chain remains the only spend authority; the views now
+> agree with it). Scope of this re-read: the sections whose claims rest on
+> which rows the budget views return and on the connect activation check;
+> the invariant, custody, redemption and settlement sections were NOT
+> re-read (the diff touches no file that implements them). `last-verified`
+> is bumped for exactly this coverage.

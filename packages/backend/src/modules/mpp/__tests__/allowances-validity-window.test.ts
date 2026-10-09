@@ -2,19 +2,20 @@
  * #3802 — the agent-facing allowances read (`GET /machine-payments/allowances`,
  * delegation rail) and the validity window.
  *
- * CHARACTERIZATION ONLY, added BEFORE the #3802 fix: this file pins what the
- * agent-facing read TOLD the agent about an out-of-window budget under the
- * OLD behaviour, where `status = 'active'` is the only filter. The chain
- * reader is the only mock — the remaining figure is an RPC concern, not the
- * thing under test; the pool is real (no mocked pool, per
- * `docs/contributing/testing-strategy.md`).
+ * CHARACTERIZATION FIRST (the #1698 precedent: `delegation-selection-
+ * characterization.test.ts`): this file pins what an agent whose only budget
+ * is out of its validity window is TOLD about its spend readiness, before
+ * the window reaches this read. The chain reader is the only mock — the
+ * remaining figure is an RPC concern, not the thing under test; the pool is
+ * real (no mocked pool, per `docs/contributing/testing-strategy.md`).
  *
- * What it records: an expired (or not-yet-started) grant IS reported as a
- * live allowance and the SDK derives `ready` for an agent that cannot spend
- * a single cent — the exact wrongness #3802 exists to fix. The #3802 fix
- * commit inverts the expired/future assertions: an out-of-window grant is
- * not live authority, so the agent-facing read reports NO budget —
- * `allowances: []` — and readiness derives `needs_approval`.
+ * The commit that adds this file asserts the OLD behaviour: `status =
+ * 'active'` is the only filter, so an expired grant is reported as a live
+ * allowance and the SDK derives `ready` for an agent that cannot spend a
+ * single cent. The #3802 fix inverts the expired/future assertions: an
+ * agent whose only budget expired (or has not started) now reports NO
+ * budget — `allowances: []` — so readiness derives `needs_approval`
+ * instead of an authority the chain would refuse.
  */
 import { beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import db from '../../../db.js'
@@ -91,32 +92,28 @@ describeDb('#3802 — allowances read vs the validity window (characterization)'
     await resetDb()
   })
 
-  it('CHARACTERIZATION (pre-#3802): an agent whose only budget EXPIRED is still reported a live allowance', async () => {
-    // Pins the OLD behaviour on unmodified code: `status = 'active'` is the
-    // only filter, so a grant whose `expires_at` has passed — authority the
-    // on-chain TimestampEnforcer refuses — reaches the agent as a live
-    // budget and readiness derives `ready`. The #3802 fix inverts this.
+  it('#3802: an agent whose only budget EXPIRED now reports NO budget — readiness derives needs_approval', async () => {
+    // The characterization commit this file began as asserted the OLD
+    // behaviour (expired → 1 allowance, `ready`) and passed on `dev`; the
+    // #3802 fix inverts it: an out-of-window grant is not live authority,
+    // so the agent-facing read reports none.
     const agent = await seedAgentWithDelegation({ expiresAt: Math.floor(Date.now() / 1000) - 60 })
 
     const result = await handleGetAllowances(agent)
 
     expect(result.statusCode).toBe(200)
-    const body = result.body as { allowances: { configured_amount: string }[] }
-    expect(body.allowances).toHaveLength(1)
-    expect(body.allowances[0].configured_amount).toBe('1.00')
+    const body = result.body as { allowances: unknown[] }
+    expect(body.allowances).toHaveLength(0)
   })
 
-  it('CHARACTERIZATION (pre-#3802): an agent whose only budget has NOT STARTED is still reported a live allowance', async () => {
-    // Same old-behaviour pin for a future-dated grant: dormant carry is
-    // presented as spend authority today.
+  it('#3802: an agent whose only budget has NOT STARTED now reports NO budget', async () => {
     const agent = await seedAgentWithDelegation({ startDate: Math.floor(Date.now() / 1000) + 3_600 })
 
     const result = await handleGetAllowances(agent)
 
     expect(result.statusCode).toBe(200)
-    const body = result.body as { allowances: { configured_amount: string }[] }
-    expect(body.allowances).toHaveLength(1)
-    expect(body.allowances[0].configured_amount).toBe('1.00')
+    const body = result.body as { allowances: unknown[] }
+    expect(body.allowances).toHaveLength(0)
   })
 
   it('a LIVE budget keeps being reported (the window must never hide a real one)', async () => {

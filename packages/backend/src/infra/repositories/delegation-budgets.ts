@@ -55,6 +55,29 @@ export async function listDelegationJsonByIds(ids: string[]): Promise<Map<string
   return new Map(result.rows.map((r) => [r.id, r.delegation_json]))
 }
 
+/**
+ * The #1698 live window — `start_date <= now < expires_at`, evaluated against
+ * the DATABASE clock (`EXTRACT(EPOCH FROM NOW())`), the same predicate
+ * `SELECT_DELEGATION_FOR_PAYMENT_SQL` and `SELECT_ACTIVE_DELEGATION_BY_HASH_SQL`
+ * already enforce on the payment path. #3802: ONE shared fragment instead of
+ * five copies, because every budget-VIEWING read below must agree with the
+ * payment path about which grants are live — a `status = 'active'` row alone
+ * is not live authority: a grant whose first period has not opened (dormant
+ * carry) or whose `expires_at` has passed is refused by the on-chain
+ * TimestampEnforcer, so showing it as "5.00 USDC/daily" (or letting it
+ * activate an agent) states an authority the chain will not honour.
+ *
+ * Unqualified on purpose — every interpolating query joins only tables with
+ * no `start_date`/`expires_at` of their own, and the aliased join queries
+ * call {@link delegationLiveWindowSql} with their table alias. The payment
+ * selection queries above keep their inline copy: their text is pinned
+ * (#1698's tests assert it untouched) and the predicate is identical.
+ */
+export function delegationLiveWindowSql(tableAlias?: string): string {
+  const prefix = tableAlias ? `${tableAlias}.` : ''
+  return `${prefix}start_date <= EXTRACT(EPOCH FROM NOW()) AND ${prefix}expires_at > EXTRACT(EPOCH FROM NOW())`
+}
+
 export async function listActiveDelegations(
   agentIds: string[],
 ): Promise<ActiveDelegationRow[]> {
@@ -65,11 +88,16 @@ export async function listActiveDelegations(
   // can tell WHICH budget a row describes. The dashboard-facing narrow
   // projection (`deriveDelegationAllowances`) still strips to its frozen
   // six fields, so nothing leaks onto that wire.
+  //
+  // #3802: the live window joins the predicate — `status = 'active'` alone
+  // kept presenting expired and future-dated grants as budgets on the
+  // dashboard, the agents routes and the agent-facing allowances read.
   const result = await pool.query<ActiveDelegationRow>(
     `SELECT id, agent_id, chain_id, token_address, budget_atomic, period_seconds,
             delegation_hash, recipient_address, merchant_id, start_date, expires_at, created_at
      FROM agent_delegations
      WHERE agent_id = ANY($1) AND status = 'active'
+       AND (${delegationLiveWindowSql()})
      ORDER BY created_at ASC`,
     [agentIds],
   )

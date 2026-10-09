@@ -5718,10 +5718,10 @@ export const SCENARIOS = {
       await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
 
-      // The hero labels this button "Receive" when funded and "Receive funds"
-      // when not — both branches exist and which one renders depends on the
-      // fixture's balances, which this scenario deliberately does not pin.
-      await page.getByRole('button', { name: /^Receive( funds)?$/ }).first().click()
+      // The hero's deposit action is named "Deposit address" everywhere since
+      // #3807 (the funded/unfunded distinction moved to the meta-line under
+      // the sparkline, not the button label).
+      await page.getByRole('button', { name: /^Deposit address$/ }).first().click()
       const dialog = page.getByRole('dialog')
       // Confirmed by the RESOLVED sentence rather than by a bare timeout, so a
       // run that lands on the refusal fails here instead of being shot under
@@ -5765,7 +5765,7 @@ export const SCENARIOS = {
       await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
 
-      await page.getByRole('button', { name: /^Receive( funds)?$/ }).first().click()
+      await page.getByRole('button', { name: /^Deposit address$/ }).first().click()
       const dialog = page.getByRole('dialog')
       await dialog
         .getByText(/can't confirm which network this account uses/)

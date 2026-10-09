@@ -75,7 +75,7 @@ describe('ReceiveFundsModal', () => {
 
     render(<ReceiveFundsModal open account={SAFE} onClose={onClose} />)
 
-    expect(screen.getByRole('heading', { name: 'Receive funds' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Deposit address' })).toBeInTheDocument()
     expect(screen.getByText('Based')).toBeInTheDocument()
     expect(screen.getAllByText('Base').length).toBeGreaterThan(0)
     expect(screen.getByText(SAFE.account_address)).toBeInTheDocument()
@@ -140,7 +140,7 @@ describe('ReceiveFundsModal', () => {
 
       // A2 — the dialog is actually on screen, so the negatives below are about
       // a rendered refusal and not about an empty tree.
-      expect(screen.getByRole('heading', { name: 'Receive funds' })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Deposit address' })).toBeInTheDocument()
 
       // A3 — no network named anywhere in the dialog, word-anchored, over
       // text nodes rather than concatenated `textContent` (see the helper).

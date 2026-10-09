@@ -12999,9 +12999,9 @@ export const openapiSpec = {
           accountId: { type: ['string', 'null'], format: 'uuid' },
           accountName: { type: ['string', 'null'] },
           accountChainId: { type: ['integer', 'null'] },
-          // #3807 removes the allowances tile together with this field; until
-          // then it stays (the frontend reads it, and `resetPeriodMin` is
-          // deprecated with it).
+          // #3807 removed the allowances tile; this field stays because the
+          // frontend still reads it (and `resetPeriodMin` is deprecated with
+          // it).
           allowances: { type: 'array', items: { $ref: '#/components/schemas/DashboardAgentAllowance' }, deprecated: true },
           // #3803: the connection setup's own status, carried ONLY for a
           // `pending_approval` agent — the client shows "Remove" instead of

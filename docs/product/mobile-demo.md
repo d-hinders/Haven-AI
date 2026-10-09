@@ -57,8 +57,8 @@ so the presenter can tell them apart at arm's length.
    Share → Add to Home Screen. The label is "Haven Dev" and the icon carries a
    DEV badge.
 
-The dev install points at the **stable branch alias, never a per-PR preview
-URL**. A per-PR preview is a different domain every time, and a different
+The dev install points at the **stable branch alias, never a preview
+URL** (an opt-in `preview/*` deployment). A preview is a different domain for every branch, and a different
 domain is a different installed app: the phone would accumulate a dead icon
 per PR and the session cookie would not follow the alias. If the label under
 the icon is not exactly "Haven" or "Haven Dev", the wrong URL was installed —
@@ -183,7 +183,7 @@ with no manual refresh — is what row 7 asserts, and that is verified.
 
 ## Troubleshooting
 
-- **Home-screen label is neither "Haven" nor "Haven Dev".** A per-PR preview
+- **Home-screen label is neither "Haven" nor "Haven Dev".** A preview
   URL was installed instead of the branch alias. Delete the icon, reinstall
   from the stable hostname.
 - **Sign-in asked again after a relaunch.** The credentials went into a

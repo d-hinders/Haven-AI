@@ -34,6 +34,13 @@ covers:
 last-verified: "2026-10-08"
 ---
 
+> **Re-verified #3821 (2026-10-09, opt-in frontend previews):** the frontend
+> project now deploys only `dev`, `main` and `preview/*` branches
+> (`git.deploymentEnabled` in `packages/frontend/vercel.json`). This note's
+> edits are the per-PR-preview statements: the intro, the topology row, the
+> URLs entry, *Which pushes rebuild the frontend* and *Inspecting the dev
+> environment*. Nothing else in this document was re-verified.
+
 > **Re-verified #3770 (2026-10-08, delivery-quality report):** this diff
 > touched one file in this document's coverage list,
 > `packages/backend/src/openapi/route-modules.generated.ts`, and none of this
@@ -153,7 +160,8 @@ before it is promoted to `main`. The **backend, hosted MCP, demo-merchant, and
 Postgres** are one shared set of Railway services deploying from `dev`. The
 frontend's **canonical dev URL is the branch-tracking Vercel preview** of the
 `dev` branch (a stable hostname that Vercel re-points at the newest `dev`
-deployment); each PR additionally gets its own per-PR preview link. All of them
+deployment); a PR gets its own preview link only when it opts in with a
+`preview/<name>` branch ([below](#pr-previews-are-opt-in)). All of them
 point at the same shared dev backend, so they are the same environment and the
 same data — only the domain differs, which is what makes passkeys per-domain.
 
@@ -165,7 +173,7 @@ how to configure it. For the branch workflow that feeds it, see
 
 | Service | Platform | Deploys from | Notes |
 |---|---|---|---|
-| Frontend | **Vercel** | `dev` branch alias + per-PR previews | Canonical dev URL: the **branch-tracking preview of `dev`** (stable hostname, serving the newest `dev` build — and a push that changes nothing the frontend is built from normally builds nothing; see [Which pushes rebuild the frontend](#which-pushes-rebuild-the-frontend)). Per-PR previews exist alongside it. There is no separate "dev" environment in Vercel — Haven's dev frontend **is** Vercel's **Preview** scope, which sets `NEXT_PUBLIC_HAVEN_ENV=dev` (→ `DEV` badge) and points the build at the dev backend. That is why every preview link is the same dev environment on a different domain. |
+| Frontend | **Vercel** | `dev` branch alias + opt-in `preview/*` previews | Canonical dev URL: the **branch-tracking preview of `dev`** (stable hostname, serving the newest `dev` build — and a push that changes nothing the frontend is built from normally builds nothing; see [Which pushes rebuild the frontend](#which-pushes-rebuild-the-frontend)). Opt-in `preview/*` previews exist alongside it ([#3821](#pr-previews-are-opt-in)). There is no separate "dev" environment in Vercel — Haven's dev frontend **is** Vercel's **Preview** scope, which sets `NEXT_PUBLIC_HAVEN_ENV=dev` (→ `DEV` badge) and points the build at the dev backend. That is why every preview link is the same dev environment on a different domain. |
 | Backend / API | **Railway** (dev project) | `dev` branch | Own isolated Postgres — never the prod DB. |
 | Hosted MCP server | **Railway** (dev project) | `dev` branch | Points at the dev backend via its own `HAVEN_API_URL`. ⚠️ Was found wired to `main` with a dead upstream on 2026-08-06 — [verify before trusting it](#verifying-a-dev-service-actually-works). |
 | Demo-merchant | **Railway** (dev project) | `dev` branch | For x402 demo flows against dev. Advertises EIP-3009 first by default; the ERC-7710 rail is off unless enabled — see [below](#enabling-the-erc-7710-rail-on-the-dev-demo-merchant). |
@@ -192,9 +200,10 @@ Railway rather than the repo; they are recorded in
   inputs*: a push that changes none of them normally skips its build
   ([below](#which-pushes-rebuild-the-frontend), including when it builds anyway). Verified 2026-08-06, before
   that change: it serves the same build as the immutable
-  deployment of `dev` HEAD, and proxies to the dev backend. Per-PR preview links
-  exist alongside it (the PR's Vercel check) and are what you use to test *that
-  PR's build* — they are a different domain each time.
+  deployment of `dev` HEAD, and proxies to the dev backend. Preview links of
+  opt-in `preview/*` branches exist alongside it and are what you use to test
+  *that branch's build* — a different domain for each branch
+  ([PR previews are opt-in](#pr-previews-are-opt-in)).
   **You will not find this URL under Vercel → Domains**, and that is expected:
   that page lists only *assigned* domains (production + custom). Branch aliases
   are generated automatically for any branch that has a deployment — open a
@@ -203,11 +212,11 @@ Railway rather than the repo; they are recorded in
   there rather than hand-building it. The alias is **public** — no login gate —
   so treat the link as sharing the dev stack.
   **The consequence that bites:** **passkeys are bound to the exact domain they
-  were created on**, so a passkey made on one PR preview is unreachable on the
+  were created on**, so a passkey made on one preview is unreachable on the
   next (the browser offers only the "use another device" QR, which is
   domain-bound too and will not help). Keep passkey-holding accounts on the
-  branch-tracking URL above, and to test PR previews without a new account per
-  PR, enrol a wallet as a signer once and sign with it everywhere:
+  branch-tracking URL above, and to test previews without a new account per
+  preview, enrol a wallet as a signer once and sign with it everywhere:
   [`dev-testing-with-a-wallet-signer.md`](dev-testing-with-a-wallet-signer.md).
   Domain-hopping mid-flow has burned real sessions — finish on one link before
   moving to the next.
@@ -296,9 +305,11 @@ since the ops project runs the same script. For this project that means:
   deployed is in Vercel's clone; when it is not, the step builds. The `dev`
   host then keeps serving the last build, which is current, because nothing it
   serves changed.
-- A PR's first preview compares the branch with its merge base with `dev`,
-  fetching `dev` when Vercel's clone lacks it, so a frontend PR gets a preview
-  even when its newest push is docs-only. If no merge base can be found, the
+- A `preview/*` branch's first preview compares the branch with its merge base
+  with `dev`, fetching `dev` when Vercel's clone lacks it, so a frontend change
+  gets a preview even when the newest push is docs-only. A `preview/*` branch
+  that changes nothing the frontend is built from is skipped like any other
+  push, so it gets no URL. If no merge base can be found, the
   preview builds, and the build log's `vercel ignore-build:` line names the
   step that failed. The first log after #3601 (PR #3622, 2026-10-05) found no
   merge base, without saying whether the fetch failed or found no shared
@@ -310,8 +321,9 @@ since the ops project runs the same script. For this project that means:
 - A push to `dev` or `main` with no recorded previous deployment always builds.
 - **A skipped build still counts toward the Hobby plan's cap of 100
   deployments a day** (#3681): the step saves build minutes and keeps the
-  host current, not deployments. Each push creates a frontend deployment,
-  built or skipped; the ops console deploys from `dev` only (see
+  host current, not deployments. Each push to `dev`, `main` or a `preview/*`
+  branch creates a frontend deployment, built or skipped; other branches create
+  none (#3821), and the ops console deploys from `dev` only (see
   [`ops-console.md` § 1](ops-console.md#1-the-vercel-project)). When the cap is
   hit, Vercel refuses the deployment: its status reads "Resource is limited"
   (`api-deployments-free-per-day`), where a skip reads "Canceled by Ignored
@@ -329,6 +341,28 @@ step would skip it. Set the project environment variable `FRONTEND_FORCE_BUILD`
 to `1` in the scope you are changing (Preview for the dev host, Production for
 production), redeploy the latest deployment of that branch, then delete
 `FRONTEND_FORCE_BUILD`; left in place it makes every build in that scope run.
+
+### PR previews are opt-in
+
+Since #3821 the frontend project deploys only three kinds of branch
+(`git.deploymentEnabled` in `packages/frontend/vercel.json`): `dev` (the dev
+host), `main` (production) and `preview/*`. A push to any other branch, a
+`feat/*` PR or a `hotfix/*` included, creates no frontend deployment at all, so
+it spends nothing of the daily cap and the PR shows no frontend preview. No
+required check reads a preview: browser smoke and visual regression run against
+their own local server.
+
+To get a preview of a branch, push it under a `preview/` name:
+
+- open the PR from `preview/<name>` directly, so every push updates the
+  preview; or
+- push an existing branch there too (`git push origin HEAD:preview/<name>`),
+  and push again to update it.
+
+The preview still goes through the Ignored Build Step, so it gets a URL only
+when the branch changes something the frontend is built from (above). Branches
+cut before #3821 keep deploying until they pick up the new `vercel.json`,
+because Vercel reads it from the commit it deploys.
 
 ### Verifying a dev service actually works
 
@@ -1102,8 +1136,8 @@ unaffected; deleting it from a project's settings is tidying, not a fix.
 - **Railway → dev backend service → Deployments** — build and runtime logs.
 - **Railway → dev Postgres → Data** — inspect tables (read-only with Viewer role).
 - **Vercel → dev project** — frontend build logs, the branch-tracking `dev`
-  preview (the canonical dev URL above) and the per-PR preview deployments
-  (open a PR's own link only to test that PR's build — remember each is a
+  preview (the canonical dev URL above) and the opt-in `preview/*` deployments
+  (open one only to test that branch's build — remember each is a
   different domain, so passkeys don't carry between them).
   ⚠️ `haven-dev.vercel.app` is a different app, not ours.
   The backend is `https://havenbackend-dev-8b95.up.railway.app`.

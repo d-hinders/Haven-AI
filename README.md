@@ -500,17 +500,17 @@ All changes go through pull requests — no direct pushes to `main` or `dev`. Fe
 1. Branch off `dev` → make your changes
 2. Push the branch and open a PR **into `dev`** on GitHub
 3. CI runs automatically (type-check + build per surface: SDK, CLI, backend, frontend, MCP, connect, signer)
-4. Vercel posts a preview URL as a comment on the PR — click to test the frontend live
+4. Need a live frontend preview? Push the branch as `preview/<name>` (PR previews are opt-in, [`dev-environment.md` § PR previews are opt-in](docs/operations/dev-environment.md#pr-previews-are-opt-in)); Vercel then posts its URL on the PR
 5. Once CI is green, the PR can merge into `dev` and auto-deploys to the dev environment
 6. **Promote `dev → main`** with a separate PR (the only normal path into `main`); merging triggers automatic production deploys to Vercel + Railway (~2 min). Emergency fixes can use a `hotfix/*` branch straight into `main`.
 
 ### Frontend-only changes
 
-The Vercel preview URL points at the **production Railway backend**. You can test most frontend changes directly against the preview URL — no local setup needed beyond the PR.
+A Vercel preview (a `preview/*` branch) points at the **dev Railway backend**, like the `dev` host. You can test most frontend changes directly against it — no local setup needed beyond the branch.
 
 ### Backend changes — test locally first
 
-Vercel previews share the prod backend, so backend changes can't be tested via the PR preview alone. Run the backend locally before opening the PR:
+Vercel previews share the deployed dev backend, so a PR's backend changes can't be tested through a preview. Run the backend locally before opening the PR:
 
 ```bash
 # 1. Start the local Postgres
@@ -532,7 +532,7 @@ Collaborators have **Viewer** access to the Railway project — you can see serv
 
 - **Railway → backend service → Deployments** — build logs and runtime logs
 - **Railway → Postgres → Data** — inspect tables (read-only with Viewer role)
-- **Vercel previews** — every PR has a preview URL with its own build logs (linked from the PR comment)
+- **Vercel deployments** — production and the `dev` host deploy on every push that changes the frontend; a PR gets a preview only from a `preview/*` branch
 
 If you need an env var changed in Railway or a secret rotated, ping the project owner.
 

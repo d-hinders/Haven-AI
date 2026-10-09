@@ -1354,7 +1354,8 @@ Rules:
   action, the row heading says it in other words ("Review and sign" under
   "Approve the agent budget").
 - A row's done state comes from state that only moves forward (the
-  connect flow's latched `promptCopied`), never from a value a later action can
+  connect flow's `promptCopied`, latched per setup and keyed by `setup_id`, so
+  "Create a new setup" starts uncopied), never from a value a later action can
   overwrite.
 - Live status inside a row goes in an `aria-live="polite"` region with a
   reserved height, so a status change swaps words without moving the rows below.
@@ -1391,7 +1392,7 @@ usual bar** (§ 5's Arrows subsection declines a precedent on one instance). It
 is written down anyway because the alternative was worse in a specific way:
 `--v2-border-strong` already had three unrelated uses, plain `border-l` +
 `--v2-border` grouping exists at three more call sites
-(`ConnectionVerificationFooter.tsx`, `WaitingForConnector.tsx` ×2) at a lighter
+(`ConnectionVerificationFooter.tsx`, `WaitingForConnector.tsx` ×2 at the time of #1952) at a lighter
 weight, and none of them is documented — so the next author wanting a local hint
 had four undocumented shapes to copy and would plausibly have hand-rolled a
 fifth. Two reviewers split on whether this belongs here; it is recorded rather

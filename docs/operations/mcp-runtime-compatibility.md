@@ -3124,7 +3124,10 @@ Before registration, the dashboard stages what it says about a missing
 connection over three periods, in one status slot that is never empty (#1399).
 Before the setup prompt is copied it says the screen advances by itself once
 the agent connects; once it is copied (#3832), it says it is waiting for the
-agent to run the connector command. After one minute of a confirmed `awaiting_connection` it acknowledges
+agent to run the connector command, and only then does the one-minute line
+below appear. Once server credentials are issued (#2482), it says instead to
+save them and continue to wallet approval, and the recovery state below does
+not show. After one minute of a confirmed `awaiting_connection` it acknowledges
 that a first run downloads the connector before it can register — an
 observation, not a warning: it offers no recovery actions and does not suggest
 anything is wrong. After **three minutes** of confirmed `awaiting_connection`

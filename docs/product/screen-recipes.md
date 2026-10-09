@@ -163,7 +163,9 @@ Structure (step 3 of the modal is one numbered list — copy → paste → appro
 that is both the instructions and the progress, #3832; see design-system.md §
 Numbered step list):
 1. Create and copy a single setup prompt — identical for every environment. The
-   copy action is the screen's one full-width primary; the prompt text sits in
+   copy action is the screen's one full-width primary (until the
+   server-credential path issues credentials, when "Continue to wallet
+   approval" takes that role); the prompt text sits in
    a closed "View the prompt" disclosure. Next to the steps, one line says the
    agent creates its own key and Haven only receives its public address — shown
    on the connector path only, since the manual path makes the key in the

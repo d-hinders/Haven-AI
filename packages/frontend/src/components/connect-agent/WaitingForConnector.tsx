@@ -83,6 +83,11 @@ export function WaitingForConnector({
   // Row 1 must not keep a second full-width primary competing with it, and
   // row 3 must not promise "nothing else to click".
   const manualInProgress = Boolean(manualCredential)
+  // The recovery warning says "Do not approve the budget yet" and offers the
+  // local command — both wrong once the user has taken the server-credential
+  // path, whose next step IS continuing to wallet approval. On that path the
+  // credential line replaces it, whatever the stage.
+  const showRecovery = connectionStage === 'recovery' && !manualInProgress
 
   const promptRows: ConnectStepRow[] = [
     promptCopied
@@ -171,7 +176,7 @@ export function WaitingForConnector({
         // timer-driven, not copy-driven (useAgentConnectionSetupStatus), so it
         // surfaces here whether or not row 1 was ever marked copied.
         <div className="min-h-16 sm:min-h-11" aria-live="polite">
-          {connectionStage !== 'recovery' && (
+          {!showRecovery && (
             <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
               {manualInProgress
                 ? 'Save the credentials below, then continue to wallet approval.'
@@ -182,7 +187,7 @@ export function WaitingForConnector({
                   : 'Waiting for your agent to run the connector command. This usually takes a few seconds.'}
             </p>
           )}
-          {connectionStage === 'recovery' && (
+          {showRecovery && (
             <div className="rounded-[10px] border border-warning/25 bg-[var(--v2-warning-soft)] p-3 text-xs text-[var(--v2-ink-2)]">
               <p className="font-semibold text-[var(--v2-ink)]">Haven has not received a connection yet</p>
               {/* #1720: the connector can refuse LOCALLY — it stops before
@@ -378,7 +383,7 @@ export function WaitingForConnector({
             Expires {formatAbsoluteDate(expiresAt)}.{' '}
             {error ? `Status check failed: ${error}` : 'Haven keeps checking in the background.'}
           </p>
-          {connectionStage !== 'recovery' && (
+          {!showRecovery && (
             <Button variant="ghost" size="sm" onClick={onCancel}>
               Cancel setup
             </Button>

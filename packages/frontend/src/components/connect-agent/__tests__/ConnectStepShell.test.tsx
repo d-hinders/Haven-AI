@@ -497,6 +497,40 @@ describe('the numbered step list on the waiting screen (#3832)', () => {
     expect(slot?.textContent).not.toMatch(/nothing else to click/i)
   })
 
+  it('on the server-credential path, recovery never says "do not approve" — and one cancel remains', () => {
+    // The recovery warning says "Do not approve the budget yet" and offers the
+    // local command; on this path the next step IS continuing to wallet
+    // approval, so the credential line replaces it at every stage.
+    const { container, getByRole, queryByRole } = render(
+      <WaitingForConnector
+        setup={SETUP}
+        runtime="claude-code"
+        copied={null}
+        promptCopied={true}
+        keyMadeInBrowser={true}
+        onCopy={() => {}}
+        manualCredential={{ apiKey: 'k', delegatePrivateKey: '0x1', delegateAddress: '0x2', prompt: 'p', env: 'e' }}
+        manualCredentialAcknowledged={false}
+        manualCreating={false}
+        manualError={null}
+        onCreateManualCredential={() => {}}
+        onContinueAfterManualCredential={() => {}}
+        loading={false}
+        error={null}
+        connectionStage="recovery"
+        expiresAt={EXPIRES_AT}
+        onCancel={() => {}}
+      />,
+    )
+    expect(container.textContent).not.toContain('Haven has not received a connection yet')
+    expect(container.textContent).not.toMatch(/Do not approve the budget yet/)
+    expect(container.querySelector('[aria-live="polite"]')?.textContent).toMatch(/continue to wallet approval/i)
+    // Exactly one cancel: the footer's, since the recovery block (which owns
+    // "Cancel this setup" in recovery) is not shown.
+    expect(getByRole('button', { name: 'Cancel setup' })).toBeTruthy()
+    expect(queryByRole('button', { name: 'Cancel this setup' })).toBeNull()
+  })
+
   it('names no agent client — any MCP client works (#3832 owner decision)', () => {
     const { container } = render(renderWaiting(false, 'starting', () => {}, false))
     const paste = container.querySelectorAll('ol[aria-label="Connection steps"] > li')[1]

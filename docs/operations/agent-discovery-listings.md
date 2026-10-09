@@ -90,12 +90,14 @@ It has. #2532 serves four product docs from this origin under `/docs/`,
 guard test carries only `www.npmjs.com`. The artifacts are back to the rule
 with no exception: own-product links are same-origin paths.
 
-Two in-app links are a deliberate exception and are NOT the same case:
-`AccountSignersCard` and `RecoveryNudge` still send a signed-in human to the
+One in-app link is a deliberate exception and is NOT the same case:
+`AccountSignersCard` still sends a signed-in human to the
 rendered document on GitHub. `/docs/account-recovery.md` is raw Markdown — the
 right answer for an agent and a worse one for a person, who would get an
 unrendered file. The same-origin rule governs the agent-readable artifacts;
-these two are product UI pointing a human at a rendered page.
+this one is product UI pointing a human at a rendered page. (#3808 deleted
+`RecoveryNudge`, the other one; its backup prompt lives in the dashboard's
+NeedsYou card now, which links to the account page rather than the document.)
 
 **A manifest key must never name a surface that 404s (#2531).** The manifest's
 whole value is that an agent's *code* can follow it without guessing, and a key

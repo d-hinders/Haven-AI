@@ -51,6 +51,7 @@
 import pool from '../../db.js'
 import type { Executor } from '../transaction.js'
 import { getChainData } from '@haven_ai/core'
+import { delegationLiveWindowSql } from './delegation-budgets.js'
 import {
   readRemainingBudget,
   currentPeriodBounds,
@@ -788,7 +789,8 @@ export const ACTIVE_DELEGATIONS_FOR_USER_SQL = `SELECT
   FROM agent_delegations ad
   JOIN agents a ON a.id = ad.agent_id
   ${DELEGATION_RAIL_JOIN}
-  WHERE a.user_id = $1 AND ad.status = 'active'`
+  WHERE a.user_id = $1 AND ad.status = 'active'
+    AND (${delegationLiveWindowSql('ad')})`
 
 export async function listActiveDelegationsForUser(
   userId: string,

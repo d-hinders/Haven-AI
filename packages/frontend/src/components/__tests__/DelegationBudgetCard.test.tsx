@@ -723,6 +723,24 @@ describe('DelegationBudgetCard Spending section (#3695)', () => {
     expect(document.body.textContent).not.toMatch(/expires in|refills in|used this period/)
   })
 
+  // #3802: an expired row keeps its "expired" line but does NOT count toward
+  // hasActive — the grant form shows for an agent whose only budget expired,
+  // exactly as for one that was never granted (#3695's gate on the row's
+  // bookkeeping `active` status alone is not the owner predicate).
+  it('an expired-ONLY row keeps its expired line AND shows the grant form (it does not count toward hasActive)', () => {
+    mockGet.mockReturnValue([
+      budget({
+        remaining_atomic: '4000000',
+        remaining_from_chain: true,
+        expires_at: Math.floor(Date.now() / 1000) - 3600,
+      }),
+    ])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.getByText('This budget has expired and can no longer be spent.')).toBeTruthy()
+    expect(screen.getByText('Set its first budget')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Add budget' })).toBeNull()
+  })
+
   // #3695 review S2: opening and collapsing swap the pressed control for
   // another, so focus is placed deliberately instead of falling to <body>.
   it('Add budget moves focus to the amount field; Cancel returns it to Add budget', () => {

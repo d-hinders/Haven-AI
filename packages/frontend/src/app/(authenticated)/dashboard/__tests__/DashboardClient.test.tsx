@@ -99,6 +99,7 @@ vi.mock('@/components/ui/Toast', async () => {
 })
 
 import DashboardClient from '../DashboardClient'
+import type { DashboardAgentPreview } from '@/types/dashboard'
 
 const SAFE = {
   id: 'safe-1',
@@ -110,7 +111,7 @@ const SAFE = {
   account_type: 'delegator_hybrid' as const,
 }
 
-function mockBaseState() {
+function mockBaseState(overviewAgents: DashboardAgentPreview[] = []) {
   mockUseAuth.mockReturnValue({
     user: {
       id: 'user-1',
@@ -162,7 +163,7 @@ function mockBaseState() {
       onboardingProgress: {
         hasFirstAgentPayment: false,
       },
-      agents: [],
+      agents: overviewAgents,
       transactions: [],
     },
     loading: false,
@@ -189,6 +190,42 @@ describe('DashboardClient', () => {
     window.localStorage.clear()
     window.sessionStorage.clear()
     mockBaseState()
+  })
+
+  describe('spend summary copy (#3802)', () => {
+    /** `useAgents` knows an agent exists; the overview supplies the preview rows. */
+    const agentWithAllowances = (allowances: DashboardAgentPreview['allowances']): DashboardAgentPreview => ({
+      id: 'agent-1',
+      name: 'Research agent',
+      status: 'active',
+      accountId: null,
+      accountName: null,
+      accountChainId: 8453,
+      allowances,
+    })
+
+    it('reads "No budget" for an agent with zero live allowances — not "No spend limits"', () => {
+      // #3802: the overview's allowances array carries only live (unexpired,
+      // started) budgets, so an empty array means the agent cannot spend at
+      // all. "No spend limits" said the opposite of the truth.
+      mockBaseState([agentWithAllowances([])])
+
+      render(<DashboardClient />)
+
+      expect(screen.getByText('No budget')).toBeInTheDocument()
+      expect(screen.queryByText('No spend limits')).not.toBeInTheDocument()
+    })
+
+    it('still summarizes the budgets of an agent that has them', () => {
+      mockBaseState([
+        agentWithAllowances([{ allowanceAmount: '250.00', tokenSymbol: 'USDC', resetPeriodMin: 1440 }]),
+      ])
+
+      render(<DashboardClient />)
+
+      expect(screen.queryByText('No budget')).not.toBeInTheDocument()
+      expect(screen.getByText('250.00 USDC/daily')).toBeInTheDocument()
+    })
   })
 
   it('leads with total balance, primary actions, attention, and metric cards', () => {

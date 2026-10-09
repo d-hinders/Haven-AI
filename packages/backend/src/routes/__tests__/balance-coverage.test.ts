@@ -81,12 +81,14 @@ async function seedActiveDelegation(
   agentId: string,
   budgetAtomic: string,
   tokenAddress: string = USDC,
+  /** #3802 characterization: an expiry in the past makes the grant expired-only. */
+  expiresAt: number = 99999999999,
 ): Promise<string> {
   const { rows } = await db.query<{ id: string }>(
     `INSERT INTO agent_delegations
        (agent_id, chain_id, token_address, delegation_hash, delegation_json, version, status,
         budget_atomic, period_seconds, start_date, expires_at)
-     VALUES ($1, $2, $3, $4, $5, 1, 'active', $6, 604800, 0, 99999999999) RETURNING id`,
+     VALUES ($1, $2, $3, $4, $5, 1, 'active', $6, 604800, 0, $7) RETURNING id`,
     [
       agentId,
       CHAIN,
@@ -94,6 +96,7 @@ async function seedActiveDelegation(
       `0x${String(++seq).padStart(64, '3')}`,
       JSON.stringify({ kind: 'test-fixture' }),
       budgetAtomic,
+      expiresAt,
     ],
   )
   return rows[0].id
@@ -208,6 +211,21 @@ describeDb('GET /machine-payments/balance-coverage (#3126)', () => {
     expect(res.json().budget_remaining_atomic).toBe('0')
     expect(res.json()).not.toHaveProperty('budget_remaining_is_from_chain')
     expect(res.json().covered).toBe(true)
+  })
+
+  it('#3802 characterization: an EXPIRED-ONLY budget answers budget_remaining_atomic "0" — the coverage window already refuses it', async () => {
+    // Characterization on today's code (spec: the first three stay green
+    // after the change): the coverage row filter carries the same
+    // `start_date <= now < expires_at` window the payment path does
+    // (#1698), so an expired grant is already no authority here.
+    const { agentId } = await seedDelegationAgent()
+    // 5.00 USDC remaining on the LEDGER — but the grant expired a minute ago.
+    await seedActiveDelegation(agentId, '5000000', USDC, Math.floor(Date.now() / 1000) - 60)
+    mockGetTokenBalance.mockResolvedValue(3_000_000n)
+
+    const res = await app.inject({ method: 'GET', url: coverageUrl(USDC, '1000000'), headers })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().budget_remaining_atomic).toBe('0')
   })
 
   it('#3518 review: ONLY merchant-locked budgets for the token — "0" carries their recipients, never a bare "no budget"', async () => {

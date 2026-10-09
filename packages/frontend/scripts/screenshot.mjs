@@ -4292,6 +4292,58 @@ export const SCENARIOS = {
     },
   },
 
+  'owner-wallet-only': {
+    description:
+      'An account owned only by a browser wallet, with no wallet connected (#3812) — the signing surfaces that offer their own Connect wallet: the account signers card, the agent budget card, and the remove-agent dialog',
+    // #3812: the header WalletButton used to be the only connect entry, so
+    // these surfaces said "connect your owner wallet" with nothing to click.
+    // The state only exists for an owner-only signer set (no passkeys): any
+    // enrolled passkey keeps every surface `ready` (#1969), which is why the
+    // shared fixture — one passkey — never reaches it and no route capture
+    // can show it.
+    api(apiPath) {
+      if (apiPath.startsWith('/accounts/hybrid/') && apiPath.endsWith('/signers')) {
+        return {
+          account_address: FIXTURE_ACCOUNT.account_address,
+          chain_id: FIXTURE_ACCOUNT.chain_id,
+          owner_address: '0x' + 'ee'.repeat(20),
+          passkeys: [],
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      const settle = async (url) => {
+        await page.goto(url, { waitUntil: 'networkidle', timeout: 30_000 })
+        await page.evaluate(() => document.fonts.ready)
+        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await dismissMobileSidebar(page, vp)
+      }
+
+      // ── account page: Backup & recovery ──────────────────────────────────
+      await settle(`${BASE_URL}/accounts/${FIXTURE_ACCOUNT.id}`)
+      const signersHeading = page.getByRole('heading', { name: 'Backup & recovery' })
+      await signersHeading.waitFor({ timeout: 15_000 })
+      const signersCard = page.locator('div.rounded-\\[10px\\]', { has: signersHeading })
+      await signersCard.getByRole('button', { name: 'Connect wallet' }).waitFor({ timeout: 15_000 })
+      await shoot(signersCard, 'account-signers')
+
+      // ── agent page: the budget card's rows ───────────────────────────────
+      await settle(`${BASE_URL}/agents/agent-research`)
+      const budgetNotice = page.getByText(/Connect your account owner wallet to change or stop a budget/)
+      await budgetNotice.waitFor({ timeout: 15_000 })
+      const budgetSection = page.locator('section', { has: budgetNotice })
+      await budgetSection.getByRole('button', { name: 'Connect wallet' }).waitFor({ timeout: 15_000 })
+      await shoot(budgetSection, 'agent-budget')
+
+      // ── remove-agent dialog: the revoke path ─────────────────────────────
+      await page.getByRole('button', { name: 'Agent options' }).click()
+      await page.getByRole('menuitem', { name: /Remove agent/ }).click()
+      const dialog = page.getByRole('dialog')
+      await dialog.getByRole('button', { name: 'Connect wallet' }).waitFor({ timeout: 15_000 })
+      await shoot(dialog, 'remove-agent')
+    },
+  },
   'account-backup-recovery': {
     description:
       'Backup & recovery card at both viewports, in all three of its rendered states — the healthy multi-signer layout, the one-way-to-approve warning, and the load failure',

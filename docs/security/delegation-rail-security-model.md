@@ -215,6 +215,21 @@ up.
 > or when revocation bites changed. A CSS token rename in a delegation-surface
 > file is not a semantics change: this paragraph is that re-verification record.
 
+> **Re-verified #3812 (in-flow wallet connect):** this change touched three files
+> in this document's coverage list: `AccountSignersCard.tsx`,
+> `DelegationSendModal.tsx` and `WalletButton.tsx`. All three edits are
+> presentation-only. The first two now render a "Connect wallet" / "Switch
+> wallet" control (`WalletConnectAction`) beside the owner-wallet blocker they
+> already showed. `WalletButton`'s disconnect-then-reopen-the-picker logic
+> moved, unchanged, into a shared `useSwitchWallet` hook. Nothing that decides
+> who may sign changed: `useActiveSigner`, `pickSigningPath`,
+> `useAccountOperationGate` and every `ready` predicate are untouched. The
+> control renders only where the caller is already not ready, and connecting
+> a wallet that is not the set's named owner still leaves the account blocked
+> (#2068). The statements in §2 about the header pill and the `wrong_wallet`
+> caption stand. `last-verified` is not re-stamped: this note is the scope,
+> and nothing else in this document was re-verified.
+
 **Where the signed delegation lives:** the agent receives it through the
 existing credential channel (same trust envelope as the agent API key).
 Haven stores a copy server-side for reconstruction, revocation targeting and

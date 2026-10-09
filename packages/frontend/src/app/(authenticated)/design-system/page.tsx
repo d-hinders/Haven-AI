@@ -2186,8 +2186,15 @@ export default function DesignSystemPage() {
             balance="$4,280.35 available"
           />
 
-          <Card hover={false} className="overflow-hidden" data-testid="ds-activity-row">
-            <Card.Header title="Recent agent activity" />
+          {/* #3810: the grouped dashboard row — `countLabel` renders the muted
+                ×N beside the title, and `fiat` switches the amount to Amount's
+                currency mode (≈ marks a serve-time valuation). The dashboard's
+                merchant-first activity list is this shape. The testid anchors
+                the design-system clip (#3064 pattern); `Card` does not spread
+                extra props, so the div carries it. */}
+          <div data-testid="ds-activity-row">
+            <Card hover={false} className="overflow-hidden">
+              <Card.Header title="Recent agent activity" />
             <TransactionActivityRow
               direction="out"
               title="Agent payment"
@@ -2230,7 +2237,8 @@ export default function DesignSystemPage() {
               status="Failed"
               statusTone="danger"
             />
-          </Card>
+            </Card>
+          </div>
         </div>
       </Section>
 

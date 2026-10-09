@@ -9161,7 +9161,10 @@ export const openapiSpec = {
           'deployment\'s channel. For the connector-installed packages (signer, mcp, connect) it is ' +
           'the connector doctor (#3412): it works as pasted on an existing install and prints the ' +
           'exact `--doctor --repair` line to run next — a bare connector re-run is a setup command ' +
-          'that stops at "Missing --setup" on an already set-up machine.',
+          'that stops at "Missing --setup" on an already set-up machine. #3799: on those packages ' +
+          'the backend may append ` --name <slug>` (normalised from the calling agent\'s recorded ' +
+          'MCP pair — a display aid, never identity), so an agent on a multi-agent machine can run ' +
+          'one command. `/discovery`, `/.well-known/haven.json` and `/releases` keep the bare form.',
         required: ['package', 'current', 'recommended', 'min_version', 'required', 'upgrade_command', 'notes_url'],
         properties: {
           package: { type: 'string', examples: ['@haven_ai/mcp'] },

@@ -5565,3 +5565,25 @@ to call next in structured fields, and those fields are typed end to end
 > version-skew and consent-hash contracts do not move. `last-verified` stays
 > 2026-10-08 for exactly this coverage. Nothing else in this document was
 > re-verified.
+
+> **#3799 re-verification (2026-10-09, connect self-update in one command).**
+> This diff touches covered connect files (`doctor.ts`, `cli.ts`, `args.ts`,
+> `storage.ts`) and `packages/backend/src/middleware/client-compat.ts`:
+> `--doctor`/`--repair` accept `--name <slug>` and select the agent directory
+> by its RECORDED pair (one resolver shared with `--rekey --name` and
+> `--unwire --name`); the multi-directory repair refusal names each agent id
+> and its pair and offers the `--name` command; the Claude Code repair states
+> the wrapper re-point instead of a false "Rewriting MCP entries" line; and a
+> repair whose installed signer would refuse to start stops before writing
+> anything unless `--ack-local-tools` is passed — the re-ack is then produced
+> by the INSTALLED signer via the recorded wrapper's `--ack`, no setup token.
+> The doctor's consent-missing check offers the same token-free path instead
+> of `--ack-local-tools --setup <token>`. The consent-hash contract does not
+> move: the hash still covers the signer's tool names, the signer still
+> refuses on mismatch, and the ack file still holds only the hash (the repair
+> never claims "the tools grew"). No `haven_*` tool schema, description
+> fragment or failure envelope changes; the version-skew table is untouched;
+> the backend's `upgrade_command` suffix is additive text on the connector
+> doctor form and core's `/ --doctor$` parity command is unchanged.
+> `last-verified` stays 2026-10-08: this note is the scope. Nothing else in
+> this document was re-verified.

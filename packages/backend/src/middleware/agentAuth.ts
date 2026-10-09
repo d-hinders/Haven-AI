@@ -28,6 +28,12 @@ export interface AgentContext {
   /** The account's execution rail (#821): 'delegation' routes to the new rail. */
   execution_rail?: string | null
   account_type?: string | null
+  /**
+   * The agent's recorded MCP pair name (migration 067) — a display aid, never
+   * identity (#3799): it only ever personalises a `client_update` hint's
+   * `--name <slug>` suffix. Absent in older in-process fixtures.
+   */
+  mcp_server_name?: string | null
   /** False when the agent's account row was removed; recovery must fail closed. */
   has_bound_account?: boolean
 }
@@ -232,6 +238,7 @@ export async function agentAuthMiddleware(
     archived_at: row.archived_at ?? null,
     execution_rail: row.execution_rail ?? null,
     account_type: row.account_type ?? null,
+    mcp_server_name: row.mcp_server_name ?? null,
     // Characterization fakes from before this field existed omit it; the
     // real query always returns a boolean. Treat an omitted value as bound so
     // those fakes keep exercising the legacy auth branches.

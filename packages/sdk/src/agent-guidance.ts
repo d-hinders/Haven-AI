@@ -40,7 +40,7 @@ export const AGENT_SECRET_HYGIENE_SENTENCE =
  * agent meets in both places is one text.
  */
 export const AGENT_CLIENT_UPDATE_SENTENCE =
-  'If a Haven result carries `client_update`, that client is out of date: run its `upgrade_command` as given, then any repair line it prints, then retry. `required: true` means payments are refused until you do.'
+  'If a Haven result carries `client_update`, that client is out of date: run its `upgrade_command` exactly as given — a connector command may name your pair with `--name <slug>` — then any repair line it prints, then retry. `required: true` means payments are refused until you do.'
 
 /** Where the signing key is made, and what Haven receives instead of it. */
 export const AGENT_LOCAL_KEY_SENTENCE =

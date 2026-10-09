@@ -103,8 +103,12 @@ describe('haven guide text (#2525)', () => {
     // bullet stops claiming "you can pay" and states readiness is authority,
     // naming `funds_cover_remaining` as the heads-up it is. Lands at
     // 11619/11528.
-    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(11619)
-    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(11528)
+    // #3799: +75 bytes / +71 units — the client_update sentence names the
+    // connector command's optional `--name <slug>` pair suffix, so an agent
+    // on a multi-agent machine runs the upgrade as one command. Lands at
+    // 11694/11599.
+    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(11694)
+    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(11599)
   })
 
   it('keeps the CLI free of runtime dependencies', () => {

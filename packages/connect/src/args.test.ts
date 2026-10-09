@@ -332,4 +332,16 @@ describe('#3737: --bare and the derived-by-default slug', () => {
     expect(text).toContain('--bare')
     expect(text).toMatch(/display name/)
   })
+
+  it('#3799: --ack-local-tools with a bare --doctor is REFUSED, never silently dropped', () => {
+    expect(() => parseArgs(['--doctor', '--ack-local-tools'], {})).toThrow(/does nothing with --doctor/)
+  })
+
+  it('#3799: --repair --ack-local-tools is honoured (re-consents the installed signer)', () => {
+    const parsed = parseArgs(['--repair', '--runtime', 'codex-cli', '--ack-local-tools'], {})
+    expect(parsed.repair).toBe(true)
+    expect(parsed.options.ackLocalTools).toBe(true)
+    // And the help says so: the flag is no longer "during setup" only.
+    expect(helpText()).toMatch(/--repair\)\s*$|with --repair/m)
+  })
 })

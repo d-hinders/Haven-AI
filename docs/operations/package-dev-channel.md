@@ -13,6 +13,7 @@ covers:
   - packages/mcp-server/src/connector-channel.ts
   - packages/backend/src/config.ts
   - packages/backend/src/routes/agent-connection-setups.ts
+  - packages/backend/src/middleware/client-compat.ts
   - packages/connect/src/runtime-spec-override.ts
   - packages/connect/src/doctor.ts
   - packages/connect/src/cli.ts
@@ -398,6 +399,24 @@ and the `release` skill.
 > `parseOpsDatabaseUrl` in `config/ops.ts`) and its comment, plus its import.
 > `connectorChannel` / `parseConnectorChannel` and `requestValidationMode` have
 > no diff. `last-verified` is not bumped; nothing else here was re-verified.
+>
+> **Re-verification (#3799, 2026-10-09, the upgrade hint's per-agent suffix).**
+> This diff touches covered connect files (`doctor.ts`, `cli.ts`, `args.ts`,
+> `storage.ts`) and `packages/backend/src/middleware/client-compat.ts`. For
+> the connector packages only, `client_update.upgrade_command` may append
+> ` --name <slug>` — normalised from `agents.mcp_server_name` (migration 067)
+> with a fail-closed slug check, `haven` → no flag, anything the connector's
+> parser would refuse → no flag. The suffix is added in the backend hint
+> (from the SAME auth SELECT that authenticated the request — no second read
+> in `onSend`), not in core or the SDK: `@haven_ai/core`'s
+> `upgradeCommandFor` keeps the bare `/ --doctor$/` form,
+> `connector-upgrade-command-parity.test.ts` is unchanged and green, and
+> `/discovery`, `/.well-known/haven.json` and `/releases` keep the bare
+> command. The connect-side changes are directory selection and refusal
+> wording (`--doctor`/`--repair --name <slug>` now resolve through the shared
+> pair-record rule); channel selection, dist-tag resolution, version
+> ordering and the snapshot path do not move. `last-verified` is not bumped:
+> this note is the scope. Nothing else in this document was re-verified.
 >
 > **Re-verification (#3304):** coupled because `packages/core/src/client-compat.ts`
 > is in this doc's `covers:`. The only edit there is a comment: the sentence

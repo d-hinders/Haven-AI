@@ -3632,7 +3632,7 @@ export type paths = {
 export type webhooks = Record<string, never>;
 export type components = {
     schemas: {
-        /** @description #3303: the backend's update hint for an outdated published client. `required: true` means the client is below a minimum this deployment set and will be refused at its refusal points; `upgrade_command` is the command that starts the update, on this deployment's channel. For the connector-installed packages (signer, mcp, connect) it is the connector doctor (#3412): it works as pasted on an existing install and prints the exact `--doctor --repair` line to run next — a bare connector re-run is a setup command that stops at "Missing --setup" on an already set-up machine. */
+        /** @description #3303: the backend's update hint for an outdated published client. `required: true` means the client is below a minimum this deployment set and will be refused at its refusal points; `upgrade_command` is the command that starts the update, on this deployment's channel. For the connector-installed packages (signer, mcp, connect) it is the connector doctor (#3412): it works as pasted on an existing install and prints the exact `--doctor --repair` line to run next — a bare connector re-run is a setup command that stops at "Missing --setup" on an already set-up machine. #3799: on those packages the backend may append ` --name <slug>` (normalised from the calling agent's recorded MCP pair — a display aid, never identity), so an agent on a multi-agent machine can run one command. `/discovery`, `/.well-known/haven.json` and `/releases` keep the bare form. */
         ClientUpdate: {
             /** @example @haven_ai/mcp */
             package: string;

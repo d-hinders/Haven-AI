@@ -47,7 +47,40 @@ Do not point it at a project repository, shared folder, or cloud-synced folder.
 
 Use `--ack-local-tools` with Haven-generated setup prompts. It prepares the
 local Haven tools acknowledgement during setup so Codex and Claude Code can load
-Haven after a normal restart.
+Haven after a normal restart. It also works with `--repair`: when an upgrade
+changes the signer's tool set, the stored acknowledgement no longer matches and
+the new signer refuses to start — `--repair --ack-local-tools` re-acknowledges
+consent for the signer the repair installs (printing the consent block), with
+no setup token. With a bare `--doctor` the flag is refused: the doctor is
+read-only. The token-free path, without a repair, is the recorded wrapper:
+`<agent dir>/bin/haven-signer.mjs --ack < /dev/null`.
+
+## Updating an agent's own connector (#3799)
+
+On a machine with several agents, an agent can update its own pair in one
+command. `--doctor` and `--repair` accept `--name <slug>` and select the agent
+directory by its recorded MCP pair (`haven-<slug>` / `haven-signer-<slug>`) —
+the same rule `--rekey --name` and `--unwire --name` use. An unknown slug is
+refused listing the slugs that exist; two live directories claiming one pair
+are refused listing both; tombstoned directories never match. When several
+agents exist and no `--name` or `--credentials-dir` is given, the multi-agent
+refusal names, per directory, the agent id AND the pair it owns, and offers the
+`--name <slug>` command for named pairs.
+
+Two honesty rules worth knowing:
+
+- On Claude Code, `--repair` writes no MCP config (the connector does not own
+  that runtime's registry). It re-points `<dir>/bin/haven-signer.mjs` at the
+  pinned signer runtime, and says exactly that — the entry that launches the
+  wrapper uses the new signer after a restart. `--doctor --runtime claude-code`
+  names the recorded pair and how to confirm it (`claude mcp get
+  haven-signer-<slug>`).
+- When the stored consent does not match the pinned signer's tool set, a bare
+  `--repair` stops before writing anything and names the token-free
+  re-consent command; `--repair --ack-local-tools` performs the
+  re-acknowledgement with the installed signer during the repair. The stored
+  ack holds only a hash, so a mismatch is never reported as "the tools grew" —
+  a rekey or a chain change produces the same mismatch.
 
 ## Supported runtimes
 
@@ -78,7 +111,9 @@ spending authority.
 ### `--doctor` reports every agent, not just one (#1697)
 
 With several agents wired into one runtime (`--name`), the doctor enumerates
-every credential directory on the machine and classifies each one:
+every credential directory on the machine and classifies each one. An agent can
+also select its OWN directory with `--doctor --name <slug>` or
+`--repair --name <slug>` — see [Updating an agent's own connector](#updating-an-agents-own-connector-3799):
 
 | Classification | Meaning |
 | --- | --- |

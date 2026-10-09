@@ -15,6 +15,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Added
+
+- `HavenCatalogEntry.assetTransferMethods` (optional, additive): the x402 transfer methods a catalog merchant last advertised, as the catalog stores them (`"eip3009"`, `"eip3009,erc7710"`; `null` until probed; absent against a backend that does not send it). New `catalogFundingLegExpected(methods)` turns it into the discovery hint `true | false | "unknown"` (#3839). The `discoverTools` description gains one sentence on how to use that hint.
+
 ### Changed
 
 - `MERCHANT_NOT_READY`'s code description (published as `x-enumDescriptions`) and the `haven-pay` skill say an out-of-gas refusal (`reason_code: settlement_wallet_out_of_gas`) needs the merchant's operator to top up its settlement wallet before any retry succeeds, rather than "often transient" alone (#3834). The code, its wire shape and `retry_with_new_quote` are unchanged.

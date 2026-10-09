@@ -2479,6 +2479,16 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 >
 > The rest of this document was not re-read for it, and `last-verified` is not bumped.
 
+> **Re-verified unchanged (#3839, 2026-10-09, discovery funding-leg hint):**
+> this doc is coupled through `packages/sdk/src/client.ts`, whose catalog
+> mapping now carries `asset_transfer_methods` through to discovery as an
+> additive field. Discovery also gains a `funding_leg_expected` hint read from
+> that same column — the one the merchant-locked budget rule above reads per offer.
+> The hint is advisory output only: no delegation shape, caveat, pin rule,
+> redemption guard or settlement selection moves, and the per-offer ERC-7710
+> reading above is unchanged. The rest of this document was not re-read for
+> it, and `last-verified` is not bumped.
+
 > **#3542 (2026-10-01).** Re-verified unchanged except the archive guard
 > above. The archive guard and the account-delete guard
 > (`HAS_LIVE_DELEGATIONS_FOR_ACCOUNT_SQL`) now count `replaced` rows as live,

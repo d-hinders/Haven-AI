@@ -16,6 +16,7 @@ import {
   HavenError,
   HavenPaymentStateError,
   HavenSigningError,
+  catalogFundingLegExpected,
   composeDescription,
   discoverMerchantMcpUrl,
   resolveTokenFromAddress,
@@ -85,6 +86,10 @@ export type DiscoveryEntry = {
   price_atomic: string | null
   asset: string | null
   network: string | null
+  /** #3839: comma-separated x402 assetTransferMethods last advertised; null when none recorded. */
+  asset_transfer_methods: string | null
+  /** #3839: catalog-based hint — false when erc7710 is advertised, true when not, "unknown" when nothing is recorded. */
+  funding_leg_expected: boolean | 'unknown'
   status: string
   verified_at: string | null
   source?: string
@@ -761,6 +766,10 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
           price_atomic: entry.priceAtomic,
           asset: entry.asset,
           network: entry.network,
+          // #3839: same hint the hosted surface emits — a catalog hint, the
+          // live quote stays authoritative; "unknown" when nothing is recorded.
+          asset_transfer_methods: entry.assetTransferMethods ?? null,
+          funding_leg_expected: catalogFundingLegExpected(entry.assetTransferMethods),
           status: entry.status,
           verified_at: entry.verifiedAt,
           source: entry.source,

@@ -1866,6 +1866,27 @@ describe('haven_discover_tools (#349)', () => {
     expect(String(fetchMock.mock.calls[0][0])).toBe(`${baseUrl}/catalog`)
   })
 
+  it('carries asset_transfer_methods and the funding_leg_expected hint like the hosted surface (#3839)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({
+        entries: [
+          { ...catalogEntries[0], id: 'a', asset_transfer_methods: 'eip3009,erc7710' },
+          { ...catalogEntries[0], id: 'b', asset_transfer_methods: 'eip3009' },
+          { ...catalogEntries[0], id: 'c', asset_transfer_methods: null },
+          { ...catalogEntries[0], id: 'd' },
+        ],
+      }),
+    )
+    const result = await handlers().haven_discover_tools({})
+    const data = (result as { data: Array<Record<string, unknown>> }).data
+    expect(data.map((e) => [e.id, e.asset_transfer_methods, e.funding_leg_expected])).toEqual([
+      ['a', 'eip3009,erc7710', false],
+      ['b', 'eip3009', true],
+      ['c', null, 'unknown'],
+      ['d', null, 'unknown'],
+    ])
+  })
+
   it('forwards category and rail filters as query parameters', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       jsonResponse({ entries: [] }),

@@ -1953,6 +1953,22 @@ merchant selects eip3009 — pre-existing), the same no-guess stance as
 `requireSettleableSelection` treats an unknown rail at prepare/pay. Read-only:
 the quote still reserves no price and creates no intent.
 
+[#3839](https://github.com/d-hinders/Haven-AI/issues/3839) moves the same fact
+to **choice time**. `haven_discover_tools` (hosted and local `@haven_ai/mcp`)
+now returns each entry's stored `asset_transfer_methods` and a catalog-based
+`funding_leg_expected: true | false | "unknown"` — `false` when the recorded
+set includes `erc7710`, `true` when it is recorded without it, `"unknown"` when
+nothing is recorded. It is deliberately not named `expected_funding_leg`, where
+`null` means the agent read failed. It is a hint from the merchant's last
+probe (the network of its first `accepts` entry, possibly not the agent's
+chain; a stale row keeps its old set), so the quote above stays
+authoritative; the discovery description tells the agent to prefer `false`
+among equivalent entries, to treat `"unknown"` as no preference, never to hide
+`true` entries, and that a recipient-pinned budget pays erc7710 merchants only.
+Listing order is unchanged. One function, the SDK's `catalogFundingLegExpected`,
+computes it; the dashboard's `needsUnpinnedBudget` reads the same column and a
+parity test keeps the two in agreement.
+
 [#2999](https://github.com/d-hinders/Haven-AI/issues/2999) gives the plain-HTTP
 `haven_quote_x402` — the third and last hosted quote surface — the same four
 fields, built through the identical `settlementPredictionFields` support

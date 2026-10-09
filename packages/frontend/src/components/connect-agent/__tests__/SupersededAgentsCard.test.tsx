@@ -420,7 +420,7 @@ describe('SupersededAgentsCard', () => {
       // #3812: the budget half's way out is offered in the confirm itself, and
       // the copy names the choice instead of sending the owner elsewhere.
       expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeInTheDocument()
-      expect(screen.getByText(/Connect the owner wallet below to end the budget too, or revoke now/)).toBeInTheDocument()
+      expect(screen.getByText(/Connect your account owner wallet below to end the budget too, or revoke now/)).toBeInTheDocument()
       // Not disabled: the credential half needs no signature.
       const confirm = screen.getByRole('button', { name: /^revoke agent$/i })
       expect(confirm).not.toBeDisabled()

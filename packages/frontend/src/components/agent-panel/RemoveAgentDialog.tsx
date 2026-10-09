@@ -69,7 +69,7 @@ export function RemoveAgentDialog({
   onArchive: () => Promise<void>
   onClose: () => void
 }) {
-  const { revokeAll, ready, busy, budgets, budgetsError, signersError, signersLoading } = useDelegationBudget(agent.id, chainId)
+  const { revokeAll, ready, busy, budgets, budgetsError, signersError, signersLoading, hasPasskeys } = useDelegationBudget(agent.id, chainId)
   const { balance, hasRecoverableUsdc } = useDelegateBalance(agent.id)
   const [phase, setPhase] = useState<'confirm' | 'working' | 'filing_failed' | 'too_many'>('confirm')
   const [error, setError] = useState<string | null>(null)
@@ -245,7 +245,13 @@ export function RemoveAgentDialog({
           {needsSignature && !ready && (
             <div className="space-y-2">
               <p className="text-xs text-[var(--v2-ink-3)]">
-                Connect a wallet or use a passkey on this device to {finish ? 'end this budget' : 'remove this agent'}.
+                {/* #3845: never offer a passkey to an account that has none —
+                    its only signer is the owner wallet. Unknown (null) keeps
+                    the sentence that offers both. */}
+                {hasPasskeys === false
+                  ? 'Connect your account owner wallet to '
+                  : 'Connect a wallet or use a passkey on this device to '}
+                {finish ? 'end this budget' : 'remove this agent'}.
               </p>
               {/* #3812: revoking must never depend on the header — this is
                   the way out for an owner who signs with a browser wallet.

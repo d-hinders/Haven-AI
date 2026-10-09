@@ -253,7 +253,7 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
   // `chainId` change (agent picker inside one mounted instance), so `budgets`
   // and `ready` below are never the PREVIOUS agent's while the new read is in
   // flight — they read `null`/`false` instead.
-  const { budgets, budgetsError, reload, grant, busy, ready, signersError, signersLoading } = useDelegationBudget(
+  const { budgets, budgetsError, reload, grant, busy, ready, signersError, signersLoading, hasPasskeys } = useDelegationBudget(
     selectedAgent?.id ?? '',
     chainId ?? 0,
     { enabled: open && !!selectedAgent },
@@ -560,7 +560,11 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
               {!ready && (
                 <div className="space-y-2">
                   <p className="text-xs text-[var(--v2-ink-3)]">
-                    Connect the wallet or passkey that approves actions for this agent's Haven wallet.
+                    {/* #3845: offer a passkey only to an account that has one
+                        (any device); unknown keeps the offer. */}
+                    {hasPasskeys === false
+                      ? 'Connect your account owner wallet to sign this budget.'
+                      : 'Connect your account owner wallet, or use one of the account’s passkeys, to sign this budget.'}
                   </p>
                   {/* #3812: connect or switch in place, not only from the header. */}
                   {!signersError && !signersLoading ? <WalletConnectAction /> : null}

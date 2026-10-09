@@ -197,7 +197,7 @@ export function DelegationApprovalStep({
           notReadyHint={
             isWrongChain
               ? `This Haven wallet is on ${approvalChainName}. Switch networks to approve the budget.`
-              : 'Connect the wallet that owns this Haven wallet to approve the budget.'
+              : 'Connect your account owner wallet to approve the budget.'
           }
           // A passkey account is always ready. An EOA-owned one is blocked for
           // one of two different reasons, and the legacy step distinguishes

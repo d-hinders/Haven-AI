@@ -227,6 +227,14 @@ describe('AccountSignersCard (#888)', () => {
     render(<AccountSignersCard {...PROPS} />)
     const [ownerRemove] = screen.getAllByText('Remove') as HTMLButtonElement[]
     expect(ownerRemove.disabled).toBe(true)
+    // #3845: the row promises no passkeys the account does not have, and says
+    // why Remove is unavailable.
+    expect(screen.queryByText(/your passkeys/)).toBeNull()
+    expect(
+      screen.getByText(
+        "This wallet is the only way to approve this account, so it can't be removed until you add a backup.",
+      ),
+    ).toBeTruthy()
   })
 
   it('surfaces the honest "Lost a device?" recovery explainer behind a help modal', async () => {

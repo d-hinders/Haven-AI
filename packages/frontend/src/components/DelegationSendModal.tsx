@@ -123,7 +123,7 @@ export default function DelegationSendModal({ open, onClose, accountAddress, cha
           // `ready` true otherwise) — the wallet really is the blocker.
           <div className="space-y-2">
             <p className="text-xs text-[var(--v2-ink-muted)]">
-              Connect the account&apos;s owner wallet to send.
+              Connect your account owner wallet to send.
             </p>
             {/* #3812: connect or switch in place, not only from the header. */}
             <WalletConnectAction />

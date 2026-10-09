@@ -34,6 +34,7 @@ const { mockRevokeAll, mockBudgetState, mockBalanceState } = vi.hoisted(() => ({
     budgetsError: false,
     signersLoading: false,
     signersError: null as string | null,
+    hasPasskeys: null as boolean | null,
   },
   mockBalanceState: {
     balance: null as null | Record<string, unknown>,
@@ -56,6 +57,7 @@ vi.mock('@/hooks/useDelegationBudget', () => ({
     reload: vi.fn(),
     signersError: mockBudgetState.signersError,
     signersLoading: mockBudgetState.signersLoading,
+    hasPasskeys: mockBudgetState.hasPasskeys,
     reloadSigners: vi.fn(),
   }),
 }))
@@ -114,6 +116,7 @@ beforeEach(() => {
   mockBudgetState.budgetsError = false
   mockBudgetState.signersLoading = false
   mockBudgetState.signersError = null
+  mockBudgetState.hasPasskeys = null
   mockBalanceState.balance = null
   mockBalanceState.hasRecoverableUsdc = false
 })
@@ -477,6 +480,55 @@ describe('RemoveAgentDialog', () => {
     const confirm = screen.getByRole('button', { name: 'Remove agent' }) as HTMLButtonElement
     expect(confirm.disabled).toBe(true)
     expect(screen.getByText(/connect a wallet or use a passkey/i)).toBeTruthy()
+  })
+
+  // #3845: the no-signer sentence offers a passkey only to an account that
+  // has one enrolled (on any device); unknown keeps today's sentence.
+  describe('the no-signer sentence follows the signer set (#3845)', () => {
+    it('an account with no passkeys is told only to connect its owner wallet', () => {
+      mockBudgetState.ready = false
+      mockBudgetState.hasPasskeys = false
+      renderDialog(agentFixture())
+      const line = screen.getByText(/to remove this agent\./)
+      expect(line.textContent).toBe('Connect your account owner wallet to remove this agent.')
+      expect(line.textContent).not.toMatch(/passkey/i)
+    })
+
+    it('an account with a passkey keeps the passkey clause', () => {
+      mockBudgetState.ready = false
+      mockBudgetState.hasPasskeys = true
+      renderDialog(agentFixture())
+      expect(screen.getByText(/to remove this agent\./).textContent).toBe(
+        'Connect a wallet or use a passkey on this device to remove this agent.',
+      )
+    })
+
+    it('an unknown signer set keeps the sentence unchanged', () => {
+      mockBudgetState.ready = false
+      mockBudgetState.hasPasskeys = null
+      renderDialog(agentFixture())
+      expect(screen.getByText(/to remove this agent\./).textContent).toBe(
+        'Connect a wallet or use a passkey on this device to remove this agent.',
+      )
+    })
+
+    it('finish mode words the same choice for ending the budget', () => {
+      mockBudgetState.ready = false
+      mockBudgetState.hasPasskeys = false
+      render(
+        <RemoveAgentDialog
+          agent={agentFixture({ status: 'revoked' })}
+          chainId={84532}
+          mode="finish"
+          onRevokeCredential={vi.fn().mockResolvedValue(undefined)}
+          onArchive={vi.fn().mockResolvedValue(undefined)}
+          onClose={vi.fn()}
+        />,
+      )
+      expect(screen.getByText(/to end this budget\./).textContent).toBe(
+        'Connect your account owner wallet to end this budget.',
+      )
+    })
   })
 
   it('no-signer does NOT block removing an already-revoked agent with no live budget (archive-only leg)', () => {

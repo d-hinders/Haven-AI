@@ -410,7 +410,7 @@ export function ReplaceSigningKeyModal({
       {blocked && step !== 'done' ? (
         <ApprovalRequiredBanner title="You cannot replace this key from this device" tone="warning">
           <p className="text-sm leading-relaxed">
-            Connect the wallet that owns this Haven account, or use a device with one of its
+            Connect your account owner wallet, or use a device with one of the account’s
             passkeys. Replacing a signing key needs the account owner’s signature, and Haven never
             signs on your behalf.
           </p>

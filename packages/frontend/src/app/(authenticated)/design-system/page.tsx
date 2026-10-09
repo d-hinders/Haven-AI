@@ -2186,7 +2186,7 @@ export default function DesignSystemPage() {
             balance="$4,280.35 available"
           />
 
-          <Card hover={false} className="overflow-hidden">
+          <Card hover={false} className="overflow-hidden" data-testid="ds-activity-row">
             <Card.Header title="Recent agent activity" />
             <TransactionActivityRow
               direction="out"

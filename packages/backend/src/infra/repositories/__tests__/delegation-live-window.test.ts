@@ -1,14 +1,18 @@
 /**
- * #3802: every budget-VIEWING read applies the #1698 live window —
- * `start_date <= now < expires_at` beside `status = 'active'`.
+ * #3802 (round 2 — owner predicate): every budget-VIEWING read filters
+ * `expires_at > EXTRACT(EPOCH FROM NOW())` ONLY, beside `status = 'active'`.
+ * `start_date` is NOT filtered: a credential rotation writes a dormant
+ * "steady" row with a FUTURE `start_date` beside the live "carry" row in the
+ * same slot (`delegation-budgets.ts`, `rekey-carry.ts`) — filtering future
+ * starts would hide the whole budget for the carry window.
  *
- * Before this, only the payment path (`SELECT_DELEGATION_FOR_PAYMENT_SQL`,
- * `SELECT_ACTIVE_DELEGATION_BY_HASH_SQL`) filtered the window; every view of
- * a budget still presented a grant the on-chain TimestampEnforcer would
- * refuse — an expired one as "5.00 USDC/daily", a future-dated one as live
- * authority that can activate an agent. This pins the shared fragment's
- * reach: one agent seeded with an EXPIRED, a FUTURE and a LIVE delegation,
- * and each reader returning only the live one.
+ * Before #3802 only the payment path (`SELECT_DELEGATION_FOR_PAYMENT_SQL`,
+ * `SELECT_ACTIVE_DELEGATION_BY_HASH_SQL`) filtered expiry; every view of a
+ * budget still presented a grant the on-chain TimestampEnforcer would refuse
+ * — an expired one as "5.00 USDC/daily". This pins the shared fragment's
+ * reach: one agent seeded with a LIVE, an EXPIRED, an EXPIRED-1-S-AGO and a
+ * FUTURE-START delegation, and each reader returning exactly the live AND
+ * the future-start rows.
  *
  * Real-DB, per `docs/contributing/testing-strategy.md`: every assertion is
  * about which rows a SQL predicate returns, including comparisons against
@@ -75,13 +79,24 @@ async function seedDelegation(
   return result.rows[0].id
 }
 
-/** One agent, three grants: only the LIVE one is presented as a budget. */
-async function seedExpiredFutureLive(agentId: string): Promise<string> {
+/** One agent, four grants: exactly the LIVE and the FUTURE-START ones come back. */
+async function seedFourWindowRows(
+  agentId: string,
+): Promise<{ live: string; future: string; liveHash: string; futureHash: string }> {
   const nowSec = Math.floor(Date.now() / 1000)
-  await seedDelegation(agentId, { expiresAt: nowSec - 60 }) // expired
-  await seedDelegation(agentId, { startDate: nowSec + 3_600 }) // future-dated
-  return seedDelegation(agentId) // live
+  await seedDelegation(agentId, { expiresAt: nowSec - 60 }) // expired a minute ago
+  await seedDelegation(agentId, { expiresAt: nowSec - 1 }) // expired 1s ago — the exclusive bound
+  const future = await seedDelegation(agentId, { startDate: nowSec + 3_600 }) // dormant steady row
+  const live = await seedDelegation(agentId) // the live carry row
+  const hashes = await db.query<{ id: string; delegation_hash: string }>(
+    `SELECT id, delegation_hash FROM agent_delegations WHERE agent_id = $1 AND status = 'active'`,
+    [agentId],
+  )
+  const byId = new Map(hashes.rows.map((r) => [r.id, r.delegation_hash]))
+  return { live, future, liveHash: byId.get(live)!, futureHash: byId.get(future)! }
 }
+
+const windowReturn = (live: string, future: string) => [live, future].sort()
 
 describeDb('#3802 — budget views apply the live window to active delegations', () => {
   beforeAll(async () => {
@@ -92,73 +107,74 @@ describeDb('#3802 — budget views apply the live window to active delegations',
     await resetDb()
   })
 
-  it('listActiveDelegations returns only the live grant', async () => {
+  it('listActiveDelegations returns the live AND the future-start grant', async () => {
     const { agentId } = await seedDelegationRailAgent()
-    const live = await seedExpiredFutureLive(agentId)
+    const { live, future } = await seedFourWindowRows(agentId)
 
     const rows = await listActiveDelegations([agentId])
 
-    expect(rows).toHaveLength(1)
-    expect(rows[0].id).toBe(live)
+    expect(rows.map((r) => r.id).sort()).toEqual(windowReturn(live, future))
   })
 
-  it('deriveDelegationBudgets (dashboard, agents routes, allowances read) derives only the live grant', async () => {
+  it('deriveDelegationBudgets (dashboard, agents routes, allowances read) derives the live AND the future-start grant', async () => {
     const { agentId } = await seedDelegationRailAgent()
-    const live = await seedExpiredFutureLive(agentId)
+    const { live, future } = await seedFourWindowRows(agentId)
 
     const derived = (await deriveDelegationBudgets([agentId])).get(agentId) ?? []
 
-    expect(derived).toHaveLength(1)
-    expect(derived[0].id).toBe(live)
+    expect(derived.map((r) => r.id).sort()).toEqual(windowReturn(live, future))
   })
 
-  it('listActiveDelegationsForUser (analytics budget-remaining slice) returns only the live grant', async () => {
+  it('listActiveDelegationsForUser (analytics budget-remaining slice) returns the live AND the future-start grant', async () => {
     const { userId, agentId } = await seedDelegationRailAgent()
-    const live = await seedExpiredFutureLive(agentId)
+    const { live, future } = await seedFourWindowRows(agentId)
 
     const rows = await listActiveDelegationsForUser(userId)
 
-    expect(rows).toHaveLength(1)
-    expect(rows[0].id).toBe(live)
+    expect(rows.map((r) => r.id).sort()).toEqual(windowReturn(live, future))
   })
 
-  it('ops overview counts only the live grant as active', async () => {
+  it('ops overview counts the live and future-start grants as active (the two expired ones are not)', async () => {
     await seedDelegationRailAgent()
-    await seedExpiredFutureLive((await db.query<{ id: string }>(`SELECT id FROM agents LIMIT 1`)).rows[0].id)
+    await seedFourWindowRows((await db.query<{ id: string }>(`SELECT id FROM agents LIMIT 1`)).rows[0].id)
 
-    expect((await db.query<{ count: number }>(OPS_OVERVIEW_ACTIVE_DELEGATIONS_SQL, [])).rows[0].count).toBe(1)
+    expect((await db.query<{ count: number }>(OPS_OVERVIEW_ACTIVE_DELEGATIONS_SQL, [])).rows[0].count).toBe(2)
     // The composed overview read agrees with the raw predicate.
     const overview = await readOpsOverview(db)
-    expect(overview.activeDelegations).toBe(1)
+    expect(overview.activeDelegations).toBe(2)
   })
 
-  it('ops user detail lists only the live grant', async () => {
+  it('ops user detail lists the live AND the future-start grant', async () => {
     const { userId, agentId } = await seedDelegationRailAgent()
-    const live = await seedExpiredFutureLive(agentId)
+    const { live, future } = await seedFourWindowRows(agentId)
 
     const detail = await readOpsUserDetail(db, userId)
 
-    expect(detail?.delegations).toHaveLength(1)
-    expect(detail?.delegations[0].id).toBe(live)
+    expect(detail?.delegations.map((r) => r.id).sort()).toEqual(windowReturn(live, future))
   })
 
-  it('ops onchain view reads only the live grant', async () => {
+  it('ops onchain view reads the live AND the future-start grant', async () => {
     const { userId, agentId } = await seedDelegationRailAgent()
-    await seedExpiredFutureLive(agentId)
+    const { liveHash, futureHash } = await seedFourWindowRows(agentId)
 
     const view = await readOpsOnchainView(db, userId)
 
     expect(view?.accounts).toHaveLength(1)
-    expect(view?.accounts[0].delegations).toHaveLength(1)
+    // OpsOnchainDelegationRow projects delegation_hash, not id — the two
+    // surviving grants are the live and future-start ones.
+    expect(view?.accounts[0].delegations.map((r) => r.delegation_hash).sort()).toEqual(
+      [liveHash, futureHash].sort(),
+    )
   })
 
-  it('the connect activation check sees only the live grant — an expired grant cannot activate an agent', async () => {
+  it('the connect activation check sees the live AND the future-start grant — an EXPIRED grant cannot activate an agent', async () => {
     const { agentId } = await seedDelegationRailAgent()
-    await seedExpiredFutureLive(agentId)
+    const { live, future } = await seedFourWindowRows(agentId)
 
     const rows = await listSetupsActiveDelegations(agentId)
 
-    expect(rows).toHaveLength(1)
-    expect(rows[0].budget_atomic).toBe('1000000')
+    // The setup projection carries token/budget/period, not the row id — the
+    // surviving grants are the live and future-start ones.
+    expect(rows).toHaveLength(2)
   })
 })

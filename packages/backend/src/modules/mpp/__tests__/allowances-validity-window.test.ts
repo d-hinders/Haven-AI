@@ -12,10 +12,14 @@
  * The commit that adds this file asserts the OLD behaviour: `status =
  * 'active'` is the only filter, so an expired grant is reported as a live
  * allowance and the SDK derives `ready` for an agent that cannot spend a
- * single cent. The #3802 fix inverts the expired/future assertions: an
- * agent whose only budget expired (or has not started) now reports NO
- * budget — `allowances: []` — so readiness derives `needs_approval`
- * instead of an authority the chain would refuse.
+ * single cent. The #3802 fix inverts the EXPIRED assertion: an agent whose
+ * only budget expired now reports NO budget — `allowances: []` — so
+ * readiness derives `needs_approval` instead of an authority the chain
+ * would refuse. Round 2 (owner predicate): the NOT-STARTED assertion flips
+ * the OTHER way — `start_date` is NOT filtered, because a credential
+ * rotation writes a dormant "steady" row with a future `start_date` beside
+ * the live "carry" row, and filtering future starts would hide the whole
+ * budget for the carry window.
  */
 import { beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import db from '../../../db.js'
@@ -106,14 +110,20 @@ describeDb('#3802 — allowances read vs the validity window (characterization)'
     expect(body.allowances).toHaveLength(0)
   })
 
-  it('#3802: an agent whose only budget has NOT STARTED now reports NO budget', async () => {
+  it('#3802 round 2: a NOT-STARTED budget is STILL reported — start_date is not filtered (the dormant steady row)', async () => {
+    // Round 1 pinned "not started → no budget" under the start_date window;
+    // the owner predicate is `expires_at` ONLY: a future `start_date` row is
+    // the dormant "steady" grant a credential rotation writes beside the
+    // live "carry" row, and hiding it would blind the allowances read for
+    // the whole carry window. The expired assertion above stays inverted.
     const agent = await seedAgentWithDelegation({ startDate: Math.floor(Date.now() / 1000) + 3_600 })
 
     const result = await handleGetAllowances(agent)
 
     expect(result.statusCode).toBe(200)
-    const body = result.body as { allowances: unknown[] }
-    expect(body.allowances).toHaveLength(0)
+    const body = result.body as { allowances: { configured_amount: string }[] }
+    expect(body.allowances).toHaveLength(1)
+    expect(body.allowances[0].configured_amount).toBe('1.00')
   })
 
   it('a LIVE budget keeps being reported (the window must never hide a real one)', async () => {

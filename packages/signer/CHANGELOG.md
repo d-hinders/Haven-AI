@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.9.0-alpha.0 — 2026-10-09
+
 ### Added
 
 - **The `initialize` instructions state the signer's identity and the several-pairs rule (#3738).** A new line, `This signer is bound to agent id <id> and delegate address <0x…>.`, sits inside the first ~2,000 characters (Claude Code truncates server instructions around 2,048), followed by the rule for a harness carrying several Haven pairs: ask which agent when the user has not said, sign only through the signer of the hosted server called, and compare this identity with `haven_get_agent`'s `id` and `delegateAddress` before signing. `signerInstructions()` takes an optional `SignerIdentity` (exported type). Advisory only; nothing the signer refuses changed. No update needed.

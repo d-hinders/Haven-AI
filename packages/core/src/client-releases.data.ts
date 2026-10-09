@@ -15,8 +15,20 @@
 
 export const CLIENT_RELEASE_DATA = {
   "@haven_ai/sdk": {
-    "released_version": "0.8.1-alpha.0",
+    "released_version": "0.9.0-alpha.0",
     "notes": [
+      {
+        "version": "0.9.0-alpha.0",
+        "date": "2026-10-09",
+        "summary": "The SDK reports the merchant's EIP-3009 settlement hash it already holds. (+11 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "The SDK reports the merchant's EIP-3009 settlement hash it already holds. (+11 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.8.1-alpha.0",
         "date": "2026-10-07",
@@ -36,44 +48,32 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.8.0-alpha.0",
-        "date": "2026-10-05",
-        "summary": "PostPurchaseAllowanceSummary (the settled-x402 allowance block) spells its figures like haven_get_agent. Includes a breaking change. (+21 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "PostPurchaseAllowanceSummary",
-            "code": true
-          },
-          {
-            "text": " (the settled-x402 ",
-            "code": false
-          },
-          {
-            "text": "allowance",
-            "code": true
-          },
-          {
-            "text": " block) spells its figures like ",
-            "code": false
-          },
-          {
-            "text": "haven_get_agent",
-            "code": true
-          },
-          {
-            "text": ". Includes a breaking change. (+21 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/signer": {
-    "released_version": "0.8.1-alpha.0",
+    "released_version": "0.9.0-alpha.0",
     "notes": [
+      {
+        "version": "0.9.0-alpha.0",
+        "date": "2026-10-09",
+        "summary": "The initialize instructions state the signer's identity and the several-pairs rule. (+5 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "The ",
+            "code": false
+          },
+          {
+            "text": "initialize",
+            "code": true
+          },
+          {
+            "text": " instructions state the signer's identity and the several-pairs rule. (+5 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.8.1-alpha.0",
         "date": "2026-10-07",
@@ -85,48 +85,24 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.8.0-alpha.0",
-        "date": "2026-10-05",
-        "summary": "The consent text and the initialize handshake now say this signer signs sub-budgets. Since 0.7.0, haven_sign has signed sub-budget opens and closes (sub_budget_id), but the operator's consent screen named only payments and task budgets, and the handshake listed no sub-budget versions. (+1 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "The consent text and the ",
-            "code": false
-          },
-          {
-            "text": "initialize",
-            "code": true
-          },
-          {
-            "text": " handshake now say this signer signs sub-budgets. Since 0.7.0, ",
-            "code": false
-          },
-          {
-            "text": "haven_sign",
-            "code": true
-          },
-          {
-            "text": " has signed sub-budget opens and closes (",
-            "code": false
-          },
-          {
-            "text": "sub_budget_id",
-            "code": true
-          },
-          {
-            "text": "), but the operator's consent screen named only payments and task budgets, and the handshake listed no sub-budget versions. (+1 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/mcp": {
-    "released_version": "0.8.1-alpha.0",
+    "released_version": "0.9.0-alpha.0",
     "notes": [
+      {
+        "version": "0.9.0-alpha.0",
+        "date": "2026-10-09",
+        "summary": "The local x402 tools report the merchant's EIP-3009 settlement hash. (+3 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "The local x402 tools report the merchant's EIP-3009 settlement hash. (+3 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.8.1-alpha.0",
         "date": "2026-10-07",
@@ -138,52 +114,32 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.8.0-alpha.0",
-        "date": "2026-10-05",
-        "summary": "haven_get_task_budget reads one task budget by id, whatever its status. haven_get_agent lists only live task budgets (closing, plus unexpired pending and open), each with its status and isExpired; closed and expired ones are read with the new tool. (+2 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "haven_get_task_budget",
-            "code": true
-          },
-          {
-            "text": " reads one task budget by id, whatever its status. ",
-            "code": false
-          },
-          {
-            "text": "haven_get_agent",
-            "code": true
-          },
-          {
-            "text": " lists only live task budgets (closing, plus unexpired pending and open), each with its ",
-            "code": false
-          },
-          {
-            "text": "status",
-            "code": true
-          },
-          {
-            "text": " and ",
-            "code": false
-          },
-          {
-            "text": "isExpired",
-            "code": true
-          },
-          {
-            "text": "; closed and expired ones are read with the new tool. (+2 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/connect": {
-    "released_version": "0.8.1-alpha.0",
+    "released_version": "0.9.0-alpha.0",
     "notes": [
+      {
+        "version": "0.9.0-alpha.0",
+        "date": "2026-10-09",
+        "summary": "A rebind or --replace now warns that an open session keeps acting as the previous agent. The connector re-points the MCP server name on disk, but a client that is already running keeps the entries it loaded at start-up, and Connect revokes nothing in Haven. (+7 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "A rebind or ",
+            "code": false
+          },
+          {
+            "text": "--replace",
+            "code": true
+          },
+          {
+            "text": " now warns that an open session keeps acting as the previous agent. The connector re-points the MCP server name on disk, but a client that is already running keeps the entries it loaded at start-up, and Connect revokes nothing in Haven. (+7 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.8.1-alpha.0",
         "date": "2026-10-07",
@@ -219,28 +175,44 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.8.0-alpha.0",
-        "date": "2026-10-05",
-        "summary": "--doctor never picks a retired credential directory as the primary.",
-        "summary_segments": [
-          {
-            "text": "--doctor",
-            "code": true
-          },
-          {
-            "text": " never picks a retired credential directory as the primary.",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/cli": {
-    "released_version": "0.8.1-alpha.0",
+    "released_version": "0.9.0-alpha.0",
     "notes": [
+      {
+        "version": "0.9.0-alpha.0",
+        "date": "2026-10-09",
+        "summary": "agents pause, resume and revoke say what they do not do. The help said pause would \"Stop the agent spending\" and revoke would \"Permanently revoke an agent\"; all three are backend-only status changes, and the budget stays live on-chain. (+2 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "agents pause",
+            "code": true
+          },
+          {
+            "text": ", ",
+            "code": false
+          },
+          {
+            "text": "resume",
+            "code": true
+          },
+          {
+            "text": " and ",
+            "code": false
+          },
+          {
+            "text": "revoke",
+            "code": true
+          },
+          {
+            "text": " say what they do not do. The help said pause would \"Stop the agent spending\" and revoke would \"Permanently revoke an agent\"; all three are backend-only status changes, and the budget stays live on-chain. (+2 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.8.1-alpha.0",
         "date": "2026-10-07",
@@ -268,38 +240,6 @@ export const CLIENT_RELEASE_DATA = {
           },
           {
             "text": "'s own free-text argument.",
-            "code": false
-          }
-        ],
-        "action_required": false
-      },
-      {
-        "version": "0.8.0-alpha.0",
-        "date": "2026-10-05",
-        "summary": "haven wallets list and haven wallets balances name Base Sepolia, and no longer name Gnosis. The chain-name table held Gnosis (100) and Base (8453) only, so a Base Sepolia account printed chain 84532. (+1 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "haven wallets list",
-            "code": true
-          },
-          {
-            "text": " and ",
-            "code": false
-          },
-          {
-            "text": "haven wallets balances",
-            "code": true
-          },
-          {
-            "text": " name Base Sepolia, and no longer name Gnosis. The chain-name table held Gnosis (100) and Base (8453) only, so a Base Sepolia account printed ",
-            "code": false
-          },
-          {
-            "text": "chain 84532",
-            "code": true
-          },
-          {
-            "text": ". (+1 more in the changelog)",
             "code": false
           }
         ],

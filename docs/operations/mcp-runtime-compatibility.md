@@ -2210,6 +2210,36 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > **Re-read, not rubber-stamped:** the Node floor and the Codex and Claude Code
 > rows are unchanged. `last-verified` is not bumped.
 
+> **Re-verification (0.9.0-alpha.0 release, 2026-10-09):** the manifest table
+> above is re-pinned by the bump to `0.9.0-alpha.0` for `connect`, `mcp`, `sdk`
+> and `signer`, with `SDK_VERSION` rewritten beside it. The step from
+> `0.8.1-alpha.0` is **MINOR**: the range adds surfaces and narrows or removes
+> none; no CHANGELOG entry is marked **Update required**.
+>
+> **Surfaces this release moves:**
+> - **Signer.** A new tool, `haven_sign_siwx` (#3728): a Sign-In-With-X
+>   signature by the delegate key, moving no funds. The signer's instructions
+>   gain an advisory identity line (#3738), and one consent line is reworded
+>   (#3722), so the consent text differs.
+> - **Connect.** A default setup names each new agent's pair `haven-<slug>` /
+>   `haven-signer-<slug>` (#3737); `--bare` / `--replace` reach the bare pair;
+>   `--json` gains `server_name`. A `--replace` or rebind warns that a running
+>   session keeps acting as the previous agent (#3772). Existing installs are
+>   left as they are.
+> - **SDK.** Settlement-hash reporting (#3764), folded settlement evidence and
+>   retry headers (#3727), the request-mode key lookup (#3739); skill text
+>   split by scheme (#3774) and several wording fixes. Additive.
+> - **Local MCP.** `haven_get_receipt` returns the signed bundle (#3723).
+> - **CLI.** `haven agents revoke` refuses while a budget is live unless
+>   `--keep-budget` (#3729).
+> - **Not moved.** `CLIENT_COMPAT` is unchanged: `@haven_ai/signer`
+>   `min_version` stays `0.6.0-alpha.0`, so no installed client is forced to
+>   update.
+>
+> **Re-read, not rubber-stamped:** the Node floor and the Codex and Claude Code
+> rows are unchanged. `last-verified` already reads 2026-10-08 from an earlier
+> change and is not bumped.
+
 > **Re-verification (0.8.1-alpha.0 release, 2026-10-07):** the manifest table
 > above is re-pinned by the bump to `0.8.1-alpha.0` for `connect`, `mcp`, `sdk`
 > and `signer`, with `SDK_VERSION` rewritten beside it. The step from
@@ -2477,10 +2507,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.8.1-alpha.0` |
-| `@haven_ai/mcp` | `0.8.1-alpha.0` |
-| `@haven_ai/sdk` | `0.8.1-alpha.0` |
-| `@haven_ai/signer` | `0.8.1-alpha.0` |
+| `@haven_ai/connect` | `0.9.0-alpha.0` |
+| `@haven_ai/mcp` | `0.9.0-alpha.0` |
+| `@haven_ai/sdk` | `0.9.0-alpha.0` |
+| `@haven_ai/signer` | `0.9.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

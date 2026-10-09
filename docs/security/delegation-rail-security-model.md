@@ -2308,6 +2308,19 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > text, copy-only) and #3524 (compact `haven_send`/`haven_pay` results), were
 > re-verified where they merged. Nothing else in this document was re-verified.
 
+> **Re-verified (0.9.0-alpha.0 release, 2026-10-09):** the release bump's only
+> covered-file edit is the `SIGNER_VERSION` literal in `packages/signer/src/tools.ts`
+> (`0.9.0-alpha.0`). No signing check, refusal or allowlist moves in that edit.
+> The range's own signer-source changes were each recorded where they merged:
+> #3728 (`haven_sign_siwx`, the delegate's Sign-In-With-X signature — moves no
+> funds, approves no payment; noted above at its merge), #3727 (ready-made retry
+> headers) and #3739 (description text for the request-mode probe). Two changed
+> signer source without a note here, both read at this release: #3738 adds an
+> advisory identity line (agent id, delegate address) to the signer's
+> instructions and leaves the signing path's checks unchanged; #3722 rewords one
+> consent line ("pause or revoke" → "stop the agent's budget or remove the
+> agent"). Nothing else in this document was re-verified.
+
 > **Re-verified (0.8.1-alpha.0 release, 2026-10-07):** the release bump's only
 > covered-file edit is the `SIGNER_VERSION` literal in `packages/signer/src/tools.ts`
 > (`0.8.1-alpha.0`). No signing check, refusal or allowlist moves in that edit.

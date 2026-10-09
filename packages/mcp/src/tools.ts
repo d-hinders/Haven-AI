@@ -1209,7 +1209,12 @@ class MerchantNotReadyError extends Error {
   // wrong; the merchant's own wallet needs to recover first.
   readonly retryWithNewQuote = true
 
-  constructor(message: string) {
+  constructor(
+    message: string,
+    // #3834: the out-of-gas branch passes its own reason — that message gives
+    // no retry_after_s to wait out, so the default would point at nothing.
+    readonly nextToolOmittedReason: string = 'the merchant needs to recover first; re-quote after the retry_after_s in the message',
+  ) {
     super(message)
     this.name = 'MerchantNotReadyError'
   }
@@ -1242,7 +1247,11 @@ async function merchantNotReadyErrorFor(response: Response): Promise<MerchantNot
   // `merchantOutOfGasMessage` (mcp-server, support/mcp-context.ts), pinned by
   // a parity test; every other reason keeps the wording below.
   if (reason_code === MERCHANT_OUT_OF_GAS_REASON) {
-    return new MerchantNotReadyError(merchantOutOfGasMessage(settlements_remaining, fail_floor))
+    return new MerchantNotReadyError(
+      merchantOutOfGasMessage(settlements_remaining, fail_floor),
+      // Same reason the hosted runtime returns (support/mcp-context.ts).
+      "the merchant's operator must top up its settlement wallet first; re-quote after that",
+    )
   }
   return new MerchantNotReadyError(
     'The merchant refused this call: it cannot settle a payment right now' +
@@ -1297,8 +1306,10 @@ function normalizeError(err: unknown): ToolFailure {
       next_action: err.nextAction,
       retry_with_new_quote: err.retryWithNewQuote,
       // #3103: the local runtime's one decision site — no tool can act until
-      // the merchant recovers; the message carries retry_after_s.
-      next_tool_omitted_reason: 'the merchant needs to recover first; re-quote after the retry_after_s in the message',
+      // the merchant recovers. The reason rides the error (#3834): the
+      // generic one points at the message's retry_after_s, the out-of-gas
+      // one at the operator top-up.
+      next_tool_omitted_reason: err.nextToolOmittedReason,
     }
   }
 

@@ -1542,6 +1542,10 @@ describe('haven_pay_mcp_tool: merchant_not_ready parity (#2983)', () => {
     expect(result.retry_with_new_quote).toBe(true)
     expect(result.message).toMatch(/reason_code: fail_floor_reached/)
     expect(result.message).toMatch(/Retry after approximately 30s/)
+    // #3834: every other reason keeps the generic next-step reason.
+    expect(result.next_tool_omitted_reason).toBe(
+      'the merchant needs to recover first; re-quote after the retry_after_s in the message',
+    )
     expect(result.message).not.toMatch(/discovery document/)
     // Never spent the discovery retry — the merchant's own reason is
     // conclusive, no need to probe .well-known or same-origin `/`.
@@ -1573,6 +1577,10 @@ describe('haven_pay_mcp_tool: merchant_not_ready parity (#2983)', () => {
     if (result.success) throw new Error('expected failure')
     expect(result.code).toBe('MERCHANT_NOT_READY')
     expect(result.retry_with_new_quote).toBe(true)
+    // Same literal the hosted test pins for next_tool_omitted_reason.
+    expect(result.next_tool_omitted_reason).toBe(
+      "the merchant's operator must top up its settlement wallet first; re-quote after that",
+    )
     expect(result.message).toBe(
       "The merchant refused this call: its settlement wallet is out of gas (reason_code: settlement_wallet_out_of_gas). It has gas for 11 more settlements and refuses new payments below 12 (settlements_remaining: 11, fail_floor: 12). No payment was created. The merchant's operator must top up its settlement wallet; until then every retry is refused again. Tell the user, and re-quote once the merchant has been topped up.",
     )

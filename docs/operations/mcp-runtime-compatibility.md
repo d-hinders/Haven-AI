@@ -80,6 +80,16 @@ last-verified: "2026-10-09"
 ---
 
 
+> **Re-verification (#3819, 2026-10-09):** coupled through
+> `.github/workflows/publish.yml`: the dependency-presence ledger
+> (`dep_state`) is now a space-delimited `pkg=state` string with an
+> exact-word `case` lookup instead of a bash-4 associative array, making the
+> loop bash 3.2 compatible (#3819). No Supported Runtime Manifest rule,
+> version-skew contract or hosted-runtime statement in this document moves:
+> the hold-back / FAILED / never-nominated behaviour is identical on bash 5
+> and bash 3.2. Verified by `release-bump.test.mjs` (102/102), including a
+> real GNU bash 3.2.57 container run.
+
 > **Re-verification (#3797, 2026-10-09):** coupled through
 > `.github/workflows/publish.yml`, which gains a dependency-presence gate (a
 > package whose internal `@haven_ai/*` dependency did not publish in the same

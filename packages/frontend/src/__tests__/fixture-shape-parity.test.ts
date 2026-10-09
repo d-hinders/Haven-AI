@@ -94,6 +94,11 @@ describe('fixture shape parity (screenshot dataset ↔ e2e dataset)', () => {
     expect(keysOf(FIXTURE_OVERVIEW.metrics)).toEqual(keysOf(dashboardOverview.metrics))
     expect(keysOf(FIXTURE_OVERVIEW.agents[0])).toEqual(keysOf(dashboardOverview.agents[0]))
     for (const t of FIXTURE_TXS) expectKeySuperset(dashboardTransaction, t, 'transaction')
+    // #3824: the grouped-activity rows move together too — one shape, both
+    // harnesses, or whichever mock renders second silently drops the field.
+    // Superset, not equal: the screenshot dataset carries the OPTIONAL
+    // `countIsFloor` on its truncated-window group.
+    expectKeySuperset(FIXTURE_OVERVIEW.activity![0], dashboardOverview.activity[0], 'activity group')
     // #3127 (finding 8): the SEK figures the SERVED DEFAULT renders exist in
     // BOTH harnesses, with values. A harness that drops a `sek` key back out
     // photographs `0,00 kr` under the default — the same "green tick that is

@@ -66,7 +66,7 @@ function agentBudgetSummary(agent: Agent, chainId: number | null): string {
   if (isHalfRevoked(agent)) return 'Budget still active on-chain'
   if (agent.status === 'revoked') return 'Access revoked'
   const allowances = agent.allowances ?? []
-  if (allowances.length === 0) return 'No agent budget set'
+  if (allowances.length === 0) return 'No budget'
   if (allowances.length > 1) return `${allowances.length} agent budgets`
 
   const allowance = allowances[0]

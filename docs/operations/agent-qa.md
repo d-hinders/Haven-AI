@@ -777,7 +777,8 @@ and preflight output reaches only a run log.
 
 `qa-balances.yml` runs once a day (06:00 UTC, and on `workflow_dispatch`). It
 calls `npm run qa:balances -w packages/qa-agent`, which reads three wallets on
-Base Sepolia and may request testnet faucet ETH for the dev relayer. Then
+Base Sepolia and may request testnet faucet ETH for the demo merchant's
+settlement wallet and the dev relayer. Then
 `scripts/ci/qa-balance-issue.mjs` keeps **one standing issue**, `QA wallet
 balances low` (label `qa-funding`):
 
@@ -803,12 +804,28 @@ for the relayer. `unknown` means a missing config value or a failed read.
 
 **How the issue behaves.**
 
-- **Before reporting:** a `warn` or `critical` dev relayer triggers bounded CDP
-  Base Sepolia ETH faucet requests toward a 0.03 ETH target, at most 300 claims.
-  Each accepted claim is 0.0001 ETH; a 429 or any faucet error stops the loop.
-  The job then re-reads the relayer and builds the report and history from that
-  post-top-up reading. A shared daily faucet cap can therefore produce a partial
-  top-up without making the workflow red.
+- **Before reporting:** bounded CDP Base Sepolia ETH faucet requests, one wallet
+  at a time, each accepted claim 0.0001 ETH; a 429 or any faucet error stops
+  that wallet's loop only. Both loops share one six-minute budget.
+  - **The demo merchant goes first** (#3836). It is topped up whenever it is
+    below a 0.002 ETH target (about 800 settlements), **whatever its band**: its
+    `critical` floor is its own payment-refusal point and its fallback `warn`
+    floor is hours of burn, so a daily band trigger let it run dry between two
+    runs on 2026-10-09. It needs at most 20 claims. It is topped up only when
+    its `/healthz` reports `chain_id` 84532 and a valid settlement address;
+    otherwise the top-up is skipped with that reason and the row keeps its band.
+  - **The dev relayer** is topped up when it is `warn` or `critical`, toward a
+    0.03 ETH target, at most 300 claims.
+  - After both loops, the job re-reads each wallet it topped up and builds the
+    report and history from that post-top-up reading. A failed re-read keeps
+    the pre-top-up reading rather than turning the row `unknown`. A shared daily
+    faucet cap can therefore produce a partial top-up without making the
+    workflow red.
+  - On a day the job refills the merchant, the history records the refilled
+    balance, so the merchant's observed burn reads low, its runway high, and
+    its band is usually `ok`. The trigger does not depend on
+    the band; when a top-up fails the real drop is recorded, and a balance below
+    the merchant's fail floor is `critical` whatever the history says.
 - **Any wallet `warn` or `critical`:** the body is rewritten, and the issue is
   reopened (or created once). Each row carries the full address, balance, burn
   per day, runway and a link to the matching top-up heading below.
@@ -822,8 +839,9 @@ for the relayer. `unknown` means a missing config value or a failed read.
   `standing-issue-upsert.mjs` rule (#3341). A human issue with the same label,
   or one whose title contains the words, is never edited or closed.
 
-The check is read-only except for testnet faucet requests for the dev relayer.
-It never signs or moves Haven or customer funds, and it receives neither a
+The check is read-only except for testnet faucet requests for the demo
+merchant's settlement wallet and the dev relayer. It never signs or moves Haven
+or customer funds, and it receives neither a
 delegate private key nor a CDP Wallet Secret.
 
 ### Top up the delegation treasury
@@ -836,6 +854,12 @@ treasury address the issue names, from any source. It is the same address as
 
 ### Top up the demo-merchant settlement wallet
 
+The job does this automatically (#3836): when the merchant's `/healthz` reports
+chain 84532 and a balance below 0.002 ETH, it requests Base Sepolia ETH from CDP
+until the live balance plus accepted claims reaches 0.002 ETH, the shared
+six-minute budget expires, or CDP returns an error or 429, and logs a
+`merchant top-up:` line. The steps below are the manual fallback.
+
 Send Base Sepolia ETH to the settlement address the issue names (the merchant's
 `/healthz` reports the same one). That wallet pays the gas for the merchant's own
 settlements. The merchant's warn and fail floors are counted in settlements;
@@ -847,7 +871,8 @@ settlement wallet.
 
 When the row is `warn` or `critical`, the job requests Base Sepolia ETH from
 CDP until the live starting balance plus accepted 0.0001 ETH claims reaches
-0.03 ETH, 300 claims are accepted, the six-minute loop budget expires, or CDP
+0.03 ETH, 300 claims are accepted, the shared six-minute budget (what the
+merchant's loop left of it) expires, or CDP
 returns an error or 429. It re-reads the chain afterwards; that reading, not the
 number of accepted requests, decides the row and the history artifact. The
 standing issue records the accepted claim count, amount, stop reason, and a
@@ -857,9 +882,10 @@ CDP's faucet endpoint needs `QA_CDP_API_KEY_ID` and
 `QA_CDP_API_KEY_SECRET`; it does **not** need `CDP_WALLET_SECRET`. Coinbase's
 public documentation does not describe a faucet-only API-key permission, so use
 a dedicated CDP project/key with no wallets or other product configuration and
-reserve it for this workflow. If either secret is absent, the job prints and
-reports `top-up skipped: no CDP credentials`; the relayer row keeps its real
-band, no row becomes `unknown`, and that absence alone never makes the job red.
+reserve it for this workflow. If either secret is absent, the job prints
+`merchant top-up: skipped: no CDP credentials` and the same line for the
+relayer, and the standing issue names the skip per wallet; both rows keep their real bands, no row becomes `unknown`, and that
+absence alone never makes the job red.
 
 Manual fallback: send Base Sepolia ETH to the address in
 `QA_DEV_RELAYER_ADDRESS` with the [Alchemy Base Sepolia faucet](https://www.alchemy.com/faucets/base-sepolia)
@@ -882,6 +908,10 @@ is 0.01 ETH.
 3. With the Base Sepolia relayer below 0.03 ETH, manually dispatch **QA wallet
    balances** and require a `relayer top-up:` log line plus a post-top-up
    reading in the run's report before closing the implementation issue.
+4. With the dev demo merchant's settlement wallet below 0.002 ETH, manually
+   dispatch **QA wallet balances** and require a `merchant top-up:` log line with
+   accepted claims, and a post-top-up merchant balance of at least 0.0019 ETH
+   (the target minus one claim), before closing #3836.
 
 ## Automation & gating
 

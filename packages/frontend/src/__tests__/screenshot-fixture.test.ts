@@ -1351,7 +1351,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       it('pins the manual credential fallback at connected_local and approval-ready', () => {
         // The fallback cannot truthfully report a configured runtime. Its
         // explicit marker is what routes it to the same owner-signed approval
-        // screen instead of silently shooting "Finishing setup".
+        // screen instead of silently shooting the finalizing-local screen.
         const first = approve.api(`/agent-connection-setups/${SETUP_ID}`, 'GET') as {
           status: string
           agent_id: string

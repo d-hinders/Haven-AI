@@ -103,7 +103,8 @@ export function DelegationApprovalStep({
     <>
       <AgentRulesSummary
         // #1684: no card heading — the modal subtitle already reads "Approve
-        // the agent budget" about 40px above this card. One sentence, once.
+        // the agent budget" above this card, and since #3832 the step-list
+        // row around it says "Review and sign". One sentence, once.
         title={null}
         // #1684: one line, not three sentences. What the table below cannot
         // say is kept: the refill, and the guarantee that nothing executes

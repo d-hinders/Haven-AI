@@ -23,6 +23,7 @@ import { Button } from './ui/Button'
 import { Input } from './ui/Input'
 import { Modal } from './ui/Modal'
 import ConfirmDialog from './ConfirmDialog'
+import WalletConnectAction from './WalletConnectAction'
 import { Icon } from './ui/Icon'
 import { useToast } from './ui/Toast'
 import { truncateAddress } from '@/components/haven'
@@ -207,9 +208,13 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
             // #1097: with passkeys present the optimistic fallback keeps
             // `ready` true, so this state only occurs for owner-only
             // accounts — the wallet really is the blocker.
-            <p className="mt-3 text-xs text-[var(--v2-ink-muted)]">
-              Connect your account owner wallet to change how this account is approved.
-            </p>
+            <div className="mt-3 space-y-2">
+              <p className="text-xs text-[var(--v2-ink-muted)]">
+                Connect your account owner wallet to change how this account is approved.
+              </p>
+              {/* #3812: connect or switch in place, not only from the header. */}
+              {!loadError ? <WalletConnectAction /> : null}
+            </div>
           ) : null}
           {ready && passkeyElsewhere ? (
             // #1097: signing works, but the ceremony may hand off to the

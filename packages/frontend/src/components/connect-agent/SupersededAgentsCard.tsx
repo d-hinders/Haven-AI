@@ -4,6 +4,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import WalletConnectAction from '@/components/WalletConnectAction'
 import { RemoveAgentDialog } from '@/components/agent-panel/RemoveAgentDialog'
 import { useAgents, type Agent } from '@/hooks/useAgents'
 import { useDelegationBudget, type BudgetResult } from '@/hooks/useDelegationBudget'
@@ -75,7 +76,7 @@ function RevokeAndEndBudgetDialog({
   onConfirm: (signer: BudgetSigner) => void
   onCancel: () => void
 }) {
-  const { revokeAll, ready, busy, signersLoading } = useDelegationBudget(agent.id, chainId)
+  const { revokeAll, ready, busy, signersLoading, signersError } = useDelegationBudget(agent.id, chainId)
   return (
     <ConfirmDialog
       open
@@ -86,10 +87,16 @@ function RevokeAndEndBudgetDialog({
           <RevokeConfirmBody linked />
           {!ready && !signersLoading && (
             <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
-              This device cannot sign for the account. Its key will still be revoked, but the
-              budget stays active until you finish on a device that can.
+              This device cannot sign for the account yet. Connect the owner wallet below to end
+              the budget too, or revoke now: the key is still revoked, but the budget stays active
+              until you finish on a device that can.
             </p>
           )}
+          {/* #3812: the budget half needs the owner's signature — connect or
+              switch in place so the revoke can finish here. */}
+          {!ready && !signersLoading && !signersError ? (
+            <WalletConnectAction className="mt-2" />
+          ) : null}
         </>
       }
       confirmLabel="Revoke agent"

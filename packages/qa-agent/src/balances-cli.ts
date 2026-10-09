@@ -13,9 +13,9 @@
  * including when a read fails (an RPC or `/healthz` outage says nothing about
  * the wallet). Unlike `runPreflight`, a missing config never drops a row.
  *
- * Read-only except for bounded Base Sepolia faucet requests for the dev
- * relayer. Deliberately takes no delegate private key and never signs or moves
- * Haven or customer funds.
+ * Read-only except for bounded Base Sepolia faucet requests for the demo
+ * merchant's settlement wallet and the dev relayer (#3836). Deliberately takes
+ * no delegate private key and never signs or moves Haven or customer funds.
  */
 import { createHash, randomUUID } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -26,22 +26,36 @@ import { HavenApi } from './lib/haven-api.js'
 import {
   buildBalancesReport,
   collectBalanceReadings,
+  MERCHANT_TOPUP_TARGET_WEI,
+  readMerchant,
   readRelayer,
   RELAYER_TOPUP_TARGET_WEI,
   safeReason,
+  TOP_UP_WALLETS,
   withDeadline,
   type BalanceReadings,
+  type BalanceSources,
   type BalancesReport,
   type HistoryEntry,
+  type Reading,
+  type TopUpOutcome,
+  type TopUpWallet,
 } from './lib/balances.js'
 import type { QaConfig } from './config.js'
 
 /** Coinbase's documented Base Sepolia ETH amount per accepted faucet request. */
 export const CDP_FAUCET_CLAIM_WEI = 100_000_000_000_000n
 export const RELAYER_TOPUP_MAX_CLAIMS = 300
-export const RELAYER_TOPUP_RUN_BUDGET_MS = 6 * 60_000
-export const RELAYER_TOPUP_CALL_TIMEOUT_MS = 10_000
-export const RELAYER_TOPUP_DELAY_MS = 250
+/**
+ * One budget for BOTH wallets' faucet loops (#3836): the merchant loop runs
+ * first and the relayer loop gets what is left, so the top-ups together never
+ * spend more than this of the job's 10-minute timeout.
+ */
+export const TOPUP_RUN_BUDGET_MS = 6 * 60_000
+export const TOPUP_CALL_TIMEOUT_MS = 10_000
+export const TOPUP_DELAY_MS = 250
+/** The only chain the CDP faucet serves; the merchant must report it before a claim. */
+const FAUCET_CHAIN_ID = 84532
 
 export function readHistory(path: string | undefined): HistoryEntry[] {
   if (!path) return []
@@ -90,7 +104,14 @@ export function boundedProvider(url: string = BASE_SEPOLIA_RPC): ethers.JsonRpcP
 
 type FaucetRequest = typeof requestCdpEvmFaucet
 
-function deterministicClaimId(
+/**
+ * A stable `X-Idempotency-Key` per run, attempt, wallet and claim. Each wallet
+ * has its own namespace: sharing one would give the merchant's claim N the
+ * relayer's claim N key, and CDP would treat it as a replay (#3836). The
+ * relayer's namespace is unchanged from #3655, pinned by a test.
+ */
+export function deterministicClaimId(
+  wallet: TopUpWallet,
   runId: string | undefined,
   runAttempt: string | undefined,
   claim: number,
@@ -98,7 +119,7 @@ function deterministicClaimId(
   if (!runId) return randomUUID()
   const attempt = runAttempt?.trim() || '1'
   const hex = createHash('sha256')
-    .update(`qa-relayer-topup:${runId}:${attempt}:${claim}`)
+    .update(`qa-${wallet}-topup:${runId}:${attempt}:${claim}`)
     .digest('hex')
     .slice(0, 32)
     .split('')
@@ -108,52 +129,64 @@ function deterministicClaimId(
   return `${s.slice(0, 8)}-${s.slice(8, 12)}-${s.slice(12, 16)}-${s.slice(16, 20)}-${s.slice(20)}`
 }
 
-function skippedTopUp(stopReason: 'not-needed' | 'missing-credentials'): NonNullable<BalancesReport['topUp']> {
-  return { status: 'skipped', claimsMade: 0, amountReceivedAtomic: '0', stopReason }
+function skippedTopUp(stopReason: TopUpOutcome['stopReason'], reason?: string): TopUpOutcome {
+  return { status: 'skipped', claimsMade: 0, amountReceivedAtomic: '0', stopReason, ...(reason ? { reason } : {}) }
 }
 
-export async function topUpRelayer(
-  readings: BalanceReadings,
-  provisional: BalancesReport,
-  env: NodeJS.ProcessEnv,
-  deps: {
-    requestFaucet?: FaucetRequest
-    sleep?: (ms: number) => Promise<void>
-    nowMs?: () => number
-  } = {},
-): Promise<NonNullable<BalancesReport['topUp']>> {
-  const row = provisional.rows.find((candidate) => candidate.key === 'relayer')
-  const reading = readings.relayer
+interface TopUpDeps {
+  requestFaucet?: FaucetRequest
+  sleep?: (ms: number) => Promise<void>
+  nowMs?: () => number
+  /** Epoch ms after which no further claim starts; shared by both wallets' loops. */
+  deadlineAt?: number
+}
+
+function cdpCredentials(env: NodeJS.ProcessEnv): { apiKeyId: string; apiKeySecret: string } | null {
   const apiKeyId = env.QA_CDP_API_KEY_ID?.trim()
   const apiKeySecret = env.QA_CDP_API_KEY_SECRET?.trim()
-  if (!apiKeyId || !apiKeySecret) return skippedTopUp('missing-credentials')
-  if (!row || !reading.ok || (row.band !== 'warn' && row.band !== 'critical')) return skippedTopUp('not-needed')
+  return apiKeyId && apiKeySecret ? { apiKeyId, apiKeySecret } : null
+}
 
-  const needed = RELAYER_TOPUP_TARGET_WEI > reading.atomic ? RELAYER_TOPUP_TARGET_WEI - reading.atomic : 0n
+/**
+ * Claim toward `targetWei` for one wallet, one bounded request at a time. Stops
+ * at the target, the cap (when one is given), a 429, any other faucet error, or
+ * the deadline. Without a cap the target bounds the loop: balance ≥ 0, so at
+ * most ceil(target / claim) claims.
+ */
+async function claimToTarget(
+  wallet: TopUpWallet,
+  address: string,
+  balance: bigint,
+  targetWei: bigint,
+  maxClaims: number | undefined,
+  credentials: { apiKeyId: string; apiKeySecret: string },
+  env: NodeJS.ProcessEnv,
+  deps: TopUpDeps,
+): Promise<TopUpOutcome> {
+  const needed = targetWei > balance ? targetWei - balance : 0n
   const claimsToTarget = Number((needed + CDP_FAUCET_CLAIM_WEI - 1n) / CDP_FAUCET_CLAIM_WEI)
-  const plannedClaims = Math.min(claimsToTarget, RELAYER_TOPUP_MAX_CLAIMS)
+  const plannedClaims = maxClaims === undefined ? claimsToTarget : Math.min(claimsToTarget, maxClaims)
   const requestFaucet = deps.requestFaucet ?? requestCdpEvmFaucet
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
   const nowMs = deps.nowMs ?? Date.now
-  const started = nowMs()
+  const deadlineAt = deps.deadlineAt ?? nowMs() + TOPUP_RUN_BUDGET_MS
   let claimsMade = 0
-  let stopReason: NonNullable<BalancesReport['topUp']>['stopReason'] =
-    claimsToTarget >= RELAYER_TOPUP_MAX_CLAIMS ? 'claim-cap-reached' : 'target-requests-complete'
+  let stopReason: TopUpOutcome['stopReason'] =
+    maxClaims !== undefined && claimsToTarget >= maxClaims ? 'claim-cap-reached' : 'target-requests-complete'
   let reason: string | undefined
 
   for (let claim = 1; claim <= plannedClaims; claim++) {
-    if (nowMs() - started >= RELAYER_TOPUP_RUN_BUDGET_MS) {
+    if (nowMs() >= deadlineAt) {
       stopReason = 'run-budget-exhausted'
       break
     }
     try {
       await requestFaucet({
-        address: reading.address,
-        chainId: 84532,
-        apiKeyId,
-        apiKeySecret,
-        idempotencyKey: deterministicClaimId(env.GITHUB_RUN_ID, env.GITHUB_RUN_ATTEMPT, claim),
-        timeoutMs: RELAYER_TOPUP_CALL_TIMEOUT_MS,
+        address,
+        chainId: FAUCET_CHAIN_ID,
+        ...credentials,
+        idempotencyKey: deterministicClaimId(wallet, env.GITHUB_RUN_ID, env.GITHUB_RUN_ATTEMPT, claim),
+        timeoutMs: TOPUP_CALL_TIMEOUT_MS,
       })
       claimsMade++
     } catch (error) {
@@ -161,18 +194,113 @@ export async function topUpRelayer(
       reason = safeReason('faucet request failed', error)
       break
     }
-    if (claim < plannedClaims) await sleep(RELAYER_TOPUP_DELAY_MS)
+    if (claim < plannedClaims) await sleep(TOPUP_DELAY_MS)
   }
 
   return {
     status: 'attempted',
     claimsMade,
-    // The post-loop chain read below supplies what actually arrived. An
-    // accepted faucet response is not confirmation of an increased balance.
+    // The post-loop read supplies what actually arrived. An accepted faucet
+    // response is not confirmation of an increased balance.
     amountReceivedAtomic: '0',
     stopReason,
     ...(reason ? { reason } : {}),
   }
+}
+
+/** The dev relayer: topped up to 0.03 ETH when its band is `warn` or `critical` (#3655). */
+export async function topUpRelayer(
+  readings: BalanceReadings,
+  provisional: BalancesReport,
+  env: NodeJS.ProcessEnv,
+  deps: TopUpDeps = {},
+): Promise<TopUpOutcome> {
+  const row = provisional.rows.find((candidate) => candidate.key === 'relayer')
+  const reading = readings.relayer
+  const credentials = cdpCredentials(env)
+  if (!credentials) return skippedTopUp('missing-credentials')
+  if (!row || !reading.ok || (row.band !== 'warn' && row.band !== 'critical')) {
+    return skippedTopUp('not-needed', 'the relayer was not `warn` or `critical`')
+  }
+  return claimToTarget('relayer', reading.address, reading.atomic, RELAYER_TOPUP_TARGET_WEI, RELAYER_TOPUP_MAX_CLAIMS, credentials, env, deps)
+}
+
+/**
+ * The demo merchant's settlement wallet (#3836): topped up whenever it is
+ * readable, on 84532, and below its target — NOT on band. Its `critical` floor
+ * is its own refusal point and its fallback `warn` floor is hours of burn, so a
+ * daily band trigger lets it run dry between runs (2026-10-09). The claim count
+ * is bounded by the target itself: at most ceil(target / claim).
+ */
+export async function topUpMerchant(
+  readings: BalanceReadings,
+  env: NodeJS.ProcessEnv,
+  deps: TopUpDeps & { merchantTargetWei?: bigint } = {},
+): Promise<TopUpOutcome> {
+  const reading = readings.merchant
+  const target = deps.merchantTargetWei ?? MERCHANT_TOPUP_TARGET_WEI
+  const credentials = cdpCredentials(env)
+  if (!credentials) return skippedTopUp('missing-credentials')
+  if (!reading.ok) return skippedTopUp('unreadable', 'the merchant balance could not be read')
+  if (reading.chainId !== FAUCET_CHAIN_ID) {
+    return skippedTopUp(
+      'wrong-chain',
+      reading.chainId === undefined
+        ? 'merchant /healthz reports no chain_id'
+        : `merchant /healthz reports chain ${reading.chainId}, not ${FAUCET_CHAIN_ID}`,
+    )
+  }
+  if (!ethers.isAddress(reading.address)) return skippedTopUp('invalid-address', 'merchant /healthz settlement address is not an address')
+  if (reading.atomic >= target) {
+    return skippedTopUp('not-needed', `the merchant was at or above its ${ethers.formatEther(target)} ETH target`)
+  }
+  return claimToTarget('merchant', reading.address, reading.atomic, target, undefined, credentials, env, deps)
+}
+
+/**
+ * Both wallets' top-ups under ONE deadline, merchant first: it needs at most
+ * ceil(target / claim) claims, and below its fail floor it refuses every
+ * payment. A merchant 429 or error ends only the merchant loop.
+ */
+export async function runTopUps(
+  readings: BalanceReadings,
+  provisional: BalancesReport,
+  env: NodeJS.ProcessEnv,
+  deps: TopUpDeps & { merchantTargetWei?: bigint } = {},
+): Promise<Record<TopUpWallet, TopUpOutcome>> {
+  const nowMs = deps.nowMs ?? Date.now
+  const shared = { ...deps, deadlineAt: deps.deadlineAt ?? nowMs() + TOPUP_RUN_BUDGET_MS }
+  const merchant = await topUpMerchant(readings, env, shared)
+  const relayer = await topUpRelayer(readings, provisional, env, shared)
+  return { merchant, relayer }
+}
+
+/**
+ * Re-read one wallet after the top-ups. A failed or timed-out re-read keeps the
+ * PRE-top-up reading: replacing a `critical` reading with `unknown` would hide
+ * it, since `unknown` never opens the standing issue (#3836).
+ */
+async function rereadAfterTopUp(
+  wallet: TopUpWallet,
+  before: Reading,
+  outcome: TopUpOutcome,
+  sources: BalanceSources,
+  deadlineMs: number,
+): Promise<Reading> {
+  const reader = wallet === 'merchant' ? readMerchant : readRelayer
+  const after = await withDeadline(reader(sources), deadlineMs, (): Reading => ({
+    ok: false,
+    reason: `post-top-up read timed out after ${Math.round(deadlineMs / 1000)} s`,
+  }))
+  if (!after.ok) {
+    const note = `post-top-up read failed (${after.reason}); showing the pre-top-up reading`
+    outcome.reason = outcome.reason ? `${outcome.reason}; ${note}` : note
+    return before
+  }
+  if (before.ok && after.atomic > before.atomic) {
+    outcome.amountReceivedAtomic = (after.atomic - before.atomic).toString()
+  }
+  return after
 }
 
 export async function runBalances(
@@ -187,6 +315,7 @@ export async function runBalances(
     sleep?: (ms: number) => Promise<void>
     nowMs?: () => number
     deadlineMs?: number
+    merchantTargetWei?: bigint
   } = {},
 ): Promise<{ report: BalancesReport; exitCode: number }> {
   const arg = (name: string) => {
@@ -200,20 +329,15 @@ export async function runBalances(
   const history = readHistory(arg('history'))
   const readings = await collectBalanceReadings(sources, deps.deadlineMs)
   const provisional = buildBalancesReport(readings, history, deps.now)
-  const topUp = await topUpRelayer(readings, provisional, env, deps)
-  if (topUp.status === 'attempted') {
-    const before = readings.relayer
-    readings.relayer = await withDeadline(readRelayer(sources), deps.deadlineMs ?? 30_000, () => ({
-      ok: false,
-      reason: `post-top-up read timed out after ${Math.round((deps.deadlineMs ?? 30_000) / 1000)} s`,
-    }))
-    const after = readings.relayer
-    if (before.ok && after.ok && after.atomic > before.atomic) {
-      topUp.amountReceivedAtomic = (after.atomic - before.atomic).toString()
-    }
+  const topUps = await runTopUps(readings, provisional, env, deps)
+  // Re-read only after BOTH loops: a faucet call returns a transaction hash,
+  // not a confirmation, so this gives the merchant's claims time to be mined.
+  for (const wallet of TOP_UP_WALLETS) {
+    if (topUps[wallet].status !== 'attempted') continue
+    readings[wallet] = await rereadAfterTopUp(wallet, readings[wallet], topUps[wallet], sources, deps.deadlineMs ?? 30_000)
   }
   const report = buildBalancesReport(readings, history, deps.now)
-  report.topUp = topUp
+  report.topUps = topUps
   // Name the exact missing variable on the treasury row (the reader only
   // knows "no API").
   if (src.apiMissing) {
@@ -223,6 +347,19 @@ export async function runBalances(
   const out = arg('out')
   if (out) writeFileSync(out, JSON.stringify(report, null, 2) + '\n')
   return { report, exitCode: report.configMissing ? 1 : 0 }
+}
+
+/** One log line per wallet: `merchant top-up: …` / `relayer top-up: …`. */
+export function topUpLogLine(wallet: TopUpWallet, outcome: TopUpOutcome | undefined): string | null {
+  if (!outcome) return null
+  if (outcome.stopReason === 'missing-credentials') return `${wallet} top-up: skipped: no CDP credentials`
+  if (outcome.status === 'skipped') {
+    return `${wallet} top-up: skipped (${outcome.stopReason})${outcome.reason ? ` — ${outcome.reason}` : ''}`
+  }
+  return (
+    `${wallet} top-up: ${outcome.claimsMade} claim(s), ${ethers.formatEther(outcome.amountReceivedAtomic)} ETH, ${outcome.stopReason}` +
+    (outcome.reason ? ` — ${outcome.reason}` : '')
+  )
 }
 
 const isMain = (() => {
@@ -242,13 +379,9 @@ if (isMain) {
         const runway = r.runwayDays !== undefined ? `, runway ${r.runwayDays} d` : ''
         console.log(`${r.band.padEnd(8)} ${r.name}${where}: ${bal}${runway}${r.reason ? ` — ${r.reason}` : ''}`)
       }
-      const topUp = report.topUp
-      if (topUp?.stopReason === 'missing-credentials') console.log('top-up skipped: no CDP credentials')
-      else if (topUp) {
-        console.log(
-          `relayer top-up: ${topUp.claimsMade} claim(s), ${ethers.formatEther(topUp.amountReceivedAtomic)} ETH, ${topUp.stopReason}` +
-            (topUp.reason ? ` — ${topUp.reason}` : ''),
-        )
+      for (const wallet of TOP_UP_WALLETS) {
+        const line = topUpLogLine(wallet, report.topUps?.[wallet])
+        if (line) console.log(line)
       }
       if (exitCode !== 0) console.error('qa:balances: a required config value is missing (see the unknown rows above)')
       process.exit(exitCode)

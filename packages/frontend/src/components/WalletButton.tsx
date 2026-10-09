@@ -14,7 +14,7 @@ import { Info, TriangleAlert, Wallet } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { VIEWPORT_MARGIN } from '@/components/ui/Tooltip'
 import { useScrollEdgeCue } from '@/hooks/useScrollEdgeCue'
-import { useAccount, useDisconnect } from 'wagmi'
+import { useDisconnect } from 'wagmi'
 import type { Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
@@ -28,6 +28,7 @@ import {
 import { passkeyRowLabel } from '@/lib/passkeyLabels'
 import { BRAND_COLOURS } from '@/lib/brand-colours'
 import { useAccountOperationGate } from '@/hooks/useAccountOperationGate'
+import { useSwitchWallet } from '@/hooks/useSwitchWallet'
 import { truncateAddress } from '@/components/haven'
 import { resolveDefaultAccount } from '@/lib/default-account'
 import { usePathname } from 'next/navigation'
@@ -701,36 +702,10 @@ export default function WalletButton({
   // wagmi has committed isConnected=false. Driven from the parent so the
   // open call survives the popover unmounting and lands in the
   // disconnected render path (RainbowKit refuses to open the connect
-  // modal while a wallet is still connected).
-  const { isConnected } = useAccount()
-  const { disconnectAsync } = useDisconnect()
+  // modal while a wallet is still connected). Shared with every signing
+  // flow's in-flow `WalletConnectAction` (#3812).
   const { openConnectModal: openConnectModalHook } = useConnectModal()
-  const [pendingSwitch, setPendingSwitch] = useState(false)
-
-  useEffect(() => {
-    if (!pendingSwitch) return
-
-    if (!isConnected && openConnectModalHook) {
-      setPendingSwitch(false)
-      openConnectModalHook()
-      return
-    }
-
-    // Safety valve: if we have been in pending state for >3 s but the connect
-    // modal is still not available (e.g. RainbowKit not ready), give up so the
-    // UI doesn't stay stuck on "Disconnecting…" indefinitely.
-    const id = window.setTimeout(() => setPendingSwitch(false), 3000)
-    return () => window.clearTimeout(id)
-  }, [pendingSwitch, isConnected, openConnectModalHook])
-
-  const handleSwitchWallet = async () => {
-    setPendingSwitch(true)
-    try {
-      await disconnectAsync()
-    } catch {
-      setPendingSwitch(false)
-    }
-  }
+  const { switchWallet: handleSwitchWallet, switching: pendingSwitch } = useSwitchWallet()
 
   return (
     <ConnectButton.Custom>

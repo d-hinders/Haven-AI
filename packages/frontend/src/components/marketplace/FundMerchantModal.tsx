@@ -39,6 +39,7 @@ import {
 import { truncateAddress, BudgetAmountRow } from '@/components/haven'
 import { Icon } from '@/components/ui/Icon'
 import { Button } from '@/components/ui/Button'
+import WalletConnectAction from '@/components/WalletConnectAction'
 import { Select } from '@/components/ui/Select'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
@@ -251,7 +252,7 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
   // `chainId` change (agent picker inside one mounted instance), so `budgets`
   // and `ready` below are never the PREVIOUS agent's while the new read is in
   // flight — they read `null`/`false` instead.
-  const { budgets, budgetsError, reload, grant, busy, ready } = useDelegationBudget(
+  const { budgets, budgetsError, reload, grant, busy, ready, signersError, signersLoading } = useDelegationBudget(
     selectedAgent?.id ?? '',
     chainId ?? 0,
     { enabled: open && !!selectedAgent },
@@ -556,9 +557,13 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                 </Button>
               </div>
               {!ready && (
-                <p className="text-xs text-[var(--v2-ink-3)]">
-                  Connect the wallet or passkey that approves actions for this agent's Haven wallet.
-                </p>
+                <div className="space-y-2">
+                  <p className="text-xs text-[var(--v2-ink-3)]">
+                    Connect the wallet or passkey that approves actions for this agent's Haven wallet.
+                  </p>
+                  {/* #3812: connect or switch in place, not only from the header. */}
+                  {!signersError && !signersLoading ? <WalletConnectAction /> : null}
+                </div>
               )}
             </div>
           )}

@@ -17,6 +17,7 @@ import {
   readBands,
   selectStandingIssue,
   TOP_UP_ANCHOR,
+  topUpSummary,
 } from './qa-balance-issue.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./qa-balance-issue.mjs', import.meta.url))
@@ -58,14 +59,14 @@ function row(key, band, extra = {}) {
   return { key, band, balance: '0.5', basis: 'observed', burnPerDay: '0.1', runwayDays: 5, ...meta, ...extra }
 }
 
-const report = (rows, topUp) => ({ checkedAt: '2026-10-05T06:00:00.000Z', rows, history: [], configMissing: false, ...(topUp ? { topUp } : {}) })
+const report = (rows, topUps) => ({ checkedAt: '2026-10-05T06:00:00.000Z', rows, history: [], configMissing: false, ...(topUps ? { topUps } : {}) })
 
-function run({ rows, issues = [], listFail = false, topUp }) {
+function run({ rows, issues = [], listFail = false, topUps }) {
   const dir = mkdtempSync(join(tmpdir(), 'qa-balance-issue-'))
   makeStub(dir)
   const log = join(dir, 'gh.log')
   const reportPath = join(dir, 'report.json')
-  writeFileSync(reportPath, JSON.stringify(report(rows, topUp)))
+  writeFileSync(reportPath, JSON.stringify(report(rows, topUps)))
   const result = spawnSync(process.execPath, [SCRIPT, '--report', reportPath], {
     encoding: 'utf8',
     env: {
@@ -113,9 +114,9 @@ test('the issue body records a scrubbed faucet failure and accepted amount', () 
     reason: 'faucet request failed: https://api.cdp.coinbase.com?key=SUPERSECRETKEY1234567',
   }
   const rows = [row('treasury', 'ok'), row('merchant', 'ok'), row('relayer', 'critical')]
-  const { calls } = run({ rows, topUp })
+  const { calls } = run({ rows, topUps: { relayer: topUp } })
   const body = calls.at(-1).input
-  assert.match(body, /2 accepted claim\(s\), 0\.0002 ETH received/)
+  assert.match(body, /Dev backend relayer testnet faucet top-up: 2 accepted claim\(s\), 0\.0002 ETH received/)
   assert.match(body, /rate-limited/)
   assert.doesNotMatch(body, /SUPERSECRETKEY/)
   assert.doesNotMatch(body, /api\.cdp\.coinbase\.com/)
@@ -124,15 +125,47 @@ test('the issue body records a scrubbed faucet failure and accepted amount', () 
 test('missing CDP credentials is an informational top-up line, not an unknown row', () => {
   const topUp = { status: 'skipped', claimsMade: 0, amountReceivedAtomic: '0', stopReason: 'missing-credentials' }
   const rows = [row('treasury', 'ok'), row('merchant', 'ok'), row('relayer', 'critical')]
-  const { calls } = run({ rows, topUp })
-  assert.match(calls.at(-1).input, /top-up: skipped: no CDP credentials/)
+  const { calls } = run({ rows, topUps: { merchant: topUp, relayer: topUp } })
+  assert.match(calls.at(-1).input, /Demo-merchant settlement wallet testnet faucet top-up: skipped: no CDP credentials/)
+  assert.match(calls.at(-1).input, /Dev backend relayer testnet faucet top-up: skipped: no CDP credentials/)
   assert.doesNotMatch(calls.at(-1).input, /unknown/)
 })
 
 test('a post-top-up relayer reading of ok does not open the standing issue', () => {
   const topUp = { status: 'attempted', claimsMade: 250, amountReceivedAtomic: '25000000000000000', stopReason: 'target-requests-complete' }
-  const { verbs } = run({ rows: ok, topUp })
+  const { verbs } = run({ rows: ok, topUps: { relayer: topUp } })
   assert.deepEqual(verbs, ['label create', 'issue list'])
+})
+
+test('the body shows one top-up line per wallet, merchant first, each naming its wallet and skip reason (#3836)', () => {
+  const topUps = {
+    relayer: { status: 'skipped', claimsMade: 0, amountReceivedAtomic: '0', stopReason: 'not-needed', reason: 'the relayer was not `warn` or `critical`' },
+    merchant: { status: 'skipped', claimsMade: 0, amountReceivedAtomic: '0', stopReason: 'wrong-chain', reason: 'merchant /healthz reports chain 8453, not 84532' },
+  }
+  const body = buildBody(report(treasuryWarn, topUps), { runUrl: 'u', repo: 'd-hinders/Haven-AI', bands: {} })
+  const lines = body.split('\n').filter((l) => /testnet faucet top-up/.test(l))
+  assert.deepEqual(lines, [
+    'Demo-merchant settlement wallet testnet faucet top-up: not requested — merchant /healthz reports chain 8453, not 84532.',
+    'Dev backend relayer testnet faucet top-up: not requested — the relayer was not `warn` or `critical`.',
+  ])
+  assert.doesNotMatch(body, /accepted claim/)
+})
+
+test('a skip reason is scrubbed before it reaches the public issue', () => {
+  const line = topUpSummary('merchant', {
+    status: 'skipped', claimsMade: 0, amountReceivedAtomic: '0', stopReason: 'unreadable',
+    reason: 'merchant could not read its balance: https://rpc.example/v2/SUPERSECRETKEY1234567',
+  })
+  assert.doesNotMatch(line, /SUPERSECRETKEY/)
+  assert.doesNotMatch(line, /rpc\.example/)
+})
+
+test('a skip without a reason still gets its own wording, never the attempted-claims line', () => {
+  for (const [stopReason, text] of [['not-needed', 'not needed'], ['unreadable', 'could not be read'], ['wrong-chain', 'not on Base Sepolia'], ['invalid-address', 'not an address']]) {
+    const line = topUpSummary('merchant', { status: 'skipped', claimsMade: 0, amountReceivedAtomic: '0', stopReason })
+    assert.match(line, new RegExp(`not requested — .*${text}`), stopReason)
+    assert.doesNotMatch(line, /accepted claim/, stopReason)
+  }
 })
 
 test('a closed standing issue is reopened, not duplicated, and a band change comments once', () => {

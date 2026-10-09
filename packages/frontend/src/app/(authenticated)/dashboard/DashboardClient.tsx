@@ -102,7 +102,10 @@ function formatResetLabel(resetPeriodMin: number): string {
 }
 
 function buildSpendSummary(agent: DashboardAgentPreview): string {
-  if (agent.allowances.length === 0) return 'No spend limits'
+  // #3802: "No budget" — the overview's allowance array already carries only
+  // live (unexpired, started) budgets, so an empty array means the agent
+  // cannot spend at all. The old copy said the opposite of the truth.
+  if (agent.allowances.length === 0) return 'No budget'
 
   const summaries = agent.allowances.slice(0, 2).map((allowance) => {
     const amount = formatAllowanceForToken(

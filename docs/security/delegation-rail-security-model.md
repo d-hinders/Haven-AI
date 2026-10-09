@@ -58,6 +58,7 @@ covers:
   - packages/frontend/src/lib/signer.ts
   - packages/frontend/src/hooks/useAccountOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
+  - packages/frontend/src/components/DelegationBudgetCard.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
   - packages/backend/src/modules/passport/attestation.ts
   - packages/backend/src/modules/passport/revocation.ts
@@ -67,7 +68,7 @@ covers:
   - packages/backend/src/modules/ops/**
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
-last-verified: "2026-10-08"
+last-verified: "2026-10-09"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -214,6 +215,26 @@ up.
 > read, caveat value, or user-visible claim about who signs, what may be spent,
 > or when revocation bites changed. A CSS token rename in a delegation-surface
 > file is not a semantics change: this paragraph is that re-verification record.
+
+> **Re-verified #3812 (in-flow wallet connect):** this change touched three
+> files in this document's coverage list. `AccountSignersCard.tsx` and
+> `DelegationSendModal.tsx` are presentation-only: each now renders a "Connect
+> wallet" / "Switch wallet" control beside the owner-wallet blocker it already
+> showed. `useAgentRekey.ts` gains a read-only `signersState`
+> (`loading`/`loaded`/`error`), so a connect offer can tell a pending signer
+> read from a failed one; `signingBlockedReason` and every signing step are
+> unchanged. Elsewhere the change only adds restrictions: "Sign new budget" and
+> the off-ramp "Sign transfer" are disabled while no one on this device can
+> sign. (`WalletButton.tsx`, whose
+> disconnect-then-reopen-the-picker logic moved unchanged into a shared
+> `useSwitchWallet` hook, is not in the coverage list.) Nothing that decides
+> who may sign changed: `useActiveSigner`, `pickSigningPath`,
+> `useAccountOperationGate` and every `ready` predicate are untouched. The
+> control renders only where the caller is already not ready, and connecting
+> a wallet that is not the set's named owner still leaves the account blocked
+> (#2068). The statements in §6 about the header pill and the `wrong_wallet`
+> caption stand. `last-verified` is not re-stamped: this note is the scope,
+> and nothing else in this document was re-verified.
 
 **Where the signed delegation lives:** the agent receives it through the
 existing credential channel (same trust envelope as the agent API key).
@@ -2646,6 +2667,52 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > authority change. The rest of this document was not re-read for it, and
 > `last-verified` is bumped to 2026-10-08 for exactly this coverage.
 
+> **Re-verified unchanged (#3799, 2026-10-09, auth-row display field):** this
+> diff touches `infra/repositories/agents.ts` (a covered path) by adding
+> `a.mcp_server_name` to `AGENT_BY_API_KEY_SQL` and `AgentAuthRow` (plus the
+> `mcp_server_name` pass-through on `AgentContext` in
+> `middleware/agentAuth.ts`). The field is migration 067's "a display aid,
+> never identity": it only personalises a `client_update.upgrade_command`
+> hint string in the client-compat middleware and is read nowhere else on the
+> auth path. Authentication still keys on the API-key hash; no delegation,
+> enforcer, budget, signer-set or custody decision reads it, and no signing
+> input changes. Scope of this re-read: this field only. The rest of this
+> document was not re-read for it, and `last-verified` is not bumped.
+> **Re-verified #3802 (2026-10-09, expired budgets stop counting as active —
+> round 2, owner predicate):**
+> this diff touches `infra/repositories/delegation-budgets.ts` (a covered
+> path) to stop presenting EXPIRED grants as budgets. Every budget-VIEWING
+> read now filters `expires_at > EXTRACT(EPOCH FROM NOW())` (the DATABASE
+> clock, exclusive bound) beside `status = 'active'`: ONE shared fragment
+> (`delegationLiveWindowSql`) joins `listActiveDelegations` (which feeds the
+> dashboard, the agents routes and the agent-facing allowances read), the
+> analytics budget-remaining slice, the three ops reads and the connect
+> activation check. `start_date` is deliberately NOT filtered (owner
+> decision 2026-10-09): a credential rotation writes a dormant "steady" row
+> with a future `start_date` beside the live "carry" row, and filtering
+> future starts would hide the whole budget for the carry window. The
+> payment selection queries keep their own inline `start_date <= now <
+> expires_at` copy — pinned by #1698's tests — so a grant is never SELECTED
+> for payment before its window opens even though the views show its
+> dormant steady sibling; `GET /agents/:id/delegations` keeps listing every
+> status on purpose (the round-1 JS windowing there was reverted), and the
+> agent-detail `DelegationBudgetCard` excludes expired rows from
+> `hasActive` so the grant form shows. Nothing this document pins moves: no
+> new grant, signature, signer, key or custody path; the rows' status
+> values and every revoke/calldata-binding claim are untouched (the
+> still-enabled sets those span `pending`/`active`/`replaced` by status in
+> their own queries, not through these views); and the activation check
+> plus the allowances read only ever get NARROWER than `status = 'active'`
+> — an agent whose only budget expired now reports no budget (readiness
+> `needs_approval`) and can no longer activate through connect, matching
+> what the on-chain `TimestampEnforcer` already refuses (Red Line #4: the
+> chain remains the only spend authority; the views now agree with it).
+> Scope of this re-read: the sections whose claims rest on which rows the
+> budget views return and on the connect activation check; the invariant,
+> custody, redemption and settlement sections were NOT
+> re-read (the diff touches no file that implements them). `last-verified`
+> is bumped for exactly this coverage.
+>
 > **Re-verified unchanged (#3799, 2026-10-09, auth-row display field):** this
 > diff touches `infra/repositories/agents.ts` (a covered path) by adding
 > `a.mcp_server_name` to `AGENT_BY_API_KEY_SQL` and `AgentAuthRow` (plus the

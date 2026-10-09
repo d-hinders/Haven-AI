@@ -1922,6 +1922,19 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
       passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
     }
   }
+  if (pathname.startsWith('/agents/') && pathname.endsWith('/account-signers')) {
+    // #3812: the agent-scoped signer read behind the budget card, the remove
+    // dialog and the re-key modal. Unkeyed, it fell through to the empty
+    // fallback (no signer at all), so every default agent capture rendered
+    // the "connect your owner wallet" state. One passkey, as the account-
+    // scoped read above and the e2e fixture (`haven-api.ts`) both serve.
+    return {
+      account_address: FIXTURE_ACCOUNT.account_address,
+      chain_id: FIXTURE_ACCOUNT.chain_id,
+      owner_address: null,
+      passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
+    }
+  }
   if (pathname.startsWith('/agents/') && pathname.endsWith('/delegate-balance')) {
     // #2194. Keyed for EVERY fixture agent — the point is not that this one
     // path now answers correctly, it is that the generic fallback can no
@@ -4316,6 +4329,60 @@ export const SCENARIOS = {
     },
   },
 
+  'owner-wallet-only': {
+    description:
+      'An account owned only by a browser wallet, with no wallet connected (#3812) — the signing surfaces that offer their own Connect wallet: the account signers card, the agent budget card, and the remove-agent dialog',
+    // #3812: the header WalletButton used to be the only connect entry, so
+    // these surfaces said "connect your owner wallet" with nothing to click.
+    // The state only exists for an owner-only signer set (no passkeys): any
+    // enrolled passkey keeps every surface `ready` (#1969). The account page
+    // reads `/accounts/hybrid/<addr>/signers` (the shared fixture serves one
+    // passkey there); the agent page and its dialogs read the agent-scoped
+    // `/agents/<id>/account-signers`. Both are served the same owner-only set
+    // here, so every capture shows the state it is named for.
+    api(apiPath) {
+      const ownerOnly = {
+        account_address: FIXTURE_ACCOUNT.account_address,
+        chain_id: FIXTURE_ACCOUNT.chain_id,
+        owner_address: '0x' + 'ee'.repeat(20),
+        passkeys: [],
+      }
+      if (apiPath.startsWith('/accounts/hybrid/') && apiPath.endsWith('/signers')) return ownerOnly
+      if (apiPath === '/agents/agent-research/account-signers') return ownerOnly
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      const settle = async (url) => {
+        await page.goto(url, { waitUntil: 'networkidle', timeout: 30_000 })
+        await page.evaluate(() => document.fonts.ready)
+        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await dismissMobileSidebar(page, vp)
+      }
+
+      // ── account page: Backup & recovery ──────────────────────────────────
+      await settle(`${BASE_URL}/accounts/${FIXTURE_ACCOUNT.id}`)
+      const signersHeading = page.getByRole('heading', { name: 'Backup & recovery' })
+      await signersHeading.waitFor({ timeout: 15_000 })
+      const signersCard = page.locator('div.rounded-\\[10px\\]', { has: signersHeading })
+      await signersCard.getByRole('button', { name: 'Connect wallet' }).waitFor({ timeout: 15_000 })
+      await shoot(signersCard, 'account-signers')
+
+      // ── agent page: the budget card's rows ───────────────────────────────
+      await settle(`${BASE_URL}/agents/agent-research`)
+      const budgetNotice = page.getByText(/Connect your account owner wallet to change or stop a budget/)
+      await budgetNotice.waitFor({ timeout: 15_000 })
+      const budgetSection = page.locator('section', { has: budgetNotice })
+      await budgetSection.getByRole('button', { name: 'Connect wallet' }).waitFor({ timeout: 15_000 })
+      await shoot(budgetSection, 'agent-budget')
+
+      // ── remove-agent dialog: the revoke path ─────────────────────────────
+      await page.getByRole('button', { name: 'Agent options' }).click()
+      await page.getByRole('menuitem', { name: /Remove agent/ }).click()
+      const dialog = page.getByRole('dialog')
+      await dialog.getByRole('button', { name: 'Connect wallet' }).waitFor({ timeout: 15_000 })
+      await shoot(dialog, 'remove-agent')
+    },
+  },
   'account-backup-recovery': {
     description:
       'Backup & recovery card at both viewports, in all three of its rendered states — the healthy multi-signer layout, the one-way-to-approve warning, and the load failure',
@@ -4993,7 +5060,11 @@ export const SCENARIOS = {
 
 
       await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
-      await dialog.getByText('Connect your agent').waitFor({ timeout: 30_000 })
+      // #3832: the connect step is a numbered list whose row 1 is the copy
+      // action. Captured BEFORE the copy (the ready frame), then with the
+      // prompt disclosure open, then copied, at each stage.
+      const copyPrompt = dialog.getByRole('button', { name: 'Copy setup prompt' })
+      await copyPrompt.waitFor({ timeout: 30_000 })
 
       // The stage timers are armed by the effect that runs once a POLLED GET
       // reports `awaiting_connection` — a different round-trip from the POST
@@ -5009,7 +5080,14 @@ export const SCENARIOS = {
       // Each stage is CONFIRMED by its own copy before it is captured, so a
       // stage that never arrives fails the run instead of producing a
       // convincing, wrongly-labelled PNG.
-      await dialog.getByText('Waiting for the agent to run').waitFor({ timeout: 15_000 })
+      await shoot(dialog, 'waiting-ready')
+      await dialog.getByText('View the prompt').click()
+      await dialog.getByText(CONNECT_SETUP_TOKEN).first().waitFor({ timeout: 10_000 })
+      await shoot(dialog, 'waiting-prompt-open')
+      await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+      await copyPrompt.click()
+      await dialog.getByText('Prompt copied').waitFor({ timeout: 10_000 })
+      await dialog.getByText('Waiting for your agent to run').waitFor({ timeout: 15_000 })
       await shoot(dialog, 'waiting-starting')
 
       await page.clock.fastForward(65_000)
@@ -5021,7 +5099,7 @@ export const SCENARIOS = {
       await shoot(dialog, 'waiting-recovery')
 
       // #2482: the server-side credential path now lives in its own top-level
-      // disclosure directly under the setup prompt — one click from the
+      // disclosure (since #3832, in the footer below the setup steps) — one click from the
       // connect step, no reveal button, no warning panel, no checkbox. It is
       // the most safety-relevant surface in the flow (it hands out the
       // one-time private signing key), so it is captured twice: BEFORE

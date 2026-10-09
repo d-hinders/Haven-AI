@@ -4,13 +4,14 @@ status: current
 covers:
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/frontend/src/hooks/useAccountSigners.ts
-  - packages/frontend/src/components/onboarding/RecoveryNudge.tsx
+  - packages/frontend/src/lib/dashboard-attention.ts
+  - packages/frontend/src/app/(authenticated)/dashboard/NeedsYou.tsx
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/hybrid-accounts.ts
   - packages/backend/src/rails/hybrid-signer-actions.ts
   - packages/frontend/src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx
   - packages/backend/src/routes/passkeys.ts
-last-verified: "2026-09-11"
+last-verified: "2026-10-09"
 ---
 
 # Account recovery (delegation-rail accounts)

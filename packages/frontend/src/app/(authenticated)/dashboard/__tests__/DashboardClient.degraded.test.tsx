@@ -54,6 +54,12 @@ vi.mock('@/hooks/useAccountOperationGate', () => ({
   useAccountOperationGate: () => mockUseAccountOperationGate(),
 }))
 
+// #3808: the budget-remaining poll feeds the rules' ≥90% arm; these tests
+// exercise the degraded-balance wiring, not the poll.
+vi.mock('@/hooks/useBudgetRemaining', () => ({
+  useBudgetRemaining: () => ({ data: null, loading: false, error: null, refetch: vi.fn() }),
+}))
+
 vi.mock('@/components/DashboardOnboardingGuide', () => ({
   default: () => null,
 }))

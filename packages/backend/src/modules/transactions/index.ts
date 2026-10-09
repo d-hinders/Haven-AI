@@ -43,6 +43,18 @@ export { compareTransactions, enrichedTransactionIdentityKey } from './ordering.
 export { fetchAccountTransactions } from './aggregate.js'
 export { enrichTransactionsWithAgents } from './enrichment.js'
 export { enrichTransactionsWithAccounting } from './accounting.js'
+export { serveTimeAmount } from './serve-time.js'
+export {
+  ACTIVITY_GROUP_LIMIT,
+  ACTIVITY_WINDOW_DAYS,
+  buildActivityGroups,
+  isValidActivityTimeZone,
+  localDayKey,
+  activityOutcome,
+  type ActivityOutcome,
+  type BuildActivityGroupsParams,
+  type DashboardActivityGroup,
+} from './activity.js'
 export { fetchConfirmedX402Transactions, mergeX402Transactions } from './x402.js'
 export {
   ingestInboundTransfers,

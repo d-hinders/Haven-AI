@@ -11,6 +11,8 @@ import {
   type MonthlySpendRow,
 } from '../infra/repositories/dashboard.js'
 import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
+import { listContactsForUser } from '../infra/repositories/contacts.js'
+import { listReceiptMerchantNamesForUser } from '../infra/repositories/analytics.js'
 import {
   combineBalanceFreshness,
   fetchPortfolioForAccount,
@@ -18,7 +20,9 @@ import {
 } from '../modules/accounts/index.js'
 import { deriveDelegationAllowances } from '../rails/delegation-budget-view.js'
 import {
+  buildActivityGroups,
   compareTransactions,
+  isValidActivityTimeZone,
   type EnrichedTransaction,
   enrichedTransactionIdentityKey,
   enrichTransactionsWithAgents,
@@ -92,8 +96,20 @@ export default async function dashboardRoutes(
 ): Promise<void> {
   app.addHook('onRequest', authMiddleware)
 
-  app.get('/overview', async (request) => {
+  app.get<{ Querystring: { tz?: string } }>('/overview', async (request, reply) => {
     const { sub } = request.user as { sub: string }
+
+    // #3824: the activity groups bucket by the USER's local day, so the
+    // caller names the zone. Validated exactly as analytics validates its
+    // `tz` — an invalid zone is a 400, before any read. Default UTC, same as
+    // analytics (`analytics-overview.ts`).
+    const tz = request.query.tz ?? 'UTC'
+    if (!isValidActivityTimeZone(tz)) {
+      // Never echo the raw query value: an offset/abbreviation reflected
+      // verbatim into a 400 body is exactly the instrument analytics refuses
+      // to be (same wording and reasoning as its handler).
+      return reply.code(400).send({ error: 'unsupported tz' })
+    }
 
     const [
       accounts,
@@ -188,14 +204,20 @@ export default async function dashboardRoutes(
     const monthlySpendSek = paymentSpend.sek
 
     const mergedTransactions: EnrichedTransaction[] = []
+    // #3824: a capped explorer read makes every count the groups serve a
+    // FLOOR over an unknown total — the flag is read per account here and ORs
+    // into the group builder below (`countIsFloor`).
+    let explorerTruncated = false
     const transactionResults = await Promise.allSettled(
       accounts.map(async (account) => {
-        const { transactions } = await fetchAccountTransactions({
+        const { transactions, truncated } = await fetchAccountTransactions({
           accountId: account.id,
           accountAddress: account.account_address,
           chainId: account.chain_id,
           log: request.log,
         })
+
+        if (truncated) explorerTruncated = true
 
         return transactions.map((tx) => ({
           ...tx,
@@ -236,16 +258,50 @@ export default async function dashboardRoutes(
       return true
     })
 
+    const currency = await resolveTransactionCurrency(sub)
     const enrichedTransactions = await enrichTransactionsWithAgents(
       sub,
       dedupedTransactions,
       // The preview names its currency like the feed does (#3127 round-2
       // review): without the preference, the same payment is SEK here and
-      // USD on /transactions for a USD user.
-      await resolveTransactionCurrency(sub),
+      // USD on /transactions for a USD user. #3824: hoisted so the activity
+      // groups' serve-time pricing strikes in the SAME currency.
+      currency,
     )
 
     const successfulTransactions = dedupedTransactions.filter((tx) => !tx.isError).length
+
+    // #3824: the grouped activity rows — server-side over the SAME feed the
+    // preview slices, so the counts are not bounded by any client window.
+    // Merchant labels come from the same two lookups analytics resolves them
+    // from (address-book contacts, then receipt merchant names); one read of
+    // each per request, over the counterparty addresses the feed carries.
+    const merchantAddresses = Array.from(
+      new Set(
+        enrichedTransactions
+          .filter((tx) => tx.direction === 'out' && tx.to)
+          .map((tx) => tx.to.toLowerCase()),
+      ),
+    )
+    // Fail-soft on purpose: the labels are display garnish on top of the
+    // grouped rows — a contacts or receipt-read outage must not 500 the
+    // overview, it just serves the raw addresses (the same degradation the
+    // CSV export has always had when a lookup came back empty).
+    const [contacts, receiptNames] = await Promise.all([
+      listContactsForUser(sub).catch(() => []),
+      listReceiptMerchantNamesForUser(sub, merchantAddresses).catch(() => new Map<string, string>()),
+    ])
+    const contactNames = new Map(contacts.map((c) => [c.address.toLowerCase(), c.name]))
+    const resolveMerchantName = (address: string): string | null =>
+      contactNames.get(address.toLowerCase()) ?? receiptNames.get(address.toLowerCase()) ?? null
+
+    const activity = await buildActivityGroups({
+      transactions: enrichedTransactions,
+      truncated: explorerTruncated,
+      tz,
+      currency,
+      resolveMerchantName,
+    })
 
     return {
       totals: {
@@ -309,6 +365,10 @@ export default async function dashboardRoutes(
           })),
         }),
       ),
+      // #3824: up to 8 grouped-activity rows over the last 7 user-local days,
+      // newest first, grouped server-side over the feed above. The 5-row
+      // preview below stays on the wire unchanged until #3810 retires it.
+      activity,
       transactions: enrichedTransactions.slice(0, TRANSACTION_PREVIEW_LIMIT).map((tx) =>
         ({
           hash: tx.hash,

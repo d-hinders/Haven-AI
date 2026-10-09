@@ -773,21 +773,22 @@ const ADDR = {
 }
 const T0 = Date.parse('2026-07-10T09:00:00.000Z') / 1000 // fixed anchor, in seconds
 
-const tx = (i, over = {}) => ({
-  hash: `0x${String(i).repeat(4).padStart(8, '0')}${'ab'.repeat(28)}`.slice(0, 66),
-  // #3763: the two EIP-3009 legs ride every row on the wire (nullable), so
-  // the dataset carries the keys everywhere and fills them on the eip3009
-  // rows below — the parity suite requires screenshot rows to carry every
-  // key the e2e fixture's `dashboardTransaction` has.
-  fundingTxHash: null,
-  settlementTxHash: null,
-  settlementScheme: null,
-  type: 'erc20',
-  from: FIXTURE_ACCOUNT.account_address,
-  to: ADDR.recipient,
-  value: '25000000',
-  valueFormatted: '25.00',
-  asset: 'USDC',
+const tx = (i, over = {}) => {
+  const row = {
+    hash: `0x${String(i).repeat(4).padStart(8, '0')}${'ab'.repeat(28)}`.slice(0, 66),
+    // #3763: the two EIP-3009 legs ride every row on the wire (nullable), so
+    // the dataset carries the keys everywhere and fills them on the eip3009
+    // rows below — the parity suite requires screenshot rows to carry every
+    // key the e2e fixture's `dashboardTransaction` has.
+    fundingTxHash: null,
+    settlementTxHash: null,
+    settlementScheme: null,
+    type: 'erc20',
+    from: FIXTURE_ACCOUNT.account_address,
+    to: ADDR.recipient,
+    value: '25000000',
+    valueFormatted: '25.00',
+    asset: 'USDC',
   decimals: 6,
   direction: 'out',
   timestamp: T0 - i * 8_600,
@@ -800,7 +801,19 @@ const tx = (i, over = {}) => ({
   accountAddress: FIXTURE_ACCOUNT.account_address,
   accountName: FIXTURE_ACCOUNT.name,
   ...over,
-})
+  }
+  // #3824: the serve-time amount rides every row (the parity suite requires
+  // screenshot rows to carry every key the e2e `dashboardTransaction` has),
+  // computed from the row's FINAL `valueFormatted` so the overridden rows
+  // (1.00, 150.00, 0.012 …) price consistently at the dataset's ~10.76
+  // SEK/USD story. No row in this dataset carries book-time fiat, so
+  // `approx*` is the fiat half on all of them — matching the e2e fixture.
+  return {
+    ...row,
+    approxAmount: (Number(row.valueFormatted) * 10.76).toFixed(4),
+    approxCurrency: 'SEK',
+  }
+}
 // #2870: the accounting badge's three states on three agent rows — pushed
 // ("In Fortnox"), pending ("Feeding…"), failed ("Not fed", reason on hover).
 // The inbound rows and the plain ETH transfer carry none, which is the
@@ -1094,6 +1107,51 @@ export const FIXTURE_OVERVIEW = {
     })),
   })),
   transactions: FIXTURE_TXS.slice(0, 4),
+  // #3824: the grouped-activity rows — SAME top-level key set as the e2e
+  // `dashboardOverview` (the parity suite compares them exactly). Two groups
+  // over the dataset's rows: the Research agent's USDC stream at the merchant
+  // (a floor count — the screenshot story includes a truncated-window render
+  // beside it) and one deposit day. approx (serve-time) fiat throughout: no
+  // row in this dataset carries book-time fiat.
+  activity: [
+    {
+      count: 3,
+      countIsFloor: true,
+      sumAtomic: '75000000',
+      tokenSymbol: 'USDC',
+      decimals: 6,
+      latestAt: new Date((T0 - 8_600) * 1000).toISOString(),
+      agentId: 'agent-research',
+      agentName: 'Research agent',
+      source: 'x402',
+      x402ResourceUrl: 'https://api.example.dev/reports',
+      to: ADDR.merchant,
+      merchantName: 'Example Merchant API',
+      activityType: null,
+      direction: 'out',
+      status: 'confirmed',
+      approxAmount: '807.0000',
+      approxCurrency: 'SEK',
+    },
+    {
+      count: 2,
+      sumAtomic: '225500000',
+      tokenSymbol: 'USDC',
+      decimals: 6,
+      latestAt: new Date((T0 - 17_200) * 1000).toISOString(),
+      agentId: null,
+      agentName: null,
+      source: null,
+      x402ResourceUrl: null,
+      to: FIXTURE_ACCOUNT.account_address,
+      merchantName: null,
+      activityType: null,
+      direction: 'in',
+      status: 'confirmed',
+      approxAmount: '2425.8200',
+      approxCurrency: 'SEK',
+    },
+  ],
 }
 
 // #3804: the cached budget-remaining read. One KNOWN row (chain-backed,
@@ -1128,6 +1186,9 @@ export const FIXTURE_AGENT_ACTIVITY = [
     type: 'payment', id: 'pay-1', agent_id: 'agent-research', agent_name: 'Research agent',
     token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
     amount_raw: '25000000', amount: '25.00', to: ADDR.merchant,
+    // #3824: the serve-time amount at today's rate in the user's preference —
+    // 25 USDC ≈ 269.00 SEK at the dataset's ~10.76 SEK/USD story.
+    approx_amount: '269.0000', approx_currency: 'SEK',
     // #2120: 'confirmed', not 'executed'. `payment_intents.status` is only
     // ever written pending_signature | submitted | confirmed | failed |
     // expired; 'executed' was an `approval_requests` status, and it only
@@ -1179,6 +1240,8 @@ export const FIXTURE_AGENT_ACTIVITY = [
     type: 'payment', id: 'pay-3', agent_id: 'agent-research', agent_name: 'Research agent',
     token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
     amount_raw: '12000000', amount: '12.00', to: ADDR.recipient,
+    // #3824: serve-time amount, same rate story as pay-1 (12 USDC ≈ 129.12 SEK).
+    approx_amount: '129.1200', approx_currency: 'SEK',
     reason: null, status: 'failed', tx_hash: null, source: 'api',
     x402_resource_url: null, x402_merchant_address: null, chain_id: FIXTURE_ACCOUNT.chain_id,
     account_id: FIXTURE_ACCOUNT.id, account_address: FIXTURE_ACCOUNT.account_address, account_name: FIXTURE_ACCOUNT.name,
@@ -1190,6 +1253,8 @@ export const FIXTURE_AGENT_ACTIVITY = [
     type: 'payment', id: 'pay-2', agent_id: 'agent-research', agent_name: 'Research agent',
     token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
     amount_raw: '4500000', amount: '4.50', to: ADDR.recipient,
+    // #3824: serve-time amount, same rate story as pay-1 (4.50 USDC ≈ 48.42 SEK).
+    approx_amount: '48.4200', approx_currency: 'SEK',
     reason: null, status: 'confirmed', tx_hash: `0x${'b2'.repeat(32)}`,  // #2120: see pay-1
     source: 'api', x402_resource_url: null, x402_merchant_address: null,
     chain_id: FIXTURE_ACCOUNT.chain_id,

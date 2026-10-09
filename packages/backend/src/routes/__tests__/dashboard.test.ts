@@ -20,6 +20,10 @@ const { mockQuery, portfolioMocks, transactionMocks } = vi.hoisted(() => ({
   },
   transactionMocks: {
     compareTransactions: vi.fn(() => 0),
+    // #3824: the route derives the tz validity check and the grouped rows
+    // from this module; the characterization below feeds it directly.
+    isValidActivityTimeZone: vi.fn(() => true),
+    buildActivityGroups: vi.fn(async () => []),
     enrichedTransactionIdentityKey: vi.fn((tx: {
       chainId: number
       safeId: string

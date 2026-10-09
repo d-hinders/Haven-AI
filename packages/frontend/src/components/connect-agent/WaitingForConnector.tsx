@@ -144,7 +144,9 @@ export function WaitingForConnector({
         },
     {
       id: 'paste',
-      state: promptCopied ? 'active' : 'pending',
+      // On the server-credential path there is nothing to paste: row 3 is
+      // the current step, so this one never is (one current row per list).
+      state: promptCopied && !manualInProgress ? 'active' : 'pending',
       title: 'Paste it into your agent',
       children: (
         // #1720: one command for every environment, so the approval heads-up
@@ -152,7 +154,7 @@ export function WaitingForConnector({
         // runtime. "Connector command" is the canonical term
         // (copy-guidelines.md). No list of client names (#3832 owner
         // decision): any MCP client works, and a list says otherwise.
-        <p className={`text-xs leading-relaxed ${promptCopied ? 'text-[var(--v2-ink-2)]' : 'text-[var(--v2-ink-3)]'}`}>
+        <p className={`text-xs leading-relaxed ${promptCopied && !manualInProgress ? 'text-[var(--v2-ink-2)]' : 'text-[var(--v2-ink-3)]'}`}>
           Any agent app that supports MCP. When{' '}
           {runtime === 'codex-desktop' ? 'Codex Desktop' : 'it'} asks to run the connector command,
           approve it.
@@ -162,8 +164,10 @@ export function WaitingForConnector({
     {
       id: 'approve',
       // Pending until the prompt is out; then the row is in flight — the
-      // user's part is done and Haven is the one waiting.
-      state: promptCopied ? 'working' : 'pending',
+      // user's part is done and Haven is the one waiting. On the
+      // server-credential path the next move is the user's (save, then
+      // continue), so the row is the current step, not a spinner.
+      state: manualInProgress ? 'active' : promptCopied ? 'working' : 'pending',
       // #1684: the gate is named once per viewport. On this screen the
       // subtitle no longer names it, so this heading does.
       title: 'Approve the budget',

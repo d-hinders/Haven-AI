@@ -524,6 +524,10 @@ describe('the numbered step list on the waiting screen (#3832)', () => {
     )
     expect(container.textContent).not.toContain('Haven has not received a connection yet')
     expect(container.textContent).not.toMatch(/Do not approve the budget yet/)
+    // The next move is the user's, so row 3 is the current step, not a spinner.
+    const rows = container.querySelectorAll('ol[aria-label="Connection steps"] > li')
+    expect(rows[2].getAttribute('data-step-state')).toBe('active')
+    expect(container.querySelectorAll('[aria-current="step"]')).toHaveLength(1)
     expect(container.querySelector('[aria-live="polite"]')?.textContent).toMatch(/continue to wallet approval/i)
     // Exactly one cancel: the footer's, since the recovery block (which owns
     // "Cancel this setup" in recovery) is not shown.

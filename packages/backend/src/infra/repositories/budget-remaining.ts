@@ -29,6 +29,7 @@
 
 import { getChainData } from '@haven_ai/core'
 import pool from '../../db.js'
+import { delegationLiveWindowSql } from './delegation-budgets.js'
 import type { Executor } from '../transaction.js'
 
 export type { Executor }
@@ -51,15 +52,11 @@ export interface DashboardBudgetRow {
 }
 
 /**
- * #3802's owner predicate — `expires_at > NOW()` — is INLINED here because
- * `delegationLiveWindowSql()` (the shared fragment #3802 round 2 landed) is
- * not on `origin/dev` yet; this branch is cut from `origin/dev` per AGENTS.md.
- * When #3833 merges, swap this literal for the shared fragment so the two
- * cannot drift. `start_date` is deliberately NOT filtered — the future-dated
- * steady row a re-key writes must stay visible beside its live carry row
- * (#3802 owner decision 2026-10-09).
+ * `start_date` is deliberately NOT filtered — the future-dated steady row a
+ * re-key writes must stay visible beside its live carry row (#3802 owner
+ * decision 2026-10-09). The live-window predicate itself is the shared
+ * fragment (#3833) so it cannot drift from the other readers.
  */
-const DELEGATION_LIVE_WINDOW_SQL = `expires_at > EXTRACT(EPOCH FROM NOW())`
 
 export const LIST_DASHBOARD_BUDGET_DELEGATIONS_SQL = `SELECT ad.id, ad.agent_id, ad.chain_id,
          ad.token_address, ad.delegation_hash, ad.budget_atomic, ad.period_seconds,
@@ -69,7 +66,7 @@ export const LIST_DASHBOARD_BUDGET_DELEGATIONS_SQL = `SELECT ad.id, ad.agent_id,
        JOIN smart_accounts sa ON sa.id = a.account_id AND sa.account_type = 'delegator_hybrid'
        WHERE a.user_id = $1
          AND ad.status = 'active'
-         AND (${DELEGATION_LIVE_WINDOW_SQL})
+         AND (${delegationLiveWindowSql('ad')})
        ORDER BY ad.created_at ASC`
 
 /**

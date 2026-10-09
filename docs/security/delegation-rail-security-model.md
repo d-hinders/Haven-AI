@@ -58,6 +58,7 @@ covers:
   - packages/frontend/src/lib/signer.ts
   - packages/frontend/src/hooks/useAccountOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
+  - packages/frontend/src/components/DelegationBudgetCard.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
   - packages/backend/src/modules/passport/attestation.ts
   - packages/backend/src/modules/passport/revocation.ts

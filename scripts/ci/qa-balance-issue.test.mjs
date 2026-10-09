@@ -151,8 +151,17 @@ test('the body shows one top-up line per wallet, merchant first, each naming its
   assert.doesNotMatch(body, /accepted claim/)
 })
 
+test('a skip reason is scrubbed before it reaches the public issue', () => {
+  const line = topUpSummary('merchant', {
+    status: 'skipped', claimsMade: 0, amountReceivedAtomic: '0', stopReason: 'unreadable',
+    reason: 'merchant could not read its balance: https://rpc.example/v2/SUPERSECRETKEY1234567',
+  })
+  assert.doesNotMatch(line, /SUPERSECRETKEY/)
+  assert.doesNotMatch(line, /rpc\.example/)
+})
+
 test('a skip without a reason still gets its own wording, never the attempted-claims line', () => {
-  for (const [stopReason, text] of [['not-needed', 'not needed'], ['wrong-chain', 'not on Base Sepolia'], ['invalid-address', 'not an address']]) {
+  for (const [stopReason, text] of [['not-needed', 'not needed'], ['unreadable', 'could not be read'], ['wrong-chain', 'not on Base Sepolia'], ['invalid-address', 'not an address']]) {
     const line = topUpSummary('merchant', { status: 'skipped', claimsMade: 0, amountReceivedAtomic: '0', stopReason })
     assert.match(line, new RegExp(`not requested — .*${text}`), stopReason)
     assert.doesNotMatch(line, /accepted claim/, stopReason)

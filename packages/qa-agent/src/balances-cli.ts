@@ -241,7 +241,7 @@ export async function topUpMerchant(
   const target = deps.merchantTargetWei ?? MERCHANT_TOPUP_TARGET_WEI
   const credentials = cdpCredentials(env)
   if (!credentials) return skippedTopUp('missing-credentials')
-  if (!reading.ok) return skippedTopUp('not-needed', 'the merchant balance could not be read')
+  if (!reading.ok) return skippedTopUp('unreadable', 'the merchant balance could not be read')
   if (reading.chainId !== FAUCET_CHAIN_ID) {
     return skippedTopUp(
       'wrong-chain',

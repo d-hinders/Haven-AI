@@ -133,6 +133,7 @@ const TOP_UP_NAMES = { merchant: 'Demo-merchant settlement wallet', relayer: 'De
  */
 const SKIP_TEXT = {
   'not-needed': 'not needed',
+  unreadable: 'the wallet balance could not be read',
   'wrong-chain': 'the wallet is not on Base Sepolia',
   'invalid-address': 'the wallet address is not an address',
 }

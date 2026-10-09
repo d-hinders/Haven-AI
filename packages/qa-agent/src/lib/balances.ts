@@ -418,6 +418,7 @@ export interface TopUpOutcome {
   stopReason:
     | 'not-needed'
     | 'missing-credentials'
+    | 'unreadable'
     | 'wrong-chain'
     | 'invalid-address'
     | 'target-requests-complete'

@@ -199,6 +199,30 @@ describe('qa:balances merchant top-up (#3836)', () => {
     })
   })
 
+  it('re-reads the merchant only after the relayer loop too (time for the faucet transactions to be mined)', async () => {
+    const events: string[] = []
+    let fetches = 0
+    const fetchImpl = (async () => {
+      events.push(++fetches === 1 ? 'merchant-read' : 'merchant-reread')
+      const wei = fetches === 1 ? MERCHANT_TOPUP_TARGET_WEI - CDP_FAUCET_CLAIM_WEI : MERCHANT_TOPUP_TARGET_WEI
+      return {
+        ok: true, status: 200,
+        json: async () => ({ chain_id: 84532, settlement: { address: MERCHANT, native_balance_wei: wei.toString(), cost_per_settlement_wei: '2500000000000', warn_floor: 25, fail_floor: 12 } }),
+      }
+    }) as unknown as typeof fetch
+    const low = { ...provider(), getBalance: async () => ethers.parseEther('0.005') } as unknown as ethers.Provider
+    await runBalances([], { ...FULL, ...CDP }, {
+      ...deps(),
+      provider: low,
+      fetchImpl,
+      requestFaucet: async ({ address }) => { events.push(address === MERCHANT ? 'merchant-claim' : 'relayer-claim'); return { transactionHash: `0x${'ab'.repeat(32)}` } },
+      sleep: async () => {},
+    })
+    const reread = events.indexOf('merchant-reread')
+    expect(reread).toBeGreaterThan(events.lastIndexOf('relayer-claim'))
+    expect(events.lastIndexOf('relayer-claim')).toBeGreaterThan(events.indexOf('merchant-claim'))
+  })
+
   it('a failed post-top-up /healthz read keeps the pre-top-up reading (critical stays critical)', async () => {
     const low = 28_855_666_942_768n
     const h = merchantHealthz([low, null])
@@ -265,7 +289,7 @@ describe('merchant faucet top-up loop (#3836)', () => {
 
   for (const [label, readings, stopReason, reason] of [
     ['at the target', merchantReadings(MERCHANT_TOPUP_TARGET_WEI), 'not-needed', /at or above its 0\.002 ETH target/],
-    ['unknown', merchantReadings(null), 'not-needed', /could not be read/],
+    ['unknown', merchantReadings(null), 'unreadable', /could not be read/],
     ['on chain 8453', merchantReadings(0n, { chainId: 8453 }), 'wrong-chain', /reports chain 8453/],
     ['with no chain_id', merchantReadings(0n, { chainId: undefined }), 'wrong-chain', /reports no chain_id/],
     ['with an invalid address', merchantReadings(0n, { address: 'not-an-address' }), 'invalid-address', /not an address/],
@@ -311,6 +335,21 @@ describe('both wallets under one budget (#3836)', () => {
     expect(order).toEqual([MERCHANT, MERCHANT, RELAYER, RELAYER])
     expect(result.merchant.claimsMade).toBe(2)
     expect(result.relayer.claimsMade).toBe(2)
+  })
+
+  it('each loop sends its own wallet namespace as X-Idempotency-Key (no replay across wallets)', async () => {
+    const { readings, report } = bothLow()
+    const keys: Record<string, string[]> = {}
+    await runTopUps(readings, report, env, {
+      requestFaucet: async ({ address, idempotencyKey }) => {
+        ;(keys[address] ??= []).push(idempotencyKey!)
+        return { transactionHash: `0x${'ab'.repeat(32)}` }
+      },
+      sleep: async () => {},
+    })
+    expect(keys[MERCHANT]).toEqual([1, 2].map((c) => deterministicClaimId('merchant', '123', undefined, c)))
+    expect(keys[RELAYER]).toEqual([1, 2].map((c) => deterministicClaimId('relayer', '123', undefined, c)))
+    expect(keys[MERCHANT]!.filter((k) => keys[RELAYER]!.includes(k))).toEqual([])
   })
 
   it('a merchant 429 ends only the merchant loop', async () => {

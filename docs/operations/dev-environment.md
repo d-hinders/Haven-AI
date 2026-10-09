@@ -68,6 +68,18 @@ last-verified: "2026-10-08"
 > money-path. Nothing else in this document was re-verified, and
 > `last-verified` is not bumped.
 >
+> **Re-verified #3804 (2026-10-09):** `index.ts`'s `enforcedModules` gains one
+> born-enforced entry — `routes/dashboard-budget-remaining.ts`, the
+> display-only `GET /dashboard/budget-remaining` read (its own file riding
+> the `/dashboard` prefix, GET-only, no parameters, no body, no live caller
+> at birth — the same brand-new-module rule as `agent-organizations.ts`).
+> It is NOT money-path: the route caches the enforcer read for DISPLAY while
+> `readRemainingBudget` itself is untouched behind every spend decision, and
+> a structural import guard pins the route as the cache module's only
+> importer. The request schema comes from the OpenAPI spec (no body to
+> refuse). No route file is moved, no mode/rollback/env semantics change, and
+> `last-verified` is not bumped.
+>
 > **Re-verified #3645 (2026-10-05):** `.env.dev.example`'s comments on the
 > hosted-MCP URL now match the backend: `NEXT_PUBLIC_HAVEN_MCP_URL` is a legacy
 > name the frontend no longer reads (#1823) and the backend reads only as a

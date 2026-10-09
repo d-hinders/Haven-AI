@@ -136,6 +136,19 @@ and the `release` skill.
 >
 > The rest of this document was not re-read for it, and `last-verified` is not bumped.
 
+> **Re-verified unchanged (#3830, 2026-10-09, coexisting-agent wording and
+> Claude Code wiring evidence):** this doc is coupled through connect's
+> `doctor.ts` and `runtime.ts`. The changes: the completion heads-up names the
+> other agent directories as "other agent directories on this machine" and
+> says this setup revoked none of them (no longer "previous agent(s)" or "If
+> you meant to replace them"); on Claude Code `--doctor` reads `~/.claude.json`
+> server entries as additive wiring evidence, and the `superseded_agents`
+> advisory's label reads "Other agent credentials (wiring not verifiable)". The
+> check id, its levels and exit code, the inventory classifications and every
+> `--json` field are unchanged, and no channel, dist-tag, version-order or
+> publish behaviour this document describes moves. The rest of this document
+> was not re-read for it, and `last-verified` is not bumped.
+
 > **Re-verified unchanged (#3756, 2026-10-07, superseded-agent wording):**
 > this doc is coupled through connect's `doctor.ts`, `runtime.ts`, `args.ts`
 > and `wiring-collision.ts`, and through the backend's

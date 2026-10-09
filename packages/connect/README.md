@@ -144,7 +144,7 @@ report stays `version: 1`; `level` is additive.
 | Level | Meaning | Example |
 | --- | --- | --- |
 | `ok` | Nothing to say. | The installed signer matches the connector's pin. |
-| `advisory` | Worth reading; nothing is broken. Exit 0. | `signer_runtime`: the install is intact but behind the pinned version ("intact, but outdated" — both versions named, `--repair` offered); `signer_runtime_unused` (#3123): runtime directories nothing references; `mcp_server_name_rebound` (#3122): two local binding records claim one server name. `superseded_agents` on a recognised runtime with no config file the connector can read (Claude Code, `other`): a second live key is reported, and the check says why "wired" cannot be verified from this machine. |
+| `advisory` | Worth reading; nothing is broken. Exit 0. | `signer_runtime`: the install is intact but behind the pinned version ("intact, but outdated" — both versions named, `--repair` offered); `signer_runtime_unused` (#3123): runtime directories nothing references; `mcp_server_name_rebound` (#3122): two local binding records claim one server name. `superseded_agents` on a recognised runtime with no config file the connector can read (Claude Code, `other`): a second live key is reported, and the check — labelled "Other agent credentials (wiring not verifiable)" — says why "wired" cannot be verified from this machine. On Claude Code a pair named in `~/.claude.json` counts as wired (#3830), so only unnamed directories reach this advisory. |
 | `failed` | A real failure with one repair action. Exit 1. | A stale or empty runtime directory; a live key in a directory the runtime's config demonstrably does not use. |
 
 What stays blocking is live spend authority: a directory whose stored key
@@ -320,10 +320,10 @@ long-lived host afterwards, as with any retirement.
 
 Setup guards the **name slot** (a taken `--name`, the bare pair already wired
 — #2551 refuses or asks) but never the **wallet**: a machine can carry several
-agents with live keys, and until #3122 the "your previous agent(s) still exist
-with their own keys" heads-up was printed only after the credentials were
-written (that completion heads-up, #1688, is unchanged — this slice ADDS an
-earlier notice). Two things changed, both from local files only (no network call is
+agents with live keys, and until #3122 the heads-up naming the other agent
+directories was printed only after the credentials were written (that
+completion heads-up, #1688, still prints — reworded by #3830, see below — and
+this slice ADDS an earlier notice). Two things changed, both from local files only (no network call is
 added; the backend is not asked whether any key still authenticates):
 
 - **Before the key is minted or anything is written**, setup names every
@@ -418,21 +418,28 @@ deployment, so the two differing is intended topology, not an environment
 mismatch. It is non-secret: the same string goes into your own MCP config file,
 and the API key travels beside it in a header.
 
-`superseded_agent_ids` lists the other agent directories on this machine. A
-re-run mints a NEW agent, and without `--replace` retires nothing, so those
-older agents still hold live API and signing keys — use **Remove agent…** on the
-Haven agent page for each if you meant to replace them. Empty on a clean first run; an empty
-list here is not a guarantee, since a scan that cannot read the credential root
-also yields one rather than failing a completed setup.
+`superseded_agent_ids` lists the other agent directories on this machine —
+every one, key-less and tombstoned included, on any backend. Despite the field
+name it is **not** a replace set (#3830): since named pairs became the default
+(#3737), a run without `--replace` adds its agent alongside the ones already
+here and retires nothing, so most listed agents are simply other agents, many
+of them wired and in use. Agents a `--replace` run actually retired are
+`retired_agent_ids`. The completion heads-up names the list as "other agent
+directories on this machine" and says this setup revoked none of them; if you
+no longer use one, use **Remove agent…** on its Haven agent page. Empty on a
+clean first run; an empty list here is not a guarantee, since a scan that
+cannot read the credential root also yields one rather than failing a
+completed setup.
 
-**The dashboard offers the revoke, never the connector (#2561).** The same ids
-now ride the install-status report, so the Haven dashboard can put a
-revoke next to the setup that displaced them; it also ends the agent's budget
-with one owner signature (#3542). The connector does not
-and must not do it: `POST /agents/:id/revoke` is owner-authenticated, and an
-agent credential retiring a sibling agent is the "agent editing its own
-authority" the re-key routes refuse. Nothing is revoked automatically — the
-owner clicks, one agent at a time.
+**The dashboard lists them; revoking stays on each agent's page (#2561,
+#3830).** The same ids ride the install-status report, and the connect modal's
+completed state lists those that are still active agents of the owner, each
+linking to its agent page. It does not call them replaced and offers no revoke
+there (owner decision, 2026-10-09): the report cannot tell a coexisting agent
+from a retired one. The connector never revokes either: `POST
+/agents/:id/revoke` is owner-authenticated, and an agent credential retiring a
+sibling agent is the "agent editing its own authority" the re-key routes
+refuse.
 
 On the REPORT the field is a tri-state, unlike the `--json` outcome above: a
 list, `[]` when the scan ran and found none, and `null` when it could not run.

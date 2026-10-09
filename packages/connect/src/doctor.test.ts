@@ -857,6 +857,80 @@ describe('per-agent inventory (#1697)', () => {
     expect(detail).toContain('retired records (dir removed): agent-gone (reset)')
     expect(detail).not.toContain('agent-decoy')
   })
+
+  /**
+   * #3830 — Claude Code keeps MCP servers in ~/.claude.json, which the
+   * connector does not write, so without evidence every directory but the
+   * selected one read `superseded`. A named pair present there is now proof
+   * of wiring; its absence still proves nothing (the fallback is unchanged).
+   */
+  describe('Claude Code wiring evidence from ~/.claude.json (#3830)', () => {
+    async function writeClaudeJson(homeDir: string, servers: Record<string, unknown>, projectServers?: Record<string, unknown>) {
+      await writeFile(join(homeDir, '.claude.json'), JSON.stringify({
+        mcpServers: servers,
+        ...(projectServers ? { projects: { '/work/repo': { mcpServers: projectServers } } } : {}),
+      }))
+    }
+
+    it('MUTATION PROOF: both pairs in user-scope mcpServers → both wired, superseded_agents ok', async () => {
+      const { homeDir, dir, namedDir } = await homeWithTwoWiredAgents()
+      await writeClaudeJson(homeDir, {
+        haven: { type: 'http', url: HOSTED, headers: { Authorization: 'Bearer sk_agent_never_read' } },
+        'haven-signer': { command: join(dir, 'bin', 'haven-signer.mjs'), args: [] },
+        'haven-ops': { type: 'http', url: HOSTED },
+        'haven-signer-ops': { command: join(namedDir, 'bin', 'haven-signer.mjs') },
+      })
+      const report = await runDoctor({ runtime: 'claude-code' }, { homeDir, ...depsForTwo() })
+
+      expect(report.agents.filter((a) => a.classification === 'wired').map((a) => a.agentId).sort())
+        .toEqual(['agent-1', 'agent-ops'])
+      const check = report.checks.find((c) => c.id === 'superseded_agents')
+      expect(check?.level).toBe('ok')
+      // The header value is never surfaced anywhere in the report.
+      expect(JSON.stringify(report)).not.toContain('sk_agent_never_read')
+    })
+
+    it('a pair wired only in a project scope counts too', async () => {
+      const { homeDir, dir } = await homeWithTwoWiredAgents()
+      await writeClaudeJson(homeDir, {}, {
+        'haven-signer': { command: join(dir, 'bin', 'haven-signer.mjs') },
+      })
+      const report = await runDoctor({ runtime: 'claude-code' }, { homeDir, ...depsForTwo() })
+      expect(report.agents.find((a) => a.agentId === 'agent-1')?.classification).toBe('wired')
+    })
+
+    it('absence is not evidence: a directory the file does not name keeps the fallback verdict and the advisory', async () => {
+      const { homeDir } = await homeWithTwoWiredAgents()
+      // Only an unrelated server — agent-1's pair is not in the file.
+      await writeClaudeJson(homeDir, { github: { command: 'gh-mcp', args: ['--stdio'] } })
+      const report = await runDoctor({ runtime: 'claude-code' }, { homeDir, ...depsForTwo() })
+
+      // ops is the selected (newest) directory: wired by the fallback, never downgraded.
+      expect(report.agents.find((a) => a.agentId === 'agent-ops')?.classification).toBe('wired')
+      expect(report.agents.find((a) => a.agentId === 'agent-1')?.classification).toBe('superseded')
+      const check = report.checks.find((c) => c.id === 'superseded_agents')
+      expect(check?.level).toBe('advisory')
+      // An advisory could not tell wired from superseded, so its label says so.
+      expect(check?.label).toBe('Other agent credentials (wiring not verifiable)')
+    })
+
+    it('an unparseable ~/.claude.json changes nothing', async () => {
+      const { homeDir } = await homeWithTwoWiredAgents()
+      await writeFile(join(homeDir, '.claude.json'), '{ not json')
+      const report = await runDoctor({ runtime: 'claude-code' }, { homeDir, ...depsForTwo() })
+      expect(report.agents.find((a) => a.agentId === 'agent-1')?.classification).toBe('superseded')
+      expect(report.checks.find((c) => c.id === 'superseded_agents')?.level).toBe('advisory')
+    })
+
+    it('is read only for claude-code: a codex-cli run ignores it', async () => {
+      const { homeDir, namedDir } = await homeWithTwoWiredAgents()
+      // Unwire ops from the Codex config, then name it in ~/.claude.json.
+      await writeFile(join(homeDir, '.codex', 'config.toml'), '[mcp_servers.haven]\nurl = "x"\n')
+      await writeClaudeJson(homeDir, { 'haven-signer-ops': { command: join(namedDir, 'bin', 'haven-signer.mjs') } })
+      const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...depsForTwo() })
+      expect(report.agents.find((a) => a.agentId === 'agent-ops')?.classification).not.toBe('wired')
+    })
+  })
 })
 
 /**

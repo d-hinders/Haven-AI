@@ -480,6 +480,53 @@ export interface AgentInventoryEntry {
 }
 
 /**
+ * #3830: Claude Code keeps its MCP servers in `~/.claude.json` — user scope
+ * `mcpServers`, and per-project `projects[<path>].mcpServers` — a file the
+ * connector does not write, so `runtimeConfigPathFor` names no config for it
+ * and `agentIsWired` used to fall back to "the selected directory is wired,
+ * the rest are not". Under named pairs by default (#3737) that labelled a
+ * second, deliberately connected agent `superseded` and still spend-capable.
+ *
+ * This reduces the file to what `agentIsWired` matches on — each server's
+ * NAME, launch command and args, and URL — one line per server. `env` and
+ * `headers` are never kept: they can hold secrets, and wiring evidence does
+ * not need them. The text is only matched against, never printed. Returns
+ * null when the file is missing, unparseable, or names no servers; the
+ * caller then keeps the fallback exactly as before. Project-scope `.mcp.json`
+ * files are not discoverable from here, so this is positive evidence only:
+ * it can show a directory IS wired, never that it is not.
+ */
+export async function readClaudeCodeWiringEvidence(homeDir: string): Promise<string | null> {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(await readFile(join(homeDir, '.claude.json'), 'utf8'))
+  } catch {
+    return null
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null
+  const blocks: unknown[] = [(parsed as { mcpServers?: unknown }).mcpServers]
+  const projects = (parsed as { projects?: unknown }).projects
+  if (typeof projects === 'object' && projects !== null) {
+    for (const project of Object.values(projects as Record<string, unknown>)) {
+      if (typeof project === 'object' && project !== null) blocks.push((project as { mcpServers?: unknown }).mcpServers)
+    }
+  }
+  const lines: string[] = []
+  for (const block of blocks) {
+    if (typeof block !== 'object' || block === null) continue
+    for (const [name, server] of Object.entries(block as Record<string, unknown>)) {
+      const entry = typeof server === 'object' && server !== null ? (server as Record<string, unknown>) : {}
+      const parts = [JSON.stringify(name) + ':']
+      if (typeof entry.command === 'string') parts.push(entry.command)
+      if (Array.isArray(entry.args)) parts.push(...entry.args.filter((arg): arg is string => typeof arg === 'string'))
+      if (typeof entry.url === 'string') parts.push(entry.url)
+      lines.push(parts.join(' '))
+    }
+  }
+  return lines.length > 0 ? lines.join('\n') : null
+}
+
+/**
  * Is this agent's MCP pair actually present in the runtime's config?
  *
  * The answer depends on whether the pair is NAMED, because only a named pair
@@ -1088,6 +1135,11 @@ export async function runDoctor(
       configText = null
     }
   }
+  // #3830: wiring evidence for the runtime that owns no config file the
+  // connector writes. Used ONLY to upgrade a directory to `wired` — every
+  // other check keeps reading `configText`, and stays on the CLI-managed skip.
+  const claudeCodeWiring =
+    configText === null && normalizedRuntime === 'claude-code' ? await readClaudeCodeWiringEvidence(homeDir) : null
 
   // ── Inventory ─────────────────────────────────────────────────────────────
   const allDirectories = directory ? [directory, ...others] : others
@@ -1135,7 +1187,12 @@ export async function runDoctor(
       })
       continue
     }
-    const wired = agentIsWired(configText, names, slug, identity, sidecar, dir === directory, bareOwnerExists)
+    const wired =
+      agentIsWired(configText, names, slug, identity, sidecar, dir === directory, bareOwnerExists) ||
+      // Additive only: a name or wrapper path in ~/.claude.json proves this
+      // directory is wired; its absence proves nothing (#3830), so the
+      // fallback verdict above is never downgraded.
+      (claudeCodeWiring !== null && agentIsWired(claudeCodeWiring, names, slug, identity, sidecar, false, false))
     const entry: AgentInventoryEntry = {
       ...(slug ? { slug } : {}),
       ...(identity.agent_id ? { agentId: identity.agent_id } : {}),
@@ -1418,7 +1475,11 @@ export async function runDoctor(
       supersededLive.length === 0 ? 'ok' : classificationUnreliable ? 'advisory' : 'failed'
     checks.push({
       id: 'superseded_agents',
-      label: 'Superseded agent credentials',
+      // #3830: an advisory means the connector could not tell wired from
+      // superseded, so its label must not assert "superseded" either. The
+      // inventory `classification` stays as is (#3121 decision 5); the label
+      // is what a person reads.
+      label: supersededLevel === 'advisory' ? 'Other agent credentials (wiring not verifiable)' : 'Superseded agent credentials',
       level: supersededLevel,
       detail:
         supersededLevel === 'failed'

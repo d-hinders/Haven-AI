@@ -2112,7 +2112,7 @@ describe('--name wiring slug through runConnect (#1696)', () => {
     })
 
     const output = logs.join('\n')
-    expect(output).not.toContain('Heads-up: this setup created a NEW agent')
+    expect(output).not.toContain('Heads-up: other agent directories on this machine')
     expect(output).not.toContain('agent-named')
   })
 
@@ -2517,7 +2517,13 @@ describe('runConnect terminal outcome record (#2173)', () => {
     // still name the same agents — the field is additive to that prose, not a
     // replacement for it.
     const headsUp = logs.join('\n')
-    expect(headsUp).toContain('this setup created a NEW agent')
+    expect(headsUp).toContain('Heads-up: other agent directories on this machine')
+    // #3830: these agents coexist — the run neither replaced nor retired them,
+    // so none of the old "replaced" framing may print.
+    expect(headsUp).toContain('revoked none of them')
+    expect(headsUp).not.toContain('previous agent(s)')
+    expect(headsUp).not.toContain('If you meant to replace them')
+    expect(headsUp).not.toMatch(/keeps acting as them/)
     // Each id separately: readdir order is not guaranteed, so asserting the
     // joined string would be an ordering flake rather than a guard.
     expect(headsUp).toContain('agent-0')

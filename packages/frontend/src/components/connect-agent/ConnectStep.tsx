@@ -205,14 +205,15 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           chainId={setupStatus?.haven_wallet.chain_id ?? flow.approvalChainId}
           onClose={flow.handleClose}
           // Inside the done state, above its Done button — two rendered
-          // captures to get here (#2561). Placing the offer FIRST made a
-          // "replaced / revoke" decision the first thing a reader met, ahead
+          // captures to get here (#2561). Placing the list FIRST made the
+          // other agents on this machine the first thing a reader met, ahead
           // of the grant line that screen exists to state. Placing it after
           // the whole component put it below `Done`, where the one action a
           // finished screen invites closes the modal past it. Above the
           // button is the only spot that is both: the success stays the
-          // heading, and the follow-up is still read. It renders nothing
-          // unless the connector reported agents this owner actually has.
+          // heading, and the note is still read. It lists, and offers no
+          // action on, the other agents the connector found (#3830), and
+          // renders nothing unless those are active agents this owner has.
           beforeDone={
             <SupersededAgentsCard
               supersededAgentIds={setupStatus?.install_status?.superseded_agent_ids}

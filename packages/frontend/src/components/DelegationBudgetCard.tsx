@@ -18,6 +18,7 @@ import { useDelegationBudget, type DelegationBudget, type GrantInput } from '@/h
 import { useTaskBudgets, type TaskBudget } from '@/hooks/useTaskBudgets'
 import { useSubBudgetTrees, type SubBudgetTree } from '@/hooks/useSubBudgets'
 import BudgetGrantAction from './BudgetGrantAction'
+import WalletConnectAction from './WalletConnectAction'
 import EditBudgetModal from './EditBudgetModal'
 import IssueSubBudgetModal from './IssueSubBudgetModal'
 import ConfirmDialog from './ConfirmDialog'
@@ -103,8 +104,13 @@ function inDuration(targetMs: number, nowMs: number): string {
 export default function DelegationBudgetCard({ agentId, chainId, tokens, agentName, onBudgetChange, retired }: Props) {
   // #3695: this card is the one caller that asks for remaining-this-period —
   // the meter on each row is drawn from it.
-  const { budgets, grant, editBudget, revoke, busy, ready, budgetsError, reload, signersError, reloadSigners } =
+  const { budgets, grant, editBudget, revoke, busy, ready, budgetsError, reload, signersError, reloadSigners, signersLoading } =
     useDelegationBudget(agentId, chainId, { includeRemaining: true })
+  // #3812: `ready` is false for three different reasons. A failed signer-set
+  // read has its own Try again below, and a pending read is not an answer yet;
+  // only the remaining case — the set is known and nobody here can sign — is
+  // fixed by connecting the owner wallet, so only it offers that way out.
+  const needsOwnerWallet = !ready && !signersError && !signersLoading
   // #3329: read separately from the period budgets above — a failed fetch
   // here must never take the budgets list down with it, so `taskBudgets`
   // stays `null` (nothing rendered) rather than surfacing its own error UI.
@@ -360,6 +366,18 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
         </div>
       ) : null}
 
+      {needsOwnerWallet && hasActive && !showForm && !retired ? (
+        // #3812: Stop and Edit on the rows below are disabled while nobody on
+        // this device can sign. Say why, and offer the way out here — the
+        // header was the only place to connect a wallet before.
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3">
+          <p className="text-sm text-[var(--v2-ink-2)]">
+            Connect your account owner wallet to change or stop a budget.
+          </p>
+          <WalletConnectAction />
+        </div>
+      ) : null}
+
       <div className="divide-y divide-[var(--v2-border)]">
         {budgetsError ? (
           <div className="flex flex-wrap items-center justify-between gap-3 py-3">
@@ -473,6 +491,8 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
                 : 'One signature. Refills every period automatically.'
             }
             onGranted={handleGranted}
+            notReadyHint={needsOwnerWallet ? 'Connect your account owner wallet to set a budget.' : undefined}
+            notReadyAction={needsOwnerWallet ? <WalletConnectAction /> : undefined}
             // With a budget already listed, the opened form is a disclosure:
             // Cancel sits in the submit row, beside the action it cancels
             // (#3695 design review).

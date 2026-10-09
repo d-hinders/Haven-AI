@@ -1,6 +1,13 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+// #3812: the in-flow connect/switch control reads wagmi and RainbowKit, which
+// these tests do not provide. Stub it so the test can assert WHEN a flow
+// offers it; `WalletConnectAction.test.tsx` covers what it does.
+vi.mock('@/components/WalletConnectAction', () => ({
+  default: () => <button type="button">Connect wallet</button>,
+}))
+
 const { mockUseSigners } = vi.hoisted(() => ({ mockUseSigners: vi.fn() }))
 
 vi.mock('@/hooks/useAccountSigners', () => ({ useAccountSigners: (...a: unknown[]) => mockUseSigners(...a) }))
@@ -272,6 +279,14 @@ describe('AccountSignersCard (#888)', () => {
     )
     render(<AccountSignersCard {...PROPS} />)
     expect(screen.getByText(/Connect your account owner wallet/)).toBeTruthy()
+    // #3812: connect or switch here, not only from the header.
+    expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeTruthy()
+  })
+
+  it('a ready (passkey) account offers no wallet connect (#3812)', () => {
+    mockUseSigners.mockReturnValue(base())
+    render(<AccountSignersCard {...PROPS} />)
+    expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
   })
 
   // #1097: the passkey optimistic fallback keeps `ready` true, so cross-device

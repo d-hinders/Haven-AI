@@ -33,6 +33,8 @@ import { Address } from '@/components/haven'
 import { useReceiveLedger } from '@/hooks/useReceiveLedger'
 import { signPreparedAccountOp, type PreparedAccountOp } from '@/lib/hybridAccountOps'
 import { useActiveSigner } from '@/lib/signer'
+import { pickSigningPath } from '@/hooks/useDelegationBudget'
+import WalletConnectAction from '@/components/WalletConnectAction'
 import type { AccountSigners } from '@/lib/delegationPasskeySigner'
 import type { OffRampDestination, OffRampPrepareResponse } from '@/types/transactions'
 
@@ -272,12 +274,22 @@ function ReceiveHandoff({ accountAddress, chainId, prepared, onDone, onCancel }:
     chainId,
   })
   const [signers, setSigners] = useState<AccountSigners | null>(null)
+  // #3812: whether the set is known decides whether "connect the owner
+  // wallet" is honest advice — never while loading or after a failed read.
+  const [signersLoaded, setSignersLoaded] = useState(false)
   useEffect(() => {
     let cancelled = false
+    setSignersLoaded(false)
     api
       .get<AccountSigners>(`/accounts/hybrid/${accountAddress}/signers?chain_id=${chainId}`)
       .then((rows) => {
-        if (!cancelled) setSigners(rows)
+        if (!cancelled) {
+          // #3093 normalisation, as `useAccountSigners` / `useDelegationBudget`
+          // apply it: `pickSigningPath` reads `passkeys.length` during render
+          // (#3812), so a response without the key must not crash the page.
+          setSigners({ ...rows, passkeys: rows.passkeys ?? [] })
+          setSignersLoaded(true)
+        }
       })
       .catch(() => {
         if (!cancelled) setSigners(null)
@@ -286,6 +298,11 @@ function ReceiveHandoff({ accountAddress, chainId, prepared, onDone, onCancel }:
       cancelled = true
     }
   }, [accountAddress, chainId])
+
+  // The same decision the budget hook and the re-key make: with the set known
+  // and no reachable signer, only the owner wallet can sign this transfer.
+  const needsOwnerWallet =
+    signersLoaded && pickSigningPath(signers, signer?.type === 'eoa' ? signer.address : null) === null
 
   async function signAndSubmit() {
     setSignBusy(true)
@@ -326,8 +343,17 @@ function ReceiveHandoff({ accountAddress, chainId, prepared, onDone, onCancel }:
       <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
         You sign with this account&apos;s own signer. The transfer can only go to the saved address.
       </p>
+      {needsOwnerWallet ? (
+        // #3812: the header was the only place to connect a wallet before.
+        <div className="mt-3 space-y-2">
+          <p className="text-xs text-[var(--v2-ink-3)]">
+            Connect your account owner wallet to sign this transfer.
+          </p>
+          <WalletConnectAction />
+        </div>
+      ) : null}
       <div className="mt-3 flex flex-wrap gap-2">
-        <Button size="sm" onClick={signAndSubmit} disabled={signBusy}>
+        <Button size="sm" onClick={signAndSubmit} disabled={signBusy || needsOwnerWallet}>
           {signBusy ? 'Waiting for signature...' : 'Sign transfer'}
         </Button>
         <Button variant="ghost" size="sm" onClick={onCancel} disabled={signBusy}>

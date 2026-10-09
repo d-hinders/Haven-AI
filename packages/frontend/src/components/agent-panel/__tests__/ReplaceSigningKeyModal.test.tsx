@@ -80,6 +80,13 @@ function gateBox(): HTMLElement | null {
 }
 import { ApiRequestError } from '@/lib/api'
 
+// #3812: the in-flow connect/switch control reads wagmi and RainbowKit, which
+// these tests do not provide. Stub it so the test can assert WHEN a flow
+// offers it; `WalletConnectAction.test.tsx` covers what it does.
+vi.mock('@/components/WalletConnectAction', () => ({
+  default: () => <button type="button">Connect wallet</button>,
+}))
+
 const CURRENT = '0x2222222222222222222222222222222222222222'
 const NEXT = '0x3333333333333333333333333333333333333333'
 
@@ -637,6 +644,39 @@ describe('signing-path refusal — the one reason left (#1890)', () => {
     await advanceToConsequences()
     fireEvent.click(screen.getByRole('checkbox'))
     expect(screen.getByRole('button', { name: /switch off the old key/i })).toBeEnabled()
+  })
+
+  // #3812: the refusal comes with its way out — connect or switch the owner
+  // wallet right here, since the header is no longer the only place to.
+  it('offers the owner wallet connect inside the refusal', async () => {
+    mockUseActiveSigner.mockReturnValue(null)
+    renderModal()
+    await waitFor(() =>
+      expect(screen.getByText(/cannot replace this key from this device/i)).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeInTheDocument()
+  })
+
+  // #3812 review S1: `signers === null` is both "loading" and "failed", and
+  // either reads as `no_signer`. Connecting fixes neither, so a failed read —
+  // which a passkey-only owner can hit too — must not offer the connect.
+  it('offers no wallet connect when the signer set could not be read', async () => {
+    mockUseActiveSigner.mockReturnValue(null)
+    const signersBody = await mockApiGet()
+    mockApiGet.mockImplementation((url: string) =>
+      String(url).includes('/account-signers') ? Promise.reject(new Error('boom')) : Promise.resolve(signersBody),
+    )
+    renderModal()
+    await waitFor(() =>
+      expect(screen.getByText(/cannot replace this key from this device/i)).toBeInTheDocument(),
+    )
+    expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
+  })
+
+  it('offers no wallet connect when the owner can already sign (#3812)', async () => {
+    renderModal()
+    await advanceToConsequences()
+    expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
   })
 
   it('still lets a blocked owner read what the flow will cost', async () => {

@@ -38,8 +38,8 @@ last-verified: "2026-10-08"
 > project now deploys only `dev`, `main` and `preview/*` branches
 > (`git.deploymentEnabled` in `packages/frontend/vercel.json`). This note's
 > edits are the per-PR-preview statements: the intro, the topology row, the
-> URLs entry, *Which pushes rebuild the frontend* and *Inspecting the dev
-> environment*. Nothing else in this document was re-verified.
+> URLs entry, *Which pushes rebuild the frontend*, *Inspecting the dev
+> environment*, and the new § *PR previews are opt-in*. Nothing else in this document was re-verified.
 
 > **Re-verified #3770 (2026-10-08, delivery-quality report):** this diff
 > touched one file in this document's coverage list,
@@ -323,7 +323,8 @@ since the ops project runs the same script. For this project that means:
   deployments a day** (#3681): the step saves build minutes and keeps the
   host current, not deployments. Each push to `dev`, `main` or a `preview/*`
   branch creates a frontend deployment, built or skipped; other branches create
-  none (#3821), and the ops console deploys from `dev` only (see
+  none (#3821), bar the occasional "Skipped - Not affected" record from Vercel's
+  monorepo skip ([below](#pr-previews-are-opt-in)), and the ops console deploys from `dev` only (see
   [`ops-console.md` § 1](ops-console.md#1-the-vercel-project)). When the cap is
   hit, Vercel refuses the deployment: its status reads "Resource is limited"
   (`api-deployments-free-per-day`), where a skip reads "Canceled by Ignored
@@ -347,8 +348,10 @@ production), redeploy the latest deployment of that branch, then delete
 Since #3821 the frontend project deploys only three kinds of branch
 (`git.deploymentEnabled` in `packages/frontend/vercel.json`): `dev` (the dev
 host), `main` (production) and `preview/*`. A push to any other branch, a
-`feat/*` PR or a `hotfix/*` included, creates no frontend deployment at all, so
-it spends nothing of the daily cap and the PR shows no frontend preview. No
+`feat/*` PR or a `hotfix/*` included, gets no frontend preview and no build.
+Vercel may still record a "Skipped - Not affected" deployment for some of these
+pushes, from its monorepo skip, which runs before `vercel.json` applies. After
+#3681 haven-ops showed 2–3 a day from that skip, against 14–38 before it. No
 required check reads a preview: browser smoke and visual regression run against
 their own local server.
 

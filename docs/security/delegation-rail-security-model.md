@@ -1485,9 +1485,10 @@ its last deployment. That includes a `preview/*` branch's first preview fetching
 the repository's public URL, which is read-only and needs no credential. It
 moves no authority either, and the same scope note holds. Since #3681 the
 console deploys from `dev` only (`git.deploymentEnabled`), so no per-PR
-console preview exists; since #3821 the dashboard deploys only `dev`, `main`
-and opt-in `preview/*` branches. The dashboard's watch file excludes tests and
-Playwright baselines; they decide only whether the console deploys and
+console preview exists, and since #3821 the dashboard's
+`git.deploymentEnabled` map also limits which branches deploy. The dashboard's
+watch file excludes tests and Playwright baselines. The maps and watch files
+decide only whether the console deploys and
 whether the dashboard builds, move
 no authority, and the same scope note holds. The console's CI render
 smoke (#3583) only proves, in a browser, that the console renders under that

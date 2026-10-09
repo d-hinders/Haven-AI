@@ -1116,13 +1116,22 @@ short, and an icon-only square grows in both axes. Two rules generalise from it:
   announces as "button". Every collapsing state carries an explicit `aria-label` (plus a
   matching `title`, which is the pointer-hover mitigation for the lost label). jsdom
   applies no CSS, so a unit test that queries by role and name keeps passing on text the
-  real browser never renders — `e2e/mobile-nav-tap-target.mobile.spec.ts` measures the
-  rendered label width and the name together, and `WalletButton.test.tsx` asserts the
-  attribute rather than the name.
+  real browser never renders — `WalletButton.test.tsx` asserts the attribute rather than
+  the name. (`e2e/mobile-nav-tap-target.mobile.spec.ts` measured the rendered label width
+  and the name together until #3825 took the pill out of the top bar; the spec now
+  asserts the bar's right cluster holds no control at all.)
 
 A collapsed control also takes its neighbour's radius (`rounded-xl` here, the
 notification bell's), because two adjacent 40px squares in one 56px band read as a row
 only if they are the same shape.
+
+**Since [#3825](https://github.com/d-hinders/Haven-AI/issues/3825) the top bar carries
+no wallet pill.** Most users sign with a passkey, and a signer with a raw address on every
+screen is the wrong level of detail; signers have their own home in Settings → Signers,
+and every signing flow offers its own in-flow connect (#3812). `WalletButton` still
+renders in the connect flow's approval step, so the collapse rules above still describe
+it; the over-subscribed-bar argument is history. Below `lg` the bar's right cluster is
+now empty — the theme toggle lives in the More sheet there.
 
 **The former investor-briefing borrower was retired with the page in #2468.** The
 remaining borrowers and their guards are the live tap-target examples; do not infer a

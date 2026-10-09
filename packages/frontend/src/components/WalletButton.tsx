@@ -499,7 +499,10 @@ export function WalletPopover({
         keyboard reachability is unchanged. Their `focus-visible:ring-2` paints
         OUTSIDE the border box (#1873) and is not clipped, because this box
         clips at its PADDING edge and `p-4` leaves 16px of gutter for a 2px
-        ring — measured in `wallet-popover-height-bound.spec.ts`, not assumed.
+        ring — measured (not assumed) by `wallet-popover-height-bound.spec.ts`
+        while the pill lived in the top bar (#2067). #3825 removed that spec
+        with the pill: no app route now opens the popover in its tallest
+        state, so the clamp is no longer re-measured end to end.
       */}
       <div className="relative flex min-h-0 flex-1 flex-col border-b border-[var(--v2-border)]">
         <div

@@ -432,7 +432,10 @@ export const GOVERNED_PACKAGE_DOCS = [
     // #3655: the balances-check paragraphs re-read against the automatic CDP
     // Base Sepolia faucet exception, including the API-key-only/no-wallet-secret
     // credential boundary. Other QA scenario prose was not re-read.
-    'last-verified': '2026-10-05',
+    // #3836: the balances-check paragraph re-read against the merchant
+    // settlement-wallet faucet top-up (below-target trigger, 0.002 ETH target).
+    // Other QA scenario prose was not re-read.
+    'last-verified': '2026-10-09',
   },
   {
     doc: 'packages/demo-merchant-mcp/README.md',

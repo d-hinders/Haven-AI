@@ -11,6 +11,7 @@ import {
   classify,
   collectBalances,
   MIN_READINGS,
+  readMerchant,
   readingsFor,
   RELAYER_FALLBACK_FLOOR_WEI,
   runwayDays,
@@ -225,6 +226,20 @@ describe('collectBalances', () => {
       expect(row, drop).toMatchObject({ band: 'unknown' })
       expect(row.reason, drop).toContain(drop)
     }
+  })
+
+  it('readMerchant carries /healthz chain_id when present; its absence keeps the reading (#3836)', async () => {
+    const settlement = {
+      address: SETTLEMENT, native_balance_wei: ETH(0.01).toString(), cost_per_settlement_wei: COST.toString(), warn_floor: 25, fail_floor: 12,
+    }
+    const src = (body: unknown): BalanceSources =>
+      ({ api: null, demoMerchantUrl: 'https://m.test', provider: provider(0n, {}), fetchImpl: healthz(body) })
+    expect(await readMerchant(src({ chain_id: 84532, settlement }))).toMatchObject({ ok: true, chainId: 84532 })
+    const absent = await readMerchant(src({ settlement }))
+    expect(absent.ok).toBe(true)
+    expect(absent).not.toHaveProperty('chainId')
+    // A non-numeric chain_id is not trusted as one.
+    expect(await readMerchant(src({ chain_id: '84532', settlement }))).not.toHaveProperty('chainId')
   })
 
   it('a reader that hangs becomes unknown at the deadline, never a job timeout', async () => {

@@ -5,7 +5,8 @@
  * 2026-10-05T06:08Z, about 40 runs) because the delegation treasury ran dry
  * and nothing warned beforehand: the treasury check has only a FAIL floor
  * (one run's cost), and preflight output only reaches a run log. This module
- * is read-only except for the dev relayer's Base Sepolia faucet requests —
+ * is read-only except for Base Sepolia faucet requests for the demo merchant's
+ * settlement wallet and the dev relayer —
  * one row per wallet the QA flows depend on, with a runway in days — and
  * `scripts/ci/qa-balance-issue.mjs` turns the rows into one standing issue.
  *
@@ -15,7 +16,8 @@
  * readings exist, each wallet falls back to a fixed floor and says so.
  *
  * Nothing here signs or moves Haven or customer funds. The caller may request
- * testnet ETH for the dev relayer between the first reading and final report.
+ * testnet ETH for the demo merchant's settlement wallet and the dev relayer
+ * between the first reading and final report.
  */
 import { ethers } from 'ethers'
 import { ERC20_BALANCE_ABI, SEPOLIA_USDC, USDC_DECIMALS } from './chain.js'
@@ -48,6 +50,15 @@ export const RELAYER_FALLBACK_FLOOR_WEI = 10_000_000_000_000_000n
 
 /** The automatic faucet target: three times the relayer's 0.01 ETH floor. */
 export const RELAYER_TOPUP_TARGET_WEI = 30_000_000_000_000_000n
+
+/**
+ * The demo merchant's automatic faucet target, 0.002 ETH (#3836): about 800
+ * settlements at a 0.0000025 ETH `cost_per_settlement_wei`, about 5.9 days at
+ * the ~0.00034 ETH/day burn #3654 recorded (2026-10-05 → 10-09). The merchant
+ * is topped up whenever it is BELOW this, whatever its band: its `critical`
+ * floor is its own payment-refusal point, so a band trigger fires too late.
+ */
+export const MERCHANT_TOPUP_TARGET_WEI = 2_000_000_000_000_000n
 
 /** The treasury's warn floor until enough history exists: 1.0 USDC, ~30 runs. */
 export const TREASURY_FALLBACK_FLOOR_ATOMIC = 1_000_000n
@@ -214,7 +225,15 @@ export async function withDeadline<T>(work: Promise<T>, ms: number, onTimeout: (
 
 /** What a reader returns: the raw balance, or why there is none. */
 export type Reading =
-  | { ok: true; address: string; atomic: bigint; criticalFloor: bigint; fallbackFloor: bigint }
+  | {
+      ok: true
+      address: string
+      atomic: bigint
+      criticalFloor: bigint
+      fallbackFloor: bigint
+      /** The chain the wallet is on, when its source reports it (the merchant's `/healthz` `chain_id`). */
+      chainId?: number
+    }
   | { ok: false; address?: string; reason: string; configMissing?: boolean }
 
 export interface BalanceSources {
@@ -268,6 +287,7 @@ export async function readMerchant(src: BalanceSources): Promise<Reading> {
     const res = await fetchImpl(`${src.demoMerchantUrl}/healthz`, { signal: AbortSignal.timeout(READ_TIMEOUT_MS) })
     if (!res.ok) return { ok: false, reason: `/healthz returned HTTP ${res.status}` }
     const body = (await res.json()) as {
+      chain_id?: unknown
       settlement?: {
         address?: string
         native_balance_wei?: string
@@ -287,12 +307,16 @@ export async function readMerchant(src: BalanceSources): Promise<Reading> {
       return { ok: false, address: s.address, reason: `merchant /healthz lacks ${missing.join(', ')}` }
     }
     const cost = BigInt(s.cost_per_settlement_wei!)
+    // `chain_id` only gates the faucet top-up (#3836); a /healthz without it
+    // still has a valid balance, so its absence never makes the row unknown.
+    const chainId = typeof body.chain_id === 'number' && Number.isInteger(body.chain_id) ? body.chain_id : undefined
     return {
       ok: true,
       address: s.address!,
       atomic: BigInt(s.native_balance_wei!),
       criticalFloor: cost * BigInt(s.fail_floor!),
       fallbackFloor: cost * BigInt(s.warn_floor!),
+      ...(chainId !== undefined ? { chainId } : {}),
     }
   } catch (error) {
     return { ok: false, reason: safeReason(`could not reach ${src.demoMerchantUrl}/healthz`, error) }
@@ -378,21 +402,30 @@ export interface BalancesReport {
   history: HistoryEntry[]
   /** True when any row is `unknown` for a missing config — the run goes red. */
   configMissing: boolean
-  /** The dev-relayer Base Sepolia faucet outcome, when the CLI evaluated it. */
-  topUp?: {
-    status: 'skipped' | 'attempted'
-    claimsMade: number
-    amountReceivedAtomic: string
-    stopReason:
-      | 'not-needed'
-      | 'missing-credentials'
-      | 'target-requests-complete'
-      | 'claim-cap-reached'
-      | 'rate-limited'
-      | 'faucet-error'
-      | 'run-budget-exhausted'
-    reason?: string
-  }
+  /** The Base Sepolia faucet outcome per wallet, when the CLI evaluated it (#3836). */
+  topUps?: Partial<Record<TopUpWallet, TopUpOutcome>>
+}
+
+/** The wallets the CLI may request testnet ETH for, in the order it requests it. */
+export type TopUpWallet = 'merchant' | 'relayer'
+export const TOP_UP_WALLETS: readonly TopUpWallet[] = ['merchant', 'relayer']
+
+/** One wallet's faucet outcome. */
+export interface TopUpOutcome {
+  status: 'skipped' | 'attempted'
+  claimsMade: number
+  amountReceivedAtomic: string
+  stopReason:
+    | 'not-needed'
+    | 'missing-credentials'
+    | 'wrong-chain'
+    | 'invalid-address'
+    | 'target-requests-complete'
+    | 'claim-cap-reached'
+    | 'rate-limited'
+    | 'faucet-error'
+    | 'run-budget-exhausted'
+  reason?: string
 }
 
 export type BalanceReadings = Record<WalletKey, Reading>

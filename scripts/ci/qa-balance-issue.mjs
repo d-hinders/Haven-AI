@@ -122,12 +122,32 @@ function fmtWei(atomic) {
   }
 }
 
-function topUpSummary(topUp) {
+/** The wallets the harness may top up from the faucet, in the order it does (#3836). */
+const TOP_UP_WALLETS = ['merchant', 'relayer']
+const TOP_UP_NAMES = { merchant: 'Demo-merchant settlement wallet', relayer: 'Dev backend relayer' }
+
+/**
+ * Why a top-up was skipped, when the harness gave no reason. Every skip has
+ * its own wording: rendering a skip with the attempted-claims line would show
+ * it as a failed attempt.
+ */
+const SKIP_TEXT = {
+  'not-needed': 'not needed',
+  'wrong-chain': 'the wallet is not on Base Sepolia',
+  'invalid-address': 'the wallet address is not an address',
+}
+
+/** One line for one wallet's faucet outcome, naming the wallet. */
+export function topUpSummary(wallet, topUp) {
   if (!topUp) return null
-  if (topUp.stopReason === 'missing-credentials') return 'Testnet faucet top-up: skipped: no CDP credentials.'
-  if (topUp.stopReason === 'not-needed') return 'Testnet faucet top-up: not requested; the relayer was not `warn` or `critical`.'
+  const head = `${TOP_UP_NAMES[wallet] ?? wallet} testnet faucet top-up`
+  if (topUp.stopReason === 'missing-credentials') return `${head}: skipped: no CDP credentials.`
+  if (topUp.status === 'skipped') {
+    const why = topUp.reason ? publicReason(topUp.reason) : (SKIP_TEXT[topUp.stopReason] ?? `\`${topUp.stopReason}\``)
+    return `${head}: not requested — ${why}.`
+  }
   const reason = topUp.reason ? ` — ${publicReason(topUp.reason)}` : ''
-  return `Testnet faucet top-up: ${Number(topUp.claimsMade) || 0} accepted claim(s), ${fmtWei(topUp.amountReceivedAtomic)} ETH received; stop: \`${topUp.stopReason}\`${reason}.`
+  return `${head}: ${Number(topUp.claimsMade) || 0} accepted claim(s), ${fmtWei(topUp.amountReceivedAtomic)} ETH received; stop: \`${topUp.stopReason}\`${reason}.`
 }
 
 /** The issue body: one row per wallet, the top-up links, the time and the run. */
@@ -149,8 +169,8 @@ export function buildBody(report, { runUrl, repo, bands }) {
       `| ${row.name} | ${band} | ${row.address ? `\`${row.address}\`` : '—'} | ${balance} | ${burn} | ${fmtRunway(row)} | ${asset} | [how](${docBase}#${TOP_UP_ANCHOR[row.key]}) |`,
     )
   }
-  const topUp = topUpSummary(report.topUp)
-  if (topUp) lines.push('', topUp)
+  const topUps = TOP_UP_WALLETS.map((wallet) => topUpSummary(wallet, report.topUps?.[wallet])).filter(Boolean)
+  if (topUps.length > 0) lines.push('', ...topUps)
   lines.push(
     '',
     `Runway is the balance divided by the median observed daily drop over the last 14 daily readings; until 7 ` +

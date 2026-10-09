@@ -597,7 +597,13 @@ heal). The job names its own likely cause in its error output; the mechanism
 and why it had to be a separate job are in `.github/workflows/publish.yml`'s
 header comment, which is where they stay current.
 
-Report what published, and name anything that did not.
+Report what published, and name anything that did not. A package whose row
+reads `**FAILED** — not published: dependency <dep>@<version> did not publish
+in this run` is healed by **re-running the failed publish job** — never by
+cutting another version, and never by hand-publishing the dependant alone
+([#3797](https://github.com/d-hinders/Haven-AI/issues/3797)): the re-run
+skips the versions already on npm, publishes the missing dependency, and the
+held-back package goes out on that same re-run.
 
 ### When the `promote-tags` re-run cannot heal `latest`
 

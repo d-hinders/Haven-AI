@@ -76,9 +76,18 @@ covers:
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-10-08"
+last-verified: "2026-10-09"
 ---
 
+
+> **Re-verification (#3797, 2026-10-09):** coupled through
+> `.github/workflows/publish.yml`, which gains a dependency-presence gate (a
+> package whose internal `@haven_ai/*` dependency did not publish in the same
+> run is held back, not published, not nominated for `latest`). No Supported
+> Runtime Manifest rule, version-skew contract or hosted-runtime statement in
+> this document moves: the gate only narrows which packages reach npm in a
+> single run, and the re-run remedy is unchanged. Verified by
+> `release-bump.test.mjs` (102/102).
 
 > **#3778 (2026-10-08, optional bounded `delivery_reference` on the x402
 > outcome and settle surfaces):** `haven_report_x402_outcome`,

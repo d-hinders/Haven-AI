@@ -63,6 +63,12 @@ name: Publish packages
 #      second is the real control — an `if:` is one edit away from being wrong,
 #      whereas the environment withholds the secret itself.
 #
+# THE LOOP ORDER IS LOAD-BEARING (#3797): every internal dependency precedes
+# its dependents (sdk → signer, mcp; connect → sdk, signer, mcp), because the
+# dependency-presence gate in the publish step decides presence from each
+# package's outcome EARLIER IN THE SAME LOOP. Reordering the list strands the
+# gate and `release-bump.test.mjs` fails the run-order test.
+#
 # The committed contract doc docs/operations/mcp-runtime-compatibility.md stays
 # PROD-only. Its Supported Runtime Manifest table is rewritten by the bump
 # script, which on the dev channel happens in the throwaway tree; there is
@@ -362,6 +368,11 @@ jobs:
           refused=""
           promote=""
           results=""
+          # Per-package outcome of THIS run, keyed by package directory:
+          # published | skipped (already on npm) | failed | dep-failed. This is
+          # the dependency-presence ledger below (#3797); it is deliberately
+          # NOT refreshed from the registry mid-run (see the block's comment).
+          declare -A dep_state
 
           for pkg in sdk signer mcp connect cli; do
             name=$(node -p "require('./packages/$pkg/package.json').name")
@@ -395,11 +406,87 @@ jobs:
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "✓ $name@$version already on npm — skipping"
               results="$results| \`$name\` | $version | skipped — already on npm |"$'\n'
+              dep_state[$pkg]=skipped
               continue
             fi
 
+            # ── Dependency presence (#3797) ───────────────────────────────────
+            # A package whose exact-pinned internal dependency did not reach
+            # npm in THIS run is not published here. Publishing it anyway is
+            # how the 0.9.0-alpha.0 promotion left `npx @haven_ai/mcp` and
+            # fresh signer/connect installs resolving to a version that did
+            # not exist for five minutes (run 37898155685 attempt 1).
+            #
+            # Presence is decided from THIS RUN'S OWN OUTCOMES, never a fresh
+            # registry read of the dependency: the registry serves cached
+            # metadata (max-age=300), the CLI can serve the pre-publish
+            # document, and registry timestamps lag the publish step by up to
+            # ~4 minutes (#2660). The loop order above already puts every
+            # internal dependency before its dependents, so "published here"
+            # or "was already on npm at its own check" is a complete answer
+            # for anything inside the loop. Only a dependency outside the loop
+            # may fall back to the registry — and then by POLLING with
+            # --prefer-online, never one cached read.
+            #
+            # Runs AFTER assert_publish_allowed and the already-on-npm check
+            # above: a re-run reports an already-live package as skipped, not
+            # dependency-failed. The word *skipped* stays reserved for
+            # "already on npm"; a dependency-blocked package is marked FAILED
+            # with the reason, so the footer below stays true.
+            internal_deps="$(node -p "Object.entries(require('./packages/$pkg/package.json').dependencies ?? {}).filter(([n]) => n.startsWith('@haven_ai/')).map(([n, v]) => n + '=' + v).join(' ')")"
+            for entry in $internal_deps; do
+              dep="${entry%%=*}"
+              depver="${entry#*=}"
+              depdir="${dep#@haven_ai/}"
+
+              if [ ! -f "packages/$depdir/package.json" ]; then
+                # Outside the loop: nothing from this run's outcomes to read,
+                # so poll the registry instead. No workspace package is
+                # outside the loop today (sdk signer mcp connect cli covers
+                # every internal dependency); this path exists so the gate
+                # stays total if one ever is.
+                dep_present=false
+                for _attempt in 1 2 3 4 5 6; do
+                  if npm view --prefer-online "$dep@$depver" version >/dev/null 2>&1; then
+                    dep_present=true
+                    break
+                  fi
+                  sleep 10
+                done
+              else
+                # Published packages pin internal dependencies exactly
+                # (lint:workspace-pins). A range, or a pin drifted from the
+                # workspace, is a defect in the tree: the package is held back
+                # like a dependency-failed one and the job fails at the end —
+                # NOT an `exit 1` here, which would strand `latest` for the
+                # packages that already published (#1159's rule the
+                # promote-write-before-any-exit test enforces).
+                dep_workspace_version="$(node -p "require('./packages/$depdir/package.json').version")"
+                if [ "$depver" != "$dep_workspace_version" ]; then
+                  echo "✗ $name@$version not published: pins $dep@$depver but the workspace has $dep@$dep_workspace_version — published packages pin internal dependencies exactly (lint:workspace-pins)"
+                  results="$results| \`$name\` | $version | **FAILED** — not published: pins $dep@$depver but the workspace has $dep@$dep_workspace_version (published packages pin internal dependencies exactly, lint:workspace-pins) |"$'\n'
+                  failed="$failed $name"
+                  dep_state[$pkg]=dep-failed
+                  continue 2
+                fi
+                case "${dep_state[$depdir]-absent}" in
+                  published|skipped) dep_present=true ;;
+                  *) dep_present=false ;;
+                esac
+              fi
+
+              if [ "$dep_present" != true ]; then
+                echo "✗ $name@$version not published: dependency $dep@$depver did not publish in this run"
+                results="$results| \`$name\` | $version | **FAILED** — not published: dependency $dep@$depver did not publish in this run |"$'\n'
+                failed="$failed $name"
+                dep_state[$pkg]=dep-failed
+                continue 2
+              fi
+            done
+
             echo "→ Publishing $name@$version with --tag $tag"
             if npm publish -w "packages/$pkg" --tag "$tag" --access public; then
+              dep_state[$pkg]=published
               published_any=true
               if record_latest_promotion "$channel" "$name" "$version" "$tag"; then
                 results="$results| \`$name\` | $version | published under \`$tag\` |"$'\n'
@@ -414,6 +501,7 @@ jobs:
                 refused="$refused $name@$version"
               fi
             else
+              dep_state[$pkg]=failed
               echo "✗ $name@$version failed to publish — continuing with the remaining packages"
               results="$results| \`$name\` | $version | **FAILED** — npm publish exited non-zero (see log) |"$'\n'
               failed="$failed $name"
@@ -455,6 +543,8 @@ jobs:
           if [ -n "$failed" ]; then
             echo "ERROR: failed to publish:$failed"
             echo "Every other package was still attempted — anything not marked FAILED above is live or was already on npm."
+            echo "Remedy: re-run the failed job. A re-run skips the versions already on npm and publishes the rest,"
+            echo "including any package above that was held back because its dependency had not published in this run."
             exit 1
           fi
 

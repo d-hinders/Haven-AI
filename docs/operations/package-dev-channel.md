@@ -26,8 +26,17 @@ covers:
   - packages/mcp/src/credentials.ts
   - packages/backend/src/middleware/retired-safe-names.ts
   - packages/core/src/client-compat.ts
-last-verified: "2026-09-25"
+last-verified: "2026-10-09"
 ---
+
+> **Re-verification (#3797, 2026-10-09):** coupled through
+> `.github/workflows/publish.yml`, which gains a dependency-presence gate that
+> runs on BOTH channels: a package whose exact-pinned internal `@haven_ai/*`
+> dependency did not publish in the same run is held back and marked FAILED,
+> never nominated for `latest`. The dev-channel checklist above was updated in
+> the same pass; the snapshot version shape, dist-tag rules, channel guard and
+> every credential path are untouched. Verified by `release-bump.test.mjs`
+> (102/102), which runs the real loop shell on the dev channel too.
 
 > **Re-verification (#3496, tombstone-before-identity doctor selection,
 > 2026-09-30):** this doc is coupled through `packages/connect/src/doctor.ts`.
@@ -667,7 +676,11 @@ throughout.
    step prints `Snapshot version: 0.0.0-dev.…`, and the run summary carries a
    per-package table with `published under `dev`` on each row. Read the table:
    one package can fail while the others publish (#1159), so a green summary
-   glance is not enough.
+   glance is not enough. A package whose internal `@haven_ai/*` dependency did
+   not publish in the same run is **held back**, not published: its row reads
+   `**FAILED** — not published: dependency <dep>@<ver> did not publish in this
+   run` (#3797 — the gate runs on both channels). Re-run the failed job to
+   heal it; the re-run skips versions already on npm.
 
 3. **Confirm on the registry, and poll before concluding.**
 

@@ -41,6 +41,7 @@ import {
   isPermanentMerchantBudgetRefusal,
 } from '@/lib/merchantBudgetRefusal'
 import { truncateAddress, BudgetAmountRow } from './haven'
+import { budgetPeriodWords } from '@/lib/budget-caption'
 import { Icon } from './ui/Icon'
 import { Button } from './ui/Button'
 import WalletConnectAction from './WalletConnectAction'
@@ -69,15 +70,9 @@ interface Props {
   onBudgetChange?: () => void
 }
 
-const PERIODS: Array<{ label: string; seconds: number }> = [
-  { label: 'per day', seconds: 86_400 },
-  { label: 'per week', seconds: 604_800 },
-  { label: 'per month', seconds: 2_592_000 },
-]
-
-function periodLabel(seconds: number): string {
-  return PERIODS.find((p) => p.seconds === seconds)?.label ?? `every ${seconds}s`
-}
+// The day/week/month rhythm the picker offers (#3806: the words come from the
+// caption helper, so a prefilled period outside this trio still reads right).
+const PERIODS = [86_400, 604_800, 2_592_000] as const
 
 /**
  * Plain copy for the merchant-STALE build refusals a merchant-locked budget's
@@ -171,11 +166,13 @@ export default function EditBudgetModal({
   }, [open, budget, token])
 
   const periodOptions = useMemo(() => {
-    const list = [...PERIODS]
-    if (!list.some((p) => p.seconds === period)) {
-      list.push({ label: `every ${period}s`, seconds: period })
+    const list: number[] = [...PERIODS]
+    if (!list.some((p) => p === period)) {
+      list.push(period)
     }
-    return list
+    // Labels are the caption helper's period words (#3806) — the picker, the
+    // row and the confirmation all phrase one period the same way.
+    return list.map((seconds) => ({ label: budgetPeriodWords(seconds), seconds }))
   }, [period])
 
   // A merchant-locked budget's recipient is never user-editable (F3) — it is
@@ -337,7 +334,7 @@ export default function EditBudgetModal({
             <div className="space-y-5">
               <p className="text-sm text-[var(--v2-ink-2)]">
                 Editing the {formatUnits(BigInt(budget.budget_atomic), token?.decimals ?? 18)}{' '}
-                {token?.symbol} {periodLabel(budget.period_seconds)} budget
+                {token?.symbol} {budgetPeriodWords(budget.period_seconds)} budget
                 {/* Design review round 2, finding 1: a merchant-locked budget
                     already names its merchant in the read-only row just below
                     — "budget for its recipient" here would be a second, vaguer
@@ -432,7 +429,7 @@ export default function EditBudgetModal({
                 <div>
                   <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">Now</p>
                   <p className="text-sm text-[var(--v2-ink-2)]">
-                    {changes.oldAmount} {changes.symbol} {periodLabel(changes.oldPeriod)}
+                    {changes.oldAmount} {changes.symbol} {budgetPeriodWords(changes.oldPeriod)}
                     {/* Design review round 2, finding 1: name the merchant (and
                         its truncated address) for a merchant-locked budget —
                         the recipient never changes here, so "one recipient" is
@@ -447,7 +444,7 @@ export default function EditBudgetModal({
                 <div>
                   <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">After you sign</p>
                   <p className="text-sm font-medium text-[var(--v2-ink)]">
-                    {changes.newAmount} {changes.symbol} {periodLabel(changes.newPeriod)}
+                    {changes.newAmount} {changes.symbol} {budgetPeriodWords(changes.newPeriod)}
                     {isMerchantLocked && changes.newRecipient
                       ? ` · ${budget.merchant_name ?? 'this merchant'} only · ${truncateAddress(changes.newRecipient)}`
                       : changes.newRecipient

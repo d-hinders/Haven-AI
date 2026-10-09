@@ -487,7 +487,10 @@ export default function AgentPanel() {
             hidden={!panel.showRemovedAgents}
             role="group"
             aria-label="Removed agents"
-            className="grid items-start gap-4 lg:grid-cols-2"
+            // The class must toggle too (#3829): `.grid` and preflight's
+            // `[hidden]` rule share specificity and the utility is emitted
+            // later, so `grid` alone keeps the collapsed panel on screen.
+            className={panel.showRemovedAgents ? 'grid items-start gap-4 lg:grid-cols-2' : 'hidden'}
           >
             {removedAgents.map((agent) => (
               <AgentCard

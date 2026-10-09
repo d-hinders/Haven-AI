@@ -32,6 +32,7 @@ import { Row } from './ui/Row'
 import { useToast } from './ui/Toast'
 import { BudgetMeter, truncateAddress } from '@/components/haven'
 import { timeUntil } from '@/lib/format'
+import { budgetCaption, budgetPeriodWords, budgetReservedNote, type BudgetCaption } from '@/lib/budget-caption'
 
 interface TokenOption {
   address: string
@@ -71,35 +72,11 @@ interface Props {
  */
 export const DELEGATION_BUDGET_CARD_ID = 'delegation-budget-card'
 
-const PERIODS: Array<{ label: string; seconds: number }> = [
-  { label: 'per day', seconds: 86_400 },
-  { label: 'per week', seconds: 604_800 },
-  { label: 'per month', seconds: 2_592_000 },
-]
-
-/**
- * When a budget's next refill happens. `period_end` comes from the read
- * (#3693) and can be stale: the hook polls, so a response can land moments
- * before a boundary and be read after it. A past `period_end` is rolled
- * forward by whole periods — the same boundary arithmetic the server uses —
- * rather than rendering "refills expired".
- */
-function nextRefillMs(periodEndIso: string, periodSeconds: number, nowMs: number): number | null {
-  const end = Date.parse(periodEndIso)
-  if (!Number.isFinite(end)) return null
-  if (end > nowMs || periodSeconds <= 0) return end
-  const periodMs = periodSeconds * 1000
-  return end + Math.ceil((nowMs - end + 1) / periodMs) * periodMs
-}
-
-/** "in 45m", "in 14h", "in 3 days" — the coarse future the caption needs. */
-function inDuration(targetMs: number, nowMs: number): string {
-  const mins = Math.max(1, Math.round((targetMs - nowMs) / 60_000))
-  if (mins < 60) return `in ${mins}m`
-  const hours = Math.round(mins / 60)
-  if (hours < 48) return `in ${hours}h`
-  return `in ${Math.round(hours / 24)} days`
-}
+// The period picker offers the day/week/month rhythm (#3806: the words are
+// the caption helper's — a prefilled build may carry any period the CLI chose
+// (an hour, a minute-floor of 60s), so the prefilled value gets its own
+// option instead of silently desyncing the Select from the state it shows).
+const PERIODS = [86_400, 604_800, 2_592_000] as const
 
 export default function DelegationBudgetCard({ agentId, chainId, tokens, agentName, onBudgetChange, retired }: Props) {
   // #3695: this card is the one caller that asks for remaining-this-period —
@@ -241,10 +218,10 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
   // prefilled value gets its own option instead of silently desyncing the
   // Select from the state it shows.
   const periodOptions = useMemo(() => {
-    const list = [...PERIODS]
+    const list: number[] = [...PERIODS]
     const prefilled = prefill?.periodSeconds
-    if (prefilled !== undefined && !list.some((p) => p.seconds === prefilled)) {
-      list.push({ label: `every ${prefilled}s`, seconds: prefilled })
+    if (prefilled !== undefined && !list.some((p) => p === prefilled)) {
+      list.push(prefilled)
     }
     return list
   }, [prefill])
@@ -399,6 +376,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
               budget={b}
               tokens={tokens}
               agentName={agentName}
+              chainId={chainId}
               openTaskBudgets={openTaskBudgets}
               onRevoke={handleRevoke}
               onEdit={retired ? undefined : setEditing}
@@ -460,7 +438,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
             )}
             <Select value={String(period)} onChange={(e) => setPeriod(Number(e.target.value))} aria-label="Period" className="sm:w-36">
               {periodOptions.map((p) => (
-                <option key={p.seconds} value={p.seconds}>{p.label}</option>
+                <option key={p} value={p}>{budgetPeriodWords(p)}</option>
               ))}
             </Select>
           </div>
@@ -647,6 +625,7 @@ function BudgetRow({
   budget,
   tokens,
   agentName,
+  chainId,
   openTaskBudgets,
   onRevoke,
   onEdit,
@@ -657,6 +636,8 @@ function BudgetRow({
   tokens: TokenOption[]
   /** #3717: the agent's display name, for the confirm's body. */
   agentName: string
+  /** The agent's chain — resolves the token's decimals for the caption (#3806). */
+  chainId: number
   /** Open, unexpired task budgets across the agent (#3329) — filtered to this row's parent below. */
   openTaskBudgets: TaskBudget[]
   onRevoke: (hash: string) => void | Promise<void>
@@ -667,8 +648,7 @@ function BudgetRow({
 }) {
   const t = tokens.find((x) => x.address.toLowerCase() === budget.token_address.toLowerCase())
   const amount = t ? formatUnits(BigInt(budget.budget_atomic), t.decimals) : budget.budget_atomic
-  const periodLabel =
-    PERIODS.find((p) => p.seconds === budget.period_seconds)?.label ?? `every ${budget.period_seconds}s`
+  const periodLabel = budgetPeriodWords(budget.period_seconds)
 
   // #3717: Stop ends an irreversible on-chain budget, so it explains itself
   // at the moment of action rather than asking for a signature cold. The
@@ -693,9 +673,8 @@ function BudgetRow({
   const reservedAtomic = openTaskBudgets
     .filter((tb) => tb.parent_delegation_hash === budget.delegation_hash)
     .reduce((sum, tb) => sum + BigInt(tb.max_atomic), 0n)
-  const reservedDisplay = t ? formatUnits(reservedAtomic, t.decimals) : reservedAtomic.toString()
 
-  const usage = budgetUsage(budget, t)
+  const usage = budgetCaptionFor(budget, chainId, t?.symbol ?? '')
 
   return (
     <div className="flex items-start justify-between gap-3 py-3">
@@ -714,19 +693,15 @@ function BudgetRow({
         </p>
         {reservedAtomic > 0n ? (
           <p className="text-xs text-[var(--v2-ink-3)]">
-            {reservedDisplay} {t?.symbol ?? ''} reserved for task budgets
+            {budgetReservedNote(reservedAtomic.toString(), t?.symbol ?? '', { chainId })}
           </p>
         ) : null}
         {usage.kind === 'meter' ? (
           <div className="mt-2 max-w-sm">
             <BudgetMeter usedPercent={usage.usedPercent} label={usage.label} caption={usage.caption} />
           </div>
-        ) : usage.kind === 'expired' ? (
-          <p className="mt-2 text-xs text-[var(--v2-ink-3)]">This budget has expired and can no longer be spent.</p>
-        ) : usage.kind === 'unread' ? (
-          <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
-            Usage this period couldn&rsquo;t be read from the chain.
-          </p>
+        ) : usage.kind === 'expired' || usage.kind === 'unknown' || usage.kind === 'refilled-updating' || usage.kind === 'not-started' ? (
+          <p className="mt-2 text-xs text-[var(--v2-ink-3)]">{usage.caption}</p>
         ) : null}
       </div>
       {/* #3166: Edit changes this budget's limits in place — same slot, same
@@ -777,59 +752,53 @@ function BudgetRow({
   )
 }
 
-type BudgetUsage =
-  | { kind: 'none' }
-  | { kind: 'unread' }
-  | { kind: 'expired' }
-  | { kind: 'meter'; usedPercent: number; label: string; caption: string }
+type BudgetUsage = BudgetCaption
 
 /**
- * How much of this period a budget has used (#3695), from the read's
- * remaining-this-period (#3693).
+ * The row's caption, from the shared helper (#3806). The state machine —
+ * expired, dormant (not-started), failed read (unknown), stale read
+ * (refilled-updating), meter — and the wording live in
+ * `lib/budget-caption.ts`; this only projects the wire row onto it.
  *
- * - No figure on the row (not asked for, or not an active row): nothing.
- * - `remaining_from_chain: false`: the chain read failed and `remaining_atomic`
- *   is the full budget, NOT a measurement — so no meter (it would claim
- *   "0 used") and no "snapshot" wording (it is not one either).
- * - Otherwise: used = budget − remaining, with the next refill — or the
- *   expiry, when the budget ends before its period does.
+ * `remaining_from_chain: false` means the chain read failed and
+ * `remaining_atomic` is the full budget, NOT a measurement — so no meter (it
+ * would claim "0 used") and no "snapshot" wording (it is not one either).
+ * A null `remaining_from_chain` is "no figure on the row", which renders
+ * nothing at all rather than a zero.
  */
-function budgetUsage(budget: DelegationBudget, t: TokenOption | undefined): BudgetUsage {
-  // An `active` row can outlive its `expires_at` — nothing flips the status
-  // (`eligibleSubBudgetParents` filters on expiry for the same reason). Such a
-  // budget can no longer spend, so it gets no "used this period" meter and no
-  // "expires in …" countdown (#3695 review).
-  if (budget.expires_at * 1000 <= Date.now()) return { kind: 'expired' }
-  if (budget.remaining_atomic == null || budget.remaining_from_chain == null) return { kind: 'none' }
-  if (budget.remaining_from_chain === false) return { kind: 'unread' }
-  let total: bigint
-  let remaining: bigint
+function budgetCaptionFor(budget: DelegationBudget, chainId: number, symbol: string): BudgetUsage {
+  let hasParseableAmounts = true
   try {
-    total = BigInt(budget.budget_atomic)
-    remaining = BigInt(budget.remaining_atomic)
+    BigInt(budget.budget_atomic)
+    if (budget.remaining_atomic != null) BigInt(budget.remaining_atomic)
   } catch {
-    return { kind: 'none' }
+    hasParseableAmounts = false
   }
-  const used = total > remaining ? total - remaining : 0n
-  const usedPercent = total > 0n ? Number((used * 10_000n) / total) / 100 : 0
-  const symbol = t?.symbol ?? ''
-  const fmt = (v: bigint) => (t ? formatUnits(v, t.decimals) : v.toString())
-  const nowMs = Date.now()
-  const expiresMs = budget.expires_at * 1000
-  const refillMs = budget.period_end ? nextRefillMs(budget.period_end, budget.period_seconds, nowMs) : null
-  const when =
-    refillMs === null
-      ? null
-      : expiresMs < refillMs
-        ? `expires ${inDuration(expiresMs, nowMs)}`
-        : `refills ${inDuration(refillMs, nowMs)}`
-  const usedLine = `${fmt(used)} of ${fmt(total)} ${symbol} used this period`.replace(/\s+/g, ' ').trim()
-  return {
-    kind: 'meter',
-    usedPercent,
-    label: `${symbol} budget used`.trim(),
-    caption: when ? `${usedLine} · ${when}` : usedLine,
+  const readOk = hasParseableAmounts && budget.remaining_atomic != null && budget.remaining_from_chain === true
+  let usedAtomic: string | null = null
+  if (readOk) {
+    const total = BigInt(budget.budget_atomic)
+    const remaining = BigInt(budget.remaining_atomic!)
+    usedAtomic = (total > remaining ? total - remaining : 0n).toString()
   }
+  return budgetCaption(
+    {
+      token: budget.token_address,
+      recipient: budget.recipient_address,
+      startSec: Number(budget.start_date),
+      periodSeconds: budget.period_seconds,
+      expiresSec: budget.expires_at,
+      budgetAtomic: budget.budget_atomic,
+      usedAtomic,
+      readFromChain: budget.remaining_from_chain !== false,
+      periodEndMs: budget.period_end ? Date.parse(budget.period_end) : null,
+      createdMs: Date.parse(budget.created_at),
+      symbol,
+      chainId,
+    },
+    // #1995: the clock enters as a value — the helper never reads it itself.
+    { nowMs: Date.now() },
+  )
 }
 
 /**

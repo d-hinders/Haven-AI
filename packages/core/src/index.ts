@@ -48,6 +48,13 @@ export {
   type CoreTokenConfig,
 } from './chains.js'
 
+// The shared period-boundary arithmetic (#3806) — the ONE definition the
+// backend's reads and the frontend's budget captions both compute refills
+// from. Moved from `delegation-budget-reader.ts` (its home since #3693),
+// which now re-exports it so the backend's two consumers keep importing from
+// the same module path.
+export { currentPeriodBounds } from './period-bounds.js'
+
 // Machine-payment lifecycle domain (#987) — rails, status unions, derivation.
 export {
   MACHINE_PAYMENT_RAILS,

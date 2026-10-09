@@ -659,11 +659,20 @@ full ARIA contract (`aria-valuemin`, `aria-valuemax`, `aria-valuenow`,
 `aria-label`). It takes `usedPercent` — **clamped to 0–100**, so an overdrawn
 or malformed read can never push the fill past its track or the ARIA value
 outside its own declared range — and a `label`; an optional `caption` slot
-renders the "1.20 of 3.00 USDC used · refills …" line. The label row above the
-bar (token value, percentage) belongs to the caller: it is the caller's tabular
-typography, not part of the measurement. The fill is a token surface colour,
-never a series colour — a budget bar measures one delegation against its own
-period, it is not a category to be keyed against a legend. Recorded on
+carries the meter's line. That caption is the shared budget-caption helper's
+output (`lib/budget-caption.ts`, #3806): token amounts at two decimals
+("1.25 of 5.00 USDC used this period") — or ONE leading "≈" in fiat when the
+caller supplies a rate — followed by the earlier of the refill and the
+expiry, phrased under 24 h relative ("refills in 45m"), under 7 days as
+weekday and 24-hour time ("refills Thu 14:02"), otherwise day and month
+("refills 14 Nov"). The states that replace the bar: a failed or stale read
+shows "Usage this period couldn't be read" (never a 0 % bar, never a
+"snapshot" claim), an expired budget its own line, and a future `start_date`
+shows when the budget starts. The label row above the bar (token value,
+percentage) belongs to the caller: it is the caller's tabular typography, not
+part of the measurement. The fill is a token surface colour, never a series
+colour — a budget bar measures one delegation against its own period, it is
+not a category to be keyed against a legend. Recorded on
 `/design-system` → *BudgetMeter*; the analytics agents table renders through
 it.
 

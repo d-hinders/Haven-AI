@@ -80,6 +80,18 @@ last-verified: "2026-10-09"
 ---
 
 
+> **Re-verification (#3838, 2026-10-09, wording-only `haven_pay_x402_quote`
+> description edit):** the local tool's sign-in-with-x sentence was rewritten
+> (sign in FIRST for multi-call flows; the merchant session token never
+> reaches the quote tools) at the same 434-byte length — byte-neutral against
+> the #1591 ratchet, re-measured green. No Supported Runtime Manifest rule,
+> version-skew contract, consent-hash or hosted-runtime statement in this
+> document moves: descriptions are not a skew axis (#2330 precedent), the
+> tool's schema, arguments and response shapes are unchanged, and the
+> sign-in guidance itself lives in the SDK skill copy mirrored byte-pinned
+> into the frontend bundle. `last-verified` stays 2026-10-09. Nothing else in
+> this document was re-verified.
+
 > **Re-verification (#3819, 2026-10-09):** coupled through
 > `.github/workflows/publish.yml`: the dependency-presence ledger
 > (`dep_state`) is now a space-delimited `pkg=state` string with an

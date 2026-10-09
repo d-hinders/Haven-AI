@@ -647,6 +647,30 @@ test.describe('design-system visual regression', () => {
       })
     })
 
+    // #3845: NoticeRow is a shared haven/ primitive whose one layout decision
+    // — the action on its own line under the text below sm, on the line from
+    // sm up — is invisible to unit tests. Two rows: a retry and a connect.
+    test(`/design-system NoticeRow sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-notice-row')
+      await expect(sample).toHaveCount(1)
+      await expect(sample.getByRole('button')).toHaveCount(2)
+      await assertFitsViewport(sample, vp.height, 'the NoticeRow sample')
+
+      await expect(sample).toHaveScreenshot(`design-system-notice-row-${vp.name}${schemeSuffix}.png`, {
+        animations: 'disabled',
+        caret: 'hide',
+        maxDiffPixels: SAMPLE_MAX_DIFF_PIXELS,
+        threshold: PIXEL_THRESHOLD,
+      })
+    })
+
     test(`/design-system AreaChart sparkline sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
       const scheme = schemeOf(testInfo)
       const schemeSuffix = scheme === 'dark' ? '-dark' : ''

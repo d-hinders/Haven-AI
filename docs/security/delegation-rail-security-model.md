@@ -2747,7 +2747,7 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > for it, and `last-verified` is not bumped.
 >
 > **Re-verified unchanged (#3845, 2026-10-09, owner-wallet surfaces polish):**
-> this diff touches three covered files, all display-layer.
+> this diff touches four covered files, all display-layer.
 > `hooks/useDelegationBudget.ts` returns one more read-only value,
 > `hasPasskeys` (`signers.passkeys.length > 0`, null until the signer read
 > lands) — no new fetch, and `pickSigningPath`, `ready` and every signing step
@@ -2755,11 +2755,15 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > whether the set has a passkey; the Remove button's `wayCount < 2` gate and
 > both consequence confirmations are unchanged. `components/DelegationSendModal.tsx`
 > rewords its not-ready line to "Connect your account owner wallet to send."
+> `components/DelegationBudgetCard.tsx` renders its failed-signer-load retry
+> and its #3812 owner-wallet notice through one shared notice-row component;
+> the `signersError` / `needsOwnerWallet` conditions and every Stop and Edit
+> gate are unchanged.
 > Elsewhere the change only rewords or de-duplicates: the remove dialog and the
 > merchant-budget modal stop offering a passkey to an account that has none,
-> and three tinted notice rows render through one shared component.
+> and the edit-budget modal's retry row uses the same shared component.
 > `useAgentRekey.ts` and `lib/signer.ts` are not touched. No new spender, no
-> authority grant, no custody change. Scope of this re-read: the three files
+> authority grant, no custody change. Scope of this re-read: the four files
 > above and the sections whose claims rest on the hook's signing-path
 > selection and the signers card's removal gate (§3's #3812 note, §6);
 > nothing else in this document was re-read for it, and `last-verified` is not

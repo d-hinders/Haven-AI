@@ -121,8 +121,10 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
                     {truncateAddress(signers.owner_address)}
                   </p>
                   <p className="mt-0.5 text-xs text-[var(--v2-ink-muted)]">
-                    If you remove it, your passkeys become the only ways to approve — and to recover this
-                    account.
+                    {/* #3845: never promise passkeys the account does not have. */}
+                    {signers.passkeys.length > 0
+                      ? 'If you remove it, your passkeys become the only ways to approve — and to recover this account.'
+                      : "This wallet is the only way to approve this account, so it can't be removed until you add a backup."}
                   </p>
                 </div>
                 <Button

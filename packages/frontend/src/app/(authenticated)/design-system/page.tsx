@@ -35,6 +35,7 @@ import type { StackedBarDay } from '@/components/ui/StackedBarChart'
 import { AreaChart } from '@/components/ui/AreaChart'
 import type { AreaPoint, SparklinePoint } from '@/components/ui/AreaChart'
 import { AttentionList } from '@/components/haven/AttentionList'
+import { NoticeRow } from '@/components/haven/NoticeRow'
 import type { AttentionListItem } from '@/components/haven/AttentionList'
 import { CodeBlock } from '@/components/ui/CodeBlock'
 import ConfirmDialog from '@/components/ConfirmDialog'
@@ -2532,7 +2533,7 @@ export default function DesignSystemPage() {
                 className="mb-2 flex items-start gap-2 text-xs text-[var(--v2-ink-3)]"
               >
                 <Icon icon={Info} className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
-                <span>Connect the account&apos;s owner wallet to update this agent budget.</span>
+                <span>Connect your account owner wallet to update this agent budget.</span>
               </p>
               <div className="flex gap-3">
                 <Button variant="ghost" className="flex-1">Back</Button>
@@ -2884,6 +2885,25 @@ export default function DesignSystemPage() {
           <StatTile variant="inline" label="Spent today" value="13 000,50 kr" />
           <StatTile variant="inline" label="Refused" value="3" />
           <StatTile variant="inline" label="Fees paid to Haven" value="No fees yet" />
+        </div>
+      </Section>
+
+      <Section
+        title="NoticeRow"
+        description="One tinted notice line inside a card or modal (#3845): a sentence and, optionally, the one action that resolves it — a retry, or the owner-wallet connect. The tint is a callout, one of the reserved uses of --v2-surface, not a grouping wrapper. Below sm the action sits on its own line under the text; from sm up they share one line, the action at the end. The caller sets the outer margin. Not AttentionList: that is a dismissable list of things that need your eye; a NoticeRow is a single line that stays until its cause is gone."
+      >
+        <div data-testid="ds-notice-row">
+          <Card hover={false} className="p-5">
+            <NoticeRow
+              className="mb-4"
+              action={<Button size="sm" variant="ghost">Try again</Button>}
+            >
+              Haven could not load how this account is approved.
+            </NoticeRow>
+            <NoticeRow action={<Button size="sm" variant="ghost">Connect wallet</Button>}>
+              Connect your account owner wallet to change or stop a budget.
+            </NoticeRow>
+          </Card>
         </div>
       </Section>
 

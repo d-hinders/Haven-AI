@@ -702,7 +702,7 @@ describe('signing-path refusal — the one reason left (#1890)', () => {
       expect(screen.getByText(/cannot replace this key from this device/i)).toBeInTheDocument(),
     )
     expect(screen.queryByText(/passkey is not supported/i)).toBeNull()
-    expect(screen.getByText(/or use a device with one of its passkeys/i)).toBeInTheDocument()
+    expect(screen.getByText(/or use a device with one of the account’s passkeys/i)).toBeInTheDocument()
   })
 })
 

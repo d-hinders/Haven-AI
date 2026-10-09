@@ -30,7 +30,7 @@ import { Input } from './ui/Input'
 import { Select } from './ui/Select'
 import { Row } from './ui/Row'
 import { useToast } from './ui/Toast'
-import { BudgetMeter, truncateAddress } from '@/components/haven'
+import { BudgetMeter, NoticeRow, truncateAddress } from '@/components/haven'
 import { timeUntil } from '@/lib/format'
 import { budgetCaption, budgetPeriodWords, budgetReservedNote, type BudgetCaption } from '@/lib/budget-caption'
 
@@ -333,26 +333,25 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
       {/* A failed signer-set fetch must be retryable (#1079) — without it the
           card is stranded at ready=false with no way out. */}
       {signersError ? (
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3">
-          <p className="text-sm text-[var(--v2-ink-2)]">
-            Haven could not load how this account is approved.
-          </p>
-          <Button size="sm" variant="ghost" onClick={() => void reloadSigners()}>
-            Try again
-          </Button>
-        </div>
+        <NoticeRow
+          className="mb-4"
+          action={
+            <Button size="sm" variant="ghost" onClick={() => void reloadSigners()}>
+              Try again
+            </Button>
+          }
+        >
+          Haven could not load how this account is approved.
+        </NoticeRow>
       ) : null}
 
       {needsOwnerWallet && hasActive && !showForm && !retired ? (
         // #3812: Stop and Edit on the rows below are disabled while nobody on
         // this device can sign. Say why, and offer the way out here — the
         // header was the only place to connect a wallet before.
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3">
-          <p className="text-sm text-[var(--v2-ink-2)]">
-            Connect your account owner wallet to change or stop a budget.
-          </p>
-          <WalletConnectAction />
-        </div>
+        <NoticeRow className="mb-4" action={<WalletConnectAction />}>
+          Connect your account owner wallet to change or stop a budget.
+        </NoticeRow>
       ) : null}
 
       <div className="divide-y divide-[var(--v2-border)]">

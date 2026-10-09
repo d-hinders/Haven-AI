@@ -687,6 +687,10 @@ export function useDelegationBudget(
     // which is not the same as "this device cannot sign". Callers that act on
     // `!ready` wait on this first.
     signersLoading: signers === null && !signersError,
+    // #3845: whether the signer set has ANY enrolled passkey, on any device
+    // (the ceremony can hand off to another one). Null until the set is read,
+    // so a caller never drops a passkey clause on a guess.
+    hasPasskeys: signers ? signers.passkeys.length > 0 : null,
     reload,
     budgetsError,
     signersError,

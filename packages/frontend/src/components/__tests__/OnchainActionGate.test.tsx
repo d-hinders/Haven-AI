@@ -28,7 +28,7 @@ const WRONG_WALLET: AccountOperationGate = {
   ownerAddress: OWNER,
 }
 
-const GENERIC = "Connect the account's owner wallet to update this agent budget."
+const GENERIC = 'Connect your account owner wallet to update this agent budget.'
 
 describe('OnchainActionGate rendering by gate kind', () => {
   it('wrong_wallet renders a DISTINCT visible message naming both addresses — not the generic no-signer copy, and never nothing (#2073)', () => {

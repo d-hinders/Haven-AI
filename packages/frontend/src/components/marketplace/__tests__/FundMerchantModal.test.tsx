@@ -12,8 +12,9 @@ vi.mock('@/components/WalletConnectAction', () => ({
   default: () => <button type="button">Connect wallet</button>,
 }))
 
-const { mockGrant, mockReady, mockBudgets, mockBudgetsError, mockReload, mockSignersLoading } = vi.hoisted(() => ({
+const { mockGrant, mockReady, mockBudgets, mockBudgetsError, mockReload, mockSignersLoading, mockHasPasskeys } = vi.hoisted(() => ({
   mockSignersLoading: vi.fn(() => false),
+  mockHasPasskeys: vi.fn((): boolean | null => null),
   mockGrant: vi.fn(),
   mockReady: vi.fn(() => true),
   mockBudgets: vi.fn((): unknown[] | null => []),
@@ -30,6 +31,7 @@ vi.mock('@/hooks/useDelegationBudget', () => ({
     busy: false,
     ready: mockReady(),
     signersLoading: mockSignersLoading(),
+    hasPasskeys: mockHasPasskeys(),
     signersError: null,
   }),
 }))
@@ -147,6 +149,7 @@ beforeEach(() => {
   mockReady.mockReset()
   mockReady.mockReturnValue(true)
   mockSignersLoading.mockReturnValue(false)
+  mockHasPasskeys.mockReturnValue(null)
   mockBudgets.mockReset()
   mockBudgets.mockReturnValue([])
   mockBudgetsError.mockReset()
@@ -355,6 +358,24 @@ describe('FundMerchantModal (#3331)', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
     expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeDefined()
     mockReady.mockReturnValue(true)
+  })
+
+  // #3845: the not-ready line offers a passkey only to an account that has
+  // one enrolled; unknown keeps the offer.
+  it.each([
+    [false, 'Connect your account owner wallet to sign this budget.'],
+    [true, 'Connect your account owner wallet, or use one of the account’s passkeys, to sign this budget.'],
+    [null, 'Connect your account owner wallet, or use one of the account’s passkeys, to sign this budget.'],
+  ])('review step: hasPasskeys=%s words the not-ready line for the signer set', async (has, text) => {
+    mockBudgets.mockReturnValue([])
+    mockReady.mockReturnValue(false)
+    mockHasPasskeys.mockReturnValue(has)
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
+    expect(screen.getByText(text)).toBeDefined()
+    if (has === false) expect(screen.queryByText(/passkey/i)).toBeNull()
   })
 
   it('review step: no wallet connect while the signer set loads', async () => {

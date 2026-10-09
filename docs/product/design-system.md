@@ -34,6 +34,7 @@ covers:
   - packages/frontend/src/components/haven/TransactionMovement.tsx
   - packages/frontend/src/components/haven/Amount.tsx
   - packages/frontend/src/components/haven/AttentionList.tsx
+  - packages/frontend/src/components/haven/NoticeRow.tsx
   - packages/frontend/src/components/transactions/**
   - packages/frontend/src/components/haven/LabelChip.tsx
   - packages/frontend/src/__tests__/capture-viewports.test.ts
@@ -735,6 +736,21 @@ item, or to the caller's list heading (`headingId`) when the list emptied.
 Below `sm` the trailing slot wraps under the body and the body line-clamps
 to two lines (`Row` truncates to one); from `sm` up the plain row rhythm
 returns. Zero items renders nothing — the caller owns the empty state.
+
+### NoticeRow (#3845)
+
+`components/haven/NoticeRow` is one tinted notice line inside a card or
+modal: a sentence and, optionally, the one action that resolves it (a
+retry, or the owner-wallet connect). It replaced three hand-copied rows on
+the owner-signing surfaces: the agent budget card's failed signer load and
+its #3812 owner-wallet notice, and the edit-budget modal's failed signer
+load. The
+tint is a callout, one of the reserved `--v2-surface` uses, not a grouping
+wrapper. Below `sm` the action sits on its own line under the text; from
+`sm` up they share one line, the action at the end. The caller sets the
+outer margin. It is not `AttentionList`: that is a dismissable list of
+things that need your eye, while a `NoticeRow` is a single line that stays
+until its cause is gone.
 
 ### AreaChart sparkline (#3805)
 

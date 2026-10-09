@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../config.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../config.js')>()
-  return { config: { ...actual.config, blockscoutApiKey: 'bs-test-key' } }
+  return { config: { ...actual.config, blockscoutApiKey: 'bs-test-key', alchemyHistoryApiKey: '' } }
 })
 
 import { EXPLORER_ERROR_BODY_MAX, fetchNormalTransactions } from '../explorer-api.js'

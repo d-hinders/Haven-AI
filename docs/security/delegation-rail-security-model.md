@@ -2692,3 +2692,15 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > custody, redemption and settlement sections were NOT
 > re-read (the diff touches no file that implements them). `last-verified`
 > is bumped for exactly this coverage.
+>
+> **Re-verified unchanged (#3799, 2026-10-09, auth-row display field):** this
+> diff touches `infra/repositories/agents.ts` (a covered path) by adding
+> `a.mcp_server_name` to `AGENT_BY_API_KEY_SQL` and `AgentAuthRow` (plus the
+> `mcp_server_name` pass-through on `AgentContext` in
+> `middleware/agentAuth.ts`). The field is migration 067's "a display aid,
+> never identity": it only personalises a `client_update.upgrade_command`
+> hint string in the client-compat middleware and is read nowhere else on the
+> auth path. Authentication still keys on the API-key hash; no delegation,
+> enforcer, budget, signer-set or custody decision reads it, and no signing
+> input changes. Scope of this re-read: this field only. The rest of this
+> document was not re-read for it, and `last-verified` is not bumped.

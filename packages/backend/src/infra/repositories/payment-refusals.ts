@@ -206,7 +206,8 @@ export async function aggregateRefusalsForUserByAgent(
 ): Promise<RefusalsPerAgentAggregate[]> {
   // Refusals = distinct rows, attempts = SUM(attempts), by_reason = per-reason
   // row counts — all three from ONE grouped scan (inner GROUP BY
-  // (agent_id, reason), outer GROUP BY agent_id).
+  // (agent_id, reason), outer GROUP BY agent_id). Refusals sums the per-reason
+  // row counts: a bare COUNT(*) here would count reasons, not rows (#3815).
   const result = await pool.query<{
     agent_id: string
     refusals: string
@@ -214,7 +215,7 @@ export async function aggregateRefusalsForUserByAgent(
     by_reason: Record<string, number> | null
   }>(
     `SELECT agent_id,
-            COUNT(*)::text AS refusals,
+            COALESCE(SUM(reason_rows), 0)::text AS refusals,
             COALESCE(SUM(reason_attempts), 0)::text AS attempts,
             jsonb_object_agg(reason, reason_rows) AS by_reason
        FROM (
@@ -224,7 +225,7 @@ export async function aggregateRefusalsForUserByAgent(
           GROUP BY agent_id, reason
        ) per_reason
       GROUP BY agent_id
-      ORDER BY attempts DESC, agent_id ASC`,
+      ORDER BY SUM(reason_attempts) DESC, agent_id ASC`,
     [userId, range.fromExclusive, range.toInclusive],
   )
   return result.rows.map((row) => ({

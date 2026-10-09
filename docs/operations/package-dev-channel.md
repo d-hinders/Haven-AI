@@ -13,6 +13,7 @@ covers:
   - packages/mcp-server/src/connector-channel.ts
   - packages/backend/src/config.ts
   - packages/backend/src/routes/agent-connection-setups.ts
+  - packages/backend/src/middleware/client-compat.ts
   - packages/connect/src/runtime-spec-override.ts
   - packages/connect/src/doctor.ts
   - packages/connect/src/cli.ts
@@ -28,6 +29,17 @@ covers:
   - packages/core/src/client-compat.ts
 last-verified: "2026-10-09"
 ---
+
+> **Re-verification (#3819, 2026-10-09):** coupled through
+> `.github/workflows/publish.yml`: the dependency-presence gate's ledger
+> (`dep_state`) is now a space-delimited `pkg=state` string with an
+> exact-word `case` lookup instead of a bash-4 associative array, making the
+> loop bash 3.2 compatible (#3819). The gate runs on BOTH channels and its
+> behaviour is unchanged on every bash; the dev-channel checklist, snapshot
+> version shape and dist-tag rules in this document are untouched. Verified
+> by `release-bump.test.mjs` (102/102), which runs the real loop shell on
+> host bash 5 and in a real GNU bash 3.2.57 container — on the dev channel
+> too.
 
 > **Re-verification (#3797, 2026-10-09):** coupled through
 > `.github/workflows/publish.yml`, which gains a dependency-presence gate that
@@ -102,6 +114,12 @@ and the `release` skill.
 
 > **Re-verified unchanged (#3669, 2026-10-06, backend supported vs known chains):**
 > - **What changed.** `routes/agent-connection-setups.ts` loses its chain-100 network-name branch. A setup can only be approved on a delegation-rail account (Base or Base Sepolia), so the only visible change is that a historic chain-100 setup row's `network` reads "Chain 100" instead of "Gnosis". No connector-handed command changes.
+> - **What did not.** No dist-tag, channel or `HAVEN_CONNECTOR_CHANNEL` behaviour moves.
+>
+> The rest of this document was not re-read for it, and `last-verified` is not bumped.
+
+> **Re-verified unchanged (2026-10-09, `ALCHEMY_HISTORY_API_KEY` added):**
+> - **What changed.** `config.ts` gains `alchemyHistoryApiKey`, read by the Base / Base Sepolia transaction-history reads only. No connector, dist-tag or channel variable is touched.
 > - **What did not.** No dist-tag, channel or `HAVEN_CONNECTOR_CHANNEL` behaviour moves.
 >
 > The rest of this document was not re-read for it, and `last-verified` is not bumped.
@@ -398,6 +416,24 @@ and the `release` skill.
 > `parseOpsDatabaseUrl` in `config/ops.ts`) and its comment, plus its import.
 > `connectorChannel` / `parseConnectorChannel` and `requestValidationMode` have
 > no diff. `last-verified` is not bumped; nothing else here was re-verified.
+>
+> **Re-verification (#3799, 2026-10-09, the upgrade hint's per-agent suffix).**
+> This diff touches covered connect files (`doctor.ts`, `cli.ts`, `args.ts`,
+> `storage.ts`) and `packages/backend/src/middleware/client-compat.ts`. For
+> the connector packages only, `client_update.upgrade_command` may append
+> ` --name <slug>` — normalised from `agents.mcp_server_name` (migration 067)
+> with a fail-closed slug check, `haven` → no flag, anything the connector's
+> parser would refuse → no flag. The suffix is added in the backend hint
+> (from the SAME auth SELECT that authenticated the request — no second read
+> in `onSend`), not in core or the SDK: `@haven_ai/core`'s
+> `upgradeCommandFor` keeps the bare `/ --doctor$/` form,
+> `connector-upgrade-command-parity.test.ts` is unchanged and green, and
+> `/discovery`, `/.well-known/haven.json` and `/releases` keep the bare
+> command. The connect-side changes are directory selection and refusal
+> wording (`--doctor`/`--repair --name <slug>` now resolve through the shared
+> pair-record rule); channel selection, dist-tag resolution, version
+> ordering and the snapshot path do not move. `last-verified` is not bumped:
+> this note is the scope. Nothing else in this document was re-verified.
 >
 > **Re-verification (#3304):** coupled because `packages/core/src/client-compat.ts`
 > is in this doc's `covers:`. The only edit there is a comment: the sentence

@@ -11,9 +11,12 @@
  *   - blockscout-v2  Blockscout's REST v2 API. Required for Base because
  *                    the v1 `tokentx` action times out with HTTP 524.
  *
- * The chain registry picks one per chain.
+ * The chain registry picks one per chain. On Base and Base Sepolia,
+ * `ALCHEMY_HISTORY_API_KEY` overrides it with Alchemy's transfers API (see
+ * "Alchemy transfers client" below).
  */
 import { getChain } from '../domain/chains.js'
+import { config } from '../config.js'
 
 // ── Normalized tx shapes (Etherscan-compatible) ───────────────────
 
@@ -339,6 +342,226 @@ export interface ExplorerLeg<T> {
   hasMore: boolean
 }
 
+// ── Alchemy transfers client (Base / Base Sepolia history) ─────────
+//
+// Base's public Blockscout API answers server traffic from Railway with a
+// Cloudflare "Just a moment…" challenge (HTTP 403, 2026-10-09), which no
+// header or retry passes, and Blockscout's keyed PRO API puts Base behind a
+// paid plan. `alchemy_getAssetTransfers` is the keyed replacement, on the
+// Alchemy account the RPC already uses. It is chosen per read when
+// `ALCHEMY_HISTORY_API_KEY` is set and the chain has an Alchemy host below;
+// otherwise the chain's explorer provider answers as before.
+//
+// Shape differences from the explorers, and how each is absorbed:
+// - The API filters by ONE direction per call (`fromAddress` OR
+//   `toAddress`), so each leg reads both and concatenates. A self-transfer
+//   appears in both; `transactionDedupKey` drops the twin downstream.
+// - Amounts come from `rawContract.value` (hex, base units), never the
+//   float `value` field, which is rounded.
+// - Only successful transfers are returned and there is no gas data, so
+//   `isError` is '0' and the gas fields are empty — neither is read for
+//   rows this source produces.
+// - The `internal` category is not offered on Base, so the internal leg is
+//   skipped here exactly as it is on Blockscout v2.
+
+const ALCHEMY_HISTORY_HOSTS: Record<number, string> = {
+  8453: 'base-mainnet.g.alchemy.com',
+  84532: 'base-sepolia.g.alchemy.com',
+}
+
+/** Rows per Alchemy page (`maxCount`). The page COUNT budget is `EXPLORER_MAX_PAGES`, per direction. */
+export const ALCHEMY_PAGE_SIZE = 100
+
+/** The Alchemy endpoint serving this chain's history, or null when Alchemy is not configured for it. */
+export function alchemyHistoryEndpoint(chainId: number): string | null {
+  const host = ALCHEMY_HISTORY_HOSTS[chainId]
+  const key = config.alchemyHistoryApiKey
+  if (!host || !key) return null
+  return `https://${host}/v2/${key}`
+}
+
+interface AlchemyTransfer {
+  blockNum: string // hex
+  hash: string
+  from: string | null
+  to: string | null
+  asset: string | null
+  category: string
+  rawContract: { value: string | null; address: string | null; decimal: string | null }
+  metadata?: { blockTimestamp?: string }
+}
+
+interface AlchemyTransfersResult {
+  transfers: AlchemyTransfer[]
+  pageKey?: string
+}
+
+interface AlchemyRpcResponse {
+  result?: AlchemyTransfersResult
+  error?: { code: number; message: string }
+}
+
+type AlchemyCategory = 'external' | 'erc20'
+type AlchemyDirection = 'fromAddress' | 'toAddress'
+
+/** Hex quantity (`0x…`) → decimal string; anything unparseable is '0'. */
+function hexToDecimal(hex: string | null | undefined): string {
+  if (!hex) return '0'
+  try {
+    return BigInt(hex).toString()
+  } catch {
+    return '0'
+  }
+}
+
+async function postAlchemy(
+  chainId: number,
+  endpoint: string,
+  params: Record<string, unknown>,
+  retries = 2,
+): Promise<AlchemyTransfersResult> {
+  const key = config.alchemyHistoryApiKey
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { ...EXPLORER_REQUEST_HEADERS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: 1, jsonrpc: '2.0', method: 'alchemy_getAssetTransfers', params: [params] }),
+    })
+
+    if (!response.ok) {
+      if (attempt < retries && (response.status === 429 || response.status >= 500)) {
+        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)))
+        continue
+      }
+      // The key is part of the endpoint PATH, so the diagnosis redacts it.
+      throw new Error(
+        `Alchemy transfers error (chain ${chainId}): ${response.status}${await errorDiagnosis(response, key)}`,
+      )
+    }
+
+    const data = (await response.json()) as AlchemyRpcResponse
+    if (data.error || !data.result) {
+      const message = data.error ? `${data.error.code} ${data.error.message}` : 'no result'
+      const redacted = key ? message.split(key).join('[redacted]') : message
+      throw new Error(`Alchemy transfers (chain ${chainId}) refused request: ${redacted}`)
+    }
+    return data.result
+  }
+  throw new Error(`Alchemy transfers (chain ${chainId}): retries exhausted`)
+}
+
+/**
+ * Both directions of one category, each walked by `pageKey` up to
+ * `EXPLORER_MAX_PAGES` pages. `hasMore` when either direction still offered
+ * a `pageKey` at the budget — the provider's own "more exist" signal.
+ *
+ * The two directions page independently, so a capped one stops at a more
+ * recent block than an uncapped one reaches. Concatenated as-is, the feed
+ * would hold the uncapped direction's old rows while silently missing the
+ * capped direction's rows of the same age — a gap in the MIDDLE, where
+ * `truncated` tells the reader only that older rows exist. So the result is
+ * trimmed to one contiguous window: nothing older than the oldest block any
+ * capped direction reached. That block itself is kept; a capped direction
+ * may hold only part of it, as a cursor-capped Blockscout read would.
+ */
+async function fetchAlchemyTransfers(
+  chainId: number,
+  endpoint: string,
+  address: string,
+  category: AlchemyCategory,
+): Promise<{ transfers: AlchemyTransfer[]; hasMore: boolean }> {
+  const transfers: AlchemyTransfer[] = []
+  // The newest "oldest block reached" across capped directions: the window floor.
+  let floor: bigint | null = null
+  let capped = false
+  const directions: AlchemyDirection[] = ['fromAddress', 'toAddress']
+  for (const direction of directions) {
+    const rows: AlchemyTransfer[] = []
+    let pageKey: string | undefined
+    let page = 0
+    do {
+      const result = await postAlchemy(chainId, endpoint, {
+        fromBlock: '0x0',
+        toBlock: 'latest',
+        [direction]: address,
+        category: [category],
+        withMetadata: true,
+        excludeZeroValue: true,
+        maxCount: `0x${ALCHEMY_PAGE_SIZE.toString(16)}`,
+        order: 'desc',
+        ...(pageKey ? { pageKey } : {}),
+      })
+      rows.push(...(result.transfers ?? []))
+      pageKey = result.pageKey || undefined
+      page++
+    } while (pageKey && page < EXPLORER_MAX_PAGES)
+    transfers.push(...rows)
+    if (pageKey) capped = true
+    if (pageKey && rows.length > 0) {
+      const oldest = rows.reduce((min, t) => {
+        const block = BigInt(hexToDecimal(t.blockNum))
+        return block < min ? block : min
+      }, BigInt(hexToDecimal(rows[0]!.blockNum)))
+      if (floor === null || oldest > floor) floor = oldest
+    }
+  }
+  if (!capped) return { transfers, hasMore: false }
+  if (floor === null) return { transfers, hasMore: true }
+  const cutoff = floor
+  return {
+    transfers: transfers.filter((t) => BigInt(hexToDecimal(t.blockNum)) >= cutoff),
+    hasMore: true,
+  }
+}
+
+function alchemyBase(t: AlchemyTransfer) {
+  return {
+    blockNumber: hexToDecimal(t.blockNum),
+    timeStamp: t.metadata?.blockTimestamp ? isoToUnix(t.metadata.blockTimestamp) : '0',
+    hash: t.hash,
+    from: t.from ?? '',
+    to: t.to ?? '',
+    value: hexToDecimal(t.rawContract?.value),
+  }
+}
+
+async function fetchAlchemyNormal(
+  chainId: number,
+  endpoint: string,
+  address: string,
+): Promise<ExplorerLeg<RawNormalTx>> {
+  const { transfers, hasMore } = await fetchAlchemyTransfers(chainId, endpoint, address, 'external')
+  const rows = transfers.map((t) => ({
+    ...alchemyBase(t),
+    gas: '',
+    gasUsed: '',
+    isError: '0',
+    functionName: '',
+  }))
+  return { rows, hasMore }
+}
+
+async function fetchAlchemyERC20(
+  chainId: number,
+  endpoint: string,
+  address: string,
+): Promise<ExplorerLeg<RawERC20Transfer>> {
+  const { transfers, hasMore } = await fetchAlchemyTransfers(chainId, endpoint, address, 'erc20')
+  const rows = transfers
+    // A transfer with no contract address cannot be attributed to a token.
+    .filter((t) => Boolean(t.rawContract?.address))
+    .map((t) => ({
+      ...alchemyBase(t),
+      contractAddress: t.rawContract.address ?? '',
+      tokenName: t.asset ?? '',
+      tokenSymbol: t.asset ?? '',
+      // '' (not '18') when absent: the aggregator falls back to the registry
+      // first, then to 18, so a missing decimal never overrides a known token.
+      tokenDecimal: t.rawContract.decimal ? hexToDecimal(t.rawContract.decimal) : '',
+    }))
+  return { rows, hasMore }
+}
+
 // ── Public fetchers (provider-aware) ──────────────────────────────
 
 export async function fetchNormalTransactions(
@@ -347,6 +570,8 @@ export async function fetchNormalTransactions(
   _page = 1,
   offset = EXPLORER_PAGE_SIZE,
 ): Promise<ExplorerLeg<RawNormalTx>> {
+  const alchemy = alchemyHistoryEndpoint(chainId)
+  if (alchemy) return fetchAlchemyNormal(chainId, alchemy, address)
   const chain = getChain(chainId)
   if (chain.explorerApiProvider === 'blockscout-v2') {
     const { items, hasNextPage } = await fetchFromV2<V2Transaction>(
@@ -392,7 +617,9 @@ export async function fetchInternalTransactions(
   offset = EXPLORER_PAGE_SIZE,
 ): Promise<ExplorerLeg<RawInternalTx>> {
   const chain = getChain(chainId)
-  if (chain.explorerApiProvider === 'blockscout-v2') {
+  // Alchemy offers no `internal` category on Base; Blockscout v2's endpoint
+  // times out. Either way the leg is skipped, not truncated.
+  if (alchemyHistoryEndpoint(chainId) || chain.explorerApiProvider === 'blockscout-v2') {
     // Base Blockscout's v2 internal-transactions endpoint is unreliable
     // (times out with 524). Internal txs on fresh Safes are rare and also
     // surface via the normal tx list, so skipping here is the pragmatic
@@ -425,6 +652,8 @@ export async function fetchERC20Transfers(
   _page = 1,
   offset = EXPLORER_PAGE_SIZE,
 ): Promise<ExplorerLeg<RawERC20Transfer>> {
+  const alchemy = alchemyHistoryEndpoint(chainId)
+  if (alchemy) return fetchAlchemyERC20(chainId, alchemy, address)
   const chain = getChain(chainId)
   if (chain.explorerApiProvider === 'blockscout-v2') {
     const { items, hasNextPage } = await fetchFromV2<V2TokenTransfer>(

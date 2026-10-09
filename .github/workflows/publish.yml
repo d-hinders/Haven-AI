@@ -372,7 +372,13 @@ jobs:
           # published | skipped (already on npm) | failed | dep-failed. This is
           # the dependency-presence ledger below (#3797); it is deliberately
           # NOT refreshed from the registry mid-run (see the block's comment).
-          declare -A dep_state
+          # Held as a space-delimited `pkg=state` string, NOT an associative
+          # array: `declare -A` is bash >=4, but release-bump.test.mjs runs
+          # this script under the local `bash`, which on macOS is 3.2 (#3819).
+          # Package directories contain no spaces, so the space padding in the
+          # case lookup below is an exact-word match, the same as the array
+          # read it replaced.
+          dep_state=""
 
           for pkg in sdk signer mcp connect cli; do
             name=$(node -p "require('./packages/$pkg/package.json').name")
@@ -406,7 +412,7 @@ jobs:
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "✓ $name@$version already on npm — skipping"
               results="$results| \`$name\` | $version | skipped — already on npm |"$'\n'
-              dep_state[$pkg]=skipped
+              dep_state="$dep_state $pkg=skipped"
               continue
             fi
 
@@ -466,11 +472,15 @@ jobs:
                   echo "✗ $name@$version not published: pins $dep@$depver but the workspace has $dep@$dep_workspace_version — published packages pin internal dependencies exactly (lint:workspace-pins)"
                   results="$results| \`$name\` | $version | **FAILED** — not published: pins $dep@$depver but the workspace has $dep@$dep_workspace_version (published packages pin internal dependencies exactly, lint:workspace-pins) |"$'\n'
                   failed="$failed $name"
-                  dep_state[$pkg]=dep-failed
+                  dep_state="$dep_state $pkg=dep-failed"
                   continue 2
                 fi
-                case "${dep_state[$depdir]-absent}" in
-                  published|skipped) dep_present=true ;;
+                # Exact-word lookup on the ledger string: the surrounding
+                # spaces make `cli` match `cli=published` but not a state
+                # appended to another package name (bash-3.2 stand-in for the
+                # associative-array read #3797 originally had here).
+                case " $dep_state " in
+                  *" $depdir=published "*|*" $depdir=skipped "*) dep_present=true ;;
                   *) dep_present=false ;;
                 esac
               fi
@@ -479,14 +489,14 @@ jobs:
                 echo "✗ $name@$version not published: dependency $dep@$depver did not publish in this run"
                 results="$results| \`$name\` | $version | **FAILED** — not published: dependency $dep@$depver did not publish in this run |"$'\n'
                 failed="$failed $name"
-                dep_state[$pkg]=dep-failed
+                dep_state="$dep_state $pkg=dep-failed"
                 continue 2
               fi
             done
 
             echo "→ Publishing $name@$version with --tag $tag"
             if npm publish -w "packages/$pkg" --tag "$tag" --access public; then
-              dep_state[$pkg]=published
+              dep_state="$dep_state $pkg=published"
               published_any=true
               if record_latest_promotion "$channel" "$name" "$version" "$tag"; then
                 results="$results| \`$name\` | $version | published under \`$tag\` |"$'\n'
@@ -501,7 +511,7 @@ jobs:
                 refused="$refused $name@$version"
               fi
             else
-              dep_state[$pkg]=failed
+              dep_state="$dep_state $pkg=failed"
               echo "✗ $name@$version failed to publish — continuing with the remaining packages"
               results="$results| \`$name\` | $version | **FAILED** — npm publish exited non-zero (see log) |"$'\n'
               failed="$failed $name"

@@ -458,10 +458,18 @@ done, and how to stop it (#3691, epic). Sections, in order:
    one-line description (budgets are enforced on-chain) ABOVE the card (see
    the detail-page section rule in design-system.md). The card holds one row
    per active budget — amount, period, recipient or merchant, Edit and Stop —
-   each measured by `BudgetMeter` from the read's remaining-this-period:
-   "{used} of {budget} {token} used this period · refills in …" (or
-   "· expires in …" when the budget ends first). When the chain read failed
-   the row shows no meter and says usage couldn't be read — never "0 used".
+   each measured by `BudgetMeter`, captioned by the shared budget-caption
+   helper (#3806): "{used} of {budget} {token} used this period" at two
+   decimals, then the earlier of the refill and the expiry ("refills in 45m"
+   / "refills Thu 14:02" / "refills 14 Nov"; "expires …" when the budget ends
+   first). The refill is anchored on the row's `start_date`, never on the
+   wall clock. When the chain read failed or the read's period has already
+   ended, the row shows no meter and says usage couldn't be read — never
+   "0 used", and the old amount is never paired with the next refill; a
+   future `start_date` (a re-key's dormant steady grant) shows when it
+   starts. Quiet note lines under the caption come from the helper too:
+   "incl. … by {agent}" for sub-agents that spent and "… reserved for task
+   budgets".
    **Add budget is collapsed once a budget exists**: with no budget the grant
    form is the section's content, headed "Set its first budget"; once one
    exists, adding another is an "Add budget" control that opens the form in
@@ -618,7 +626,10 @@ Structure:
    — no card chrome, `text-base` value, no delta chip — #3805.)
 4. The agents table: spend, share, payments, refusals, budget used, top
    merchant, last payment, each row a link into the agent. Budget figures ride
-   in the delegation's own token units with a progress bar and the reset date.
+   in the delegation's own token units, captioned by the shared budget-caption
+   helper (#3806) — the period length derived from the response's own bounds,
+   and the next refill as its next event ("refills Thu 14:02"). There is no
+   `expires_at` on this endpoint, so no "expires" branch.
 5. Below the table: the spend-over-time chart (one bar per day with activity,
    stacked by agent, refusal caps, partial edge days striped; #3051), then the
    top-merchants table, then the balance-over-time chart (#2949). The table
@@ -633,9 +644,10 @@ Money and risk clarity:
   payment is money that was not spent, not money that was kept. The count's
   limit is said out — price-cap refusals in the agent's runtime are not
   recorded.
-- A budget reading says where the measurement came from: from the chain, or
-  from Haven's last snapshot when the chain could not be read. The two are not
-  the same claim and the cell does not let the reader assume the stronger.
+- A budget reading that cannot be made is not a measurement: a failed chain
+  read, or a read whose period has already ended, renders "Usage this period
+  couldn't be read" instead of a bar — never a 0 % bar and never a "read from
+  Haven's last snapshot" claim (#3806).
 - The states are mutually exclusive, because what they report about the
   request is: empty says the endpoint answered and the window holds nothing;
   error says it did not answer. A page of confident zeros is what an outage

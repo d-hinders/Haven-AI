@@ -2724,3 +2724,24 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > enforcer, budget, signer-set or custody decision reads it, and no signing
 > input changes. Scope of this re-read: this field only. The rest of this
 > document was not re-read for it, and `last-verified` is not bumped.
+>
+> **Re-verified unchanged (#3806, 2026-10-09, budget caption helper):** this
+> diff touches two covered files, both display-layer.
+> `hooks/useDelegationBudget.ts` adds two fields to the `DelegationBudget`
+> interface (`start_date`, `created_at` — Unix-second digit strings the wire
+> already carries) so the dashboard can anchor refill captions on the same
+> boundary arithmetic the reads use; the hook's `pickSigningPath`, its
+> signer-set fetch-on-mount and its visible-only poll are untouched.
+> `components/DelegationBudgetCard.tsx` moves caption wording (period words,
+> usage/expired/unread captions, the reserved-for-task-budgets note) into the
+> shared `lib/budget-caption.ts` helper and renders its states — no signing,
+> edit, revoke or confirm path moves, and the card's #3717/#3166 refusal
+> explanations stand. The period arithmetic itself moved verbatim to
+> `@haven_ai/core` (backend re-export, arithmetic unchanged) and is certified
+> by the casp shard for the `satisfied-by` contract doc:
+> `docs/regulatory/casp-changelog/2026-10-09-3806.md`. No new spender, no new
+> authority grant, no custody change (Red Line #4: the chain remains the only
+> spend authority). Scope of this re-read: the two files above and the
+> sections whose claims rest on the hook's signing-path selection and the
+> card's display of budget state; nothing else in this document was re-read
+> for it, and `last-verified` is not bumped.

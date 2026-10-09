@@ -65,6 +65,9 @@ function budget(overrides: Record<string, unknown> = {}) {
     id: 'b1', token_address: USDC, recipient_address: '0x' + 'cc'.repeat(20),
     delegation_hash: '0x' + 'ab'.repeat(32), version: 1, status: 'active',
     budget_atomic: '5000000', period_seconds: 86_400, expires_at: 9_999_999_999,
+    // #3806: the anchor — 2026-09-01T02:00:00Z, so the daily boundary after the
+    // frozen clock (2026-09-01T12:00Z) is 2026-09-02T02:00Z, 14h out.
+    start_date: '1788228000', created_at: '2026-09-01T00:00:00Z',
     ...overrides,
   }
 }
@@ -265,10 +268,12 @@ describe('DelegationBudgetCard (#833)', () => {
   })
 
   it('the Stop confirm falls back to the row label for an off-list period and an unknown token', async () => {
-    mockGet.mockReturnValue([budget({ period_seconds: 3_600 })])
+    // 90 s is off the picker's trio: the words come from the caption helper's
+    // largest-dividing-unit rule ("every 90 seconds"), not a raw "90s".
+    mockGet.mockReturnValue([budget({ period_seconds: 90 })])
     render(<DelegationBudgetCard {...PROPS} />)
-    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Stop budget 5 USDC every 3600s' })))
-    expect(screen.getByText(/from this 5 USDC every 3600s budget\./)).toBeTruthy()
+    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Stop budget 5 USDC every 90 seconds' })))
+    expect(screen.getByText(/from this 5 USDC every 90 seconds budget\./)).toBeTruthy()
 
     mockGet.mockReturnValue([budget({ budget_atomic: '5' })])
     const { unmount } = render(<DelegationBudgetCard {...PROPS} tokens={[]} />)
@@ -525,7 +530,7 @@ describe('DelegationBudgetCard task budgets (#3329)', () => {
     mockGet.mockReturnValue([budget({ recipient_address: null })])
     mockTaskBudgets.mockReturnValue([taskBudget({ parent_delegation_hash: '0x' + 'ab'.repeat(32), max_atomic: '2000000' })])
     render(<DelegationBudgetCard {...PROPS} />)
-    await waitFor(() => expect(screen.getByText(/2 USDC reserved for task budgets/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/2.00 USDC reserved for task budgets/)).toBeTruthy())
     expect(screen.getByText('Task budgets')).toBeTruthy()
     expect(screen.getByText(/up to 2 USDC · ends/)).toBeTruthy()
     expect(document.body.textContent).not.toMatch(/delegation|caveat|redemption|userop|permission/i)
@@ -623,7 +628,7 @@ describe('DelegationBudgetCard on a retired agent (#3549)', () => {
     mockTaskBudgets.mockReturnValue([taskBudget({ max_atomic: '2000000' })])
     render(<DelegationBudgetCard {...PROPS} retired="revoked" />)
     await waitFor(() => expect(screen.getByText('Task budgets')).toBeTruthy())
-    expect(screen.getByText(/2 USDC reserved for task budgets/)).toBeTruthy()
+    expect(screen.getByText(/2.00 USDC reserved for task budgets/)).toBeTruthy()
   })
 
   it('with no active budget it never invites the owner to set one', async () => {
@@ -693,7 +698,8 @@ describe('DelegationBudgetCard Spending section (#3695)', () => {
     render(<DelegationBudgetCard {...PROPS} />)
     const meter = screen.getByRole('progressbar', { name: 'USDC budget used' })
     expect(meter.getAttribute('aria-valuenow')).toBe('25')
-    expect(screen.getByText('1.25 of 5 USDC used this period · refills in 14h')).toBeTruthy()
+    // #3806: amounts are always two decimals.
+    expect(screen.getByText('1.25 of 5.00 USDC used this period · refills in 14h')).toBeTruthy()
   })
 
   it('says "expires" when the budget ends before its period does', () => {
@@ -702,26 +708,30 @@ describe('DelegationBudgetCard Spending section (#3695)', () => {
         remaining_atomic: '5000000',
         remaining_from_chain: true,
         period_end: '2026-09-08T12:00:00Z',
-        expires_at: Math.floor(Date.parse('2026-09-04T12:00:00Z') / 1000),
+        // Ends 2h after the frozen clock — before the 02:00Z boundary would
+        // refill it, so "expires" is the next event.
+        expires_at: Math.floor(Date.parse('2026-09-01T14:00:00Z') / 1000),
       }),
     ])
     render(<DelegationBudgetCard {...PROPS} />)
-    expect(screen.getByText('0 of 5 USDC used this period · expires in 3 days')).toBeTruthy()
+    expect(screen.getByText('0.00 of 5.00 USDC used this period · expires in 2h')).toBeTruthy()
   })
 
-  it('rolls a stale period_end forward instead of saying it already passed', () => {
+  it('a read whose period has already ended shows unknown — the old amount is never paired with the next refill', () => {
     mockGet.mockReturnValue([
       budget({
         remaining_atomic: '4000000',
         remaining_from_chain: true,
-        // A daily period whose end the read put 2h in the past: the next
-        // boundary is 22h away.
+        // A daily period whose end the read put 2h in the past: the used
+        // amount belongs to a FINISHED period, so it renders as unknown until
+        // the next read — never paired with the next boundary.
         period_end: '2026-09-01T10:00:00Z',
       }),
     ])
     render(<DelegationBudgetCard {...PROPS} />)
-    expect(screen.getByText('1 of 5 USDC used this period · refills in 22h')).toBeTruthy()
-    expect(document.body.textContent).not.toMatch(/expired/)
+    expect(screen.queryByRole('progressbar')).toBeNull()
+    expect(screen.getByText(/couldn.t be read/)).toBeTruthy()
+    expect(document.body.textContent).not.toMatch(/expired|refills|used this period/)
   })
 
   it('a failed chain read shows no meter and says so — never "0 used", never "snapshot"', () => {
@@ -730,7 +740,7 @@ describe('DelegationBudgetCard Spending section (#3695)', () => {
     ])
     render(<DelegationBudgetCard {...PROPS} />)
     expect(screen.queryByRole('progressbar')).toBeNull()
-    expect(screen.getByText(/couldn.t be read from the chain/)).toBeTruthy()
+    expect(screen.getByText(/couldn.t be read/)).toBeTruthy()
     expect(document.body.textContent).not.toMatch(/snapshot|0 of 5/)
   })
 

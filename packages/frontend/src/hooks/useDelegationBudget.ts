@@ -83,6 +83,16 @@ export interface DelegationBudget {
   period_seconds: number
   expires_at: number
   /**
+   * #3806: the period ANCHOR — a Unix-second digit string on the wire (the
+   * driver decodes the BIGINT as a string). A period runs from
+   * `start_date + k × period_seconds`, not from creation time: budgets are
+   * signed with `startDate: nowSec - 60` and a re-key's carry/steady pair
+   * keeps the old boundary. The caption helper anchors refills here.
+   */
+  start_date: string
+  /** #3806: ordering anchor for the multi-budget primary selection. */
+  created_at: string
+  /**
    * The merchant a merchant-locked budget (#3331) was issued for, or null for
    * every other row (and after that merchant is deleted). All three travel
    * together — a row either names all three or none.

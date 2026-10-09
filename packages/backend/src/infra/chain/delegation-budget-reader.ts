@@ -131,16 +131,11 @@ export async function readRemainingBudget(
 // use, and bounds its reads with the SAME worker pool — one definition, two
 // consumers, no drift.
 
-/**
- * `start_date`/`period_seconds` are Unix SECONDS (`routes/agent-delegations.ts`'s `startDate: nowSec - 60`).
- */
-export function currentPeriodBounds(startDateSec: number, periodSeconds: number, nowSec: number): { start: number; end: number } {
-  if (periodSeconds <= 0 || nowSec < startDateSec) return { start: startDateSec, end: startDateSec + periodSeconds }
-  const elapsed = nowSec - startDateSec
-  const periodsElapsed = Math.floor(elapsed / periodSeconds)
-  const start = startDateSec + periodsElapsed * periodSeconds
-  return { start, end: start + periodSeconds }
-}
+// `currentPeriodBounds` moved to `@haven_ai/core` (#3806) — the dashboard's
+// budget caption anchors refills on the same boundary arithmetic the reads
+// report. This re-export keeps the backend's two import sites (and its test)
+// untouched.
+export { currentPeriodBounds } from '@haven_ai/core'
 
 /**
  * Bounded-concurrency map: runs `fn` over `items` with at most

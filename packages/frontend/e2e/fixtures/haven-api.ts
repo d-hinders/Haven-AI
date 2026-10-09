@@ -290,7 +290,7 @@ export const dashboardOverview = {
       isTestnet: false,
       usdcBalanceAtomic: '1250000000',
       usdcDecimals: 6,
-      usdcBalanceFreshness: { status: 'stale', asOf: '2026-10-09T10:00:00.000Z' },
+      usdcBalanceFreshness: { status: 'stale' as const, asOf: '2026-10-09T10:00:00.000Z' },
       funded: true,
       needs_backup_recommendation: false,
       usdcPace7dAtomic: '6250000',
@@ -412,7 +412,7 @@ export const dashboardOverview = {
     {
       id: 'agent-e2e-watcher',
       name: 'Watcher agent',
-      status: 'paused',
+      status: 'paused' as const,
       accountId: testSafe.id,
       accountName: testSafe.name,
       accountChainId: testSafe.chain_id,
@@ -466,7 +466,7 @@ export const dashboardOverview = {
       // "Finish setup" instead of a bare spinner.
       id: 'agent-e2e-pending',
       name: 'Connecting agent',
-      status: 'pending_approval',
+      status: 'pending_approval' as const,
       accountId: 'safe-sepolia',
       accountName: 'Showcase account',
       accountChainId: 84532,

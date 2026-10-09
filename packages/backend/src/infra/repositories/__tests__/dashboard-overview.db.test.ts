@@ -19,6 +19,7 @@
 import fs from 'node:fs'
 import { beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../db.js'
+import { deriveDelegationBudgets } from '../../../rails/delegation-budget-view.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import {
   countFailedIntents7d,
@@ -168,6 +169,58 @@ describeDb('#3803 overview statements', () => {
   beforeEach(async () => {
     await resetDb()
     seq = 0
+  })
+
+  /** One ACTIVE delegation on an agent — the two-budgets fixture seeds two. */
+  async function seedDelegation(
+    seed: Seed,
+    overrides: { budgetAtomic?: string; periodSeconds?: number; tokenAddress?: string } = {},
+  ): Promise<string> {
+    const result = await db.query<{ id: string }>(
+      `INSERT INTO agent_delegations
+         (agent_id, chain_id, token_address, recipient_address, delegation_hash,
+          delegation_json, version, status, budget_atomic, period_seconds,
+          start_date, expires_at, created_at)
+       VALUES ($1, 84532, $2, NULL, $3, '{}', 1, 'active', $4, $5,
+               EXTRACT(EPOCH FROM NOW())::bigint - 3600,
+               EXTRACT(EPOCH FROM NOW())::bigint + 86400, NOW())
+       RETURNING id`,
+      [
+        seed.agentId,
+        overrides.tokenAddress ?? USDC_84532,
+        `0x${String(++seq).padStart(64, '0')}`,
+        overrides.budgetAtomic ?? '1000000',
+        overrides.periodSeconds ?? 86_400,
+      ],
+    )
+    return result.rows[0].id
+  }
+
+  it('TWO budgets on one agent both come back with the identity + live-window fields', async () => {
+    // The #3803 wire maps every one of these fields — a budget that arrives
+    // without delegation_hash/period window is a broken caption, and a map
+    // keyed by (agent) that kept only the last grant would silently drop the
+    // second budget. Today's code returns nothing at all, so this is red on
+    // the pre-#3803 build by construction.
+    const userId = await seedUser()
+    const seed = await seedAccountAndAgent(userId)
+    const first = await seedDelegation(seed, { budgetAtomic: '250000000' })
+    const second = await seedDelegation(seed, { periodSeconds: 604_800 })
+
+    const budgets = (await deriveDelegationBudgets([seed.agentId])).get(seed.agentId)
+    expect(budgets).toHaveLength(2)
+    const byId = new Map(budgets!.map((b) => [b.id, b]))
+    expect(byId.get(first)!.budget_atomic).toBe('250000000')
+    expect(byId.get(first)!.period_seconds).toBe(86_400)
+    expect(byId.get(second)!.budget_atomic).toBe('1000000')
+    expect(byId.get(second)!.period_seconds).toBe(604_800)
+    for (const budget of budgets!) {
+      expect(budget.delegation_hash).toMatch(/^0x[0-9a-f]{64}$/)
+      expect(budget.chain_id).toBe(84532)
+      expect(budget.token_address.toLowerCase()).toBe(USDC_84532)
+      expect(budget.token_symbol).toBe('USDC')
+      expect(Number(budget.start_date)).toBeLessThan(Number(budget.expires_at))
+    }
   })
 
   it('the preview returns EVERY delegation-rail agent, including pending_approval', async () => {
@@ -342,7 +395,7 @@ describeDb('#3803 EXPLAIN artifact (5 agents × 300 payments)', () => {
       }
     }
 
-    const result = await db.query<{ 'QUERY PLAN': string }[]>(
+    const result = await db.query<{ 'QUERY PLAN': string }>(
       `EXPLAIN (COSTS OFF) ${DASHBOARD_SPEND_GROUPS_SQL}`,
       [userId, from30, from7, to, [84532]],
     )

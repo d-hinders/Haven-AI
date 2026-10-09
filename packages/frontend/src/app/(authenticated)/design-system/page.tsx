@@ -2197,6 +2197,20 @@ export default function DesignSystemPage() {
               status="Sent"
               statusTone="neutral"
             />
+            {/* #3810: the grouped dashboard row — `countLabel` renders the
+                muted ×N beside the title, and `fiat` switches the amount to
+                Amount's currency mode (≈ marks a serve-time valuation). The
+                dashboard's merchant-first activity list is this shape. */}
+            <TransactionActivityRow
+              direction="out"
+              title="api.vendor.com"
+              description="Research assistant"
+              value="36.00"
+              countLabel="×3"
+              fiat={{ amount: 134.5, currency: 'SEK', approx: true }}
+              status="Sent"
+              statusTone="neutral"
+            />
             <TransactionActivityRow
               direction="out"
               title="Agent payment"

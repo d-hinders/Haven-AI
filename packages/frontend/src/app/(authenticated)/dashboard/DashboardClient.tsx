@@ -1,13 +1,12 @@
 'use client'
 
-import { ArrowLeftRight, Bot, ChevronRight, Coins, ShieldCheck, Wallet } from 'lucide-react'
+import { Bot, ChevronRight, Coins, ShieldCheck, Wallet } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import type { Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
 import { usePreferences } from '@/hooks/usePreferences'
-import { useContacts } from '@/hooks/useContacts'
 import { useAgents } from '@/hooks/useAgents'
 import { useAggregatedBalances } from '@/hooks/useAggregatedPortfolio'
 import { useCountUp } from '@/hooks/useCountUp'
@@ -17,15 +16,9 @@ import { useAccountFunding } from '@/hooks/useAccountFunding'
 import { useAccountOperationGate } from '@/hooks/useAccountOperationGate'
 import { RESET_PERIODS } from '@/lib/budget-period'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
-import { formatFiat, currencyLocale, timeAgo } from '@/lib/format'
-import {
-  transactionMovement,
-  transactionStatus,
-  transactionTitle,
-} from '@/lib/transaction-presentation'
+import { formatFiat, currencyLocale } from '@/lib/format'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { agentStatusPresentation } from '@/lib/payment-status'
-import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
 import { displayName } from '@/lib/user'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import { RecoveryNudge } from '@/components/onboarding/RecoveryNudge'
@@ -44,9 +37,8 @@ import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { BalanceFreshnessIndicator } from '@/components/haven'
 import { useToast } from '@/components/ui/Toast'
-import { TransactionActivityRow } from '@/components/haven'
+import { ActivitySection } from './ActivitySection'
 import type { DashboardAgentPreview } from '@/types/dashboard'
-import type { AggregatedTransaction } from '@/types/transactions'
 import { resolveDefaultAccount } from '@/lib/default-account'
 
 // #3127 (finding 6): the per-currency formatting itself lives in ONE place —
@@ -498,14 +490,6 @@ function WalletIcon() {
   )
 }
 
-function EmptyTransactionsIcon() {
-  // Arrows-in-out icon — mirrors the sidebar's "transactions" mark so the
-  // empty state belongs to the same visual family.
-  return (
-    <Icon icon={ArrowLeftRight} className="w-full h-full" />
-  )
-}
-
 /**
  * The "Needs attention" panel.
  *
@@ -556,126 +540,11 @@ function AttentionSection({
   )
 }
 
-function TransactionsSection({
-  transactions,
-  hasAccounts,
-  loading,
-  unavailable,
-  onRetry,
-  resolveAddress,
-}: {
-  transactions: AggregatedTransaction[]
-  hasAccounts: boolean
-  loading: boolean
-  unavailable: boolean
-  onRetry: () => void
-  resolveAddress: (address: string) => string | null
-}) {
-  return (
-    <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card overflow-hidden">
-      <Card.Header
-        as="h2"
-        title="Recent transactions"
-        actions={
-          <Link href="/transactions" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
-            View all
-          </Link>
-        }
-      />
-
-      {loading ? (
-        <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-live="polite" aria-label="Loading recent transactions">
-          {[0, 1, 2].map((item) => (
-            // Same breakpoint-scoped height as the loaded row it stands in for
-            // (#1833). It does not currently overflow — the stacked skeleton is
-            // ~64px against the 72px clamp — but it is the identical shape:
-            // an `sm:`-gated two-column grid pinned unconditionally. Left
-            // clamped it would ALSO make the list jump on load, since the
-            // loaded row now grows to 116-164px below `sm` while this stayed
-            // at 72px.
-            <div key={item} className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5 sm:py-0 sm:h-[72px]">
-              <div className="flex items-center gap-3">
-                <div className="h-9 w-9 rounded-[10px] bg-[var(--v2-surface-2)] animate-pulse" />
-                <div>
-                  <div className="h-3.5 w-40 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                  <div className="mt-1.5 h-2.5 w-56 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                </div>
-              </div>
-              <div className="h-4 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse sm:justify-self-end" />
-            </div>
-          ))}
-        </div>
-      ) : unavailable ? (
-        <div className="p-6">
-          <EmptyState
-            size="compact"
-            title="Activity preview unavailable"
-            body="Haven could not refresh recent payments right now."
-            action={<Button variant="ghost" size="sm" onClick={onRetry}>Try again</Button>}
-          />
-        </div>
-      ) : transactions.length === 0 ? (
-        <div className="p-6">
-          <EmptyState
-            tone="brand"
-            icon={<EmptyTransactionsIcon />}
-            title="No transactions yet"
-            body={
-              hasAccounts
-                ? 'Receive funds or make your first payment to start building activity here.'
-                : 'Create a Haven account to start tracking transactions.'
-            }
-            action={
-              <Button
-                href={hasAccounts ? '/transactions' : '/accounts'}
-                variant="ghost"
-                size="sm"
-              >
-                {hasAccounts ? 'Open transactions' : 'Go to accounts'}
-              </Button>
-            }
-          />
-        </div>
-      ) : (
-        <div className="divide-y divide-[var(--v2-border)] v2-animate-fade-in">
-          {transactions.slice(0, 5).map((tx) => {
-            const lifecycle = machinePaymentLifecyclePresentation(tx)
-            const recovery = transactionStatus(tx)
-            return (
-              <Link
-                key={`${tx.hash}-${tx.type}-${tx.accountId}`}
-                href="/transactions"
-                className="block"
-              >
-                <TransactionActivityRow
-                  title={transactionTitle(tx)}
-                  description={transactionMovement(tx, resolveAddress)}
-                  value={tx.valueFormatted}
-                  asset={tx.asset}
-                  failed={tx.isError}
-                  status={recovery?.label ?? lifecycle?.label ?? (tx.isError ? 'Failed' : tx.direction === 'in' ? 'Received' : 'Sent')}
-                  statusTone={recovery?.tone ?? lifecycle?.tone ?? (
-                    tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'neutral'
-                  )}
-                  timestamp={timeAgo(tx.timestamp * 1000)}
-                  direction={tx.direction}
-                  density="compact"
-                />
-              </Link>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
 export default function DashboardClient() {
   const { user, passkeys: enrolledPasskeys } = useAuth()
   const { toast } = useToast()
   const accounts = user?.accounts ?? []
   const { currency } = usePreferences()
-  const { contacts, error: contactsError, resolveAddress } = useContacts()
   const { agents, loading: agentsLoading, refetch: refetchAgents } = useAgents()
   const {
     balances,
@@ -1094,13 +963,13 @@ export default function DashboardClient() {
         onRetry={refetchOverview}
         onConnectAgent={openConnectAgent}
       />
-      <TransactionsSection
-        transactions={overview?.transactions ?? []}
+      <ActivitySection
+        activity={overview?.activity ?? []}
+        accountCount={accounts.length}
         hasAccounts={accounts.length > 0}
         loading={overviewInitialLoading}
         unavailable={overviewUnavailable}
         onRetry={refetchOverview}
-        resolveAddress={resolveAddress}
       />
     </div>
   )

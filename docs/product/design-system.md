@@ -1642,6 +1642,26 @@ Use `components/transactions/TransactionsTable.tsx` for full transaction history
 
 Use `TransactionActivityRow` for compact dashboard, account detail, or agent detail previews.
 
+**Merchant-first titles (#3810).** The dashboard's activity list reads
+`counterpartyLabel` in `lib/transaction-presentation.tsx` with the opt-in
+`noAddress` mode, so a raw address never titles a row there: the merchant's
+site for x402, the receipt/contact name the backend resolved, "Deposit" for
+inbound, "New recipient" when nothing resolves, "Agent payment" when an x402
+row carries no resource URL, and "Returned from <agent>" for sweeps. The
+subtitle is the agent's name; "From My account" appears only when the user
+has more than one account. The shared screens (`TransactionsTable`,
+`TransactionDetailPanel`) pass no mode and keep the truncated address until
+#3811 — the two supports on the same helper must not drift apart silently,
+which is what the characterization tests in
+`lib/__tests__/transaction-presentation.test.tsx` pin. Two row props exist for
+the grouped dashboard shape: `countLabel` renders the muted ×N beside the
+title (×N+ when the count is a floor over a truncated window — a count is
+never presented as exact when it is not), and `fiat` switches the amount to
+`Amount`'s currency mode (book-time plain, serve-time `≈`, unknown valuation
+an em dash). Rows group under user-local day headings ("Today" /
+"Yesterday" / a short date); the server buckets the groups per day (#3824),
+the client only names the bucket.
+
 A collapsing table like this one has to **fit** at mobile widths, not scroll: the `overflow-x-auto` wrapper the `Table` primitive recommends for dense admin tables is mutually exclusive with `Table.Head sticky`, because `overflow-x: auto` forces the computed `overflow-y` to `auto` and the wrapper then becomes the sticky scroll ancestor. When such a table overflows, the cause is usually a `truncate`d cell — `truncate` is `white-space: nowrap`, and an auto-layout column can never be narrower than its min-content, so the untruncated text widens the table instead of ellipsising. Put `max-w-0` on the one flexible cell. Both findings, with their measured numbers, live in `components/ui/Table.tsx`'s docstring ([#1772](https://github.com/d-hinders/Haven-AI/issues/1772)).
 
 **Column collapse is keyed on the table's CONTAINER, not on the viewport, and it still takes more than one stage.** Two things step at `lg` and both take width: the sidebar goes `fixed` to `lg:static` at `w-[240px]` — border-box, so its 1px `border-r` is *inside* the 240 (`main` measures 784px at a 1024px viewport) — and the authenticated layout's `main` steps `p-6` to `lg:p-8`, 16px more across the pair. **240 + 16 = 256px** handed back in a single breakpoint, so the content available to a table is a **sawtooth** in viewport width, not a ramp. Attributing it to the sidebar alone is wrong and invites a reader who checks `Sidebar.tsx`, finds 240px, and discards the whole claim. Measured in real Chromium on `/design-system`, `/transactions`, `/accounts/:id` and `/agents/:id` — the same numbers on all four, because they share the shell:

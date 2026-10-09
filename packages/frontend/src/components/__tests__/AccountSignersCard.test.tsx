@@ -229,7 +229,7 @@ describe('AccountSignersCard (#888)', () => {
     expect(ownerRemove.disabled).toBe(true)
     // #3845: the row promises no passkeys the account does not have, and says
     // why Remove is unavailable.
-    expect(screen.queryByText(/your passkeys/)).toBeNull()
+    expect(screen.queryByText(/your passkeys become/)).toBeNull()
     expect(
       screen.getByText(
         "This wallet is the only way to approve this account, so it can't be removed until you add a backup.",
@@ -354,10 +354,16 @@ describe('AccountSignersCard (#888)', () => {
     // Positive control: both signer rows rendered.
     expect(screen.getByText('Browser wallet')).toBeTruthy()
     expect(screen.getByText('Passkey · added March 3, 2026')).toBeTruthy()
-    const text = document.body.textContent ?? ''
-    // Neither the full value nor the truncated `0xeeee…eeee` form.
-    expect(text).not.toMatch(/0xeeee|0x1111/i)
-    const link = screen.getByRole('link', { name: /All your signers in Settings/ })
+    // The key id never renders; the owner address only inside a CLOSED
+    // "Show address" disclosure (#3825 design review: the card asks for THE
+    // owner wallet, so the user must be able to tell which one).
+    expect(document.body.textContent ?? '').not.toMatch(/0x1111/i)
+    const details = screen.getByText('Show address').closest('details') as HTMLDetailsElement
+    expect(details.open).toBe(false)
+    expect(details.textContent).toContain(owner)
+    const outside = Array.from(document.body.querySelectorAll('p')).filter((p) => !p.closest('details'))
+    expect(outside.some((p) => /0xeeee/i.test(p.textContent ?? ''))).toBe(false)
+    const link = screen.getByRole('link', { name: /All your passkeys and wallets in Settings/ })
     expect(link.getAttribute('href')).toBe('/settings#signers')
   })
 

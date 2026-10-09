@@ -98,7 +98,7 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
           href="/settings#signers"
           className="mt-1 inline-flex items-center gap-1 text-sm font-medium text-[var(--v2-brand)] hover:underline"
         >
-          All your signers in Settings
+          All your passkeys and wallets in Settings
           <Icon icon={ArrowRight} className="h-3.5 w-3.5" />
         </Link>
       </div>
@@ -125,9 +125,17 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
             {signers.owner_address ? (
               <div className="flex items-center justify-between gap-3 py-3">
                 <div className="min-w-0">
-                  {/* #3825: no address by default — Settings → Signers can
-                      reveal it for the user who needs to tell wallets apart. */}
+                  {/* #3825: no address by default, but revealable here — this
+                      card asks the user to connect THE owner wallet, and they
+                      must be able to tell which one without leaving the task
+                      (#3825 design review). */}
                   <p className="text-sm font-medium text-[var(--v2-ink)]">Browser wallet</p>
+                  <details className="mt-0.5">
+                    <summary className="cursor-pointer rounded-sm text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80">
+                      Show address
+                    </summary>
+                    <p className="mt-1 break-all font-mono text-xs text-[var(--v2-ink-2)]">{signers.owner_address}</p>
+                  </details>
                   <p className="mt-0.5 text-xs text-[var(--v2-ink-muted)]">
                     {/* #3845: never promise passkeys the account does not have. */}
                     {signers.passkeys.length > 0

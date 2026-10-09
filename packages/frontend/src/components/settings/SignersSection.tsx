@@ -57,7 +57,7 @@ function SignerRow({
           <p>{approves}</p>
           {signer.kind === 'wallet' ? (
             <details className="mt-1">
-              <summary className="cursor-pointer text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)]">
+              <summary className="cursor-pointer rounded-sm text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80">
                 {t.showAddress}
               </summary>
               <p className="mt-1 break-all font-mono text-xs text-[var(--v2-ink-2)]">{signer.address}</p>
@@ -69,6 +69,14 @@ function SignerRow({
   )
 }
 
+/**
+ * The browser-wallet connect / disconnect control (#3825), now that the top
+ * bar carries no wallet pill. Deliberately NOT a `SettingsRow`: in a list
+ * titled Signers a row with the same bold label reads as one more signer —
+ * for the passkey-only majority, as a missing one to fix (#3825 design
+ * review). It is a quiet footer line instead: secondary ink, no label, the
+ * sentence saying what connecting is for.
+ */
 function WalletConnectionRow() {
   const t = useT().settings.signers
   const { isConnected, connector } = useAccount()
@@ -76,12 +84,15 @@ function WalletConnectionRow() {
   const { openConnectModal } = useConnectModal()
   const name = connector?.name ?? t.walletLabel
   return (
-    <SettingsRow
+    <div
       data-testid="signer-wallet-connection"
-      label={t.connectionLabel}
-      detail={isConnected ? t.connectionConnected(name) : t.connectionNone}
-      action={
-        isConnected ? (
+      className="flex flex-col gap-2 px-6 py-3 sm:flex-row sm:items-center sm:justify-between"
+    >
+      <p className="text-xs text-[var(--v2-ink-3)]">
+        {isConnected ? t.connectionConnected(name) : t.connectionNone}
+      </p>
+      <div className="shrink-0">
+        {isConnected ? (
           <Button size="sm" variant="ghost" onClick={() => disconnect()}>
             {t.disconnect}
           </Button>
@@ -89,9 +100,9 @@ function WalletConnectionRow() {
           <Button size="sm" variant="ghost" onClick={() => openConnectModal?.()} disabled={!openConnectModal}>
             {t.connect}
           </Button>
-        )
-      }
-    />
+        )}
+      </div>
+    </div>
   )
 }
 

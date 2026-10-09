@@ -199,7 +199,7 @@ export const en = {
 
     access: {
       title: 'Access',
-      description: 'How you sign in to Haven and approve actions on your accounts.',
+      description: 'How you sign in to Haven.',
     },
     /**
      * Settings → Signers (#3825). A signer is its own object, not part of an
@@ -210,7 +210,7 @@ export const en = {
     signers: {
       title: 'Signers',
       description:
-        'The passkeys and wallets that can approve actions on your accounts. One signer can approve several accounts.',
+        'The passkeys and wallets that can approve actions on your accounts. One passkey or wallet can approve several accounts.',
       walletLabel: 'Browser wallet',
       walletLabelConnected: (connector: string) => `Browser wallet · ${connector}`,
       approves: 'Approves',
@@ -221,9 +221,8 @@ export const en = {
       loadError: 'Haven could not load your signers.',
       retry: 'Try again',
       empty: 'No signers yet. Your first passkey is added when you create an account.',
-      connectionLabel: 'Browser wallet connection',
-      connectionConnected: (connector: string) => `Connected: ${connector}.`,
-      connectionNone: 'No browser wallet is connected on this device.',
+      connectionConnected: (connector: string) => `${connector} is connected on this device.`,
+      connectionNone: 'Approve with a browser wallet? Connect it on this device.',
       connect: 'Connect wallet',
       disconnect: 'Disconnect',
     },

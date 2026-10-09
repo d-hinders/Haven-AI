@@ -104,7 +104,7 @@ describe('SignersSection (#3825)', () => {
   it('connects and disconnects a browser wallet from the connection row', async () => {
     const { unmount } = renderSection()
     const row = await screen.findByTestId('signer-wallet-connection')
-    expect(within(row).getByText('No browser wallet is connected on this device.')).toBeInTheDocument()
+    expect(within(row).getByText('Approve with a browser wallet? Connect it on this device.')).toBeInTheDocument()
     fireEvent.click(within(row).getByRole('button', { name: 'Connect wallet' }))
     expect(mockOpenConnect).toHaveBeenCalledTimes(1)
     unmount()
@@ -112,7 +112,7 @@ describe('SignersSection (#3825)', () => {
     accountRef.current = { isConnected: true, address: WALLET, connector: { name: 'MetaMask' } }
     renderSection()
     const connected = await screen.findByTestId('signer-wallet-connection')
-    expect(within(connected).getByText('Connected: MetaMask.')).toBeInTheDocument()
+    expect(within(connected).getByText('MetaMask is connected on this device.')).toBeInTheDocument()
     fireEvent.click(within(connected).getByRole('button', { name: 'Disconnect' }))
     expect(mockDisconnect).toHaveBeenCalledTimes(1)
   })
@@ -123,6 +123,25 @@ describe('SignersSection (#3825)', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Try again' }))
     await waitFor(() => expect(screen.getAllByTestId('signer-row-passkey')).toHaveLength(2))
     expect(mockGet).toHaveBeenCalledTimes(2)
+  })
+
+  // #3825 design review: the connection control must not read as one more
+  // signer — it is not a signer row and carries no row label.
+  it('the wallet connection is a footer line, not a signer row', async () => {
+    renderSection()
+    const row = await screen.findByTestId('signer-wallet-connection')
+    expect(row.getAttribute('data-testid')).not.toMatch(/^signer-row-/)
+    expect(row.querySelector('p.font-medium')).toBeNull()
+    expect(screen.getAllByTestId(/^signer-row-/)).toHaveLength(3)
+  })
+
+  it('never says "signer" outside the section title', async () => {
+    const { container } = renderSection()
+    await screen.findAllByTestId('signer-row-passkey')
+    const heading = screen.getByRole('heading', { level: 2 })
+    expect(heading.textContent).toBe('Signers')
+    const rest = (container.textContent ?? '').replace(heading.textContent ?? '', '')
+    expect(rest).not.toMatch(/signer/i)
   })
 
   it('an account without a name reads as "Account"', async () => {

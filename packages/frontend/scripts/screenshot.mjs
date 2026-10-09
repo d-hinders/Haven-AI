@@ -1086,12 +1086,121 @@ export const FIXTURE_OVERVIEW = {
   // photographs a number the product cannot produce.
   actionableApprovals: 0, pendingApprovals: 0,
   onboardingProgress: { hasFirstAgentPayment: true },
+  // #3803: the same section keys the typed e2e fixture carries (the parity
+  // test `fixture-shape-parity.test.ts` holds the two together). Values are
+  // this harness's showcase dataset; shapes are identical.
+  agentCount: { active: 2, paused: 1, pending_approval: 1 },
+  accounts: [
+    {
+      accountId: FIXTURE_ACCOUNT.id,
+      chainId: FIXTURE_ACCOUNT.chain_id,
+      isTestnet: false,
+      usdcBalanceAtomic: '12640550000',
+      usdcDecimals: 6,
+      usdcBalanceFreshness: { status: 'stale', asOf: '2026-10-09T10:00:00.000Z' },
+      funded: true,
+      needs_backup_recommendation: false,
+      usdcPace7dAtomic: '62500000',
+    },
+    {
+      accountId: 'safe-showcase-sepolia',
+      chainId: 84532,
+      isTestnet: true,
+      usdcBalanceAtomic: '500000000',
+      usdcDecimals: 6,
+      funded: true,
+      needs_backup_recommendation: false,
+      usdcPace7dAtomic: '10000000',
+    },
+  ],
+  spotRates: { USDC: 1 },
+  spend: {
+    scope: 'mainnet',
+    d7: {
+      gross: { usd: 185.0, eur: 168.4, sek: 1991.0 },
+      net: { usd: 111.0, eur: 101.0, sek: 1194.6 },
+      approx: false,
+      payments: 6,
+      distinctMerchants: 3,
+      budgetStops: 1,
+    },
+    d30: {
+      gross: { usd: 740.0, eur: 673.4, sek: 7964.0 },
+      net: { usd: 481.0, eur: 437.7, sek: 5176.6 },
+      approx: true,
+      payments: 21,
+      distinctMerchants: 5,
+      budgetStops: 3,
+    },
+    topMerchant7d: {
+      key: 'api.example.dev',
+      x402ResourceUrl: 'https://api.example.dev/reports',
+      to: ADDR.merchant,
+      merchantName: null,
+    },
+    failedIntents7d: 1,
+    balance_by_day: Array.from({ length: 30 }, (_, i) => {
+      const day = new Date(Date.UTC(2026, 8, 10 + i))
+      return {
+        snapshotDate: day.toISOString().slice(0, 10),
+        totalUsd: 12_615 + i * 0.85,
+        totalEur: 11_668 + i * 0.79,
+        totalSek: i % 7 === 0 ? null : 135_800 + i * 9.2,
+      }
+    }),
+  },
   agents: FIXTURE_AGENTS.map((a) => ({
     id: a.id, name: a.name, status: a.status, accountId: a.account_id,
     accountName: a.account_name, accountChainId: a.account_chain_id,
+    ...(a.status === 'pending_approval' ? { setupStatus: 'awaiting_connection' } : {}),
     allowances: a.allowances.map((x) => ({
       tokenSymbol: x.token_symbol, allowanceAmount: x.allowance_amount, resetPeriodMin: x.reset_period_min,
     })),
+    budgets: a.status === 'pending_approval' ? [] : [
+      {
+        id: a.id === 'agent-research'
+          ? '9d1f4c0a-0000-4000-8000-0000000000a1'
+          : '9d1f4c0a-0000-4000-8000-0000000000a2',
+        delegationHash: a.id === 'agent-research' ? `0x${'31'.repeat(32)}` : `0x${'32'.repeat(32)}`,
+        chainId: a.account_chain_id,
+        tokenAddress: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+        tokenSymbol: 'USDC',
+        decimals: 6,
+        budgetAtomic: a.id === 'agent-research' ? '250000000' : '50000000',
+        // Mixed periods: a daily budget on the research agent, a weekly one
+        // on the second active agent — the captions must render both.
+        periodSeconds: a.id === 'agent-research' ? 86_400 : 604_800,
+        startDate: '2026-10-08T10:00:00.000Z',
+        expiresAt: '2027-10-08T10:00:00.000Z',
+        periodEnd: '2026-10-10T10:00:00.000Z',
+      },
+    ],
+    receivedSubBudgets: a.id === 'agent-research' ? [] : [
+      { parentAgentId: 'agent-research', parentAgentName: 'Research agent', open: true },
+    ],
+    stats: {
+      d7: {
+        gross: { usd: 62.5, eur: 57.38, sek: 672.5 },
+        net: { usd: 37.5, eur: 34.43, sek: 403.5 },
+        approx: false,
+        payments: 4,
+        refusals: { budget: 1, scope: 0, failed: 0, haven: 0 },
+      },
+      d30: {
+        gross: { usd: 250.0, eur: 229.5, sek: 2690.0 },
+        net: { usd: 162.5, eur: 149.18, sek: 1748.5 },
+        approx: true,
+        payments: 14,
+        refusals: { budget: 2, scope: 1, failed: 1, haven: 0 },
+      },
+      lastPaymentAt: '2026-10-09T09:41:00.000Z',
+      lastCounterparty: a.status === 'pending_approval' ? null : {
+        source: 'x402',
+        x402ResourceUrl: 'https://api.example.dev/reports',
+        to: ADDR.merchant,
+        merchantName: null,
+      },
+    },
   })),
   transactions: FIXTURE_TXS.slice(0, 4),
 }
@@ -3283,10 +3392,6 @@ async function runAnalyticsScenario({ page, vp, shoot }, waitForContent) {
   await shoot(page.locator('main').first(), 'page')
 }
 
-// Staged by the `half-revoked-agents` run: how the superseded card's signer set
-// answers (`ready` | `not-ready` | `loading`). Reset at the top of each run.
-let halfRevokedSignerStage = 'ready'
-
 // The auth pages' API stages (#3578): the redesigned sign-in and sign-up
 // captures need the error band and the in-flight submit, which no URL can
 // reach — both exist only while a login/register round-trip has just failed
@@ -3945,78 +4050,9 @@ export const SCENARIOS = {
           passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
         }
       }
-      // ── The superseded-agent revoke confirm (#3542 B), reached through the
-      // connect modal's completed setup exactly as `connect-agent-superseded-*`
-      // do. Its signer set is staged by the run: loading (delayed answer),
-      // cannot-sign (no signer at all) and ready (one enrolled passkey).
-      if (apiPath === '/agents/agent-research/account-signers') {
-        if (halfRevokedSignerStage === 'loading') {
-          return delayedHttp(30_000, {
-            account_address: FIXTURE_ACCOUNT.account_address, chain_id: FIXTURE_ACCOUNT.chain_id,
-            owner_address: null, passkeys: [],
-          })
-        }
-        return {
-          account_address: FIXTURE_ACCOUNT.account_address,
-          chain_id: FIXTURE_ACCOUNT.chain_id,
-          owner_address: null,
-          passkeys: halfRevokedSignerStage === 'not-ready'
-            ? []
-            : [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
-        }
-      }
-      if (apiPath === '/agents/agent-research/revoke' && method === 'POST') return {}
-      if (apiPath === '/agents/agent-research/delegations/revoke-all' && method === 'POST') {
-        // A prepare the headless browser cannot sign: no WebAuthn here, so the
-        // ceremony fails and the card shows its "key revoked, budget still
-        // active" result — the same screen a cancelled signature produces.
-        return {
-          signature_scheme: 'webauthn_userop',
-          user_operation: {},
-          user_op_hash: '0x' + '9c'.repeat(32),
-          delegation_hashes: ['0x' + '4d'.repeat(32)],
-        }
-      }
-      if (apiPath === '/agent-connection-setups' && method === 'POST') {
-        return {
-          setup_id: CONNECT_SETUP_ID,
-          status: 'active',
-          setup_token: CONNECT_SETUP_TOKEN,
-          expires_at: '2099-01-01T00:00:00.000Z',
-          connector_command: CONNECT_COMMAND,
-          setup_prompt: 'Please connect this workspace to Haven.',
-        }
-      }
-      if (apiPath === `/agent-connection-setups/${CONNECT_SETUP_ID}`) {
-        return {
-          setup_id: CONNECT_SETUP_ID,
-          agent_id: 'agent-fixture-new',
-          status: 'active',
-          expires_at: '2099-01-01T00:00:00.000Z',
-          agent: { name: 'New agent', description: null },
-          haven_wallet: {
-            id: FIXTURE_ACCOUNT.id, name: FIXTURE_ACCOUNT.name,
-            address: FIXTURE_ACCOUNT.account_address, chain_id: FIXTURE_ACCOUNT.chain_id,
-            network: 'Base Sepolia',
-          },
-          agent_budget: [{
-            id: 'budget-1', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-            token_symbol: 'USDC', allowance_amount: '25000000', reset_period_min: 1440,
-          }],
-          delegate_address: '0x3333333333333333333333333333333333333333',
-          install_status: {
-            runtime_mcp_mode: 'local_stdio', local_mcp_configured: true,
-            local_mcp_acknowledged: true, credential_files_written: true,
-            skill_installed: false, restart_required: true,
-            superseded_agent_ids: ['agent-research'],
-          },
-          approval: { status: 'confirmed', safe_tx_hash: null, tx_hash: null },
-        }
-      }
       return undefined
     },
     async run({ page, vp, shoot }) {
-      halfRevokedSignerStage = 'ready'
       // ── /agents: list card, collapsed toggle, expanded Removed group ──────
       await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
@@ -4065,52 +4101,6 @@ export const SCENARIOS = {
       await dismissMobileSidebar(page, vp)
       await page.getByText(/Budget still active/).first().waitFor({ timeout: 20_000 })
       await shoot(page.locator('main').first(), 'account-summary')
-
-      // ── Superseded-agent revoke confirm: loading, cannot sign, ready, result ──
-      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
-      await dismissMobileSidebar(page, vp)
-      await page.getByRole('button', { name: 'Connect agent', exact: true }).first().click()
-      const connect = page.getByRole('dialog').first()
-      await connect.getByLabel('Agent name').fill('New agent')
-      await connect.getByRole('button', { name: 'Set agent budget' }).click()
-      await connect.getByPlaceholder('Amount').fill('25')
-      await connect.getByRole('button', { name: 'Create setup prompt' }).click()
-      await connect.getByText(/This setup replaced /).waitFor({ timeout: 30_000 })
-
-      const confirm = page.getByRole('dialog', { name: 'Revoke Research agent?' })
-      const openConfirm = async (stage) => {
-        halfRevokedSignerStage = stage
-        await connect.getByRole('button', { name: 'Revoke Research agent' }).click()
-        await confirm.waitFor({ timeout: 20_000 })
-      }
-      const closeConfirm = async () => {
-        await confirm.getByRole('button', { name: 'Keep it' }).click()
-        await confirm.waitFor({ state: 'detached', timeout: 20_000 })
-      }
-
-      // Signer set still loading: only the confirm waits (cancel stays usable),
-      // and it says nothing about signing.
-      await openConfirm('loading')
-      await confirm.locator('button:disabled', { hasText: 'Revoke agent' }).waitFor({ timeout: 20_000 })
-      await shoot(confirm, 'superseded-confirm-loading')
-      await closeConfirm()
-
-      // No signer reachable from this device: confirm still available, hint shown.
-      await openConfirm('not-ready')
-      await confirm.getByText(/cannot sign for the account/).waitFor({ timeout: 20_000 })
-      await shoot(confirm, 'superseded-confirm-cannot-sign')
-      await closeConfirm()
-
-      // Normal state: one enrolled passkey.
-      await openConfirm('ready')
-      await confirm.getByRole('button', { name: 'Revoke agent' }).waitFor({ timeout: 20_000 })
-      await shoot(confirm, 'superseded-confirm')
-
-      // Confirm: the credential is revoked, the signature cannot complete, and
-      // the card says which half happened.
-      await confirm.getByRole('button', { name: 'Revoke agent' }).click()
-      await connect.getByText(/Its key is revoked, but its budget is still active/).waitFor({ timeout: 30_000 })
-      await shoot(connect, 'superseded-result-budget-active')
     },
   },
 
@@ -5358,7 +5348,8 @@ export const SCENARIOS = {
   },
 
   /**
-   * The superseded-agent revoke offer (#2561), which had no rendered evidence
+   * The other-agents list in the completed setup (#2561; a revoke offer until
+   * #3830 made it a list with links), which had no rendered evidence
    * at all until two design-review passes each rebuilt a throwaway scenario to
    * see it. Committed so the third does not have to, and so the state is
    * captured the same way twice rather than off spec each time.
@@ -5368,24 +5359,24 @@ export const SCENARIOS = {
    * agents this owner has, so `null` (the scan could not run), `[]` and a
    * report naming agents the owner does not hold all produce the same correct
    * silence — and a capture of silence proves little. What is worth pinning is
-   * the offer itself, the long list, and the one branch where the card speaks
-   * without offering: the agent list failed to load, so it says so rather than
-   * implying there was nothing to replace.
+   * the list itself, the long list, and the one branch where the card speaks
+   * without listing: the agent list failed to load, so it says so rather than
+   * implying there were no other agents.
    */
   ...Object.fromEntries(
     [
-      ['one', ['agent-research'], 'a single superseded agent'],
+      ['one', ['agent-research'], 'a single other agent'],
       // Both fixture agents, and they are the only two — an id this fixture
       // does not have would have rendered ONE agent under a name promising
       // several, which is a scenario measuring something other than its title.
-      // `agent-retired` is `paused`, not `revoked`, so it is still offerable:
+      // `agent-retired` is `paused`, not `revoked`, so it is still listed:
       // the card drops revoked agents, not paused ones.
-      ['many', ['agent-research', 'agent-retired'], 'several, each revocable on its own'],
+      ['many', ['agent-research', 'agent-retired'], 'several, a paused one showing its status'],
       ['failed', ['agent-research'], 'the agent list could not be read'],
     ].map(([name, supersededIds, why]) => [
       `connect-agent-superseded-${name}`,
       {
-        description: `Connect agent, the completed setup's superseded-agent offer: ${why} (#2561)`,
+        description: `Connect agent, the completed setup's list of other agents on this machine: ${why} (#2561, #3830)`,
         api(apiPath, method) {
           // `failed` breaks the read the card intersects against, which is the
           // whole point of that variant.
@@ -5460,8 +5451,8 @@ export const SCENARIOS = {
           await dialog
             .getByText(
               name === 'failed'
-                ? /may have replaced an earlier agent/
-                : /This setup replaced /,
+                ? /Other agents may be set up on this machine/
+                : /other agents? (is|are) set up on this machine/i,
             )
             .waitFor({ timeout: 30_000 })
           await shoot(dialog, name)

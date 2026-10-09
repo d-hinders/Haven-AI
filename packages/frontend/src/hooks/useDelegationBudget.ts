@@ -685,7 +685,7 @@ export function useDelegationBudget(
     ready: signingPath !== null,
     // #3542 review: `ready` reads false while the signer set is still loading,
     // which is not the same as "this device cannot sign". Callers that act on
-    // `!ready` (the replaced-agents card) wait on this first.
+    // `!ready` wait on this first.
     signersLoading: signers === null && !signersError,
     // #3845: whether the signer set has ANY enrolled passkey, on any device
     // (the ceremony can hand off to another one). Null until the set is read,

@@ -2112,7 +2112,7 @@ describe('--name wiring slug through runConnect (#1696)', () => {
     })
 
     const output = logs.join('\n')
-    expect(output).not.toContain('Heads-up: this setup created a NEW agent')
+    expect(output).not.toContain('Heads-up: other agent directories on this machine')
     expect(output).not.toContain('agent-named')
   })
 
@@ -2296,10 +2296,11 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
     expect(output).toContain('use Remove agent\u2026 on the Haven agent page for each (it ends their live budgets)')
     expect(output).not.toMatch(/revoke them on the Haven agent page/)
     // #2551: replaced means retired LOCALLY — the restart guidance survives,
-    // the "keeps acting as them" warning is now false and must not print.
+    // and the other-directories heads-up (the not-retired branch) must not
+    // print. Keyed on its current lead (#3830) so the guard can still fail.
     expect(output).toMatch(/NOT revoked/)
     expect(output).toMatch(/restart EVERY long-lived host/)
-    expect(output).not.toMatch(/keeps acting as them/)
+    expect(output).not.toContain('Heads-up: other agent directories on this machine')
     // Never the secret, never an auto-action claim.
     expect(output).not.toContain('sk_agent_oldsecret')
     expect(output).not.toMatch(/revoked (it|them) for you/)
@@ -2383,7 +2384,7 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
   it('says nothing extra on a first-ever setup — no prior dirs, no heads-up', async () => {
     const { output } = await runWithPriorDir(false)
     expect(output).not.toContain('agent-old')
-    expect(output).not.toMatch(/previous agent/)
+    expect(output).not.toContain('Heads-up: other agent directories on this machine')
   })
 })
 
@@ -2517,7 +2518,13 @@ describe('runConnect terminal outcome record (#2173)', () => {
     // still name the same agents — the field is additive to that prose, not a
     // replacement for it.
     const headsUp = logs.join('\n')
-    expect(headsUp).toContain('this setup created a NEW agent')
+    expect(headsUp).toContain('Heads-up: other agent directories on this machine')
+    // #3830: these agents coexist — the run neither replaced nor retired them,
+    // so none of the old "replaced" framing may print.
+    expect(headsUp).toContain('revoked none of them')
+    expect(headsUp).not.toContain('previous agent(s)')
+    expect(headsUp).not.toContain('If you meant to replace them')
+    expect(headsUp).not.toMatch(/keeps acting as them/)
     // Each id separately: readdir order is not guaranteed, so asserting the
     // joined string would be an ordering flake rather than a guard.
     expect(headsUp).toContain('agent-0')
@@ -3301,7 +3308,7 @@ describe('existing-agent wiring collision at setup (#2551)', () => {
     const output = h.logs.join('\n')
     expect(output).toMatch(/Retired previous agent agent-old locally/)
     expect(output).toMatch(/NOT revoked/)
-    expect(output).not.toMatch(/keeps acting as them/)
+    expect(output).not.toContain('Heads-up: other agent directories on this machine')
     // #3772 review S2: a bare directory with NO binding record (pre-0.4.0
     // wiring) still gets the stale-session sentence in --json — the replace
     // itself names the displaced agent.

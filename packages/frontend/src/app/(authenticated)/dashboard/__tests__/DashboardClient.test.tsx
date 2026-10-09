@@ -202,6 +202,26 @@ describe('DashboardClient', () => {
       accountName: null,
       accountChainId: 8453,
       allowances,
+      budgets: [],
+      receivedSubBudgets: [],
+      stats: {
+        d7: {
+          gross: { usd: 0, eur: 0, sek: 0 },
+          net: { usd: 0, eur: 0, sek: 0 },
+          approx: false,
+          payments: 0,
+          refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+        },
+        d30: {
+          gross: { usd: 0, eur: 0, sek: 0 },
+          net: { usd: 0, eur: 0, sek: 0 },
+          approx: false,
+          payments: 0,
+          refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+        },
+        lastPaymentAt: null,
+        lastCounterparty: null,
+      },
     })
 
     it('reads "No budget" for an agent with zero live allowances — not "No spend limits"', () => {

@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { HavenClient, HavenSigningError } from '@haven_ai/sdk'
+import { HOSTED_CONTRACT_FINGERPRINT } from './contract-fingerprint.js'
 import {
   buildHostedMcpServer,
   createHostedHavenClient,
@@ -470,6 +471,115 @@ describe('mcp_transport at the MCP protocol boundary (#2282)', () => {
     expect(text).toContain('handshake_required')
     expect(text).toContain('handshakeRequired')
     expect(text).toContain('snake_case')
+
+    await client.close()
+    await server.close()
+  })
+})
+
+// ── #3816: stale-tool-list detection over the real MCP transport ─────────────
+
+describe('contract fingerprint delivery (#3816)', () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      'fetch',
+      async () =>
+        ({
+          ok: false,
+          status: 401,
+          headers: new Headers(),
+          json: async () => ({}),
+          text: async () => '{}',
+        }) as unknown as Response,
+    )
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  async function connectHosted() {
+    const haven = new HavenClient({ apiKey: '«reda...…»', baseUrl: 'http://haven.test' })
+    const server = buildHostedMcpServer(haven)
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'fingerprint-client', version: '0.0.0' })
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
+    return { client, server }
+  }
+
+  it('the stale-tool-list rule is in the instructions, with the hosted-only scope and the carve-out', () => {
+    expect(HOSTED_INSTRUCTIONS).toContain('Reconnect or restart the session before continuing')
+    expect(HOSTED_INSTRUCTIONS).toContain('never hand-build or reshape a payload')
+    expect(HOSTED_INSTRUCTIONS).toContain('the HOSTED')
+    // A signer misfit is NOT a stale list — it routes to the upgrade guidance.
+    expect(HOSTED_INSTRUCTIONS).toContain('signer skew, not a stale list')
+    // The in-flight carve-out: keep the payment, resume, never pay again.
+    expect(HOSTED_INSTRUCTIONS).toContain('keep its')
+    expect(HOSTED_INSTRUCTIONS).toContain('payment_id')
+    expect(HOSTED_INSTRUCTIONS).toContain('haven_get_payment_status')
+    expect(HOSTED_INSTRUCTIONS).toContain('haven_resume_x402_payment')
+    expect(HOSTED_INSTRUCTIONS).toContain('haven_sweep_delegate')
+    expect(HOSTED_INSTRUCTIONS).toContain('Never pay again')
+    // Rolling-deploy alternation: reconnect once, then continue and report.
+    expect(HOSTED_INSTRUCTIONS).toContain('reconnect once, and if it still')
+  })
+
+  it('the fingerprint in the instructions equals the one on a tool result (transport-level)', async () => {
+    const { client, server } = await connectHosted()
+
+    const instructions = client.getInstructions() ?? ''
+    const match = instructions.match(/Contract fingerprint ([0-9a-f]{16})/)
+    expect(match?.[1]).toBe(HOSTED_CONTRACT_FINGERPRINT)
+
+    // haven_get_agent passes validation with no arguments and is NOT
+    // identity-gate-exempt: the 401-stubbed identity read refuses through
+    // `toMcpResult`, so the payload is a hosted handler result.
+    const result = (await client.callTool({ name: 'haven_get_agent', arguments: {} })) as {
+      isError?: boolean
+      content: { type: string; text: string }[]
+    }
+    const payload = JSON.parse(result.content.map((part) => part.text).join('\n')) as {
+      success: boolean
+      contract_fingerprint: string
+      server_version: string
+    }
+    expect(result.isError).toBe(true)
+    expect(payload.contract_fingerprint).toBe(HOSTED_CONTRACT_FINGERPRINT)
+    expect(payload.server_version).toBe(HOSTED_SERVER_VERSION)
+
+    await client.close()
+    await server.close()
+  })
+
+  it('an SDK-generated unknown-tool refusal carries the fingerprint and the stale hint', async () => {
+    const { client, server } = await connectHosted()
+
+    const result = (await client.callTool({
+      name: 'haven_does_not_exist',
+      arguments: {},
+    })) as { isError?: boolean; content: { type: string; text: string }[] }
+    const text = result.content.map((part) => part.text).join('\n')
+
+    expect(result.isError).toBe(true)
+    expect(text).toContain('not found')
+    expect(text).toContain(HOSTED_CONTRACT_FINGERPRINT)
+    expect(text).toContain('your tool list may be stale')
+    expect(text.toLowerCase()).toContain('reconnect or restart the session')
+
+    await client.close()
+    await server.close()
+  })
+
+  it('an SDK-generated strict-input refusal carries the fingerprint and the stale hint', async () => {
+    const { client, server } = await connectHosted()
+
+    const result = (await client.callTool({
+      name: 'haven_get_payment_status',
+      arguments: { payment_id: 'pay_x', tx_hash: 'stale schema' },
+    })) as { isError?: boolean; content: { type: string; text: string }[] }
+    const text = result.content.map((part) => part.text).join('\n')
+
+    expect(result.isError).toBe(true)
+    expect(text).toContain('tx_hash')
+    expect(text).toContain(HOSTED_CONTRACT_FINGERPRINT)
+    expect(text).toContain('your tool list may be stale')
 
     await client.close()
     await server.close()

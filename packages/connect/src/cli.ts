@@ -431,6 +431,12 @@ export async function runCli(
         // describes ONE agent; multi-agent means the rest still have to be
         // accounted for, by name and by verdict, never silently dropped.
         const otherAgents = report.agents.filter((agent) => agent.directory !== report.credentialDirectory)
+        // #3830: when the superseded check is an advisory, the connector could
+        // not tell wired from superseded, so the row must not assert it either.
+        // The `--json` classification is unchanged (#3121 decision 5).
+        const wiringUnverifiable = report.checks.some(
+          (check) => check.id === 'superseded_agents' && check.level === 'advisory',
+        )
         if (otherAgents.length > 0) {
           io.stdout('\nOther agents on this machine:\n')
           for (const agent of otherAgents) {
@@ -450,7 +456,9 @@ export async function runCli(
               // re-key check above.
               : agent.classification === 'parked'
                 ? 'parked re-key only — no identity.json in this directory, but key material is still there'
-                : agent.classification
+                : agent.classification === 'superseded' && wiringUnverifiable
+                  ? 'not verified as wired — no config the connector can read names it'
+                  : agent.classification
             io.stdout(redactSecrets(`  ${failed.length > 0 ? '✗' : advised.length > 0 ? '!' : '•'} ${name}: ${verdict}\n`))
             for (const check of [...failed, ...advised]) {
               io.stdout(redactSecrets(`      ${levelMarker(check.level)} ${check.label}: ${check.detail}\n`))

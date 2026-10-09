@@ -27,6 +27,9 @@ import fastifyJwt from '@fastify/jwt'
 // the route also reads the pure freshness combiner from it (#3295), which
 // stays real so the marker math this file pins is the production math.
 import { combineBalanceFreshness } from '../../modules/accounts/balance-freshness.js'
+// #3803: the route answers needs_backup_recommendation per account — kept
+// real, like the freshness combiner above.
+import { needsBackupSignerRecommendation } from '../../modules/accounts/mainnet-gate.js'
 
 const { mockQuery, portfolioMocks, transactionMocks, fiatMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
@@ -55,9 +58,16 @@ vi.mock('../../db.js', () => ({
 vi.mock('../../modules/accounts/index.js', () => ({
   ...portfolioMocks,
   combineBalanceFreshness,
+  needsBackupSignerRecommendation,
 }))
 vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 vi.mock('../../modules/transactions/index.js', () => transactionMocks)
+// #3803: the route reads today's spot rates for the budget captions. A mock
+// keeps the suite off CoinGecko — the price read itself is infra/prices.ts'
+// own concern.
+vi.mock('../../infra/prices.js', () => ({
+  getTokenPrice: vi.fn(async () => ({ usd: 1, eur: 0.9, sek: 10 })),
+}))
 
 import dashboardRoutes from '../dashboard.js'
 
@@ -100,7 +110,7 @@ function installQueryMock(overrides: {
     if (sql.includes('AS has_first_agent_payment')) {
       return Promise.resolve({ rows: [{ has_first_agent_payment: false }] })
     }
-    if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) {
+    if (sql.includes('FROM smart_accounts us') && sql.includes('GROUP BY us.id')) {
       return Promise.resolve({ rows: overrides.accounts ?? [ACCOUNT] })
     }
     if (sql.includes('FROM agents a')) {
@@ -120,6 +130,48 @@ function installQueryMock(overrides: {
     // route separately is gone with the query it stubbed.
     if (sql.includes('GROUP BY token_symbol') && sql.includes('FROM payment_intents')) {
       return Promise.resolve({ rows: overrides.paymentSpend ?? [] })
+    }
+    // #3803: the new overview sections. Default: an EMPTY dataset — zero
+    // spend, zero merchants, zero refusals, no last payments, no budgets,
+    // no setups, no sub-budgets, no contacts. The sections' own real-DB
+    // proofs live in infra/repositories/__tests__/dashboard-overview.db.test.ts.
+    if (sql.includes('WITH legs AS') && sql.includes('FROM payment_intents pi')) {
+      return Promise.resolve({ rows: [] })
+    }
+    if (sql.includes('distinct_merchants_30')) {
+      return Promise.resolve({
+        rows: [
+          {
+            distinct_merchants_30: '0',
+            distinct_merchants_7: '0',
+            top_merchant_key: null,
+            top_merchant_url: null,
+            top_merchant_to: null,
+            top_merchant_address: null,
+          },
+        ],
+      })
+    }
+    if (sql.includes('FROM payment_refusals')) {
+      return Promise.resolve({ rows: [] })
+    }
+    if (sql.includes('AS failed_intents')) {
+      return Promise.resolve({ rows: [{ failed_intents: '0' }] })
+    }
+    if (sql.includes('DISTINCT ON (pi.agent_id)')) {
+      return Promise.resolve({ rows: [] })
+    }
+    if (sql.includes('FROM contacts WHERE')) {
+      return Promise.resolve({ rows: [] })
+    }
+    if (sql.includes('FROM agent_connection_setups')) {
+      return Promise.resolve({ rows: [] })
+    }
+    if (sql.includes('agent_sub_budgets')) {
+      return Promise.resolve({ rows: [] })
+    }
+    if (sql.includes('FROM agent_delegations')) {
+      return Promise.resolve({ rows: [] })
     }
     throw new Error(`Unexpected query: ${sql}`)
   })
@@ -204,8 +256,14 @@ describe('dashboard aggregates (characterization, #1167)', () => {
 
       await getOverview()
 
-      const read = callsMatching('FROM user_daily_portfolio_snapshots')[0]
-      expect(read[1]).toEqual(['user-1', [snapshotDate(0), snapshotDate(-1)]])
+      // #3803: the balance_by_day read ALSO matches this pattern (it is the
+      // shared analytics statement), so pin the one whose second bind is the
+      // date ARRAY — the snapshot pair.
+      const read = mockQuery.mock.calls.find(
+        ([sql, params]) =>
+          String(sql).includes('FROM user_daily_portfolio_snapshots') && Array.isArray(params?.[1]),
+      )
+      expect(read?.[1]).toEqual(['user-1', [snapshotDate(0), snapshotDate(-1)]])
     })
   })
 

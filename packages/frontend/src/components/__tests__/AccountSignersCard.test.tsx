@@ -313,7 +313,7 @@ describe('AccountSignersCard (#888)', () => {
   })
 
   // ── #1679: credential naming — "Passkey · added {date}", never positional ──
-  it('labels every passkey row "Passkey · added {date}" and the EOA row "Wallet"', () => {
+  it('labels every passkey row "Passkey · added {date}" and the EOA row "Browser wallet"', () => {
     mockUseSigners.mockReturnValue(
       base({
         signers: {
@@ -330,9 +330,35 @@ describe('AccountSignersCard (#888)', () => {
     render(<AccountSignersCard {...PROPS} />)
     expect(screen.getByText('Passkey · added March 3, 2026')).toBeTruthy()
     expect(screen.getByText('Passkey · added May 10, 2026')).toBeTruthy()
-    expect(screen.getByText('Wallet')).toBeTruthy()
+    expect(screen.getByText('Browser wallet')).toBeTruthy()
     // The banned platform-brand label and role words never render as names:
     expect(document.body.textContent).not.toMatch(/Face ID \/ Touch ID|External owner/)
+  })
+
+  // #3825: who your signers are is Settings → Signers' job; the account card
+  // shows which signers approve THIS account, with no address or key id.
+  it('shows no owner address or passkey key id, and links to Settings → Signers', () => {
+    const owner = '0x' + 'ee'.repeat(20)
+    const keyId = '0x' + '11'.repeat(32)
+    mockUseSigners.mockReturnValue(
+      base({
+        signers: {
+          account_address: '0x' + 'aa'.repeat(20),
+          chain_id: 84532,
+          owner_address: owner,
+          passkeys: [{ key_id: keyId, x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
+        },
+      }),
+    )
+    render(<AccountSignersCard {...PROPS} />)
+    // Positive control: both signer rows rendered.
+    expect(screen.getByText('Browser wallet')).toBeTruthy()
+    expect(screen.getByText('Passkey · added March 3, 2026')).toBeTruthy()
+    const text = document.body.textContent ?? ''
+    // Neither the full value nor the truncated `0xeeee…eeee` form.
+    expect(text).not.toMatch(/0xeeee|0x1111/i)
+    const link = screen.getByRole('link', { name: /All your signers in Settings/ })
+    expect(link.getAttribute('href')).toBe('/settings#signers')
   })
 
   it('REGRESSION (#1679): after a recovery removes the original key, the surviving backup keeps ITS OWN label', () => {

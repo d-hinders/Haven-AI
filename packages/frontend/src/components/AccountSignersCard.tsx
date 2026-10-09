@@ -16,7 +16,8 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import { isAddress } from 'viem'
-import { CircleHelp } from 'lucide-react'
+import Link from 'next/link'
+import { ArrowRight, CircleHelp } from 'lucide-react'
 import { useAccountSigners } from '@/hooks/useAccountSigners'
 import { Card } from './ui/Card'
 import { Button } from './ui/Button'
@@ -26,7 +27,6 @@ import ConfirmDialog from './ConfirmDialog'
 import WalletConnectAction from './WalletConnectAction'
 import { Icon } from './ui/Icon'
 import { useToast } from './ui/Toast'
-import { truncateAddress } from '@/components/haven'
 import { passkeyRowLabel } from '@/lib/passkeyLabels'
 
 interface Props {
@@ -92,6 +92,15 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
           These are the ways this account can be approved. Keep at least two, so a lost device never
           means a lost account.
         </p>
+        {/* #3825: a signer is its own object; the full list — every passkey and
+            wallet, with all the accounts each approves — lives in Settings. */}
+        <Link
+          href="/settings#signers"
+          className="mt-1 inline-flex items-center gap-1 text-sm font-medium text-[var(--v2-brand)] hover:underline"
+        >
+          All your signers in Settings
+          <Icon icon={ArrowRight} className="h-3.5 w-3.5" />
+        </Link>
       </div>
 
       {loadError ? (
@@ -116,10 +125,9 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
             {signers.owner_address ? (
               <div className="flex items-center justify-between gap-3 py-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-[var(--v2-ink)]">Wallet</p>
-                  <p className="truncate text-xs text-[var(--v2-ink-muted)]">
-                    {truncateAddress(signers.owner_address)}
-                  </p>
+                  {/* #3825: no address by default — Settings → Signers can
+                      reveal it for the user who needs to tell wallets apart. */}
+                  <p className="text-sm font-medium text-[var(--v2-ink)]">Browser wallet</p>
                   <p className="mt-0.5 text-xs text-[var(--v2-ink-muted)]">
                     {/* #3845: never promise passkeys the account does not have. */}
                     {signers.passkeys.length > 0
@@ -146,9 +154,6 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-[var(--v2-ink)]">
                     {passkeyRowLabel(pk.created_at, i)}
-                  </p>
-                  <p className="truncate font-mono text-xs text-[var(--v2-ink-muted)]">
-                    {truncateAddress(pk.key_id)}
                   </p>
                 </div>
                 <Button

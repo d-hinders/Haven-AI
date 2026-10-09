@@ -2761,71 +2761,79 @@ export default function DesignSystemPage() {
         title="Amount: currency mode"
         description="The other half of the Amount contract (#3805): for a figure that is already a fiat valuation server-side, pass the unsigned magnitude (amount) and the currency it is in — never a symbol string, never a conversion done here. It formats through formatFiat, the one formatter, so a SEK figure reads the same on every screen; the sign comes only from direction, and a negative magnitude can never double-sign it. ≈ marks a figure converted at today's rate rather than booked, and it goes before the sign. Unknown — null, or a non-finite value — renders an em dash in secondary ink, never 0,00 kr: an unknown valuation is not a zero. A currency figure is a valuation of a token amount, not a fiat balance Haven holds."
       >
-        <Card hover={false} className="p-5" data-testid="ds-amount-currency">
-          <div className="space-y-2 text-sm">
-            <p><Amount amount={9.09} currency="SEK" direction="out" /> <span className="text-xs text-[var(--v2-ink-3)]">— SEK valuation, signed by direction</span></p>
-            <p><Amount amount={0.96} currency="USD" direction="in" /> <span className="text-xs text-[var(--v2-ink-3)]">— incoming: the quiet success green</span></p>
-            <p><Amount amount={0.88} currency="EUR" /> <span className="text-xs text-[var(--v2-ink-3)]">— signless figure (budgets, balances)</span></p>
-            <p><Amount amount={9.09} currency="SEK" direction="out" approx /> <span className="text-xs text-[var(--v2-ink-3)]">— approx: converted at today&apos;s rate, ≈ before the sign</span></p>
-            <p><Amount amount={null} currency="SEK" direction="out" /> <span className="text-xs text-[var(--v2-ink-3)]">— unknown renders an em dash, never 0,00 kr</span></p>
-            <p><Amount amount={0} currency="SEK" /> <span className="text-xs text-[var(--v2-ink-3)]">— zero is a real valuation and renders as one</span></p>
-          </div>
-        </Card>
+        {/* The testid rides a plain wrapper: `Card` forwards no extra props,
+            and the visual spec clips this sample by it. */}
+        <div data-testid="ds-amount-currency">
+          <Card hover={false} className="p-5">
+            <div className="space-y-2 text-sm">
+              <p><Amount amount={9.09} currency="SEK" direction="out" /> <span className="text-xs text-[var(--v2-ink-3)]">— SEK valuation, signed by direction</span></p>
+              <p><Amount amount={0.96} currency="USD" direction="in" /> <span className="text-xs text-[var(--v2-ink-3)]">— incoming: the quiet success green</span></p>
+              <p><Amount amount={0.88} currency="EUR" /> <span className="text-xs text-[var(--v2-ink-3)]">— signless figure (budgets, balances)</span></p>
+              <p><Amount amount={9.09} currency="SEK" direction="out" approx /> <span className="text-xs text-[var(--v2-ink-3)]">— approx: converted at today&apos;s rate, ≈ before the sign</span></p>
+              <p><Amount amount={null} currency="SEK" direction="out" /> <span className="text-xs text-[var(--v2-ink-3)]">— unknown renders an em dash, never 0,00 kr</span></p>
+              <p><Amount amount={0} currency="SEK" /> <span className="text-xs text-[var(--v2-ink-3)]">— zero is a real valuation and renders as one</span></p>
+            </div>
+          </Card>
+        </div>
       </Section>
 
       <Section
         title="AttentionList"
         description="The list of things that need your eye (#3805), built from Row, StatusBadge and Icon. The rows are static — the action and the dismiss live in trailing, never on the row itself, so an action is never nested inside another control. The tone always rides text as well as colour (Row's leading icon is aria-hidden): a StatusBadge label, or an sr-only tone word when the item has no badge. Budget reached is neutral — the budget did its job; danger is for real failures only. Dismiss is labelled Dismiss: {title} and calls onDismiss(id); the list holds no dismissal state, and after a dismiss focus moves to the next item, or to the list heading when the list empties. Below sm the trailing slot wraps under the body and the body line-clamps to two lines. Zero items renders nothing — the caller shows the empty state."
       >
-        <Card hover={false} className="p-5" data-testid="ds-attention-list">
-          <h3 id="ds-attention-list-heading" className="text-sm font-medium text-[var(--v2-ink)]">
-            Needs attention
-          </h3>
-          <div className="mt-2">
-            <AttentionListShowcase />
-          </div>
-        </Card>
+        <div data-testid="ds-attention-list">
+          <Card hover={false} className="p-5">
+            <h3 id="ds-attention-list-heading" className="text-sm font-medium text-[var(--v2-ink)]">
+              Needs attention
+            </h3>
+            <div className="mt-2">
+              <AttentionListShowcase />
+            </div>
+          </Card>
+        </div>
       </Section>
 
       <Section
         title="AreaChart — sparkline"
         description="The sparkline variant of AreaChart (#3805): the balance line alone, in a box the caller sizes (height, default 40px). No gridlines, ticks, x labels, delta annotation, tooltip or caret — one dot on the last point. It is role=img with the required ariaLabel summary sentence and is not a tab stop: there is no hidden data table, the sentence is the data access. Days with no snapshot are gaps in the line, never zeros. Below three points it renders a flat placeholder line of the same height instead of nothing, so the layout does not jump, and there is no draw animation on data refresh."
       >
-        <Card hover={false} className="p-5" data-testid="ds-area-chart-sparkline">
-          <div className="space-y-5">
-            <div>
-              <p className="text-xs text-[var(--v2-ink-3)]">Balance, last 14 days (2 days without a snapshot)</p>
-              <div className="mt-2">
-                <AreaChart variant="sparkline" points={DS_SPARKLINE_POINTS} ariaLabel={DS_SPARKLINE_SUMMARY} />
+        <div data-testid="ds-area-chart-sparkline">
+          <Card hover={false} className="p-5">
+            <div className="space-y-5">
+              <div>
+                <p className="text-xs text-[var(--v2-ink-3)]">Balance, last 14 days (2 days without a snapshot)</p>
+                <div className="mt-2">
+                  <AreaChart variant="sparkline" points={DS_SPARKLINE_POINTS} ariaLabel={DS_SPARKLINE_SUMMARY} />
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-[var(--v2-ink-3)]">Below three points: a flat placeholder line of the same height</p>
+                <div className="mt-2 max-w-[320px]">
+                  <AreaChart
+                    variant="sparkline"
+                    height={28}
+                    points={[
+                      { label: 'Mon', value: null },
+                      { label: 'Tue', value: 5 },
+                    ]}
+                    ariaLabel="Balance: not enough days with a snapshot yet."
+                  />
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-[var(--v2-ink-3)]">height=64, for a row that has the room</p>
+                <div className="mt-2">
+                  <AreaChart
+                    variant="sparkline"
+                    height={64}
+                    points={DS_SPARKLINE_POINTS}
+                    ariaLabel={DS_SPARKLINE_SUMMARY}
+                  />
+                </div>
               </div>
             </div>
-            <div>
-              <p className="text-xs text-[var(--v2-ink-3)]">Below three points: a flat placeholder line of the same height</p>
-              <div className="mt-2 max-w-[320px]">
-                <AreaChart
-                  variant="sparkline"
-                  height={28}
-                  points={[
-                    { label: 'Mon', value: null },
-                    { label: 'Tue', value: 5 },
-                  ]}
-                  ariaLabel="Balance: not enough days with a snapshot yet."
-                />
-              </div>
-            </div>
-            <div>
-              <p className="text-xs text-[var(--v2-ink-3)]">height=64, for a row that has the room</p>
-              <div className="mt-2">
-                <AreaChart
-                  variant="sparkline"
-                  height={64}
-                  points={DS_SPARKLINE_POINTS}
-                  ariaLabel={DS_SPARKLINE_SUMMARY}
-                />
-              </div>
-            </div>
-          </div>
-        </Card>
+          </Card>
+        </div>
       </Section>
 
       <Section

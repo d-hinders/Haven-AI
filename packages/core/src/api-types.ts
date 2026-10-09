@@ -5809,6 +5809,13 @@ export type components = {
              */
             convertedCurrency?: "SEK" | "USD" | "EUR";
             convertedFxRate?: string | null;
+            /** @description #3824: the token amount at today’s rate in `approxCurrency`, for rows without book-time fiat. Null when no usable price exists — never "0". */
+            approxAmount?: string | null;
+            /**
+             * @description #3824: the currency `approxAmount` is denominated in — the user’s `currency_preference`, or SEK when none is set.
+             * @enum {string}
+             */
+            approxCurrency?: "SEK" | "USD" | "EUR";
             /** @description Book-time token→currency rates frozen at settlement (`machine_payment_evidence.fx_rates`, migration 082), one per supported ledger currency with a usable quote. Null on rows settled before migration 082 and on rows with no evidence row. */
             fxRates?: {
                 [key: string]: number;
@@ -5901,6 +5908,13 @@ export type components = {
              */
             convertedCurrency?: "SEK" | "USD" | "EUR";
             convertedFxRate?: string | null;
+            /** @description #3824: the token amount at today’s rate in `approxCurrency`, for rows without book-time fiat. Null when no usable price exists — never "0". */
+            approxAmount?: string | null;
+            /**
+             * @description #3824: the currency `approxAmount` is denominated in — the user’s `currency_preference`, or SEK when none is set.
+             * @enum {string}
+             */
+            approxCurrency?: "SEK" | "USD" | "EUR";
             /** @description Book-time token→currency rates frozen at settlement (`machine_payment_evidence.fx_rates`, migration 082), one per supported ledger currency with a usable quote. Null on rows settled before migration 082 and on rows with no evidence row. */
             fxRates?: {
                 [key: string]: number;
@@ -6257,6 +6271,8 @@ export type components = {
             };
             /** @description #3803: EVERY delegation-rail agent in active/paused/pending_approval — the former at-most-6 cap moved to the client (#3809). */
             agents: components["schemas"]["DashboardAgentPreview"][];
+            /** @description Grouped activity rows, newest first. Every count is a FLOOR (`countIsFloor`) when the explorer window was truncated. */
+            activity?: components["schemas"]["DashboardActivityGroup"][];
             /** @description At most 5. Payment-enrichment fields (paymentId, paymentFlowStatus, amountSek, …) are never populated in this projection. */
             transactions: components["schemas"]["Transaction"][];
             /** @description #3803 — the overview’s agents[] by status, so tiles do not derive counts from a client-side slice. */
@@ -6302,6 +6318,58 @@ export type components = {
                     totalSek: number | null;
                 }[];
             };
+        };
+        DashboardActivityGroup: {
+            /** @description Rows in the group. A FLOOR, not a total, when `countIsFloor` is true — the client renders "×40+". */
+            count: number;
+            /** @description Present ONLY when the explorer window that produced the feed was truncated: the count is a floor over an unknown total. A count is never presented as exact when it is not. */
+            countIsFloor?: boolean;
+            /** @description Sum of the member rows' atomic `value` strings. One token per group, so the units agree. */
+            sumAtomic: string;
+            /** @description Ticker of the group’s token. */
+            tokenSymbol: string;
+            /** @description Decimals of the group’s token. */
+            decimals: number;
+            /**
+             * Format: date-time
+             * @description ISO 8601 instant of the newest member row.
+             */
+            latestAt: string;
+            /** @description Agent attribution of the newest member; null when the row has no agent (deposits, unattributed transfers). */
+            agentId: string | null;
+            /** @description Agent name of the newest member. */
+            agentName: string | null;
+            /** @description The newest member's source, e.g. `x402`. */
+            source: string | null;
+            /** @description The newest member’s x402 resource URL, when it is an x402 payment. */
+            x402ResourceUrl: string | null;
+            /** @description The newest member’s raw `to` field — the merchant address on outbound payments, the account’s own address on deposits. */
+            to: string;
+            /** @description Contact or receipt-merchant name resolved for the counterparty, when one exists; null otherwise (always null on deposits). */
+            merchantName: string | null;
+            /** @description The activity class, e.g. `delegate_sweep`; null for plain transfers and x402 payments. */
+            activityType: string | null;
+            /** @enum {string} */
+            direction: "in" | "out";
+            /**
+             * @description The DERIVED outcome: isError → failed; a paymentFlowStatus of confirming_merchant/needs_attention or a non-terminal paymentProofStatus → pending; else confirmed.
+             * @enum {string}
+             */
+            status: "confirmed" | "pending" | "failed";
+            /** @description The book-time fiat sum — present ONLY when every member row carries a stored `convertedAmount` capture. */
+            convertedAmount?: string;
+            /**
+             * @description The currency `convertedAmount` is denominated in (the user’s preference).
+             * @enum {string}
+             */
+            convertedCurrency?: "SEK" | "USD" | "EUR";
+            /** @description The serve-time fiat sum at today’s rate — present INSTEAD of convertedAmount when any member lacked book-time fiat. Null when no usable price exists; never 0. */
+            approxAmount?: string | null;
+            /**
+             * @description The currency `approxAmount` is denominated in (the user’s preference).
+             * @enum {string}
+             */
+            approxCurrency?: "SEK" | "USD" | "EUR";
         };
         DashboardBudgetRemainingEntry: {
             /** Format: uuid */
@@ -15966,6 +16034,13 @@ export interface operations {
                             token: string | null;
                             amount_raw?: string | null;
                             amount: string | null;
+                            /** @description #3824: the token amount at today’s rate in `approx_currency`; null when no usable price exists — never "0". */
+                            approx_amount?: string | null;
+                            /**
+                             * @description #3824: the currency `approx_amount` is denominated in (the user’s `currency_preference`).
+                             * @enum {string}
+                             */
+                            approx_currency?: "SEK" | "USD" | "EUR";
                             to: string | null;
                             status: string | null;
                             /** @description The FUNDING transaction on the eip3009 bridge — Haven’s sponsored UserOp (account → delegate). */
@@ -16155,6 +16230,13 @@ export interface operations {
                             token: string | null;
                             amount_raw?: string | null;
                             amount: string | null;
+                            /** @description #3824: the token amount at today’s rate in `approx_currency`; null when no usable price exists — never "0". */
+                            approx_amount?: string | null;
+                            /**
+                             * @description #3824: the currency `approx_amount` is denominated in (the user’s `currency_preference`).
+                             * @enum {string}
+                             */
+                            approx_currency?: "SEK" | "USD" | "EUR";
                             to: string | null;
                             status: string | null;
                             /** @description The FUNDING transaction on the eip3009 bridge — Haven’s sponsored UserOp (account → delegate). */
@@ -22052,7 +22134,10 @@ export interface operations {
     };
     getDashboardOverview: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description IANA time-zone name (e.g. `Europe/Stockholm`) the activity groups bucket local days by. Defaults to UTC; an invalid zone is refused with 400. */
+                tz?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -22066,6 +22151,21 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DashboardOverviewResponse"];
+                };
+            };
+            /** @description Invalid `tz` — not an IANA zone name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Error response */

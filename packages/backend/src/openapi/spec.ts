@@ -198,6 +198,22 @@ const transactionBaseProperties = {
     description: 'The currency `convertedAmount` is denominated in — the user’s `currency_preference`, or SEK when none is set. SEK mirrors `amountSek`; USD/EUR are struck from the row’s book-time rate map (`machine_payment_evidence.fx_rates`, migration 082) and are null when no rate was captured there.',
   },
   convertedFxRate: { type: ['string', 'null'] },
+  // #3824: the serve-time ("at today's rate") amount for rows WITHOUT
+  // book-time fiat, struck NOW in the user's preferred currency — priced via
+  // the CoinGecko read, never persisted. Additive and optional: a row that
+  // already carries `convertedAmount` (the stored book-time capture) does
+  // NOT carry these, so the two provenances never blur. Null — not 0 — when
+  // the token has no usable quote (an inbound spam token must not read
+  // "≈ 0"). Absent from the CSV export, which stays fixed-currency book-time.
+  approxAmount: {
+    type: ['string', 'null'],
+    description: '#3824: the token amount at today’s rate in `approxCurrency`, for rows without book-time fiat. Null when no usable price exists — never "0".',
+  },
+  approxCurrency: {
+    type: 'string',
+    enum: ['SEK', 'USD', 'EUR'],
+    description: '#3824: the currency `approxAmount` is denominated in — the user’s `currency_preference`, or SEK when none is set.',
+  },
   // #3127: the row's own stored book-time rate map (migration 082), carried
   // for auditability — the same capture `convertedFxRate` names the one used
   // rate out of. Keys are the settlement-time supported ledger currencies;
@@ -878,6 +894,14 @@ const activityPayment = {
     token: { type: ['string', 'null'] },
     amount_raw: { type: ['string', 'null'] },
     amount: { type: ['string', 'null'] },
+    // #3824: the serve-time amount at today's rate, in the user's preferred
+    // currency (the preference this feed reads since #3824 — the
+    // /transactions route and the dashboard have read it since #3127).
+    // Optional and additive: absent until a row is priced, and `null` — not
+    // 0 — when the token has no usable quote. The mcp_tool_call branch does
+    // not carry these: it is not a transaction-shaped row.
+    approx_amount: { type: ['string', 'null'], description: '#3824: the token amount at today’s rate in `approx_currency`; null when no usable price exists — never "0".' },
+    approx_currency: { type: 'string', enum: ['SEK', 'USD', 'EUR'], description: '#3824: the currency `approx_amount` is denominated in (the user’s `currency_preference`).' },
     to: { type: ['string', 'null'] },
     status: { type: ['string', 'null'] },
     // #3763: `tx_hash` keeps its FUNDING meaning (Haven's sponsored UserOp,
@@ -8675,11 +8699,25 @@ export const openapiSpec = {
         operationId: 'getDashboardOverview',
         summary: 'Aggregated dashboard overview: totals, day change, metrics, previews.',
         security: [{ DashboardJwt: [] }],
+        // #3824: the grouped activity rows bucket by the USER's local day, so
+        // the caller names the zone. Shape is a plain string; "a zone Intl
+        // knows" is not a shape the spec can state — the handler validates it
+        // against the IANA tzdata list exactly as `/analytics/overview` does
+        // and 400s an invalid one.
+        parameters: [
+          {
+            name: 'tz',
+            in: 'query',
+            schema: { type: 'string' },
+            description: 'IANA time-zone name (e.g. `Europe/Stockholm`) the activity groups bucket local days by. Defaults to UTC; an invalid zone is refused with 400.',
+          },
+        ],
         responses: {
           '200': {
             description: 'Dashboard overview.',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/DashboardOverviewResponse' } } },
           },
+          '400': { ...errorResponse, description: 'Invalid `tz` — not an IANA zone name.' },
           '401': errorResponse,
         },
       },
@@ -13227,6 +13265,17 @@ export const openapiSpec = {
             additionalProperties: false,
           },
           agents: { type: 'array', items: { $ref: '#/components/schemas/DashboardAgentPreview' }, description: '#3803: EVERY delegation-rail agent in active/paused/pending_approval — the former at-most-6 cap moved to the client (#3809).' },
+          // #3824: grouped dashboard activity — up to 8 groups over the last 7
+          // user-local days (bucketed by the `tz` query parameter, default
+          // UTC), newest first, grouped server-side in memory over the same
+          // feed the `transactions` preview slices. Optional so pre-#3824
+          // consumers read the same response unchanged.
+          activity: {
+            type: 'array',
+            maxItems: 8,
+            items: { $ref: '#/components/schemas/DashboardActivityGroup' },
+            description: 'Grouped activity rows, newest first. Every count is a FLOOR (`countIsFloor`) when the explorer window was truncated.',
+          },
           transactions: { type: 'array', items: { $ref: '#/components/schemas/Transaction' }, description: 'At most 5. Payment-enrichment fields (paymentId, paymentFlowStatus, amountSek, …) are never populated in this projection.' },
           agentCount: {
             type: 'object',
@@ -13284,6 +13333,62 @@ export const openapiSpec = {
             },
             additionalProperties: false,
           },
+        },
+        additionalProperties: false,
+      },
+      // ── Grouped dashboard activity (#3824) ─────────────────────────────
+      //
+      // One row per agent + token + counterparty + user-local day + outcome
+      // + activityType, computed in memory over the dashboard's merged feed
+      // (explorer window + synthesized x402 rows) — not a database table.
+      // `status` is the DERIVED outcome (confirmed | pending | failed, from
+      // `isError` / `paymentFlowStatus` / `paymentProofStatus`); the
+      // accounting push `Transaction.status` is a different field and never
+      // appears here. The fiat pair is EITHER book-time (`convertedAmount`,
+      // when every member row carried a stored capture) OR serve-time
+      // (`approxAmount`, today's rate via the CoinGecko read) — never both.
+      // Null means "no usable price", never 0.
+      DashboardActivityGroup: {
+        type: 'object',
+        required: [
+          'count',
+          'sumAtomic',
+          'tokenSymbol',
+          'decimals',
+          'latestAt',
+          'agentId',
+          'agentName',
+          'source',
+          'x402ResourceUrl',
+          'to',
+          'merchantName',
+          'activityType',
+          'direction',
+          'status',
+        ],
+        properties: {
+          count: { type: 'integer', description: 'Rows in the group. A FLOOR, not a total, when `countIsFloor` is true — the client renders "×40+".' },
+          countIsFloor: {
+            type: 'boolean',
+            description: 'Present ONLY when the explorer window that produced the feed was truncated: the count is a floor over an unknown total. A count is never presented as exact when it is not.',
+          },
+          sumAtomic: { type: 'string', description: 'Sum of the member rows\' atomic `value` strings. One token per group, so the units agree.' },
+          tokenSymbol: { type: 'string', description: 'Ticker of the group’s token.' },
+          decimals: { type: 'integer', description: 'Decimals of the group’s token.' },
+          latestAt: { type: 'string', format: 'date-time', description: 'ISO 8601 instant of the newest member row.' },
+          agentId: { type: ['string', 'null'], description: 'Agent attribution of the newest member; null when the row has no agent (deposits, unattributed transfers).' },
+          agentName: { type: ['string', 'null'], description: 'Agent name of the newest member.' },
+          source: { type: ['string', 'null'], description: "The newest member's source, e.g. `x402`." },
+          x402ResourceUrl: { type: ['string', 'null'], description: 'The newest member’s x402 resource URL, when it is an x402 payment.' },
+          to: { type: 'string', description: 'The newest member’s raw `to` field — the merchant address on outbound payments, the account’s own address on deposits.' },
+          merchantName: { type: ['string', 'null'], description: 'Contact or receipt-merchant name resolved for the counterparty, when one exists; null otherwise (always null on deposits).' },
+          activityType: { type: ['string', 'null'], description: "The activity class, e.g. `delegate_sweep`; null for plain transfers and x402 payments." },
+          direction: { type: 'string', enum: ['in', 'out'] },
+          status: { type: 'string', enum: ['confirmed', 'pending', 'failed'], description: 'The DERIVED outcome: isError → failed; a paymentFlowStatus of confirming_merchant/needs_attention or a non-terminal paymentProofStatus → pending; else confirmed.' },
+          convertedAmount: { type: 'string', description: 'The book-time fiat sum — present ONLY when every member row carries a stored `convertedAmount` capture.' },
+          convertedCurrency: { type: 'string', enum: ['SEK', 'USD', 'EUR'], description: 'The currency `convertedAmount` is denominated in (the user’s preference).' },
+          approxAmount: { type: ['string', 'null'], description: 'The serve-time fiat sum at today’s rate — present INSTEAD of convertedAmount when any member lacked book-time fiat. Null when no usable price exists; never 0.' },
+          approxCurrency: { type: 'string', enum: ['SEK', 'USD', 'EUR'], description: 'The currency `approxAmount` is denominated in (the user’s preference).' },
         },
         additionalProperties: false,
       },

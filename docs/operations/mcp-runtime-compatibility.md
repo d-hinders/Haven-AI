@@ -1735,6 +1735,21 @@ last-verified: "2026-10-09"
 > on every fiat surface instead of USD totals under a SEK label. No MCP
 > tool, flag, auth step, consent hash, or version-skew contract changes;
 > nothing about the local runtime's capabilities moves.
+
+> **Re-verified unchanged (#3824, 2026-10-09 — serve-time approx amounts +
+> grouped activity):** this doc is coupled through
+> `routes/transactions.ts` (the only coverage-list file in the diff). The
+> change is additive on the JSON feed only: rows without book-time fiat
+> gain OPTIONAL `approxAmount` / `approxCurrency` (serve-time pricing via
+> `getServeTimeFiatValues`, null never 0, struck in the same per-user
+> preference currency the #3127 block documents); the CSV export path is
+> byte-identical (pinned by test), so no importer contract shifts. The new
+> dashboard activity grouping is a pure in-memory projection served beside
+> the existing preview rows. No MCP tool, schema key, `next_tool` value,
+> expected-context version, consent hash or version-skew contract changes;
+> nothing about the local runtime's capabilities moves. Scope of this note:
+> `routes/transactions.ts`'s response mapping and the new
+> transactions-module files. Nothing else in this document was re-verified.
 >
 > **Recent re-verification (#2811):** the same for the hosted server's
 > plain-HTTP x402 lifecycle handlers — `haven_quote_x402`,

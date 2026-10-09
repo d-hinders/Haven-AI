@@ -598,6 +598,21 @@ chain.
 > four files, the two SQL statements' SELECT lists, and the signup INSERT's
 > column list. Nothing else in this
 > document was re-verified.
+
+> **Re-verified unchanged (#3824, 2026-10-09 — serve-time approx amounts +
+> grouped activity):** this diff touched one file in this document's coverage
+> list, `routes/transactions.ts`, and none of its authority, custody or
+> signing surfaces. The change is additive READ-only projection: the JSON feed
+> stamps rows that lack book-time fiat with an OPTIONAL `approxAmount` /
+> `approxCurrency` pair priced at serve time (`getServeTimeFiatValues` — one
+> cached CoinGecko read per token, null never 0), after the shared enrichment
+> helper and only on the JSON route; the CSV export path is byte-identical
+> (pinned by test). No filter, scope, tenant bound, query WHERE or route
+> ordering moved; the route still writes nothing. The new dashboard activity
+> grouping (`modules/transactions/activity.ts`) is a pure in-memory projection
+> of the same user-scoped feed and touches no enforcement surface. Scope of
+> this note: `routes/transactions.ts`'s response mapping and the new
+> transactions-module files. Nothing else in this document was re-verified.
 >
 > **Re-verified unchanged (#3195, 2026-09-30, the monthly-spend SEK fallback
 > predicate):** `infra/repositories/dashboard.ts`'s `fallback_amount_sek`

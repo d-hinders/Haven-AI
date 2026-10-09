@@ -28,8 +28,9 @@ type FieldErrors = Partial<Record<'name' | 'email' | 'password' | 'confirmPasswo
  * least 12 characters" give way to the real four-field form with the
  * 8-character minimum, and the "created on Base" note is not shipped —
  * sign-up names no chain because the network is picked later, at
- * onboarding, where one account is provisioned on it. The sub-line ("One passkey prompt…") is true of the real flow:
- * onboarding is passkey-only (`app/onboarding/copy.ts`).
+ * onboarding, where one account is provisioned on it. The sub-line ("One
+ * passkey prompt…") is true of the real flow: onboarding is passkey-only
+ * (`app/onboarding/copy.ts`).
  */
 function SignupForm() {
   const { signup } = useAuth()

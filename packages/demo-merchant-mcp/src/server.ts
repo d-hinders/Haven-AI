@@ -12,6 +12,7 @@ import {
   buildProductMetadata,
   formatUsdc,
   merchantEnvironmentForChain,
+  networkDisplayName,
   productDescription,
   type MerchantLocale,
   type ProductId,
@@ -33,6 +34,8 @@ export interface MerchantConfig {
    *  option) as the HTTP 402 challenge. */
   buildPaymentRequired: X402PaymentProcessor['buildPaymentRequired']
   settlementMethods?: readonly SettlementMethod[]
+  /** Chain named in agent-facing text; defaults to the process `CHAIN_ID`. */
+  chainId?: number
 }
 
 // #1550: the confirmation text now varies by (locale, result_detail), so the
@@ -54,7 +57,7 @@ interface MerchantStrings {
   availableProductsHeading: string
   priceLabel: string
   perMonth: string
-  listFooter: (defaultMethod: SettlementMethod) => string
+  listFooter: (defaultMethod: SettlementMethod, chainId?: number) => string
   paymentRequired: (productName: string) => string
   priceLine: (amount: string) => string
   paymentAddress: string
@@ -90,10 +93,10 @@ export const STRINGS: Record<MerchantLocale, MerchantStrings> = {
     availableProductsHeading: 'Available products:',
     priceLabel: 'Price',
     perMonth: '/month',
-    listFooter: (defaultMethod) =>
+    listFooter: (defaultMethod, chainId = CHAIN_ID) =>
       `Use buy_vpn or buy_cloud_storage to purchase. ` +
       `Omit settlement_method for ${defaultMethod}; pass eip3009 or erc7710 to choose explicitly. ` +
-      `Payment happens via x402 (USDC on Base) and must be signed by the buyer's wallet or agent runtime.`,
+      `Payment happens via x402 (USDC on ${networkDisplayName(chainId, 'en')}) and must be signed by the buyer's wallet or agent runtime.`,
     paymentRequired: (productName) => `Payment required for ${productName}.`,
     priceLine: (amount) => `Price: $${amount} USDC (incl. 25% VAT)`,
     paymentAddress: 'Payment address',
@@ -120,10 +123,10 @@ export const STRINGS: Record<MerchantLocale, MerchantStrings> = {
     availableProductsHeading: 'Tillgängliga produkter:',
     priceLabel: 'Pris',
     perMonth: '/månad',
-    listFooter: (defaultMethod) =>
+    listFooter: (defaultMethod, chainId = CHAIN_ID) =>
       `Använd buy_vpn eller buy_cloud_storage för att köpa. ` +
       `Utelämna settlement_method för ${defaultMethod}; ange eip3009 eller erc7710 för att välja explicit. ` +
-      `Betalning sker via x402 (USDC på Base) och måste signeras av köparens wallet eller agentruntime.`,
+      `Betalning sker via x402 (USDC på ${networkDisplayName(chainId, 'sv')}) och måste signeras av köparens wallet eller agentruntime.`,
     paymentRequired: (productName) => `Betalning krävs för ${productName}.`,
     priceLine: (amount) => `Pris: $${amount} USDC (inkl. 25% moms)`,
     paymentAddress: 'Betalningsadress',
@@ -274,7 +277,7 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
         content: [
           {
             type: 'text',
-            text: `${t.availableProductsHeading}\n\n${text}\n\n${t.listFooter(defaultSettlementMethod)}`,
+            text: `${t.availableProductsHeading}\n\n${text}\n\n${t.listFooter(defaultSettlementMethod, config.chainId)}`,
           },
         ],
         structuredContent: {
@@ -289,7 +292,7 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
   // ── buy_vpn ────────────────────────────────────────────────────────────────
   server.tool(
     'buy_vpn',
-    'Buy a NordShield VPN subscription. Payment via x402 (USDC on Base). ' +
+    `Buy a NordShield VPN subscription. Payment via x402 (USDC on ${networkDisplayName(config.chainId, 'en')}). ` +
       `settlement_method is optional and defaults to ${defaultSettlementMethod}. Requires a valid PAYMENT-SIGNATURE or X-PAYMENT header. ` +
       'On success, report the purchase to the user from the structured `summary` object (status, product_name, amount, ' +
       'settlement_tx_hash) rather than parsing the confirmation text or invoice. ' +
@@ -315,7 +318,7 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
   // ── buy_cloud_storage ──────────────────────────────────────────────────────
   server.tool(
     'buy_cloud_storage',
-    'Buy CloudNest cloud storage. Payment via x402 (USDC on Base). ' +
+    `Buy CloudNest cloud storage. Payment via x402 (USDC on ${networkDisplayName(config.chainId, 'en')}). ` +
       `settlement_method is optional and defaults to ${defaultSettlementMethod}. Requires a valid PAYMENT-SIGNATURE or X-PAYMENT header. ` +
       'On success, report the purchase to the user from the structured `summary` object (status, product_name, amount, ' +
       'settlement_tx_hash) rather than parsing the confirmation text or invoice. ' +
@@ -390,7 +393,7 @@ function completePurchase(
   // every call is cheap and deterministic (invoiceForPayment memoizes per
   // payment), so the summary below can never disagree between a fresh
   // purchase and a retried/duplicate one.
-  const invoice = invoiceForPayment(payment, productId)
+  const invoice = invoiceForPayment(payment, productId, config.chainId)
   const summary = buildPurchaseSummary(payment, invoice)
 
   // #1550: cached per (locale, detail) — the replay guarantee is per VARIANT,
@@ -434,7 +437,7 @@ function completePurchase(
       ? `${header}\n${t.summaryTail}`
       : `${header}\n` +
         `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        renderInvoiceText(invoice.json, product.name, locale) +
+        renderInvoiceText(invoice.json, product.name, locale, config.chainId) +
         `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
         `${t.invoiceJsonHeading}\n` +
         JSON.stringify(invoice.json, null, 2)

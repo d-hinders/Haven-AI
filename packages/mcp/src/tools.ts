@@ -1168,6 +1168,32 @@ function parseMaybeJson(text: string): unknown {
   }
 }
 
+/** The demo merchant's reason code for a settlement wallet below its fail floor (#2979). */
+const MERCHANT_OUT_OF_GAS_REASON = 'settlement_wallet_out_of_gas'
+
+/**
+ * #3834: the local twin of mcp-server's `merchantOutOfGasMessage`
+ * (`support/mcp-context.ts`). Kept here, not shared — the two runtimes do not
+ * import each other — and pinned equal by a parity test.
+ */
+function merchantOutOfGasMessage(settlementsRemaining: unknown, failFloor: unknown): string {
+  const remaining = typeof settlementsRemaining === 'number' ? settlementsRemaining : null
+  const floor = typeof failFloor === 'number' ? failFloor : null
+  const figures =
+    remaining !== null && floor !== null
+      ? ` It has gas for ${remaining} more settlement${remaining === 1 ? '' : 's'} and refuses new payments below ${floor} (settlements_remaining: ${remaining}, fail_floor: ${floor}).`
+      : remaining !== null
+        ? ` settlements_remaining: ${remaining}.`
+        : ''
+  return (
+    `The merchant refused this call: its settlement wallet is out of gas (reason_code: ${MERCHANT_OUT_OF_GAS_REASON}).` +
+    figures +
+    ' No payment was created.' +
+    " The merchant's operator must top up its settlement wallet; until then every retry is refused again." +
+    ' Tell the user, and re-quote once the merchant has been topped up.'
+  )
+}
+
 /**
  * #2983: the local-flow counterpart of mcp-server's `HostedToolError` for the
  * `MERCHANT_NOT_READY` failure — carries the same wire fields
@@ -1210,7 +1236,14 @@ async function merchantNotReadyErrorFor(response: Response): Promise<MerchantNot
   if (!body || typeof body !== 'object' || (body as Record<string, unknown>).error !== 'merchant_not_ready') {
     return null
   }
-  const { reason_code, settlements_remaining, retry_after_s } = body as Record<string, unknown>
+  const { reason_code, settlements_remaining, fail_floor, retry_after_s } = body as Record<string, unknown>
+  // #3834: out of gas does not recover by waiting — the operator must top the
+  // merchant's settlement wallet up. Same sentence as the hosted runtime's
+  // `merchantOutOfGasMessage` (mcp-server, support/mcp-context.ts), pinned by
+  // a parity test; every other reason keeps the wording below.
+  if (reason_code === MERCHANT_OUT_OF_GAS_REASON) {
+    return new MerchantNotReadyError(merchantOutOfGasMessage(settlements_remaining, fail_floor))
+  }
   return new MerchantNotReadyError(
     'The merchant refused this call: it cannot settle a payment right now' +
       (typeof reason_code === 'string' ? ` (reason_code: ${reason_code})` : '') +

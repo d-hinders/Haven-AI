@@ -268,12 +268,19 @@ wallet that drains between the two is caught before anything is settled.
   {
     "error": "merchant_not_ready",
     "reason_code": "settlement_wallet_out_of_gas",
+    "recovery": "operator_top_up",
     "settlements_remaining": 0,
     "fail_floor": 12,
     "retry_after_s": 60
   }
   ```
   with a matching `Retry-After: 60` header.
+  `recovery: "operator_top_up"` (out-of-gas refusals only) says the settlement
+  wallet does not refill itself: the merchant's operator must top it up, and a
+  retry before then is refused again. `retry_after_s` / `Retry-After` are only a
+  back-off interval, not a promise of recovery. Any refusal at or below
+  `fail_floor` is by design, so `settlements_remaining` just under the floor
+  (e.g. 11 of 12) still refuses.
 - **`warn`**: unchanged — the call proceeds normally.
 - **unknown** (the `readiness()` read itself threw, e.g. an unreachable RPC):
   unchanged — same "never block on an unknown" rule as `/healthz`.

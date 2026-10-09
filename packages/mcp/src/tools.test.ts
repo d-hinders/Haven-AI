@@ -1548,6 +1548,36 @@ describe('haven_pay_mcp_tool: merchant_not_ready parity (#2983)', () => {
     expect(calls.some((c) => c.url.includes('.well-known'))).toBe(false)
   })
 
+  // #3834: out of gas recovers only when the operator tops the merchant's
+  // settlement wallet up. The literal below is the SAME one the hosted test
+  // pins (packages/mcp-server/src/tools/catalog-purchase.test.ts) — that pair
+  // is the hosted/local parity check.
+  it('out of gas: the exact operator-top-up sentence, with the floor (#3834)', async () => {
+    installFetch({
+      'POST http://merchant.test/mcp': {
+        status: 503,
+        body: {
+          error: 'merchant_not_ready',
+          reason_code: 'settlement_wallet_out_of_gas',
+          settlements_remaining: 11,
+          fail_floor: 12,
+          retry_after_s: 60,
+          recovery: 'operator_top_up',
+        },
+      },
+    })
+    const result = await notReadyHandlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'buy_vpn',
+    })
+    if (result.success) throw new Error('expected failure')
+    expect(result.code).toBe('MERCHANT_NOT_READY')
+    expect(result.retry_with_new_quote).toBe(true)
+    expect(result.message).toBe(
+      "The merchant refused this call: its settlement wallet is out of gas (reason_code: settlement_wallet_out_of_gas). It has gas for 11 more settlements and refuses new payments below 12 (settlements_remaining: 11, fail_floor: 12). No payment was created. The merchant's operator must top up its settlement wallet; until then every retry is refused again. Tell the user, and re-quote once the merchant has been topped up.",
+    )
+  })
+
   // #2987 review: the mapping also runs on the retry against a DISCOVERED
   // endpoint — a base URL that 404s, resolves through .well-known, and then
   // answers merchant_not_ready at the real /mcp. Mutation target: dropping the

@@ -3861,6 +3861,17 @@ These are hosted surface changes. The local runtime has no twins: its `haven_sub
 
 Hosted text only. The `haven_settle_mcp_tool` description and the server instructions no longer say an erc7710 merchant refusal moved nothing; they say there is nothing to sweep, check `haven_get_payment_status` after the payment window, and re-quote only if unsettled — the next step the settle refusal returns for a generic merchant refusal (a merchant that reported it is not ready gets stop-and-tell-user, and the served text is the more cautious of the two). The `haven_complete_mcp_tool` description drops its erc7710 clause for "erc7710 settles via `haven_settle_mcp_tool`". No tool, schema, refusal code or consent-hash change; a connected client sees the new text on its next `tools/list` / initialize.
 
+### Out-of-gas `MERCHANT_NOT_READY` names the operator top-up (#3834)
+
+Message text and one next-step reason only. When a merchant refuses with `reason_code: settlement_wallet_out_of_gas`:
+
+- The hosted runtime (on deploy) and the local runtime (`@haven_ai/mcp`, once released) both say the merchant's operator must top up its settlement wallet, and give `fail_floor` beside `settlements_remaining`. They no longer say "retry after approximately 60s"; the wallet does not refill itself, so retrying before a top-up is refused again.
+- The hosted `next_tool_omitted_reason` names the top-up. The paid-retry refusal on `haven_settle_mcp_tool` / `haven_complete_mcp_tool` follows the same rule.
+- Every other reason code keeps its wording. The code, `next_action: stop_and_tell_user` and `retry_with_new_quote: true` are unchanged.
+- The demo merchant's 503 body gains an additive `recovery: 'operator_top_up'`; Haven's wording is keyed on `reason_code`, not on that field.
+
+No tool, schema, refusal code or consent-hash change. A local client on an older `@haven_ai/mcp` keeps the old "retry after" text until it updates.
+
 ### Detecting skew before a payment (#1155)
 
 Every row above is a *post-quote* symptom: the agent found out by trying to pay.

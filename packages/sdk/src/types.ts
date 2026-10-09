@@ -1954,7 +1954,7 @@ export const AgentPaymentFailureCodeDescriptions: Record<AgentPaymentFailureCode
   [AgentPaymentFailureCode.MaxAmountUnconvertible]:
     "max_amount_human could not be converted to atomic units against this quote's asset — either its decimals are unknown to Haven or the cap has more decimal places than the asset supports. Nothing was spent. Round the cap, or re-send it as an exact atomic max_amount.",
   [AgentPaymentFailureCode.MerchantNotReady]:
-    'The merchant refused the probe with its own "cannot settle right now" signal instead of a 402 challenge. No payment was created. Often transient — retry later (see retry_after_s in the message, if given) rather than treating this as a broken or wrong endpoint.',
+    'The merchant refused the probe with its own "cannot settle right now" signal instead of a 402 challenge. No payment was created. Often transient — retry later (see retry_after_s in the message, if given) rather than treating this as a broken or wrong endpoint — except an out-of-gas refusal (reason_code settlement_wallet_out_of_gas), which needs the merchant\'s operator to top up its settlement wallet before any retry can succeed.',
 }
 
 /**

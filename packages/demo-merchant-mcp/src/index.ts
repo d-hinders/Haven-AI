@@ -6,6 +6,7 @@ import {
   SUPPORTED_SETTLEMENT_METHODS,
   formatUsdc,
   CHAIN_ID,
+  networkLogLabel,
   TRUSTED_DELEGATION_MANAGER,
   TRUSTED_ERC20_TRANSFER_AMOUNT_ENFORCER,
   hostedMerchantBaseUrlForChain,
@@ -149,7 +150,7 @@ server.listen(PORT, () => {
   console.log(`  Healthz:   ${BASE_URL}/healthz`)
   console.log(`  Env:       ${MERCHANT_ENVIRONMENT}`)
   console.log(`  Merchant:  ${MERCHANT_ADDRESS}`)
-  console.log(`  Network:   eip155:${CHAIN_ID}${CHAIN_ID === 84532 ? ' (Base Sepolia testnet)' : CHAIN_ID === 8453 ? ' (Base mainnet)' : ''}`)
+  console.log(`  Network:   eip155:${CHAIN_ID}${networkLogLabel(CHAIN_ID) ? ` (${networkLogLabel(CHAIN_ID)})` : ''}`)
   console.log(`  Payment:   USDC via x402 ${SETTLEMENT_METHODS.join(' + ')} (default ${DEFAULT_METHOD})`)
   console.log()
   console.log(

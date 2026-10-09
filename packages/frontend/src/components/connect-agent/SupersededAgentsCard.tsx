@@ -22,7 +22,7 @@ function OfferCallout({ children }: { children: ReactNode }) {
 }
 
 /**
- * "Other agents on this machine are still active" (#2561, reworded by #3830).
+ * "Other agents set up on this machine" (#2561, reworded by #3830).
  *
  * ## What the report is, and why this card no longer says "replaced"
  *
@@ -35,9 +35,12 @@ function OfferCallout({ children }: { children: ReactNode }) {
  * an owner to revoke working agents (#3830). The card cannot tell a `--replace`
  * run from a normal one (the retire signal, `retired_agent_ids`, is not on the
  * install report), so every sentence here has to be true for ANY reported id:
- * the connector found a folder for the agent on this machine, and Haven still
- * lists it as active. Owner decision (2026-10-09): list them, offer no revoke —
- * revoking stays on each agent's own page, behind its own confirm.
+ * the connector found a folder for the agent on this machine, and Haven has
+ * not revoked it. Not "active" — a listed agent can be paused or still
+ * awaiting approval — and not "has a budget": one may have none, or one that
+ * has expired, so the card says it MAY still hold a key and a budget. Owner
+ * decision (2026-10-09): list them, offer no revoke — revoking stays on each
+ * agent's own page, behind its own confirm.
  *
  * ## Two rules this component keeps
  *
@@ -90,7 +93,7 @@ export function SupersededAgentsCard({
         </h3>
         <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
           The connector found other agent folders here, but your agent list could not be loaded,
-          so Haven cannot show which are still active.
+          so Haven cannot show which of them it has not revoked.
         </p>
         <div className="mt-3">
           <Button
@@ -119,24 +122,31 @@ export function SupersededAgentsCard({
   return (
     <OfferCallout>
       <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
-        {one
-          ? 'Another agent on this machine is still active'
-          : `${listed.length} other agents on this machine are still active`}
+        {one ? 'Another agent is set up on this machine' : `${listed.length} other agents are set up on this machine`}
       </h3>
       {/* #3830: true for ANY reported id — a normal run, a `--replace` run,
-          a key-less or tombstoned folder. No "replaced", no "unchanged", and
-          no revoke offer (owner decision 2026-10-09). */}
+          a key-less or tombstoned folder, a paused or not-yet-approved agent.
+          No "replaced", no "unchanged", no "active", and no revoke offer
+          (owner decision 2026-10-09). */}
       <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
         {one
-          ? 'The connector found a folder for it here, and it still has its own key and budget in Haven. If you no longer use it, remove it from its agent page.'
-          : 'The connector found folders for them here, and each still has its own key and budget in Haven. If you no longer use one, remove it from its agent page.'}
+          ? 'The connector found a folder for it here, and Haven has not revoked it, so it may still have a key and a budget. If you no longer use it, remove it from its agent page.'
+          : 'The connector found folders for them here, and Haven has not revoked them, so each may still have a key and a budget. If you no longer use one, remove it from its agent page.'}
       </p>
       {/* `divide-y` draws between siblings, so it sits on the list whose
           children are the rows — on a wrapper around the list it drew none. */}
       <ul className="mt-3 divide-y divide-[var(--v2-border)] border-t border-[var(--v2-border)]">
         {listed.map((agent) => (
           <li key={agent.id} className="flex items-center justify-between gap-3 py-2.5 last:pb-0">
-            <p className="min-w-0 truncate text-sm font-medium text-[var(--v2-ink)]">{agent.name}</p>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{agent.name}</p>
+              {/* The status the title no longer claims, said per row. */}
+              {agent.status === 'paused' ? (
+                <p className="text-xs text-[var(--v2-ink-3)]">Paused</p>
+              ) : agent.status === 'pending_approval' ? (
+                <p className="text-xs text-[var(--v2-ink-3)]">Awaiting approval</p>
+              ) : null}
+            </div>
             <Link
               href={`/agents/${agent.id}`}
               // Named per agent: a list of links all reading "Open" is

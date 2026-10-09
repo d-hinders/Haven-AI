@@ -978,7 +978,7 @@ async function executeConnect(
       log('')
       log(
         `Heads-up: other agent directories on this machine — ${supersededAgentIds.join(', ')}. ` +
-          'This setup created a NEW agent and revoked none of them; any that are still active keep their own keys and budgets.',
+          'This setup created a NEW agent and revoked none of them; any not revoked in Haven keep their own keys and any budgets.',
       )
       log(
         'To retire one you no longer use: use Remove agent\u2026 on its Haven agent page (it ends its live budget), restart any ' +

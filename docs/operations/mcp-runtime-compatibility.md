@@ -3228,7 +3228,8 @@ set (#3830): under named pairs by default (#3737) most of them are agents wired
 alongside this one, so neither the heads-up nor the dashboard calls them
 replaced or previous — the heads-up says "other agent directories on this
 machine" and that this setup revoked none of them, and the dashboard lists the
-owner's active ones without a revoke offer. The ids a `--replace` run actually
+owner's not-revoked ones (active, paused or awaiting approval) without a
+revoke offer. The ids a `--replace` run actually
 retired are `retired_agent_ids`. The list is empty on a clean first run — and
 an empty list is **not** proof of a clean machine, because a scan that cannot
 read the credential root also yields an empty list rather than failing a
@@ -4503,11 +4504,14 @@ to call next in structured fields, and those fields are typed end to end
   > is no longer labelled superseded and still spend-capable. Only server names,
   > commands, args and URLs are kept — never `env` or `headers` — and the text
   > is matched, never printed. The evidence is additive: absence proves
-  > nothing (project `.mcp.json` files are not discoverable), so an unnamed
-  > directory keeps the fallback verdict and the advisory, whose label now
+  > nothing (project `.mcp.json` files are not discoverable), so a directory
+  > the file does not name keeps the fallback verdict and the advisory, whose label now
   > reads "Other agent credentials (wiring not verifiable)" instead of
-  > asserting "superseded". The inventory `classification` values and every
-  > other check are unchanged; `configText` still drives the CLI-managed skip.
+  > asserting "superseded" (nor does the human inventory row, which reads "not
+  > verified as wired"). A directory the evidence upgrades to `wired` runs the
+  > full per-agent check set like a wired agent on Codex, so its failures now
+  > reach the exit code. The inventory `classification` values are unchanged,
+  > and the runtime-config checks still take the CLI-managed skip.
 
   The hosted MCP `tools/list` check proves only that its endpoint responds; it
   does not authenticate a bearer token. Credential verdicts instead use the

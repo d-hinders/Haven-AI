@@ -144,7 +144,7 @@ report stays `version: 1`; `level` is additive.
 | Level | Meaning | Example |
 | --- | --- | --- |
 | `ok` | Nothing to say. | The installed signer matches the connector's pin. |
-| `advisory` | Worth reading; nothing is broken. Exit 0. | `signer_runtime`: the install is intact but behind the pinned version ("intact, but outdated" — both versions named, `--repair` offered); `signer_runtime_unused` (#3123): runtime directories nothing references; `mcp_server_name_rebound` (#3122): two local binding records claim one server name. `superseded_agents` on a recognised runtime with no config file the connector can read (Claude Code, `other`): a second live key is reported, and the check — labelled "Other agent credentials (wiring not verifiable)" — says why "wired" cannot be verified from this machine. On Claude Code a pair named in `~/.claude.json` counts as wired (#3830), so only unnamed directories reach this advisory. |
+| `advisory` | Worth reading; nothing is broken. Exit 0. | `signer_runtime`: the install is intact but behind the pinned version ("intact, but outdated" — both versions named, `--repair` offered); `signer_runtime_unused` (#3123): runtime directories nothing references; `mcp_server_name_rebound` (#3122): two local binding records claim one server name. `superseded_agents` on a recognised runtime with no config file the connector can read (Claude Code, `other`): a second live key is reported, and the check — labelled "Other agent credentials (wiring not verifiable)" — says why "wired" cannot be verified from this machine. On Claude Code a pair named in `~/.claude.json` counts as wired (#3830), so only directories that file does not name reach this advisory, and the inventory row reads "not verified as wired" rather than "superseded"; a directory it upgrades runs the full per-agent checks and can fail the run. |
 | `failed` | A real failure with one repair action. Exit 1. | A stale or empty runtime directory; a live key in a directory the runtime's config demonstrably does not use. |
 
 What stays blocking is live spend authority: a directory whose stored key
@@ -433,9 +433,10 @@ completed setup.
 
 **The dashboard lists them; revoking stays on each agent's page (#2561,
 #3830).** The same ids ride the install-status report, and the connect modal's
-completed state lists those that are still active agents of the owner, each
-linking to its agent page. It does not call them replaced and offers no revoke
-there (owner decision, 2026-10-09): the report cannot tell a coexisting agent
+completed state lists those that are the owner's agents and not revoked
+(active, paused or awaiting approval), each linking to its agent page. It
+does not call them replaced and offers no revoke there (owner decision,
+2026-10-09): the report cannot tell a coexisting agent
 from a retired one. The connector never revokes either: `POST
 /agents/:id/revoke` is owner-authenticated, and an agent credential retiring a
 sibling agent is the "agent editing its own authority" the re-key routes
@@ -760,7 +761,8 @@ repair spelled out: use **Remove agent…** on the Haven agent page, then remove
 the directory. An already-revoked one reports as informational; an unreachable
 probe is a note, never a verdict. Connect never revokes or deletes
 credentials itself — it reports, you decide. The setup completion output
-names superseded agents the moment they are created, for the same reason.
+names the other agent directories the moment the new agent is created, for
+the same reason.
 One honest limit: "newest" is decided by file mtime, so a restored backup or
 a sync tool that rewrites timestamps can make doctor examine the wrong
 directory as current — before revoking anything, confirm the agent id

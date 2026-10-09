@@ -92,8 +92,9 @@ export interface UpdateInstallStatusInput {
   errorCode?: string | null
   environmentLabel?: string
   /**
-   * The other agent directories this machine holds, so the DASHBOARD can offer
-   * the owner a one-click revoke of what this setup superseded (#2561).
+   * The other agent directories this machine holds, so the DASHBOARD can list
+   * them for the owner (#2561). Every other directory, not a replace set: the
+   * dashboard calls none of them replaced and offers no revoke (#3830).
    *
    * A tri-state, and the middle case is why it is not a plain array:
    *

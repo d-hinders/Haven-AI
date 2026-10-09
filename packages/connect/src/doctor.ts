@@ -496,7 +496,7 @@ export interface AgentInventoryEntry {
  * files are not discoverable from here, so this is positive evidence only:
  * it can show a directory IS wired, never that it is not.
  */
-export async function readClaudeCodeWiringEvidence(homeDir: string): Promise<string | null> {
+async function readClaudeCodeWiringEvidence(homeDir: string): Promise<string | null> {
   let parsed: unknown
   try {
     parsed = JSON.parse(await readFile(join(homeDir, '.claude.json'), 'utf8'))
@@ -1136,8 +1136,10 @@ export async function runDoctor(
     }
   }
   // #3830: wiring evidence for the runtime that owns no config file the
-  // connector writes. Used ONLY to upgrade a directory to `wired` — every
-  // other check keeps reading `configText`, and stays on the CLI-managed skip.
+  // connector writes. It feeds only the `wired` decision — the runtime-config
+  // checks keep reading `configText` and stay on the CLI-managed skip. A
+  // directory it upgrades is then a wired agent like any on Codex: it runs the
+  // full per-agent check set, and a failure there now fails the run.
   const claudeCodeWiring =
     configText === null && normalizedRuntime === 'claude-code' ? await readClaudeCodeWiringEvidence(homeDir) : null
 

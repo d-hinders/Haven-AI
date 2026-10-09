@@ -213,7 +213,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           // button is the only spot that is both: the success stays the
           // heading, and the note is still read. It lists, and offers no
           // action on, the other agents the connector found (#3830), and
-          // renders nothing unless those are active agents this owner has.
+          // renders nothing unless those are not-revoked agents this owner has.
           beforeDone={
             <SupersededAgentsCard
               supersededAgentIds={setupStatus?.install_status?.superseded_agent_ids}

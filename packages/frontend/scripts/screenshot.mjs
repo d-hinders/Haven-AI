@@ -5215,7 +5215,8 @@ export const SCENARIOS = {
   },
 
   /**
-   * The superseded-agent revoke offer (#2561), which had no rendered evidence
+   * The other-agents list in the completed setup (#2561; a revoke offer until
+   * #3830 made it a list with links), which had no rendered evidence
    * at all until two design-review passes each rebuilt a throwaway scenario to
    * see it. Committed so the third does not have to, and so the state is
    * captured the same way twice rather than off spec each time.
@@ -5225,19 +5226,19 @@ export const SCENARIOS = {
    * agents this owner has, so `null` (the scan could not run), `[]` and a
    * report naming agents the owner does not hold all produce the same correct
    * silence — and a capture of silence proves little. What is worth pinning is
-   * the offer itself, the long list, and the one branch where the card speaks
-   * without offering: the agent list failed to load, so it says so rather than
-   * implying there was nothing to replace.
+   * the list itself, the long list, and the one branch where the card speaks
+   * without listing: the agent list failed to load, so it says so rather than
+   * implying there were no other agents.
    */
   ...Object.fromEntries(
     [
-      ['one', ['agent-research'], 'a single superseded agent'],
+      ['one', ['agent-research'], 'a single other agent'],
       // Both fixture agents, and they are the only two — an id this fixture
       // does not have would have rendered ONE agent under a name promising
       // several, which is a scenario measuring something other than its title.
       // `agent-retired` is `paused`, not `revoked`, so it is still listed:
       // the card drops revoked agents, not paused ones.
-      ['many', ['agent-research', 'agent-retired'], 'several, each with a link to its page'],
+      ['many', ['agent-research', 'agent-retired'], 'several, a paused one showing its status'],
       ['failed', ['agent-research'], 'the agent list could not be read'],
     ].map(([name, supersededIds, why]) => [
       `connect-agent-superseded-${name}`,
@@ -5318,7 +5319,7 @@ export const SCENARIOS = {
             .getByText(
               name === 'failed'
                 ? /Other agents may be set up on this machine/
-                : /other agents? on this machine (is|are) still active/i,
+                : /other agents? (is|are) set up on this machine/i,
             )
             .waitFor({ timeout: 30_000 })
           await shoot(dialog, name)

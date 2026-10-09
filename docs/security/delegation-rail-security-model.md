@@ -2479,6 +2479,12 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 >
 > The rest of this document was not re-read for it, and `last-verified` is not bumped.
 
+> **#3830 (2026-10-09).** The connect modal's other-agents card no longer
+> revokes: it lists the owner's not-revoked agents from the connector's report
+> with a link to each agent page (owner decision), so the "replaced-agents
+> card" path in the #3542 note below is gone. The Remove dialog and Finish
+> revoking flows it describes are unchanged. Nothing else here was re-read.
+
 > **#3542 (2026-10-01).** Re-verified unchanged except the archive guard
 > above. The archive guard and the account-delete guard
 > (`HAS_LIVE_DELEGATIONS_FOR_ACCOUNT_SQL`) now count `replaced` rows as live,

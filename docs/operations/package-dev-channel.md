@@ -143,10 +143,13 @@ and the `release` skill.
 > says this setup revoked none of them (no longer "previous agent(s)" or "If
 > you meant to replace them"); on Claude Code `--doctor` reads `~/.claude.json`
 > server entries as additive wiring evidence, and the `superseded_agents`
-> advisory's label reads "Other agent credentials (wiring not verifiable)". The
-> check id, its levels and exit code, the inventory classifications and every
-> `--json` field are unchanged, and no channel, dist-tag, version-order or
-> publish behaviour this document describes moves. The rest of this document
+> advisory's label (and the human inventory row) no longer assert
+> "superseded". A directory the evidence upgrades to `wired` now runs the full
+> per-agent checks, so on Claude Code a broken second agent can fail
+> `--doctor` where it used to be an advisory — the behaviour Codex already
+> had. The check id, the inventory classifications and every `--json` field
+> are unchanged, and no channel, dist-tag, version-order or publish behaviour
+> this document describes moves. The rest of this document
 > was not re-read for it, and `last-verified` is not bumped.
 
 > **Re-verified unchanged (#3756, 2026-10-07, superseded-agent wording):**

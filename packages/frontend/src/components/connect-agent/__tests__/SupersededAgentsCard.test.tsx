@@ -68,7 +68,7 @@ describe('SupersededAgentsCard', () => {
       const { container } = render(<SupersededAgentsCard supersededAgentIds={['agt_old']} />)
 
       expect(
-        screen.getByRole('heading', { name: 'Another agent on this machine is still active' }),
+        screen.getByRole('heading', { name: 'Another agent is set up on this machine' }),
       ).toBeInTheDocument()
       expect(screen.getByText('Research agent')).toBeInTheDocument()
       expect(screen.getByRole('link', { name: 'Open Research agent' })).toHaveAttribute(
@@ -78,7 +78,7 @@ describe('SupersededAgentsCard', () => {
       // Owner decision 2026-10-09: list them, no revoke offer.
       expect(screen.queryByRole('button', { name: /revoke/i })).not.toBeInTheDocument()
       // True for ANY reported id, so none of these may appear.
-      expect(container.textContent ?? '').not.toMatch(/replaced|previous|earlier agent|unchanged|did not change/i)
+      expect(container.textContent ?? '').not.toMatch(/replaced|previous|earlier agent|unchanged|did not change|still active/i)
     })
 
     it('the plural title says the same, without "replaced"', () => {
@@ -87,12 +87,31 @@ describe('SupersededAgentsCard', () => {
       )
 
       expect(
-        screen.getByRole('heading', { name: '2 other agents on this machine are still active' }),
+        screen.getByRole('heading', { name: '2 other agents are set up on this machine' }),
       ).toBeInTheDocument()
       expect(screen.getByRole('link', { name: 'Open Research agent' })).toBeInTheDocument()
       expect(screen.getByRole('link', { name: 'Open Ops agent' })).toBeInTheDocument()
       expect(screen.queryAllByRole('button')).toHaveLength(0)
       expect(container.textContent ?? '').not.toMatch(/replaced|previous|earlier agent/i)
+    })
+
+    it('a paused or not-yet-approved agent is listed with its status, and nothing claims it is active or funded', () => {
+      // A setup abandoned before approval leaves a folder whose agent is
+      // `pending_approval` with no budget; a paused agent is not active.
+      mockAgents.current = [
+        { id: 'agt_paused', name: 'Paused agent', status: 'paused' },
+        { id: 'agt_pending', name: 'Pending agent', status: 'pending_approval' },
+      ]
+      const { container } = render(
+        <SupersededAgentsCard supersededAgentIds={['agt_paused', 'agt_pending']} />,
+      )
+      expect(screen.getByText('Paused')).toBeInTheDocument()
+      expect(screen.getByText('Awaiting approval')).toBeInTheDocument()
+      const text = container.textContent ?? ''
+      expect(text).not.toMatch(/still active|is active|are active/i)
+      // "may still have", never "has": a pending agent has no budget at all.
+      expect(text).toMatch(/may still have a key and a budget/)
+      expect(text).not.toMatch(/still has its own key and budget/)
     })
 
     it('revokes nothing, on render or on following a link', async () => {

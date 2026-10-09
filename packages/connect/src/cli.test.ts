@@ -477,6 +477,39 @@ describe('--doctor per-agent output (#1697)', () => {
       spy.mockRestore()
     }
   })
+
+  it('#3830: an unverifiable superseded row says so instead of asserting "superseded"; a verified one keeps the word', async () => {
+    const doctor = await import('./doctor.js')
+    const base = {
+      version: 1 as const,
+      runtime: 'claude-code',
+      credentialDirectory: '/home/u/.haven/agents/agent-1',
+      agents: [
+        { agentId: 'agent-1', directory: '/home/u/.haven/agents/agent-1', classification: 'wired' as const, checks: [] },
+        { slug: 'ops', agentId: 'agent-ops', directory: '/home/u/.haven/agents/ops', classification: 'superseded' as const, checks: [] },
+      ],
+    }
+    const render = async (level: 'advisory' | 'failed') => {
+      const stdout: string[] = []
+      const spy = vi.spyOn(doctor, 'runDoctor').mockResolvedValue({
+        ...base,
+        ok: level !== 'failed',
+        level,
+        checks: [{ id: 'superseded_agents', label: 'x', ok: level !== 'failed', level, detail: 'd' }],
+      } as never)
+      try {
+        await runCli(['--doctor', '--runtime', 'claude-code'], { stdout: (m) => stdout.push(m), stderr: () => undefined })
+      } finally {
+        spy.mockRestore()
+      }
+      return stdout.join('')
+    }
+    const advisory = await render('advisory')
+    expect(advisory).toContain('ops (agent-ops): not verified as wired')
+    expect(advisory).not.toContain('ops (agent-ops): superseded')
+    // With a readable config the classification is evidence, and it stays.
+    expect(await render('failed')).toContain('ops (agent-ops): superseded')
+  })
 })
 
 describe('the --json outcome carries the recovery fields (#2173)', () => {

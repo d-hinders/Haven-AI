@@ -914,6 +914,22 @@ describe('per-agent inventory (#1697)', () => {
       expect(check?.label).toBe('Other agent credentials (wiring not verifiable)')
     })
 
+    it('name boundaries hold: "haven-ops-2" and a path containing haven-ops do not wire ops', async () => {
+      const { homeDir } = await homeWithTwoWiredAgents()
+      // agent-1 is selected explicitly, so ops is not the primary and can only
+      // read `wired` from evidence. Look-alikes must not supply it; an exact
+      // 'haven-ops' entry in the same place does (that control turns this red).
+      await writeClaudeJson(homeDir, {
+        'haven-ops-2': { type: 'http', url: HOSTED },
+        other: { command: '/opt/haven-ops/bin/run', args: ['haven-ops.cfg'] },
+      })
+      const report = await runDoctor(
+        { runtime: 'claude-code', credentialsDir: join(homeDir, '.haven', 'agents', 'agent-1') },
+        { homeDir, ...depsForTwo() },
+      )
+      expect(report.agents.find((a) => a.agentId === 'agent-ops')?.classification).toBe('superseded')
+    })
+
     it('an unparseable ~/.claude.json changes nothing', async () => {
       const { homeDir } = await homeWithTwoWiredAgents()
       await writeFile(join(homeDir, '.claude.json'), '{ not json')

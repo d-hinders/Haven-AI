@@ -126,8 +126,9 @@ the `x402-erc7710-settle` QA leg's assertions, executed by hand on 8453.
 1. **Provision.** There is no launch switch left to flip. Under #908 this
    step was `NEXT_PUBLIC_DELEGATION_ONBOARDING=1` on the **prod** Vercel
    scope, ANDed with a frontend chain set; #1984 retires the Safe rail, so
-   onboarding provisions a Hybrid delegation-rail account unconditionally on
-   every supported chain and both the flag and the set are gone. Where the
+   onboarding provisions a Hybrid delegation-rail account unconditionally, on
+   the one network the user picks at signup, and both the flag and the set
+   are gone. Where the
    rail actually serves is the backend's `DELEGATION_RAIL_CHAIN_IDS`
    (`rails/delegation-contracts.ts`). **Provision** a fresh account on
    **Base mainnet** through the production app (passkey onboarding — this

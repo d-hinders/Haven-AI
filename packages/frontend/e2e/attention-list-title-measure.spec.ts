@@ -31,6 +31,8 @@ interface TitleMetrics {
   lineClamp: string
   scrollWidth: number
   clientWidth: number
+  scrollHeight: number
+  clientHeight: number
   height: number
   lineHeight: number
 }
@@ -48,6 +50,8 @@ async function lengthenFirstTitle(page: import('@playwright/test').Page): Promis
       lineClamp: cs.getPropertyValue('-webkit-line-clamp'),
       scrollWidth: el.scrollWidth,
       clientWidth: el.clientWidth,
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
       height: el.getBoundingClientRect().height,
       lineHeight: parseFloat(cs.lineHeight),
     }
@@ -77,6 +81,8 @@ test.describe('AttentionList title overflow (#3861)', () => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto('/design-system')
     const m = await lengthenFirstTitle(page)
+    // The title really runs past two lines — otherwise the clamp is untested.
+    expect(m.scrollHeight).toBeGreaterThan(m.clientHeight)
     expect(m.whiteSpace).toBe('normal')
     expect(m.lineClamp).toBe('2')
     expect(m.overflowX).toBe('hidden')

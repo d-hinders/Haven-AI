@@ -2835,25 +2835,6 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
-        title="NoticeRow"
-        description="One tinted notice line inside a card or modal (#3845): a sentence and, optionally, the one action that resolves it — a retry, or the owner-wallet connect. The tint is a callout, one of the reserved uses of --v2-surface, not a grouping wrapper. Below sm the action sits on its own line under the text; from sm up they share one line, the action at the end. The caller sets the outer margin. Not AttentionList: that is a dismissable list of things that need your eye; a NoticeRow is a single line that stays until its cause is gone."
-      >
-        <div data-testid="ds-notice-row">
-          <Card hover={false} className="p-5">
-            <NoticeRow
-              className="mb-4"
-              action={<Button size="sm" variant="ghost">Try again</Button>}
-            >
-              Haven could not load how this account is approved.
-            </NoticeRow>
-            <NoticeRow action={<Button size="sm" variant="ghost">Connect wallet</Button>}>
-              Connect your account owner wallet to change or stop a budget.
-            </NoticeRow>
-          </Card>
-        </div>
-      </Section>
-
-      <Section
         title="AreaChart — sparkline"
         description="The sparkline variant of AreaChart (#3805): the balance line alone, in a box the caller sizes (height, default 40px). No gridlines, ticks, x labels, delta annotation, tooltip or caret — one dot on the last point. It is role=img with the required ariaLabel summary sentence and is not a tab stop: there is no hidden data table, the sentence is the data access. Days with no snapshot are gaps in the line, never zeros. Below three points it renders a flat placeholder line of the same height instead of nothing, so the layout does not jump, and there is no draw animation on data refresh."
       >
@@ -2904,6 +2885,25 @@ export default function DesignSystemPage() {
           <StatTile variant="inline" label="Spent today" value="13 000,50 kr" />
           <StatTile variant="inline" label="Refused" value="3" />
           <StatTile variant="inline" label="Fees paid to Haven" value="No fees yet" />
+        </div>
+      </Section>
+
+      <Section
+        title="NoticeRow"
+        description="One tinted notice line inside a card or modal (#3845): a sentence and, optionally, the one action that resolves it — a retry, or the owner-wallet connect. The tint is a callout, one of the reserved uses of --v2-surface, not a grouping wrapper. Below sm the action sits on its own line under the text; from sm up they share one line, the action at the end. The caller sets the outer margin. Not AttentionList: that is a dismissable list of things that need your eye; a NoticeRow is a single line that stays until its cause is gone."
+      >
+        <div data-testid="ds-notice-row">
+          <Card hover={false} className="p-5">
+            <NoticeRow
+              className="mb-4"
+              action={<Button size="sm" variant="ghost">Try again</Button>}
+            >
+              Haven could not load how this account is approved.
+            </NoticeRow>
+            <NoticeRow action={<Button size="sm" variant="ghost">Connect wallet</Button>}>
+              Connect your account owner wallet to change or stop a budget.
+            </NoticeRow>
+          </Card>
         </div>
       </Section>
 

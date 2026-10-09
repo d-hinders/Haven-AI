@@ -13,18 +13,12 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
+import type { ApiOperations } from '@haven_ai/core'
 import { api } from '@/lib/api'
 
-export interface UserSignerAccount {
-  account_id: string
-  account_address: string
-  account_name: string | null
-  chain_id: number
-}
-
-export type UserSigner =
-  | { kind: 'passkey'; key_id: string; created_at: string | null; accounts: UserSignerAccount[] }
-  | { kind: 'wallet'; address: string; accounts: UserSignerAccount[] }
+type UserSignersResponse = ApiOperations['listUserSigners']['responses']['200']['content']['application/json']
+export type UserSigner = UserSignersResponse['signers'][number]
+export type UserSignerAccount = UserSigner['accounts'][number]
 
 export function useUserSigners(): {
   signers: UserSigner[] | null
@@ -36,7 +30,7 @@ export function useUserSigners(): {
 
   const reload = useCallback(async () => {
     try {
-      const res = await api.get<{ signers?: UserSigner[] }>('/user/signers')
+      const res = await api.get<Partial<UserSignersResponse>>('/user/signers')
       setSigners(res.signers ?? [])
       setLoadError(false)
     } catch {

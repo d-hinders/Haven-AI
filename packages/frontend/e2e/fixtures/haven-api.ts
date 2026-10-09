@@ -142,6 +142,12 @@ export const dashboardTransaction = {
   to: testRecipientAddress,
   value: '12500000',
   valueFormatted: '12.50',
+  // #3824: the serve-time amount for a row without book-time fiat — today's
+  // rate (~10.76 SEK/USD, the same story `totals.sek` tells) in the served
+  // default currency. `convertedAmount` stays absent on this row: the two
+  // provenances never ride together.
+  approxAmount: '134.5000',
+  approxCurrency: 'SEK' as const,
   asset: 'USDC',
   decimals: 6,
   direction: 'out' as const,
@@ -192,6 +198,9 @@ export const x402UnrecordedSettlementTransaction = {
   to: testRecipientAddress,
   value: '1000000',
   valueFormatted: '1.00',
+  // #3824: serve-time amount, same rule and rate story as `dashboardTransaction`.
+  approxAmount: '10.7600',
+  approxCurrency: 'SEK' as const,
   asset: 'USDC',
   decimals: 6,
   direction: 'out' as const,
@@ -495,6 +504,31 @@ export const dashboardOverview = {
     },
   ],
   transactions: [dashboardTransaction],
+  // #3824: the grouped-activity rows the redesigned dashboard renders. One
+  // group: the fixture's one confirmed x402 payment, keyed agent + token +
+  // merchant + local day + outcome. approx (serve-time) rather than
+  // converted (book-time) — the row has no book-time fiat. `latestAt` is the
+  // row's timestamp (1_779_000_000) as ISO 8601.
+  activity: [
+    {
+      count: 1,
+      sumAtomic: '12500000',
+      tokenSymbol: 'USDC',
+      decimals: 6,
+      latestAt: new Date(1_779_000_000 * 1000).toISOString(),
+      agentId: testAgent.id,
+      agentName: testAgent.name,
+      source: 'x402',
+      x402ResourceUrl: 'https://research.example/report',
+      to: testRecipientAddress,
+      merchantName: null,
+      activityType: null,
+      direction: 'out' as const,
+      status: 'confirmed' as const,
+      approxAmount: '134.5000',
+      approxCurrency: 'SEK' as const,
+    },
+  ],
 }
 
 /**
@@ -1451,6 +1485,11 @@ export async function serveAgentDetailResponses(
             token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
             amount_raw: '25000000',
             amount: '25.00',
+            // #3824: the serve-time amount at today's rate in the user's
+            // preference — 25 USDC ≈ 269.00 SEK at the fixture's ~10.76
+            // SEK/USD story.
+            approx_amount: '269.0000',
+            approx_currency: 'SEK',
             to: testRecipientAddress,
             reason: null,
             status: 'confirmed',

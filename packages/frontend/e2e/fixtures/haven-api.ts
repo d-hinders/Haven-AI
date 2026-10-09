@@ -1147,6 +1147,32 @@ export async function mockHavenApi(page: Page) {
       return
     }
 
+    // #3825: Settings → Signers lists the user's signers once each. Same
+    // account and same single passkey as `/accounts/hybrid/:address/signers`
+    // and the agent-scoped twin above, so every read of "who can approve" tells
+    // one story; no browser wallet, because the fixture account has no EOA
+    // owner. Without this answer `/settings` hits the 599 unmocked-route gate.
+    if (method === 'GET' && path === '/user/signers') {
+      await fulfillJson(route, {
+        signers: [
+          {
+            kind: 'passkey',
+            key_id: `0x${'11'.repeat(32)}`,
+            created_at: '2026-05-01T10:00:00.000Z',
+            accounts: [
+              {
+                account_id: testSafe.id,
+                account_address: testSafeAddress,
+                account_name: testSafe.name,
+                chain_id: testSafe.chain_id,
+              },
+            ],
+          },
+        ],
+      })
+      return
+    }
+
     if (method === 'GET' && path === '/user/owners') {
       await fulfillJson(route, {
         owners: [],
@@ -1270,10 +1296,11 @@ export async function serveAccountingFeedStatus(page: Page, status: unknown) {
  * hydrates from and the agent-scoped twin (#888) — for the reason the shared
  * handlers give: same account, same answer. Register AFTER `mockHavenApi`
  * (later-registered routes win); everything else falls back to the shared
- * fixture. Two specs use it: `wallet-button-collapsed-states.visual.spec.ts`
- * (the collapsed connected-EOA captures) and `wallet-signer-offering.spec.ts`
- * (the owner-match / "Wrong wallet" pills, #2073) — one encoding of the shape,
- * so the two cannot drift the way #2264 found two fixtures drifting.
+ * fixture. `wallet-signer-offering.spec.ts` uses it for the owner-match /
+ * "Switch wallet" states on the account page (#2073, #3825). The collapsed
+ * WalletButton pixel spec that once shared it was removed with the top-bar
+ * pill (#3825); the single encoding stays so any future consumer cannot drift
+ * the way #2264 found two fixtures drifting.
  */
 export async function serveOwnerOnlyHybridSigners(page: Page, ownerAddress: string) {
   await page.route('**/api/**', async (route) => {

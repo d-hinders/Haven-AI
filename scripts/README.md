@@ -497,6 +497,24 @@ published packages carry a `repository` block for this reason.
 > outcome (published / skipped / failed), and the job fails at the end naming
 > the failures.
 
+**A package whose internal dependency did not publish is not published either**
+([#3797](https://github.com/d-hinders/Haven-AI/issues/3797)). Every published
+package pins its `@haven_ai/*` dependencies exactly, and the publish loop's
+fixed order already puts every dependency before its dependents (`sdk` →
+`signer`, `mcp`; `connect` → `sdk`, `signer`, `mcp`). So the workflow decides
+dependency presence from the run's OWN outcomes — published here, or "already
+on npm" at its own check — never a fresh registry read: registry metadata
+serves stale cache and lags a publish by minutes
+([#2660](https://github.com/d-hinders/Haven-AI/issues/2660)). A package whose
+dependency is missing is not published, is never nominated for `latest`, and
+its results row reads `**FAILED** — not published: dependency
+<dep>@<version> did not publish in this run`; the word *skipped* still means
+only "already on npm". The remedy for the whole run stays **re-run the failed
+job**: the re-run skips the versions already on npm and publishes the rest,
+dependency-failed packages included. `release-bump.test.mjs` runs the real
+loop shell against a stubbed `npm` to pin all of this, including the loop
+order itself.
+
 #### Manual fallback
 
 Only if the workflow is unavailable mid-incident and a release is urgent,
@@ -508,6 +526,15 @@ OIDC flow), so prefer re-running the workflow whenever possible.
 It mirrors `publish.yml`'s build-and-publish step deliberately: the same five
 packages, the same dist-wipe, and the same build **order** — connect's tsup
 inlines `MCP_VERSION`, so building it before a fresh `mcp` bundles a stale one.
+
+The publish **order** carries the same rule the workflow's
+dependency-presence gate enforces (#3797): a package whose exact-pinned
+internal dependency did not go out **must not be published**. Publish
+`sdk` first, then `signer`/`mcp`, then `connect`, `cli` last, and confirm each
+dependency reached the registry before publishing its dependents — by polling
+(`npm view <dep>@<version> version --prefer-online`, repeated over minutes,
+never one cached read — #2660). Publishing a dependant onto a missing
+dependency is exactly the broken-`npx` window the gate exists to prevent.
 
 Three things the workflow does that this path cannot, and one you must decide:
 you get no per-package summary table, no provenance, **no `latest` promotion**

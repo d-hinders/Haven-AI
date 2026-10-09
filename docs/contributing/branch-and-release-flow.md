@@ -12,7 +12,7 @@ covers:
   - scripts/release-version-constants.mjs
   - scripts/ci/qa-freshness.mjs
   - .github/workflows/publish.yml
-last-verified: "2026-09-26"
+last-verified: "2026-10-09"
 ---
 
 # Branch & release flow
@@ -183,6 +183,15 @@ the epic when its last sub-issue lands on `dev`.
 > (the dev → main promotion) won't re-close anything; the issues are already
 > closed from the dev-merge.
 
+> **Re-verification (#3797, 2026-10-09):** coupled through
+> `.github/workflows/publish.yml`, which gains a dependency-presence gate: a
+> package whose exact-pinned internal `@haven_ai/*` dependency did not publish
+> in the same run is held back and marked FAILED, never nominated for
+> `latest`. The two `publish.yml` descriptions in this document were updated
+> in the same pass; branch flow, the promotion window, dev-gate/qa-freshness
+> requirements and every credential path are untouched. Verified by
+> `release-bump.test.mjs` (102/102), which runs the real loop shell.
+
 > **Re-verification (#3305):** coupled because `scripts/release-bump.mjs` is in
 > its `covers:`. The bump gains one owned file, the client release data in
 > `@haven_ai/core`, which it regenerates from the
@@ -275,6 +284,13 @@ the epic when its last sub-issue lands on `dev`.
      package is attempted and the run summary reports each outcome, so read
      the per-package table — green-except-one is a real outcome (a separate
      concern — see [`../../scripts/README.md`](../../scripts/README.md)).
+     A package whose exact-pinned internal `@haven_ai/*` dependency did not
+     publish in the same run is **not** published (#3797): its row reads
+     `**FAILED** — not published: dependency <dep>@<ver> did not publish in
+     this run`, it is never nominated for `latest`, and the job still exits
+     non-zero — re-running the failed job heals it (the re-run skips versions
+     already on npm). Presence is decided from the run's own outcomes, never
+     a fresh registry read (#2660).
      Moving `latest` onto what was just published is a **separate job**,
      `promote-tags`, not a step of the publish ([#2647](https://github.com/d-hinders/Haven-AI/issues/2647)).
      It has to be: publishing authenticates by npm Trusted Publishing (OIDC),
@@ -443,7 +459,7 @@ the next promotion may conflict with it.
 | `dev-gate.yml` | PR into `main` | `gate`: blocks anything but `dev`/`hotfix/*`. `qa-freshness`: blocks unless a green money-flow QA run covers the promoted money-path code; a money-path `hotfix/*` blocks outright ([#1030](https://github.com/d-hinders/Haven-AI/issues/1030)). Bypass: `qa-override`. |
 | `release.yml` | push to `main` | cuts the `prod-*` Release |
 | `promotion-digest.yml` | push to `dev` + push to `main` + daily + manual | upserts the pending-promotion issue; since [#2767](https://github.com/d-hinders/Haven-AI/issues/2767) the body also carries two trailing-7-day figures with their reproducing commands — issues filed per issue closed and product PRs as a share of `dev` merges (`scripts/ci/promotion-digest-metrics.mjs`). The filing bar they were the trend line for was reverted by #3248 under #2781's re-measure; the figures stay as kept machinery |
-| `publish.yml` | push to `main` | **prod channel**: publishes packages whose version isn't yet on npm, under the tag its version implies (`alpha`/`latest`), then hands them to the `promote-tags` job, which moves `latest` onto each one (#2536, split out by [#2647](https://github.com/d-hinders/Haven-AI/issues/2647)) so a bare `npm install`/`npx` gets the newest release. Two jobs, two outcomes: publish can succeed while the tag move fails |
+| `publish.yml` | push to `main` | **prod channel**: publishes packages whose version isn't yet on npm, under the tag its version implies (`alpha`/`latest`), then hands them to the `promote-tags` job, which moves `latest` onto each one (#2536, split out by [#2647](https://github.com/d-hinders/Haven-AI/issues/2647)) so a bare `npm install`/`npx` gets the newest release. A package whose internal `@haven_ai/*` dependency did not publish in the same run is held back and marked FAILED, never nominated (#3797). Two jobs, two outcomes: publish can succeed while the tag move fails |
 | `publish.yml` | push to `dev` | **dev channel** ([#2421](https://github.com/d-hinders/Haven-AI/issues/2421)): publishes a `0.0.0-dev.<ts>.<sha>` snapshot of all five packages under the `dev` tag. Same file, by necessity — npm trusted publishing is pinned to the workflow filename. Runbook: [`../operations/package-dev-channel.md`](../operations/package-dev-channel.md) |
 
 ## One-time setup

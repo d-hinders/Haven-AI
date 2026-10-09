@@ -28,8 +28,6 @@ import { agentStatusPresentation } from '@/lib/payment-status'
 import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
 import { displayName } from '@/lib/user'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
-import { RecoveryNudge } from '@/components/onboarding/RecoveryNudge'
-import { getStoredHybridSigners } from '@/lib/signer'
 import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
 import ConnectAgentModal from '@/components/ConnectAgentModal'
 import DashboardActionPickerModal from '@/components/DashboardActionPickerModal'
@@ -48,6 +46,9 @@ import { TransactionActivityRow } from '@/components/haven'
 import type { DashboardAgentPreview } from '@/types/dashboard'
 import type { AggregatedTransaction } from '@/types/transactions'
 import { resolveDefaultAccount } from '@/lib/default-account'
+import { computeAttentionItems, type AttentionRuleItem } from '@/lib/dashboard-attention'
+import { useBudgetRemaining } from '@/hooks/useBudgetRemaining'
+import NeedsYou from './NeedsYou'
 
 // #3127 (finding 6): the per-currency formatting itself lives in ONE place —
 // `lib/format.ts`'s `formatFiat`, shared with /accounts and /accounts/[id].
@@ -506,56 +507,6 @@ function EmptyTransactionsIcon() {
   )
 }
 
-/**
- * The "Needs attention" panel.
- *
- * #1989 (epic #1440) removed its SECOND row — "N agent payments need your
- * action" with an "Open approvals" button. That row belonged entirely to the
- * legacy Safe rail: `POST /approvals/:id/approve` answers 410 (#1986), the
- * queue UI is deleted, and `/approvals` no longer routes, so the row could only
- * ever count items the user has no way to act on and send them to a dead link.
- * The delegation rail enforces budgets on-chain and produces no approvals.
- *
- * The overview-error row is untouched — it is rail-independent.
- */
-function AttentionSection({
-  hasOverviewError,
-  onRetry,
-}: {
-  hasOverviewError: boolean
-  onRetry: () => void
-}) {
-  if (!hasOverviewError) return null
-
-  return (
-    // Anchor elevation — the "Needs attention" panel is the second-most
-    // important surface on the dashboard after the balance hero. The cooler
-    // off-white surface and brand-tinted hairline give it presence without
-    // competing with the hero. Slide-in on mount so the arrival feels
-    // intentional rather than abrupt (it's an interruption element).
-    <Card as="article" elevation="anchor" className="overflow-hidden v2-animate-slide-in">
-      <div className="border-b border-[var(--v2-border)] px-5 py-4">
-        <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Needs attention</h2>
-      </div>
-      <div className="divide-y divide-[var(--v2-border)]">
-        {hasOverviewError ? (
-          <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-medium text-[var(--v2-danger)]">Dashboard data could not load</p>
-              <p className="mt-1 text-sm text-[var(--v2-ink-2)]">
-                Haven could not refresh balances, agents, and activity.
-              </p>
-            </div>
-            <Button variant="ghost" size="sm" onClick={onRetry}>
-              Try again
-            </Button>
-          </div>
-        ) : null}
-      </div>
-    </Card>
-  )
-}
-
 function TransactionsSection({
   transactions,
   hasAccounts,
@@ -728,40 +679,14 @@ export default function DashboardClient() {
   // #2413: the account list is delegation-only, so "the first delegation
   // account" is just the first account.
   const delegationAccount = accounts[0]
-  const recoverySigners = getStoredHybridSigners({
-    accountAddress: delegationAccount?.account_address as Address | undefined,
-    chainId: delegationAccount?.chain_id,
-  })
-  // #1205: the server now answers this question — computed by
-  // needsBackupSignerRecommendation next to the chain classification, so a
-  // testnet account is never nagged and the frontend holds no second copy of
-  // "which chains carry value". The device-local read remains ONLY as the
-  // fallback for an older backend that has not sent the field yet.
-  // Unknown signer set → stay silent. Nagging on a failed read is worse than
-  // a late recommendation, and the next load will know.
-  const serverRecommendation = delegationAccount?.needs_backup_recommendation
-  const missingBackup =
-    serverRecommendation !== undefined && serverRecommendation !== null
-      ? serverRecommendation
-      : recoverySigners
-        ? recoverySigners.passkeys.length + (recoverySigners.owner_address ? 1 : 0) < 2
-        : false
 
-  // #1229's legacy passkey-Safe arm of this nudge is REMOVED (#1989, epic
-  // #1440). It read the Safe's on-chain owner count through
-  // `GET /user/safes/:id/approvers` and, when it found one owner, pointed the
-  // user at Approvers in settings. #1988 deleted all five approver routes and
-  // `ManageApprovers` goes with them here, so the arm had neither a signal to
-  // read nor a destination to send anyone to — a nudge to do something the
-  // product no longer offers is worse than no nudge.
-  //
-  // The exposure it described is REAL and does not go away: a legacy passkey
-  // Safe is single-owner, threshold 1. What changed is that Haven no longer
-  // offers the fix. #1988's boundary section carries the owner-approved
-  // argument for that (the Base-mainnet census found no passkey-owned Safe;
-  // an EOA owner manages owners with their own key at Safe's own interfaces)
-  // and states its own residual limit.
-  //
+  // #3808: the "Needs you" rules read the overview's per-account
+  // `needs_backup_recommendation` (#1205) — the server's answer, computed next
+  // to the chain classification, so no second copy of "which chains carry
+  // value" lives here. The #1153/#1162 RecoveryNudge component is gone; its
+  // dismissal key survives as the backup items' dismissal until #3813 owns
+  // per-item persistence.
+
   // The DELEGATION-rail nudge above is untouched — `Backup & recovery` is live
   // and this is still the rail where new accounts land.
   const hasAgents = dataReady && agents.length > 0
@@ -947,7 +872,6 @@ export default function DashboardClient() {
       ? (overview?.metrics.monthlyAgentSpendSek ?? 0)
       : (overview?.metrics.monthlyAgentSpendUsd ?? 0)
   const overviewUnavailable = Boolean(overviewError && !overview)
-  const hasAttention = Boolean(overviewError)
   // Render the guide whenever the user has at least one account and either:
   // (a) they have unfinished steps and haven't dismissed the checklist, OR
   // (b) they've just finished all three steps and haven't dismissed the celebration.
@@ -957,7 +881,39 @@ export default function DashboardClient() {
     completeDismissalReady &&
     !requiresOtherDevice &&
     (allOnboardingComplete ? !completeDismissed : !inProgressDismissed)
-  const showTopAside = hasAttention
+
+  // ── #3808: the "Needs you" items ─────────────────────────────────────────
+  // One definition: `lib/dashboard-attention.ts` — the same rules #3809 (badges)
+  // and #3818 (setup guide) import. The panel renders from the last good
+  // overview (or the error row when the overview failed); it never renders
+  // "nothing needs attention" while the first load is still in flight.
+  const { data: budgetRemaining } = useBudgetRemaining()
+  const [backupDismissed, setBackupDismissed] = useState(false)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    setBackupDismissed(window.localStorage.getItem('haven.recovery-nudge.dismissed') === '1')
+  }, [])
+  // Session-only dismissal for everything the rules will re-fire on the next
+  // load anyway — until #3813, only the backup item's dismissal persists.
+  const [sessionDismissedIds, setSessionDismissedIds] = useState<Set<string>>(() => new Set())
+  const accountNames = useMemo(
+    () => Object.fromEntries(accounts.map((account) => [account.id, account.name])),
+    [accounts],
+  )
+  const attentionItems = useMemo(() => {
+    if (!overview) return []
+    return computeAttentionItems({
+      overview,
+      budgetRemaining: budgetRemaining ?? null,
+      accountNames,
+      backupDismissed,
+      // While the setup guide's "Add USDC" step is open, the guide IS the
+      // funds ask — the low-balance and zero-USDC items step aside (#3808).
+      holdBackLowBalance: showOnboardingGuide && !hasFunds,
+    }).filter((item) => !sessionDismissedIds.has(item.id))
+  }, [overview, budgetRemaining, accountNames, backupDismissed, showOnboardingGuide, hasFunds, sessionDismissedIds])
+
+  const attentionVisible = Boolean(overview) || Boolean(overviewError)
 
   function refreshDashboardData() {
     refetchOverview()
@@ -1015,6 +971,27 @@ export default function DashboardClient() {
     }
   }
 
+  function openAddFundsForAccount(accountId: string) {
+    setActionAccountId(accountId)
+    setAddFundsOpen(true)
+  }
+
+  function handleDismissAttention(item: AttentionRuleItem) {
+    if (item.kind === 'no-backup') {
+      // The legacy global key: one flag hides the backup item for every
+      // account, exactly as RecoveryNudge's "Got it" did. #3813 replaces
+      // this with per-item persistence.
+      setBackupDismissed(true)
+      try {
+        window.localStorage.setItem('haven.recovery-nudge.dismissed', '1')
+      } catch {
+        /* private mode — the state flip above still hides it this session */
+      }
+      return
+    }
+    setSessionDismissedIds((previous) => new Set(previous).add(item.id))
+  }
+
   const heroPanel = (
     <DashboardHero
       loading={overviewInitialLoading}
@@ -1039,12 +1016,16 @@ export default function DashboardClient() {
     />
   )
 
-  const attentionPanel = (
-    <AttentionSection
+  const attentionPanel = attentionVisible ? (
+    <NeedsYou
+      items={attentionItems}
       hasOverviewError={Boolean(overviewError)}
       onRetry={refetchOverview}
+      onDismiss={handleDismissAttention}
+      onAddFunds={openAddFundsForAccount}
     />
-  )
+  ) : null
+  const showTopAside = attentionVisible
 
   const metricsGrid = (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -1137,28 +1118,20 @@ export default function DashboardClient() {
           />
         ) : null
 
-        // Home for the backup-signer prompt (#1162, #1153). Onboarding used
-        // to render it on its "You're in" screen, which #1162 removed and
-        // relocated here; #1153 replaces the unconditional
-        // "any account" render with a funded-state trigger
-        // — the owner does not want this in front of the user before they
-        // have funds at risk. `hasFunds` is already fail-closed: it only
-        // goes true once `fundingStateKnown` is true (accounts loaded, balance
-        // fetch not loading, no balance error), so a transient RPC failure
-        // reads as "not funded", never as "funded". Dismissible exactly as
-        // before, and kept to delegation-rail accounts because "Backup &
-        // recovery" is where it sends you and that only exists on those
-        // accounts.
-        const recoveryNudge =
-          hasFunds && delegationAccount && missingBackup ? <RecoveryNudge /> : null
+        // The backup-signer prompt lives INSIDE the NeedsYou card now (#3808):
+        // one item per funded account without a backup signer, dismissed via
+        // the legacy global key. The focused view keeps the guide first — the
+        // items that still apply (load error, backup once funded, extra
+        // pending agents) render below its steps, and the low-balance /
+        // zero-USDC items are held back while the guide's "Add USDC" step is
+        // open (`holdBackLowBalance` on the rules).
 
         if (isFocusedView) {
           return (
             <div className="space-y-6">
               {heroPanel}
-              {hasAttention ? attentionPanel : null}
+              {attentionPanel}
               {guide}
-              {recoveryNudge}
             </div>
           )
         }
@@ -1174,7 +1147,6 @@ export default function DashboardClient() {
               {attentionPanel}
             </div>
             {guide}
-            {recoveryNudge}
             {metricsGrid}
             {activityGrid}
           </div>

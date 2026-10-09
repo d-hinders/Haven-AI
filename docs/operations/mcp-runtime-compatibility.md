@@ -80,6 +80,18 @@ last-verified: "2026-10-09"
 ---
 
 
+> **Re-verification (#3838, 2026-10-09, wording-only `haven_pay_x402_quote`
+> description edit):** the local tool's sign-in-with-x sentence was rewritten
+> (sign in FIRST for multi-call flows; the merchant session token never
+> reaches the quote tools) at the same 434-byte length — byte-neutral against
+> the #1591 ratchet, re-measured green. No Supported Runtime Manifest rule,
+> version-skew contract, consent-hash or hosted-runtime statement in this
+> document moves: descriptions are not a skew axis (#2330 precedent), the
+> tool's schema, arguments and response shapes are unchanged, and the
+> sign-in guidance itself lives in the SDK skill copy mirrored byte-pinned
+> into the frontend bundle. `last-verified` stays 2026-10-09. Nothing else in
+> this document was re-verified.
+
 > **Re-verification (#3819, 2026-10-09):** coupled through
 > `.github/workflows/publish.yml`: the dependency-presence ledger
 > (`dep_state`) is now a space-delimited `pkg=state` string with an
@@ -3229,10 +3241,17 @@ value is non-secret: the same string already sits in the user's own MCP config
 file, and the API key travels beside it in a header, never in the URL.
 
 `superseded_agent_ids` makes the #1688 heads-up structural. A re-run mints a
-NEW agent and, without `--replace` (#2551), retires nothing, so earlier
-credential directories keep live API and signing keys; the ids of those other
-directories are now in the record
-instead of only in stderr prose. The list is empty on a clean first run — and
+NEW agent and, without `--replace` (#2551), retires nothing, so the other
+credential directories keep their live API and signing keys; the ids of those
+other directories are now in the record
+instead of only in stderr prose. It is every other directory, not a replace
+set (#3830): under named pairs by default (#3737) most of them are agents wired
+alongside this one, so neither the heads-up nor the dashboard calls them
+replaced or previous — the heads-up says "other agent directories on this
+machine" and that this setup revoked none of them, and the dashboard lists the
+owner's not-revoked ones (active, paused or still in setup) without a
+revoke offer. The ids a `--replace` run actually
+retired are `retired_agent_ids`. The list is empty on a clean first run — and
 an empty list is **not** proof of a clean machine, because a scan that cannot
 read the credential root also yields an empty list rather than failing a
 completed setup. Directories are excluded by path, never by agent id (#1696):
@@ -3369,11 +3388,35 @@ current, and the failure mode differs by which half is stale:
 | Signer older than the backend, **signer predating #1138** | `MCP error -32602: Input validation error: Invalid arguments for tool haven_sign_x402: Invalid literal value, expected 1 at x402_expected.auth.version` |
 | Signer with #1138 but predating #1143 (forward-looking — see below) | `… Invalid input at x402_expected.auth.version` — Zod says nothing at all about a failing literal *union* |
 | Backend older than the signer | `Refusing to sign typed data under an expected context that does not commit to it` |
+| Hosted tool list (client loaded `tools/list` before a hosted deploy) | A result's `contract_fingerprint` differs from the one in the server instructions the client loaded at `initialize`; or a `next_arguments` doesn't fit the schema the client loaded for the **hosted** tool it names (a misfit on a signer tool is signer skew — the rows above). The server cannot push `notifications/tools/list_changed` (stateless transport, `sessionIdGenerator: undefined`), so the SDK's `-32602` / unknown-tool refusals arrive before any Haven handler and now carry the fingerprint plus a reconnect hint. |
 
 All of these fail closed, which is the point: none produces a signature. Treat any
 of them on the delegation rail as a version-skew report, not a credential
 problem — and note the last is also what a *legacy-rail* intent looks like if
 a caller passes `typed_data` that the context never committed to.
+
+### Hosted tool lists — the contract fingerprint and the reconnect rule (#3816)
+
+The hosted transport is stateless, so a deploy cannot tell connected clients
+that the contract moved. Instead every hosted tool result carries
+`contract_fingerprint` and `server_version` as top-level fields of its JSON
+payload (and the SDK-generated strict-input / unknown-tool refusals, which a
+stale client is exactly the one to hit, carry both plus a one-line reconnect
+hint via a CallTool wrapper in `packages/mcp-server/src/server.ts`). The same
+16-hex fingerprint is computed at boot from what `tools/list` advertises —
+name, the SDK's converted input schema, description; the instructions are
+excluded — and is embedded in `HOSTED_INSTRUCTIONS`, delivered at
+`initialize`. A client compares the fingerprint it loaded in the instructions
+against the one on any result; a difference, or a `next_arguments` that does
+not fit the schema it loaded for the hosted tool named, means the tool list
+is stale: reconnect or restart the session before continuing, and never
+hand-build or reshape a payload to make it fit. The in-flight carve-out: a
+prepared or funded payment keeps its `payment_id` and resumes through
+`haven_get_payment_status` / `haven_resume_x402_payment`
+(`haven_sweep_delegate` for a stranded bridge balance) — never pay again.
+During a rolling deploy the fingerprint may alternate once across replicas;
+reconnect once, and if it still alternates, continue and report. The
+published `haven-pay` skill carries the same rule.
 
 ### Task budgets — a third sign-context, and the tool set moves (#3329)
 
@@ -4509,6 +4552,22 @@ to call next in structured fields, and those fields are typed end to end
   > doctor's check, the repair's local-topology refusal and the repair's
   > config write, instead of the "CLI-managed" skip and a repair that
   > reported success having written nothing.
+  >
+  > **Re-verified #3830:** on Claude Code the doctor now reads `~/.claude.json`
+  > (user-scope `mcpServers` and every `projects[<path>].mcpServers`) as
+  > wiring evidence: a directory whose named pair or signer wrapper appears
+  > there classifies `wired`, so a second agent the user connected on purpose
+  > is no longer labelled superseded and still spend-capable. Only server names,
+  > commands, args and URLs are kept — never `env` or `headers` — and the text
+  > is matched, never printed. The evidence is additive: absence proves
+  > nothing (project `.mcp.json` files are not discoverable), so a directory
+  > the file does not name keeps the fallback verdict and the advisory, whose label now
+  > reads "Other agent credentials (wiring not verifiable)" instead of
+  > asserting "superseded" (nor does the human inventory row, which reads "not
+  > verified as wired"). A directory the evidence upgrades to `wired` runs the
+  > full per-agent check set like a wired agent on Codex, so its failures now
+  > reach the exit code. The inventory `classification` values are unchanged,
+  > and the runtime-config checks still take the CLI-managed skip.
 
   The hosted MCP `tools/list` check proves only that its endpoint responds; it
   does not authenticate a bearer token. Credential verdicts instead use the

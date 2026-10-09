@@ -1296,7 +1296,7 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   // #3728: a 402 may carry a sign-in-with-x extension — the route where the
   // signer's SIWX tool is the right answer, so the agent holding such a 402
   // learns it here, at the moment it is looking at the extension.
-  'A sign-in-with-x extension in this 402? Call haven_sign_siwx on the local signer with { url, challenge } and retry with the SIGN-IN-WITH-X header it returns: the delegate wallet signs in as the wallet that paid — it moves no funds — and the merchant\'s session typically waives the micro-fees afterwards. url is the FINAL URL after redirects, and never follow a redirect with SIGN-IN-WITH-X (or a resulting session token) attached.',
+  'Several calls to this merchant? If a 402 or its docs offer a sign-in-with-x session, sign in FIRST: haven_sign_siwx { url, challenge }, then the waived calls YOURSELF with the SIGN-IN-WITH-X header — never pass a session token to haven_quote_x402 or this tool (probe refuses a 200); the delegate wallet signs in, no funds move. url is the FINAL URL after redirects; never follow a redirect with SIGN-IN-WITH-X (or a token) attached.',
 ].join(' ')
 
 // #2145: the backend now emits nextAction=retry_original_x402_request from

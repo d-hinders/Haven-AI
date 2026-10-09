@@ -274,6 +274,81 @@ export const dashboardOverview = {
   onboardingProgress: {
     hasFirstAgentPayment: true,
   },
+  // #3803: the agentCount tiles read this — every preview agent is counted,
+  // by status, including the pending ones the old LIMIT 6 preview dropped.
+  agentCount: {
+    active: 2,
+    paused: 1,
+    pending_approval: 1,
+  },
+  // #3803: TWO accounts (mainnet + testnet) so the account rows render both
+  // the mainnet USDC balance story and a testnet pace story.
+  accounts: [
+    {
+      accountId: testSafe.id,
+      chainId: 8453,
+      isTestnet: false,
+      usdcBalanceAtomic: '1250000000',
+      usdcDecimals: 6,
+      usdcBalanceFreshness: { status: 'stale' as const, asOf: '2026-10-09T10:00:00.000Z' },
+      funded: true,
+      needs_backup_recommendation: false,
+      usdcPace7dAtomic: '6250000',
+    },
+    {
+      accountId: 'safe-sepolia',
+      chainId: 84532,
+      isTestnet: true,
+      usdcBalanceAtomic: '50000000',
+      usdcDecimals: 6,
+      funded: true,
+      needs_backup_recommendation: false,
+      usdcPace7dAtomic: '1000000',
+    },
+  ],
+  // #3803: today's rate per BUDGET token, in the viewer's preferred currency
+  // (testUser is USD). Null means "the price read failed" — the client shows
+  // the caption without a rate, never a fake 0.
+  spotRates: { USDC: 1 },
+  // #3803: the 7/30-day block. scope 'mainnet' because the user HAS a
+  // mainnet account; d30 carries the larger triple so the two tiles differ.
+  spend: {
+    scope: 'mainnet' as const,
+    d7: {
+      gross: { usd: 18.5, eur: 16.84, sek: 199.1 },
+      net: { usd: 11.1, eur: 10.1, sek: 119.46 },
+      approx: false,
+      payments: 6,
+      distinctMerchants: 3,
+      budgetStops: 1,
+    },
+    d30: {
+      gross: { usd: 74.0, eur: 67.34, sek: 796.4 },
+      net: { usd: 48.1, eur: 43.77, sek: 517.66 },
+      approx: true,
+      payments: 21,
+      distinctMerchants: 5,
+      budgetStops: 3,
+    },
+    topMerchant7d: {
+      key: 'research.example',
+      x402ResourceUrl: 'https://research.example/report',
+      to: testRecipientAddress,
+      merchantName: null,
+    },
+    failedIntents7d: 1,
+    // 30 days, most recent last — days WITHOUT a snapshot are ABSENT from the
+    // real wire; the harness generates a dense series so a gap never renders.
+    balance_by_day: Array.from({ length: 30 }, (_, i) => {
+      const day = new Date(Date.UTC(2026, 8, 10 + i))
+      return {
+        snapshotDate: day.toISOString().slice(0, 10),
+        totalUsd: 1225 + i * 1.25,
+        totalEur: 1113.8 + i * 1.14,
+        totalSek: i % 7 === 0 ? null : 13170 + i * 13.45,
+      }
+    }),
+  },
   agents: [
     {
       id: testAgent.id,
@@ -291,6 +366,132 @@ export const dashboardOverview = {
           resetPeriodMin: 43_200,
         },
       ],
+      // #3803: the full budget view beside the frozen mirror above —
+      // identity, raw budget, and the LIVE window the client renders as
+      // "resets in …". Two agents carry budgets with MIXED periods.
+      budgets: [
+        {
+          id: '9d1f4c0a-0000-4000-8000-000000000001',
+          delegationHash: `0x${'11'.repeat(32)}`,
+          chainId: 8453,
+          tokenAddress: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
+          tokenSymbol: 'USDC',
+          decimals: 6,
+          budgetAtomic: '250000000',
+          periodSeconds: 86_400,
+          startDate: '2026-10-08T10:00:00.000Z',
+          expiresAt: '2027-10-08T10:00:00.000Z',
+          periodEnd: '2026-10-10T10:00:00.000Z',
+        },
+      ],
+      receivedSubBudgets: [],
+      stats: {
+        d7: {
+          gross: { usd: 12.5, eur: 11.38, sek: 134.5 },
+          net: { usd: 7.5, eur: 6.83, sek: 80.7 },
+          approx: false,
+          payments: 4,
+          refusals: { budget: 1, scope: 0, failed: 0, haven: 0 },
+        },
+        d30: {
+          gross: { usd: 50.0, eur: 45.5, sek: 538.0 },
+          net: { usd: 32.5, eur: 29.58, sek: 349.7 },
+          approx: true,
+          payments: 14,
+          refusals: { budget: 2, scope: 1, failed: 1, haven: 0 },
+        },
+        lastPaymentAt: '2026-10-09T09:41:00.000Z',
+        lastCounterparty: {
+          source: 'x402',
+          x402ResourceUrl: 'https://research.example/report',
+          to: testRecipientAddress,
+          merchantName: null,
+        },
+      },
+    },
+    {
+      id: 'agent-e2e-watcher',
+      name: 'Watcher agent',
+      status: 'paused' as const,
+      accountId: testSafe.id,
+      accountName: testSafe.name,
+      accountChainId: testSafe.chain_id,
+      allowances: [],
+      budgets: [
+        {
+          id: '9d1f4c0a-0000-4000-8000-000000000002',
+          delegationHash: `0x${'22'.repeat(32)}`,
+          chainId: 8453,
+          tokenAddress: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
+          tokenSymbol: 'USDC',
+          decimals: 6,
+          budgetAtomic: '50000000',
+          // Mixed periods: a WEEKLY budget beside the daily one above.
+          periodSeconds: 604_800,
+          startDate: '2026-10-05T10:00:00.000Z',
+          expiresAt: '2027-10-05T10:00:00.000Z',
+          periodEnd: '2026-10-12T10:00:00.000Z',
+        },
+      ],
+      receivedSubBudgets: [
+        { parentAgentId: testAgent.id, parentAgentName: testAgent.name, open: true },
+      ],
+      stats: {
+        d7: {
+          gross: { usd: 6.0, eur: 5.46, sek: 64.6 },
+          net: { usd: 3.6, eur: 3.28, sek: 38.76 },
+          approx: false,
+          payments: 2,
+          refusals: { budget: 0, scope: 0, failed: 1, haven: 1 },
+        },
+        d30: {
+          gross: { usd: 24.0, eur: 21.84, sek: 258.4 },
+          net: { usd: 15.6, eur: 14.2, sek: 167.96 },
+          approx: false,
+          payments: 7,
+          refusals: { budget: 1, scope: 0, failed: 1, haven: 2 },
+        },
+        lastPaymentAt: '2026-10-07T18:02:00.000Z',
+        lastCounterparty: {
+          source: 'api',
+          x402ResourceUrl: null,
+          to: testRecipientAddress,
+          merchantName: 'Example Shop AB',
+        },
+      },
+    },
+    {
+      // #3803: a pending agent — carries NO budgets (nothing delegated yet)
+      // but DOES carry its connection setup status, so the client can offer
+      // "Finish setup" instead of a bare spinner.
+      id: 'agent-e2e-pending',
+      name: 'Connecting agent',
+      status: 'pending_approval' as const,
+      accountId: 'safe-sepolia',
+      accountName: 'Showcase account',
+      accountChainId: 84532,
+      setupStatus: 'awaiting_connection',
+      allowances: [],
+      budgets: [],
+      receivedSubBudgets: [],
+      stats: {
+        d7: {
+          gross: { usd: 0, eur: 0, sek: 0 },
+          net: { usd: 0, eur: 0, sek: 0 },
+          approx: false,
+          payments: 0,
+          refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+        },
+        d30: {
+          gross: { usd: 0, eur: 0, sek: 0 },
+          net: { usd: 0, eur: 0, sek: 0 },
+          approx: false,
+          payments: 0,
+          refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+        },
+        lastPaymentAt: null,
+        lastCounterparty: null,
+      },
     },
   ],
   transactions: [dashboardTransaction],

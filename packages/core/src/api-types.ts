@@ -6029,6 +6029,7 @@ export type components = {
             tokenSymbol: string;
             /** @description HUMAN-DECIMAL token amount — whole token units, NOT the atomic integer (25 USDC is "25.00", a zero budget is "0"). Projected from the agent's active delegation by rails/delegation-budget-view.ts via formatTokenValue(budget_atomic, decimals), whose output is always "0" or <integer>.<2–6 fraction digits> — so this pattern REJECTS an atomic value such as "500" (#2408). "0" is the one value both shapes share. Do not BigInt() this value: it is the shape that made #2283 a production bug. To compare it against an atomic price, scale it by the token's decimals first (#2295). */
             allowanceAmount: string;
+            /** @deprecated */
             resetPeriodMin: number;
         };
         DashboardAgentPreview: {
@@ -6036,15 +6037,141 @@ export type components = {
             id: string;
             name: string;
             /**
-             * @description Revoked agents are excluded from the preview query.
+             * @description Revoked agents are excluded from the overview query. #3803: pending_approval joins — the redesigned overview must surface an agent still waiting for its connection.
              * @enum {string}
              */
-            status: "active" | "paused";
+            status: "active" | "paused" | "pending_approval";
             /** Format: uuid */
             accountId: string | null;
             accountName: string | null;
             accountChainId: number | null;
+            /** @deprecated */
             allowances: components["schemas"]["DashboardAgentAllowance"][];
+            /** @description Present only when status is 'pending_approval': the agent's newest connection setup status (e.g. 'awaiting_connection', 'expired', 'failed'). */
+            setupStatus?: string;
+            /** @description #3803: every live budget from the active delegation set — expired rows follow the #3802 predicate and are absent. */
+            budgets: components["schemas"]["DashboardAgentBudget"][];
+            /** @description #3803: sub-budget grants this agent RECEIVED, so an agent whose only authority is a received sub-budget does not read "No budget". */
+            receivedSubBudgets: components["schemas"]["DashboardReceivedSubBudget"][];
+            stats: components["schemas"]["DashboardAgentStats"];
+        };
+        /** @description #3803 — one delegation-rail budget with its identity and live window, for the caption the client renders in the user currency (see spotRates). budgetAtomic is the atomic integer; never parse the human `allowances[].allowanceAmount` for arithmetic. */
+        DashboardAgentBudget: {
+            /** Format: uuid */
+            id: string;
+            /** @description The delegation's stable identity (#827) — keccak of the unsigned delegation. */
+            delegationHash: string;
+            chainId: number;
+            /** @example 0x1111111111111111111111111111111111111111 */
+            tokenAddress: string;
+            tokenSymbol: string;
+            decimals: number;
+            /** @description Base-10 atomic integer (VARCHAR(78) on the wire source). */
+            budgetAtomic: string;
+            periodSeconds: number;
+            /** Format: date-time */
+            startDate: string;
+            /** Format: date-time */
+            expiresAt: string;
+            /**
+             * Format: date-time
+             * @description End of the CURRENT budget period, computed from startDate + periodSeconds at read time.
+             */
+            periodEnd: string;
+        };
+        /** @description #3803 — a sub-budget grant the agent received from a parent agent. */
+        DashboardReceivedSubBudget: {
+            /** Format: uuid */
+            parentAgentId: string;
+            parentAgentName: string;
+            /** @description true iff the grant's stored status is 'open'. */
+            open: boolean;
+        };
+        /** @description #3803 — one window of the 7/30-day block. gross is the booked (or re-priced) fiat; net is gross with the #3755 delegate_sweeps ratio netting applied. Both are USD/EUR/SEK triples. */
+        DashboardSpendWindow: {
+            gross: {
+                usd: number;
+                eur: number;
+                sek: number;
+            };
+            net: {
+                usd: number;
+                eur: number;
+                sek: number;
+            };
+            /** @description Owner decision 1: true when any row's booked fiat was NULL and was priced at today's rate — the client marks the figure ≈ so a re-priced total is never shown as booked. */
+            approx: boolean;
+            /** @description Confirmed payment rows in the window — activity, never netted. */
+            payments: number;
+            /** @description DISTINCT merchants over the window — merchant = the x402 resource host, else the recipient address. A user-level figure, never a sum of per-agent counts. */
+            distinctMerchants: number;
+            /** @description Refusal rows whose reason was delegation_budget_exceeded or delegation_expired — a budget stopped a payment. */
+            budgetStops: number;
+        };
+        /** @description #3803 — one window of a PER-AGENT stats block. Same gross/net/approx/payments definitions as the user-level DashboardSpendWindow; per-agent refusals instead of the user-level distinctMerchants/budgetStops rollups. */
+        DashboardAgentSpendWindow: {
+            gross: {
+                usd: number;
+                eur: number;
+                sek: number;
+            };
+            net: {
+                usd: number;
+                eur: number;
+                sek: number;
+            };
+            /** @description Owner decision 1: true when any row's booked fiat was NULL and was priced at today's rate. */
+            approx: boolean;
+            /** @description Confirmed payment rows in the window — activity, never netted. */
+            payments: number;
+            refusals: components["schemas"]["DashboardRefusalBuckets"];
+        };
+        /** @description #3803 — refusal ROW counts per bucket (not distinct reasons — #3815). relayer_budget is Haven’s own cap and is never shown as the user’s budget. */
+        DashboardRefusalBuckets: {
+            /** @description delegation_budget_exceeded + delegation_expired. */
+            budget: number;
+            /** @description no_delegation_for_target. */
+            scope: number;
+            /** @description onchain_revert. */
+            failed: number;
+            /** @description relayer_budget. */
+            haven: number;
+        };
+        /** @description #3803 — per-agent 7/30-day figures. The spend windows carry the same definition as the user-level block; refusals are row counts per bucket over the same window. */
+        DashboardAgentStats: {
+            d7: components["schemas"]["DashboardAgentSpendWindow"];
+            d30: components["schemas"]["DashboardAgentSpendWindow"];
+            /**
+             * Format: date-time
+             * @description ALL-TIME latest confirmed payment (not windowed); null when the agent never paid.
+             */
+            lastPaymentAt: string | null;
+            lastCounterparty: {
+                source: string | null;
+                x402ResourceUrl: string | null;
+                to: string | null;
+                merchantName: string | null;
+            } | null;
+        };
+        /** @description #3803 — per-account USDC, funding and pace. No new chain reads: the balance comes from the portfolio the overview already fetches. */
+        DashboardAccountOverview: {
+            /** Format: uuid */
+            accountId: string;
+            chainId: number;
+            /** @description The chain registry’s own testnet marker (faucet presence). */
+            isTestnet: boolean;
+            /** @description The chain-registry USDC balance in base units. NULL when the balance read is unavailable — unknown, never 0. */
+            usdcBalanceAtomic: string | null;
+            /** @description The registry USDC decimals; null when the chain has no registry USDC. */
+            usdcDecimals: number | null;
+            /** @description Present only when the USDC balance read was stale or unavailable (#3295 marker). */
+            usdcBalanceFreshness?: components["schemas"]["BalanceFreshness"];
+            /** @description The account's own USDC > 0. Null when the balance is unknown — never derived from a 0. */
+            funded: boolean | null;
+            /** @description Per account (the session payload answered only accounts[0] before #3803). */
+            needs_backup_recommendation: boolean;
+            /** @description Σ confirmed − min(swept, confirmed) per (agent, token, chain) over the last 7 days, for this account’s agents on this chain in the registry USDC. Swept = delegate_sweeps status submitted with a tx_hash. */
+            usdcPace7dAtomic: string;
         };
         DashboardOverviewResponse: {
             totals: {
@@ -6070,13 +6197,35 @@ export type components = {
                 balancesFreshness?: components["schemas"]["BalanceFreshness"];
             };
             metrics: {
-                /** @description Agents with status 'active' only. */
+                /**
+                 * @deprecated
+                 * @description Agents with status 'active' only. Deprecated (#3803): superseded by agentCount — removed with its tile in #3807.
+                 */
                 connectedAgents: number;
+                /**
+                 * @deprecated
+                 * @description Deprecated (#3803): superseded by spend.d30 — removed with its tile in #3807.
+                 */
                 monthlyAgentSpendUsd: number;
+                /**
+                 * @deprecated
+                 * @description Deprecated (#3803): superseded by spend.d30 — removed with its tile in #3807.
+                 */
                 monthlyAgentSpendEur: number;
+                /**
+                 * @deprecated
+                 * @description Deprecated (#3803): superseded by spend.d30 — removed with its tile in #3807.
+                 */
                 monthlyAgentSpendSek?: number;
+                /**
+                 * @deprecated
+                 * @description Deprecated (#3803): removed with its tile in #3807.
+                 */
                 successfulTransactions: number;
-                /** @description All linked Safes, regardless of activity. */
+                /**
+                 * @deprecated
+                 * @description All linked Safes, regardless of activity. Deprecated (#3803): superseded by accounts — removed with its tile in #3807.
+                 */
                 activeAccounts: number;
             };
             /** @description Always 0 since #2055 — the approval queue died with the Safe rail and its table is dropped; the field survives for wire compatibility. */
@@ -6086,10 +6235,53 @@ export type components = {
             onboardingProgress: {
                 hasFirstAgentPayment: boolean;
             };
-            /** @description At most 6. */
+            /** @description #3803: EVERY delegation-rail agent in active/paused/pending_approval — the former at-most-6 cap moved to the client (#3809). */
             agents: components["schemas"]["DashboardAgentPreview"][];
             /** @description At most 5. Payment-enrichment fields (paymentId, paymentFlowStatus, amountSek, …) are never populated in this projection. */
             transactions: components["schemas"]["Transaction"][];
+            /** @description #3803 — the overview’s agents[] by status, so tiles do not derive counts from a client-side slice. */
+            agentCount: {
+                active: number;
+                paused: number;
+                pending_approval: number;
+            };
+            /** @description #3803 — one entry per delegation-rail account, in the accounts list order. */
+            accounts: components["schemas"]["DashboardAccountOverview"][];
+            /** @description #3803 — today’s rate per BUDGET token symbol in the user’s preferred currency (see the transaction feed’s resolution); null when the price read failed or quoted zero. The client has no rate of its own, so the budget captions are struck here. */
+            spotRates: {
+                [key: string]: number | null;
+            };
+            /** @description #3803 — the 7/30-day block. Windows are [now − N×24h, now) on confirmed_at — the same definition as /analytics/overview. Rows are confirmed, delegation-rail agents only; revoked agents’ in-window spend is included. Not counted: fees, deposits, other tokens. */
+            spend: {
+                /**
+                 * @description Owner decision 3: mainnet accounts only whenever the user has one; a testnet-only user sees test totals labelled 'Test network'.
+                 * @enum {string}
+                 */
+                scope: "mainnet" | "testnet";
+                d7: components["schemas"]["DashboardSpendWindow"];
+                d30: components["schemas"]["DashboardSpendWindow"];
+                /** @description The 7-day top merchant by USD booked sum, with RAW identity fields; null on a no-spend window. */
+                topMerchant7d: {
+                    /** @description The merchant identity: the x402 resource host, else the recipient address. */
+                    key: string;
+                    /** @description One representative x402 resource URL of this merchant’s rows. */
+                    x402ResourceUrl: string | null;
+                    /** @description One representative recipient address. */
+                    to: string | null;
+                    /** @description Contact name, else receipt name, for the merchant address; null when neither exists. */
+                    merchantName: string | null;
+                } | null;
+                /** @description Payment intents with status failed in the 7-day window. */
+                failedIntents7d: number;
+                /** @description 30 days of portfolio totals, shared with analytics’ BALANCE_BY_DAY_SQL. Days with no snapshot are ABSENT, not zero; totalSek is null on pre-migration-090 days. */
+                balance_by_day: {
+                    /** @description YYYY-MM-DD (UTC). */
+                    snapshotDate: string;
+                    totalUsd: number;
+                    totalEur: number;
+                    totalSek: number | null;
+                }[];
+            };
         };
         DashboardBudgetRemainingEntry: {
             /** Format: uuid */

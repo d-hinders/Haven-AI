@@ -1,13 +1,20 @@
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
+  counterpartyLabel,
   settlementSchemeLabel,
   transactionInitiator,
   transactionMovement,
   transactionStatus,
   transactionTitle,
 } from '../transaction-presentation'
+import { truncate } from '@/lib/format'
+import TransactionsTable from '@/components/transactions/TransactionsTable'
+import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
 import type { AggregatedTransaction } from '@/types/transactions'
+
+vi.mock('@/hooks/useEscapeToClose', () => ({ useEscapeToClose: vi.fn() }))
+vi.mock('@/hooks/useFocusTrap', () => ({ useFocusTrap: vi.fn() }))
 
 function tx(overrides: Partial<AggregatedTransaction> = {}): AggregatedTransaction {
   return {
@@ -163,5 +170,152 @@ describe('counterparty name resolution is case-insensitive (#3129)', () => {
     render(transactionMovement(tx({ direction: 'in', from: CHECKSUMMED })))
 
     expect(screen.queryByText('Acme Ltd')).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * #3810 — the dashboard's no-address mode. The dashboard reads
+ * `counterpartyLabel` DIRECTLY as the merchant-first row title, so the raw
+ * address must never surface there: every `truncate()` fallback is replaced
+ * by calm copy. The acceptance cases, verbatim from the issue:
+ * an x402 row with no resource URL ("Agent payment"), an unknown address
+ * ("New recipient"), a sweep ("Returned from <agent>"), and an x402 row with
+ * a resource URL (its hostname).
+ */
+describe('counterpartyLabel no-address mode (#3810)', () => {
+  const UNKNOWN = '0x9999999999999999999999999999999999999999'
+
+  it('reads "Agent payment" for an x402 row with no resource URL', () => {
+    const label = counterpartyLabel(
+      tx({ direction: 'out', source: 'x402', x402ResourceUrl: undefined }),
+      undefined,
+      undefined,
+      { noAddress: true },
+    )
+    expect(label).toBe('Agent payment')
+    expect(label).not.toContain('…')
+  })
+
+  it('reads the hostname for an x402 row with a resource URL', () => {
+    const label = counterpartyLabel(
+      tx({
+        direction: 'out',
+        source: 'x402',
+        x402ResourceUrl: 'https://api.vendor.com/data?q=1',
+      }),
+      undefined,
+      undefined,
+      { noAddress: true },
+    )
+    expect(label).toBe('api.vendor.com')
+  })
+
+  it('reads "New recipient" for an address nothing resolves — never a truncated address', () => {
+    const label = counterpartyLabel(
+      tx({ direction: 'out', source: undefined, to: UNKNOWN }),
+      () => null,
+      undefined,
+      { noAddress: true },
+    )
+    expect(label).toBe('New recipient')
+    expect(label).not.toContain('…')
+    expect(label).not.toContain('0x')
+  })
+
+  it('reads "Returned from <agent>" for a sweep', () => {
+    const label = counterpartyLabel(
+      tx({
+        direction: 'in',
+        activityType: 'delegate_sweep',
+        agentName: 'Research assistant',
+      }),
+      undefined,
+      undefined,
+      { noAddress: true },
+    )
+    expect(label).toBe('Returned from Research assistant')
+    expect(label).not.toContain('…')
+  })
+
+  it('reads "Deposit" for an inbound row', () => {
+    const label = counterpartyLabel(tx({ direction: 'in', from: UNKNOWN }), undefined, undefined, {
+      noAddress: true,
+    })
+    expect(label).toBe('Deposit')
+    expect(label).not.toContain('…')
+  })
+
+  it('prefers the server-resolved counterparty name, then the client lookups', () => {
+    const resolved = counterpartyLabel(
+      tx({ direction: 'out', source: 'direct', to: UNKNOWN }),
+      () => null,
+      undefined,
+      { noAddress: true, resolvedName: 'Acme Ltd' },
+    )
+    expect(resolved).toBe('Acme Ltd')
+
+    // Without a server-side name the own-account and contact lookups still
+    // run — the same resolution order the default mode uses.
+    const accounts = new Map([[`${UNKNOWN.toLowerCase()}:8453`, 'Savings']])
+    const viaAccounts = counterpartyLabel(
+      tx({ direction: 'out', source: 'direct', to: UNKNOWN, chainId: 8453 }),
+      () => null,
+      accounts,
+      { noAddress: true },
+    )
+    expect(viaAccounts).toBe('Savings')
+  })
+
+  it('CONTROL: the default mode still truncates — the shared screens are unchanged', () => {
+    // The no-address mode is opt-in. TransactionsTable and
+    // TransactionDetailPanel pass no options, so their counterparty fallback
+    // stays `truncate(to)` until #3811 retires it.
+    const label = counterpartyLabel(tx({ direction: 'out', to: UNKNOWN }))
+    expect(label).toBe(truncate(UNKNOWN))
+  })
+})
+
+/**
+ * #3810 — shared screens unchanged. The presentation helpers are shared with
+ * `TransactionsTable` and `TransactionDetailPanel`; rendering the SAME row
+ * through both must still show the truncated address and the generic title —
+ * byte-relevant output identical to pre-#3810.
+ */
+describe('shared screens render unchanged (#3810)', () => {
+  const UNKNOWN = '0x9999999999999999999999999999999999999999'
+  const TRUNCATED = truncate(UNKNOWN)
+
+  const row = tx({ direction: 'out', source: 'direct', to: UNKNOWN, agentName: undefined })
+
+  it('TransactionsTable keeps the truncated counterparty', () => {
+    render(
+      <TransactionsTable
+        transactions={[row]}
+        loading={false}
+        error={null}
+        onRefresh={() => {}}
+        hasActiveFilters={false}
+      />,
+    )
+
+    // The truncated counterparty renders in BOTH the desktop and the stacked
+    // mobile layout of the same table — unchanged from pre-#3810.
+    expect(screen.getAllByText(TRUNCATED).length).toBeGreaterThan(0)
+    expect(screen.getByText('Payment sent')).toBeInTheDocument()
+    expect(screen.queryByText('New recipient')).not.toBeInTheDocument()
+  })
+
+  it('TransactionDetailPanel keeps the truncated counterparty', () => {
+    render(
+      <TransactionDetailPanel
+        transaction={row}
+        open
+        onClose={() => {}}
+        resolveAddress={() => null}
+      />,
+    )
+
+    expect(screen.getByText(TRUNCATED)).toBeInTheDocument()
+    expect(screen.queryByText('New recipient')).not.toBeInTheDocument()
   })
 })

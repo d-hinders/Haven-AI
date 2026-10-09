@@ -10,6 +10,7 @@ vi.mock('@/lib/api', () => ({
 }))
 
 import { useDashboardOverview } from '@/hooks/useDashboardOverview'
+import { browserTimeZone } from '@/lib/analytics-range'
 import type { DashboardOverviewResponse } from '@/types/dashboard'
 
 function overview(id: string): DashboardOverviewResponse {
@@ -112,7 +113,13 @@ describe('useDashboardOverview', () => {
     })
     expect(result.current.data?.transactions[0]?.hash).toBe('0xnew')
     expect(mockApiGet).toHaveBeenCalledTimes(2)
-    expect(mockApiGet).toHaveBeenCalledWith('/dashboard/overview')
+    // #3810: the request names the browser's IANA zone so the activity groups
+    // bucket on the user's local days — omitted entirely when the runtime
+    // cannot resolve one (the server's UTC default takes over).
+    const zone = browserTimeZone()
+    expect(mockApiGet).toHaveBeenCalledWith(
+      zone ? `/dashboard/overview?tz=${encodeURIComponent(zone)}` : '/dashboard/overview',
+    )
   })
 })
 

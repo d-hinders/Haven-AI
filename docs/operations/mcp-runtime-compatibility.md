@@ -3220,10 +3220,17 @@ value is non-secret: the same string already sits in the user's own MCP config
 file, and the API key travels beside it in a header, never in the URL.
 
 `superseded_agent_ids` makes the #1688 heads-up structural. A re-run mints a
-NEW agent and, without `--replace` (#2551), retires nothing, so earlier
-credential directories keep live API and signing keys; the ids of those other
-directories are now in the record
-instead of only in stderr prose. The list is empty on a clean first run — and
+NEW agent and, without `--replace` (#2551), retires nothing, so the other
+credential directories keep their live API and signing keys; the ids of those
+other directories are now in the record
+instead of only in stderr prose. It is every other directory, not a replace
+set (#3830): under named pairs by default (#3737) most of them are agents wired
+alongside this one, so neither the heads-up nor the dashboard calls them
+replaced or previous — the heads-up says "other agent directories on this
+machine" and that this setup revoked none of them, and the dashboard lists the
+owner's not-revoked ones (active, paused or still in setup) without a
+revoke offer. The ids a `--replace` run actually
+retired are `retired_agent_ids`. The list is empty on a clean first run — and
 an empty list is **not** proof of a clean machine, because a scan that cannot
 read the credential root also yields an empty list rather than failing a
 completed setup. Directories are excluded by path, never by agent id (#1696):
@@ -4500,6 +4507,22 @@ to call next in structured fields, and those fields are typed end to end
   > doctor's check, the repair's local-topology refusal and the repair's
   > config write, instead of the "CLI-managed" skip and a repair that
   > reported success having written nothing.
+  >
+  > **Re-verified #3830:** on Claude Code the doctor now reads `~/.claude.json`
+  > (user-scope `mcpServers` and every `projects[<path>].mcpServers`) as
+  > wiring evidence: a directory whose named pair or signer wrapper appears
+  > there classifies `wired`, so a second agent the user connected on purpose
+  > is no longer labelled superseded and still spend-capable. Only server names,
+  > commands, args and URLs are kept — never `env` or `headers` — and the text
+  > is matched, never printed. The evidence is additive: absence proves
+  > nothing (project `.mcp.json` files are not discoverable), so a directory
+  > the file does not name keeps the fallback verdict and the advisory, whose label now
+  > reads "Other agent credentials (wiring not verifiable)" instead of
+  > asserting "superseded" (nor does the human inventory row, which reads "not
+  > verified as wired"). A directory the evidence upgrades to `wired` runs the
+  > full per-agent check set like a wired agent on Codex, so its failures now
+  > reach the exit code. The inventory `classification` values are unchanged,
+  > and the runtime-config checks still take the CLI-managed skip.
 
   The hosted MCP `tools/list` check proves only that its endpoint responds; it
   does not authenticate a bearer token. Credential verdicts instead use the

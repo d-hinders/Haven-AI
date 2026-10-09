@@ -33,6 +33,13 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => searchParamsRef.current,
 }))
 vi.mock('@/hooks/useScrollEdgeCue', () => ({ useScrollEdgeCue: () => false }))
+// #3825: the Signers section's wallet-connection row reads wagmi and
+// RainbowKit, which this page test does not provide.
+vi.mock('wagmi', () => ({
+  useAccount: () => ({ isConnected: false, address: undefined, connector: undefined }),
+  useDisconnect: () => ({ disconnect: vi.fn() }),
+}))
+vi.mock('@rainbow-me/rainbowkit', () => ({ useConnectModal: () => ({ openConnectModal: vi.fn() }) }))
 
 const FORTNOX = {
   id: 'fortnox', displayName: 'Fortnox', authKind: 'oauth2', availability: 'live', configured: true,
@@ -68,6 +75,8 @@ function serveAccounting(connections: unknown[]) {
     if (url === '/accounting/providers') return Promise.resolve({ providers: [FORTNOX, ...COMING_SOON] })
     if (url === '/accounting/connections') return Promise.resolve({ connections })
     if (url === '/accounting/feed/status') return Promise.resolve(FEED_ON)
+    // #3825: the Signers section reads every signer once.
+    if (url === '/user/signers') return Promise.resolve({ signers: [] })
     return Promise.reject(new Error(`unexpected GET ${url}`))
   })
 }
@@ -115,12 +124,31 @@ describe('SettingsClient', () => {
     })
   })
 
-  it('renders the Access and Recovery sections for a passkey-managed account', () => {
+  it('renders the Access, Signers and Recovery sections for a passkey-managed account', () => {
     renderSettings()
 
     expect(screen.getByText('Access')).toBeInTheDocument()
-    expect(screen.getByText('Passkey status')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2, name: 'Signers' })).toBeInTheDocument()
     expect(screen.getByText('Recovery and safety')).toBeInTheDocument()
+  })
+
+  // #3825: Signers replaced the Access → "Passkey status" row and Recovery's
+  // "Backup and recovery" placeholder. Positive control: the sections they
+  // sat in still render.
+  it('no longer carries the Passkey status row or the Backup and recovery placeholder', () => {
+    renderSettings()
+    expect(screen.getByText('Recovery limitations')).toBeInTheDocument()
+    expect(screen.getByText('Password')).toBeInTheDocument()
+    expect(screen.queryByText('Passkey status')).toBeNull()
+    expect(screen.queryByText('Backup and recovery')).toBeNull()
+  })
+
+  it('anchors the Signers section at #signers, between Access and Accounting', () => {
+    renderSettings()
+    expect(document.getElementById('signers')).not.toBeNull()
+    const headings = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)
+    expect(headings.indexOf('Signers')).toBeGreaterThan(headings.indexOf('Access'))
+    expect(headings.indexOf('Signers')).toBeLessThan(headings.indexOf('Accounting'))
   })
 
   /**

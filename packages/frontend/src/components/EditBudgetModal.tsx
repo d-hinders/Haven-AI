@@ -45,6 +45,7 @@ import { budgetPeriodWords } from '@/lib/budget-caption'
 import { Icon } from './ui/Icon'
 import { Button } from './ui/Button'
 import WalletConnectAction from './WalletConnectAction'
+import PasskeyElsewhereHint from './PasskeyElsewhereHint'
 import { Input } from './ui/Input'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
@@ -117,7 +118,7 @@ export default function EditBudgetModal({
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
   useFocusTrap(panelRef, open)
-  const { editBudget, busy, ready, signersError, signersLoading, reloadSigners } = useDelegationBudget(
+  const { editBudget, busy, ready, signersError, signersLoading, reloadSigners, passkeyElsewhere } = useDelegationBudget(
     agentId,
     chainId,
     { enabled: open },
@@ -477,6 +478,7 @@ export default function EditBudgetModal({
                   the old one. Haven will ask for that second signature.
                 </p>
               </div>
+              {ready && passkeyElsewhere ? <PasskeyElsewhereHint /> : null}
               {!ready && !signersError && !signersLoading ? (
                 // #3812: the wallet can go away after Edit opened (Edit itself
                 // is disabled without a signer). Say so before the signature

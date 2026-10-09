@@ -23,7 +23,7 @@ import { useSwitchWallet } from '@/hooks/useSwitchWallet'
  * - No wallet connected: "Connect wallet" opens RainbowKit's picker.
  * - A wallet IS connected AND its client is ready (so it is the wrong one,
  *   or the caller would be ready): "Switch wallet" disconnects it and reopens
- *   the picker, the same flow as the header pill (`useSwitchWallet`).
+ *   the picker, the same flow as the wallet pill (`useSwitchWallet`).
  * - A wallet is connected but its client is not ready yet (a reconnect in
  *   flight): render nothing. That wallet may be the owner, and readiness
  *   needs the client too (`lib/signer.ts`), so offering "Switch wallet" here

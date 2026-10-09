@@ -98,7 +98,9 @@ export function useDelegationSend(accountAddress: string, chainId: number) {
     // Some signer for this account is reachable from THIS device.
     ready: signingPath !== null,
     // #1097: hint condition — the ceremony may hand off to another device.
-    passkeyElsewhere: passkeyLikelyElsewhere(signers),
+    // #3825 design review: only when the PASSKEY will sign — with the owner
+    // wallet connected the EOA path signs and nothing hands off.
+    passkeyElsewhere: signingPath === 'passkey' && passkeyLikelyElsewhere(signers),
     send,
   }
 }

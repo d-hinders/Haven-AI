@@ -159,25 +159,11 @@ const MIN_NEIGHBOUR_CLEARANCE_PX = 14
  */
 const MIN_CONTROL_GAP_PX = 8
 /**
- * Narrowest a truncating chip segment may render before it stops carrying
- * information. Roughly two glyphs plus an ellipsis at this 13px type.
+ * The least a bar control's measured hit rectangle may be on either axis. The
+ * back link is a 13px text row, not a 44px target, so this is deliberately a
+ * "not collapsed / not covered" floor and not the comfort target.
  */
-const LEGIBLE_SEGMENT_PX = 24
-/**
- * Tailwind's `sm`, where the wallet control's label appears (#1803). Not a
- * choice made here: it is the breakpoint #1767 already dropped the chip's
- * chain segment at, and the same one this collapse uses.
- */
-const SM_BREAKPOINT_PX = 640
-/**
- * The wallet control's collapsed box below `sm`. It was set to the
- * notification bell's own 40px square, deliberately, so the phone bar read as
- * one row of equally sized controls rather than as three different shapes.
- * #1989 deleted the bell with the Safe rail; the bar is now two controls and
- * the number no longer mirrors a sibling. Kept at 40 — the tap-target floor is
- * what this constant defends, and that is unchanged.
- */
-const COLLAPSED_WALLET_PX = 40
+const BACK_LINK_MIN_HIT_PX = 12
 
 type Measurement = {
   painted: { w: number; h: number }
@@ -202,20 +188,6 @@ type Measurement = {
   barControlCount: number
   /** Account chips in the header — 0 since #3719 removed the global account picker. */
   accountChipCount: number
-  /**
-   * The wallet control — the bar's RIGHTMOST control, and what #1803 dropped
-   * the label of. Three facts, because the collapse can fail in three ways:
-   * it can not happen (`renderedTextPx` stays wide), it can happen and take
-   * the accessible name with it (`accessibleName` empties — the defect an
-   * icon-only control invites), or it can happen at the wrong size
-   * (`painted`, which must match the bell's 40px box next to it).
-   */
-  wallet: {
-    accessibleName: string
-    renderedTextPx: number
-    painted: { w: number; h: number }
-    hit: { w: number; h: number }
-  } | null
   /** The `w-8 shrink-0 lg:hidden` spacer: the room `TopBar` claims to reserve. */
   slot: { left: number; right: number; width: number; centreX: number } | null
   /** The bar itself. Height, because the spacer's own height is 0. */
@@ -396,65 +368,6 @@ async function measureToggle(page: Page): Promise<Measurement> {
       const slotBox = slotEl?.getBoundingClientRect()
       const headerBox = header.getBoundingClientRect()
 
-      // The wallet control (#1803). Found POSITIONALLY — the rightmost control
-      // in the bar's band — rather than by a label, because every one of its
-      // five states renders a different label and the state under test here
-      // ("Connect wallet") is the fixture's, not the definition.
-      //
-      // `renderedTextPx` sums only segments that actually paint:
-      // `getClientRects().length` is what separates "the label is hidden below
-      // `sm`" from "the label is there and squeezed", which is the exact
-      // distinction #1767 got wrong in the chip's own measurement and had to
-      // fix. `accessibleName` prefers `aria-label` the way the browser's own
-      // name computation does — and that IS the assertion, because with the
-      // label `display: none` there is nothing else left to name the button.
-      const rightmost = inBar.length > 0 ? inBar[inBar.length - 1] : null
-      const walletEl = rightmost
-        ? Array.from(header.querySelectorAll<HTMLElement>('button, a[href], [role="button"]')).find(
-            (el) => el.getBoundingClientRect().left === rightmost.left,
-          ) ?? null
-        : null
-      const walletBox = walletEl?.getBoundingClientRect()
-      const wallet =
-        walletEl && walletBox
-          ? {
-              accessibleName: (
-                walletEl.getAttribute('aria-label') ??
-                Array.from(walletEl.querySelectorAll<HTMLElement>('span'))
-                  .filter((el) => el.getClientRects().length > 0)
-                  .map((el) => el.textContent ?? '')
-                  .join(' ')
-              ).trim(),
-              renderedTextPx: Math.round(
-                Array.from(walletEl.querySelectorAll<HTMLElement>('span'))
-                  .filter((el) => el.getClientRects().length > 0 && !!el.textContent?.trim())
-                  .reduce((sum, el) => sum + el.getBoundingClientRect().width, 0),
-              ),
-              painted: { w: Math.round(walletBox.width), h: Math.round(walletBox.height) },
-              // Its OWN hit rectangle, walked the same way the toggle's is.
-              // The collapsed control is an icon-only square, so it borrows
-              // #1726's invisible 44px extension exactly as the sidebar toggle
-              // does — and exactly like the toggle's, a `::after` overlay has
-              // several silent no-op failure modes that only a real engine's
-              // hit-testing can tell apart from a working one.
-              hit: (() => {
-                const wx = Math.round(walletBox.left + walletBox.width / 2)
-                const wy = Math.round(walletBox.top + walletBox.height / 2)
-                const cap = Math.ceil(Math.max(walletBox.width, walletBox.height) / 2) + 12
-                return {
-                  w:
-                    walkFrom(walletEl, wx, wy, -1, 0, cap) +
-                    walkFrom(walletEl, wx, wy, 1, 0, cap) +
-                    1,
-                  h:
-                    walkFrom(walletEl, wx, wy, 0, -1, cap) +
-                    walkFrom(walletEl, wx, wy, 0, 1, cap) +
-                    1,
-                }
-              })(),
-            }
-          : null
-
       return {
         painted: { w: Math.round(box.width), h: Math.round(box.height) },
         hit: { left: cx - l, right: cx + r, top: cy - u, bottom: cy + d, w: l + r + 1, h: u + d + 1 },
@@ -466,7 +379,6 @@ async function measureToggle(page: Page): Promise<Measurement> {
           ? Math.round(smallestBarGap * 100) / 100
           : null,
         accountChipCount: header.querySelectorAll('button[aria-label^="Active account"]').length,
-        wallet,
         slot: slotBox
           ? {
               left: Math.round(slotBox.left),
@@ -484,6 +396,76 @@ async function measureToggle(page: Page): Promise<Measurement> {
     },
     { half: Math.floor(COMFORTABLE_TAP_TARGET_PX / 2) },
   )
+}
+
+/**
+ * What the top bar's band holds, read from the live DOM (#3825).
+ *
+ * Found by the `[data-app-bar]` contract and the header's own scope, never by
+ * the pill's label: the point is that NOTHING interactive lives in the right
+ * cluster any more, and an assertion that located the pill by name could not
+ * notice a different control arriving in its place. `controls` are the visible
+ * links/buttons in the band left to right, each with a hit rectangle walked
+ * with `elementFromPoint` (a finger's view, not a border box).
+ */
+async function measureBar(page: Page) {
+  return page.evaluate(() => {
+    const header = document.querySelector('header[data-app-chrome]')!
+    const bar = header.querySelector<HTMLElement>('[data-app-bar]')!
+    const selector = 'button, a[href], [role="button"], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    const visible = (el: HTMLElement) => {
+      const b = el.getBoundingClientRect()
+      return b.width > 0 && b.height > 0 && getComputedStyle(el).visibility !== 'hidden'
+    }
+    const nameOf = (el: HTMLElement) =>
+      (el.getAttribute('aria-label') || el.textContent || el.tagName).trim().slice(0, 40)
+    const walk = (el: HTMLElement, ox: number, oy: number, dx: number, dy: number, cap: number) => {
+      let n = 0
+      while (n < cap) {
+        const x = ox + dx * (n + 1)
+        const y = oy + dy * (n + 1)
+        if (x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) break
+        const top = document.elementFromPoint(x, y)
+        if (!(!!top && (top === el || el.contains(top)))) break
+        n += 1
+      }
+      return n
+    }
+    const all = Array.from(header.querySelectorAll<HTMLElement>(selector)).filter(visible)
+    const controls = all
+      .map((el) => {
+        const b = el.getBoundingClientRect()
+        const cx = Math.round(b.left + b.width / 2)
+        const cy = Math.round(b.top + b.height / 2)
+        const top = document.elementFromPoint(cx, cy)
+        const cap = Math.ceil(Math.max(b.width, b.height) / 2) + 12
+        return {
+          label: nameOf(el),
+          left: Math.round(b.left),
+          right: Math.round(b.right),
+          reachableAtCentre: !!top && (top === el || el.contains(top)),
+          hit: {
+            w: walk(el, cx, cy, -1, 0, cap) + walk(el, cx, cy, 1, 0, cap) + 1,
+            h: walk(el, cx, cy, 0, -1, cap) + walk(el, cx, cy, 0, 1, cap) + 1,
+          },
+        }
+      })
+      .sort((a, b) => a.left - b.left)
+    // The right cluster is the bar's LAST direct child region (`ml-auto`).
+    const cluster = bar.lastElementChild as HTMLElement | null
+    const rightClusterControls = cluster
+      ? Array.from(cluster.querySelectorAll<HTMLElement>(selector)).filter(visible).map(nameOf)
+      : ['(no right cluster)']
+    // Every wallet-state name the retired pill could announce as, anywhere in
+    // the chrome band.
+    const WALLET_NAMES = /^(connect wallet|wrong wallet|wrong network|passkey|0x[0-9a-f]{4}…[0-9a-f]{4})$/i
+    return {
+      controls,
+      rightClusterControls,
+      chromeControlNames: all.map(nameOf).filter((n) => WALLET_NAMES.test(n)),
+      scrollOverflowPx: Math.round(bar.scrollWidth - bar.clientWidth),
+    }
+  })
 }
 
 /**
@@ -635,91 +617,65 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
         expect(t.barBottomGap).toBe(0)
         expect(t.barSpansViewport).toBe(true)
 
-        // 8. The controls IN the bar keep a real gap from each other (#1767).
-        //    (6) makes the bar stop over-promising the toggle's slot; the 32px
-        //    it stops giving away has to be absorbed by something, and if
-        //    nothing can truncate, the widest item overflows its parent instead
-        //    of shrinking — measured, `NetworkSwitcher` kept its intrinsic
-        //    176.88px inside a 141px slot and ran 34px under the notification
-        //    bell. Same defect as the toggle-over-chip one this issue started
-        //    with, one control further along, and invisible to every
-        //    toggle-relative assertion above.
-        //
-        //    A GAP floor rather than a no-overlap check: the first version of
-        //    this fix passed no-overlap at 390px with the chip's right edge and
-        //    the bell's left edge both at 210.61 — touching. Design review
-        //    called that what it was, a coincidence of the current account
-        //    name rather than a spacing decision, in a file that rejects a 6px
-        //    gap elsewhere. `TopBar`'s regions now hold `mr-3` apart.
-        //
-        //    Since #3719 removed the account chip, a phone's bar on this route
-        //    holds ONE control (the wallet; `EnvBadge` is a span and the theme
-        //    toggle is `hidden` below `lg`), so on `/dashboard` this floor has
-        //    nothing to measure and does not fire. It still applies wherever
-        //    two controls share the band (a detail route's back link beside
-        //    the wallet), and `barControlCount` is asserted so an empty scan
-        //    cannot pass as "nothing to compare".
-        expect(m.barControlCount).toBeGreaterThan(0)
-        if (m.barControlCount >= 2) {
-          expect(m.smallestBarGap!).toBeGreaterThanOrEqual(MIN_CONTROL_GAP_PX)
-        }
+        // 8. The top bar's band paints NO control on the dashboard (#3825).
+        //    The wallet pill was the only interactive item the phone bar held
+        //    here (`EnvBadge` is a span, the theme toggle is `hidden` below
+        //    `lg`), so removing it leaves an EMPTY band. That is asserted as a
+        //    count rather than assumed: `barControlCount` is the same scan the
+        //    gap floor used to run over, now required to find nothing, so a
+        //    control re-added to the bar (the pill, or any other) fails here
+        //    with the number instead of silently re-crowding a 320px row.
+        //    The right cluster is checked on its own as well, because "the bar
+        //    has no controls" would still pass if a control had merely moved
+        //    to the left region.
+        const bar = await measureBar(page)
+        expect(m.barControlCount).toBe(0)
+        expect(m.smallestBarGap).toBeNull()
+        expect(bar.rightClusterControls).toEqual([])
+        //    ...and no wallet-state control by NAME anywhere in the chrome
+        //    band, so a pill that rendered outside the two regions fails too.
+        expect(bar.chromeControlNames).toEqual([])
 
         // 9. The account chip is GONE (#3719 removed the global active
-        //    account and its picker). It was the row's compressible item, and
-        //    this assertion used to hold its truncated segments to a legibility
-        //    floor (#1767, #1803). With nothing left to squeeze, what remains
-        //    is that the chip stays gone — a reintroduced one would reopen
-        //    every width question above. The wallet collapse (10) still guards
-        //    the row that is left; see (8) for when the gap floor fires.
+        //    account and its picker); a reintroduced one would reopen every
+        //    width question the bar used to have (#1767, #1803).
         expect(m.accountChipCount).toBe(0)
+      })
 
-        // 10. What PAYS for (9), and the two ways paying for it goes wrong
-        //     (#1803, owner decision 2026-08-23).
-        //
-        //     The bar cannot fit three labelled controls at 320 and never
-        //     could; the widest one drops its label rather than everything
-        //     squeezing together. Measured on `/dashboard`: "Connect wallet"
-        //     was 88.64px at 320 (and wrapped to two lines, painting taller
-        //     than the 56px band); collapsed it is the bell's own 40px square.
-        //
-        //     a. The collapse HAPPENED. `renderedTextPx` is the width of the
-        //        label segments that actually paint — 0 below `sm`. Asserted
-        //        on painted width rather than on the absence of the class,
-        //        because `hidden sm:inline` is a claim and this is the render.
-        //     b. The button still has a NAME. This is the defect an icon-only
-        //        control invites: the label is `display: none`, so it stops
-        //        contributing to the accessible name, and without the explicit
-        //        `aria-label` the control announces as "button" — a silent,
-        //        invisible regression that no layout assertion in this file
-        //        would notice. jsdom cannot see it either (no CSS, no layout),
-        //        which is why it is asserted HERE and not only in the unit
-        //        test.
-        //     c. It collapsed to the RIGHT size — the 40px box the
-        //        notification bell next to it already paints. A different
-        //        number would pass (a) and (b) and leave the bar a row of
-        //        mismatched squares.
-        //
-        //     Asserted on BOTH sides of the breakpoint, from the same
-        //     measurement. 1023 is above `sm`, so the label must come BACK
-        //     there: "hide it at every width" is the plausible over-correction
-        //     and it would satisfy (a), (b) and (c) at 320 and 390 without
-        //     anyone noticing the desktop bar had lost its label too.
-        expect(m.wallet).not.toBeNull()
-        expect(m.wallet!.accessibleName.length).toBeGreaterThan(0)
-        if (width < SM_BREAKPOINT_PX) {
-          expect(m.wallet!.renderedTextPx).toBe(0)
-          expect(m.wallet!.painted).toEqual({ w: COLLAPSED_WALLET_PX, h: COLLAPSED_WALLET_PX })
-          //  d. ...and a 40px painted square is 4px under the comfort target,
-          //     so it borrows the same invisible extension the toggle does
-          //     (#1726/#1766). Measured as a hit rectangle, never as a class:
-          //     the whole point of assertion 1 at the top of this file is that
-          //     `after:h-11 after:w-11` in a className proves nothing about
-          //     what a finger reaches.
-          expect(m.wallet!.hit.w).toBeGreaterThanOrEqual(COMFORTABLE_TAP_TARGET_PX)
-          expect(m.wallet!.hit.h).toBeGreaterThanOrEqual(COMFORTABLE_TAP_TARGET_PX)
-        } else {
-          expect(m.wallet!.renderedTextPx).toBeGreaterThan(LEGIBLE_SEGMENT_PX)
-        }
+      test('on a detail route the bar keeps exactly its back link, which is reachable and clear of the edges (#3825)', async ({
+        page,
+      }) => {
+        // The one control the phone bar still holds. This is the "remaining
+        // items keep their tap target and do not overlap" half of the pill's
+        // removal: with the right cluster empty the back link is alone in the
+        // band, so a regression that re-crowds it shows as a second control
+        // (count) or as an overlap (gap floor), at the widths where the old
+        // row ran out of room.
+        await page.goto('/agents/agent-research')
+        await page.locator('header[data-app-chrome] a[href="/agents"]').waitFor()
+
+        const bar = await measureBar(page)
+
+        // Exactly the back link: one control, labelled, in the LEFT region.
+        expect(bar.controls.map((c) => c.label)).toEqual(['Agents'])
+        expect(bar.rightClusterControls).toEqual([])
+        expect(bar.chromeControlNames).toEqual([])
+
+        const back = bar.controls[0]
+        // It is the thing a finger reaches at its own centre: nothing in the
+        // chrome (and no stale overlay) has taken its taps.
+        expect(back.reachableAtCentre).toBe(true)
+        // Measured hit rectangle, the same walk the toggle's uses. The link is
+        // a 13px text row, so this records the real number instead of a
+        // comfort target it never had; the floor is "not collapsed".
+        expect(back.hit.h).toBeGreaterThanOrEqual(BACK_LINK_MIN_HIT_PX)
+        expect(back.hit.w).toBeGreaterThanOrEqual(BACK_LINK_MIN_HIT_PX)
+        // On the left, inside the viewport, and nowhere near the right edge
+        // the pill used to occupy.
+        expect(back.left).toBeGreaterThanOrEqual(0)
+        expect(back.right).toBeLessThanOrEqual(width / 2)
+        // Nothing overflowed the bar sideways.
+        expect(bar.scrollOverflowPx).toBeLessThanOrEqual(0)
       })
     })
   }

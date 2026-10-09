@@ -65,6 +65,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { ApprovalRequiredBanner, Address } from '@/components/haven'
 import WalletConnectAction from '@/components/WalletConnectAction'
+import PasskeyElsewhereHint from '@/components/PasskeyElsewhereHint'
 import { formatAllowanceAmount } from '@/lib/allowance-format'
 import { timeAgo } from '@/lib/format'
 import {
@@ -73,6 +74,7 @@ import {
   type RekeyFailure,
   type CompleteResult,
 } from '@/hooks/useAgentRekey'
+import { useAgentPasskeyElsewhere } from '@/hooks/useAgentPasskeyElsewhere'
 import type { PaymentActivityItem } from '@/hooks/useAgentActivity'
 
 /** Why the owner is replacing the key. Same mechanics, different urgency. */
@@ -150,6 +152,9 @@ export function ReplaceSigningKeyModal({
   onCompleted: () => void
 }) {
   const rekey = useAgentRekey(agentId, chainId)
+  // #3825: the #1097 cross-device heads-up — read beside the money-path
+  // re-key hook, never through it.
+  const passkeyElsewhere = useAgentPasskeyElsewhere(agentId, chainId, open)
   const [step, setStep] = useState<Step>('reason')
   const [reason, setReason] = useState<Reason | null>(null)
   const [newAddress, setNewAddress] = useState('')
@@ -420,6 +425,8 @@ export function ReplaceSigningKeyModal({
           {rekey.signersState === 'loaded' ? <WalletConnectAction className="mt-3" /> : null}
         </ApprovalRequiredBanner>
       ) : null}
+
+      {!blocked && passkeyElsewhere && step !== 'done' ? <PasskeyElsewhereHint className="mb-4" /> : null}
 
       {step === 'reason' ? renderReason() : null}
       {step === 'address' ? renderAddress() : null}

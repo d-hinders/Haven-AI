@@ -1,6 +1,8 @@
 /**
- * A mock EIP-1193 browser wallet, for specs that need `WalletButton`'s
- * CONNECTED renderings (#1944).
+ * A mock EIP-1193 browser wallet, for specs that need a CONNECTED owner wallet
+ * through the real wagmi path (#1944; since #3825 the consumer is
+ * `wallet-signer-offering.spec.ts`, which reads the resolved signer off the
+ * account page's in-flow connect/switch control).
  *
  * ── Why this is a legitimate fixture and not a doctored render ───────────────
  *
@@ -52,21 +54,8 @@ const WAGMI_STORAGE_PREFIX = 'wagmi'
  */
 export const connectedWalletAddress = '0x3333333333333333333333333333333333333333'
 
-/** `truncateAddress(connectedWalletAddress)` — see `components/haven`. */
-export const connectedWalletShortName = '0x3333…3333'
-
 /** Base — a chain `lib/chains.ts` offers, so the connected branch renders. */
 export const SUPPORTED_CHAIN_ID_HEX = '0x2105'
-
-/**
- * Ethereum mainnet — a REAL chain that Haven does not offer
- * (`SUPPORTED_CHAIN_IDS` is Base + Base Sepolia). Chosen deliberately over an
- * invented id: #1930 declined to redden `ErrorBoundary` with `chain_id: 999`
- * because a fixture could produce a capture the product cannot, and the same
- * discipline applies here in the opposite direction — a user whose wallet is on
- * Ethereum mainnet is the ordinary way this state happens.
- */
-export const UNSUPPORTED_CHAIN_ID_HEX = '0x1'
 
 /**
  * Install the mock wallet BEFORE any app code runs, and mark it as previously

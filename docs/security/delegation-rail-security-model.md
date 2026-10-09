@@ -4,6 +4,9 @@ status: current
 contract: true
 covers:
   - packages/backend/src/middleware/owner-cli.ts
+  - packages/backend/src/domain/user-signers.ts
+  - packages/backend/src/routes/user.ts
+  - packages/frontend/src/components/PasskeyElsewhereHint.tsx
   - packages/backend/src/infra/repositories/merchants.ts
   - packages/backend/src/modules/catalog/merchant-catalog.ts
   - packages/backend/src/db/migrations/101_merchant_pay_to.ts
@@ -946,7 +949,13 @@ plus per-credential enrollment time** (`key_id`, P256 x/y, owner address, and
 "Passkey · added {date}"; nothing secret, nothing spend-enabling). It powers
 login-time signer resolution and the account-level recovery card. It is a
 read: no route lets Haven — or this endpoint's caller — change a signer set
-without an existing signer's signature (invariant 13 unchanged).
+without an existing signer's signature (invariant 13 unchanged). Since #3825
+`GET /user/signers` lists the same material across all of the caller's live
+delegation-rail accounts — each passkey (by `key_id`) and owner wallet once,
+with the accounts it approves — for Settings → Signers. Its signer material is
+`key_id`, owner address and enrollment time only (no P256 coordinates), next to
+each approved account's id, address, name and chain; it is scoped to the
+authenticated user, and is equally a read.
 
 **Management surface (#1081).** Signer changes are reachable the same two ways:
 agent-scoped (`/agents/:id/account-signers/{prepare,submit}`, #888) and
@@ -1015,8 +1024,13 @@ simultaneously blocked gated actions for the same state. The decision:
 EOA when the connected wallet **is** the set's named owner (#2068) → any
 passkey — so a mixed account keeps
 signing with its connected owner wallet and only the pure-passkey marker-less
-case changed; the fallback credential is **disclosed** in the wallet menu
-(#1952's rendering, reachable since this decision) before any ceremony. This
+case changed; the fallback credential is **disclosed** before any ceremony.
+That disclosure was the wallet menu's (#1952's rendering) until #3825 took the
+wallet pill out of the top bar; since then each owner-signing flow renders the
+shared `PasskeyElsewhereHint` line itself — "This account's passkey may be on
+another device" — whenever the passkey path is the one that will sign and no
+enrolled passkey is marked on this device (owner decision 2026-10-09). With the
+owner wallet connected the EOA signs and no hint shows. This
 offers no signer that cannot sign: the set is the account's on-chain-enrolled
 signers, selection draws only from that account+chain-scoped set, and device
 availability — the one unknown — is answered by the ceremony itself.
@@ -1043,8 +1057,9 @@ since #2068 — for an owner-only set exactly when the connected wallet is
 the named owner (the same address check; an unrelated wallet stays blocked,
 and since #2073 that block has its own name: the gate answers
 `wrong_wallet`, carrying both addresses, rather than folding the mismatch
-into `no_signer`. The distinct kind changes what the UI *says* — the header
-wallet pill and the action-area caption name the mismatch instead of asking
+into `no_signer`. The distinct kind changes what the UI *says* — the wallet
+pill (in the connect flow's approval step; #3825 removed it from the header)
+and the action-area caption name the mismatch instead of asking
 the user to connect the wallet they already connected — and never what may
 *sign*: every consumer treats it as blocked, `wrong_wallet` is produced
 only by the hybrid branch's address compare, and the owner on the wrong
@@ -2816,3 +2831,32 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > selection and the signers card's removal gate (§3's #3812 note, §6);
 > nothing else in this document was re-read for it, and `last-verified` is not
 > bumped.
+>
+> **Re-verified (#3825, 2026-10-09, Settings → Signers; wallet pill leaves the
+> top bar):** the covered files this diff touches are
+> `domain/user-signers.ts` (new: the signer aggregation behind
+> `GET /user/signers`), `routes/user.ts` (that route — owner-scoped, read-only),
+> `components/PasskeyElsewhereHint.tsx` (new: the shared #1097 line),
+> `hooks/useDelegationBudget.ts` (one more read-only return field,
+> `passkeyElsewhere`, true only when the passkey path will sign;
+> `pickSigningPath` untouched), `hooks/useAccountSigners.ts` and
+> `hooks/useDelegationSend.ts` (only their `passkeyElsewhere` return, now gated
+> on the passkey path the same way; `pickSigningPath` untouched),
+> `components/DelegationSendModal.tsx` and `components/DelegationBudgetCard.tsx`
+> (both render the shared hint), and `components/AccountSignersCard.tsx`. The
+> card hides the owner address behind "Show address" and the passkey key ids
+> entirely, and links to Settings → Signers; its Remove gates
+> (`wayCount < 2`), both consequence confirmations, the enrolment action and
+> its in-flow wallet connect are unchanged. Outside the coverage list, the
+> top bar no longer renders the wallet pill (it stays in the connect flow's
+> approval step), and the backend adds the read-only `GET /user/signers`
+> described in §6's read surface. §6's wording about the "header wallet pill"
+> was updated in place; `useAccountOperationGate`, `pickSigningPath` and every
+> signing step are untouched. No new spender, no authority grant, no custody
+> change. The #1969 paragraph's "disclosed in the wallet menu" was rewritten
+> in place: with the pill gone the menu no longer opens for a ready user, so
+> each owner-signing flow now shows the #1097 cross-device line itself — a
+> hint beside a working action, never a gate. Scope of this re-read: §6 (read
+> surface, the #1969 paragraph and the `wrong_wallet` paragraph) and the
+> #3812 note in §3; nothing else in this document was re-read for it, and
+> `last-verified` is not bumped.

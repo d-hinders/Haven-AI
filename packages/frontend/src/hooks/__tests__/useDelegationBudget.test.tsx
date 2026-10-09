@@ -360,6 +360,23 @@ describe('multi-signer accounts (the Daniel regression)', () => {
     passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
   }
 
+  // #3825 design review: the cross-device hint describes the PASSKEY path
+  // only. With the owner wallet connected the EOA signs, and nothing hands off.
+  it('passkeyElsewhere: true on the passkey path with no device marker', async () => {
+    mockApi(MIXED_SIGNERS)
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    expect(result.current.passkeyElsewhere).toBe(true)
+  })
+
+  it('passkeyElsewhere: false when the connected owner wallet will sign', async () => {
+    mockApi(MIXED_SIGNERS)
+    mockSigner.mockReturnValue({ type: 'eoa', address: MIXED_SIGNERS.owner_address, walletClient: {} })
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    expect(result.current.passkeyElsewhere).toBe(false)
+  })
+
   it('stays ready and signs with the passkey after an EOA owner is enrolled', async () => {
     mockApi(MIXED_SIGNERS)
     mockOnDevice.mockReturnValue(true) // the passkey is on this device

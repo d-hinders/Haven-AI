@@ -34,6 +34,16 @@ covers:
 last-verified: "2026-10-08"
 ---
 
+> **Re-verified #3825 (2026-10-09, `GET /user/signers`):** this diff touched
+> one file in this document's coverage list,
+> `packages/backend/src/openapi/route-modules.generated.ts`, and none of this
+> document's mode/rollback/env semantics. The map gains exactly one operation —
+> `GET /user/signers` → `routes/user.ts`, the owner-scoped read that lists a
+> user's signers once across their accounts. `routes/user.ts` is already an
+> enforced module, no route file is added or moved, `enforcedModules` is
+> untouched, and `.env.dev.example` gains no variable. Nothing else in this
+> document was re-verified, and `last-verified` is not bumped.
+
 > **Re-verified #3821 (2026-10-09, opt-in frontend previews):** the frontend
 > project now deploys only `dev`, `main` and `preview/*` branches
 > (`git.deploymentEnabled` in `packages/frontend/vercel.json`). This note's

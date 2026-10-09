@@ -225,7 +225,7 @@ export async function aggregateRefusalsForUserByAgent(
           GROUP BY agent_id, reason
        ) per_reason
       GROUP BY agent_id
-      ORDER BY attempts DESC, agent_id ASC`,
+      ORDER BY SUM(reason_attempts) DESC, agent_id ASC`,
     [userId, range.fromExclusive, range.toInclusive],
   )
   return result.rows.map((row) => ({

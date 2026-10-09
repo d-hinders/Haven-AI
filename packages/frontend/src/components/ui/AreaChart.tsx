@@ -107,7 +107,19 @@ export interface AreaPoint {
   value: number
 }
 
-export interface AreaChartProps {
+/**
+ * A sparkline point. `value: null` is a day with no snapshot — a GAP, drawn
+ * as a break in the line, never as a zero: a zero would state a balance of
+ * nothing on a day nobody measured (#3805).
+ */
+export interface SparklinePoint {
+  label: string
+  value: number | null
+}
+
+export interface FullChartProps {
+  /** Omitted for the default full chart: gridlines, ticks, delta, tooltip. */
+  variant?: 'full'
   points: AreaPoint[]
   /**
    * Display currency code the figures are in — named only in the accessible
@@ -130,7 +142,139 @@ export interface AreaChartProps {
   className?: string
 }
 
-export function AreaChart({
+interface SparklineProps {
+  variant: 'sparkline'
+  points: SparklinePoint[]
+  /**
+   * Rendered height in px (default 40). The caller owns it — a sparkline
+   * scales to the row it sits in, not to the chart's own 140/200px treatment.
+   */
+  height?: number
+  /** Required summary sentence: the sparkline is `role="img"` with no hidden
+   *  data table and is not a tab stop — the sentence IS the data access. */
+  ariaLabel: string
+  className?: string
+}
+
+export type AreaChartProps = FullChartProps | SparklineProps
+
+/** The sparkline's default height, and its viewBox width (see `pct`). */
+const SPARKLINE_HEIGHT = 40
+const SPARKLINE_VIEW_W = 640
+
+export function AreaChart(props: AreaChartProps) {
+  if (props.variant === 'sparkline') {
+    const { points, height = SPARKLINE_HEIGHT, ariaLabel, className = '' } = props
+    return <Sparkline points={points} height={height} ariaLabel={ariaLabel} className={className} />
+  }
+  return <AreaChartFull {...props} />
+}
+
+/**
+ * The sparkline variant (#3805): the balance line alone — no gridlines, ticks,
+ * x labels, delta annotation, tooltip or caret; one dot on the last point.
+ * `role="img"` with the required `ariaLabel`, NOT a tab stop, and no hidden
+ * data table — a glanceable shape, whose data access is the summary sentence.
+ * Below `MIN_CHARTABLE_DAYS` it renders a flat placeholder line of the same
+ * height instead of `null`, so a layout that reserved the sparkline's box
+ * does not jump on the first snapshot arriving. Gaps are breaks in the line,
+ * and there is no draw animation: a shape that redraws itself on every data
+ * refresh is noise, not information.
+ */
+function Sparkline({
+  points,
+  height,
+  ariaLabel,
+  className = '',
+}: {
+  points: SparklinePoint[]
+  height: number
+  ariaLabel: string
+  className?: string
+}) {
+  const chartable = points.length >= MIN_CHARTABLE_DAYS
+
+  // The same scale maths as the full chart (data + headroom, never zero-based),
+  // computed over the measured values only — a null is a missing day, not a
+  // data point, and must not drag the scale.
+  const measured = points
+    .map((p) => p.value)
+    .filter((v): v is number => v !== null && Number.isFinite(v))
+  const min = measured.length > 0 ? Math.min(...measured) : 0
+  const max = measured.length > 0 ? Math.max(...measured) : 0
+  const pad = Math.max((max - min) * HEADROOM, 2)
+  const scale = chartScaleRange(Math.max(0, min - pad), max + pad)
+  const floor = scale.min
+  const span = scale.max - floor
+  const xOf = (index: number) =>
+    points.length <= 1 ? SPARKLINE_VIEW_W / 2 : (SPARKLINE_VIEW_W * index) / (points.length - 1)
+  const yOf = (value: number) => (span <= 0 ? height / 2 : height - ((value - floor) / span) * height)
+
+  // Line segments, split at gaps: each run of consecutive measured days is
+  // its own path, so a day with no snapshot is a break, not a drop to zero.
+  const segments: string[] = []
+  let run: string[] = []
+  let lastIndex = -1
+  points.forEach((p, i) => {
+    if (p.value === null || !Number.isFinite(p.value)) {
+      if (run.length > 1) segments.push(run.join(' '))
+      run = []
+      return
+    }
+    lastIndex = i
+    run.push(`${run.length === 0 ? 'M' : 'L'}${xOf(i).toFixed(2)} ${yOf(p.value).toFixed(2)}`)
+  })
+  if (run.length > 1) segments.push(run.join(' '))
+
+  return (
+    <div data-testid="area-chart-sparkline" className={`w-full ${className}`.trim()}>
+      <svg
+        role="img"
+        aria-label={ariaLabel}
+        viewBox={`0 0 ${SPARKLINE_VIEW_W} ${height}`}
+        preserveAspectRatio="none"
+        className="block w-full"
+        style={{ height }}
+      >
+        {!chartable ? (
+          <line
+            x1={0}
+            y1={height / 2}
+            x2={SPARKLINE_VIEW_W}
+            y2={height / 2}
+            stroke={AXIS_COLOR}
+            strokeWidth={2}
+          />
+        ) : (
+          <>
+            {segments.map((d, i) => (
+              <path
+                key={i}
+                d={d}
+                fill="none"
+                stroke={LINE_COLOR}
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            ))}
+            {lastIndex >= 0 && points[lastIndex].value !== null && (
+              <circle
+                cx={xOf(lastIndex)}
+                cy={yOf(points[lastIndex].value as number)}
+                r={DOT_R}
+                fill={LINE_COLOR}
+                stroke={LINE_COLOR}
+              />
+            )}
+          </>
+        )}
+      </svg>
+    </div>
+  )
+}
+
+function AreaChartFull({
   points,
   currency,
   ariaLabel,
@@ -138,7 +282,7 @@ export function AreaChart({
   formatTick = formatValue,
   narrow = false,
   className = '',
-}: AreaChartProps) {
+}: FullChartProps) {
   const [hovered, setHovered] = useState<number | null>(null)
   const [pinned, setPinned] = useState<number | null>(null)
   const [caret, setCaret] = useState<number | null>(null)

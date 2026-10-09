@@ -587,6 +587,108 @@ test.describe('design-system visual regression', () => {
   }
 
   /**
+   * ── The #3805 showcase clips — Amount currency, AttentionList, sparkline, inline StatTile ──
+   *
+   * The four design-system pieces the redesigned dashboard (#3801) is built
+   * from, each photographed against its own sample the way the
+   * StackedBarChart clips above are: one clip per `data-testid` sample, per
+   * viewport, per scheme — 16 baselines in all. Each clip asserts its own box
+   * fits the viewport (the fold guarantee above), so an edit that pushes a
+   * sample past the fold fails HERE, naming the sample.
+   *
+   * Placement is load-bearing and recorded in the issue: the four samples sit
+   * AFTER the AreaChart section, so none of the 12 StackedBarChart clips
+   * shifts by a pixel (#3441). A clip above this point flipping in a PR that
+   * touches none of it is a placement defect, not a paint drift.
+   */
+  const SAMPLE_MAX_DIFF_PIXELS = 100
+
+  for (const vp of VIEWPORTS) {
+    test(`/design-system Amount currency sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-amount-currency')
+      await expect(sample).toHaveCount(1)
+      await assertFitsViewport(sample, vp.height, 'the Amount currency sample')
+
+      await expect(sample).toHaveScreenshot(`design-system-amount-currency-${vp.name}${schemeSuffix}.png`, {
+        animations: 'disabled',
+        caret: 'hide',
+        maxDiffPixels: SAMPLE_MAX_DIFF_PIXELS,
+        threshold: PIXEL_THRESHOLD,
+      })
+    })
+
+    test(`/design-system AttentionList sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-attention-list')
+      await expect(sample).toHaveCount(1)
+      // All four tone items rendered — a dismiss here is interaction state,
+      // and this gate photographs the resting page only.
+      await expect(sample.getByTestId(/^attention-dismiss-/)).toHaveCount(4)
+      await assertFitsViewport(sample, vp.height, 'the AttentionList sample')
+
+      await expect(sample).toHaveScreenshot(`design-system-attention-list-${vp.name}${schemeSuffix}.png`, {
+        animations: 'disabled',
+        caret: 'hide',
+        maxDiffPixels: SAMPLE_MAX_DIFF_PIXELS,
+        threshold: PIXEL_THRESHOLD,
+      })
+    })
+
+    test(`/design-system AreaChart sparkline sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-area-chart-sparkline')
+      await expect(sample).toHaveCount(1)
+      await assertFitsViewport(sample, vp.height, 'the AreaChart sparkline sample')
+
+      await expect(sample).toHaveScreenshot(`design-system-area-chart-sparkline-${vp.name}${schemeSuffix}.png`, {
+        animations: 'disabled',
+        caret: 'hide',
+        maxDiffPixels: SAMPLE_MAX_DIFF_PIXELS,
+        threshold: PIXEL_THRESHOLD,
+      })
+    })
+
+    test(`/design-system StatTile inline sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-stat-tile-inline')
+      await expect(sample).toHaveCount(1)
+      await assertFitsViewport(sample, vp.height, 'the StatTile inline sample')
+
+      await expect(sample).toHaveScreenshot(`design-system-stat-tile-inline-${vp.name}${schemeSuffix}.png`, {
+        animations: 'disabled',
+        caret: 'hide',
+        maxDiffPixels: SAMPLE_MAX_DIFF_PIXELS,
+        threshold: PIXEL_THRESHOLD,
+      })
+    })
+  }
+
+  /**
    * The fold guarantee for the clips above: the element being captured must
    * fit the viewport, because the page scrolls INSIDE the shell and pixels
    * past the fold are never painted — a clip that outgrows the viewport would

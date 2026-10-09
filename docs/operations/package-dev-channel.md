@@ -106,6 +106,12 @@ and the `release` skill.
 >
 > The rest of this document was not re-read for it, and `last-verified` is not bumped.
 
+> **Re-verified unchanged (2026-10-09, `ALCHEMY_HISTORY_API_KEY` added):**
+> - **What changed.** `config.ts` gains `alchemyHistoryApiKey`, read by the Base / Base Sepolia transaction-history reads only. No connector, dist-tag or channel variable is touched.
+> - **What did not.** No dist-tag, channel or `HAVEN_CONNECTOR_CHANNEL` behaviour moves.
+>
+> The rest of this document was not re-read for it, and `last-verified` is not bumped.
+
 > **Re-verified unchanged (2026-10-07, `BLOCKSCOUT_API_KEY` added):**
 > - **What changed.** `config.ts` gains `blockscoutApiKey`, read by the Base / Base Sepolia explorer history reads only. No connector, dist-tag or channel variable is touched.
 > - **What did not.** No dist-tag, channel or `HAVEN_CONNECTOR_CHANNEL` behaviour moves.

@@ -93,6 +93,16 @@ last-verified: "2026-10-08"
 >
 > Nothing else in this document was re-verified, and `last-verified` is not bumped.
 
+> **Re-verified (2026-10-09, `ALCHEMY_HISTORY_API_KEY` added):** a new
+> optional backend variable. When set, Base and Base Sepolia transaction
+> history is read through Alchemy's transfers API (`alchemy_getAssetTransfers`,
+> hosts `base-mainnet` / `base-sepolia.g.alchemy.com`) instead of Blockscout,
+> whose public API answers Railway with a Cloudflare challenge (HTTP 403) and
+> whose keyed API puts Base behind a paid plan. Use a key from its own Alchemy
+> app, apart from the RPC app. Unset, history stays on Blockscout as before.
+> No other variable, value or deploy step changes. Nothing else in this
+> document was re-verified, and `last-verified` is not bumped.
+
 > **Re-verified (2026-10-07, `BLOCKSCOUT_API_KEY` added):** a new optional
 > backend variable. When set, it is sent as `apikey` on the Base and Base
 > Sepolia Blockscout history reads; unset, the reads stay anonymous as before.

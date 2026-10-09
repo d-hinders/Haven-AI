@@ -2130,7 +2130,7 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
-        title="Receive funds"
+        title="Deposit address"
         description="Manual funding surfaces must make the Haven wallet, network, supported tokens, and copy action obvious before the user sends anything on-chain."
       >
         <Card hover={false} className="max-w-xl p-5">
@@ -2139,7 +2139,7 @@ export default function DesignSystemPage() {
               <p className="text-sm font-semibold text-[var(--v2-ink)]">Operating wallet</p>
               <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Base</p>
             </div>
-            <StatusBadge>On-chain receive</StatusBadge>
+            <StatusBadge>On-chain deposit</StatusBadge>
           </div>
           <div className="mt-5 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
             <p className="text-xs font-medium text-[var(--v2-ink-3)]">Haven wallet address</p>

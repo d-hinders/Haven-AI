@@ -138,7 +138,7 @@ export default function ReceiveFundsModal({ open, account, onClose }: Props) {
                 )}
               </div>
               <span className="rounded-full bg-[var(--v2-surface-2)] px-2 py-1 text-xs font-medium text-[var(--v2-ink-2)]">
-                On-chain receive
+                On-chain deposit
               </span>
             </div>
           </Card>

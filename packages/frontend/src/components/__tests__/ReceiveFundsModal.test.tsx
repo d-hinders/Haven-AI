@@ -76,6 +76,9 @@ describe('ReceiveFundsModal', () => {
     render(<ReceiveFundsModal open account={SAFE} onClose={onClose} />)
 
     expect(screen.getByRole('heading', { name: 'Deposit address' })).toBeInTheDocument()
+    // The last 'receive' in the flow: the rail badge now matches the deposit
+    // framing of the modal title.
+    expect(screen.getByText('On-chain deposit')).toBeInTheDocument()
     expect(screen.getByText('Based')).toBeInTheDocument()
     expect(screen.getAllByText('Base').length).toBeGreaterThan(0)
     expect(screen.getByText(SAFE.account_address)).toBeInTheDocument()

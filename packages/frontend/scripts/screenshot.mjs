@@ -1086,12 +1086,121 @@ export const FIXTURE_OVERVIEW = {
   // photographs a number the product cannot produce.
   actionableApprovals: 0, pendingApprovals: 0,
   onboardingProgress: { hasFirstAgentPayment: true },
+  // #3803: the same section keys the typed e2e fixture carries (the parity
+  // test `fixture-shape-parity.test.ts` holds the two together). Values are
+  // this harness's showcase dataset; shapes are identical.
+  agentCount: { active: 2, paused: 1, pending_approval: 1 },
+  accounts: [
+    {
+      accountId: FIXTURE_ACCOUNT.id,
+      chainId: FIXTURE_ACCOUNT.chain_id,
+      isTestnet: false,
+      usdcBalanceAtomic: '12640550000',
+      usdcDecimals: 6,
+      usdcBalanceFreshness: { status: 'stale', asOf: '2026-10-09T10:00:00.000Z' },
+      funded: true,
+      needs_backup_recommendation: false,
+      usdcPace7dAtomic: '62500000',
+    },
+    {
+      accountId: 'safe-showcase-sepolia',
+      chainId: 84532,
+      isTestnet: true,
+      usdcBalanceAtomic: '500000000',
+      usdcDecimals: 6,
+      funded: true,
+      needs_backup_recommendation: false,
+      usdcPace7dAtomic: '10000000',
+    },
+  ],
+  spotRates: { USDC: 1 },
+  spend: {
+    scope: 'mainnet',
+    d7: {
+      gross: { usd: 185.0, eur: 168.4, sek: 1991.0 },
+      net: { usd: 111.0, eur: 101.0, sek: 1194.6 },
+      approx: false,
+      payments: 6,
+      distinctMerchants: 3,
+      budgetStops: 1,
+    },
+    d30: {
+      gross: { usd: 740.0, eur: 673.4, sek: 7964.0 },
+      net: { usd: 481.0, eur: 437.7, sek: 5176.6 },
+      approx: true,
+      payments: 21,
+      distinctMerchants: 5,
+      budgetStops: 3,
+    },
+    topMerchant7d: {
+      key: 'api.example.dev',
+      x402ResourceUrl: 'https://api.example.dev/reports',
+      to: ADDR.merchant,
+      merchantName: null,
+    },
+    failedIntents7d: 1,
+    balance_by_day: Array.from({ length: 30 }, (_, i) => {
+      const day = new Date(Date.UTC(2026, 8, 10 + i))
+      return {
+        snapshotDate: day.toISOString().slice(0, 10),
+        totalUsd: 12_615 + i * 0.85,
+        totalEur: 11_668 + i * 0.79,
+        totalSek: i % 7 === 0 ? null : 135_800 + i * 9.2,
+      }
+    }),
+  },
   agents: FIXTURE_AGENTS.map((a) => ({
     id: a.id, name: a.name, status: a.status, accountId: a.account_id,
     accountName: a.account_name, accountChainId: a.account_chain_id,
+    ...(a.status === 'pending_approval' ? { setupStatus: 'awaiting_connection' } : {}),
     allowances: a.allowances.map((x) => ({
       tokenSymbol: x.token_symbol, allowanceAmount: x.allowance_amount, resetPeriodMin: x.reset_period_min,
     })),
+    budgets: a.status === 'pending_approval' ? [] : [
+      {
+        id: a.id === 'agent-research'
+          ? '9d1f4c0a-0000-4000-8000-0000000000a1'
+          : '9d1f4c0a-0000-4000-8000-0000000000a2',
+        delegationHash: a.id === 'agent-research' ? `0x${'31'.repeat(32)}` : `0x${'32'.repeat(32)}`,
+        chainId: a.account_chain_id,
+        tokenAddress: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+        tokenSymbol: 'USDC',
+        decimals: 6,
+        budgetAtomic: a.id === 'agent-research' ? '250000000' : '50000000',
+        // Mixed periods: a daily budget on the research agent, a weekly one
+        // on the second active agent — the captions must render both.
+        periodSeconds: a.id === 'agent-research' ? 86_400 : 604_800,
+        startDate: '2026-10-08T10:00:00.000Z',
+        expiresAt: '2027-10-08T10:00:00.000Z',
+        periodEnd: '2026-10-10T10:00:00.000Z',
+      },
+    ],
+    receivedSubBudgets: a.id === 'agent-research' ? [] : [
+      { parentAgentId: 'agent-research', parentAgentName: 'Research agent', open: true },
+    ],
+    stats: {
+      d7: {
+        gross: { usd: 62.5, eur: 57.38, sek: 672.5 },
+        net: { usd: 37.5, eur: 34.43, sek: 403.5 },
+        approx: false,
+        payments: 4,
+        refusals: { budget: 1, scope: 0, failed: 0, haven: 0 },
+      },
+      d30: {
+        gross: { usd: 250.0, eur: 229.5, sek: 2690.0 },
+        net: { usd: 162.5, eur: 149.18, sek: 1748.5 },
+        approx: true,
+        payments: 14,
+        refusals: { budget: 2, scope: 1, failed: 1, haven: 0 },
+      },
+      lastPaymentAt: '2026-10-09T09:41:00.000Z',
+      lastCounterparty: a.status === 'pending_approval' ? null : {
+        source: 'x402',
+        x402ResourceUrl: 'https://api.example.dev/reports',
+        to: ADDR.merchant,
+        merchantName: null,
+      },
+    },
   })),
   transactions: FIXTURE_TXS.slice(0, 4),
 }

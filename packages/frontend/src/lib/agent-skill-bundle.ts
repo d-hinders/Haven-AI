@@ -405,6 +405,20 @@ check on in-flight payments. Do not poll in a tight loop.
   reports a missing or invalid credential, tell the user to re-run the Haven
   connector command.
 
+## Stale tool list
+
+Every hosted Haven result carries \`contract_fingerprint\` and
+\`server_version\` at the top level of its JSON. If a result's
+\`contract_fingerprint\` differs from the one in the server instructions you
+loaded at connect, or a \`next_arguments\` doesn't fit the schema you loaded
+for the hosted tool it names, your tool list is stale — reconnect or restart
+the session before continuing, and never hand-build or reshape a payload to
+make it fit; defer to the live schema and the \`next_arguments\` Haven returns.
+(A misfit on a signer tool is signer skew, not a stale list.) If a payment is
+already prepared or funded, keep its \`payment_id\`: after reconnecting,
+resume through \`haven_get_payment_status\` or \`haven_resume_x402_payment\`
+(\`haven_sweep_delegate\` for a stranded bridge balance). Never pay again.
+
 ## Failure handling
 
 Haven tool failures are shaped like \`{ success: false, code, message, ... }\`

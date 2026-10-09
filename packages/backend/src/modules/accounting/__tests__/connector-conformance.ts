@@ -226,6 +226,11 @@ export function feedTransaction(paymentId: string, over: Partial<FeedTransaction
     fxAt: '2026-09-10T09:30:00.000Z',
     receiptRef: 'receipt-1',
     merchantReceipt: null,
+    // #3767: the contract's hash fields. `null` renders a retired-rail push;
+    // cases that need a booked hash override via `over`.
+    txHash: null,
+    txHashIsFunding: false,
+    fundingTxHash: null,
     suggestedAccount: '6540',
     ...over,
   }
@@ -235,7 +240,10 @@ export function feedTransaction(paymentId: string, over: Partial<FeedTransaction
 export function accountingEntry(paymentId: string) {
   const tx = feedTransaction(paymentId)
   return {
-    paymentId, txHash: '0xabc', chainId: 84532, settledAt: tx.settledAt, direction: 'out' as const,
+    paymentId, txHash: '0xabc',
+    bookedTxHash: null, bookedTxHashIsFunding: false, fundingTxHash: null,
+    settlementScheme: null, verifiedSettlementTxHash: null, pinnedBookedTxHash: null, pinnedBookedTxKind: null,
+    chainId: 84532, settledAt: tx.settledAt, direction: 'out' as const,
     counterparty: { ...tx.counterparty, country: null }, resourceUrl: tx.resourceUrl, token: tx.token,
     amountAtomic: tx.amountAtomic, amountHuman: '0.001', amountSek: tx.amountSek, fxRate: tx.fxRate,
     fxSource: tx.fxSource, fxAt: tx.fxAt, fxRates: { SEK: 10.42, EUR: 0.92, DKK: 6.87 },

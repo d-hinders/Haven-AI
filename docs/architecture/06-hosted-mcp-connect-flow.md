@@ -22,7 +22,7 @@ covers:
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/modules/x402/authorize.ts
   - packages/frontend/src/components/connect-agent/WaitingForConnector.tsx
-last-verified: "2026-10-05"
+last-verified: "2026-10-08"
 ---
 
 # Haven — Hosted MCP Connect Flow And Edge-Signing Contract
@@ -38,6 +38,19 @@ runtime or `@haven_ai/signer`.
 | Hosted MCP | API key / Bearer token | Identity, state reads, orchestration, unsigned payload construction, signature relay |
 | Edge signer | Delegate private key | Local signing authority |
 | Budget delegation | On-chain caveat enforcers | Automatic-spend enforcement |
+
+**Merchant egress (#3747).** Every hosted merchant request — quote, MCP
+session, tool call, paid delivery, discovery — is additionally constrained by
+the string-level egress policy in
+[docs/security/hosted-egress.md](../security/hosted-egress.md): https-only
+public hosts (no IP literals, no localhost or internal names — including
+`*.railway.internal`), GET redirects followed only with every hop re-checked
+(≤3; a redirect on any other method is refused), while-reading response byte
+caps, and short probe budgets with a finite paid-delivery budget. The same
+policy runs at quote/prepare time, so a bad target is refused **before**
+funding; a refusal during paid delivery after the request was sent routes
+through the #1300 verify-then-sweep handling. Accepted residual: a public
+name whose DNS answer points at private space is not blocked (#3742–#3744).
 
 API authentication is identity, a delegate signature is authority, and the
 on-chain caveat stack is enforcement. Hosted MCP must never accept, store, or log a
@@ -61,9 +74,12 @@ permissions require action by the Safe owner outside Haven.
 2. Haven creates a pending setup and returns a setup token and connector
    command.
 3. The connector normally runs locally, generates the delegate signing key and
-   API key, and stores both in protected local runtime configuration. Before
-   it generates anything it checks whether this machine's bare `haven` /
-   `haven-signer` pair already belongs to a different agent with a live key
+   API key, and stores both in protected local runtime configuration. A default
+   setup names the pair from the agent's display name
+   ([#3737](https://github.com/d-hinders/Haven-AI/issues/3737)) and displaces
+   nothing, so it never has to ask. Only a bare-pair run — `--bare`, or
+   `--replace` — can collide with an agent already wired to the bare
+   `haven` / `haven-signer` pair with a live key
    ([#2551](https://github.com/d-hinders/Haven-AI/issues/2551)): a terminal is
    asked to replace or install alongside, a non-interactive run refuses, and
    either way declining reaches neither key generation nor step 4. A server
@@ -176,16 +192,19 @@ haven_quote_x402 / haven_pay_x402_quote
   → haven_submit                       (relays the FUNDING signature)
   → haven_x402_sign_header
   → merchant retry or haven_complete_mcp_tool
-  → haven_report_x402_outcome          (only when YOU did the retry)
-  → haven_report_settlement_evidence   (#3475 follow-up: only on an accepted outcome
-                                         with no settlement recorded yet, and only if the
-                                         merchant returned PAYMENT-RESPONSE.transaction)
+  → haven_report_x402_outcome          (only when YOU did the retry; pass the merchant's
+                                         PAYMENT-RESPONSE as payment_response on the SAME
+                                         call when it names a transaction — #3727)
+  (the SDK's own delivery — hosted complete/settle and the local paid retry —
+   reports the merchant settlement itself, #3764; haven_report_settlement_evidence
+   only when an outcome answer names it)
 
 erc7710 direct settlement (delegation rail + merchant advertises it)
 haven_quote_x402 / haven_pay_x402_quote
   → haven_sign                         (signs the SETTLEMENT CHILD)
   → haven_submit { settlement_scheme: "erc7710" }  → payment_header
-  → merchant retry
+  → merchant retry  → haven_report_settlement_evidence { payment_id, settlement_tx_hash }
+                                       (#3774: the next_tool after the erc7710 haven_submit)
 ```
 
 > **Re-verified (#3475 follow-up, 2026-09-30, passage only).** The added
@@ -196,14 +215,40 @@ haven_quote_x402 / haven_pay_x402_quote
 > merchant returned no hash. `last-verified` unchanged — nothing else in this
 > file's scope was re-checked.
 
+**Merchant-issued credentials in the settled result
+([#3768](https://github.com/d-hinders/Haven-AI/issues/3768)).** The `result`
+both settle shapes return is the merchant's raw tool result, forwarded through
+the agent's untrusted context. Since the 2026-10-08 prod QA finding (payment
+`79084a5e`, Soundside `create_text`: an `x402_session_token` JWT and a
+`wallet_link` URL with an embedded JWT, both bound to the delegate EOA,
+delivered verbatim inside `result.structuredContent`), `deliverMerchantPayment`
+redacts the merchant body before any settled arm returns it — JWT-shaped
+strings by shape (including embedded in URLs), and values under
+credential-named keys (`*_token`, `*_link`, `access_token`, `session`, plus
+`secret`/`password`/`api_key`/`authorization`/`bearer`/`credential`) whole.
+`include_merchant_credentials: true` on
+`haven_settle_mcp_tool`/`haven_complete_mcp_tool` returns the body unredacted:
+a merchant session (Bitrefill `X-Access-Token`, #3728) is how an agent avoids
+paying per call, so receiving a credential is the agent's explicit act, never
+the default. Money fields, `settled`/`delivered` and hashes are untouched, and
+the refusal paths' bounded `Merchant response:` echo redacts unconditionally.
+Nothing in the persistence path stores a result body: the evidence row records
+status, challenge, proof and receipt headers only
+(`modules/mpp/evidence.ts`), the hosted access log is metadata-only
+(`packages/mcp-server/src/log.ts`), and the `agent_tool_invocations` audit
+persists extracted metadata — its tool allowlist never included the
+settle/complete tools.
+
 **Why the last EIP-3009 step exists at all
 ([#2292](https://github.com/d-hinders/Haven-AI/issues/2292)).** The two
 branches of "merchant retry **or** `haven_complete_mcp_tool`" are not
 symmetric, and the asymmetry is the point of this whole flow: on the
 `haven_complete_mcp_tool` branch Haven makes the merchant call and therefore
 *observes* the outcome, writing the evidence or reconciliation row itself. On
-the plain-HTTP branch Haven never contacts the merchant — it holds no key and
-speaks to no merchant — so the outcome only exists in the agent. Without a
+the plain-HTTP branch Haven never sends the merchant the paid request — it holds
+no key, and its only merchant calls are unpaid probes (`haven_quote_x402`'s,
+and since [#3739](https://github.com/d-hinders/Haven-AI/issues/3739) request
+mode's in `haven_pay_x402_quote`) — so the outcome only exists in the agent. Without a
 report, the funded-but-undelivered detection this doc describes could not fire
 for fifteen minutes on the one flow Haven prescribes.
 
@@ -331,7 +376,7 @@ handler-level check remains for callers that import `createToolHandlers`
 directly. The advertised JSON Schema is unchanged — it already said
 `additionalProperties: false`.
 
-The edge signer exposes four local, sign-only tools. `haven_x402_sign_header`
+The edge signer exposes five local, sign-only tools. `haven_x402_sign_header`
 and `haven_sign_sweep_delegate` never reach the network; `haven_sign` and
 `haven_sign_x402` do only in their by-id forms. Given a `payment_id`, both fetch
 that payment's exact signing context from Haven over an authenticated,
@@ -360,8 +405,10 @@ requests or their responses, and nothing here relays, submits, or broadcasts:
 - Declined or insufficient requests expose no signable hash — nothing is queued.
 - x402 authorization is bound to amount, merchant, resource, asset, and network.
 - Sweep authorization is bound to the registered delegate and Haven wallet.
-- Live delegation agents can be paused or revoked in Haven; legacy Safe
-  permissions require action by the Safe owner outside Haven.
+- A live delegation agent's budget can be stopped, or its signing key
+  replaced, in Haven; pausing only blocks payments through Haven and leaves the
+  budget live on-chain. Legacy Safe permissions require action by the Safe owner
+  outside Haven.
 
 Re-verified 2026-10-05 (weekly docs audit #3645, at dev `cdb91d86`), a full
 re-read of everything except the dated notes. Changed: the recommended
@@ -385,4 +432,7 @@ custody summary.
 - [x402 payment sequence](04-x402-payment-sequence.md)
 - [Edge signer](07-edge-signer.md)
 - [Local vs hosted MCP](08-local-vs-hosted-mcp.md)
+- [Hosted merchant egress](../security/hosted-egress.md) (#3747: the string-level
+  policy every hosted merchant request runs under — https-only public hosts,
+  re-checked GET redirects, while-reading byte caps; the accepted DNS residual)
 - [CASP / MiCA guardrails](../regulatory/casp-risk-guardrails.md)

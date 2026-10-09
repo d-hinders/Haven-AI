@@ -16,12 +16,14 @@ import {
   attachEvidenceHandler,
   handleMerchantReceiptCapture,
   listReceipts,
+  recordDeliveryQualityHandler,
   RECEIPT_LIST_SCOPE,
   mppDemoRetired,
   prepareSweep,
   submitSweep,
   type AuthorizeBody,
   type BudgetPrecheckBody,
+  type DeliveryQuality,
   type EvidenceBody,
   type SendAsset,
   type SendBody,
@@ -268,6 +270,28 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       const agent = request.agent as AgentContext
       const { url, json } = request.body ?? {}
       const result = await handleMerchantReceiptCapture(agent.id, request.params.id, url, json)
+      return reply.code(result.statusCode).send(result.body)
+    },
+  )
+
+  // ── POST /:id/delivery-quality — the agent's evidence-only verdict on what
+  // a settled payment DELIVERED (#3770) ──────────────────────────────────────
+  // Moves no money and never touches the payment: the handler writes to
+  // `machine_payment_delivery_reports` only. Another agent's payment is a
+  // 404; an unsettled payment is a 409; the enforced request schema
+  // (`MachinePaymentDeliveryQualityRequest`) refuses shape errors.
+  app.post<{ Params: { id: string }; Body: { quality?: string; note?: string } }>(
+    '/:id/delivery-quality',
+    { config: moneyPathRateLimit },
+    async (request, reply) => {
+      const agent = request.agent as AgentContext
+      const body = (request.body ?? {}) as { quality?: string; note?: string }
+      const result = await recordDeliveryQualityHandler(
+        agent.id,
+        request.params.id,
+        (body.quality ?? '') as DeliveryQuality,
+        body.note,
+      )
       return reply.code(result.statusCode).send(result.body)
     },
   )

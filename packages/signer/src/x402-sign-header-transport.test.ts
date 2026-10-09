@@ -110,6 +110,13 @@ describe('haven_x402_sign_header transport robustness', () => {
     )
     expect(typeof (result.data as { payment_header: string }).payment_header).toBe('string')
     expect((result.data as { payment_header: string }).payment_header.length).toBeGreaterThan(0)
+    // #3727: the ready-made retry headers ride the result — names from the
+    // SDK's live rule (both on the EIP-3009 bridge), values the header itself.
+    const data = result.data as { payment_header: string; retry_headers: Record<string, string> }
+    expect(data.retry_headers).toEqual({
+      'PAYMENT-SIGNATURE': data.payment_header,
+      'X-PAYMENT': data.payment_header,
+    })
   })
 
   it('still works when payment_required arrives as a proper object', async () => {
@@ -157,12 +164,19 @@ describe('haven_sign_x402 (one-shot funding + header signing)', () => {
       x402_binding: string
       payment_header: string
       accepted: unknown
+      retry_headers: Record<string, string>
     }
     expect(data.signature).toMatch(/^0x[0-9a-f]+$/i)
     expect(data.x402_binding.length).toBeGreaterThan(0)
     expect(typeof data.payment_header).toBe('string')
     expect(data.payment_header.length).toBeGreaterThan(0)
     expect(data.accepted).toBeDefined()
+    // #3727: the one-shot's result carries the retry headers too — the agent
+    // never picks the header names from prose.
+    expect(data.retry_headers).toEqual({
+      'PAYMENT-SIGNATURE': data.payment_header,
+      'X-PAYMENT': data.payment_header,
+    })
   })
 
   it('coerces a stringified payment_required in the one-shot path too', async () => {

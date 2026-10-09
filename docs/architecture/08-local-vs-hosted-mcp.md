@@ -145,7 +145,10 @@ map; a new undeclared pair fails `lint:vocabulary`.
 where the hosted surface takes `idempotency_key`; #3411 closed that divergence —
 the local surface now takes only `idempotency_key`, and refuses `idempotencyKey`
 by name (see below). Local
-`haven_pay_x402_quote` takes `quote` where hosted takes `payment_required`;
+`haven_pay_x402_quote` takes `quote` where hosted takes `payment_required` (or,
+since [#3739](https://github.com/d-hinders/Haven-AI/issues/3739), the request
+itself — `url`, `method`, `headers`, `body` — from which it fetches the
+challenge);
 local `haven_quote_x402` took a `body` the hosted schema had no field for
 (closed by [#2366](https://github.com/d-hinders/Haven-AI/issues/2366) — `body`
 is now declared on both, spelled the same). An
@@ -161,8 +164,9 @@ rather than from arguments (`haven_report_x402_outcome`, `haven_submit`,
 `haven_send`, `haven_pay_mcp_tool`, `haven_quote_x402`,
 `haven_pay_x402_quote` — each with a refusal that NAMES the local spelling, so
 a caller holding `idempotencyKey` is told what to send instead. #2349 closed
-the list: **the split now stands at 25 strict of the 27 hosted tools, with the
+the list: **the split now stands at 26 strict of the 28 hosted tools, with the
 two permissive tools on a second, equally explicit list** (re-measured
+2026-10-07: #3723 added `haven_get_receipt` strict; re-measured
 2026-10-05: #3557 added `haven_get_task_budget` strict; re-measured
 2026-09-30: #3354 added `haven_open_task_budget`, `haven_close_task_budget`
 and `haven_check_funds` strict, and the vocabulary-map follow-ups grew
@@ -245,7 +249,7 @@ and the divergence table alone reads as though they were:
 | `haven_send` | `idempotencyKey` | Total loss. `POST /payments` went out as `{token, amount, to}` with **no** `idempotency_key` field, so the backend's replay contract never engaged and a retry was a second spend. |
 | `haven_pay_mcp_tool` | `idempotencyKey` | Replay scope **replaced**, not merely lost: the SDK fell back to `buildX402IdempotencyKey`, a hash of the merchant quote over a 300 s bucket. It de-dupes two genuinely distinct purchases inside one bucket and fails to de-dupe a retry that crosses a bucket boundary. |
 | `haven_quote_x402` | `body` (and `idempotencyKey`) | The hosted probe fired with an **empty** body, so the quote described a request the caller never made. A quote creates no payment, so the `idempotencyKey` half cost nothing directly. **`body` is converged since #2366**; `idempotencyKey` converged by #3411. |
-| `haven_pay_x402_quote` | `idempotencyKey` only | Its headline crossover, `quote` for `payment_required`, **always failed loudly** — `payment_required` is required, so the call was refused with `-32602 … Required` and made zero Haven calls. Only `idempotencyKey` was silent. |
+| `haven_pay_x402_quote` | `idempotencyKey` only | Its headline crossover, `quote` for `payment_required`, **always failed loudly** — `payment_required` is required, so the call was refused with `-32602 … Required` and made zero Haven calls. Only `idempotencyKey` was silent. (Since #3739 `payment_required` is optional; `quote` still fails loudly, now as an undeclared key under the strict schema.) |
 
 Refusing is the on-ramp, not the destination, and **#2366 has now walked half of
 it, and #3411 the other half.** The hosted `haven_quote_x402` takes a `body`, threaded verbatim into the
@@ -317,8 +321,11 @@ Treat the registered tool unions in `packages/mcp/src/tools.ts`,
 `packages/mcp-server/src/tools.ts`, the facade), and
 `packages/signer/src/tools.ts` as the source of truth.
 
-The four edge-signer tools are `haven_sign`, `haven_x402_sign_header`,
-`haven_sign_x402`, and `haven_sign_sweep_delegate`.
+The five edge-signer tools are `haven_sign`, `haven_sign_siwx`,
+`haven_x402_sign_header`, `haven_sign_x402`, and `haven_sign_sweep_delegate`.
+`haven_sign_siwx` (#3728) is the x402 Sign-In-With-X signer: it composes the
+EIP-4361 message itself from a validated merchant challenge and signs in as the
+delegate wallet — it moves no funds and takes no input from Haven.
 
 ## x402 comparison
 
@@ -346,7 +353,8 @@ haven_pay_x402_quote → haven_sign → haven_submit
 erc7710 direct settlement
 haven_pay_x402_quote → haven_sign
   → haven_submit { settlement_scheme: "erc7710" } → payment_header
-  → merchant retry
+  → merchant retry  → haven_report_settlement_evidence { payment_id, settlement_tx_hash }
+                                       (#3774: the next_tool after the erc7710 haven_submit)
 ```
 
 > **Re-verified (#3475 follow-up, 2026-09-30, passage only).** The added
@@ -354,12 +362,24 @@ haven_pay_x402_quote → haven_sign
 > when the fact warrants it (eip3009, accepted, unsettled) — not a new call
 > an agent must always make. `last-verified` unchanged.
 
+> **Hosted egress (#3747).** Only the HOSTED side of this comparison is
+> constrained: `createHostedHavenClient` installs the strict merchant-egress
+> policy (https-only public hosts, no IP literals or internal names, ≤3
+> re-checked GET redirects, while-reading byte caps, per-use budgets —
+> [docs/security/hosted-egress.md](../security/hosted-egress.md)). The local
+> MCP and SDK embedders are unchanged: without `merchantEgress` the client
+> behaves exactly as before, including `http` to loopback and reserved
+> `.test`/`.localhost`/`.invalid`/`.example` fixtures. Accepted residual on
+> the hosted side: a public name whose DNS answer points at private space is
+> not blocked (that is the resolution-time work parked in #3742–#3744).
+
 The report step exists only on the EIP-3009 branch, and only in hosted mode's
 plain-HTTP shape ([#2292](https://github.com/d-hinders/Haven-AI/issues/2292)).
 It is where the local/hosted split has a consequence rather than a preference:
 in local mode the SDK makes the merchant retry itself and writes the evidence
 or reconciliation row from what it observed, while here the AGENT makes that
-retry and Haven never contacts the merchant — so the outcome has to come back
+retry and Haven never sends the merchant the paid request (it sends only unpaid
+probes: `haven_quote_x402`'s, and since #3739 request mode's) — so the outcome has to come back
 through a tool or it does not come back at all. erc7710 needs no equivalent:
 there is no funding leg, `confirmed` IS merchant settlement, and the
 funded-but-undelivered state the report resolves is scoped to
@@ -423,6 +443,7 @@ since #1984 — are unaffected, hosted and local alike.
 
 - [Hosted connect flow](06-hosted-mcp-connect-flow.md)
 - [Edge signer](07-edge-signer.md)
+- [Hosted merchant egress](../security/hosted-egress.md) (#3747)
 - [CASP / MiCA guardrails](../regulatory/casp-risk-guardrails.md)
 
 > **Re-verification (#3097, the paid retry's target, 2026-09-18):** this diff
@@ -567,7 +588,7 @@ open count still 0 — `scripts/ci/vocabulary-map.json` unchanged), the #3411
 `idempotencyKey` refusal (`IDEMPOTENCY_KEY_RENAMED`, still declared-but-refused
 in the schemas), the #2366 body convergence, the standing
 `quote`/`payment_required` owner decision, the deleted `#314` aliases
-(`server.ts` still iterates `toolSchemas` only), the four edge-signer tool
+(`server.ts` still iterates `toolSchemas` only), the five edge-signer tool
 names, the two-flow x402 comparison (EIP-3009 bridge / erc7710 direct, the
 settle-column split, `POST /x402/:id/settle` selection, the #1986 410 rail
 scope — still present in `routes/x402.ts`), `assertExpectedBinding` /

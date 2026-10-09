@@ -54,7 +54,7 @@ methods (`pay()`, `sign()`, `authorizeX402()`) are unavailable by construction.
 | `haven_open_task_budget` | `POST /task-budgets` (#3329: reserves a budget for one task; returns the budget to sign) | no — edge signs |
 | `haven_close_task_budget` | `POST /task-budgets/:id/close` (#3329: ends one early, releasing whatever of its cap went unspent; returns the close operation to sign) | no — edge signs |
 | `haven_quote_x402` | merchant x402 quote probe | no |
-| `haven_pay_x402_quote` | `POST /x402` (returns funding `payload_hash` + x402 context) | no — edge signs |
+| `haven_pay_x402_quote` | `POST /x402` (returns funding `payload_hash` + x402 context); in request mode (#3739) first `GET /x402/by-idempotency-key/{key}` when a key is passed, then one unpaid merchant probe | no — edge signs |
 | `haven_pay_mcp_tool` | merchant MCP quote probe + `POST /x402` | no — edge signs |
 | `haven_settle_mcp_tool` | `POST /payments/:id/sign`, then merchant MCP endpoint + evidence/reconciliation APIs | no — relays signed artifacts |
 | `haven_complete_mcp_tool` | merchant MCP endpoint + evidence/reconciliation APIs | no — relays signed header |
@@ -63,6 +63,7 @@ methods (`pay()`, `sign()`, `authorizeX402()`) are unavailable by construction.
 | `haven_get_payment_status` | `GET /machine-payments/:id/status` | no |
 | `haven_get_resume_state` | `GET /machine-payments/:id/status` as resume state | no |
 | `haven_list_receipts` | `GET /machine-payments/receipts` (paged, #3128: `limit` + `cursor`, plus `compact` (#3423) which strips payload echoes client-side → `{ receipts, total, hasMore, nextCursor }`) | no |
+| `haven_get_receipt` | `GET /payments/:id/receipt` via `HavenClient.getReceipt` (#3723: the signed bundle — `{ receipt }` only, settled payments only; `haven_verify_receipt` reads it unchanged) | no |
 | `haven_sweep_delegate` | gasless stranded-funds sweep prepare/submit | no — relays signed sweep |
 | `haven_report_x402_outcome` | `POST /machine-payments/reconciliation-events` (rejected) or `POST /machine-payments/evidence` (accepted) | no — records a caller-asserted outcome; contacts no merchant |
 | `haven_report_settlement_evidence` | `POST /machine-payments/evidence` (fail-closed on-chain verification of a settlement hash the agent holds: an erc7710 settlement, #2972, or an eip3009 merchant settlement from a plain-HTTP retry, #3475) | no — hands over a hash; contacts no merchant |
@@ -133,8 +134,10 @@ mcp__haven__haven_pay_mcp_tool
 
 ### Reporting a plain-HTTP merchant retry (#2292)
 
-On the plain-HTTP x402 path Haven never contacts the merchant — the agent
-retries it with the header the edge signer built. That is the keyless design
+On the plain-HTTP x402 path Haven never sends the merchant the paid request —
+the agent retries it with the header the edge signer built. (In request mode,
+#3739, `haven_pay_x402_quote` makes one unpaid probe to fetch the challenge; it
+never sends a paid request.) That is the keyless design
 working, and it means the outcome of that retry has to come back through a
 tool: `haven_report_x402_outcome`.
 
@@ -143,7 +146,11 @@ mcp__haven__haven_pay_x402_quote
   -> mcp__haven-signer__haven_sign_x402
   -> (the agent's OWN retry of the merchant)
   -> mcp__haven__haven_report_x402_outcome
-  -> mcp__haven__haven_report_settlement_evidence (eip3009, only if PAYMENT-RESPONSE.transaction was returned)
+       (pass the merchant's raw PAYMENT-RESPONSE header as payment_response on
+        the SAME call when it names a transaction — Haven decodes and verifies
+        the settlement itself, #3727)
+  (the SDK's own paid retry reports the merchant settlement itself, #3764;
+   haven_report_settlement_evidence only when an outcome answer names it)
 ```
 
 `outcome: "rejected"` writes the same open
@@ -154,10 +161,10 @@ of after the 15-minute merchant-report grace window. `outcome: "accepted"`
 writes the merchant-response evidence row, so a delivered purchase stops
 reading as undelivered and never enters that window. On the eip3009 funding
 leg specifically, an accepted outcome with no settlement recorded yet
-(#3475 follow-up) also names `haven_report_settlement_evidence` as the next
-step, `payment_id` prefilled — pass the merchant's `PAYMENT-RESPONSE.transaction`
-as `settlement_tx_hash` if it returned one; calling with no hash is a
-well-formed no-op, since the purchase may already be complete.
+(#3475 follow-up) names `haven_report_settlement_evidence` as the next step,
+`payment_id` prefilled — supply the merchant's `PAYMENT-RESPONSE` there as
+`payment_response` if you hold it (or `settlement_tx_hash`); calling with no
+hash is a well-formed no-op, since the purchase may already be complete.
 
 The report is **evidence, not authority**. Haven does not verify the claim —
 verifying it would mean calling the merchant. What bounds it instead: the

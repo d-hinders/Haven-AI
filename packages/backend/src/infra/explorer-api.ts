@@ -60,6 +60,56 @@ export interface RawERC20Transfer {
   tokenDecimal: string
 }
 
+// ── Shared request plumbing ──────────────────────────────────────
+
+/**
+ * Sent on every explorer request. Node's default fetch identifies itself as
+ * `node`, which edge bot protection in front of public explorers may refuse
+ * (HTTP 403). Production Base history reads were refused with 403 on every
+ * request (2026-10-07); whether the identity, a missing key or the caller's
+ * IP was the reason is what the error excerpt below exists to say.
+ */
+const EXPLORER_REQUEST_HEADERS: Record<string, string> = {
+  Accept: 'application/json',
+  'User-Agent': 'Haven-Backend/1.0 (transaction history)',
+}
+
+/** Longest response-body excerpt an explorer error carries. */
+export const EXPLORER_ERROR_BODY_MAX = 200
+
+/**
+ * A short, single-line diagnosis of a failed response, so the logged error
+ * says WHY the explorer refused (a Cloudflare page, an API-key notice)
+ * rather than only the status: the `server` and `cf-ray` headers, then an
+ * excerpt of the body. `secret` (the API key, when one is sent) is redacted
+ * from the result — the request URL carries it, and an intermediary's error
+ * page may echo that URL back. Never throws: anything unreadable is omitted.
+ */
+async function errorDiagnosis(response: Response, secret: string): Promise<string> {
+  // Redact BEFORE truncating, so a cut can never leave a partial key behind.
+  const redact = (text: string) => (secret ? text.split(secret).join('[redacted]') : text)
+  const parts: string[] = []
+  try {
+    const server = response.headers?.get('server')
+    const cfRay = response.headers?.get('cf-ray')
+    if (server) parts.push(`server=${redact(server)}`)
+    if (cfRay) parts.push(`cf-ray=${redact(cfRay)}`)
+  } catch {
+    // headers unreadable — the body may still say enough
+  }
+  try {
+    const text = redact((await response.text()).replace(/\s+/g, ' ').trim())
+    if (text) {
+      parts.push(
+        text.length > EXPLORER_ERROR_BODY_MAX ? `${text.slice(0, EXPLORER_ERROR_BODY_MAX)}…` : text,
+      )
+    }
+  } catch {
+    // body unreadable — keep whatever the headers gave
+  }
+  return parts.length === 0 ? '' : ` — ${parts.join(' ')}`
+}
+
 // ── Etherscan-compatible v1 client (Etherscan V2 + Blockscout v1) ──
 
 async function fetchFromV1<T>(
@@ -81,14 +131,16 @@ async function fetchFromV1<T>(
   }
 
   for (let attempt = 0; attempt <= retries; attempt++) {
-    const response = await fetch(url.toString())
+    const response = await fetch(url.toString(), { headers: EXPLORER_REQUEST_HEADERS })
 
     if (!response.ok) {
       if (attempt < retries && (response.status === 429 || response.status >= 500)) {
         await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)))
         continue
       }
-      throw new Error(`Explorer API error (chain ${chainId}): ${response.status}`)
+      throw new Error(
+        `Explorer API error (chain ${chainId}): ${response.status}${await errorDiagnosis(response, chain.explorerApiKey)}`,
+      )
     }
 
     const data = (await response.json()) as EtherscanResponse<T[] | string>
@@ -166,6 +218,11 @@ async function fetchFromV2<T>(
   // explorerApiUrl ends in /api/v2. The caller owns the address, so the
   // caller passes `addresses/${addr}/${resource}`.
   const url = new URL(`${chain.explorerApiUrl.replace(/\/$/, '')}/${resource}`)
+  // Blockscout takes its key as the `apikey` query param. It survives the
+  // cursor hops below: those only set params, never clear the URL.
+  if (chain.explorerApiKey) {
+    url.searchParams.set('apikey', chain.explorerApiKey)
+  }
   for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v)
 
   const items: T[] = []
@@ -174,9 +231,11 @@ async function fetchFromV2<T>(
   // the loop ended: a spent budget with the provider still offering a cursor
   // is a capped read, an absent cursor is a complete one.
   for (let page = 0; page < EXPLORER_MAX_PAGES; page++) {
-    const response = await fetch(url.toString())
+    const response = await fetch(url.toString(), { headers: EXPLORER_REQUEST_HEADERS })
     if (!response.ok) {
-      throw new Error(`Blockscout v2 error (chain ${chainId}): ${response.status}`)
+      throw new Error(
+        `Blockscout v2 error (chain ${chainId}): ${response.status}${await errorDiagnosis(response, chain.explorerApiKey)}`,
+      )
     }
     const data = (await response.json()) as V2Page<T>
     items.push(...(data.items ?? []))

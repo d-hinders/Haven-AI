@@ -36,7 +36,7 @@ export interface ChainConfig {
   nativeCurrency: { name: string; symbol: string; decimals: number }
   explorerUrl: string        // e.g. https://gnosisscan.io
   explorerApiUrl: string     // e.g. https://api.etherscan.io/v2/api
-  explorerApiKey: string     // empty allowed for Blockscout
+  explorerApiKey: string     // empty allowed for Blockscout (anonymous)
   explorerApiProvider: ExplorerApiProvider
   passkey: {
     /** P-256 verifier the Safe passkey signer will call. */
@@ -70,12 +70,12 @@ const CHAIN_ENV: Record<number, BackendChainEnv> = {
   },
   8453: {
     explorerApiUrl: 'https://base.blockscout.com/api/v2',
-    explorerApiKey: '',
+    explorerApiKey: config.blockscoutApiKey,
     explorerApiProvider: 'blockscout-v2',
   },
   84532: {
     explorerApiUrl: 'https://base-sepolia.blockscout.com/api/v2',
-    explorerApiKey: '',
+    explorerApiKey: config.blockscoutApiKey,
     explorerApiProvider: 'blockscout-v2',
   },
 }

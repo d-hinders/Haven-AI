@@ -398,7 +398,7 @@ Money and risk clarity:
 
 ## Agent List
 
-Use for `/agents`: every managed agent as a card, with the list controls above it (#3165).
+Use for `/agents`: every managed agent as a card, with the list controls above it (#3165). The list spans every account the user has — there is no global active account narrowing it (#3719) — so each card names its account with the chain as the secondary half (`Account: Treasury · Base`).
 
 Structure:
 1. Header with the count and the primary action (Connect agent).
@@ -409,7 +409,7 @@ Structure:
 
 Rules:
 - Filter state lives in the URL (`?q=…&status=active,paused&budget=none&sort=seen`; the comma is percent-encoded on the wire), so a view is shareable and survives reload; `?setup=` and other parameters on the page are preserved in both directions (closing the setup modal drops only `setup`). Writes use `history.replaceState` with a `null` state (Next treats its own `__NA`-marked state as an internal write and would not re-sync `useSearchParams`), so the URL never lags a keystroke. Unknown values in a pasted link are dropped, never applied silently.
-- A facet is registered as data (`AgentFacet` in `lib/agent-list-filters.ts`: id, options, predicate, match mode), so the labels facet (#3167) and the organization facet (#3164) plug in without a toolbar change. Facet counts answer "how many if I pick this" — a facet's own selection is excluded from its counts.
+- A facet is registered as data (`AgentFacet` in `lib/agent-list-filters.ts`: id, options, predicate, match mode), so the labels facet (#3167), the organization facet (#3164) and the account facet (#3719) plug in without a toolbar change. The account facet is registered only when the user has more than one account; its options use the same `name · chain` shape as the card. Facet counts answer "how many if I pick this" — a facet's own selection is excluded from its counts.
 - The budget facet offers only what `GET /agents` can prove from `allowances`: recurring, one-time, none. Exhausted, near-limit and pending-signature need a server field and are not offered, because an option that can never match reads as "no agent is near its limit".
 - Sort keys: name, recently seen (`mcp_last_seen_at`, never-seen last), newest, largest budget (largest single allowance in its own token units — the row carries no price, so this is deliberately unit-blind).
 - Filtering is client-side over the loaded list; the API is unpaginated, so this holds until an account has enough agents for `GET /agents` itself to need paging.
@@ -423,7 +423,7 @@ done, and how to stop it (#3691, epic). Sections, in order:
    `meta` line — wallet · network · Created {age} · Last activity {age} (or
    "No activity yet"; last activity is `mcp_last_seen_at`). Labels sit under
    it. The actions slot: the status badge (renders nothing while active),
-   **Pause/Resume beside the header** — Pause while active, Resume while
+   **Pause payments/Resume beside the header** — Pause payments while active, Resume while
    paused, never for an archived agent — then the kebab menu. The per-state
    action matrix (#3694): the kebab renders for **every** state; Edit agent and
    Manage labels unless revoked; Payment credentials and Replace signing key
@@ -456,9 +456,13 @@ done, and how to stop it (#3691, epic). Sections, in order:
    form is the section's content, headed "Set its first budget"; once one
    exists, adding another is an "Add budget" control that opens the form in
    place (Cancel collapses it), never a permanent second form — unless
-   `?grant=` asks for the form, in which case it opens expanded. A revoked or
-   removed agent's section is read-only plus Stop (#3549). There is no
-   second, read-only budget summary on the page.
+   `?grant=` asks for the form, in which case it opens expanded. Sharing part
+   of an existing budget with another agent lives INSIDE the Add budget
+   panel — a quiet line and an "Issue sub-budget" button below the grant
+   form, shown only while the panel is open (#3716) — never as a permanent
+   card row; the Sub-agent budgets list of issued slices stays on the card,
+   outside the panel. A revoked or removed agent's section is read-only plus
+   Stop (#3549). There is no second, read-only budget summary on the page.
 5. Activity — heading and description above the card, payments-only rows
    (`TransactionsTable` in card variant), empty state "No activity yet". The
    header's right side carries the counts summary — "{n} today · {m} all
@@ -540,13 +544,18 @@ Money and risk clarity:
   detection is not exact on every provider, and the reason lives in the code.
 - Use `Payment sent` (neutral), `Received payment`, and `Agent payment by [agent name]` before using technical transaction language. `Payment sent by you` is reserved for human-initiated payments only (#2097); a transaction with no attribution renders as `Payment sent` with an explicit unknown initiator — never `You`.
 - For x402 payments, collapse the historical Safe-to-agent funding step into
-  one merchant-facing row such as `Agent payment by [agent name]`. Live
-  delegation-rail x402 payments have no funding leg; the row still represents
-  the agent payment, while any legacy Safe funding is historical only. The row
-  title deliberately does NOT name the protocol (#2357): `x402` rides on the
-  detail drawer's section heading, and the row's `From -> To` line carries the
-  resource hostname, so an x402 row and an ordinary agent payment read the same
-  at the title and are told apart by those two surfaces.
+  one merchant-facing row such as `Agent payment by [agent name]`. On the
+  eip3009 bridge the funding leg is REAL and present on every payment (#946):
+  the account funds the agent's delegate key first, then the delegate pays
+  the merchant from the agent's signed authorization. The row still
+  represents the agent payment — but the detail drawer names the funding leg
+  ("Funding from your account") and headlines the merchant settlement when
+  one is recorded, saying "Merchant settlement · Not recorded" when it is
+  not (#3763). Scheme-less/legacy rows keep the single-transaction read. The
+  row title deliberately does NOT name the protocol (#2357): `x402` rides on
+  the detail drawer's section heading, and the row's `From -> To` line
+  carries the resource hostname, so an x402 row and an ordinary agent payment
+  read the same at the title and are told apart by those two surfaces.
 - Show the money path as a compact `From [wallet/counterparty] -> To [wallet/counterparty]` line instead of repeating wallet, initiator, and counterparty in a separate metadata row.
 - Keep amount in its own cell **at `md` and up**; date and the external-details
   link are separate columns or controls. Below `md` the amount column collapses
@@ -678,8 +687,8 @@ Money and risk clarity:
   returns Base USDC only; native ETH remains in the agent wallet.
 - Explain that Haven's relayer pays gas but cannot change the signed destination
   or spend by itself.
-- Pausing or revoking stops new Haven-supported funding but does not recover an
-  existing agent-wallet balance. Present recovery as a separate action.
+- Stopping the budget ends new funding but does not recover an existing
+  agent-wallet balance. Present recovery as a separate action.
 - Submission, success, retry guidance, and explorer links belong in the
   agent/tool result today. Surface them on this screen only if execution status
   is later wired back into the route.

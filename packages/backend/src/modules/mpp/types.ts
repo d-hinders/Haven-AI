@@ -63,6 +63,13 @@ export interface EvidenceBody {
   protocolReceiptHeaderName?: string
   protocolReceiptHeader?: string
   protocolReceiptPayload?: Record<string, unknown>
+  /**
+   * #3778: the optional NON-SECRET delivery pointer ("Bik Bok 5 SEK, order
+   * 6ac7…"). Shape-capped by the enforced schema; the secret-shape refusal is
+   * the semantic layer's (`attachMachinePaymentEvidence`), via
+   * `@haven_ai/core`'s `deliveryReferenceError`.
+   */
+  deliveryReference?: string
 }
 
 export const SUPPORTED_ASSETS = ['ETH', 'USDC'] as const

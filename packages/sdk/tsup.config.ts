@@ -3,8 +3,9 @@ import { defineConfig } from 'tsup'
 export default defineConfig({
   // #3283: `test-support` ships the ONE guard-valid direct-payment UserOp
   // builder the signer, `@haven_ai/mcp` and `mcp-server` tests share — test
-  // fixtures, never imported by anything the SDK or signer runs.
-  entry: { index: 'src/index.ts', edge: 'src/edge.ts', 'test-support': 'src/test-support/direct-userop.ts' },
+  // fixtures, never imported by anything the SDK or signer runs. #3723 adds
+  // the signed erc7710 receipt fixture beside it (index re-exports both).
+  entry: { index: 'src/index.ts', edge: 'src/edge.ts', 'test-support': 'src/test-support/index.ts' },
   format: ['esm', 'cjs'],
   dts: true,
   clean: true,

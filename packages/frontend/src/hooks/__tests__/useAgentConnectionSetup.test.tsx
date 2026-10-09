@@ -263,7 +263,7 @@ describe('manual credential renderings (#2482)', () => {
 describe('resume from a hand-off link (#2522)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockUseAuth.mockReturnValue({ user: { accounts: [SAFE] }, activeAccount: SAFE })
+    mockUseAuth.mockReturnValue({ user: { accounts: [SAFE] } })
     mockUseSafeDetails.mockReturnValue({ details: null, loading: false, error: null })
     mockUseAccountOperationGate.mockReturnValue({ kind: 'ready' })
     mockUsePublicClient.mockReturnValue({})
@@ -354,7 +354,7 @@ describe('resume from a hand-off link (#2522)', () => {
 describe('useAgentConnectionSetup — rail awareness without rendering the modal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockUseAuth.mockReturnValue({ user: { accounts: [SAFE] }, activeAccount: SAFE })
+    mockUseAuth.mockReturnValue({ user: { accounts: [SAFE] } })
     mockUseSafeDetails.mockReturnValue({
       details: { address: SAFE.account_address, threshold: 1, owners: ['0x2222222222222222222222222222222222222222'] },
       loading: false,
@@ -398,7 +398,6 @@ describe('useAgentConnectionSetup — rail awareness without rendering the modal
   it('drives the delegation approval view (#1070)', async () => {
     mockUseAuth.mockReturnValue({
       user: { accounts: [{ ...SAFE, account_type: 'delegator_hybrid' }] },
-      activeAccount: { ...SAFE, account_type: 'delegator_hybrid' },
     })
     const { result } = renderFlow()
 
@@ -503,5 +502,34 @@ describe('useAgentConnectionSetup — rail awareness without rendering the modal
     })
     expect(result.current.manualCredentialAcknowledged).toBe(true)
     expect(result.current.connectView).toEqual({ kind: 'delegation_approval', agentId: 'agent-1' })
+  })
+})
+
+describe('manual credential prompt leak guidance (#3722)', () => {
+  // Pause is a Haven-side block and API revoke is a status flip: neither ends
+  // a leaked key's on-chain authority, so neither may be offered as the remedy.
+  const prompt = buildManualCredentialPrompt({
+    agentName: 'Research Agent',
+    havenWallet: 'Operating wallet',
+    budgets: ['10 USDC every day'],
+    apiKey: 'sk_agent_render_test',
+    delegatePrivateKey: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    delegateAddress: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    apiBaseUrl: 'https://api.haven.example',
+    hostedMcpUrl: 'https://mcp.haven.example',
+  })
+
+  it('names the owner-ruled remedies with the real control names', () => {
+    expect(prompt).toContain('If this credential may have leaked, open the agent in Haven and choose Replace signing key')
+    expect(prompt).toContain('use Stop budget on the agent’s budget, or Remove agent… to end every budget')
+    expect(prompt).toContain('Pausing only blocks payments through Haven; the budget stays live on-chain.')
+  })
+
+  it('discloses that ending the budget does not recover funds already in the agent wallet', () => {
+    expect(prompt).toContain('also controls any funds already in the agent wallet; ending the budget does not recover them')
+  })
+
+  it('never offers pause or revoke as the leak remedy', () => {
+    expect(prompt).not.toMatch(/pause or revoke/i)
   })
 })

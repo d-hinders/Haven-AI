@@ -25,6 +25,7 @@ import {
   countEvidenceReceiptsForAgent,
   receiptCursorResolvesForAgent,
   resolveReconciliationForPayment,
+  setEvidenceDeliveryReference,
   upsertEvidenceBase,
   type IntentSettlementFields,
 } from '../../infra/repositories/machine-payments.js'
@@ -45,6 +46,7 @@ import { withParties } from '../../openapi/party-model.js'
 import { toCanonicalAddress } from '../transactions/index.js'
 import type { EvidenceBody, MppHandlerResult } from './types.js'
 import { isZeroSettlementTxHash } from '@haven_ai/sdk'
+import { deliveryReferenceError } from '@haven_ai/core'
 
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/
 
@@ -127,6 +129,14 @@ export interface AttachMachinePaymentEvidenceInput {
   protocolReceiptHeaderName?: string
   protocolReceiptHeader?: string
   protocolReceiptPayload?: Record<string, unknown>
+  /**
+   * #3778: the optional NON-SECRET delivery pointer. Validated here (the one
+   * semantic layer every caller funnels through) — a secret-shaped value is
+   * refused before anything is written, exactly like the other cross-field
+   * guards. The MCP layer refuses earlier still (fail-fast, pre-funding);
+   * this is the defense in depth for direct SDK/API callers.
+   */
+  deliveryReference?: string
 }
 
 export interface MachinePaymentEvidenceRow {
@@ -157,6 +167,7 @@ export interface MachinePaymentEvidenceRow {
   protocol_receipt_header: string | null
   protocol_receipt_payload: Record<string, unknown> | null
   merchant_status: number | null
+  delivery_reference: string | null
   confirmed_at: string | null
   amount_sek: string | null
   fx_rate_sek: string | null
@@ -190,6 +201,15 @@ export interface MachinePaymentEvidenceRow {
    * on-chain (`modules/x402/eip3009-settlement-evidence.ts`). Null until one is.
    */
   verified_merchant_settlement_tx_hash?: string | null
+  /**
+   * #3770: the calling agent's evidence-only delivery verdict, joined from
+   * `machine_payment_delivery_reports` (LIST_EVIDENCE_RECEIPTS_SQL). Null
+   * while the agent has reported nothing — it never gates anything and
+   * never changes the payment.
+   */
+  delivery_quality?: string | null
+  delivery_note?: string | null
+  delivery_reported_at?: string | null
   /** #3332: joined from `owner_company_details` on `user_id` — `OWNER_COMPANY_DETAILS_JOIN_COLUMNS`. */
   buyer_legal_name?: string | null
   buyer_country?: string | null
@@ -293,6 +313,7 @@ export type EvidenceRecordOutcome =
 
 export async function recordMachinePaymentEvidenceBase(
   intent: MachinePaymentEvidenceSource,
+  opts: { suppressFeed?: boolean } = {},
 ): Promise<EvidenceRecordOutcome> {
   const rail = railForPayment(intent)
   // Nothing to record: evidence is a protocol-payment concept, and callers on
@@ -393,7 +414,16 @@ export async function recordMachinePaymentEvidenceBase(
   // Auto-feed the settled payment into the user's accounting tool (#491/#499).
   // Fire-and-forget + idempotent: never blocks or delays settlement, inert
   // unless the hosted reporting feed is available for this user.
-  feedSettledPaymentBestEffort(intent.user_id, intent.id)
+  //
+  // #3767 (B1): a caller that will write MORE evidence after this row — the
+  // #3475 settlement branch, which records the verified merchant settlement
+  // hash RIGHT AFTER this call — suppresses the fire here and fires the feed
+  // itself once its write has landed. Firing here would push the funding
+  // hash milliseconds before the settlement is written, and the feed would
+  // book a payment whose settlement hash it cannot yet see.
+  if (!opts.suppressFeed) {
+    feedSettledPaymentBestEffort(intent.user_id, intent.id)
+  }
 
   return { status: 'recorded' }
 }
@@ -463,6 +493,14 @@ export async function attachMachinePaymentEvidence(
   ) {
     throw new Error('merchant_status_invalid')
   }
+  // #3778: the delivery reference is validated BEFORE anything is written —
+  // the same fail-closed ordering every other cross-field guard here uses. A
+  // secret-shaped value never reaches the row, on any branch below.
+  const normalizedDeliveryReference = input.deliveryReference?.trim()
+  if (normalizedDeliveryReference) {
+    const referenceError = deliveryReferenceError(normalizedDeliveryReference)
+    if (referenceError) throw new Error('delivery_reference_refused')
+  }
 
   let payment = await findProtocolPaymentForEvidence(input.agentId, input.paymentId)
   if (!payment) return null
@@ -516,16 +554,34 @@ export async function attachMachinePaymentEvidence(
     }
     // The base row first: if it cannot exist (no resource URL), refuse before
     // the hash is committed rather than commit it and answer "not found".
-    const base = await recordMachinePaymentEvidenceBase(payment)
+    // #3767 (B1): the feed fire inside the base call is SUPPRESSED — this
+    // branch is about to write the verified settlement hash below, and the
+    // feed must see it (or the expired window) when it fires, never push the
+    // funding hash ahead of that write. Fired once, after the outcome, below.
+    const base = await recordMachinePaymentEvidenceBase(payment, { suppressFeed: true })
     if (base.status === 'failed' && base.reason === 'missing_resource_url') throw new Error('resource_missing')
     if (base.status !== 'recorded') throw new Error(`evidence_base_${base.reason}`)
     const settled = await observeEip3009MerchantSettlement(payment, input.txHash)
     if (settled.outcome === 'unverified') {
+      // Nothing was fed: the evidence row exists, but the settlement report
+      // was refused — the feed fires on the next evidence call, Sync now,
+      // the backfill, or the retry sweep's #3767 second selection.
       throw new SettlementReportRefusal(
         settled.retryable ? 'settlement_unobservable' : 'settlement_unverified',
         'eip3009',
         settled.reason,
       )
+    }
+    // The settlement write has landed (or, for the defensively-handled
+    // not_applicable — unreachable behind isFundedEip3009Payment above — the
+    // base row is written and the feed's own gates apply). Fire ONCE.
+    feedSettledPaymentBestEffort(payment.user_id, payment.id)
+    // #3778: this branch returns without reaching the attach below, so a
+    // delivery reference supplied with the settlement report is recorded on
+    // the (already-existing) base row directly. Validated above, before the
+    // hash was verified — nothing is written when the value is refused.
+    if (normalizedDeliveryReference) {
+      await setEvidenceDeliveryReference(payment.id, input.agentId, normalizedDeliveryReference)
     }
     if (settled.outcome === 'recorded') {
       return findEvidenceForIntent<MachinePaymentEvidenceRow>(payment.id, input.agentId)
@@ -567,6 +623,7 @@ export async function attachMachinePaymentEvidence(
     protocolReceiptHeader: cleanHeaderValue(input.protocolReceiptHeader),
     protocolReceiptPayload: normalizeJson(input.protocolReceiptPayload),
     merchantStatus: input.merchantStatus ?? null,
+    deliveryReference: normalizedDeliveryReference || null,
   })
 
   if (evidence) {
@@ -771,6 +828,18 @@ export function mapEvidence(row: MachinePaymentEvidenceRow) {
       // at the read surfaces instead (SDK type doc, tool description).
       protocol_receipt_payload: row.protocol_receipt_payload,
       merchant_status: row.merchant_status,
+      // #3770: the agent's own delivery verdict, when it reported one.
+      // Evidence-only — it never gates anything and the payment itself is
+      // unchanged; declared on the served schema (MachinePaymentReceipt) as
+      // nullable so absence reads as "not reported".
+      delivery_quality: row.delivery_quality ?? null,
+      delivery_note: row.delivery_note ?? null,
+      delivery_reported_at: row.delivery_reported_at ?? null,
+      // #3778: the non-secret delivery pointer, echoed on the receipt — the
+      // owner's "a deliverable exists and here is the pointer to it" field.
+      // Written only from validated input (see `attachMachinePaymentEvidence`),
+      // never the merchant body.
+      delivery_reference: row.delivery_reference ?? null,
       confirmed_at: row.confirmed_at,
       created_at: row.created_at,
       updated_at: row.updated_at,
@@ -855,6 +924,8 @@ export async function attachEvidenceHandler(
       protocolReceiptHeaderName: body.protocolReceiptHeaderName,
       protocolReceiptHeader: body.protocolReceiptHeader,
       protocolReceiptPayload: body.protocolReceiptPayload,
+      // #3778: the optional non-secret delivery pointer.
+      deliveryReference: body.deliveryReference,
     })
 
     if (!evidence) {
@@ -947,6 +1018,20 @@ export async function attachEvidenceHandler(
     }
     if (marker === 'merchant_status_invalid') {
       return { statusCode: 400, body: { error: 'merchantStatus must be an HTTP status code' } }
+    }
+    // #3778: a secret-shaped delivery reference never reaches the row. The
+    // wording says WHY it was refused (shape, not length) and what to send
+    // instead, mirroring `deliveryReferenceError`'s message intent.
+    if (marker === 'delivery_reference_refused') {
+      return {
+        statusCode: 400,
+        body: {
+          error:
+            'deliveryReference refused: the value is shaped like a credential (a code, token or key), ' +
+            'not like a delivery reference. Report the non-secret pointer instead (merchant, product, ' +
+            'value, order id) and relay the secret itself to the owner directly.',
+        },
+      }
     }
 
     throw err

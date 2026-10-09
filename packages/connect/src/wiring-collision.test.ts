@@ -3,11 +3,13 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  deriveServerSlug,
   detectWiringCollision,
   promptWiringCollisionResolution,
   proposeServerSlug,
   type WiringCollision,
 } from './wiring-collision.js'
+import { assertValidServerSlug } from './server-names.js'
 import type { PromptIo } from './installed-clients.js'
 
 describe('proposeServerSlug (#2551)', () => {
@@ -122,7 +124,9 @@ describe('promptWiringCollisionResolution (#2551)', () => {
     expect(shown).toContain('replace')
     expect(shown).toContain('alongside')
     expect(shown).toContain('payment-agent')
-    expect(shown).toMatch(/revoke it on the Haven agent page/)
+    // #3756: the agent page's control is Remove agent…, not "revoke".
+    expect(shown).toContain('you still use Remove agent\u2026 on the Haven agent page')
+    expect(shown).not.toMatch(/revoke it on the Haven agent page/)
   })
 
   it.each([
@@ -155,5 +159,35 @@ describe('promptWiringCollisionResolution (#2551)', () => {
   it('EOF / Ctrl-C aborts at either question', async () => {
     expect((await promptWiringCollisionResolution(collision, 'A', io([null]))).action).toBe('abort')
     expect((await promptWiringCollisionResolution(collision, 'A', io(['a', null]))).action).toBe('abort')
+  })
+})
+
+describe('#3737: deriveServerSlug', () => {
+  it('marks a non-production backend with -dev', () => {
+    expect(deriveServerSlug('Payment Agent', new Set(), true)).toBe('payment-agent-dev')
+  })
+
+  it('leaves a production slug unmarked', () => {
+    expect(deriveServerSlug('Payment Agent', new Set(), false)).toBe('payment-agent')
+  })
+
+  it('does not double-mark a display name that already ends in -dev', () => {
+    expect(deriveServerSlug('Research Dev', new Set(), true)).toBe('research-dev')
+  })
+
+  it('de-collides against EVERY directory name, retired ones included', () => {
+    const taken = new Set(['research-dev', 'research-dev-2'])
+    expect(deriveServerSlug('Research', taken, true)).toBe('research-dev-3')
+  })
+
+  it('falls back to agent and still marks', () => {
+    expect(deriveServerSlug('€¥£', new Set(), true)).toBe('agent-dev')
+  })
+
+  it('caps the base so the marked slug still passes the slug validator', () => {
+    const long = 'a'.repeat(40)
+    const slug = deriveServerSlug(long, new Set(), true)
+    expect(slug).toBe(`${'a'.repeat(28)}-dev`)
+    expect(() => assertValidServerSlug(slug)).not.toThrow()
   })
 })

@@ -1,5 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { HavenClient, havenClientIdentity } from '@haven_ai/sdk'
+import { HavenClient, havenClientIdentity, strictMerchantEgressPolicy, type MerchantEgressPolicy } from '@haven_ai/sdk'
 import { hostedConnectorUpgradeCommand } from './connector-channel.js'
 import {
   assertHostedToolRegistry,
@@ -10,9 +10,13 @@ import {
   type HostedToolName,
   type ToolPayload,
 } from './tools.js'
+import { runTool } from './tools/support/index.js'
+import { IDENTITY_GATE_EXEMPT, requireAgentIdentity } from './tools/identity-gate.js'
+
+export { AGENT_IDENTITY_UNVERIFIED, IDENTITY_GATE_EXEMPT } from './tools/identity-gate.js'
 
 export const HOSTED_SERVER_NAME = '@haven_ai/mcp-server'
-export const HOSTED_SERVER_VERSION = '0.8.1-alpha.0'
+export const HOSTED_SERVER_VERSION = '0.9.0-alpha.0'
 
 /**
  * MCP `instructions` — the critical path, surfaced to the model at
@@ -32,6 +36,24 @@ export const HOSTED_INSTRUCTIONS = [
   'check. When catalog discovery is needed, haven_discover_tools can run in',
   'parallel with haven_get_agent — neither waits on the other.',
   '',
+  'Server names: next_tool is Claude-family namespaced (mcp__<server>__<tool>)',
+  'and names the DEFAULT server names, which is all this server can know: your',
+  'local server names are your config, not ours. If yours differ — a named pair',
+  'is haven-<slug> + haven-signer-<slug>, and Codex uses config keys haven /',
+  'haven_signer — then next_tool and next_tool_server name a server you do not',
+  'have. Use next_tool_server_role (hosted | signer) with next_tool_name, and',
+  'resolve the role against your OWN configured servers.',
+  'When more than one Haven pair is configured, you act as ONE agent per task:',
+  'if the user has not said which (in the request, or a project-level choice',
+  'they stated), ask before any payment tool. Keep every call inside that pair —',
+  'a signer call goes to the signer of the hosted server you called: haven-<slug>',
+  'with haven-signer-<slug>, bare haven with haven-signer, Codex haven with',
+  'haven_signer. Confirm by identity, not name: haven_get_agent returns id and',
+  'delegateAddress, and each signer states the agent id and delegate address',
+  'it is bound to in its own instructions (compare the delegate address alone',
+  'when a signer has no recorded agent id). If they differ, stop and sign',
+  'nothing — switch to the signer whose identity matches.',
+  '',
   'For a catalogued MCP merchant, use haven_discover_tools to find a catalog_id,',
   'then haven_quote_catalog_purchase when you need its live price before choosing',
   'a cap. Quotes are informational only: they never reserve a price or create',
@@ -49,18 +71,12 @@ export const HOSTED_INSTRUCTIONS = [
   'next_tool, and next_arguments — follow those fields first; description prose',
   'is fallback, not the source of truth. When no tool follows, next_tool is absent and',
   'next_tool_omitted_reason says why — that is a complete answer, not a gap to fill from',
-  'prose. next_tool is Claude-family namespaced',
-  '(mcp__<server>__<tool>) and names the DEFAULT server names, which is all this',
-  'server can know: your local server names are your config, not ours. If yours',
-  'differ — a connector run with --name <slug> wires haven-<slug> and',
-  'haven-signer-<slug>, and Codex uses config keys haven / haven_signer — then',
-  'next_tool and next_tool_server name a server you do not have. Use',
-  'next_tool_server_role (hosted | signer) with next_tool_name, and resolve the',
-  'role against your OWN configured servers.',
+  'prose. Resolve next_tool against your own server names (Server names, above).',
   '',
   'For a plain-HTTP x402 merchant (a catalog row with protocol: http, or any',
-  'https paywall), call haven_quote_x402, then haven_pay_x402_quote with',
-  '{ payment_required, url: request_url, max_amount_human | max_amount } —',
+  'https paywall), call haven_quote_x402, then haven_pay_x402_quote with the',
+  "quote's next_arguments { url, method, headers, body, max_amount_human } and no",
+  'payment_required: Haven fetches the challenge itself, so never copy it.',
   "url is the quote's request_url, never its resource_url, which is the",
   "merchant's own declaration and may differ. Then follow the pay response's",
   'signer and scheme-specific guidance. EIP-3009 (funding leg): haven_sign_x402,',
@@ -68,8 +84,9 @@ export const HOSTED_INSTRUCTIONS = [
   'payment_header (both header names, below), then haven_report_x402_outcome.',
   'erc7710: haven_sign, then haven_submit with settlement_scheme "erc7710", then',
   'retry the merchant yourself with the payment_header haven_submit returns',
-  '(PAYMENT-SIGNATURE only) — there is no outcome report on this path: confirmed',
-  'already means the merchant settled. The outcome report is EIP-3009-only.',
+  '(PAYMENT-SIGNATURE only), then record the merchant\'s settlement with',
+  'haven_report_settlement_evidence (payment_id, settlement_tx_hash = the',
+  '`transaction` in the merchant\'s PAYMENT-RESPONSE). The outcome report is EIP-3009-only.',
   '',
   'When YOU retry a merchant yourself (the plain-HTTP x402 path), always set',
   'PAYMENT-SIGNATURE (x402 v2) to the payment_header. A strict v2 merchant reads',
@@ -111,8 +128,9 @@ export const HOSTED_INSTRUCTIONS = [
   'received_version) — stop, tell the user to run',
   `${hostedConnectorUpgradeCommand()} and the repair line it prints; nothing has been spent at that point.`,
   'If a merchant rejects AFTER funding, the delegate holds stranded funds —',
-  'recover them with haven_sweep_delegate. (erc7710 has no funding leg: a',
-  'merchant refusal there moves nothing — ignore the sweep for it.)',
+  'recover them with haven_sweep_delegate. (erc7710 has no funding leg, so',
+  'nothing to sweep — but the merchant may already have settled: check',
+  'haven_get_payment_status after the payment window and re-quote only if unsettled.)',
   '',
   'What settled means, every settle/complete response: true ONLY after Haven',
   'verified the settlement on-chain — a merchant answering 2xx is delivery,',
@@ -138,6 +156,17 @@ export interface HostedClientOptions {
   apiKey: string
   /** Haven backend base URL the server relays through. */
   baseUrl?: string
+  /**
+   * #3747: override the strict hosted merchant-egress policy. Production
+   * callers OMIT this — `createHostedHavenClient` then installs
+   * `strictMerchantEgressPolicy()` (https-only public hosts, re-checked GET
+   * redirects, while-reading byte caps, short probe budgets, finite paid
+   * delivery). The override exists as the EXPLICIT test seam so tests reach
+   * local fixture servers without carving an exemption into the production
+   * policy, and for a deployment that must adjust budgets deliberately. It is
+   * never read from request input.
+   */
+  merchantEgress?: MerchantEgressPolicy
 }
 
 /**
@@ -163,6 +192,13 @@ export function createHostedHavenClient(options: HostedClientOptions): HavenClie
     apiKey: options.apiKey,
     baseUrl: options.baseUrl,
     chainRpcs,
+    // #3747: the hosted server constrains every merchant request — quote,
+    // MCP session, tool call, paid delivery, discovery — to public https
+    // hosts, with re-checked redirects and while-reading body caps. The
+    // per-request test seam is `options.merchantEgress`; production never
+    // passes it. Without a policy the SDK would ship requests to any host
+    // the agent names, including IP literals and *.railway.internal.
+    merchantEgress: options.merchantEgress ?? strictMerchantEgressPolicy(),
     // #3303: the hosted server is Haven-deployed and outside the five
     // published packages, so the backend's compat table never hints or refuses
     // it; naming it keeps its requests from reading as a bare SDK embedder's.
@@ -228,9 +264,13 @@ export function buildHostedMcpServer(haven: HavenClient): McpServer {
       name,
       { description: toolDescriptions[name], inputSchema: toolInputSchema(name) },
       async (args: unknown) =>
-        haven.withRequestContext({ 'X-Haven-MCP-Tool': name }, async () =>
-          toMcpResult(await handlers[name](args)),
-        ),
+        haven.withRequestContext({ 'X-Haven-MCP-Tool': name }, async () => {
+          if (!IDENTITY_GATE_EXEMPT.has(name)) {
+            const identity = await runTool(() => requireAgentIdentity(haven))
+            if (!identity.success) return toMcpResult(identity)
+          }
+          return toMcpResult(await handlers[name](args))
+        }),
     )
   }
 

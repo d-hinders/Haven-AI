@@ -332,6 +332,7 @@ function evidenceAttachSql(referenceColumn: 'payment_intent_id'): string {
          protocol_receipt_header = COALESCE($9, protocol_receipt_header),
          protocol_receipt_payload = COALESCE($10::JSONB, protocol_receipt_payload),
          merchant_status = COALESCE($11, merchant_status),
+         delivery_reference = COALESCE($12, delivery_reference),
          updated_at = NOW()
      WHERE ${referenceColumn} = $1
        AND agent_id = $2
@@ -352,6 +353,13 @@ export interface AttachEvidenceParams {
   protocolReceiptHeader: string | null
   protocolReceiptPayload: string | null
   merchantStatus: number | null
+  /**
+   * #3778: the optional NON-SECRET delivery pointer ("Bik Bok 5 SEK, order
+   * 6ac7…"). Validated upstream (`@haven_ai/core`'s `deliveryReferenceError`)
+   * — a secret-shaped value never reaches this write. COALESCE keeps the
+   * attach idempotent: a re-attach without one never clears a recorded one.
+   */
+  deliveryReference: string | null
 }
 
 export async function attachEvidenceProof<R extends QueryRow>(
@@ -370,8 +378,75 @@ export async function attachEvidenceProof<R extends QueryRow>(
     input.protocolReceiptHeader,
     input.protocolReceiptPayload,
     input.merchantStatus,
+    input.deliveryReference,
   ])
   return result.rows[0] ?? null
+}
+
+// ── Delivery-quality reports (#3770) ─────────────────────────────────────────
+
+/**
+ * #3770: the agent's evidence-only verdict on what a settled payment
+ * DELIVERED. One row per (payment, agent); a re-report replaces the agent's
+ * own row (last write wins, never another agent's). Writes NOTHING on
+ * `payment_intents` — the report cannot touch `status`, `tx_hash`, any
+ * amount, or `settled`; it is a fact ABOUT the payment, recorded beside it.
+ */
+export const UPSERT_DELIVERY_QUALITY_SQL = `
+  INSERT INTO machine_payment_delivery_reports
+    (payment_intent_id, agent_id, user_id, quality, note)
+  VALUES ($1, $2, $3, $4, $5)
+  ON CONFLICT (payment_intent_id, agent_id)
+  DO UPDATE SET quality = EXCLUDED.quality, note = EXCLUDED.note, updated_at = NOW()
+  RETURNING quality, note, updated_at
+`
+
+export interface DeliveryQualityReportRow {
+  quality: 'ok' | 'unusable' | 'partial'
+  note: string | null
+  updated_at: string
+}
+
+export async function upsertDeliveryQualityReport(
+  input: {
+    paymentIntentId: string
+    agentId: string
+    userId: string
+    quality: DeliveryQualityReportRow['quality']
+    note: string | null
+  },
+  db: Executor = pool,
+): Promise<DeliveryQualityReportRow> {
+  const result = await db.query<DeliveryQualityReportRow>(UPSERT_DELIVERY_QUALITY_SQL, [
+    input.paymentIntentId,
+    input.agentId,
+    input.userId,
+    input.quality,
+    input.note,
+  ])
+  return result.rows[0]
+}
+
+/**
+ * #3778: record the delivery reference on an EXISTING evidence row — the
+ * #3475 eip3009 settlement branch of `attachMachinePaymentEvidence` returns
+ * after the base write without reaching `attachEvidenceProof`, so a reference
+ * supplied with that report would otherwise be dropped. Scoped to the
+ * payment + agent exactly like every other evidence write; a row that does
+ * not exist (base write failed) is a no-op, matching that branch's swallow.
+ */
+export async function setEvidenceDeliveryReference(
+  paymentIntentId: string,
+  agentId: string,
+  deliveryReference: string,
+  db: Executor = pool,
+): Promise<void> {
+  await db.query(
+    `UPDATE machine_payment_evidence
+        SET delivery_reference = $3, updated_at = NOW()
+      WHERE payment_intent_id = $1 AND agent_id = $2`,
+    [paymentIntentId, agentId, deliveryReference],
+  )
 }
 
 // ── Receipts list + evidence echo (routes/machine-payments.ts) ───────────────
@@ -392,10 +467,14 @@ export const LIST_EVIDENCE_RECEIPTS_SQL = `SELECT e.*, pi.machine_metadata->>'se
               pi.machine_metadata->>'merchant_settlement_tx_hash' AS verified_merchant_settlement_tx_hash,
               pi.budget_delegation_hash,
               pi.delegate_address AS intent_delegate_address,
+              dq.quality AS delivery_quality,
+              dq.note AS delivery_note,
+              dq.updated_at AS delivery_reported_at,
               ${OWNER_COMPANY_DETAILS_JOIN_COLUMNS}
        FROM machine_payment_evidence e
        LEFT JOIN payment_intents pi ON pi.id = e.payment_intent_id
        LEFT JOIN owner_company_details ocd ON ocd.user_id = e.user_id
+       LEFT JOIN machine_payment_delivery_reports dq ON dq.payment_intent_id = e.payment_intent_id AND dq.agent_id = e.agent_id
        WHERE e.agent_id = $1
          AND ($3::uuid IS NULL OR (e.created_at, e.id) < (
            SELECT c.created_at, c.id FROM machine_payment_evidence c WHERE c.id = $3::uuid AND c.agent_id = $1
@@ -1002,7 +1081,6 @@ export const LOAD_RECEIPT_UNDERLAG_SOURCE_SQL = `SELECT mpe.tx_hash, mpe.chain_i
      FROM machine_payment_evidence mpe
      LEFT JOIN payment_intents pi ON pi.id = mpe.payment_intent_id
      WHERE mpe.id = $1 AND mpe.user_id = $2`
-
 export interface UnderlagSourceRow {
   tx_hash: string | null
   chain_id: number | null
@@ -1028,4 +1106,41 @@ export async function loadReceiptUnderlagSource(
     userId,
   ])
   return result.rows[0] ?? null
+}
+
+// ── Booked-hash pin (#3767 B2) ────────────────────────────────────────────────
+//
+// What the accounting surfaces book for a payment is decided ONCE, at its
+// first feed claim, and frozen here — so a settlement recorded AFTER the pin
+// (or between two attempts) can never change the bytes a retry renders. That
+// is what keeps Accounted's idempotency key (which derives from the
+// paymentId) from going terminal on a re-file with different bytes.
+//
+// Storage is `payment_intents.machine_metadata` JSONB — deliberately no
+// migration and no `accounting_feed_syncs` column (the latter would put the
+// change under CODEOWNERS for a fact that lives with the payment, not with
+// one destination's ledger row).
+
+export const PIN_ACCOUNTING_BOOKED_TX_SQL = `UPDATE payment_intents
+     SET machine_metadata = COALESCE(machine_metadata, '{}'::jsonb) || jsonb_build_object(
+           'accounting_booked_tx_hash', LOWER($2::text),
+           'accounting_booked_tx_kind', $3::text)
+     WHERE id = $1
+       AND machine_metadata->>'accounting_booked_tx_hash' IS NULL
+     RETURNING id`
+
+/**
+ * Pin the hash (and its `settlement` | `funding` label) a feed push will
+ * render, on the payment's FIRST claim only. First-writer-wins: a pin that
+ * already exists is never replaced, which is exactly the guarantee the
+ * stable-bytes acceptance rests on. True when this call wrote the pin.
+ */
+export async function pinAccountingBookedTx(
+  paymentIntentId: string,
+  txHash: string,
+  kind: 'settlement' | 'funding',
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query(PIN_ACCOUNTING_BOOKED_TX_SQL, [paymentIntentId, txHash, kind])
+  return result.rows.length > 0
 }

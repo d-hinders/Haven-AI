@@ -1,4 +1,7 @@
 import { HAVEN_CONNECTOR_CHANNEL, connectorUpgradeCommand } from './connector-channel.js'
+// Type-only on purpose: merchant-egress.ts extends HavenError at module eval,
+// and a runtime import here would make the two modules circular.
+import type { MerchantEgressPolicy } from './merchant-egress.js'
 
 // ── Client Configuration ─────────────────────────────────────────
 
@@ -22,6 +25,17 @@ export interface HavenClientConfig {
    *  merchants may settle on-chain synchronously, so the default is
    *  deliberately generous. #1300. */
   merchantTimeout?: number
+
+  /**
+   * #3747: optional string-level merchant-egress policy. When set, EVERY
+   * merchant request (and every redirect hop) is checked against it before
+   * connecting; GET redirects are followed `manual` with re-checked hops;
+   * response bodies are capped WHILE being read; per-use timeouts apply.
+   * Absent — the SDK, local-MCP and embedder default — behaviour is
+   * unchanged. This is network policy, never spend control: the on-chain
+   * allowance remains the real control. See `merchant-egress.ts`.
+   */
+  merchantEgress?: MerchantEgressPolicy
 
   /** Timeout in ms when polling for tx confirmation (default: 90000) */
   confirmationTimeout?: number
@@ -506,6 +520,13 @@ export interface X402McpCallContext {
   toolName: string
   arguments?: Record<string, unknown>
   mcpTransport?: X402McpTransport
+  /**
+   * #3781: Haven's own catalog row name, when the purchase came from a
+   * catalog entry — persisted with the context so a settle can report the
+   * catalog row's name as the display product. Optional — omit for a direct
+   * `haven_pay_mcp_tool` call. Haven-derived, never merchant content (#1349).
+   */
+  catalogName?: string
 }
 
 /**
@@ -518,6 +539,8 @@ export interface X402MerchantCallContext {
   toolName: string
   arguments: Record<string, unknown>
   mcpTransport?: X402McpTransport
+  /** #3781: the catalog row's name, when the purchase came from a catalog entry. */
+  catalogName?: string
 }
 
 /** @internal */
@@ -527,9 +550,45 @@ export interface RawX402MerchantCallContext {
   tool_name: string
   arguments?: Record<string, unknown>
   mcp_transport?: { handshake_required: boolean; source: 'path' | 'bazaar' }
+  catalog_name?: string
   error?: string
   error_code?: string
   status?: string
+}
+
+/**
+ * Response shape of `findX402IntentByIdempotencyKey` — the read-only state of
+ * the caller's own x402 intent for an idempotency key (#3739).
+ */
+export interface X402IntentByKey {
+  paymentId: string
+  status: string
+  /** `null` when the stored row does not say (never guessed). */
+  settlementScheme: 'erc7710' | 'eip3009' | null
+  resourceUrl: string | null
+  expiresAt: string | null
+  /** True only for a `pending_signature` intent whose `expiresAt` is still in the future. */
+  windowOpen: boolean
+  taskBudgetId: string | null
+  /** Atomic amount, as a string. */
+  amountAtomic: string
+  /** #3739 review: token contract of `amountAtomic`, so a whole-token cap can be converted. */
+  asset: string | null
+  network: string
+}
+
+/** @internal */
+export interface RawX402IntentByKey {
+  payment_id: string
+  status: string
+  settlement_scheme: 'erc7710' | 'eip3009' | null
+  resource_url: string | null
+  expires_at: string | null
+  window_open: boolean
+  task_budget_id: string | null
+  amount_atomic: string
+  asset?: string | null
+  network: string
 }
 
 /** Quote parsed from an HTTP 402 response without creating a Haven payment. */
@@ -671,6 +730,19 @@ export interface HavenAllowance {
   tokenSymbol: string
   configuredAmount: string
   resetPeriodMin: number
+  /**
+   * #3731: whether the account's balance can back THIS row's WHOLE remaining
+   * period budget. `false` is a heads-up to mention to the user, never a
+   * refusal — a budget larger than the balance is a normal setup (an owner
+   * may top up weekly) and says nothing certain about the next payment;
+   * `null` when unverifiable (the chain read failed, or `remaining` was not
+   * read live — `onchain.remainingIsFromChain` false). Always present: any
+   * non-boolean wire value, including an absent one, maps to `null` rather
+   * than `undefined`. The key is absent on the WIRE when the remaining is 0
+   * (`balance >= 0` would be a vacuous true). Rows for one token are each
+   * compared alone — they do not add up. Never a balance figure.
+   */
+  fundsCoverRemaining: boolean | null
   /**
    * #3518: this budget's SCOPE, so an agent holding more than one budget
    * for a token can name the merchant-locked one before paying. The
@@ -896,9 +968,13 @@ export interface RawHavenBalanceCoverage {
  * call returns, so it surfaces as an API error rather than `revoked`. `revoked`
  * is reached when the request authenticates but the agent status is non-active.
  *
- * Wallet token balance is intentionally NOT folded in here: the on-chain
- * remaining allowance is the gate Haven enforces, and insufficient wallet
- * funding surfaces at pay time as INSUFFICIENT_FUNDS.
+ * Wallet token balance is intentionally NOT folded into the readiness value
+ * itself — `ready` stays an AUTHORITY signal (installed consumers switch on
+ * its value set) — but the account's ability to back it is reported beside
+ * it: the allowances rows carry `fundsCoverRemaining` (#3731), null when
+ * unverifiable, and an underfunded prepare surfaces at pay time as
+ * `PREPARE_REVERTED` with `revert_cause: "insufficient_balance"`, never
+ * `INSUFFICIENT_FUNDS`.
  */
 export type HavenAgentReadiness = 'ready' | 'needs_approval' | 'revoked'
 
@@ -928,6 +1004,14 @@ export interface HavenAgentAllowanceSummary {
   configuredAmount: string
   resetPeriodMin: number
   isResetPending: boolean
+  /**
+   * #3731: the {@link HavenAllowance.fundsCoverRemaining} projection —
+   * whether the account's balance can back this row's whole remaining
+   * period budget. `false` is a heads-up to mention to the user, not a
+   * refusal; `null` when unverifiable. Same provenance rule as the detailed
+   * read: any non-boolean wire value maps to `null`, never `undefined`.
+   */
+  fundsCoverRemaining: boolean | null
 }
 
 /**
@@ -2452,6 +2536,14 @@ export interface RawHavenAllowance {
   recipient_address?: string | null
   merchant_id?: string | null
   reserved_haven_atomic?: string
+  /**
+   * #3731: whether the account's balance can back this row's whole remaining
+   * period budget — true/false/null per the
+   * {@link HavenAllowance.fundsCoverRemaining} contract. Absent on the wire
+   * when `onchain.remaining` is 0, and on backends that predate the field;
+   * the mapping turns any non-boolean into `null`.
+   */
+  funds_cover_remaining?: boolean | null
   onchain: {
     amount: string
     spent: string
@@ -2525,6 +2617,20 @@ export interface HavenCatalogEntry {
   protocol: 'http' | 'mcp'
   toolName: string | null
   toolArguments: Record<string, unknown> | null
+  /**
+   * #3769: the row's declared JSON Schema for a per-call MCP tool's caller
+   * arguments — `haven_prepare_catalog_purchase` validates an `arguments`
+   * input against it. NULL/absent on a fixed-SKU row, which refuses caller
+   * arguments. OPTIONAL on purpose: an installed SDK may face a backend
+   * predating #3769.
+   */
+  toolArgumentsSchema?: Record<string, unknown> | null
+  /** #3769: the HTTP method a plain-HTTP resource needs (null = GET). OPTIONAL like the schema above. */
+  httpMethod?: string | null
+  /** #3769: the body encoding of `bodyExample` — 'json' today. OPTIONAL like the schema above. */
+  bodyType?: string | null
+  /** #3769: an example body the row's discovery hint carries. OPTIONAL like the schema above. */
+  bodyExample?: Record<string, unknown> | null
   priceDisplay: string | null
   priceAtomic: string | null
   asset: string | null
@@ -2589,6 +2695,11 @@ export interface RawCatalogEntry {
   protocol: 'http' | 'mcp'
   tool_name: string | null
   tool_arguments: Record<string, unknown> | null
+  /** #3769: absent from a backend predating it; null when the row declares none. */
+  tool_arguments_schema?: Record<string, unknown> | null
+  http_method?: string | null
+  body_type?: string | null
+  body_example?: Record<string, unknown> | null
   price_display: string | null
   price_atomic: string | null
   asset: string | null

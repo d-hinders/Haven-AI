@@ -278,8 +278,13 @@ describe('shared Haven tool descriptions', () => {
     const sendDesc = composeDescription(toolDescriptions.send)
     expect(sendDesc).toContain('haven_check_funds')
 
+    // #3731: getAllowances no longer routes to haven_check_funds — the shared
+    // description also feeds the LOCAL runtime, which has no such tool, and
+    // the rows now carry the coverage answer themselves
+    // (`fundsCoverRemaining`).
     const allowanceDesc = composeDescription(toolDescriptions.getAllowances)
-    expect(allowanceDesc).toContain('haven_check_funds')
+    expect(allowanceDesc).not.toContain('haven_check_funds')
+    expect(allowanceDesc).toContain('fundsCoverRemaining')
   })
 
   it('describes the sweep destination as the originating account, not a Safe', () => {

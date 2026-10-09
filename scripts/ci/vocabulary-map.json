@@ -262,6 +262,8 @@
       "agentName": "Attribution joined onto the history row. The receipt surface is agent-scoped already, so the agent is the principal rather than a field.",
       "initiatedBy": "#2097 initiator classification for any history row. Every receipt is agent-initiated by construction.",
       "settlementScheme": "eip3009 / erc7710 -- WHICH settlement branch moved the money (#1705). The three axes #1705 keeps unmerged are this, `source` (the payment protocol) and the ACCOUNT's `execution_rail` (account architecture) -- not the old receipt `rail` (removed by #3306), which was the same axis as `source`.",
+      "fundingTxHash": "#3763: the EIP-3009 funding leg, named -- Haven's sponsored UserOp (account -> delegate). Equal by copy to `hash` on the rows that carry it (the framing `to` uses), and a DIFFERENT CONCEPT from the receipt's fundingTxHash: there it is scheme-dependent (#2998), here it exists only on x402-synthesized rows and is null on every other row class (explorer-derived, sweeps), so no concept pair can claim convergence.",
+      "settlementTxHash": "#3763: the merchant's settlement transaction (delegate -> merchant) when an agent reported it and it verified on-chain (#3475); null is 'not recorded', never 'failed' -- the SDK's default evidence post reports the FUNDING hash, which the writer refuses, so many eip3009 rows legitimately never get one. Equal by copy to the receipt's settlementTxHash on rows that carry one, but only x402-synthesized rows carry the field at all, so it stays unpaired.",
       "amountSek": "Book-time SEK value (#463) for the accounting feed.",
       "fxRateSek": "The rate amountSek was struck at (#2871).",
       "fxSource": "Where that rate came from.",
@@ -271,7 +273,8 @@
       "fxRates": "#3127: the row's own book-time rate map (machine_payment_evidence.fx_rates, migration 082) -- one rate per supported ledger currency frozen at settlement. The receipt carries the settled figures themselves and does not restate the capture.",
       "accounting": "Accounting-feed sync state joined by paymentId (#2870).",
       "timestamp": "The row's non-null unix-seconds SORT KEY: the block timestamp on explorer rows, `confirmed_at ?? created_at` on x402-synthesized rows. Its counterpart for 'when did this settle' is `confirmedAt` (paired above, #3132); on the JSON rows the fallback is marked by `timestampSource` -- the CSV export's settled_at projection of it is not (see the settled-at reason).",
-      "timestampSource": "#3132: which column produced `timestamp` ('block' | 'confirmed_at' | 'created_at') -- the mark that turns the sort key's fallback from a silent substitution into a stated one. A receipt has no sort-key fallback to mark."
+      "timestampSource": "#3132: which column produced `timestamp` ('block' | 'confirmed_at' | 'created_at') -- the mark that turns the sort key's fallback from a silent substitution into a stated one. A receipt has no sort-key fallback to mark.",
+      "deliveryReference": "#3778: the NON-SECRET pointer to a delivered good (machine_payment_evidence.delivery_reference, migration 107) -- what was bought and where to recover it, on the transaction detail drawer and the activity feed. No receipt counterpart: the SDK receipt is the settlement's own protocol proof and does not restate the delivery pointer, and the write-side echo lives on the evidence POST, not the receipt surface (mapPaymentReceipt is untouched). Credential-shaped values are refused at the handler, semantic and recognizer layers."
     }
   },
   "cliConventions": {
@@ -399,8 +402,8 @@
       },
       "cmdAgentRevoke": {
         "convention": "snake",
-        "keys": "ok, agent_id, status",
-        "reason": "Hybrid envelope: a bare `ok` beside snake_case identifiers."
+        "keys": "ok, agent_id, status; ok, agent_id, status, live_delegations (the --keep-budget success with rows still live, each carrying delegation_hash and status)",
+        "reason": "Hybrid envelope: a bare `ok` beside snake_case identifiers. #3729 added optional live_delegations on the --keep-budget success path."
       },
       "cmdAgentRename": {
         "convention": "snake",

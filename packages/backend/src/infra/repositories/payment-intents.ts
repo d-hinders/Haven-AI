@@ -953,10 +953,14 @@ export const FIND_SETTLED_PAYMENT_RECEIPT_SQL = `SELECT pi.id, pi.account_addres
             pi.machine_metadata->>'delegate_account_address' AS delegate_account_address,
             mpe.resource_url AS resource_url,
             mpe.amount_sek AS amount_sek,
+            dq.quality AS delivery_quality,
+            dq.note AS delivery_note,
+            dq.updated_at AS delivery_reported_at,
             ${OWNER_COMPANY_DETAILS_JOIN_COLUMNS}
      FROM payment_intents pi
      LEFT JOIN machine_payment_evidence mpe ON mpe.payment_intent_id = pi.id
      LEFT JOIN owner_company_details ocd ON ocd.user_id = pi.user_id
+     LEFT JOIN machine_payment_delivery_reports dq ON dq.payment_intent_id = pi.id AND dq.agent_id = pi.agent_id
      WHERE pi.id = $1 AND pi.agent_id = $2 AND pi.status = 'confirmed'`
 
 export interface PaymentReceiptRow extends BuyerJoinColumns {

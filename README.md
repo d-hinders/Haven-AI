@@ -140,6 +140,7 @@ Edit `.env` and fill in the required values:
 | `RELAYER_PRIVATE_KEY` | Yes for on-chain execution | EOA private key that pays gas for relayed transactions; it cannot access user funds |
 | `GNOSISSCAN_API_KEY` | No | History only (decision (c), #3635): the chain-100 explorer history read; nothing runs on Gnosis |
 | `BASESCAN_API_KEY` | No | Base explorer API key when using an Etherscan-style Base source; Base currently defaults to Blockscout for transactions |
+| `BLOCKSCOUT_API_KEY` | No | Sent on the Base / Base Sepolia Blockscout history reads; without it Blockscout may refuse (403) anonymous requests from a datacenter IP |
 | `COINGECKO_API_KEY` | No | Token price lookups |
 | `FRONTEND_URL` | No | Backend CORS/link base (default: `http://localhost:3000`) |
 | `NEXT_PUBLIC_API_URL` | No | Frontend backend URL override (default through local rewrite: `http://localhost:3001`) |
@@ -317,8 +318,9 @@ Independent layers keep the API and signing boundaries separate:
 | **Credential scoping** | API-key identity, prefix display, rotation, and revocation state | Haven backend |
 
 If Haven is compromised, API keys alone cannot sign transactions. For a live delegation
-agent, an account owner can pause or revoke it in Haven, and can revoke the underlying
-on-chain authority directly without needing Haven — see the [independent exit path](docs/exit/README.md).
+agent, an account owner can stop its budget or replace its signing key in Haven (pausing
+only blocks payments through Haven), and can revoke the underlying on-chain authority
+directly without needing Haven — see the [independent exit path](docs/exit/README.md).
 The dashboard exposes no pause or revoke controls for legacy Safe records; any residual Safe permission
 must be revoked externally by the Safe owner.
 

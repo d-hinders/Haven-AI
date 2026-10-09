@@ -105,7 +105,12 @@ interface TransactionsTableProps {
 /** `null` = the row has no explorer link (explicitly, or its chain is unknown). */
 function rowExplorerHref(tx: AggregatedTransaction): string | null {
   if (tx.explorerUrl === null) return null
-  return tx.explorerUrl ?? getExplorerUrlOrNull(tx.chainId, 'tx', tx.hash)
+  // #3763: on eip3009 rows the merchant names the SETTLEMENT, so the table's
+  // external-details link points there when one is recorded — the same
+  // transaction the merchant shows — and falls back to the funding hash
+  // (`hash`) otherwise. `settlementTxHash` is null on every row that is not
+  // a synthesized x402 payment, so non-x402 rows keep linking `hash`.
+  return tx.explorerUrl ?? getExplorerUrlOrNull(tx.chainId, 'tx', tx.settlementTxHash ?? tx.hash)
 }
 
 function LoadingTable({ columns, padY }: { columns: TransactionColumnId[]; padY: string }) {

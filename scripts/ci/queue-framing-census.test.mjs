@@ -113,6 +113,8 @@ const GUARDED_FILES = [
   'packages/mcp-server/src/tools/contracts.ts',
   'packages/mcp-server/src/tools/parsing.ts',
   'packages/mcp-server/src/tools/registry.ts',
+  // The hosted dispatch identity gate: its refusal copy is agent-visible.
+  'packages/mcp-server/src/tools/identity-gate.ts',
   'packages/mcp-server/src/tools/state-direct-recovery.ts',
   // #2812 — the final capability module (paid-MCP completion: the two
   // settle/complete handlers and the merchant delivery/context-rehydration
@@ -124,6 +126,10 @@ const GUARDED_FILES = [
   // #3329 — the task-budget capability module (open / close, signer hand-off prose)
   'packages/mcp-server/src/tools/task-budgets.ts',
   'packages/mcp-server/src/tools/support/cap-price.ts',
+  // #3769 — the catalog argument-resolution support: holds the fixed-SKU and
+  // schema-violation refusal prose (agent-facing payment-refusal strings),
+  // verified clean against the phrase list before being added.
+  'packages/mcp-server/src/tools/support/catalog-arguments.ts',
   'packages/mcp-server/src/tools/support/catalog-entry.ts',
   'packages/mcp-server/src/tools/support/errors.ts',
   'packages/mcp-server/src/tools/support/guidance.ts',

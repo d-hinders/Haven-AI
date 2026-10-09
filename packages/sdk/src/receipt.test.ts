@@ -394,3 +394,84 @@ describe('verifyPaymentReceipt #3418 — retired-rail bundles (no scheme)', () =
     expect(result).toMatchObject({ verified: false, reason: 'signer_mismatch' })
   })
 })
+
+describe('verifyPaymentReceipt #3723 — the endpoint\'s wrapped response is accepted as-is', () => {
+  // GET /payments/{id}/receipt returns { receipt, verification } — and
+  // HavenClient.getReceipt re-wraps the same way. Passing that response
+  // UNCHANGED used to answer not_a_signed_receipt (field evidence
+  // 2026-10-07): the verifier looked for `authorization` at the top level.
+  const bundle = () => erc7710Receipt({ signatureScheme: 'eip712_delegation' })
+
+  it('verifies the whole { receipt, verification } response unchanged', () => {
+    // The wrapper's verification is deliberately a LIE here: if the verifier
+    // ever trusted it, this would verify a bundle that says nothing of the sort.
+    const response = { receipt: bundle(), verification: { verified: true, recoveredSigner: '0xlies' } }
+    expect(verifyPaymentReceipt(response)).toEqual({
+      verified: true,
+      recoveredSigner: DELEGATE_7710.address,
+      verifiedOver: 'delegation_digest',
+    })
+  })
+
+  it('never reads the wrapper\'s verification — a throwing getter still verifies', () => {
+    const response = {
+      receipt: bundle(),
+      get verification(): never {
+        throw new Error('the wrapper self-check must never be read')
+      },
+    }
+    expect(verifyPaymentReceipt(response)).toEqual({
+      verified: true,
+      recoveredSigner: DELEGATE_7710.address,
+      verifiedOver: 'delegation_digest',
+    })
+  })
+
+  it('a wrapper around a bundle signed by another key is signer_mismatch, never verified', () => {
+    const forged = erc7710Receipt({
+      signature: OTHER_7710.signingKey.sign(erc7710Digest(BASE_SEPOLIA)).serialized,
+      signatureScheme: 'eip712_delegation',
+    })
+    const response = { receipt: forged, verification: { verified: true } }
+    expect(verifyPaymentReceipt(response)).toMatchObject({ verified: false, reason: 'signer_mismatch' })
+  })
+
+  it('unwraps ONE level only — a wrapper of a wrapper is not a bundle', () => {
+    const response = { receipt: { receipt: bundle() }, verification: { verified: true } }
+    expect(verifyPaymentReceipt(response)).toEqual({ verified: false, reason: 'not_a_signed_receipt' })
+  })
+
+  it('a wrapped haven_list_receipts row still answers not_a_signed_receipt', () => {
+    const row = mapPaymentReceipt({
+      id: '50dec266-a3a5-4e5b-a8ef-8b2f3ad4c111',
+      payment_id: 'aa9ece55-9b0c-4f4d-a6b7-1c2d3e4f5a6b',
+      rail: 'x402',
+      proof_status: 'protocol_receipt_attached',
+      tx_hash: null,
+      funding_tx_hash: null,
+      settlement_tx_hash: '0xsettlement',
+      chain_id: BASE_SEPOLIA,
+      resource_url: 'https://merchant.example/resource',
+      merchant_address: '0x00000000000000000000000000000000000000aa',
+      payer_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+      settlement_address: '0x00000000000000000000000000000000000000bb',
+      token_symbol: 'USDC',
+      token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      amount_raw: '1000000',
+      amount_human: '1.00',
+      challenge_id: null,
+      idempotency_key: null,
+      challenge_payload: null,
+      selected_payment: null,
+      payment_proof_header_name: null,
+      protocol_receipt_header_name: 'PAYMENT-RESPONSE',
+      protocol_receipt_payload: '{}',
+      merchant_status: null,
+      confirmed_at: '2026-09-28T10:00:00.000Z',
+      created_at: '2026-09-28T10:00:00.000Z',
+      updated_at: '2026-09-28T10:00:00.000Z',
+    } as never)
+    const response = { receipt: row, verification: { verified: true } }
+    expect(verifyPaymentReceipt(response)).toEqual({ verified: false, reason: 'not_a_signed_receipt' })
+  })
+})

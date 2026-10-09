@@ -22,7 +22,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
+  encodeBase64Json,
+  verifyPaymentReceipt,
 } from '@haven_ai/sdk'
+import { signedErc7710Receipt } from '@haven_ai/sdk/test-support'
 import {
   AGENT_ALLOWANCES_RESPONSE,
   AGENT_RESPONSE,
@@ -737,6 +740,80 @@ describe('haven_verify_receipt (#3418) — a list row is not a signed bundle', (
       expect(result.data).toEqual({ verified: false, reason: 'not_a_signed_receipt' })
     }
   })
+
+  // #3723 guard: the wrapper unwrap never rescues a list row — the row inside
+  // a { receipt, verification } wrapper carries no authorization either way.
+  it('a WRAPPED list row still answers not_a_signed_receipt', async () => {
+    const result = await handlers().haven_verify_receipt({
+      receipt: { receipt: erc7710Row, verification: { verified: true } } as never,
+    })
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error(`verify failed: ${result.message}`)
+    expect(result.data).toEqual({ verified: false, reason: 'not_a_signed_receipt' })
+  })
+})
+
+// ── #3723 — the wrapped response and the bundle read ─────────────────────────
+
+describe('#3723 — haven_verify_receipt accepts the endpoint response; haven_get_receipt returns the bundle', () => {
+  const bundle = signedErc7710Receipt()
+
+  it('the whole { receipt, verification } response verifies — the first positive erc7710 verify here', async () => {
+    expect(verifyPaymentReceipt(bundle)).toMatchObject({ verified: true, verifiedOver: 'delegation_digest' })
+    const result = await handlers().haven_verify_receipt({
+      receipt: { receipt: bundle, verification: { verified: true, recoveredSigner: '0xlies' } } as never,
+    })
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error(`verify failed: ${result.message}`)
+    expect(result.data).toEqual({
+      verified: true,
+      recoveredSigner: bundle.authorization.delegate,
+      verifiedOver: 'delegation_digest',
+    })
+  })
+
+  it('the spread form — { receipt, verification } as top-level arguments — verifies: verification accepted and ignored', async () => {
+    const result = await handlers().haven_verify_receipt({
+      receipt: bundle,
+      verification: { verified: true, recoveredSigner: '0xlies' },
+    } as never)
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error(`verify failed: ${result.message}`)
+    expect(result.data).toEqual({
+      verified: true,
+      recoveredSigner: bundle.authorization.delegate,
+      verifiedOver: 'delegation_digest',
+    })
+  })
+
+  it('haven_get_receipt returns { receipt } and that output verifies unchanged', async () => {
+    stubFetch({
+      'GET /payments/pay_3723/receipt': {
+        status: 200,
+        body: { receipt: bundle, verification: { verified: true, verifiedOver: 'delegation_digest' } },
+      },
+    })
+    const result = ok<{ receipt: unknown }>(await handlers().haven_get_receipt({ payment_id: 'pay_3723' }))
+    // { receipt } ONLY — the server-side self-check is not returned.
+    expect(result.data).toEqual({ receipt: bundle })
+    const verify = ok<{ verified: boolean; verifiedOver?: string }>(
+      await handlers().haven_verify_receipt({ receipt: result.data.receipt }),
+    )
+    expect(verify.data).toMatchObject({ verified: true, verifiedOver: 'delegation_digest' })
+  })
+
+  it('an unknown id answers the structured 404, never a raw error', async () => {
+    stubFetch({
+      'GET /payments/pay_missing/receipt': {
+        status: 404,
+        body: { error: 'not_found', message: 'No receipt for payment pay_missing' },
+      },
+    })
+    const result = await handlers().haven_get_receipt({ payment_id: 'pay_missing' })
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.statusCode).toBe(404)
+  })
 })
 
 
@@ -1379,6 +1456,71 @@ describe('haven_submit — erc7710 settle (#2041)', () => {
     expect(recordedCalls().find((c) => c.url.includes('/sign'))).toBeUndefined()
   })
 
+  it('rides the ready-made retry headers beside the payment_header on the erc7710 success return (#3727)', async () => {
+    // A realistic erc7710 envelope, not a placeholder string: the retry-header
+    // names come from the SDK's live name rule, which reads the header's own
+    // `accepted` option. A short stub would hit that rule's conservative
+    // "both names" parse-failure fallback and never exercise the erc7710 half
+    // of the rule — the exact blind spot the #2289 short-header fixtures had.
+    const addr = `0x${'12'.repeat(20)}`
+    const sig = `0x${'ab'.repeat(65)}`
+    const erc7710Header = encodeBase64Json({
+      x402Version: 2,
+      scheme: 'exact',
+      network: 'eip155:8453',
+      accepted: {
+        scheme: 'exact',
+        network: 'eip155:8453',
+        amount: '10000',
+        payTo: addr,
+        maxTimeoutSeconds: 300,
+        asset: addr,
+        extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: [addr] },
+      },
+      payload: {
+        delegationChain: [
+          {
+            delegate: addr,
+            delegator: addr,
+            authority: `0x${'00'.repeat(32)}`,
+            salt: `0x${'1'.padStart(64, '0')}`,
+            signature: sig,
+            caveats: [{ enforcer: addr, terms: `0x${'cd'.repeat(96)}`, args: '0x' }],
+          },
+        ],
+        userOperation: {
+          sender: addr,
+          nonce: '0x1',
+          callData: `0x${'22'.repeat(400)}`,
+          paymasterAndData: `0x${'33'.repeat(200)}`,
+          signature: sig,
+        },
+      },
+    })
+    stubFetch({
+      'POST /x402/pay_generic_7710/settle': {
+        status: 200,
+        body: { payment_header: erc7710Header },
+      },
+    })
+    const res = ok(
+      await handlers().haven_submit({
+        payment_id: 'pay_generic_7710',
+        signature: SIG,
+        settlement_scheme: 'erc7710',
+      }),
+    ) as { data: Record<string, any> }
+
+    // #3727: the retry headers are derived from the SDK's live name rule, so
+    // on the erc7710 submit path this is PAYMENT-SIGNATURE ONLY — the legacy
+    // alias would double past the header-size ceiling with the delegation
+    // chain (#2341). The value is the header verbatim, so the agent never
+    // picks the header names from prose.
+    expect(res.data.retry_headers).toEqual({ 'PAYMENT-SIGNATURE': erc7710Header })
+    expect(res.data.retry_headers['PAYMENT-SIGNATURE']).toBe(res.data.payment_header)
+    expect('X-PAYMENT' in res.data.retry_headers).toBe(false)
+  })
+
   it('a repeated submit of a payment that already settled answers the same done state as haven_settle_mcp_tool (#3423)', async () => {
     const TX = '0x' + '7d'.repeat(32)
     stubFetch({
@@ -1515,3 +1657,112 @@ describe('haven_submit — erc7710 settle (#2041)', () => {
  * both carried the identical `1000000` — that construction is precisely why a
  * green suite could not see this.
  */
+
+// ── #3774: haven_submit names the step that actually follows ─────────────────
+
+describe('#3774 haven_submit next steps', () => {
+  const SIG = '0x' + '55'.repeat(65)
+  const status = (overrides: Record<string, unknown>) => ({
+    payment_id: 'pay_1',
+    kind: 'payment_intent',
+    status: 'confirmed',
+    phase: 'payment_confirmed',
+    next_action: 'none',
+    tx_hash: '0xtx',
+    message: 'ok',
+    ...overrides,
+  })
+
+  it('erc7710: after the agent\'s own retry, names haven_report_settlement_evidence with the payment_id', async () => {
+    stubFetch({ 'POST /x402/pay_7710/settle': { status: 200, body: { payment_header: 'HEADER' } } })
+    const res = ok(
+      await handlers().haven_submit({ payment_id: 'pay_7710', signature: SIG, settlement_scheme: 'erc7710' }),
+    ) as { data: Record<string, any> }
+    expect(res.data.next_action).toBe(AgentPaymentNextAction.RetryOriginalX402Request)
+    expect(res.data.next_tool_name).toBe('haven_report_settlement_evidence')
+    expect(res.data.next_arguments).toEqual({ payment_id: 'pay_7710' })
+    expect(res.data.reason).toContain('PAYMENT-RESPONSE')
+    expect(res.data.reason).not.toContain('X-PAYMENT')
+  })
+
+  it('x402 eip3009 plain-HTTP funding confirmed: retry the merchant with the signer header, then haven_report_x402_outcome', async () => {
+    stubFetch({
+      'POST /payments/pay_1/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xtx' } },
+      'GET /machine-payments/pay_1/status': { status: 200, body: status({ rail: 'x402', settlement_scheme: 'eip3009' }) },
+      // Plain HTTP stores no merchant MCP call context.
+      'GET /x402/pay_1/merchant-call-context': { status: 409, body: { error: 'no stored context', error_code: 'no_merchant_call_context' } },
+    })
+    const res = ok(await handlers().haven_submit({ payment_id: 'pay_1', signature: SIG })) as { data: Record<string, any> }
+    expect(res.data).toMatchObject({ status: 'confirmed', tx_hash: '0xtx' })
+    expect(res.data.next_action).toBe(AgentPaymentNextAction.RetryOriginalX402Request)
+    expect(res.data.next_tool).toBeUndefined()
+    expect(res.data.next_tool_omitted_reason).toContain('haven_report_x402_outcome')
+    expect(res.data.reason).toContain('payment_header')
+    expect(res.data.reason).toContain('haven_x402_sign_header')
+    expect(res.data.reason).not.toContain('haven_complete_mcp_tool')
+  })
+
+  it('x402 MCP-tool purchase funding confirmed: names haven_complete_mcp_tool, never a self-retry or outcome report', async () => {
+    stubFetch({
+      'POST /payments/pay_1/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xtx' } },
+      'GET /machine-payments/pay_1/status': { status: 200, body: status({ rail: 'x402', settlement_scheme: 'eip3009' }) },
+      'GET /x402/pay_1/merchant-call-context': {
+        status: 200,
+        body: { payment_id: 'pay_1', merchant_url: 'https://merchant.example/mcp', tool_name: 'search', arguments: {} },
+      },
+    })
+    const res = ok(await handlers().haven_submit({ payment_id: 'pay_1', signature: SIG })) as { data: Record<string, any> }
+    expect(res.data.next_action).toBe(AgentPaymentNextAction.RetryOriginalX402Request)
+    expect(res.data.next_tool_name).toBe('haven_complete_mcp_tool')
+    expect(res.data.next_arguments).toEqual({ payment_id: 'pay_1' })
+    expect(res.data.reason).toContain('payment_header')
+    expect(res.data.reason).toContain('Do NOT retry the merchant yourself')
+  })
+
+  it('x402 with an unreadable call-context lookup names both continuations, never just one', async () => {
+    stubFetch({
+      'POST /payments/pay_1/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xtx' } },
+      'GET /machine-payments/pay_1/status': { status: 200, body: status({ rail: 'x402', settlement_scheme: 'eip3009' }) },
+      'GET /x402/pay_1/merchant-call-context': { status: 503, body: { error: 'down' } },
+    })
+    const res = ok(await handlers().haven_submit({ payment_id: 'pay_1', signature: SIG })) as { data: Record<string, any> }
+    expect(res.data.next_action).toBe(AgentPaymentNextAction.RetryOriginalX402Request)
+    expect(res.data.next_tool_name).toBeUndefined()
+    expect(res.data.reason).toContain('haven_complete_mcp_tool')
+    expect(res.data.reason).toContain('haven_report_x402_outcome')
+  })
+
+  it('direct payment confirmed: done, no merchant retry', async () => {
+    stubFetch({
+      'POST /payments/pay_1/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xtx' } },
+      'GET /machine-payments/pay_1/status': { status: 200, body: status({ rail: 'direct' }) },
+    })
+    const res = ok(await handlers().haven_submit({ payment_id: 'pay_1', signature: SIG })) as { data: Record<string, any> }
+    expect(res.data.next_action).toBe(AgentPaymentNextAction.None)
+    expect(res.data.next_tool_omitted_reason).toBe('the direct payment is confirmed; no Haven tool follows')
+    expect(JSON.stringify(res.data)).not.toMatch(/retry the merchant|haven_report_x402_outcome/i)
+  })
+
+  it('not confirmed yet: read the status, and never "retry the merchant"', async () => {
+    stubFetch({
+      'POST /payments/pay_1/sign': { status: 200, body: { status: 'submitted' } },
+    })
+    const res = ok(await handlers().haven_submit({ payment_id: 'pay_1', signature: SIG })) as { data: Record<string, any> }
+    expect(res.data.next_action).toBe(AgentPaymentNextAction.CheckStatusLater)
+    expect(res.data.next_tool_name).toBe('haven_get_payment_status')
+    expect(res.data.next_arguments).toEqual({ payment_id: 'pay_1' })
+    expect(res.data.reason).toContain('do NOT retry the merchant')
+    // No status read before confirmation.
+    expect(recordedCalls().some((c) => c.method === 'GET')).toBe(false)
+  })
+
+  it('an unreadable status degrades to a status read, never a merchant retry', async () => {
+    stubFetch({
+      'POST /payments/pay_1/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xtx' } },
+      'GET /machine-payments/pay_1/status': { status: 503, body: { error: 'down' } },
+    })
+    const res = ok(await handlers().haven_submit({ payment_id: 'pay_1', signature: SIG })) as { data: Record<string, any> }
+    expect(res.data.next_action).toBe(AgentPaymentNextAction.CheckStatusLater)
+    expect(res.data.next_tool_name).toBe('haven_get_payment_status')
+  })
+})

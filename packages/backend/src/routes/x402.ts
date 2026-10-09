@@ -6,6 +6,7 @@ import {
   authorizeX402,
   settleX402,
   getX402SignContext,
+  getX402IntentByIdempotencyKey,
   getX402MerchantCallContext,
   isPositiveDecimalAtomicAmount,
   normaliseAddress,
@@ -144,6 +145,20 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
 
   app.post<{ Body: X402AuthorizeBody }>('/', { config: moneyPathRateLimit }, authorizeX402Handler)
   app.post<{ Body: X402AuthorizeBody }>('/authorize', { config: moneyPathRateLimit }, authorizeX402Handler)
+
+  // ── GET /x402/by-idempotency-key/:key — read-only intent lookup (#3739) ──
+  // Agent-scoped, writes nothing (no lazy-expire). The hosted pay tool's
+  // request mode checks it before re-probing a merchant. The client
+  // URL-encodes the key; Fastify decodes the param.
+  app.get<{ Params: { key: string } }>(
+    '/by-idempotency-key/:key',
+    { config: moneyPathRateLimit },
+    async (request, reply) => {
+      const agent = request.agent as AgentContext
+      const result = await getX402IntentByIdempotencyKey(agent, request.params.key)
+      return reply.code(result.code).send(result.body)
+    },
+  )
 
   // ── GET /x402/:id/sign-context — byte-free signing handoff (#1263) ───────
   // Read-only: re-serves the stored delegation-rail signing payload + a fresh

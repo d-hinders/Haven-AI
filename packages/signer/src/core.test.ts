@@ -131,8 +131,8 @@ describe('createEdgeSigner', () => {
     expect('signPaymentHash' in signer).toBe(false)
     expect('signX402FundingHash' in signer).toBe(false)
     expect(Object.keys(signer).sort()).toEqual([
-      'buildX402PaymentHeader', 'delegateAddress', 'signDelegationTypedData', 'signSweepAuthorization',
-      'signX402FundingTypedData',
+      'buildX402PaymentHeader', 'delegateAddress', 'signDelegationTypedData', 'signSiwxMessage',
+      'signSweepAuthorization', 'signX402FundingTypedData',
     ].sort())
   })
 })

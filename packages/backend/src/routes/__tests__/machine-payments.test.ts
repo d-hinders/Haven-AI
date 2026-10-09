@@ -517,6 +517,10 @@ describe('machine payment routes', () => {
           recipient_address: null,
           merchant_id: null,
           reserved_haven_atomic: '0',
+          // #3731: the remaining was NOT read live (no delegation_json row —
+          // the same fallback path #1145 takes on an RPC failure), so the
+          // coverage answer is null, never fabricated from the fallback.
+          funds_cover_remaining: null,
           onchain: {
             amount: '10000000',
             spent: '0',
@@ -894,6 +898,13 @@ describe('machine payment routes', () => {
         protocol_receipt_header_name: 'Payment-Receipt',
         protocol_receipt_payload: { ok: true },
         merchant_status: 200,
+        // #3770: the agent has reported no delivery verdict here — null is
+        // "not reported", and it rides every receipt row.
+        delivery_quality: null,
+        delivery_note: null,
+        delivery_reported_at: null,
+        // #3778: no reference reported for this seed — null, not absent.
+        delivery_reference: null,
         confirmed_at: '2026-05-15T12:00:00.000Z',
         created_at: '2026-05-15T12:00:01.000Z',
         updated_at: '2026-05-15T12:00:01.000Z',

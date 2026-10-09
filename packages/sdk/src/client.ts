@@ -37,6 +37,8 @@ import type {
   X402McpCallContext,
   X402MerchantCallContext,
   RawX402MerchantCallContext,
+  X402IntentByKey,
+  RawX402IntentByKey,
   X402Quote,
   X402Receipt,
   X402RequestSnapshot,
@@ -125,6 +127,8 @@ import {
   mcpSettlementFromToolResult,
   mcpToolResultOf,
 } from './mcp-merchant-transport.js'
+import type { MerchantEgressPolicy } from './merchant-egress.js'
+import { MerchantEgressResponseCapError } from './merchant-egress.js'
 import { AccountReads, mapSubBudget, mapTaskBudget } from './account-reads.js'
 import { DelegateSweepApi } from './delegate-sweep.js'
 import {
@@ -146,7 +150,7 @@ import {
 import { X402FundingLeg, sameX402TaskBudget, type FundingLegExpectation } from './x402-funding-leg.js'
 import { X402Erc7710 } from './x402-erc7710.js'
 import { toolError, toolX402PaymentRequired, x402ToolReceipt } from './tool-adapter.js'
-import { MerchantCompletion, isZeroSettlementTxHash, parseMerchantSettlement } from './merchant-completion.js'
+import { MerchantCompletion, isZeroSettlementTxHash, isWellFormedSettlementTxHash, parseMerchantSettlement } from './merchant-completion.js'
 import type { EvidenceReportOutcome, X402MerchantOutcome, X402MerchantOutcomeReport } from './merchant-completion.js'
 
 const DEFAULT_POLLING_INTERVAL = 3_000
@@ -191,6 +195,18 @@ function mapCatalogEntry(entry: RawCatalogEntry): HavenCatalogEntry {
     protocol: entry.protocol,
     toolName: entry.tool_name,
     toolArguments: entry.tool_arguments ?? null,
+    // #3769: call semantics. Conditional spread like `merchant` — a backend
+    // predating #3769 leaves the fields absent, never null-but-present, so a
+    // fixture's exact object shape does not grow keys. Present on the wire
+    // means the row was read post-#3769 and null means "not declared".
+    ...(entry.tool_arguments_schema !== undefined
+      ? {
+          toolArgumentsSchema: entry.tool_arguments_schema ?? null,
+          httpMethod: entry.http_method ?? null,
+          bodyType: entry.body_type ?? null,
+          bodyExample: entry.body_example ?? null,
+        }
+      : {}),
     priceDisplay: entry.price_display,
     priceAtomic: entry.price_atomic,
     asset: entry.asset,
@@ -222,6 +238,7 @@ export class HavenClient {
   private readonly accountReads: AccountReads
   private readonly delegateSweep: DelegateSweepApi
   private readonly x402Wallet: string | undefined
+  private readonly egressPolicy: MerchantEgressPolicy | undefined
   private readonly merchantTransport: McpMerchantTransport
   private readonly confirmationTimeout: number
   private readonly pollingInterval: number
@@ -254,6 +271,16 @@ export class HavenClient {
   /** Delegate address derived from the private key (if provided) */
   readonly delegateAddress: string | undefined
 
+  /**
+   * #3747: the merchant-egress policy this client enforces on every merchant
+   * request, or `undefined` when none was configured (default SDK behaviour).
+   * Hosted tool seams read this to run the SAME policy at quote/prepare time,
+   * so a bad target is refused before funding, not only at the wire.
+   */
+  get merchantEgress(): MerchantEgressPolicy | undefined {
+    return this.egressPolicy
+  }
+
   constructor(config: HavenClientConfig) {
     this.delegateKey = config.delegateKey
     this.havenApi = new HavenApiTransport(config)
@@ -269,7 +296,8 @@ export class HavenClient {
       buildExplorerUrl: (chainId, hash) => buildExplorerUrl(chainId, hash),
     })
     this.x402Wallet = config.x402Wallet
-    this.merchantTransport = new McpMerchantTransport({ merchantTimeout: config.merchantTimeout })
+    this.egressPolicy = config.merchantEgress
+    this.merchantTransport = new McpMerchantTransport({ merchantTimeout: config.merchantTimeout, egress: config.merchantEgress })
     // #1756 moved the 90 s literal to `types.ts` so the delegate sweep shares
     // this number rather than choosing a fourth one. Same value, same default.
     this.confirmationTimeout = config.confirmationTimeout ?? DEFAULT_CONFIRMATION_TIMEOUT_MS
@@ -1037,6 +1065,9 @@ export class HavenClient {
    * locally. The server's own verification is ignored — the receipt is verified
    * here (independently of Haven) by recovering the signer from the
    * authorisation, so the result is trustworthy even if the backend lied.
+   * The returned `{ receipt, verification }` object is the same shape the
+   * `GET /payments/{id}/receipt` endpoint returns, and `verifyPaymentReceipt`
+   * (#3723) accepts either layer: pass this whole object or `.receipt` alone.
    */
   async getReceipt(
     paymentId: string,
@@ -1323,7 +1354,7 @@ export class HavenClient {
   ): Promise<X402Quote> {
     const initialInit = withX402Wallet(init, x402PayerAddress(this.delegateAddress, this.x402Wallet))
     const request = snapshotX402Request(url, initialInit)
-    const response = await this.merchantTransport.fetch(url, initialInit)
+    const response = await this.merchantTransport.fetch(url, initialInit, this.merchantTransport.budgetFor('quote'), this.merchantTransport.capFor('quote'))
 
     if (response.status !== 402) {
       // #3118: a merchant on the official x402 MCP profile answers HTTP 200
@@ -1345,7 +1376,10 @@ export class HavenClient {
       let body: unknown
       try {
         body = await response.clone().json()
-      } catch {
+      } catch (err) {
+        // #3747: a mid-read egress cap refusal is a refusal, not a
+        // "body was not JSON" — never launder it into a bare status.
+        if (err instanceof MerchantEgressResponseCapError) throw err
         body = undefined
       }
       // #1300: typed, so consumers key on the class instead of message text.
@@ -1582,7 +1616,7 @@ export class HavenClient {
       if (!url) {
         throw new HavenApiError('x402 resume requires the original URL or a captured request snapshot.', 400)
       }
-      const response = await this.merchantTransport.fetch(url, initialInit)
+      const response = await this.merchantTransport.fetch(url, initialInit, this.merchantTransport.budgetFor('quote'), this.merchantTransport.capFor('quote'))
       if (response.status !== 402) {
         throw new HavenApiError('Expected the original x402 request to return HTTP 402 before resuming.', 400)
       }
@@ -1640,7 +1674,7 @@ export class HavenClient {
     if (mcpSessionId) requestInit = this.merchantTransport.withSessionHeaders(requestInit, mcpSessionId)
 
     // 1. Make the original request
-    const response = await this.merchantTransport.fetch(url, requestInit)
+    const response = await this.merchantTransport.fetch(url, requestInit, this.merchantTransport.budgetFor('quote'), this.merchantTransport.capFor('quote'))
 
     // 2. Not a 402 — return as-is (collapsing SSE for MCP sessions), unless
     //    it is a native MCP payment-required tool result (#3118): the
@@ -1669,7 +1703,10 @@ export class HavenClient {
       // 3. Parse x402 payment requirements
       try {
         paymentRequired = await parsePaymentRequiredResponse(response)
-      } catch {
+      } catch (err) {
+        // #3747: a mid-read egress cap refusal must not read as "not a
+        // standard x402 response" — surface it.
+        if (err instanceof MerchantEgressResponseCapError) throw err
         // Not a standard x402 402 response — return it unchanged.
         return response
       }
@@ -1769,6 +1806,15 @@ export class HavenClient {
      * no-funding-leg path through both.
      */
     noFundingLeg?: boolean
+    /**
+     * #3778: the optional NON-SECRET delivery pointer ("Bik Bok 5 SEK, order
+     * 6ac7…") threaded from haven_settle_mcp_tool / haven_complete_mcp_tool.
+     * Recorded on the evidence row when the merchant accepted, so the owner's
+     * receipt and dashboard show a deliverable exists and where to recover
+     * it. Never the deliverable itself — credential-shaped values are refused
+     * by the backend's semantic layer.
+     */
+    deliveryReference?: string
   }): Promise<{
     status: number
     ok: boolean
@@ -1780,10 +1826,23 @@ export class HavenClient {
      * the erc7710 branch and no (or a zero) merchant-reported settlement hash.
      * The hosted erc7710 settle/complete gate reads this to decide whether
      * `settled: true` is honest; the 3009 branch's `settled: true` does not
-     * need it — see `paid-mcp-completion.ts` for why.
+     * need it — see `paid-mcp-completion.ts` for why. #3764: this stays the
+     * FUNDING/anchor outcome; the merchant's own EIP-3009 settlement is a
+     * second report with its own outcome — `settlementEvidenceOutcome` below.
      */
     evidenceOutcome?: EvidenceReportOutcome
-  }> {
+    /**
+     * #3764: what the SECOND evidence report — the merchant's own EIP-3009
+     * settlement transaction, posted AFTER the funding report through the
+     * same endpoint — learned, when one was made. `undefined` when there was
+     * nothing to report: no funding leg (erc7710 keeps its single settlement
+     * report — its anchor IS the merchant's hash), the merchant named no
+     * hash, or the hash was malformed, the zero marker, or the funding hash
+     * in any letter case. ONE attempt, no backoff (D2) — a retryable answer
+     * is the hosted tools' handoff problem, never a client-side wait.
+     */
+    settlementEvidenceOutcome?: EvidenceReportOutcome
+  }>{
     const evidenceContext = await this.merchantCompletion.resolveCompletionContext({
       paymentId: input.paymentId,
       url: input.url,
@@ -1855,6 +1914,9 @@ export class HavenClient {
     // the `return` — `undefined` on the refusal branch and whenever there was
     // no hash to report at all.
     let evidenceOutcome: EvidenceReportOutcome | undefined
+    // #3764: the merchant-settlement report's outcome — `undefined` whenever
+    // nothing was posted. Assigned in the accepted branch below.
+    let settlementEvidenceOutcome: EvidenceReportOutcome | undefined
 
     if (!merchantAccepted) {
       // #1508: both evidence surfaces below require a txHash — the backend
@@ -1925,7 +1987,43 @@ export class HavenClient {
           paymentProofHeader: input.paymentHeader,
           protocolReceiptHeaderName,
           protocolReceiptHeader,
+          // #3778: the delivery pointer rides the accepted arm's evidence
+          // report — a rejection delivered nothing to point at.
+          ...(input.deliveryReference ? { deliveryReference: input.deliveryReference } : {}),
         })
+      }
+
+      // #3764 (D3 — funding first, settlement second): on a payment WITH a
+      // funding leg, the merchant's own settlement transaction — the same
+      // `PAYMENT-RESPONSE` / `_meta` receipt the funding report above carries
+      // as its protocol payload — is a SECOND evidence report through the
+      // same endpoint, so Haven records the transaction the merchant shows
+      // (`machine_metadata.merchant_settlement_tx_hash`, #3475). The backend
+      // verifies the delegate → merchant transfer on-chain and creates its
+      // own idempotent base row, so a refused FUNDING report does not gate
+      // this one — it runs whenever the funding leg exists. Gated the way
+      // the backend compares: well-formed, non-zero, and different from the
+      // funding hash CASE-INSENSITIVELY (a checksummed copy of the funding
+      // hash is not a settlement). A zero or malformed hash is skipped
+      // client-side — the backend could only refuse it. When the merchant
+      // named no hash, nothing is posted: inventing an anchor client-side is
+      // what the backend's on-chain verification exists to prevent (#2117
+      // above still holds). ONE attempt, no backoff (D2); the outcome rides
+      // the result for the hosted tools to map (D1).
+      if (!input.noFundingLeg) {
+        const settlementCandidate = settlement.settlementTxHash
+        if (
+          settlementCandidate &&
+          isWellFormedSettlementTxHash(settlementCandidate) &&
+          !isZeroSettlementTxHash(settlementCandidate) &&
+          fundingTxHash &&
+          settlementCandidate.toLowerCase() !== fundingTxHash.toLowerCase()
+        ) {
+          settlementEvidenceOutcome = await this.merchantCompletion.reportSettlementEvidenceOnce(
+            evidenceContext.paymentId,
+            settlementCandidate,
+          )
+        }
       }
       // #956: the hosted-MCP completion path is a successful paid retry too —
       // capture the merchant's receipt exactly like the local flow does.
@@ -1939,6 +2037,7 @@ export class HavenClient {
       // #3155 review S3: a transaction beside a rejection is not a settlement.
       settlementTxHash: merchantAccepted ? (settlement.settlementTxHash ?? undefined) : undefined,
       evidenceOutcome,
+      settlementEvidenceOutcome,
     }
   }
 
@@ -1956,6 +2055,8 @@ export class HavenClient {
     outcome: X402MerchantOutcome
     merchantStatus: number
     merchantBody?: string
+    /** #3778: the optional NON-SECRET delivery pointer — see `reportMerchantOutcome`. */
+    deliveryReference?: string
   }): Promise<X402MerchantOutcomeReport> {
     return await this.merchantCompletion.reportMerchantOutcome(input)
   }
@@ -1985,12 +2086,30 @@ export class HavenClient {
   }
 
   /**
+   * #3770: record the agent's evidence-only delivery verdict on a settled
+   * payment — `ok`, `unusable` or `partial`, with a bounded note. The
+   * receipt reads (`haven_list_receipts` / `haven_get_receipt`) then carry
+   * it beside the payment. Moves no money and never changes `settled`;
+   * another agent's payment is refused (404), an unsettled one refused
+   * (409).
+   */
+  async reportDeliveryQuality(input: {
+    paymentId: string
+    quality: 'ok' | 'unusable' | 'partial'
+    note?: string
+  }): Promise<{ payment_id: string; quality: string; note: string | null; updated_at: string }> {
+    return await this.merchantCompletion.reportDeliveryQuality(input)
+  }
+
+  /**
    * GET /x402/:id/merchant-call-context — the settle-leg twin of #1263's
    * sign-context fetch (#1307). Re-serves the stored merchant MCP-tool call
-   * context (merchant_url, tool_name, arguments, mcp_transport) recorded at
-   * quote time, so `haven_settle_mcp_tool` / `haven_complete_mcp_tool` can
-   * omit those fields and let Haven rehydrate them by payment_id instead of
-   * the caller re-threading them. Throws `HavenApiError` (404 unknown/foreign
+   * context (merchant_url, tool_name, arguments, mcp_transport — and the
+   * catalog row name #3781 added, when the purchase came from a catalog
+   * entry) recorded at quote time, so `haven_settle_mcp_tool` /
+   * `haven_complete_mcp_tool` can omit those fields and let Haven rehydrate
+   * them by payment_id instead of the caller re-threading them. Throws
+   * `HavenApiError` (404 unknown/foreign
    * payment_id, 409 no stored context, 410 expired) — the caller decides the
    * fallback (re-send the full context explicitly).
    */
@@ -2003,6 +2122,9 @@ export class HavenClient {
       merchantUrl: raw.merchant_url,
       toolName: raw.tool_name,
       arguments: raw.arguments ?? {},
+      // #3781: the catalog row name rides the same blob; absent on a direct
+      // haven_pay_mcp_tool purchase.
+      ...(raw.catalog_name ? { catalogName: raw.catalog_name } : {}),
       ...(raw.mcp_transport
         ? {
             mcpTransport: {
@@ -2011,6 +2133,37 @@ export class HavenClient {
             },
           }
         : {}),
+    }
+  }
+
+  /**
+   * GET /x402/by-idempotency-key/:key — read-only, agent-scoped lookup of the
+   * caller's own x402 intent for an idempotency key (#3739). A hosted pay tool
+   * calls it BEFORE re-probing a merchant, so a replay never depends on the
+   * merchant still answering. Writes nothing (a stale pending intent is
+   * reported with `windowOpen: false`, never expired here). Returns `null`
+   * when there is no such intent (a 404: unknown and not-yours are the same
+   * answer); any other failure throws `HavenApiError`.
+   */
+  async findX402IntentByIdempotencyKey(key: string): Promise<X402IntentByKey | null> {
+    let raw: RawX402IntentByKey
+    try {
+      raw = await this.get<RawX402IntentByKey>(`/x402/by-idempotency-key/${encodeURIComponent(key)}`)
+    } catch (err) {
+      if (err instanceof HavenApiError && err.statusCode === 404) return null
+      throw err
+    }
+    return {
+      paymentId: raw.payment_id,
+      status: raw.status,
+      settlementScheme: raw.settlement_scheme ?? null,
+      resourceUrl: raw.resource_url ?? null,
+      expiresAt: raw.expires_at ?? null,
+      windowOpen: raw.window_open === true,
+      taskBudgetId: raw.task_budget_id ?? null,
+      amountAtomic: raw.amount_atomic,
+      asset: raw.asset ?? null,
+      network: raw.network,
     }
   }
 

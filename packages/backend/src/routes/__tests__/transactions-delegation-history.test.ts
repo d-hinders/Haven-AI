@@ -146,6 +146,7 @@ describe('#2849 delegation-account history read', () => {
     expect(safesCall).toBeDefined()
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('https://base.blockscout.com/api/v2/addresses/'),
+      expect.anything(), // the request init (explorer headers)
     )
   })
 })

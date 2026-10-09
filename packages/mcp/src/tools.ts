@@ -45,6 +45,10 @@ export type HavenMcpToolName =
   | 'haven_get_allowances'
   | 'haven_list_receipts'
   | 'haven_verify_receipt'
+  // #3723: the signed bundle's read — `haven_get_receipt { payment_id }`
+  // returns `{ receipt }`, and `haven_verify_receipt` accepts that response
+  // (or the endpoint's `{ receipt, verification }`) unchanged.
+  | 'haven_get_receipt'
   | 'haven_sweep_delegate'
   | 'haven_discover_tools'
   | 'haven_submit_catalog_entry'
@@ -180,6 +184,20 @@ export const toolSchemas = {
   },
   haven_verify_receipt: {
     receipt: z.unknown(),
+    // #3723: the spread form — the endpoint's `{ receipt, verification }`
+    // spread as top-level arguments — verifies: `verification` is declared
+    // ACCEPTED-AND-IGNORED (Haven's own self-check, never read). The stdio
+    // z.object would strip it silently anyway; declaring it keeps the schema
+    // identical to the hosted runtime's, where the key must be declared to
+    // pass its strict refusal.
+    verification: z.unknown().optional().describe('accepted and ignored — verification reads the receipt itself'),
+  },
+  // #3723: the signed bundle's read — `{ receipt }` only, settled payments
+  // only. The endpoint's server-side `verification` is deliberately NOT
+  // returned: it is computed on Haven's server, not offline, and an agent
+  // that trusted it would skip haven_verify_receipt.
+  haven_get_receipt: {
+    payment_id: z.string().min(1),
   },
   // #3329: a budget for one task that ends by itself — a short-lived child of
   // the agent's own budget, capped and time-boxed independently of the period
@@ -282,6 +300,8 @@ export const toolDescriptions: Record<HavenMcpToolName, string> = {
   haven_submit_catalog_entry: composeDescription(sharedDescriptions.submitCatalogEntry),
   haven_list_receipts: composeDescription(sharedDescriptions.listReceipts),
   haven_verify_receipt: composeDescription(sharedDescriptions.verifyReceipt),
+  // #3723: the signed bundle's read, described from the shared fragment.
+  haven_get_receipt: composeDescription(sharedDescriptions.getReceipt),
   haven_open_task_budget: OPEN_TASK_BUDGET_DESCRIPTION,
   haven_close_task_budget: CLOSE_TASK_BUDGET_DESCRIPTION,
   haven_get_task_budget: GET_TASK_BUDGET_DESCRIPTION,
@@ -808,6 +828,19 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
       return runTool(async () => verifyPaymentReceipt(args.receipt as PaymentReceipt))
     },
 
+    // #3723: the signed bundle's home on the local surface. Parsed INSIDE
+    // runTool, so a missing payment_id is a structured INVALID_INPUT failure
+    // rather than a thrown ZodError (the hosted runtime's parseStrict already
+    // answers that way). Returns `{ receipt }` only — the endpoint's
+    // server-side `verification` is not offline evidence, and the agent
+    // verifies with haven_verify_receipt, which reads the bundle unchanged.
+    haven_get_receipt: async (input) =>
+      runTool(async () => {
+        const args = objectInput('haven_get_receipt', input)
+        const { receipt } = await haven.getReceipt(args.payment_id as string)
+        return { receipt }
+      }),
+
     haven_open_task_budget: async (input) => {
       const args = objectInput('haven_open_task_budget', input)
       return runTool(async () => {
@@ -1283,6 +1316,19 @@ function normalizeError(err: unknown): ToolFailure {
         ? { next_tool_omitted_reason: body.next_tool_omitted_reason }
         : {}),
       body: err.body,
+    }
+  }
+
+  if (err instanceof z.ZodError) {
+    // #3723: an argument-schema failure that reaches a handler — the
+    // direct-embedder path, or a parse moved inside runTool — is a structured
+    // INVALID_INPUT, the same envelope the hosted runtime answers (mirrors
+    // mcp-server tools/support/errors.ts), never a raw ZodError or a shrug.
+    return {
+      success: false,
+      code: 'INVALID_INPUT',
+      message: err.errors.map((e) => `${e.path.join('.') || '(root)'}: ${e.message}`).join('; '),
+      statusCode: 400,
     }
   }
 

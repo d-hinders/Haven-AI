@@ -8,12 +8,12 @@ Run an exploratory QA pass as the agent, using **this session's own model** (no 
 
 ## Phase 1 — Connect (or confirm) the dev QA setup
 
-1. If a Haven MCP is **already connected to the QA agent on dev**, use it — confirm with `claude mcp list` (both `haven` and `haven-signer` connected). Skip to Phase 2.
+1. If a Haven MCP is **already connected to the QA agent on dev**, use it — confirm with `claude mcp list` (the agent's pair connected: `haven-<slug>` / `haven-signer-<slug>` on a named-by-default setup, bare `haven` / `haven-signer` on older installs). Skip to Phase 2.
 2. Otherwise connect the QA setup with the connector **the dev backend itself hands out**, pointed at the **dev backend**:
    `npx -y <connector_package> --setup <QA setup token> --api <dev backend URL>`
-   where `<connector_package>` is the `connector_package` value on that backend's own setup response (it is also the package named inside its `connector_command`). Since #2422 the dev backend's channel is set by `HAVEN_CONNECTOR_CHANNEL` and is **not necessarily `@alpha`** — pinning the alpha tag by hand against a `@dev` backend installs a signer that skews against it, which is the `x402_expected_context_version` refusal epic #2420 exists to make testable.
+   where `<connector_package>` is the `connector_package` value on that backend's own setup response (it is also the package named inside its `connector_command`). Since #2422 the dev backend's channel is set by `HAVEN_CONNECTOR_CHANNEL` and is **not necessarily `@alpha`** — pinning the alpha tag by hand against a `@dev` backend installs a signer that skews against it, which is the `x402_expected_context_version` refusal epic #2420 exists to make testable. A default connect names its own pair from the agent's display name ([#3737](https://github.com/d-hinders/Haven-AI/issues/3737)) — on the dev backend the derived slug ends `-dev` — and installs alongside anything already wired, so it will not refuse.
    (The QA setup token + dev backend URL are owner-provisioned — see `docs/operations/agent-qa.md` "QA identity, funding & secrets". If you don't have them, stop and ask; do not invent credentials.)
-   If the connector refuses with `wiring_collision` ([#2551](https://github.com/d-hinders/Haven-AI/issues/2551)) — this machine already holds a spend-capable Haven agent on the bare `haven` / `haven-signer` pair — **relay the refusal to the owner and stop**; do not add `--replace` or `--name` on your own. The refusal names the superseded agent ids and proposes a `--name`. On the dedicated QA runner, where the previous QA agent is the only agent, the owner's usual answer is `--replace` (which also retires the old directory locally); on a developer machine it is `--name`.
+   If the connector refuses with `wiring_collision` ([#2551](https://github.com/d-hinders/Haven-AI/issues/2551)) — a run targeting the bare `haven` / `haven-signer` pair (only reachable through `--bare`/`--replace` now) on a machine that already holds a spend-capable Haven agent — **relay the refusal to the owner and stop**; do not add `--replace` or `--name` on your own. The refusal names the superseded agent ids and proposes a `--name`. On the dedicated QA runner, where the previous QA agent is the only agent, the owner's usual answer is `--replace` (which also retires the old directory locally); on a developer machine it is `--name`.
 3. If the signer fails to connect or you need a clean slate, run `/haven-reset` first, then retry step 2.
 
 ## Phase 2 — Confirm wiring (do not skip)
@@ -40,7 +40,7 @@ Run each goal through the actual tools. Record the outcome (pass/fail + what you
    behaviour as a FAIL. Its deterministic sibling is the `over-budget-refused`
    harness leg — renamed from `over-budget-queue` by #2016 for the same reason.)*
 8. **Over max price** — make a priced call **above the configured max price**. Expect the `PRICE_EXCEEDS_MAX` rejection — not a settlement.
-9. **Receipts** — `haven_list_receipts` for recent activity. `haven_verify_receipt` takes the signed bundle from `GET /payments/:id/receipt` (`HavenClient.getReceipt`), not a list row — a row carries no signature and returns `not_a_signed_receipt`. A signed erc7710 bundle verifies (`verifiedOver: 'delegation_digest'`); a direct or eip3009 bundle returns `not_verifiable_offline`.
+9. **Receipts** — `haven_list_receipts` for recent activity. `haven_get_receipt { payment_id }` returns the signed bundle (`{ receipt }`, settled payments only); `haven_verify_receipt` accepts the `GET /payments/:id/receipt` response (`HavenClient.getReceipt`) as-is, not a list row — a row carries no signature and returns `not_a_signed_receipt`. A signed erc7710 bundle verifies (`verifiedOver: 'delegation_digest'`); a direct or eip3009 bundle returns `not_verifiable_offline`.
 
 Stop and report on the **first failed step** rather than pressing on (a failed money-path step is the signal).
 

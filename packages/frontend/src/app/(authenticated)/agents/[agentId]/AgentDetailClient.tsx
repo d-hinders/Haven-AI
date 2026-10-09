@@ -143,6 +143,7 @@ function activityToTransaction(
     source: item.source as AggregatedTransaction['source'],
     x402ResourceUrl: item.x402_resource_url ?? null,
     x402MerchantAddress: item.x402_merchant_address ?? null,
+    deliveryReference: item.delivery_reference ?? null,
     chainId: item.chain_id ?? 0,
     accountId: item.account_id ?? '',
     accountAddress: item.account_address ?? '',
@@ -569,7 +570,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                 // painted 36px next to a 44px square (#3694 design review).
                 size="lg"
               >
-                {pendingAction === 'pause' ? 'Pausing…' : 'Pause agent'}
+                {pendingAction === 'pause' ? 'Pausing…' : 'Pause payments'}
               </Button>
             ) : null}
             {showResume ? (
@@ -795,6 +796,7 @@ export default function AgentDetailClient({ agentId }: Props) {
           agentId={agentId}
           chainId={chainId}
           tokens={budgetTokenOptions}
+          agentName={currentAgent.name}
           onBudgetChange={refetch}
           retired={isRevoked ? 'revoked' : isArchived ? 'archived' : undefined}
         />

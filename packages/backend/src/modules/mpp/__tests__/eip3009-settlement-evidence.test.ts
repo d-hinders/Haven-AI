@@ -39,6 +39,7 @@ import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import { attachEvidenceHandler, attachMachinePaymentEvidence, listReceipts } from '../evidence.js'
 import { RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL } from '../../../infra/repositories/x402-authorizations.js'
+import { feedSettledPaymentBestEffort } from '../../accounting/index.js'
 
 const TOKEN = '0x036cbd53842c5426634e7929541ec2318f3dcf7e'
 const TREASURY = '0x00000000000000000000000000000000000000b1'
@@ -187,6 +188,34 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
       const page = await listReceipts(agentId, 10)
       expect(page?.receipts).toHaveLength(1)
       expect(page?.receipts[0]).toMatchObject({ funding_tx_hash: funding, settlement_tx_hash: SETTLE_A })
+    })
+
+    it('fires the accounting feed exactly once, AFTER the settlement hash is written (B1: no pre-settlement race)', async () => {
+      getTransactionReceipt.mockResolvedValue(goodReceipt())
+      const { agentId, userId } = await seedAgent()
+      const { id, funding } = await seedFunded({ agentId, userId })
+      await reportOutcome(agentId, id, funding)
+
+      // Capture the intent's recorded hash AT THE MOMENT the feed fires: if
+      // the feed ever ran before the UPDATE, it would read a settlement-less
+      // entry and defer a payment that is already verified.
+      const metadataAtFire: Array<string | null> = []
+      ;(feedSettledPaymentBestEffort as ReturnType<typeof vi.fn>).mockImplementation(
+        async (_userId: string, paymentId: string) => {
+          const intent = await readIntent(paymentId)
+          metadataAtFire.push((intent.machine_metadata?.merchant_settlement_tx_hash as string | undefined) ?? null)
+        },
+      )
+      // reportOutcome is itself a settlement report (the self-settling case)
+      // and fired its own feed — count only THIS report's fire.
+      ;(feedSettledPaymentBestEffort as ReturnType<typeof vi.fn>).mockClear()
+      metadataAtFire.length = 0
+
+      await report(agentId, id, SETTLE_A)
+
+      expect(feedSettledPaymentBestEffort).toHaveBeenCalledTimes(1)
+      expect(feedSettledPaymentBestEffort).toHaveBeenCalledWith(userId, id)
+      expect(metadataAtFire).toEqual([SETTLE_A])
     })
 
     it('leaves the evidence row as it was: a settlement is not a merchant response', async () => {

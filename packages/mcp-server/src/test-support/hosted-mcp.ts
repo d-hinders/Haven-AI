@@ -15,7 +15,7 @@
  * fixture rather than cloning it.
  */
 import { beforeEach, afterEach, vi } from 'vitest'
-import { HavenClient } from '@haven_ai/sdk'
+import { HavenClient, HOSTED_EGRESS_TIMEOUTS, HOSTED_MAX_GET_REDIRECTS, HOSTED_RESPONSE_BYTE_CAPS, assertPublicHttpsMerchantUrl, type MerchantEgressPolicy } from '@haven_ai/sdk'
 import {
   createToolHandlers,
   type HostedToolName,
@@ -158,6 +158,20 @@ export function handlers(): Record<HostedToolName, (input: unknown) => Promise<T
   return createToolHandlers(haven)
 }
 
+/**
+ * #3739: the full handler set over a client carrying #3747's fixture egress
+ * policy — the strict hosted policy that admits only `https://merchant.test`,
+ * so request mode's own probe can reach the stubbed merchant.
+ */
+export function fixtureHandlers(): Record<HostedToolName, (input: unknown) => Promise<ToolPayload>> {
+  const haven = new HavenClient({
+    apiKey: 'test-key',
+    baseUrl: 'http://haven.test',
+    merchantEgress: fixtureMerchantEgress(),
+  })
+  return createToolHandlers(haven)
+}
+
 /** A client that can mint REAL payment headers through the SDK funding leg. */
 export function headerSignerClient(): HavenClient {
   return new HavenClient({
@@ -175,6 +189,25 @@ export function keylessClient(): HavenClient {
 /** Clear the recorded-call buffer (auto-reset by the installed beforeEach). */
 export function clearCalls(): void {
   calls = []
+}
+
+/**
+ * #3747: the fixture egress policy — the strict hosted policy with ONE
+ * exemption, the shared `https://merchant.test` origin the wire-contract and
+ * integration fixtures stub. Everything else still goes through the real
+ * strict check, so a test that wanders off the fixture origin still refuses.
+ */
+export function fixtureMerchantEgress(): MerchantEgressPolicy {
+  return {
+    assertUrl(url: string) {
+      if (new URL(url).origin === 'https://merchant.test') return
+      assertPublicHttpsMerchantUrl(url)
+    },
+    maxResponseBytes: HOSTED_RESPONSE_BYTE_CAPS.delivery,
+    responseByteCaps: { ...HOSTED_RESPONSE_BYTE_CAPS },
+    maxGetRedirects: HOSTED_MAX_GET_REDIRECTS,
+    timeouts: { ...HOSTED_EGRESS_TIMEOUTS },
+  }
 }
 
 /** Install the shared per-test lifecycle: reset calls, unstub after each. */

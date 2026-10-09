@@ -15,6 +15,22 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.9.0-alpha.0 — 2026-10-09
+
+### Changed
+
+- **The local x402 tools report the merchant's EIP-3009 settlement hash (#3764, reaches stdio only after the next release).** `haven_pay_x402`, `haven_pay_x402_quote`, `haven_resume_x402_payment` and `haven_pay_mcp_tool` now post the merchant's own settlement transaction — parsed from the paid answer's `PAYMENT-RESPONSE` (or `_meta`) — as a second evidence report right after the funding one, so the receipt shows the transaction the merchant shows. One attempt, no backoff, and it can never change the tool's own answer: a missing, malformed, zero, or funding-equal hash posts nothing. Hosted delivery picks this up on deploy; stdio serves it once `@haven_ai/mcp` pins the SDK release that carries it (see `docs/operations/mcp-runtime-compatibility.md`).
+
+- **A funding-first `PREPARE_REVERTED` failure (#3731, hosted behaviour — reaches stdio only after the next release).** When a prepare revert was the token's own insufficient-balance error, the hosted failure now carries `revert_cause: "insufficient_balance"` and answers `next_action: fund_account_or_raise_allowance` with a funding-specific reason — the account needs funds, not a caveat change; the revert already proves the shortfall, so no check tool is named. Any other revert keeps today's caveat text and stop step, and the refusal ledger is unchanged (still `onchain_revert`). The hosted runtime picks the backend change up on deploy; stdio serves it once `@haven_ai/mcp` pins the SDK release that carries it (see `docs/operations/mcp-runtime-compatibility.md`).
+
+### Added
+
+- **`haven_get_receipt { payment_id }` returns the signed receipt bundle (#3723).** No MCP tool returned the signed bundle `haven_verify_receipt` checks, so an agent that wanted it had to call the REST API with the key from its credential file by hand (field evidence 2026-10-07). The new read tool answers `{ receipt }` — the signed `haven-receipt-1` bundle only, from this agent's own **settled** payments: an unknown id, another agent's id or an unsettled payment is a structured 404, and the endpoint's server-side `verification` is deliberately not returned (it is computed on Haven's server, not offline — `haven_verify_receipt` reads the bundle unchanged). The tool list change re-consents: this runtime hashes its registered tool names, so installed clients ask for consent once after updating, and the exported `HavenMcpToolName` union grows (a source break for exhaustive `switch`/`Record` consumers).
+
+### Fixed
+
+- **`haven_verify_receipt` accepts the receipt endpoint's wrapped response as-is (#3723).** `GET /payments/{id}/receipt` returns `{ receipt, verification }`, but passing that response unchanged as the `receipt` argument answered `not_a_signed_receipt` — the verifier looked for `authorization` at the top level. The bundle inside is now verified when the top level carries no `authorization` (one level only, no recursion; the wrapper's `verification` is never read — it is Haven's own self-check, not offline evidence). The spread form (`{ receipt, verification }` as top-level arguments) also verifies: `verification` is an accepted-and-ignored argument. A `haven_list_receipts` row still answers `not_a_signed_receipt`, bare or wrapped.
+
 ## 0.8.1-alpha.0 — 2026-10-07
 
 ## 0.8.0-alpha.0 — 2026-10-05

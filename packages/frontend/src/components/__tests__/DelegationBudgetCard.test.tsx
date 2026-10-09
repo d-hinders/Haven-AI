@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
 
-const { mockGet, mockGrant, mockRevoke, mockReload, mockBudgetsError, mockTaskBudgets, mockHookArgs } = vi.hoisted(() => ({
+const { mockGet, mockGrant, mockRevoke, mockReload, mockBudgetsError, mockTaskBudgets, mockHookArgs, mockToast } =
+  vi.hoisted(() => ({
   mockHookArgs: vi.fn(),
   mockGet: vi.fn(),
   mockGrant: vi.fn(),
@@ -9,6 +10,9 @@ const { mockGet, mockGrant, mockRevoke, mockReload, mockBudgetsError, mockTaskBu
   mockReload: vi.fn(),
   mockBudgetsError: vi.fn(() => false),
   mockTaskBudgets: vi.fn(() => [] as unknown[]),
+  // Shared so the revoke-toast tests can assert on it; the component only
+  // ever calls the namespaced methods (success/info/error).
+  mockToast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn() }),
 }))
 
 vi.mock('@/hooks/useDelegationBudget', () => ({
@@ -31,7 +35,7 @@ vi.mock('@/hooks/useTaskBudgets', () => ({
   useTaskBudgets: () => ({ taskBudgets: mockTaskBudgets(), error: false, reload: vi.fn() }),
 }))
 vi.mock('@/components/ui/Toast', () => ({
-  useToast: () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn() }) }),
+  useToast: () => ({ toast: mockToast }),
 }))
 
 const DelegationBudgetCard = (await import('../DelegationBudgetCard')).default
@@ -41,6 +45,8 @@ const PROPS = {
   agentId: 'agent-1',
   chainId: 84532,
   tokens: [{ address: USDC, symbol: 'USDC', decimals: 6 }],
+  // #3717: the Stop confirm names the agent in its body.
+  agentName: 'Research agent',
 }
 
 function budget(overrides: Record<string, unknown> = {}) {
@@ -72,6 +78,10 @@ beforeEach(() => {
   mockBudgetsError.mockReturnValue(false)
   mockTaskBudgets.mockReset()
   mockTaskBudgets.mockReturnValue([])
+  mockToast.mockClear()
+  mockToast.success.mockClear()
+  mockToast.error.mockClear()
+  mockToast.info.mockClear()
 })
 
 describe('DelegationBudgetCard (#833)', () => {
@@ -100,11 +110,12 @@ describe('DelegationBudgetCard (#833)', () => {
     expect(screen.getByText(/to 0xf0f0/)).toBeTruthy()
   })
 
-  it('offers Issue sub-budget only when the agent has an active budget (#3506)', async () => {
+  it('offers Issue sub-budget only when the agent has an active budget (#3506, #3716)', async () => {
     mockGet.mockReturnValue([])
     const { unmount } = render(<DelegationBudgetCard {...PROPS} />)
     await waitFor(() => expect(screen.getByText('Set budget')).toBeTruthy())
     expect(screen.queryByText('Issue sub-budget')).toBeNull()
+    expect(screen.queryByText('Or share part of an existing budget with another agent')).toBeNull()
     unmount()
 
     // A pending (not yet active) budget is not something to slice either.
@@ -114,9 +125,16 @@ describe('DelegationBudgetCard (#833)', () => {
     expect(screen.queryByText('Issue sub-budget')).toBeNull()
     second.unmount()
 
+    // #3716: with an eligible budget the entry lives INSIDE the Add budget
+    // panel — absent while the panel is closed, present once it is open.
     mockGet.mockReturnValue([budget()])
-    render(<DelegationBudgetCard {...PROPS} />)
-    await waitFor(() => expect(screen.getByText('Issue sub-budget')).toBeTruthy())
+    const third = render(<DelegationBudgetCard {...PROPS} />)
+    await waitFor(() => expect(screen.getByText(/5 USDC per day/)).toBeTruthy())
+    expect(screen.queryByText('Issue sub-budget')).toBeNull()
+    expect(screen.queryByText('Or share part of an existing budget with another agent')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    expect(screen.getByText('Issue sub-budget')).toBeTruthy()
+    third.unmount()
   })
 
   it('grant: one Set-budget action calls grant with parsed atomic amount + period', async () => {
@@ -154,13 +172,83 @@ describe('DelegationBudgetCard (#833)', () => {
     expect((screen.getByText('Set budget') as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('Stop calls revoke with the budget hash', async () => {
+  // ── #3717: Stop budget, behind a confirm ──
+  // Stopping ends an irreversible on-chain delegation, so the row's button
+  // now opens the ConfirmDialog with the owner copy and only the dialog's
+  // confirm reaches the signature.
+
+  it('Stop budget opens the confirm with the owner copy; no signature until confirmed', async () => {
     mockGet.mockReturnValue([budget()])
     mockRevoke.mockResolvedValue({ ok: true })
     render(<DelegationBudgetCard {...PROPS} />)
-    await waitFor(() => expect(screen.getByText('Stop')).toBeTruthy())
-    fireEvent.click(screen.getByText('Stop'))
+    const stop = await waitFor(() => screen.getByRole('button', { name: 'Stop budget 5 USDC per day' }))
+    fireEvent.click(stop)
+    // The owner copy, rendered for the row: agent name, 5 USDC, period noun.
+    expect(screen.getByRole('heading', { name: 'Stop this budget?' })).toBeTruthy()
+    expect(
+      screen.getByText(/Research agent can no longer spend from this 5 USDC\/day budget\. This can.t be undone, but you can set a new budget for the agent at any time\./),
+    ).toBeTruthy()
+    // Nothing has been signed yet.
+    expect(mockRevoke).not.toHaveBeenCalled()
+    // Confirming is what fires the revoke, with this row's hash.
+    fireEvent.click(screen.getByRole('button', { name: 'Stop budget' }))
     await waitFor(() => expect(mockRevoke).toHaveBeenCalledWith('0x' + 'ab'.repeat(32)))
+  })
+
+  it('Cancel closes the Stop confirm with nothing called', async () => {
+    mockGet.mockReturnValue([budget()])
+    render(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Stop budget 5 USDC per day' })))
+    expect(screen.getByRole('heading', { name: 'Stop this budget?' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('heading', { name: 'Stop this budget?' })).toBeNull()
+    expect(mockRevoke).not.toHaveBeenCalled()
+  })
+
+  it('the Stop confirm falls back to the row label for an off-list period and an unknown token', async () => {
+    mockGet.mockReturnValue([budget({ period_seconds: 3_600 })])
+    render(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Stop budget 5 USDC every 3600s' })))
+    expect(screen.getByText(/from this 5 USDC every 3600s budget\./)).toBeTruthy()
+
+    mockGet.mockReturnValue([budget({ budget_atomic: '5' })])
+    const { unmount } = render(<DelegationBudgetCard {...PROPS} tokens={[]} />)
+    // An unknown token has no decimals, so the row shows the raw atomic
+    // amount — its own fallback, without the slash form.
+    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Stop budget 5 per day' })))
+    expect(screen.getByText(/from this 5 per day budget\./)).toBeTruthy()
+    unmount()
+  })
+
+  it('a successful stop toasts "Budget stopped." and closes the confirm', async () => {
+    mockGet.mockReturnValue([budget()])
+    mockRevoke.mockResolvedValue({ ok: true })
+    render(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Stop budget 5 USDC per day' })))
+    fireEvent.click(screen.getByRole('button', { name: 'Stop budget' }))
+    await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Budget stopped.'))
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Stop this budget?' })).toBeNull())
+  })
+
+  it('a cancelled signature toasts "Signature was cancelled." and closes the confirm', async () => {
+    mockGet.mockReturnValue([budget()])
+    mockRevoke.mockResolvedValue({ ok: false, reason: 'cancelled' })
+    render(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Stop budget 5 USDC per day' })))
+    fireEvent.click(screen.getByRole('button', { name: 'Stop budget' }))
+    await waitFor(() => expect(mockToast.info).toHaveBeenCalledWith('Signature was cancelled.'))
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Stop this budget?' })).toBeNull())
+    expect(mockToast.success).not.toHaveBeenCalled()
+  })
+
+  it('a failed stop toasts the retry line and closes the confirm', async () => {
+    mockGet.mockReturnValue([budget()])
+    mockRevoke.mockResolvedValue({ ok: false, reason: 'failed' })
+    render(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Stop budget 5 USDC per day' })))
+    fireEvent.click(screen.getByRole('button', { name: 'Stop budget' }))
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith('Could not stop the budget. Try again.'))
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Stop this budget?' })).toBeNull())
   })
 
   it('notifies onBudgetChange after a successful revoke — the page summary reads a different source (#1090)', async () => {
@@ -168,8 +256,8 @@ describe('DelegationBudgetCard (#833)', () => {
     mockRevoke.mockResolvedValue({ ok: true })
     const onBudgetChange = vi.fn()
     render(<DelegationBudgetCard {...PROPS} onBudgetChange={onBudgetChange} />)
-    await waitFor(() => expect(screen.getByText('Stop')).toBeTruthy())
-    fireEvent.click(screen.getByText('Stop'))
+    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Stop budget 5 USDC per day' })))
+    fireEvent.click(screen.getByRole('button', { name: 'Stop budget' }))
     await waitFor(() => expect(onBudgetChange).toHaveBeenCalled())
   })
 
@@ -178,8 +266,8 @@ describe('DelegationBudgetCard (#833)', () => {
     mockRevoke.mockResolvedValue({ ok: false, reason: 'failed' })
     const onBudgetChange = vi.fn()
     render(<DelegationBudgetCard {...PROPS} onBudgetChange={onBudgetChange} />)
-    await waitFor(() => expect(screen.getByText('Stop')).toBeTruthy())
-    fireEvent.click(screen.getByText('Stop'))
+    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Stop budget 5 USDC per day' })))
+    fireEvent.click(screen.getByRole('button', { name: 'Stop budget' }))
     await waitFor(() => expect(mockRevoke).toHaveBeenCalled())
     expect(onBudgetChange).not.toHaveBeenCalled()
   })
@@ -241,6 +329,9 @@ describe('DelegationBudgetCard (#833)', () => {
       await waitFor(() => expect((screen.getByLabelText('Budget amount') as HTMLInputElement).value).toBe('7'))
       expect(screen.getByText('Set budget')).toBeTruthy()
       expect(screen.queryByRole('button', { name: 'Add budget' })).toBeNull()
+      // #3716: the prefill opens the panel, so the entry shows there too.
+      expect(screen.getByText('Issue sub-budget')).toBeTruthy()
+      expect(screen.getByText('Or share part of an existing budget with another agent')).toBeTruthy()
     } finally {
       restore()
     }
@@ -418,7 +509,7 @@ describe('DelegationBudgetCard task budgets (#3329)', () => {
 
 describe('DelegationBudgetCard on a retired agent (#3549)', () => {
   // Nothing that GRANTS authority is offered to a revoked or removed agent;
-  // reading what is left and ending it (Stop) still are.
+  // reading what is left and ending it (Stop budget) still are.
   it.each([
     ['revoked', /This agent has been revoked, so its budgets can only be stopped/],
     ['archived', /This agent has been removed, so its budgets can only be stopped/],
@@ -428,7 +519,7 @@ describe('DelegationBudgetCard on a retired agent (#3549)', () => {
     // rendered them (an Edit / Issue sub-budget needs an active, unexpired row).
     mockGet.mockReturnValue([budget()])
     const live = render(<DelegationBudgetCard {...PROPS} />)
-    await waitFor(() => expect(screen.getByText('Issue sub-budget')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/5 USDC per day/)).toBeTruthy())
     // #3695: with an active budget the grant form waits behind "Add budget",
     // so "Set budget" is not on screen until it is opened — asserting "Add
     // budget" is what keeps the retired half below from passing vacuously.
@@ -437,6 +528,9 @@ describe('DelegationBudgetCard on a retired agent (#3549)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
     expect(screen.getByText('Set budget')).toBeTruthy()
     expect(screen.getByLabelText('Period')).toBeTruthy()
+    // #3716: the live half's sub-budget assertion moved here — the entry only
+    // exists once the panel is open, and a retired agent has neither.
+    expect(screen.getByText('Issue sub-budget')).toBeTruthy()
     live.unmount()
 
     render(<DelegationBudgetCard {...PROPS} retired={retired} />)
@@ -450,7 +544,7 @@ describe('DelegationBudgetCard on a retired agent (#3549)', () => {
     expect(screen.queryByLabelText('Recipient')).toBeNull()
     expect(screen.queryByText('Edit')).toBeNull()
     expect(screen.queryByText('Issue sub-budget')).toBeNull()
-    expect(screen.getByText('Stop')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Stop budget 5 USDC per day' })).toBeTruthy()
     expect(document.body.textContent).not.toMatch(/delegation|caveat|redemption|userop|permission/i)
   })
 
@@ -458,9 +552,10 @@ describe('DelegationBudgetCard on a retired agent (#3549)', () => {
     mockGet.mockReturnValue([budget()])
     mockRevoke.mockResolvedValue({ ok: true })
     render(<DelegationBudgetCard {...PROPS} retired={retired} />)
-    await waitFor(() => expect(screen.getByText('Stop')).toBeTruthy())
-    expect((screen.getByText('Stop').closest('button') as HTMLButtonElement).disabled).toBe(false)
-    fireEvent.click(screen.getByText('Stop'))
+    const stop = await waitFor(() => screen.getByRole('button', { name: 'Stop budget 5 USDC per day' }))
+    expect((stop as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(stop)
+    fireEvent.click(screen.getByRole('button', { name: 'Stop budget' }))
     await waitFor(() => expect(mockRevoke).toHaveBeenCalledWith('0x' + 'ab'.repeat(32)))
   })
 
@@ -480,6 +575,23 @@ describe('DelegationBudgetCard on a retired agent (#3549)', () => {
     expect(screen.queryByText('Set budget')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Add budget' })).toBeNull()
   })
+
+  // #3716: the sub-budget entry lives inside the Add budget panel, which a
+  // retired agent does not have — so `retired ? []` keeps the modal from ever
+  // mounting. This asserts it in the only way available from outside: no
+  // panel to open, no entry, no dialog.
+  it.each(['revoked', 'archived'] as const)(
+    '%s: cannot mount the sub-budget modal — the panel it lives in does not exist (#3716)',
+    async (retired) => {
+      mockGet.mockReturnValue([budget()])
+      render(<DelegationBudgetCard {...PROPS} retired={retired} />)
+      await waitFor(() => expect(screen.getByText(/5 USDC per day/)).toBeTruthy())
+      expect(screen.queryByRole('button', { name: 'Add budget' })).toBeNull()
+      expect(screen.queryByText('Issue sub-budget')).toBeNull()
+      expect(screen.queryByText('Or share part of an existing budget with another agent')).toBeNull()
+      expect(screen.queryByRole('dialog')).toBeNull()
+    },
+  )
 })
 
 // #3695: one Spending surface — the section heading above the card, a meter
@@ -648,6 +760,76 @@ describe('DelegationBudgetCard Spending section (#3695)', () => {
     await waitFor(() => expect(mockGrant).toHaveBeenCalled())
     await waitFor(() => expect(screen.queryByLabelText('Budget amount')).toBeNull())
     // ...and focus lands on Add budget, not <body> (#3695 review S2).
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Add budget' }))
+  })
+})
+
+// #3716: the sub-budget entry moved from a permanent card row into the Add
+// budget panel — below the grant form, visible only while the panel is open.
+describe('DelegationBudgetCard sub-budget entry in the Add budget panel (#3716)', () => {
+  it('sits below Set budget / Cancel in DOM order once the panel is open', () => {
+    mockGet.mockReturnValue([budget()])
+    render(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    const link = screen.getByRole('button', { name: 'Issue sub-budget' })
+    const setBudget = screen.getByRole('button', { name: 'Set budget' })
+    const cancel = screen.getByRole('button', { name: 'Cancel' })
+    const FOLLOWING = Node.DOCUMENT_POSITION_FOLLOWING
+    expect(setBudget.compareDocumentPosition(link) & FOLLOWING).toBeTruthy()
+    expect(cancel.compareDocumentPosition(link) & FOLLOWING).toBeTruthy()
+  })
+
+  it('is absent with the panel open when the only active budget is merchant-pinned', () => {
+    mockGet.mockReturnValue([budget({ merchant_id: 'm-1', merchant_slug: 'ampersend-demo-api', merchant_name: 'Ampersend Demo API' })])
+    render(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    expect(screen.getByRole('button', { name: 'Set budget' })).toBeTruthy()
+    expect(screen.queryByText('Issue sub-budget')).toBeNull()
+    expect(screen.queryByText('Or share part of an existing budget with another agent')).toBeNull()
+  })
+
+  it('is absent when the form shows by default over a pending-only budget', () => {
+    mockGet.mockReturnValue([budget({ status: 'pending' })])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.getByText('Set budget')).toBeTruthy()
+    expect(screen.queryByText('Issue sub-budget')).toBeNull()
+    expect(screen.queryByText('Or share part of an existing budget with another agent')).toBeNull()
+  })
+
+  // The real hook nulls `budgets` on error (useDelegationBudget), so
+  // subBudgetParents is [] there — the rows here keep the fixture one step
+  // from vacuous while the clause under test stays `!budgetsError`.
+  it('is absent when the budgets read failed, even with the panel open', () => {
+    mockGet.mockReturnValue([budget()])
+    mockBudgetsError.mockReturnValue(true)
+    render(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    expect(screen.getByRole('button', { name: 'Set budget' })).toBeTruthy()
+    expect(screen.queryByText('Issue sub-budget')).toBeNull()
+    expect(screen.queryByText('Or share part of an existing budget with another agent')).toBeNull()
+  })
+
+  it('clicking the entry collapses the form, opens the modal inside focus, and returns focus to Add budget on close', async () => {
+    mockGet.mockReturnValue([budget()])
+    render(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '2' } })
+    // act-wrapped: the modal's open/close state lands in effects (its own
+    // child effect and the card's focus-restore) that outlive the event.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Issue sub-budget' }))
+    })
+
+    // The form is gone; the modal is open with focus INSIDE the dialog (the
+    // card's focus effect must not pull it back out).
+    expect(screen.queryByLabelText('Budget amount')).toBeNull()
+    const dialog = screen.getByRole('dialog', { name: 'Issue sub-budget' })
+    expect(dialog.contains(document.activeElement)).toBe(true)
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    })
+    expect(screen.queryByRole('dialog')).toBeNull()
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Add budget' }))
   })
 })

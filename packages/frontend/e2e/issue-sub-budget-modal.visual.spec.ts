@@ -89,6 +89,9 @@ async function openModal(page: Page) {
     timeout: ANCHOR_TIMEOUT_MS,
   })
   await dismissMobileSidebar(page)
+  // #3716: the entry moved into the Add budget panel, below the grant form —
+  // the panel must open before the entry exists to click.
+  await page.getByRole('button', { name: 'Add budget', exact: true }).click()
   const entry = page.getByRole('button', { name: 'Issue sub-budget', exact: true })
   await expect(entry).toBeVisible()
   await entry.click()

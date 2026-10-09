@@ -198,6 +198,14 @@ export function serialize(row: CatalogRow & CatalogRowWithMerchant) {
     asset: row.asset,
     network: row.network,
     asset_transfer_methods: row.asset_transfer_methods,
+    // #3769: how a purchase CALLS this row — the per-call argument schema
+    // (null = fixed-SKU, caller arguments refused) and the HTTP request
+    // shape. NULL on rows that never declare them; not in the public
+    // (credential-less) shape, which carries no call/price detail.
+    tool_arguments_schema: row.tool_arguments_schema ?? null,
+    http_method: row.http_method ?? null,
+    body_type: row.body_type ?? null,
+    body_example: row.body_example ?? null,
     status: row.status,
     verified_at: row.verified_at,
     source: 'operator' as const,
@@ -232,6 +240,13 @@ export function serializeIngestion(row: VerifiedCatalogListingRow) {
     protocol: 'mcp' as const,
     tool_name: row.entrypoint,
     tool_arguments: null,
+    // #3769: the ingestion probe stores no call semantics — a self-submitted
+    // row is a bare resource URL until an operator curates a schema/method
+    // onto it.
+    tool_arguments_schema: null,
+    http_method: null,
+    body_type: null,
+    body_example: null,
     price_display: null,
     price_atomic: null,
     asset: null,

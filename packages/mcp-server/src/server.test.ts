@@ -47,6 +47,7 @@ describe('buildHostedMcpServer', () => {
         'haven_get_resume_state',
         'haven_list_receipts',
         'haven_verify_receipt',
+        'haven_get_receipt',
         'haven_complete_mcp_tool',
         'haven_settle_mcp_tool',
         'haven_pay',
@@ -57,6 +58,7 @@ describe('buildHostedMcpServer', () => {
         'haven_pay_x402_quote',
         'haven_quote_x402',
         'haven_report_x402_outcome',
+        'haven_report_delivery_quality',
         'haven_report_settlement_evidence',
         'haven_resume_x402_payment',
         'haven_send',
@@ -113,6 +115,8 @@ describe('buildHostedMcpServer', () => {
     expect(HOSTED_INSTRUCTIONS).toContain('Never invent headroom')
     // The failure mode is safe-by-construction, and the instructions say so.
     expect(HOSTED_INSTRUCTIONS).toMatch(/re-quote and confirm/i)
+    expect(HOSTED_INSTRUCTIONS).not.toContain('moves nothing')
+    expect(HOSTED_INSTRUCTIONS).toMatch(/haven_get_payment_status after the payment window and re-quote only if unsettled/)
 
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
     const server = buildHostedMcpServer(haven)
@@ -196,6 +200,26 @@ describe('buildHostedMcpServer', () => {
     expect(toolDescriptions.haven_pay).toContain('sign_context_unavailable')
   })
 
+  it('puts the server-name and several-pairs rules where Claude Code still reads them (#3738)', () => {
+    // Claude Code truncates server instructions at about 2,048 characters; a
+    // rule past the cut is invisible to it. Both rules must START before 2,000
+    // and the several-pairs rule must END before it, so the whole of it is read.
+    const namedPair = HOSTED_INSTRUCTIONS.indexOf('If yours differ')
+    const severalPairs = HOSTED_INSTRUCTIONS.indexOf('When more than one Haven pair is configured')
+    const ruleEnd = HOSTED_INSTRUCTIONS.indexOf('switch to the signer whose identity matches.')
+    expect(namedPair).toBeGreaterThan(-1)
+    expect(namedPair).toBeLessThan(2000)
+    expect(severalPairs).toBeGreaterThan(-1)
+    expect(severalPairs).toBeLessThan(2000)
+    expect(ruleEnd).toBeGreaterThan(severalPairs)
+    expect(ruleEnd).toBeLessThan(2000)
+    // (a) ask which agent, (b) the pair mapping, (c) identity by agent id.
+    expect(HOSTED_INSTRUCTIONS).toContain('ask before any payment tool')
+    expect(HOSTED_INSTRUCTIONS).toContain('haven-<slug>\nwith haven-signer-<slug>, bare haven with haven-signer, Codex haven with\nhaven_signer')
+    expect(HOSTED_INSTRUCTIONS).toContain('haven_get_agent returns id and\ndelegateAddress')
+    expect(HOSTED_INSTRUCTIONS).toContain('compare the delegate address alone\nwhen a signer has no recorded agent id')
+  })
+
   it('keeps x402 next-tool guidance runtime-neutral (bare names in descriptions, naming note on instructions)', async () => {
     // The slim-descriptions pass (#1591) finished what the runtime-neutral
     // naming work (#1588) started: descriptions name next tools by their BARE
@@ -211,7 +235,10 @@ describe('buildHostedMcpServer', () => {
     // resolve via next_tool_server, which is the field that is WRONG on a
     // `--name <slug>` install. Cheap literal guards; nothing interprets prose.
     expect(HOSTED_INSTRUCTIONS).toContain('next_tool_server_role')
-    expect(HOSTED_INSTRUCTIONS).toContain('--name <slug>')
+    // #3738: a named pair is no longer attributed to `--name` alone (#3737
+    // names every new pair by default), so the guard pins the pair shape.
+    expect(HOSTED_INSTRUCTIONS).toContain('haven-<slug> + haven-signer-<slug>')
+    expect(HOSTED_INSTRUCTIONS).not.toContain('--name <slug>')
 
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
     const server = buildHostedMcpServer(haven)
@@ -253,6 +280,17 @@ describe('buildHostedMcpServer', () => {
     )
     expect(byName.get('haven_settle_mcp_tool')).toContain('no further Haven tool is needed')
     expect(byName.get('haven_complete_mcp_tool')).toContain('no further Haven tool is needed')
+    // A refused erc7710 settle is verify-then-act: the merchant may already
+    // have redeemed its single-use authorization, so "nothing moved,
+    // re-quote" could pay twice. Complete has no erc7710 path at all.
+    for (const name of ['haven_settle_mcp_tool', 'haven_complete_mcp_tool']) {
+      expect(byName.get(name)).not.toMatch(/nothing moved|re-quote instead/)
+      expect(byName.get(name)).toContain('haven_sweep_delegate')
+    }
+    expect(byName.get('haven_settle_mcp_tool')).toMatch(
+      /erc7710: nothing to sweep — check haven_get_payment_status after the window; re-quote only if unsettled/,
+    )
+    expect(byName.get('haven_complete_mcp_tool')).toContain('erc7710 settles via haven_settle_mcp_tool')
 
     await client.close()
     await server.close()
@@ -319,7 +357,11 @@ describe('buildHostedMcpServer', () => {
     it('names the quote → pay handoff with url: request_url, never resource_url', () => {
       expect(paragraph).not.toBe('')
       expect(paragraph).toContain('haven_quote_x402, then haven_pay_x402_quote')
-      expect(paragraph).toContain('{ payment_required, url: request_url, max_amount_human | max_amount }')
+      // #3739: the handoff is request mode now — the quote's next_arguments,
+      // never a copied payment_required (changed on purpose, not weakened).
+      expect(paragraph).toContain("next_arguments { url, method, headers, body, max_amount_human } and no")
+      expect(paragraph).toContain('Haven fetches the challenge itself, so never copy it')
+      expect(paragraph).not.toContain('{ payment_required, url: request_url')
       // #3097: passing the merchant's declared resource_url as url was the downgrade.
       expect(HOSTED_INSTRUCTIONS).not.toMatch(/url:\s*resource_url/)
     })
@@ -340,7 +382,8 @@ describe('buildHostedMcpServer', () => {
       const idx = order(erc7710, ['haven_sign,', 'haven_submit', 'settlement_scheme "erc7710"', 'PAYMENT-SIGNATURE'])
       expect(idx.every((i) => i >= 0)).toBe(true)
       expect(idx).toEqual([...idx].sort((a, b) => a - b))
-      expect(erc7710).toContain('there is no outcome report on this path')
+      expect(erc7710).toContain('then record the merchant\'s settlement with')
+      expect(erc7710).toContain('haven_report_settlement_evidence')
       expect(erc7710).not.toContain('haven_report_x402_outcome')
       expect(paragraph).toContain('The outcome report is EIP-3009-only.')
     })

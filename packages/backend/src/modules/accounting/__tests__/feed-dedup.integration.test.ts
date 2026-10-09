@@ -162,7 +162,7 @@ describe('reporting feed — integrated never-double-post guard', () => {
 
     expect([a.owned, b.owned].filter(Boolean)).toHaveLength(1)
     expect(a.owned).toBe(true)
-    expect(b).toEqual({ owned: false, status: 'pending' })
+    expect(b).toEqual({ owned: false, status: 'pending', fresh: false })
   })
 
   it('retries a previously failed payment and still pushes exactly once (resumable)', async () => {

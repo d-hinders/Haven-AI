@@ -29,6 +29,7 @@ export function DelegationApprovalStep({
   agentId,
   setupId,
   chainId,
+  accountId,
   status,
   walletName,
   onApproved,
@@ -42,6 +43,8 @@ export function DelegationApprovalStep({
   agentId: string
   setupId: string
   chainId: number
+  /** The account the budget is approved on; the wallet pill reports its signer. */
+  accountId?: string | null
   status: AgentConnectionSetupStatusResponse
   walletName: string
   onApproved: () => Promise<void>
@@ -153,8 +156,8 @@ export function DelegationApprovalStep({
       {confirmFailed ? (
         <div className="flex gap-3">
           {/* The budget is signed and the agent is live. Closing is all that
-              is left — to stop it, the user pauses or revokes it on its own
-              page. Offering a cancel here would promise a reversal
+              is left — to stop it, the user uses Stop budget or Remove
+              agent… on its own page. Offering a cancel here would promise a reversal
               Haven cannot perform. */}
           <Button variant="ghost" onClick={onClose} disabled={confirming} className="flex-1">
             Close
@@ -211,7 +214,7 @@ export function DelegationApprovalStep({
                 {isSwitchingChain ? 'Switching network…' : `Switch to ${approvalChainName}`}
               </Button>
             ) : (
-              <WalletButton />
+              <WalletButton accountId={accountId} />
             )
           }
           onGranted={confirmWithHaven}

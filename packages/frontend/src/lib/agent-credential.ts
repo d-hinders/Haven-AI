@@ -140,7 +140,9 @@ export function buildAgentCredential(input: HandoffInput): AgentCredentialArtifa
       custody:
         'Haven is non-custodial. The delegate_key in this file lives only on this machine. ' +
         'Haven\'s backend never receives it. Treat this file like a private key — keep it offline ' +
-        'and revoke the agent at revoke_url if it leaks. ' +
+        'and if it leaks, open the agent at revoke_url and choose Replace signing key (or Stop budget / ' +
+        'Remove agent… to stop all spending); pausing only blocks payments through Haven. The delegate_key ' +
+        'also controls any funds already in the agent wallet, and ending the budget does not recover them. ' +
         'Restrict file permissions immediately after saving: ' +
         'macOS/Linux: `chmod 600 path/to/this/file.json`. ' +
         'Windows (PowerShell): ' +

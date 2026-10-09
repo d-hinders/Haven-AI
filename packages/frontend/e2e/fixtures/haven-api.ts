@@ -1,5 +1,5 @@
 import type { Page, Route } from '@playwright/test'
-import { ACTIVE_ACCOUNT_STORAGE_KEY, AUTH_TOKEN_STORAGE_KEY } from '../../src/lib/auth-storage'
+import { AUTH_TOKEN_STORAGE_KEY } from '../../src/lib/auth-storage'
 import {
   ampersendDemoApi,
   ampersendOffers,
@@ -129,6 +129,14 @@ export const testAgent = {
 
 export const dashboardTransaction = {
   hash: `0x${'ab'.repeat(32)}`,
+  // #3763: the two EIP-3009 legs, named. `hash` stays the FUNDING hash; the
+  // recorded settlement — the transaction the MERCHANT names — headlines the
+  // drawer's On-chain section and the table link. Visible text: the drawer
+  // renders "Merchant settlement (reported by the agent, verified
+  // on-chain)" + "Funding from your account" on this row.
+  fundingTxHash: `0x${'ab'.repeat(32)}`,
+  settlementTxHash: `0x${'22'.repeat(32)}`,
+  settlementScheme: 'eip3009' as const,
   type: 'erc20' as const,
   from: testSafeAddress,
   to: testRecipientAddress,
@@ -164,6 +172,51 @@ export const dashboardTransaction = {
     externalRef: 'fortnox:supplierinvoice:11',
     error: null,
   },
+}
+
+/**
+ * #3763: the OTHER eip3009 state — a synthesized x402 payment with NO
+ * recorded settlement. The drawer reads "Merchant settlement / Not recorded"
+ * (never a promise of a later record) and links the funding leg labelled as
+ * the funding leg. Served as the SECOND `/transactions` row so the
+ * regenerated baselines photograph both states' rows; every other route that
+ * serves `dashboardTransaction` alone is unchanged.
+ */
+export const x402UnrecordedSettlementTransaction = {
+  hash: `0x${'cd'.repeat(32)}`,
+  fundingTxHash: `0x${'cd'.repeat(32)}`,
+  settlementTxHash: null,
+  settlementScheme: 'eip3009' as const,
+  type: 'erc20' as const,
+  from: testSafeAddress,
+  to: testRecipientAddress,
+  value: '1000000',
+  valueFormatted: '1.00',
+  asset: 'USDC',
+  decimals: 6,
+  direction: 'out' as const,
+  timestamp: 1_778_900_000,
+  // #3129: a synthesized x402 row never carries a block number — null, not 0.
+  blockNumber: null,
+  isError: false,
+  tokenAddress: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
+  tokenSymbol: 'USDC',
+  agentId: testAgent.id,
+  agentName: testAgent.name,
+  chainId: 8453,
+  accountId: testSafe.id,
+  accountAddress: testSafeAddress,
+  accountName: testSafe.name,
+  source: 'x402',
+  x402ResourceUrl: 'https://api.example.dev/datasets',
+  x402MerchantAddress: testRecipientAddress,
+  paymentId: 'pay-research-2',
+  confirmedAt: '2026-05-16T01:13:20.000Z',
+  timestampSource: 'confirmed_at' as const,
+  paymentProofStatus: 'payment_confirmed',
+  paymentFlowStatus: 'confirming_merchant',
+  paymentAttentionReason: null,
+  initiatedBy: 'agent' as const,
 }
 
 const balances = [
@@ -662,10 +715,13 @@ export async function mockHavenApi(page: Page) {
     // Transaction history feed (TransactionsClient). Exact `/transactions`
     // path with a query string — distinct from the dashboard's per-safe
     // `/transactions/{id}` reads handled by the catch-all below.
+    // #3763: two rows, one per eip3009 settlement state (recorded on the
+    // first, not recorded on the second) so the regenerated baselines carry
+    // visible changes for both.
     if (method === 'GET' && path === '/transactions') {
       await fulfillJson(route, {
-        transactions: [dashboardTransaction],
-        total: 1,
+        transactions: [dashboardTransaction, x402UnrecordedSettlementTransaction],
+        total: 2,
         offset: 0,
         limit: 25,
         hasMore: false,
@@ -1221,13 +1277,11 @@ export async function serveAgentDetailResponses(
 
 export async function seedAuthenticatedSession(page: Page) {
   await page.addInitScript(
-    ({ tokenKey, activeAccountKey }) => {
+    ({ tokenKey }) => {
       window.localStorage.setItem(tokenKey, 'e2e-token')
-      window.localStorage.setItem(activeAccountKey, 'safe-main')
     },
     {
       tokenKey: AUTH_TOKEN_STORAGE_KEY,
-      activeAccountKey: ACTIVE_ACCOUNT_STORAGE_KEY,
     },
   )
 }

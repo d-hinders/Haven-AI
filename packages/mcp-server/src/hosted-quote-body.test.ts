@@ -3,6 +3,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { HavenClient } from '@haven_ai/sdk'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildHostedMcpServer } from './server.js'
+import { AGENT_RESPONSE } from './test-support/hosted-mcp.js'
 
 /**
  * `haven_quote_x402` can quote a body-bearing paywall (#2366).
@@ -32,6 +33,16 @@ function stubFetch() {
   vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString()
     seen.push({ url, init })
+    // The hosted identity gate's agent read must succeed first.
+    if (url === 'http://haven.test/machine-payments/agent') {
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => AGENT_RESPONSE,
+        text: async () => JSON.stringify(AGENT_RESPONSE),
+      } as unknown as Response
+    }
     // A 402 shaped enough for the SDK's quote path to parse.
     return {
       ok: false,

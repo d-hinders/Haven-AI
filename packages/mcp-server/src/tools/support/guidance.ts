@@ -506,12 +506,24 @@ export function buildPurchaseSummary(input: {
    * behavior change for the bridge.
    */
   hasFundingLeg?: boolean
+  /**
+   * #3771: the HAVEN-DERIVED label `product` falls back to when the
+   * merchant's result names no product. The caller computes it from facts
+   * Haven itself holds — never from merchant content — so a merchant without
+   * `structuredContent.summary` still yields a non-null `product` the skill's
+   * "report from purchase_summary" instruction can stand on (#1349's rule is
+   * untouched: money, status and hashes never come from the merchant, and
+   * neither does this label). The merchant's own `product_name` still WINS
+   * whenever it is present; the fallback only fills the gap. Absent or null
+   * keeps the pre-#3771 behavior (`product: null`).
+   */
+  fallbackProduct?: string | null
 }): AgentPurchaseSummary {
   const merchantSummary = merchantPurchaseMetadata(input.merchantResult)
   const hasFundingLeg = input.hasFundingLeg ?? true
   return {
     status: 'settled',
-    product: merchantSummary.product,
+    product: merchantSummary.product ?? input.fallbackProduct ?? null,
     amount: input.payment?.amount ?? null,
     amount_atomic: input.payment?.amountAtomic ?? null,
     asset: input.payment?.asset ?? null,

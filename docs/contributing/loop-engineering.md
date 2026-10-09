@@ -88,7 +88,7 @@ loop-harness/
   <thing>-differential.test.ts   # equivalence ratchet + regression guards
 ```
 
-(The frontend instance keeps the differential test under
+(The frontend instance kept the differential test under
 `loop-harness/__tests__/` per that package's test-layout convention.)
 
 - **Reference model** — the smallest faithful port of the intended behavior,
@@ -117,10 +117,12 @@ can be verified. Therefore:
 - Generate cases from a **seed**, never `Math.random()`.
 - Do **not** anchor generated inputs to wall-clock time. Use a fixed epoch
   constant (`BASE_NOW_MIN`, in both harnesses' `generators.ts`) so a reported
-  `seed` reproduces the same case months later. Both harnesses now comply; the
+  `seed` reproduces the same case months later. Both harnesses complied before
+  they were withdrawn with the Safe rail (#2020, #2848); the
   backend's generator anchored to `Date.now()` until 2026-07-25, which made a
   backend seed stable only within a run — a divergence found on one day could
-  not be replayed on the next. A regression test pins the property.
+  not be replayed on the next. A regression test pinned the property while the
+  harnesses existed.
 - Surface the `seed` (and the minimal inputs) in the failure message.
 
 ## 6. Convergence model
@@ -150,9 +152,9 @@ A loop has a terminal state, and the harness encodes it:
   does not pause for human approval on merge, so the restraint has to live here.
 - **Bound the campaign:** cap iterations and diff size so a stuck loop surfaces a
   "stuck, here's my diagnosis" report instead of a sprawling refactor.
-- **Classify the value honestly.** The remaining allowance loop is a frontend
-  display-math regression loop against a historical AllowanceModule model, not
-  a live authority or fund-safety loop. Live delegation budgets are enforced by
+- **Classify the value honestly.** The withdrawn allowance loops were
+  display/routing-math regression loops against a historical AllowanceModule
+  model, not live authority or fund-safety loops. Live delegation budgets are enforced by
   the delegation caveat enforcers; the retired module is not a current control.
 
 ## 8. Running and scheduling
@@ -165,7 +167,7 @@ A loop has a terminal state, and the harness encodes it:
 - As a recurring *active* campaign (only worth it while editing that surface or
   to widen coverage — re-running identical seeds on frozen code is a no-op):
   ```
-  /loop 30m npm --prefix packages/backend run test:loop
+  /loop 30m npm --prefix <pkg> run test:loop   # for a package that defines one; none does today
   ```
   To widen coverage, bump the base seed in the differential test.
 
@@ -179,7 +181,8 @@ The judgment does not automate; the mechanics do.
   target and oracle are named.
 
 Any capable coding agent (Codex, another Claude session, Cursor) can replicate
-the pattern from this repo — the two `loop-harness/` dirs are worked examples and
+the pattern from this repo — the two withdrawn `loop-harness/` dirs (in git history before #2020 and
+#2848) are worked examples and
 this doc is the spec. Give it an explicit prompt, not "go find loops":
 
 > Replicate the loop-harness pattern in `packages/*/src/loop-harness`
@@ -206,5 +209,5 @@ behavior (reward-hacking) rather than independent truth.
 
 ## See also
 
-- [`loop-harness-index.md`](./loop-harness-index.md) — the portfolio of live loops.
+- [`loop-harness-index.md`](./loop-harness-index.md) — the loop portfolio (none live today).
 - [`ai-agent-workflow.md`](./ai-agent-workflow.md) — the broader agentic delivery workflow.

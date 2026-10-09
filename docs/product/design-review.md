@@ -156,10 +156,12 @@ Any remaining matches should be deliberate technical disclosure, developer copy,
   recommended merge order when multiple PRs are open.
 - For table changes, verify amount sorting uses raw values rather than formatted strings.
 - For app-shell changes, verify sidebar active state, TopBar back links,
-  environment badge, network switcher, skip link, and mobile navigation. (The
+  environment badge, skip link, and mobile navigation. (The
   Approvals badge was on this list until
   [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) deleted the nav
-  entry with the Safe rail.)
+  entry with the Safe rail, and the network switcher until
+  [#3719](https://github.com/d-hinders/Haven-AI/issues/3719) removed the global
+  active account it switched.)
 - For animation/style changes, verify the class remains stable across state
   transitions and reduced-motion behavior is covered.
 

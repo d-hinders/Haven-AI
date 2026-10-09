@@ -116,6 +116,7 @@ export type {
   X402McpTransport,
   X402McpCallContext,
   X402MerchantCallContext,
+  X402IntentByKey,
   X402Receipt,
   X402AuthorizationOptions,
   X402Intent,
@@ -189,6 +190,10 @@ export {
   toStandardPaymentRequirements,
   x402AuthorizationAmount,
   x402V2PaymentEnvelope,
+  // #3727: the live header-name rule and the ready-made retry headers built
+  // from it.
+  x402PaymentHeaderNamesFor,
+  x402RetryHeadersFor,
   validateStandardX402PaymentHeader,
   X402PaymentHeaderValidationError,
   X402_MAX_AUTHORIZATION_WINDOW_SECONDS,
@@ -226,6 +231,9 @@ export type { X402MerchantOutcome, X402MerchantOutcomeReport } from './merchant-
 // own marker.
 export type { EvidenceReportOutcome } from './merchant-completion.js'
 export { isZeroSettlementTxHash } from './merchant-completion.js'
+// #3727: the PAYMENT-RESPONSE decoder the hosted outcome report reuses —
+// it takes `transaction` (or its aliases) only and never surfaces `payer`.
+export { parseMerchantSettlement } from './merchant-completion.js'
 export {
   resolveX402RetryTarget,
   isSecureX402RetryTarget,
@@ -234,6 +242,28 @@ export {
   INSECURE_RETRY_TARGET_CODE,
 } from './x402-retry-target.js'
 export type { X402RetryTarget } from './x402-retry-target.js'
+
+export {
+  MERCHANT_EGRESS_REFUSED_CODE,
+  MERCHANT_EGRESS_RESPONSE_CAP_CODE,
+  HOSTED_DISCOVERY_TIMEOUT_MS,
+  HOSTED_EGRESS_TIMEOUTS,
+  HOSTED_RESPONSE_BYTE_CAPS,
+  HOSTED_MAX_GET_REDIRECTS,
+  MerchantEgressRefusedError,
+  MerchantEgressResponseCapError,
+  assertPublicHttpsMerchantUrl,
+  isPublicHttpsMerchantUrl,
+  publicHttpsMerchantUrlRefusal,
+  readBodyCapped,
+  strictMerchantEgressPolicy,
+} from './merchant-egress.js'
+export type {
+  MerchantEgressPolicy,
+  MerchantEgressRefusalReason,
+  MerchantEgressTimeouts,
+  MerchantEgressUse,
+} from './merchant-egress.js'
 
 export {
   SWEEP_BASE_CHAIN_ID,

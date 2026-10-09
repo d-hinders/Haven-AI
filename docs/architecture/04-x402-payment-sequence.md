@@ -372,6 +372,25 @@ case: the Ampersend sandbox declares `http://` for a resource it serves over
 https, and its `http://` answers 308 → https — a client that adopted the
 declaration sent the signed header in clear on the first hop.
 
+**Request mode ([#3739](https://github.com/d-hinders/Haven-AI/issues/3739)) —
+the hosted default.** The drawing below is `payment_required` mode, where the
+agent hands over the 402 it received. In request mode the agent instead passes
+`haven_pay_x402_quote` the request it quoted (`url`, `method`, `headers`,
+`body`, and a required cap — `haven_quote_x402` names them in its
+`next_arguments`), and the hosted MCP makes that unpaid request again itself,
+under #3747's hosted egress policy (public https hosts only — no IP literal,
+localhost, single-label or internal name — with its 15 s and 256 KiB quote
+budgets) and a stricter redirect rule: none is followed. It builds the intent from the 402 *it*
+fetched, so the challenge the backend stores — and the eip3009 header echoes —
+is the merchant's, never an agent's copy (the 2026-10-07 Bitrefill failure was
+an agent dropping `extensions.bazaar.schema` while retyping it). A repeated call
+with the same `idempotency_key` — for the same URL, within the cap — answers from Haven's record
+(`GET /x402/by-idempotency-key/{key}`) before any re-probe; without a key the
+derived key covers the whole probed challenge, `extensions` included. The paid
+request is still the agent's own retry. What the probe cannot refuse from
+inside `mcp-server` is a public name that resolves to a private address
+([#3740](https://github.com/d-hinders/Haven-AI/issues/3740)).
+
 ```mermaid
 sequenceDiagram
   autonumber
@@ -441,10 +460,15 @@ gaining any:
 haven_pay_x402_quote  → settlement child + settlement_scheme: "erc7710"
 haven_sign            → { payment_id } only; the signer fetches the child
 haven_submit          → { payment_id, signature, settlement_scheme: "erc7710" }
-                        POST /x402/:id/settle → payment_header, tx_hash null
+                        POST /x402/:id/settle → payment_header, retry_headers
+                        (#3727: { "PAYMENT-SIGNATURE": <header> } — the names
+                        come from the SDK's live rule, not prose), tx_hash null
 agent retry           → PAYMENT-SIGNATURE: <payment_header>   (ONLY — #2341:
                         the header carries a delegation chain, and adding the
                         X-PAYMENT copy doubles it past Node's 16 KB ceiling)
+haven_report_settlement_evidence → { payment_id, settlement_tx_hash }  (#3774: the
+                        hosted next_tool after the erc7710 haven_submit; the hash
+                        is the `transaction` in the merchant's PAYMENT-RESPONSE)
 ```
 
 There is no `haven_submit` funding relay to confirm and **no
@@ -685,12 +709,15 @@ Since #3100 each entry carries `suggested_tool` **and** `suggested_arguments`,
 spelled in that tool's own vocabulary and accepted by it verbatim — on the
 hosted surface an MCP entry points at the cap-free `haven_quote_catalog_purchase`
 `{ catalog_id }` (prepare requires a cap the server must never invent) and an
-HTTP entry at `haven_quote_x402 { url }`; the local runtime points at its pay
-tools with `{ merchant_url, tool_name, arguments }` (`arguments` only when the
-row carries them) / `{ url }`. A row the suggested tool would refuse — no
-`tool_name` on either surface, degraded on the hosted one — gets
-`suggested_tool_omitted_reason` instead of a hint. A hosted strict refusal
-names the declared keys and the declared alias of a rejected key
+HTTP entry at `haven_quote_x402 { url }` — with `method` and `body` added to
+the hint when the row declares them (#3769: a GET-only suggestion for a
+POST-declared resource described a call the merchant cannot answer usefully;
+`body` is the JSON string of the row's `body_example`); the local runtime
+points at its pay tools with `{ merchant_url, tool_name, arguments }`
+(`arguments` only when the row carries them) / `{ url }`. A row the suggested
+tool would refuse — no `tool_name` on either surface, degraded on the hosted
+one — gets `suggested_tool_omitted_reason` instead of a hint. A hosted strict
+refusal names the declared keys and the declared alias of a rejected key
 (`resource_url` → `url`, `id` → `catalog_id`; epic #3105, decision 5). The
 quote tool the hosted hint names carries no structured next step of its own
 yet — its description leads to prepare; slice #3102 closes that hop.
@@ -721,9 +748,17 @@ the two then refuses safely at the cap check and the agent re-confirms with
 the user. Guidance only: the cap stays required and its enforcement is
 unchanged.
 
-`haven_prepare_catalog_purchase({ catalog_id, max_amount_human | max_amount, idempotency_key? })`
+`haven_prepare_catalog_purchase({ catalog_id, max_amount_human | max_amount, arguments?, idempotency_key? })`
 starts a paid-MCP-tool purchase from a curated `merchant_catalog` row instead
-of a hand-copied `merchant_url` / `tool_name` / `tool_arguments`. It is a
+of a hand-copied `merchant_url` / `tool_name` / `tool_arguments`. A row that
+DECLARES an argument schema (`tool_arguments_schema`, #3769) accepts caller
+`arguments` for its per-call tool — merged over the row's pinned ones and
+validated against the schema BEFORE the merchant is contacted, so prepare with
+an invalid call (Soundside `create_text` with `{}`, whose merchant schema has
+no required clause of its own) refuses before any payment exists; a row
+WITHOUT a schema is a fixed SKU and refuses `arguments` outright (the
+CloudNest tiers). The merchant URL and tool name still always come from the
+row. It is a
 convenience and verification layer built entirely from EXISTING primitives —
 it composes, rather than duplicates, the `haven_pay_mcp_tool` internals: the
 quote probe with the #1271 discovery fallback is shared via one
@@ -763,8 +798,15 @@ Sequence:
    not have); a `degraded` MCP row or one missing `tool_name` names
    `haven_pay_mcp_tool` (with an explicit `merchant_url`/`tool_name`) as the
    manual fallback.
-3. Run the LIVE quote against the entry's own `resource_url` / `tool_name` /
-   `tool_arguments` — the shared probe, including the #1271 same-origin
+3. Resolve the call arguments (#3769) BEFORE the probe: a row with
+   `tool_arguments_schema` validates the caller `arguments` (merged over the
+   row's pinned `tool_arguments`) against it and refuses
+   `INVALID_CATALOG_ARGUMENTS` — no merchant is contacted and no payment
+   exists on an invalid call; a row without a schema refuses any caller
+   `arguments` with `INVALID_INPUT`. The resolved object is what the probe
+   carries and what the response's `arguments` reports.
+   Run the LIVE quote against the entry's own `resource_url` / `tool_name` /
+   resolved `arguments` — the shared probe, including the #1271 same-origin
    discovery fallback. **Round-trip budget (#1348):** the two Haven reads
    steps 5–6 need (agent, allowances) are independent of this probe, so they
    are DISPATCHED here and overlap the merchant leg — the slowest part of the
@@ -776,7 +818,9 @@ Sequence:
    sequential calls stay fresh reads), and `createX402Intent` accepts the
    already-fetched `delegateAddress` instead of re-fetching the agent. Net: a
    successful preflight makes exactly ONE call per Haven surface — catalog,
-   agent, allowances, `POST /x402` — pinned by
+   agent, allowances, `POST /x402` — inside the handler (through the hosted
+   server, the dispatch identity gate in `tools/identity-gate.ts` makes one
+   agent read before the handler runs), pinned by
    [`packages/mcp-server/src/tools.test.ts`](../../packages/mcp-server/src/tools.test.ts)
    ("ROUND-TRIP BUDGET", #1348), which counts every stubbed fetch per surface;
    per-step wall-clock telemetry rides the
@@ -1099,7 +1143,8 @@ x402 merchants answer a re-request of a settled purchase idempotently
 derivation above is deliberately server-side, and stays so — case 2 has to
 fire for an agent that never came back, which no client-written signal can
 provide. What #2292 changes is how long the *surviving* agent has to wait. On
-the plain-HTTP path Haven never contacts the merchant, so before #2292 both
+the plain-HTTP path Haven never sends the merchant the paid request (it sends
+only unpaid probes: `haven_quote_x402`'s, and since #3739 request mode's), so before #2292 both
 routes into `funded_but_unsettled` were out of reach there: the
 `merchant_retry_rejected_after_payment` event had exactly one producer, the
 SDK's own retry path, and a manually retried merchant could not write it; and
@@ -1125,6 +1170,17 @@ predicate permanently rather than until the window elapses.
 > is a well-formed success no-op — nothing checked, nothing recorded — never
 > a refusal, since the merchant may simply have returned no hash.
 > `last-verified` unchanged.
+>
+> **Folded in one call earlier (#3727).** The outcome tool itself now takes
+> the optional evidence — `settlement_tx_hash` and/or the raw base64
+> `PAYMENT-RESPONSE` header as `payment_response` — and on an `accepted`
+> outcome records it through the same `reportSettlementEvidence` seam,
+> verified on-chain BEFORE recording (a mismatching or zero hash refuses
+> before anything is written; the decoded header contributes `transaction`
+> only, never `payer`). With evidence supplied the response names no next
+> tool, so the plain-HTTP eip3009 purchase is six hosted/signer calls, not
+> seven; the standalone `haven_report_settlement_evidence` stays for agents
+> that call it and for the paid-MCP/erc7710 handoffs that already name it.
 
 The report is caller-**asserted**, and the boundary is drawn the way #2092/#2096
 drew it for a caller-asserted settlement hash:
@@ -1318,8 +1374,10 @@ and lives in `src/domain/payment-token.ts` for the same reason.
 
 ## Delegation rail x402 (new accounts)
 
-On the delegation rail (#830, epic #821) there is **no funding leg and no delegate
-EOA to strand**. The agent's budget delegation *is* the settlement instrument:
+On the delegation rail (#830, epic #821), erc7710 direct settlement has **no
+funding leg and no delegate EOA to strand**; the one delegation-rail shape that
+funds the delegate first is the EIP-3009 bridge below (#946), for facilitators
+without erc7710 support. The agent's budget delegation *is* the settlement instrument:
 funds move `account → merchant` directly, and the on-chain caveat enforcers meter
 the period budget as part of the settlement itself.
 
@@ -1495,8 +1553,11 @@ direct account → merchant transaction); `settlement_tx_hash` is `tx_hash`
 itself on erc7710 and on those retired mpp rows. On eip3009 it is, first,
 the merchant settlement an agent reported and Haven verified on-chain (#3475,
 `machine_metadata.merchant_settlement_tx_hash`: a delegate → merchant
-Transfer of exactly the amount, mined after this payment's funding, through
-`haven_report_settlement_evidence`); otherwise
+Transfer of exactly the amount, mined after this payment's funding — reported
+by the SDK itself on hosted delivery and the local paid retry (#3764), or by
+an agent that retried the merchant itself through `haven_report_x402_outcome`'s
+`payment_response` (#3727), or through `haven_report_settlement_evidence` only
+when that answer names it); otherwise
 `protocol_receipt_payload.transaction` when it is a non-zero 0x-prefixed
 32-byte hash; else `null` — the merchant has not reported a settlement, or
 reported the zero-hash "delivered, not settled" marker `isZeroSettlementTxHash`
@@ -1505,7 +1566,15 @@ eip3009 when the hash is the verified report, Haven verified it on-chain; the
 eip3009 fallback is the merchant's claim as relayed in `PAYMENT-RESPONSE`, not
 verified on-chain by Haven — cite it as such. `tx_hash` /
 `txHash` are unchanged and kept for wire compatibility, marked deprecated in
-their OpenAPI/SDK description only.
+their OpenAPI/SDK description only. The DASHBOARD headlines the same split
+(#3763): on the history views and the agent activity feed, an eip3009 row
+with a recorded settlement links the SETTLEMENT as the payment (the
+transaction the merchant names) and shows the funding leg as a named
+secondary step ("Funding from your account"); without a recorded settlement
+it says so plainly rather than promising one, and links the funding leg
+labelled as the funding leg. `hash`/`tx_hash` on those views keep their
+funding meaning — the legs travel as named fields, so the row cannot split
+in two.
 
 Deliberately NOT checked: the facilitator's DelegationManager **calldata**
 (facilitator-specific and opaque — the Transfer log is the settlement's
@@ -2222,8 +2291,10 @@ sub-budget half of that sum walks grant → parent-child → the budget
 delegation's hash (`SUM_OPEN_RESERVED_FOR_BUDGET_DELEGATION_SQL`) —
 `sumOpenReservedForParent` keys on the parent-child row's OWN hash and
 would answer 0 here. `GET /task-budgets?status=live` (and the MCP/SDK reads
-over it) list closing rows always and unexpired pending and open rows, each
-with its `status` (closed and expired rows omitted; `status=all` still
+over it) list unexpired pending, open, and closing rows, each
+with its `status` (closed rows and every expired row omitted — an
+expired `closing` row owes no close signature, since the close would
+be trivial #3329 N2(c) / #3773; `status=all` still
 answers every row), and
 `GET /task-budgets/:id` is the read-by-id the MCP
 `haven_get_task_budget` surfaces — the status check a close refusal's

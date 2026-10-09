@@ -31,8 +31,21 @@ covers:
   - packages/frontend/vercel.json
   - packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts
   - scripts/vercel/**
-last-verified: "2026-10-06"
+last-verified: "2026-10-08"
 ---
+
+> **Re-verified #3770 (2026-10-08, delivery-quality report):** this diff
+> touched one file in this document's coverage list,
+> `packages/backend/src/openapi/route-modules.generated.ts`, and none of this
+> document's mode/rollback/env semantics. The map gains exactly one operation —
+> `POST /machine-payments/{id}/delivery-quality` → `routes/machine-payments.ts`
+> — the agent's evidence-only verdict on what a settled payment DELIVERED
+> (#3770): it writes to the new `machine_payment_delivery_reports` table only,
+> never touches `payment_intents`, and is agent-scoped like the evidence
+> attach path. No route file is added or moved, `enforcedModules` is untouched
+> (`routes/machine-payments.ts` is already money-path), and `.env.dev.example`
+> gains no variable. Migration 107 follows the structural-down pattern (#1139).
+> Nothing else in this document was re-verified.
 
 > **Re-verified #3664 (2026-10-05):** `index.ts`'s `enforcedModules` comments
 > on the sub-budget routes no longer say "money-path-adjacent" —
@@ -79,6 +92,14 @@ last-verified: "2026-10-06"
 > - **No variable changes.** No variable, value or deploy step changes; `RPC_URL` and `GNOSISSCAN_API_KEY` are slice #3671.
 >
 > Nothing else in this document was re-verified, and `last-verified` is not bumped.
+
+> **Re-verified (2026-10-07, `BLOCKSCOUT_API_KEY` added):** a new optional
+> backend variable. When set, it is sent as `apikey` on the Base and Base
+> Sepolia Blockscout history reads; unset, the reads stay anonymous as before.
+> Production Base history reads were refused with HTTP 403 on every request,
+> so set it on any environment where `Explorer API fetch failed` logs a 403.
+> No other variable, value or deploy step changes. Nothing else in this
+> document was re-verified, and `last-verified` is not bumped.
 
 > **Re-verified #3671 (2026-10-06, `RPC_URL` removed):** the backend no longer
 > reads `RPC_URL`; RPC is resolved only for supported chains, so chain 100 has
@@ -525,9 +546,24 @@ Isolation rules that are non-negotiable for a payments product:
   ERC-7710 rail is enabled ([below](#enabling-the-erc-7710-rail-on-the-dev-demo-merchant)),
   reports `erc7710: false` and the build refuses a merchant-locked budget for
   it. The payTo itself arrives with the next catalog refresh after migration
-  101 deploys (see `docs/product/marketplace.md`); until then every offer
-  reads `unstated`.
-- **Owner company details (#3332)** — `HAVEN_OWNER_COMPANY_DETAILS` (strict
+ 101 deploys (see `docs/product/marketplace.md`); until then every offer
+ reads `unstated`.
+
+ > **Re-verified #3769 (2026-10-08):** the catalog verifier
+ > (`modules/catalog/merchant-catalog.ts`) now probes a plain-HTTP row with
+ > the row's DECLARED method and body example (`http_method`/`body_type`/
+ > `body_example`, migration 108) instead of a hardcoded GET, and a challenge
+ > that structurally advertises its own method (`resource.method` on the 402)
+ > is written back onto the row's `http_method` in the same success UPDATE —
+ > one more COALESCE'd column beside the #3331 `pay_to` write. The claims
+ > above about what the refresh records and when payTo arrives are unchanged:
+ > `pay_to` is still written as seen from the challenge, `asset_transfer_methods`
+ > is still scoped to `accepts[0]`'s network, and the probe is still read-only
+ > (it never pays, signs, or follows the challenge). Scope of this re-read:
+ > this bullet's catalog-verification paragraphs; nothing else in the
+ > document was re-read for it, and `last-verified` is bumped to 2026-10-08
+ > for exactly this coverage.
+ - **Owner company details (#3332)** — `HAVEN_OWNER_COMPANY_DETAILS` (strict
   boolean) gates `/user/company-details*`, the additive `parties.buyer`
   field on payment evidence/receipts, and the Settings → Company details
   screen. Dark by default; GET/PUT and POST vies-check answer 404 when off, and
@@ -1205,3 +1241,11 @@ project owner — collaborators have Viewer access, not env-var write access.
 > by hand). The shadow/enforce semantics this document describes are
 > unchanged. Nothing else in this file's coverage was touched; `last-verified`
 > was already 2026-10-02 at the base commit, so this note is the only edit.
+
+> **Re-verified unchanged (#3739, 2026-10-07, route table):** this diff
+> regenerates `packages/backend/src/openapi/route-modules.generated.ts`
+> (`npm run generate:route-modules`) for one new read-only route,
+> `GET /x402/by-idempotency-key/{key}`, in the existing `x402` module. No
+> request-validation mode, enforced-module list, environment variable or dev
+> setup step this document describes moved. The rest of this document was not
+> re-read for it, and `last-verified` is not bumped.

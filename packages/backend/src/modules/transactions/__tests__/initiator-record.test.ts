@@ -59,6 +59,7 @@ const RAW_TWIN = {
 const X402_ROW: X402PaymentIntentRow = {
   id: 'pi-1',
   tx_hash: '0xabc',
+  delivery_reference: null,
   agent_id: 'agent-1',
   agent_name: 'Alice',
   account_id: 'safe-1',
@@ -79,8 +80,17 @@ const X402_ROW: X402PaymentIntentRow = {
   fx_source: null,
   fx_rates: null,
   settlement_scheme: 'eip3009',
+  // #3763: the SDK's default evidence post reports the FUNDING hash, so the
+  // baseline row carries NO recorded settlement — null is the common case.
+  settlement_tx_hash: null,
   confirmed_at: '2026-08-01T00:00:00.000Z',
   created_at: '2026-08-01T00:00:00.000Z',
+}
+
+/** The same payment with the merchant's settlement recorded (#3475 → #3763). */
+const X402_ROW_SETTLED: X402PaymentIntentRow = {
+  ...X402_ROW,
+  settlement_tx_hash: `0x${'22'.repeat(32)}`,
 }
 
 /** Enrichment-match payment intent (matched by hash + account + chain). */
@@ -204,6 +214,31 @@ describe('initiatedBy dedup guard (#2097)', () => {
       agentName: 'Alice',
       initiatedBy: 'agent',
     })
+  })
+
+  it('#3763: an eip3009 row WITH a recorded settlement still collapses to ONE row, carrying both legs', async () => {
+    mockModules({ x402Rows: [X402_ROW_SETTLED] })
+
+    const { mergeSortDedupeAndEnrich } = await import('../orchestration.js')
+    const merged = [withSafe(RAW_TWIN)]
+
+    const result = await mergeSortDedupeAndEnrich('user-1', [USER_SAFE], merged)
+
+    // The recorded settlement must NOT break the twin collapse: the funding
+    // hash still keys the identity, so the raw explorer twin and the x402
+    // row are ONE row — the settlement does not split the payment in two.
+    const rowsForHash = result.filter((tx) => tx.hash === '0xabc')
+    expect(rowsForHash).toHaveLength(1)
+    expect(rowsForHash[0]).toMatchObject({
+      // `hash` keeps its FUNDING meaning; the legs travel named.
+      hash: '0xabc',
+      fundingTxHash: '0xabc',
+      settlementTxHash: `0x${'22'.repeat(32)}`,
+      initiatedBy: 'agent',
+      source: 'x402',
+    })
+    // And no second row exists for the settlement hash itself.
+    expect(result.filter((tx) => tx.hash === X402_ROW_SETTLED.settlement_tx_hash)).toHaveLength(0)
   })
 
   it('enrichment classifies: matched outbound=agent, lone outbound=unknown, inbound=undefined', async () => {

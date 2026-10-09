@@ -235,6 +235,14 @@ originally granted.
   pause/resume, re-key, or revoke controls for them. Owners manage any remaining Safe permission
   outside Haven where they have access; use the live delegation flow for a
   replacement agent.
+- **A rekey changes the Sign-In-With-X identity (#3728).** The signer's
+  `haven_sign_siwx` signs a merchant x402 sign-in as the delegate wallet, so
+  the sign-in identity is the delegate key — and `/agents/:id/rekey/*` issues
+  a new one. After a rekey, the agent signs in as the NEW key: a merchant
+  session minted for the old key keeps working until it expires, but codes the
+  old key never retrieved can no longer be reached by SIWX. Finish any
+  sign-in flows (e.g. retrieving gift-card redemption codes) before running
+  `--rekey-finish`.
 - **A key is never moved between machines.** There is no "restore my key here". The
   new keypair is generated on the target machine, and any design that transported one
   would break the non-custody the whole system rests on.

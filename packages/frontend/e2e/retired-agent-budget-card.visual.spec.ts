@@ -7,6 +7,10 @@
  * keep the read-only row plus Stop, with a one-line reason where the form
  * was. These clips pin that card state.
  *
+ * Since #3716 the sub-budget entry lives inside the Add budget panel, which
+ * a retired agent does not have — the "no Issue sub-budget" assertion below
+ * is structurally true there and kept as a cheap guard, not the gate.
+ *
  * ELEMENT-SCOPED to the card's anchor (`#delegation-budget-card`), the same
  * scoping `edit-budget-modal.visual.spec.ts` uses, at the 390 px evidence
  * viewport (`scripts/evidence-viewports.mjs`). One clip, REVOKED: a revoked
@@ -77,7 +81,10 @@ test.describe('retired agent budget card visual regression (#3549)', () => {
       await expect(card).toHaveCount(1)
       // The active budget is still listed, and Stop still ends it.
       await expect(card.getByText(/250 USDC per week/)).toBeVisible()
-      await expect(card.getByRole('button', { name: 'Stop' })).toHaveCount(1)
+      // The row button's accessible name is its aria-label ("Stop budget 250
+      // USDC per week"), so an exact-text match can never resolve; anchor on
+      // the label prefix instead (CI #3721: toHaveCount received 0).
+      await expect(card.getByRole('button', { name: /^Stop budget/ })).toHaveCount(1)
       // Nothing that grants authority.
       await expect(card.getByText(state.reason)).toBeVisible()
       await expect(card.getByRole('button', { name: 'Set budget' })).toHaveCount(0)

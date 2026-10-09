@@ -262,6 +262,9 @@ export class AccountReads {
         configuredAmount: allowance.configuredAmount,
         resetPeriodMin: allowance.resetPeriodMin,
         isResetPending: allowance.onchain.isResetPending,
+        // #3731: same provenance as the detailed read's field — the compact
+        // row is a projection of the same allowance, never a second source.
+        fundsCoverRemaining: allowance.fundsCoverRemaining,
       }
     })
     const readiness = deriveReadiness(agent.status, allowances)
@@ -382,6 +385,14 @@ export class AccountReads {
         ...(allowance.reserved_haven_atomic !== undefined
           ? { reservedHavenAtomic: allowance.reserved_haven_atomic }
           : {}),
+        // #3731: boolean → itself; ANY other value (absent, string, null) →
+        // null, never undefined — a malformed or empty body answers
+        // "unverifiable", not a missing key. The key is absent on the wire
+        // when the remaining is 0; that maps to null here too.
+        fundsCoverRemaining:
+          allowance.funds_cover_remaining === true || allowance.funds_cover_remaining === false
+            ? allowance.funds_cover_remaining
+            : null,
         remainingDisplay: formatRemainingDisplay(allowance.token_address, allowance.token_symbol, allowance.onchain.remaining),
         onchain: {
           amount: allowance.onchain.amount,
@@ -555,6 +566,12 @@ export class AccountReads {
     }
   }
 
+  /**
+   * #3723: the re-wrap is deliberate — this is the endpoint's own
+   * `{ receipt, verification }` shape, and `verifyPaymentReceipt` accepts the
+   * whole object or `.receipt` alone. The local `verification` is Haven's
+   * self-check, not offline evidence.
+   */
   async getReceipt(paymentId: string): Promise<{ receipt: PaymentReceipt; verification: ReceiptVerification }> {
     const { receipt } = await this.transport.get<{ receipt: PaymentReceipt }>(`/payments/${paymentId}/receipt`)
     return { receipt, verification: verifyPaymentReceipt(receipt) }

@@ -297,7 +297,7 @@ from branches; `@haven_ai/core` is workspace-private.
   were created 2026-09-13 and the one release between then and the fix
   hand-stamped the heading.
   Published packages pin internal `@haven_ai/*` deps exactly; workspace-private
-  consumers (`backend`, `qa-agent`, `frontend`, `mcp-server`) use `"*"`. The
+  consumers (`backend`, `qa-agent`, `frontend`, `ops`, `mcp-server`) use `"*"`. The
   dividing line is `private: true`, not "is it on npm" — `mcp-server` is
   Docker-deployed yet installs its siblings as workspaces.
   `npm run lint:workspace-pins` enforces both, and `release-bump.mjs` re-checks

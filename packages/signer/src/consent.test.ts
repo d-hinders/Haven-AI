@@ -74,7 +74,9 @@ describe('signer consent gate', () => {
     // toContain holds, and the retired rail's name must not come back.
     expect(block).toContain("The agent's signed budget delegation is the real spend gate")
     expect(block).not.toContain('Safe')
-    expect(block).toContain('pause or revoke agent authority outside this signer')
+    // #3722: the owner-ruled sentence, exactly (pause and API revoke end no on-chain authority).
+    expect(block).toContain("the wallet\nowner can stop the agent's budget or remove the agent outside this signer.")
+    expect(block).not.toMatch(/pause or revoke/)
     expect(block).toContain('haven_sign')
     expect(block).toContain(`${SIGNER_ACK_ENV}=${hash}`)
   })
@@ -89,7 +91,11 @@ describe('signer consent gate', () => {
       // The full description is LLM prose; its distinctive clauses must not be in the human block.
       expect(block).not.toContain(toolDescriptions[name].slice(0, 60))
     }
-    expect(block.length).toBeLessThan(2500)
+    // #3728: a fifth tool and two more honest lines about what a sign-in does
+    // pushed the block past #3173's original 2500-char bound — still one
+    // screen for a person, so the cap moves with it rather than the copy
+    // losing the no-spend scoping.
+    expect(block.length).toBeLessThan(3000)
     expect(block).toContain('npx @haven_ai/connect --doctor')
     expect(block).toContain("failed 'Signer stdio handshake' check")
     expect(block).toContain('local_signer_ack_required')
@@ -217,11 +223,12 @@ describe('consent surface version (#1263)', () => {
   })
 })
 
-describe('#3506: sub-budget consent copy is copy-only (owner decision 2026-09-30)', () => {
+describe('#3728 + #3506: consent copy is copy-only (owner decisions 2026-09-30, 2026-10-07)', () => {
   // The hash covers identity, tool NAMES and SIGNER_CONSENT_SURFACE_VERSION,
-  // never the summaries. Naming sub-budget signing in the consent text must
-  // not re-prompt any operator: this pins the v2 hash for a fixed identity, so
-  // a change that moves it (a version bump, a summary leaking into the hash)
+  // never the summaries. #3728 added haven_sign_siwx to the registered set,
+  // which MOVED this pinned hash exactly once (every install re-prompts once —
+  // the intended effect); from here, naming the new tool in the consent text
+  // must not move it again: a version bump or a summary leaking into the hash
   // goes red here and has to be argued, not slipped in.
   const fixed: SignerConsentInput = {
     delegateAddress: '0x000000000000000000000000000000000000dEaD',
@@ -229,15 +236,20 @@ describe('#3506: sub-budget consent copy is copy-only (owner decision 2026-09-30
     agentId: 'agt_test',
     chainId: 100,
     network: 'Gnosis Chain',
-    toolNames: ['haven_sign', 'haven_x402_sign_header', 'haven_sign_x402', 'haven_sign_sweep_delegate'],
+    toolNames: ['haven_sign', 'haven_sign_siwx', 'haven_x402_sign_header', 'haven_sign_x402', 'haven_sign_sweep_delegate'],
   }
 
   it('keeps SIGNER_CONSENT_SURFACE_VERSION at 2 and the hash for a fixed identity unchanged', () => {
     expect(SIGNER_CONSENT_SURFACE_VERSION).toBe(2)
-    expect(computeSignerConsentHash(fixed)).toBe('6705a7d8ec919961')
+    expect(computeSignerConsentHash(fixed)).toBe('91e94ab01723dd04')
   })
 
   it('names sub-budget signing in the haven_sign summary', () => {
     expect(toolSummaries.haven_sign).toMatch(/task-budget or sub-budget open or close/)
+  })
+
+  it('names the SIWX sign-in in the haven_sign_siwx summary, scoped to no-spend', () => {
+    expect(toolSummaries.haven_sign_siwx).toMatch(/Sign-In-With-X/)
+    expect(toolSummaries.haven_sign_siwx).toMatch(/moves no funds/)
   })
 })

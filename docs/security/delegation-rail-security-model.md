@@ -17,6 +17,7 @@ covers:
   - packages/sdk/src/sub-budget-guards.ts
   - packages/sdk/src/userop-binding.ts
   - packages/sdk/src/client.ts
+  - packages/sdk/src/receipt.ts
   - packages/sdk/src/x402-erc7710.ts
   - packages/sdk/src/x402-funding-leg.ts
   - packages/sdk/src/delegate-sweep.ts
@@ -66,7 +67,7 @@ covers:
   - packages/backend/src/modules/ops/**
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
-last-verified: "2026-10-06"
+last-verified: "2026-10-08"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -372,6 +373,19 @@ which the bridge selects before the open budget. The budget would then fund
 payments to any merchant. `agent_delegations.merchant_id` is a label, not a
 caveat, so the authority is still the signed caveat stack and nothing else.
 
+> **Re-verified #3769 (2026-10-08):** #3769 adds an `http_method`
+> correction column to the catalog verifier's success UPDATE — the same
+> statement that records `merchant_catalog.pay_to`. The payTo contract above
+> is unchanged: `pay_to` is still written AS SEEN from the challenge (never
+> COALESCEd), still collected only across `accepts[]` options on the recorded
+> network, still refused when the options disagree, and the advertised-method
+> correction never applies to an MCP row (an `http`-protocol guard). A row's
+> `http_method` says how the verifier PROBES the resource; it feeds no budget
+> pin, no caveat, and no authority path. Scope of this re-read: this section
+> (Merchant-locked budgets) and the `merchant-catalog.ts`/`merchants.ts`
+> coverage it names; the rest of the document was not re-read for it, and
+> `last-verified` stays 2026-10-08.
+
 Two limits are deliberate:
 - **Slot sharing.** A merchant-locked budget and a plain budget pinned to the
   same address share one `(agent, token, recipient)` slot. Activating either
@@ -579,6 +593,92 @@ chain.
 > a priced row is collected into neither bucket. Nothing this document claims
 > about authority, custody or signing changes. Scope of this note: that one
 > CASE predicate. Nothing else in this document was re-verified.
+
+> **Re-verified unchanged (#3778, 2026-10-08 — the optional `delivery_reference`
+> delivery pointer):** this diff touched two files in this document's coverage
+> list, `packages/sdk/src/client.ts` and
+> `packages/backend/src/infra/repositories/transaction-history.ts`, and none of
+> their authority, custody or signing surfaces. On `client.ts` the change rides
+> the same seam #3764's note scopes — the ACCEPTED arm's
+> `/machine-payments/evidence` report — plus the `reportMerchantOutcome`
+> pass-through: one new OPTIONAL `deliveryReference` input (≤ 512 chars, the
+> NON-SECRET pointer to a delivered good), spread into the evidence payload
+> only when present. It authorizes nothing, produces or consumes no signature,
+> and no spend decision reads its value; when the caller supplies a
+> credential-shaped value the tool refuses pre-write (report) / pre-funding
+> (settle) — declining a write the caller opted into by sending the field, not
+> narrowing any previously-allowed path (the field did not exist before). On
+> `transaction-history.ts` the change is one nullable column added to
+> `X402PaymentIntentRow` and its SELECT (`mpe.delivery_reference AS
+> delivery_reference`) — the same read-only projection class the #2871 note
+> scopes: inside the existing `pi.user_id = $N` + `us.id = ANY($N)` tenant
+> scoping, no writer, no authority and no spend path implicated. The dashboard
+> surfaces that read the projection display the pointer; they decide nothing.
+> Scope of this note: those two files. Nothing else in this document was
+> re-verified.
+
+> **Re-verified unchanged (#3770, 2026-10-08 — the delivery-quality report):**
+> this diff touched two files in this document's coverage list,
+> `packages/sdk/src/receipt.ts` and `packages/sdk/src/client.ts`, and none of
+> its authority, custody or signing surfaces. `receipt.ts`'s `payment` block
+> gains one OPTIONAL additive field, `deliveryQuality` — the paying agent's
+> own evidence-only verdict (`ok` / `unusable` / `partial` + note) on what a
+> settled payment DELIVERED — and `verifyPaymentReceipt` still reads only
+> `authorization`, so nothing a signature covers moves (the same rule
+> `parties` follows); `client.ts` gains `reportDeliveryQuality`, a plain POST
+> relay to the backend's agent-scoped report route, which writes a verdict to
+> a new evidence table only and never touches `payment_intents` — `settled`,
+> `tx_hash`, amounts and status are untouched, no signature is produced or
+> consumed, and no spend decision reads the report. Haven holds no new key,
+> grant or credential because of it. Scope of this note: those two files.
+>
+> **Re-verified unchanged (#3781, 2026-10-08 — the catalog tier of the
+> purchase label):** this diff touched one file in this document's coverage
+> list, `packages/sdk/src/client.ts`, and none of its authority, custody or
+> signing surfaces. `getX402MerchantCallContext` maps one new OPTIONAL
+> rehydrated field — the catalog row's name (`catalog_name` on the wire,
+> `catalogName` on the client type), persisted by
+> `haven_prepare_catalog_purchase` so the settle leg can report the catalog
+> tier of the purchase label. The field is display metadata from Haven's own
+> catalog row: it authorizes nothing, is never merchant content (#1349), and
+> is absent on a direct `haven_pay_mcp_tool` purchase. No signature is
+> produced or consumed, nothing becomes signable or refused differently, and
+> no spend decision reads it. Scope of this note: that one mapping.
+> Nothing else in this document was re-verified.
+
+> **Re-verified unchanged (#3764, 2026-10-08 — the SDK's own settlement-evidence
+> report):** this diff touched one file in this document's coverage list,
+> `packages/sdk/src/client.ts`, and none of its authority, custody or signing
+> surfaces. On an ACCEPTED merchant answer to a payment WITH a funding leg,
+> `completeX402MerchantCall` now posts the merchant's own settlement
+> transaction — already parsed from `PAYMENT-RESPONSE` since #3118 — as a
+> SECOND `/machine-payments/evidence` report right after the funding one
+> (#3764): one attempt, no backoff, gated on a well-formed, non-zero hash
+> different from the funding hash case-insensitively. This is a best-effort
+> evidence WRITE after the purchase completed, on the same #3475 seam the
+> backend verifies on-chain before recording — the SDK hands Haven a claim,
+> not an authority; nothing becomes signable or refused differently, no
+> signature is produced or consumed, and no spend decision reads the new
+> `settlementEvidenceOutcome` field (the hosted tools map it to agent
+> guidance; the local path swallows it by design). The local
+> `retryRequest` hook lives in `merchant-completion.ts`, outside this
+> document's coverage list. Scope of this note: that evidence path.
+> Nothing else in this document was re-verified.
+
+> **Re-verified unchanged (#3727, 2026-10-07 — the folded settlement evidence
+> and retry_headers):** this diff touched one file in this document's coverage
+> list, `packages/signer/src/tools.ts`, and none of its signing surfaces. The
+> signer's `haven_sign_x402` / `haven_x402_sign_header` results now also carry
+> `retry_headers` — a `{ <name>: <payment_header> }` echo derived from the
+> SDK's live `x402PaymentHeaderNamesFor` rule, naming which headers to set on
+> the agent's own merchant retry; the header value itself, its signing, its
+> binding spend and its audit entry are untouched, and no payload becomes
+> signable or refused differently. The hosted `haven_report_x402_outcome`
+> evidence fold lives outside this document's coverage and is
+> caller-asserted + chain-verified
+> (`docs/regulatory/casp-changelog/2026-10-07-3727.md`), moving no authority.
+> Scope of this note: those result-shaped additions. Nothing else in this
+> document was re-verified.
 
 > **Re-verified #2912 (naming epic #2906, phase 3b — the `account_type` data
 > migration):** this diff touched one file in this document's coverage list,
@@ -1919,9 +2019,14 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 - **ERC-1271.** `isValidSignature` is on the ABI. Whether the account accepts a
   plain owner ECDSA signature over a raw digest, without ERC-7739 wrapping, is
   **not verified in this repository**. **Reduced for an updated signer:** it
-  now signs only EIP-712 digests in the HybridDeleGator `PackedUserOperation`
-  domain of its own account (plus the Haven-bound x402, header and sweep
-  payloads), not arbitrary digests a protocol could present for a 1271 check.
+  now signs only payloads whose meaning is checked in-package: EIP-712 digests
+  in the HybridDeleGator `PackedUserOperation` domain of its own account (the
+  Haven-bound x402, header and sweep payloads) and — since #3728 — composed
+  EIP-4361 Sign-In-With-X messages for the x402 `sign-in-with-x` extension,
+  where the signer itself composes the message from grammar-validated
+  challenge fields and the address from the key. It still never signs a
+  caller-supplied digest or an arbitrary digest a protocol could present for
+  a 1271 check.
 - **Installed signers.** A signer installed before #3272 keeps the oracle until
   it is upgraded. Haven cannot gate that: the attack never passes through
   Haven, and the hosted MCP cannot see the signer's handshake. Credential
@@ -2203,6 +2308,19 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > text, copy-only) and #3524 (compact `haven_send`/`haven_pay` results), were
 > re-verified where they merged. Nothing else in this document was re-verified.
 
+> **Re-verified (0.9.0-alpha.0 release, 2026-10-09):** the release bump's only
+> covered-file edit is the `SIGNER_VERSION` literal in `packages/signer/src/tools.ts`
+> (`0.9.0-alpha.0`). No signing check, refusal or allowlist moves in that edit.
+> The range's own signer-source changes were each recorded where they merged:
+> #3728 (`haven_sign_siwx`, the delegate's Sign-In-With-X signature — moves no
+> funds, approves no payment; noted above at its merge), #3727 (ready-made retry
+> headers) and #3739 (description text for the request-mode probe). Two changed
+> signer source without a note here, both read at this release: #3738 adds an
+> advisory identity line (agent id, delegate address) to the signer's
+> instructions and leaves the signing path's checks unchanged; #3722 rewords one
+> consent line ("pause or revoke" → "stop the agent's budget or remove the
+> agent"). Nothing else in this document was re-verified.
+
 > **Re-verified (0.8.1-alpha.0 release, 2026-10-07):** the release bump's only
 > covered-file edit is the `SIGNER_VERSION` literal in `packages/signer/src/tools.ts`
 > (`0.8.1-alpha.0`). No signing check, refusal or allowlist moves in that edit.
@@ -2458,3 +2576,70 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > Nothing else in this document was re-read for it, and `last-verified` is not
 > bumped.
 
+> **Re-verified #3723 (2026-10-07, offline receipt verification):** the covered
+> file this diff touches is `packages/sdk/src/client.ts`, JSDoc-only: the
+> `getReceipt()` doc comment now states that its returned
+> `{ receipt, verification }` object is the endpoint's own shape and that
+> `verifyPaymentReceipt` (#3723) accepts either layer — the whole object or
+> `.receipt` alone. No build, signing, intent, guard or refusal path moves.
+> The digest this document describes is untouched: the verifier lives in
+> `packages/sdk/src/receipt.ts`, which this diff adds to the front-matter
+> coverage list — the offline verifier is trust-critical, so future
+> receipt.ts changes re-gate this document. Its #3723 change was re-read from
+> that side — the endpoint-response wrapper is unwrapped ONE level and the
+> wrapper's `verification` (Haven's own self-check) is never read, so the
+> offline evidence is still the recovered delegate signature over the
+> delegation digest, nothing server-asserted.
+> Scope of this note: the `getReceipt()` doc comment, the new coverage-list
+> entry for the verifier, and that re-read; `last-verified` is bumped for exactly
+> this coverage.
+
+> **#3747 re-verification (2026-10-07, outbound network policy only).**
+> #3747 added the hosted merchant-egress policy, which touches
+> `packages/sdk/src/client.ts` (an optional `merchantEgress` config and a
+> getter) — on this contract's cover list. The change is network policy on
+> the hosted server's own outbound connections only: it gates WHERE a
+> request may connect, never whether money moves and never who may spend.
+> No new spender, no new authority grant, no new spend path, no mutation of
+> a signed payment intent (a refusal is pre-signing or post-relay), and the
+> on-chain allowance and caveat stack remain the only spend authority (Red
+> Line #4) — the hosted server stays keyless and the policy touches no key
+> material. Scope of this note: the client.ts egress wiring; `last-verified`
+> is not re-stamped (it already reads 2026-10-07) — this block is the scope.
+
+> **Re-verified unchanged (#3756, 2026-10-07, refusal wording):** this diff
+> touches `routes/agents.ts`, a covered file, in one human-readable string
+> only: the archive 409 for a non-revoked agent with no live budget now says
+> "This agent holds no live budget, so revoke it first (POST
+> /agents/:id/revoke), then archive." instead of implying the agent can still
+> spend. Re-read §"Archiving cannot hide a live delegation agent (#1436)": its
+> claim that the refusal names the remedy that applies (`revoke-all` for live
+> budgets, "revoke first" for a live credential) still holds, so the body is
+> unchanged. The refusal fires on exactly the same conditions with the same
+> 409. (The setup-cancel refusal in `routes/agent-connection-setups.ts`, also
+> reworded, is outside the code this document covers.) No authority, signer set,
+> delegation or custody path moves. Nothing else in this document was re-read
+> for it, and `last-verified` is not bumped.
+
+> **Re-verified unchanged (#3739, 2026-10-07, x402 key lookup):** this diff
+> touches `packages/sdk/src/client.ts`, a covered file, with one new read-only
+> method, `findX402IntentByIdempotencyKey` (`GET /x402/by-idempotency-key/{key}`,
+> agent-authenticated, scoped to the calling agent, 404 for another agent's
+> key, never writes). It returns an intent's id, status, scheme, amount,
+> asset, network, resource URL, expiry, task budget and signing-window state so the hosted pay tool can answer a replay before
+> re-probing a merchant. It creates, signs and authorizes nothing; no
+> delegation, caveat, signer set or custody path moves. The rest of this
+> document was not re-read for it, and `last-verified` is not bumped.
+
+> **Re-verified unchanged (#3763, 2026-10-08, history read model):** this
+> diff touches the transactions/agent-activity read model
+> (`modules/transactions/`, `infra/repositories/transaction-history.ts`,
+> `infra/repositories/agent-activity.ts`) and `openapi/spec.ts` so the
+> dashboard's history views headline the EIP-3009 settlement hash the agent
+> reported (#3475) instead of linking the funding leg as "the" payment. It
+> reads `machine_metadata` it never wrote and writes nothing; no delegation,
+> caveat, enforcer, signer set, budget or custody path moves, and no signing
+> input is touched — `hash`/`tx_hash` keep their funding meaning everywhere,
+> so no consumer can be tricked into treating a displayed link as an
+> authority change. The rest of this document was not re-read for it, and
+> `last-verified` is bumped to 2026-10-08 for exactly this coverage.

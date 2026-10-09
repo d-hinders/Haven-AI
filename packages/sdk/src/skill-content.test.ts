@@ -93,6 +93,17 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).toMatch(/never reserves a price/i)
   })
 
+  it('keeps one Haven pair per task when several are configured (#3738)', () => {
+    // (a) ask which agent, (b) the pair mapping, (c) identity by agent id.
+    expect(HAVEN_SKILL_MD).toContain('**When more than one Haven pair is configured**')
+    expect(HAVEN_SKILL_MD).toContain('ask before any payment tool')
+    expect(HAVEN_SKILL_MD).toContain(
+      '`haven-<slug>` with `haven-signer-<slug>`, bare `haven` with\n`haven-signer`, Codex `haven` with `haven_signer`',
+    )
+    expect(HAVEN_SKILL_MD).toContain('`haven_get_agent` returns `id` and `delegateAddress`')
+    expect(HAVEN_SKILL_MD).toContain('compare the delegate address alone when a signer has no recorded\nagent id')
+  })
+
   it('tells the agent to follow the response guidance fields first (#1308)', () => {
     expect(HAVEN_SKILL_MD).toContain('next_action')
     expect(HAVEN_SKILL_MD).toContain('next_tool')
@@ -282,6 +293,9 @@ describe('onboarding and setup section (#2537)', () => {
     // up", and it used to name only paying.
     const frontMatter = HAVEN_SKILL_MD.slice(0, HAVEN_SKILL_MD.indexOf('\n---\n', 4))
     expect(frontMatter).toMatch(/create a Haven account, create an agent, or connect one/)
+    // #3735: the same rule for the payment-URL hand-off, which starts before
+    // any 402 is seen.
+    expect(frontMatter).toMatch(/hits an HTTP 402 \(x402\) paywall, or another tool returns an x402 payment URL/)
   })
 
   it('says the payment tools cannot create authority', () => {
@@ -384,14 +398,169 @@ describe('onboarding and setup section (#2537)', () => {
 })
 
 describe('plain-HTTP settlement report (#3475)', () => {
-  it("tells the agent to hand the merchant's PAYMENT-RESPONSE transaction to haven_report_settlement_evidence", () => {
+  it("tells the agent to hand the merchant's PAYMENT-RESPONSE to haven_report_x402_outcome as payment_response (#3764)", () => {
     const start = HAVEN_SKILL_MD.indexOf('**Direct transfer / non-MCP paywall:**')
     const end = HAVEN_SKILL_MD.indexOf('**Catalog tool arguments:**')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const paragraph = HAVEN_SKILL_MD.slice(start, end)
+    // #3727 folded the settlement into the outcome report: the raw header rides
+    // `payment_response` on the SAME call — not a second tool.
     expect(paragraph).toContain('PAYMENT-RESPONSE')
+    expect(paragraph).toContain('payment_response')
+    expect(paragraph).toContain('mcp__haven__haven_report_x402_outcome')
+    expect(paragraph).toContain('SAME')
+    // The standalone evidence tool is named ONLY as the answer-driven remedy.
     expect(paragraph).toContain('mcp__haven__haven_report_settlement_evidence')
-    expect(paragraph).toContain('settlement_tx_hash')
+    expect(paragraph).toMatch(/haven_report_settlement_evidence[^.]*only when the outcome answer/)
+  })
+})
+
+describe('x402 payment URL handed back by another tool (#3735)', () => {
+  // Sliced the #3475 way: the new paragraph's own heading up to the next
+  // heading the #3475 test also anchors on, so each assertion is about THIS
+  // paragraph and not a sentence elsewhere in the skill.
+  const start = HAVEN_SKILL_MD.indexOf('**An x402 payment URL handed back by another tool:**')
+  const end = HAVEN_SKILL_MD.indexOf('**Catalog tool arguments:**')
+  const paragraph = HAVEN_SKILL_MD.slice(start, end)
+
+  it('sits between the non-MCP paywall paragraph and the catalog arguments heading', () => {
+    const directTransfer = HAVEN_SKILL_MD.indexOf('**Direct transfer / non-MCP paywall:**')
+    expect(directTransfer).toBeGreaterThan(-1)
+    expect(start).toBeGreaterThan(directTransfer)
+    expect(end).toBeGreaterThan(start)
+  })
+
+  it('quotes the exact request: url, method, headers, and body as a JSON string', () => {
+    expect(paragraph).toContain('mcp__haven__haven_quote_x402')
+    for (const field of ['`url`', '`method`', '`headers`', '`body`']) expect(paragraph).toContain(field)
+    expect(paragraph).toMatch(/`body` is a JSON \*\*string\*\*, not an object/)
+  })
+
+  it('always sends Content-Type: application/json on a JSON POST quote', () => {
+    expect(paragraph).toContain('headers: {"Content-Type": "application/json"}')
+    expect(paragraph).toMatch(/On a JSON POST always pass/)
+  })
+
+  it('tells a local-runtime agent that haven_pay_x402 does the round trip itself', () => {
+    // The local runtime's haven_pay_x402_quote takes a `quote` object, not
+    // `payment_required`, and replays the request itself; the hosted-only
+    // bullets must not read as instructions there.
+    expect(paragraph).toMatch(/On the local runtime\*\* \(`@haven_ai\/mcp`\), `haven_pay_x402` with that\s+same `url`, `method`, `headers` and `body` probes, pays and retries/)
+    // #3739: three hosted bullets now — pay from the request, the paid retry, and the payment_required fallback.
+    expect(paragraph).toMatch(/the next three points are for the hosted tools/)
+  })
+
+  it('#3739: the hosted pay takes the quote\'s next_arguments, so the challenge is never copied', () => {
+    expect(paragraph).toMatch(/\*\*Pay from the request\.\*\*/)
+    expect(paragraph).toMatch(/the quote result's `next_arguments`/)
+    expect(paragraph).toMatch(/no `payment_required`/)
+    expect(paragraph).toMatch(/the challenge never passes through you/)
+  })
+
+  it('says the paid retry repeats the method, body and Content-Type, with the payment header', () => {
+    expect(paragraph).toMatch(/the same\s+method, body and `Content-Type` to `retry_url`/)
+    expect(paragraph).toContain('`PAYMENT-SIGNATURE`')
+    expect(paragraph).toContain('`X-PAYMENT`')
+  })
+
+  it('hands payment_required over verbatim, and says why', () => {
+    // Worded "copy … verbatim", not "pass …": the #2353 guard above refuses an
+    // imperative to PASS `payment_required` anywhere after
+    // haven_complete_mcp_tool, and this paragraph is about a different tool.
+    // #3739: it is now the fallback mode, after "Pay from the request".
+    expect(paragraph).toMatch(/If you pass `payment_required` instead, copy it verbatim/)
+    expect(paragraph).toMatch(/to `mcp__haven__haven_pay_x402_quote`\s+exactly as returned/)
+    expect(paragraph).toMatch(/never retyped, trimmed or "corrected"/)
+    expect(paragraph).toContain('`extensions`')
+  })
+
+  it('prefers the x402 URL over a deposit address, with the reasons, and without a false binding claim', () => {
+    expect(paragraph).toMatch(/Prefer the x402 URL over the deposit address or web link/)
+    expect(paragraph).toContain("merchant's own machine-readable challenge")
+    expect(paragraph).toMatch(/merchant's own\s+reference \(the invoice id\)/)
+    expect(paragraph).toContain('settlement evidence')
+    expect(paragraph).toMatch(/bound\s+to its payee and amount on-chain too/)
+  })
+
+  it('pays exactly one route and never falls back to the deposit address', () => {
+    expect(paragraph).toMatch(/Pay exactly one route, and never fall back silently/)
+    expect(paragraph).toMatch(/do not then pay the deposit address/)
+    expect(paragraph).toContain('mcp__haven__haven_sweep_delegate')
+    expect(paragraph).toMatch(/budget pinned to one recipient/)
+  })
+
+  it("checks delivery in the merchant's own tool, with any merchant named only as an example", () => {
+    expect(paragraph).toMatch(/Check delivery in the merchant's own tool/)
+    // No merchant is named as the case; an example is labelled as one.
+    expect(paragraph).not.toMatch(/bitrefill/i)
+    expect(paragraph).toMatch(/own tool\*\* after paying \(a get-invoice\s+tool, say\)/)
+  })
+
+  it('is reachable — the front matter names the hand-off case beside the 402 trigger', () => {
+    const frontMatter = HAVEN_SKILL_MD.slice(0, HAVEN_SKILL_MD.indexOf('\n---\n', 4))
+    expect(frontMatter).toMatch(/hits an HTTP 402 \(x402\) paywall, or another tool returns an x402 payment URL/)
+  })
+})
+
+describe('leaked-credential guidance (#3722)', () => {
+  const start = HAVEN_SKILL_MD.indexOf('## If the credential may have leaked')
+  const section = HAVEN_SKILL_MD.slice(start).replace(/\s+/g, ' ')
+
+  it('exists, and names the owner-ruled remedies by their real control names', () => {
+    expect(start).toBeGreaterThan(-1)
+    expect(section).toContain('choose Replace signing key: the old budget is revoked on-chain and a new one is issued')
+    expect(section).toContain('use Stop budget on the agent\'s budget, or Remove agent… to end every budget')
+    expect(section).toContain('Pausing only blocks payments through Haven; the budget stays live on-chain.')
+  })
+
+  it('discloses that ending the budget does not recover agent-wallet funds', () => {
+    expect(section).toContain('also controls any funds already in the agent wallet, and ending the budget does not recover them')
+  })
+
+  it('never offers pause or revoke as the remedy anywhere in the skill', () => {
+    expect(HAVEN_SKILL_MD).not.toMatch(/pause or revoke/i)
+    expect(HAVEN_SKILL_MD).not.toMatch(/^## Revoke$/m)
+  })
+})
+
+describe('#3774: the step after the merchant retry is split by scheme', () => {
+  it('eip3009 reports the outcome; erc7710 records settlement evidence, and says the outcome report does not apply', () => {
+    expect(HAVEN_SKILL_MD).toMatch(/\*\*EIP-3009\*\* scheme[\s\S]*?mcp__haven__haven_report_x402_outcome/)
+    expect(HAVEN_SKILL_MD).toMatch(/\*\*erc7710\*\* scheme[\s\S]*?mcp__haven__haven_report_settlement_evidence/)
+    expect(HAVEN_SKILL_MD).toMatch(/`mcp__haven__haven_report_x402_outcome`\s+does not apply on erc7710/)
+    expect(HAVEN_SKILL_MD).toMatch(/do not re-quote at once/)
+  })
+})
+
+describe('#3778: the relay rule for delivered codes and credentials', () => {
+  // Sliced the #3735 way: the section's own heading up to the next heading,
+  // so every assertion is about THIS section and not a phrase elsewhere.
+  const start = HAVEN_SKILL_MD.indexOf('### Relay a delivered code or credential to the owner — immediately, verbatim')
+  const end = HAVEN_SKILL_MD.indexOf('## If the credential may have leaked')
+  const section = HAVEN_SKILL_MD.slice(start, end)
+
+  it('has its own section between the outcome-report guidance and the leak guidance', () => {
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+  })
+
+  it('pins the relay rule: immediate, verbatim and complete, never paraphrased or withheld', () => {
+    expect(section).toContain('### Relay a delivered code or credential to the owner — immediately, verbatim')
+    expect(section).toContain('relay it to the user\nin your next message, verbatim and complete')
+    expect(section).toContain('Never paraphrase, truncate,\nsummarize or withhold it')
+    expect(section).toMatch(/a code relayed "later" is a code the session may lose/)
+  })
+
+  it('pins the delivery_reference NON-SECRET pointer rule and its refusal signal', () => {
+    expect(section).toContain('Haven deliberately does not store it.')
+    expect(section).toContain('Report only the NON-SECRET pointer with')
+    expect(section).toContain('delivery_reference — merchant, product, value, order id')
+    expect(section).toMatch(/A value shaped like a code, token or key is refused there/)
+    expect(section).toMatch(/its only safe path is\nto the owner/)
+  })
+
+  it('pins the Bitrefill SIWX recovery line', () => {
+    expect(section).toContain('the\ndocumented recovery is a SIWX sign-in on bitrefill.com from the same wallet\nthat paid, or a Bitrefill support ticket quoting the invoice id.')
   })
 })

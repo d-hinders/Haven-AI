@@ -32,6 +32,7 @@ const boundary: ClientBoundary = {
     'ensureFundingConfirmed',
     'executeTool',
     'fetch',
+    'findX402IntentByIdempotencyKey', // #3739
     'getAgent',
     'getAgentSummary',
     'getAllowances',
@@ -51,6 +52,7 @@ const boundary: ClientBoundary = {
     'listReceipts',
     'listReceiptsPage', // #3128
     'listTaskBudgets', // #3329
+    'merchantEgress', // #3747
     'openTaskBudget', // #3329
     'pay',
     'payX402Quote',
@@ -59,6 +61,7 @@ const boundary: ClientBoundary = {
     'precheckBudget',
     'quoteMcpX402',
     'quoteX402',
+    'reportDeliveryQuality', // #3770
     'reportSettlementEvidence',
     'reportX402MerchantOutcome',
     'resumeAuthorizedX402',
@@ -79,13 +82,14 @@ const boundary: ClientBoundary = {
     "async authorizeX402(paymentRequired: X402PaymentRequired, options: X402AuthorizationOptions = {}): Promise<X402Receipt>",
     "async closeSubBudget(id: string): Promise<CloseSubBudgetResult>",
     "async closeTaskBudget(id: string): Promise<CloseTaskBudgetResult>",
-    "async completeX402MerchantCall(input: { url: string; init?: RequestInit; paymentId: string; paymentHeader: string; mcpTransport?: X402McpTransport; noFundingLeg?: boolean; }): Promise<{ status: number; ok: boolean; body: unknown; settlementTxHash?: string; evidenceOutcome?: EvidenceReportOutcome; }>",
+    "async completeX402MerchantCall(input: { url: string; init?: RequestInit; paymentId: string; paymentHeader: string; mcpTransport?: X402McpTransport; noFundingLeg?: boolean; deliveryReference?: string; }): Promise<{ status: number; ok: boolean; body: unknown; settlementTxHash?: string; evidenceOutcome?: EvidenceReportOutcome; settlementEvidenceOutcome?: EvidenceReportOutcome; }>",
     "async createIntent(request: PaymentRequest): Promise<PaymentIntent>",
     "async createX402Intent(paymentRequired: X402PaymentRequired, options: X402AuthorizationOptions = {}): Promise<X402Intent>",
     "async discoverTools(options: { category?: string; search?: string; rail?: 'x402' | 'mpp'; verified?: 'any' | 'verified' | 'operator'; } = {}): Promise<HavenCatalogEntry[]>",
     "async ensureFundingConfirmed(paymentId: string, fundingTxHash?: string): Promise<void>",
     "async executeTool(toolName: string, input: Record<string, unknown>): Promise<Record<string, unknown>>",
     "async fetch(url: string, init?: RequestInit, options: X402AuthorizationOptions = {}): Promise<Response>",
+    "async findX402IntentByIdempotencyKey(key: string): Promise<X402IntentByKey | null>", // #3739
     "async getAgent(): Promise<HavenAgent>",
     "async getAgentSummary(): Promise<HavenAgentSummary>",
     "async getAllowances(): Promise<HavenAllowanceSummary>",
@@ -117,9 +121,11 @@ const boundary: ClientBoundary = {
     "async prepareX402Erc7710(paymentRequired: X402PaymentRequired, options: { resourceUrl?: string; delegationRail?: boolean; mcpCallContext?: X402McpCallContext; idempotencyKey?: string; taskBudgetId?: string; subBudgetId?: string; } = {}): Promise<{ paymentId: string; signData: SignData; settlement: Omit<X402Erc7710Settlement, 'paymentHeader'>; }>",
     "async quoteMcpX402(url: string, init?: RequestInit, options: X402AuthorizationOptions = {}): Promise<X402Quote>",
     "async quoteX402(url: string, init?: RequestInit, options: X402AuthorizationOptions = {}): Promise<X402Quote>",
+    // #3770: the delivery-quality report — evidence-only, moves no money.
+    "async reportDeliveryQuality(input: { paymentId: string; quality: 'ok' | 'unusable' | 'partial'; note?: string; }): Promise<{ payment_id: string; quality: string; note: string | null; updated_at: string; }>",
     "async resumeAuthorizedX402(input: ResumeAuthorizedX402Input): Promise<X402Receipt>",
     "async resumeX402Payment(input: ResumeX402PaymentInput | X402ResumeState): Promise<Response>",
-    "async reportX402MerchantOutcome(input: { paymentId: string; outcome: X402MerchantOutcome; merchantStatus: number; merchantBody?: string; }): Promise<X402MerchantOutcomeReport>",
+    "async reportX402MerchantOutcome(input: { paymentId: string; outcome: X402MerchantOutcome; merchantStatus: number; merchantBody?: string; deliveryReference?: string; }): Promise<X402MerchantOutcomeReport>",
     "async reportSettlementEvidence(paymentId: string, settlementTxHash: string): Promise<EvidenceReportOutcome>",
     "async settleX402Erc7710(paymentRequired: X402PaymentRequired, options: { resourceUrl?: string; } = {}): Promise<X402Erc7710Settlement>",
     "async submitCatalogEntry(resourceUrl: string, options: { website?: string; } = {}): Promise<HavenCatalogSubmission>",
@@ -132,6 +138,7 @@ const boundary: ClientBoundary = {
     "async waitForConfirmation(paymentId: string): Promise<PaymentResult>",
     "clientUpdate(): HavenClientUpdate | undefined",
     "constructor(config: HavenClientConfig)",
+    "get merchantEgress(): MerchantEgressPolicy | undefined", // #3747
     "readonly delegateAddress: string | undefined",
     "sign(hash: string): string",
     "withRequestContext<T>(headers: Record<string, string>, fn: () => Promise<T>): Promise<T>",
@@ -161,6 +168,7 @@ const boundary: ClientBoundary = {
     './haven-api-transport.js',
     './mcp-merchant-transport.js',
     './merchant-completion.js',
+    './merchant-egress.js', // #3747
     './payment-mappers.js',
     './payment-state.js',
     './receipt.js',
@@ -465,6 +473,10 @@ describe('HavenClient structural boundary', () => {
       'HAVEN_MINIMUM_NODE_VERSION',
       'HAVEN_SKILL_BODY_MD',
       'HAVEN_SKILL_MD',
+      'HOSTED_DISCOVERY_TIMEOUT_MS', // #3747
+      'HOSTED_EGRESS_TIMEOUTS', // #3747
+      'HOSTED_MAX_GET_REDIRECTS', // #3747
+      'HOSTED_RESPONSE_BYTE_CAPS', // #3747
       'HYBRID_DELEGATOR_DOMAIN_NAME', // #3271
       'HYBRID_DELEGATOR_DOMAIN_VERSION', // #3271
       'HavenApiError',
@@ -481,6 +493,10 @@ describe('HavenClient structural boundary', () => {
       'INSECURE_RETRY_TARGET_CODE', // #3097
       'MAX_TASK_BUDGET_TTL_SECONDS', // #3329
       'MERCHANT_DISCOVERY_PATHS',
+      'MERCHANT_EGRESS_REFUSED_CODE', // #3747
+      'MERCHANT_EGRESS_RESPONSE_CAP_CODE', // #3747
+      'MerchantEgressRefusedError', // #3747
+      'MerchantEgressResponseCapError', // #3747
       'MerchantTimeoutError',
       'NEXT_TOOL_SERVER_NAMES', // #3101
       'NEXT_TOOL_SERVER_ROLES', // #3101
@@ -518,6 +534,7 @@ describe('HavenClient structural boundary', () => {
       'assertBoundDirectPaymentUserOp', // #3283
       'assertOwnTaskBudgetCloseUserOp', // #3329
       'assertOwnTaskChild', // #3329
+      'assertPublicHttpsMerchantUrl', // #3747
       'assertSecureX402RetryTarget', // #3097
       'assertUserOpTypedDataBinding', // #3271
       'buildSweepAuthorizationMessage',
@@ -544,6 +561,7 @@ describe('HavenClient structural boundary', () => {
       'isConnectorChannel',
       'isErc7710Option',
       'isPackedUserOperationTypedData', // #3271
+      'isPublicHttpsMerchantUrl', // #3747
       'isSecureX402RetryTarget', // #3097
       'isSupportedNodeVersion',
       'isSweepableChain',
@@ -551,9 +569,14 @@ describe('HavenClient structural boundary', () => {
       'isZeroSettlementTxHash', // #2970
       'normalizePaymentRequired',
       'packedUserOperationHash', // #3271
+      // #3727: the PAYMENT-RESPONSE decoder the hosted outcome report reuses
+      // (transaction only, never payer).
+      'parseMerchantSettlement',
       'parseNextTool', // #3101
       'parsePaymentRequired',
       'parsePaymentRequiredResponse',
+      'publicHttpsMerchantUrlRefusal', // #3747
+      'readBodyCapped', // #3747
       'readClientUpdate', // #3303
       'readX402ReceiptPayer',
       'renderNextTool', // #3101
@@ -569,6 +592,7 @@ describe('HavenClient structural boundary', () => {
       'signHash',
       'signUserOpTypedDataForDelegation',
       'signerUpdateFallback',
+      'strictMerchantEgressPolicy', // #3747
       'sweepUsdcAddress',
       'sweepUsdcDomain',
       'toStandardPaymentRequirements',
@@ -581,6 +605,10 @@ describe('HavenClient structural boundary', () => {
       'x402AssetTransferMethod',
       'x402AuthorizationAmount',
       'x402FacilitatorAddresses',
+      // #3727: the live header-name rule and the ready-made retry headers
+      // built from it (barrel and edge).
+      'x402PaymentHeaderNamesFor',
+      'x402RetryHeadersFor',
       // #2361: the shared v2 payment envelope (resource/extensions echoes) —
       // exported so the edge signer builds the same envelope as the SDK's
       // own funding leg instead of a drifting copy.
@@ -598,6 +626,7 @@ describe('HavenClient structural boundary', () => {
       'confirmationTimeout?: number',
       'defaultHeaders?: Record<string, string>',
       'delegateKey?: string',
+      'merchantEgress?: MerchantEgressPolicy', // #3747
       'merchantTimeout?: number',
       'pollingInterval?: number',
       'requestTimeout?: number',
@@ -633,6 +662,10 @@ describe('HavenClient structural boundary', () => {
       'HavenPaymentReceipt',
       'HavenPaymentReceiptsPage', // #3128
       'MachinePaymentRail',
+      'MerchantEgressPolicy', // #3747
+      'MerchantEgressRefusalReason', // #3747
+      'MerchantEgressTimeouts', // #3747
+      'MerchantEgressUse', // #3747
       'NextStep', // #3101
       'NextStepArguments', // #3101
       'NextStepHandoff', // #3101
@@ -679,6 +712,7 @@ describe('HavenClient structural boundary', () => {
       'X402ExpectedAuth',
       'X402ExpectedContext',
       'X402Intent',
+      'X402IntentByKey', // #3739
       'X402McpCallContext',
       'X402McpTransport',
       'X402MerchantCallContext',

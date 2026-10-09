@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -12,6 +12,7 @@ import {
   readRekeyPending,
   rewriteCredentialFiles,
   writeCredentialFiles,
+  writeMcpServerBinding,
 } from './storage.js'
 import type { AgentIdentity, ConnectApiClient } from './api.js'
 
@@ -775,5 +776,66 @@ describe('the missing-api-key refusal is one sentence, not two (#2187)', () => {
     // site stopped importing it, which is the drift this pins.
     expect(fromParser).toBe(fromFunction)
     expect(fromParser).toBe(REKEY_FINISH_NEEDS_API_KEY)
+  })
+})
+
+describe('#3737: --rekey auto-selects the sole LIVE agent (owner decision 3)', () => {
+  const io = () => {
+    const out: string[] = []
+    const err: string[] = []
+    return { io: { stdout: (m: string) => out.push(m), stderr: (m: string) => err.push(m) }, out, err }
+  }
+
+  it('a key-removed directory left by --unwire is NOT a candidate — the one live agent is selected', async () => {
+    // Named-by-default fills the credential root with retired directories of
+    // every shape; only a directory that still holds a stored API key is one
+    // --rekey can act for.
+    const { baseDir } = await seedAgent()
+    await mkdir(join(baseDir, 'agent-old-uuid'), { recursive: true })
+    await writeFile(join(baseDir, 'agent-old-uuid', 'identity.json'), JSON.stringify({ agent_id: 'agent-old' }))
+    const { io: sink, out, err } = io()
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify(identity()), { status: 200 }))
+
+    const code = await runCli(['--rekey', '--credentials-dir', baseDir, '--json'], sink)
+    vi.unstubAllGlobals()
+
+    expect(code).toBe(0)
+    expect(err.join('')).toBe('')
+    expect(JSON.parse(out.join('')).agent_id).toBe(AGENT_ID)
+  })
+
+  it('an auto-selected NAMED agent prints the exact --name on the repair line', async () => {
+    // The sole-agent discovery picked the directory; the printed finish
+    // command must not depend on that discovery still holding at phase two.
+    const { baseDir, directory } = await seedAgent('research')
+    await writeMcpServerBinding(directory, {
+      version: 1,
+      server_name: 'haven-research',
+      signer_name: 'haven-signer-research',
+      agent_id: AGENT_ID,
+      api_url: API_URL,
+      bound_at: new Date().toISOString(),
+    })
+    const { io: sink, out, err } = io()
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify(identity()), { status: 200 }))
+
+    const code = await runCli(['--rekey', '--credentials-dir', baseDir], sink)
+    vi.unstubAllGlobals()
+
+    expect(code).toBe(0)
+    expect(err.join('')).toBe('')
+    expect(out.join('')).toMatch(/--rekey-finish --name research/)
+  })
+
+  it('an auto-selected BARE agent prints no --name, exactly as before', async () => {
+    const { baseDir } = await seedAgent()
+    const { io: sink, out } = io()
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify(identity()), { status: 200 }))
+
+    const code = await runCli(['--rekey', '--credentials-dir', baseDir], sink)
+    vi.unstubAllGlobals()
+
+    expect(code).toBe(0)
+    expect(out.join('')).not.toMatch(/--rekey-finish --name/)
   })
 })

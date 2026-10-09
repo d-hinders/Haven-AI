@@ -20,8 +20,11 @@ import {
   HavenApiError,
   HavenError,
   HavenPaymentStateError,
+  MerchantEgressRefusedError,
+  MerchantEgressResponseCapError,
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
+  type AgentNextStep,
   type HavenClient,
   type NextStep,
 } from '@haven_ai/sdk'
@@ -246,6 +249,108 @@ const PREPARE_REVERTED_ERROR_CODE = 'prepare_reverted'
 const PREPARE_REVERTED_OMITTED_REASON =
   'the payment reverted during on-chain simulation (see revert_reason); nothing was signed or moved and retrying the same payment reverts again — tell the user the reason; a budget, recipient or expiry caveat is changed by the wallet owner in Haven'
 
+/**
+ * #3731: the backend's `revert_cause` when the revert was the token's own
+ * insufficient-balance error — the wallet is SHORT. The funding-specific
+ * step: the account needs funds before this payment can be attempted, and
+ * the revert already proves the shortfall, so no tool call adds anything
+ * (the body carries no token or amount to build a check from). The ledger
+ * still books `onchain_revert` — this only names the real remedy.
+ */
+const INSUFFICIENT_BALANCE_REVERT_CAUSE = 'insufficient_balance'
+const PREPARE_REVERTED_FUNDING_OMITTED_REASON =
+  'the account does not hold enough of the token to fund this payment; the revert already proves the shortfall and the body carries no token or amount to check with — tell the user the account needs funds, and the payment can be re-made once it is funded'
+
+/**
+ * #3747: the structured hosted refusal for a merchant-egress policy refusal
+ * that happened BEFORE anything was sent — the quote/prepare seams run the
+ * policy pre-intent, so the sentence can say nothing was funded or signed
+ * with certainty.
+ */
+/**
+ * #3774: which argument carried the refused URL, so the refusal names
+ * something the calling tool actually takes — `url` (the plain-HTTP x402
+ * tools), `merchant_url` (the MCP-tool purchase and settle tools), or a
+ * catalog entry (the catalog tools take only `catalog_id`, so there is no URL
+ * argument to correct; the remedy is another entry).
+ */
+export type EgressRefusalTarget = 'url' | 'merchant_url' | 'catalog'
+
+const EGRESS_REMEDY: Record<
+  EgressRefusalTarget,
+  { nextAction: AgentNextStep['next_action']; nextTool: null; nextToolOmittedReason: string }
+> = {
+  url: {
+    nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+    nextTool: null,
+    nextToolOmittedReason:
+      're-call with the merchant’s public https URL as url (no IP literals, no localhost or internal names); nothing was funded or signed',
+  },
+  merchant_url: {
+    nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+    nextTool: null,
+    nextToolOmittedReason:
+      're-call with the merchant’s public https URL as merchant_url (no IP literals, no localhost or internal names); nothing was funded or signed',
+  },
+  catalog: {
+    nextAction: AgentPaymentNextAction.StopAndTellUser,
+    nextTool: null,
+    nextToolOmittedReason:
+      'this catalog entry’s merchant URL is refused by the hosted egress policy, and no argument here can change it; pick another catalog entry. Nothing was funded or signed',
+  },
+}
+
+export function egressRefusalBeforeIntent(err: unknown, target: EgressRefusalTarget): HostedToolError {
+  const refused = err instanceof MerchantEgressRefusedError
+    ? err
+    : new MerchantEgressRefusedError(String(err instanceof Error ? err.message : err), '', 'url_not_allowed', true)
+  return new HostedToolError({
+    code: 'MERCHANT_EGRESS_REFUSED',
+    message: `${refused.message} Nothing was funded or signed.`,
+    statusCode: 400,
+    nextStep: refusalNextStep(EGRESS_REMEDY[target]),
+  })
+}
+
+/**
+ * #3747: the structured refusal for egress refusals raised at the transport —
+ * the fallback envelope for every quote-path refusal (a refused initial URL,
+ * a refused redirect hop, a body over the while-reading cap). Delivery-time
+ * refusals are mapped earlier, in paid-mcp-completion, where the payment id
+ * and the verify-then-sweep state are known.
+ */
+function normalizeMerchantEgressError(
+  err: MerchantEgressRefusedError | MerchantEgressResponseCapError,
+): ToolFailure {
+  const code = err instanceof MerchantEgressResponseCapError
+    ? 'MERCHANT_EGRESS_RESPONSE_CAP'
+    : 'MERCHANT_EGRESS_REFUSED'
+  const omittedReason = err instanceof MerchantEgressResponseCapError
+    ? 'the merchant’s response exceeded the hosted response-size cap while it was being read and the read was aborted; re-quote the resource, and tell the user if it persists'
+    : err.beforeRequest
+      ? 'the hosted egress policy refuses this merchant URL: re-call with a public https merchant URL (no IP literals, no localhost or internal names); nothing was sent'
+      : 'the hosted egress policy refused a redirect mid-flight; nothing further was sent to the refused target — if a payment was in flight, check haven_get_payment_status before anything else'
+  const step = err instanceof MerchantEgressResponseCapError || !err.beforeRequest
+    ? refusalNextStep({
+        nextAction: AgentPaymentNextAction.StopAndTellUser,
+        nextTool: null,
+        nextToolOmittedReason: omittedReason,
+      })
+    : refusalNextStep({
+        nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+        nextTool: null,
+        nextToolOmittedReason: omittedReason,
+      })
+  return {
+    success: false,
+    code,
+    message: err.message,
+    statusCode: 400,
+    next_action: step.next_action,
+    ...nextStepWireFields(step),
+  }
+}
+
 export function normalizeError(err: unknown): ToolFailure {
   if (err instanceof HostedToolError) {
     return {
@@ -469,12 +574,26 @@ export function normalizeError(err: unknown): ToolFailure {
     err instanceof HavenApiError &&
     (err.body as { error_code?: string } | undefined)?.error_code === PREPARE_REVERTED_ERROR_CODE
   ) {
-    const body = err.body as { revert_reason?: string | null; refusal_reason?: string }
-    const step = refusalNextStep({
-      nextAction: AgentPaymentNextAction.StopAndTellUser,
-      nextTool: null,
-      nextToolOmittedReason: PREPARE_REVERTED_OMITTED_REASON,
-    })
+    const body = err.body as { revert_reason?: string | null; refusal_reason?: string; revert_cause?: string }
+    // #3731: an insufficient-balance revert names the REAL remedy — fund the
+    // account (fund_account_or_raise_allowance, already the enum's value for
+    // the shortfalls the backend refuses before prepare) — instead of the
+    // caveat text, which pointed at the wrong fix. No tool is named: the
+    // body carries no token or amount to build a check from, and the revert
+    // already proves the shortfall. Without `revert_cause`, today's caveat
+    // text stays.
+    const step =
+      body.revert_cause === INSUFFICIENT_BALANCE_REVERT_CAUSE
+        ? refusalNextStep({
+            nextAction: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
+            nextTool: null,
+            nextToolOmittedReason: PREPARE_REVERTED_FUNDING_OMITTED_REASON,
+          })
+        : refusalNextStep({
+            nextAction: AgentPaymentNextAction.StopAndTellUser,
+            nextTool: null,
+            nextToolOmittedReason: PREPARE_REVERTED_OMITTED_REASON,
+          })
     return {
       success: false,
       code: 'PREPARE_REVERTED',
@@ -483,6 +602,7 @@ export function normalizeError(err: unknown): ToolFailure {
       paymentId: err.paymentId,
       ...(body.revert_reason !== undefined ? { revert_reason: body.revert_reason } : {}),
       ...(body.refusal_reason !== undefined ? { refusal_reason: body.refusal_reason } : {}),
+      ...(body.revert_cause !== undefined ? { revert_cause: body.revert_cause } : {}),
       next_action: step.next_action,
       ...nextStepWireFields(step),
     }
@@ -539,6 +659,9 @@ export function normalizeError(err: unknown): ToolFailure {
       next_action: step.next_action,
       ...nextStepWireFields(step),
     }
+  }
+  if (err instanceof MerchantEgressRefusedError || err instanceof MerchantEgressResponseCapError) {
+    return normalizeMerchantEgressError(err)
   }
   if (err instanceof HavenError) {
     return {

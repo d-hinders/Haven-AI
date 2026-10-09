@@ -7,6 +7,7 @@ import { ConnectRequestError } from './api.js'
 import type { ConnectApiClient, ConnectorStatusResponse, RegisterSetupInput, ResolvedSetup, UpdateInstallStatusInput } from './api.js'
 import { delegateKeyFromPrivateKey } from './key.js'
 import type { InstalledClientCandidate } from './installed-clients.js'
+import { scanInstalledClients } from './installed-clients.js'
 import { completionHandoffLines, failedConnectOutcome, failureOutcomeFor, runConnect, waitForBudgetApproval } from './runtime.js'
 import type { ConnectDeps } from './runtime.js'
 import { CONNECT_OUTCOME_FILENAME } from './storage.js'
@@ -575,6 +576,25 @@ describe('runConnect', () => {
 
         expect(promptRuntime).toHaveBeenCalledTimes(1)
         expect(spies.api.resolveSetup).toHaveBeenCalledWith(expect.objectContaining({ runtime: 'claude-desktop' }))
+      })
+
+      it('passes the hint scan’s env to the default prompt rung, so both rungs see one machine (#3732)', async () => {
+        const spies = resolutionSpies()
+        // A neutral env: no detection variable (CLAUDECODE etc.) may fire, or
+        // the ladder would resolve at rung 2 and never reach the prompt.
+        const env = { TERM: 'xterm' } as NodeJS.ProcessEnv
+        const promptRuntimeByInstalledClient = vi.fn(async () => 'hermes' as const)
+        // The run still fails later (stub API returns nothing) — the assertions
+        // are about what happened BEFORE that: the prompt rung got the hint
+        // scan's env, and the resolved value carried through.
+        await expectRejection(runConnect({
+          setupToken: 'hv_setup_test',
+          apiBaseUrl: 'https://api.haven.example',
+          interactive: true,
+        }, { ...spies, nodeVersion: SUPPORTED_NODE, env, isTty: true, promptRuntimeByInstalledClient }))
+
+        expect(promptRuntimeByInstalledClient).toHaveBeenCalledWith(expect.objectContaining({ env }))
+        expect(spies.api.resolveSetup).toHaveBeenCalledWith(expect.objectContaining({ runtime: 'hermes' }))
       })
 
       it('skips the prompt entirely when stdin is not a TTY', async () => {
@@ -2271,7 +2291,10 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
     expect(outcome).not.toHaveProperty('retirement_mirror_errors')
 
     expect(output).toContain('agent-old')
-    expect(output).toMatch(/[Rr]evoke/)
+    // #3756: /[Rr]evoke/ alone was satisfied by "NOT revoked" whatever the remedy said;
+    // pin the named control and the absence of the old one.
+    expect(output).toContain('use Remove agent\u2026 on the Haven agent page for each (it ends their live budgets)')
+    expect(output).not.toMatch(/revoke them on the Haven agent page/)
     // #2551: replaced means retired LOCALLY — the restart guidance survives,
     // the "keeps acting as them" warning is now false and must not print.
     expect(output).toMatch(/NOT revoked/)
@@ -2309,6 +2332,11 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
     const error = await expectRejection(runWithPriorDir(true))
     expect(error).toBeInstanceOf(ConnectError)
     expect((error as ConnectError).code).toBe('wiring_collision')
+    // #3756: the relayed refusal names the agent-page control, not a bare "revoke".
+    expect((error as ConnectError).message).toContain(
+      'still use Remove agent\u2026 on the Haven agent page to end the old agent\u2019s budgets',
+    )
+    expect((error as ConnectError).message).not.toMatch(/revoke the old agent on the Haven agent page/)
   })
 
   it('REGRESSION (B1): filesystem junk under the credentials root is never named as an agent', async () => {
@@ -2739,6 +2767,8 @@ describe('runConnect terminal outcome record (#2173)', () => {
       const { outcome } = await runInto(root)
       expect(outcome.existing_agents_before_write).toEqual([])
       expect(outcome).not.toHaveProperty('server_name_rebound_from')
+      // #3772: no rebind, so no stale-session warning in the instruction.
+      expect(outcome.activation.instruction).not.toContain('keeps acting as the previous agent')
     })
 
     it('writes a non-secret mcp-server-binding.json beside the outcome record: name → agent id, backend URL, bound-at; no key material', async () => {
@@ -2771,6 +2801,12 @@ describe('runConnect terminal outcome record (#2173)', () => {
       expect(outcome.server_name_rebound_from).toEqual({
         server_name: 'haven', agent_id: 'agent-prod', api_url: 'https://api.prod.haven.example', bound_at: '2026-09-17T09:00:00.000Z', backend_changed: true,
       })
+      // #3772: a running session keeps the old wiring — say so, naming the
+      // previous agent, in both the --json instruction and the human log.
+      expect(outcome.activation.instruction).toContain('keeps acting as the previous agent (agent-prod) until it is restarted')
+      expect(outcome.activation.instruction).toContain('use Remove agent\u2026 on the Haven agent page')
+      // A cross-backend rebind says where that agent lives.
+      expect(outcome.activation.instruction).toContain('(agent-prod is on the backend it was created on, not this one)')
       // S2: the retired holder has NO stored key, so it is not "live" — the
       // pre-write list is the keyed subset, never every directory.
       expect(outcome.existing_agents_before_write).toEqual([])
@@ -2892,6 +2928,8 @@ describe('runConnect terminal outcome record (#2173)', () => {
       expect(notice).toContain('This run replaces that wiring, as you chose')
       expect(notice).not.toContain('rebinds it to a new agent')
       expect(outcome.server_name_rebound_from?.agent_id).toBe('agent-old')
+      // #3772: the exact field case — a replace leaves an open session on the old agent.
+      expect(outcome.activation.instruction).toContain('keeps acting as the previous agent (agent-old) until it is restarted')
       // The retired directory's record is released by the replace retirement.
       await expect(readFile(join(oldDir, 'mcp-server-binding.json'), 'utf8')).rejects.toThrow()
       expect(outcome.retired_agent_ids).toEqual(['agent-old'])
@@ -2922,6 +2960,11 @@ describe('runConnect terminal outcome record (#2173)', () => {
 // menu to what is actually installed here — as a HINT. The load-bearing
 // assertion in every case below is that it is still a REFUSAL.
 describe('runtime_undetermined installed-client hint (#2174)', () => {
+  // Hand-built candidates: pairs like `claude-code` + `config-file` are states
+  // the REAL scanner cannot produce (its Claude Code evidence now comes via
+  // `evidencePath` — `~/.claude.json` — with `configPath` null, #3732). These
+  // therefore pin the hint → refusal WIRING as a pure function of the scan
+  // result; the real-path fixtures live in the #3732 tests below.
   function scanStub(candidates: Array<[InstalledClientCandidate['runtime'], InstalledClientCandidate['evidence']]>) {
     return vi.fn(async () => candidates.map(([runtime, evidence]) => ({
       runtime, label: runtime, detail: 'x', configPath: null, evidence,
@@ -2992,6 +3035,31 @@ describe('runtime_undetermined installed-client hint (#2174)', () => {
 
     expect(record?.installed_clients).toEqual(['claude-code', 'cursor'])
     expect(record?.suggested_runtime).toBeUndefined()
+  })
+
+  it('JSON record and prose agree on a REAL claude-code/codex tie: no suggestion in either channel (#3732)', async () => {
+    // Over real paths, not the hand-built scanStub: a home with
+    // ~/.codex/config.toml AND a ~/.claude.json carrying mcpServers used to
+    // suggest Codex by construction. Now both are config-tier, so neither
+    // channel suggests — the same rule the prompt follows (Enter never
+    // selects), pinned here across BOTH channels with one test.
+    const claudeJson = '/home/agent/.claude.json'
+    const codexToml = '/home/agent/.codex/config.toml'
+    const scan = vi.fn(async () => scanInstalledClients({
+      homeDir: '/home/agent',
+      cwd: '/work',
+      env: {},
+      exists: async (path) => path === claudeJson || path === codexToml,
+      readFile: async (path) => (path === claudeJson ? JSON.stringify({ mcpServers: {} }) : '[mcp_servers.haven]'),
+    }))
+    const { error } = await refuse(scan as ConnectDeps['scanInstalledClients'])
+    const record = failedConnectOutcome(undefined, error).error
+
+    expect(record?.installed_clients).toEqual(['claude-code', 'codex-cli'])
+    expect(record?.suggested_runtime).toBeUndefined()
+    expect(error.message).toContain('claude-code, codex-cli')
+    expect(error.message).toContain('Haven will not choose between them for you')
+    expect(error.message).not.toContain('The likeliest is')
   })
 
   it('names the found clients in the prose channel too', async () => {
@@ -3234,6 +3302,25 @@ describe('existing-agent wiring collision at setup (#2551)', () => {
     expect(output).toMatch(/Retired previous agent agent-old locally/)
     expect(output).toMatch(/NOT revoked/)
     expect(output).not.toMatch(/keeps acting as them/)
+    // #3772 review S2: a bare directory with NO binding record (pre-0.4.0
+    // wiring) still gets the stale-session sentence in --json — the replace
+    // itself names the displaced agent.
+    expect(result.outcome).not.toHaveProperty('server_name_rebound_from')
+    expect(result.outcome.activation.instruction).toContain('keeps acting as the previous agent (agent-old) until it is restarted')
+  })
+
+  it('#3772: a --replace displacing several bare directories names every previous agent, in the plural', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-3772-replace-many-'))
+    await seedDir(root, 'agent-a-uuid', liveBare('agent-a'))
+    await seedDir(root, 'agent-b-uuid', liveBare('agent-b'))
+    const h = harness(root)
+
+    const result = await runConnect({ ...baseOptions(root), replaceExistingWiring: true }, h.deps)
+
+    const instruction = result.outcome.activation.instruction
+    expect(instruction).toMatch(/keeps acting as the previous agents \((agent-a, agent-b|agent-b, agent-a)\) until it is restarted/)
+    expect(instruction).toContain('they may still be active in Haven')
+    expect(instruction).toContain('it ends their live budgets')
   })
 
   it('--replace does NOT retire the prior directory when the runtime install ended with an errorCode', async () => {
@@ -3250,6 +3337,9 @@ describe('existing-agent wiring collision at setup (#2551)', () => {
     expect(result.outcome.superseded_agents_retired_locally).toBe(false)
     expect(result.outcome.retired_agent_ids).toEqual([])
     expect(h.logs.join('\n')).toMatch(/were NOT retired/)
+    // #3772 review S1: the install wrote nothing, so a restart moves no session
+    // off the old agent — and that agent's wiring may be the only working one.
+    expect(result.outcome.activation.instruction).not.toContain('keeps acting as the previous agent')
   })
 
   it('REGRESSION (review): retired_agent_ids names only the collision set — a coexisting NAMED agent is listed as superseded but never retired', async () => {
@@ -3507,5 +3597,185 @@ describe('existing-agent wiring collision at setup (#2551)', () => {
     expect(h.api.registerSetup.mock.calls[0][0].mcpServerName).toBe('haven')
     expect(result.outcome.schema_version).toBe(1)
     expect('superseded_agents_retired_locally' in result.outcome).toBe(false)
+  })
+})
+
+describe('#3737: a default setup names its pair from the display name (deriveServerName)', () => {
+  const SETUP_FOR = (agentName: string, chainId: number): ResolvedSetup => ({
+    setup_id: 'setup-3737',
+    status: 'awaiting_connection',
+    agent: { name: agentName },
+    haven_wallet: {
+      id: 'safe-1',
+      name: 'Main Haven wallet',
+      address: '0x2222222222222222222222222222222222222222',
+      chain_id: chainId,
+      network: chainId === 8453 ? 'Base' : 'Base Sepolia',
+    },
+    agent_budget: [],
+    hosted_mcp_url: 'https://mcp.haven.example/v1',
+    challenge: { id: 'challenge-3737', message: 'sign me', expires_at: '2099-01-01T00:00:00.000Z' },
+  })
+
+  function deriveApi(setup: ResolvedSetup) {
+    return {
+      resolveSetup: vi.fn(async () => setup),
+      registerSetup: vi.fn(async (input: RegisterSetupInput) => ({
+        setup_id: 'setup-3737',
+        agent_id: 'agent-3737',
+        status: 'connected_local',
+        agent_status: 'pending_approval',
+        api_key_prefix: input.apiKeyPrefix,
+        api_key_scope: 'setup_pending',
+        delegate_address: input.delegateAddress.toLowerCase(),
+        hosted_mcp_url: 'https://mcp.haven.example/v1',
+        next_action: 'return_to_haven_for_wallet_approval',
+      })),
+      updateInstallStatus: vi.fn(async () => {}),
+      getConnectorStatus: vi.fn(),
+      getAgentIdentity: vi.fn(),
+    }
+  }
+
+  function deriveHarness(root: string, setup: ResolvedSetup, extra: Partial<ConnectDeps> = {}) {
+    const api = deriveApi(setup)
+    // Creates the slug-keyed directory for real, so a SECOND run's
+    // de-collision scan sees the first run's slug on disk — the same root the
+    // real writer uses.
+    const writeCredentials = vi.fn(async (input: { serverName?: string }) => {
+      const dir = join(root, input.serverName ?? 'agent-3737')
+      await mkdir(dir, { recursive: true })
+      return { directory: dir, identityPath: join(dir, 'identity.json'), signerPath: join(dir, 'signer.json'), agentPath: join(dir, 'agent.json') }
+    })
+    const deps: ConnectDeps = {
+      api: api as never,
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_age...cret',
+      preflightStorage: vi.fn(async () => root),
+      writeCredentials: writeCredentials as never,
+      installRuntime: vi.fn(async () => completedInstall('claude-code')) as never,
+      log: () => undefined,
+      redactPaths: true,
+      ...extra,
+    }
+    return { api, writeCredentials, deps }
+  }
+
+  const baseOptions = (root: string) => ({
+    setupToken: 'hv_setup_test',
+    apiBaseUrl: 'https://api.haven.example',
+    runtime: 'claude-code',
+    credentialsDir: root,
+    waitForApproval: false,
+  })
+
+  /** A bare (unnamed) prior agent with a usable key — the alongside case. */
+  const liveBare = (agentId: string) => ({
+    'identity.json': { api_key: `sk_agent_${agentId}`, agent_id: agentId },
+    'signer.json': { private_key: PRIVATE_KEY },
+  })
+
+  async function seedDir(root: string, name: string, files: Record<string, unknown>) {
+    const dir = join(root, name)
+    await mkdir(dir, { recursive: true })
+    for (const [file, content] of Object.entries(files)) {
+      await writeFile(join(dir, file), typeof content === 'string' ? content : JSON.stringify(content))
+    }
+    return dir
+  }
+
+  it('a clean machine wires haven-<slug>-dev from the display name (non-production chain)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-3737-clean-'))
+    const { api, writeCredentials, deps } = deriveHarness(root, SETUP_FOR('Payment Agent', 84532))
+
+    const result = await runConnect({ ...baseOptions(root), deriveServerName: true }, deps)
+
+    expect(api.registerSetup.mock.calls[0][0].mcpServerName).toBe('haven-payment-agent-dev')
+    expect(writeCredentials.mock.calls[0][0].serverName).toBe('payment-agent-dev')
+    expect(result.outcome.server_name).toBe('haven-payment-agent-dev')
+  })
+
+  it('a production backend derives the plain slug, unmarked', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-3737-prod-'))
+    const { api, deps } = deriveHarness(root, SETUP_FOR('Payment Agent', 8453))
+
+    const result = await runConnect({ ...baseOptions(root), deriveServerName: true }, deps)
+
+    expect(api.registerSetup.mock.calls[0][0].mcpServerName).toBe('haven-payment-agent')
+    expect(result.outcome.server_name).toBe('haven-payment-agent')
+  })
+
+  it('a machine with a live bare pair succeeds WITHOUT prompting and leaves the bare pair byte-identical', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-3737-alongside-'))
+    const oldDir = await seedDir(root, 'agent-old-uuid', liveBare('agent-old'))
+    const prompt = vi.fn()
+    const { api, deps } = deriveHarness(root, SETUP_FOR('Payment Agent', 84532), {
+      promptWiringCollision: prompt,
+      isTty: true,
+    } as Partial<ConnectDeps>)
+
+    const result = await runConnect({ ...baseOptions(root), deriveServerName: true, interactive: true }, deps)
+
+    // Never asked: the derived pair displaces nothing, so replace-vs-alongside
+    // is not a question this run has to put to anyone.
+    expect(prompt).not.toHaveBeenCalled()
+    expect(api.registerSetup.mock.calls[0][0].mcpServerName).toBe('haven-payment-agent-dev')
+    expect(result.outcome.superseded_agents_retired_locally).toBeUndefined()
+    // The bare pair's directory is untouched: no tombstone, key still there.
+    await expect(stat(join(oldDir, 'TOMBSTONE.json'))).rejects.toThrow()
+    await expect(stat(join(oldDir, 'signer.json'))).resolves.toBeDefined()
+  })
+
+  it('two setups whose agents share a display name produce distinct working slugs', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-3737-dedupe-'))
+    const first = deriveHarness(root, SETUP_FOR('Payment Agent', 84532))
+    const r1 = await runConnect({ ...baseOptions(root), deriveServerName: true }, first.deps)
+    const second = deriveHarness(root, SETUP_FOR('Payment Agent', 84532))
+    const r2 = await runConnect({ ...baseOptions(root), deriveServerName: true }, second.deps)
+
+    expect(r1.outcome.server_name).toBe('haven-payment-agent-dev')
+    expect(r2.outcome.server_name).toBe('haven-payment-agent-dev-2')
+    expect(first.writeCredentials.mock.calls[0][0].serverName).not.toBe(second.writeCredentials.mock.calls[0][0].serverName)
+  })
+
+  it('a derived slug never resolves to a tombstoned or key-removed directory left by --unwire', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-3737-unwire-'))
+    // The retired directory the slug WOULD resolve to: tombstoned, key removed.
+    await seedDir(root, 'payment-agent-dev', {
+      'identity.json': { agent_id: 'agent-retired' },
+      'TOMBSTONE.json': { agent_id: 'agent-retired', reason: 'unwired' },
+    })
+    const { api, writeCredentials, deps } = deriveHarness(root, SETUP_FOR('Payment Agent', 84532))
+
+    const result = await runConnect({ ...baseOptions(root), deriveServerName: true }, deps)
+
+    expect(writeCredentials.mock.calls[0][0].serverName).toBe('payment-agent-dev-2')
+    expect(result.outcome.server_name).toBe('haven-payment-agent-dev-2')
+    // The retired directory stands exactly as it was.
+    expect(JSON.parse(await readFile(join(root, 'payment-agent-dev', 'TOMBSTONE.json'), 'utf8'))).toMatchObject({ agent_id: 'agent-retired' })
+    await expect(stat(join(root, 'payment-agent-dev', 'signer.json'))).rejects.toThrow()
+    expect(api.registerSetup.mock.calls[0][0].mcpServerName).toBe('haven-payment-agent-dev-2')
+  })
+
+  it('an explicit --name wins over derivation and is used verbatim, unmarked', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-3737-explicit-'))
+    const { api, writeCredentials, deps } = deriveHarness(root, SETUP_FOR('Payment Agent', 84532))
+
+    const result = await runConnect({ ...baseOptions(root), serverName: 'research', deriveServerName: true }, deps)
+
+    expect(writeCredentials.mock.calls[0][0].serverName).toBe('research')
+    expect(api.registerSetup.mock.calls[0][0].mcpServerName).toBe('haven-research')
+    expect(result.outcome.server_name).toBe('haven-research')
+  })
+
+  it('a display name that slugifies to nothing falls back to agent, still marked -dev', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-3737-fallback-'))
+    const { api, deps } = deriveHarness(root, SETUP_FOR('€¥£', 84532))
+
+    const result = await runConnect({ ...baseOptions(root), deriveServerName: true }, deps)
+
+    expect(api.registerSetup.mock.calls[0][0].mcpServerName).toBe('haven-agent-dev')
+    expect(result.outcome.server_name).toBe('haven-agent-dev')
   })
 })

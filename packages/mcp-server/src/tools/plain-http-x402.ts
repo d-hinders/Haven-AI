@@ -64,28 +64,40 @@ import {
   selectStandardPaymentOption,
   selectX402SettlementScheme,
   normalizePaymentRequired,
+  parsePaymentRequiredResponse,
+  resolveTokenFromAddress,
   resolveX402RetryTarget,
+  strictMerchantEgressPolicy,
+  type MerchantEgressPolicy,
   isSecureX402RetryTarget,
+  isZeroSettlementTxHash,
+  parseMerchantSettlement,
+  type EvidenceReportOutcome,
   type X402RetryTarget,
+  type X402PaymentRequired,
   type X402Quote,
   type X402ResumeState,
 } from '@haven_ai/sdk'
+import { createHash, randomUUID } from 'node:crypto'
+import { deliveryReferenceError } from '@haven_ai/core'
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
 import { delegationAllowanceBlock } from './support/allowance-block.js'
 import {
   CAP_WARNING_TEXT,
+  humanToAtomic,
   priceSelectedOption,
   quoteWarnings,
   readMaxAmountCap,
 } from './support/cap-price.js'
-import { HostedToolError, normalizeError, runTool } from './support/errors.js'
+import { HostedToolError, egressRefusalBeforeIntent, normalizeError, runTool } from './support/errors.js'
 import {
   buildAgentGuidance,
   catchSettledReplay,
   paymentStatusHandoff,
   type HostedHandoff,
   refusalNextStep,
+  taskBudgetNextStep,
 } from './support/guidance.js'
 import { buildX402SigningContext, coerceJsonField } from './support/mcp-context.js'
 import {
@@ -100,6 +112,69 @@ import {
 // compared, and a literal `false` there read as "the merchant agrees with what
 // you quoted" (haven-reviewer on #3112).
 /**
+ * #3774: `haven_report_x402_outcome` anchors a report to a Haven FUNDING
+ * transaction, which an erc7710 payment never has — the merchant settles by
+ * redeeming the delegation chain itself, so the intent stays `submitted` and
+ * the SDK refuses it (`HavenPaymentStateError`, which surfaced as a generic
+ * `API_ERROR`, dropping any folded evidence). Mapped HERE, from
+ * `err.state.settlementScheme`, to a typed refusal naming the tool that DOES
+ * record an erc7710 settlement, with the caller's own hash carried over.
+ * An eip3009 payment whose funding is unconfirmed keeps the existing
+ * status-read refusal (returns null). An erc7710 `rejected` outcome is
+ * verify-then-act (#2987): read the status after the payment window and
+ * re-quote only if it shows no settlement. No delegate balance to sweep.
+ */
+function erc7710OutcomeRefusal(
+  err: unknown,
+  args: Record<string, any>,
+  evidence: { settlementTxHash: string } | null,
+): HostedToolError | null {
+  if (!(err instanceof HavenPaymentStateError)) return null
+  const state = err.state as { settlementScheme?: string | null; status?: string; paymentId?: string }
+  if (state.settlementScheme !== 'erc7710' || state.status === 'confirmed') return null
+  const paymentId = state.paymentId ?? args.payment_id
+  if (args.outcome === 'rejected') {
+    return new HostedToolError({
+      code: 'ERC7710_OUTCOME_NOT_REPORTABLE',
+      // Verify-then-act, as paid-mcp-completion's erc7710 refusal (#2987): a
+      // rejected retry does not prove the merchant never redeemed the
+      // single-use settlement authorization it held, so "re-quote now"
+      // could pay twice.
+      message:
+        `Payment ${paymentId} is an erc7710 payment: the merchant settles it by redeeming the delegation ` +
+        'itself, so there is no Haven funding transaction for this report to anchor to. Nothing was ' +
+        'written. There is no delegate balance to sweep on this scheme. Haven has NOT observed a ' +
+        'settlement, but the merchant held a single-use settlement authorization valid for up to the ' +
+        'payment window (typically 300s) and may have redeemed it before refusing: check the payment ' +
+        'status after that window and re-quote only if it shows no settlement.',
+      statusCode: 409,
+      paymentId,
+      nextStep: refusalNextStep({
+        nextAction: AgentPaymentNextAction.CheckStatusLater,
+        ...paymentStatusHandoff(paymentId),
+      }),
+    })
+  }
+  return new HostedToolError({
+    code: 'ERC7710_REPORT_SETTLEMENT_EVIDENCE',
+    message:
+      `Payment ${paymentId} is an erc7710 payment, which has no Haven funding transaction for this report ` +
+      "to anchor to. Record the merchant's settlement with haven_report_settlement_evidence instead: pass " +
+      "settlement_tx_hash (the transaction from the merchant's PAYMENT-RESPONSE). Nothing was written.",
+    statusCode: 409,
+    paymentId,
+    nextStep: refusalNextStep({
+      nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+      nextTool: 'haven_report_settlement_evidence',
+      nextArguments: {
+        payment_id: paymentId,
+        ...(evidence ? { settlement_tx_hash: evidence.settlementTxHash } : {}),
+      },
+    }),
+  })
+}
+
+/**
  * #3101: the handoff after a reported outcome — sweep on a rejection; on
  * acceptance, nothing follows UNLESS `offerSettlementEvidence` is true.
  *
@@ -112,20 +187,585 @@ import {
  * add. Rejected outcomes, erc7710 payments, a non-eip3009/unknown scheme, and
  * a payment whose settlement is already recorded all keep the old answer.
  */
-function reportOutcomeHandoff(outcome: 'accepted' | 'rejected', offerSettlementEvidence: boolean, paymentId: string): HostedHandoff {
+function reportOutcomeHandoff(
+  outcome: 'accepted' | 'rejected',
+  offerSettlementEvidence: boolean,
+  paymentId: string,
+  // #3727: the folded evidence's result, when the caller supplied evidence.
+  // Its answer REPLACES the status re-read's offer — a confirmed record is
+  // "no tool follows" even if the re-read somehow lagged, a retryable one
+  // re-names the evidence tool with the hash prefilled, and a refused one
+  // names NO tool (re-reporting the same hash re-refuses).
+  settlementEvidence?: ReportedSettlementEvidence | null,
+): HostedHandoff {
   if (outcome === 'rejected') {
     return { nextTool: 'haven_sweep_delegate', nextArguments: {} }
   }
+  if (settlementEvidence) return evidenceHandoff(settlementEvidence, paymentId)
   if (offerSettlementEvidence) {
     return { nextTool: 'haven_report_settlement_evidence', nextArguments: { payment_id: paymentId } }
   }
   return { nextTool: null, nextToolOmittedReason: 'the merchant accepted the paid retry; the purchase is complete and no Haven tool follows' }
 }
 
+/**
+ * #3727: the settlement evidence a caller may fold INTO the outcome report —
+ * the raw base64 `PAYMENT-RESPONSE` header the merchant returned and/or an
+ * explicit `settlement_tx_hash`. Resolved and validated BEFORE anything is
+ * written, so a malformed or self-contradictory call refuses the same way the
+ * strict input contract does and leaves no partial record behind.
+ *
+ * What the decoder contributes: `parseMerchantSettlement` reads the header
+ * for its `transaction` field (and the `txHash`/`tx_hash` spellings some
+ * merchants use) and nothing else — a `payer` inside is the merchant's claim
+ * about who paid, is NOT Haven's record, and is never written (#3125).
+ *
+ * Refusals, each before any write:
+ * - `PAYMENT_EVIDENCE_UNREADABLE` — `payment_response` decoded to no
+ *   transaction field, or to a value that is not a 0x-prefixed 64-hex hash.
+ * - `ZERO_SETTLEMENT_HASH` — the decoded (or supplied) hash is the demo
+ *   merchant's `0x00…00` "delivered, not settled" marker. Same recognizer
+ *   `haven_report_settlement_evidence` refuses with, applied here before the
+ *   outcome write so the two tools refuse identically.
+ * - `SETTLEMENT_EVIDENCE_CONFLICT` — both inputs supplied and they name
+ *   DIFFERENT hashes (hex is case-insensitive: matching case-insensitively is
+ *   the honest comparison, since a checksummed copy of the same hash must not
+ *   read as a conflict). One hash, asserted twice in agreement, is accepted —
+ *   the explicit `settlement_tx_hash` wins for the echo.
+ */
+type FoldedSettlementEvidence = {
+  /** The single hash the evidence names, after decoding and conflict-checking. */
+  readonly settlementTxHash: string
+  /** Which argument named it — echoed on the response for reconciliation. */
+  readonly source: 'settlement_tx_hash' | 'payment_response' | 'both'
+}
+
+const TX_HASH_PATTERN = /^0x[0-9a-fA-F]{64}$/
+
+/**
+ * #3778: refuse a credential-shaped `delivery_reference` BEFORE anything is
+ * written — the same fail-closed ordering `resolveSettlementEvidence` uses
+ * for the folded evidence. Inline here, not support/: each capability calls
+ * it once and the canonical shape rules live in `@haven_ai/core`
+ * (`deliveryReferenceError`) — this is only the refusal envelope, so a
+ * shared wrapper would be an ownership-map entry for two one-line calls.
+ */
+function assertDeliveryReference(
+  tool: HostedToolName,
+  args: Record<string, any>,
+): void {
+  const value = args.delivery_reference
+  if (value === undefined) return
+  const reason = deliveryReferenceError(String(value))
+  if (!reason) return
+  throw new HostedToolError({
+    code: 'DELIVERY_REFERENCE_REFUSED',
+    statusCode: 400,
+    paymentId: typeof args.payment_id === 'string' ? args.payment_id : undefined,
+    message: `${tool}: ${reason} Nothing was written.`,
+  })
+}
+
+function resolveSettlementEvidence(args: {
+  settlement_tx_hash?: string
+  payment_response?: string
+}): FoldedSettlementEvidence | null {
+  const explicit = args.settlement_tx_hash
+  const header = args.payment_response
+  if (!explicit && !header) return null
+
+  let decoded: string | undefined
+  if (header) {
+    const parsed = parseMerchantSettlement(header).settlementTxHash
+    if (typeof parsed !== 'string' || parsed.length === 0) {
+      throw new HostedToolError({
+        code: 'PAYMENT_EVIDENCE_UNREADABLE',
+        statusCode: 400,
+        message:
+          'payment_response did not decode to a settlement transaction: the PAYMENT-RESPONSE header must be ' +
+          'the base64 value the merchant returned and carry a `transaction` field. Nothing was written — ' +
+          're-report with settlement_tx_hash, or without evidence.',
+      })
+    }
+    if (!TX_HASH_PATTERN.test(parsed)) {
+      throw new HostedToolError({
+        code: 'PAYMENT_EVIDENCE_UNREADABLE',
+        statusCode: 400,
+        message:
+          'payment_response decoded to a `transaction` that is not a 0x-prefixed 64-hex transaction hash. ' +
+          'Nothing was written — re-report with settlement_tx_hash, or without evidence.',
+      })
+    }
+    if (isZeroSettlementTxHash(parsed)) {
+      throw new HostedToolError({
+        code: 'ZERO_SETTLEMENT_HASH',
+        statusCode: 400,
+        message:
+          'payment_response decoded to the zero hash (0x00…00) — the "delivered, not settled" marker, not a ' +
+          'transaction. Nothing was written, and nothing would verify on-chain.',
+      })
+    }
+    decoded = parsed
+  }
+
+  if (explicit && decoded && explicit.toLowerCase() !== decoded.toLowerCase()) {
+    throw new HostedToolError({
+      code: 'SETTLEMENT_EVIDENCE_CONFLICT',
+      statusCode: 409,
+      message:
+        'settlement_tx_hash and the transaction inside payment_response name DIFFERENT hashes. Nothing was ' +
+        'written: supply the one hash you hold, or both copies of the same hash.',
+    })
+  }
+  if (explicit && isZeroSettlementTxHash(explicit)) {
+    throw new HostedToolError({
+      code: 'ZERO_SETTLEMENT_HASH',
+      statusCode: 400,
+      message:
+        'settlement_tx_hash is the zero hash (0x00…00) — the "delivered, not settled" marker, not a ' +
+        'transaction. Nothing was written, and nothing would verify on-chain.',
+    })
+  }
+
+  return {
+    settlementTxHash: explicit ?? decoded!,
+    source: explicit && decoded ? 'both' : explicit ? 'settlement_tx_hash' : 'payment_response',
+  }
+}
+
+/**
+ * #3727: the `settlement_evidence` block the outcome report carries when the
+ * caller supplied evidence — the result of the ONE `reportSettlementEvidence`
+ * call it replaced (the same seam `haven_report_settlement_evidence` uses, so
+ * the on-chain verification and every refusal are exactly that tool's). Absent
+ * entirely when no evidence was supplied: calls without evidence answer the
+ * pre-existing shape, byte for byte.
+ */
+type ReportedSettlementEvidence = {
+  readonly settlement_tx_hash: string
+  readonly source: FoldedSettlementEvidence['source']
+  readonly recorded: boolean
+  readonly outcome: EvidenceReportOutcome['outcome'] | 'not_attempted'
+  readonly status_code?: number
+  readonly refusal_reason?: string
+  readonly note?: string
+}
+
+const EVIDENCE_RECORDED_OMITTED_REASON =
+  'the merchant accepted the paid retry and the settlement is verified and recorded; the purchase is complete and no Haven tool follows'
+
+function evidenceHandoff(
+  reported: ReportedSettlementEvidence,
+  paymentId: string,
+): HostedHandoff {
+  if (reported.recorded) {
+    return { nextTool: null, nextToolOmittedReason: EVIDENCE_RECORDED_OMITTED_REASON }
+  }
+  if (reported.outcome === 'retryable') {
+    return {
+      nextTool: 'haven_report_settlement_evidence',
+      nextArguments: { payment_id: paymentId, settlement_tx_hash: reported.settlement_tx_hash },
+    }
+  }
+  if (reported.outcome === 'refused') {
+    return {
+      nextTool: null,
+      nextToolOmittedReason:
+        'the settlement hash was refused: it does not match this payment on-chain — do not re-report the same hash',
+    }
+  }
+  // Unreachable for an accepted outcome (not_attempted only rides a rejection,
+  // which keeps the sweep handoff), but typed honestly rather than asserted.
+  return { nextTool: 'haven_get_payment_status', nextArguments: { payment_id: paymentId } }
+}
+
+function evidenceReason(reported: ReportedSettlementEvidence): string {
+  if (reported.recorded) {
+    return (
+      'Recorded. The merchant settlement was verified on-chain and recorded beside the funding ' +
+      'transaction; the purchase is complete and no further Haven tool is needed.'
+    )
+  }
+  if (reported.outcome === 'retryable') {
+    return (
+      'Recorded. The settlement hash could not be verified yet (the chain read failed, or the ' +
+      'transaction is not mined); retry haven_report_settlement_evidence with the same hash.'
+    )
+  }
+  return (
+    'Recorded, but the settlement evidence was refused: the hash does not match this payment ' +
+    'on-chain. Do not re-report the same hash — check the PAYMENT-RESPONSE you relayed.'
+  )
+}
+
 function differsFromRequest(target: X402RetryTarget): { resource_url_differs_from_request?: boolean } {
   return target.resourceUrlDiffersFromRequest === undefined
     ? {}
     : { resource_url_differs_from_request: target.resourceUrlDiffersFromRequest }
+}
+
+// ── #3739: request mode's own unpaid probe ────────────────────────────────
+//
+// In request mode `haven_pay_x402_quote` makes the unpaid request itself and
+// builds the payment from the 402 it fetched, so the challenge never passes
+// through the agent (the 2026-10-07 Bitrefill failure was an agent retyping
+// it). The probe is a NEW kind of reach for this tool, so it runs under
+// #3747's hosted egress policy (the quote's own: public https hosts only, its
+// quote timeout and while-reading byte cap) with a stricter redirect rule —
+// none is followed. What it cannot do
+// from inside mcp-server is refuse a public NAME that resolves to a private
+// address (the backend's DNS-pinning guard is not importable here) — the
+// accepted residual tracked by #3740. It returns only a parsed challenge to
+// the agent, never the response body.
+
+/**
+ * #3739: the probe's budgets fall back to these when the client carries no
+ * egress policy. They equal #3747's hosted quote budgets
+ * (`HOSTED_EGRESS_TIMEOUTS.quote`, `HOSTED_RESPONSE_BYTE_CAPS.quote`), which
+ * apply whenever the policy is present.
+ */
+export const X402_REQUEST_PROBE_TIMEOUT_MS = 15_000
+export const X402_REQUEST_PROBE_MAX_BYTES = 256 * 1024
+/** `POST /x402` drops a stored challenge over 64 KB (`createX402Intent`). */
+const X402_STORED_CHALLENGE_MAX_BYTES = 65_536
+/** The SDK's derived-key bucket (`X402_IDEMPOTENCY_BUCKET_MS`), same width. */
+const REQUEST_MODE_KEY_BUCKET_MS = 300_000
+
+/**
+ * #3774: each probe refusal states what actually happened — the egress-policy
+ * wording only where that policy refused (a redirect). A probe that SUCCEEDED
+ * and found nothing payable says so, not that it could not be made.
+ */
+const PROBE_REFUSAL_REASONS = {
+  redirect: 'the merchant request could not be probed under the egress policy; nothing was created, so there is nothing to resume',
+  timeout: 'the merchant did not answer the unpaid probe in time; nothing was created, so there is nothing to resume',
+  transport: 'the unpaid probe to the merchant failed in transit; nothing was created, so there is nothing to resume',
+  responseTooLarge: 'the merchant answered the unpaid probe with more data than an x402 challenge holds; nothing was created, so there is nothing to resume',
+  notPaymentRequired: 'the merchant answered the unpaid probe without a 402, so there is nothing to pay; nothing was created',
+  unreadableChallenge: 'the merchant answered 402, but not with an x402 challenge Haven can read; nothing was created',
+  noPayableOption: "the merchant's 402 offers no payment option Haven can settle; nothing was created",
+  challengeTooLarge: "the merchant's x402 challenge is too large for Haven to store, and request mode pays only from the stored copy; nothing was created",
+} as const
+type ProbeRefusalReason = keyof typeof PROBE_REFUSAL_REASONS
+
+function probeRefusal(code: string, message: string, why: ProbeRefusalReason): HostedToolError {
+  return new HostedToolError({
+    code,
+    message: `${message} Nothing was funded or signed, and no payment was created.`,
+    statusCode: 400,
+    nextStep: refusalNextStep({
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextTool: null,
+      nextToolOmittedReason: PROBE_REFUSAL_REASONS[why],
+    }),
+  })
+}
+
+/** Reads at most `max` bytes; `null` when the body is larger. */
+async function readBounded(response: Response, max: number): Promise<Uint8Array<ArrayBuffer> | null> {
+  const declared = Number(response.headers.get('content-length') ?? NaN)
+  if (Number.isFinite(declared) && declared > max) return null
+  if (!response.body) {
+    // A Response with no stream (a test double, or an empty body): read it
+    // whole — it is already in memory, so the cap is a check, not a bound.
+    const buf =
+      typeof response.arrayBuffer === 'function'
+        ? new Uint8Array(await response.arrayBuffer())
+        : new TextEncoder().encode(await response.text())
+    return buf.byteLength > max ? null : (buf as Uint8Array<ArrayBuffer>)
+  }
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > max) {
+      await reader.cancel().catch(() => undefined)
+      return null
+    }
+    chunks.push(value)
+  }
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const c of chunks) {
+    out.set(c, offset)
+    offset += c.byteLength
+  }
+  return out
+}
+
+function isTimeout(err: unknown): boolean {
+  return err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
+}
+
+/**
+ * The request-mode probe: one unpaid request under the egress policy, parsed
+ * to an x402 challenge. Anything but a parseable x402 402 refuses here, before
+ * any intent, funding or signature exists.
+ */
+export async function probeX402Challenge(
+  rawUrl: string,
+  init: RequestInit,
+  policy: MerchantEgressPolicy,
+): Promise<X402PaymentRequired> {
+  // #3747's hosted egress policy decides the target (public https hosts only;
+  // no IP literal, localhost, single-label or internal name), BEFORE any fetch.
+  try {
+    policy.assertUrl(rawUrl)
+  } catch (err) {
+    throw egressRefusalBeforeIntent(err, 'url')
+  }
+  const url = new URL(rawUrl)
+  const timeoutMs = policy.timeouts?.quote ?? X402_REQUEST_PROBE_TIMEOUT_MS
+  const maxBytes = policy.responseByteCaps?.quote ?? policy.maxResponseBytes ?? X402_REQUEST_PROBE_MAX_BYTES
+  const signal = AbortSignal.timeout(timeoutMs)
+  let response: Response
+  let bytes: Uint8Array<ArrayBuffer> | null
+  try {
+    // `redirect: 'error'`, set per call: stricter than #3747's re-checked GET
+    // redirects, as #3739 and #3747 agreed — a 3xx is refused, never followed.
+    response = await globalThis.fetch(url.toString(), { ...init, redirect: 'error', signal })
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel().catch(() => undefined)
+      throw probeRefusal(
+        'X402_PROBE_REDIRECT_REFUSED',
+        `The merchant answered the unpaid request with HTTP ${response.status} (a redirect). Request mode does not follow redirects: re-call with the final https URL.`,
+        'redirect',
+      )
+    }
+    bytes = await readBounded(response, maxBytes)
+  } catch (err) {
+    if (err instanceof HostedToolError) throw err
+    if (isTimeout(err) || signal.aborted) {
+      throw probeRefusal(
+        'X402_PROBE_TIMEOUT',
+        `The merchant did not answer the unpaid request within ${Math.round(timeoutMs / 1000)} s.`,
+        'timeout',
+      )
+    }
+    const cause = (err as { cause?: { message?: string } })?.cause?.message ?? ''
+    if (/redirect/i.test(`${(err as Error)?.message ?? ''} ${cause}`)) {
+      throw probeRefusal(
+        'X402_PROBE_REDIRECT_REFUSED',
+        'The merchant answered the unpaid request with a redirect. Request mode does not follow redirects: re-call with the final https URL.',
+        'redirect',
+      )
+    }
+    throw probeRefusal(
+      'X402_PROBE_FAILED',
+      `The unpaid request to ${url.origin} failed: ${(err as Error)?.message ?? String(err)}.`,
+      'transport',
+    )
+  }
+  if (bytes === null) {
+    throw probeRefusal(
+      'X402_PROBE_TOO_LARGE',
+      `The merchant's answer to the unpaid request is larger than ${maxBytes} bytes, too large to be an x402 challenge.`,
+      'responseTooLarge',
+    )
+  }
+  if (response.status !== 402) {
+    throw probeRefusal(
+      'X402_PROBE_NOT_PAYMENT_REQUIRED',
+      `The merchant answered the unpaid request with HTTP ${response.status}, not 402 Payment Required, so there is nothing to pay. ` +
+        'Check the url, method, headers and body (Content-Type: application/json for a JSON API).',
+      'notPaymentRequired',
+    )
+  }
+  try {
+    return await parsePaymentRequiredResponse(
+      new Response(bytes, { status: 402, headers: response.headers }),
+    )
+  } catch {
+    throw probeRefusal(
+      'X402_PROBE_NOT_PAYMENT_REQUIRED',
+      'The merchant answered 402, but not with an x402 challenge Haven can read.',
+      'unreadableChallenge',
+    )
+  }
+}
+
+/**
+ * A hosted wrapper for the no-payable-option case, refused before any intent
+ * exists. The SDK's shared `noCompatiblePaymentOptionError` lives in
+ * `x402-protocol.ts`, which the SDK deliberately keeps off its public surface
+ * (`x402-module-boundaries.test.ts`), so this restates its #3735 hint for
+ * field case 1: Bitrefill answers a JSON POST sent without its body or
+ * `Content-Type` with a generic `upto` challenge Haven cannot pay.
+ */
+function noPayableOptionRefusal(accepts: unknown[]): HostedToolError {
+  const offered = [
+    ...new Set(
+      accepts
+        .map((o) => (o && typeof o === 'object' ? (o as { scheme?: unknown }).scheme : undefined))
+        .filter((s): s is string => typeof s === 'string' && s !== 'exact'),
+    ),
+  ]
+  return probeRefusal(
+    'X402_NO_PAYABLE_OPTION',
+    "The merchant's 402 offers no payment option Haven can settle" +
+      (offered.length ? ` (it offered only ${offered.map((s) => `'${s}'`).join(', ')}; Haven pays only the 'exact' scheme)` : '') +
+      '. For a request with a body, this often means the body or its Content-Type was missing or invalid: ' +
+      're-call with the full request (method, body, and Content-Type: application/json for a JSON API).',
+    'noPayableOption',
+  )
+}
+
+/** Key-sorted JSON, so the derived key does not depend on property order. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (value && typeof value === 'object') {
+    // Keys holding `undefined` are dropped, as JSON (and the JSONB copy) drops them.
+    return `{${Object.keys(value as Record<string, unknown>)
+      .filter((k) => (value as Record<string, unknown>)[k] !== undefined)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonicalJson((value as Record<string, unknown>)[k])}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(value) ?? 'null'
+}
+
+/**
+ * Request mode's derived replay key when the caller passed none. It covers the
+ * WHOLE probed challenge, `extensions` included, so a request-mode call can
+ * never replay an intent built from a different (e.g. agent-edited) challenge.
+ * Same 5-minute bucket as the SDK's derived key.
+ */
+export function requestModeIdempotencyKey(paymentRequired: X402PaymentRequired, now = Date.now()): string {
+  const bucket = Math.floor(now / REQUEST_MODE_KEY_BUCKET_MS)
+  return `x402r:${createHash('sha256').update(`${canonicalJson(paymentRequired)}|${bucket}`).digest('hex').slice(0, 24)}`
+}
+
+/**
+ * #3739: request mode's replay, BEFORE any probe. With the caller's
+ * `idempotency_key` an existing intent answers from Haven's own record, so a
+ * repeated call never depends on the merchant still answering and never
+ * re-probes. Returns `null` — fall through to probe + `POST /x402`, whose own
+ * key replay still applies — when there is no live intent to answer with: no
+ * row, an expired or closed signing window (the backend frees the key), a
+ * different task budget (the backend's #3392 pin answers that), an unknown
+ * scheme, or a failed lookup (an older backend without the route).
+ *
+ * #3739 review (B1): it ALSO falls through unless the stored intent is for this
+ * request's URL and its amount fits this call's cap. The backend's own replay
+ * refuses a reused key on a different resource or amount (409); a shortcut
+ * that skipped those checks would hand back a sign instruction for another
+ * merchant's, or a larger, payment. Falling through restores both: the probe
+ * re-checks the cap, and `POST /x402` re-checks the rest.
+ */
+async function requestModeReplay(
+  haven: HavenClient,
+  args: Record<string, any>,
+  cap: ReturnType<typeof readMaxAmountCap>,
+): Promise<Record<string, unknown> | null> {
+  const found = await haven.findX402IntentByIdempotencyKey(args.idempotency_key).catch(() => null)
+  if (!found) return null
+  const requestedBudget = typeof args.task_budget_id === 'string' ? args.task_budget_id.toLowerCase() : null
+  if ((found.taskBudgetId?.toLowerCase() ?? null) !== requestedBudget) return null
+  if (!sameRequestUrl(found.resourceUrl, args.url)) return null
+  if (!storedAmountWithinCap(found, cap)) return null
+  if (found.status === 'expired') return null
+  if (found.status === 'pending_signature' && !found.windowOpen) return null
+  const facts = {
+    payment_id: found.paymentId,
+    status: found.status,
+    idempotent_replay: true,
+    ...(found.settlementScheme ? { settlement_scheme: found.settlementScheme } : {}),
+    amount_atomic: found.amountAtomic,
+    network: found.network,
+    resource_url: found.resourceUrl,
+    retry_url: args.url,
+  }
+  const summary = {
+    payment_id: found.paymentId,
+    status: found.status,
+    amount_atomic: found.amountAtomic,
+    network: found.network,
+  }
+  if (found.status === 'pending_signature' && found.settlementScheme === 'erc7710') {
+    return {
+      ...facts,
+      ...buildAgentGuidance({
+        nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+        nextTool: 'haven_sign',
+        nextArguments: { payment_id: found.paymentId },
+        safeToContinue: true,
+        reason:
+          'This idempotency_key already has a payment awaiting signature, so nothing was probed or ' +
+          'created. Sign locally: call next_tool with next_arguments EXACTLY as given, then ' +
+          "haven_submit with settlement_scheme: 'erc7710' to receive the merchant payment_header, " +
+          'and retry retry_url yourself with PAYMENT-SIGNATURE set to it.',
+        summary,
+      }),
+    }
+  }
+  if (found.status === 'pending_signature' && found.settlementScheme === 'eip3009') {
+    return {
+      ...facts,
+      ...buildAgentGuidance({
+        nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+        nextTool: 'haven_sign_x402',
+        nextArguments: { payment_id: found.paymentId },
+        safeToContinue: true,
+        reason:
+          'This idempotency_key already has a payment awaiting signature, so nothing was probed or ' +
+          'created. Sign locally: call next_tool with next_arguments EXACTLY as given — the signer ' +
+          'fetches the stored payment challenge itself. It returns BOTH signature and payment_header. ' +
+          'Relay signature via haven_submit, then retry retry_url yourself with payment_header.',
+        summary,
+      }),
+    }
+  }
+  if (found.status === 'pending_signature') return null
+  return {
+    ...facts,
+    ...buildAgentGuidance({
+      nextAction: AgentPaymentNextAction.CheckStatusLater,
+      ...paymentStatusHandoff(found.paymentId),
+      safeToContinue: true,
+      reason:
+        'This idempotency_key already belongs to a payment past the signing step, so nothing was ' +
+        'probed or created. Read its state with next_tool and follow its nextAction. Do NOT pay again.',
+      summary,
+    }),
+  }
+}
+
+/** Same resource, compared as parsed URLs (case of scheme/host, default port). */
+function sameRequestUrl(stored: string | null, requested: string | undefined): boolean {
+  if (!stored || !requested) return false
+  try {
+    return new URL(stored).href === new URL(requested).href
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The stored intent's amount against THIS call's cap. A whole-token cap is
+ * converted with the stored asset's own decimals; an asset Haven does not
+ * recognise, or a cap that cannot be converted, is not "within" — the caller
+ * then falls through to the probe, where the cap is enforced as always.
+ */
+function storedAmountWithinCap(
+  found: { amountAtomic: string; asset: string | null; network: string },
+  cap: ReturnType<typeof readMaxAmountCap>,
+): boolean {
+  let amount: bigint
+  try {
+    amount = BigInt(found.amountAtomic)
+  } catch {
+    return false
+  }
+  if (cap.kind === 'atomic') return amount <= BigInt(cap.value)
+  if (cap.kind === 'human') {
+    const token = found.asset ? resolveTokenFromAddress(found.asset, found.network) : null
+    const capAtomic = token ? humanToAtomic(cap.value, token.decimals) : null
+    return capAtomic !== null && amount <= capAtomic
+  }
+  return false
 }
 
 // #3497: the block itself moved to `support/allowance-block.ts` — #3476 built
@@ -195,7 +835,9 @@ export function createPlainHttpX402Handlers(
       // as a separate tool call makes its own read — the SDK's in-flight
       // dedupe (`AccountReads.agentInFlight`) only collapses reads issued
       // within the same tick. The "exactly ONE agent fetch" pin on this file
-      // measures the pay tool alone and is unaffected.
+      // measures the pay tool alone and is unaffected. Through the hosted
+      // server the dispatch identity gate (`identity-gate.ts`) adds one more
+      // agent read before this handler runs.
       const agentPromise = haven.getAgent().then(
         (a) => a,
         () => undefined,
@@ -212,7 +854,25 @@ export function createPlainHttpX402Handlers(
           agent,
           'haven_pay_x402_quote',
         )
-        // Return the full quote — the agent passes paymentRequired to haven_pay_x402_quote.
+        // #3739: the result names its next tool for the first time — the pay
+        // tool in REQUEST MODE, with the request exactly as the caller sent
+        // it (url, method, headers, body), so the agent never copies the
+        // challenge. The cap is prefilled with the quoted amount, the
+        // no-cap convention every quote → pay pair follows; the agent lowers
+        // it to a cap the user stated. payment_required stays in the result
+        // for payment_required mode, unchanged.
+        // #3739 review (S2): a fresh replay key per quote, so a retried pay
+        // call replays its intent instead of minting another — a key derived
+        // from the challenge cannot collapse retries against a merchant whose
+        // challenge varies per request. A new purchase is a new quote.
+        const payNextArguments: Record<string, unknown> = {
+          idempotency_key: `x402q:${randomUUID()}`,
+          url: args.url,
+          ...(args.method ? { method: args.method } : {}),
+          ...(args.headers ? { headers: args.headers } : {}),
+          ...(args.body !== undefined ? { body: args.body } : {}),
+          max_amount_human: quote.amount,
+        }
         // Omit the captured request snapshot (it's server-side context, not useful at the agent).
         return {
           success: true,
@@ -242,6 +902,15 @@ export function createPlainHttpX402Handlers(
             merchant_address: quote.merchantAddress,
             max_timeout_seconds: quote.maxTimeoutSeconds,
             ...prediction,
+            ...taskBudgetNextStep({
+              nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+              nextTool: 'haven_pay_x402_quote',
+              nextArguments: payNextArguments,
+              reason:
+                'Pay with next_tool and next_arguments: Haven fetches the payment challenge itself ' +
+                'from this same request, so do not copy payment_required. The cap is prefilled ' +
+                'with the quoted amount; lower it to any cap the user stated.',
+            }),
           },
         }
       } catch (err) {
@@ -262,25 +931,84 @@ export function createPlainHttpX402Handlers(
       } catch (err) {
         return normalizeError(err)
       }
-      // #1469: agent-supplied shape, sanitized through the SAME normalizer the
-      // parsed-Response path uses — it drops null/non-object accepts[] entries
-      // and validates the envelope. The raw cast this replaced let a null hole
-      // reach the selectors and 500 where every other caller gets a clean
-      // refusal; the Zod schema only guarantees a string-keyed record.
-      const payReq = normalizePaymentRequired(args.payment_required)
-      if (!payReq) {
-        return wrongTool(
-          'WRONG_TOOL',
-          'The payment_required argument is missing or is not a valid x402 PaymentRequired object. Call haven_quote_x402 first to obtain the payment_required, or use haven_pay_mcp_tool for a full round trip.',
-          'haven_quote_x402',
-        )
+      // #3739: the mode is selected by whether payment_required is present.
+      // Absent → REQUEST MODE: this handler probes the request itself and
+      // builds the payment from the 402 it fetched. Present → today's
+      // payment_required mode, byte-for-byte below.
+      const requestMode = args.payment_required === undefined
+      let payReq: X402PaymentRequired | null = null
+      if (!requestMode) {
+        // #1469: agent-supplied shape, sanitized through the SAME normalizer the
+        // parsed-Response path uses — it drops null/non-object accepts[] entries
+        // and validates the envelope. The raw cast this replaced let a null hole
+        // reach the selectors and 500 where every other caller gets a clean
+        // refusal; the Zod schema only guarantees a string-keyed record.
+        payReq = normalizePaymentRequired(args.payment_required)
+        if (!payReq) {
+          return wrongTool(
+            'WRONG_TOOL',
+            'The payment_required argument is missing or is not a valid x402 PaymentRequired object. Call haven_quote_x402 first to obtain the payment_required, or use haven_pay_mcp_tool for a full round trip.',
+            'haven_quote_x402',
+          )
+        }
       }
       return runTool(async () => {
+        // ── #3739: request mode — cap, replay, probe, all before any intent ──
+        let requestModeCap: ReturnType<typeof readMaxAmountCap> | undefined
+        let derivedKey: string | undefined
+        if (requestMode) {
+          if (!args.url) {
+            throw new HostedToolError({
+              code: 'INVALID_INPUT',
+              message:
+                'Pass url (the https URL of the request you quoted, with method, headers and body ' +
+                'as you sent them) so Haven can fetch the payment challenge itself, or pass ' +
+                'payment_required. Nothing was probed, funded or signed.',
+              statusCode: 400,
+              nextStep: refusalNextStep({
+                nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+                nextTool: null,
+                nextToolOmittedReason: 're-call this tool with url; nothing was probed, funded or signed',
+              }),
+            })
+          }
+          // The cap is REQUIRED here: the price is whatever the merchant
+          // answers this probe with, which no one has seen yet.
+          requestModeCap = readMaxAmountCap(args, { required: true })
+          // A repeated call with the caller's key returns the existing
+          // intent BEFORE any re-probe, so a replay never depends on the
+          // merchant still answering.
+          if (args.idempotency_key) {
+            const replayed = await requestModeReplay(haven, args, requestModeCap)
+            if (replayed) return replayed
+          }
+          const init: RequestInit = {}
+          if (args.method) init.method = args.method
+          if (args.headers) init.headers = args.headers
+          if (args.body !== undefined) init.body = args.body
+          payReq = await probeX402Challenge(args.url, init, haven.merchantEgress ?? strictMerchantEgressPolicy())
+          if (!selectStandardPaymentOption(payReq.accepts) && !selectErc7710PaymentOption(payReq.accepts)) {
+            throw noPayableOptionRefusal(payReq.accepts)
+          }
+          // payment_required mode falls back to the agent's own copy when the
+          // backend cannot store an oversized challenge; request mode has no
+          // such copy, so it refuses instead.
+          if (new TextEncoder().encode(JSON.stringify(payReq)).length > X402_STORED_CHALLENGE_MAX_BYTES) {
+            throw probeRefusal(
+              'X402_CHALLENGE_TOO_LARGE',
+              `The merchant's x402 challenge is larger than ${X402_STORED_CHALLENGE_MAX_BYTES} bytes, too large for Haven to store, and request mode builds the payment only from the stored copy.`,
+              'challengeTooLarge',
+            )
+          }
+          derivedKey = args.idempotency_key ? undefined : requestModeIdempotencyKey(payReq)
+        }
+        if (!payReq) throw new Error('unreachable: payment_required mode returned above')
         // #3097: where the paid retry will go, decided BEFORE any intent exists.
         // The caller's `url` (the one it quoted) wins; the merchant-declared
         // `resource.url` is the fallback. A public http:// target is refused
-        // here — this tool never retries the merchant itself, so this is the
-        // last point before a signed header is handed to the agent.
+        // here — this tool never sends the PAID retry itself (request mode's
+        // unpaid probe above is the only merchant call it makes, #3739), so
+        // this is the last point before a signed header is handed to the agent.
         const retryTarget = resolveX402RetryTarget({
           requestUrl: args.url,
           resourceUrl: payReq.resource.url,
@@ -298,9 +1026,22 @@ export function createPlainHttpX402Handlers(
             nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.RetryWithExplicitContext, nextTool: null, nextToolOmittedReason: 're-call with the https URL you quoted as url; nothing was funded or signed' }),
           })
         }
-        // #1351: shape-check the cap before the funding intent — this tool has
-        // no merchant probe of its own, so this is the first thing that runs.
-        const cap = readMaxAmountCap(args, { required: false })
+        // #3747: the hosted egress policy also runs HERE, at the last point
+        // before an intent exists — an https:// IP literal or internal name
+        // passes the scheme check above but is refused before funding, so it
+        // can never surface only as a funded-but-undeliverable payment.
+        if (haven.merchantEgress) {
+          try {
+            haven.merchantEgress.assertUrl(retryTarget.url)
+          } catch (err) {
+            throw egressRefusalBeforeIntent(err, 'url')
+          }
+        }
+        // #1351: shape-check the cap before the funding intent. In
+        // payment_required mode this tool has no merchant probe of its own, so
+        // this is the first thing that runs; request mode read it before probing.
+        // #3739: request mode already read (and required) the cap before probing.
+        const cap = requestModeCap ?? readMaxAmountCap(args, { required: false })
         try {
           // ── #2041: ONE cap assertion, against the option actually selected ──
           // This tool used to assert the cap HERE, pre-network, against
@@ -366,7 +1107,8 @@ export function createPlainHttpX402Handlers(
           // 'delegation' would build a request the backend refuses, and 3009
           // is this tool's pre-#2041 behaviour anyway. The prefetch doubles as
           // createX402Intent's delegateAddress hint (#1348), so the 3009 branch
-          // still makes exactly ONE agent round-trip rather than two.
+          // still makes exactly ONE agent round-trip rather than two (in this
+          // handler; the hosted dispatch identity gate makes its own first).
           const prefetchedAgent = await haven.getAgent().then(
             (a) => a,
             () => undefined,
@@ -400,7 +1142,9 @@ export function createPlainHttpX402Handlers(
               // funding-shape branch; the erc7710 insert carries
               // `conflictTarget: 'x402_idempotency_key'`); it was simply never
               // invoked from here.
-              ...(args.idempotency_key ? { idempotencyKey: args.idempotency_key } : {}),
+              // #3739: request mode's derived key covers the whole probed
+              // challenge (extensions included) when the caller passed none.
+              ...(args.idempotency_key ?? derivedKey ? { idempotencyKey: args.idempotency_key ?? derivedKey } : {}),
               // #3378: build the settlement child under the task budget the
               // caller named (#3329) — this handler used to drop it.
               ...(args.task_budget_id ? { taskBudgetId: args.task_budget_id } : {}),
@@ -479,7 +1223,8 @@ export function createPlainHttpX402Handlers(
           }
 
           const intent = await haven.createX402Intent(payReq, {
-            idempotencyKey: args.idempotency_key,
+            // #3739: see the erc7710 branch — request mode's derived key.
+            idempotencyKey: args.idempotency_key ?? derivedKey,
             // #3378: fund the leg under the task budget the caller named (#3329).
             ...(args.task_budget_id ? { taskBudgetId: args.task_budget_id } : {}),
             // #3617: no sub_budget_id — see the erc7710 branch above.
@@ -522,8 +1267,12 @@ export function createPlainHttpX402Handlers(
               // One contract now, and it is the one the tool already implements.
               reason:
                 'Sign locally: call next_tool with next_arguments EXACTLY as given — the ' +
-                'signer fetches payment_required itself; only if it reports the context carried ' +
-                'none, re-call with the payment_required you passed to this tool added VERBATIM. ' +
+                // #3739 review: request mode passed no payment_required, so the
+                // fallback clause applies to payment_required mode only.
+                (requestMode
+                  ? 'signer fetches payment_required itself (Haven stored the challenge it fetched). '
+                  : 'signer fetches payment_required itself; only if it reports the context carried ' +
+                    'none, re-call with the payment_required you passed to this tool added VERBATIM. ') +
                 'It returns BOTH signature and payment_header. Relay signature via haven_submit, ' +
                 'then retry retry_url yourself with payment_header. Do NOT call ' +
                 'haven_x402_sign_header: haven_sign_x402 already spent its binding building that ' +
@@ -694,12 +1443,72 @@ export function createPlainHttpX402Handlers(
     haven_report_x402_outcome: async (input) =>
       runTool(async () => {
         const args = parseStrict('haven_report_x402_outcome', input)
-        const report = await haven.reportX402MerchantOutcome({
-          paymentId: args.payment_id,
-          outcome: args.outcome,
-          merchantStatus: args.merchant_status,
-          ...(args.merchant_body ? { merchantBody: args.merchant_body } : {}),
-        })
+        // #3778: refuse a credential-shaped delivery_reference BEFORE the
+        // evidence is resolved and nothing is written — same pre-write
+        // ordering as the evidence resolution below.
+        assertDeliveryReference('haven_report_x402_outcome', args)
+        // #3727: resolve and validate the optional folded evidence BEFORE
+        // anything is written — a malformed or self-contradictory call
+        // refuses here and leaves no partial record.
+        const evidence = resolveSettlementEvidence(args)
+        const report = await haven
+          .reportX402MerchantOutcome({
+            paymentId: args.payment_id,
+            outcome: args.outcome,
+            merchantStatus: args.merchant_status,
+            // #3778: the validated non-secret delivery pointer — recorded on
+            // the evidence row (accepted outcomes only) so the owner's
+            // receipt and dashboard show a deliverable exists.
+            ...(args.delivery_reference
+              ? { deliveryReference: args.delivery_reference }
+              : {}),
+            ...(args.merchant_body ? { merchantBody: args.merchant_body } : {}),
+          })
+          .catch((err: unknown) => {
+            throw erc7710OutcomeRefusal(err, args, evidence) ?? err
+          })
+        // #3727: on an accepted outcome, record the folded evidence through
+        // the SAME seam `haven_report_settlement_evidence` uses — one call
+        // replaces the follow-up. Deliberately BEFORE the status re-read
+        // below, so the re-read reflects the write: a confirmed evidence
+        // report shows up as `merchant_settlement_recorded: true` on the
+        // very read this response is reconciled against. On a REJECTED
+        // outcome the evidence is ignored with a warning (the report's own
+        // handoff to haven_sweep_delegate is unchanged) — there is no
+        // merchant settlement to verify when the merchant refused the retry,
+        // and the caller can re-send the same evidence once it holds a real
+        // acceptance. The three-outcome contract (`confirmed` / `retryable`
+        // / `refused`) is that tool's; a refused hash names the same
+        // on-chain mismatch it always did.
+        let settlementEvidence: ReportedSettlementEvidence | null = null
+        if (evidence && report.outcome === 'accepted') {
+          const evidenceOutcome = await haven.reportSettlementEvidence(
+            report.paymentId,
+            evidence.settlementTxHash,
+          )
+          settlementEvidence = {
+            settlement_tx_hash: evidence.settlementTxHash,
+            source: evidence.source,
+            recorded: evidenceOutcome.outcome === 'confirmed',
+            outcome: evidenceOutcome.outcome,
+            ...(evidenceOutcome.outcome !== 'confirmed' && evidenceOutcome.statusCode !== undefined
+              ? { status_code: evidenceOutcome.statusCode }
+              : {}),
+            ...(evidenceOutcome.outcome === 'refused' && evidenceOutcome.reason
+              ? { refusal_reason: evidenceOutcome.reason }
+              : {}),
+          }
+        } else if (evidence) {
+          settlementEvidence = {
+            settlement_tx_hash: evidence.settlementTxHash,
+            source: evidence.source,
+            recorded: false,
+            outcome: 'not_attempted',
+            note:
+              'Evidence is only recorded with outcome "accepted"; the rejection was recorded as reported, ' +
+              'and no settlement was verified or written.',
+          }
+        }
         // Re-read rather than predict. The status this returns is the one the
         // agent would get from haven_get_payment_status on its next call, so
         // "reflected on the NEXT call" is demonstrated in the report's own
@@ -733,6 +1542,9 @@ export function createPlainHttpX402Handlers(
           // was anchored to — and see that the agent did not choose it.
           tx_hash: report.txHash,
           resource_url: report.resourceUrl,
+          // #3727: present only when the caller supplied evidence — calls
+          // without evidence answer the pre-existing shape, byte for byte.
+          ...(settlementEvidence ? { settlement_evidence: settlementEvidence } : {}),
           ...buildAgentGuidance({
             // #3475 follow-up review round 1 (S1): next_action is UNCHANGED
             // by the settlement-evidence offer — it stays the status re-read's
@@ -747,20 +1559,38 @@ export function createPlainHttpX402Handlers(
               (report.outcome === 'rejected'
                 ? AgentPaymentNextAction.SweepStrandedFunds
                 : AgentPaymentNextAction.None),
-            ...reportOutcomeHandoff(report.outcome, offerSettlementEvidence, report.paymentId),
+            // #3727: the handoff comes from the outcome + folded-evidence
+            // result — a confirmed record names no tool, a retryable one
+            // re-names the evidence tool with the hash prefilled, and a
+            // refused one names no tool (re-reporting the same hash
+            // re-refuses). Without evidence this is the #3475 offer logic,
+            // unchanged.
+            ...reportOutcomeHandoff(
+              report.outcome,
+              offerSettlementEvidence,
+              report.paymentId,
+              settlementEvidence,
+            ),
             safeToContinue: true,
             reason:
               report.outcome === 'rejected'
-                ? 'Recorded. The merchant refused the paid retry, so the funding may be stranded on ' +
-                  'the delegate wallet — recover it with haven_sweep_delegate. Do NOT pay again for ' +
-                  'the same purchase.'
-                : offerSettlementEvidence
-                  ? "Recorded. If the merchant's response carried a settlement transaction " +
-                    '(PAYMENT-RESPONSE.transaction), pass it as settlement_tx_hash to ' +
-                    'haven_report_settlement_evidence so Haven can verify and record it. If it did ' +
-                    'not, the purchase is already complete and no further Haven tool is needed.'
-                  : 'Recorded. The purchase is complete and no longer reads as undelivered; no further ' +
-                    'Haven tool is needed.',
+                ? settlementEvidence
+                  ? 'Recorded. The merchant refused the paid retry, so the funding may be stranded on ' +
+                    'the delegate wallet — recover it with haven_sweep_delegate. Do NOT pay again for ' +
+                    'the same purchase. The settlement evidence you attached was not used: it is only ' +
+                    'recorded with an accepted outcome.'
+                  : 'Recorded. The merchant refused the paid retry, so the funding may be stranded on ' +
+                    'the delegate wallet — recover it with haven_sweep_delegate. Do NOT pay again for ' +
+                    'the same purchase.'
+                : settlementEvidence
+                  ? evidenceReason(settlementEvidence)
+                  : offerSettlementEvidence
+                    ? "Recorded. If the merchant's response carried a settlement transaction " +
+                      '(PAYMENT-RESPONSE.transaction), pass it as settlement_tx_hash to ' +
+                      'haven_report_settlement_evidence so Haven can verify and record it. If it did ' +
+                      'not, the purchase is already complete and no further Haven tool is needed.'
+                    : 'Recorded. The purchase is complete and no longer reads as undelivered; no further ' +
+                      'Haven tool is needed.',
             summary: {
               payment_id: report.paymentId,
               status: status?.status ?? 'confirmed',

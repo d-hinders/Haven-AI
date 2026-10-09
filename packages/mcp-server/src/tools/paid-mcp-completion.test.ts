@@ -128,6 +128,37 @@ describe('haven_settle_mcp_tool', () => {
     expect(recordedCalls().some((call) => call.url.endsWith('/payments/pay_x402/sign'))).toBe(true)
   })
 
+  it('#3778: a credential-shaped delivery_reference is refused BEFORE the funding relay', async () => {
+    // The wire is armed to CONFIRM a relay: if the refusal ever moved past
+    // the assert, the signature would be submitted and this test would see
+    // the funding call. Refusal means no money moved and no merchant call.
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = new HavenClient({ apiKey: '«reda...…»', baseUrl: 'http://haven.test' })
+    const spy = vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({ status: 200, ok: true, body: {} })
+
+    const payload = await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_x402',
+      signature: SIG,
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: { prompt: 'Hello' },
+      payment_header: VALID_PAYMENT_HEADER_REF.v1,
+      // 16 chars, mixed case, digits — the gift-card code shape the shared
+      // recognizer refuses (the same value shape the report-path test pins).
+      delivery_reference: 'aB3xK9mQ2pL7vR4t',
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe('DELIVERY_REFERENCE_REFUSED')
+    expect(payload.statusCode).toBe(400)
+    expect(payload.message).toMatch(/Nothing was written/)
+    // Refused BEFORE the funding relay: no signature submission ever left.
+    expect(recordedCalls().some((call) => call.url.includes('/payments/pay_x402/sign'))).toBe(false)
+    expect(spy).not.toHaveBeenCalled()
+  })
+
   it.each([
     ['malformed base64', 'not-a-payment-header'],
     ['oversized header', 'A'.repeat(65_540)],
@@ -604,12 +635,16 @@ describe('haven_settle_mcp_tool', () => {
 
   /**
    * #3497 item 2, the tool-name fallback: a settled erc7710 response whose
-   * delivered result carries NO product metadata still reports a product —
-   * the tool name that called the merchant — and it agrees with
-   * purchase_summary's own absent product rather than inventing one there.
-   * (F1's twin above pins the merchant-name path; this pins the fallback.)
+   * delivered result carries NO product metadata still reports a product.
+   * #3771: `purchase_summary.product` no longer stays null in that case —
+   * it takes the Haven-derived `<merchant host> <tool_name>` label built
+   * from the settle call's own context — and `agent_summary.product` (which
+   * reads the same summary) carries the SAME label, so the two fields agree
+   * and the skill's "report from purchase_summary" instruction never hands
+   * an agent a null. (F1's twin above pins the merchant-name path; this
+   * pins the fallback — it fails if the fallback is removed.)
    */
-  it('falls back agent_summary.product to the tool name when the settled erc7710 result names no product', async () => {
+  it('falls back purchase_summary.product AND agent_summary.product to the Haven-derived host+tool label when the settled erc7710 result names no product', async () => {
     stubFetch({})
     const haven = keylessClient()
     vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(
@@ -657,8 +692,135 @@ describe('haven_settle_mcp_tool', () => {
     )
     const data = result.data as Record<string, any>
     expect(data.settled).toBe(true)
-    expect(data.agent_summary.product).toBe('buy_cloud_storage')
-    expect((data.agent_summary.purchase_summary as Record<string, unknown>).product).toBeNull()
+    // #3771: the Haven-derived label — the merchant HOST the settle was
+    // resolved against plus the tool that was called — fills the gap the
+    // merchant's payload leaves. Both fields agree on it.
+    expect(data.agent_summary.product).toBe('merchant.test buy_cloud_storage')
+    expect((data.agent_summary.purchase_summary as Record<string, unknown>).product).toBe(
+      'merchant.test buy_cloud_storage',
+    )
+  })
+
+  /**
+   * #3781, the catalog tier: a settle whose purchase came from a catalog
+   * entry rehydrates `catalogName` from the stored merchant call context and
+   * reports the catalog row's name as the purchase label — Haven's own data,
+   * not the `<merchant host> <tool_name>` label a direct pay gets.
+   */
+  it('reports the catalog row name as purchase_summary.product when a rehydrated erc7710 settle came from a catalog purchase and names no product', async () => {
+    stubFetch({})
+    const haven = keylessClient()
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockResolvedValue({
+      paymentId: 'pay_7710_catalog',
+      merchantUrl: 'http://merchant.test/mcp',
+      toolName: 'buy_cloud_storage',
+      arguments: { tier: '50gb' },
+      // #3781: the catalog row's name, persisted by haven_prepare_catalog_purchase.
+      catalogName: 'CloudNest 50GB',
+    })
+    vi.spyOn(haven, 'submitX402Erc7710').mockResolvedValue('HEADER_FROM_HAVEN')
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200,
+      ok: true,
+      // No structuredContent.summary — the label is the whole gap filler.
+      body: { content: [{ type: 'text', text: 'storage unlocked' }] },
+      settlementTxHash: '0x' + 'ab'.repeat(32),
+      evidenceOutcome: { outcome: 'confirmed' },
+    })
+    vi.spyOn(haven, 'getPostPurchaseAllowanceSummary').mockResolvedValue({
+      allowance: null,
+      warnings: [],
+      payment: {
+        paymentId: 'pay_7710_catalog',
+        kind: 'payment_intent',
+        rail: 'erc7710',
+        status: 'confirmed',
+        phase: AgentPaymentPhase.PaymentConfirmed,
+        nextAction: AgentPaymentNextAction.None,
+        amount: '500',
+        token: 'USDC',
+        resourceUrl: 'http://merchant.test/mcp',
+        merchantAddress: null,
+        txHash: null,
+        expiresAt: '2026-09-28T12:00:00.000Z',
+        chainId: 84532,
+        message: 'The payment settled.',
+      },
+    })
+
+    // No merchant_url/tool_name — the rehydration branch, as the guided path
+    // settles (payment_id + signature only).
+    const result = ok<Record<string, unknown>>(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_7710_catalog',
+        signature: SIG,
+      }),
+    )
+    const data = result.data as Record<string, any>
+    expect(data.settled).toBe(true)
+    // #3781: the CATALOG row's name — the first tier — not host+tool, and not
+    // anything the merchant's response said.
+    expect(data.agent_summary.product).toBe('CloudNest 50GB')
+    expect((data.agent_summary.purchase_summary as Record<string, unknown>).product).toBe(
+      'CloudNest 50GB',
+    )
+  })
+
+  it('still lets the merchant product_name beat the catalog row name on a catalog erc7710 settle', async () => {
+    stubFetch({})
+    const haven = keylessClient()
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockResolvedValue({
+      paymentId: 'pay_7710_catalog_named',
+      merchantUrl: 'http://merchant.test/mcp',
+      toolName: 'buy_cloud_storage',
+      arguments: { tier: '50gb' },
+      catalogName: 'CloudNest 50GB',
+    })
+    vi.spyOn(haven, 'submitX402Erc7710').mockResolvedValue('HEADER_FROM_HAVEN')
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200,
+      ok: true,
+      // The merchant names the product — it wins over the catalog tier.
+      body: {
+        content: [{ type: 'text', text: 'storage unlocked' }],
+        structuredContent: { summary: { product_name: 'CloudNest 50GB Pro', invoice_id: 'inv_1' } },
+      },
+      settlementTxHash: '0x' + 'ab'.repeat(32),
+      evidenceOutcome: { outcome: 'confirmed' },
+    })
+    vi.spyOn(haven, 'getPostPurchaseAllowanceSummary').mockResolvedValue({
+      allowance: null,
+      warnings: [],
+      payment: {
+        paymentId: 'pay_7710_catalog_named',
+        kind: 'payment_intent',
+        rail: 'erc7710',
+        status: 'confirmed',
+        phase: AgentPaymentPhase.PaymentConfirmed,
+        nextAction: AgentPaymentNextAction.None,
+        amount: '500',
+        token: 'USDC',
+        resourceUrl: 'http://merchant.test/mcp',
+        merchantAddress: null,
+        txHash: null,
+        expiresAt: '2026-09-28T12:00:00.000Z',
+        chainId: 84532,
+        message: 'The payment settled.',
+      },
+    })
+
+    const result = ok<Record<string, unknown>>(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_7710_catalog_named',
+        signature: SIG,
+      }),
+    )
+    const data = result.data as Record<string, any>
+    expect(data.settled).toBe(true)
+    expect(data.agent_summary.product).toBe('CloudNest 50GB Pro')
+    expect((data.agent_summary.purchase_summary as Record<string, unknown>).product).toBe(
+      'CloudNest 50GB Pro',
+    )
   })
 
   /**
@@ -1073,7 +1235,11 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
     expect(result.data.result).toBe(merchantResult)
     expect(result.data.agent_summary.purchase_summary).toMatchObject({
       status: 'settled',
-      product: null,
+      // #3771: an untrusted blob that merely CLAIMS payment names no product,
+      // but `product` is no longer null for that — the Haven-derived
+      // `<merchant host> <tool_name>` label from the settle context fills the
+      // gap. Nothing in the blob (its fake status/invoice_id) leaks through.
+      product: 'merchant.test create_text',
       asset: null,
       merchant: { address: null, resource_url: null },
       invoice_id: null,
@@ -1081,6 +1247,41 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
     })
     // The reporting status is set by Haven's completed flow, never this blob.
     expect(result.data.agent_summary.purchase_summary.status).toBe('settled')
+  })
+
+  it('reports the catalog row name as the purchase label when a rehydrated EIP-3009 settle came from a catalog purchase and names no product (#3781)', async () => {
+    const haven = havenSettled({
+      'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('3500000', 'delegation') },
+    })
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockResolvedValue({
+      paymentId: 'pay_x402',
+      merchantUrl: 'http://merchant.test/mcp',
+      toolName: 'create_text',
+      arguments: { prompt: 'Hello' },
+      // #3781: the catalog row's name, persisted by haven_prepare_catalog_purchase.
+      catalogName: 'CloudNest 50GB',
+    })
+    // completeX402MerchantCall (from havenSettled) carries no
+    // structuredContent.summary — the label is the whole gap filler.
+
+    // No merchant_url/tool_name — the rehydration branch, as the guided path
+    // settles (payment_id + signature + payment_header only).
+    const result = ok<{ agent_summary: { purchase_summary: Record<string, unknown> } }>(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_x402',
+        signature: SIG,
+        payment_header: VALID_PAYMENT_HEADER_REF.v1,
+      }),
+    )
+
+    expect(result.data.agent_summary.purchase_summary).toMatchObject({
+      status: 'settled',
+      // #3781: the CATALOG row's name — the first tier — not the
+      // <merchant host> <tool_name> label a direct haven_pay_mcp_tool gets.
+      product: 'CloudNest 50GB',
+    })
   })
 
   it('keeps a merchant receipt transaction hash as optional evidence, not settlement truth', async () => {

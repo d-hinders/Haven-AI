@@ -47,6 +47,7 @@
  * that rule executable lives in `tools/module-boundaries.test.ts`.
  */
 import { randomUUID } from 'node:crypto'
+import { deliveryReferenceError } from '@haven_ai/core'
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
@@ -54,6 +55,8 @@ import {
   HavenApiError,
   HavenClient,
   HavenInsecureRetryTargetError,
+  MerchantEgressRefusedError,
+  MerchantEgressResponseCapError,
   type NextStep,
   MerchantTimeoutError,
   X402PaymentHeaderValidationError,
@@ -64,7 +67,7 @@ import {
 } from '@haven_ai/sdk'
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
-import { HostedToolError, paymentWindowExpiredError, runTool } from './support/errors.js'
+import { HostedToolError, egressRefusalBeforeIntent, paymentWindowExpiredError, runTool } from './support/errors.js'
 import {
   buildAgentGuidance,
   buildPurchaseSummary,
@@ -93,6 +96,13 @@ export interface ResolvedMerchantCallContext {
   toolName: string
   toolArguments: Record<string, unknown>
   mcpTransport: X402McpTransport | undefined
+  /**
+   * #3781: the catalog row's name, when the purchase came from a catalog
+   * entry — null when the caller supplied the context explicitly (an explicit
+   * context has no catalog row) or the stored context carries none (a direct
+   * haven_pay_mcp_tool purchase). Display tier of the purchase label only.
+   */
+  catalogName: string | null
 }
 
 /** #3101: after an erc7710 settle whose merchant reported a hash — report it if the agent can, else poll. */
@@ -100,6 +110,77 @@ function heldHashHandoff(canReport: boolean, paymentId: string, heldHash: string
   return canReport && heldHash
     ? { nextTool: 'haven_report_settlement_evidence', nextArguments: { payment_id: paymentId, settlement_tx_hash: heldHash } }
     : { nextTool: 'haven_get_payment_status', nextArguments: { payment_id: paymentId } }
+}
+
+/**
+ * #3764 (D1): the next-step handoff the hosted eip3009 tools derive from
+ * `completeX402MerchantCall`'s `settlementEvidenceOutcome` — the same three
+ * arms #3727's `evidenceHandoff` gives the plain-HTTP outcome report:
+ * recorded (or nothing posted) → no tool; retryable →
+ * `haven_report_settlement_evidence` with `payment_id` and the hash
+ * prefilled; refused → no tool, because re-reporting the same hash
+ * re-refuses. Spread at an emission's top level so `lint:next-steps` reads it
+ * as named.
+ */
+function settlementEvidenceHandoff(
+  outcome: EvidenceReportOutcome | undefined,
+  paymentId: string,
+  settlementTxHash: string | null,
+): HostedHandoff {
+  if (!outcome || outcome.outcome === 'confirmed') {
+    return { nextTool: null, nextToolOmittedReason: 'the purchase is settled; no Haven tool follows' }
+  }
+  if (outcome.outcome === 'retryable') {
+    return {
+      nextTool: 'haven_report_settlement_evidence',
+      nextArguments: {
+        payment_id: paymentId,
+        // A retryable answer can only follow a hash that was actually posted —
+        // well-formed and non-zero, which `settlement_tx_hash` echoes (zero
+        // collapses to null at the delivery boundary, but a zero hash never
+        // reaches the wire). The schema keeps the field optional: without it
+        // the report call is a defined no-op (#3475 follow-up), never a
+        // validation refusal in front of an agent.
+        ...(settlementTxHash ? { settlement_tx_hash: settlementTxHash } : {}),
+      },
+    }
+  }
+  return {
+    nextTool: null,
+    nextToolOmittedReason:
+      'the merchant settlement hash was refused: it does not match this payment on-chain — do not re-report the same hash',
+  }
+}
+
+/**
+ * #3764 (D1): the reason line that goes WITH `settlementEvidenceHandoff` —
+ * the recorded arm keeps the settled-purchase prose the eip3009 arm has said
+ * since #1308, the retryable one tells the agent the chain was not readable
+ * YET (mirror of #3727's `evidenceReason`), and the refused one says the hash
+ * is wrong, not that the purchase failed.
+ */
+function settlementEvidenceReason(outcome: EvidenceReportOutcome | undefined): string {
+  if (!outcome || outcome.outcome === 'confirmed') {
+    return (
+      'Funding and merchant settlement both succeeded. Report the result to the user ' +
+      'from agent_summary.purchase_summary; `result` is optional raw merchant evidence, ' +
+      'not Haven payment truth. Merchant-issued credentials in `result` are withheld ' +
+      'unless this call passed include_merchant_credentials=true — never echo or log one. ' +
+      'The summary includes remaining allowance/budget when available.'
+    )
+  }
+  if (outcome.outcome === 'retryable') {
+    return (
+      'The purchase is complete and the merchant settlement was reported, but Haven could not ' +
+      'verify it on-chain just yet (the chain was unreachable or the transaction is not mined); ' +
+      'retry haven_report_settlement_evidence with the same hash.'
+    )
+  }
+  return (
+    'The purchase itself is complete — report the result to the user via ' +
+    'agent_summary.purchase_summary. The merchant settlement hash was refused: it does not match ' +
+    'this payment on-chain — do not re-report the same hash.'
+  )
 }
 
 /**
@@ -139,6 +220,9 @@ export async function resolveMerchantCallContext(
       merchantUrl: args.merchant_url,
       toolName: args.tool_name,
       toolArguments: (args.arguments as Record<string, unknown> | undefined) ?? {},
+      // #3781: an explicitly-threaded context has no catalog row behind it —
+      // the <merchant host> <tool_name> label applies.
+      catalogName: null,
       // #2282: parse the transport HERE, where the caller can still act on a
       // refusal, rather than deep inside the merchant call after funding.
       mcpTransport: parseMcpTransport(args.mcp_transport),
@@ -168,6 +252,10 @@ export async function resolveMerchantCallContext(
       merchantUrl: ctx.merchantUrl,
       toolName: ctx.toolName,
       toolArguments: ctx.arguments,
+      // #3781: the catalog tier — present only when the purchase came from a
+      // catalog entry (the stored context carries it); absent on a direct
+      // haven_pay_mcp_tool purchase.
+      catalogName: ctx.catalogName ?? null,
       mcpTransport: parseMcpTransport(
         ctx.mcpTransport ? serializeMcpTransport(ctx.mcpTransport) : undefined,
       ),
@@ -199,6 +287,172 @@ export async function resolveMerchantCallContext(
     }
     throw err
   }
+}
+
+/**
+ * #3778: refuse a credential-shaped `delivery_reference` BEFORE anything
+ * moves — on haven_settle_mcp_tool this runs before the funding relay, on
+ * haven_complete_mcp_tool before the merchant call, so a bad value can never
+ * reach the row OR spend. Inline here, not support/: each capability calls it
+ * once and the canonical shape rules live in `@haven_ai/core`
+ * (`deliveryReferenceError`) — this is only the refusal envelope, so a
+ * shared wrapper would be an ownership-map entry for two one-line calls.
+ */
+function assertDeliveryReference(tool: HostedToolName, args: Record<string, any>): void {
+  const value = args.delivery_reference
+  if (value === undefined) return
+  const reason = deliveryReferenceError(String(value))
+  if (!reason) return
+  throw new HostedToolError({
+    code: 'DELIVERY_REFERENCE_REFUSED',
+    statusCode: 400,
+    paymentId: typeof args.payment_id === 'string' ? args.payment_id : undefined,
+    message: `${tool}: ${reason} Nothing was written and no funding was relayed.`,
+  })
+}
+
+/**
+ * #3771: the Haven-derived purchase label for a settle whose merchant result
+ * names no product. #3781 added the FIRST tier: the catalog row's name, when
+ * the purchase came from a catalog entry (`haven_prepare_catalog_purchase` —
+ * Haven's own data, so it is a Haven-derived label, never merchant content
+ * #1349). Without one, the label is `<merchant host> <tool_name>` — both
+ * halves are facts the settle call already holds — the merchant URL the call
+ * context was resolved against, and the tool that was called. A URL that
+ * will not parse (or none) falls back to the tool name alone — still
+ * Haven-derived, still non-null, so `purchase_summary.product` never reads
+ * null purely because the merchant's payload was thin.
+ */
+function purchaseFallbackLabel(
+  merchantUrl: string | undefined,
+  toolName: string,
+  catalogName: string | null | undefined = null,
+): string {
+  if (catalogName) return catalogName
+  let host: string | null = null
+  try {
+    host = merchantUrl ? new URL(merchantUrl).host : null
+  } catch {
+    host = null
+  }
+  return host ? `${host} ${toolName}` : toolName
+}
+
+/**
+ * #3768 — redaction of MERCHANT-ISSUED credentials from the agent-facing
+ * `result`.
+ *
+ * A settled merchant tool result is forwarded to the agent's context, which is
+ * untrusted (prompt injection, transcripts, logs). Prod QA 2026-10-08 (payment
+ * `79084a5e`, Soundside `create_text`) showed a merchant result carrying two
+ * bearer credentials bound to the agent's delegate EOA inside
+ * `result.structuredContent` — an `x402_session_token` JWT and a `wallet_link`
+ * URL with an embedded JWT — reaching that context verbatim. The default is
+ * WITHHOLD (issue #3768, option 1): `deliverMerchantPayment` redacts before
+ * the result reaches any handler arm, and the settle/complete tools take an
+ * explicit `include_merchant_credentials: true` opt-in that returns the
+ * merchant body unredacted. This is a design decision, not a blanket strip of
+ * merchant sessions: a merchant session (Bitrefill `X-Access-Token`, #3728) is
+ * how an agent avoids paying per call, so the opt-in exists — but it is the
+ * agent's explicit act, never the default.
+ *
+ * What counts as a credential, deliberately conservative and mechanical:
+ *
+ *  1. A JWT-shaped string (three base64url segments joined by dots) — redacted
+ *     by SHAPE, whatever the key is named, including as a substring of a
+ *     longer string (a `wallet_link` URL keeps its shape, loses its token).
+ *  2. A string value under a credential-NAMED key — `*_token`, `*_link`,
+ *     `access_token`, `session` fields (the issue's enumeration), plus the
+ *     other bearer spellings (`secret`, `password`, `api_key`,
+ *     `authorization`, `bearer`, `credential`) — withheld whole, because an
+ *     opaque token a merchant mints is exactly the thing a JWT scan can miss.
+ *
+ * What is NEVER touched: money fields, `settled`/`delivered` markers,
+ * transaction hashes, URLs without embedded JWTs — anything that is not a
+ * string under a credential-named key or JWT-shaped. The same recognizer
+ * redacts the bounded `JSON.stringify` of the merchant body that the
+ * MERCHANT_REJECTED_AFTER_FUNDING refusals echo, so a credential cannot
+ * escape through an error message instead of the result.
+ */
+
+/** The replacement for a whole withheld credential value. */
+export const MERCHANT_CREDENTIAL_WITHHELD = '[merchant credential withheld by Haven]'
+/** The replacement for a JWT-shaped segment found inside a longer string. */
+export const MERCHANT_JWT_REDACTED = '[merchant JWT redacted]'
+
+/** One base64url JWT segment. 16+ chars keeps real-world non-JWTs (ids, versions) out. */
+const JWT_SEGMENT = '[A-Za-z0-9_-]{16,}'
+const IS_JWT = new RegExp(`^${JWT_SEGMENT}\\.${JWT_SEGMENT}\\.${JWT_SEGMENT}$`)
+const JWT_IN_STRING = new RegExp(`${JWT_SEGMENT}\\.${JWT_SEGMENT}\\.${JWT_SEGMENT}`, 'g')
+
+/**
+ * Credential-named keys, matched case-insensitively on a snake_case
+ * normalization (so camelCase `sessionToken` reads `session_token` too).
+ * `token` requires the exact or underscore form (a bare `token` IS matched,
+ * `sort_token`-style keys are too); `link` requires the `_link` suffix — a
+ * bare `link` is NOT a credential (a product link is not); `session` matches
+ * the issue's "session fields" enumeration.
+ */
+const CREDENTIAL_KEY = new RegExp(
+  [
+    '(^|_)(access_?token|refresh_?token|id_?token|session_?token|api_?key|apikey|secret|password|credential|authorization|bearer)(_|$)',
+    '(^|_)token$',
+    '_link$',
+    '(^|_)session(_|$)',
+  ].join('|'),
+  'i',
+)
+
+function isCredentialKey(key: string): boolean {
+  const normalized = key.replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+  return CREDENTIAL_KEY.test(normalized)
+}
+
+/** Maximum traversal depth — merchant bodies arrive via JSON.parse (acyclic); this is belt-and-braces. */
+const REDACTION_MAX_DEPTH = 24
+
+/**
+ * Redact merchant-issued credentials from a parsed merchant response body,
+ * returning a new structure (inputs are never mutated). JSON primitives pass
+ * through untouched; only credential-shaped strings change. When NOTHING in
+ * the body redacts, the input is returned by reference — a clean merchant
+ * body is forwarded exactly as the #1310 pass-through contract pins it, and
+ * only a body that actually carries a credential is rewritten.
+ */
+export function redactMerchantCredentials(value: unknown, depth = 0): unknown {
+  if (typeof value === 'string') return redactCredentialString('', value)
+  if (value === null || typeof value !== 'object') return value
+  if (depth >= REDACTION_MAX_DEPTH) return value
+  if (Array.isArray(value)) {
+    let changed = false
+    const out = value.map((item) => {
+      const redacted = redactMerchantCredentials(item, depth + 1)
+      if (redacted !== item) changed = true
+      return redacted
+    })
+    return changed ? out : value
+  }
+  let changed = false
+  const out: Record<string, unknown> = {}
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    const redacted =
+      typeof item === 'string' ? redactCredentialString(key, item) : redactMerchantCredentials(item, depth + 1)
+    if (redacted !== item) changed = true
+    out[key] = redacted
+  }
+  return changed ? out : value
+}
+
+function redactCredentialString(key: string, value: string): string {
+  if (IS_JWT.test(value)) return MERCHANT_CREDENTIAL_WITHHELD
+  if (key !== '' && isCredentialKey(key)) {
+    if (value.length === 0) return value
+    return MERCHANT_CREDENTIAL_WITHHELD
+  }
+  if (JWT_IN_STRING.test(value)) {
+    return value.replace(JWT_IN_STRING, MERCHANT_JWT_REDACTED)
+  }
+  return value
 }
 
 /**
@@ -247,7 +501,14 @@ export async function deliverMerchantPayment(
   settlement_tx_hash: string | null
   /** #2970: what `haven.completeX402MerchantCall`'s evidence report learned, when it made one. */
   evidence_outcome?: EvidenceReportOutcome
-}> {
+  /**
+   * #3764: what the SECOND evidence report — the merchant's own EIP-3009
+   * settlement, posted after the funding report — learned, when one was made.
+   * `undefined` when nothing was posted (no funding leg, no merchant hash, a
+   * malformed/zero/equal-to-funding hash).
+   */
+  settlement_evidence_outcome?: EvidenceReportOutcome
+}>{
   // #1307: resolve merchant_url/tool_name/arguments/mcp_transport BEFORE
   // waiting on funding confirmation — a version-skew refusal (no stored
   // context) should surface immediately, not after a pointless wait.
@@ -257,6 +518,8 @@ export async function deliverMerchantPayment(
   // the context itself, pre-funding, and hands the result in. Resolving once
   // and passing it through also keeps the two calls from diverging (the stored
   // context could change, and a second GET is a second chance to disagree).
+  // (#3778: the delivery reference is refused in the HANDLERS, which know
+  // their own tool name and run before any submit — never here.)
   const context = options?.context ?? (await resolveMerchantCallContext(haven, args))
 
   // Wait for ≥1 on-chain confirmation of the funding tx BEFORE the merchant
@@ -295,6 +558,12 @@ export async function deliverMerchantPayment(
       paymentId: args.payment_id,
       paymentHeader: args.payment_header,
       mcpTransport: context.mcpTransport,
+      // #3778: the validated non-secret delivery pointer — recorded on the
+      // evidence row when the merchant accepted, so the owner's receipt and
+      // dashboard show a deliverable exists.
+      ...(args.delivery_reference
+        ? { deliveryReference: args.delivery_reference }
+        : {}),
       // #1508: the same flag that skips the funding wait above also has to
       // reach the SDK's completion gate, which is where the real refusal was.
       noFundingLeg: options?.noFundingLeg === true,
@@ -354,6 +623,83 @@ export async function deliverMerchantPayment(
         suggestedTool: 'haven_get_payment_status',
       })
     }
+    // #3747: an egress-policy refusal during PAID delivery. Two distinct
+    // states, both carrying the payment id because funding is already
+    // confirmed (or erc7710 has no funding leg at all):
+    //  - BEFORE any request was sent (a pre-send URL refusal): the merchant
+    //    was NOT called — mirror the HavenInsecureRetryTargetError branch.
+    //  - MID-FLIGHT (a redirect on the paid POST, a refused redirect hop, or
+    //    the response cap crossed while reading): the paid request itself was
+    //    already sent and the header MAY have been delivered — this is the
+    //    #1300 verify-then-sweep state, routed to the status read FIRST,
+    //    NEVER a blind sweep. On erc7710 there is no funding leg, so the
+    //    existing no-sweep handling applies: check status later, ignore any
+    //    sweep guidance.
+    if (err instanceof MerchantEgressRefusedError || err instanceof MerchantEgressResponseCapError) {
+      const midFlight = !(err instanceof MerchantEgressRefusedError) || !err.beforeRequest
+      const detail = err.message
+      if (midFlight && options?.noFundingLeg) {
+        throw new HostedToolError({
+          code: 'MERCHANT_EGRESS_REFUSED',
+          message:
+            `The erc7710 paid retry was interrupted by the hosted egress policy after the request was sent: ` +
+            `${detail} erc7710 has no funding leg, so there is no delegate balance to strand or sweep — ` +
+            `ignore this code's sweep guidance. The merchant may still redeem the settlement authorization ` +
+            `within its window: check haven_get_payment_status after that window and re-quote only if it ` +
+            `shows no settlement.`,
+          statusCode: 400,
+          paymentId: args.payment_id,
+          status: 'merchant_unresponsive_after_funding',
+          phase: 'not_delivered',
+          nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.CheckStatusLater, nextTool: 'haven_get_payment_status', nextArguments: { payment_id: args.payment_id } }),
+          rail: 'erc7710',
+          suggestedTool: 'haven_get_payment_status',
+        })
+      }
+      if (midFlight) {
+        throw new HostedToolError({
+          code: 'MERCHANT_EGRESS_REFUSED',
+          message:
+            `The paid retry was interrupted by the hosted egress policy after the request was sent: ` +
+            `${detail} The funding leg is confirmed on-chain and the merchant's answer never arrived ` +
+            `complete: the merchant may still settle late. Check haven_get_payment_status and retry ` +
+            `haven_complete_mcp_tool ONCE before considering a sweep — sweep only if no settlement appears.`,
+          statusCode: 400,
+          paymentId: args.payment_id,
+          status: 'merchant_unresponsive_after_funding',
+          phase: 'funded_but_unsettled',
+          nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.SweepStrandedFunds, nextTool: 'haven_get_payment_status', nextArguments: { payment_id: args.payment_id } }),
+          rail: 'x402',
+          suggestedTool: 'haven_get_payment_status',
+        })
+      }
+      // Pre-send: the merchant was never called.
+      throw new HostedToolError({
+        code: 'MERCHANT_EGRESS_REFUSED',
+        message: options?.noFundingLeg
+          ? `${err.message} No merchant call was made and erc7710 has no funding leg, so nothing ` +
+            `moved; re-quote the merchant at its public https URL.`
+          : `${err.message} The funding leg is already confirmed on-chain and the merchant was NOT ` +
+            `called: retry haven_complete_mcp_tool with the merchant's public https URL as merchant_url, ` +
+            `or recover the delegate balance with haven_sweep_delegate.`,
+        statusCode: 400,
+        paymentId: args.payment_id,
+        phase: options?.noFundingLeg ? 'not_delivered' : 'funded_but_unsettled',
+        nextStep: options?.noFundingLeg
+          ? refusalNextStep({
+              nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+              nextTool: null,
+              nextToolOmittedReason: 're-quote the merchant at its public https URL; nothing moved',
+            })
+          : refusalNextStep({
+              nextAction: AgentPaymentNextAction.SweepStrandedFunds,
+              nextTool: 'haven_sweep_delegate',
+              nextArguments: {},
+            }),
+        rail: options?.noFundingLeg ? 'erc7710' : 'x402',
+        suggestedTool: options?.noFundingLeg ? 'haven_quote_mcp_tool' : 'haven_get_payment_status',
+      })
+    }
     // #3097: the SDK refuses to hand a payment header to a public http://
     // merchant at the deliverPayment seam. quoteMcpToolCall refuses the same
     // URL before any intent, so this fires only for a merchant_url that
@@ -410,8 +756,8 @@ export async function deliverMerchantPayment(
     // it rather than re-deriving "which scheme is this" a second way.
     if (options?.noFundingLeg) {
       // On erc7710 the signature IS the settlement child (#1456): there is no
-      // funding leg, so a merchant refusal at this point means NOTHING moved
-      // — no delegate balance to strand, nothing to sweep. The eip3009
+      // funding leg, so a merchant refusal at this point strands no delegate
+      // balance — nothing to sweep. The eip3009
       // guidance below is false here and would tell the agent to "reconcile"
       // a balance that was never created. Say what is true instead.
       // #2987 review: the categorical "nothing moved, re-quote" is only
@@ -434,14 +780,14 @@ export async function deliverMerchantPayment(
           `funds moved — the agent's budget is intact. Ignore this code's sweep guidance: there ` +
           `is no delegate balance to sweep. Re-quote` +
           (notReady.retryAfterS ? ` after approximately ${notReady.retryAfterS}s` : ' later') +
-          `. Merchant response: ${JSON.stringify(result.body).slice(0, 500)}`
+          `. Merchant response: ${JSON.stringify(redactMerchantCredentials(result.body)).slice(0, 500)}`
         : `Merchant refused to deliver the resource (${merchantHttp}). erc7710 has no ` +
           `funding leg, so there is no delegate balance to sweep — ignore this code's sweep ` +
           `guidance. Haven has NOT observed a settlement, but the merchant held a single-use ` +
           `settlement authorization valid for up to the payment window (typically 300s) and ` +
           `may have redeemed it before answering: check haven_get_payment_status after that ` +
           `window and re-quote only if it shows no settlement. ` +
-          `Merchant response: ${JSON.stringify(result.body).slice(0, 500)}`
+          `Merchant response: ${JSON.stringify(redactMerchantCredentials(result.body)).slice(0, 500)}`
       throw new HostedToolError({
         code: AgentPaymentFailureCode.MerchantRejectedAfterFunding,
         message,
@@ -471,7 +817,7 @@ export async function deliverMerchantPayment(
       message:
         `Merchant rejected the payment after funding (${merchantHttp}). ` +
         `The delegate wallet may hold stranded funds — reconcile with haven_sweep_delegate. ` +
-        `Merchant response: ${JSON.stringify(result.body).slice(0, 500)}`,
+        `Merchant response: ${JSON.stringify(redactMerchantCredentials(result.body)).slice(0, 500)}`,
       statusCode: merchantStatus,
       paymentId: args.payment_id,
       status: status?.status ?? 'merchant_rejected_after_funding',
@@ -489,7 +835,16 @@ export async function deliverMerchantPayment(
   return {
     status: result.status,
     ok: result.ok,
-    result: result.body,
+    // #3768: the agent-facing `result` carries merchant-issued credentials
+    // REDACTED unless the caller explicitly opted in
+    // (`include_merchant_credentials: true` on the settle/complete tool
+    // arguments — the flag rides `args` and both handler call sites forward
+    // it). Money fields, `settled`/`delivered` and hashes are untouched; the
+    // recognizer only rewrites credential-shaped strings. The refusal paths
+    // below redact unconditionally — an error echo never delivers a
+    // credential the caller paid nothing to receive.
+    result:
+      args?.include_merchant_credentials === true ? result.body : redactMerchantCredentials(result.body),
     // #2968: the response-level zero-hash ban. `settlementTxHash` here is the
     // MERCHANT's word (the PAYMENT-RESPONSE header, or since #3118 the native
     // MCP profile's `result._meta["x402/payment-response"]`), and the demo merchant's
@@ -505,6 +860,7 @@ export async function deliverMerchantPayment(
         ? result.settlementTxHash
         : null,
     evidence_outcome: result.evidenceOutcome,
+    settlement_evidence_outcome: result.settlementEvidenceOutcome,
   }
 }
 
@@ -723,6 +1079,10 @@ export const PAID_MCP_COMPLETION_TOOLS = [
   'haven_complete_mcp_tool',
   'haven_settle_mcp_tool',
   'haven_report_settlement_evidence',
+  // #3770: the delivery-quality report lives beside the other reports —
+  // Haven-completed purchases are exactly the flow with no other feedback
+  // channel for "paid, but the output was unusable".
+  'haven_report_delivery_quality',
 ] as const satisfies readonly HostedToolName[]
 
 export type PaidMcpCompletionToolName = (typeof PAID_MCP_COMPLETION_TOOLS)[number]
@@ -746,8 +1106,11 @@ export function createPaidMcpCompletionHandlers(
         // `createToolHandlers` directly, where no MCP SDK validation runs.
         // Both layers read their refusal text from STRICT_INPUT_TOOLS.
         const args = parseStrict('haven_complete_mcp_tool', input)
+        // #3778: a credential-shaped delivery_reference is refused BEFORE the
+        // merchant call — nothing written, nothing called.
+        assertDeliveryReference('haven_complete_mcp_tool', args)
         // #2970 review: pick explicit fields rather than spreading
-        // `deliverMerchantPayment`'s result verbatim — that result now also
+        // `deliverMerchantPayment`'s result verbatim — that result also
         // carries `evidence_outcome` (which can be `{outcome:'refused',
         // statusCode:0}` on a transport failure) on BOTH schemes, and this
         // tool's contract (`COMPLETE_MCP_TOOL_DESCRIPTION`) never documented
@@ -758,6 +1121,33 @@ export function createPaidMcpCompletionHandlers(
         // classify (see `deliverMerchantPayment`'s `noFundingLeg` gate — a
         // `submitted` erc7710 intent 409s here today, pre-existing).
         const delivered = await deliverMerchantPayment(haven, args)
+        // #3764 (D1): the funding outcome above is still dropped, but the
+        // merchant SETTLEMENT report's outcome IS mapped — the same three
+        // arms #3727's `evidenceHandoff` gives the plain-HTTP outcome report.
+        // On erc7710 (no funding leg) `settlement_evidence_outcome` is always
+        // undefined, so the recorded arm is a no-op and this stays byte-for-
+        // byte the pre-#3764 answer; on eip3009 a retryable report names the
+        // report tool with the hash prefilled, and a refused one names no
+        // tool with the reason.
+        if (delivered.settlement_evidence_outcome && delivered.settlement_evidence_outcome.outcome !== 'confirmed') {
+          return {
+            status: delivered.status,
+            ok: delivered.ok,
+            result: delivered.result,
+            settlement_tx_hash: delivered.settlement_tx_hash,
+            ...buildAgentGuidance({
+              nextAction: AgentPaymentNextAction.None,
+              ...settlementEvidenceHandoff(
+                delivered.settlement_evidence_outcome,
+                args.payment_id,
+                delivered.settlement_tx_hash,
+              ),
+              safeToContinue: true,
+              reason: settlementEvidenceReason(delivered.settlement_evidence_outcome),
+              summary: { payment_id: args.payment_id, status: 'settled' },
+            }),
+          }
+        }
         return {
           status: delivered.status,
           ok: delivered.ok,
@@ -769,6 +1159,9 @@ export function createPaidMcpCompletionHandlers(
     haven_settle_mcp_tool: async (input) =>
       runTool(async () => {
         const args = parseStrict('haven_settle_mcp_tool', input)
+        // #3778: a credential-shaped delivery_reference is refused BEFORE the
+        // funding relay — a bad value can never reach the row or move money.
+        assertDeliveryReference('haven_settle_mcp_tool', args)
         // ── #2282: the merchant-call context is resolved BEFORE anything is
         // submitted, on BOTH schemes. ──
         //
@@ -794,6 +1187,22 @@ export function createPaidMcpCompletionHandlers(
         // the submit burns the settlement child, which is not recoverable by
         // re-signing either.
         const merchantContext = await resolveMerchantCallContext(haven, args)
+        // #3747: the egress policy also runs HERE — before the funding
+        // signature relay and before the erc7710 submit (both schemes resolve
+        // at this site; erc7710 has no funding leg, so refusing pre-submit is
+        // equally before-spend). The stored-context rehydration path was
+        // already validated at quote time, so re-asserting is a no-op there;
+        // an EXPLICITLY supplied merchant_url has never been checked by this
+        // point and the first transport-side check would otherwise land only
+        // after `ensureFundingConfirmed` — the exact funded-but-undeliverable
+        // outcome the issue criterion forbids.
+        if (haven.merchantEgress) {
+          try {
+            haven.merchantEgress.assertUrl(merchantContext.merchantUrl)
+          } catch (err) {
+            throw egressRefusalBeforeIntent(err, 'merchant_url')
+          }
+        }
         // Fast path: fund (relay the signature) then deliver the merchant header
         // in one hosted call. The signature and X-PAYMENT header are both signed
         // by the local edge signer — Haven relays them but never holds the key.
@@ -861,6 +1270,15 @@ export function createPaidMcpCompletionHandlers(
               settlementTxHash: merchant7710.settlement_tx_hash,
               allowance: summary7710.allowance,
               hasFundingLeg: false,
+              // #3771: the merchant's product_name wins; this is only the gap
+              // filler when the result carries none. #3781: the catalog row's
+              // name is the first tier of that filler when the purchase came
+              // from a catalog entry.
+              fallbackProduct: purchaseFallbackLabel(
+                merchantContext.merchantUrl,
+                merchantContext.toolName,
+                merchantContext.catalogName,
+              ),
             })
             return {
               payment_id: args.payment_id,
@@ -887,7 +1305,9 @@ export function createPaidMcpCompletionHandlers(
                 reason:
                   'Settled directly from the treasury through the budget delegation — no funding ' +
                   'leg, so the delegate wallet never held these funds and there is nothing to sweep. ' +
-                  'Report the result to the user from agent_summary.purchase_summary.',
+                  'Report the result to the user from agent_summary.purchase_summary. Merchant-issued ' +
+                  'credentials in `result` are withheld unless this call passed ' +
+                  'include_merchant_credentials=true — never echo or log one.',
                 summary: {
                   payment_id: args.payment_id,
                   status: summary7710.payment?.status ?? 'settled',
@@ -1032,6 +1452,14 @@ export function createPaidMcpCompletionHandlers(
           fundingTxHash: funding.txHash ?? null,
           settlementTxHash: merchant.settlement_tx_hash,
           allowance,
+          // #3771: same gap filler as the erc7710 settled arm — the merchant's
+          // own product_name still wins when the result carries one. #3781:
+          // the catalog row's name is the filler's first tier.
+          fallbackProduct: purchaseFallbackLabel(
+            merchantContext.merchantUrl,
+            merchantContext.toolName,
+            merchantContext.catalogName,
+          ),
         })
         // Pick explicit fields — don't spread the raw HTTP status/ok, which would
         // collide with the funding/payment-status meaning an agent expects here.
@@ -1048,14 +1476,18 @@ export function createPaidMcpCompletionHandlers(
           // #1308: done — nothing left but reporting.
           ...buildAgentGuidance({
             nextAction: AgentPaymentNextAction.None,
-            // #3101 (decision 3): a done state names no tool and says so.
-            nextTool: null,
-            nextToolOmittedReason: 'the purchase is settled; no Haven tool follows',
+            // #3764 (D1): the settlement-evidence report's outcome maps the
+            // same three arms #3727's `evidenceHandoff` gives the plain-HTTP
+            // outcome report — recorded (or nothing posted) keeps "no tool
+            // follows", a retryable report names the report tool with the
+            // hash prefilled, a refused one names no tool and says why.
+            ...settlementEvidenceHandoff(
+              merchant.settlement_evidence_outcome,
+              args.payment_id,
+              merchant.settlement_tx_hash,
+            ),
             safeToContinue: true,
-            reason:
-              'Funding and merchant settlement both succeeded. Report the result to the user ' +
-              'from agent_summary.purchase_summary; `result` is optional raw merchant evidence, ' +
-              'not Haven payment truth. The summary includes remaining allowance/budget when available.',
+            reason: settlementEvidenceReason(merchant.settlement_evidence_outcome),
             summary: {
               payment_id: args.payment_id,
               status: 'settled',
@@ -1140,6 +1572,26 @@ export function createPaidMcpCompletionHandlers(
           outcome,
           observedStatus,
         )
+      }),
+
+    // #3770: the delivery-quality report. Evidence-only by contract — the
+    // handler relays the agent's verdict and nothing else; the backend
+    // scopes it to this agent (another agent's payment is 404), refuses an
+    // unsettled payment (409), and never touches the payment itself.
+    haven_report_delivery_quality: async (input) =>
+      runTool(async () => {
+        const args = parseStrict('haven_report_delivery_quality', input)
+        const report = await haven.reportDeliveryQuality({
+          paymentId: args.payment_id,
+          quality: args.quality,
+          ...(args.note !== undefined ? { note: args.note } : {}),
+        })
+        return {
+          payment_id: report.payment_id,
+          quality: report.quality,
+          ...(report.note !== null ? { note: report.note } : {}),
+          updated_at: report.updated_at,
+        }
       }),
   }
 }

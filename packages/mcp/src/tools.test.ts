@@ -3,8 +3,9 @@ import {
   HavenClient,
   addressFromKey,
   toolDescriptions as sharedDescriptions,
+  verifyPaymentReceipt,
 } from '@haven_ai/sdk'
-import { buildBoundDirectUserOp, buildFundingLegUserOp } from '@haven_ai/sdk/test-support'
+import { buildBoundDirectUserOp, buildFundingLegUserOp, signedErc7710Receipt } from '@haven_ai/sdk/test-support'
 import { z } from 'zod'
 import { createToolHandlers, toolDescriptions, toolSchemas } from './tools.js'
 import { readFileSync } from 'node:fs'
@@ -2264,5 +2265,78 @@ describe('haven_verify_receipt (#3418) — a list row is not a signed bundle', (
       if (!result.success) throw new Error(`verify failed on ${String(receipt)}`)
       expect(result.data).toEqual({ verified: false, reason: 'not_a_signed_receipt' })
     }
+  })
+})
+
+// #3723: the receipt endpoint's own response is accepted as-is, and the
+// bundle itself is reachable through MCP — `haven_get_receipt` — instead of
+// the agent calling REST with its credential file by hand.
+describe('#3723 — the wrapped response verifies; haven_get_receipt returns the bundle', () => {
+  const bundle = signedErc7710Receipt()
+
+  function localHandlers() {
+    return createToolHandlers(new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl, x402Wallet: safeAddress }))
+  }
+
+  it('the whole { receipt, verification } response verifies — the first positive erc7710 verify here', async () => {
+    expect(verifyPaymentReceipt(bundle)).toMatchObject({ verified: true, verifiedOver: 'delegation_digest' })
+    const result = await localHandlers().haven_verify_receipt({
+      receipt: { receipt: bundle, verification: { verified: true, recoveredSigner: '0xlies' } } as never,
+    })
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error(`verify failed: ${result.message}`)
+    expect(result.data).toEqual({
+      verified: true,
+      recoveredSigner: bundle.authorization.delegate,
+      verifiedOver: 'delegation_digest',
+    })
+  })
+
+  it('the spread form — { receipt, verification } as top-level arguments — verifies: verification accepted and ignored', async () => {
+    const result = await localHandlers().haven_verify_receipt({
+      receipt: bundle,
+      verification: { verified: true, recoveredSigner: '0xlies' },
+    } as never)
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error(`verify failed: ${result.message}`)
+    expect(result.data).toEqual({
+      verified: true,
+      recoveredSigner: bundle.authorization.delegate,
+      verifiedOver: 'delegation_digest',
+    })
+  })
+
+  it('haven_get_receipt returns { receipt } and that output verifies unchanged', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      jsonResponse({ receipt: bundle, verification: { verified: true, verifiedOver: 'delegation_digest' } }),
+    )
+    const result = await localHandlers().haven_get_receipt({ payment_id: 'pay_3723' })
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error(`get failed: ${result.message}`)
+    // { receipt } ONLY — the server-side self-check is not returned.
+    expect(result.data).toEqual({ receipt: bundle })
+    const verify = await localHandlers().haven_verify_receipt({
+      receipt: (result.data as { receipt: unknown }).receipt,
+    })
+    expect(verify.success).toBe(true)
+    if (!verify.success) throw new Error(`verify failed: ${verify.message}`)
+    expect(verify.data).toMatchObject({ verified: true, verifiedOver: 'delegation_digest' })
+  })
+
+  it('a missing payment_id is a structured INVALID_INPUT, never a thrown ZodError', async () => {
+    const result = await localHandlers().haven_get_receipt({})
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect((result as { code: string }).code).toBe('INVALID_INPUT')
+  })
+
+  it('an unknown id carries the structured 404, never a raw error', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      jsonResponse({ error: 'not_found', message: 'No receipt for payment pay_missing' }, 404),
+    )
+    const result = await localHandlers().haven_get_receipt({ payment_id: 'pay_missing' })
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect((result as { statusCode?: number }).statusCode).toBe(404)
   })
 })

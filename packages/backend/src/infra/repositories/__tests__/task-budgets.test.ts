@@ -177,27 +177,34 @@ describeDb('agent_task_budgets repository (#3329)', () => {
     expect(all).toHaveLength(3)
   })
 
-  it('listForAgent status=live (#3518) keeps closing rows always and unexpired pending/open rows; drops closed and expired', async () => {
+  it('listForAgent status=live (#3518, #3773) keeps unexpired pending/open/closing rows; drops closed and every expired row', async () => {
     const seeded = await seedAgent()
     const past = Math.floor(Date.now() / 1000) - 10
+    const nowSec = past + 5 // past the expired rows' expiry, before the live rows' (+3600)
     const signed = JSON.stringify({ signed: true })
 
     const openRow = await insertPendingTaskBudget(pendingInput(seeded.agentId))
     await markOpen(openRow.id, seeded.agentId, signed)
     const pendingRow = await insertPendingTaskBudget(pendingInput(seeded.agentId))
+    const liveClosing = await insertPendingTaskBudget(pendingInput(seeded.agentId))
+    await markOpen(liveClosing.id, seeded.agentId, signed)
+    // Unexpired closing: a close signature may still be owed — stays live.
+    await markClosing(liveClosing.id, seeded.agentId, JSON.stringify({}))
     const expiredOpen = await insertPendingTaskBudget(pendingInput(seeded.agentId, { expiresAt: past }))
     await markOpen(expiredOpen.id, seeded.agentId, signed)
     await insertPendingTaskBudget(pendingInput(seeded.agentId, { expiresAt: past })) // expired pending
     const expiredClosing = await insertPendingTaskBudget(pendingInput(seeded.agentId, { expiresAt: past }))
     await markOpen(expiredClosing.id, seeded.agentId, signed)
+    // Expired closing: the close would be trivial (#3329 N2(c)) — no signature
+    // owed, so #3773 drops it from live. Reverting the predicate fails here.
     await markClosing(expiredClosing.id, seeded.agentId, JSON.stringify({}))
     const closedRow = await insertPendingTaskBudget(pendingInput(seeded.agentId))
     await markOpen(closedRow.id, seeded.agentId, signed)
     await markClosed(closedRow.id, seeded.agentId, '0xclosed')
 
-    const live = await listForAgent(seeded.agentId, { status: 'live' })
-    expect(new Set(live.map((r) => r.id))).toEqual(new Set([openRow.id, pendingRow.id, expiredClosing.id]))
-    expect(await listForAgent(seeded.agentId, { status: 'all' })).toHaveLength(6)
+    const live = await listForAgent(seeded.agentId, { status: 'live', nowSec })
+    expect(new Set(live.map((r) => r.id))).toEqual(new Set([openRow.id, pendingRow.id, liveClosing.id]))
+    expect(await listForAgent(seeded.agentId, { status: 'all' })).toHaveLength(7)
   })
 
   it('listForOwner scopes through agents.user_id', async () => {

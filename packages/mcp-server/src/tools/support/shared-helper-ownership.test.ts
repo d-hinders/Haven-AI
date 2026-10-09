@@ -132,6 +132,9 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   isX402PaymentWindowExpired: { module: 'errors', slices: ['s2809', 's2810', 's2811', 's2812'] },
   paymentWindowExpiredError: { module: 'errors', slices: ['s2809', 's2810', 's2811', 's2812'] },
   paymentWindowExpiredErrorFor: { module: 'errors', slices: ['s2809', 's2810', 's2811', 's2812'] },
+  // #3747: the hosted refusal for a pre-intent merchant-egress refusal, used
+  // by the quote/prepare seams in mcp-context and plain-http-x402.
+  egressRefusalBeforeIntent: { module: 'errors', slices: ['s2809', 's2810', 's2811', 's2812'] },
   // tools/support/guidance.ts — agent guidance and purchase summaries.
   buildAgentGuidance: { module: 'guidance', slices: ['s2809', 's2810', 's2811', 's2812'] },
   buildPurchaseSummary: { module: 'guidance', slices: ['s2810', 's2812'] },
@@ -158,7 +161,7 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // which is not a payment and so cannot go through buildAgentGuidance's
   // AgentPaymentSummary. #3506: a sub-budget row's hand-off (haven_get_agent's
   // pending rows, haven_submit's sub_budget_id result) uses it from s2809 too.
-  taskBudgetNextStep: { module: 'guidance', slices: ['s2809', 's3329'] },
+  taskBudgetNextStep: { module: 'guidance', slices: ['s2809', 's2811', 's3329'] },
   // tools/support/cap-price.ts — cap/price selection.
   readMaxAmountCap: { module: 'cap-price', slices: ['s2810', 's2811'] },
   priceSelectedOption: { module: 'cap-price', slices: ['s2810', 's2811'] },
@@ -219,6 +222,12 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // EvidenceReportOutcome rather than a merchant HTTP result. Single-slice,
   // same module.
   classifySettlementEvidenceReport: { module: 'paid-mcp-completion', slices: ['s2812'] },
+  // #3768: merchant-credential redaction over the agent-facing `result` — the
+  // recognizer and its two replacement markers. Single-slice (only this
+  // capability's settle/complete arms forward a merchant result), same module.
+  redactMerchantCredentials: { module: 'paid-mcp-completion', slices: ['s2812'] },
+  MERCHANT_CREDENTIAL_WITHHELD: { module: 'paid-mcp-completion', slices: ['s2812'] },
+  MERCHANT_JWT_REDACTED: { module: 'paid-mcp-completion', slices: ['s2812'] },
   // tools/support/quote-response.ts — quote responses + status predicates.
   buildMcpToolQuoteResponse: { module: 'quote-response', slices: ['s2810', 's2811'] },
   isPendingApproval: { module: 'quote-response', slices: ['s2809', 's2810', 's2811', 's2812'] },
@@ -373,7 +382,9 @@ const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
  * inclusion, so the default for a new file is "checked". A new seam has to be
  * argued for here; a new capability needs nothing.
  */
-const TOOL_SEAM_MODULES = ['contracts', 'parsing', 'registry']
+// identity-gate: the hosted dispatch gate `buildHostedMcpServer` runs before
+// every handler; it owns no tool, so it is a seam, not a capability.
+const TOOL_SEAM_MODULES = ['contracts', 'parsing', 'registry', 'identity-gate']
 
 const CAPABILITY_MODULES: readonly string[] = fs
   .readdirSync(new URL('../', import.meta.url), { withFileTypes: true })
@@ -393,6 +404,10 @@ const CAPABILITY_MODULES: readonly string[] = fs
  */
 const CAPABILITY_ALLOWED_IMPORTS = [
   '@haven_ai/sdk',
+  // #3778: @haven_ai/core — the shared kernel both the SDK-free surfaces and
+  // the capabilities import. The delivery_reference recognizer lives there
+  // (one definition across mcp-server, sdk consumers and the backend).
+  '@haven_ai/core',
   'zod',
   './contracts.js',
   './parsing.js',
@@ -410,6 +425,9 @@ const CAPABILITY_ALLOWED_IMPORTS = [
  */
 const CAPABILITY_EXTRA_ALLOWED_IMPORTS: Record<string, string[]> = {
   'paid-mcp-completion': ['node:crypto'],
+  // #3739: `createHash` for request mode's derived replay key, which hashes
+  // the whole probed challenge (extensions included).
+  'plain-http-x402': ['node:crypto'],
 }
 
 /** Support module → its runtime export names, enumerated (not derived). */
@@ -439,6 +457,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'paymentWindowExpiredError',
     'paymentWindowExpiredErrorFor',
     'normalizeError',
+    'egressRefusalBeforeIntent', // #3747
   ],
   guidance: [
     'buildAgentGuidance',
@@ -518,6 +537,10 @@ const HELPER_HOST_MODULE_EXPORTS: Record<string, string[]> = {
     'preflightMcpPaymentHeader',
     'classifyErc7710Settlement',
     'classifySettlementEvidenceReport',
+    // #3768: merchant-credential redaction over the agent-facing `result`.
+    'redactMerchantCredentials',
+    'MERCHANT_CREDENTIAL_WITHHELD',
+    'MERCHANT_JWT_REDACTED',
   ],
 }
 
@@ -933,7 +956,7 @@ describe('capability-module dependency rule (#2806, first enforced #2809)', () =
     }
   })
 
-  it('contributes exactly the eleven tools it claims, and only those', async () => {
+  it('contributes exactly the twelve tools it claims, and only those', async () => {
     const { STATE_DIRECT_RECOVERY_TOOLS, createStateDirectRecoveryHandlers } = await import(
       '../state-direct-recovery.js'
     )
@@ -947,6 +970,7 @@ describe('capability-module dependency rule (#2806, first enforced #2809)', () =
         'haven_get_agent',
         'haven_get_allowances',
         'haven_get_payment_status',
+        'haven_get_receipt',
         'haven_get_resume_state',
         'haven_list_receipts',
         'haven_pay',

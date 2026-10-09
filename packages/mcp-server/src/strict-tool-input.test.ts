@@ -35,7 +35,7 @@ import { HavenClient, HAVEN_SKILL_MD } from '@haven_ai/sdk'
 // would break the Docker builder on a workspace link pointing at a directory
 // the image never copied. (haven-reviewer, #2348.)
 import { toolSchemas as localToolSchemas, computeConsentHash, type ConsentInput } from '@haven_ai/mcp'
-import { buildHostedMcpServer } from './server.js'
+import { AGENT_IDENTITY_UNVERIFIED, IDENTITY_GATE_EXEMPT, buildHostedMcpServer } from './server.js'
 import {
   createToolHandlers,
   toolSchemas,
@@ -51,6 +51,9 @@ import {
 /** Minimum valid arguments for each strict tool, plus the undeclared key to smuggle. */
 const VALID_ARGS: Record<StrictInputToolName, Record<string, unknown>> = {
   haven_report_x402_outcome: { payment_id: 'pay_x402', outcome: 'rejected', merchant_status: 402 },
+  // #3770: reaches the handler (the stubbed Haven answers `{}` and the loop
+  // tolerates what it reads off that).
+  haven_report_delivery_quality: { payment_id: 'pay_1', quality: 'unusable' },
   haven_report_settlement_evidence: {
     payment_id: 'pay_7710',
     settlement_tx_hash: '0x' + 'ab'.repeat(32),
@@ -112,6 +115,9 @@ const VALID_ARGS: Record<StrictInputToolName, Record<string, unknown>> = {
   haven_verify_receipt: {
     receipt: { authorization: { delegate: '0xabc', signHash: '0x00', signature: '' } },
   },
+  // #3723: the handler calls haven.getReceipt('pay_1') — the stubbed Haven
+  // answers `{}`, which the loop tolerates downstream.
+  haven_get_receipt: { payment_id: 'pay_1' },
   haven_discover_tools: {},
   haven_submit_catalog_entry: { resource_url: 'https://merchant.example/mcp' },
   // #3329: the handler resolves the token via haven.getAllowances() first
@@ -145,6 +151,9 @@ const OFFLINE_TOOLS: Partial<Record<StrictInputToolName, string>> = {
  */
 const SMUGGLED_KEY: Record<StrictInputToolName, string> = {
   haven_report_x402_outcome: 'tx_hash',
+  // #3770: a money field this tool deliberately does not take — the amount
+  // is the payment record's, not the report's.
+  haven_report_delivery_quality: 'amount',
   // #2972: `rail` is one of the fields this tool reads from the payment's
   // own record (STRICT_INPUT_TOOLS.haven_report_settlement_evidence), not an
   // invented key.
@@ -180,7 +189,12 @@ const SMUGGLED_KEY: Record<StrictInputToolName, string> = {
   // new tool, same class as the pay tools' crossover key.
   haven_check_funds: 'maxAmountHuman',
   haven_quote_mcp_tool: 'max_amount',
-  haven_prepare_catalog_purchase: 'arguments',
+  // #3769: `arguments` is a DECLARED key on the catalog prepare now (a row
+  // with an argument schema accepts it, validated; a fixed-SKU row refuses it
+  // at the handler with INVALID_INPUT, not the strict-input parse). The
+  // natural mis-key is tool_name — it always comes from the row, never from
+  // the call.
+  haven_prepare_catalog_purchase: 'tool_name',
   haven_quote_catalog_purchase: 'max_amount',
   haven_resume_x402_payment: 'payment_header',
   haven_get_payment_status: 'tx_hash',
@@ -196,6 +210,9 @@ const SMUGGLED_KEY: Record<StrictInputToolName, string> = {
   // #3518: a spelling the LOCAL MCP reserves for the sign handoff's
   // payment branch — this read tool takes the id only.
   haven_get_task_budget: 'signature',
+  // #3723: the SDK's camelCase spelling — the same crossover-key class as the
+  // other by-id reads; this tool takes the snake_case id only.
+  haven_get_receipt: 'paymentId',
 }
 
 let fetches: string[]
@@ -396,10 +413,12 @@ describe('#2349 — the {} tools: strictness would change exactly one case', () 
  * whether a strict parse changes which refusal a caller meets first. It does
  * not for a caller sending only declared keys: both cap spellings are
  * declared, so strict passes them through and `readMaxAmountCap` still
- * raises its own — more useful — refusals, before any network call.
+ * raises its own — more useful — refusals, before any payment work. The one
+ * request they make is the hosted identity gate's agent read, which runs
+ * before every networked tool's handler.
  */
 describe('#2349 — the cap refusals stay reachable behind strict', () => {
-  it('both caps → AmbiguousMaxAmount, no network', async () => {
+  it('both caps → AmbiguousMaxAmount, only the identity read', async () => {
     const client = await connectedClient()
     const { text } = await callToolText(client, 'haven_prepare_catalog_purchase', {
       catalog_id: 'cat_1',
@@ -408,15 +427,15 @@ describe('#2349 — the cap refusals stay reachable behind strict', () => {
     })
     expect(text).toContain('Both max_amount')
     expect(text.toLowerCase()).not.toContain('unrecognized')
-    expect(fetches).toEqual([])
+    expect(fetches).toEqual(['GET /machine-payments/agent'])
   })
 
-  it('no cap → the cap-required refusal, no network', async () => {
+  it('no cap → the cap-required refusal, only the identity read', async () => {
     const client = await connectedClient()
     const { text } = await callToolText(client, 'haven_prepare_catalog_purchase', { catalog_id: 'cat_1' })
     expect(text).toContain('A spending cap is REQUIRED')
     expect(text.toLowerCase()).not.toContain('unrecognized')
-    expect(fetches).toEqual([])
+    expect(fetches).toEqual(['GET /machine-payments/agent'])
   })
 
   it('an UNDECLARED key alongside both caps meets the strict refusal first — stated, not hidden', async () => {
@@ -599,10 +618,14 @@ describe('#2348 — the crossover keys are the LOCAL surface\'s real spellings',
       'haven_open_task_budget',
       'haven_close_task_budget',
       'haven_get_task_budget',
+      // #3723: the signed bundle's read, pinned as a literal for the same
+      // anti-vacuity reason — the loops self-scope, so only a literal
+      // assertion goes red when the entry is deleted.
+      'haven_get_receipt',
     ]) {
       expect(Object.keys(STRICT_INPUT_TOOLS)).toContain(tool)
     }
-    expect(Object.keys(STRICT_INPUT_TOOLS)).toHaveLength(25)
+    expect(Object.keys(STRICT_INPUT_TOOLS)).toHaveLength(27)
     // And the two deliberate exclusions, as a literal list for the same reason.
     expect(Object.keys(PERMISSIVE_INPUT_TOOLS).sort()).toEqual(
       ['haven_get_agent', 'haven_get_allowances'],
@@ -617,16 +640,20 @@ describe('#2348 — the crossover keys are the LOCAL surface\'s real spellings',
     })
   }
 
-  it('haven_pay_x402_quote\'s "quote" crossover ALREADY failed loudly — payment_required is required', async () => {
-    // Measured, not assumed. #2348's divergence table reads as though `quote`
-    // were as silent as `idempotencyKey`; it never was, because the field it
-    // stands in for is required. Pinned so the claim in STRICT_INPUT_TOOLS'
-    // message stays true.
+  it('haven_pay_x402_quote\'s "quote" crossover fails loudly as an undeclared key, not for a missing payment_required', async () => {
+    // #3739: payment_required is OPTIONAL now (its absence selects request
+    // mode), so "payment_required is required" — the reason this pin used to
+    // give — no longer holds and would pass for the wrong reason. What refuses
+    // `quote` is the strict schema: the key is undeclared here, and the
+    // refusal says what the hosted tool reads instead. Nothing is fetched,
+    // so request mode never starts.
     const client = await connectedClient()
     const { text } = await callToolText(client, 'haven_pay_x402_quote', {
       quote: { paymentRequired: {} },
     })
-    expect(text).toContain('payment_required')
+    expect(text).toContain('quote')
+    expect(text).toContain('A quote object has no meaning here')
+    expect(text).not.toContain('payment_required is required')
     expect(fetches).toEqual([])
   })
 
@@ -844,4 +871,94 @@ describe('#3620 — budget-scope keys are the same on both runtimes, or the diff
       }).toEqual({ missingOnHosted: allowed.missingOnHosted, missingOnLocal: allowed.missingOnLocal })
     })
   }
+})
+
+/**
+ * The hosted identity gate (`tools/identity-gate.ts`). Every gated tool runs
+ * with its own valid arguments over the real transport against a Haven that
+ * refuses the agent read; the only request made is that read, and the
+ * handler never runs.
+ */
+describe('hosted identity gate — nothing runs before the agent read succeeds', () => {
+  const ALL_ARGS: Record<HostedToolName, Record<string, unknown>> = {
+    ...VALID_ARGS,
+    haven_get_agent: {},
+    haven_get_allowances: {},
+  }
+
+  const BODIES: Record<number, Record<string, string>> = {
+    401: { error: 'Invalid or revoked API key' },
+    403: {
+      error: 'agent_paused',
+      detail: 'New API-initiated transactions are blocked until you resume this agent.',
+    },
+    503: { error: 'service_unavailable' },
+  }
+
+  function stubHaven(agentStatus: number, open: string[] = []) {
+    fetches = []
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+      const u = new URL(url)
+      fetches.push(`${(init.method ?? 'GET').toUpperCase()} ${u.host}${u.pathname}`)
+      const refused = u.host === 'haven.test' && !open.some((p) => u.pathname.endsWith(p))
+      const body = refused ? BODIES[agentStatus] : {}
+      return {
+        ok: !refused,
+        status: refused ? agentStatus : 200,
+        statusText: refused ? 'refused' : 'OK',
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => body,
+        text: async () => JSON.stringify(body),
+      } as unknown as Response
+    })
+  }
+
+  for (const status of [401, 403, 503]) {
+    for (const name of Object.keys(toolSchemas) as HostedToolName[]) {
+      if (IDENTITY_GATE_EXEMPT.has(name)) continue
+      it(`${name}: a ${status} on the agent read refuses before the handler`, async () => {
+        stubHaven(status)
+        const client = await connectedClient()
+        const { text } = await callToolText(client, name, ALL_ARGS[name])
+        expect(fetches).toEqual(['GET haven.test/machine-payments/agent'])
+        const payload = JSON.parse(text) as { success: boolean; code: string; message: string; next_action?: string }
+        expect(payload.success).toBe(false)
+        if (status === 401) {
+          expect(payload.code).toBe(AGENT_IDENTITY_UNVERIFIED)
+          expect(payload.next_action).toBe('stop_and_tell_user')
+        } else {
+          // A valid key on a paused/pending agent, or a backend fault: the
+          // backend's own answer is relayed, not reworded as a bad key.
+          expect(payload.code).not.toBe(AGENT_IDENTITY_UNVERIFIED)
+        }
+      })
+    }
+  }
+
+  it('a 403 keeps the backend reason (paused agent, valid key)', async () => {
+    stubHaven(403)
+    const client = await connectedClient()
+    const { text } = await callToolText(client, 'haven_get_agent', {})
+    expect(text).toContain('resume this agent')
+    expect(text).not.toContain('did not accept this agent API key')
+  })
+
+  it('haven_verify_receipt is exempt and makes no request', async () => {
+    stubHaven(401)
+    const client = await connectedClient()
+    await callToolText(client, 'haven_verify_receipt', ALL_ARGS.haven_verify_receipt)
+    expect(fetches).toEqual([])
+  })
+
+  it('haven_sweep_delegate is exempt: a key refused on the agent read still reaches sweep/prepare', async () => {
+    stubHaven(401, ['/sweep/prepare'])
+    const client = await connectedClient()
+    await callToolText(client, 'haven_sweep_delegate', ALL_ARGS.haven_sweep_delegate)
+    expect(fetches.some((f) => f.endsWith('/sweep/prepare'))).toBe(true)
+    expect(fetches).not.toContain('GET haven.test/machine-payments/agent')
+  })
+
+  it('exempts exactly the two tools whose reason is written in identity-gate.ts', () => {
+    expect([...IDENTITY_GATE_EXEMPT].sort()).toEqual(['haven_sweep_delegate', 'haven_verify_receipt'])
+  })
 })

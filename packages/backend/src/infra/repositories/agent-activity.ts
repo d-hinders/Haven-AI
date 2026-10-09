@@ -55,6 +55,15 @@ export interface ActivityPaymentRow {
   to_address: string
   status: string
   tx_hash: string | null
+  /**
+   * #3763: `machine_metadata.merchant_settlement_tx_hash` — the merchant's
+   * own settlement transaction when an agent reported one and it verified
+   * on-chain (#3475). `null` is "not recorded", never "failed". `tx_hash`
+   * keeps its funding meaning.
+   */
+  settlement_tx_hash: string | null
+  /** #3763: `machine_metadata.settlement_scheme` (#1705) — no scheme selected before this read. */
+  settlement_scheme: string | null
   source: string | null
   x402_resource_url: string | null
   x402_merchant_address: string | null
@@ -62,6 +71,8 @@ export interface ActivityPaymentRow {
   payment_resource_url: string | null
   merchant_address: string | null
   payment_proof_status: string | null
+  /** `machine_payment_evidence.delivery_reference` (migration 107, #3778). */
+  delivery_reference: string | null
   payment_reconciliation_event_type: string | null
   execution_rail: string | null
   delegation_hash: string | null
@@ -92,10 +103,13 @@ export const LIST_AGENT_PAYMENTS_SQL = `SELECT pi.id,
               pi.to_address,
               pi.status,
               pi.tx_hash,
+              pi.machine_metadata->>'merchant_settlement_tx_hash' AS settlement_tx_hash,
+              pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
               COALESCE(pi.payment_rail, pi.source, 'direct') AS source,
               COALESCE(pi.payment_resource_url, pi.x402_resource_url) AS x402_resource_url,
               COALESCE(pi.merchant_address, pi.x402_merchant_address) AS x402_merchant_address,
               mpe.proof_status AS payment_proof_status,
+              mpe.delivery_reference AS delivery_reference,
               pi.payment_rail,
               pi.payment_resource_url,
               pi.merchant_address,
@@ -156,10 +170,13 @@ export const LIST_FEED_PAYMENTS_SQL = `SELECT pi.id,
               pi.to_address,
               pi.status,
               pi.tx_hash,
+              pi.machine_metadata->>'merchant_settlement_tx_hash' AS settlement_tx_hash,
+              pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
               COALESCE(pi.payment_rail, pi.source, 'direct') AS source,
               COALESCE(pi.payment_resource_url, pi.x402_resource_url) AS x402_resource_url,
               COALESCE(pi.merchant_address, pi.x402_merchant_address) AS x402_merchant_address,
               mpe.proof_status AS payment_proof_status,
+              mpe.delivery_reference AS delivery_reference,
               pi.payment_rail,
               pi.payment_resource_url,
               pi.merchant_address,

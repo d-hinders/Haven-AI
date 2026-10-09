@@ -95,7 +95,27 @@ describe('transactionCsvRow', () => {
       // converted currency, appended at the end of the contract.
       reporting_currency: 'SEK',
       converted_currency: '',
+      // #3763: the settlement column is DELIBERATELY appended last — `tx_hash`
+      // keeps its funding meaning, and a row with no recorded settlement
+      // exports an EMPTY cell, never a copy of the funding hash.
+      settlement_tx_hash: '',
     })
+  })
+
+  it('#3763: exports the recorded settlement hash beside the funding one', () => {
+    const row = transactionCsvRow(
+      tx({
+        source: 'x402',
+        agentName: 'Buyer',
+        paymentId: 'pi-1',
+        // `hash` is the FUNDING leg; the settlement is its own column.
+        settlementTxHash: `0x${'22'.repeat(32)}`,
+      }),
+      NEVER_NAMED,
+    )
+
+    expect(row.tx_hash).toBe('0xabc')
+    expect(row.settlement_tx_hash).toBe(`0x${'22'.repeat(32)}`)
   })
 
   it('takes the counterparty from the sender on an inbound row', () => {

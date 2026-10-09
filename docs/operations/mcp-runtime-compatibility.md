@@ -25,7 +25,9 @@ covers:
   - packages/sdk/src/client.ts
   - packages/sdk/src/connector-channel.ts
   - packages/sdk/src/mcp-merchant-transport.ts
+  - packages/sdk/src/merchant-egress.ts
   - packages/sdk/src/merchant-completion.ts
+  - packages/sdk/src/receipt.ts
   - packages/sdk/src/edge.ts
   - packages/sdk/src/client-identity.ts
   - packages/core/src/client-compat.ts
@@ -42,6 +44,7 @@ covers:
   - scripts/verify-connect-bundle.mjs
   - scripts/README.md
   - packages/mcp-server/src/description-size.test.ts
+  - packages/mcp-server/src/log.ts
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/modules/x402/replay.ts
   - packages/backend/src/modules/mpp/budget-precheck.ts
@@ -73,8 +76,226 @@ covers:
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-10-02"
+last-verified: "2026-10-08"
 ---
+
+
+> **#3778 (2026-10-08, optional bounded `delivery_reference` on the x402
+> outcome and settle surfaces):** `haven_report_x402_outcome`,
+> `haven_complete_mcp_tool` and `haven_settle_mcp_tool` accept an optional
+> `delivery_reference` (≤ 512 chars) — the NON-SECRET pointer to a delivered
+> good ("Bik Bok 5 SEK, order 6ac7…"). On an accepted outcome it is recorded
+> on the `machine_payment_evidence` row (migration 107) and surfaces on the
+> receipt (`haven_list_receipts` / `POST /machine-payments/evidence` echo),
+> the transaction detail drawer, and the activity feed, so the owner can see
+> that a deliverable EXISTS and where to recover it — closing the #3778 gap
+> where the only copy of a purchased redemption code lived in the agent's
+> session context.
+> - **Credential-shaped values are refused at three layers:** the tool
+>   handlers (pre-write for the report; pre-funding for settle), the backend
+>   semantic layer (`attachMachinePaymentEvidence` → 400
+>   `delivery_reference_refused`), and the shared recognizer in
+>   `@haven_ai/core` (`deliveryReferenceError`: JWTs, long hex/base64 token
+>   material, grouped uppercase gift-card codes). Deliberately conservative —
+>   order ids and invoice references pass; the relay of the secret itself
+>   stays the skill's rule, not a stored field. Rejected outcomes record no
+>   reference (nothing was delivered).
+> - **Hosted delivery picks this up on deploy**; local MCP/connect users
+>   need an `@haven_ai/mcp` / `@haven_ai/connect` release (both pin the SDK
+>   exactly), as with #3764.
+> - **An already installed `SKILL.md` stays stale until reinstalled** (its
+>   "Reporting after a purchase" section gained the relay rule and the
+>   Bitrefill SIWX recovery steps; both byte-pinned copies edited
+>   identically).
+
+> **#3769 (2026-10-08, the guided catalog path accepts per-call arguments and
+> an HTTP call shape):** `haven_prepare_catalog_purchase` gains one OPTIONAL
+> input, `arguments`. A catalog row that declares `tool_arguments_schema` (a
+> JSON Schema the row carries; migration 107 pins Soundside `create_text`'s,
+> tightened to require prompt-or-messages) accepts caller `arguments` — merged
+> over the row's pinned `tool_arguments` and validated against the schema
+> BEFORE the merchant probe, refused `INVALID_CATALOG_ARGUMENTS` (400) when
+> they violate it; a row WITHOUT a schema is a fixed SKU and now REFUSES
+> caller `arguments` with `INVALID_INPUT` (the old drop-in-silence hardened
+> into a refusal). The strict-input mis-key census moved from `arguments` to
+> `tool_name` for this tool. Discovery entries additively carry
+> `tool_arguments_schema` / `http_method` / `body_type` / `body_example`
+> (absent on an older backend), and an http row's `haven_quote_x402` hint now
+> carries `method`/`body` when the row declares them.
+> - **Additive, not re-shaping.** No tool is added or renamed; `arguments` is
+>   optional, so an existing caller's payload is unchanged and an older local
+>   MCP is unaffected (the input lives on the hosted surface only).
+> - **Version skew is safe in both directions.** An old BACKEND sends no
+>   `tool_arguments_schema`, every row reads schema-less, and `arguments`
+>   refuses — the pre-#3769 contract. An old hosted server ignores the new
+>   backend fields and keeps quoting with the row's pinned arguments. The
+>   consent hash covers tool names, not inputs (per the #3771 note below), so
+>   it does not move.
+> - **The refusals are pre-intent.** Both argument refusals run before the
+>   live quote, so no merchant is contacted and no payment exists on an
+>   invalid call — the same position the cap refusals already hold.
+>
+> **Re-verified #3781 (2026-10-08, the catalog tier of the purchase label):**
+> a settled purchase that came from a catalog entry now reports the catalog
+> row's name as the purchase label, not the `<merchant host> <tool_name>`
+> label a direct pay gets. `haven_prepare_catalog_purchase` persists the
+> row's `name` as optional `catalogName` on the stored `mcp_call_context`
+> (both scheme branches — one shared object); `POST /x402`'s enforced request
+> schema accepts the optional key (previously refused outright under
+> `additionalProperties: false`); `GET /x402/{id}/merchant-call-context`
+> re-serves it snake_case as `catalog_name`; and the settle leg prefers the
+> rehydrated `catalogName` over the host+tool label in `purchaseFallbackLabel`
+> (`packages/mcp-server/src/tools/paid-mcp-completion.ts`).
+> - **Precedence is unchanged, and #1349 with it.** The merchant's
+>   `product_name` still wins in both cases; the catalog name is only the
+>   first tier of the Haven-derived gap filler. A direct
+>   `haven_pay_mcp_tool` purchase carries no `catalogName` and keeps the
+>   host+tool label (#3771 pinned) — and a catalog row is Haven's own data,
+>   so the tier stays Haven-derived, never merchant content.
+> - **No contract moves.** No tool is added, renamed or re-shaped; the new
+>   schema key is optional, additive, `minLength: 1`, and refused nowhere it
+>   worked before; the endpoint response gains one optional key under its
+>   existing closed schema; no migration (the context is a JSONB blob), and
+>   the version-skew, consent-hash and expected-context contracts do not
+>   move. An older settle leg simply ignores the extra rehydrated key.
+>
+> `last-verified` stays 2026-10-08. Nothing else in this document was
+> re-verified.
+
+>
+> **#3768 (2026-10-08, merchant-issued credentials are withheld from the settled `result`):**
+> a settled `haven_settle_mcp_tool` / `haven_complete_mcp_tool` response no longer
+> forwards merchant-issued bearer credentials to the agent verbatim. Prod QA
+> 2026-10-08 (payment `79084a5e`, Soundside `create_text`, Base mainnet) showed
+> `result.structuredContent` carrying an `x402_session_token` JWT and a
+> `wallet_link` URL with an embedded JWT — both bound to the agent's delegate
+> EOA — reaching the untrusted agent context as-is. `deliverMerchantPayment`
+> now redacts the merchant body before any handler arm returns it: JWT-shaped
+> strings are redacted by shape (including embedded in URLs), and string
+> values under credential-named keys (`*_token`, `*_link`, `access_token`,
+> `session`, plus `secret`/`password`/`api_key`/`authorization`/`bearer`/
+> `credential`) are withheld whole. The MERCHANT_REJECTED_AFTER_FUNDING
+> refusals' bounded `Merchant response:` echo redacts unconditionally.
+> - **The opt-in is explicit and per call:** `include_merchant_credentials:
+>   true` on either tool returns the merchant body unredacted — a merchant
+>   session (Bitrefill `X-Access-Token`, #3728) is how an agent avoids paying
+>   per call, so receiving a credential is the agent's deliberate act, never
+>   the default. Money fields, `settled`/`delivered` markers and transaction
+>   hashes are never touched by the recognizer.
+> - **The hosted surface picks this up on deploy**; no local-MCP or connect
+>   release is implicated (the local flow has the agent make the paid retry
+>   itself, so Haven never sees that result).
+> - **An already installed `SKILL.md` stays stale until reinstalled** (its
+>   "Reporting after a purchase" section now documents the withholding; both
+>   byte-pinned copies — `packages/sdk/src/skill-content.ts` and the frontend
+>   twin — were edited identically).
+> - **Persistence paths checked:** the evidence row
+>   (`attachMachinePaymentEvidence`) records status, challenge, proof and
+>   receipt headers — never a result body; the hosted access log
+>   (`packages/mcp-server/src/log.ts`) logs metadata only; the backend
+>   `agent_tool_invocations` audit extracts payment_id/next_action/error-code
+>   only, and its tool allowlist never included the settle/complete tools.
+>   Two body-bearing writes REMAIN verbatim by design, both bounded:
+>   reconciliation-event `retry_body` snippets (written only on a REJECTED
+>   retry, and only from that rejection body) and merchant `x-receipt-json`
+>   receipt documents (the merchant's own document, captured from headers).
+>   Neither is the settled tool result; flagged as accepted residual.
+
+> **#3764 (2026-10-08, the SDK reports the merchant's EIP-3009 settlement hash):**
+> on an accepted merchant answer to a payment WITH a funding leg, the SDK now
+> posts the merchant's own settlement transaction (parsed from
+> `PAYMENT-RESPONSE`, or the native MCP profile's
+> `result._meta["x402/payment-response"]`) as a SECOND
+> `/machine-payments/evidence` report right after the funding one — so Haven
+> records the transaction the merchant shows
+> (`machine_metadata.merchant_settlement_tx_hash`, #3475). Exactly one
+> attempt, no backoff; nothing is posted when the hash is missing, malformed,
+> the zero marker, or the funding hash in any letter case. The hosted eip3009
+> tools (`haven_complete_mcp_tool`, `haven_settle_mcp_tool`) map the report's
+> outcome to next steps (retryable → `haven_report_settlement_evidence` with
+> the hash prefilled; refused → no tool).
+> - **Hosted delivery picks this up on deploy.**
+> - **Local MCP users need an `@haven_ai/mcp` release** and **connect users an
+>   `@haven_ai/connect` release** — both pin `@haven_ai/sdk` exactly
+>   (`packages/mcp/package.json:57`, `packages/connect/package.json:58`), so
+>   upgrading the SDK alone does nothing for them.
+> - **An already installed `SKILL.md` stays stale until reinstalled** (the
+>   skill's plain-HTTP settlement guidance now points at
+>   `haven_report_x402_outcome`'s `payment_response`, #3727).
+
+> **Re-verified #3770 (2026-10-08, delivery-quality report):** the hosted
+> surface gains one tool, `haven_report_delivery_quality { payment_id, quality,
+> note? }` — the agent's evidence-only verdict on what a settled payment
+> DELIVERED (`ok` / `unusable` / `partial`, note bounded at 2000). It joins
+> `PAID_MCP_COMPLETION_TOOLS` and `STRICT_INPUT_TOOLS`: the rail, amount and
+> merchant are read from the payment record scoped to the calling agent, so a
+> report cannot be pointed at another agent's payment (404) or an unsettled
+> one (409). The description-size ratchet re-measures at 29,863 bytes over 29
+> tools (mean pin 1029.76, shrink-only from here).
+> - **No consent-hash event.** The tool is hosted-only — the local signer's
+>   tool set, `SIGNER_CONSENT_SURFACE_VERSION` and the signer consent hash are
+>   untouched, and the signer and connect packages do not change.
+> - **Wording-only description edits.** `haven_complete_mcp_tool` and
+>   `haven_settle_mcp_tool` gain one next-action sentence naming the report;
+>   no input or output schema, argument, expected-context version or consent
+>   surface moves, and the strict-input count goes 26 → 27 with the same
+>   per-tool rationale as its siblings.
+> - **An older build keeps working.** Without the tool the agent simply has
+>   no way to record a verdict — exactly the #3770 gap — and nothing it could
+>   do before is refused or re-shaped.
+>
+> `last-verified` stays 2026-10-08. Nothing else in this document was
+> re-verified.
+
+> **Re-verified #3771 (2026-10-08, purchase_summary.product fallback):** a
+> settled result whose merchant payload names no product — no
+> `structuredContent.summary` — no longer leaves `purchase_summary.product`
+> null: it falls back to the Haven-derived `<merchant host> <tool_name>` label
+> built from facts the settle call already holds — the merchant URL the
+> resolved call context was resolved against and the tool that was called
+> (`purchaseFallbackLabel`, `packages/mcp-server/src/tools/paid-mcp-completion.ts`);
+> a URL that will not parse (or none) falls back to the tool name alone.
+> Both settled arms pass it — erc7710 AND EIP-3009, through
+> `haven_settle_mcp_tool` and `haven_complete_mcp_tool` — and
+> `agent_summary.product` carries the same label via
+> `buildPurchaseSummary`'s `fallbackProduct` input.
+> - **The merchant's `product_name` still wins.** The fallback only fills the
+>   gap when the merchant's result carries none; #1349 is otherwise untouched —
+>   `invoice_id`, money, status and hashes keep their existing sources, and
+>   merchant content still sets no display field beyond `product_name`.
+> - **No contract moves.** No tool is added, renamed or re-shaped, no argument
+>   or input schema changes, and the version-skew and consent-hash contracts
+>   do not move: response payloads are not a skew axis and the consent hash
+>   covers tool names, not their inputs or responses. An older build without
+>   the fallback still reports `product: null` — only less informative.
+>
+> `last-verified` stays 2026-10-08. Nothing else in this document was
+> re-verified.
+
+> **Re-verified (2026-10-07, hosted agent identity before tool dispatch):**
+> - **Every hosted tool call reads the agent first.** `buildHostedMcpServer` runs `requireAgentIdentity` (`packages/mcp-server/src/tools/identity-gate.ts`) before a tool's handler. A 401 on that read refuses with `code: AGENT_IDENTITY_UNVERIFIED`, `next_action: stop_and_tell_user` and a `next_tool_omitted_reason`. Any other failure is relayed through `normalizeError` as before, so `agent_pending_approval` and `agent_paused` keep their backend reason. The handler does not run either way.
+> - **Two exemptions.** `haven_verify_receipt` makes no request. `haven_sweep_delegate` calls only the sweep routes the backend keeps open to revoked and paused keys, so sweep recovery is unchanged.
+> - **No contract moves.** No tool, schema, strict-input list, expected-context version or consent hash moves; the local MCP, the signer and the connector are untouched. A valid key sees one extra agent read per call and otherwise unchanged answers.
+>
+> `last-verified` stays 2026-10-02. Nothing else in this document was re-verified.
+
+> **Re-verified #3728 (2026-10-07, signer SIWX phase 1):** the local signer
+> gains one tool, `haven_sign_siwx { url, challenge }` — an x402
+> Sign-In-With-X (CAIP-122 / EIP-4361) sign-in for the delegate EOA. The tool
+> takes no input from Haven, composes the message in-package from
+> grammar-validated challenge fields, and returns a finished
+> `SIGN-IN-WITH-X` header; it moves no money.
+> - **One consent-hash event, not a version bump.** The consent hash covers
+>   the sorted tool NAMES, so the new tool moves it once — every upgraded
+>   install re-prompts exactly once. `SIGNER_CONSENT_SURFACE_VERSION` stays 2.
+> - **`requiredSignerTools` is derived**, so no connect-side edit: doctor and
+>   install probes now require the new tool from the installed signer. An
+>   older signer keeps paying but does not list the tool.
+> - **No schema, expected-context or sweep-binding version moves.** The audit
+>   entry gains optional additive `domain`/`nonce` fields on `version: 1`,
+>   following the `safe_address?`/`chain_id?` pattern, no key renamed (#2914).
+> Scope of this note: the signer tool set, consent and audit surfaces.
+> Nothing else in this document was re-verified.
 
 > **Re-verified #3669 (2026-10-06, backend supported vs known chains):**
 > - **The wire value narrows.** `GET /chains` and discovery `chains.supported` now list 8453 and 84532 only; chain 100 leaves. No key or field is removed.
@@ -198,6 +419,43 @@ last-verified: "2026-10-02"
 > rule sentences are byte-identical to before. `last-verified` stays
 > 2026-10-02. Nothing else in this document was re-verified.
 
+> **Re-verified #3756 (2026-10-07, superseded-agent wording):** this diff
+> touches covered connect files in their human-readable output only:
+> - the `--doctor` superseded-agents repair (`doctor.ts`);
+> - the replace and new-agent heads-ups and the `wiring_collision` refusal
+>   (`runtime.ts`);
+> - the collision prompt (`wiring-collision.ts`);
+> - the `--replace` help (`args.ts`) and the README.
+>
+> Each now names Remove agent… on the agent page instead of "revoke". No
+> flag, exit code, check id, `--json` field, tool, schema, version-skew or
+> consent-hash contract moves. Two body lines here repeated the same claim and
+> are fixed with it: the `--replace` paragraph ("the owner still revokes on the
+> Haven agent page") and the `--unwire` paragraph ("the owner revokes the agent
+> on the Haven agent page") now name Remove agent…. `last-verified` stays
+> 2026-10-02. Nothing else in this document was re-verified.
+
+> **Re-verified #3722 (2026-10-07, leaked-credential copy):** this diff touches
+> covered files in their human-readable text only: the haven-pay skill's leak
+> section (`skill-content.ts`, renamed "If the credential may have leaked"), the
+> signer consent line, and the connect `--tombstone` / `--unwire` output
+> sentences. All of them now name Replace signing key, Stop budget and Remove
+> agent… instead of "pause or revoke". Every runtime still installs the one
+> canonical skill string. The signer consent hash covers identity, tool names
+> and `SIGNER_CONSENT_SURFACE_VERSION` (unchanged), not the wording, so no
+> install is re-prompted by this. No tool, argument, schema, version-skew,
+> consent-hash or exit-code contract moves. `last-verified` stays 2026-10-02.
+> Nothing else in this document was re-verified.
+
+> **Re-verified, Backend checks ceiling (2026-10-07):** this diff touches
+> `.github/workflows/ci.yml`, a covered file, in the `backend_checks` job's
+> `timeout-minutes` only (8 to 12) and the comment above it. The job name,
+> its steps, the check identity and every ruleset contract are unchanged. No
+> tool, schema, version-skew or consent-hash contract moves; the client
+> releases table, upgrade hints, publish flow and package resolution are
+> untouched. `last-verified` stays 2026-10-02. Nothing else in this document
+> was re-verified.
+
 > **Re-verified #3583 (2026-10-02, the ops render smoke):** this diff touches
 > `.github/workflows/ci.yml`, a covered file, inside the `ops_checks` job
 > only: its build step gains a fixture `NEXT_PUBLIC_OPS_ENVIRONMENTS`, three
@@ -313,7 +571,9 @@ last-verified: "2026-10-02"
 > is what an agent acts on, pinned by a source scan in
 > `response-prose.test.ts`); `agent_summary.product` on the settled erc7710
 > arms reports the merchant's product name with the tool name as fallback
-> (value change, field and shape unchanged); and the delegation-rail
+> (value change, field and shape unchanged; since #3771 that fallback is the
+> Haven-derived `<merchant host> <tool_name>` label — see Re-verified #3771);
+> and the delegation-rail
 > `allowance` block `haven_pay_x402_quote` has carried since #3476 moved
 > VERBATIM to `support/allowance-block.ts` and is now attached to
 > `haven_pay_mcp_tool`'s successful results too — an optional additive field
@@ -1667,6 +1927,15 @@ last-verified: "2026-10-02"
 > consent-hash contracts do not move. `last-verified` is not re-stamped: this
 > block is the scope. Nothing else in this document was re-verified in this
 > pass.
+>
+> **Recent re-verification (#3645, 2026-10-07):** `scripts/README.md`'s
+> internal-pin section now lists `ops` among the private consumers that pin
+> `"*"` and adds `ops` and `ui` to the table's private rows, matching what
+> `npm run lint:workspace-pins` already enforces by the `private: true` field.
+> The published-package enumeration `release:bump:test` checks is unchanged.
+> Text only: no tool, argument, schema, description or consent input changes,
+> and the version-skew and consent-hash contracts do not move. Nothing else in
+> this document was re-verified in this pass.
 
 Haven Connect Agent 2 installs a local stdio MCP runtime for Codex Desktop,
 Codex CLI, and Claude Code. The connector must not rely on `npx` at agent
@@ -1941,6 +2210,36 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > **Re-read, not rubber-stamped:** the Node floor and the Codex and Claude Code
 > rows are unchanged. `last-verified` is not bumped.
 
+> **Re-verification (0.9.0-alpha.0 release, 2026-10-09):** the manifest table
+> above is re-pinned by the bump to `0.9.0-alpha.0` for `connect`, `mcp`, `sdk`
+> and `signer`, with `SDK_VERSION` rewritten beside it. The step from
+> `0.8.1-alpha.0` is **MINOR**: the range adds surfaces and narrows or removes
+> none; no CHANGELOG entry is marked **Update required**.
+>
+> **Surfaces this release moves:**
+> - **Signer.** A new tool, `haven_sign_siwx` (#3728): a Sign-In-With-X
+>   signature by the delegate key, moving no funds. The signer's instructions
+>   gain an advisory identity line (#3738), and one consent line is reworded
+>   (#3722), so the consent text differs.
+> - **Connect.** A default setup names each new agent's pair `haven-<slug>` /
+>   `haven-signer-<slug>` (#3737); `--bare` / `--replace` reach the bare pair;
+>   `--json` gains `server_name`. A `--replace` or rebind warns that a running
+>   session keeps acting as the previous agent (#3772). Existing installs are
+>   left as they are.
+> - **SDK.** Settlement-hash reporting (#3764), folded settlement evidence and
+>   retry headers (#3727), the request-mode key lookup (#3739); skill text
+>   split by scheme (#3774) and several wording fixes. Additive.
+> - **Local MCP.** `haven_get_receipt` returns the signed bundle (#3723).
+> - **CLI.** `haven agents revoke` refuses while a budget is live unless
+>   `--keep-budget` (#3729).
+> - **Not moved.** `CLIENT_COMPAT` is unchanged: `@haven_ai/signer`
+>   `min_version` stays `0.6.0-alpha.0`, so no installed client is forced to
+>   update.
+>
+> **Re-read, not rubber-stamped:** the Node floor and the Codex and Claude Code
+> rows are unchanged. `last-verified` already reads 2026-10-08 from an earlier
+> change and is not bumped.
+
 > **Re-verification (0.8.1-alpha.0 release, 2026-10-07):** the manifest table
 > above is re-pinned by the bump to `0.8.1-alpha.0` for `connect`, `mcp`, `sdk`
 > and `signer`, with `SDK_VERSION` rewritten beside it. The step from
@@ -2208,10 +2507,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.8.1-alpha.0` |
-| `@haven_ai/mcp` | `0.8.1-alpha.0` |
-| `@haven_ai/sdk` | `0.8.1-alpha.0` |
-| `@haven_ai/signer` | `0.8.1-alpha.0` |
+| `@haven_ai/connect` | `0.9.0-alpha.0` |
+| `@haven_ai/mcp` | `0.9.0-alpha.0` |
+| `@haven_ai/sdk` | `0.9.0-alpha.0` |
+| `@haven_ai/signer` | `0.9.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 
@@ -2376,18 +2675,33 @@ precedence order:
    the refusal at rung 7 is written as an instruction to the agent rather than
    to a human.
 6. **The clients installed here (#1719).** When nothing was detected and stdin
-   is an interactive terminal, the connector scans for the config locations it
-   can actually write (`~/.claude`, `~/.codex/config.toml`, `~/.cursor/mcp.json`,
-   the VS Code / VS Code Insiders user `mcp.json`, a workspace `.vscode/`,
-   Claude Desktop's `claude_desktop_config.json`, `$HERMES_HOME/config.yaml`)
-   and offers **only those**, likeliest first — an existing MCP config outranks
-   a bare client directory. The scan **populates the choices; it never
-   selects** (the #1719 invariant — pinned by
+   is an interactive terminal, the connector scans for agent clients — the
+   config files it can actually write (`~/.codex/config.toml`,
+   `~/.cursor/mcp.json`, the VS Code / VS Code Insiders user `mcp.json`, a
+   workspace `.vscode/`, Claude Desktop's `claude_desktop_config.json`,
+   `$HERMES_HOME/config.yaml`) plus the clients it configures through their
+   own CLIs, seen as directory markers only: Claude Code (`~/.claude`,
+   `~/.claude.json`), which is wired via `claude mcp add-json` and is never
+   configured by writing a file — so those paths are EVIDENCE, never write
+   targets (an earlier revision of this paragraph wrongly listed `~/.claude`
+   among the config locations the connector writes; corrected in #3732).
+   Since #3732, a `~/.claude.json` that carries an `mcpServers` key counts as
+   config-file evidence for Claude Code — so a machine with both a Claude
+   Code MCP config and a Codex config ties, and produces NO suggestion,
+   instead of suggesting Codex by construction. Candidates are offered
+   likeliest first — an existing MCP config outranks a bare client
+   directory — and the list may mark one client `(suggested)`, but the
+   prompt **never pre-selects**: an empty answer re-asks and, after three
+   attempts, aborts with nothing written and the setup token unused
+   (#3732's owner decision, matching the wiring-collision prompt). The scan
+   **populates the choices; it never selects** (the #1719 invariant — pinned by
    [`packages/connect/src/installed-clients.test.ts`](../../packages/connect/src/installed-clients.test.ts)
    "NEVER selects for the user", #2680). Finding exactly one installed app still prompts, because an
    installed app tells you what exists, not where the user wants their agent to
    run, and a silent wrong write plants an API key and a delegate key in an app
-   they do not use. This rung is **omitted entirely** — not answered — under
+   they do not use. The chat app's row reads "Claude Desktop (chat app)" so a
+   user in the desktop app's Code tab cannot mistake it for where they are.
+   This rung is **omitted entirely** — not answered — under
    `--json` and whenever `process.stdin.isTTY` is false, so CI and automation
    reach the refusal instead of blocking on stdin.
 7. Nothing known → the connector **refuses before any side effect** (the
@@ -2454,14 +2768,21 @@ found on **this machine** (additive, still `schema_version` 1):
   on self-knowledge alone. `allowed_runtimes` says what is *permitted*;
   `installed_clients` says what is *here*.
 - `error.suggested_runtime` — the top hit, and only when it is unambiguously
-  top: a lone candidate, or a live MCP config file outranking bare client
-  directories. Two candidates in the same evidence tier are separated only by
-  the scan's fixed order, which is a preference rather than a fact about the
-  machine, so no suggestion is offered there.
+  top: a lone candidate, or a single live MCP config file among bare client
+  directories. Since #3732, a `~/.claude.json` carrying an `mcpServers` key
+  is config-file evidence for Claude Code — so a machine with both a Claude
+  Code MCP config and a Codex config ties, and NO suggestion is offered,
+  where before Codex won by construction. Two candidates in the same evidence
+  tier are separated only by the scan's fixed order, which is a preference
+  rather than a fact about the machine, so no suggestion is offered there.
 
 **The scan populates choices; it never selects.** This is #1719's invariant and
 it is unchanged: a `suggested_runtime` is a value the agent may echo back as
-`--runtime`, never a selection the connector makes. Finding exactly one
+`--runtime`, never a selection the connector makes. The interactive prompt
+follows the same rule and is stricter still (#3732): it never pre-selects —
+an empty answer re-asks, and after three attempts aborts with
+`runtime_prompt_aborted` having written nothing — even when the scan found
+exactly one client. Finding exactly one
 installed client does **not** flip the outcome to success — an installed app
 tells you what exists, not where the user wants their agent to run, and the
 cost of being wrong is an API key and a delegate key written into an app they
@@ -2495,7 +2816,7 @@ the `ConnectError` vocabulary rather than the regex ladder.
 | `runtime_no_installed_clients` | Interactive terminal, but no client Haven can configure is installed | Re-run with `--runtime <name>`, or `other` |
 | `runtime_prompt_aborted` | Ctrl-C / EOF at the prompt, or three invalid answers | Re-run and choose, or pass `--runtime` to skip the prompt |
 | `runtime_config_unreadable` | The chosen client's config file exists but is not parseable JSON/YAML | Fix (or move aside) the named file, then `--doctor --repair --runtime <name>` — **not** the connector command |
-| `wiring_collision` ([#2551](https://github.com/d-hinders/Haven-AI/issues/2551)) | A **bare** (no `--name`) setup on a machine whose credential root already holds a bare-pair directory with a usable key — what `--doctor` calls `wired` or `superseded` — and no interactive terminal to ask | **Relay to the human**, who chooses: re-run with `--replace` (re-point `haven` / `haven-signer`, retire the previous directory locally) or with `--name <slug>` (install alongside; `error.suggested_name` proposes one). An agent following the setup prompt must not add either flag itself |
+| `wiring_collision` ([#2551](https://github.com/d-hinders/Haven-AI/issues/2551)) | A **bare** setup — `--bare`, or `--replace`; since [#3737](https://github.com/d-hinders/Haven-AI/issues/3737) a default setup names its own pair and never lands here — on a machine whose credential root already holds a bare-pair directory with a usable key — what `--doctor` calls `wired` or `superseded` — and no interactive terminal to ask | **Relay to the human**, who chooses: re-run with `--replace` (re-point `haven` / `haven-signer`, retire the previous directory locally) or with `--name <slug>` (install alongside; `error.suggested_name` proposes one). An agent following the setup prompt must not add either flag itself |
 | `wiring_collision_declined` | The same collision at an interactive terminal, and the user chose neither | Re-run with `--replace` or `--name <slug>` |
 
 The first five refuse **before any side effect**, so there is nothing to
@@ -2547,7 +2868,7 @@ superseded directory **locally** (tombstone, then the unconditional key-material
 teardown — `--unwire` itself now runs that teardown only when its #3123 probe
 says there is nothing to preserve; `--replace` does not probe — only once the
 runtime install actually completed — a failed install skips it and the outcome
-says so), and the owner still revokes on the Haven
+says so), and the owner still ends it with **Remove agent…** on the Haven
 agent page. The revoke route is owner-authenticated; the connector holds agent
 keys only. Since #3542 the dashboard's revoke of a superseded agent also ends
 its budget with one owner signature (`revoke-all`); a revoke that stops at the
@@ -2825,7 +3146,12 @@ first write, with the account each spends from; a subset of
 `superseded_agent_ids`, which also names key-less and tombstoned directories)
 and `server_name_rebound_from`
 (only when the run took a server name over from another directory's local
-`mcp-server-binding.json`, with `backend_changed`); and since #2528, also
+`mcp-server-binding.json`, with `backend_changed`; since #3772, when a run
+re-points wiring another agent held — such a rebind, or any `--replace` — and
+its install completed, `activation.instruction` also says that a session
+already running keeps acting as the previous agent(s) until it is restarted,
+and that they may still be active in Haven — text appended to an existing
+string field, no new key); and since #2528, also
 additive, `approval.url` — the absolute link to
 this setup's budget approval, echoed from the register response and present
 only when `approval.required` is true AND the backend is new enough to return
@@ -3164,6 +3490,22 @@ runtime and backend that fails closed on it. An operator on a runtime predating
 that is the defect being fixed, and its remedy is an ordinary runtime update, not
 a skew diagnosis. Nothing in the table above applies to it.
 
+### retry_headers and the installed-signer lever (#3727)
+
+`haven_sign_x402` and `haven_x402_sign_header` now return `retry_headers` —
+`{ <name>: <payment_header> }` built from the SDK's live
+`x402PaymentHeaderNamesFor` rule — and the hosted `haven_submit` returns it on
+the erc7710 path beside the header it assembles. This IS an installed-signer
+lever: `retry_headers` reaches agents only after a `@haven_ai/signer` release
+and connector refresh. Until then every agent follows the existing prose
+("set BOTH PAYMENT-SIGNATURE and X-PAYMENT", "PAYMENT-SIGNATURE only on
+erc7710"), which stays correct. The field is additive — nothing keys on its
+presence, and the name-selection rule it encodes is the same rule the wire path
+already applies, so there is no combination of signer, hosted server and
+backend that fails closed on it. The plain-HTTP outcome fold
+(`haven_report_x402_outcome` taking `settlement_tx_hash` / `payment_response`)
+is hosted-only and ships on deploy; nothing installed depends on it.
+
 **Why three stale-signer rows (#1143).** The second is what the field actually
 returned on 2026-08-06, and #1141's original version of this table got it wrong:
 it listed `x402 expected context authentication message is invalid`, which is what
@@ -3327,7 +3669,9 @@ On a successful hosted settle (#1349), agents report from the compact
 `agent_summary.purchase_summary` rather than parsing the merchant's raw
 `result`. This is a backward-compatible reporting extension only: Haven state
 sets status and payment fields, while product/invoice metadata comes from the
-merchant and `settlement_tx_hash` is only an optional merchant PAYMENT-RESPONSE
+merchant — `product` falling back, since #3771, to the Haven-derived
+`<merchant host> <tool_name>` label when the merchant names none (Re-verified
+#3771) — and `settlement_tx_hash` is only an optional merchant PAYMENT-RESPONSE
 receipt reference. Missing values are explicit; it changes neither signing nor
 runtime compatibility.
 
@@ -3412,6 +3756,88 @@ backend reports in `connector_package`. That is exactly the skew this section is
 about: a signer installed from one channel against a backend emitting another is
 how an unknown `x402_expected_context_version` arises in the first place.
 
+### `haven_pay_x402_quote` pays from the request, not a copied challenge (#3739)
+
+Hosted only; the local `@haven_ai/mcp` runtime is unchanged (its one-shot
+`haven_pay_x402` already probes and pays from the request).
+
+- **Request mode.** `haven_pay_x402_quote` now selects its mode by whether
+  `payment_required` is present:
+  - Absent: it takes `url` (required), `method`, `headers`, `body` and a cap
+    (required). It makes the unpaid request itself and builds the payment from
+    the 402 it fetched.
+  - Present: `payment_required` mode is unchanged, and the challenge must still
+    be passed UNCHANGED.
+- **The quote names the pay step.** `haven_quote_x402`'s result carries a next
+  step for the first time: `haven_pay_x402_quote` with request-mode
+  `next_arguments`. Those are the request as the caller sent it, plus
+  `max_amount_human` set to the quoted amount and a fresh `idempotency_key`
+  that a retried pay call replays.
+- **Egress policy: #3747's hosted policy, with a stricter redirect rule.**
+  - The target is checked by the client's `merchantEgress` policy
+    (`docs/security/hosted-egress.md`): public https hosts only, no IP literal,
+    localhost, single-label or internal name. A refusal is
+    `MERCHANT_EGRESS_REFUSED`, before any request.
+  - `redirect: 'error'`, set per call, and an explicit refusal of any 3xx:
+    stricter than the policy's re-checked GET redirects, as #3739 and #3747
+    agreed.
+  - The policy's quote budgets: a 15 s timeout and a 256 KiB read cap.
+  - Other refusals are typed `X402_PROBE_*` codes with nothing created. A 402 the
+    backend cannot store (over 64 KB) refuses as `X402_CHALLENGE_TOO_LARGE`:
+    request mode has no agent copy to fall back on.
+  - The policy cannot refuse a public name that resolves to a private address
+    (#3740, accepted residual).
+- **Replays.**
+  - With `idempotency_key`, the existing intent answers BEFORE any re-probe,
+    through the new read-only `GET /x402/by-idempotency-key/{key}`:
+    - awaiting signature → the signer tool;
+    - past signing → `haven_get_payment_status`.
+    - Only when the stored intent is for the same URL and its amount fits this
+      call's cap; otherwise the call falls through (the probe re-checks the
+      cap, `POST /x402` the rest).
+    - The quote's `next_arguments` prefill a fresh `idempotency_key`
+      (`x402q:…`) per quote, so a retried pay call replays.
+  - A closed window, a different task budget, or a 404 (including an older
+    backend without the route) falls through to probe + `POST /x402`, whose own
+    key replay still applies.
+  - With no key, the derived key (`x402r:…`) hashes the whole probed challenge,
+    `extensions` included.
+- **Skew.**
+  - Signer: no behaviour change; it fetches the stored challenge by
+    `payment_id` exactly as before. Its `haven_sign_x402` description now says
+    Haven never sends the merchant the paid request (text only).
+  - Hosted server ahead of the backend: request mode works, but loses only the
+    replay-before-probe.
+  - Older skill text still says to copy `payment_required` verbatim. That
+    remains a valid mode.
+
+### Plain-HTTP x402 next steps after the merchant retry (#3774)
+
+These are hosted surface changes. The local runtime has no twins: its `haven_submit { payment_id }` refuses.
+
+- **erc7710 `haven_submit`** names `haven_report_settlement_evidence` (`payment_id` prefilled) as the step after the agent's own retry, where it used to name no Haven tool.
+- **`haven_report_x402_outcome` on an unconfirmed erc7710 payment** now refuses with a typed code instead of `API_ERROR`. Clients that branched on `API_ERROR` from this tool see the new codes:
+  - `ERC7710_REPORT_SETTLEMENT_EVIDENCE` names the evidence tool and carries the caller's hash;
+  - `ERC7710_OUTCOME_NOT_REPORTABLE` answers a `rejected` outcome with `haven_get_payment_status`: the merchant may already have redeemed its authorization, so re-quote only if the status shows no settlement. There is no delegate balance to sweep.
+- **`haven_submit { payment_id }` success** now carries the next-step fields. Once confirmed, one status read picks the flow, and for x402 one merchant-call-context read picks the purchase type:
+  - x402 MCP-tool purchase (a stored call context): `haven_complete_mcp_tool` (`payment_id` prefilled);
+  - x402 plain HTTP (no stored context): retry the merchant, then `haven_report_x402_outcome`;
+  - x402 with the context read failing: both continuations, named in the reason;
+  - direct confirmed: done;
+  - anything else: `haven_get_payment_status`.
+
+  `status` and `tx_hash` are unchanged.
+- **Request-mode probe refusals** carry per-cause reasons.
+- **`MERCHANT_EGRESS_REFUSED`** names the calling tool's own argument (`url`, `merchant_url`, or "pick another catalog entry").
+- **Skew:**
+  - Text and next-step fields only; no tool, schema, version or consent-hash change. The server instructions and the `haven_pay_x402_quote` description now name `haven_report_settlement_evidence` after an erc7710 retry.
+  - The skill text splits the post-retry step by scheme.
+  - An older skill still teaches `haven_report_x402_outcome` on erc7710; that call now gets a refusal that names the right tool.
+
+### erc7710 refusal wording on settle/complete (#3784)
+
+Hosted text only. The `haven_settle_mcp_tool` description and the server instructions no longer say an erc7710 merchant refusal moved nothing; they say there is nothing to sweep, check `haven_get_payment_status` after the payment window, and re-quote only if unsettled — the next step the settle refusal returns for a generic merchant refusal (a merchant that reported it is not ready gets stop-and-tell-user, and the served text is the more cautious of the two). The `haven_complete_mcp_tool` description drops its erc7710 clause for "erc7710 settles via `haven_settle_mcp_tool`". No tool, schema, refusal code or consent-hash change; a connected client sees the new text on its next `tools/list` / initialize.
+
 ### Detecting skew before a payment (#1155)
 
 Every row above is a *post-quote* symptom: the agent found out by trying to pay.
@@ -3420,7 +3846,7 @@ nothing to read.
 
 | Surface | What it states | Where |
 |---|---|---|
-| Signer `initialize` result | The version sets this signer will verify — `capabilities.experimental["haven/signer-compatibility"]` (machine-readable) and the same numbers in `instructions` (what clients show the model) | `packages/signer/src/capabilities.ts`, wired in `buildSignerMcpServer` |
+| Signer `initialize` result | The version sets this signer will verify — `capabilities.experimental["haven/signer-compatibility"]` (machine-readable) and the same numbers in `instructions` (what clients show the model), which since #3738 also state the agent id and delegate address the signer is bound to | `packages/signer/src/capabilities.ts`, wired in `buildSignerMcpServer` |
 | Hosted quote/prepare result | `signer_compatibility.x402_expected_context_version` — the version that quote will emit — plus in-band guidance (since #1547: branch on the signer's machine-readable version-mismatch refusal, not a pre-compare). Present on the **EIP-3009 shape** of each tool; the erc7710 shape carries none, and since #2041 that now includes `haven_pay_x402_quote` | `packages/mcp-server/src/tools.ts` (`haven_pay_x402_quote`, `haven_pay_mcp_tool`, `haven_prepare_catalog_purchase`) |
 
 **The information is agent-mediated, and cannot be otherwise.** The signer and
@@ -3987,6 +4413,19 @@ to call next in structured fields, and those fields are typed end to end
   configured servers and call `next_tool_name` there. The pair alone was the
   documented answer until #2550 and was wrong for the named case, which is why
   the role exists rather than a fourth spelling of the name.
+  **Several pairs on one client (#3738):** once a harness carries more than
+  one Haven pair, the role alone is ambiguous — `signer` matches every signer.
+  The hosted instructions, the signer's own instructions and the `haven-pay`
+  skill all carry one rule: act as one agent per task, ask which when the user
+  has not said, and send each signer call to the signer of the hosted server
+  called (`haven-<slug>` with `haven-signer-<slug>`, bare `haven` with
+  `haven-signer`, Codex `haven` with `haven_signer`). Identity, not name, is
+  the check: the signer's `initialize` instructions state the agent id and
+  delegate address it is bound to, compared with `haven_get_agent`'s `id` and
+  `delegateAddress`. In the hosted instructions both this rule and the
+  server-name rule above sit inside the first 2,000 characters, because
+  Claude Code truncates server instructions at about 2,048 (pinned by the
+  hosted server's own tests).
 - **`--doctor` / `--repair` (#1589):** a stuck setup is diagnosable without a
   hand-built MCP client: `npx @haven_ai/connect@alpha --doctor --runtime
   <runtime>` checks config, credentials, the pinned signer runtime, the hosted
@@ -4234,7 +4673,7 @@ to call next in structured fields, and those fields are typed end to end
   > Nothing else in this document was re-verified in this pass.
 
   This is local teardown, **not** backend revocation: Connect reports what it
-  changed, while the owner revokes the agent on the Haven agent page. Named
+  changed, while the owner uses **Remove agent…** on the Haven agent page. Named
   pairs are uniquely addressable. For the shared bare `haven` /
   `haven-signer` pair, however, it removes entries only with positive proof
   that this directory owns the wrapper or Hermes key; otherwise it refuses
@@ -4968,3 +5407,143 @@ to call next in structured fields, and those fields are typed end to end
 > version-skew surface and no consent-hash input changed. `last-verified`
 > stays 2026-10-02 (already bumped by an earlier same-day change). Scope of
 > this note: that one file. Nothing else in this document was re-verified.
+
+> **Re-verified unchanged (#3729, 2026-10-07):** `packages/cli/src/commands.ts`
+> and `packages/cli/src/commands.test.ts` are covered by this doc and were
+> touched — `agents revoke` now reads the agent's server-computed
+> `live_delegation_count` first and refuses (exit 4, `HavenCliError`) while a
+> budget is still live on-chain unless `--keep-budget` is passed, and
+> `budget revoke` accepts a `replaced` row (the backend's prepare route
+> already did). A client-side guard only: no tool is added, renamed or
+> re-shaped, no hosted/local schema or description changes, no version-skew
+> surface and no consent-hash input moves, and the backend is untouched. The
+> manifest rows and the skew tables above stand. `last-verified` is not
+> re-stamped: this note is the scope. Nothing else in this document was
+> re-verified.
+> **Re-verified #3723 (2026-10-07, the receipt endpoint's wrapped response +
+> the signed bundle's MCP read):** `verifyPaymentReceipt`
+> (`packages/sdk/src/receipt.ts`) now accepts the response
+> `GET /payments/{id}/receipt` returns — `{ receipt, verification }` — as-is:
+> when the top level carries no `authorization` and `.receipt` is a non-null
+> object, the bundle inside is verified, one level only, no recursion. The
+> wrapper's `verification` is NEVER read — it is Haven's own self-check
+> computed on Haven's server, and trusting it would defeat an offline
+> verifier; a throwing getter around a valid bundle still verifies, and a
+> wrapper around a bundle signed by another key answers `signer_mismatch`. A
+> `haven_list_receipts` row — bare or wrapped — still answers
+> `not_a_signed_receipt`. Both MCP runtimes gain
+> `haven_get_receipt { payment_id }` (strict input, in
+> `STATE_DIRECT_RECOVERY_TOOLS` on the hosted runtime), backed by
+> `HavenClient.getReceipt` and returning `{ receipt }` only — the
+> server-side `verification` is deliberately not handed back, so an agent
+> cannot skip `haven_verify_receipt` on Haven's own word. The spread form
+> (`{ receipt, verification }` as top-level arguments) verifies on both
+> runtimes: hosted declares `verification` as accepted-and-ignored in its
+> strict schema (previously it refused the key), and stdio — which silently
+> stripped it — now declares the same schema, so the two agree. **The local
+> runtime's consent hash MOVES**: a new registered tool name joins the sorted
+> set (`packages/mcp/src/consent.ts`), so every installed client is re-asked
+> for consent once after the update — intended, with precedent in #3329 and
+> #3518, and recorded in `packages/mcp/CHANGELOG.md` under `## Unreleased`;
+> the signer's hash does not. The exported `HavenMcpToolName` union grows
+> (lever: a source break for exhaustive `switch`/`Record` consumers). The
+> description payload is re-derived as a new round in
+> `packages/mcp-server/src/description-size.test.ts` (the shrink-only
+> `MAX_TOTAL_BYTES` pin cannot absorb a 28th description without a re-measure,
+> as #3518 did); `MAX_MEAN_BYTES` is re-pinned to the new round's two-decimal
+> ceiling (960.83, stricter than round 17's 964.04). Hosted picks the SDK
+> change up on deploy; stdio only through a release (`@haven_ai/mcp` pins the
+> SDK exactly). No backend route, OpenAPI, wire field, migration or payment
+> path changed; the `agent_tool_invocations` audit allowlist is NOT extended, so
+> `haven_get_receipt` leaves no audit row (like `haven_verify_receipt`
+> today). `last-verified` is not re-stamped: this block is the scope.
+> Nothing else in this document was re-verified.
+
+> **Re-verified #3735 (2026-10-07, an x402 payment URL handed back by another
+> tool):** the generic haven-pay skill (`packages/sdk/src/skill-content.ts`,
+> and its byte-identical frontend copy `agent-skill-bundle.ts`) gains one
+> paragraph after the non-MCP paywall block, a trigger bullet, and a wider
+> front-matter `description` ("…or another tool returns an x402 payment URL").
+> The paragraph tells the agent to quote the exact request (`url`, `method`,
+> `headers`, `body` as a JSON string, `Content-Type: application/json` on a
+> JSON POST), to repeat that method, body and `Content-Type` on its own paid
+> retry (the hosted `haven_pay_x402_quote` takes none of them), to copy
+> `payment_required` verbatim, to prefer the x402 URL over a deposit address,
+> to pay one route only, and to check delivery in the merchant's own tool. The
+> SDK's shared no-compatible-option refusal (`noCompatiblePaymentOptionError`)
+> now names the offered schemes and the
+> likely cause when every `accepts` entry is a non-`exact` scheme, echoing a
+> merchant's scheme string only when it is a short identifier. Hosted
+> `haven_quote_x402` relays that message through `HavenClient.quoteX402`, so
+> hosted picks it up on deploy; the local runtime (the refusal) and connect
+> (the skill) pick up their changes only through a release (they pin the SDK
+> exactly). No tool schema,
+> consent hash, wire field, route, signer or payment path changed, and nothing
+> under `packages/mcp-server/src/**` was edited. `last-verified` is not
+> re-stamped: this block is the scope. Nothing else in this document was
+> re-verified.
+
+> **Re-verified #3731 (2026-10-07, funds coverage + the underfunded prepare's
+> real cause):** `/machine-payments/allowances` rows now carry
+> `funds_cover_remaining` (`true | false | null` — one `balanceOf` per
+> DISTINCT token, per-row compare, absent when the remaining is 0, `null` when
+> the read failed or the remaining was not live), mapped onto
+> `HavenAllowance` and the `haven_get_agent` summary rows on BOTH runtimes
+> (`fundsCoverRemaining`, any non-boolean wire value → `null`, never
+> `undefined`). A `prepare_reverted` whose revert was the token's own
+> insufficient-balance error carries `revert_cause: "insufficient_balance"`
+> and a funding-first `message`; the HOSTED `PREPARE_REVERTED` mapping reads
+> it and answers `next_action: fund_account_or_raise_allowance` with a
+> funding-specific omitted reason (one new pinned site,
+> `next-step-fixtures.ts` — `lint:next-steps` re-derived 57 → 58). **The
+> skew:** the hosted runtime answers the funding step as soon as the backend
+> deploys; stdio answers it only after its next release pins the SDK — until
+> then a stdio `haven_pay`/`haven_send` on a short wallet still returns
+> today's caveat text (the refusal itself is unchanged on both). No tool is
+> added, renamed or re-shaped; no strict schema changes (the new body field
+> rides the existing failure object); the consent hash does NOT move (no
+> registered-name change; the description fragments grew — the
+> `description-size` gate re-derived as round 19, 27,680 bytes / 28 tools).
+> The refusal ledger is unchanged (`onchain_revert`; reason set fixed by the
+> migration 086 CHECK). `last-verified` is not re-stamped: this block is the
+> scope. Nothing else in this document was re-verified.
+
+> **#3747 re-verification (2026-10-07, merchant-transport only).** The hosted
+> merchant-egress policy (`packages/sdk/src/merchant-egress.ts`) changed
+> `mcp-merchant-transport.ts` and `client.ts` — both on this contract's cover
+> list. The change is additive and outbound-only: an optional
+> `merchantEgress` config that gates where merchant requests CONNECT
+> (https-only public hosts, re-checked GET redirects, while-reading byte
+> caps, per-use timeouts). No tool is added, renamed or re-shaped; no
+> strict schema changes; the version-skew and consent-hash contracts do not
+> move, and no signing input (typed data, digest, auth.version) is touched —
+> a refusal happens before signing or after an already-signed header was
+> relayed, never by altering intent. The wire contract suite
+> (`x402-expected-wire-contract.test.ts`) runs green through the fixture
+> seam. Scope of this note: those two files' egress additions;
+> `last-verified` is bumped to 2026-10-07 for exactly this coverage.
+
+> **#3763 re-verification (2026-10-08, history read model only).** This diff
+> touches the transactions history read model (`modules/transactions/`,
+> `infra/repositories/transaction-history.ts`, `infra/repositories/agent-activity.ts`)
+> and `openapi/spec.ts`. It is display-only: the EIP-3009 settlement hash the
+> agent reported (#3475) is now surfaced beside the funding hash on the
+> dashboard's history/activity views and the CSV export. No tool is added,
+> renamed or re-shaped; no `haven_*` tool schema, description fragment or
+> failure envelope moves; the version-skew and consent-hash contracts do not
+> `last-verified` is bumped to 2026-10-08 for exactly this coverage.
+> Nothing else in this document was re-verified.
+
+> **#3767 re-verification (2026-10-08, the merchant-report grace's home).** This
+> diff touches `modules/payments/agent-payment-status.ts`, a covered file: the
+> #2145 grace window's resolved value (`MERCHANT_REPORT_GRACE_MIN`, its QA
+> override and `merchantReportGraceElapsed`) moved to a domain leaf
+> (`domain/merchant-report-grace.ts`) and is re-exported from the status module
+> under the SAME names — the status module's answers, and every field they
+> carry, are byte-identical. The move exists so the accounting feed (#3767)
+> can wait out the SAME window on the SAME clock without importing the status
+> module (a module cycle). No tool is added, renamed or re-shaped; no
+> `haven_*` tool schema, description fragment or failure envelope moves; the
+> version-skew and consent-hash contracts do not move. `last-verified` stays
+> 2026-10-08 for exactly this coverage. Nothing else in this document was
+> re-verified.

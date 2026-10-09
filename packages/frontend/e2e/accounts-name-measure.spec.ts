@@ -44,6 +44,17 @@
  * investigation found — the existing single-account test seeds
  * `is_default: true`, so a lone non-default account was asserted nowhere.
  *
+ * #3719 — the global active account is GONE, and with it the `Active` badge
+ * and "Set active". A card now renders at most ONE badge (`default`) and NO
+ * action at all. So three tests left this file rather than being weakened:
+ * #2235's "the badges wrap together" (with one badge nothing can be
+ * orphaned), and #2236's hover-reservation and focus-ring tests plus the
+ * compound badge/action test (there is no actions block to hover, focus or
+ * reserve for). What survives of #2236 is its dead-reservation half, now
+ * asserted for EVERY card: no card reserves width for actions it does not
+ * render. The `Active` badge stays in `readCard`'s scan, so a reintroduced one
+ * fails the `['default']` badge assertions below rather than going unseen.
+ *
  * WHY THESE THREE ARE ONE SPEC AND NOT THREE. They are one row's width, spent
  * three ways: the name's measure, where the badges sit, and what the actions
  * reserve. Every fix for one is payable out of the other two, so a test that
@@ -111,30 +122,6 @@ const ORDINARY_NAME = 'Operating wallet'
  * than of the string.
  */
 const UNBOUNDED_NAME = 'Treasury operations wallet for the European entity'
-/**
- * The SECOND card is the only one that renders hover actions here — the one
- * remaining button is gated on `!isActive`, so the seeded active card renders
- * none at all. #2236 lives here, and its name is long on purpose: a short one
- * would not reach the actions even when the row was mis-reserved, which is
- * exactly how the mismatch stayed latent.
- */
-const ACTION_CARD_NAME = 'Imported Safe for the European entity treasury'
-/**
- * The name length at which the row wraps but only just — and the ONLY band in
- * which #2235's defect is reachable. Derived from the measured pieces rather
- * than picked: at 1280 the title row is 265px, `Active` is 58.2px and
- * `default` 52.1px with 8px gaps, so a name strands `default` on its own line
- * exactly when it measures more than 138.7px (name + both badges overflow) and
- * at most 198.8px (name + `Active` still fit). At 390 the row is 300px and the
- * band is 173.7..233.8px. This string measures ~182px, which is inside both.
- *
- * An UNBOUNDED name does NOT exercise this: at 265px of name nothing fits
- * beside it, so both badges wrap together even when they are two independent
- * siblings — the pre-fix tree passes that check. Measured, after the full
- * revert mutation went green on it.
- */
-const WRAPPING_NAME = 'Operating wallet Europe'
-
 const SECOND_SAFE = {
   ...testSafe,
   id: 'safe-second',
@@ -294,37 +281,6 @@ async function readCardSettled(page: Page, accountName: string): Promise<CardRea
   return reading
 }
 
-/**
- * Put the pointer on a card and WAIT for the hover state to actually engage.
- *
- * `locator.hover()` alone was not enough at 390, where the second card starts
- * below the fold: the scroll it triggers is still settling when the mouse move
- * is dispatched, so the pointer lands where the card used to be and the read
- * below sees `opacity: 0`. Re-aiming at the freshly measured box each attempt
- * is what makes this deterministic. It returns the achieved opacity rather
- * than asserting, so the caller can fail with its own message — a silent
- * "hover didn't happen" is how a geometry check becomes vacuous.
- */
-async function hoverCardUntilActionsVisible(page: Page, accountName: string): Promise<number> {
-  // Below `lg` the nav drawer overlays the grid and intercepts the hover, so
-  // `elementFromPoint` at a card's centre returns the `<nav>` and the card
-  // never enters `:hover`. This is the established fix (#1749) and the same
-  // call `tooltip-reachability.spec.ts:123` makes before its own hover — a
-  // no-op at 1280, which is why it lives here rather than at each call site.
-  await dismissMobileSidebar(page)
-  const card = page.getByTestId('account-card').filter({ hasText: accountName })
-  await card.scrollIntoViewIfNeeded()
-  let opacity = 0
-  for (let i = 0; i < 20; i++) {
-    const box = await card.boundingBox()
-    if (box) await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-    await page.waitForTimeout(200)
-    opacity = (await readCard(page, accountName)).actionsOpacity
-    if (opacity > 0.9) break
-  }
-  return opacity
-}
-
 /** Overlapping area of two rects, in px — 0 on either axis means no overlap. */
 function overlapOf(a: Rect, b: Rect): { x: number; y: number } {
   return {
@@ -370,12 +326,12 @@ test('/accounts: two accounts — the name survives its chrome at both widths', 
     await page.setViewportSize({ width, height: 900 })
     const reading = await readCardSettled(page, ORDINARY_NAME)
 
-    // Non-vacuity: this is a claim about the badge layout, so the badges have
-    // to be there. `testSafe` is the seeded ACTIVE account and the default
-    // one, and both badges are gated on `accounts.length > 1` — the whole reason
-    // the #2223 defect was invisible on a one-account fixture.
-    expect(reading.badges.sort(), `@${width}px: the card renders ${JSON.stringify(reading.badges)}`)
-      .toEqual(['Active', 'default'])
+    // Non-vacuity: this is a claim about the badge layout, so the badge has
+    // to be there. `testSafe` is the default account, and the badge is gated
+    // on `accounts.length > 1` — the whole reason the #2223 defect was
+    // invisible on a one-account fixture. No `Active` badge since #3719.
+    expect(reading.badges, `@${width}px: the card renders ${JSON.stringify(reading.badges)}`)
+      .toEqual(['default'])
     expect(reading.rowInner, `@${width}px: the title row measured ${reading.rowInner}px`).toBeGreaterThan(0)
 
     // The #2223 defect, stated as the user sees it: the name reads in full.
@@ -400,8 +356,8 @@ test('/accounts: an unbounded name truncates against the card, not against its c
     await page.setViewportSize({ width, height: 900 })
     const reading = await readCardSettled(page, UNBOUNDED_NAME)
 
-    expect(reading.badges.sort(), `@${width}px: the card renders ${JSON.stringify(reading.badges)}`)
-      .toEqual(['Active', 'default'])
+    expect(reading.badges, `@${width}px: the card renders ${JSON.stringify(reading.badges)}`)
+      .toEqual(['default'])
 
     // A name this long MUST still truncate — names are user-supplied and
     // unbounded, and a card that grew to fit one would be a different defect.
@@ -420,20 +376,12 @@ test('/accounts: an unbounded name truncates against the card, not against its c
 })
 
 /**
- * #2235 — no badge is ever orphaned.
+ * #2235 — the badge sits on the name's line.
  *
- * Asserted as the reader experiences it, at two name lengths that exercise
- * both sides of the wrap, and never as a class string:
- *
- *   - an ORDINARY name: the title row is ONE line, so nothing dropped at all;
- *   - an UNBOUNDED name, which MUST wrap: the two badges are on the same line
- *     AS EACH OTHER, and it is not the name's line.
- *
- * The second case is the one that matters and the one a "title row is one line
- * tall" check alone would miss — a wrap is legitimate for a long name (#2223
- * put it there on purpose), so the defect is not the wrap, it is the row
- * breaking BETWEEN two badges and leaving one pill on its own. Only a test
- * that forces the wrap can see that.
+ * #2235 was about two badges: the row broke BETWEEN them and stranded one.
+ * Since #3719 there is one badge, so the orphan case is unreachable and its
+ * forced-wrap test is gone; what still holds is that an ordinary name keeps
+ * the badge beside it on a one-line title row, asserted as geometry.
  */
 test('/accounts: an ordinary name keeps its badges on the title line', async ({ page }) => {
   test.slow()
@@ -449,11 +397,11 @@ test('/accounts: an ordinary name keeps its badges on the title line', async ({ 
     await page.setViewportSize({ width, height: 900 })
     const reading = await readCardSettled(page, ORDINARY_NAME)
 
-    expect(reading.badges.sort(), `@${width}px: the card renders ${JSON.stringify(reading.badges)}`)
-      .toEqual(['Active', 'default'])
+    expect(reading.badges, `@${width}px: the card renders ${JSON.stringify(reading.badges)}`)
+      .toEqual(['default'])
 
-    // Both badges on the name's own line.
-    for (const label of ['Active', 'default'] as const) {
+    // The badge on the name's own line.
+    for (const label of ['default'] as const) {
       const badge = reading.badgeRects[label]
       expect(
         overlapOf(badge, reading.nameRect).y,
@@ -471,408 +419,35 @@ test('/accounts: an ordinary name keeps its badges on the title line', async ({ 
   }
 })
 
-test('/accounts: when the row must wrap, the badges wrap together — never one alone', async ({ page }) => {
+/**
+ * #2236's surviving half: no card reserves width for actions it does not
+ * render. Since #3719 NO card renders an action, so every card's title row
+ * must span its whole content box — at both widths, on the default card and
+ * on the other one. A reintroduced action (a set-default star, "Set active")
+ * would come back into flow and take width from the name, the #2223 cost this
+ * file exists to watch, and this is the first test to go red.
+ */
+test('/accounts: no card reserves width for actions it does not render', async ({ page }) => {
   test.slow()
   await mockHavenApi(page)
   await seedAuthenticatedSession(page)
   await serveAccounts(page, [
-    { ...testSafe, name: WRAPPING_NAME, is_default: true },
+    { ...testSafe, name: ORDINARY_NAME, is_default: true },
     SECOND_SAFE,
   ])
   await openAccounts(page)
 
   for (const width of WIDTHS) {
     await page.setViewportSize({ width, height: 900 })
-    const reading = await readCardSettled(page, WRAPPING_NAME)
-
-    expect(reading.badges.sort(), `@${width}px: the card renders ${JSON.stringify(reading.badges)}`)
-      .toEqual(['Active', 'default'])
-
-    const active = reading.badgeRects.Active
-    const def = reading.badgeRects.default
-
-    // Non-vacuity: this test is about the WRAPPED state, so prove it wrapped.
-    // Without this the assertion below would also pass on a row that never
-    // broke at all, which is a different (and already-covered) situation.
-    //
-    // Expressed as the row's HEIGHT, deliberately. The first version asserted
-    // that `Active` had left the name's line, which quietly encoded the fixed
-    // layout's answer: under the ungrouped defect `Active` stays beside the
-    // name and only `default` drops, so the mutation went red on this guard
-    // instead of on the assertion it exists to protect — a red for the wrong
-    // reason, which is only one step better than a green for the wrong one.
-    // Row height is true of BOTH wrapped arrangements and of neither
-    // unwrapped one.
-    expect(
-      reading.rowHeight,
-      `@${width}px: the row did not wrap — it is ${reading.rowHeight}px tall against a ${reading.nameHeight}px name`,
-    ).toBeGreaterThan(reading.nameHeight * 1.5)
-
-    // The defect: the row breaking BETWEEN the badges.
-    expect(
-      overlapOf(active, def).y,
-      `@${width}px: the badges are on different lines — Active at y ${active.y}, default at y ${def.y}`,
-    ).toBeGreaterThanOrEqual(Math.min(active.h, def.h))
-  }
-})
-
-/**
- * #2236 — the hover actions' reservation.
- *
- * Two claims, and the second is what stops the first being bought with the
- * name's width: (a) the actions never overlap the name, hovered; (b) what they
- * reserve is what they measure — the name gets every pixel the actions do not
- * occupy, and on a card that renders NO actions it gets the whole card.
- *
- * Hover is asserted to have ENGAGED (opacity 0 -> 1) before the overlap is
- * read. A geometry check against invisible buttons would pass on a card where
- * the hover state never fired, which is the same class of mistake as reading a
- * focus ring as a hover token.
- */
-test('/accounts: the hover actions reserve their own width and never cover the name', async ({ page }) => {
-  test.slow()
-  await mockHavenApi(page)
-  await seedAuthenticatedSession(page)
-  await serveAccounts(page, [
-    { ...testSafe, name: ORDINARY_NAME, is_default: true },
-    { ...SECOND_SAFE, name: ACTION_CARD_NAME },
-  ])
-  await openAccounts(page)
-
-  for (const width of WIDTHS) {
-    await page.setViewportSize({ width, height: 900 })
-
-    // (a0) HIDDEN UNTIL HOVERED, on a device that can hover (#2241).
-    //
-    // #2241 moved the reveal from a bare `opacity-0 group-hover:opacity-100`
-    // to a `(hover: hover)`-gated form, so that a touch device — which can
-    // never satisfy `group-hover` — gets the control visible instead of
-    // invisible-and-still-tappable. This project is `chromium-desktop`, a
-    // hover-capable pointer, and the OTHER half of that change is that
-    // nothing here moves: the actions must still be hidden until the card is
-    // hovered. Without this the touch fix could be "achieved" by dropping the
-    // hover treatment entirely, and no test in either file would notice.
-    await page.mouse.move(0, 0)
-    const unhovered = await readCardSettled(page, ACTION_CARD_NAME)
-    expect(unhovered.actionsRect, `@${width}px: the action card renders no actions at all`).not.toBeNull()
-    expect(
-      unhovered.actionsOpacity,
-      `@${width}px: the actions are at opacity ${unhovered.actionsOpacity} with the pointer off the card — on a hover-capable pointer they are meant to stay hidden until hover`,
-    ).toBeLessThan(0.01)
-
-    // (a) The action-bearing card, hovered.
-    const achievedOpacity = await hoverCardUntilActionsVisible(page, ACTION_CARD_NAME)
-    const hovered = await readCardSettled(page, ACTION_CARD_NAME)
-
-    expect(hovered.actionsRect, `@${width}px: the non-active, non-default card renders no actions`).not.toBeNull()
-    expect(
-      achievedOpacity,
-      `@${width}px: the actions are at opacity ${achievedOpacity} — hover did not engage, so any overlap reading below is vacuous`,
-    ).toBeGreaterThan(0.9)
-
-    // The overlapping AREA, not either axis alone. The actions sit on the
-    // name's line by design, so a y-overlap of the row height is the healthy
-    // reading and asserting `y === 0` would demand the wrong layout; what must
-    // be zero is the region where both axes intersect. Measured on unchanged
-    // `dev`: 42.7 x 14 = 597.8px^2 at 1280 and 46.6 x 18 = 838.8px^2 at 390.
-    const over = overlapOf(hovered.actionsRect!, hovered.nameRect)
-    expect(
-      +(over.x * over.y).toFixed(1),
-      `@${width}px: the hovered actions cover ${over.x}x${over.y}px of the name's box (actions x ${hovered.actionsRect!.x}..${(hovered.actionsRect!.x + hovered.actionsRect!.w).toFixed(1)}, name x ${hovered.nameRect.x}..${(hovered.nameRect.x + hovered.nameRect.w).toFixed(1)})`,
-    ).toBe(0)
-
-    // (b) The reservation is DERIVED. The name's row plus the actions plus the
-    // one gap between them account for the card's whole content width, so
-    // nothing is reserved that the actions do not occupy. 12px of slack for
-    // the gap and sub-pixel rounding; the pre-fix mismatch was 54.6px in the
-    // other direction (a 48px `pr-12` against a 102.6px actions block).
-    const accounted = hovered.rowInner + hovered.actionsRect!.w
-    expect(
-      hovered.cardInner - accounted,
-      `@${width}px: ${hovered.cardInner}px of card holds a ${hovered.rowInner}px name row + a ${hovered.actionsRect!.w}px actions block`,
-    ).toBeLessThanOrEqual(12)
-
-    // And the name really is truncating against that boundary rather than
-    // stopping short of it — otherwise "no overlap" could be bought by a name
-    // that simply never reached the actions.
-    expect(
-      hovered.truncated,
-      `@${width}px: "${hovered.text}" did not reach the actions at all (${hovered.measure}px in a ${hovered.rowInner}px row)`,
-    ).toBe(true)
-
-    // (c) The card that renders NO actions reserves nothing for them. `pr-12`
-    // was unconditional while the buttons were gated, so the active card — the
-    // one both issues photograph — was losing 48px of name to buttons that did
-    // not exist. Since #2374 the sole remaining button is gated on `!isActive`
-    // alone, so EVERY active card is this quiet case, default or not.
-    await page.mouse.move(0, 0)
-    const quiet = await readCardSettled(page, ORDINARY_NAME)
-    expect(quiet.actionsRect, `@${width}px: the active+default card renders hover actions`).toBeNull()
-    expect(
-      quiet.cardInner - quiet.rowInner,
-      `@${width}px: the active+default card reserves ${(quiet.cardInner - quiet.rowInner).toFixed(1)}px for actions it does not render`,
-    ).toBeLessThanOrEqual(1)
-  }
-})
-
-/**
- * FOCUS, not hover — the state #2241 said nobody had captured, and the one
- * `haven-design-reviewer` could not clear from screenshots (#2241, raised on
- * this PR's own first rendered pass).
- *
- * Two distinct questions, and the second is the one #2241's fix could have
- * broken without anybody noticing:
- *
- *  1. **Does `focus-within` still reveal?** The reveal used to be a bare
- *     `focus-within:opacity-100`. It is now `[@media(hover:hover)]:focus-within`,
- *     so on a hover-capable pointer — this project — a keyboard user must still
- *     get the controls by tabbing to them. Nothing else in either spec would
- *     catch that variant being dropped along with the `group-hover` one, since
- *     the mobile spec never enters this branch at all.
- *  2. **Does the focus ring clip?** #2241 listed this as explicitly not
- *     captured. The rightmost control sits at the card's right content edge and
- *     takes a `focus-visible:ring-2` — an outset ring, painted OUTSIDE the
- *     border box — so the question is whether the card's own padding absorbs
- *     it. Asserted as geometry (the ring box inside the card's padding box)
- *     rather than as a class string, for the same reason as everything else in
- *     this file.
- *
- *     Since #2374 that rightmost control is "Set active" rather than the star.
- *     The ring is the same `focus-visible:ring-2` on the same edge; what
- *     changed is which element carries it, and the button is WIDER than the
- *     star was, so this is the harder case of the two rather than a weakening.
- *
- * Both widths, because the padding differs (`p-5` at 390, `sm:p-6` at 1280) and
- * the 1280 grid gives the card a different width entirely.
- */
-test('/accounts: focus reveals the actions and the ring clears the card edge', async ({ page }) => {
-  test.slow()
-  await mockHavenApi(page)
-  await seedAuthenticatedSession(page)
-  await serveAccounts(page, [
-    { ...testSafe, name: ORDINARY_NAME, is_default: true },
-    { ...SECOND_SAFE, name: ACTION_CARD_NAME },
-  ])
-  await openAccounts(page)
-
-  /*
-    The ring width is READ from the rendered `box-shadow` rather than pinned to
-    the `ring-2` in the class string. A constant here would make the clearance
-    check blind to the one edit most likely to cause the clip it is watching
-    for — someone widening the ring — which is the shape of guard #2241's own
-    mutation pass exists to reject.
-  */
-
-  for (const width of WIDTHS) {
-    await page.setViewportSize({ width, height: 900 })
-    // Start from the resting state, so the reveal below is attributable to
-    // focus and not to a pointer left on the card by an earlier read.
-    await page.mouse.move(0, 0)
-    await dismissMobileSidebar(page)
-    const setActive = page.getByRole('button', { name: `Set ${ACTION_CARD_NAME} as active` })
-    await setActive.scrollIntoViewIfNeeded()
-    /*
-      Focus the button BY KEYBOARD, not with `locator.focus()`.
-
-      `:focus-visible` is a heuristic on the last input modality: after the
-      pointer work above (and `dismissMobileSidebar`'s tap), Chromium treats a
-      programmatic `focus()` as pointer-initiated and paints NO ring. The first
-      draft of this test did exactly that and read a 0px ring at 390 — which is
-      why the ring width is asserted to be non-zero below rather than trusted.
-      Focusing a SIBLING and pressing Tab makes the modality keyboard, which is
-      the state a keyboard user is actually in.
-
-      #3550 makes the name link and the control siblings. Focusing the link and
-      pressing Tab is therefore both the real DOM order and the user's path.
-    */
-    await page.getByRole('link', { name: ACTION_CARD_NAME, exact: true }).focus()
-    await page.keyboard.press('Tab')
-    await page.waitForTimeout(400)
-
-    const reading = await readCardSettled(page, ACTION_CARD_NAME)
-    expect(
-      reading.actionsOpacity,
-      `@${width}px: the actions are at opacity ${reading.actionsOpacity} with "Set active" focused — \`focus-within\` no longer reveals them, so a keyboard user cannot see what they are on`,
-    ).toBeGreaterThan(0.9)
-
-    const ring = await page.evaluate(
-      ({ label, buttonLabel }) => {
-        const card = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="account-card"]'))
-          .find((candidate) => candidate.querySelector('h3 a')?.textContent?.trim() === label) as HTMLElement
-        const btn = card.querySelector(`button[aria-label="${buttonLabel}"]`) as HTMLElement
-        const focused = document.activeElement === btn
-        const cardBox = card.getBoundingClientRect()
-        const cs = getComputedStyle(card)
-        const pad = {
-          top: parseFloat(cs.paddingTop) || 0,
-          right: parseFloat(cs.paddingRight) || 0,
-          bottom: parseFloat(cs.paddingBottom) || 0,
-          left: parseFloat(cs.paddingLeft) || 0,
-        }
-        /*
-          Tailwind paints a ring as an outset `box-shadow` with a spread. Take
-          the widest px value in the shadow list — the ring plus any offset —
-          so a `ring-2` -> `ring-8` edit moves this number instead of being
-          invisible to it.
-        */
-        const shadow = getComputedStyle(btn).boxShadow
-        const ringWidth = Math.max(
-          0,
-          ...(shadow.match(/(-?[\d.]+)px/g) ?? []).map((v) => Math.abs(parseFloat(v))),
-        )
-        const b = btn.getBoundingClientRect()
-        return {
-          focused,
-          ringWidth,
-          // Clearance from each edge of the ring box to the card's BORDER box.
-          // Positive means the ring is inside the card entirely.
-          clearance: {
-            right: +(cardBox.right - (b.right + ringWidth)).toFixed(1),
-            top: +(b.top - ringWidth - cardBox.top).toFixed(1),
-            bottom: +(cardBox.bottom - (b.bottom + ringWidth)).toFixed(1),
-          },
-          padRight: pad.right,
-          padTop: pad.top,
-        }
-      },
-      { label: ACTION_CARD_NAME, buttonLabel: `Set ${ACTION_CARD_NAME} as active` },
-    )
-
-    // Non-vacuity: a clearance measured on an UNfocused button says nothing
-    // about a focus ring.
-    expect(reading.actionsRect, `@${width}px: the card renders no actions`).not.toBeNull()
-    expect(ring.focused, `@${width}px: "Set active" never took focus`).toBe(true)
-    // ...and it must actually be PAINTING a ring, or a clearance measured with
-    // a zero-width ring is a clearance for no ring at all.
-    expect(
-      ring.ringWidth,
-      `@${width}px: the focused "Set active" paints no ring (box-shadow width ${ring.ringWidth}px)`,
-    ).toBeGreaterThan(0)
-
-    for (const [edge, value] of Object.entries(ring.clearance)) {
-      expect(
-        value,
-        `@${width}px: the focused "Set active"'s ${ring.ringWidth}px ring overhangs the card's ${edge} edge by ${(-value).toFixed(1)}px (card padding right ${ring.padRight}px, top ${ring.padTop}px)`,
-      ).toBeGreaterThanOrEqual(0)
-    }
-  }
-})
-
-/**
- * The COMPOUND state — a badge and an action varying INDEPENDENTLY.
- *
- * Raised by `haven-reviewer` as a coverage gap on #2236, and it was right:
- * every other test here puts the seeded active account on card one and a
- * neither-active-nor-default account on card two, so the two extremes were
- * measured and the middle was not — even though badge visibility and action
- * visibility are independent predicates, and the middle is the ordinary state
- * for anyone whose active account is not their default one.
- *
- * This fixture makes the ACTIVE account the non-default one:
- *
- *   card A (active, not default)  -> `Active` badge + NO action
- *   card B (default, not active)  -> `default` badge + "Set active" alone
- *
- * ## What #2374 changed about this test, and why it got STRONGER
- *
- * Card A used to render the star alone, and this test's headline reading was
- * "a single 26px star reserves 26px, not the 108.6px of a full pair". The star
- * is gone, so card A now renders NO action at all — and that is a state no
- * other test in this file produces. The existing no-action case is the
- * active+DEFAULT card (two badges); this one is active and NOT default (one
- * badge), which is exactly the combination #2374's investigation found
- * unasserted anywhere.
- *
- * So the two cards now assert two different halves, and both are needed:
- *
- *   - card A: a badge, no action, and a reservation of ZERO. If the star ever
- *     came back this is the first thing to go red, because the card would
- *     start reserving width again for a control it is not supposed to have.
- *   - card B: a badge, exactly one action, and a reservation that tracks it.
- *     A `pr-*` step cannot do this: whatever number it held would be right for
- *     at most one of the combinations this card can render.
- */
-test('/accounts: badges and actions vary independently, and each reserves only what it renders', async ({ page }) => {
-  test.slow()
-  // Short names, and the arithmetic is the reason. The compound state has
-  // LESS room than either extreme, which is not obvious and which the first
-  // version of this test got wrong: card A carried a 58.2px badge AND (then) a
-  // 26px star, so at 1280 the name could measure at most
-  // 265 - 26 - 8 - 58.2 - 8 = 164.8px before the badge wrapped;
-  // `Operating wallet Europe` (~182px) exceeded that. Card A has more room now
-  // that the star is gone, but the names stay short: this test is about
-  // reservations, and a wrapping badge is a different test's subject.
-  const ACTIVE_NOT_DEFAULT = ORDINARY_NAME
-  const DEFAULT_NOT_ACTIVE = 'Imported Safe'
-  await mockHavenApi(page)
-  await seedAuthenticatedSession(page)
-  await serveAccounts(page, [
-    // `seedAuthenticatedSession` pins `safe-main` as the active account, so
-    // giving it `is_default: false` is what produces the split.
-    { ...testSafe, name: ACTIVE_NOT_DEFAULT, is_default: false },
-    { ...SECOND_SAFE, name: DEFAULT_NOT_ACTIVE, is_default: true },
-  ])
-
-  await openAccounts(page)
-
-  for (const width of WIDTHS) {
-    await page.setViewportSize({ width, height: 900 })
-
-    for (const [name, badge, expectsAction] of [
-      [ACTIVE_NOT_DEFAULT, 'Active', false],
-      [DEFAULT_NOT_ACTIVE, 'default', true],
-    ] as const) {
-      const achievedOpacity = expectsAction
-        ? await hoverCardUntilActionsVisible(page, name)
-        : 0
+    for (const name of [ORDINARY_NAME, SECOND_SAFE.name]) {
       const reading = await readCardSettled(page, name)
-
-      // Exactly one badge, and it is the one this card's state earns.
-      expect(reading.badges, `@${width}px: "${name}" renders ${JSON.stringify(reading.badges)}`).toEqual([badge])
+      // Non-vacuity: the card rendered under its own name.
+      expect(reading.text, `@${width}px: the "${name}" card did not render its name`).toBe(name)
+      expect(reading.actionsRect, `@${width}px: "${name}" renders an actions block`).toBeNull()
       expect(
-        overlapOf(reading.badgeRects[badge], reading.nameRect).y,
-        `@${width}px: the ${badge} badge (y ${reading.badgeRects[badge].y}) is not on the name's line (y ${reading.nameRect.y})`,
-      ).toBeGreaterThanOrEqual(reading.badgeRects[badge].h)
-
-      if (!expectsAction) {
-        /*
-          Card A — active, NOT default. Since #2374 this card has no action at
-          all, and it must therefore reserve nothing. This is the arm that goes
-          red first on a reintroduced set-default control: the block would come
-          back into flow and take width from the name, which is the #2223 cost
-          the whole file exists to watch.
-        */
-        expect(
-          reading.actionsRect,
-          `@${width}px: "${name}" is the active account and renders an actions block anyway — the only card action is gated on \`!isActive\``,
-        ).toBeNull()
-        expect(
-          reading.cardInner - reading.rowInner,
-          `@${width}px: "${name}" reserves ${(reading.cardInner - reading.rowInner).toFixed(1)}px for actions it does not render`,
-        ).toBeLessThanOrEqual(1)
-        continue
-      }
-
-      // Card B — exactly one action, actually hovered, and not over the name.
-      expect(reading.actionsRect, `@${width}px: "${name}" renders no actions`).not.toBeNull()
-      expect(
-        achievedOpacity,
-        `@${width}px: the actions on "${name}" are at opacity ${achievedOpacity} — hover did not engage`,
-      ).toBeGreaterThan(0.9)
-      const over = overlapOf(reading.actionsRect!, reading.nameRect)
-      expect(
-        +(over.x * over.y).toFixed(1),
-        `@${width}px: the hovered action covers ${over.x}x${over.y}px of "${name}"'s box`,
-      ).toBe(0)
-
-      // And the reservation tracks the block it actually renders.
-      const accounted = reading.rowInner + reading.actionsRect!.w
-      expect(
-        reading.cardInner - accounted,
-        `@${width}px: ${reading.cardInner}px of card holds a ${reading.rowInner}px name row + a ${reading.actionsRect!.w}px actions block`,
-      ).toBeLessThanOrEqual(12)
-
-      await page.mouse.move(0, 0)
+        reading.cardInner - reading.rowInner,
+        `@${width}px: "${name}" reserves ${(reading.cardInner - reading.rowInner).toFixed(1)}px for actions it does not render`,
+      ).toBeLessThanOrEqual(1)
     }
   }
 })
@@ -971,10 +546,10 @@ test('/accounts: a lone NON-default account offers no set-default control', asyn
       `@${width}px: "${reading.text}" is ellipsised with one account and no badges`,
     ).toBe(false)
 
-    // The pin. This card is the seeded ACTIVE account, so "Set active" is gated
-    // off too and the whole actions block should be absent — but the assertion
-    // that matters is the named one, because a future action on this card must
-    // not silently re-admit a set-default control.
+    // The pin. No card renders an action since #3719, so the whole actions
+    // block should be absent — but the assertion that matters is the named
+    // one, because a future action on this card must not silently re-admit a
+    // set-default control.
     const controls = await page.evaluate(() =>
       Array.from(document.querySelectorAll('button, a[role="button"]')).map((el) =>
         `${el.getAttribute('aria-label') ?? ''} ${el.textContent ?? ''}`.trim(),
@@ -990,11 +565,11 @@ test('/accounts: a lone NON-default account offers no set-default control', asyn
       control at all. A scan that has never returned anything is not evidence
       of an absence.
 
-      This card is the seeded ACTIVE account, so it deliberately renders no
-      action of its own; the control that proves the scan works is the
-      sidebar's account switcher, which is on every authenticated page. Naming
-      what it found in the message keeps a future failure diagnosable rather
-      than just "expected > 0".
+      This card deliberately renders no action of its own; the controls that
+      prove the scan works are the app chrome's own buttons (the sidebar's
+      user menu, the wallet pill), which are on every authenticated page.
+      Naming what it found in the message keeps a future failure diagnosable
+      rather than just "expected > 0".
     */
     expect(
       controls.length,
@@ -1007,7 +582,7 @@ test('/accounts: a lone NON-default account offers no set-default control', asyn
     ).toEqual([])
     expect(
       reading.actionsRect,
-      `@${width}px: the lone active account renders an actions block`,
+      `@${width}px: the lone account renders an actions block`,
     ).toBeNull()
     expect(
       reading.cardInner - reading.rowInner,

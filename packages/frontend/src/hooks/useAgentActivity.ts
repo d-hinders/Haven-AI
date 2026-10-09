@@ -32,10 +32,30 @@ export interface PaymentActivityItem {
   to: string
   reason?: string | null
   status: ActivityStatus
+  /**
+   * #3763: the FUNDING transaction on the eip3009 bridge — Haven's sponsored
+   * UserOp (account → delegate). The merchant's settlement travels beside it
+   * as `settlement_tx_hash`.
+   */
   tx_hash: string | null
+  /**
+   * #3763: the funding leg, named — same value as `tx_hash`.
+   */
+  funding_tx_hash?: string | null
+  /**
+   * #3763: the merchant's settlement transaction (delegate → merchant) when
+   * an agent reported one and it verified on-chain (#3475). Null is "not
+   * recorded", never "failed" — `explorer_url` already headlines the
+   * settlement for the same reason the drawer does.
+   */
+  settlement_tx_hash?: string | null
+  /** #3763: which settlement branch moved the money (`eip3009` | `erc7710`); null when none was recorded. */
+  settlement_scheme?: string | null
   source?: string
   x402_resource_url?: string | null
   x402_merchant_address?: string | null
+  /** #3778: the non-secret delivery pointer reported with the x402 outcome. */
+  delivery_reference?: string | null
   chain_id?: number | null
   account_id?: string | null
   account_address?: string | null

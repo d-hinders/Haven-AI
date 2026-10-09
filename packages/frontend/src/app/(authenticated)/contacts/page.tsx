@@ -6,7 +6,7 @@ import { Icon } from '@/components/ui/Icon'
 import { useId, useState, type FormEvent, type MouseEvent } from 'react'
 import { useContacts, type Contact } from '@/hooks/useContacts'
 import { useContactChains } from '@/hooks/useContactChains'
-import { useChainScope } from '@/hooks/useActiveChain'
+import { useChainScope } from '@/hooks/useChainScope'
 import { resolveChainOrNull } from '@/lib/chains'
 import { ApiRequestError } from '@/lib/api'
 import { isValidAddress } from '@/lib/format'
@@ -338,9 +338,9 @@ function DeleteConfirm({ contact, onConfirm, onClose }: DeleteConfirmProps) {
 export default function ContactsPage() {
   const { contacts, loading, error, refetch, addContact, updateContact, deleteContact } = useContacts()
   const { chainsByAddress } = useContactChains()
-  // Contacts always show every chain — the active chain never collapses the
-  // list. This is an optional manual filter only (#634, epic #625).
-  const { scope, setScope } = useChainScope('all-chains')
+  // Contacts always show every chain; the network dropdown is an optional
+  // manual filter only (#634, epic #625).
+  const { scope, setScope } = useChainScope()
   const [search, setSearch] = useState('')
   const [showAdd, setShowAdd] = useState(false)
   const [editTarget, setEditTarget] = useState<Contact | null>(null)

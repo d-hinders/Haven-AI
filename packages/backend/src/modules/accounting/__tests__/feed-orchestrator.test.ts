@@ -9,6 +9,7 @@ const { mocks } = vi.hoisted(() => ({
     markFailed: vi.fn(),
     markSkipped: vi.fn(),
     listSyncs: vi.fn(),
+    pinAccountingBookedTx: vi.fn(),
   },
 }))
 
@@ -23,6 +24,12 @@ vi.mock('../feed-sync.js', () => ({
   markFailed: mocks.markFailed,
   markSkipped: mocks.markSkipped,
   listSyncs: mocks.listSyncs,
+}))
+// #3767: the booked-hash pin is a real write in production; stubbed here like
+// every other repository seam so the deferral/pin decision logic is tested
+// against a recorded call, not a database.
+vi.mock('../../../infra/repositories/machine-payments.js', () => ({
+  pinAccountingBookedTx: mocks.pinAccountingBookedTx,
 }))
 // #2862: the orchestrator resolves the ACTIVE destination from the
 // connections table first. No row AT ALL here (`listConnections` → []) → it
@@ -69,9 +76,10 @@ describe('feed orchestrator (#499)', () => {
     for (const m of Object.values(mocks)) m.mockReset()
     connectionMocks.getActiveConnection.mockReset().mockResolvedValue(null)
     connectionMocks.setStatus.mockReset().mockResolvedValue(undefined)
-    mocks.claimSync.mockResolvedValue({ owned: true, status: 'pending' })
+    mocks.claimSync.mockResolvedValue({ owned: true, status: 'pending', fresh: true })
     mocks.markPushed.mockResolvedValue(undefined)
     mocks.markFailed.mockResolvedValue(undefined)
+    mocks.pinAccountingBookedTx.mockResolvedValue(true)
     mocks.buildAccountingEntryForPayment.mockResolvedValue(entry())
   })
 
@@ -244,5 +252,141 @@ describe('feed orchestrator (#499)', () => {
     throwing.pushTransaction = async () => { throw err }
     await expect(feedSettledPayment(USER, PID)).resolves.toEqual({ outcome: 'failed', reason: 'fortnox down', error: err })
     expect(mocks.markFailed).toHaveBeenCalledWith(USER, 'fortnox', PID, 'fortnox down')
+  })
+})
+
+describe('#3767: wait, then push — the pre-claim deferral and the booked-hash pin', () => {
+  const FUNDING = `0x${'f1'.repeat(32)}`
+  const SETTLEMENT = `0x${'5e'.repeat(32)}`
+  function connectInMemory(): InMemoryConnector {
+    const c = new InMemoryConnector()
+    c.connect(USER)
+    registerConnector(c)
+    return c
+  }
+
+  /** An eip3009 entry: no verified settlement, nothing pinned — the fallback state. */
+  function eip3009Entry(over: Record<string, unknown> = {}) {
+    return {
+      ...entry(),
+      settlementScheme: 'eip3009',
+      verifiedSettlementTxHash: null,
+      pinnedBookedTxHash: null,
+      pinnedBookedTxKind: null,
+      bookedTxHash: FUNDING,
+      bookedTxHashIsFunding: true,
+      fundingTxHash: null,
+      ...over,
+    }
+  }
+
+  beforeEach(() => {
+    // Sibling describe: the #499 block's hooks do not run here — reset and
+    // re-seed the shared mocks the same way.
+    for (const m of Object.values(mocks)) m.mockReset()
+    connectionMocks.getActiveConnection.mockReset().mockResolvedValue(null)
+    mocks.accountingFeedAvailable.mockResolvedValue(true)
+    mocks.claimSync.mockResolvedValue({ owned: true, status: 'pending', fresh: true })
+    mocks.markPushed.mockResolvedValue(undefined)
+    mocks.markFailed.mockResolvedValue(undefined)
+    mocks.pinAccountingBookedTx.mockResolvedValue(true)
+    mocks.buildAccountingEntryForPayment.mockResolvedValue(entry())
+    // Pin the ACTIVE destination to the in-memory connector: the fallback
+    // registry scan would otherwise resolve whichever connector another
+    // suite's import chain registered.
+    connectionMocks.getActiveConnection.mockResolvedValue({ provider: 'memory', feed_from: null } as never)
+  })
+
+  it('defers an eip3009 payment with no verified settlement whose funding is inside the grace — no claim, no attempt', async () => {
+    const c = connectInMemory()
+    mocks.buildAccountingEntryForPayment.mockResolvedValue(
+      eip3009Entry({ settledAt: new Date().toISOString() }),
+    )
+    await expect(feedSettledPayment(USER, PID)).resolves.toEqual({ outcome: 'not_fed' })
+    // Before claimSync: no sync row is written and no attempt is consumed.
+    expect(mocks.claimSync).not.toHaveBeenCalled()
+    expect(c.pushed).toHaveLength(0)
+  })
+
+  it('waits out the window for a MANUAL trigger too (owner decision 2: Sync now still waits)', async () => {
+    connectInMemory()
+    mocks.buildAccountingEntryForPayment.mockResolvedValue(
+      eip3009Entry({ settledAt: new Date().toISOString() }),
+    )
+    await expect(feedSettledPayment(USER, PID, { manual: true })).resolves.toEqual({ outcome: 'not_fed' })
+    expect(mocks.claimSync).not.toHaveBeenCalled()
+  })
+
+  it('feeds once the grace passes, booking the funding hash labelled as funding, and pins it on the fresh claim', async () => {
+    const c = connectInMemory()
+    mocks.buildAccountingEntryForPayment.mockResolvedValue(
+      // 2026-06-20 is far outside the 15-minute window: the fallback books.
+      eip3009Entry(),
+    )
+    await expect(feedSettledPayment(USER, PID)).resolves.toEqual({ outcome: 'pushed' })
+    expect(c.pushed).toHaveLength(1)
+    expect(c.pushed[0]!.tx.txHash).toBe(FUNDING)
+    expect(c.pushed[0]!.tx.txHashIsFunding).toBe(true)
+    expect(mocks.pinAccountingBookedTx).toHaveBeenCalledWith(PID, FUNDING, 'funding')
+  })
+
+  it('does not defer once a verified settlement hash is recorded, and books IT', async () => {
+    const c = connectInMemory()
+    mocks.buildAccountingEntryForPayment.mockResolvedValue(
+      eip3009Entry({
+        settledAt: new Date().toISOString(),
+        verifiedSettlementTxHash: SETTLEMENT,
+        bookedTxHash: SETTLEMENT,
+        bookedTxHashIsFunding: false,
+        fundingTxHash: FUNDING,
+      }),
+    )
+    await expect(feedSettledPayment(USER, PID)).resolves.toEqual({ outcome: 'pushed' })
+    expect(c.pushed[0]!.tx.txHash).toBe(SETTLEMENT)
+    expect(c.pushed[0]!.tx.txHashIsFunding).toBe(false)
+    expect(c.pushed[0]!.tx.fundingTxHash).toBe(FUNDING)
+    expect(mocks.pinAccountingBookedTx).toHaveBeenCalledWith(PID, SETTLEMENT, 'settlement')
+  })
+
+  it('never defers erc7710 — its one transaction already IS the settlement — and pins nothing', async () => {
+    const c = connectInMemory()
+    mocks.buildAccountingEntryForPayment.mockResolvedValue({
+      ...entry(),
+      settlementScheme: 'erc7710',
+      verifiedSettlementTxHash: null,
+      pinnedBookedTxHash: null,
+      pinnedBookedTxKind: null,
+      bookedTxHash: `0x${'77'.repeat(32)}`,
+      bookedTxHashIsFunding: false,
+      fundingTxHash: null,
+      settledAt: new Date().toISOString(),
+    })
+    await expect(feedSettledPayment(USER, PID)).resolves.toEqual({ outcome: 'pushed' })
+    expect(c.pushed).toHaveLength(1)
+    expect(mocks.pinAccountingBookedTx).not.toHaveBeenCalled()
+  })
+
+  it('does not defer a PINNED payment — the deferral decision was the first claim\u2019s to make — and never re-pins', async () => {
+    const c = connectInMemory()
+    mocks.claimSync.mockResolvedValue({ owned: true, status: 'pending', fresh: false })
+    mocks.buildAccountingEntryForPayment.mockResolvedValue(
+      eip3009Entry({
+        settledAt: new Date().toISOString(),
+        pinnedBookedTxHash: FUNDING,
+        pinnedBookedTxKind: 'funding',
+      }),
+    )
+    await expect(feedSettledPayment(USER, PID)).resolves.toEqual({ outcome: 'pushed' })
+    expect(c.pushed).toHaveLength(1)
+    expect(mocks.pinAccountingBookedTx).not.toHaveBeenCalled()
+  })
+
+  it('a pin write failure fails the push without attempting it, so the retry re-runs the WHOLE claim', async () => {
+    const c = connectInMemory()
+    mocks.pinAccountingBookedTx.mockRejectedValue(new Error('db down'))
+    mocks.buildAccountingEntryForPayment.mockResolvedValue(eip3009Entry())
+    await expect(feedSettledPayment(USER, PID)).resolves.toMatchObject({ outcome: 'failed', reason: 'booked-hash pin failed: db down' })
+    expect(c.pushed).toHaveLength(0)
+    expect(mocks.markFailed).toHaveBeenCalledWith(USER, 'memory', PID, 'booked-hash pin failed: db down')
   })
 })

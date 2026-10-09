@@ -21,6 +21,7 @@ import {
   HavenApiError,
   X402UnexpectedStatusError,
   HavenClient,
+  MerchantEgressRefusedError,
   discoverMerchantMcpUrl,
   isSecureX402RetryTarget,
   sameUrl,
@@ -29,7 +30,7 @@ import {
 } from '@haven_ai/sdk'
 import { MCP_TRANSPORT_CASE_HINT } from '../contracts.js'
 import { signerCompatibilityNotice } from './signer-compat.js'
-import { HostedToolError, paymentWindowExpiredErrorFor } from './errors.js'
+import { HostedToolError, egressRefusalBeforeIntent, paymentWindowExpiredErrorFor } from './errors.js'
 import { refusalNextStep } from './guidance.js'
 
 /**
@@ -192,6 +193,8 @@ export async function quoteMcpToolCall(
     toolName: string
     toolArguments: Record<string, unknown>
     idempotencyKey?: string
+    /** #3774: the catalog tools pass 'catalog' — they take no URL argument. */
+    egressTarget?: 'merchant_url' | 'catalog'
   },
 ): Promise<{ quote: X402Quote; merchantUrl: string }> {
   const envelope = {
@@ -218,6 +221,20 @@ export async function quoteMcpToolCall(
   // origin — scheme included — equals the input's, so a discovered endpoint
   // cannot differ in scheme from an input this line admitted (a re-check
   // there was a guard no test could fail; round 2 of the same review).
+  // #3747: the hosted egress policy runs FIRST — a bad target (an IP
+  // literal, localhost, a single-label or internal name) is refused before
+  // any intent exists, so it can never be refused only after funding. Ahead
+  // of assertSecureMerchantUrl also keeps the hosted refusal copy
+  // hosted-accurate (spec review 2026-10-07): the SDK-side "(or a loopback /
+  // reserved test host)" clause is false on hosted, where the policy refuses
+  // those hosts outright.
+  if (haven.merchantEgress) {
+    try {
+      haven.merchantEgress.assertUrl(merchantUrl)
+    } catch (err) {
+      throw egressRefusalBeforeIntent(err, input.egressTarget ?? 'merchant_url')
+    }
+  }
   assertSecureMerchantUrl(merchantUrl)
   // This is an MCP-tool purchase, so always negotiate the Streamable-HTTP
   // lifecycle before its unpaid tools/call — exact MCP endpoints can use any
@@ -235,7 +252,7 @@ export async function quoteMcpToolCall(
     const notReady = merchantNotReadyErrorFor(probeErr)
     if (notReady) throw notReady
     if (!isMerchantEndpointMiss(probeErr)) throw probeErr
-    const discovered = await discoverMerchantMcpUrl(merchantUrl)
+    const discovered = await discoverMerchantMcpUrl(merchantUrl, haven.merchantEgress)
     // Trailing-slash/case echoes of the input are "same URL" — spend the one
     // retry only on a genuinely different endpoint.
     if (!discovered || sameUrl(discovered, merchantUrl)) {

@@ -7,7 +7,7 @@ covers:
   - packages/mcp/**
   - packages/connect/**
   - packages/cli/**
-last-verified: "2026-09-21"
+last-verified: "2026-10-07"
 ---
 
 # SDK / API / credentials playbook
@@ -31,7 +31,7 @@ Run the package `typecheck` (`tsc --noEmit`) as the **final** gate step, after e
 
 - **OpenAPI drift** — keep `packages/backend/src/openapi/spec.test.ts` green; a documented agent-payment route must be in the spec or the `because:` allowlist.
 - **Install-path** — `connect`/`mcp`/`sdk` changes run the install smoke (`npm run smoke:pack -w packages/connect`); don't break the packed tarball resolution.
-- **Versioning** — never hand-edit version fields or cross-package dep pins; `scripts/release-bump.mjs` is the single source of truth. The internal-pin rule runs in **both directions** (#1526): wildcard pins are forbidden in the five **published** packages (sdk/signer/mcp/connect/cli), while **private workspace consumers** (`private: true` — backend, frontend, qa-agent, mcp-server) MUST pin `"*"` so npm always links the workspace. `npm run lint:workspace-pins` enforces both on every PR; the dividing line and its rationale live in CLAUDE.md § *Releasing & publishing packages*.
+- **Versioning** — never hand-edit version fields or cross-package dep pins; `scripts/release-bump.mjs` is the single source of truth. The internal-pin rule runs in **both directions** (#1526): wildcard pins are forbidden in the five **published** packages (sdk/signer/mcp/connect/cli), while **private workspace consumers** (`private: true` — today backend, frontend, ops, qa-agent and mcp-server) MUST pin `"*"` so npm always links the workspace. `npm run lint:workspace-pins` enforces both on every PR; the dividing line and its rationale live in CLAUDE.md § *Releasing & publishing packages*.
 
 ## 5. Merge
 
@@ -44,3 +44,8 @@ pin rule's both directions as enforced by `npm run lint:workspace-pins`, the
 head. The intervening package commits (#3134 vocabulary convergence, #3173
 `@haven_ai/sdk/edge` split, #3155 the x402 MCP transport profile) changed
 package internals, not anything this playbook claims about process.
+
+Re-verified 2026-10-07 (weekly docs audit #3645, at dev `009bd611`): §§1–5
+re-read. The private-consumer list in § Versioning gains `ops` (#3570), which
+`npm run lint:workspace-pins` already enforces by its `private: true` field.
+Everything else above is unchanged at this head.

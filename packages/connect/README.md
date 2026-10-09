@@ -161,8 +161,8 @@ minutes. Two rules follow:
    stderr log on every probe, and records it in `TOMBSTONE.json` for
    `--doctor` — with a copy in `~/.haven/tombstones/` (or `.tombstones/` inside
    a custom credentials root), so the retirement stays visible after the
-   directory is deleted. It touches no key material and revokes nothing — revoke the
-   agent on the Haven agent page yourself. Delete the tombstone only once every
+   directory is deleted. It touches no key material and revokes nothing — use **Remove
+   agent…** (or **Stop budget**) on the Haven agent page yourself. Delete the tombstone only once every
    long-lived host has been restarted.
 
    **Pass a real DIRECTORY, not an agent id.** A named agent lives at its wiring
@@ -219,7 +219,7 @@ backend change) and **refuses to destroy the key material on every answer**:
 
 | Probe | What it means | What `--unwire` does |
 | --- | --- | --- |
-| `ok` | The agent is still active: its key still spends. | Refuses; tells you to revoke on the Haven agent page (connect never revokes), then re-run. |
+| `ok` | The agent is still active: its key still spends. | Refuses; tells you to use **Remove agent…** on the Haven agent page (connect never revokes), then re-run. |
 | `unauthorized` | The key no longer authenticates on normal routes (revoked, archived, paused, pending approval, rotated, or not a key the backend knows — it does not say which). | Refuses; says plainly that a stranded balance **may** exist and the connector **cannot check**; recover first (`haven_sweep_delegate`, or the agent page). |
 | `network_error` / `bad_response` | Could not verify. | Refuses: unknown is not "safe to delete". Retry. |
 | *(no stored API key + URL)* | Nothing the recovery routes would accept. | Proceeds, unprobed — the pre-#3123 shape. |
@@ -385,8 +385,8 @@ and the API key travels beside it in a header.
 
 `superseded_agent_ids` lists the other agent directories on this machine. A
 re-run mints a NEW agent, and without `--replace` retires nothing, so those
-older agents still hold live API and signing keys — revoke them on the Haven
-agent page if you meant to replace them. Empty on a clean first run; an empty
+older agents still hold live API and signing keys — use **Remove agent…** on the
+Haven agent page for each if you meant to replace them. Empty on a clean first run; an empty
 list here is not a guarantee, since a scan that cannot read the credential root
 also yields one rather than failing a completed setup.
 
@@ -499,12 +499,24 @@ already-configured machine behaves as follows (characterized in
   consumed setup when Connect resolves it (or, in a rare concurrent-run race,
   at registration). The key pair minted for the attempt exists only in memory
   and is discarded. Start a fresh connection from the Haven dashboard instead.
-- **Running a fresh setup on a configured machine** writes the new agent's
-  credentials into its own directory under `~/.haven/agents/<agent-id>/`,
+- **Running a fresh setup on a configured machine writes the new agent's
+  credentials into its own directory under `~/.haven/agents/<slug-or-id>/`,
   alongside the previous agent's directory, which stays byte-identical.
-  Nothing is rotated, revoked, or deleted locally.
+  Nothing is rotated, revoked, or deleted locally.**
+- **A default setup names its pair from the agent's display name
+  ([#3737](https://github.com/d-hinders/Haven-AI/issues/3737)) and never
+  collides.** Without `--name`, `--bare` or `--replace`, the connector derives
+  the slug itself (`proposeServerSlug`: slugified display name, `agent`
+  fallback, numeric suffix when taken) and wires `haven-<slug>` /
+  `haven-signer-<slug>` — de-collided against **every** directory under the
+  credential root (retired and key-removed ones included, so a slug freed by
+  `--unwire` is never reused), and marked `-dev` on a non-production backend
+  (Base Sepolia or any chain that is not Base mainnet 8453; an explicit
+  `--name` is used verbatim and never altered). Nothing is displaced, so
+  nothing is asked. `--bare` opts back into the unnamed pair.
 - **A bare re-run over a live previous agent is a decision, not a default
-  ([#2551](https://github.com/d-hinders/Haven-AI/issues/2551)).** Before
+  ([#2551](https://github.com/d-hinders/Haven-AI/issues/2551)).** Only a run
+  that targets the bare pair — `--bare`, or `--replace` — can collide; before
   minting a key or registering, Connect scans the credential root for a
   bare-pair directory that still holds a usable key — the same reading
   `--doctor` classifies as `wired` or `superseded`; `retired`, `orphaned`,
@@ -521,7 +533,9 @@ already-configured machine behaves as follows (characterized in
     flag itself. The setup prompt then permits one re-run with the flag the
     user picks (#3689), on top of `--json` and a `--runtime` retry.
   - **`--replace`** is the unattended answer "yes, replace". `--name <slug>`
-    installs alongside. Passing both is a usage error — they contradict.
+    installs alongside. `--bare` is the human opt-in to the unnamed pair and
+    refuses with `--name`. Passing `--replace --name` is a usage error — they
+    contradict.
 - **Replacing re-points the bare pair, then retires the previous directory
   locally.** Connect owns the `haven` and `haven-signer` entries (and the
   managed Codex/Hermes equivalents) and re-points them at the new agent's
@@ -539,8 +553,9 @@ already-configured machine behaves as follows (characterized in
   [Running several agents in one runtime](#running-several-agents-in-one-runtime).
 - **The previous agent is not revoked by a re-run — with or without
   `--replace`.** Local retirement is local: its authority remains whatever
-  its on-chain rules and the Haven agent page say. Revoke agents you no
-  longer use from the Haven dashboard. Connect never calls revoke — that
+  its on-chain rules and the Haven agent page say. Use **Remove agent…** on
+  the Haven agent page for agents you no longer use (or the superseded-agents
+  revoke on the setup screen). Connect never calls revoke — that
   route is owner-authenticated, and an agent credential revoking a sibling
   agent would be an agent editing its own authority.
 - **A re-run never overwrites an existing credential file.** A write that would
@@ -567,15 +582,17 @@ As above, `<channel>` is a placeholder like the rest of this line: take the
 package from the setup response's `connector_package`
 and add `--name` to the command the dashboard gave you.
 
-| | Without `--name` | With `--name research` |
-|---|---|---|
-| MCP entries | `haven`, `haven-signer` | `haven-research`, `haven-signer-research` |
-| Credentials | `~/.haven/agents/<agent-id>/` | `~/.haven/agents/research/` |
+| | Default (no `--name`) | `--name research` | `--bare` |
+|---|---|---|---|
+| MCP entries | `haven-<slug>`, `haven-signer-<slug>` (slug from the agent's display name, `-dev`-marked on a non-production backend) | `haven-research`, `haven-signer-research` | `haven`, `haven-signer` |
+| Credentials | `~/.haven/agents/<slug>/` | `~/.haven/agents/research/` | `~/.haven/agents/<agent-id>/` |
 
 A writer only ever touches the pair it owns, so adding a named agent cannot
-disturb the bare pair or another named one. Omitting `--name` is byte-identical
-to how the connector behaved before named pairs existed, so nothing already
-wired needs changing.
+disturb the bare pair or another named one. **`--bare` wires the bare pair
+byte-identically to how the connector behaved before named pairs existed**, so
+nothing already wired needs changing — it is the one flag (besides
+`--replace`) that reaches the unnamed pair, and it cannot be combined with
+`--name`.
 
 The slug is **1–32 lowercase letters, digits and single hyphens**, validated
 before anything is written, and **immutable once wired** — it is the server name
@@ -614,6 +631,14 @@ npx -y @haven_ai/connect@<channel> --rekey [--name research]
 npx -y @haven_ai/connect@<channel> --rekey-finish --api-key sk_agent_... \
   --runtime claude-code [--name research]
 ```
+
+**No `--name` needed when exactly one live agent is on the machine.** Since
+[#3737](https://github.com/d-hinders/Haven-AI/issues/3737), `--rekey` without
+`--name` selects the sole agent directory that still holds a stored API key —
+tombstoned and key-removed directories left by `--unwire` do not count — and
+the printed phase-two command carries that agent's exact `--name` when it has
+one. With **several** live agents it refuses and lists them, so you must pass
+`--name <slug>`; a bare agent needs no `--name`, exactly as before.
 
 **Phase one prints the exact phase-two command — prefer it over the line above.**
 Since [#2423](https://github.com/d-hinders/Haven-AI/issues/2423) the connector
@@ -689,8 +714,8 @@ terminal and refuses everywhere else, so a `superseded` directory now means
 someone chose it — a `--replace` whose install failed, an older connector, or
 a directory this scan could not classify. A superseded directory
 whose key is still live is a FAILING check naming the agent id, with the
-repair spelled out: revoke it on the Haven agent page, then remove the
-directory. An already-revoked one reports as informational; an unreachable
+repair spelled out: use **Remove agent…** on the Haven agent page, then remove
+the directory. An already-revoked one reports as informational; an unreachable
 probe is a note, never a verdict. Connect never revokes or deletes
 credentials itself — it reports, you decide. The setup completion output
 names superseded agents the moment they are created, for the same reason.

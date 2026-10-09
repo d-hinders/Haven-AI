@@ -18,6 +18,7 @@ import { getChainConfig, resolveChainOrNull, getChainTokens, DEFAULT_CHAIN_ID, S
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { budgetPeriodLabel } from '@/lib/budget-period'
 import { isIncompleteMoneyInput, validateMoneyInput } from '@/lib/money-input'
+import { resolveDefaultAccount } from '@/lib/default-account'
 
 // ── Flow types ─────────────────────────────────────────────────────
 
@@ -301,7 +302,9 @@ export function buildManualCredentialPrompt(input: {
     'Important:',
     '- The private signing key lets the agent sign payments within the approved agent budget.',
     '- The API key identifies the agent but cannot spend alone.',
-    '- If this credential may have leaked, pause or revoke the agent in Haven.',
+    '- If this credential may have leaked, open the agent in Haven and choose Replace signing key: the old budget is revoked on-chain and a new one is issued.',
+    '- To stop all spending now, use Stop budget on the agent\u2019s budget, or Remove agent\u2026 to end every budget and retire the agent. Pausing only blocks payments through Haven; the budget stays live on-chain.',
+    '- The private signing key also controls any funds already in the agent wallet; ending the budget does not recover them.',
     '- Do not commit it, upload it, paste it into shared logs, or send it to Haven.',
     '',
     'After adding the values, return to Haven and approve the budget from the Haven wallet.',
@@ -327,7 +330,7 @@ export function useAgentConnectionSetup({
   starterAllowance = false,
   resumeSetupId = null,
 }: UseAgentConnectionSetupOptions) {
-  const { user, activeAccount } = useAuth()
+  const { user } = useAuth()
   const userAccounts = useMemo(() => user?.accounts ?? [], [user?.accounts])
 
   // Only wallets on a currently-supported chain can actually run a new agent
@@ -342,9 +345,7 @@ export function useAgentConnectionSetup({
   const initialAccountId =
     propAccountId ??
     userAccounts.find((account) => account.account_address.toLowerCase() === propAccountAddress?.toLowerCase())?.id ??
-    (isSupportedChain(activeAccount?.chain_id) ? activeAccount?.id : undefined) ??
-    selectableAccounts.find((account) => account.is_default)?.id ??
-    selectableAccounts[0]?.id ??
+    resolveDefaultAccount(selectableAccounts)?.id ??
     null
 
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(initialAccountId)
@@ -373,9 +374,9 @@ export function useAgentConnectionSetup({
   const selectedAccount = userAccounts.find((account) => account.id === selectedAccountId) ?? null
   const accountAddress = selectedAccount?.account_address ?? propAccountAddress ?? ''
   const accountId = selectedAccount?.id ?? propAccountId ?? null
-  const chainId = selectedAccount?.chain_id ?? activeAccount?.chain_id ?? DEFAULT_CHAIN_ID
+  const chainId = selectedAccount?.chain_id ?? DEFAULT_CHAIN_ID
   // #1069: branch the final step on the account's rail — see
-  const walletName = selectedAccount?.name ?? activeAccount?.name ?? 'Selected Haven wallet'
+  const walletName = selectedAccount?.name ?? 'Selected Haven wallet'
   const walletNetworkName = resolveChainOrNull(chainId)?.name ?? `Chain ${chainId}`
   // A setup created in THIS session wins over a resumed id: the user who just
   // clicked through the wizard is looking at their own new setup, not at
@@ -389,6 +390,9 @@ export function useAgentConnectionSetup({
   const rawVisibleStatus = cancelled ? 'cancelled' : setupStatus?.status ?? setup?.status
   const visibleStatus = manualCredentialNeedsSave ? 'awaiting_connection' : rawVisibleStatus
   const approvalChainId = setupStatus?.haven_wallet.chain_id ?? chainId
+  // The account the budget is being approved on — what the approval step's
+  // wallet pill reports signer status for (#3719), not the user's default.
+  const approvalAccountId = setupStatus?.haven_wallet.id ?? accountId
   const approvalWalletLabel = setupStatus?.haven_wallet
     ? `${setupStatus.haven_wallet.name} on ${setupStatus.haven_wallet.network}`
     : walletName
@@ -760,6 +764,7 @@ export function useAgentConnectionSetup({
     // Approval context for the live delegation rail.
     approvalWalletLabel,
     approvalChainId,
+    approvalAccountId,
     // Approval (delegation rail)
     handleDelegationApproved,
     // Wrong-chain recovery (#1070)

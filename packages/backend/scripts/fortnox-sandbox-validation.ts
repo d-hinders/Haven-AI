@@ -132,6 +132,11 @@ async function main() {
     fxSource: 'riksbank',
     fxAt: new Date().toISOString(),
     receiptRef: 'sandbox-receipt',
+    // #3767: the sandbox push renders the production comment, which now names
+    // the booked hash — a synthetic one, since no real payment settles here.
+    txHash: `0x${'sa'.repeat(32)}`,
+    txHashIsFunding: false,
+    fundingTxHash: null,
     suggestedAccount: '6540',
   }
 
@@ -151,6 +156,8 @@ async function main() {
     resourceUrl: tx.resourceUrl,
     chainId: 84532,
     txHash: '0x' + 'cd'.repeat(32),
+    txHashIsFunding: false,
+    fundingTxHash: null,
     delegate: '0x' + 'ef'.repeat(20),
     signHash: '0x' + '12'.repeat(32),
     signature: '0x' + '34'.repeat(65),

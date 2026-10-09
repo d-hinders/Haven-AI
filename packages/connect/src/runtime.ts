@@ -41,7 +41,9 @@ import {
   type InstalledClientHint,
 } from './installed-clients.js'
 import {
+  deriveServerSlug,
   detectWiringCollision,
+  listTakenDirectoryNames,
   promptWiringCollisionResolution,
   type WiringCollision,
   type WiringCollisionResolution,
@@ -51,7 +53,17 @@ import { tombstonesDirForCredentialRoot } from './tombstone.js'
 import { assertSupportedNodeVersion } from './local-mcp-runtime.js'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 
-export const CONNECTOR_VERSION = '0.8.1-alpha.0'
+export const CONNECTOR_VERSION = '0.9.0-alpha.0'
+
+/**
+ * #3737 owner decision 4: the derived slug marks NON-production backends
+ * (`<slug>-dev`); production gets the plain slug. Production is Base
+ * mainnet, chain id 8453 — 84532 is Base Sepolia. Any other or unknown
+ * chain id counts as non-production: an unmarked slug on a dev backend is
+ * the exact confusion this exists to remove, while a `-dev` mark on an
+ * exotic chain is merely cosmetic.
+ */
+const PRODUCTION_CHAIN_ID = 8453
 
 /** #3303: the `X-Haven-Client` value every Haven API request from this connector carries. */
 export const CONNECTOR_CLIENT_IDENTITY = `@haven_ai/connect/${CONNECTOR_VERSION}`
@@ -79,6 +91,19 @@ export interface ConnectOptions {
   environmentLabel?: string
   /** #1696: wiring slug for a named MCP pair + slug-keyed credential dir. */
   serverName?: string
+  /**
+   * #3737: derive the wiring slug from the agent's display name and install
+   * a NAMED pair (`haven-<slug>` / `haven-signer-<slug>`) instead of the bare
+   * one. The CLI passes this by default so that adding an agent never
+   * targets the bare pair and therefore never has to ask replace-vs-
+   * alongside; the LIBRARY keeps today's bare behaviour when neither
+   * `serverName` nor this option is set, so existing programmatic callers
+   * are unchanged. An explicit `serverName` always wins over derivation.
+   * The derived slug de-collides against EVERY directory name under the
+   * credential root, marks non-production backends with a `-dev` suffix
+   * (owner decision 4), and is refused nothing — it never displaces anyone.
+   */
+  deriveServerName?: boolean
   /**
    * #2551: when the bare pair on this machine is already wired to a different
    * agent with a live key, replace it — re-point `haven` / `haven-signer` at
@@ -231,6 +256,16 @@ export interface ConnectOutcome {
    */
   server_name_rebound_from?: { server_name: string; agent_id: string; api_url: string; bound_at: string; backend_changed: boolean }
   /**
+   * #3737, additive within schema_version 1: the hosted MCP server name this
+   * run actually wired — `haven-<slug>` for a named run (derived or
+   * explicit), bare `haven` for a `--bare` / `--replace` run. The mirror of
+   * what `mcpServerName` reported to the backend at register and what the
+   * completion text names, carried structurally so a `--json` caller can
+   * verify `hermes mcp test <name>` without parsing prose. Always present on
+   * a completed run; absent on `failedConnectOutcome`, which wired nothing.
+   */
+  server_name?: string
+  /**
    * #2091, additive within schema_version 1: `message` is the redacted human
    * refusal (automation used to get code + next_action and nothing to act
    * on), and `allowed_runtimes` carries the valid `--runtime` retry values on
@@ -296,6 +331,14 @@ export interface ConnectDeps {
   isStdoutTty?: boolean
   /** Overridable so the #1719 installed-client prompt is testable without readline. */
   promptRuntime?: () => Promise<RuntimeId>
+  /**
+   * Overridable so the DEFAULT prompt thunk is observable: the call site in
+   * `runtimeSelectionPrompt` must pass the hint scan's `env` to it (#3732) —
+   * the prompt rung and the `--json` refusal describe ONE machine, so they
+   * must look at the same environment. Takes the full scan options, env
+   * included; defaults to `resolveRuntimeByInstalledClientPrompt`.
+   */
+  promptRuntimeByInstalledClient?: typeof resolveRuntimeByInstalledClientPrompt
   /**
    * Overridable so the #2551 replace-vs-alongside prompt is testable without
    * readline. Reached only through the same `interactive` + TTY gate as
@@ -553,9 +596,33 @@ async function executeConnect(
   // pair coexists with the bare one) and is never asked; the bare-pair run is
   // what the #1569 remove-first install would otherwise resolve by silently
   // overwriting, with the #1688 heads-up arriving after the fact.
+  //
+  // #3737: a DERIVED-slug run (`deriveServerName`, which the CLI now passes
+  // by default) also displaces nothing — it names its own pair from the
+  // agent's display name and never asks. The bare pair, and with it the
+  // replace-vs-alongside question, is reached only through an explicit
+  // `--bare` / `--replace` (owner decision 2): a default run without a name
+  // used to be the one action that could silently overwrite or refuse, and
+  // now it simply adds an agent.
   let serverName = options.serverName
   let replacing: WiringCollision | undefined
-  if (!serverName) {
+  if (!serverName && options.deriveServerName) {
+    // The widest `taken` set — every directory name under the credential
+    // root, retired and key-removed ones included — so a slug freed by
+    // `--unwire` is never handed out again (`deriveServerSlug`'s contract).
+    const taken = await listTakenDirectoryNames(options.credentialsDir)
+    const nonProduction = setup.haven_wallet.chain_id !== PRODUCTION_CHAIN_ID
+    serverName = deriveServerSlug(setup.agent.name, taken, nonProduction)
+    // Belt and braces: the derivation guarantees availability, but this is
+    // the same two-layer check the explicit `--name` path applies above.
+    await assertServerSlugAvailable(serverName, options.credentialsDir)
+    const derivedNames = serverNamesFor(serverName)
+    log(
+      `Naming this agent's MCP pair from its display name: ${derivedNames.hosted} / ${derivedNames.signer}. ` +
+        'Nothing was displaced; to wire the bare haven / haven-signer pair instead, re-run with --bare, ' +
+        'or choose the name yourself with --name <slug>.',
+    )
+  } else if (!serverName) {
     const collision = await detectWiringCollision({
       credentialsDir: options.credentialsDir,
       agentName: setup.agent.name,
@@ -896,7 +963,7 @@ async function executeConnect(
       log('')
       log(
         `Replaced: previous agent(s) ${supersededIds(replacing!)} are retired on this machine but NOT revoked — ` +
-          'revoke them on the Haven agent page, then restart EVERY long-lived host (gateways, TUI workers, ' +
+          'use Remove agent\u2026 on the Haven agent page for each (it ends their live budgets), then restart EVERY long-lived host (gateways, TUI workers, ' +
           'editors): each holds the MCP wiring snapshot from its own start time, and the tombstone speaks only ' +
           'when a stale host next probes the old path.',
       )
@@ -907,7 +974,7 @@ async function executeConnect(
           'still exist with their own keys, and any host that was already running keeps acting as them.',
       )
       log(
-        'If you meant to replace them: revoke them on the Haven agent page, then restart EVERY ' +
+        'If you meant to replace them: use Remove agent\u2026 on the Haven agent page for each (it ends their live budgets), then restart EVERY ' +
           'long-lived host (gateways, TUI workers, editors) — each holds the MCP wiring snapshot from ' +
           'its own start time, so after repeated setups each can be stuck on a DIFFERENT old agent. ' +
           `Then remove their directories under ~/.haven/agents (or ${RERUN_HINT} --tombstone <dir> to ` +
@@ -988,12 +1055,31 @@ async function executeConnect(
     runtimeInstall,
     delegateAddress: registration.delegate_address,
     hostedMcpUrl: registration.hosted_mcp_url,
+    // #3737: the resolved name — derived, explicit, or the bare pair — rides
+    // the machine-readable outcome alongside the prose completion text.
+    serverName,
     supersededAgentIds,
     supersededAgentsRetiredLocally,
     ...(replacing ? { retiredAgentIds } : {}),
     ...(Object.keys(retirementMirrorErrors).length > 0 ? { retirementMirrorErrors } : {}),
     existingAgentsBeforeWrite: existingAgents.map((a) => ({ agent_id: a.agentId, account_address: a.accountAddress })),
     ...(reboundFrom ? { serverNameReboundFrom: reboundFrom } : {}),
+    // #3772: only when the install completed. An install that ended with an
+    // error code may not have written the wiring, and on --replace it leaves the
+    // old agent's wiring as possibly the only working one (retirement is skipped
+    // on the same condition) — so it gets no such sentence. That includes
+    // manual_runtime_setup_required, deliberately: the connector wrote nothing
+    // and the manual instruction already says to start a fresh session. A
+    // --replace names every displaced agent even when no binding record exists
+    // (pre-0.4.0 wiring, or a failed best-effort write).
+    ...(!runtimeInstall.errorCode && (replacing || reboundFrom)
+      ? {
+          staleSession: {
+            agentIds: [...new Set([...(replacing?.superseded.map((entry) => entry.agentId) ?? []), ...(reboundFrom ? [reboundFrom.agent_id] : [])])],
+            ...(reboundFrom?.backend_changed ? { otherBackendAgentId: reboundFrom.agent_id } : {}),
+          },
+        }
+      : {}),
     setupChallengeExpiresAt: setup.challenge.expires_at,
     approvalRequired: registration.agent_status === 'pending_approval',
     approvalUrl: registration.approval_url,
@@ -1018,10 +1104,29 @@ async function executeConnect(
   }
 }
 
+
+/**
+ * #3772: the warning a rebind owes the user. Connect re-points the server name
+ * on disk, but an MCP client that is already running keeps the entries it
+ * loaded at start-up, so that session goes on acting as the previous agent.
+ * Connect revokes nothing in Haven (a replace retires the old directory
+ * locally only), so the previous agent may still be able to spend.
+ */
+export function staleSessionNotice(previousAgentIds: readonly string[], otherBackendAgentId?: string): string {
+  const one = previousAgentIds.length === 1
+  return (
+    `Any session that was already running keeps acting as the previous agent${one ? '' : 's'} (${previousAgentIds.join(', ')}) until it is restarted, ` +
+    `and ${one ? 'that agent' : 'they'} may still be active in Haven` +
+    (otherBackendAgentId ? ` (${otherBackendAgentId} is on the backend it was created on, not this one)` : '') +
+    `: if ${one ? 'it' : 'they'} should no longer spend, use Remove agent\u2026 on the Haven agent page (it ends ${one ? 'its' : 'their'} live budgets).`
+  )
+}
 export function completionOutcome(input: {
   runtimeInstall: RuntimeInstallResult
   delegateAddress: string
   hostedMcpUrl?: string
+  /** #3737: the resolved wiring slug; absent means the bare pair. */
+  serverName?: string
   supersededAgentIds?: readonly string[]
   /** #2551: only a replace run sets these; see the outcome fields' doc comments. */
   supersededAgentsRetiredLocally?: boolean
@@ -1033,6 +1138,8 @@ export function completionOutcome(input: {
   approvalUrl?: string
   existingAgentsBeforeWrite?: ReadonlyArray<{ agent_id: string; account_address: string | null }>
   serverNameReboundFrom?: ConnectOutcome['server_name_rebound_from']
+  /** #3772: set only when this run re-pointed wiring another agent held. */
+  staleSession?: { agentIds: readonly string[]; otherBackendAgentId?: string }
 }): ConnectOutcome {
   const { runtimeInstall } = input
   const manualSetup = runtimeInstall.errorCode === 'manual_runtime_setup_required'
@@ -1050,9 +1157,16 @@ export function completionOutcome(input: {
     probe: { result: runtimeInstall.probeResult },
     activation: {
       restart_required: runtimeInstall.restartRequired,
-      instruction: manualSetup
-        ? 'Finish the manual MCP setup using the secret-free references shown in normal Connect output, then start a fresh session.'
-        : runtimeProfile(runtimeInstall.runtime).activationInstruction,
+      instruction:
+        (manualSetup
+          ? 'Finish the manual MCP setup using the secret-free references shown in normal Connect output, then start a fresh session.'
+          : runtimeProfile(runtimeInstall.runtime).activationInstruction) +
+        // #3772: a rebind changes which agent the server name means, but a
+        // session that is already running keeps the config it loaded — it
+        // goes on acting as the previous agent, which Connect never revokes.
+        (input.staleSession && input.staleSession.agentIds.length > 0
+          ? ` ${staleSessionNotice(input.staleSession.agentIds, input.staleSession.otherBackendAgentId)}`
+          : ''),
     },
     next_action: nextAction,
     approval: {
@@ -1092,6 +1206,9 @@ export function completionOutcome(input: {
     // #3122: always emitted on a completed run (empty list included), for the
     // same reason as superseded_agent_ids above.
     existing_agents_before_write: input.existingAgentsBeforeWrite ?? [],
+    // #3737: the resolved hosted server name — always present on a completed
+    // run, bare pair included, so a caller never has to parse the prose.
+    server_name: serverNamesFor(input.serverName).hosted,
     ...(input.serverNameReboundFrom ? { server_name_rebound_from: input.serverNameReboundFrom } : {}),
     ...(input.setupChallengeExpiresAt ? { setup_challenge_expires_at: input.setupChallengeExpiresAt } : {}),
     ...(runtimeInstall.errorCode
@@ -1154,7 +1271,10 @@ function runtimeSelectionPrompt(
   deps: ConnectDeps,
 ): (() => Promise<RuntimeId>) | undefined {
   if (!interactivePromptAllowed(options, deps)) return undefined
-  return deps.promptRuntime ?? (() => resolveRuntimeByInstalledClientPrompt())
+  if (deps.promptRuntime) return deps.promptRuntime
+  // The prompt's scan gets the same `env` the hint scan got (#3732): both
+  // rungs describe ONE machine, so they must look at the same environment.
+  return () => (deps.promptRuntimeByInstalledClient ?? resolveRuntimeByInstalledClientPrompt)({ env: deps.env })
 }
 
 /**
@@ -1218,7 +1338,7 @@ async function resolveWiringCollision(
       'Haven setup token is still unused. If you are an AI agent running this command: do NOT add a flag yourself — ' +
       'relay this to your user and stop. Your user decides: REPLACE the existing wiring (re-run the same command with ' +
       '--replace added, which re-points the pair at the new agent and retires the previous directory locally — they ' +
-      'still revoke the old agent on the Haven agent page), or install ALONGSIDE it (re-run with --name <slug> added, ' +
+      'still use Remove agent\u2026 on the Haven agent page to end the old agent\u2019s budgets), or install ALONGSIDE it (re-run with --name <slug> added, ' +
       `e.g. --name ${collision.suggestedServerName}, which gives the new agent its own haven-<slug> / haven-signer-<slug> pair). ` +
       'Re-run only with the flag your user chooses.',
     'relay_wiring_collision_to_user',

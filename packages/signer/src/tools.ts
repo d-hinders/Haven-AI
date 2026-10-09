@@ -18,6 +18,7 @@ import {
   assertOwnTaskBudgetCloseUserOp,
   assertOwnSubBudgetChild,
   assertOwnSubBudgetCloseUserOp,
+  x402RetryHeadersFor,
   type HavenClientUpdate,
   type X402PaymentRequired,
 } from '@haven_ai/sdk/edge'
@@ -49,6 +50,13 @@ import {
   type FetchedSubBudgetSignContext,
 } from './sign-context.js'
 import { nextStepWireFields, signerRefusalStep } from './next-step.js'
+import {
+  buildSiwxPayload,
+  composeSiwxMessage,
+  encodeSiwxHeader,
+  HavenSiwxRefusedError,
+  validateSiwxChallenge,
+} from './siwx.js'
 
 /**
  * The signer's wire identity. Declared HERE, in the tools/handlers module —
@@ -57,7 +65,7 @@ import { nextStepWireFields, signerRefusalStep } from './next-step.js'
  * `server.ts` re-exports them, so the package's public API is unchanged.
  */
 export const SIGNER_NAME = '@haven_ai/signer'
-export const SIGNER_VERSION = '0.8.1-alpha.0'
+export const SIGNER_VERSION = '0.9.0-alpha.0'
 
 /**
  * #3419: the marker the tool layer prefixes the undeclared-argument refusal
@@ -177,6 +185,7 @@ function assertBoundDirectPaymentUserOp(
  */
 export type SignerToolName =
   | 'haven_sign'
+  | 'haven_sign_siwx'
   | 'haven_x402_sign_header'
   | 'haven_sign_x402'
   | 'haven_sign_sweep_delegate'
@@ -340,6 +349,18 @@ export const toolSchemas = {
     // #1255: see haven_sign.typed_data_b64 — the copy-through-safe form.
     typed_data_b64: z.string().min(1).max(262144).optional(),
   },
+  haven_sign_siwx: {
+    // #3728: the https URL the agent is calling — the challenge's domain and
+    // resource uri are pinned to THIS origin before anything is signed.
+    url: z.string().min(1),
+    // The merchant's sign-in-with-x challenge. Accepted as EITHER the 402
+    // extension object (payment_required.extensions['sign-in-with-x'] —
+    // { info, supportedChains, schema? }) or the flattened info object the
+    // x402 reference client builds ({ ...info, chainId, type }). Validated
+    // field by field in siwx.ts; the signer composes the EIP-4361 message
+    // itself and never signs a caller-supplied message.
+    challenge: z.record(z.string(), z.unknown()),
+  },
 // #3101: keys survive on the type (see the hosted server's contracts.ts).
 } as const satisfies Record<SignerToolName, z.ZodRawShape>
 
@@ -379,8 +400,10 @@ const X402_SIGN_HEADER_DESCRIPTION = [
   'do not call this tool. The signer validates the merchant, amount, resource, asset, and',
   'network against the recorded funding context before signing, checks expires_at when present,',
   'and rejects mismatches or expired payment windows.',
-  'Returns { payment_header, accepted }. On your retry set BOTH PAYMENT-SIGNATURE (x402 v2) and',
-  'X-PAYMENT (v1) to <payment_header>; a strict v2 merchant reads only the first.',
+  'Returns { payment_header, retry_headers, accepted }. On your retry set EVERY header named in',
+  'retry_headers to <payment_header> — the names come from the same rule the wire uses (both',
+  'PAYMENT-SIGNATURE (x402 v2) and X-PAYMENT (v1) on the EIP-3009 bridge; a strict v2 merchant reads',
+  'only the first).',
   'Only call after haven_submit has confirmed the funding step (nextAction=none or',
   'the funding tx has a confirmed status). Next for paid MCP tools: call mcp__haven__haven_complete_mcp_tool.',
 ].join(' ')
@@ -407,8 +430,8 @@ const SIGN_X402_DESCRIPTION = [
   'haven_sign, not to this one. payment_header IS the header to use.',
   'Next: for a paid MCP tool, call mcp__haven__haven_settle_mcp_tool. For a direct plain-HTTP x402',
   'merchant (the haven_pay_x402_quote path), relay signature via mcp__haven__haven_submit and then',
-  'retry the original merchant URL YOURSELF, setting BOTH PAYMENT-SIGNATURE (x402 v2) and',
-  'X-PAYMENT (v1) to payment_header — Haven never contacts that merchant.',
+  'retry the original merchant URL YOURSELF, setting EVERY header the result names in',
+  'retry_headers to payment_header — Haven never sends that merchant the paid request.',
 ].join(' ')
 
 const SIGN_SWEEP_DELEGATE_DESCRIPTION = [
@@ -422,8 +445,29 @@ const SIGN_SWEEP_DELEGATE_DESCRIPTION = [
   'returns { signature } to hand back to mcp__haven__haven_sweep_delegate to complete recovery.',
 ].join(' ')
 
+const SIGN_SIWX_DESCRIPTION = [
+  'Answer a merchant x402 Sign-In-With-X (SIWX) sign-in challenge with the local delegate key (#3728).',
+  'Use it when a merchant 402 carries a sign-in-with-x extension, or when the merchant documents a',
+  'sign-in route (CAIP-122): pass url — the FINAL URL the header will be sent to, i.e. after any',
+  'redirects, not the originally requested one — and challenge, the sign-in-with-x object from the',
+  "402 (extensions['sign-in-with-x'], or the flattened info object). NEVER follow a redirect with",
+  'the SIGN-IN-WITH-X header (or a resulting session token) attached: re-sign for the final origin.',
+  'This signer composes the EIP-4361 message ITSELF from the validated challenge fields and the',
+  'delegate address read from the key — it never signs a caller-supplied message, and an address',
+  'inside the challenge cannot change whose wallet signs in. It refuses (SIWX_REFUSED) unless the',
+  'challenge domain matches the URL host, its resource uri origin matches the URL origin, the URL is',
+  'https, the nonce is well-formed, the expiry window is at most 5 minutes (plus a small clock-skew',
+  'tolerance), and supportedChains offers the credential chain with an eip191 signature type. This',
+  'tool MOVES NO FUNDS and grants no spend authority: it only proves the delegate wallet is the one',
+  'that paid the merchant. Returns { sign_in_with_x_header } — retry the merchant request with the',
+  'SIGN-IN-WITH-X header set to that value. The merchant then recognises the delegate wallet as a',
+  'paying customer (a session it mints typically outlives the 5-minute signature; what the session',
+  'reaches is merchant-defined).',
+].join(' ')
+
 export const toolDescriptions: Record<SignerToolName, string> = {
   haven_sign: SIGN_DESCRIPTION,
+  haven_sign_siwx: SIGN_SIWX_DESCRIPTION,
   haven_x402_sign_header: X402_SIGN_HEADER_DESCRIPTION,
   haven_sign_x402: SIGN_X402_DESCRIPTION,
   haven_sign_sweep_delegate: SIGN_SWEEP_DELEGATE_DESCRIPTION,
@@ -1045,7 +1089,13 @@ export function createToolHandlers(
           'haven_x402_sign_header',
           hashPayloadForAudit(args.payment_required),
         )
-        return { payment_header: result.paymentHeader, accepted: result.accepted }
+        return {
+          payment_header: result.paymentHeader,
+          accepted: result.accepted,
+          // #3727: the ready-made retry headers beside the prose — the names
+          // come from the SDK's live rule, never re-derived here.
+          retry_headers: x402RetryHeadersFor(result.paymentHeader),
+        }
       }),
 
     haven_sign_x402: async (input) =>
@@ -1111,6 +1161,9 @@ export function createToolHandlers(
           x402_binding: funding.x402Binding,
           payment_header: header.paymentHeader,
           accepted: header.accepted,
+          // #3727: the ready-made retry headers beside the prose — the names
+          // come from the SDK's live rule, never re-derived here.
+          retry_headers: x402RetryHeadersFor(header.paymentHeader),
           ...clientUpdateField(resolved),
         }
       }),
@@ -1131,15 +1184,56 @@ export function createToolHandlers(
         )
         return { signature: result.signature }
       }),
+
+    haven_sign_siwx: async (input) =>
+      runTool(async () => {
+        const args = parseStrictFor('haven_sign_siwx', input)
+        // The credential chain (Base 8453 prod, Base Sepolia 84532 dev/QA) is
+        // what the challenge's supportedChains must offer — threaded from the
+        // credential file alongside the audit context, the same value the
+        // consent screen shows.
+        const chainId = options.audit?.chainId
+        // 1. Validate the challenge against the URL + chain, then compose the
+        //    EIP-4361 message with the delegate address read from the key.
+        //    Nothing caller-supplied is ever signed: only these validated
+        //    fields reach the message (invariant 1 of #3728).
+        const fields = validateSiwxChallenge({
+          url: args.url,
+          challenge: args.challenge,
+          chainId,
+        })
+        const message = composeSiwxMessage(fields, signer.delegateAddress)
+        // 2. Sign (EIP-191 personal_sign) and build the finished header —
+        //    base64 JSON of the decomposed fields, byte-shaped like the
+        //    x402 reference client's encodeSIWxHeader output.
+        const signature = await signer.signSiwxMessage(message)
+        const header = encodeSiwxHeader(
+          buildSiwxPayload(fields, signer.delegateAddress, signature),
+        )
+        // 3. Audit. payload_hash records the sha256 of the composed EIP-4361
+        //    message — the exact bytes signed, pre-signature, so the entry is
+        //    replayable and comparable across signers. domain/nonce ride the
+        //    audit entry's existing additive-optional-field pattern (#3728).
+        await auditSigning('haven_sign_siwx', hashPayloadForAudit(message), {
+          domain: fields.domain,
+          nonce: fields.nonce,
+        })
+        return { sign_in_with_x_header: header }
+      }),
   }
 
-  async function auditSigning(tool: SignerToolName, payloadHash: string): Promise<void> {
+  async function auditSigning(
+    tool: SignerToolName,
+    payloadHash: string,
+    extra: Pick<SigningAuditContext, 'domain' | 'nonce'> = {},
+  ): Promise<void> {
     if (!options.audit) return
     const { auditPath, ...context } = options.audit
     try {
       await appendSigningAuditEntry(
         createSigningAuditEntry(tool, payloadHash, {
           ...context,
+          ...extra,
           delegateAddress: signer.delegateAddress,
         }),
         auditPath,
@@ -1363,6 +1457,19 @@ function normalizeError(err: unknown): ToolFailure {
       ...(err.next_tool_server_role ? { next_tool_server_role: err.next_tool_server_role } : {}),
       ...(err.next_arguments ? { next_arguments: err.next_arguments } : {}),
       ...(err.next_tool_omitted_reason ? { next_tool_omitted_reason: err.next_tool_omitted_reason } : {}),
+    }
+  }
+  if (err instanceof HavenSiwxRefusedError) {
+    // #3728: the SIWX challenge refusal, structured like the others. Checked
+    // BEFORE the `HavenSigningError` branch below since this class extends it.
+    // No signature was produced and no audit entry written — the call refused
+    // before anything was composed or signed.
+    return {
+      success: false,
+      code: err.code,
+      message: err.message,
+      next_action: err.next_action,
+      ...nextStepWireFields(err.step),
     }
   }
   if (err instanceof HavenSigningError) {

@@ -312,6 +312,10 @@ describe('--tombstone (#1681)', () => {
     const out = stdout.join('')
     expect(out).toMatch(/nothing was revoked/)
     expect(out).toMatch(/Restart EVERY long-lived MCP host/)
+    // #3722: the agent page's control is "Remove agent…" (it ends the live
+    // budgets on-chain); there is no "revoke the agent" control there.
+    expect(out).toContain('use Remove agent\u2026 (or Stop budget) if you have not already')
+    expect(out).not.toMatch(/revoke the agent on the Haven agent page/i)
     // The agent API key must never surface in output.
     expect(out).not.toContain('sk_agent_x')
   })
@@ -1017,6 +1021,9 @@ describe('--unwire teardown outcome and --prune-signer-runtimes (#3123)', () => 
       expect(out).toContain('↳ Recover first, then --destroy-key-material.')
       expect(out).toContain('key material was KEPT')
       expect(out).not.toContain('key material was removed')
+      // #3722: the agent page's control is "Remove agent…", which ends the live budgets on-chain.
+      expect(out).toContain('use Remove agent\u2026 on the Haven agent page to end its budgets on-chain and stop it spending')
+      expect(out).not.toMatch(/revoke the agent on the Haven agent page/i)
 
       const json: string[] = []
       const exitJson = await runCli(['--unwire', '/home/u/.haven/agents/research', '--json'], { stdout: (m) => json.push(m), stderr: () => undefined })

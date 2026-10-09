@@ -222,6 +222,7 @@ The signer exposes local stdio MCP tools:
 | `haven_sign_x402` | One-call x402 fast path: funding signature + merchant payment header; signs by `payment_id` ALONE (#1355 — Haven's sign-context re-serves `payment_required`); a caller-supplied `payment_required` is the fallback for pre-#1355 backends |
 | `haven_x402_sign_header` | Build and sign the x402 merchant payment header after the Haven funding leg succeeds (decomposed flow) |
 | `haven_sign_sweep_delegate` | Sign a Haven-prepared gasless Base-USDC recovery sweep (delegate → the agent's account (Haven wallet) only) |
+| `haven_sign_siwx` | Answer a merchant x402 Sign-In-With-X challenge (#3728): the signer composes the EIP-4361 message itself from the validated `sign-in-with-x` challenge and the delegate address from the key, signs it EIP-191, and returns the finished `SIGN-IN-WITH-X` header. Moves no funds; refuses unless domain/uri match the URL being called (the FINAL URL after redirects — never follow a redirect with the header or a resulting session token attached), the URL is https, the nonce is well-formed, the expiry window is ≤ 5 minutes (plus a small clock-skew tolerance), and `supportedChains` offers the credential chain with `eip191` |
 
 The signer's ONE network use (#1263) is a read-only fetch of a signing context
 from Haven. It fetches by `payment_id` for a payment
@@ -337,10 +338,11 @@ API key was lost, rotate it in Haven and update the runtime config.
 
 **Tools are listed but every call fails**
 
-The hosted server lists its tools for any well-formed Bearer token; the key is
-checked only when a tool call reaches Haven. A call failing with
-`statusCode: 401` (`Invalid or revoked API key`) means the token is invalid or
-revoked: rotate the API key or create a new agent credential. A 403
+The hosted server lists its tools for any well-formed Bearer token. Every tool
+call (except `haven_verify_receipt` and `haven_sweep_delegate`) first checks the
+key with Haven and does nothing else if that check fails. A call failing with
+`code: AGENT_IDENTITY_UNVERIFIED` and `statusCode: 401` means the token is
+invalid or revoked: rotate the API key or create a new agent credential. A 403
 `agent_pending_approval` means the agent is still waiting for its first budget
 grant in Haven; `agent_paused` means the owner paused it.
 

@@ -68,6 +68,7 @@ const PINNED_TOOL_NAMES: readonly HostedToolName[] = [
   'haven_pay_x402_quote',
   'haven_resume_x402_payment',
   'haven_report_x402_outcome',
+  'haven_report_delivery_quality',
   'haven_report_settlement_evidence',
   'haven_get_payment_status',
   'haven_get_resume_state',
@@ -81,6 +82,8 @@ const PINNED_TOOL_NAMES: readonly HostedToolName[] = [
   'haven_close_task_budget',
   // #3518: the read-by-id a close refusal's "re-check the budget's status" points at.
   'haven_get_task_budget',
+  // #3723: the signed bundle's read — the receipt endpoint's own response.
+  'haven_get_receipt',
 ]
 
 /** A complete synthetic registry for the injectable detection-logic tests. */

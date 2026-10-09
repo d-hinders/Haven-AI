@@ -102,8 +102,6 @@ function mockBaseState() {
       email: 'ada@example.com',
       accounts: [ACCOUNT],
     },
-    activeAccount: ACCOUNT,
-    setActiveAccount: vi.fn(),
     loading: false,
     passkeys: [],
   })

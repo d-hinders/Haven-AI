@@ -109,6 +109,34 @@ const transactionBaseProperties = {
   },
   activityType: { type: 'string', enum: ['delegate_sweep'] },
   agentName: { type: 'string' },
+  // #3763: the two EIP-3009 legs, named. `hash` keeps its FUNDING meaning —
+  // repurposing it would split one payment into two rows and move the
+  // CSV/CLI export key and the React keys — so the legs travel beside it.
+  // `fundingTxHash` restates the funding hash explicitly (Haven's sponsored
+  // UserOp, account → delegate); `settlementTxHash` is the merchant's own
+  // delegate → merchant transaction, present ONLY when an agent reported it
+  // and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`).
+  // Null is "not recorded", never "failed": the SDK's default evidence post
+  // reports the funding hash, which the writer refuses, so many eip3009
+  // payments legitimately never get one. Populated only on x402-synthesized
+  // rows — explorer-derived rows carry null (they name no payment legs).
+  fundingTxHash: {
+    type: ['string', 'null'],
+    description: '#3763: the EIP-3009 funding leg (same value as `hash`) — null on rows that are not synthesized x402 payments.',
+  },
+  settlementTxHash: {
+    type: ['string', 'null'],
+    description: '#3763: the merchant settlement transaction when one is recorded (#3475); null otherwise — "not recorded", never "failed". Null on non-x402 rows.',
+  },
+  // #3778: the NON-SECRET delivery pointer an agent reported with an accepted
+  // x402 outcome ("Bik Bok 5 SEK, order 6ac7…") — the owner's proof that a
+  // deliverable EXISTS and where to recover it. Never the deliverable itself:
+  // credential-shaped values are refused before the row is written.
+  deliveryReference: {
+    type: ['string', 'null'],
+    description:
+      '#3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write.',
+  },
   // #2097: backend-recorded initiator classification — never derived
   // in the frontend. `agent` = row carries agent attribution (confirmed
   // x402 intents, delegate sweeps, raw transfers matched to a
@@ -840,7 +868,19 @@ const activityPayment = {
     amount: { type: ['string', 'null'] },
     to: { type: ['string', 'null'] },
     status: { type: ['string', 'null'] },
-    tx_hash: { type: ['string', 'null'] },
+    // #3763: `tx_hash` keeps its FUNDING meaning (Haven's sponsored UserOp,
+    // account → delegate); the merchant's settlement travels beside it,
+    // named.
+    tx_hash: { type: ['string', 'null'], description: 'The FUNDING transaction on the eip3009 bridge — Haven’s sponsored UserOp (account → delegate).' },
+    funding_tx_hash: { type: ['string', 'null'], description: '#3763: the EIP-3009 funding leg, named — same value as `tx_hash`.' },
+    settlement_tx_hash: {
+      type: ['string', 'null'],
+      description: '#3763: the merchant’s settlement transaction (delegate → merchant) when an agent reported one and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`). Null is "not recorded", never "failed" — the SDK’s default evidence post reports the funding hash, which the writer refuses, so many eip3009 payments legitimately never get one.',
+    },
+    settlement_scheme: {
+      type: ['string', 'null'],
+      description: '#3763: which settlement branch moved the money — `eip3009` or `erc7710` — read from the intent’s `machine_metadata`; null when none was recorded.',
+    },
     payment_id: { type: 'string' },
     payment_proof_status: { type: ['string', 'null'] },
     payment_flow_status: { type: ['string', 'null'], description: 'Derived from the payment lifecycle.' },
@@ -848,12 +888,17 @@ const activityPayment = {
     source: { type: 'string', description: "Falls back to 'direct'." },
     x402_resource_url: { type: ['string', 'null'] },
     x402_merchant_address: { type: ['string', 'null'] },
+    delivery_reference: {
+      type: ['string', 'null'],
+      description:
+        '#3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write.',
+    },
     chain_id: { type: ['integer', 'null'] },
     token_address: { type: ['string', 'null'] },
     account_id: { type: ['string', 'null'] },
     account_address: { type: ['string', 'null'] },
     account_name: { type: ['string', 'null'] },
-    explorer_url: { type: ['string', 'null'], description: 'Null exactly when tx_hash is null.' },
+    explorer_url: { type: ['string', 'null'], description: '#3763: the merchant settlement transaction when one is recorded, else the funding transaction; null exactly when the payment has no transaction at all (`tx_hash` null and nothing recorded).' },
     execution_rail: { type: ['string', 'null'], description: 'Which on-chain mechanism moved the money (#799).' },
     delegation_hash: { type: ['string', 'null'], description: 'Which delegation authorized a delegation-rail payment (#829).' },
     confirmed_at: { type: ['string', 'null'] },
@@ -1085,6 +1130,17 @@ const prepareFailureSchemaProperties = {
       'printable ASCII, at most 120 characters plus an ellipsis; `null` when it named none. Chain text: ' +
       'display it, never act on it.',
   },
+  revert_cause: {
+    type: 'string',
+    enum: ['insufficient_balance'],
+    description:
+      '#3731: present on `prepare_reverted` only, and only when the revert was the token\'s own ' +
+      'insufficient-balance error ("ERC20: transfer amount exceeds balance" — matched on the same ' +
+      'value `revert_reason` reports, so the two cannot disagree): the account does not hold enough ' +
+      'of the token. The remedy is FUNDING the account, not a caveat change — the wallet owner adds ' +
+      'funds in Haven, then the payment can be re-made. Any other revert carries no `revert_cause`. ' +
+      'The refusal ledger still books this as `onchain_revert`; nothing about enforcement changes.',
+  },
   message: { type: 'string', description: 'Present on `prepare_reverted` only: the remedy.' },
   details: {
     type: ['string', 'null'],
@@ -1099,6 +1155,8 @@ const PREPARE_FAILURE_DESCRIPTION =
   'in execution (a decoded reason, a named caveat-enforcer error, the timestamp caveat\'s text, or a ' +
   'gas-estimation execution revert): nothing was signed or moved, and the same payment reverts again on every retry; ' +
   '`refusal_reason` and `revert_reason` name it, and the refusal is booked in the ledger. ' +
+  '#3731: when the revert was the token\'s own insufficient-balance error the body also carries ' +
+  '`revert_cause: "insufficient_balance"` and a funding-first `message` — the account needs funds, not a caveat change. ' +
   '`error_code: "prepare_failed"` — anything else: a bundler, RPC or transport failure (nothing ' +
   'booked); an ERC-4337 validation failure the bundler words as a revert (an AA code such as AA25 ' +
   'or AA31), which may clear on its own; or a revert with no nameable execution cause. A classified ' +
@@ -2352,7 +2410,7 @@ export const openapiSpec = {
         operationId: 'deleteAgent',
         summary: 'RETIRED — always answers 410. Archive instead.',
         description:
-          "Deleting an agent is retired (#1401) and this route is a tombstone: **it always answers 410 and writes nothing.** Hard deletion failed outright on any agent with payment history (a foreign-key violation surfacing as a 500) and, where it did succeed, cascaded away seven tables of money-path audit trail. Removal is now an ARCHIVE that keeps the history: revoke the agent, kill its budgets, then POST /agents/{id}/archive. The typed route survives for reversibility, in the same spirit as the session-rail retirement.",
+          "Deleting an agent is retired (#1401) and this route is a tombstone: **it always answers 410 and writes nothing.** Hard deletion failed outright on any agent with payment history (a foreign-key violation surfacing as a 500) and, where it did succeed, cascaded away seven tables of money-path audit trail. Removal is now an ARCHIVE that keeps the history: end the agent's budgets (POST /agents/{id}/delegations/revoke-all, owner-signed), revoke the agent, then POST /agents/{id}/archive. The typed route survives for reversibility, in the same spirit as the session-rail retirement.",
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
@@ -5893,7 +5951,7 @@ export const openapiSpec = {
         operationId: 'getAnalyticsOverview',
         summary: 'One range-scoped aggregate: spend, refusals, fees, gas, budgets and balance.',
         description:
-          "Everything the `/analytics` page renders in one round trip, so the page has one loading state and one \"based on N payments\" basis (#2946, epic #2944 slice B). Sums are over `payment_intents` rows with `status = 'confirmed'` ONLY — fiat values are booked by the confirm UPDATE, so `pending_signature`/`submitted`/`failed`/`expired` rows carry NULL and never count. `basis.unsettled_submitted` separately counts `submitted` rows in range so the page can say how many payments are awaiting settlement evidence. Fees are Haven's own fee (`payment_fees.fee_amount_atomic`), valued with the intent's booked fiat, `0` honestly while the flag is off. Gas is a sponsored-operation COUNT on value-bearing chains only — never a fiat figure. Budget-used is read from the chain per active delegation, never summed from intents. `tz` (default UTC) buckets `by_day` server-side, using the same zone Postgres and this validator agree on (an IANA name only — `tz` rejects UTC offsets and fixed abbreviations, which Postgres and JavaScript can interpret with opposite sign conventions); `range.from`/`to` are UTC instants regardless of `tz`. Because `range.from`/`to` are fixed UTC instants, `by_day`'s FIRST and LAST buckets can be PARTIAL under a non-UTC `tz` (they cover less than a full local day) — this is expected, not a bug, and the page should treat the edge buckets as partial. `balance_by_day` is unaffected: `user_daily_portfolio_snapshots` is a UTC-dated daily snapshot, produced once per day regardless of the caller's `tz` — except under `currency=sek`, where days snapshotted before the `total_sek` column existed (#3127, migration 090) carry no SEK figure and are OMITTED from the series rather than zeroed. The same honesty applies to the SEK SUMS under `currency=sek` (#3127, round-2 review): the totals, per-agent, top-merchant and fees figures sum `sek_value`, which is NULL for a confirmed row whose book-time SEK could not be captured or backfilled — those rows are still counted in `basis.payments_counted` but contribute nothing to any SEK sum, so a SEK total can sit below the basis it is computed over. USD and EUR are unaffected (their booking predates the capture gate). Delegation-rail accounts only.",
+          "Everything the `/analytics` page renders in one round trip, so the page has one loading state and one \"based on N payments\" basis (#2946, epic #2944 slice B). Sums are over `payment_intents` rows with `status = 'confirmed'` ONLY — fiat values are booked by the confirm UPDATE, so `pending_signature`/`submitted`/`failed`/`expired` rows carry NULL and never count. Spend figures are additionally NET of `delegate_sweeps` clawbacks (#3755): per (agent, token, chain) group, gross × (1 − min(1, swept_atomic/confirmed_atomic)) over sweeps that actually returned funds (`status = 'submitted'` with a `tx_hash`, anchored on `submitted_at` in the same window) — a merchant-refused funding leg whose stranded amount was swept back to the treasury does not count as spent. `payments`/`payments_counted` and `last_payment_at` stay gross: they count funding legs made, not money kept. `basis.unsettled_submitted` separately counts `submitted` rows in range so the page can say how many payments are awaiting settlement evidence. Fees are Haven's own fee (`payment_fees.fee_amount_atomic`), valued with the intent's booked fiat, `0` honestly while the flag is off. Gas is a sponsored-operation COUNT on value-bearing chains only — never a fiat figure. Budget-used is read from the chain per active delegation, never summed from intents. `tz` (default UTC) buckets `by_day` server-side, using the same zone Postgres and this validator agree on (an IANA name only — `tz` rejects UTC offsets and fixed abbreviations, which Postgres and JavaScript can interpret with opposite sign conventions); `range.from`/`to` are UTC instants regardless of `tz`. Because `range.from`/`to` are fixed UTC instants, `by_day`'s FIRST and LAST buckets can be PARTIAL under a non-UTC `tz` (they cover less than a full local day) — this is expected, not a bug, and the page should treat the edge buckets as partial. `balance_by_day` is unaffected: `user_daily_portfolio_snapshots` is a UTC-dated daily snapshot, produced once per day regardless of the caller's `tz` — except under `currency=sek`, where days snapshotted before the `total_sek` column existed (#3127, migration 090) carry no SEK figure and are OMITTED from the series rather than zeroed. The same honesty applies to the SEK SUMS under `currency=sek` (#3127, round-2 review): the totals, per-agent, top-merchant and fees figures sum `sek_value`, which is NULL for a confirmed row whose book-time SEK could not be captured or backfilled — those rows are still counted in `basis.payments_counted` but contribute nothing to any SEK sum, so a SEK total can sit below the basis it is computed over. USD and EUR are unaffected (their booking predates the capture gate). Delegation-rail accounts only.",
         security: [{ DashboardJwt: [] }],
         parameters: [
           {
@@ -5967,8 +6025,8 @@ export const openapiSpec = {
                         'refused_previous_count', 'budget_bands', 'fees', 'gas_sponsored_ops',
                       ],
                       properties: {
-                        spent: { type: 'string', description: 'Sum of booked fiat, CONFIRMED only.' },
-                        spent_previous: { type: 'string' },
+                        spent: { type: 'string', description: 'Booked fiat of CONFIRMED payments, NET of `delegate_sweeps` clawbacks (#3755): per (agent, token, chain) group, gross × (1 − min(1, swept_atomic/confirmed_atomic)) over submitted sweeps in the window — clawed-back funding legs do not count as spent.' },
+                        spent_previous: { type: 'string', description: 'Same net-of-sweeps basis as `spent`, over the previous window.' },
                         refused_count: { type: 'integer' },
                         refused_attempts: { type: 'integer' },
                         refused_amount: { type: 'string', description: 'Attempted amount — never "saved". A numeric string like every other money field on this response.' },
@@ -6020,7 +6078,7 @@ export const openapiSpec = {
                           id: { type: 'string', format: 'uuid' },
                           name: { type: 'string' },
                           status: { type: 'string' },
-                          spent: { type: 'string' },
+                          spent: { type: 'string', description: 'Net of `delegate_sweeps` clawbacks (#3755), same basis as `totals.spent`; `payments` and `last_payment_at` stay gross.' },
                           share: { type: 'number', description: 'This agent’s share of total spend across delegation-rail agents, in [0, 1].' },
                           payments: { type: 'integer' },
                           refusals: { type: 'integer' },
@@ -6528,7 +6586,7 @@ export const openapiSpec = {
         operationId: 'cancelAgentConnectionSetup',
         summary: 'Cancel a pending Connect Agent 2 setup.',
         description:
-          'Cancels setup state and revokes the pending agent API key when no on-chain authority has been activated. Active agents must be paused or revoked through normal agent controls.',
+          'Cancels setup state and revokes the pending agent API key when no on-chain authority has been activated. An approved agent is stopped by ending its budgets instead (POST /agents/{id}/delegations/revoke-all, owner-signed; in the dashboard, Stop budget or Remove agent…); pausing only blocks payments through Haven.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/SetupId' }],
         responses: {
@@ -7395,6 +7453,71 @@ export const openapiSpec = {
         },
       },
     },
+    '/x402/by-idempotency-key/{key}': {
+      get: {
+        tags: ['x402'],
+        operationId: 'getX402IntentByIdempotencyKey',
+        summary: 'Look up the caller\'s x402 payment intent by idempotency key.',
+        description:
+          'Read-only, agent-scoped lookup (#3739). The hosted pay tool\'s request mode checks this BEFORE re-probing a merchant, so a replayed call returns the existing intent\'s state without depending on the merchant still answering. Writes nothing: a stale pending_signature row is reported with window_open false, never lazily expired here. Failed intents are not returned, and an expired one ranks below a live one with the same key. Not-found and not-yours are the same 404. The key is URL-encoded by the client.',
+        security: [{ AgentApiKey: [] }],
+        parameters: [
+          {
+            name: 'key',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', minLength: 1, maxLength: 128 },
+            description: 'The idempotency key the intent was created with (URL-encoded).',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'The intent\'s current state.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: [
+                    'payment_id',
+                    'status',
+                    'settlement_scheme',
+                    'resource_url',
+                    'expires_at',
+                    'window_open',
+                    'task_budget_id',
+                    'amount_atomic',
+                    'asset',
+                    'network',
+                  ],
+                  properties: {
+                    payment_id: { type: 'string' },
+                    status: { type: 'string' },
+                    settlement_scheme: { type: ['string', 'null'], enum: ['erc7710', 'eip3009', null] },
+                    resource_url: { type: ['string', 'null'] },
+                    expires_at: { type: ['string', 'null'], format: 'date-time' },
+                    window_open: {
+                      type: 'boolean',
+                      description: 'True only when status is pending_signature and expires_at is in the future.',
+                    },
+                    task_budget_id: { type: ['string', 'null'] },
+                    amount_atomic: { type: 'string', pattern: '^[0-9]+$' },
+                    asset: {
+                      type: ['string', 'null'],
+                      description: 'Token contract of the stored amount, so a caller can convert a whole-token cap.',
+                    },
+                    network: { type: 'string' },
+                  },
+                  additionalProperties: false,
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
     '/x402/{id}/sign-context': {
       get: {
         tags: ['x402'],
@@ -7958,6 +8081,62 @@ export const openapiSpec = {
           // reported settlement is not mined yet). Nothing was confirmed and
           // nothing was written — retry once the transaction is mined.
           '503': errorResponse,
+        },
+      },
+    },
+    '/machine-payments/{id}/delivery-quality': {
+      post: {
+        tags: ['Machine payments'],
+        operationId: 'reportDeliveryQuality',
+        summary: 'Record the agent’s evidence-only delivery verdict for a settled payment.',
+        description:
+          '#3770 — lets the agent that made a payment say what the merchant DELIVERED: "ok", "unusable" or "partial", with an optional bounded note (max 2000 characters). ' +
+          'Evidence only: it moves no money, never alters any money field, and never changes the payment — `settled` stays the on-chain fact it already was. ' +
+          'Only the paying agent can report (another agent’s payment is 404), and only once the payment is settled (409 otherwise). ' +
+          'A re-report replaces the same agent’s earlier verdict; it never touches another agent’s report. ' +
+          'The receipt reads (`GET /receipts` rows and the signed receipt bundle) carry the verdict beside the payment once recorded.',
+        security: [{ AgentApiKey: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+            description: 'The payment id (intent) the verdict is about.',
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/MachinePaymentDeliveryQualityRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Verdict recorded.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['payment_id', 'quality', 'note', 'updated_at'],
+                  properties: {
+                    payment_id: uuid,
+                    quality: { type: 'string', enum: ['ok', 'unusable', 'partial'] },
+                    note: { type: ['string', 'null'] },
+                    updated_at: isoDateTime,
+                  },
+                  additionalProperties: false,
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': agentAuthForbidden,
+          '404': errorResponse,
+          '409': errorResponse,
         },
       },
     },
@@ -9318,7 +9497,8 @@ export const openapiSpec = {
          */
         required: [
           'id', 'name', 'description', 'category', 'resource_url', 'rail', 'protocol', 'status',
-          'tool_name', 'tool_arguments', 'price_display', 'price_atomic', 'asset', 'network',
+          'tool_name', 'tool_arguments', 'tool_arguments_schema', 'http_method', 'body_type',
+          'body_example', 'price_display', 'price_atomic', 'asset', 'network',
           'asset_transfer_methods', 'verified_at', 'source', 'domain_verified', 'verified_payable',
           'merchant',
         ],
@@ -9343,6 +9523,25 @@ export const openapiSpec = {
             ],
             description:
               'Suggested MCP tool arguments for this catalog item, when the row represents a specific product variant. Agents should pass this object unchanged to the pay tool arguments field after confirming the live merchant quote.',
+          },
+          tool_arguments_schema: {
+            anyOf: [{ type: 'object', additionalProperties: true }, { type: 'null' }],
+            description:
+              '#3769: the JSON Schema a per-call MCP tool\'s caller arguments must satisfy — haven_prepare_catalog_purchase validates a caller `arguments` against it (and refuses arguments on a row that declares none, the fixed-SKU contract). Null on a fixed-SKU row or a row that declares no schema.',
+          },
+          http_method: {
+            anyOf: [{ type: 'string' }, { type: 'null' }],
+            description:
+              '#3769: the HTTP method a plain-HTTP x402 resource needs (e.g. "POST"). Null means GET. Only meaningful for `protocol: "http"` rows; the catalog verifier probes with the declared method and body.',
+          },
+          body_type: {
+            anyOf: [{ type: 'string' }, { type: 'null' }],
+            description: '#3769: the body encoding of `body_example` — "json" today. Null when the row declares no body.',
+          },
+          body_example: {
+            anyOf: [{ type: 'object', additionalProperties: true }, { type: 'null' }],
+            description:
+              '#3769: an example request body the row\'s verifier probe and the discovery hint carry (the hint\'s `body` is its JSON string). Null when the row declares no body.',
           },
           price_display: { anyOf: [{ type: 'string' }, { type: 'null' }] },
           price_atomic: { anyOf: [{ type: 'string' }, { type: 'null' }] },
@@ -11633,12 +11832,13 @@ export const openapiSpec = {
           mcpCallContext: {
             type: 'object',
             description:
-              '#1307: the merchant MCP-tool call this quote was made against (haven_pay_mcp_tool). Persisted so GET /x402/{id}/merchant-call-context can rehydrate it at settle/complete time.',
+              '#1307: the merchant MCP-tool call this quote was made against (haven_pay_mcp_tool / haven_prepare_catalog_purchase). Persisted so GET /x402/{id}/merchant-call-context can rehydrate it at settle/complete time. #3781: catalogName carries Haven\'s own catalog row name when the purchase came from a catalog entry — display only, never merchant content.',
             required: ['merchantUrl', 'toolName'],
             properties: {
               merchantUrl: { type: 'string', format: 'uri' },
               toolName: { type: 'string', minLength: 1 },
               arguments: { type: 'object', additionalProperties: true },
+              catalogName: { type: 'string', minLength: 1 },
               mcpTransport: {
                 type: 'object',
                 required: ['handshakeRequired', 'source'],
@@ -11680,6 +11880,10 @@ export const openapiSpec = {
           merchant_url: { type: 'string', format: 'uri' },
           tool_name: { type: 'string' },
           arguments: { type: 'object', additionalProperties: true },
+          // #3781: Haven's own catalog row name, when the purchase came from a
+          // catalog entry — the settle leg's first-tier purchase label.
+          // Absent on a direct haven_pay_mcp_tool purchase.
+          catalog_name: { type: 'string', minLength: 1 },
           mcp_transport: {
             type: 'object',
             properties: {
@@ -12024,6 +12228,15 @@ export const openapiSpec = {
                   description:
                     '#3518: Haven-side reservation — the sum of this budget\'s OPEN, unexpired task- and sub-budget children\'s caps (`agent_task_budgets` + `agent_sub_budgets`, joined by delegation_hash), in ATOMIC units. Reported BESIDE `onchain.remaining` and never folded into it: the on-chain figure stays authoritative, a reservation releases on close/expire without any chain event, and "0" covers both no-reservation and a failed read (the sum is best-effort).',
                 },
+                funds_cover_remaining: {
+                  type: ['boolean', 'null'],
+                  description:
+                    '#3731: whether the account\'s balance can back THIS row\'s whole remaining period budget. ' +
+                    'One `balanceOf` read per distinct token; each row is compared ALONE (several rows for one token do not add up, so two `true` rows do not mean both are backed at once). ' +
+                    '`false` means the account cannot back the whole remaining budget — a heads-up to mention to the user, NOT a refusal and NOT proof the next payment fails: a budget larger than the balance is a normal setup (an owner may top up weekly). ' +
+                    '`null` means unverifiable: the chain read failed, or `onchain.remaining` was not read live (`remaining_is_from_chain` false — the fallback figure cannot answer a holdings question). ' +
+                    'Absent when `onchain.remaining` is 0 (the compare would be vacuously true). Only the boolean rides the wire; the balance itself never does.',
+                },
                 onchain: {
                   type: 'object',
                   required: ['amount', 'spent', 'remaining', 'effective_spent', 'reset_time_min', 'last_reset_min', 'nonce', 'is_reset_pending'],
@@ -12298,6 +12511,12 @@ export const openapiSpec = {
           challenge_id: { type: ['string', 'null'] },
           idempotency_key: { type: ['string', 'null'] },
           merchant_status: { type: ['integer', 'null'] },
+          // #3770: the paying agent's evidence-only delivery verdict, when
+          // reported. Nullable = not reported; never gates anything and the
+          // payment itself is unchanged.
+          delivery_quality: { type: ['string', 'null'], enum: ['ok', 'unusable', 'partial', null] },
+          delivery_note: { type: ['string', 'null'] },
+          delivery_reported_at: { type: ['string', 'null'], format: 'date-time' },
           confirmed_at: { anyOf: [isoDateTime, { type: 'null' }] },
           created_at: isoDateTime,
           updated_at: isoDateTime,
@@ -12333,6 +12552,24 @@ export const openapiSpec = {
           protocolReceiptHeaderName: { type: 'string' },
           protocolReceiptHeader: { type: 'string' },
           protocolReceiptPayload: { type: 'object', additionalProperties: true },
+          // #3778: the NON-SECRET delivery pointer. Bounded here; the
+          // secret-shape refusal is semantic (`modules/mpp/evidence.ts`,
+          // `@haven_ai/core`'s `deliveryReferenceError`) because "looks like
+          // a credential" is not a JSON-Schema statement.
+          deliveryReference: { type: 'string', maxLength: 512 },
+        },
+        additionalProperties: false,
+      },
+      // #3770: the delivery-quality report body. `note` is a plain string —
+      // the 2000-char bound is the MODULE's semantic refusal (400 with a
+      // named reason), and the DB CHECK (migration 109) is the backstop; the
+      // shape check states only the shape.
+      MachinePaymentDeliveryQualityRequest: {
+        type: 'object',
+        required: ['quality'],
+        properties: {
+          quality: { type: 'string', enum: ['ok', 'unusable', 'partial'] },
+          note: { type: 'string' },
         },
         additionalProperties: false,
       },

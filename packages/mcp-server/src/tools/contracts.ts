@@ -29,6 +29,7 @@
  */
 import { z } from 'zod/v3'
 import { composeDescription, toolDescriptions as sharedDescriptions } from '@haven_ai/sdk'
+import { DELIVERY_REFERENCE_MAX_LENGTH } from '@haven_ai/core'
 
 /**
  * Hosted MCP tool set — keyless.
@@ -63,11 +64,16 @@ export type HostedToolName =
   | 'haven_pay_x402_quote'
   | 'haven_resume_x402_payment'
   | 'haven_report_x402_outcome'
+  | 'haven_report_delivery_quality'
   | 'haven_report_settlement_evidence'
   | 'haven_get_payment_status'
   | 'haven_get_resume_state'
   | 'haven_list_receipts'
   | 'haven_verify_receipt'
+  // #3723: the signed bundle's MCP home — `haven_get_receipt { payment_id }`
+  // returns `{ receipt }`, and `haven_verify_receipt` accepts that response
+  // (or the endpoint's `{ receipt, verification }`) unchanged.
+  | 'haven_get_receipt'
   | 'haven_sweep_delegate'
   | 'haven_discover_tools'
   | 'haven_submit_catalog_entry'
@@ -123,7 +129,12 @@ const mcpTransportArg = z
  */
 export type DiscoveryHint =
   | { suggested_tool: 'haven_quote_catalog_purchase'; suggested_arguments: { catalog_id: string } }
-  | { suggested_tool: 'haven_quote_x402'; suggested_arguments: { url: string } }
+  // #3769: a plain-HTTP row that declares a method/body carries them in the
+  // hint — the arguments must remain VERBATIM-acceptable by
+  // haven_quote_x402's schema (url, method, headers, body), which already
+  // takes all three; a GET-only hint for a POST-declared resource is what
+  // made the Anchor rows unbuyable as listed.
+  | { suggested_tool: 'haven_quote_x402'; suggested_arguments: { url: string; method?: string; body?: string } }
   | { suggested_tool_omitted_reason: string }
 
 /** One `haven_discover_tools` entry on the hosted surface (wire-shaped). */
@@ -137,6 +148,14 @@ export type DiscoveryEntry = {
   protocol: string
   tool_name: string | null
   tool_arguments: Record<string, unknown> | null
+  // #3769: how a purchase calls this row. `tool_arguments_schema` present
+  // means haven_prepare_catalog_purchase accepts a validated `arguments`;
+  // null/absent means fixed-SKU. The HTTP shape feeds the quote hint above.
+  // Absent (not merely null) when the backend predates #3769.
+  tool_arguments_schema?: Record<string, unknown> | null
+  http_method?: string | null
+  body_type?: string | null
+  body_example?: Record<string, unknown> | null
   price_display: string | null
   price_atomic: string | null
   price_is_indicative: true
@@ -319,9 +338,15 @@ export const toolSchemas = {
   },
   haven_prepare_catalog_purchase: {
     // #1306: the guided path — starts from a curated catalog row instead of a
-    // hand-copied merchant_url/tool_name/tool_arguments. Chain-scoped to this
-    // agent for free by the backend's /catalog/:id SQL (#1299).
+    // hand-copied merchant_url/tool_name. Chain-scoped to this agent for free
+    // by the backend's /catalog/:id SQL (#1299).
     catalog_id: z.string().min(1),
+    // #3769: per-call arguments, accepted ONLY on a row that declares an
+    // argument schema (validated against it before the merchant is
+    // contacted — an invalid call is refused before any payment exists).
+    // A row without a schema is a fixed SKU and REFUSES arguments; the
+    // merchant_url and tool_name still always come from the row.
+    arguments: z.record(z.string(), z.unknown()).optional(),
     // A cap is REQUIRED on this tool, as on haven_pay_mcp_tool — this is the
     // guided path, so there is no cap_warning softness
     // here. Give it in EITHER spelling; both are enforced against the LIVE
@@ -366,6 +391,19 @@ export const toolSchemas = {
     // #1456: OPTIONAL — its absence selects erc7710, where Haven assembles the
     // header at settle instead of the signer building it locally.
     payment_header: z.string().min(1).optional(),
+    // #3768: merchant-issued credentials (JWTs, *_token/*_link/session fields)
+    // are withheld from the returned `result` unless this is true. The agent's
+    // context is untrusted; receiving a bearer credential is an explicit act.
+    include_merchant_credentials: z.boolean().optional(),
+    // #3778: same contract as haven_report_x402_outcome's delivery_reference —
+    // the NON-SECRET pointer to a delivered good, recorded on the receipt
+    // when the merchant call succeeds. Refused before anything moves when it
+    // is shaped like a credential.
+    delivery_reference: z
+      .string()
+      .min(1)
+      .max(DELIVERY_REFERENCE_MAX_LENGTH, `delivery_reference must be at most ${DELIVERY_REFERENCE_MAX_LENGTH} characters`)
+      .optional(),
   },
   haven_settle_mcp_tool: {
     // Fast-path settle: fund (relay signature) AND deliver the merchant header
@@ -384,6 +422,16 @@ export const toolSchemas = {
     // #1456: OPTIONAL — its absence selects erc7710, where Haven assembles the
     // header at settle instead of the signer building it locally.
     payment_header: z.string().min(1).optional(),
+    // #3768: same contract as haven_complete_mcp_tool above.
+    include_merchant_credentials: z.boolean().optional(),
+    // #3778: same contract as haven_complete_mcp_tool above — refused
+    // pre-funding when shaped like a credential, so a bad value can never
+    // reach the row OR the funding relay.
+    delivery_reference: z
+      .string()
+      .min(1)
+      .max(DELIVERY_REFERENCE_MAX_LENGTH, `delivery_reference must be at most ${DELIVERY_REFERENCE_MAX_LENGTH} characters`)
+      .optional(),
   },
   haven_quote_x402: {
     url: z.string().url(),
@@ -408,11 +456,21 @@ export const toolSchemas = {
     // http:// retry target is refused. haven_quote_x402 returns this as
     // `request_url`; pass it back verbatim.
     url: z.string().url().optional(),
+    // #3739: REQUEST MODE — selected by `payment_required` being ABSENT. The
+    // hosted server then makes the unpaid request itself (url + these three,
+    // exactly as on haven_quote_x402) and builds the payment from the 402 it
+    // fetched, so the challenge never passes through the agent. `url` and a
+    // cap are required in that mode; the handler refuses without them.
+    method: z.string().optional(),
+    headers: z.record(z.string()).optional(),
+    body: z.string().optional(),
     // The parsed HTTP 402 PaymentRequired the agent received from the merchant
     // (or the paymentRequired field from a haven_quote_x402 result).
     // Validated downstream by the SDK; typed as an object (not z.unknown()) so
     // MCP clients embed it as JSON rather than serialising it to a string.
-    payment_required: z.record(z.string(), z.unknown()),
+    // #3739: OPTIONAL — present selects payment_required mode (unchanged),
+    // absent selects request mode above.
+    payment_required: z.record(z.string(), z.unknown()).optional(),
     // Optional pre-funding price cap, atomic units (same unit as
     // payment_required.accepts[].amount). Rejected before funding if exceeded.
     max_amount: z
@@ -446,10 +504,20 @@ export const toolSchemas = {
     // #2292: the plain-HTTP twin of haven_complete_mcp_tool's bookkeeping —
     // see REPORT_X402_OUTCOME_DESCRIPTION for why it is a separate tool.
     //
-    // Note what is NOT here: no merchant_url, no tx_hash, no resource_url, no
-    // amount. Everything Haven writes down is read from the payment's own
-    // record, so the report says what the merchant ANSWERED and cannot say
-    // what it was answering about.
+    // Note what is NOT here: no merchant_url, no resource_url, no amount.
+    // Everything Haven writes down is read from the payment's own record, so
+    // the report says what the merchant ANSWERED and cannot say what it was
+    // answering about.
+    //
+    // #3727: the ONE caller-supplied hash this tool accepts is the optional
+    // settlement evidence below, and it is safe because nothing is trusted:
+    // Haven decodes the PAYMENT-RESPONSE (taking `transaction` only, never
+    // `payer`) or takes `settlement_tx_hash` verbatim, then verifies the
+    // delegate → merchant transfer on-chain through the same
+    // `reportSettlementEvidence` seam `haven_report_settlement_evidence`
+    // uses, BEFORE recording. A hash that does not match the payment
+    // on-chain is refused exactly as that tool refuses it, so the report
+    // still cannot say anything Haven has not checked itself.
     payment_id: z.string().min(1),
     outcome: z.enum(['accepted', 'rejected'], {
       required_error:
@@ -465,6 +533,51 @@ export const toolSchemas = {
     // Truncated server-side; kept short because it is a diagnostic snippet,
     // not a receipt.
     merchant_body: z.string().max(4096).optional(),
+    // #3727: optional settlement evidence, folded in so an accepted plain-HTTP
+    // purchase needs no second tool call. Supply settlement_tx_hash and/or
+    // payment_response; supplying both with DIFFERENT hashes is refused
+    // before anything is written. Evidence is only recorded on an `accepted`
+    // outcome.
+    settlement_tx_hash: z
+      .string()
+      .regex(
+        /^0x[0-9a-fA-F]{64}$/,
+        'settlement_tx_hash must be a 0x-prefixed transaction hash: 0x followed by exactly 64 hex characters (case-insensitive).',
+      )
+      .optional(),
+    // The merchant's raw PAYMENT-RESPONSE header value, base64, verbatim as
+    // the merchant returned it. Decoded for its `transaction` field only —
+    // a `payer` inside is merchant-claimed data and is never written (#3125).
+    payment_response: z
+      .string()
+      .min(1)
+      .max(131072, 'payment_response is the raw base64 PAYMENT-RESPONSE header value; 128KB is far beyond any real header.')
+      .optional(),
+    // #3778: the optional NON-SECRET delivery pointer ("Bik Bok 5 SEK, order
+    // 6ac7…"). Bounded here; a value shaped like a credential (code, token,
+    // key) is refused by the handler BEFORE anything is written — the
+    // deliverable itself must be relayed to the owner, never stored by Haven.
+    delivery_reference: z
+      .string()
+      .min(1)
+      .max(DELIVERY_REFERENCE_MAX_LENGTH, `delivery_reference must be at most ${DELIVERY_REFERENCE_MAX_LENGTH} characters`)
+      .optional(),
+  },
+  haven_report_delivery_quality: {
+    // #3770: the delivery-quality report — the agent's evidence-only verdict
+    // on what a settled payment DELIVERED. Everything else about the payment
+    // (rail, amount, merchant, settled state) is read from Haven's own
+    // record, scoped to this agent, exactly like haven_report_x402_outcome;
+    // the report cannot say what it was about, only what came back. It
+    // moves no money and never changes `settled`.
+    payment_id: z.string().min(1),
+    quality: z.enum(['ok', 'unusable', 'partial'], {
+      required_error:
+        'quality is required: "ok" if the delivered output served its purpose, ' +
+        '"unusable" if it was paid but could not be used, "partial" if only part of it was usable.',
+    }),
+    // Bounded server-side (2000 chars) — a diagnostic note, not a receipt.
+    note: z.string().max(2000).optional(),
   },
   haven_report_settlement_evidence: {
     // #2972: the remedy #2970's guidance could not name — an erc7710 agent
@@ -511,6 +624,19 @@ export const toolSchemas = {
   },
   haven_verify_receipt: {
     receipt: z.unknown(),
+    // #3723: the spread form — the endpoint's `{ receipt, verification }`
+    // spread as top-level arguments — verifies: `verification` is declared
+    // ACCEPTED-AND-IGNORED (Haven's own self-check, never read; the stdio
+    // runtime strips the same key, so the two runtimes agree). Strictness is
+    // not dropped: every other undeclared key is still refused by name.
+    verification: z.unknown().optional(),
+  },
+  // #3723: the signed bundle's read — `{ receipt }` only, settled payments
+  // only. The endpoint's server-side `verification` is deliberately NOT
+  // returned: it is computed on Haven's server, not offline, and an agent
+  // that trusted it would skip haven_verify_receipt.
+  haven_get_receipt: {
+    payment_id: z.string().min(1),
   },
 // #3101: `as const satisfies` keeps every key on the type — under a plain
 // `Record<HostedToolName, z.ZodRawShape>` annotation a probe assigning
@@ -745,6 +871,12 @@ export const STRICT_INPUT_TOOLS = {
   haven_report_settlement_evidence:
     'The rail, amount and merchant are read from the payment record, scoped to this agent, ' +
     'so a report cannot be pointed at a different payment or a different agent\'s payment.',
+  // #3770: takes exactly which payment and what the agent judged about its
+  // delivery — the payment's own facts are read from the record, scoped to
+  // this agent, the same reason the two report tools above are strict.
+  haven_report_delivery_quality:
+    'The rail, amount and merchant are read from the payment record, scoped to this agent, ' +
+    'so a report cannot be pointed at a different payment or a different agent\'s payment.',
   // The relay leg. Everything except which payment and which signature — the
   // amount, the recipient, the rail, the typed data that was signed — comes
   // from the stored intent. A stripped key here means relaying a signature for
@@ -802,13 +934,13 @@ export const STRICT_INPUT_TOOLS = {
     'has no use for — carrying it here used to be dropped in silence. haven_discover_tools ' +
     'hands you resource_url; this tool spells that argument url.',
   haven_pay_x402_quote:
-    'This is the HOSTED surface, which takes payment_required, idempotency_key and url ' +
-    '(snake_case). The local MCP (@haven_ai/mcp) takes quote and idempotency_key — it used to ' +
-    'take idempotencyKey, but now refuses that spelling itself. Passing quote already ' +
-    'failed loudly here, because payment_required is required — it is idempotencyKey that was ' +
-    'dropped in silence before that, replacing the caller\'s replay scope with a key derived ' +
-    'from the quote. Pass payment_required (the paymentRequired field of a haven_quote_x402 ' +
-    'result) and idempotency_key.',
+    'This is the HOSTED surface, which takes url (with optional method, headers and body) or ' +
+    'payment_required, plus idempotency_key (snake_case). The local MCP (@haven_ai/mcp) takes ' +
+    'quote and idempotency_key — it used to take idempotencyKey, but now refuses that spelling ' +
+    'itself. A quote object has no meaning here: pass the request you quoted (url, method, ' +
+    'headers, body) and Haven fetches the challenge itself. idempotencyKey used to be dropped ' +
+    'in silence, replacing the caller\'s replay scope with a key derived from the quote; ' +
+    'spell it idempotency_key.',
   // ── #2349, batch 3 — the remainder ──────────────────────────────────────
   // Same discipline as above: each message says what the tool DOES read the
   // value from, so a caller holding the refused key learns where it belongs.
@@ -829,11 +961,12 @@ export const STRICT_INPUT_TOOLS = {
     'price. A cap sent here used to be dropped in silence, so the quote came back looking ' +
     'capped when nothing had checked it.',
   haven_prepare_catalog_purchase:
-    'The merchant URL, tool name and tool arguments come from the catalog row that ' +
-    'catalog_id names, never from arguments — a merchant_url, tool_name or arguments sent ' +
-    'here used to be dropped in silence while the purchase proceeded against the catalog ' +
-    'row. The cap is max_amount_human or max_amount (exactly one), and the replay key is ' +
-    'idempotency_key (snake_case), not idempotencyKey.',
+    'The merchant URL and tool name come from the catalog row that catalog_id names, never from ' +
+    'arguments. A row that DECLARES an argument schema also accepts `arguments` for its per-call ' +
+    'tool — they are validated against the row schema and refused, before any contact or payment, ' +
+    'when they do not satisfy it. A row without a schema is a fixed SKU: its arguments are the ' +
+    "row's own and `arguments` sent here is REFUSED, not dropped. The cap is max_amount_human or " +
+    'max_amount (exactly one), and the replay key is idempotency_key (snake_case), not idempotencyKey.',
   haven_quote_catalog_purchase:
     'Everything about the merchant call comes from the catalog row that catalog_id names, ' +
     'and a quote takes no cap — a max_amount, tool_name or arguments sent here used to be ' +
@@ -859,10 +992,18 @@ export const STRICT_INPUT_TOOLS = {
   haven_verify_receipt:
     'Verification is offline and reads only the receipt object itself: the signer is ' +
     'recovered from receipt.authorization and compared with the delegate the receipt names. ' +
-    'The input must be the signed bundle from GET /payments/{id}/receipt — a ' +
-    'haven_list_receipts history row carries no signature and answers ' +
-    'not_a_signed_receipt. An expected signer, delegate or payment_id sent alongside used to ' +
-    'be dropped in silence — a caller cannot pin what the receipt must say, only ask what it does say.',
+    'The input is the signed bundle from haven_get_receipt or GET /payments/{id}/receipt — ' +
+    'the whole response, its .receipt, or the spread { receipt, verification } form (that ' +
+    'verification is accepted and IGNORED: it is Haven\'s own self-check, never offline ' +
+    'evidence) — while a haven_list_receipts history row carries no signature and answers ' +
+    'not_a_signed_receipt. Any other undeclared key is refused: an expected signer, delegate ' +
+    'or payment_id cannot pin what the receipt must say, only ask what it does say.',
+  haven_get_receipt:
+    'The bundle is read by payment_id alone; nothing else selects it. The payment must be ' +
+    'this agent\'s own and settled — an unknown id, another agent\'s id or an unsettled ' +
+    'payment is the structured 404. The response is { receipt } only: the endpoint\'s ' +
+    'server-side verification is not offline evidence, so it is never returned — ' +
+    'haven_verify_receipt reads the returned bundle unchanged.',
   haven_discover_tools:
     'The catalog filters are category, search, rail and verified. A query, name, merchant, ' +
     'chain or limit sent here used to be dropped in silence and the FULL catalog came back ' +
@@ -1043,7 +1184,7 @@ const QUOTE_MCP_TOOL_DESCRIPTION = composeDescription({
     'Informational only — reserves nothing. Use it to tell the user the current price before choosing a cap. ' +
     'merchant_url may be exact or a base URL (one bounded same-origin discovery attempt; the response echoes the resolved endpoint).',
   nextActionGuidance:
-    'Next: choose a cap (or cap at this quote) and call haven_pay_mcp_tool. Not a price reservation.',
+    'Next: choose a cap (or cap at this quote) and call haven_pay_mcp_tool.',
 })
 
 // #1299 (chain-scoped catalog 404s), #1306 (guided path), #1450/#1547
@@ -1067,7 +1208,7 @@ const QUOTE_CATALOG_PURCHASE_DESCRIPTION = composeDescription({
   behavior:
     'Informational only. Use before haven_prepare_catalog_purchase to choose a cap — and always when the user stated no cap (cap at this quoted amount, never an invented number). Catalog prices are indicative; amount/amount_atomic here are the live merchant quote. A degraded row without MCP metadata: use haven_pay_mcp_tool manually instead.',
   nextActionGuidance:
-    'Next: haven_prepare_catalog_purchase with catalog_id and exactly one cap. Not a price reservation.',
+    'Next: haven_prepare_catalog_purchase with catalog_id and exactly one cap.',
 })
 
 const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
@@ -1075,9 +1216,12 @@ const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
     'Final step of the decomposed x402 MCP purchase: deliver the signed merchant payment header (both x402 wire names) and return the tool result.',
   behavior:
     'Pass payment_id and payment_header (from haven_x402_sign_header); merchant_url/tool_name/arguments/mcp_transport are optional — Haven rehydrates them by payment_id. Call only after haven_submit confirmed funding. The header is a signed, single-use, amount/merchant/nonce-bound authorization — not a key. ' +
+    'Merchant-issued credentials in the returned `result` (JWTs, *_token/*_link/session fields) are withheld unless include_merchant_credentials=true — if you receive one, use it with the merchant it came from and never echo or log it. ' +
+    'Optionally pass delivery_reference — a NON-SECRET pointer to what the merchant delivered (product, order id) shown on the owner\'s receipt; a credential-shaped value is refused before the call, so relay the secret to the owner yourself. ' +
     'On a settled x402 payment the allowance block reports the canonical names remainingAtomic / remainingDisplay / resetPeriodMin / tokenSymbol / tokenAddress (the SAME names and values haven_get_agent reports) beside the deprecated snake_case spellings (remaining_atomic, remaining_display, token_symbol, token_address, reset_period), kept for a deprecation window. ' +
-    'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true) when funding expired first; MERCHANT_REJECTED_AFTER_FUNDING on eip3009 means stranded delegate funds — recover with haven_sweep_delegate; on erc7710 (no funding leg) nothing moved, so re-quote instead.',
-  nextActionGuidance: 'On success no further Haven tool is needed — return the merchant result to the user.',
+    'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true) when funding expired first; MERCHANT_REJECTED_AFTER_FUNDING on eip3009 means stranded delegate funds — recover with haven_sweep_delegate. erc7710 settles via haven_settle_mcp_tool.',
+  nextActionGuidance:
+    'On success no further Haven tool is needed — return the merchant result to the user. If the delivered output was unusable or only partially usable, say so with haven_report_delivery_quality (evidence only; it moves no money).',
 })
 
 const SETTLE_MCP_TOOL_DESCRIPTION = composeDescription({
@@ -1085,25 +1229,37 @@ const SETTLE_MCP_TOOL_DESCRIPTION = composeDescription({
     'Fast-path final step of the x402 MCP purchase: fund and settle in one call — relay the funding signature, then deliver the merchant payment header and return the merchant tool result.',
   behavior:
     'Pass payment_id, signature, and (EIP-3009 shape only) payment_header; merchant/tool fields are optional — rehydrated by payment_id. If funding does not confirm it returns { payment_id, settled: false, funding_status } without contacting the merchant. Echoes payment_id on every outcome for reconciliation via haven_list_receipts / haven_get_payment_status. ' +
+    'Merchant-issued credentials in the returned `result` (JWTs, *_token/*_link/session fields) are withheld unless include_merchant_credentials=true — if you receive one, use it with the merchant it came from and never echo or log it. ' +
+    'Optionally pass delivery_reference — a NON-SECRET pointer to what the merchant delivered (product, order id) shown on the owner\'s receipt; a credential-shaped value is refused before funding, so relay the secret to the owner yourself. ' +
     'On a settled x402 payment the allowance block reports the canonical names remainingAtomic / remainingDisplay / resetPeriodMin / tokenSymbol / tokenAddress (the SAME names and values haven_get_agent reports) beside the deprecated snake_case spellings (remaining_atomic, remaining_display, token_symbol, token_address, reset_period), kept for a deprecation window. ' +
     'settled:true only after on-chain verification, never a merchant 2xx; unverified: settled:false, SETTLEMENT_UNCONFIRMED, null settlement_tx_hash. ' +
-    'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true); MERCHANT_REJECTED_AFTER_FUNDING on eip3009 — stranded funds, recover with haven_sweep_delegate; on erc7710 (no funding leg) nothing moved, so re-quote instead.',
-  nextActionGuidance: 'On success no further Haven tool is needed — return the merchant result to the user.',
+    'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true); MERCHANT_REJECTED_AFTER_FUNDING on eip3009 — stranded funds, recover with haven_sweep_delegate; erc7710: nothing to sweep — check haven_get_payment_status after the window; re-quote only if unsettled.',
+  nextActionGuidance:
+    'On success no further Haven tool is needed — return the merchant result to the user. If the delivered output was unusable or only partially usable, say so with haven_report_delivery_quality (evidence only; it moves no money).',
 })
 
+// #3739: the shared nextActionGuidance ("Haven re-uses the captured request
+// when paying") is true of the LOCAL runtime only; on the hosted path the pay
+// tool's request mode re-sends the request itself, so the hosted override
+// says that instead. Added to #3727 after it merged and never built (#3739).
 const QUOTE_X402_DESCRIPTION = composeDescription({
   ...sharedDescriptions.quoteX402,
   behavior:
-    'Probes the merchant directly from the hosted server and parses the 402. Haven is not contacted. Returns the full quote including payment_required for haven_pay_x402_quote.',
+    'Probes the merchant directly from the hosted server and parses the 402. Haven is not contacted. Returns the quote and a next step naming haven_pay_x402_quote with this same request.',
+  nextActionGuidance:
+    'Next: haven_pay_x402_quote with the next_arguments given (url, method, headers, body, and the cap). It fetches the challenge again itself, unpaid, so never copy payment_required across.',
 })
 
 const PAY_X402_QUOTE_DESCRIPTION = [
-  'Step 1 of a direct x402 purchase (plain HTTP, non-MCP): build the funding step and',
-  'return the unsigned hash for the local signer. Pass the payment_required from haven_quote_x402',
-  'or straight from the merchant 402, plus url (haven_quote_x402\'s request_url): the paid',
-  'retry goes there, never to the declared resource_url; public http:// is refused.',
-  'Cap rule: max_amount_human (preferred) or max_amount, never both; omitting BOTH accepts the',
-  'quoted price as-is and the response carries cap_warning.',
+  'Step 1 of a direct x402 purchase (plain HTTP, non-MCP): build the funding step for the local signer.',
+  // #3739: request mode is the default route and is named first.
+  'Request mode (preferred): pass url, method, headers and body as quoted (haven_quote_x402\'s',
+  'next_arguments) and no payment_required; Haven re-sends that unpaid request itself (https, no',
+  'redirects) and pays the 402 it got, so nothing is copied. A cap is REQUIRED.',
+  'Or pass payment_required from the merchant 402 UNCHANGED plus url. The paid retry goes to url,',
+  'never the declared resource_url; public http:// is refused.',
+  'Cap: max_amount_human (preferred) or max_amount, never both; with payment_required, neither',
+  'accepts the quoted price and adds cap_warning.',
   'Returns { payment_id, payload_hash, expires_at, x402, signer_compatibility } — compact by default;',
   'include_signing_payload=true on a same-idempotency_key re-run returns the inline payload for an',
   'older signer. Over-budget is declined at prepare; nothing is held for later approval.',
@@ -1114,9 +1270,10 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'signature — do NOT call haven_x402_sign_header afterwards; it can only refuse. Relay the',
   'signature via haven_submit, then retry the merchant YOURSELF with that payment_header,',
   'setting PAYMENT-SIGNATURE (v2); X-PAYMENT (v1) unless erc7710.',
-  'Haven never talks to this merchant and never holds the key. The header is built before funding',
+  'Haven never sends the paid request or holds the key. The header is built before funding',
   'confirms, so its validity window starts at signing: retry promptly, and on',
-  'PAYMENT_WINDOW_EXPIRED re-run this tool with the same idempotency_key.',
+  'PAYMENT_WINDOW_EXPIRED re-run this tool with the same arguments (request mode: the same',
+  'request, cap and idempotency_key).',
   'When the merchant advertises extra.assetTransferMethod "erc7710" and the account is on the',
   'delegation rail, this returns settlement_scheme "erc7710" instead: sign, then haven_submit with',
   'settlement_scheme "erc7710" returns the payment_header directly. No funding leg on that path.',
@@ -1128,11 +1285,14 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   // haven_sign_x402's inline header, but it is still the AGENT's retry, which is exactly why its
   // outcome has nowhere to go without this call.
   'On the funding-leg (EIP-3009) shape ONLY, report what the merchant answered to your retry with',
-  'haven_report_x402_outcome. Nothing to report on erc7710: there confirmed already means the',
-  'merchant settled.',
+  'haven_report_x402_outcome. On erc7710 use haven_report_settlement_evidence instead.',
   // #3617: the owner chose to delete the dead sub_budget_id forwarding rather
   // than declare the argument, so say where a sub-budget pays instead.
   'Sub-budgets (sub_budget_id) pay only through the local MCP\'s haven_pay_x402 tools.',
+  // #3728: a 402 may carry a sign-in-with-x extension — the route where the
+  // signer's SIWX tool is the right answer, so the agent holding such a 402
+  // learns it here, at the moment it is looking at the extension.
+  'A sign-in-with-x extension in this 402? Call haven_sign_siwx on the local signer with { url, challenge } and retry with the SIGN-IN-WITH-X header it returns: the delegate wallet signs in as the wallet that paid — it moves no funds — and the merchant\'s session typically waives the micro-fees afterwards. url is the FINAL URL after redirects, and never follow a redirect with SIGN-IN-WITH-X (or a resulting session token) attached.',
 ].join(' ')
 
 // #2145: the backend now emits nextAction=retry_original_x402_request from
@@ -1177,8 +1337,9 @@ const RESUME_X402_DESCRIPTION = [
 // two records — but they differ in the one place that matters: WHO called the
 // merchant. haven_complete_mcp_tool makes the call itself, so what it writes
 // is observed; this tool writes what the caller ASSERTS about a call Haven
-// deliberately did not make, because on the plain-HTTP path Haven never talks
-// to the merchant and never holds the key. Folding them together would put an
+// deliberately did not make, because on the plain-HTTP path Haven never sends
+// the merchant the PAID request (it sends only unpaid probes: haven_quote_x402's
+// and, since #3739, request mode's) and never holds the key. Folding them together would put an
 // observed fact and an asserted one behind one name, with a flag deciding
 // which — and their arguments barely intersect (merchant_url / tool_name /
 // payment_header versus outcome / merchant_status). That is the mode flag
@@ -1188,12 +1349,42 @@ const RESUME_X402_DESCRIPTION = [
 // budget, which this description sits comfortably under). What an agent needs
 // is what it does, what to pass, what changes, and what it cannot do.
 const REPORT_X402_OUTCOME_DESCRIPTION = [
-  'Report what a plain-HTTP x402 merchant answered to a retry YOU made; Haven never contacts it, so',
-  'nothing else can. Pass payment_id, outcome ("accepted" for a 2xx, else "rejected"),',
+  'Report what a plain-HTTP x402 merchant answered to a retry YOU made; Haven never sends it the',
+  'paid request, so nothing else can. Pass payment_id, outcome ("accepted" for a 2xx, else "rejected"),',
   'merchant_status, optional merchant_body. A rejection surfaces stranded funds on your next',
-  'haven_get_payment_status instead of a 15-minute wait. Evidence only, your own payments only: it',
-  'moves no money. Not for merchants Haven called for you — haven_complete_mcp_tool and',
-  'haven_settle_mcp_tool already record what they observed.',
+  'haven_get_payment_status instead of a 15-minute wait. On an accepted outcome you may fold the',
+  'settlement evidence into this call: pass the raw base64 PAYMENT-RESPONSE header as',
+  'payment_response and/or the settlement_tx_hash — Haven decodes it (transaction only), verifies',
+  'the hash on-chain BEFORE recording (a hash that does not match the payment on-chain is',
+  'refused), and the purchase is complete with no further tool. A rejected outcome records no',
+  'evidence. Optionally pass delivery_reference — a NON-SECRET pointer to what the merchant',
+  'delivered (product, order id) shown on the owner\'s receipt; code/token/key shapes are refused,',
+  'so relay the secret to the owner yourself.',
+  'Evidence only, your own payments only: it moves no money. Not for merchants Haven',
+  'called for you — haven_complete_mcp_tool and haven_settle_mcp_tool already record what they',
+  'observed.',
+].join(' ')
+
+// #3770: the delivery-quality report. A settled payment's `settled: true` is
+// an on-chain fact and cannot be revisited — but nothing else recorded what
+// the payment DELIVERED, so a paid call returning junk read as a success on
+// the receipt (the 2026-10-08 Soundside run: 0.01 USDC, `":**\n"` back).
+// This tool is the missing verdict: evidence-only, agent-scoped, and
+// deliberately NOT folded into haven_report_x402_outcome — that tool records
+// what a merchant ANSWERED to a retry (observed HTTP fact); this records
+// what the agent judged about what it GOT. Different claims, different
+// callers, near-disjoint arguments — same reasoning as #2292's split.
+const REPORT_DELIVERY_QUALITY_DESCRIPTION = [
+  'Record what a settled payment actually DELIVERED, when you are the agent that paid: quality',
+  '"ok" (the output served its purpose), "unusable" (paid but the output could not be used) or',
+  '"partial" (only part of it usable), plus an optional note (max 2000 chars) saying what was',
+  'wrong. Use it after a Haven-completed MCP purchase (haven_settle_mcp_tool /',
+  'haven_complete_mcp_tool) or a plain-HTTP retry whose output disappointed — especially when',
+  'a paid call returned an error body, empty content or gibberish, so the owner does not read',
+  'the receipt as a success. Evidence only: it moves no money, never changes settled or any',
+  'money field, and works only on your OWN settled payments (another agent\'s payment is',
+  'refused). A re-report replaces your earlier verdict; receipts and the dashboard carry it',
+  'beside the payment.',
 ].join(' ')
 
 const SWEEP_DELEGATE_DESCRIPTION = [
@@ -1236,7 +1427,7 @@ const GET_TASK_BUDGET_DESCRIPTION = [
   'Read one task budget by id, any status.',
   'Returns { task_budget } with status (pending | open | closing | closed), isExpired, maxDisplay, recipientAddress, label and expiresAt —',
   'the check to run after a close or submit refusal says to re-check the budget\'s status.',
-  'haven_get_agent lists live task budgets only; this reads any one, closed or expired included.',
+  'haven_get_agent lists live task budgets only.',
 ].join(' ')
 
 const CHECK_FUNDS_DESCRIPTION = [
@@ -1274,11 +1465,14 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_pay_x402_quote: PAY_X402_QUOTE_DESCRIPTION,
   haven_resume_x402_payment: RESUME_X402_DESCRIPTION,
   haven_report_x402_outcome: REPORT_X402_OUTCOME_DESCRIPTION,
+  haven_report_delivery_quality: REPORT_DELIVERY_QUALITY_DESCRIPTION,
   haven_report_settlement_evidence: composeDescription(sharedDescriptions.reportSettlementEvidence),
   haven_get_payment_status: composeDescription(sharedDescriptions.getPaymentStatus),
   haven_get_resume_state: composeDescription(sharedDescriptions.getResumeState),
   haven_list_receipts: composeDescription(sharedDescriptions.listReceipts),
   haven_verify_receipt: composeDescription(sharedDescriptions.verifyReceipt),
+  // #3723: the signed bundle's read, described from the shared fragment.
+  haven_get_receipt: composeDescription(sharedDescriptions.getReceipt),
   haven_open_task_budget: OPEN_TASK_BUDGET_DESCRIPTION,
   haven_close_task_budget: CLOSE_TASK_BUDGET_DESCRIPTION,
   haven_get_task_budget: GET_TASK_BUDGET_DESCRIPTION,
@@ -1320,6 +1514,14 @@ export interface ToolFailure {
    */
   revert_reason?: string | null
   refusal_reason?: string
+  /**
+   * #3731: on `PREPARE_REVERTED`, `insufficient_balance` when the revert was
+   * the token's own insufficient-balance error — the account does not hold
+   * enough of the token, and the remedy is funding (the next step is
+   * `fund_account_or_raise_allowance` with a funding reason). Any other
+   * revert carries no `revert_cause`.
+   */
+  revert_cause?: string
   /**
    * #3101 (epic #3105, decision 7): a refusal that carries a next step emits
    * the same `next_tool` family a success does, built by the SDK's typed

@@ -193,4 +193,9 @@ with no manual refresh — is what row 7 asserts, and that is verified.
   Check the DEV badge on both halves before the run.
 - **The screen shows stale data after the purchase.** Confirm nobody disabled
   polling; the screens poll while visible (#2732). Foregrounding the app is
-  enough — a manual refresh is never part of the demo.
+  enough — a manual refresh is never part of the demo. Budget remaining
+  refreshes on its own 60 s cadence (#3804: the backend caches the chain read
+  for up to 60 s and the hook paces to match), so a just-accepted payment can
+  take up to a minute to move the budget row — say so if narrating it, or
+  foreground the app (a visible flip fires the immediate fetch that reads the
+  cached value; the value itself is at most 60 s old by design).

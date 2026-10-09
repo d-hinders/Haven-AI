@@ -33,6 +33,10 @@ import transactionRoutes from './routes/transactions.js'
 import receiveRoutes from './routes/receive.js'
 import portfolioRoutes from './routes/portfolio.js'
 import dashboardRoutes from './routes/dashboard.js'
+// #3804: rides the /dashboard prefix as its own route FILE — #3803 is
+// concurrently reworking the overview route/repository, and the
+// request-validation rollout keys enforcedModules on the file.
+import dashboardBudgetRemainingRoutes from './routes/dashboard-budget-remaining.js'
 import agentRoutes from './routes/agents.js'
 import agentTaxDeclarationRoutes from './routes/agent-tax-declaration.js'
 import labelRoutes from './routes/labels.js'
@@ -156,6 +160,9 @@ installRequestValidation(app, {
   enforcedModules: [
     // Slice 1 (#3029) proof module, and the modules born enforced since.
     'routes/contacts.ts',
+    // #3804: display-only dashboard budget-remaining read — born ENFORCED
+    // like every module after the rollout began (GET-only, no parameters).
+    'routes/dashboard-budget-remaining.ts',
     'routes/merchants.ts',
     'routes/labels.ts',
     'routes/agent-labels.ts',
@@ -517,6 +524,9 @@ await app.register(transactionRoutes, { prefix: '/transactions' })
 await app.register(receiveRoutes, { prefix: '/receive', trustProxyHops: config.trustProxyHops })
 await app.register(portfolioRoutes, { prefix: '/portfolio' })
 await app.register(dashboardRoutes, { prefix: '/dashboard' })
+// #3804: the cached budget-remaining read — its own file on the same prefix
+// (see the import comment above).
+await app.register(dashboardBudgetRemainingRoutes, { prefix: '/dashboard' })
 // #2847 (epic #1440): `GET /safe/:addr/details` and `POST /safe/exec` are
 // deleted. `/safe` no longer mounts anything here but the safe-deploy
 // tombstone below — the prefix survives only because that 410 does.

@@ -3389,6 +3389,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/dashboard/budget-remaining": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Cached on-chain budget-remaining for every budget the user can see, with sub-budget spend attribution.
+         * @description Display-only. The enforcer read is cached for up to 60 s (and never past the period end in force at the read); a failed or timed-out read returns remaining_from_chain false with remaining_atomic/used_atomic null — never "0", never the full budget. `read_at` carries the staleness bound. Sub-budget spend counts confirmed payment_intents through the parent budget's sub-budget tree for the parent's current period; it is a floor, not a ledger.
+         */
+        get: operations["getDashboardBudgetRemaining"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/balances/{accountAddress}": {
         parameters: {
             query?: never;
@@ -6070,6 +6090,36 @@ export type components = {
             agents: components["schemas"]["DashboardAgentPreview"][];
             /** @description At most 5. Payment-enrichment fields (paymentId, paymentFlowStatus, amountSek, …) are never populated in this projection. */
             transactions: components["schemas"]["Transaction"][];
+        };
+        DashboardBudgetRemainingEntry: {
+            /** Format: uuid */
+            agent_id: string;
+            chain_id: number;
+            delegation_hash: string;
+            token_address: string;
+            token_symbol: string;
+            token_decimals: number;
+            budget_atomic: string;
+            /**
+             * Format: date-time
+             * @description Null when the read is unknown.
+             */
+            read_at: string | null;
+            /** Format: date-time */
+            period_end: string;
+            /** @description Null when the read is unknown — never "0", never the full budget. */
+            remaining_atomic: string | null;
+            remaining_from_chain: boolean;
+            /** @description Null when the read is unknown. */
+            used_atomic: string | null;
+            sub_budget_spend: {
+                /** Format: uuid */
+                agent_id: string;
+                spent_atomic: string;
+            }[];
+        };
+        DashboardBudgetRemainingResponse: {
+            budgets: components["schemas"]["DashboardBudgetRemainingEntry"][];
         };
         /** @description Reported whether or not it is recoverable — nothing about a stranded residual fails quietly. */
         AgentRekeyResidual: {
@@ -21742,6 +21792,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DashboardOverviewResponse"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getDashboardBudgetRemaining: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Per-budget remaining amounts with sub-budget spend attribution. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardBudgetRemainingResponse"];
                 };
             };
             /** @description Error response */

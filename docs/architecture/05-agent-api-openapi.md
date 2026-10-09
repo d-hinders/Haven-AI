@@ -514,7 +514,10 @@ The contract exposes four authentication schemes:
 - `DashboardJwt` authenticates the user for account management, setup, and
   dashboard read operations. Since #984 the dashboard read surface is
   documented in the spec itself (tag `Dashboard`, including
-  `/dashboard/overview`, `/balances/{accountAddress}`,
+  `/dashboard/overview`, `/dashboard/budget-remaining` (#3804: the cached,
+  display-only per-budget chain read — up to 60 s stale by design, unknown
+  reads ship `null`, never "0" or the full budget),
+  `/balances/{accountAddress}`,
   `/portfolio/{accountAddress}`, `/transactions/filters` and
   `/transactions/{accountAddress}`; `/safe/{accountAddress}/details` was
   deleted in #2847) — it is the source for the frontend's

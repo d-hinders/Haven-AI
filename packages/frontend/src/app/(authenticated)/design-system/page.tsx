@@ -2564,8 +2564,8 @@ export default function DesignSystemPage() {
               that is connected but is not the account&apos;s owner gets the second caption
               (`wrong_wallet` in `useAccountOperationGate`, #2073): it names both addresses, because
               &quot;connect a wallet&quot; would send the user back to the wallet they already
-              connected. The header wallet pill renders the matching &quot;Wrong wallet&quot;
-              state in the same case.
+              connected. In-flow, the connect control reads &quot;Switch wallet&quot; in the
+              same case (the header wallet pill left the top bar in #3825).
             </p>
           </div>
         </Card>

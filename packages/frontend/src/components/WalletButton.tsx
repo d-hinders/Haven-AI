@@ -674,8 +674,9 @@ export default function WalletButton({
     accountAddress: subjectAccountAddress,
     chainId: subjectAccount?.chain_id,
   })
-  // #2073: the same gate the action areas consult, so the header pill and the
-  // disabled action below it agree about whether a USEFUL wallet is connected.
+  // #2073: the same gate the action areas consult, so the pill and the
+  // disabled action beside it agree about whether a USEFUL wallet is connected.
+  // (Written when the pill lived in the header; #3825 moved it out.)
   // Before this, a hybrid account with the wrong wallet connected rendered a
   // normal connected pill up here while the action area said to connect the
   // owner wallet — the two surfaces silently disagreed.

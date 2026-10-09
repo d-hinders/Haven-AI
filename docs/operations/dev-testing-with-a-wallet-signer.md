@@ -35,13 +35,16 @@ which is production.)
    address and approve with your passkey. You supply the address only — the wallet
    doesn't need to be connected, and you pay no gas.
 3. **Check the card now lists two ways to approve:** your wallet (labeled
-   "Wallet"), and your passkey (labeled "Passkey · added {date}", #1679).
+   "Browser wallet", its address behind "Show address", #3825), and your
+   passkey (labeled "Passkey · added {date}", #1679).
 
 ## Testing on a preview
 
 1. **Sign in** with email + password — same account, same data, every preview
    points at the same dev backend.
-2. **Connect your wallet before anything else.**
+2. **Connect your wallet before anything else:** Settings → Signers → Connect
+   wallet (the top bar has no wallet button since #3825), or the in-flow
+   Connect wallet a signing screen offers.
 3. Set budgets, revoke, manage signers, run agents. Each action pops a MetaMask
    signature instead of a passkey prompt.
 
@@ -62,7 +65,8 @@ On a preview that's expected — ignore it, the wallet signs.
 
 ## Testing passkeys on a preview
 
-You don't need a new account. Sign in, connect your wallet, then **Backup &
+You don't need a new account. Sign in, connect your wallet (Settings → Signers),
+then **Backup &
 recovery → add a backup passkey** — the wallet signs the change and the new
 passkey is created on that domain. Only onboarding itself still needs a
 throwaway account.

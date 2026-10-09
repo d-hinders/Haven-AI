@@ -126,6 +126,12 @@ Avoid:
 
 ### Use “sign in” and “approve actions” instead of “signer” or “owner”
 
+One sanctioned exception (owner decision 2026-10-09, #3825): **Settings →
+Signers** is that section's name — its title and its own loading, empty and
+error states. A signer is its own object there, not part of an account. Its
+rows, and every other surface, still speak in outcomes (“Approves …”,
+“Passkey · added {date}”, “Browser wallet”).
+
 Prefer:
 - “Choose how you sign in”
 - “Choose how you want to approve actions”

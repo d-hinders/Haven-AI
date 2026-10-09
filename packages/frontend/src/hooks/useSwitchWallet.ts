@@ -12,7 +12,7 @@ import { useAccount, useDisconnect } from 'wagmi'
  * connected, so the open has to wait for the disconnected render — which is
  * why this is a hook driven by an effect rather than two calls in a row.
  * Extracted from `WalletButton` (#3812) so every signing flow's in-flow
- * `WalletConnectAction` switches the same way the header pill does.
+ * `WalletConnectAction` switches the same way the wallet pill does.
  */
 export function useSwitchWallet(): { switchWallet: () => Promise<void>; switching: boolean } {
   const { isConnected } = useAccount()

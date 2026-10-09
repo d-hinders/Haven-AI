@@ -4,6 +4,7 @@ status: current
 contract: true
 covers:
   - packages/backend/src/middleware/owner-cli.ts
+  - packages/backend/src/domain/user-signers.ts
   - packages/backend/src/infra/repositories/merchants.ts
   - packages/backend/src/modules/catalog/merchant-catalog.ts
   - packages/backend/src/db/migrations/101_merchant_pay_to.ts
@@ -949,8 +950,9 @@ read: no route lets Haven — or this endpoint's caller — change a signer set
 without an existing signer's signature (invariant 13 unchanged). Since #3825
 `GET /user/signers` lists the same material across all of the caller's live
 delegation-rail accounts — each passkey (by `key_id`) and owner wallet once,
-with the accounts it approves — for Settings → Signers. It returns `key_id`,
-owner address and enrollment time only (no P256 coordinates), is scoped to the
+with the accounts it approves — for Settings → Signers. Its signer material is
+`key_id`, owner address and enrollment time only (no P256 coordinates), next to
+each approved account's id, address, name and chain; it is scoped to the
 authenticated user, and is equally a read.
 
 **Management surface (#1081).** Signer changes are reachable the same two ways:

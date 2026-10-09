@@ -85,8 +85,8 @@ permissions require action by the Safe owner outside Haven.
    either way declining reaches neither key generation nor step 4. A server
    or hosted backend cannot run it (the command writes files under `~/.haven`
    and edits a local MCP config), so for those the connect flow offers a
-   supported credential path: one click into a top-level disclosure directly
-   under the setup prompt issues a one-time credential to save into the
+   supported credential path: one click into a top-level disclosure below the
+   setup steps issues a one-time credential to save into the
    backend's own secrets. It is marked as a manual credential rather than as a
    configured local runtime, and the owner still signs the budget delegation
    before the agent can spend. Since [#3122](https://github.com/d-hinders/Haven-AI/issues/3122) the

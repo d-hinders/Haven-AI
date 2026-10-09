@@ -5036,7 +5036,11 @@ export const SCENARIOS = {
 
 
       await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
-      await dialog.getByText('Connect your agent').waitFor({ timeout: 30_000 })
+      // #3832: the connect step is a numbered list whose row 1 is the copy
+      // action. Captured BEFORE the copy (the ready frame), then with the
+      // prompt disclosure open, then copied, at each stage.
+      const copyPrompt = dialog.getByRole('button', { name: 'Copy setup prompt' })
+      await copyPrompt.waitFor({ timeout: 30_000 })
 
       // The stage timers are armed by the effect that runs once a POLLED GET
       // reports `awaiting_connection` — a different round-trip from the POST
@@ -5052,7 +5056,14 @@ export const SCENARIOS = {
       // Each stage is CONFIRMED by its own copy before it is captured, so a
       // stage that never arrives fails the run instead of producing a
       // convincing, wrongly-labelled PNG.
-      await dialog.getByText('Waiting for the agent to run').waitFor({ timeout: 15_000 })
+      await shoot(dialog, 'waiting-ready')
+      await dialog.getByText('View the prompt').click()
+      await dialog.getByText(CONNECT_SETUP_TOKEN).first().waitFor({ timeout: 10_000 })
+      await shoot(dialog, 'waiting-prompt-open')
+      await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+      await copyPrompt.click()
+      await dialog.getByText('Prompt copied').waitFor({ timeout: 10_000 })
+      await dialog.getByText('Waiting for your agent to run').waitFor({ timeout: 15_000 })
       await shoot(dialog, 'waiting-starting')
 
       await page.clock.fastForward(65_000)
@@ -5064,7 +5075,7 @@ export const SCENARIOS = {
       await shoot(dialog, 'waiting-recovery')
 
       // #2482: the server-side credential path now lives in its own top-level
-      // disclosure directly under the setup prompt — one click from the
+      // disclosure (since #3832, in the footer below the setup steps) — one click from the
       // connect step, no reveal button, no warning panel, no checkbox. It is
       // the most safety-relevant surface in the flow (it hands out the
       // one-time private signing key), so it is captured twice: BEFORE

@@ -159,12 +159,22 @@ one setup prompt for every environment. Legacy Safe accounts are not rendered at
 all since #2413, so this flow is unreachable for one rather than being refused by
 a notice.
 
-Structure:
-1. Create and copy a single setup prompt — identical for every environment.
+Structure (step 3 of the modal is one numbered list — copy → paste → approve —
+that is both the instructions and the progress, #3832; see design-system.md §
+Numbered step list):
+1. Create and copy a single setup prompt — identical for every environment. The
+   copy action is the screen's one full-width primary (until the
+   server-credential path issues credentials, when "Continue to wallet
+   approval" takes that role); the prompt text sits in
+   a closed "View the prompt" disclosure. Next to the steps, one line says the
+   agent creates its own key and Haven only receives its public address — shown
+   on the connector path only, since the manual path makes the key in the
+   browser.
 2. Wait for the local connector to generate the signing key and API key, then
    register the public signing address and proof with Haven. If it cannot
-   connect after the bounded wait, the warning-gated manual credential fallback
-   may create the one-time credential in the browser; the user saves it in the
+   connect after the bounded wait — or runs on a server or hosted backend, where
+   the connector cannot run at all — the server-credential disclosure (#2482;
+   no warning gate, one click) may create the one-time credential in the browser; the user saves it in the
    trusted agent workspace, and the browser registers the same public address
    and proof. It must be labeled as manual, never as an automatically
    configured runtime.

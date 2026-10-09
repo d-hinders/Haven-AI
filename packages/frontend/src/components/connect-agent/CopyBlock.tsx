@@ -3,6 +3,16 @@
 import { Button } from '../ui/Button'
 import { Card } from '../ui/Card'
 
+/**
+ * The code-preview surface every copyable value in the connect flow sits on.
+ * #1393: one radius scale — the token 10px tier the Card primitive carries,
+ * not the 6px `rounded-md` this used to sit at. Exported for the connect
+ * step's "View the prompt" disclosure (#3832), which shows the same value
+ * without a second Copy button competing with row 1's primary.
+ */
+export const CODE_PREVIEW_CLASS =
+  'max-h-48 overflow-auto rounded-[10px] bg-[var(--v2-surface)] p-3 text-left text-xs leading-relaxed text-[var(--v2-ink)] whitespace-pre-wrap break-words'
+
 export function CopyBlock({
   label,
   value,
@@ -16,10 +26,10 @@ export function CopyBlock({
   copied: boolean
   onCopy: () => void
   /**
-   * #1391: marks THE action that moves the user forward. The waiting screen's
-   * only full-width control used to be "Cancel setup", so the abort was the
-   * heaviest thing on a screen whose actual next step is copying this prompt.
-   * Exactly one block per screen should set this.
+   * #1391: marks THE action that moves the user forward. Exactly one block per
+   * screen should set this. (#3832 moved the connect step off it — that
+   * screen's primary is now a full-width Copy button with the prompt behind a
+   * disclosure — so the onboarding-prompt card is its one caller.)
    */
   primary?: boolean
   /**
@@ -34,9 +44,9 @@ export function CopyBlock({
    * exactly the nested-filled-card composition
    * `Card.tsx`'s own invariant forbids and the mechanical gates cannot see.
    *
-   * An opt-in flag rather than a change to the default, because the three
-   * existing call sites in `WaitingForConnector` are all genuinely standalone
-   * and their rendering must not move.
+   * An opt-in flag rather than a change to the default, because the call
+   * sites in `WaitingForConnector` are genuinely standalone and their
+   * rendering must not move.
    */
   nested?: boolean
 }) {
@@ -45,11 +55,9 @@ export function CopyBlock({
       <div className="mb-2 flex items-center justify-between gap-3">
         <p className="text-xs font-medium text-[var(--v2-ink-3)]">{label}</p>
         {/* #1391 design review: size="sm" is h-9 (36px), under the ≥44px floor
-            design-review.md sets for primary mobile touch targets. The recovery
-            block in WaitingForConnector already carries min-h-11 for that rule
-            on two SECONDARY buttons — missing it on the one control promoted to
-            the screen's only primary action was the wrong way round. Scoped to
-            primary: the ghost instances are secondary and stay compact. */}
+            design-review.md sets for primary mobile touch targets, so the
+            primary instance carries min-h-11. The ghost instances are
+            secondary and stay compact. */}
         <Button
           variant={primary ? 'primary' : 'ghost'}
           size="sm"
@@ -59,11 +67,7 @@ export function CopyBlock({
           {copied ? 'Copied' : 'Copy'}
         </Button>
       </div>
-      {/* #1393: one radius scale — the token 10px tier the Card primitive
-          carries, not the 6px `rounded-md` this code block used to sit at. */}
-      <pre className="max-h-48 overflow-auto rounded-[10px] bg-[var(--v2-surface)] p-3 text-left text-xs leading-relaxed text-[var(--v2-ink)] whitespace-pre-wrap break-words">
-        {value}
-      </pre>
+      <pre className={CODE_PREVIEW_CLASS}>{value}</pre>
     </>
   )
 

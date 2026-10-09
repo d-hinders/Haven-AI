@@ -32,7 +32,13 @@ test.describe('Connect agent setup acceptance', () => {
     await dialog.getByPlaceholder('Amount').fill('10')
     await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
 
-    await expect(dialog.getByText('Connect your agent')).toBeVisible()
+    // #3832: the connect step is a numbered list. Before copying, its one
+    // full-width primary is the copy action, and the prompt text sits in a
+    // CLOSED disclosure — hidden until opened (jsdom cannot prove this; a
+    // browser can).
+    await expect(dialog.getByRole('button', { name: 'Copy setup prompt' })).toBeVisible()
+    await expect(dialog.getByText(/hv_setup_e2e123/).first()).toBeHidden()
+    await dialog.getByText('View the prompt').click()
     await expect(dialog.getByText(/hv_setup_e2e123/).first()).toBeVisible()
     await expect(dialog).not.toContainText(/delegate_key|private_key|privateKey|HAVEN_DELEGATE_KEY/)
 

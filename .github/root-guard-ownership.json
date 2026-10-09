@@ -310,6 +310,18 @@
       "reason": "The generator and verifier for the runbook copies above. It lives under packages/cli/ but reads packages/sdk/, so a change here can break a check that any of the three jobs running lint:runbook-parity performs -- and these rules match before the packages/cli/* arm, so without the explicit cli in jobs a change to this file would stop routing the CLI's own suite (#2727)."
     },
     {
+      "path": "packages/sdk/src/catalog-funding-leg.ts",
+      "jobs": [
+        "sdk",
+        "frontend"
+      ],
+      "runsVia": [
+        "test -w packages/sdk",
+        "test -w packages/frontend"
+      ],
+      "reason": "The discovery funding-leg hint (#3839). The dashboard's needsUnpinnedBudget (packages/frontend/src/lib/marketplace.ts) reads the same catalog column without an @haven_ai/sdk runtime dependency, and packages/frontend/src/lib/__tests__/marketplace.test.ts imports THIS file by relative path to assert the two agree on every input -- a test that runs only in frontend_checks. Same shape as skill-content.ts below: an SDK-only change here must route frontend too, or a reading change that breaks the parity would pass in sdk and fail in a job that never ran."
+    },
+    {
       "path": "packages/sdk/src/skill-content.ts",
       "jobs": [
         "sdk",

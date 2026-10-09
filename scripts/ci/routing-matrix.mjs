@@ -400,6 +400,27 @@ export const ROUTING_MATRIX = [
       'hand because both declare no SDK-dependency fan-out can reach.',
   },
   {
+    files: ['packages/sdk/src/catalog-funding-leg.ts'],
+    expect: [
+      'code',
+      'sdk',
+      'frontend',
+      'backend',
+      'connect',
+      'mcp',
+      'mcp_server',
+      'signer',
+      'qa_agent',
+    ],
+    kind: CONTRACT,
+    why:
+      'The discovery funding-leg hint (#3839). The dashboard\'s needsUnpinnedBudget reads the same ' +
+      'catalog column without an SDK runtime dependency, and marketplace.test.ts imports THIS file ' +
+      'by relative path to assert the two agree — a test that runs only in frontend_checks. Same ' +
+      'shape as skill-content.ts below: only `sdk` and `frontend` are decided by the manifest entry; ' +
+      'the rest arrive by `dependentsOf(sdk)`.',
+  },
+  {
     files: ['packages/sdk/src/skill-content.ts'],
     expect: [
       'code',

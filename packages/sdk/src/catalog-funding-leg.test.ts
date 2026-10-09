@@ -9,8 +9,9 @@ describe('catalogFundingLegExpected (#3839)', () => {
   })
 
   it('matches exactly, like the settlement selector and the backend: "ERC7710" is not erc7710', () => {
-    // The quote's `isErc7710Option` and the merchant-locked SQL both compare
-    // `=== 'erc7710'`; a case-folding hint would contradict them.
+    // The quote's `isErc7710Option` (`=== 'erc7710'`) and the merchant-locked
+    // SQL (`'erc7710' = ANY(...)`) are case-sensitive; a case-folding hint
+    // would contradict them.
     expect(catalogFundingLegExpected('eip3009,ERC7710')).toBe(true)
   })
 

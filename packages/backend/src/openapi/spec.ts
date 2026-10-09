@@ -8620,6 +8620,24 @@ export const openapiSpec = {
         },
       },
     },
+    '/dashboard/budget-remaining': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getDashboardBudgetRemaining',
+        summary:
+          'Cached on-chain budget-remaining for every budget the user can see, with sub-budget spend attribution.',
+        description:
+          'Display-only. The enforcer read is cached for up to 60 s (and never past the period end in force at the read); a failed or timed-out read returns remaining_from_chain false with remaining_atomic/used_atomic null — never "0", never the full budget. `read_at` carries the staleness bound. Sub-budget spend counts confirmed payment_intents through the parent budget\'s sub-budget tree for the parent\'s current period; it is a floor, not a ledger.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Per-budget remaining amounts with sub-budget spend attribution.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/DashboardBudgetRemainingResponse' } } },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
     '/balances/{accountAddress}': {
       get: {
         tags: ['Dashboard'],
@@ -13006,6 +13024,71 @@ export const openapiSpec = {
           },
           agents: { type: 'array', items: { $ref: '#/components/schemas/DashboardAgentPreview' }, description: 'At most 6.' },
           transactions: { type: 'array', items: { $ref: '#/components/schemas/Transaction' }, description: 'At most 5. Payment-enrichment fields (paymentId, paymentFlowStatus, amountSek, …) are never populated in this projection.' },
+        },
+        additionalProperties: false,
+      },
+      // ── Dashboard budget-remaining (#3804) ─────────────────────────────
+      //
+      // Display-only, cached enforcer reads. A failed or timed-out read is
+      // `remaining_from_chain: false` with `remaining_atomic`/`used_atomic`
+      // NULL — deliberately NOT the `?include=remaining` fallback (full
+      // budget) and NOT `/analytics/overview`'s `used_atomic: "0"`: shipping
+      // either would state a fact the chain did not give us. `read_at` is
+      // the instant the cached read was made; the dashboard may be up to 60 s
+      // behind a just-accepted payment (owner decision 1, #3804).
+      DashboardBudgetRemainingEntry: {
+        type: 'object',
+        required: [
+          'agent_id',
+          'chain_id',
+          'delegation_hash',
+          'token_address',
+          'token_symbol',
+          'token_decimals',
+          'budget_atomic',
+          'read_at',
+          'period_end',
+          'remaining_atomic',
+          'remaining_from_chain',
+          'used_atomic',
+          'sub_budget_spend',
+        ],
+        properties: {
+          agent_id: { type: 'string', format: 'uuid' },
+          chain_id: { type: 'integer' },
+          delegation_hash: { type: 'string' },
+          token_address: { type: 'string' },
+          token_symbol: { type: 'string' },
+          token_decimals: { type: 'integer' },
+          budget_atomic: { type: 'string' },
+          read_at: { type: ['string', 'null'], format: 'date-time', description: 'Null when the read is unknown.' },
+          period_end: { type: 'string', format: 'date-time' },
+          remaining_atomic: { type: ['string', 'null'], description: 'Null when the read is unknown — never "0", never the full budget.' },
+          remaining_from_chain: { type: 'boolean' },
+          used_atomic: { type: ['string', 'null'], description: 'Null when the read is unknown.' },
+          sub_budget_spend: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['agent_id', 'spent_atomic'],
+              properties: {
+                agent_id: { type: 'string', format: 'uuid' },
+                spent_atomic: { type: 'string' },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+        additionalProperties: false,
+      },
+      DashboardBudgetRemainingResponse: {
+        type: 'object',
+        required: ['budgets'],
+        properties: {
+          budgets: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/DashboardBudgetRemainingEntry' },
+          },
         },
         additionalProperties: false,
       },

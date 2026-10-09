@@ -34,7 +34,10 @@ import { useEffect, useRef } from 'react'
  * This hook only decides WHEN to fetch.
  */
 
-/** Poll cadence while the document is visible. */
+/**
+ * Poll cadence while the document is visible. The DEFAULT every existing
+ * consumer gets; #3804's budget-remaining hook passes its own 60 s cadence.
+ */
 export const VISIBLE_POLL_INTERVAL_MS = 10_000
 
 /**
@@ -46,10 +49,23 @@ export const VISIBLE_POLL_INTERVAL_MS = 10_000
  */
 const TICK_DEDUP_WINDOW_MS = 1_500
 
-export function useVisiblePolling(fetch: () => void | Promise<void>): void {
+/**
+ * `intervalMs` is optional (#3804) and defaults to the 10 s cadence, so every
+ * existing consumer and its tests are unchanged. Pass it as a module-level
+ * constant (hooks re-register the cadence when it changes); the budget-
+ * remaining hook passes 60_000. The dedup window below stays far below the
+ * FASTEST sane cadence — a cadence under ~2 s would need it revisited.
+ */
+export function useVisiblePolling(
+  fetch: () => void | Promise<void>,
+  intervalMs: number = VISIBLE_POLL_INTERVAL_MS,
+): void {
   // Keep the latest fetcher without re-registering timers/listeners when a
   // consumer's callback identity changes across renders (useCallback deps).
   const fetchRef = useRef(fetch)
+  // Same for the cadence: an inline literal (`60_000` vs a const) would
+  // otherwise tear down the cadence every render.
+  const intervalRef = useRef(intervalMs)
 
   // Shared across every tick source (timer, visibilitychange, focus) so two
   // events in the same turn can not start two requests.
@@ -59,6 +75,10 @@ export function useVisiblePolling(fetch: () => void | Promise<void>): void {
   useEffect(() => {
     fetchRef.current = fetch
   })
+
+  useEffect(() => {
+    intervalRef.current = intervalMs
+  }, [intervalMs])
 
   useEffect(() => {
     let scheduledId: ReturnType<typeof setTimeout> | null = null
@@ -80,7 +100,7 @@ export function useVisiblePolling(fetch: () => void | Promise<void>): void {
       // fired timer or a hidden-stop, so a focus event that trails a
       // visibility event on the same visible flip re-arms nothing.
       if (scheduledId === null) {
-        scheduledId = setTimeout(onTimer, VISIBLE_POLL_INTERVAL_MS)
+        scheduledId = setTimeout(onTimer, intervalRef.current)
       }
       if (inFlightRef.current) return
       const now = Date.now()
@@ -116,7 +136,7 @@ export function useVisiblePolling(fetch: () => void | Promise<void>): void {
     // No immediate fetch here — consumers own their mount fetch; this only
     // starts the cadence when the page is already visible.
     if (isVisible()) {
-      scheduledId = setTimeout(onTimer, VISIBLE_POLL_INTERVAL_MS)
+      scheduledId = setTimeout(onTimer, intervalRef.current)
     }
 
     document.addEventListener('visibilitychange', onVisibilityChange)

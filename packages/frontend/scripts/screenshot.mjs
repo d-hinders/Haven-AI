@@ -1095,6 +1095,29 @@ export const FIXTURE_OVERVIEW = {
   })),
   transactions: FIXTURE_TXS.slice(0, 4),
 }
+
+// #3804: the cached budget-remaining read. One KNOWN row (chain-backed,
+// sub-budget attribution) and one UNKNOWN row (`remaining_*` null) — the
+// unknown row photographs as "unavailable", never "0 left" and never the
+// full budget, which is the wire-shape rule the issue pins.
+export const FIXTURE_BUDGET_REMAINING = {
+  budgets: [
+    {
+      agent_id: 'agent-research', chain_id: 84532, delegation_hash: `0x${'c'.repeat(64)}`,
+      token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', token_symbol: 'USDC', token_decimals: 6,
+      budget_atomic: '3000000', read_at: '2026-10-09T13:00:00.000Z', period_end: '2026-10-10T00:00:00.000Z',
+      remaining_atomic: '1500000', remaining_from_chain: true, used_atomic: '1500000',
+      sub_budget_spend: [{ agent_id: 'agent-claw', spent_atomic: '250000' }],
+    },
+    {
+      agent_id: 'agent-ops', chain_id: 84532, delegation_hash: `0x${'d'.repeat(64)}`,
+      token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', token_symbol: 'USDC', token_decimals: 6,
+      budget_atomic: '2000000', read_at: null, period_end: '2026-10-10T00:00:00.000Z',
+      remaining_atomic: null, remaining_from_chain: false, used_atomic: null,
+      sub_budget_spend: [],
+    },
+  ],
+}
 // Agent detail (#1075): the activity feed + spend stats behind
 // `/agent-activity/:id/*`. Without these the route fell through to the empty
 // fallback, which had no `activity` key at all — the page rendered nothing and
@@ -1831,6 +1854,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   }
   if (pathname === '/chains') return { deployable: [FIXTURE_ACCOUNT.chain_id] }
   if (pathname === '/dashboard/overview') return FIXTURE_OVERVIEW
+  if (pathname === '/dashboard/budget-remaining') return FIXTURE_BUDGET_REMAINING
   if (pathname.startsWith('/portfolio/')) return FIXTURE_PORTFOLIO
   if (pathname.startsWith('/balances/')) return FIXTURE_BALANCES
   if (pathname === '/agents') {

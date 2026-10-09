@@ -297,6 +297,51 @@ export const dashboardOverview = {
 }
 
 /**
+ * `GET /dashboard/budget-remaining` (#3804) — the cached, display-only
+ * budget-remaining read. Two rows: one KNOWN (fromChain, amounts populated,
+ * a sub-budget attribution line) and one UNKNOWN (`remaining_from_chain:
+ * false`, `remaining_atomic`/`used_atomic`/`read_at` null — never "0 left",
+ * never the full budget). The screenshot harness and any spec seeding the
+ * dashboard spread this same shape.
+ */
+export const dashboardBudgetRemaining = {
+  budgets: [
+    {
+      agent_id: testAgent.id,
+      chain_id: 84532,
+      delegation_hash: `0x${'c'.repeat(64)}`,
+      token_address: '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
+      token_symbol: 'USDC',
+      token_decimals: 6,
+      budget_atomic: '3000000',
+      read_at: '2026-10-09T13:00:00.000Z',
+      period_end: '2026-10-10T00:00:00.000Z',
+      remaining_atomic: '1500000',
+      remaining_from_chain: true,
+      used_atomic: '1500000',
+      sub_budget_spend: [
+        { agent_id: '33333333-3333-4333-8333-333333333333', spent_atomic: '250000' },
+      ],
+    },
+    {
+      agent_id: '44444444-4444-4444-8444-444444444444',
+      chain_id: 84532,
+      delegation_hash: `0x${'d'.repeat(64)}`,
+      token_address: '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
+      token_symbol: 'USDC',
+      token_decimals: 6,
+      budget_atomic: '2000000',
+      read_at: null,
+      period_end: '2026-10-10T00:00:00.000Z',
+      remaining_atomic: null,
+      remaining_from_chain: false,
+      used_atomic: null,
+      sub_budget_spend: [],
+    },
+  ],
+}
+
+/**
  * Accounting connections (#2868, backend #2862–#2867). `GET
  * /accounting/providers` lists Fortnox live and the three coming-soon
  * providers; the connection row is exported so a spec can seed any of the

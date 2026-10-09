@@ -1022,8 +1022,13 @@ simultaneously blocked gated actions for the same state. The decision:
 EOA when the connected wallet **is** the set's named owner (#2068) → any
 passkey — so a mixed account keeps
 signing with its connected owner wallet and only the pure-passkey marker-less
-case changed; the fallback credential is **disclosed** in the wallet menu
-(#1952's rendering, reachable since this decision) before any ceremony. This
+case changed; the fallback credential is **disclosed** before any ceremony.
+That disclosure was the wallet menu's (#1952's rendering) until #3825 took the
+wallet pill out of the top bar; since then every owner-signing flow carries
+the #1097 line itself — "This account's passkey may be on another device" —
+in the account's Backup & recovery card, send, the budget card (grant, edit,
+stop), the connect flow's budget approval, the merchant budget, remove, and
+re-key (owner decision 2026-10-09). This
 offers no signer that cannot sign: the set is the account's on-chain-enrolled
 signers, selection draws only from that account+chain-scoped set, and device
 availability — the one unknown — is answered by the ceremony itself.
@@ -2836,6 +2841,10 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > described in §6's read surface. §6's wording about the "header wallet pill"
 > was updated in place; `useAccountOperationGate`, `pickSigningPath` and every
 > signing step are untouched. No new spender, no authority grant, no custody
-> change. Scope of this re-read: §6 (read surface and the `wrong_wallet`
-> paragraph) and the #3812 note in §3; nothing else in this document was
-> re-read for it, and `last-verified` is not bumped.
+> change. The #1969 paragraph's "disclosed in the wallet menu" was rewritten
+> in place: with the pill gone the menu no longer opens for a ready user, so
+> each owner-signing flow now shows the #1097 cross-device line itself — a
+> hint beside a working action, never a gate. Scope of this re-read: §6 (read
+> surface, the #1969 paragraph and the `wrong_wallet` paragraph) and the
+> #3812 note in §3; nothing else in this document was re-read for it, and
+> `last-verified` is not bumped.

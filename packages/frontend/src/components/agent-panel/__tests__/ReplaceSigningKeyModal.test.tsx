@@ -70,6 +70,28 @@ import { ReplaceSigningKeyModal } from '../ReplaceSigningKeyModal'
  * and it is what the assertions actually mean. Returns null when there is no
  * such ancestor, so the paired-absence test can assert its absence honestly.
  */
+// #3825: the cross-device heads-up, read beside the money-path re-key hook.
+describe('ReplaceSigningKeyModal cross-device hint (#3825)', () => {
+  it('shows the hint when the account has passkeys but none on this device', async () => {
+    mockUseActiveSigner.mockReturnValue(null)
+    mockApiGet.mockResolvedValue({
+      account_address: '0x9999999999999999999999999999999999999999',
+      chain_id: 8453,
+      owner_address: null,
+      passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+    })
+    mockOnDevice.mockReturnValue(false)
+    renderModal()
+    expect(await screen.findByText(/passkey may be on another device/)).toBeTruthy()
+  })
+
+  it('shows no hint for a wallet-owned account with no passkeys', async () => {
+    renderModal()
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalled())
+    expect(screen.queryByText(/passkey may be on another device/)).toBeNull()
+  })
+})
+
 function gateBox(): HTMLElement | null {
   const title = screen.queryByText(/the next step cannot be undone/i)
   const checkbox = screen.queryByRole('checkbox')

@@ -19,6 +19,7 @@ import { useTaskBudgets, type TaskBudget } from '@/hooks/useTaskBudgets'
 import { useSubBudgetTrees, type SubBudgetTree } from '@/hooks/useSubBudgets'
 import BudgetGrantAction from './BudgetGrantAction'
 import WalletConnectAction from './WalletConnectAction'
+import PasskeyElsewhereHint from './PasskeyElsewhereHint'
 import EditBudgetModal from './EditBudgetModal'
 import IssueSubBudgetModal from './IssueSubBudgetModal'
 import ConfirmDialog from './ConfirmDialog'
@@ -81,7 +82,7 @@ const PERIODS = [86_400, 604_800, 2_592_000] as const
 export default function DelegationBudgetCard({ agentId, chainId, tokens, agentName, onBudgetChange, retired }: Props) {
   // #3695: this card is the one caller that asks for remaining-this-period —
   // the meter on each row is drawn from it.
-  const { budgets, grant, editBudget, revoke, busy, ready, budgetsError, reload, signersError, reloadSigners, signersLoading } =
+  const { budgets, grant, editBudget, revoke, busy, ready, budgetsError, reload, signersError, reloadSigners, signersLoading, passkeyElsewhere } =
     useDelegationBudget(agentId, chainId, { includeRemaining: true })
   // #3812: `ready` is false for three different reasons. A failed signer-set
   // read has its own Try again below, and a pending read is not an answer yet;
@@ -353,6 +354,11 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
           Connect your account owner wallet to change or stop a budget.
         </NoticeRow>
       ) : null}
+
+      {/* #3825: one heads-up for every signature this card asks for — Stop,
+          Edit and the grant form below — now that the wallet menu that
+          disclosed the fallback passkey has left the top bar. */}
+      {ready && passkeyElsewhere && !retired ? <PasskeyElsewhereHint className="mb-4" /> : null}
 
       <div className="divide-y divide-[var(--v2-border)]">
         {budgetsError ? (

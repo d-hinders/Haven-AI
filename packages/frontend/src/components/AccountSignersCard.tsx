@@ -25,6 +25,7 @@ import { Input } from './ui/Input'
 import { Modal } from './ui/Modal'
 import ConfirmDialog from './ConfirmDialog'
 import WalletConnectAction from './WalletConnectAction'
+import PasskeyElsewhereHint from './PasskeyElsewhereHint'
 import { Icon } from './ui/Icon'
 import { useToast } from './ui/Toast'
 import { passkeyRowLabel } from '@/lib/passkeyLabels'
@@ -235,10 +236,7 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
             // #1097: signing works, but the ceremony may hand off to the
             // device that holds the passkey — say so BEFORE the browser's
             // QR dialog surprises them.
-            <p className="mt-3 text-xs text-[var(--v2-ink-muted)]">
-              This account&apos;s passkey may be on another device — your browser will
-              guide you there when you approve.
-            </p>
+            <PasskeyElsewhereHint className="mt-3" />
           ) : null}
 
           <Card.Section className="mt-4">

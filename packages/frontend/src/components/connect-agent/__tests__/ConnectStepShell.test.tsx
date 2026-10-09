@@ -198,8 +198,9 @@ describe('server-side credential path (#2482)', () => {
     // The flattening the old nesting test pinned is now REQUIRED: no details
     // may be nested inside another.
     for (const d of disclosures) expect(d.querySelector('details')).toBeNull()
-    // Server disclosure sits first — directly under the setup prompt — and
-    // the trouble disclosure no longer carries the manual path.
+    // Server disclosure sits first — the first in the footer below the setup
+    // steps (#3832) — and the trouble disclosure no longer carries the manual
+    // path.
     expect(disclosures[0]).toBe(server)
     expect(disclosures[1]).toBe(trouble)
     expect(trouble!.textContent).not.toContain('Generate credentials')
@@ -450,6 +451,50 @@ describe('the numbered step list on the waiting screen (#3832)', () => {
     // The manual-credential path makes the key in this browser.
     const manual = render(renderWaiting(false, 'starting', () => {}, true, { keyMadeInBrowser: true }))
     expect(manual.container.textContent).not.toContain(TRUST)
+  })
+
+  it('moves keyboard focus to "Copy again" when the copy swaps the primary out', () => {
+    const { getByRole, rerender } = render(renderWaiting(false, 'starting', () => {}, false))
+    getByRole('button', { name: /Copy setup prompt/ }).focus()
+    rerender(renderWaiting(false, 'starting', () => {}, true))
+    expect(document.activeElement).toBe(getByRole('button', { name: 'Copy again' }))
+  })
+
+  it('marks exactly one row as the current step', () => {
+    const { container } = render(renderWaiting(false, 'starting', () => {}, true))
+    const current = container.querySelectorAll('[aria-current="step"]')
+    expect(current).toHaveLength(1)
+    expect(current[0].getAttribute('data-step-state')).toBe('active')
+  })
+
+  it('once server credentials exist, row 1 stops competing with "Continue to wallet approval" (#2482)', () => {
+    const { container, getByRole } = render(
+      <WaitingForConnector
+        setup={SETUP}
+        runtime="claude-code"
+        copied={null}
+        promptCopied={false}
+        keyMadeInBrowser={true}
+        onCopy={() => {}}
+        manualCredential={{ apiKey: 'k', delegatePrivateKey: '0x1', delegateAddress: '0x2', prompt: 'p', env: 'e' }}
+        manualCredentialAcknowledged={false}
+        manualCreating={false}
+        manualError={null}
+        onCreateManualCredential={() => {}}
+        onContinueAfterManualCredential={() => {}}
+        loading={false}
+        error={null}
+        connectionStage="starting"
+        expiresAt={EXPIRES_AT}
+        onCancel={() => {}}
+      />,
+    )
+    const copy = getByRole('button', { name: /Copy setup prompt/ })
+    expect(copy.className).not.toContain('w-full')
+    expect(getByRole('button', { name: 'Continue to wallet approval' }).className).toContain('w-full')
+    const slot = container.querySelector('[aria-live="polite"]')
+    expect(slot?.textContent).toMatch(/continue to wallet approval/i)
+    expect(slot?.textContent).not.toMatch(/nothing else to click/i)
   })
 
   it('names no agent client — any MCP client works (#3832 owner decision)', () => {

@@ -5008,7 +5008,7 @@ export const SCENARIOS = {
       await shoot(dialog, 'waiting-recovery')
 
       // #2482: the server-side credential path now lives in its own top-level
-      // disclosure directly under the setup prompt — one click from the
+      // disclosure (since #3832, in the footer below the setup steps) — one click from the
       // connect step, no reveal button, no warning panel, no checkbox. It is
       // the most safety-relevant surface in the flow (it hands out the
       // one-time private signing key), so it is captured twice: BEFORE

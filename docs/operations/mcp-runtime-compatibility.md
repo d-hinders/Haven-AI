@@ -3122,13 +3122,14 @@ emitted promptly.
 
 Before registration, the dashboard stages what it says about a missing
 connection over three periods, in one status slot that is never empty (#1399).
-On arrival it says only that it is waiting for the agent to run the setup
-command. After one minute of a confirmed `awaiting_connection` it acknowledges
+Before the setup prompt is copied it says the screen advances by itself once
+the agent connects; once it is copied (#3832), it says it is waiting for the
+agent to run the connector command. After one minute of a confirmed `awaiting_connection` it acknowledges
 that a first run downloads the connector before it can register — an
 observation, not a warning: it offers no recovery actions and does not suggest
 anything is wrong. After **three minutes** of confirmed `awaiting_connection`
-it says Haven has not received a connection yet, asks the user not to approve
-agent rules, offers the same local command for copying, and lets them cancel
+it says Haven has not received a connection yet — whether or not the prompt
+was copied — asks the user not to approve agent rules, offers the same local command for copying, and lets them cancel
 the one-time setup before creating a fresh prompt. A status-read error resets
 the clock rather than advancing it: it remains an error state, not evidence
 that the connector succeeded or failed.

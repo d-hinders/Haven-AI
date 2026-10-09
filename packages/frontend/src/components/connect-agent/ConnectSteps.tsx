@@ -15,8 +15,8 @@ import { Icon } from '../ui/Icon'
  * design system treats a one-call-site pattern as too thin to promote
  * (`docs/product/design-system.md` § Numbered step list).
  *
- * Marker states, all StepProgress's existing treatments (no new colour,
- * radius or size):
+ * Marker states — done, active and pending are StepProgress's disc
+ * treatments; working adds the brand spinner (no new colour, radius or size):
  * - `done`    — success-soft disc with a check;
  * - `active`  — brand-soft disc, brand ring, brand numeral;
  * - `working` — the brand spinner (lucide `Loader2`), for a row whose outcome
@@ -32,11 +32,23 @@ export interface ConnectStepRow {
   /** Right-aligned control on the heading line (e.g. "Copy again"). */
   aside?: ReactNode
   children?: ReactNode
+  /**
+   * Below the `sm` breakpoint, render `children` at the list's full width
+   * instead of indented under the heading. For a row whose body is a whole
+   * sub-flow with paired buttons (the approval card): indented by the marker
+   * column, a 390px screen left each button ~125px and wrapped "Approve
+   * budget" onto two lines (#3832 design review). Last row only — a wide body
+   * covers the marker column, where a connector line would run.
+   */
+  wideBodyOnMobile?: boolean
 }
 
-const STATE_LABEL: Record<ConnectStepRowState, string> = {
+// Screen-reader state prefix for the row heading. None for `active`: that row
+// carries `aria-current="step"`, which already announces it — a prefix would
+// say it twice.
+const STATE_LABEL: Record<ConnectStepRowState, string | null> = {
   done: 'Done',
-  active: 'Current step',
+  active: null,
   working: 'In progress',
   pending: 'Not started',
 }
@@ -47,7 +59,7 @@ function Marker({ state, number }: { state: ConnectStepRowState; number: number 
   // progress language, so a user moving from one to the other reads one
   // system continuing, not a second one starting (#3832 design review ask).
   const base =
-    'flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-xs font-medium v2-tabular'
+    'flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-xs font-medium v2-tabular sm:h-8 sm:w-8'
   if (state === 'done') {
     return (
       <span className={`${base} border-success/30 bg-[var(--v2-success-soft)] text-[var(--v2-success)]`}>
@@ -88,26 +100,38 @@ export function ConnectSteps({ rows }: { rows: ConnectStepRow[] }) {
           <li
             key={row.id}
             data-step-state={row.state}
-            aria-current={row.state === 'active' || row.state === 'working' ? 'step' : undefined}
-            className="flex gap-3.5"
+            // One current step per list: the row the user acts on. A `working`
+            // row is Haven's to finish, so it is not "current".
+            aria-current={row.state === 'active' ? 'step' : undefined}
           >
-            <div className="flex flex-col items-center gap-1.5">
-              <Marker state={row.state} number={index + 1} />
-              {!last && <span aria-hidden="true" className="w-px flex-1 bg-[var(--v2-border)]" />}
-            </div>
-            {/* The row spacing sits on THIS column, not the <li>: padding on the
-                <li> would sit outside the marker column's stretch, and a
-                heading-only row would draw no connector line at all. */}
-            <div className={`flex min-w-0 flex-1 flex-col gap-3 pt-0.5 ${last ? '' : 'pb-5'}`}>
-              <div className="flex min-h-5 items-center justify-between gap-3">
-                {/* #1393: section tier — the modal keeps its one title. */}
-                <h3 className={`text-sm font-semibold ${TITLE_TONE[row.state]}`}>
-                  <span className="sr-only">{`${STATE_LABEL[row.state]}: `}</span>
-                  {row.title}
-                </h3>
-                {row.aside}
+            <div className="flex gap-3.5">
+              <div className="flex flex-col items-center gap-1.5">
+                <Marker state={row.state} number={index + 1} />
+                {!last && <span aria-hidden="true" className="w-px flex-1 bg-[var(--v2-border)]" />}
               </div>
-              {row.children}
+              {/* The row spacing sits on THIS column, not the <li>: padding on
+                  the <li> would sit outside the marker column's stretch, and a
+                  heading-only row would draw no connector line at all. */}
+              <div className={`flex min-w-0 flex-1 flex-col gap-3 pt-0.5 sm:pt-1 ${last ? '' : 'pb-5'}`}>
+                <div className="flex min-h-5 items-center justify-between gap-3">
+                  {/* #1393: section tier — the modal keeps its one title. */}
+                  <h3 className={`text-sm font-semibold ${TITLE_TONE[row.state]}`}>
+                    {STATE_LABEL[row.state] && (
+                      <span className="sr-only">{`${STATE_LABEL[row.state]}: `}</span>
+                    )}
+                    {row.title}
+                  </h3>
+                  {row.aside}
+                </div>
+                {row.wideBodyOnMobile ? (
+                  // Rendered ONCE (the body can hold a signing flow, so it must
+                  // never mount twice); below `sm` it pulls left over the
+                  // marker column — 1.75rem disc + 0.875rem gap.
+                  <div className="-ml-[2.625rem] flex flex-col gap-3 sm:ml-0">{row.children}</div>
+                ) : (
+                  row.children
+                )}
+              </div>
             </div>
           </li>
         )

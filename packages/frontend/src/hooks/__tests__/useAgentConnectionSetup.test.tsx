@@ -409,6 +409,72 @@ describe('useAgentConnectionSetup — rail awareness without rendering the modal
     expect(result.current.connectView).toEqual({ kind: 'delegation_approval', agentId: 'agent-1' })
   })
 
+  describe('the latched prompt-copied flag (#3832)', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    beforeEach(() => {
+      writeText.mockClear()
+      Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    })
+
+    it('stays set when a later copy of something else overwrites `copied`', async () => {
+      const { result } = renderFlow()
+      await act(async () => {
+        await result.current.handleCreateSetup()
+      })
+      expect(result.current.promptCopied).toBe(false)
+      await act(async () => {
+        await result.current.copyText('prompt', 'prompt')
+      })
+      expect(result.current.promptCopied).toBe(true)
+      await act(async () => {
+        await result.current.copyText('command', 'npx …')
+      })
+      expect(result.current.copied).toBe('command')
+      expect(result.current.promptCopied).toBe(true)
+    })
+
+    it('is cleared by "Create a new setup": the new prompt starts uncopied', async () => {
+      // The clipboard still holds the OLD prompt, with a dead setup token —
+      // the new setup's row 1 must ask for a fresh copy.
+      const { result } = renderFlow()
+      await act(async () => {
+        await result.current.handleCreateSetup()
+      })
+      await act(async () => {
+        await result.current.copyText('prompt', 'prompt')
+      })
+      expect(result.current.promptCopied).toBe(true)
+      act(() => result.current.restartFromPolicy({ clearCancelled: true }))
+      expect(result.current.promptCopied).toBe(false)
+      expect(result.current.copied).toBeNull()
+      mockApiPost.mockResolvedValueOnce({
+        setup_id: 'setup-2',
+        status: 'awaiting_connection',
+        setup_token: 'hv_setup_def',
+        expires_at: '2099-01-01T00:00:00.000Z',
+        connector_command: 'npx -y @haven_ai/connect@alpha --setup hv_setup_def',
+        setup_prompt: 'prompt 2',
+      })
+      await act(async () => {
+        await result.current.handleCreateSetup()
+      })
+      expect(result.current.setup?.setup_id).toBe('setup-2')
+      expect(result.current.promptCopied).toBe(false)
+    })
+
+    it('does not latch when there is no clipboard API — nothing was copied', async () => {
+      Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
+      const { result } = renderFlow()
+      await act(async () => {
+        await result.current.handleCreateSetup()
+      })
+      await act(async () => {
+        await result.current.copyText('prompt', 'prompt')
+      })
+      expect(result.current.promptCopied).toBe(false)
+    })
+  })
+
   it('flags a connected-but-wrong-chain wallet instead of treating it as absent (#1070)', () => {
     // Connected to Base (8453) while the approval needs Gnosis (100):
     // useActiveSigner returns null, so without the explicit detection the gate

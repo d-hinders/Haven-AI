@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type {
   CopyKind,
   CreateSetupResponse,
@@ -68,6 +68,22 @@ export function WaitingForConnector({
   // component rather than riding the flow hook (#2482).
   const [manualFormat, setManualFormat] = useState<'env' | 'prompt'>('env')
 
+  // Copying swaps row 1's primary for "Copy again" — the focused button
+  // unmounts, which would drop keyboard focus to <body>. Hand it to the
+  // control that replaced it, on the transition only (never on mount).
+  const copyAgainRef = useRef<HTMLButtonElement>(null)
+  const wasCopied = useRef(promptCopied)
+  useEffect(() => {
+    if (promptCopied && !wasCopied.current) copyAgainRef.current?.focus()
+    wasCopied.current = promptCopied
+  }, [promptCopied])
+
+  // #2482: once the server-credential path has issued credentials, that path
+  // is the user's next step (save them, then "Continue to wallet approval").
+  // Row 1 must not keep a second full-width primary competing with it, and
+  // row 3 must not promise "nothing else to click".
+  const manualInProgress = Boolean(manualCredential)
+
   const promptRows: ConnectStepRow[] = [
     promptCopied
       ? {
@@ -75,7 +91,12 @@ export function WaitingForConnector({
           state: 'done',
           title: 'Prompt copied',
           aside: (
-            <Button variant="ghost" size="sm" onClick={() => onCopy('prompt', setup.setup_prompt)}>
+            <Button
+              ref={copyAgainRef}
+              variant="ghost"
+              size="sm"
+              onClick={() => onCopy('prompt', setup.setup_prompt)}
+            >
               <Icon icon={Copy} className="h-3.5 w-3.5" />
               Copy again
             </Button>
@@ -92,7 +113,12 @@ export function WaitingForConnector({
                   they hand their agent, so it sits behind a closed
                   disclosure instead of a 192px scrolling preview that
                   pushed this button down the screen. */}
-              <Button size="lg" className="w-full" onClick={() => onCopy('prompt', setup.setup_prompt)}>
+              <Button
+                variant={manualInProgress ? 'ghost' : 'primary'}
+                size={manualInProgress ? 'sm' : 'lg'}
+                className={manualInProgress ? 'self-start' : 'w-full'}
+                onClick={() => onCopy('prompt', setup.setup_prompt)}
+              >
                 <Icon icon={Copy} className="h-4 w-4" />
                 Copy setup prompt
               </Button>
@@ -141,15 +167,17 @@ export function WaitingForConnector({
         // transition changes words inside its reserved height. The floors
         // clear the longer (slow) string with a line to spare at this row's
         // content width — sized for the worse wrap on purpose (#1391: a floor
-        // sized to one line jumps the moment copy or font moves). Recovery is timer-driven, not copy-driven
-        // (useAgentConnectionSetupStatus), so it surfaces here whether or not
-        // row 1 was ever marked copied.
+        // sized to one line jumps the moment copy or font moves). Recovery is
+        // timer-driven, not copy-driven (useAgentConnectionSetupStatus), so it
+        // surfaces here whether or not row 1 was ever marked copied.
         <div className="min-h-16 sm:min-h-11" aria-live="polite">
           {connectionStage !== 'recovery' && (
             <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
-              {!promptCopied
-                ? 'Haven advances this screen automatically once your agent connects — nothing else to click here.'
-                : connectionStage === 'slow'
+              {manualInProgress
+                ? 'Save the credentials below, then continue to wallet approval.'
+                : !promptCopied
+                  ? 'Haven advances this screen automatically once your agent connects — nothing else to click here.'
+                  : connectionStage === 'slow'
                   ? 'Still going — a first run downloads the connector first, so it can take a minute or two.'
                   : 'Waiting for your agent to run the connector command. This usually takes a few seconds.'}
             </p>
@@ -303,8 +331,8 @@ export function WaitingForConnector({
         </details>
 
         {/* The local-command recovery path no longer hosts the manual route:
-            #2482 moved the manual credential to its own disclosure directly
-            under the setup prompt, so this one keeps a single job — the
+            #2482 moved the manual credential to its own disclosure (since
+            #3832, the first one in the footer below the setup steps), so this one keeps a single job — the
             command to re-run when the connector did not connect. */}
         <details className="group text-xs">
           <summary className="flex cursor-pointer list-none items-center gap-1 text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)]">

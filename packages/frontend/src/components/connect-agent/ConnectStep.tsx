@@ -16,14 +16,19 @@ import { WaitingForConnector } from './WaitingForConnector'
  */
 /**
  * #3832: rows 1-2 once the agent has connected. Any status past
- * `waiting_for_connector` means the prompt reached the agent and its
- * connector ran, so both render done — including on a session resumed from a
- * hand-off link, which never copied anything in this browser.
+ * `waiting_for_connector` means both are behind the user, so both render
+ * done — including on a session resumed from a hand-off link (#2522).
+ *
+ * The done titles say what is TRUE on each path, not what this browser did:
+ * - connector path: the agent received the prompt and its connector ran —
+ *   true whether or not this browser was the one that copied it;
+ * - manual-credential path (#2482): no prompt was pasted and no connector
+ *   ran; the credentials were made in the browser and saved by the user.
  */
-function connectedRows(approve: ConnectStepRow): ConnectStepRow[] {
+function connectedRows(approve: ConnectStepRow, manual: boolean): ConnectStepRow[] {
   return [
-    { id: 'copy', state: 'done', title: 'Prompt copied' },
-    { id: 'paste', state: 'done', title: 'Agent connected' },
+    { id: 'copy', state: 'done', title: manual ? 'Credentials created' : 'Prompt received by your agent' },
+    { id: 'paste', state: 'done', title: manual ? 'Credentials saved' : 'Agent connected' },
     approve,
   ]
 }
@@ -88,6 +93,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
   // connector has not reported yet"; that state is now simply reached by
   // everyone rather than by the command path alone.
   const effectiveRuntime = setupStatus?.runtime ?? ''
+  const manualPath = Boolean(setupStatus?.install_status?.manual_credential_fallback)
 
   return (
     <ConnectStepShell stateKey={connectView?.kind ?? 'none'}>
@@ -114,9 +120,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           runtime={effectiveRuntime}
           copied={flow.copied}
           promptCopied={flow.promptCopied}
-          keyMadeInBrowser={Boolean(
-            flow.manualCredential || setupStatus?.install_status?.manual_credential_fallback,
-          )}
+          keyMadeInBrowser={Boolean(flow.manualCredential || manualPath)}
           onCopy={flow.copyText}
           manualCredential={flow.manualCredential}
           manualCredentialAcknowledged={flow.manualCredentialAcknowledged}
@@ -144,7 +148,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
                 The connector is finishing local setup. This usually takes a few seconds.
               </p>
             ),
-          })}
+          }, manualPath)}
         />
       )}
 
@@ -158,6 +162,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
             // heading says what the row asks for in other words. One sentence,
             // once per viewport.
             title: 'Review and sign',
+            wideBodyOnMobile: true,
             children: (
               <DelegationApprovalStep
                 key={connectView.agentId}
@@ -176,7 +181,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
                 isSwitchingChain={flow.isSwitchingChain}
               />
             ),
-          })}
+          }, manualPath)}
         />
       )}
 
@@ -186,7 +191,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
         // "Approved" used to carry. The grant line below stays the heading of
         // what the user just did (#1394).
         <ConnectSteps
-          rows={connectedRows({ id: 'approve', state: 'done', title: 'Budget approved' })}
+          rows={connectedRows({ id: 'approve', state: 'done', title: 'Budget approved' }, manualPath)}
         />
       )}
 

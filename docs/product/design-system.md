@@ -3,6 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/frontend/src/app/globals.css
+  - packages/frontend/src/components/connect-agent/ConnectSteps.tsx
   - packages/frontend/src/context/ThemeContext.tsx
   - packages/frontend/src/lib/theme-bootstrap.ts
   - packages/frontend/src/lib/theme-tokens.ts
@@ -761,7 +762,7 @@ its *text* colour on hover (`ink-2` → `ink`), pinned by
 That difference has a shipped consequence, and it is the rule to take from it: **tertiary
 needs surrounding structure to be legible as pressable.** It works inside a dialog's action
 row or at the end of a card, where position tells you it is a control. It fails in running
-content — `connect-agent/SetupStates.tsx:234` records the case where a tertiary button
+content — `connect-agent/SetupStates.tsx:208` records the case where a tertiary button
 "rendered as stray bold text in the middle of a checklist rather than a control", and was
 changed to ghost for the border alone while keeping secondary weight. Reach for ghost when
 the control has to announce itself; tertiary when its context already has.
@@ -791,7 +792,7 @@ command is not reproducible. It misses two things by construction. **`variant` i
 so every unadorned `<Button>` is an uncounted `primary` — which is why primary shows 0 and is
 nonetheless the most common button in the product. And it cannot see the four dynamic call
 sites (`DashboardClient.tsx:361`, `ConfirmDialog.tsx:60`, `agent-panel/ReplaceSigningKeyModal.tsx:904`,
-`connect-agent/CopyBlock.tsx:54`). The shape of the distribution is the point, not the integer.
+`connect-agent/CopyBlock.tsx:62`). The shape of the distribution is the point, not the integer.
 Re-derived 2026-09-30 for #3195 by running the published command: the previous figure
 (112/11/5/1 — 129, derived by #2203 at `ba4e045b`) had drifted through merged work to
 155/31/7/0 — 193, the same shape (ghost dominates, primary lives in the unadorned call
@@ -1334,8 +1335,9 @@ approve), where the old Waiting → Connected → Approved ticker said where the
 user was without saying what to do. Use `StepProgress` instead when the steps
 are separate screens of a wizard.
 
-Markers reuse `StepProgress`'s disc treatments, so the wizard band and the list
-read as one progress language rather than two:
+Done, active and pending reuse `StepProgress`'s disc treatments, so the wizard
+band and the list read as one progress language rather than two; working adds
+the brand spinner:
 
 | State | Disc | Heading |
 |---|---|---|
@@ -1389,7 +1391,7 @@ usual bar** (§ 5's Arrows subsection declines a precedent on one instance). It
 is written down anyway because the alternative was worse in a specific way:
 `--v2-border-strong` already had three unrelated uses, plain `border-l` +
 `--v2-border` grouping exists at three more call sites
-(`ConnectionVerificationFooter.tsx`, `WaitingForConnector.tsx` ×3 since #3832) at a lighter
+(`ConnectionVerificationFooter.tsx`, `WaitingForConnector.tsx` ×2) at a lighter
 weight, and none of them is documented — so the next author wanting a local hint
 had four undocumented shapes to copy and would plausibly have hand-rolled a
 fifth. Two reviewers split on whether this belongs here; it is recorded rather

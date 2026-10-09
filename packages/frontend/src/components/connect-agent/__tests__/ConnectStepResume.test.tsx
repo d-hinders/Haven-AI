@@ -198,7 +198,7 @@ describe('ConnectStep step list (#3832)', () => {
   function rows(container: HTMLElement) {
     return Array.from(container.querySelectorAll('ol[aria-label="Connection steps"] > li')).map((li) => ({
       state: li.getAttribute('data-step-state'),
-      title: li.querySelector('h3')?.textContent?.replace(/^[^:]+: /, ''),
+      title: li.querySelector('h3')?.textContent?.replace(/^(Done|In progress|Not started): /, ''),
     }))
   }
 
@@ -212,7 +212,7 @@ describe('ConnectStep step list (#3832)', () => {
       />,
     )
     expect(rows(container)).toEqual([
-      { state: 'done', title: 'Prompt copied' },
+      { state: 'done', title: 'Prompt received by your agent' },
       { state: 'done', title: 'Agent connected' },
       { state: 'active', title: 'Review and sign' },
     ])
@@ -252,10 +252,32 @@ describe('ConnectStep step list (#3832)', () => {
       />,
     )
     expect(rows(container)).toEqual([
-      { state: 'done', title: 'Prompt copied' },
+      { state: 'done', title: 'Prompt received by your agent' },
       { state: 'done', title: 'Agent connected' },
       { state: 'done', title: 'Budget approved' },
     ])
+  })
+
+  it('the manual-credential path says what actually happened in rows 1-2 (#2482)', () => {
+    // No prompt was pasted and no connector ran on this path — the
+    // credentials were made in the browser and saved by the user.
+    const { container } = render(
+      <ConnectStep
+        flow={resumedFlow({
+          setupStatus: {
+            ...STATUS,
+            status: 'awaiting_wallet_approval',
+            install_status: { manual_credential_fallback: true },
+          },
+          connectView: { kind: 'delegation_approval', agentId: 'agent-1' },
+        })}
+      />,
+    )
+    expect(rows(container).slice(0, 2)).toEqual([
+      { state: 'done', title: 'Credentials created' },
+      { state: 'done', title: 'Credentials saved' },
+    ])
+    expect(container.textContent).not.toMatch(/Prompt received|Agent connected/)
   })
 
   it.each(['expired', 'cancelled', 'failed', 'unknown_status'] as const)(

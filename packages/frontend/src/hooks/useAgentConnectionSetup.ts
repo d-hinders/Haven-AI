@@ -169,8 +169,10 @@ export function headerSubtitle(step: SetupStep, status: string | undefined, appr
     if (status === 'expired') return 'This setup prompt expired'
     if (status === 'cancelled') return 'This setup was cancelled'
     // #3832: the step list below spells out copy → paste → approve, so the
-    // subtitle states the outcome instead of repeating step 2's instruction.
-    return 'Give your agent the setup prompt. It does the rest.'
+    // subtitle states the whole job in one line rather than repeating step 2.
+    // It must not say the agent "does the rest": the last step — the
+    // authority grant — is the user's.
+    return 'Give your agent the setup prompt, then approve its budget here'
   }
   // #1720: no longer "choose where it runs" — there is nothing to choose.
   // A subtitle that names an action the step does not offer is worse than a
@@ -367,10 +369,13 @@ export function useAgentConnectionSetup({
   const creatingRef = useRef(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const [copied, setCopied] = useState<CopyKind | null>(null)
-  // #3832: LATCHED. `copied` is single-valued — copying the local command or
-  // the .env block overwrites 'prompt' — so the connect step's row 1 reads
-  // this instead, and a later copy of something else cannot un-tick it.
-  const [promptCopied, setPromptCopied] = useState(false)
+  // #3832: LATCHED, and keyed to the setup it was copied for. `copied` is
+  // single-valued — copying the local command or the .env block overwrites
+  // 'prompt' — so the connect step's row 1 reads this instead, and a later
+  // copy of something else cannot un-tick it. Keyed by setup_id so "Create a
+  // new setup" after an expiry or cancel starts the new prompt uncopied: the
+  // clipboard still holds the OLD prompt, with a dead token.
+  const [promptCopiedFor, setPromptCopiedFor] = useState<string | null>(null)
   const [cancelled, setCancelled] = useState(false)
   const [manualCredential, setManualCredential] = useState<ManualCredential | null>(null)
   const [manualCredentialAcknowledged, setManualCredentialAcknowledged] = useState(false)
@@ -499,7 +504,7 @@ export function useAgentConnectionSetup({
     setCreating(false)
     setCreateError(null)
     setCopied(null)
-    setPromptCopied(false)
+    setPromptCopiedFor(null)
     setCancelled(false)
     setManualCredential(null)
     setManualCredentialAcknowledged(false)
@@ -590,9 +595,12 @@ export function useAgentConnectionSetup({
   }
 
   async function copyText(kind: CopyKind, value: string) {
-    await navigator.clipboard?.writeText(value)
+    const clipboard = navigator.clipboard
+    await clipboard?.writeText(value)
     setCopied(kind)
-    if (kind === 'prompt') setPromptCopied(true)
+    // Without a clipboard API nothing was copied; latching would hide the
+    // prompt's only on-screen copy (row 1's "View the prompt") for nothing.
+    if (kind === 'prompt' && clipboard && setup) setPromptCopiedFor(setup.setup_id)
   }
 
   async function handleCancelSetup() {
@@ -695,6 +703,8 @@ export function useAgentConnectionSetup({
   // "Create a new setup" would re-run the create that already failed.
   function restartFromPolicy(options?: { clearCancelled?: boolean }) {
     setSetup(null)
+    setCopied(null)
+    setPromptCopiedFor(null)
     if (options?.clearCancelled) setCancelled(false)
     setStep('policy')
   }
@@ -760,7 +770,7 @@ export function useAgentConnectionSetup({
       agentId: setupStatus?.agent_id ?? null,
     }),
     copied,
-    promptCopied,
+    promptCopied: Boolean(setup && promptCopiedFor === setup.setup_id),
     copyText,
     manualCredential,
     manualCredentialAcknowledged,

@@ -170,8 +170,9 @@ Numbered step list):
    browser.
 2. Wait for the local connector to generate the signing key and API key, then
    register the public signing address and proof with Haven. If it cannot
-   connect after the bounded wait, the warning-gated manual credential fallback
-   may create the one-time credential in the browser; the user saves it in the
+   connect after the bounded wait — or runs on a server or hosted backend, where
+   the connector cannot run at all — the server-credential disclosure (#2482;
+   no warning gate, one click) may create the one-time credential in the browser; the user saves it in the
    trusted agent workspace, and the browser registers the same public address
    and proof. It must be labeled as manual, never as an automatically
    configured runtime.

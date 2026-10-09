@@ -234,6 +234,13 @@ describe('ReceivePanel (#3333)', () => {
       expect((screen.getByRole('button', { name: 'Sign transfer' }) as HTMLButtonElement).disabled).toBe(false)
     })
 
+    it('a signer response without a passkeys array does not crash the hand-off (#3093)', async () => {
+      await openHandoff(() =>
+        Promise.resolve({ account_address: ADDRESS, chain_id: 8453, owner_address: '0x' + 'ee'.repeat(20) }),
+      )
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeTruthy())
+    })
+
     it('a failed signer read offers no connect — connecting would not fix it', async () => {
       await openHandoff(() => Promise.reject(new Error('boom')))
       expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()

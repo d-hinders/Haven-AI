@@ -245,6 +245,7 @@ export function useAgentRekey(agentId: string, chainId: number) {
   })
 
   const loadSigners = useCallback(async () => {
+    setSignersState('loading')
     try {
       setSigners(await api.get<AccountSigners>(`/agents/${agentId}/account-signers`))
       setSignersState('loaded')

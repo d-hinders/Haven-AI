@@ -284,7 +284,10 @@ function ReceiveHandoff({ accountAddress, chainId, prepared, onDone, onCancel }:
       .get<AccountSigners>(`/accounts/hybrid/${accountAddress}/signers?chain_id=${chainId}`)
       .then((rows) => {
         if (!cancelled) {
-          setSigners(rows)
+          // #3093 normalisation, as `useAccountSigners` / `useDelegationBudget`
+          // apply it: `pickSigningPath` reads `passkeys.length` during render
+          // (#3812), so a response without the key must not crash the page.
+          setSigners({ ...rows, passkeys: rows.passkeys ?? [] })
           setSignersLoaded(true)
         }
       })

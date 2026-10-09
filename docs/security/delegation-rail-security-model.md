@@ -215,11 +215,16 @@ up.
 > or when revocation bites changed. A CSS token rename in a delegation-surface
 > file is not a semantics change: this paragraph is that re-verification record.
 
-> **Re-verified #3812 (in-flow wallet connect):** this change touched two files
-> in this document's coverage list, `AccountSignersCard.tsx` and
-> `DelegationSendModal.tsx`. Both edits are presentation-only: each now renders
-> a "Connect wallet" / "Switch wallet" control beside the owner-wallet blocker
-> it already showed. (`WalletButton.tsx`, whose
+> **Re-verified #3812 (in-flow wallet connect):** this change touched three
+> files in this document's coverage list. `AccountSignersCard.tsx` and
+> `DelegationSendModal.tsx` are presentation-only: each now renders a "Connect
+> wallet" / "Switch wallet" control beside the owner-wallet blocker it already
+> showed. `useAgentRekey.ts` gains a read-only `signersState`
+> (`loading`/`loaded`/`error`), so a connect offer can tell a pending signer
+> read from a failed one; `signingBlockedReason` and every signing step are
+> unchanged. Elsewhere the change only adds restrictions: "Sign new budget" and
+> the off-ramp "Sign transfer" are disabled while no one on this device can
+> sign. (`WalletButton.tsx`, whose
 > disconnect-then-reopen-the-picker logic moved unchanged into a shared
 > `useSwitchWallet` hook, is not in the coverage list.) Nothing that decides
 > who may sign changed: `useActiveSigner`, `pickSigningPath`,

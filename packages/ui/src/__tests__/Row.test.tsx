@@ -20,3 +20,28 @@ describe('Row density', () => {
     expect(root.className).not.toMatch(/\bpx-4\b|\bpy-3\b/)
   })
 })
+
+describe('Row — titleClassName / trailingClassName (#3805)', () => {
+  it('lands the title override on the title paragraph, not the row root', () => {
+    // AttentionList clamps the title to two lines below `sm`; classes aimed at
+    // the row root would land on the flex container and do nothing.
+    const { container } = render(<Row title="Agent" titleClassName="line-clamp-2" />)
+    const title = container.querySelector('p')!
+    expect(title.className).toContain('line-clamp-2')
+    expect(title.className).toContain('truncate')
+    expect((container.firstElementChild as HTMLElement).className).not.toContain('line-clamp-2')
+  })
+
+  it('lands the trailing override on the trailing wrapper', () => {
+    const { container } = render(
+      <Row title="Agent" trailing={<span>x</span>} trailingClassName="basis-full" />,
+    )
+    expect(container.querySelector('.basis-full')).not.toBeNull()
+  })
+
+  it('renders byte-identical classes when neither override is given', () => {
+    const { container } = render(<Row title="Agent" trailing={<span>x</span>} />)
+    expect(container.querySelector('p')!.className).toBe('truncate text-sm font-medium text-[var(--v2-ink)]')
+    expect(container.innerHTML).not.toContain('undefined')
+  })
+})

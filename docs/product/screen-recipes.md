@@ -18,7 +18,7 @@ covers:
   - packages/frontend/src/components/ui/PageHeader.tsx
   - packages/frontend/src/components/ui/SegmentedControl.tsx
   - packages/frontend/src/components/ui/Skeleton.tsx
-  - packages/frontend/src/components/ui/StatTile.tsx
+  - packages/ui/src/StatTile.tsx
   - packages/frontend/src/components/analytics/AgentsTable.tsx
   - packages/frontend/src/components/analytics/EmptyStates.tsx
   - packages/frontend/src/components/analytics/RangeControl.tsx
@@ -603,6 +603,9 @@ Structure:
    Haven charges no fees says "No fees yet — Haven is not charging fees" in
    words rather than rendering `$0.00`, because "nothing charged in this
    window" is a different fact from "the product is not charging fees".
+   (`StatTile` lives in `packages/ui/src/StatTile.tsx`; these are the card
+   variant. The redesigned dashboard's hero figures use the `inline` variant
+   — no card chrome, `text-base` value, no delta chip — #3805.)
 4. The agents table: spend, share, payments, refusals, budget used, top
    merchant, last payment, each row a link into the agent. Budget figures ride
    in the delegation's own token units with a progress bar and the reset date.

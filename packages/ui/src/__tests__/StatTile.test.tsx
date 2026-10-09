@@ -247,3 +247,57 @@ describe('delta locale (#3204)', () => {
     expect(screen.getByText('+15.9%')).toBeInTheDocument()
   })
 })
+
+describe('StatTile — variants (#3805)', () => {
+  it('pins the default (card) chrome and figure class strings', () => {
+    // The inline variant branches on exactly these strings; pinning them means
+    // an edit that changes the card tile's rendering fails here too, and the
+    // branch cannot silently rewrite the variant every existing caller mounts.
+    const t = mount(<StatTile label="Spent" value="$324.75" />)
+    expect(t.tile().className).toBe(
+      'rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card p-5 ',
+    )
+    expect(t.value().className).toBe(
+      'mt-2 v2-tabular text-2xl font-semibold leading-tight text-[var(--v2-ink)]',
+    )
+  })
+
+  it('inline drops the card chrome and sizes the figure to text-base, label above', () => {
+    const t = mount(<StatTile variant="inline" label="Spent today" value="13 000,50 kr" />)
+    // No border, no ground, no shadow, no padding — the tile sits inside a
+    // larger card the caller frames.
+    expect(t.tile().className).toBe('')
+    expect(t.value().className).toBe(
+      'mt-2 v2-tabular text-base font-semibold leading-tight text-[var(--v2-ink)]',
+    )
+    expect(t.value().className).not.toContain('text-2xl')
+    // The label still sits above the figure, in the same secondary ink.
+    expect(t.text('Spent today')).toBeTruthy()
+    expect(within(t.tile()).getByText('Spent today').className).toContain('text-[var(--v2-ink-2)]')
+  })
+
+  it('throws when polarity or delta is passed with inline — no chip, ever', () => {
+    const error = console.error
+    console.error = () => {}
+    try {
+      expect(() =>
+        render(<StatTile variant="inline" label="Refused" value="3" polarity="higher-is-bad" />),
+      ).toThrow(/no delta chip/)
+      expect(() => render(<StatTile variant="inline" label="Refused" value="3" delta={12} />)).toThrow(
+        /no delta chip/,
+      )
+      expect(() =>
+        render(
+          <StatTile variant="inline" label="Refused" value="3" polarity="neutral" delta={0} />,
+        ),
+      ).toThrow(/no delta chip/)
+    } finally {
+      console.error = error
+    }
+  })
+
+  it('keeps the derivable test hook on an inline tile', () => {
+    const t = mount(<StatTile variant="inline" label="Spent today" value="13 000,50 kr" />)
+    expect(t.tile().getAttribute('data-testid')).toBe('stat-tile-spent-today')
+  })
+})

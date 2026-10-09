@@ -2838,7 +2838,10 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > `GET /user/signers`), `routes/user.ts` (that route — owner-scoped, read-only),
 > `components/PasskeyElsewhereHint.tsx` (new: the shared #1097 line),
 > `hooks/useDelegationBudget.ts` (one more read-only return field,
-> `passkeyElsewhere`; `pickSigningPath` untouched),
+> `passkeyElsewhere`, true only when the passkey path will sign;
+> `pickSigningPath` untouched), `hooks/useAccountSigners.ts` and
+> `hooks/useDelegationSend.ts` (only their `passkeyElsewhere` return, now gated
+> on the passkey path the same way; `pickSigningPath` untouched),
 > `components/DelegationSendModal.tsx` and `components/DelegationBudgetCard.tsx`
 > (both render the shared hint), and `components/AccountSignersCard.tsx`. The
 > card hides the owner address behind "Show address" and the passkey key ids

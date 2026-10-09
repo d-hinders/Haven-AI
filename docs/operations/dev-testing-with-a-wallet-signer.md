@@ -60,8 +60,10 @@ unhelpful error — it is never offered at all, and the app falls back to the
 passkey path (the cross-device QR dead end above) or shows the no-signer state.
 Check MetaMask's selected account first; "connected" alone proves nothing here.
 
-The card may say *"This account's passkey may be on another device"*.
-On a preview that's expected — ignore it, the wallet signs.
+If a signing screen says *"This account's passkey may be on another device"*,
+the enrolled wallet is NOT the one that will sign — the passkey path will, and
+that ends at the cross-device QR dead end above (since #3825 the line shows only
+on the passkey path). Connect the enrolled wallet and retry.
 
 ## Testing passkeys on a preview
 

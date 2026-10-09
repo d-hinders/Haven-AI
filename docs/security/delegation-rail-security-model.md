@@ -931,7 +931,12 @@ plus per-credential enrollment time** (`key_id`, P256 x/y, owner address, and
 "Passkey · added {date}"; nothing secret, nothing spend-enabling). It powers
 login-time signer resolution and the account-level recovery card. It is a
 read: no route lets Haven — or this endpoint's caller — change a signer set
-without an existing signer's signature (invariant 13 unchanged).
+without an existing signer's signature (invariant 13 unchanged). Since #3825
+`GET /user/signers` lists the same material across all of the caller's live
+delegation-rail accounts — each passkey (by `key_id`) and owner wallet once,
+with the accounts it approves — for Settings → Signers. It returns `key_id`,
+owner address and enrollment time only (no P256 coordinates), is scoped to the
+authenticated user, and is equally a read.
 
 **Management surface (#1081).** Signer changes are reachable the same two ways:
 agent-scoped (`/agents/:id/account-signers/{prepare,submit}`, #888) and
@@ -1028,8 +1033,9 @@ since #2068 — for an owner-only set exactly when the connected wallet is
 the named owner (the same address check; an unrelated wallet stays blocked,
 and since #2073 that block has its own name: the gate answers
 `wrong_wallet`, carrying both addresses, rather than folding the mismatch
-into `no_signer`. The distinct kind changes what the UI *says* — the header
-wallet pill and the action-area caption name the mismatch instead of asking
+into `no_signer`. The distinct kind changes what the UI *says* — the wallet
+pill (in the connect flow's approval step; #3825 removed it from the header)
+and the action-area caption name the mismatch instead of asking
 the user to connect the wallet they already connected — and never what may
 *sign*: every consumer treats it as blocked, `wrong_wallet` is produced
 only by the hybrid branch's address compare, and the owner on the wrong
@@ -2801,3 +2807,18 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > selection and the signers card's removal gate (§3's #3812 note, §6);
 > nothing else in this document was re-read for it, and `last-verified` is not
 > bumped.
+>
+> **Re-verified (#3825, 2026-10-09, Settings → Signers; wallet pill leaves the
+> top bar):** this diff touches one covered file,
+> `components/AccountSignersCard.tsx`. It stops rendering the owner address
+> and passkey key ids and links to Settings → Signers; its Remove gates
+> (`wayCount < 2`), both consequence confirmations, the enrolment action and
+> its in-flow wallet connect are unchanged. Outside the coverage list, the
+> top bar no longer renders the wallet pill (it stays in the connect flow's
+> approval step), and the backend adds the read-only `GET /user/signers`
+> described in §6's read surface. §6's wording about the "header wallet pill"
+> was updated in place; `useAccountOperationGate`, `pickSigningPath` and every
+> signing step are untouched. No new spender, no authority grant, no custody
+> change. Scope of this re-read: §6 (read surface and the `wrong_wallet`
+> paragraph) and the #3812 note in §3; nothing else in this document was
+> re-read for it, and `last-verified` is not bumped.

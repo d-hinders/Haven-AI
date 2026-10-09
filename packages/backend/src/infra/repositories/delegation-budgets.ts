@@ -2,7 +2,7 @@
  * Read side of the delegation budget view (#1090): the ACTIVE
  * `agent_delegations` rows a delegation-rail agent's displayed budget is
  * derived from. Storage access only — the shaping lives in
- * `lib/delegation-budget-view.ts`.
+ * `rails/delegation-budget-view.ts`.
  */
 
 import pool from '../../db.js'
@@ -56,26 +56,32 @@ export async function listDelegationJsonByIds(ids: string[]): Promise<Map<string
 }
 
 /**
- * The #1698 live window — `start_date <= now < expires_at`, evaluated against
- * the DATABASE clock (`EXTRACT(EPOCH FROM NOW())`), the same predicate
- * `SELECT_DELEGATION_FOR_PAYMENT_SQL` and `SELECT_ACTIVE_DELEGATION_BY_HASH_SQL`
- * already enforce on the payment path. #3802: ONE shared fragment instead of
- * five copies, because every budget-VIEWING read below must agree with the
- * payment path about which grants are live — a `status = 'active'` row alone
- * is not live authority: a grant whose first period has not opened (dormant
- * carry) or whose `expires_at` has passed is refused by the on-chain
- * TimestampEnforcer, so showing it as "5.00 USDC/daily" (or letting it
- * activate an agent) states an authority the chain will not honour.
+ * The #3802 owner predicate — `expires_at > EXTRACT(EPOCH FROM NOW())`,
+ * evaluated against the DATABASE clock, beside `status = 'active'`.
+ * `start_date` is deliberately NOT filtered (owner decision 2026-10-09,
+ * superseding the round-1 "same window as the payment path" framing): a
+ * credential rotation writes a dormant "steady" row whose `start_date` is
+ * in the FUTURE beside the live "carry" row in the same slot
+ * (`rekey-carry.ts`) — filtering future starts would hide the whole budget
+ * for the carry window. ONE shared fragment instead of five copies, because
+ * every budget-VIEWING read below must agree about which grants are still
+ * budgets — a `status = 'active'` row alone is not: nothing flips the
+ * status when `expires_at` passes (the status CHECK has no expired value),
+ * and the on-chain TimestampEnforcer refuses an expired grant, so showing
+ * it as "5.00 USDC/daily" (or letting it activate an agent) states an
+ * authority the chain will not honour.
  *
  * Unqualified on purpose — every interpolating query joins only tables with
  * no `start_date`/`expires_at` of their own, and the aliased join queries
  * call {@link delegationLiveWindowSql} with their table alias. The payment
- * selection queries above keep their inline copy: their text is pinned
- * (#1698's tests assert it untouched) and the predicate is identical.
+ * selection queries above keep their inline copy — INCLUDING their
+ * `start_date <= now` bound: their text is pinned (#1698's tests assert it
+ * untouched), and an expired grant must never be SELECTED for payment even
+ * though the views still show its dormant steady sibling.
  */
 export function delegationLiveWindowSql(tableAlias?: string): string {
   const prefix = tableAlias ? `${tableAlias}.` : ''
-  return `${prefix}start_date <= EXTRACT(EPOCH FROM NOW()) AND ${prefix}expires_at > EXTRACT(EPOCH FROM NOW())`
+  return `${prefix}expires_at > EXTRACT(EPOCH FROM NOW())`
 }
 
 export async function listActiveDelegations(
@@ -89,9 +95,11 @@ export async function listActiveDelegations(
   // projection (`deriveDelegationAllowances`) still strips to its frozen
   // six fields, so nothing leaks onto that wire.
   //
-  // #3802: the live window joins the predicate — `status = 'active'` alone
-  // kept presenting expired and future-dated grants as budgets on the
-  // dashboard, the agents routes and the agent-facing allowances read.
+  // #3802: the owner predicate joins the filter — `status = 'active'` alone
+  // kept presenting EXPIRED grants as budgets on the dashboard, the agents
+  // routes and the agent-facing allowances read. `start_date` is not
+  // filtered: the future-dated steady row a rekey writes must stay visible
+  // beside its live carry row.
   const result = await pool.query<ActiveDelegationRow>(
     `SELECT id, agent_id, chain_id, token_address, budget_atomic, period_seconds,
             delegation_hash, recipient_address, merchant_id, start_date, expires_at, created_at

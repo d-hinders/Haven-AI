@@ -163,7 +163,7 @@ describe('AgentsTable — the desktop table', () => {
     const bare = { ...RETIRED, budgets: [] }
     const view = render(<AgentsTable agents={[bare]} currency="USD" />)
     const container = view.container as HTMLElement
-    expect(container.textContent).toContain('No budget set')
+    expect(container.textContent).toContain('No budget')
     expect(container.querySelectorAll('[role="progressbar"]').length).toBe(0)
   })
 

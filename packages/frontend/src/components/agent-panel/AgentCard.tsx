@@ -363,7 +363,7 @@ export function AgentCard({
                 />
               ))
             ) : (
-              <p className="text-xs text-[var(--v2-ink-3)]">No agent budget configured</p>
+              <p className="text-xs text-[var(--v2-ink-3)]">No budget</p>
             )}
           </div>
         </div>

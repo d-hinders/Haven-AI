@@ -2646,30 +2646,48 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > authority change. The rest of this document was not re-read for it, and
 > `last-verified` is bumped to 2026-10-08 for exactly this coverage.
 
-> **Re-verified #3802 (2026-10-09, expired budgets stop counting as active):**
-> this diff touches two files in this document's coverage list —
-> `infra/repositories/delegation-budgets.ts` and `routes/agent-delegations.ts`
-> — to stop presenting out-of-window grants as budgets. Every budget-VIEWING
-> read now requires the same validity window the payment path has enforced
-> since #1698 (`start_date <= now < expires_at`, against the DATABASE clock)
-> beside `status = 'active'`: ONE shared fragment (`delegationLiveWindowSql`)
-> joins `listActiveDelegations` (which feeds the dashboard, the agents routes
-> and the agent-facing allowances read), the analytics budget-remaining
-> slice, the three ops reads and the connect activation check; the
-> `GET /agents/:id/delegations` route applies the same window to its
-> already-fetched rows in JS, so an expired or future-dated row keeps its
-> bookkeeping `active` status but is enriched like every non-live grant (no
-> chain read, nulls). Nothing this document pins moves: no new grant,
-> signature, signer, key or custody path; the rows' status values and every
-> revoke/calldata-binding claim are untouched (the still-enabled sets those
-> span `pending`/`active`/`replaced` by status in their own queries, not
-> through these views); and the activation check plus the allowances read
-> only ever get NARROWER — an agent whose only budget expired now reports no
-> budget (readiness `needs_approval`) and can no longer activate through
-> connect, matching what the on-chain `TimestampEnforcer` already refuses
-> (Red Line #4: the chain remains the only spend authority; the views now
-> agree with it). Scope of this re-read: the sections whose claims rest on
-> which rows the budget views return and on the connect activation check;
-> the invariant, custody, redemption and settlement sections were NOT
+> **Re-verified unchanged (#3799, 2026-10-09, auth-row display field):** this
+> diff touches `infra/repositories/agents.ts` (a covered path) by adding
+> `a.mcp_server_name` to `AGENT_BY_API_KEY_SQL` and `AgentAuthRow` (plus the
+> `mcp_server_name` pass-through on `AgentContext` in
+> `middleware/agentAuth.ts`). The field is migration 067's "a display aid,
+> never identity": it only personalises a `client_update.upgrade_command`
+> hint string in the client-compat middleware and is read nowhere else on the
+> auth path. Authentication still keys on the API-key hash; no delegation,
+> enforcer, budget, signer-set or custody decision reads it, and no signing
+> input changes. Scope of this re-read: this field only. The rest of this
+> document was not re-read for it, and `last-verified` is not bumped.
+> **Re-verified #3802 (2026-10-09, expired budgets stop counting as active —
+> round 2, owner predicate):**
+> this diff touches `infra/repositories/delegation-budgets.ts` (a covered
+> path) to stop presenting EXPIRED grants as budgets. Every budget-VIEWING
+> read now filters `expires_at > EXTRACT(EPOCH FROM NOW())` (the DATABASE
+> clock, exclusive bound) beside `status = 'active'`: ONE shared fragment
+> (`delegationLiveWindowSql`) joins `listActiveDelegations` (which feeds the
+> dashboard, the agents routes and the agent-facing allowances read), the
+> analytics budget-remaining slice, the three ops reads and the connect
+> activation check. `start_date` is deliberately NOT filtered (owner
+> decision 2026-10-09): a credential rotation writes a dormant "steady" row
+> with a future `start_date` beside the live "carry" row, and filtering
+> future starts would hide the whole budget for the carry window. The
+> payment selection queries keep their own inline `start_date <= now <
+> expires_at` copy — pinned by #1698's tests — so a grant is never SELECTED
+> for payment before its window opens even though the views show its
+> dormant steady sibling; `GET /agents/:id/delegations` keeps listing every
+> status on purpose (the round-1 JS windowing there was reverted), and the
+> agent-detail `DelegationBudgetCard` excludes expired rows from
+> `hasActive` so the grant form shows. Nothing this document pins moves: no
+> new grant, signature, signer, key or custody path; the rows' status
+> values and every revoke/calldata-binding claim are untouched (the
+> still-enabled sets those span `pending`/`active`/`replaced` by status in
+> their own queries, not through these views); and the activation check
+> plus the allowances read only ever get NARROWER than `status = 'active'`
+> — an agent whose only budget expired now reports no budget (readiness
+> `needs_approval`) and can no longer activate through connect, matching
+> what the on-chain `TimestampEnforcer` already refuses (Red Line #4: the
+> chain remains the only spend authority; the views now agree with it).
+> Scope of this re-read: the sections whose claims rest on which rows the
+> budget views return and on the connect activation check; the invariant,
+> custody, redemption and settlement sections were NOT
 > re-read (the diff touches no file that implements them). `last-verified`
 > is bumped for exactly this coverage.

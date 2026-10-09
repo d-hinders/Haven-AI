@@ -101,12 +101,7 @@ const DELEGATION_ROW = {
   budget_atomic: '5000000',
   period_seconds: 86400,
   start_date: '1755600000',
-  // #3802: the fixture must sit INSIDE the live window the enrichment now
-  // applies (`start_date <= now < expires_at`). The old value (Nov 2025)
-  // predates the harness clock, so the row read as expired and the ACTIVE
-  // row's enrichment nullified — use an unbounded expiry instead, the same
-  // constant every real-DB delegation seed uses.
-  expires_at: '99999999999',
+  expires_at: '1763376000',
   created_at: '2026-08-19T10:00:00.000Z',
   merchant_id: null,
   merchant_slug: null,
@@ -1740,34 +1735,6 @@ describe('delegation lifecycle API (#828)', () => {
         remaining_atomic: '77',
         remaining_from_chain: true,
       })
-      expect(mockReadRemaining).toHaveBeenCalledTimes(1)
-    })
-
-    it('an out-of-window ACTIVE row is enriched like a non-live grant — nulls, never read from the chain (#3802)', async () => {
-      // status stays 'active' (bookkeeping), but `start_date <= now <
-      // expires_at` is the same live window the payment path enforces: an
-      // expired grant must not be presented as spend authority.
-      const expired = {
-        ...DELEGATION_ROW,
-        id: 'eeeeeeee-1111-4222-8333-444444444444',
-        expires_at: String(Math.floor(Date.now() / 1000) - 60),
-      }
-      mockDb({
-        list: [expired, { ...DELEGATION_ROW, id: 'ffffffff-1111-4222-8333-444444444444' }],
-        jsonByIds: [{ id: 'ffffffff-1111-4222-8333-444444444444', delegation_json: storedJson }],
-      })
-      mockReadRemaining.mockImplementation(async () => ({ remainingAtomic: '77', fromChain: true }))
-
-      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations?include=remaining` })
-
-      expect(res.statusCode).toBe(200)
-      const rows = res.json().delegations as Array<Record<string, unknown>>
-      const expiredRow = rows.find((r) => r.id === expired.id)
-      expect(expiredRow).toMatchObject({ status: 'active', remaining_atomic: null, remaining_from_chain: null, period_end: null })
-      expect(rows.find((r) => r.id === 'ffffffff-1111-4222-8333-444444444444')).toMatchObject({
-        remaining_atomic: '77',
-      })
-      // Only the in-window row reached the reader.
       expect(mockReadRemaining).toHaveBeenCalledTimes(1)
     })
 

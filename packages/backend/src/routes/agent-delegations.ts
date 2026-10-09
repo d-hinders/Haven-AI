@@ -272,27 +272,18 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       return { delegations: result.rows }
     }
 
-    // #3802: "active" for the remaining-this-period enrichment is the SAME
-    // live window the payment path enforces (#1698) — `start_date <= now <
-    // expires_at` against the app clock (the rows are already fetched, so
-    // there is no second DB round trip to fold the predicate into). An
-    // expired or future-dated row keeps its bookkeeping `status` in the
-    // response but is enriched like every other not-currently-live grant:
-    // no chain read, and the enrichment keys null — never presented as live
-    // spend authority.
-    const nowSec = Math.floor(Date.now() / 1000)
-    const isLiveDelegation = (row: AgentDelegationListRow): boolean =>
-      row.status === 'active' &&
-      Number(row.start_date) <= nowSec &&
-      Number(row.expires_at) > nowSec
-    const activeIds = result.rows.filter(isLiveDelegation).map((r) => r.id)
+    // delegation_json intentionally NOT in the list — fetch is explicit (#3693:
+    // the remaining-this-period read needs it, so it is read SERVER-SIDE only,
+    // for the ACTIVE rows, and never reaches the response).
+    const activeIds = result.rows.filter((r) => r.status === 'active').map((r) => r.id)
     const jsonById = await listDelegationJsonByIds(activeIds)
+    const nowSec = Math.floor(Date.now() / 1000)
     // #3693: each ACTIVE row reports what the chain will still allow this
     // period. Reads share analytics' worker pool (`BUDGET_READ_CONCURRENCY` in
     // flight) and the reader's own per-read timeouts, so a slow RPC can slow
     // the page by at most one read — never hang it, never fire N RPCs at once.
     const delegations = await mapWithConcurrency(result.rows, BUDGET_READ_CONCURRENCY, async (row) => {
-      if (!isLiveDelegation(row)) {
+      if (row.status !== 'active') {
         return { ...row, remaining_atomic: null, remaining_from_chain: null, period_end: null }
       }
       // `readRemainingBudget` already degrades to the full budget on failure;

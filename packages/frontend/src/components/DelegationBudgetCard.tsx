@@ -319,7 +319,15 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
   // A failed fetch keeps the card and its form (#2473 design review): the same
   // shape `signersError` already uses below, rather than collapsing the whole
   // card and taking the grant form with it.
+  // #3802: the row list keeps every bookkeeping-`active` row (an expired one
+  // renders its own "expired" line — #3695), but `hasActive` — the grant-form
+  // gate — is the owner predicate: active AND unexpired. Nothing flips the
+  // row's status when `expires_at` passes, so gating on status alone would
+  // keep the form hidden behind "Add budget" forever for an agent whose only
+  // budget expired.
   const active = (budgets ?? []).filter((b) => b.status === 'active')
+  const nowSec = Math.floor(Date.now() / 1000)
+  const hasActive = active.some((b) => b.expires_at > nowSec)
   // #3506: a sub-budget is carved from a LIVE budget — the entry point, now
   // inside the Add budget panel below (#3716), exists only when this agent
   // has an active, unexpired one (the card itself renders only on the
@@ -329,8 +337,9 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
   // #3695: with no active budget the grant form IS the section's content;
   // with one, it waits behind "Add budget" unless opened (or `?grant=` opened
   // it). A failed list read counts as "no active budget" here, so the form —
-  // gated below on knowing the current budgets — stays reachable.
-  const hasActive = active.length > 0
+  // gated below on knowing the current budgets — stays reachable. #3802:
+  // "active" here is the owner predicate (see above) — an expired-only row
+  // counts as no active budget, so the form shows.
   const showForm = !hasActive || formOpen
 
   return (

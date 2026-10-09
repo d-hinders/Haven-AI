@@ -171,10 +171,12 @@ export const LIST_SETUP_ALLOWANCES_SQL = `SELECT id, token_address, token_symbol
      WHERE setup_id = $1
      ORDER BY created_at ASC`
 
-// #3802: the live window joins the predicate — the connect activation check
-// must not count a dormant (future start) or expired grant as spend authority:
-// an out-of-window grant can no longer activate an agent, matching what the
-// chain would honour. Same window the payment path enforces (#1698).
+// #3802: the owner predicate joins the filter — the connect activation check
+// must not count an EXPIRED grant as spend authority: an expired grant can no
+// longer activate an agent, matching what the chain would honour. `start_date`
+// is not filtered: a future-dated grant is the dormant steady row a rekey
+// writes beside its live carry row, and it MAY activate (its window opens
+// later) — only expiry gates here.
 export const LIST_ACTIVE_DELEGATIONS_SQL = `SELECT token_address, budget_atomic, period_seconds
        FROM agent_delegations
        WHERE agent_id = $1 AND status = 'active'

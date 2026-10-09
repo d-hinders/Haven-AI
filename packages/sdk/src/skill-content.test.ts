@@ -583,3 +583,46 @@ describe('#3778: the relay rule for delivered codes and credentials', () => {
     expect(section).toContain('the\ndocumented recovery is a SIWX sign-in on bitrefill.com from the same wallet\nthat paid, or a Bitrefill support ticket quoting the invoice id.')
   })
 })
+
+describe('SIWX sign-in-first guidance for multi-call flows (#3838)', () => {
+  // Sliced the #3475 way: the paragraph's own opening line up to the next
+  // paragraph, so each assertion is about THIS paragraph and not a sentence
+  // elsewhere in the skill.
+  const start = HAVEN_SKILL_MD.indexOf('Sign in BEFORE a multi-call flow:')
+  const end = HAVEN_SKILL_MD.indexOf('On THIS path Haven never sends the')
+  const paragraph = HAVEN_SKILL_MD.slice(start, end)
+
+  it('instructs signing in before the first paid call — not only reactively on a 402', () => {
+    // Fails on the old reactive wording as the only trigger: "If the 402
+    // carries a sign-in-with-x extension, call ..." fires only AFTER a paid
+    // 402 and never tells an agent about to make several calls to sign in
+    // first. It equally fails if this paragraph is deleted.
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+  })
+
+  it('covers merchants that document or offer a session, and reuses it for the waived calls', () => {
+    expect(paragraph).toMatch(/documents or offers a\nsign-in session/)
+    expect(paragraph).toMatch(/waives the merchant's micro-fees/)
+    expect(paragraph).toContain('make every now-free call')
+    expect(paragraph).toContain('pay only where the merchant still')
+    expect(paragraph).toContain('`invoice/pay`')
+  })
+
+  it('sends the free session calls from the agent itself, never through the quote tools', () => {
+    expect(paragraph).toContain('YOURSELF with the `SIGN-IN-WITH-X` header set')
+    expect(paragraph).toContain('never pass a merchant\nsession token to `mcp__haven__haven_quote_x402` or')
+    expect(paragraph).toContain('`mcp__haven__haven_pay_x402_quote` (their unpaid probe refuses a 200 with')
+    expect(paragraph).toContain('X402_PROBE_NOT_PAYMENT_REQUIRED')
+  })
+
+  it('keeps the redirect safety rules in meaning', () => {
+    expect(paragraph).toContain('Sign at the FINAL URL after redirects')
+    expect(paragraph).toMatch(/never forward\n`SIGN-IN-WITH-X` or a session token across a redirect/)
+  })
+
+  it('pins the fallback: an old signer or a refused sign-in pays each call normally', () => {
+    expect(paragraph).toContain('tools/list has no `haven_sign_siwx` (a signer older than 0.9.0-alpha.0)')
+    expect(paragraph).toMatch(/or the sign-in is refused, pay each call normally instead\./)
+  })
+})

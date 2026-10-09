@@ -1,6 +1,6 @@
 'use client'
 
-import { ArrowDown, ArrowUp, Bot, Check, Circle, EllipsisVertical, Info, TriangleAlert, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Bot, Check, Circle, EllipsisVertical, Info, OctagonAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
 import { MobileTabBar } from '@/components/sidebar/MobileTabBar'
 import { baseNavItems } from '@/components/sidebar/Sidebar'
 import { Icon } from '@/components/ui/Icon'
@@ -33,7 +33,9 @@ import { StepProgress } from '@/components/ui/StepProgress'
 import { SeriesSwatch, StackedBarChart } from '@/components/ui/StackedBarChart'
 import type { StackedBarDay } from '@/components/ui/StackedBarChart'
 import { AreaChart } from '@/components/ui/AreaChart'
-import type { AreaPoint } from '@/components/ui/AreaChart'
+import type { AreaPoint, SparklinePoint } from '@/components/ui/AreaChart'
+import { AttentionList } from '@/components/haven/AttentionList'
+import type { AttentionListItem } from '@/components/haven/AttentionList'
 import { CodeBlock } from '@/components/ui/CodeBlock'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import ComingSoonModal from '@/components/ComingSoonModal'
@@ -269,6 +271,88 @@ const DS_BALANCE_POINTS: AreaPoint[] = [
 const DS_BALANCE_END = DS_BALANCE_POINTS[DS_BALANCE_POINTS.length - 1].value
 const DS_BALANCE_SPENT = DS_BALANCE_POINTS[0].value - DS_BALANCE_END
 const DS_BALANCE_SUMMARY = `Balance over 7 days: ends at ${dsMoney(DS_BALANCE_END)} USD, ${dsMoney(DS_BALANCE_SPENT)} USD spent across the range`
+
+/**
+ * Sparkline sample data (#3805). Two of the fourteen days carry no snapshot —
+ * `null`, the gap the sparkline draws as a break in the line rather than a
+ * zero, because a zero would state a balance nobody measured.
+ */
+const DS_SPARKLINE_POINTS: SparklinePoint[] = [
+  { label: 'Sep 24', value: 1180 },
+  { label: 'Sep 25', value: 1220 },
+  { label: 'Sep 26', value: null },
+  { label: 'Sep 27', value: 1105 },
+  { label: 'Sep 28', value: 1060 },
+  { label: 'Sep 29', value: null },
+  { label: 'Sep 30', value: 1140 },
+  { label: 'Oct 1', value: 1190 },
+  { label: 'Oct 2', value: 1150 },
+  { label: 'Oct 3', value: 1210 },
+  { label: 'Oct 4', value: 1255 },
+  { label: 'Oct 5', value: 1230 },
+  { label: 'Oct 6', value: 1275 },
+  { label: 'Oct 7', value: 1240 },
+]
+const DS_SPARKLINE_SUMMARY =
+  'Balance over the last 14 days: ends at 1,240 USDC, up 60 USDC across the range, with 2 days without a snapshot.'
+
+/** The AttentionList sample's items — one per tone, one of them without a badge label. */
+const DS_ATTENTION_ITEMS: AttentionListItem[] = [
+  {
+    id: 'budget-reached',
+    title: 'Travel budget reached',
+    subtitle:
+      'Travel planner has spent its 75 USDC total budget. It approves nothing further until you raise or clear it.',
+    tone: 'neutral',
+    badge: 'Budget reached',
+    icon: Info,
+  },
+  {
+    id: 'reapproval',
+    title: 'Re-approval needed',
+    subtitle: 'Spending paused while Travel planner awaits your approval of the new agent rules.',
+    tone: 'warning',
+    badge: 'Needs attention',
+    icon: TriangleAlert,
+    action: (
+      <Button size="sm" variant="ghost">
+        Review
+      </Button>
+    ),
+  },
+  {
+    id: 'summary',
+    title: 'Weekly summary ready',
+    subtitle: 'The spending summary for the week ending Sunday is ready to read.',
+    tone: 'brand',
+    icon: Sparkles,
+  },
+  {
+    id: 'payment-failed',
+    title: 'Payment failed',
+    subtitle: 'The payment to acme.dev failed at signing. Nothing was spent.',
+    tone: 'danger',
+    badge: 'Failed',
+    icon: OctagonAlert,
+  },
+]
+
+/**
+ * The AttentionList showcase owns the dismissal state the list itself refuses
+ * to hold (#3813 owns persistence) — the sample is a caller like any other.
+ */
+function AttentionListShowcase() {
+  const [dismissed, setDismissed] = useState<string[]>([])
+  const items = DS_ATTENTION_ITEMS.filter((item) => !dismissed.includes(item.id))
+  return (
+    <AttentionList
+      items={items}
+      onDismiss={(id) => setDismissed((prev) => [...prev, id])}
+      headingId="ds-attention-list-heading"
+    />
+  )
+}
+
 
 function Section({
   title,
@@ -2671,6 +2755,96 @@ export default function DesignSystemPage() {
             formatValue={dsMoney}
           />
         </Card>
+      </Section>
+
+      <Section
+        title="Amount: currency mode"
+        description="The other half of the Amount contract (#3805): for a figure that is already a fiat valuation server-side, pass the unsigned magnitude (amount) and the currency it is in — never a symbol string, never a conversion done here. It formats through formatFiat, the one formatter, so a SEK figure reads the same on every screen; the sign comes only from direction, and a negative magnitude can never double-sign it. ≈ marks a figure converted at today's rate rather than booked, and it goes before the sign. Unknown — null, or a non-finite value — renders an em dash in secondary ink, never 0,00 kr: an unknown valuation is not a zero. A currency figure is a valuation of a token amount, not a fiat balance Haven holds."
+      >
+        {/* The testid rides a plain wrapper: `Card` forwards no extra props,
+            and the visual spec clips this sample by it. */}
+        <div data-testid="ds-amount-currency">
+          <Card hover={false} className="p-5">
+            <div className="space-y-2 text-sm">
+              <p><Amount amount={9.09} currency="SEK" direction="out" /> <span className="text-xs text-[var(--v2-ink-3)]">— SEK valuation, signed by direction</span></p>
+              <p><Amount amount={0.96} currency="USD" direction="in" /> <span className="text-xs text-[var(--v2-ink-3)]">— incoming: the quiet success green</span></p>
+              <p><Amount amount={0.88} currency="EUR" /> <span className="text-xs text-[var(--v2-ink-3)]">— signless figure (budgets, balances)</span></p>
+              <p><Amount amount={9.09} currency="SEK" direction="out" approx /> <span className="text-xs text-[var(--v2-ink-3)]">— approx: converted at today&apos;s rate, ≈ before the sign</span></p>
+              <p><Amount amount={null} currency="SEK" direction="out" /> <span className="text-xs text-[var(--v2-ink-3)]">— unknown renders an em dash, never 0,00 kr</span></p>
+              <p><Amount amount={0} currency="SEK" /> <span className="text-xs text-[var(--v2-ink-3)]">— zero is a real valuation and renders as one</span></p>
+            </div>
+          </Card>
+        </div>
+      </Section>
+
+      <Section
+        title="AttentionList"
+        description="The list of things that need your eye (#3805), built from Row, StatusBadge and Icon. The rows are static — the action and the dismiss live in trailing, never on the row itself, so an action is never nested inside another control. The tone always rides text as well as colour (Row's leading icon is aria-hidden): a StatusBadge label, or an sr-only tone word when the item has no badge. Budget reached is neutral — the budget did its job; danger is for real failures only. Dismiss is labelled Dismiss: {title} and calls onDismiss(id); the list holds no dismissal state, and after a dismiss focus moves to the next item, or to the list heading when the list empties. Below sm the trailing slot wraps under the body and the body line-clamps to two lines. Zero items renders nothing — the caller shows the empty state."
+      >
+        <div data-testid="ds-attention-list">
+          <Card hover={false} className="p-5">
+            <h3 id="ds-attention-list-heading" className="text-sm font-medium text-[var(--v2-ink)]">
+              Needs attention
+            </h3>
+            <div className="mt-2">
+              <AttentionListShowcase />
+            </div>
+          </Card>
+        </div>
+      </Section>
+
+      <Section
+        title="AreaChart — sparkline"
+        description="The sparkline variant of AreaChart (#3805): the balance line alone, in a box the caller sizes (height, default 40px). No gridlines, ticks, x labels, delta annotation, tooltip or caret — one dot on the last point. It is role=img with the required ariaLabel summary sentence and is not a tab stop: there is no hidden data table, the sentence is the data access. Days with no snapshot are gaps in the line, never zeros. Below three points it renders a flat placeholder line of the same height instead of nothing, so the layout does not jump, and there is no draw animation on data refresh."
+      >
+        <div data-testid="ds-area-chart-sparkline">
+          <Card hover={false} className="p-5">
+            <div className="space-y-5">
+              <div>
+                <p className="text-xs text-[var(--v2-ink-3)]">Balance, last 14 days (2 days without a snapshot)</p>
+                <div className="mt-2">
+                  <AreaChart variant="sparkline" points={DS_SPARKLINE_POINTS} ariaLabel={DS_SPARKLINE_SUMMARY} />
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-[var(--v2-ink-3)]">Below three points: a flat placeholder line of the same height</p>
+                <div className="mt-2 max-w-[320px]">
+                  <AreaChart
+                    variant="sparkline"
+                    height={28}
+                    points={[
+                      { label: 'Mon', value: null },
+                      { label: 'Tue', value: 5 },
+                    ]}
+                    ariaLabel="Balance: not enough days with a snapshot yet."
+                  />
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-[var(--v2-ink-3)]">height=64, for a row that has the room</p>
+                <div className="mt-2">
+                  <AreaChart
+                    variant="sparkline"
+                    height={64}
+                    points={DS_SPARKLINE_POINTS}
+                    ariaLabel={DS_SPARKLINE_SUMMARY}
+                  />
+                </div>
+              </div>
+            </div>
+          </Card>
+        </div>
+      </Section>
+
+      <Section
+        title="StatTile — inline"
+        description="The inline variant of StatTile (#3805): no card border, ground or shadow, and the figure at text-base — the tile a larger card sets beside peers, three of which row up from sm and stack below it. It shows no delta chip: passing polarity or delta with inline throws, because a judgement colour smuggled into a plain-reading tile is the defect the polarity rule exists to prevent. The figure still carries no colour in any state — the value is ink, the label secondary, exactly the card tile's contract at a smaller scale."
+      >
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3" data-testid="ds-stat-tile-inline">
+          <StatTile variant="inline" label="Spent today" value="13 000,50 kr" />
+          <StatTile variant="inline" label="Refused" value="3" />
+          <StatTile variant="inline" label="Fees paid to Haven" value="No fees yet" />
+        </div>
       </Section>
 
       <Section

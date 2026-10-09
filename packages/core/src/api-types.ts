@@ -2953,7 +2953,7 @@ export type paths = {
         };
         /**
          * Fetch live spend-authority state for the authenticated agent.
-         * @description Rail-aware (#1135): on the delegation rail the response carries the ACTIVE budget delegations (remaining = the period budget; AllowanceModule-only fields are zeroed placeholders). BOTH retired rails answer 410 — the session rail (#993) and, since #2020 reversed #1986’s left-readable decision, the Safe/AllowanceModule rail too. Reporting only — enforcement stays on-chain.
+         * @description Rail-aware (#1135): on the delegation rail the response carries the agent's active, unexpired budget delegations (remaining = the period budget; AllowanceModule-only fields are zeroed placeholders). BOTH retired rails answer 410 — the session rail (#993) and, since #2020 reversed #1986’s left-readable decision, the Safe/AllowanceModule rail too. Reporting only — enforcement stays on-chain.
          */
         get: operations["getMachinePaymentAllowances"];
         put?: never;
@@ -4822,7 +4822,7 @@ export type components = {
                 reset_period_min: number;
             } | null;
         };
-        /** @description One element of an agent's derived budget view (GET /agents, GET /agents/{id}, PUT /agents/{id}; POST /agents carries it as a literal empty array). Projected from the agent's ACTIVE delegations, never from stored allowance rows (#1090/#2020). Its `allowance_amount` is HUMAN-DECIMAL — the opposite shape to the identically named field on AgentConnectionAllowance, which is atomic (#2295). */
+        /** @description One element of an agent's derived budget view (GET /agents, GET /agents/{id}, PUT /agents/{id}; POST /agents carries it as a literal empty array). Projected from the agent's active, unexpired delegations, never from stored allowance rows (#1090/#2020). Its `allowance_amount` is HUMAN-DECIMAL — the opposite shape to the identically named field on AgentConnectionAllowance, which is atomic (#2295). */
         AgentAllowance: {
             /** Format: uuid */
             id: string;

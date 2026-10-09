@@ -20,6 +20,7 @@
 
 import pool from '../../db.js'
 import { withTransaction, type Executor } from '../transaction.js'
+import { delegationLiveWindowSql } from './delegation-budgets.js'
 
 export type { Executor }
 
@@ -170,9 +171,16 @@ export const LIST_SETUP_ALLOWANCES_SQL = `SELECT id, token_address, token_symbol
      WHERE setup_id = $1
      ORDER BY created_at ASC`
 
+// #3802: the owner predicate joins the filter — the connect activation check
+// must not count an EXPIRED grant as spend authority: an expired grant can no
+// longer activate an agent, matching what the chain would honour. `start_date`
+// is not filtered: a future-dated grant is the dormant steady row a rekey
+// writes beside its live carry row, and it MAY activate (its window opens
+// later) — only expiry gates here.
 export const LIST_ACTIVE_DELEGATIONS_SQL = `SELECT token_address, budget_atomic, period_seconds
        FROM agent_delegations
-       WHERE agent_id = $1 AND status = 'active'`
+       WHERE agent_id = $1 AND status = 'active'
+         AND (${delegationLiveWindowSql()})`
 
 export const FIND_ACTIVE_AGENT_BY_DELEGATE_SQL = `SELECT id FROM agents
          WHERE user_id = $1 AND lower(delegate_address) = $2 AND status != 'revoked'

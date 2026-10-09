@@ -32,6 +32,8 @@ covers:
   - packages/frontend/src/components/haven/BudgetMeter.tsx
   - packages/frontend/src/components/haven/ApprovalRequiredBanner.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
+  - packages/frontend/src/components/haven/Amount.tsx
+  - packages/frontend/src/components/haven/AttentionList.tsx
   - packages/frontend/src/components/transactions/**
   - packages/frontend/src/components/haven/LabelChip.tsx
   - packages/frontend/src/__tests__/capture-viewports.test.ts
@@ -638,8 +640,10 @@ which this rule does not touch).
 - State banners (`ApprovalRequiredBanner`) do not scatter through the page.
   They stack in ONE slot directly under the `PageHeader`, ordered by severity:
   `danger` first (the next action cannot be undone), then `warning` (something
-  needs attention — a half-revoked credential, stranded funds, an exhausted
-  budget), then `neutral` (informational — paused, snapshot reads). Within a
+  needs attention — a half-revoked credential, stranded funds), then `neutral`
+  (informational — paused, snapshot reads, a budget reached: the budget did
+  its job, and a state the product designed for is not a warning — owner
+  decision 2026-10-09, #3805). Within a
   tone, the banner that asks the user for a decision comes first. The slot
   opens the page on the thing that needs doing, before any content card.
 - The `PageHeader`'s own `meta` line (above) carries the entity's quiet
@@ -662,6 +666,91 @@ never a series colour — a budget bar measures one delegation against its own
 period, it is not a category to be keyed against a legend. Recorded on
 `/design-system` → *BudgetMeter*; the analytics agents table renders through
 it.
+
+### Statistics tile (#2947)
+
+`StatTile` (`packages/ui/src/StatTile.tsx`) is the one number and the sentence
+under it. The **value arrives pre-formatted** — the tile formats nothing,
+itself: the caller owns the formatter (`lib/format.ts`'s `formatFiat` and its
+`currencyLocale` rule are the one voice for money figures, and the compact
+SEK tier renders in the UI's voice — en-US `SEK 5.19K`, not sv-SE's scale
+words), so a figure on one tile cannot disagree with the same figure on the
+next. A string value is also what keeps the money path's numeric-string types
+intact. The tile's own rule is the polarity one (see the component header):
+the figure renders in `--v2-ink` in every state and the delta chip's tone is
+derived from what a *rising* value of the figure means — the tile never picks
+a colour and the caller never hands it one.
+
+The card variant is the bordered tile the analytics page mounts (§ Cards
+chrome: `rounded-[10px]`, border, `--v2-bg` ground, `shadow-card`). The
+inline variant (#3805) is below.
+
+### Amount: currency mode (#3805)
+
+`Amount` has two modes. The token mode is the original contract: a
+pre-formatted, unsigned string (`value`) with an optional `symbol`, the sign
+coming only from `direction` — callers own formatting, so a `+`/`-` can never
+disagree with the tone.
+
+The **currency mode** (#3805) is for a figure that is already a fiat
+valuation server-side (book-time `convertedAmount`, or `approxAmount`): pass
+the unsigned magnitude (`amount`), the currency it is IN (`currency: 'SEK' |
+'USD' | 'EUR'` — e.g. `convertedCurrency`, never read from preferences inside
+the component), and optionally `approx`. It formats through `formatFiat` —
+no second `Intl.NumberFormat` exists — so `9,09 kr`, `$0.96` and `0,88 €`
+are byte-for-byte the formatter's output, NBSPs included. The sign comes only
+from `direction` (a negative magnitude cannot double-sign it); `symbol` is
+not allowed in this mode. `≈` (with `title="Converted at today's rate"`) goes
+before the sign: `≈ -9,09 kr`. Unknown — `null` or a non-finite value —
+renders `—` in `--v2-ink-3`, never `0,00 kr`: existing callers turned unknown
+into zero, and this mode must not.
+
+A currency figure is a **valuation of a token amount**, not a fiat balance
+Haven holds — the budget's own token where a budget is set, the user's
+currency everywhere else (owner decision 2026-10-09).
+
+### AttentionList (#3805)
+
+`components/haven/AttentionList` is the one list of "things that need your
+eye", built from `Row`, `StatusBadge` and `Icon`. The rows are **static** —
+`href`/`onClick` never go on the row (that would nest the action inside
+another control); the caller's action and the dismiss live in the row's
+`trailing` slot. The **tone is also given in text** — a `StatusBadge` label
+or `sr-only` tone word — because `Row`'s leading icon is `aria-hidden`:
+colour alone is not a channel. Tones: `neutral` (which includes a budget
+reached — the banner ladder above says the same), `brand`, `warning`, and
+`danger` for real failures only. The dismiss is a button labelled
+`Dismiss: {title}` calling `onDismiss(id)`; the list holds no dismissal
+state (persistence is #3813's), and after a dismiss focus moves to the next
+item, or to the caller's list heading (`headingId`) when the list emptied.
+Below `sm` the trailing slot wraps under the body and the body line-clamps
+to two lines (`Row` truncates to one); from `sm` up the plain row rhythm
+returns. Zero items renders nothing — the caller owns the empty state.
+
+### AreaChart sparkline (#3805)
+
+`variant="sparkline"` inside `ui/AreaChart.tsx` (no new file, so the chart
+home's design-lint `raw-svg` exemption already covers it): the balance line
+alone, in a box the caller sizes (`height`, default 40px). No gridlines,
+ticks, x labels, delta annotation, tooltip or caret — a dot on the last
+point only. It is `role="img"` with a **required** `ariaLabel` summary
+sentence and is not a tab stop: there is no hidden data table, the sentence
+is the data access. Days with no snapshot (`value: null`) are **gaps** in
+the line, never zeros. Below `MIN_CHARTABLE_DAYS` it renders a flat
+placeholder line of the same height instead of nothing, so a layout that
+reserved the box does not jump. No draw animation on data refresh.
+
+### StatTile inline (#3805)
+
+`variant="inline"`: no card border, ground or shadow; the value at
+`text-base v2-tabular`; the label above in the usual secondary ink. It shows
+**no delta chip** — passing `polarity` or `delta` with `inline` throws, the
+same render-time refusal the missing-polarity case uses, because a judgement
+colour smuggled into a plain-reading tile is the defect the polarity rule
+exists to prevent. Three inline tiles row up from `sm`; below `sm` the
+longest supported value (`13 000,50 kr`) fits without truncation, and the
+tiles stack. The figure still carries no colour in any state — the card
+tile's contract, at a smaller scale.
 
 ### Buttons
 

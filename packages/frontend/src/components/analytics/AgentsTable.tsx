@@ -79,7 +79,7 @@ function StatusCell({ agent }: { agent: AnalyticsAgentRow }) {
 
 function BudgetCell({ agent }: { agent: AnalyticsAgentRow }) {
   if (agent.budgets.length === 0) {
-    return <span className="text-sm text-[var(--v2-ink-3)]">No budget set</span>
+    return <span className="text-sm text-[var(--v2-ink-3)]">No budget</span>
   }
   return (
     <div className="space-y-2">
@@ -277,7 +277,7 @@ function MobileAgentRow({
   const presentation = agentStatusPresentation(agent.status)
   const budgetLine =
     agent.budgets.length === 0
-      ? 'No budget set'
+      ? 'No budget'
       : agent.budgets.map((b) => `${formatBudgetTokenValue(b)} · ${budgetUsedPercent(b.used_atomic, b.budget_atomic)}%`).join(' · ')
 
   return (

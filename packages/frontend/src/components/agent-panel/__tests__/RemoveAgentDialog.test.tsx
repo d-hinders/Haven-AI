@@ -14,6 +14,13 @@ import type { Agent } from '@/hooks/useAgents'
 // ApiRequestError with the route's status and error_code body.
 import { ApiRequestError } from '@/lib/api'
 
+// #3812: the in-flow connect/switch control reads wagmi and RainbowKit, which
+// these tests do not provide. Stub it so the test can assert WHEN a flow
+// offers it; `WalletConnectAction.test.tsx` covers what it does.
+vi.mock('@/components/WalletConnectAction', () => ({
+  default: () => <button type="button">Connect wallet</button>,
+}))
+
 const { mockRevokeAll, mockBudgetState, mockBalanceState } = vi.hoisted(() => ({
   mockRevokeAll: vi.fn(),
   // `budgets` is the dialog's own delegation list (#3542): the signature is
@@ -25,6 +32,8 @@ const { mockRevokeAll, mockBudgetState, mockBalanceState } = vi.hoisted(() => ({
     busy: false,
     budgets: null as null | Array<{ id: string; status: string }>,
     budgetsError: false,
+    signersLoading: false,
+    signersError: null as string | null,
   },
   mockBalanceState: {
     balance: null as null | Record<string, unknown>,
@@ -45,7 +54,8 @@ vi.mock('@/hooks/useDelegationBudget', () => ({
     busy: mockBudgetState.busy,
     ready: mockBudgetState.ready,
     reload: vi.fn(),
-    signersError: null,
+    signersError: mockBudgetState.signersError,
+    signersLoading: mockBudgetState.signersLoading,
     reloadSigners: vi.fn(),
   }),
 }))
@@ -102,6 +112,8 @@ beforeEach(() => {
   mockBudgetState.busy = false
   mockBudgetState.budgets = [{ id: 'd-1', status: 'active' }]
   mockBudgetState.budgetsError = false
+  mockBudgetState.signersLoading = false
+  mockBudgetState.signersError = null
   mockBalanceState.balance = null
   mockBalanceState.hasRecoverableUsdc = false
 })
@@ -290,6 +302,27 @@ describe('RemoveAgentDialog', () => {
     const confirm = screen.getByRole('button', { name: 'Remove agent' }) as HTMLButtonElement
     expect(confirm.disabled).toBe(true)
     expect(screen.getByText(/connect a wallet or use a passkey/i)).toBeTruthy()
+    // #3812: revoking never depends on the header — the way out is here.
+    expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeTruthy()
+  })
+
+  it('offers no wallet connect while the signer set is still loading (#3812)', () => {
+    mockBudgetState.ready = false
+    mockBudgetState.signersLoading = true
+    renderDialog(agentFixture({ status: 'revoked' }))
+    expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
+  })
+
+  it('offers no wallet connect when the signer set failed to load (#3812)', () => {
+    mockBudgetState.ready = false
+    mockBudgetState.signersError = 'failed'
+    renderDialog(agentFixture({ status: 'revoked' }))
+    expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
+  })
+
+  it('a ready (passkey) owner is offered no wallet connect (#3812)', () => {
+    renderDialog(agentFixture({ status: 'revoked' }))
+    expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
   })
 
   it('an unlinked revoked agent is not gated behind a signature Haven cannot collect', async () => {

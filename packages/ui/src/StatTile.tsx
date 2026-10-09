@@ -46,6 +46,17 @@ import { StatusBadge } from './StatusBadge'
 
 export type StatTilePolarity = 'higher-is-bad' | 'neutral' | 'higher-is-warning'
 
+/**
+ * `card` (default) is the tile the analytics page mounts: a Card-grade surface
+ * with border, ground and shadow. `inline` (#3805) is the tile the redesigned
+ * dashboard sets inside a larger card — no border, no ground, no shadow, and
+ * the figure at `text-base` — three of which row up from `sm`. An inline tile
+ * shows no delta chip: a passing `polarity` or `delta` throws, because a
+ * judgement colour smuggled into a tile the caller framed as a plain reading
+ * is exactly the defect the polarity rule exists to prevent.
+ */
+export type StatTileVariant = 'card' | 'inline'
+
 interface StatTileProps {
   /** What the figure is. A noun or a short noun phrase, never a verb. */
   label: string
@@ -76,11 +87,16 @@ interface StatTileProps {
   deltaLocale?: string
   /** What the figure was computed over — the basis line ("based on 4 payments"). */
   footnote?: ReactNode
+  /** `card` (default) is the bordered tile; `inline` is the borderless variant. */
+  variant?: StatTileVariant
   className?: string
 }
 
 const POLARITY_ERROR =
   'StatTile shows a delta without a polarity: colouring a change is a judgement about whether more of this figure is bad, so the caller must declare what a rising value means.'
+
+const INLINE_DELTA_ERROR =
+  'StatTile inline shows no delta chip: the variant is the dashboard\u2019s plain-reading tile, and a judgement colour (polarity) or a change (delta) passed into it would smuggle a verdict into a surface framed as a plain figure.'
 
 export function StatTile({
   label,
@@ -91,9 +107,13 @@ export function StatTile({
   deltaLocale = 'en-US',
   deltaCaption,
   footnote,
+  variant = 'card',
   className = '',
 }: StatTileProps) {
   const showDelta = delta != null
+  if (variant === 'inline' && (polarity != null || showDelta)) {
+    throw new Error(INLINE_DELTA_ERROR)
+  }
   if (showDelta && polarity == null) {
     throw new Error(POLARITY_ERROR)
   }
@@ -116,13 +136,25 @@ export function StatTile({
     ? `${sign}${new Intl.NumberFormat(deltaLocale, { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(Math.abs(delta as number) / 100)}`
     : ''
 
+  const isInline = variant === 'inline'
+
   return (
     <div
-      className={`rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card p-5 ${className}`}
+      className={
+        isInline
+          ? className
+          : `rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card p-5 ${className}`
+      }
       data-testid={`stat-tile-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
     >
       <p className="text-sm font-medium text-[var(--v2-ink-2)]">{label}</p>
-      <p className="mt-2 v2-tabular text-2xl font-semibold leading-tight text-[var(--v2-ink)]">
+      <p
+        className={
+          isInline
+            ? 'mt-2 v2-tabular text-base font-semibold leading-tight text-[var(--v2-ink)]'
+            : 'mt-2 v2-tabular text-2xl font-semibold leading-tight text-[var(--v2-ink)]'
+        }
+      >
         {value}
         {unit && <span className="ml-1 text-sm font-medium text-[var(--v2-ink-3)]">{unit}</span>}
       </p>

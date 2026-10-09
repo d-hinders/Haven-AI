@@ -18,6 +18,7 @@ import { useDelegationBudget, type DelegationBudget, type GrantInput } from '@/h
 import { useTaskBudgets, type TaskBudget } from '@/hooks/useTaskBudgets'
 import { useSubBudgetTrees, type SubBudgetTree } from '@/hooks/useSubBudgets'
 import BudgetGrantAction from './BudgetGrantAction'
+import WalletConnectAction from './WalletConnectAction'
 import EditBudgetModal from './EditBudgetModal'
 import IssueSubBudgetModal from './IssueSubBudgetModal'
 import ConfirmDialog from './ConfirmDialog'
@@ -103,8 +104,13 @@ function inDuration(targetMs: number, nowMs: number): string {
 export default function DelegationBudgetCard({ agentId, chainId, tokens, agentName, onBudgetChange, retired }: Props) {
   // #3695: this card is the one caller that asks for remaining-this-period —
   // the meter on each row is drawn from it.
-  const { budgets, grant, editBudget, revoke, busy, ready, budgetsError, reload, signersError, reloadSigners } =
+  const { budgets, grant, editBudget, revoke, busy, ready, budgetsError, reload, signersError, reloadSigners, signersLoading } =
     useDelegationBudget(agentId, chainId, { includeRemaining: true })
+  // #3812: `ready` is false for three different reasons. A failed signer-set
+  // read has its own Try again below, and a pending read is not an answer yet;
+  // only the remaining case — the set is known and nobody here can sign — is
+  // fixed by connecting the owner wallet, so only it offers that way out.
+  const needsOwnerWallet = !ready && !signersError && !signersLoading
   // #3329: read separately from the period budgets above — a failed fetch
   // here must never take the budgets list down with it, so `taskBudgets`
   // stays `null` (nothing rendered) rather than surfacing its own error UI.
@@ -319,7 +325,15 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
   // A failed fetch keeps the card and its form (#2473 design review): the same
   // shape `signersError` already uses below, rather than collapsing the whole
   // card and taking the grant form with it.
+  // #3802: the row list keeps every bookkeeping-`active` row (an expired one
+  // renders its own "expired" line — #3695), but `hasActive` — the grant-form
+  // gate — is the owner predicate: active AND unexpired. Nothing flips the
+  // row's status when `expires_at` passes, so gating on status alone would
+  // keep the form hidden behind "Add budget" forever for an agent whose only
+  // budget expired.
   const active = (budgets ?? []).filter((b) => b.status === 'active')
+  const nowSec = Math.floor(Date.now() / 1000)
+  const hasActive = active.some((b) => b.expires_at > nowSec)
   // #3506: a sub-budget is carved from a LIVE budget — the entry point, now
   // inside the Add budget panel below (#3716), exists only when this agent
   // has an active, unexpired one (the card itself renders only on the
@@ -329,8 +343,9 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
   // #3695: with no active budget the grant form IS the section's content;
   // with one, it waits behind "Add budget" unless opened (or `?grant=` opened
   // it). A failed list read counts as "no active budget" here, so the form —
-  // gated below on knowing the current budgets — stays reachable.
-  const hasActive = active.length > 0
+  // gated below on knowing the current budgets — stays reachable. #3802:
+  // "active" here is the owner predicate (see above) — an expired-only row
+  // counts as no active budget, so the form shows.
   const showForm = !hasActive || formOpen
 
   return (
@@ -348,6 +363,18 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
           <Button size="sm" variant="ghost" onClick={() => void reloadSigners()}>
             Try again
           </Button>
+        </div>
+      ) : null}
+
+      {needsOwnerWallet && hasActive && !showForm && !retired ? (
+        // #3812: Stop and Edit on the rows below are disabled while nobody on
+        // this device can sign. Say why, and offer the way out here — the
+        // header was the only place to connect a wallet before.
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3">
+          <p className="text-sm text-[var(--v2-ink-2)]">
+            Connect your account owner wallet to change or stop a budget.
+          </p>
+          <WalletConnectAction />
         </div>
       ) : null}
 
@@ -464,6 +491,8 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
                 : 'One signature. Refills every period automatically.'
             }
             onGranted={handleGranted}
+            notReadyHint={needsOwnerWallet ? 'Connect your account owner wallet to set a budget.' : undefined}
+            notReadyAction={needsOwnerWallet ? <WalletConnectAction /> : undefined}
             // With a budget already listed, the opened form is a disclosure:
             // Cancel sits in the submit row, beside the action it cancels
             // (#3695 design review).

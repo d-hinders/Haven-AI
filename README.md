@@ -141,6 +141,7 @@ Edit `.env` and fill in the required values:
 | `GNOSISSCAN_API_KEY` | No | History only (decision (c), #3635): the chain-100 explorer history read; nothing runs on Gnosis |
 | `BASESCAN_API_KEY` | No | Base explorer API key when using an Etherscan-style Base source; Base currently defaults to Blockscout for transactions |
 | `BLOCKSCOUT_API_KEY` | No | Sent on the Base / Base Sepolia Blockscout history reads; without it Blockscout may refuse (403) anonymous requests from a datacenter IP |
+| `ALCHEMY_HISTORY_API_KEY` | No | When set, Base / Base Sepolia transaction history is read through Alchemy's transfers API instead of Blockscout (whose public API refuses Railway with a Cloudflare challenge). Use a separate Alchemy app from the RPC one |
 | `COINGECKO_API_KEY` | No | Token price lookups |
 | `FRONTEND_URL` | No | Backend CORS/link base (default: `http://localhost:3000`) |
 | `NEXT_PUBLIC_API_URL` | No | Frontend backend URL override (default through local rewrite: `http://localhost:3001`) |

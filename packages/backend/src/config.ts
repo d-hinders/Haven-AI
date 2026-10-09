@@ -393,6 +393,12 @@ export const config = {
   // Unset → anonymous requests, which Blockscout may refuse (403) from a
   // datacenter IP; the dashboard then shows a partial-history banner.
   blockscoutApiKey: process.env.BLOCKSCOUT_API_KEY ?? '',
+  // When set, Base and Base Sepolia transaction history is read through
+  // Alchemy's transfers API (`alchemy_getAssetTransfers`) instead of
+  // Blockscout, whose public API answers Railway with a Cloudflare challenge
+  // (HTTP 403). Use a key from its own Alchemy app, apart from the RPC one,
+  // so history reads are visible (and capped) separately. Unset → Blockscout.
+  alchemyHistoryApiKey: process.env.ALCHEMY_HISTORY_API_KEY ?? '',
   coingeckoApiKey: process.env.COINGECKO_API_KEY ?? '',
   relayerPrivateKey: process.env.RELAYER_PRIVATE_KEY ?? '',
 

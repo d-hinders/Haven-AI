@@ -6,13 +6,12 @@
  * ConnectStepShell silhouette. These tests drive a full poll cycle
  * (loading true → false → true) and assert the DOM is IDENTICAL across it.
  */
-import { describe, expect, it } from 'vitest'
-import { fireEvent, render } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, within } from '@testing-library/react'
 import { WaitingForConnector } from '../WaitingForConnector'
 import { TerminalSetupState } from '../SetupStates'
-import { FinalizingLocalSetup } from '../SetupStates'
 import { ConnectStepShell } from '../ConnectStepShell'
-import type { CreateSetupResponse, ManualCredential } from '@/hooks/useAgentConnectionSetup'
+import type { CopyKind, CreateSetupResponse, ManualCredential } from '@/hooks/useAgentConnectionSetup'
 import type { AwaitingConnectionStage } from '@/hooks/useAgentConnectionSetupStatus'
 
 const EXPIRES_AT = '2099-01-01T00:00:00.000Z'
@@ -38,13 +37,19 @@ function renderWaiting(
   loading: boolean,
   connectionStage: AwaitingConnectionStage = 'starting',
   onCancel: () => void = () => {},
+  // #3832: most of these tests are about the status slot, which only carries
+  // the stage words once the prompt is out — so they default to "copied".
+  promptCopied = true,
+  extra: { copied?: CopyKind | null; keyMadeInBrowser?: boolean; onCopy?: (k: CopyKind, v: string) => void } = {},
 ) {
   return (
     <WaitingForConnector
       setup={SETUP}
       runtime="claude-code"
-      copied={null}
-      onCopy={() => {}}
+      copied={extra.copied ?? null}
+      promptCopied={promptCopied}
+      keyMadeInBrowser={extra.keyMadeInBrowser ?? false}
+      onCopy={extra.onCopy ?? (() => {})}
       manualCredential={null}
       manualCredentialAcknowledged={false}
       manualCreating={false}
@@ -74,9 +79,13 @@ describe('step 3 poll ticks cause no content shift (#1377 C)', () => {
     expect(container.innerHTML).toBe(first)
   })
 
-  it('WaitingForConnector states the auto-advance promise in the primary instruction block', () => {
-    const { container } = render(renderWaiting(false))
-    expect(container.textContent).toMatch(/advances this screen automatically/i)
+  it('WaitingForConnector states the auto-advance promise in row 3 before the prompt is copied (#3832)', () => {
+    // The promise used to live in the brand-soft callout #3832 removed. It is
+    // kept, deliberately, as row 3's pending text: before the copy the user
+    // still needs to know nothing else on this screen needs a click.
+    const { container } = render(renderWaiting(false, 'starting', () => {}, false))
+    const slot = container.querySelector('[aria-live="polite"]')
+    expect(slot?.textContent).toMatch(/advances this screen automatically/i)
   })
 
   it('never renders the status slot empty, and the slow stage changes words only (#1399)', () => {
@@ -87,7 +96,7 @@ describe('step 3 poll ticks cause no content shift (#1377 C)', () => {
     const slot = container.querySelector('[aria-live="polite"]')
     expect(slot).not.toBeNull()
     expect(slot?.textContent?.trim()).not.toBe('')
-    expect(slot?.textContent).toMatch(/waiting for the agent to run the connector command/i)
+    expect(slot?.textContent).toMatch(/waiting for your agent to run the connector command/i)
     expect(container.textContent).not.toContain('Haven has not received a connection yet')
 
     const elementsBefore = container.querySelectorAll('*').length
@@ -146,6 +155,8 @@ describe('server-side credential path (#2482)', () => {
         setup={SETUP}
         runtime="claude-code"
         copied={null}
+        promptCopied={true}
+        keyMadeInBrowser={true}
         onCopy={() => {}}
         manualCredential={MANUAL}
         manualCredentialAcknowledged={false}
@@ -171,6 +182,9 @@ describe('server-side credential path (#2482)', () => {
   }
 
   it('puts the credential path in its own TOP-LEVEL disclosure labeled for a backend integration, not the trouble disclosure (#2482)', () => {
+    // #3832: row 1 adds a third disclosure ("View the prompt") before the
+    // copy; it is not part of this pair, so render the copied state, where
+    // the footer's two are the only ones.
     const { container } = render(renderWaiting(false, 'starting'))
     const disclosures = Array.from(container.querySelectorAll('details'))
     // Two sibling top-level disclosures, nothing nested at all.
@@ -195,11 +209,11 @@ describe('server-side credential path (#2482)', () => {
   })
 
   it('keeps the setup prompt before the server disclosure so the prompt keeps primacy (#2482)', () => {
-    const { container } = render(renderWaiting(false, 'starting'))
+    const { container } = render(renderWaiting(false, 'starting', () => {}, false))
     const html = container.innerHTML
-    expect(html.indexOf('>Setup prompt<')).toBeGreaterThanOrEqual(0)
+    expect(html.indexOf('Copy setup prompt')).toBeGreaterThanOrEqual(0)
     expect(html.indexOf('Running in a server or hosted backend?')).toBeGreaterThan(
-      html.indexOf('>Setup prompt<'),
+      html.indexOf('Copy setup prompt'),
     )
   })
 
@@ -286,6 +300,10 @@ describe('server-side credential path (#2482)', () => {
       setup: SETUP,
       runtime: 'claude-code',
       copied: null,
+      // #3832: recovery is timer-driven, never copy-driven — it must surface
+      // even if row 1 was never marked copied, so this test runs uncopied.
+      promptCopied: false,
+      keyMadeInBrowser: false,
       onCopy,
       manualCredential: null,
       manualCredentialAcknowledged: false,
@@ -318,26 +336,13 @@ describe('server-side credential path (#2482)', () => {
     fireEvent.click(getByRole('button', { name: 'Cancel this setup' }))
     expect(onCancel).toHaveBeenCalledOnce()
   })
-
-  it('FinalizingLocalSetup renders IDENTICAL text across a poll cycle', () => {
-    const { container, rerender } = render(<FinalizingLocalSetup loading={true} />)
-    const first = container.innerHTML
-    expect(container.textContent).toContain('Finishing setup')
-    expect(container.textContent).not.toContain('Checking')
-
-    rerender(<FinalizingLocalSetup loading={false} />)
-    expect(container.innerHTML).toBe(first)
-
-    rerender(<FinalizingLocalSetup loading={true} />)
-    expect(container.innerHTML).toBe(first)
-  })
 })
 
 
 describe('one frame, one rhythm (#1392)', () => {
   it('the shell body carries the rhythm and distributes reserved slack — at the source', () => {
     const { container } = render(
-      <ConnectStepShell phase="waiting" stateKey="w">
+      <ConnectStepShell stateKey="w">
         <p>block one</p>
         <p>block two</p>
       </ConnectStepShell>,
@@ -355,31 +360,104 @@ describe('one frame, one rhythm (#1392)', () => {
   })
 })
 
-describe('ConnectStepShell (#1377 C)', () => {
-  it('keeps one silhouette: progress header + reserved-height body in every phase', () => {
-    const { container, rerender, getByLabelText } = render(
-      <ConnectStepShell phase="waiting" stateKey="a">
+describe('ConnectStepShell (#1377 C, #3832)', () => {
+  it('keeps one silhouette — a reserved-height body — and renders no ticker of its own', () => {
+    // #3832: the Waiting → Connected → Approved ticker is gone. The numbered
+    // list is step 3's one progress signal (#1418), so the shell must not
+    // bring a second one back.
+    const { container, queryByLabelText, rerender } = render(
+      <ConnectStepShell stateKey="a">
         <p>body A</p>
       </ConnectStepShell>,
     )
-    expect(getByLabelText('Connection progress').textContent).toBe('WaitingConnectedApproved')
-    const reserved = container.querySelector('.min-h-\\[340px\\]')
-    expect(reserved).not.toBeNull()
-
-    // The header ticker is the SAME element set in every phase — forward
-    // motion, not a new screen.
+    expect(queryByLabelText('Connection progress')).toBeNull()
+    expect(container.querySelector('.min-h-\\[340px\\]')).not.toBeNull()
     rerender(
-      <ConnectStepShell phase="connected" stateKey="b">
+      <ConnectStepShell stateKey="b">
         <p>body B</p>
       </ConnectStepShell>,
     )
-    expect(getByLabelText('Connection progress').textContent).toBe('WaitingConnectedApproved')
-    rerender(
-      <ConnectStepShell phase="approved" stateKey="c">
-        <p>body C</p>
-      </ConnectStepShell>,
+    expect(container.querySelector('.min-h-\\[340px\\]')).not.toBeNull()
+    expect(container.textContent).not.toMatch(/WaitingConnectedApproved/)
+  })
+})
+
+describe('the numbered step list on the waiting screen (#3832)', () => {
+  function rowStates(container: HTMLElement) {
+    return Array.from(container.querySelectorAll('ol[aria-label="Connection steps"] > li')).map((li) =>
+      li.getAttribute('data-step-state'),
     )
-    expect(getByLabelText('Connection progress').textContent).toBe('WaitingConnectedApproved')
+  }
+
+  it('before a copy: one full-width primary, the prompt in a CLOSED disclosure, no instruction callout', () => {
+    const { container, getAllByRole } = render(renderWaiting(false, 'starting', () => {}, false))
+    expect(rowStates(container)).toEqual(['active', 'pending', 'pending'])
+    // The only primary control on the screen is the copy action.
+    const copy = getAllByRole('button', { name: /Copy setup prompt/ })
+    expect(copy).toHaveLength(1)
+    expect(copy[0].className).toContain('w-full')
+    expect(copy[0].className).toContain('h-11')
+    // jsdom has no layout engine, so a closed <details> does not hide its
+    // children: assert the disclosure is CLOSED, which is what hides the
+    // prompt in a browser (the e2e opens it before reading the text).
+    const view = Array.from(container.querySelectorAll('details')).find((d) =>
+      d.textContent?.includes('View the prompt'),
+    )
+    expect(view).toBeDefined()
+    expect(view!.open).toBe(false)
+    expect(view!.textContent).toContain(SETUP.setup_prompt)
+    // The brand-soft callout and its heading are gone.
+    expect(container.textContent).not.toContain('Connect your agent')
+    // (The active row's marker uses brand-soft too, so match the callout's
+    // own border, which nothing else on this screen carries.)
+    expect(container.querySelector('[class*="border-brand/15"]')).toBeNull()
+  })
+
+  it('after a copy: row 1 done with Copy again, row 2 active, row 3 in flight inside the live region', () => {
+    const onCopy = vi.fn()
+    const { container, getByRole } = render(
+      renderWaiting(false, 'starting', () => {}, true, { onCopy }),
+    )
+    expect(rowStates(container)).toEqual(['done', 'active', 'working'])
+    expect(container.textContent).toContain('Prompt copied')
+    fireEvent.click(getByRole('button', { name: 'Copy again' }))
+    expect(onCopy).toHaveBeenCalledWith('prompt', SETUP.setup_prompt)
+    const rows = container.querySelectorAll('ol[aria-label="Connection steps"] > li')
+    const live = rows[2].querySelector('[aria-live="polite"]')
+    expect(live?.textContent).toMatch(/waiting for your agent/i)
+  })
+
+  it('row 1 reads the LATCHED flag, never the single-valued `copied`', () => {
+    // Copying the local command overwrites `copied` — the row must stay done.
+    const done = render(renderWaiting(false, 'starting', () => {}, true, { copied: 'command' }))
+    expect(rowStates(done.container)[0]).toBe('done')
+    done.unmount()
+    // ...and `copied === 'prompt'` alone does not tick it.
+    const notYet = render(renderWaiting(false, 'starting', () => {}, false, { copied: 'prompt' }))
+    expect(rowStates(notYet.container)[0]).toBe('active')
+  })
+
+  it('recovery surfaces even if the prompt was never marked copied', () => {
+    const { container } = render(renderWaiting(false, 'recovery', () => {}, false))
+    expect(container.textContent).toContain('Haven has not received a connection yet')
+  })
+
+  it('the trust line renders on the connector path only', () => {
+    const TRUST = 'Your agent creates its own key on its machine. Haven only receives its public address.'
+    const connector = render(renderWaiting(false, 'starting'))
+    expect(connector.container.textContent).toContain(TRUST)
+    connector.unmount()
+    // The manual-credential path makes the key in this browser.
+    const manual = render(renderWaiting(false, 'starting', () => {}, true, { keyMadeInBrowser: true }))
+    expect(manual.container.textContent).not.toContain(TRUST)
+  })
+
+  it('names no agent client — any MCP client works (#3832 owner decision)', () => {
+    const { container } = render(renderWaiting(false, 'starting', () => {}, false))
+    const paste = container.querySelectorAll('ol[aria-label="Connection steps"] > li')[1]
+    expect(within(paste as HTMLElement).getByText(/Any agent app that supports MCP/)).toBeTruthy()
+    expect(paste.textContent).toContain('connector command')
+    expect(paste.textContent).not.toMatch(/Claude|Cursor|ChatGPT|Codex/)
   })
 })
 

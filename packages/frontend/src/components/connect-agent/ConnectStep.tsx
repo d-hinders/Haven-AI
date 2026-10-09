@@ -1,9 +1,10 @@
 'use client'
 
 import type { AgentConnectionSetupFlow } from '@/hooks/useAgentConnectionSetup'
-import { ConnectStepShell, type ConnectShellPhase } from './ConnectStepShell'
+import { ConnectStepShell } from './ConnectStepShell'
+import { ConnectSteps, type ConnectStepRow } from './ConnectSteps'
 import { DelegationApprovalStep } from './DelegationApprovalStep'
-import { FinalizingLocalSetup, SetupDoneState, SetupStatusState, TerminalSetupState } from './SetupStates'
+import { SetupDoneState, SetupStatusState, TerminalSetupState } from './SetupStates'
 import { SupersededAgentsCard } from './SupersededAgentsCard'
 import { WaitingForConnector } from './WaitingForConnector'
 
@@ -13,19 +14,18 @@ import { WaitingForConnector } from './WaitingForConnector'
  * #1069/#1070 rail branch between the delegation budget grant and the retired
  * Safe rail refusal.
  */
-/** #1377 C: map the resolved sub-state onto the shell's progress ticker. */
-function shellPhase(kind: string | undefined): ConnectShellPhase {
-  switch (kind) {
-    case 'waiting_for_connector':
-      return 'waiting'
-    case 'finalizing_local':
-    case 'delegation_approval':
-      return 'connected'
-    case 'active':
-      return 'approved'
-    default:
-      return 'halted'
-  }
+/**
+ * #3832: rows 1-2 once the agent has connected. Any status past
+ * `waiting_for_connector` means the prompt reached the agent and its
+ * connector ran, so both render done — including on a session resumed from a
+ * hand-off link, which never copied anything in this browser.
+ */
+function connectedRows(approve: ConnectStepRow): ConnectStepRow[] {
+  return [
+    { id: 'copy', state: 'done', title: 'Prompt copied' },
+    { id: 'paste', state: 'done', title: 'Agent connected' },
+    approve,
+  ]
 }
 
 export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
@@ -53,7 +53,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
   // with no account of what happened.
   if (resumed && flow.statusError && !setupStatus) {
     return (
-      <ConnectStepShell phase="halted" stateKey="resume_not_found">
+      <ConnectStepShell stateKey="resume_not_found">
         <SetupStatusState
           title="We could not open this setup"
           body="The link may be out of date, or this setup may belong to a different Haven account. Ask the agent for a fresh link."
@@ -90,7 +90,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
   const effectiveRuntime = setupStatus?.runtime ?? ''
 
   return (
-    <ConnectStepShell phase={shellPhase(connectView?.kind)} stateKey={connectView?.kind ?? 'none'}>
+    <ConnectStepShell stateKey={connectView?.kind ?? 'none'}>
       {/*
         The waiting screen is the "paste this into your agent" screen, so it
         needs the create response's token and command. A resumed session has
@@ -113,6 +113,10 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           setup={setup}
           runtime={effectiveRuntime}
           copied={flow.copied}
+          promptCopied={flow.promptCopied}
+          keyMadeInBrowser={Boolean(
+            flow.manualCredential || setupStatus?.install_status?.manual_credential_fallback,
+          )}
           onCopy={flow.copyText}
           manualCredential={flow.manualCredential}
           manualCredentialAcknowledged={flow.manualCredentialAcknowledged}
@@ -129,28 +133,62 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
       )}
 
       {connectView?.kind === 'finalizing_local' && (
-        <FinalizingLocalSetup loading={flow.statusLoading} />
-      )}
-
-      {connectView?.kind === 'delegation_approval' && setupStatus && (
-        <DelegationApprovalStep
-          key={connectView.agentId}
-          agentId={connectView.agentId}
-          setupId={setup?.setup_id ?? setupStatus.setup_id}
-          chainId={flow.approvalChainId}
-          accountId={flow.approvalAccountId}
-          status={setupStatus}
-          walletName={flow.approvalWalletLabel}
-          onApproved={flow.handleDelegationApproved}
-          onCancel={flow.handleCancelSetup}
-          onClose={flow.handleClose}
-          isWrongChain={flow.isWrongChain}
-          approvalChainName={flow.approvalChainName}
-          onSwitchChain={flow.switchToApprovalChain}
-          isSwitchingChain={flow.isSwitchingChain}
+        <ConnectSteps
+          rows={connectedRows({
+            id: 'approve',
+            state: 'working',
+            title: 'Approve the budget',
+            children: (
+              // #1377 C: static text — polling must never swap it.
+              <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
+                The connector is finishing local setup. This usually takes a few seconds.
+              </p>
+            ),
+          })}
         />
       )}
 
+      {connectView?.kind === 'delegation_approval' && setupStatus && (
+        <ConnectSteps
+          rows={connectedRows({
+            id: 'approve',
+            state: 'active',
+            // #1684: the modal subtitle names the gate here ("Approve the
+            // agent budget", pinned by e2e/connect-agent.spec.ts), so this
+            // heading says what the row asks for in other words. One sentence,
+            // once per viewport.
+            title: 'Review and sign',
+            children: (
+              <DelegationApprovalStep
+                key={connectView.agentId}
+                agentId={connectView.agentId}
+                setupId={setup?.setup_id ?? setupStatus.setup_id}
+                chainId={flow.approvalChainId}
+                accountId={flow.approvalAccountId}
+                status={setupStatus}
+                walletName={flow.approvalWalletLabel}
+                onApproved={flow.handleDelegationApproved}
+                onCancel={flow.handleCancelSetup}
+                onClose={flow.handleClose}
+                isWrongChain={flow.isWrongChain}
+                approvalChainName={flow.approvalChainName}
+                onSwitchChain={flow.switchToApprovalChain}
+                isSwitchingChain={flow.isSwitchingChain}
+              />
+            ),
+          })}
+        />
+      )}
+
+
+      {connectView?.kind === 'active' && (
+        // #3832: all three rows done, with the status word the old ticker's
+        // "Approved" used to carry. The grant line below stays the heading of
+        // what the user just did (#1394).
+        <ConnectSteps
+          rows={connectedRows({ id: 'approve', state: 'done', title: 'Budget approved' })}
+        />
+      )}
 
       {connectView?.kind === 'active' && (
         <SetupDoneState

@@ -268,7 +268,10 @@ describe('every opacity-modified colour utility compiles to a colour (#1818)', (
     // If those were scanned as call-sites, the guard would fail on its own
     // documentation and the fix would be to delete the explanation.
     expect(bases).not.toContain('ring-current/30') // Toast.tsx:141
-    expect(bases).not.toContain('bg-[var(--v2-brand)]/40') // ConnectStepShell.tsx:49
+    // #3832 deleted the ConnectStepShell ticker and the `bg-[var(--v2-brand)]/40`
+    // comment this line used to target; TopBar's comment quotes another dead
+    // class, so the guard keeps a second real comment to be wrong about.
+    expect(bases).not.toContain('bg-[var(--v2-bg)]/85') // TopBar.tsx:44
   })
 
   it('no dead class outside the triaged inventory', async () => {

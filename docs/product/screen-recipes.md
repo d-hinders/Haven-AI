@@ -159,8 +159,15 @@ one setup prompt for every environment. Legacy Safe accounts are not rendered at
 all since #2413, so this flow is unreachable for one rather than being refused by
 a notice.
 
-Structure:
-1. Create and copy a single setup prompt — identical for every environment.
+Structure (step 3 of the modal is one numbered list — copy → paste → approve —
+that is both the instructions and the progress, #3832; see design-system.md §
+Numbered step list):
+1. Create and copy a single setup prompt — identical for every environment. The
+   copy action is the screen's one full-width primary; the prompt text sits in
+   a closed "View the prompt" disclosure. Next to the steps, one line says the
+   agent creates its own key and Haven only receives its public address — shown
+   on the connector path only, since the manual path makes the key in the
+   browser.
 2. Wait for the local connector to generate the signing key and API key, then
    register the public signing address and proof with Haven. If it cannot
    connect after the bounded wait, the warning-gated manual credential fallback

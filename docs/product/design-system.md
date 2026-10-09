@@ -1313,6 +1313,54 @@ button placed there is no longer a descendant of a `<form>` in the body.
 resolves rather than that the attribute string matches — a stale id compares
 equal and still submits nothing.
 
+### Wizard progress (`StepProgress`)
+
+`ui/StepProgress` is the numbered disc band a multi-step modal carries in its
+header (`Modal`'s `headerAccessory`): one disc per step, the current one
+brand-soft with a brand ring, finished ones success-soft with a tick, the rest
+a `--v2-border` ring, joined by 1px lines. It says **where the user is in a
+wizard**, and nothing else: a step's own instructions live in its body. Call
+sites: the Connect agent modal (steps 1-2) and `ReplaceSigningKeyModal`; its `/design-system` specimen is the "StepProgress"
+section, after SidePanel.
+
+### Numbered step list (`ConnectSteps`, #3832)
+
+A vertical list in which **each row is both an instruction and its status**:
+a disc, a section-tier heading, and the row's own body (a control, a line of
+copy, or a whole sub-flow) beneath it. Use it when one screen walks the user
+through a short sequence they act on in order and the screen itself observes
+the progress — today, step 3 of the Connect agent modal (copy → paste →
+approve), where the old Waiting → Connected → Approved ticker said where the
+user was without saying what to do. Use `StepProgress` instead when the steps
+are separate screens of a wizard.
+
+Markers reuse `StepProgress`'s disc treatments, so the wizard band and the list
+read as one progress language rather than two:
+
+| State | Disc | Heading |
+|---|---|---|
+| done | `--v2-success-soft` fill, `border-success/30`, lucide `Check` | `--v2-ink-3` |
+| active | `--v2-brand-soft` fill, `--v2-brand` ring and numeral | `--v2-ink` |
+| working | lucide `Loader2` in `--v2-brand`, `motion-safe:animate-spin` | `--v2-ink` |
+| pending | `--v2-border` ring, `--v2-ink-3` numeral | `--v2-ink-2` |
+
+Rules:
+- **One progress signal per surface** (#1418). A screen that renders this list
+  renders no ticker, badge or wizard band saying the same thing — the Connect
+  agent modal hides its `StepProgress` on step 3 for exactly this reason.
+- **Name a gate once per viewport** (#1684). When the modal subtitle names the
+  action, the row heading says it in other words ("Review and sign" under
+  "Approve the agent budget").
+- A row's done state comes from state that only moves forward (the
+  connect flow's latched `promptCopied`), never from a value a later action can
+  overwrite.
+- Live status inside a row goes in an `aria-live="polite"` region with a
+  reserved height, so a status change swaps words without moving the rows below.
+
+It is local to `components/connect-agent/` because it has one call site; a
+second call site is the trigger to promote it to `components/ui/` with a
+`/design-system` specimen next to `StepProgress`.
+
 ### Local hint marker (#1952)
 
 A **known but not-preferred** fact, stated beside the thing it qualifies:
@@ -1341,7 +1389,7 @@ usual bar** (§ 5's Arrows subsection declines a precedent on one instance). It
 is written down anyway because the alternative was worse in a specific way:
 `--v2-border-strong` already had three unrelated uses, plain `border-l` +
 `--v2-border` grouping exists at three more call sites
-(`ConnectionVerificationFooter.tsx`, `WaitingForConnector.tsx` ×2) at a lighter
+(`ConnectionVerificationFooter.tsx`, `WaitingForConnector.tsx` ×3 since #3832) at a lighter
 weight, and none of them is documented — so the next author wanting a local hint
 had four undocumented shapes to copy and would plausibly have hand-rolled a
 fifth. Two reviewers split on whether this belongs here; it is recorded rather

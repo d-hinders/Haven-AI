@@ -189,3 +189,84 @@ describe('ConnectStep resumed from a hand-off link (#2522)', () => {
     expect(container).toBeEmptyDOMElement()
   })
 })
+
+/**
+ * #3832: the numbered step list across the sub-states ConnectStep owns (the
+ * waiting screen's own rows are covered in ConnectStepShell.test.tsx).
+ */
+describe('ConnectStep step list (#3832)', () => {
+  function rows(container: HTMLElement) {
+    return Array.from(container.querySelectorAll('ol[aria-label="Connection steps"] > li')).map((li) => ({
+      state: li.getAttribute('data-step-state'),
+      title: li.querySelector('h3')?.textContent?.replace(/^[^:]+: /, ''),
+    }))
+  }
+
+  it('a resumed setup already past waiting renders rows 1-2 done, with the approval inside row 3', () => {
+    const { container } = render(
+      <ConnectStep
+        flow={resumedFlow({
+          setupStatus: { ...STATUS, status: 'awaiting_wallet_approval' },
+          connectView: { kind: 'delegation_approval', agentId: 'agent-1' },
+        })}
+      />,
+    )
+    expect(rows(container)).toEqual([
+      { state: 'done', title: 'Prompt copied' },
+      { state: 'done', title: 'Agent connected' },
+      { state: 'active', title: 'Review and sign' },
+    ])
+    const third = container.querySelectorAll('ol[aria-label="Connection steps"] > li')[2]
+    expect(third.textContent).toContain(`approval for agent-1 on ${STATUS.setup_id}`)
+    // #1684: the subtitle names the gate; nothing in the body repeats it.
+    expect(container.textContent).not.toContain('Approve the agent budget')
+    expect(container.textContent).not.toMatch(/Approve the budget/)
+  })
+
+  it('finalizing_local: rows 1-2 done, row 3 in flight, and a poll tick changes nothing', () => {
+    const flow = resumedFlow({
+      setupStatus: { ...STATUS, status: 'connected_local' },
+      connectView: { kind: 'finalizing_local' },
+      statusLoading: true,
+    })
+    const { container, rerender } = render(<ConnectStep flow={flow} />)
+    expect(rows(container).map((r) => r.state)).toEqual(['done', 'done', 'working'])
+    const first = container.innerHTML
+    rerender(<ConnectStep flow={{ ...flow, statusLoading: false } as AgentConnectionSetupFlow} />)
+    expect(container.innerHTML).toBe(first)
+    rerender(<ConnectStep flow={{ ...flow, statusLoading: true } as AgentConnectionSetupFlow} />)
+    expect(container.innerHTML).toBe(first)
+  })
+
+  it('active: every row done, and the ending carries a status word', () => {
+    const { container } = render(
+      <ConnectStep
+        flow={resumedFlow({
+          setupStatus: {
+            ...STATUS,
+            status: 'active',
+            agent_budget: [{ allowance_amount: '10.00', token_symbol: 'USDC', reset_period_min: 1440 }],
+          },
+          connectView: { kind: 'active' },
+        })}
+      />,
+    )
+    expect(rows(container)).toEqual([
+      { state: 'done', title: 'Prompt copied' },
+      { state: 'done', title: 'Agent connected' },
+      { state: 'done', title: 'Budget approved' },
+    ])
+  })
+
+  it.each(['expired', 'cancelled', 'failed', 'unknown_status'] as const)(
+    '%s renders through the shell with no step list',
+    (kind) => {
+      const { container } = render(
+        <ConnectStep flow={resumedFlow({ setupStatus: { ...STATUS, status: kind }, connectView: { kind } })} />,
+      )
+      expect(container).not.toBeEmptyDOMElement()
+      expect(container.querySelector('ol[aria-label="Connection steps"]')).toBeNull()
+      expect(container.querySelector('.min-h-\\[340px\\]')).not.toBeNull()
+    },
+  )
+})

@@ -160,15 +160,17 @@ export function headerSubtitle(step: SetupStep, status: string | undefined, appr
     if (status === 'connected_local' && !approvalReady) return 'Finishing local setup'
     if (status === 'connected_local' || status === 'awaiting_wallet_approval') return 'Approve the agent budget'
     if (status === 'approval_in_progress' || status === 'proposed') return 'Waiting for approval to land'
-    // #1394: NOT "Agent rules approved" — the shell ticker already reads
-    // "Approved" and the body names the granted authority. Three statements of
+    // #1394: NOT "Agent rules approved" — the step list already reads
+    // "Budget approved" (#3832) and the body names the granted authority. Three statements of
     // one fact in one viewport made none of them authoritative. The subtitle's
     // job across this flow is to say what to DO, so here it orients the user in
     // the ending rather than restating the status.
     if (status === 'active') return 'What your agent can do now'
     if (status === 'expired') return 'This setup prompt expired'
     if (status === 'cancelled') return 'This setup was cancelled'
-    return 'Paste the setup prompt into your agent environment'
+    // #3832: the step list below spells out copy → paste → approve, so the
+    // subtitle states the outcome instead of repeating step 2's instruction.
+    return 'Give your agent the setup prompt. It does the rest.'
   }
   // #1720: no longer "choose where it runs" — there is nothing to choose.
   // A subtitle that names an action the step does not offer is worse than a
@@ -365,6 +367,10 @@ export function useAgentConnectionSetup({
   const creatingRef = useRef(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const [copied, setCopied] = useState<CopyKind | null>(null)
+  // #3832: LATCHED. `copied` is single-valued — copying the local command or
+  // the .env block overwrites 'prompt' — so the connect step's row 1 reads
+  // this instead, and a later copy of something else cannot un-tick it.
+  const [promptCopied, setPromptCopied] = useState(false)
   const [cancelled, setCancelled] = useState(false)
   const [manualCredential, setManualCredential] = useState<ManualCredential | null>(null)
   const [manualCredentialAcknowledged, setManualCredentialAcknowledged] = useState(false)
@@ -493,6 +499,7 @@ export function useAgentConnectionSetup({
     setCreating(false)
     setCreateError(null)
     setCopied(null)
+    setPromptCopied(false)
     setCancelled(false)
     setManualCredential(null)
     setManualCredentialAcknowledged(false)
@@ -585,6 +592,7 @@ export function useAgentConnectionSetup({
   async function copyText(kind: CopyKind, value: string) {
     await navigator.clipboard?.writeText(value)
     setCopied(kind)
+    if (kind === 'prompt') setPromptCopied(true)
   }
 
   async function handleCancelSetup() {
@@ -752,6 +760,7 @@ export function useAgentConnectionSetup({
       agentId: setupStatus?.agent_id ?? null,
     }),
     copied,
+    promptCopied,
     copyText,
     manualCredential,
     manualCredentialAcknowledged,

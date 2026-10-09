@@ -100,11 +100,11 @@ export default function ConnectAgentModal({
       subtitle={flow.headerSubtitleText}
       headerAccessory={
         // #1418: ONE status voice. On steps 1-2 the wizard band is the only
-        // status signal. On step 3 the shell ticker (Waiting — Connected —
-        // Approved) takes over as the single voice — the epic's rule 2 —
-        // so the wizard band does not render there: two stacked trackers in
-        // the same dot/line language made the user decode which meant what,
-        // on the screen whose whole job is calm. The ticker also carries the
+        // status signal. On step 3 the numbered step list (ConnectSteps:
+        // copy → paste → approve, #3832) takes over as the single voice — the
+        // epic's rule 2 — so the wizard band does not render there: two
+        // trackers on one screen made the user decode which meant what, on
+        // the screen whose whole job is calm. The list also carries the
         // remaining journey, so "step 3 of 3" loses no information.
         flow.step !== 'connect' ? (
           <StepProgress totalSteps={flow.setupStepCount} currentStep={Math.max(flow.currentStepIndex, 0)} />
@@ -128,7 +128,7 @@ export default function ConnectAgentModal({
        * `flow.step` so the entrance animation retriggers on every step
        * change, the same way ConnectStepShell keys its body by `stateKey`.
        * Step 3 stays OUTSIDE this wrapper and keeps its own shell/rhythm —
-       * changing it is explicitly out of scope for #1411.
+       * changing it was explicitly out of scope for #1411.
        *
        * Both wrappers are the step-change focus target (#3687): `tabIndex=-1`
        * keeps them out of the Tab order and Modal's first-focusable query,

@@ -472,7 +472,7 @@ Use this mapping when replacing technical language with product-facing language.
 | Safe deployed | Your Haven account is ready |
 | Smart account | Haven account |
 | Smart wallet | Haven wallet |
-| Signer | Sign-in method / approval method |
+| Signer | Sign-in method / approval method (exception: the Settings → Signers section name, above) |
 | Owner | Control / approve actions |
 | Owner type | Sign-in method |
 | Passkey signer | Secure passkey |

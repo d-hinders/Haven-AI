@@ -287,7 +287,7 @@ describe('AccountSignersCard (#888)', () => {
     )
     render(<AccountSignersCard {...PROPS} />)
     expect(screen.getByText(/Connect your account owner wallet/)).toBeTruthy()
-    // #3812: connect or switch here, not only from the header.
+    // #3812: connect or switch here (the header pill is gone since #3825).
     expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeTruthy()
   })
 

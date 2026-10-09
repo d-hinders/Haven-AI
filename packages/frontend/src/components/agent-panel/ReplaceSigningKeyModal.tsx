@@ -154,7 +154,7 @@ export function ReplaceSigningKeyModal({
   const rekey = useAgentRekey(agentId, chainId)
   // #3825: the #1097 cross-device heads-up — read beside the money-path
   // re-key hook, never through it.
-  const passkeyElsewhere = useAgentPasskeyElsewhere(agentId)
+  const passkeyElsewhere = useAgentPasskeyElsewhere(agentId, chainId, open)
   const [step, setStep] = useState<Step>('reason')
   const [reason, setReason] = useState<Reason | null>(null)
   const [newAddress, setNewAddress] = useState('')

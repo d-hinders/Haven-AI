@@ -228,7 +228,7 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
               <p className="text-xs text-[var(--v2-ink-muted)]">
                 Connect your account owner wallet to change how this account is approved.
               </p>
-              {/* #3812: connect or switch in place, not only from the header. */}
+              {/* #3812: connect or switch in place (the header pill is gone since #3825). */}
               {!loadError ? <WalletConnectAction /> : null}
             </div>
           ) : null}

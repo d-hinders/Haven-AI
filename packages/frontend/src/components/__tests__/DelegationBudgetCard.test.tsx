@@ -117,6 +117,12 @@ describe('DelegationBudgetCard cross-device hint (#3825)', () => {
     expect(screen.queryByText(/passkey may be on another device/)).toBeNull()
   })
 
+  it('a retired agent still shows the hint — its Stop is an owner signature too', async () => {
+    mockSigner.passkeyElsewhere = true
+    render(<DelegationBudgetCard {...PROPS} retired="archived" />)
+    expect(await screen.findAllByText(/passkey may be on another device/)).toHaveLength(1)
+  })
+
   it('shows no hint while nobody here can sign', async () => {
     mockSigner.passkeyElsewhere = true
     mockSigner.ready = false

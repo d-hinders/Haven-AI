@@ -1494,7 +1494,8 @@ A **known but not-preferred** fact, stated beside the thing it qualifies:
 icon-led label row (lucide `Info` at `h-3.5 w-3.5 flex-shrink-0`, `text-xs
 font-medium text-[var(--v2-ink-2)]`). One call site so far —
 `WalletButton.tsx`'s "No passkey enrolled on this device", shown in both states
-on `/design-system` → *Signing credential (wallet menu)*.
+on `/design-system` → *Signing credential (wallet menu)*; since #3825 that is the
+only place it renders (the pill no longer opens for a ready user).
 
 **Reach for it instead of a semantic tone when nothing has failed.** There is no
 `--v2-info` family, and `--v2-warning` is scoped to 402/pending-review, to
@@ -1506,8 +1507,8 @@ enumeration and is why the two read as contradicting each other until you check
 (#2764). So
 the honest options for "legible but not alarming" are this or plain muted text.
 Muted text is the right weight for mild friction — the #1097 "passkey may be on
-another device" hints in `AccountSignersCard` and `DelegationSendModal` are
-deliberately unmarked. This marker is for the step above that: a fact the user
+another device" hint (`PasskeyElsewhereHint`, on every owner-signing flow since
+#3825) is deliberately unmarked. This marker is for the step above that: a fact the user
 would want to act on, on an authority-bearing surface.
 
 **Recorded as a pattern on ONE call site, which is thinner than this section's

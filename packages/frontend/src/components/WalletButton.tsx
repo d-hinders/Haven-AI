@@ -187,8 +187,9 @@ interface PopoverProps {
    * the same as "we cannot tell you". The one outcome this rules out is toning
    * THIS louder than #1937's.
    *
-   * The #1097 "passkey may be on another device" hints in `AccountSignersCard`
-   * and `DelegationSendModal` are the nearest shipped precedent and are plain
+   * The #1097 "passkey may be on another device" hint (`PasskeyElsewhereHint`,
+   * on every owner-signing flow since #3825) is the nearest shipped precedent
+   * and is plain
    * muted text — but they are deliberately NOT leaned on as the argument. Their
    * fact is mild friction with the RIGHT credential (a device hop); this one is
    * a credential chosen by array position and never verified as the user's.
@@ -198,10 +199,12 @@ interface PopoverProps {
    * (owner decision 2026-08-26). `useActiveSigner` now resolves a
    * `delegator_passkey` for any non-empty hydrated signer set, mirroring
    * `pickSigningPath`'s precedence, so the marker-less user reaches this
-   * rendering for real — the state this block was built ahead of. Rendered
-   * evidence lives in `e2e/wallet-signer-offering.spec.ts`, which drives the
-   * app into the marker-less state through the real hydration path rather
-   * than forced props.
+   * rendering for real — the state this block was built ahead of. Since #3825
+   * the pill renders only in the connect flow's approval step, and only while
+   * NOT ready, so this popover state is no longer reachable from an app route:
+   * it is shown on `/design-system` (proof: `e2e/wallet-signing-credential-
+   * states.spec.ts`), and in the app the marker-less user gets the
+   * `PasskeyElsewhereHint` line on each signing flow instead.
    */
   signingWith?: { label: string; keyId: string; onThisDevice: boolean }
   unavailablePasskey?: boolean

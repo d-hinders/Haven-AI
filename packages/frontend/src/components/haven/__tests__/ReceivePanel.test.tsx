@@ -232,6 +232,17 @@ describe('ReceivePanel (#3333)', () => {
       )
       expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
       expect((screen.getByRole('button', { name: 'Sign transfer' }) as HTMLButtonElement).disabled).toBe(false)
+      // #3825: the passkey is not marked on this device, so the ceremony may
+      // hand off — the #1097 line says so before Sign transfer.
+      await waitFor(() => expect(screen.getByText(/passkey may be on another device/)).toBeTruthy())
+    })
+
+    it('an owner-only account shows no cross-device hint (#3825)', async () => {
+      await openHandoff(() =>
+        Promise.resolve({ account_address: ADDRESS, chain_id: 8453, owner_address: '0x' + 'ee'.repeat(20), passkeys: [] }),
+      )
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeTruthy())
+      expect(screen.queryByText(/passkey may be on another device/)).toBeNull()
     })
 
     it('a signer response without a passkeys array does not crash the hand-off (#3093)', async () => {

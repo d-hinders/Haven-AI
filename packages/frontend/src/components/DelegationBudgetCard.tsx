@@ -358,7 +358,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
       {/* #3825: one heads-up for every signature this card asks for — Stop,
           Edit and the grant form below — now that the wallet menu that
           disclosed the fallback passkey has left the top bar. */}
-      {ready && passkeyElsewhere && !retired ? <PasskeyElsewhereHint className="mb-4" /> : null}
+      {ready && passkeyElsewhere ? <PasskeyElsewhereHint className="mb-4" /> : null}
 
       <div className="divide-y divide-[var(--v2-border)]">
         {budgetsError ? (

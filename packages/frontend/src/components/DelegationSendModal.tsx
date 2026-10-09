@@ -126,7 +126,7 @@ export default function DelegationSendModal({ open, onClose, accountAddress, cha
             <p className="text-xs text-[var(--v2-ink-muted)]">
               Connect your account owner wallet to send.
             </p>
-            {/* #3812: connect or switch in place, not only from the header. */}
+            {/* #3812: connect or switch in place (the header pill is gone since #3825). */}
             <WalletConnectAction />
           </div>
         ) : null}

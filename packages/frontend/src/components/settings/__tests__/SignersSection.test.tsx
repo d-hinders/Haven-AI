@@ -130,7 +130,6 @@ describe('SignersSection (#3825)', () => {
   it('the wallet connection is a footer line, not a signer row', async () => {
     renderSection()
     const row = await screen.findByTestId('signer-wallet-connection')
-    expect(row.getAttribute('data-testid')).not.toMatch(/^signer-row-/)
     expect(row.querySelector('p.font-medium')).toBeNull()
     expect(screen.getAllByTestId(/^signer-row-/)).toHaveLength(3)
   })

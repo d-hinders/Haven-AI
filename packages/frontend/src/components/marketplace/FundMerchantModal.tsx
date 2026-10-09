@@ -568,7 +568,7 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                       ? 'Connect your account owner wallet to sign this budget.'
                       : 'Connect your account owner wallet, or use one of the account’s passkeys, to sign this budget.'}
                   </p>
-                  {/* #3812: connect or switch in place, not only from the header. */}
+                  {/* #3812: connect or switch in place (the header pill is gone since #3825). */}
                   {!signersError && !signersLoading ? <WalletConnectAction /> : null}
                 </div>
               )}

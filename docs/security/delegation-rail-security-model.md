@@ -5,6 +5,8 @@ contract: true
 covers:
   - packages/backend/src/middleware/owner-cli.ts
   - packages/backend/src/domain/user-signers.ts
+  - packages/backend/src/routes/user.ts
+  - packages/frontend/src/components/PasskeyElsewhereHint.tsx
   - packages/backend/src/infra/repositories/merchants.ts
   - packages/backend/src/modules/catalog/merchant-catalog.ts
   - packages/backend/src/db/migrations/101_merchant_pay_to.ts
@@ -1024,11 +1026,11 @@ passkey — so a mixed account keeps
 signing with its connected owner wallet and only the pure-passkey marker-less
 case changed; the fallback credential is **disclosed** before any ceremony.
 That disclosure was the wallet menu's (#1952's rendering) until #3825 took the
-wallet pill out of the top bar; since then every owner-signing flow carries
-the #1097 line itself — "This account's passkey may be on another device" —
-in the account's Backup & recovery card, send, the budget card (grant, edit,
-stop), the connect flow's budget approval, the merchant budget, remove, and
-re-key (owner decision 2026-10-09). This
+wallet pill out of the top bar; since then each owner-signing flow renders the
+shared `PasskeyElsewhereHint` line itself — "This account's passkey may be on
+another device" — whenever the passkey path is the one that will sign and no
+enrolled passkey is marked on this device (owner decision 2026-10-09). With the
+owner wallet connected the EOA signs and no hint shows. This
 offers no signer that cannot sign: the set is the account's on-chain-enrolled
 signers, selection draws only from that account+chain-scoped set, and device
 availability — the one unknown — is answered by the ceremony itself.
@@ -2831,9 +2833,16 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > bumped.
 >
 > **Re-verified (#3825, 2026-10-09, Settings → Signers; wallet pill leaves the
-> top bar):** this diff touches one covered file,
-> `components/AccountSignersCard.tsx`. It stops rendering the owner address
-> and passkey key ids and links to Settings → Signers; its Remove gates
+> top bar):** the covered files this diff touches are
+> `domain/user-signers.ts` (new: the signer aggregation behind
+> `GET /user/signers`), `routes/user.ts` (that route — owner-scoped, read-only),
+> `components/PasskeyElsewhereHint.tsx` (new: the shared #1097 line),
+> `hooks/useDelegationBudget.ts` (one more read-only return field,
+> `passkeyElsewhere`; `pickSigningPath` untouched),
+> `components/DelegationSendModal.tsx` and `components/DelegationBudgetCard.tsx`
+> (both render the shared hint), and `components/AccountSignersCard.tsx`. The
+> card hides the owner address behind "Show address" and the passkey key ids
+> entirely, and links to Settings → Signers; its Remove gates
 > (`wayCount < 2`), both consequence confirmations, the enrolment action and
 > its in-flow wallet connect are unchanged. Outside the coverage list, the
 > top bar no longer renders the wallet pill (it stays in the connect flow's

@@ -218,8 +218,8 @@ up.
 > **Re-verified #3812 (in-flow wallet connect):** this change touched two files
 > in this document's coverage list, `AccountSignersCard.tsx` and
 > `DelegationSendModal.tsx`. Both edits are presentation-only: each now renders
-> a "Connect wallet" / "Switch wallet" control (`WalletConnectAction`) beside
-> the owner-wallet blocker it already showed. (`WalletButton.tsx`, whose
+> a "Connect wallet" / "Switch wallet" control beside the owner-wallet blocker
+> it already showed. (`WalletButton.tsx`, whose
 > disconnect-then-reopen-the-picker logic moved unchanged into a shared
 > `useSwitchWallet` hook, is not in the coverage list.) Nothing that decides
 > who may sign changed: `useActiveSigner`, `pickSigningPath`,

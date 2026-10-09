@@ -357,6 +357,10 @@ describe('agentPairSuffix (#3799 — the pair-specific upgrade hint)', () => {
     expect(agentPairSuffix('@haven_ai/mcp', `haven-${'a'.repeat(33)}`)).toBe('')
     expect(agentPairSuffix('@haven_ai/mcp', 'haven-signer')).toBe('')
     expect(agentPairSuffix('@haven_ai/mcp', 'haven-signer-x')).toBe('')
+    // #1696: the bare pair's own names are refused as slugs outright, so a
+    // doubled record (`haven-haven` → slug `haven`) must also name no flag.
+    expect(agentPairSuffix('@haven_ai/mcp', 'haven-haven')).toBe('')
+    expect(agentPairSuffix('@haven_ai/mcp', 'haven-haven-signer')).toBe('')
   })
 
   it('clientUpdateHint appends the suffix only onto the connector doctor form', () => {

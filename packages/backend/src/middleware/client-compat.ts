@@ -162,9 +162,11 @@ const CONNECTOR_PACKAGES: readonly string[] = ['@haven_ai/signer', '@haven_ai/mc
 
 // Mirrors `assertValidServerSlug` in @haven_ai/connect (1-32 lowercase letters,
 // digits, single hyphens; 'signer' and 'signer-*' reserved because they would
-// collide with another pair's haven-signer-* entry). The backend cannot import
-// the connector, so the shape is pinned here — a suffix is only appended when
-// the slug is one the connector's own `--name` parser would accept.
+// collide with another pair's haven-signer-* entry; #1696 — 'haven' and
+// 'haven-signer' refused outright as the bare pair's own names). The backend
+// cannot import the connector, so the shape is pinned here — a suffix is only
+// appended when the slug is one the connector's own `--name` parser would
+// accept.
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
 /**
@@ -186,6 +188,7 @@ export function agentPairSuffix(
   const slug = mcpServerName.slice('haven-'.length)
   if (slug.length === 0 || slug.length > 32 || !SLUG_RE.test(slug)) return ''
   if (slug === 'signer' || slug.startsWith('signer-')) return ''
+  if (slug === 'haven' || slug === 'haven-signer') return ''
   return ` --name ${slug}`
 }
 

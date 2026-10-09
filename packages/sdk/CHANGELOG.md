@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.9.0-alpha.0 — 2026-10-09
+
 ### Added
 
 - **The SDK reports the merchant's EIP-3009 settlement hash it already holds (#3764).** On an ACCEPTED merchant answer to a payment WITH a funding leg — hosted `completeX402MerchantCall` and the local paid retry (`fetch`, `payX402Quote`, `resumeX402Payment`) — the settlement parsed from the `PAYMENT-RESPONSE` header (or the native MCP profile's `result._meta["x402/payment-response"]`) is now posted as a SECOND `/machine-payments/evidence` report right after the funding one, so Haven records the transaction the merchant shows (`machine_metadata.merchant_settlement_tx_hash`, #3475). Exactly ONE attempt, no backoff (D2): a retryable answer is the hosted tools' handoff problem, never a client-side wait. The post is gated on a well-formed (`0x` + 64 hex), non-zero hash DIFFERENT from the funding hash (case-insensitively) — a missing, malformed, zero, or equal hash posts nothing, and the #2117 no-invented-hash rule still holds. `completeX402MerchantCall`'s result gains an additive `settlementEvidenceOutcome`; `evidenceOutcome` keeps its meaning (the funding/anchor outcome). The outcome is swallowed on the local path by design — the local receipt already shows the settlement. No update needed.

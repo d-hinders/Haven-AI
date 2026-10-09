@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.9.0-alpha.0 — 2026-10-09
+
 ### Changed
 
 - **The local x402 tools report the merchant's EIP-3009 settlement hash (#3764, reaches stdio only after the next release).** `haven_pay_x402`, `haven_pay_x402_quote`, `haven_resume_x402_payment` and `haven_pay_mcp_tool` now post the merchant's own settlement transaction — parsed from the paid answer's `PAYMENT-RESPONSE` (or `_meta`) — as a second evidence report right after the funding one, so the receipt shows the transaction the merchant shows. One attempt, no backoff, and it can never change the tool's own answer: a missing, malformed, zero, or funding-equal hash posts nothing. Hosted delivery picks this up on deploy; stdio serves it once `@haven_ai/mcp` pins the SDK release that carries it (see `docs/operations/mcp-runtime-compatibility.md`).

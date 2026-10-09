@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.9.0-alpha.0 — 2026-10-09
+
 ### Changed
 
 - **`agents pause`, `resume` and `revoke` say what they do not do (#3722).** The help said pause would "Stop the agent spending" and revoke would "Permanently revoke an agent"; all three are backend-only status changes, and the budget stays live on-chain. The help now says so and points to `haven budget revoke`. The `--yes` refusal says revoke retires the agent in Haven and ends no budget on-chain, `agents pause` says the budget stays live on-chain, and a revoke with no live budget no longer points at an "on-chain allowance" in the dashboard. Text-only; no exit code or flag changed. No update needed.

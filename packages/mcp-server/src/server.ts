@@ -16,7 +16,7 @@ import { IDENTITY_GATE_EXEMPT, requireAgentIdentity } from './tools/identity-gat
 export { AGENT_IDENTITY_UNVERIFIED, IDENTITY_GATE_EXEMPT } from './tools/identity-gate.js'
 
 export const HOSTED_SERVER_NAME = '@haven_ai/mcp-server'
-export const HOSTED_SERVER_VERSION = '0.8.1-alpha.0'
+export const HOSTED_SERVER_VERSION = '0.9.0-alpha.0'
 
 /**
  * MCP `instructions` — the critical path, surfaced to the model at

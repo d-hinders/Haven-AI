@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.9.0-alpha.0 — 2026-10-09
+
 ### Changed
 
 - **A rebind or `--replace` now warns that an open session keeps acting as the previous agent (#3772).** The connector re-points the MCP server name on disk, but a client that is already running keeps the entries it loaded at start-up, and Connect revokes nothing in Haven. When a run re-points wiring another agent held (a `--replace`, including pre-0.4.0 wiring with no binding record, or a rebind) and the install completed, the outcome's `activation.instruction` now says so, names every previous agent, and points at **Remove agent…** on the Haven agent page. An install that ended with an error code gets no such sentence: its wiring may not have been written, and on `--replace` the old agent's wiring is left as possibly the only working one. Text only; no field, flag or behaviour changes. No update needed.

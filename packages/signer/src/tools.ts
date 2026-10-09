@@ -65,7 +65,7 @@ import {
  * `server.ts` re-exports them, so the package's public API is unchanged.
  */
 export const SIGNER_NAME = '@haven_ai/signer'
-export const SIGNER_VERSION = '0.8.1-alpha.0'
+export const SIGNER_VERSION = '0.9.0-alpha.0'
 
 /**
  * #3419: the marker the tool layer prefixes the undeclared-argument refusal

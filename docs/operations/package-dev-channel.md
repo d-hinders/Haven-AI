@@ -789,6 +789,12 @@ as the `signer_runtime_unused` advisory. It never removes a directory any
 credential directory names, so switching channels back and forth costs disk
 only until you prune.
 
+> **Re-verified #3772 (2026-10-08):** `packages/connect/src/runtime.ts`
+> gains a stale-session sentence in a rebind run's `activation.instruction`
+> and human output. `CONNECTOR_VERSION`, the channel resolution and the
+> install path are untouched; nothing in this document changes meaning.
+> Nothing else here was re-verified, and `last-verified` is not bumped.
+
 > **Re-verified #2963:** for a *pinned* (non-override) install `--doctor`'s
 > `signer_runtime` check compares intactness against the sidecar and currency
 > against the manifest — a dev-channel snapshot that is intact but behind the

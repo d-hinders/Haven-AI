@@ -2767,6 +2767,8 @@ describe('runConnect terminal outcome record (#2173)', () => {
       const { outcome } = await runInto(root)
       expect(outcome.existing_agents_before_write).toEqual([])
       expect(outcome).not.toHaveProperty('server_name_rebound_from')
+      // #3772: no rebind, so no stale-session warning in the instruction.
+      expect(outcome.activation.instruction).not.toContain('keeps acting as the previous agent')
     })
 
     it('writes a non-secret mcp-server-binding.json beside the outcome record: name → agent id, backend URL, bound-at; no key material', async () => {
@@ -2799,6 +2801,12 @@ describe('runConnect terminal outcome record (#2173)', () => {
       expect(outcome.server_name_rebound_from).toEqual({
         server_name: 'haven', agent_id: 'agent-prod', api_url: 'https://api.prod.haven.example', bound_at: '2026-09-17T09:00:00.000Z', backend_changed: true,
       })
+      // #3772: a running session keeps the old wiring — say so, naming the
+      // previous agent, in both the --json instruction and the human log.
+      expect(outcome.activation.instruction).toContain('keeps acting as the previous agent (agent-prod) until it is restarted')
+      expect(outcome.activation.instruction).toContain('use Remove agent\u2026 on the Haven agent page')
+      // A cross-backend rebind says where that agent lives.
+      expect(outcome.activation.instruction).toContain('(agent-prod is on the backend it was created on, not this one)')
       // S2: the retired holder has NO stored key, so it is not "live" — the
       // pre-write list is the keyed subset, never every directory.
       expect(outcome.existing_agents_before_write).toEqual([])
@@ -2920,6 +2928,8 @@ describe('runConnect terminal outcome record (#2173)', () => {
       expect(notice).toContain('This run replaces that wiring, as you chose')
       expect(notice).not.toContain('rebinds it to a new agent')
       expect(outcome.server_name_rebound_from?.agent_id).toBe('agent-old')
+      // #3772: the exact field case — a replace leaves an open session on the old agent.
+      expect(outcome.activation.instruction).toContain('keeps acting as the previous agent (agent-old) until it is restarted')
       // The retired directory's record is released by the replace retirement.
       await expect(readFile(join(oldDir, 'mcp-server-binding.json'), 'utf8')).rejects.toThrow()
       expect(outcome.retired_agent_ids).toEqual(['agent-old'])
@@ -3292,6 +3302,25 @@ describe('existing-agent wiring collision at setup (#2551)', () => {
     expect(output).toMatch(/Retired previous agent agent-old locally/)
     expect(output).toMatch(/NOT revoked/)
     expect(output).not.toMatch(/keeps acting as them/)
+    // #3772 review S2: a bare directory with NO binding record (pre-0.4.0
+    // wiring) still gets the stale-session sentence in --json — the replace
+    // itself names the displaced agent.
+    expect(result.outcome).not.toHaveProperty('server_name_rebound_from')
+    expect(result.outcome.activation.instruction).toContain('keeps acting as the previous agent (agent-old) until it is restarted')
+  })
+
+  it('#3772: a --replace displacing several bare directories names every previous agent, in the plural', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-3772-replace-many-'))
+    await seedDir(root, 'agent-a-uuid', liveBare('agent-a'))
+    await seedDir(root, 'agent-b-uuid', liveBare('agent-b'))
+    const h = harness(root)
+
+    const result = await runConnect({ ...baseOptions(root), replaceExistingWiring: true }, h.deps)
+
+    const instruction = result.outcome.activation.instruction
+    expect(instruction).toMatch(/keeps acting as the previous agents \((agent-a, agent-b|agent-b, agent-a)\) until it is restarted/)
+    expect(instruction).toContain('they may still be active in Haven')
+    expect(instruction).toContain('it ends their live budgets')
   })
 
   it('--replace does NOT retire the prior directory when the runtime install ended with an errorCode', async () => {
@@ -3308,6 +3337,9 @@ describe('existing-agent wiring collision at setup (#2551)', () => {
     expect(result.outcome.superseded_agents_retired_locally).toBe(false)
     expect(result.outcome.retired_agent_ids).toEqual([])
     expect(h.logs.join('\n')).toMatch(/were NOT retired/)
+    // #3772 review S1: the install wrote nothing, so a restart moves no session
+    // off the old agent — and that agent's wiring may be the only working one.
+    expect(result.outcome.activation.instruction).not.toContain('keeps acting as the previous agent')
   })
 
   it('REGRESSION (review): retired_agent_ids names only the collision set — a coexisting NAMED agent is listed as superseded but never retired', async () => {

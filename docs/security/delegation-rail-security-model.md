@@ -739,6 +739,33 @@ chain.
 > chain state changes. Scope of this note: the unlink and re-default writes.
 > Nothing else in this document was re-verified.
 
+> **Re-verified #3803 (2026-10-09 — the redesigned dashboard overview):** this
+> diff touched one file in this document's coverage list,
+> `infra/repositories/dashboard.ts`, and every change is a read. The two
+> existing list statements widen: `LIST_DASHBOARD_AGENTS_SQL` adds
+> `pending_approval` to its status set — a connect-flow agent the overview
+> must show; a status with no spend authority, per §3's #3544 note on what
+> `pending_approval` can and cannot become — and `LIST_DASHBOARD_ACCOUNTS_SQL`
+> adds `owner_address` plus a `hybrid_account_passkeys` COUNT, the raw
+> signer-set inputs so `needsBackupSignerRecommendation` (§7) can be answered
+> PER ACCOUNT by the route; the predicate itself is unchanged and still lives
+> in `modules/accounts/mainnet-gate.ts`, and the recommendation remains
+> advice, not a gate. The rest is additive: seven new SELECT-only grouped
+> statements (connection-setup statuses, received sub-budgets, the 7/30-day
+> spend groups with the USDC pace, distinct-merchant counts, per-agent last
+> payment, refusal row buckets, failed-intent count) over rows the caller's
+> own `user_id` already scopes (`$1` in every statement) and, on the
+> payment/refusal/intent reads, rail-scoped through the shared
+> `DELEGATION_RAIL_JOIN` fragment. The netting reuses analytics'
+> `spendNetFactorSql` rather than a fourth verbatim copy of the ratio, and
+> every figure — gross, net, pace, buckets — is a display re-projection of
+> already-confirmed rows at read time: no confirm path, no booking write, no
+> signing path and no spend decision reads them; budget, recipient and expiry
+> remain enforced on-chain by the caveat enforcers. The account list keeps its
+> `account_type = 'delegator_hybrid'` filter (#2413's rule: no legacy rail
+> surface on the dashboard). Scope of this note: those statements and their
+> WHERE/JOIN shapes. Nothing else in this document was re-verified.
+
 The unlink guard also refuses while an agent re-key is in flight, so the Safe
 binding cannot disappear between re-key stages. This is a database
 serialization guard only: it grants nothing, signs nothing, and touches no

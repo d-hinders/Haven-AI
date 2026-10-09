@@ -31,6 +31,7 @@ import { useDelegationBudget, type BudgetResult, type DelegationBudget, type Gra
 import type { Agent } from '@/hooks/useAgents'
 import type { CatalogEntry, Merchant, MerchantFundingTarget } from '@/hooks/useCatalog'
 import { getChainConfig } from '@/lib/chains'
+import { budgetPeriodWords } from '@/lib/budget-caption'
 import { needsUnpinnedBudget, networkToChainId } from '@/lib/marketplace'
 import {
   classifyMerchantBudgetRefusal,
@@ -52,14 +53,14 @@ interface TokenOption {
 
 type Step = 'select' | 'review' | 'working' | 'done' | 'error'
 
-const PERIODS: Array<{ label: string; seconds: number }> = [
-  { label: 'per day', seconds: 86_400 },
-  { label: 'per week', seconds: 604_800 },
-  { label: 'per month', seconds: 2_592_000 },
-]
+const PERIODS: Array<{ label: string; seconds: number }> = [86_400, 604_800, 2_592_000].map((seconds) => ({
+  // #3806: the period words are the caption helper's.
+  label: budgetPeriodWords(seconds),
+  seconds,
+}))
 
 function periodLabel(seconds: number): string {
-  return PERIODS.find((p) => p.seconds === seconds)?.label ?? `every ${seconds}s`
+  return budgetPeriodWords(seconds)
 }
 
 /** A plain, no-exponent, non-negative decimal — `1e3` or `-5` are refused with a message, never silently. */

@@ -139,22 +139,26 @@ describe('AgentsTable — the desktop table', () => {
     expect(badge!.className).toContain('text-[var(--v2-danger)]')
   })
 
-  it('marks the budget bar as a measurement, and says when the measurement is a snapshot', () => {
-    const { container } = mount()
-    const bars = Array.from(container.querySelectorAll('[role="progressbar"]'))
-    expect(bars.length).toBe(2)
-    expect(bars[0].getAttribute('aria-valuenow')).toBe('86')
-    expect(bars[0].getAttribute('aria-valuemin')).toBe('0')
-    expect(bars[0].getAttribute('aria-valuemax')).toBe('100')
-    expect(bars[0].getAttribute('aria-label')).toBe('USDC budget used')
-
-    // The two readings are not the same claim. "214 of 250" read from the
-    // chain is the delegation as it stands; the same words read from Haven's
-    // last snapshot are a record of it. The response says which one it is, so
-    // the cell says it too rather than letting the reader assume the stronger.
-    const rows = Array.from(container.querySelectorAll('tbody tr')).map((tr) => tr.textContent ?? '')
-    expect(rows[0]).not.toMatch(/last snapshot/)
-    expect(rows[1]).toMatch(/read from Haven’s last snapshot/)
+  it('renders a stale or failed read as unknown — no bar, never a snapshot claim (#3806)', () => {
+    // Frozen at the capture instant the e2e fixture was built for: the
+    // response's period bounds end the day BEFORE the clock, so even the
+    // successful read describes a finished period (refilled-updating) and the
+    // failed read was never a measurement (unknown). Neither row renders a
+    // bar — a 0 % bar would claim "nothing used" and a "read from Haven's
+    // last snapshot" suffix no longer exists to soften a fallback into a
+    // measurement.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-07-12T09:00:00Z'))
+    try {
+      const { container } = mount()
+      expect(container.querySelectorAll('[role="progressbar"]')).toHaveLength(0)
+      const rows = Array.from(container.querySelectorAll('tbody tr')).map((tr) => tr.textContent ?? '')
+      expect(rows[0]).toMatch(/couldn.t be read/)
+      expect(rows[1]).toMatch(/couldn.t be read/)
+      for (const text of rows) expect(text).not.toMatch(/last snapshot/)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('says "no budget set" in words rather than rendering an empty bar', () => {

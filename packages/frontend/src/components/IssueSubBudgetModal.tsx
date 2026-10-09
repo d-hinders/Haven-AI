@@ -15,6 +15,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { formatUnits, isAddress } from 'viem'
 import { useAgents } from '@/hooks/useAgents'
+import { budgetPeriodWords } from '@/lib/budget-caption'
 import { issueSubBudget, type IssueSubBudgetResponse } from '@/hooks/useSubBudgets'
 import type { DelegationBudget } from '@/hooks/useDelegationBudget'
 import {
@@ -63,12 +64,11 @@ function describeBudget(b: DelegationBudget, tokens: TokenOption[]): string {
   } catch {
     // keep the raw amount
   }
-  const period = PERIOD_LABELS[b.period_seconds] ?? `every ${b.period_seconds}s`
+  // #3806: the period words are the caption helper's — no local table to drift.
+  const period = budgetPeriodWords(b.period_seconds)
   const pin = b.recipient_address ? `to ${truncateAddress(b.recipient_address)}` : 'to any recipient'
   return `${amount} ${t?.symbol ?? ''} ${period} · ${pin}`.replace(/\s+/g, ' ')
 }
-
-const PERIOD_LABELS: Record<number, string> = { 86_400: 'per day', 604_800: 'per week', 2_592_000: 'per month' }
 
 export default function IssueSubBudgetModal({ open, onClose, agentId, budgets, tokens, onIssued }: Props) {
   const { agents, loading: agentsLoading } = useAgents()
@@ -158,7 +158,8 @@ export default function IssueSubBudgetModal({ open, onClose, agentId, budgets, t
       return budget.budget_atomic
     }
   })()
-  const periodLabel = PERIOD_LABELS[budget.period_seconds] ?? `every ${budget.period_seconds}s`
+  // #3806: the period words are the caption helper's — no local table to drift.
+  const periodLabel = budgetPeriodWords(budget.period_seconds)
 
   async function submit() {
     setTouched(true)

@@ -1,3 +1,4 @@
+import { budgetPeriodWords } from './budget-caption'
 import { formatAllowanceForToken } from './allowance-format'
 
 // Keep the historical one-time value for rendering old records. New
@@ -17,10 +18,10 @@ export const RESET_PERIODS = [
 export function budgetPeriodLabel(mins: number): string {
   const label = (RESET_PERIODS.find((period) => period.value === mins)?.label ?? `${mins}m`).toLowerCase()
   if (label === 'one-time') return 'total budget'
-  if (label === 'daily') return 'per day'
-  if (label === 'weekly') return 'per week'
-  if (label === 'monthly') return 'per month'
-  return `every ${label}`
+  // The period words are the caption helper's (#3806): one mapping, so this
+  // label and every budget meter phrase a 90-minute budget the same way.
+  // `mins` is MINUTES; the helper speaks seconds.
+  return budgetPeriodWords(mins * 60)
 }
 
 /**

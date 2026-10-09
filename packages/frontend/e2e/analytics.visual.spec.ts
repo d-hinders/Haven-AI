@@ -244,6 +244,15 @@ const COPY = {
    */
   budgetOf250: '214.00 of 250.00 USDC',
   budgetOf500: '5.00 of 500.00 USDC',
+  /**
+   * The #3806 `refilled-updating` caption, word for word what
+   * `UNREAD_CAPTION` (lib/budget-caption.ts) prints: the fixture's read is
+   * STALE — its `period_end` (2026-07-11) precedes `FROZEN_NOW`
+   * (2026-07-12) — so the used amount belongs to a finished period and the
+   * row says so in words instead of measuring it. Rendered once per
+   * delegation row.
+   */
+  unreadBudget: 'Usage this period couldn’t be read',
 } as const
 
 const OVERVIEW_PATH = '/analytics/overview'
@@ -388,23 +397,29 @@ const SCENARIOS: Scenario[] = [
       await expect(agents.getByText(COPY.agentRetired)).toHaveCount(2)
       await expectExactlyOneVisible(agents, COPY.agentResearch)
       await expectExactlyOneVisible(agents, COPY.agentRetired)
-      // Each delegation's budget renders by a different medium per half: the
-      // desktop table measures it with a `role=progressbar` per delegation,
-      // the mobile rows print the same figures as text (`formatBudgetTokenValue`
-      // + the used percent, joined by `budgetLine`). Asserted by medium — and
-      // the role is an accessibility-tree role, so at mobile, where the desktop
-      // half is `display:none`, the bars resolve 0 BY DESIGN and the text line
-      // is the budget's only rendering (#3038 structure run: a viewport-blind
-      // bar count reads 2 on desktop and 0 on mobile for the same page).
+      // Each delegation's budget renders its FIGURES by a different medium per
+      // half: the desktop table prints them above the cell, the mobile rows
+      // join them with `budgetLine`. Neither half measures the budget any
+      // more (#3806): the fixture's read is stale — its `period_end` precedes
+      // `FROZEN_NOW`, the `refilled-updating` state — so the used amount
+      // belongs to a finished period, no `role=progressbar` renders, and the
+      // row says the period couldn't be read. (The role is an
+      // accessibility-tree role, so at mobile, where the desktop half is
+      // `display:none`, a bar count reads 0 on both halves for the same
+      // page.)
       await expect(agents.getByText(COPY.budgetOf250)).toHaveCount(2)
       await expect(agents.getByText(COPY.budgetOf500)).toHaveCount(2)
       await expect(agents.getByText(COPY.budgetOf250).filter({ visible: true })).toHaveCount(1)
       await expect(agents.getByText(COPY.budgetOf500).filter({ visible: true })).toHaveCount(1)
+      await expect(agents.getByRole('progressbar')).toHaveCount(0)
+      await expect(agents.getByText(COPY.unreadBudget)).toHaveCount(2)
+      // The caption lives in the DESKTOP cell only (`BudgetCell`); the mobile
+      // row's `budgetLine` keeps the figures, so at desktop both rows show it
+      // and at mobile the desktop half is `display:none`.
       if (vp.width >= 1024) {
-        // One bar per delegation, two delegations, both read from the response.
-        await expect(agents.getByRole('progressbar')).toHaveCount(2)
+        await expect(agents.getByText(COPY.unreadBudget).filter({ visible: true })).toHaveCount(2)
       } else {
-        await expect(agents.getByRole('progressbar')).toHaveCount(0)
+        await expect(agents.getByText(COPY.unreadBudget).filter({ visible: true })).toHaveCount(0)
       }
 
       // ── The merchants table ────────────────────────────────────────────────

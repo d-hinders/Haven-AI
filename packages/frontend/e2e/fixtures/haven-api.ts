@@ -791,7 +791,9 @@ export async function mockHavenApi(page: Page) {
               status: 'active',
               budget_atomic: '250000000',
               period_seconds: 43_200 * 60,
-              start_date: '2026-05-02T10:00:00.000Z',
+              // #3806: the wire carries `start_date` as a Unix-seconds digit
+              // string (the driver decodes the BIGINT), never ISO.
+              start_date: '1777716000',
               expires_at: Math.floor(Date.UTC(2027, 4, 2) / 1000),
               created_at: '2026-05-02T10:00:00.000Z',
             },
@@ -804,7 +806,7 @@ export async function mockHavenApi(page: Page) {
               // The fixture's single row is active: a mid-period read with the
               // budget mostly intact, refilling one period after start_date.
               ...(r.status === 'active'
-                ? { remaining_atomic: '187500000', remaining_from_chain: true, period_end: new Date(Date.parse(r.start_date) + r.period_seconds * 1000).toISOString() }
+                ? { remaining_atomic: '187500000', remaining_from_chain: true, period_end: new Date(Number(r.start_date) * 1000 + r.period_seconds * 1000).toISOString() }
                 : { remaining_atomic: null, remaining_from_chain: null, period_end: null }),
             }))
           : rows,
@@ -1181,7 +1183,8 @@ export async function serveAgentDetailResponses(
             status: 'active',
             budget_atomic: '250000000',
             period_seconds: 604_800,
-            start_date: '2026-06-02T10:00:00.000Z',
+            // #3806: Unix-seconds digit string on the wire, never ISO.
+            start_date: '1780394400',
             expires_at: Math.floor(Date.UTC(2027, 5, 2) / 1000),
             created_at: '2026-06-02T10:00:00.000Z',
           },

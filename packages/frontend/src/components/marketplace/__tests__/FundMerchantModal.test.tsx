@@ -122,6 +122,9 @@ function budget(overrides: Partial<DelegationBudget> = {}): DelegationBudget {
     budget_atomic: '5000000',
     period_seconds: 86_400,
     expires_at: 9_999_999_999,
+    // #3806: the wire's anchor and ordering fields.
+    start_date: '1788228000',
+    created_at: '2026-09-01T00:00:00Z',
     merchant_id: null,
     merchant_slug: null,
     merchant_name: null,

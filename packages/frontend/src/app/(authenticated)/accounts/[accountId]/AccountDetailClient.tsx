@@ -44,6 +44,7 @@ import { getExplorerUrlOrNull, resolveChainOrNull, DEFAULT_CHAIN_ID } from '@/li
 // rendered `13 000,50 kr` for the same figure.
 import { formatFiat, truncate } from '@/lib/format'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
+import { budgetPeriodLabel } from '@/lib/budget-period'
 import { agentStatusPresentation } from '@/lib/payment-status'
 import { isHalfRevoked } from '@/lib/half-revoked'
 import { formatAgentLastActivity } from '@/lib/agent-last-seen'
@@ -51,11 +52,10 @@ import { Tooltip } from '@/components/ui/Tooltip'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 
+// #3806: the period words are the caption helper's (via `budgetPeriodLabel`),
+// so the account row phrases a period the same way every budget meter does.
 function formatResetPeriod(minutes: number): string {
-  if (minutes === 1440) return 'per day'
-  if (minutes === 10080) return 'per week'
-  if (minutes === 43200) return 'per month'
-  return `every ${minutes} minutes`
+  return budgetPeriodLabel(minutes)
 }
 
 function agentBudgetSummary(agent: Agent, chainId: number | null): string {

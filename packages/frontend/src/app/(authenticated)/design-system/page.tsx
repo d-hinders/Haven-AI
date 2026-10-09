@@ -50,6 +50,7 @@ import { Tooltip } from '@/components/ui/Tooltip'
 import { useToast } from '@/components/ui/Toast'
 import { THEME_TOKENS, contrastTable } from '@/lib/theme-tokens'
 import { formatAnalyticsTick } from '@/lib/analytics-format'
+import { budgetCaption, type BudgetCaptionRow } from '@/lib/budget-caption'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 
 import { WalletPopover } from '@/components/WalletButton'
@@ -353,6 +354,45 @@ function AttentionListShowcase() {
   )
 }
 
+// #3806: the budget examples' captions are the caption helper's OUTPUT,
+// computed at one frozen instant (UTC) so the page renders the same words on
+// every machine and in every capture — the helper never reads the clock.
+const DS_BUDGET_NOW = Date.parse('2026-07-12T09:00:00Z')
+const dsMeterCaption = (row: BudgetCaptionRow): string => {
+  const caption = budgetCaption(row, { nowMs: DS_BUDGET_NOW, timeZone: 'UTC' })
+  return caption.kind === 'meter' ? caption.caption : ''
+}
+// 250 USDC per week, 62.50 used — the refill lands 2026-07-18T00:00Z.
+const DS_SPENDING_ROW: BudgetCaptionRow = {
+  token: 'USDC',
+  recipient: null,
+  startSec: 1_783_728_000,
+  periodSeconds: 604_800,
+  expiresSec: null,
+  budgetAtomic: '250000000',
+  usedAtomic: '62500000',
+  readFromChain: true,
+  periodEndMs: null,
+  symbol: 'USDC',
+  chainId: null,
+}
+// 1.20 of 3.00 USDC over a 14-day period anchored 2026-06-26T09:00Z — the
+// next boundary (2026-07-24T09:00Z) is 12 days out, the day-and-month branch.
+const DS_METER_ROW: BudgetCaptionRow = {
+  token: 'USDC',
+  recipient: null,
+  startSec: 1_782_464_400,
+  periodSeconds: 1_209_600,
+  expiresSec: null,
+  budgetAtomic: '3000000',
+  usedAtomic: '1200000',
+  readFromChain: true,
+  periodEndMs: null,
+  symbol: 'USDC',
+  chainId: null,
+}
+// Untouched: zero used on the same period — the caption still names the refill.
+const DS_METER_UNTOUCHED_ROW: BudgetCaptionRow = { ...DS_METER_ROW, usedAtomic: '0' }
 
 function Section({
   title,
@@ -2464,7 +2504,7 @@ export default function DesignSystemPage() {
                   <BudgetMeter
                     usedPercent={25}
                     label="USDC budget used"
-                    caption="62.5 of 250 USDC used this period · refills in 3 days"
+                    caption={dsMeterCaption(DS_SPENDING_ROW)}
                   />
                 </div>
               </div>
@@ -3048,9 +3088,9 @@ export default function DesignSystemPage() {
               </span>
               <span className="v2-tabular text-xs text-[var(--v2-ink-3)]">40%</span>
             </div>
-            <BudgetMeter usedPercent={40} label="USDC budget used" caption="Refills in 12 days" />
+            <BudgetMeter usedPercent={40} label="USDC budget used" caption={dsMeterCaption(DS_METER_ROW)} />
             <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
-              The analytics agents table renders exactly this shape — its “resets …” line is the
+              The analytics agents table renders exactly this shape — the helper's next-refill line is the
               caption slot.
             </p>
           </div>
@@ -3062,7 +3102,7 @@ export default function DesignSystemPage() {
             </p>
           </div>
           <div>
-            <BudgetMeter usedPercent={0} label="USDC budget used" caption="Nothing spent yet" />
+            <BudgetMeter usedPercent={0} label="USDC budget used" caption={dsMeterCaption(DS_METER_UNTOUCHED_ROW)} />
             <p className="mt-2 text-xs text-[var(--v2-ink-3)]">Untouched — clamped at 0.</p>
           </div>
         </div>

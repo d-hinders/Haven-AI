@@ -5,7 +5,6 @@ import {
   budgetUsedPercent,
   formatAnalyticsAmount,
   formatAnalyticsAmountCompact,
-  formatBudgetResetDate,
   formatBudgetTokenValue,
   formatSharePercent,
   lastPaymentCaption,
@@ -13,6 +12,7 @@ import {
 } from '@/lib/analytics-format'
 import type { AnalyticsCurrency } from '@/lib/analytics-format'
 import { agentStatusPresentation } from '@/lib/payment-status'
+import { budgetCaption, UNREAD_CAPTION } from '@/lib/budget-caption'
 import { useState } from 'react'
 import { BudgetMeter } from '@/components/haven'
 import { Card } from '@/components/ui/Card'
@@ -85,6 +85,26 @@ function BudgetCell({ agent }: { agent: AnalyticsAgentRow }) {
     <div className="space-y-2">
       {agent.budgets.map((budget) => {
         const used = budgetUsedPercent(budget.used_atomic, budget.budget_atomic)
+        // #3806: the caption is the shared helper's. The row projects onto it:
+        // the period length is derived from the response's own bounds
+        // (period_end − period_start), the anchor is the bounds' start, and
+        // there is no `expires_at` on this endpoint — no "expires" branch.
+        const caption = budgetCaption(
+          {
+            token: budget.token,
+            recipient: budget.recipient,
+            startSec: Math.floor(Date.parse(budget.period_start) / 1000),
+            periodSeconds: Math.round((Date.parse(budget.period_end) - Date.parse(budget.period_start)) / 1000),
+            expiresSec: null,
+            budgetAtomic: budget.budget_atomic,
+            usedAtomic: budget.used_atomic,
+            readFromChain: budget.remaining_from_chain,
+            periodEndMs: Date.parse(budget.period_end),
+            symbol: budget.token,
+            chainId: null,
+          },
+          { nowMs: Date.now() },
+        )
         return (
           <div key={`${budget.token}:${budget.recipient ?? 'any'}`}>
             <div className="flex items-center justify-between gap-2">
@@ -93,24 +113,15 @@ function BudgetCell({ agent }: { agent: AnalyticsAgentRow }) {
               </span>
               <span className="v2-tabular text-xs text-[var(--v2-ink-3)]">{used}%</span>
             </div>
-            <BudgetMeter
-              usedPercent={used}
-              label={`${budget.token} budget used`}
-              caption={
-                <>
-                  <span title={new Date(budget.period_end).toLocaleString()}>
-                    resets {formatBudgetResetDate(budget.period_end)}
-                  </span>
-                  {/* When the on-chain read failed the endpoint says so, and the
-                      page must say it too: "200 of 250" read from a stale
-                      snapshot is not the same claim as "200 of 250" read from the
-                      chain, and a reader comparing this cell against the agent's
-                      budget screen needs to know which of the two they are
-                      looking at. */}
-                  {!budget.remaining_from_chain && ' · read from Haven’s last snapshot'}
-                </>
-              }
-            />
+            {caption.kind === 'meter' ? (
+              <BudgetMeter usedPercent={caption.usedPercent} label={caption.label} caption={caption.caption} />
+            ) : caption.kind === 'unknown' || caption.kind === 'refilled-updating' ? (
+              // A failed read is not a 0 % bar — the used amount the endpoint
+              // reports is a fallback, so the cell says the reading is missing
+              // instead of rendering a measurement it does not have. The old
+              // "read from Haven's last snapshot" suffix is gone with it.
+              <p className="text-xs text-[var(--v2-ink-3)]">{UNREAD_CAPTION}</p>
+            ) : null}
           </div>
         )
       })}

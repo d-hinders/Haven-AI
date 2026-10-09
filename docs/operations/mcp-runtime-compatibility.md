@@ -5429,6 +5429,15 @@ to call next in structured fields, and those fields are typed end to end
 > manifest rows and the skew tables above stand. `last-verified` is not
 > re-stamped: this note is the scope. Nothing else in this document was
 > re-verified.
+> **Re-verified unchanged (#3822, 2026-10-09, comment-only):**
+> `packages/cli/src/commands.ts` and `packages/cli/src/commands.test.ts` are
+> covered by this doc and were touched, but only in one comment each: the
+> reason the balances call passes `chain_id` no longer claims an account is
+> "provisioned on every supported chain" (signup provisions one). The code
+> still sends `?chain_id=` exactly as before. No command, flag, output, route,
+> tool, schema key or version floor changes. `last-verified` is not
+> re-stamped: this note is the scope. Nothing else in this document was
+> re-verified.
 > **Re-verified #3723 (2026-10-07, the receipt endpoint's wrapped response +
 > the signed bundle's MCP read):** `verifyPaymentReceipt`
 > (`packages/sdk/src/receipt.ts`) now accepts the response

@@ -1319,13 +1319,14 @@ async function resolveWalletAndToken(
     : (accounts.find((s) => s.is_default) ?? accounts[0])
   if (!safe) throw new UsageError(`No wallet matches --safe ${args.flags.safe}`)
 
-  // `chain_id` is REQUIRED here, not decorative. The same account address is
-  // provisioned on every supported chain, so a wallet address usually owns more
-  // than one ownership row — and `GET /balances/:address` answers
-  // `400 chain_id required` rather than guessing when it finds more than one
-  // (`routes/balances.ts`). `wallets balances` has always passed it; this call
-  // omitted it and would have failed for exactly the ordinary multi-chain
-  // account (haven-reviewer, #2527).
+  // `chain_id` is REQUIRED here, not decorative. A passkey set derives the same
+  // account address on every chain, so one address can own more than one
+  // ownership row (an account on each of two chains) — and
+  // `GET /balances/:address` answers `400 chain_id required` rather than
+  // guessing when it finds more than one (`routes/balances.ts`). `wallets
+  // balances` has always passed it; this call omitted it and would have failed
+  // for any address with accounts on more than one chain (haven-reviewer,
+  // #2527).
   const { balances } = await api.get<{ balances: BalanceToken[] }>(
     `/balances/${accountAddressOf(safe)}?chain_id=${safe.chain_id}`,
   )

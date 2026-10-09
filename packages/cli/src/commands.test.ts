@@ -1517,11 +1517,11 @@ describe('agents connect (#2527)', () => {
   })
 
   it('asks for balances on the WALLET\'s chain, which is not optional', async () => {
-    // The same account address is provisioned on every supported chain, so the
-    // address usually owns more than one row and `GET /balances/:address`
-    // answers 400 `chain_id required` rather than guessing. Omitting it would
-    // have broken this command for the ordinary multi-chain account while
-    // `wallets balances`, which has always passed it, kept working.
+    // A passkey set derives the same account address on every chain, so one
+    // address can own more than one row, and `GET /balances/:address` answers
+    // 400 `chain_id required` rather than guessing. Omitting it would have
+    // broken this command for any address with accounts on more than one chain,
+    // while `wallets balances`, which has always passed it, kept working.
     const { api } = recordingApi({
       'GET /user/accounts': SAFES,
       // Only the chain-qualified URL is served. A request without it falls

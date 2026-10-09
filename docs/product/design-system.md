@@ -1507,8 +1507,8 @@ enumeration and is why the two read as contradicting each other until you check
 (#2764). So
 the honest options for "legible but not alarming" are this or plain muted text.
 Muted text is the right weight for mild friction — the #1097 "passkey may be on
-another device" hint (`PasskeyElsewhereHint`, on every owner-signing flow since
-#3825) is deliberately unmarked. This marker is for the step above that: a fact the user
+another device" hint (shown on every owner-signing flow since #3825) is
+deliberately unmarked. This marker is for the step above that: a fact the user
 would want to act on, on an authority-bearing surface.
 
 **Recorded as a pattern on ONE call site, which is thinner than this section's

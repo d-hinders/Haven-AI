@@ -15,6 +15,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Changed
+
+- **An out-of-gas `MERCHANT_NOT_READY` refusal names the operator top-up (#3834).** When the merchant refuses with `reason_code: settlement_wallet_out_of_gas`, the local runtime's message now gives `fail_floor` beside `settlements_remaining` and says the merchant's operator must top up its settlement wallet, so retrying before then is refused again. It no longer says "Retry after approximately 60s". Its `next_tool_omitted_reason` names the top-up too. Every other reason code keeps its wording; `retry_with_new_quote` stays `true`. Same sentence as the hosted runtime.
+
 ## 0.9.0-alpha.0 — 2026-10-09
 
 ### Changed

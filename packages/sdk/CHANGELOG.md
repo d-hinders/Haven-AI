@@ -17,6 +17,7 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
+- `MERCHANT_NOT_READY`'s code description (published as `x-enumDescriptions`) and the `haven-pay` skill say an out-of-gas refusal (`reason_code: settlement_wallet_out_of_gas`) needs the merchant's operator to top up its settlement wallet before any retry succeeds, rather than "often transient" alone (#3834). The code, its wire shape and `retry_with_new_quote` are unchanged.
 - `AGENT_CLIENT_UPDATE_SENTENCE` says a connector `upgrade_command` may name
   the agent's pair with `--name <slug>` (#3799, backend-sourced suffix): an
   agent on a multi-agent machine runs the update as one command. The runbook

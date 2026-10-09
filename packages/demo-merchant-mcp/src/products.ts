@@ -11,6 +11,10 @@
 import { getAddress, isAddress, type Address } from 'viem'
 
 interface MerchantChainConfig {
+  /** The ONE home of the network's display name (#3834). */
+  name: string
+  /** Testnets are marked in every display copy; mainnet is not. */
+  testnet: boolean
   usdcAddress: `0x${string}`
   usdcDomainName: string
   usdcDomainVersion: string
@@ -31,6 +35,8 @@ interface MerchantChainConfig {
 
 const CHAINS: Record<number, MerchantChainConfig> = {
   8453: {
+    name: 'Base',
+    testnet: false,
     usdcAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
     usdcDomainName: 'USD Coin',
     usdcDomainVersion: '2',
@@ -38,6 +44,8 @@ const CHAINS: Record<number, MerchantChainConfig> = {
     erc20TransferAmountEnforcer: '0xf100b0819427117EcF76Ed94B358B1A5b5C6D2Fc',
   },
   84532: {
+    name: 'Base Sepolia',
+    testnet: true,
     usdcAddress: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
     usdcDomainName: 'USDC',
     usdcDomainVersion: '2',
@@ -53,6 +61,25 @@ if (!chain) {
   throw new Error(
     `Unsupported MERCHANT_CHAIN_ID: ${CHAIN_ID}. Supported: ${Object.keys(CHAINS).join(', ')}`,
   )
+}
+
+/**
+ * Display name of the merchant's network, per chain and language (#3834).
+ * Mainnet is the bare name ("Base"); a testnet carries a marker ("Base Sepolia
+ * testnet" / "Base Sepolia testnät"). Every human/agent-facing copy of the
+ * network name derives from here.
+ */
+export function networkDisplayName(chainId: number = CHAIN_ID, locale: MerchantLocale = 'en'): string {
+  const c = CHAINS[chainId]
+  if (!c) throw new Error(`Unsupported chain: ${chainId}`)
+  if (!c.testnet) return c.name
+  return locale === 'sv' ? `${c.name} testnät` : `${c.name} testnet`
+}
+
+/** Startup-log label: "Base mainnet" / "Base Sepolia testnet". */
+export function networkLogLabel(chainId: number = CHAIN_ID): string {
+  const c = CHAINS[chainId]
+  return c ? `${c.name} ${c.testnet ? 'testnet' : 'mainnet'}` : ''
 }
 
 export const USDC_ADDRESS = chain.usdcAddress

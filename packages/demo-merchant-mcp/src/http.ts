@@ -453,6 +453,9 @@ async function refuseIfNotReady(res: ServerResponse, options: ResolvedServerOpti
   writeJson(res, 503, {
     error: 'merchant_not_ready',
     reason_code: 'settlement_wallet_out_of_gas',
+    // Additive (#3834): the wallet does not refill itself — recovery needs the
+    // merchant's operator, not a later retry. retry_after_s is only a back-off.
+    recovery: 'operator_top_up',
     settlements_remaining: ready.settlementsRemaining,
     fail_floor: ready.failFloor,
     retry_after_s: NOT_READY_RETRY_AFTER_SECONDS,

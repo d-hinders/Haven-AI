@@ -440,7 +440,9 @@ fields a success does; follow them first, then branch on \`code\` and surface
   "cannot settle right now" signal (a 503 \`merchant_not_ready\` with a
   \`reason_code\`) instead of a 402. No payment was created. Tell the user;
   retry later (the message carries \`retry_after_s\` when the merchant gave
-  one) — this is not a wrong or broken endpoint.
+  one) — this is not a wrong or broken endpoint. An out-of-gas refusal
+  (\`settlement_wallet_out_of_gas\`) needs the merchant's operator to top up
+  its settlement wallet first; retrying before then is refused again.
 - \`MERCHANT_REJECTED_AFTER_FUNDING\`: the merchant refused the paid retry.
   On eip3009 (\`rail\` not \`erc7710\`): Stop-and-sweep — stop retrying the
   merchant and use \`mcp__haven__haven_sweep_delegate\` to recover stranded

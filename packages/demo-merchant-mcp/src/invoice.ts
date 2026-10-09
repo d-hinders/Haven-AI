@@ -1,5 +1,5 @@
 import type { MerchantLocale, ProductId } from './products.js'
-import { PRODUCTS, formatUsdc } from './products.js'
+import { CHAIN_ID, PRODUCTS, formatUsdc, networkDisplayName } from './products.js'
 import type { SettledPayment, SettlementState } from './x402.js'
 
 // #1550: the invoice DOCUMENT (`InvoiceJson` + its Swedish text render) is a
@@ -17,7 +17,7 @@ const MERCHANT = {
   moms_nr: 'SE559412345601',
   iban: 'SE35 5000 0000 0549 1000 0003',
   bic: 'ESSESESS',
-  /** USDC on Base — our merchant wallet */
+  /** USDC on the merchant's network (see `networkDisplayName`) — our merchant wallet */
   crypto_address: process.env.MERCHANT_ADDRESS ?? '0x0000000000000000000000000000000000000000',
 }
 
@@ -78,6 +78,8 @@ function isoDate(d: Date): string {
 }
 
 export interface InvoiceParams {
+  /** Merchant chain for the payment-method text; defaults to `CHAIN_ID`. */
+  chainId?: number
   invoiceNumber: string
   productId: ProductId
   buyerAddress: string
@@ -130,7 +132,8 @@ export interface InvoiceJson {
   moms_belopp: string
   totalt_inkl_moms: string
   valuta: 'USDC'
-  betalningssatt: 'Kryptovaluta (USDC på Base)'
+  /** `Kryptovaluta (USDC på <network>)`; mainnet is exactly `... på Base)` (#1550, #3834). */
+  betalningssatt: `Kryptovaluta (USDC på ${string})`
   /**
    * #2969: `null` on both non-settled states — never the zero hash. Only
    * `settlement === 'settled_onchain'` carries a real transaction reference.
@@ -207,7 +210,7 @@ export function generateInvoice(params: InvoiceParams): Invoice {
     moms_belopp: formatUsdc(momsBelopp),
     totalt_inkl_moms: formatUsdc(totalInclMoms),
     valuta: 'USDC',
-    betalningssatt: 'Kryptovaluta (USDC på Base)',
+    betalningssatt: `Kryptovaluta (USDC på ${networkDisplayName(params.chainId ?? CHAIN_ID, 'sv')})`,
     blockkedje_referens: blockRef,
     status: STATUS_BY_SETTLEMENT[params.settlement],
   }
@@ -287,8 +290,9 @@ export function renderInvoiceText(
   inv: InvoiceJson,
   productName: string,
   locale: MerchantLocale,
+  chainId: number = CHAIN_ID,
 ): string {
-  return locale === 'sv' ? buildInvoiceText(inv, productName) : buildInvoiceTextEn(inv, productName)
+  return locale === 'sv' ? buildInvoiceText(inv, productName) : buildInvoiceTextEn(inv, productName, chainId)
 }
 
 const STATUS_EN: Record<InvoiceJson['status'], string> = {
@@ -297,7 +301,7 @@ const STATUS_EN: Record<InvoiceJson['status'], string> = {
   'Levererad — ej bekräftad på kedjan': 'Delivered — not confirmed on-chain',
 }
 
-function buildInvoiceTextEn(inv: InvoiceJson, productName: string): string {
+function buildInvoiceTextEn(inv: InvoiceJson, productName: string, chainId: number): string {
   const row = inv.rader[0]
   return `
 ════════════════════════════════════════════════════════════
@@ -333,7 +337,7 @@ SERVICES
 ────────────────────────────────────────────────────────────
 
   Currency:          ${inv.valuta}
-  Payment method:    Cryptocurrency (USDC on Base)
+  Payment method:    Cryptocurrency (USDC on ${networkDisplayName(chainId, 'en')})
   Recipient address: ${inv.saljare.crypto_address}
 
 ${blockchainReferenceSection(inv, 'BLOCKCHAIN REFERENCE')}  Status: ${STATUS_EN[inv.status]}
@@ -356,12 +360,13 @@ export { nextInvoiceNumber }
 // keeps the two identical — and repeat tool calls replay the same invoice.
 const invoicesByPayment = new WeakMap<SettledPayment, Invoice>()
 
-export function invoiceForPayment(payment: SettledPayment, productId: ProductId): Invoice {
+export function invoiceForPayment(payment: SettledPayment, productId: ProductId, chainId?: number): Invoice {
   const cached = invoicesByPayment.get(payment)
   if (cached) return cached
   const invoice = generateInvoice({
     invoiceNumber: nextInvoiceNumber(),
     productId,
+    chainId,
     buyerAddress: payment.from,
     // #2960: `payment.from` is the delegate EOA on `eip3009` and the
     // delegate SMART account (`delegator`) on `erc7710` — see

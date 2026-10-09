@@ -1168,6 +1168,32 @@ function parseMaybeJson(text: string): unknown {
   }
 }
 
+/** The demo merchant's reason code for a settlement wallet below its fail floor (#2979). */
+const MERCHANT_OUT_OF_GAS_REASON = 'settlement_wallet_out_of_gas'
+
+/**
+ * #3834: the local twin of mcp-server's `merchantOutOfGasMessage`
+ * (`support/mcp-context.ts`). Kept here, not shared — the two runtimes do not
+ * import each other — and pinned equal by a parity test.
+ */
+function merchantOutOfGasMessage(settlementsRemaining: unknown, failFloor: unknown): string {
+  const remaining = typeof settlementsRemaining === 'number' ? settlementsRemaining : null
+  const floor = typeof failFloor === 'number' ? failFloor : null
+  const figures =
+    remaining !== null && floor !== null
+      ? ` It has gas for ${remaining} more settlement${remaining === 1 ? '' : 's'} and refuses new payments below ${floor} (settlements_remaining: ${remaining}, fail_floor: ${floor}).`
+      : remaining !== null
+        ? ` settlements_remaining: ${remaining}.`
+        : ''
+  return (
+    `The merchant refused this call: its settlement wallet is out of gas (reason_code: ${MERCHANT_OUT_OF_GAS_REASON}).` +
+    figures +
+    ' No payment was created.' +
+    " The merchant's operator must top up its settlement wallet; until then every retry is refused again." +
+    ' Tell the user, and re-quote once the merchant has been topped up.'
+  )
+}
+
 /**
  * #2983: the local-flow counterpart of mcp-server's `HostedToolError` for the
  * `MERCHANT_NOT_READY` failure — carries the same wire fields
@@ -1183,7 +1209,12 @@ class MerchantNotReadyError extends Error {
   // wrong; the merchant's own wallet needs to recover first.
   readonly retryWithNewQuote = true
 
-  constructor(message: string) {
+  constructor(
+    message: string,
+    // #3834: the out-of-gas branch passes its own reason — that message gives
+    // no retry_after_s to wait out, so the default would point at nothing.
+    readonly nextToolOmittedReason: string = 'the merchant needs to recover first; re-quote after the retry_after_s in the message',
+  ) {
     super(message)
     this.name = 'MerchantNotReadyError'
   }
@@ -1193,7 +1224,8 @@ class MerchantNotReadyError extends Error {
  * #2983: mirrors mcp-server's `merchantNotReadyErrorFor` (`mcp-context.ts`)
  * for the local runtime. Only the merchant's OWN refusal shape — `503
  * { error: 'merchant_not_ready', reason_code, settlements_remaining,
- * retry_after_s }` — maps here. A bare 503 (a load balancer, an HTML outage
+ * fail_floor, retry_after_s }` — maps here (`fail_floor` is read for the
+ * out-of-gas message, #3834). A bare 503 (a load balancer, an HTML outage
  * page, a non-JSON body) is not a capacity signal and keeps going through
  * the #1301 discovery path. `response.clone()` because the caller still
  * needs to read the ORIGINAL response (for `discoveryMissError`'s status)
@@ -1210,7 +1242,18 @@ async function merchantNotReadyErrorFor(response: Response): Promise<MerchantNot
   if (!body || typeof body !== 'object' || (body as Record<string, unknown>).error !== 'merchant_not_ready') {
     return null
   }
-  const { reason_code, settlements_remaining, retry_after_s } = body as Record<string, unknown>
+  const { reason_code, settlements_remaining, fail_floor, retry_after_s } = body as Record<string, unknown>
+  // #3834: out of gas does not recover by waiting — the operator must top the
+  // merchant's settlement wallet up. Same sentence as the hosted runtime's
+  // `merchantOutOfGasMessage` (mcp-server, support/mcp-context.ts), pinned by
+  // a parity test; every other reason keeps the wording below.
+  if (reason_code === MERCHANT_OUT_OF_GAS_REASON) {
+    return new MerchantNotReadyError(
+      merchantOutOfGasMessage(settlements_remaining, fail_floor),
+      // Same reason the hosted runtime returns (support/mcp-context.ts).
+      "the merchant's operator must top up its settlement wallet first; re-quote after that",
+    )
+  }
   return new MerchantNotReadyError(
     'The merchant refused this call: it cannot settle a payment right now' +
       (typeof reason_code === 'string' ? ` (reason_code: ${reason_code})` : '') +
@@ -1264,8 +1307,10 @@ function normalizeError(err: unknown): ToolFailure {
       next_action: err.nextAction,
       retry_with_new_quote: err.retryWithNewQuote,
       // #3103: the local runtime's one decision site — no tool can act until
-      // the merchant recovers; the message carries retry_after_s.
-      next_tool_omitted_reason: 'the merchant needs to recover first; re-quote after the retry_after_s in the message',
+      // the merchant recovers. The reason rides the error (#3834): the
+      // generic one points at the message's retry_after_s, the out-of-gas
+      // one at the operator top-up.
+      next_tool_omitted_reason: err.nextToolOmittedReason,
     }
   }
 

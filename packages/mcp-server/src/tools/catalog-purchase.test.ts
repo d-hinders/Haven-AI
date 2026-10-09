@@ -3567,7 +3567,16 @@ describe('a merchant_not_ready 503 is reported as itself, not a wrong-endpoint m
       expect((res as { next_action?: string }).next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
       const message = (res as { message?: string }).message ?? ''
       expect(message).toContain('settlement_wallet_out_of_gas')
-      expect(message).toContain('60')
+      // #3834: out of gas recovers only when the operator tops the wallet up,
+      // so the message names that and the floor, never a retry interval.
+      // (Was `toContain('60')`, which an incidental digit could satisfy.)
+      expect(message).toContain('fail_floor: 12')
+      expect(message).toContain('settlements_remaining: 0')
+      expect(message).toContain("The merchant's operator must top up its settlement wallet")
+      expect(message).not.toMatch(/often transient|Retry after approximately/)
+      expect((res as { next_tool_omitted_reason?: string }).next_tool_omitted_reason).toBe(
+        "the merchant's operator must top up its settlement wallet first; re-quote after that",
+      )
       // The old, misleading text this replaces must be gone.
       expect(message).not.toContain('discovery document')
       expect((res as { retry_with_new_quote?: boolean }).retry_with_new_quote).toBe(true)
@@ -3588,6 +3597,52 @@ describe('a merchant_not_ready 503 is reported as itself, not a wrong-endpoint m
       expect(res.success).toBe(false)
       expect((res as { code?: string }).code).not.toBe(AgentPaymentFailureCode.MerchantNotReady)
       expect((res as { message?: string }).message ?? '').not.toContain('cannot settle a payment right now')
+    })
+
+    // #3834: the exact out-of-gas sentence. The local runtime's test
+    // (packages/mcp/src/tools.test.ts) pins the SAME literal — that pair is
+    // the hosted/local parity check.
+    it('out of gas: the exact operator-top-up sentence, with the floor beside the remaining count (#3834)', async () => {
+      stubFetch({
+        'POST /mcp': {
+          status: 503,
+          body: { ...MERCHANT_NOT_READY_BODY, settlements_remaining: 11, recovery: 'operator_top_up' },
+          responseHeaders: { 'Retry-After': '60' },
+        },
+      })
+      const res = await handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'buy_vpn',
+        arguments: { plan: 'basic' },
+      })
+      expect((res as { message?: string }).message).toBe(
+        "The merchant refused this call: its settlement wallet is out of gas (reason_code: settlement_wallet_out_of_gas). It has gas for 11 more settlements and refuses new payments below 12 (settlements_remaining: 11, fail_floor: 12). No payment was created. The merchant's operator must top up its settlement wallet; until then every retry is refused again. Tell the user, and re-quote once the merchant has been topped up.",
+      )
+    })
+
+    // #3834: no hosted test pinned the wording for any OTHER reason code
+    // (hosted-egress.test.ts only checks 'capacity' appears). This pins it,
+    // byte for byte, so the out-of-gas branch cannot leak into it.
+    it('any other reason_code keeps the generic retry wording, unchanged (#3834)', async () => {
+      stubFetch({
+        'POST /mcp': {
+          status: 503,
+          body: { error: 'merchant_not_ready', reason_code: 'capacity', settlements_remaining: 2, retry_after_s: 30 },
+        },
+      })
+      const res = await handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'buy_vpn',
+        arguments: { plan: 'basic' },
+      })
+      expect((res as { code?: string }).code).toBe(AgentPaymentFailureCode.MerchantNotReady)
+      expect((res as { message?: string }).message).toBe(
+        'The merchant refused this call: it cannot settle a payment right now (reason_code: capacity), settlements_remaining: 2. No payment was created. Retry after approximately 30s.',
+      )
+      expect((res as { next_tool_omitted_reason?: string }).next_tool_omitted_reason).toBe(
+        'the merchant needs to recover first; re-quote after retry_after_s',
+      )
+      expect((res as { retry_with_new_quote?: boolean }).retry_with_new_quote).toBe(true)
     })
 
     it('never spends the bounded #1271 discovery retry on an honest 503', async () => {

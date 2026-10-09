@@ -298,8 +298,10 @@ retry alike, so a wallet that drains between the two is caught before
 settlement. In the `fail` band the merchant answers
 `HTTP 503 { error: 'merchant_not_ready', reason_code:
 'settlement_wallet_out_of_gas', settlements_remaining, fail_floor,
-retry_after_s }` with a matching `Retry-After` header, and no 402 is ever
-issued. `warn` and an unknown (throwing) read both proceed unchanged, same
+retry_after_s, recovery: 'operator_top_up' }` with a matching `Retry-After`
+header, and no 402 is ever issued. `recovery` (#3834) says the wallet does
+not refill itself: Haven's hosted and local runtimes tell the agent the
+operator must top it up, with the floor, rather than "retry after 60s". `warn` and an unknown (throwing) read both proceed unchanged, same
 rule as `/healthz`; free tools and the `MERCHANT_SKIP_SETTLE_PRODUCT` fixture
 below are exempt because they settle nothing. This is a second, independent
 line of defense — a QA harness that skips the preflight, or races a topped-up

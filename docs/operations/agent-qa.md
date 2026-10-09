@@ -871,7 +871,8 @@ settlement wallet.
 
 When the row is `warn` or `critical`, the job requests Base Sepolia ETH from
 CDP until the live starting balance plus accepted 0.0001 ETH claims reaches
-0.03 ETH, 300 claims are accepted, the six-minute loop budget expires, or CDP
+0.03 ETH, 300 claims are accepted, the shared six-minute budget (what the
+merchant's loop left of it) expires, or CDP
 returns an error or 429. It re-reads the chain afterwards; that reading, not the
 number of accepted requests, decides the row and the history artifact. The
 standing issue records the accepted claim count, amount, stop reason, and a
@@ -881,9 +882,9 @@ CDP's faucet endpoint needs `QA_CDP_API_KEY_ID` and
 `QA_CDP_API_KEY_SECRET`; it does **not** need `CDP_WALLET_SECRET`. Coinbase's
 public documentation does not describe a faucet-only API-key permission, so use
 a dedicated CDP project/key with no wallets or other product configuration and
-reserve it for this workflow. If either secret is absent, the job prints and
-reports `merchant top-up: skipped: no CDP credentials` and the same line for
-the relayer; both rows keep their real bands, no row becomes `unknown`, and that
+reserve it for this workflow. If either secret is absent, the job prints
+`merchant top-up: skipped: no CDP credentials` and the same line for the
+relayer, and the standing issue names the skip per wallet; both rows keep their real bands, no row becomes `unknown`, and that
 absence alone never makes the job red.
 
 Manual fallback: send Base Sepolia ETH to the address in

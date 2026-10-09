@@ -13,8 +13,8 @@ import userEvent from '@testing-library/user-event'
  *
  * The real form wins over the mockup on the two lines that differ: four
  * fields (not three) and the 8-character minimum (not "At least 12
- * characters"). The mockup's "created on Base" note ships nowhere — sign-up
- * provisions on every supported chain.
+ * characters"). The mockup's "created on Base" note ships nowhere — the
+ * network is picked later, at onboarding.
  */
 
 const mockPush = vi.fn()

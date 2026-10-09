@@ -86,8 +86,8 @@ the live EIP-3009 bridge.
 **Accounts.** Signup provisions **one** passkey-owned Hybrid DeleGator, on the
 network chosen at signup (`POST /accounts/hybrid` takes one `chain_id`),
 counterfactually and with zero transactions — one passkey prompt, the only
-onboarding path. There is no in-app path to a second account yet. The **signer set** is user-managed
-(`/agents/:id/account-signers/*`): every change is signed by an existing signer,
+onboarding path. There is no in-app path to a second account yet. The
+**signer set** is user-managed (`/agents/:id/account-signers/*`): every change is signed by an existing signer,
 never by Haven; recovery is a backup signer replacing a lost one.
 **Single-signer accounts are permitted and have no recovery** — recommended
 against after funding, never gated. Both removal actions refuse exactly one

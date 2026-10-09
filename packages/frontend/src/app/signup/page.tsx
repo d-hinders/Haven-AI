@@ -27,8 +27,8 @@ type FieldErrors = Partial<Record<'name' | 'email' | 'password' | 'confirmPasswo
  * Copy is the mockup's, minus its two untrue lines: three fields and "At
  * least 12 characters" give way to the real four-field form with the
  * 8-character minimum, and the "created on Base" note is not shipped —
- * sign-up provisions an account on every supported chain, so no chain is
- * named. The sub-line ("One passkey prompt…") is true of the real flow:
+ * sign-up names no chain because the network is picked later, at
+ * onboarding, where one account is provisioned on it. The sub-line ("One passkey prompt…") is true of the real flow:
  * onboarding is passkey-only (`app/onboarding/copy.ts`).
  */
 function SignupForm() {

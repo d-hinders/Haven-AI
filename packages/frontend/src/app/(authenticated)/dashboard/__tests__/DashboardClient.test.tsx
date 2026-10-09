@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockUseAuth = vi.fn()
@@ -52,6 +53,15 @@ vi.mock('@/hooks/useAccountOperationGate', () => ({
 // its own suite).
 vi.mock('@/hooks/useBudgetRemaining', () => ({
   useBudgetRemaining: () => ({ data: null, loading: false, error: null, refetch: vi.fn() }),
+}))
+
+// #3813: server-saved dismissals are a hook with its own suite — here the
+// dashboard tests pin the WIRING (a dismissed id hides its item; a dismiss
+// on a dismissible kind writes through to the hook).
+const mockUseAttentionDismissals = vi.fn()
+const mockDismissOnServer = vi.fn()
+vi.mock('@/hooks/useAttentionDismissals', () => ({
+  useAttentionDismissals: () => mockUseAttentionDismissals(),
 }))
 
 
@@ -202,6 +212,10 @@ describe('DashboardClient', () => {
     vi.clearAllMocks()
     window.localStorage.clear()
     window.sessionStorage.clear()
+    mockUseAttentionDismissals.mockReturnValue({
+      dismissedIds: new Set<string>(),
+      dismiss: mockDismissOnServer,
+    })
     mockBaseState()
   })
 
@@ -679,13 +693,74 @@ describe('DashboardClient', () => {
       expect(screen.queryByText(/has one way to approve payments/)).not.toBeInTheDocument()
     })
 
-    it('honours the legacy global dismissal key', () => {
-      window.localStorage.setItem('haven.recovery-nudge.dismissed', '1')
+    it('hides the backup item when its id is in the server-saved dismissals (#3813)', () => {
+      mockUseAttentionDismissals.mockReturnValue({
+        dismissedIds: new Set([`no-backup:${RECOMMENDED_ACCOUNT.accountId}`]),
+        dismiss: mockDismissOnServer,
+      })
       mockBaseState([], { accounts: [RECOMMENDED_ACCOUNT], spend: { failedIntents7d: 0 } })
 
       render(<DashboardClient />)
 
       expect(screen.queryByText(/has one way to approve payments/)).not.toBeInTheDocument()
+    })
+
+    it('writes a server-saved dismissal through the hook when the backup item is dismissed', async () => {
+      const user = userEvent.setup()
+      mockBaseState([], { accounts: [RECOMMENDED_ACCOUNT], spend: { failedIntents7d: 0 } })
+
+      render(<DashboardClient />)
+      await user.click(screen.getByTestId(`attention-dismiss-no-backup:${RECOMMENDED_ACCOUNT.accountId}`))
+
+      expect(mockDismissOnServer).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'no-backup', accountId: RECOMMENDED_ACCOUNT.accountId }),
+      )
+      // The legacy key is no longer written — the server owns persistence now.
+      expect(window.localStorage.getItem('haven.recovery-nudge.dismissed')).toBeNull()
+    })
+
+    it('writes a needs-setup dismissal through the hook when a setup item is dismissed', async () => {
+      const user = userEvent.setup()
+      // An active agent with no usable budget raises "Needs setup"
+      // (dashboard-attention rule 1) — the agent a user keeps without a
+      // budget on purpose.
+      const budgetlessAgent: DashboardAgentPreview = {
+        id: 'agent-9',
+        name: 'Kept agent',
+        status: 'active',
+        accountId: null,
+        accountName: null,
+        accountChainId: 8453,
+        allowances: [],
+        budgets: [],
+        receivedSubBudgets: [],
+        stats: {
+          d7: {
+            gross: { usd: 0, eur: 0, sek: 0 },
+            net: { usd: 0, eur: 0, sek: 0 },
+            approx: false,
+            payments: 0,
+            refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+          },
+          d30: {
+            gross: { usd: 0, eur: 0, sek: 0 },
+            net: { usd: 0, eur: 0, sek: 0 },
+            approx: false,
+            payments: 0,
+            refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+          },
+          lastPaymentAt: null,
+          lastCounterparty: null,
+        },
+      }
+      mockBaseState([budgetlessAgent])
+
+      render(<DashboardClient />)
+      await user.click(screen.getByTestId('attention-dismiss-needs-setup:agent-9'))
+
+      expect(mockDismissOnServer).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'needs-setup', agentId: 'agent-9' }),
+      )
     })
   })
 

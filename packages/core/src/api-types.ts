@@ -1526,6 +1526,30 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/user/attention-dismissals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The caller’s saved "Needs you" dismissals.
+         * @description Server-saved dismissals for the recurring "Needs you" items (#3813), stored per account (backup) and per agent (needs setup) — permanent, and visible from every device of the same user. Presentation-only: nothing here is on the payment path, and there is no undismiss — the backup recommendation stays visible on the account page and a budget-less agent on the agent page.
+         */
+        get: operations["listAttentionDismissals"];
+        put?: never;
+        /**
+         * Dismiss one recurring "Needs you" item.
+         * @description Idempotent: re-dismissing answers the same 201 as the first write. `item_kind` decides which id the body must carry — `no-backup` requires `account_id` (the backup item is per account), `needs-setup` requires `agent_id` (per agent within its account). A foreign or unknown id is a 404, never a 403 — the route does not confirm that an id exists.
+         */
+        post: operations["createAttentionDismissal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/accounting/export": {
         parameters: {
             query?: never;
@@ -3850,6 +3874,40 @@ export type components = {
              * @description Retention is 7 days from `created_at` (#3597).
              */
             expires_at: string;
+        };
+        /** @description One server-saved "Needs you" dismissal (#3813). `no-backup` rows carry `account_id` (the backup item is per account); `needs-setup` rows carry `agent_id` (per agent within its account). Permanent — there is no undismiss. */
+        AttentionDismissal: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            item_kind: "no-backup" | "needs-setup";
+            /**
+             * Format: uuid
+             * @description Set on `no-backup` rows; null otherwise.
+             */
+            account_id: string | null;
+            /**
+             * Format: uuid
+             * @description Set on `needs-setup` rows; null otherwise.
+             */
+            agent_id: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        AttentionDismissalsResponse: {
+            dismissals: components["schemas"]["AttentionDismissal"][];
+        };
+        /** @description The kind decides which id the body carries; any other pairing is refused before the handler. */
+        AttentionDismissalInput: {
+            /** @enum {string} */
+            item_kind: "no-backup";
+            /** Format: uuid */
+            account_id: string;
+        } | {
+            /** @enum {string} */
+            item_kind: "needs-setup";
+            /** Format: uuid */
+            agent_id: string;
         };
         CatalogEntryMerchant: {
             /** Format: uuid */
@@ -13315,6 +13373,110 @@ export interface operations {
                 };
             };
             /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listAttentionDismissals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every dismissal the caller has made, oldest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttentionDismissalsResponse"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    createAttentionDismissal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttentionDismissalInput"];
+            };
+        };
+        responses: {
+            /** @description Dismissed. Returns the stored dismissal. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttentionDismissal"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The account or agent does not exist or belongs to another user. */
             404: {
                 headers: {
                     [name: string]: unknown;

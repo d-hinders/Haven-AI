@@ -4585,6 +4585,52 @@ export const openapiSpec = {
         },
       },
     },
+    '/user/attention-dismissals': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'listAttentionDismissals',
+        summary: 'The caller\u2019s saved "Needs you" dismissals.',
+        description:
+          'Server-saved dismissals for the recurring "Needs you" items (#3813), stored per account (backup) and per agent (needs setup) — permanent, and visible from every device of the same user. Presentation-only: nothing here is on the payment path, and there is no undismiss — the backup recommendation stays visible on the account page and a budget-less agent on the agent page.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Every dismissal the caller has made, oldest first.',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/AttentionDismissalsResponse' } },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'createAttentionDismissal',
+        summary: 'Dismiss one recurring "Needs you" item.',
+        description:
+          'Idempotent: re-dismissing answers the same 201 as the first write. `item_kind` decides which id the body must carry — `no-backup` requires `account_id` (the backup item is per account), `needs-setup` requires `agent_id` (per agent within its account). A foreign or unknown id is a 404, never a 403 — the route does not confirm that an id exists.',
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/AttentionDismissalInput' },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Dismissed. Returns the stored dismissal.',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/AttentionDismissal' } },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'The account or agent does not exist or belongs to another user.' },
+        },
+      },
+    },
     // #2847 (epic #1440): the /user/owners directory is deleted. It probed
     // each linked account's owners over the Safe ABI and answered
     // { owners: [], partialFailure: true } on every delegation account, and
@@ -9548,6 +9594,52 @@ export const openapiSpec = {
           expires_at: { ...isoDateTime, description: 'Retention is 7 days from `created_at` (#3597).' },
         },
         additionalProperties: false,
+      },
+      AttentionDismissal: {
+        type: 'object',
+        description:
+          'One server-saved "Needs you" dismissal (#3813). `no-backup` rows carry `account_id` (the backup item is per account); `needs-setup` rows carry `agent_id` (per agent within its account). Permanent — there is no undismiss.',
+        required: ['id', 'item_kind', 'account_id', 'agent_id', 'created_at'],
+        properties: {
+          id: uuid,
+          item_kind: { type: 'string', enum: ['no-backup', 'needs-setup'] },
+          account_id: { ...uuid, nullable: true, description: 'Set on `no-backup` rows; null otherwise.' },
+          agent_id: { ...uuid, nullable: true, description: 'Set on `needs-setup` rows; null otherwise.' },
+          created_at: isoDateTime,
+        },
+        additionalProperties: false,
+      },
+      AttentionDismissalsResponse: {
+        type: 'object',
+        required: ['dismissals'],
+        properties: {
+          dismissals: { type: 'array', items: { $ref: '#/components/schemas/AttentionDismissal' } },
+        },
+        additionalProperties: false,
+      },
+      AttentionDismissalInput: {
+        description:
+          'The kind decides which id the body carries; any other pairing is refused before the handler.',
+        oneOf: [
+          {
+            type: 'object',
+            required: ['item_kind', 'account_id'],
+            properties: {
+              item_kind: { type: 'string', enum: ['no-backup'] },
+              account_id: uuid,
+            },
+            additionalProperties: false,
+          },
+          {
+            type: 'object',
+            required: ['item_kind', 'agent_id'],
+            properties: {
+              item_kind: { type: 'string', enum: ['needs-setup'] },
+              agent_id: uuid,
+            },
+            additionalProperties: false,
+          },
+        ],
       },
       CatalogEntryMerchant: {
         type: 'object',

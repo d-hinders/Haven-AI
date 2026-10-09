@@ -87,16 +87,33 @@ export interface DashboardAttentionInput {
    */
   accountNames?: Record<string, string>
   /**
-   * The legacy global dismissal (`haven.recovery-nudge.dismissed`): one flag
-   * that hides every backup item, until #3813 owns persistence per item.
+   * Rule-item ids the user has dismissed — the server-saved list (#3813,
+   * `useAttentionDismissals`) merged with the session-only set. A dismissal
+   * is PER ACCOUNT / PER AGENT because it is keyed by the item id
+   * (`no-backup:<accountId>`, `needs-setup:<agentId>`): an account funded
+   * after a backup dismissal elsewhere still raises its own item.
    */
-  backupDismissed?: boolean
+  dismissedIds?: ReadonlySet<string>
   /**
    * While the setup guide's "Add USDC" step is open (#3818), the low-balance
    * and zero-USDC items are held back — the guide IS the ask for funds.
    */
   holdBackLowBalance?: boolean
 }
+
+/**
+ * The kinds a user can dismiss (#3813, owner decisions 2026-10-09): "No
+ * backup signer" (per account) and "Needs setup" for an agent kept without
+ * a budget on purpose (per agent). Everything else — low balance, budget
+ * reached, payments failed — offers NO dismiss control: those are states the
+ * user must resolve, not preferences the user can opt out of. `NeedsYou`
+ * reads this to set each row's `dismissible`, so the rules layer stays the
+ * one definition and #3809/#3818 cannot drift from the dashboard.
+ */
+export const DISMISSIBLE_ATTENTION_KINDS: ReadonlySet<AttentionItemKind> = new Set([
+  'needs-setup',
+  'no-backup',
+])
 
 /** A usable budget: a live delegation budget, or an open received sub-budget. */
 function hasUsableBudget(agent: DashboardAgent): boolean {
@@ -164,7 +181,7 @@ function usedAtLeast90Percent(
  * only when its condition holds on KNOWN values.
  */
 export function computeAttentionItems(input: DashboardAttentionInput): AttentionRuleItem[] {
-  const { overview, budgetRemaining, accountNames, backupDismissed, holdBackLowBalance } = input
+  const { overview, budgetRemaining, accountNames, dismissedIds, holdBackLowBalance } = input
   const items: AttentionRuleItem[] = []
   // Defensive at the wire edge: an overview without the #3803 fields (an old
   // cached response, a lagging fixture) means the data is UNKNOWN — the same
@@ -345,26 +362,34 @@ export function computeAttentionItems(input: DashboardAttentionInput): Attention
   // `needs_backup_recommendation` is the server's answer (#1205) — false on
   // test networks by construction (`mainnet-gate.ts`), so the frontend keeps
   // no second copy of "which chains carry value". `funded: null` is an
-  // unknown USDC read — never a nag.
-  if (!backupDismissed) {
-    for (const account of accounts) {
-      if (account.isTestnet) continue
-      if (account.needs_backup_recommendation !== true) continue
-      if (account.funded !== true) continue
-      const label = accountLabel(account, overview, accountNames)
-      items.push({
-        id: `no-backup:${account.accountId}`,
-        kind: 'no-backup',
-        tone: 'warning',
-        badge: 'Backup',
-        title: `${label} has one way to approve payments`,
-        subtitle:
-          'Add a backup — a backup passkey or a wallet — so a lost device never means a lost account.',
-        actionLabel: 'Add backup',
-        href: `/accounts/${account.accountId}`,
-        accountId: account.accountId,
-      })
-    }
+  // unknown USDC read — never a nag. Hiding is owned by `dismissedIds`
+  // (#3813) below, which is per account because it is keyed by item id.
+  for (const account of accounts) {
+    if (account.isTestnet) continue
+    if (account.needs_backup_recommendation !== true) continue
+    if (account.funded !== true) continue
+    const label = accountLabel(account, overview, accountNames)
+    items.push({
+      id: `no-backup:${account.accountId}`,
+      kind: 'no-backup',
+      tone: 'warning',
+      badge: 'Backup',
+      title: `${label} has one way to approve payments`,
+      subtitle:
+        'Add a backup — a backup passkey or a wallet — so a lost device never means a lost account.',
+      actionLabel: 'Add backup',
+      href: `/accounts/${account.accountId}`,
+      accountId: account.accountId,
+    })
+  }
+
+  // ── 6. Dismissed (#3813) — the last word ────────────────────────────────
+  // A failed dismissal read NEVER hides an item: `dismissedIds` only ever
+  // contains ids a successful server read (or this session's own dismiss)
+  // put there, so a read that failed shows the items again — the nag is the
+  // safe direction, silence is the destructive one.
+  if (dismissedIds !== undefined && dismissedIds.size > 0) {
+    return items.filter((item) => !dismissedIds.has(item.id))
   }
 
   return items

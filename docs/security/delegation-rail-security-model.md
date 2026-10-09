@@ -2860,3 +2860,19 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > surface, the #1969 paragraph and the `wrong_wallet` paragraph) and the
 > #3812 note in §3; nothing else in this document was re-read for it, and
 > `last-verified` is not bumped.
+
+> **Re-verified (#3813, 2026-10-10, server-saved "Needs you" dismissals):** this
+> diff touches one file in this document's coverage list,
+> `packages/backend/src/routes/user.ts` — it adds `GET`/`POST
+> /user/attention-dismissals` (migration 110's `attention_dismissals` table
+> behind them). Both endpoints are presentation-only: a dismissal hides a
+> nagging dashboard row and nothing else — it grants no spending ability, does
+> not touch `pickSigningPath`, budgets, allowances, signers or any §3/§6
+> surface, and no payment-path code reads the table. The POST is scoped to the
+> JWT subject with an ownership `EXISTS` against `smart_accounts`/`agents`, so
+> a dismissal can never be planted for another user's account or agent, and
+> the spec's `oneOf` body plus the table's CHECK refuse every kind except the
+> two owner-approved ones. No new spender, no authority grant, no custody
+> change. Scope of this re-read: the `routes/user.ts` coverage and the
+> endpoints above; nothing else in this document was re-read for it.
+> `last-verified` is bumped to 2026-10-10 for exactly this coverage.

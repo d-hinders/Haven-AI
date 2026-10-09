@@ -1488,8 +1488,8 @@ console deploys from `dev` only (`git.deploymentEnabled`), so no per-PR
 console preview exists, and since #3821 the dashboard's
 `git.deploymentEnabled` map also limits which branches deploy. The dashboard's
 watch file excludes tests and Playwright baselines. The maps and watch files
-decide only whether the console deploys and
-whether the dashboard builds, move
+decide only whether each project deploys and
+builds, move
 no authority, and the same scope note holds. The console's CI render
 smoke (#3583) only proves, in a browser, that the console renders under that
 CSP and that the CSP refuses an un-nonced inline script; it moves no

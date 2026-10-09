@@ -16,8 +16,9 @@ covers:
 last-verified: "2026-10-06"
 ---
 
-> **Re-verified #3821 (2026-10-09):** only the Ignored Build Step paragraph
-> changed — the frontend project takes the first-preview path for opt-in
+> **Re-verified #3821 (2026-10-09):** only the *Deploys from `dev` only*
+> paragraph (the "Skipped - Not affected" residual) and the Ignored Build Step
+> paragraph changed — the frontend project takes the first-preview path for opt-in
 > `preview/*` branches only. Nothing else in this document was re-verified,
 > and `last-verified` is not bumped.
 
@@ -126,7 +127,9 @@ repo — record what you actually entered on the issue when you do them.
 
 **Deploys from `dev` only (#3681).** `packages/ops/vercel.json` sets
 `git.deploymentEnabled` to `{ "**": false, "dev": true }`: a push to any other
-branch creates no console deployment at all. Vercel deploys a branch when any
+branch creates no console build. Vercel may still record a "Skipped - Not
+affected" deployment, apparently from its monorepo skip (see
+[`dev-environment.md` § PR previews are opt-in](dev-environment.md#pr-previews-are-opt-in)). Vercel deploys a branch when any
 `true` rule matches it, so `dev` matches and nothing else does. Previews could
 never sign in (below), and every push used to spend one deployment of the
 Hobby plan's 100-a-day cap on this project even when the Ignored Build Step

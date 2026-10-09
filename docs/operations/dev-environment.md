@@ -350,8 +350,8 @@ Since #3821 the frontend project deploys only three kinds of branch
 host), `main` (production) and `preview/*`. A push to any other branch, a
 `feat/*` PR or a `hotfix/*` included, gets no frontend preview and no build.
 Vercel may still record a "Skipped - Not affected" deployment for some of these
-pushes, from its monorepo skip, which runs before `vercel.json` applies. After
-#3681 haven-ops showed 2–3 a day from that skip, against 14–38 before it. No
+pushes, apparently from its monorepo skip. #3821's Method counted 22–38
+haven-ops deployments a day before #3681 took effect and 3 on 2026-10-08. No
 required check reads a preview: browser smoke and visual regression run against
 their own local server.
 

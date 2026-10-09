@@ -158,8 +158,14 @@ test.describe('agent panel empty states and card banners', () => {
     const toggle = page.getByRole('button', { name: /Removed/ })
     await expect(toggle).toContainText('1 still has an active budget')
     await expect(toggle).toHaveScreenshot('agentpanel-removed-toggle-warning-desktop.png', SNAPSHOT_OPTIONS)
+    // Collapsed means not rendered (#3829): the panel stays in the DOM for
+    // `aria-controls`, but computes to `display: none`.
+    const removedPanel = page.locator('#removed-agent-list')
+    await expect(removedPanel).toHaveCount(1)
+    await expect(removedPanel).toBeHidden()
 
     await toggle.click()
+    await expect(removedPanel).toBeVisible()
     const card = page.getByRole('group', { name: 'Removed agents' }).getByTestId('agent-card')
     await expect(card.getByRole('button', { name: `Finish revoking ${agent.name}` })).toHaveCount(1)
     await expect(card).toHaveScreenshot('agentcard-half-removed-desktop.png', SNAPSHOT_OPTIONS)

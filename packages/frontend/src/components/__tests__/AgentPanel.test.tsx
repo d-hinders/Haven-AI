@@ -217,6 +217,25 @@ describe('AgentPanel rail affordances', () => {
     expect(screen.getByText('Old agent')).toBeVisible()
     expect(controlled).not.toHaveAttribute('hidden')
   })
+
+  it('collapses Removed with a class, not only the attribute a utility overrides (#3829)', () => {
+    setAgents([agent({ id: 'archived-agent', name: 'Old agent', archived_at: '2026-06-01T00:00:00Z' })])
+
+    render(<AgentPanel />)
+
+    // jsdom honours the `hidden` attribute without Tailwind loaded, so the
+    // attribute test above passes even when `.grid` would win in a browser.
+    // The class list is what the browser actually sees.
+    const toggle = screen.getByRole('button', { name: /Removed\s*\(1\)/ })
+    const controlled = document.getElementById('removed-agent-list')!
+    expect(controlled).toHaveClass('hidden')
+    expect(controlled).not.toHaveClass('grid')
+
+    fireEvent.click(toggle)
+
+    expect(controlled).toHaveClass('grid')
+    expect(controlled).not.toHaveClass('hidden')
+  })
 })
 
 /**

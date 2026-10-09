@@ -2564,8 +2564,8 @@ export default function DesignSystemPage() {
               that is connected but is not the account&apos;s owner gets the second caption
               (`wrong_wallet` in `useAccountOperationGate`, #2073): it names both addresses, because
               &quot;connect a wallet&quot; would send the user back to the wallet they already
-              connected. The header wallet pill renders the matching &quot;Wrong wallet&quot;
-              state in the same case.
+              connected. In-flow, the connect control reads &quot;Switch wallet&quot; in the
+              same case (the header wallet pill left the top bar in #3825).
             </p>
           </div>
         </Card>
@@ -2912,13 +2912,13 @@ export default function DesignSystemPage() {
         description="Which passkey is about to sign, as the wallet menu states it. Two states, because they are two different facts: a credential this device's marker matched, and the passkeys[0] fallback used when no enrolled passkey carries this device's marker. The fallback is deliberate and load-bearing — see delegation-rail-security-model.md §6 — and until #1952 the menu rendered NOTHING in that case, going silent in exactly the case where the credential was chosen by array position."
       >
         {/*
-          Rendered with props forced, as every gallery state is — and since
-          #1969 (owner decision 2026-08-26) the fallback state is ALSO a
-          reachable production render: `useActiveSigner` resolves a
-          `delegator_passkey` for any non-empty hydrated signer set, so a
-          marker-less user reaches it through ordinary hydration. The
-          app-state proof lives in `e2e/wallet-signer-offering.spec.ts`; this
-          showcase keeps both states side by side under the blocking pixel
+          Rendered with props forced, as every gallery state is. Since #3825
+          the wallet pill renders only in the connect flow's approval step,
+          and only while not ready, so neither state is reachable from an app
+          route any more — this page is where they live (proof:
+          `e2e/wallet-signing-credential-states.spec.ts`). The marker-less
+          user sees the `PasskeyElsewhereHint` line on each signing flow
+          instead. Both states stay side by side under the blocking pixel
           gate so their designed difference stays photographed.
         */}
         {/*

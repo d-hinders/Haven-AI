@@ -12,9 +12,10 @@ vi.mock('@/components/WalletConnectAction', () => ({
   default: () => <button type="button">Connect wallet</button>,
 }))
 
-const { mockGrant, mockReady, mockBudgets, mockBudgetsError, mockReload, mockSignersLoading, mockHasPasskeys } = vi.hoisted(() => ({
+const { mockGrant, mockReady, mockBudgets, mockBudgetsError, mockReload, mockSignersLoading, mockHasPasskeys, mockPasskeyElsewhere } = vi.hoisted(() => ({
   mockSignersLoading: vi.fn(() => false),
   mockHasPasskeys: vi.fn((): boolean | null => null),
+  mockPasskeyElsewhere: vi.fn(() => false),
   mockGrant: vi.fn(),
   mockReady: vi.fn(() => true),
   mockBudgets: vi.fn((): unknown[] | null => []),
@@ -32,6 +33,7 @@ vi.mock('@/hooks/useDelegationBudget', () => ({
     ready: mockReady(),
     signersLoading: mockSignersLoading(),
     hasPasskeys: mockHasPasskeys(),
+    passkeyElsewhere: mockPasskeyElsewhere(),
     signersError: null,
   }),
 }))
@@ -150,6 +152,7 @@ beforeEach(() => {
   mockReady.mockReturnValue(true)
   mockSignersLoading.mockReturnValue(false)
   mockHasPasskeys.mockReturnValue(null)
+  mockPasskeyElsewhere.mockReturnValue(false)
   mockBudgets.mockReset()
   mockBudgets.mockReturnValue([])
   mockBudgetsError.mockReset()
@@ -376,6 +379,16 @@ describe('FundMerchantModal (#3331)', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
     expect(screen.getByText(text)).toBeDefined()
     if (has === false) expect(screen.queryByText(/passkey/i)).toBeNull()
+  })
+
+  it('review step: a signable budget whose passkey is elsewhere carries the cross-device hint (#3825)', async () => {
+    mockBudgets.mockReturnValue([])
+    mockPasskeyElsewhere.mockReturnValue(true)
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
+    expect(screen.getByText(/passkey may be on another device/)).toBeDefined()
   })
 
   it('review step: no wallet connect while the signer set loads', async () => {

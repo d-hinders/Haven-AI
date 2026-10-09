@@ -35,13 +35,16 @@ which is production.)
    address and approve with your passkey. You supply the address only — the wallet
    doesn't need to be connected, and you pay no gas.
 3. **Check the card now lists two ways to approve:** your wallet (labeled
-   "Wallet"), and your passkey (labeled "Passkey · added {date}", #1679).
+   "Browser wallet", its address behind "Show address", #3825), and your
+   passkey (labeled "Passkey · added {date}", #1679).
 
 ## Testing on a preview
 
 1. **Sign in** with email + password — same account, same data, every preview
    points at the same dev backend.
-2. **Connect your wallet before anything else.**
+2. **Connect your wallet before anything else:** Settings → Signers → Connect
+   wallet (the top bar has no wallet button since #3825), or the in-flow
+   Connect wallet a signing screen offers.
 3. Set budgets, revoke, manage signers, run agents. Each action pops a MetaMask
    signature instead of a passkey prompt.
 
@@ -57,12 +60,15 @@ unhelpful error — it is never offered at all, and the app falls back to the
 passkey path (the cross-device QR dead end above) or shows the no-signer state.
 Check MetaMask's selected account first; "connected" alone proves nothing here.
 
-The card may say *"This account's passkey may be on another device"*.
-On a preview that's expected — ignore it, the wallet signs.
+If a signing screen says *"This account's passkey may be on another device"*,
+the enrolled wallet is NOT the one that will sign — the passkey path will, and
+that ends at the cross-device QR dead end above (since #3825 the line shows only
+on the passkey path). Connect the enrolled wallet and retry.
 
 ## Testing passkeys on a preview
 
-You don't need a new account. Sign in, connect your wallet, then **Backup &
+You don't need a new account. Sign in, connect your wallet (Settings → Signers),
+then **Backup &
 recovery → add a backup passkey** — the wallet signs the change and the new
 passkey is created on that domain. Only onboarding itself still needs a
 throwaway account.

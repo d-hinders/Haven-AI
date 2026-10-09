@@ -11,7 +11,7 @@ vi.mock('@/components/WalletConnectAction', () => ({
 const { mockGet, mockGrant, mockRevoke, mockReload, mockBudgetsError, mockTaskBudgets, mockHookArgs, mockToast, mockSigner } =
   vi.hoisted(() => ({
   // #3812: whether this device can sign, and whether the signer set is known.
-  mockSigner: { ready: true, signersLoading: false, signersError: null as string | null },
+  mockSigner: { ready: true, signersLoading: false, signersError: null as string | null, passkeyElsewhere: false },
   mockHookArgs: vi.fn(),
   mockGet: vi.fn(),
   mockGrant: vi.fn(),
@@ -35,6 +35,7 @@ vi.mock('@/hooks/useDelegationBudget', () => ({
     ready: mockSigner.ready,
     signersLoading: mockSigner.signersLoading,
     signersError: mockSigner.signersError,
+    passkeyElsewhere: mockSigner.passkeyElsewhere,
     budgetsError: mockBudgetsError(),
     reload: mockReload,
     }
@@ -86,6 +87,7 @@ function taskBudget(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   mockSigner.ready = true
+  mockSigner.passkeyElsewhere = false
   mockSigner.signersLoading = false
   mockSigner.signersError = null
   mockGet.mockReset()
@@ -99,6 +101,44 @@ beforeEach(() => {
   mockToast.success.mockClear()
   mockToast.error.mockClear()
   mockToast.info.mockClear()
+})
+
+// #3825: one cross-device heads-up for every signature the card asks for.
+describe('DelegationBudgetCard cross-device hint (#3825)', () => {
+  it('shows the hint once when this device can sign but the passkey is elsewhere', async () => {
+    mockSigner.passkeyElsewhere = true
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(await screen.findAllByText(/passkey may be on another device/)).toHaveLength(1)
+  })
+
+  it('shows no hint when the passkey is on this device', async () => {
+    render(<DelegationBudgetCard {...PROPS} />)
+    await screen.findByText('Spending')
+    expect(screen.queryByText(/passkey may be on another device/)).toBeNull()
+  })
+
+  it('a retired agent with a live budget still shows the hint — its Stop is an owner signature too', async () => {
+    mockSigner.passkeyElsewhere = true
+    mockGet.mockReturnValue([budget()])
+    render(<DelegationBudgetCard {...PROPS} retired="archived" />)
+    expect(await screen.findAllByText(/passkey may be on another device/)).toHaveLength(1)
+  })
+
+  it('a retired agent with no active budget shows no hint — nothing to approve', async () => {
+    mockSigner.passkeyElsewhere = true
+    mockGet.mockReturnValue([])
+    render(<DelegationBudgetCard {...PROPS} retired="archived" />)
+    await screen.findByText('No active budget.')
+    expect(screen.queryByText(/passkey may be on another device/)).toBeNull()
+  })
+
+  it('shows no hint while nobody here can sign', async () => {
+    mockSigner.passkeyElsewhere = true
+    mockSigner.ready = false
+    render(<DelegationBudgetCard {...PROPS} />)
+    await screen.findByText('Spending')
+    expect(screen.queryByText(/passkey may be on another device/)).toBeNull()
+  })
 })
 
 describe('DelegationBudgetCard (#833)', () => {

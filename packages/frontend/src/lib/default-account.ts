@@ -7,7 +7,7 @@ import type { SmartAccount } from '@/context/AuthContext'
  * Haven has no global "active" account. Every surface shows all accounts and
  * an account-specific action picks its account locally; this is only the
  * pre-selection for those pickers and the subject of account-agnostic chrome
- * such as the header wallet pill.
+ * such as the wallet pill (in the connect flow's approval step).
  */
 export function resolveDefaultAccount(
   accounts: readonly SmartAccount[] | null | undefined,

@@ -12,6 +12,7 @@ import { ApiRequestError } from '@/lib/api'
 import Link from 'next/link'
 import ConfirmDialog from '../ConfirmDialog'
 import WalletConnectAction from '../WalletConnectAction'
+import PasskeyElsewhereHint from '../PasskeyElsewhereHint'
 import { ApprovalRequiredBanner } from '../haven/ApprovalRequiredBanner'
 import { InlineAlert } from '../ui/InlineAlert'
 
@@ -69,7 +70,7 @@ export function RemoveAgentDialog({
   onArchive: () => Promise<void>
   onClose: () => void
 }) {
-  const { revokeAll, ready, busy, budgets, budgetsError, signersError, signersLoading, hasPasskeys } = useDelegationBudget(agent.id, chainId)
+  const { revokeAll, ready, busy, budgets, budgetsError, signersError, signersLoading, hasPasskeys, passkeyElsewhere } = useDelegationBudget(agent.id, chainId)
   const { balance, hasRecoverableUsdc } = useDelegateBalance(agent.id)
   const [phase, setPhase] = useState<'confirm' | 'working' | 'filing_failed' | 'too_many'>('confirm')
   const [error, setError] = useState<string | null>(null)
@@ -242,6 +243,7 @@ export function RemoveAgentDialog({
               — or remove now and sweep later; removal never blocks recovery.
             </ApprovalRequiredBanner>
           )}
+          {needsSignature && ready && passkeyElsewhere ? <PasskeyElsewhereHint /> : null}
           {needsSignature && !ready && (
             <div className="space-y-2">
               <p className="text-xs text-[var(--v2-ink-3)]">

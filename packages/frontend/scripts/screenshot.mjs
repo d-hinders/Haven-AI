@@ -2097,6 +2097,26 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
       passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
     }
   }
+  if (pathname === '/user/signers') {
+    // #3825: Settings → Signers — every signer once, with the accounts it
+    // approves. The same one passkey the account-scoped reads above serve,
+    // approving the fixture account.
+    return {
+      signers: [
+        {
+          kind: 'passkey',
+          key_id: '0x' + '11'.repeat(32),
+          created_at: '2026-03-03T12:00:00.000Z',
+          accounts: [{
+            account_id: FIXTURE_ACCOUNT.id,
+            account_address: FIXTURE_ACCOUNT.account_address,
+            account_name: FIXTURE_ACCOUNT.name,
+            chain_id: FIXTURE_ACCOUNT.chain_id,
+          }],
+        },
+      ],
+    }
+  }
   if (pathname.startsWith('/agents/') && pathname.endsWith('/account-signers')) {
     // #3812: the agent-scoped signer read behind the budget card, the remove
     // dialog and the re-key modal. Unkeyed, it fell through to the empty
@@ -5529,7 +5549,7 @@ export const SCENARIOS = {
 
   'wrong-wallet': {
     description:
-      'The wrong-wallet gate state (#2073): a hydrated hybrid signer set naming an EOA owner, a connected wallet that is NOT it — the header Wrong wallet pill and its popover',
+      'The wrong-wallet gate state (#2073): a hydrated hybrid signer set naming an EOA owner, a connected wallet that is NOT it — the account page Backup & recovery card offering Switch wallet in place (the header pill left the top bar in #3825)',
     // ── Why this scenario exists ─────────────────────────────────────────────
     //
     // #2068 made the signer gate fail closed for an unrelated wallet, and
@@ -5559,32 +5579,55 @@ export const SCENARIOS = {
       return undefined
     },
     async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/dashboard`, {
+      // #3825: the header pill is gone; the mismatch is now named where it
+      // blocks — the account's Backup & recovery card, whose in-flow
+      // `WalletConnectAction` (#3812) reads "Switch wallet" for a connected
+      // wallet that is not the owner. Waiting on that name pins the state
+      // through the real path — reconnect, hydration, gate — and a run where
+      // the healthy state renders instead FAILS here.
+      await page.goto(`${BASE_URL}/accounts/${FIXTURE_ACCOUNT.id}`, {
         waitUntil: 'domcontentloaded',
         timeout: 60_000,
       })
       await dismissMobileSidebar(page, vp)
-
-      // The header names the mismatch. Waiting on the accessible name pins
-      // the state through the real path — reconnect, hydration, gate — and a
-      // run where the normal address pill renders instead FAILS here rather
-      // than photographing the silent-disagreement defect as evidence.
-      const pill = page.getByRole('button', { name: 'Wrong wallet' })
-      await pill.waitFor({ timeout: 30_000 })
-      const header = page.locator('header').first()
-      await shoot(header, 'header-pill')
-
-      // The fix is one click away: the wallet menu with Switch wallet.
-      await pill.click()
-      const popover = page.getByRole('dialog', { name: 'Wallet menu' })
-      await popover.waitFor({ timeout: 15_000 })
-      await popover.getByRole('button', { name: 'Switch wallet' }).waitFor({ timeout: 15_000 })
-      // The mismatch note (design-review finding on #2073): the popover must
-      // not photograph identical to the healthy connected state.
-      await popover
-        .getByText('This is not the wallet that controls this account', { exact: false })
-        .waitFor({ timeout: 15_000 })
-      await shoot(popover, 'popover')
+      const heading = page.getByRole('heading', { name: 'Backup & recovery' })
+      await heading.waitFor({ timeout: 30_000 })
+      const card = page.locator('div.rounded-\\[10px\\]', { has: heading })
+      await card.getByRole('button', { name: 'Switch wallet' }).waitFor({ timeout: 30_000 })
+      await shoot(card, 'account-signers')
+    },
+  },
+  'settings-signers': {
+    description:
+      'Settings → Signers (#3825): every passkey and wallet once, with the accounts each approves — a passkey on two networks, a dateless passkey (ordinal label), and an owner wallet with its address behind Show address',
+    api(apiPath) {
+      if (apiPath === '/user/signers') {
+        const main = {
+          account_id: FIXTURE_ACCOUNT.id,
+          account_address: FIXTURE_ACCOUNT.account_address,
+          account_name: FIXTURE_ACCOUNT.name,
+          chain_id: FIXTURE_ACCOUNT.chain_id,
+        }
+        const mainnet = { ...main, account_id: 'acc-mainnet', account_address: '0x' + 'a2'.repeat(20), chain_id: 8453 }
+        return {
+          signers: [
+            { kind: 'passkey', key_id: '0x' + '11'.repeat(32), created_at: '2026-03-03T12:00:00.000Z', accounts: [mainnet, main] },
+            { kind: 'passkey', key_id: '0x' + '22'.repeat(32), created_at: null, accounts: [main] },
+            { kind: 'wallet', address: '0x' + 'ee'.repeat(20), accounts: [main] },
+          ],
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/settings#signers`, { waitUntil: 'networkidle', timeout: 30_000 })
+      await page.evaluate(() => document.fonts.ready)
+      await dismissMobileSidebar(page, vp)
+      const heading = page.getByRole('heading', { name: 'Signers' })
+      await heading.waitFor({ timeout: 15_000 })
+      const section = page.locator('#signers')
+      await section.getByText('Passkey 2').waitFor({ timeout: 15_000 })
+      await shoot(section, 'section')
     },
   },
   'modal-migrations': {

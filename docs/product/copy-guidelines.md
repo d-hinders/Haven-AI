@@ -126,6 +126,12 @@ Avoid:
 
 ### Use “sign in” and “approve actions” instead of “signer” or “owner”
 
+One sanctioned exception (owner decision 2026-10-09, #3825): **Settings →
+Signers** is that section's name — its title and its own loading, empty and
+error states. A signer is its own object there, not part of an account. Its
+rows, and every other surface, still speak in outcomes (“Approves …”,
+“Passkey · added {date}”, “Browser wallet”).
+
 Prefer:
 - “Choose how you sign in”
 - “Choose how you want to approve actions”
@@ -176,8 +182,13 @@ Credential rows (signer lists, “ways to approve”):
   enrolled, e.g. “Passkey · added March 3, 2026”. When a credential has no
   stored date (it predates timestamp exposure), fall back to **“Passkey 1”**,
   “Passkey 2”, … in enrollment order — never to a platform name.
-- An EOA row is **“Wallet”** with the address underneath — not “External
-  owner”, “signer”, or “owner” (the sign-in rule above already bans those).
+- An EOA row is **“Browser wallet”** — not “External owner”, “signer”, or
+  “owner” (the sign-in rule above already bans those). Its address is hidden
+  by default and revealed behind a **“Show address”** disclosure (#3825): most
+  users approve with a passkey, and a raw address on every list is the wrong
+  level of detail, but a user asked to connect a wallet must be able to tell
+  which one. When the wallet is the one connected on this device, the row may
+  name the connector: “Browser wallet · MetaMask”.
 
 Action copy keeps the anchor pattern — passkey first, familiar examples second,
 ideally as subtext:
@@ -461,7 +472,7 @@ Use this mapping when replacing technical language with product-facing language.
 | Safe deployed | Your Haven account is ready |
 | Smart account | Haven account |
 | Smart wallet | Haven wallet |
-| Signer | Sign-in method / approval method |
+| Signer | Sign-in method / approval method (exception: the Settings → Signers section name, above) |
 | Owner | Control / approve actions |
 | Owner type | Sign-in method |
 | Passkey signer | Secure passkey |

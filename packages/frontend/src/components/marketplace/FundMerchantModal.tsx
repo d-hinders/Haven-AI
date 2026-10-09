@@ -41,6 +41,7 @@ import { truncateAddress, BudgetAmountRow } from '@/components/haven'
 import { Icon } from '@/components/ui/Icon'
 import { Button } from '@/components/ui/Button'
 import WalletConnectAction from '@/components/WalletConnectAction'
+import PasskeyElsewhereHint from '@/components/PasskeyElsewhereHint'
 import { Select } from '@/components/ui/Select'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
@@ -253,7 +254,7 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
   // `chainId` change (agent picker inside one mounted instance), so `budgets`
   // and `ready` below are never the PREVIOUS agent's while the new read is in
   // flight — they read `null`/`false` instead.
-  const { budgets, budgetsError, reload, grant, busy, ready, signersError, signersLoading, hasPasskeys } = useDelegationBudget(
+  const { budgets, budgetsError, reload, grant, busy, ready, signersError, signersLoading, hasPasskeys, passkeyElsewhere } = useDelegationBudget(
     selectedAgent?.id ?? '',
     chainId ?? 0,
     { enabled: open && !!selectedAgent },
@@ -557,6 +558,7 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                   Sign budget
                 </Button>
               </div>
+              {ready && passkeyElsewhere ? <PasskeyElsewhereHint /> : null}
               {!ready && (
                 <div className="space-y-2">
                   <p className="text-xs text-[var(--v2-ink-3)]">
@@ -566,7 +568,7 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                       ? 'Connect your account owner wallet to sign this budget.'
                       : 'Connect your account owner wallet, or use one of the account’s passkeys, to sign this budget.'}
                   </p>
-                  {/* #3812: connect or switch in place, not only from the header. */}
+                  {/* #3812: connect or switch in place (the header pill is gone since #3825). */}
                   {!signersError && !signersLoading ? <WalletConnectAction /> : null}
                 </div>
               )}

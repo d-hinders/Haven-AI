@@ -599,6 +599,18 @@ const accountProperties = {
   created_at: { type: 'string', format: 'date-time' },
 } as const
 
+/** One account a signer approves — `GET /user/signers` (#3825). */
+const userSignerAccount = {
+  type: 'object',
+  required: ['account_id', 'account_address', 'account_name', 'chain_id'],
+  properties: {
+    account_id: { type: 'string' },
+    account_address: address,
+    account_name: { type: 'string', nullable: true },
+    chain_id: { type: 'integer' },
+  },
+}
+
 /** A linked account as every `/user/accounts…` write and the list route return it. The deprecated alias schema went with #2914. */
 const account = {
   type: 'object',
@@ -4453,6 +4465,58 @@ export const openapiSpec = {
         responses: {
           '401': errorResponse,
           '410': { ...errorResponse, description: 'Always. The Safe rail is retired; the message names POST /accounts/hybrid.' },
+        },
+      },
+    },
+    '/user/signers': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'listUserSigners',
+        summary: "List the caller's signers across all of their accounts, each once.",
+        description:
+          "Every signer of the caller's live Hybrid DeleGator accounts on every chain, deduplicated: a passkey by `key_id` (one passkey sits on every chain's account), an owner wallet by address (always lowercase). Each lists the accounts it approves. Passkeys come first, ordered by `created_at` ascending (unknown last, then `key_id`); wallets follow, ordered by address. Each `accounts` list is ordered by chain then address. `created_at` is the earliest enrollment date known for the key, null when none is recorded. Public-key material only; an account whose signer configuration cannot be resolved is skipped.",
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The deduplicated signer list.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['signers'],
+                  properties: {
+                    signers: {
+                      type: 'array',
+                      items: {
+                        oneOf: [
+                          {
+                            type: 'object',
+                            required: ['kind', 'key_id', 'created_at', 'accounts'],
+                            properties: {
+                              kind: { type: 'string', enum: ['passkey'] },
+                              key_id: { type: 'string' },
+                              created_at: { type: 'string', format: 'date-time', nullable: true },
+                              accounts: { type: 'array', items: userSignerAccount },
+                            },
+                          },
+                          {
+                            type: 'object',
+                            required: ['kind', 'address', 'accounts'],
+                            properties: {
+                              kind: { type: 'string', enum: ['wallet'] },
+                              address: address,
+                              accounts: { type: 'array', items: userSignerAccount },
+                            },
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
         },
       },
     },

@@ -513,7 +513,6 @@ describe('fixture shape parity (apiMock builder ↔ e2e dataset, #3027)', () => 
     expect(keysOf(overview.totals)).toEqual(keysOf(dashboardOverview.totals))
     expect(keysOf(overview.metrics)).toEqual(keysOf(dashboardOverview.metrics))
     expect(keysOf(overview.agents[0])).toEqual(keysOf(dashboardOverview.agents[0]))
-    expect(keysOf(overview.transactions[0])).toEqual(keysOf(dashboardTransaction))
   })
 
   it('/accounting/providers, /accounting/connections, /accounting/feed/status align with the e2e constants', () => {

@@ -503,7 +503,8 @@ export const dashboardOverview = {
       },
     },
   ],
-  transactions: [dashboardTransaction],
+  // #3858: the former 5-row `transactions` preview is gone from the wire —
+  // the dashboard reads the grouped-activity rows below.
   // #3824: the grouped-activity rows the redesigned dashboard renders. One
   // group: the fixture's one confirmed x402 payment, keyed agent + token +
   // merchant + local day + outcome. approx (serve-time) rather than

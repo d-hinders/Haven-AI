@@ -315,8 +315,6 @@ describeDb('#3824 — grouped activity + serve-time approx amounts on the wire',
     expect(activity[0].approxCurrency).toBe('SEK')
     expect(activity[0].convertedAmount).toBeUndefined()
     expect(activity[0].countIsFloor).toBeUndefined()
-    // The deprecated 5-row preview is untouched on the same response.
-    expect((body.transactions as unknown[]).length).toBe(5)
   })
 
   it('the same payments split across the user-local midnight return two groups, newest first', async () => {

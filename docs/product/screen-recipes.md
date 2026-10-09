@@ -522,7 +522,7 @@ days. The title is the counterparty through `counterpartyLabel`'s no-address
 mode (merchant site, receipt name, "Deposit", "New recipient" — never a
 truncated address); the subtitle is the agent's name; a group of N renders
 "×N" ("×N+" when the count is a floor). The 5-row `transactions` preview is
-deprecated on the wire and no longer read here.
+removed from the wire (#3858) — no dashboard surface reads it.
 
 ## Policy Violation
 

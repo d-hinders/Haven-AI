@@ -29,6 +29,17 @@ covers:
 last-verified: "2026-10-09"
 ---
 
+> **Re-verification (#3819, 2026-10-09):** coupled through
+> `.github/workflows/publish.yml`: the dependency-presence gate's ledger
+> (`dep_state`) is now a space-delimited `pkg=state` string with an
+> exact-word `case` lookup instead of a bash-4 associative array, making the
+> loop bash 3.2 compatible (#3819). The gate runs on BOTH channels and its
+> behaviour is unchanged on every bash; the dev-channel checklist, snapshot
+> version shape and dist-tag rules in this document are untouched. Verified
+> by `release-bump.test.mjs` (102/102), which runs the real loop shell on
+> host bash 5 and in a real GNU bash 3.2.57 container — on the dev channel
+> too.
+
 > **Re-verification (#3797, 2026-10-09):** coupled through
 > `.github/workflows/publish.yml`, which gains a dependency-presence gate that
 > runs on BOTH channels: a package whose exact-pinned internal `@haven_ai/*`

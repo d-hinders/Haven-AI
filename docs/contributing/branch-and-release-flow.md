@@ -183,6 +183,19 @@ the epic when its last sub-issue lands on `dev`.
 > (the dev → main promotion) won't re-close anything; the issues are already
 > closed from the dev-merge.
 
+> **Re-verification (#3819, 2026-10-09):** coupled through
+> `.github/workflows/publish.yml`: the dependency-presence ledger inside the
+> loop (`dep_state`) was rewritten from a bash-4 associative array
+> (`declare -A`) to a space-delimited `pkg=state` string read by an
+> exact-word `case` lookup, so the loop runs on bash 3.2 (stock macOS
+> `/bin/bash`) without changing what it decides (#3819). The gate's
+> behaviour is identical on every bash — the same packages are held back,
+> marked FAILED and never nominated for `latest` — so no branch-flow,
+> promotion-window, dev-gate/qa-freshness or credential claim in this
+> document moves. Verified by `release-bump.test.mjs` (102/102), which runs
+> the real loop shell on host bash 5 and in a real GNU bash 3.2.57
+> container.
+
 > **Re-verification (#3797, 2026-10-09):** coupled through
 > `.github/workflows/publish.yml`, which gains a dependency-presence gate: a
 > package whose exact-pinned internal `@haven_ai/*` dependency did not publish

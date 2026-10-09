@@ -3,7 +3,15 @@ import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DelegationBudget } from '@/hooks/useDelegationBudget'
 
-const { mockEditBudget, mockSignersError, mockReloadSigners } = vi.hoisted(() => ({
+// #3812: the in-flow connect/switch control reads wagmi and RainbowKit, which
+// these tests do not provide. Stub it so the test can assert WHEN a flow
+// offers it; `WalletConnectAction.test.tsx` covers what it does.
+vi.mock('@/components/WalletConnectAction', () => ({
+  default: () => <button type="button">Connect wallet</button>,
+}))
+
+const { mockEditBudget, mockSignersError, mockReloadSigners, mockReady } = vi.hoisted(() => ({
+  mockReady: vi.fn(() => true),
   mockEditBudget: vi.fn(),
   mockSignersError: vi.fn(() => false),
   mockReloadSigners: vi.fn(),
@@ -13,7 +21,8 @@ vi.mock('@/hooks/useDelegationBudget', () => ({
   useDelegationBudget: () => ({
     editBudget: mockEditBudget,
     busy: false,
-    ready: true,
+    ready: mockReady(),
+    signersLoading: false,
     signersError: mockSignersError(),
     reloadSigners: mockReloadSigners,
   }),
@@ -49,6 +58,7 @@ beforeEach(() => {
   mockEditBudget.mockReset()
   mockEditBudget.mockResolvedValue({ ok: true, newDelegationHash: '0x' + 'be'.repeat(32), oldDelegationRevoked: true })
   mockSignersError.mockReturnValue(false)
+  mockReady.mockReturnValue(true)
   mockReloadSigners.mockReset()
 })
 
@@ -104,6 +114,20 @@ describe('EditBudgetModal (#3166) — form', () => {
 })
 
 describe('EditBudgetModal (#3166) — review', () => {
+  // #3812: Edit opens only with a reachable signer, but the wallet can go away
+  // before the review is signed. The way back is offered in the modal.
+  it('offers the owner wallet connect on the review step when nobody here can sign', () => {
+    mockReady.mockReturnValue(false)
+    toReview()
+    expect(screen.getByText(/Connect your account owner wallet to sign the new budget/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeInTheDocument()
+  })
+
+  it('a signable review offers no wallet connect', () => {
+    toReview()
+    expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
+  })
+
   it('shows a RAISE explicitly before signing', () => {
     toReview('10')
     expect(screen.getByText('Raise')).toBeInTheDocument()

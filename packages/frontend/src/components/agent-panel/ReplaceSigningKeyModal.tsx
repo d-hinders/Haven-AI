@@ -64,6 +64,7 @@ import { StepProgress } from '@/components/ui/StepProgress'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { ApprovalRequiredBanner, Address } from '@/components/haven'
+import WalletConnectAction from '@/components/WalletConnectAction'
 import { formatAllowanceAmount } from '@/lib/allowance-format'
 import { timeAgo } from '@/lib/format'
 import {
@@ -413,6 +414,8 @@ export function ReplaceSigningKeyModal({
             passkeys. Replacing a signing key needs the account owner’s signature, and Haven never
             signs on your behalf.
           </p>
+          {/* #3812: the owner's wallet can be connected right here. */}
+          <WalletConnectAction className="mt-3" />
         </ApprovalRequiredBanner>
       ) : null}
 

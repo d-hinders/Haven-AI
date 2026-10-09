@@ -1,8 +1,17 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
 
-const { mockGet, mockGrant, mockRevoke, mockReload, mockBudgetsError, mockTaskBudgets, mockHookArgs, mockToast } =
+// #3812: the in-flow connect/switch control reads wagmi and RainbowKit, which
+// these tests do not provide. Stub it so the test can assert WHEN a flow
+// offers it; `WalletConnectAction.test.tsx` covers what it does.
+vi.mock('@/components/WalletConnectAction', () => ({
+  default: () => <button type="button">Connect wallet</button>,
+}))
+
+const { mockGet, mockGrant, mockRevoke, mockReload, mockBudgetsError, mockTaskBudgets, mockHookArgs, mockToast, mockSigner } =
   vi.hoisted(() => ({
+  // #3812: whether this device can sign, and whether the signer set is known.
+  mockSigner: { ready: true, signersLoading: false, signersError: null as string | null },
   mockHookArgs: vi.fn(),
   mockGet: vi.fn(),
   mockGrant: vi.fn(),
@@ -23,7 +32,9 @@ vi.mock('@/hooks/useDelegationBudget', () => ({
     grant: mockGrant,
     revoke: mockRevoke,
     busy: false,
-    ready: true,
+    ready: mockSigner.ready,
+    signersLoading: mockSigner.signersLoading,
+    signersError: mockSigner.signersError,
     budgetsError: mockBudgetsError(),
     reload: mockReload,
     }
@@ -71,6 +82,9 @@ function taskBudget(overrides: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  mockSigner.ready = true
+  mockSigner.signersLoading = false
+  mockSigner.signersError = null
   mockGet.mockReset()
   mockGrant.mockReset()
   mockRevoke.mockReset()
@@ -170,6 +184,51 @@ describe('DelegationBudgetCard (#833)', () => {
     render(<DelegationBudgetCard {...PROPS} />)
     await waitFor(() => expect(screen.getByText('Set budget')).toBeTruthy())
     expect((screen.getByText('Set budget') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  // ── #3812: the owner wallet's way in, on the card itself ──
+  // Stop and Edit (and Set budget) are dead while nobody here can sign; the
+  // header used to be the only place to connect a wallet.
+
+  it('a listed budget with no reachable signer explains why Stop is dead and offers the connect', async () => {
+    mockSigner.ready = false
+    mockGet.mockReturnValue([budget()])
+    render(<DelegationBudgetCard {...PROPS} />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Stop budget 5 USDC per day' })).toBeTruthy())
+    expect((screen.getByRole('button', { name: 'Stop budget 5 USDC per day' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText(/Connect your account owner wallet to change or stop a budget/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeTruthy()
+  })
+
+  it('the grant form with no reachable signer offers the connect beside Set budget', async () => {
+    mockSigner.ready = false
+    mockGet.mockReturnValue([])
+    render(<DelegationBudgetCard {...PROPS} />)
+    await waitFor(() => expect(screen.getByText('Set budget')).toBeTruthy())
+    expect(screen.getByText(/Connect your account owner wallet to set a budget/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeTruthy()
+  })
+
+  it('no connect while the signer set loads or failed to load — connecting fixes neither', async () => {
+    mockSigner.ready = false
+    mockSigner.signersLoading = true
+    mockGet.mockReturnValue([budget()])
+    const { unmount } = render(<DelegationBudgetCard {...PROPS} />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Stop budget 5 USDC per day' })).toBeTruthy())
+    expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
+    unmount()
+    mockSigner.signersLoading = false
+    mockSigner.signersError = 'failed'
+    render(<DelegationBudgetCard {...PROPS} />)
+    await waitFor(() => expect(screen.getByText(/could not load how this account is approved/)).toBeTruthy())
+    expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
+  })
+
+  it('a ready (passkey) owner is offered no wallet connect', async () => {
+    mockGet.mockReturnValue([budget()])
+    render(<DelegationBudgetCard {...PROPS} />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Stop budget 5 USDC per day' })).toBeTruthy())
+    expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
   })
 
   // ── #3717: Stop budget, behind a confirm ──

@@ -3,6 +3,13 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SupersededAgentsCard } from '../SupersededAgentsCard'
 
+// #3812: the in-flow connect/switch control reads wagmi and RainbowKit, which
+// these tests do not provide. Stub it so the test can assert WHEN a flow
+// offers it; `WalletConnectAction.test.tsx` covers what it does.
+vi.mock('@/components/WalletConnectAction', () => ({
+  default: () => <button type="button">Connect wallet</button>,
+}))
+
 /**
  * The superseded-agent revoke offer (#2561).
  *
@@ -410,6 +417,8 @@ describe('SupersededAgentsCard', () => {
 
       await userEvent.click(screen.getByRole('button', { name: 'Revoke Research agent' }))
       expect(await screen.findByText(/cannot sign for the account/i)).toBeInTheDocument()
+      // #3812: the budget half's way out is offered in the confirm itself.
+      expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeInTheDocument()
       // Not disabled: the credential half needs no signature.
       const confirm = screen.getByRole('button', { name: /^revoke agent$/i })
       expect(confirm).not.toBeDisabled()
@@ -428,6 +437,7 @@ describe('SupersededAgentsCard', () => {
 
       await userEvent.click(screen.getByRole('button', { name: 'Revoke Research agent' }))
       expect(screen.queryByText(/cannot sign for the account/i)).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Connect wallet' })).not.toBeInTheDocument()
       // Only the confirm waits; cancel stays usable so the owner is never trapped.
       expect(screen.getByRole('button', { name: /^revoke agent$/i })).toBeDisabled()
       expect(screen.getByRole('button', { name: /keep it/i })).not.toBeDisabled()

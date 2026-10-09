@@ -5,6 +5,13 @@ import type { Agent } from '@/hooks/useAgents'
 import type { CatalogEntry, Merchant, MerchantFundingTarget } from '@/hooks/useCatalog'
 import type { DelegationBudget } from '@/hooks/useDelegationBudget'
 
+// #3812: the in-flow connect/switch control reads wagmi and RainbowKit, which
+// these tests do not provide. Stub it so the test can assert WHEN a flow
+// offers it; `WalletConnectAction.test.tsx` covers what it does.
+vi.mock('@/components/WalletConnectAction', () => ({
+  default: () => <button type="button">Connect wallet</button>,
+}))
+
 const { mockGrant, mockReady, mockBudgets, mockBudgetsError, mockReload } = vi.hoisted(() => ({
   mockGrant: vi.fn(),
   mockReady: vi.fn(() => true),
@@ -328,6 +335,28 @@ describe('FundMerchantModal (#3331)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
     expect(screen.queryByText(/replaces/)).toBeNull()
+  })
+
+  // #3812: a review step that cannot be signed offers the owner wallet connect
+  // in place; a signable one offers nothing extra.
+  it('review step: offers the owner wallet connect when nobody here can sign', async () => {
+    mockBudgets.mockReturnValue([])
+    mockReady.mockReturnValue(false)
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
+    expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeDefined()
+    mockReady.mockReturnValue(true)
+  })
+
+  it('review step: a signable budget offers no wallet connect', async () => {
+    mockBudgets.mockReturnValue([])
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
+    expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
   })
 
   it('review step: states the no-fallback rule and BOTH exceptions while this budget is active (#3331 F2, corrected round 3 captain copy)', async () => {

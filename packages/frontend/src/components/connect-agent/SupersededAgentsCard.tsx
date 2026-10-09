@@ -4,6 +4,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/Button'
 import { useAgents } from '@/hooks/useAgents'
+import { agentStatusPresentation } from '@/lib/payment-status'
 
 /**
  * The surface this list sits on (#3690). A neutral callout, not a `Card`: it
@@ -37,8 +38,8 @@ function OfferCallout({ children }: { children: ReactNode }) {
  * install report), so every sentence here has to be true for ANY reported id:
  * the connector found a folder for the agent on this machine, and Haven has
  * not revoked it. Not "active" — a listed agent can be paused or still
- * awaiting approval — and not "has a budget": one may have none, or one that
- * has expired, so the card says it MAY still hold a key and a budget. Owner
+ * still in setup — and not "has a budget": one may have none, or one that
+ * has expired, so the card says it MAY have a key and a budget. Owner
  * decision (2026-10-09): list them, offer no revoke — revoking stays on each
  * agent's own page, behind its own confirm.
  *
@@ -125,13 +126,13 @@ export function SupersededAgentsCard({
         {one ? 'Another agent is set up on this machine' : `${listed.length} other agents are set up on this machine`}
       </h3>
       {/* #3830: true for ANY reported id — a normal run, a `--replace` run,
-          a key-less or tombstoned folder, a paused or not-yet-approved agent.
+          a key-less or tombstoned folder, a paused agent or one still in setup.
           No "replaced", no "unchanged", no "active", and no revoke offer
           (owner decision 2026-10-09). */}
       <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
         {one
-          ? 'The connector found a folder for it here, and Haven has not revoked it, so it may still have a key and a budget. If you no longer use it, remove it from its agent page.'
-          : 'The connector found folders for them here, and Haven has not revoked them, so each may still have a key and a budget. If you no longer use one, remove it from its agent page.'}
+          ? 'The connector found a folder for it here, and Haven has not revoked it, so it may have a key and a budget. If you no longer use it, remove it from its agent page.'
+          : 'The connector found folders for them here, and Haven has not revoked them, so each may have a key and a budget. If you no longer use one, remove it from its agent page.'}
       </p>
       {/* `divide-y` draws between siblings, so it sits on the list whose
           children are the rows — on a wrapper around the list it drew none. */}
@@ -140,11 +141,10 @@ export function SupersededAgentsCard({
           <li key={agent.id} className="flex items-center justify-between gap-3 py-2.5 last:pb-0">
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{agent.name}</p>
-              {/* The status the title no longer claims, said per row. */}
-              {agent.status === 'paused' ? (
-                <p className="text-xs text-[var(--v2-ink-3)]">Paused</p>
-              ) : agent.status === 'pending_approval' ? (
-                <p className="text-xs text-[var(--v2-ink-3)]">Awaiting approval</p>
+              {/* The status the title no longer claims, said per row, in the
+                  product's own words (the agent page shows the same label). */}
+              {agent.status !== 'active' ? (
+                <p className="text-xs text-[var(--v2-ink-3)]">{agentStatusPresentation(agent.status).label}</p>
               ) : null}
             </div>
             <Link

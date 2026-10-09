@@ -505,7 +505,7 @@ describe('--doctor per-agent output (#1697)', () => {
       return stdout.join('')
     }
     const advisory = await render('advisory')
-    expect(advisory).toContain('ops (agent-ops): not verified as wired')
+    expect(advisory).toContain('ops (agent-ops): not verified as wired — no config the connector can read names it')
     expect(advisory).not.toContain('ops (agent-ops): superseded')
     // With a readable config the classification is evidence, and it stays.
     expect(await render('failed')).toContain('ops (agent-ops): superseded')

@@ -78,7 +78,7 @@ keys, and it reports their ids so the DASHBOARD can list them for the owner.
 Since named pairs became the default (#3737) most of those agents coexist with
 the new one rather than being replaced by it, and the report cannot tell the
 two apart, so the dashboard lists the owner's agents among them that Haven has not revoked — active,
-paused or awaiting approval — with a link to each
+paused or still in setup — with a link to each
 agent page and offers no revoke there (#3830, owner decision 2026-10-09);
 revoking — which also ends the agent's budget with one owner signature (#3542)
 — stays on the agent page. The connector never revokes: `POST

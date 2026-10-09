@@ -1489,7 +1489,7 @@ export async function runDoctor(
             'your latest setup keeps authenticating (and spending) as the old agent.'
           : supersededLevel === 'advisory'
             ? `${otherEntries.length} other credential dir(s) found — ${parts.join('; ')}. Runtime ` +
-              `'${input2.runtime}' has no config file the connector can read, so which of these agents ` +
+              `'${input2.runtime}' has no config file the connector writes, and none it can read names these agents, so which of them ` +
               'are wired cannot be verified from this machine: a live key here may be an agent you use ' +
               'deliberately, or one a host started before your latest setup is still spending as.'
             : `${otherEntries.length} other credential dir(s) found — ${parts.join('; ')}.`,

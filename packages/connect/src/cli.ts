@@ -457,7 +457,7 @@ export async function runCli(
               : agent.classification === 'parked'
                 ? 'parked re-key only — no identity.json in this directory, but key material is still there'
                 : agent.classification === 'superseded' && wiringUnverifiable
-                  ? 'not verified as wired — this runtime has no config the connector can read'
+                  ? 'not verified as wired — no config the connector can read names it'
                   : agent.classification
             io.stdout(redactSecrets(`  ${failed.length > 0 ? '✗' : advised.length > 0 ? '!' : '•'} ${name}: ${verdict}\n`))
             for (const check of [...failed, ...advised]) {

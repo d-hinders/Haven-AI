@@ -3228,7 +3228,7 @@ set (#3830): under named pairs by default (#3737) most of them are agents wired
 alongside this one, so neither the heads-up nor the dashboard calls them
 replaced or previous — the heads-up says "other agent directories on this
 machine" and that this setup revoked none of them, and the dashboard lists the
-owner's not-revoked ones (active, paused or awaiting approval) without a
+owner's not-revoked ones (active, paused or still in setup) without a
 revoke offer. The ids a `--replace` run actually
 retired are `retired_agent_ids`. The list is empty on a clean first run — and
 an empty list is **not** proof of a clean machine, because a scan that cannot

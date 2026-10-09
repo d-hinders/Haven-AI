@@ -434,7 +434,7 @@ completed setup.
 **The dashboard lists them; revoking stays on each agent's page (#2561,
 #3830).** The same ids ride the install-status report, and the connect modal's
 completed state lists those that are the owner's agents and not revoked
-(active, paused or awaiting approval), each linking to its agent page. It
+(active, paused or still in setup), each linking to its agent page. It
 does not call them replaced and offers no revoke there (owner decision,
 2026-10-09): the report cannot tell a coexisting agent
 from a retired one. The connector never revokes either: `POST

@@ -2288,7 +2288,7 @@ describe('doctor verdict levels (#3121)', () => {
     expect(check?.level).toBe('advisory')
     expect(check?.ok).toBe(true)
     expect(check?.detail).toContain('STILL SPEND-CAPABLE: agent-old')
-    expect(check?.detail).toContain("Runtime 'claude-code' has no config file the connector can read")
+    expect(check?.detail).toContain("Runtime 'claude-code' has no config file the connector writes, and none it can read names these agents")
     expect(check?.detail).toContain('cannot be verified from this machine')
     expect(check?.repair).toMatch(/Check agent-old on the Haven agent page/)
     expect(check?.repair).toContain('use Remove agent\u2026 on the ones you no longer use')
@@ -2302,7 +2302,7 @@ describe('doctor verdict levels (#3121)', () => {
     const report = await runDoctor({ runtime: 'other' }, { homeDir, ...deps })
     const check = report.checks.find((c) => c.id === 'superseded_agents')
     expect(check?.level).toBe('advisory')
-    expect(check?.detail).toContain("Runtime 'other' has no config file the connector can read")
+    expect(check?.detail).toContain("Runtime 'other' has no config file the connector writes, and none it can read names these agents")
     expect(report.ok).toBe(true)
   })
 

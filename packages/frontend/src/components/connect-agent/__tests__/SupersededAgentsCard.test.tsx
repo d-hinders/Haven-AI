@@ -95,7 +95,7 @@ describe('SupersededAgentsCard', () => {
       expect(container.textContent ?? '').not.toMatch(/replaced|previous|earlier agent/i)
     })
 
-    it('a paused or not-yet-approved agent is listed with its status, and nothing claims it is active or funded', () => {
+    it('a paused agent or one still in setup is listed with its status, and nothing claims it is active or funded', () => {
       // A setup abandoned before approval leaves a folder whose agent is
       // `pending_approval` with no budget; a paused agent is not active.
       mockAgents.current = [
@@ -106,12 +106,13 @@ describe('SupersededAgentsCard', () => {
         <SupersededAgentsCard supersededAgentIds={['agt_paused', 'agt_pending']} />,
       )
       expect(screen.getByText('Paused')).toBeInTheDocument()
-      expect(screen.getByText('Awaiting approval')).toBeInTheDocument()
+      // The product's own label for `pending_approval` (agentStatusPresentation).
+      expect(screen.getByText('Needs setup')).toBeInTheDocument()
       const text = container.textContent ?? ''
       expect(text).not.toMatch(/still active|is active|are active/i)
-      // "may still have", never "has": a pending agent has no budget at all.
-      expect(text).toMatch(/may still have a key and a budget/)
-      expect(text).not.toMatch(/still has its own key and budget/)
+      // "may have", never "has" or "still has": a pending agent never had a budget.
+      expect(text).toMatch(/may have a key and a budget/)
+      expect(text).not.toMatch(/still has|may still have/)
     })
 
     it('revokes nothing, on render or on following a link', async () => {

@@ -1,3 +1,4 @@
+// #3681 Vercel ignore-step probe — throwaway, never merged.
 import { render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 

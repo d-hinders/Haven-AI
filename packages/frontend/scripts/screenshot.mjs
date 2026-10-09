@@ -1898,6 +1898,19 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
       passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
     }
   }
+  if (pathname.startsWith('/agents/') && pathname.endsWith('/account-signers')) {
+    // #3812: the agent-scoped signer read behind the budget card, the remove
+    // dialog and the re-key modal. Unkeyed, it fell through to the empty
+    // fallback (no signer at all), so every default agent capture rendered
+    // the "connect your owner wallet" state. One passkey, as the account-
+    // scoped read above and the e2e fixture (`haven-api.ts`) both serve.
+    return {
+      account_address: FIXTURE_ACCOUNT.account_address,
+      chain_id: FIXTURE_ACCOUNT.chain_id,
+      owner_address: null,
+      passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
+    }
+  }
   if (pathname.startsWith('/agents/') && pathname.endsWith('/delegate-balance')) {
     // #2194. Keyed for EVERY fixture agent — the point is not that this one
     // path now answers correctly, it is that the generic fallback can no
@@ -4298,18 +4311,20 @@ export const SCENARIOS = {
     // #3812: the header WalletButton used to be the only connect entry, so
     // these surfaces said "connect your owner wallet" with nothing to click.
     // The state only exists for an owner-only signer set (no passkeys): any
-    // enrolled passkey keeps every surface `ready` (#1969), which is why the
-    // shared fixture — one passkey — never reaches it and no route capture
-    // can show it.
+    // enrolled passkey keeps every surface `ready` (#1969). The account page
+    // reads `/accounts/hybrid/<addr>/signers` (the shared fixture serves one
+    // passkey there); the agent page and its dialogs read the agent-scoped
+    // `/agents/<id>/account-signers`. Both are served the same owner-only set
+    // here, so every capture shows the state it is named for.
     api(apiPath) {
-      if (apiPath.startsWith('/accounts/hybrid/') && apiPath.endsWith('/signers')) {
-        return {
-          account_address: FIXTURE_ACCOUNT.account_address,
-          chain_id: FIXTURE_ACCOUNT.chain_id,
-          owner_address: '0x' + 'ee'.repeat(20),
-          passkeys: [],
-        }
+      const ownerOnly = {
+        account_address: FIXTURE_ACCOUNT.account_address,
+        chain_id: FIXTURE_ACCOUNT.chain_id,
+        owner_address: '0x' + 'ee'.repeat(20),
+        passkeys: [],
       }
+      if (apiPath.startsWith('/accounts/hybrid/') && apiPath.endsWith('/signers')) return ownerOnly
+      if (apiPath === '/agents/agent-research/account-signers') return ownerOnly
       return undefined
     },
     async run({ page, vp, shoot }) {

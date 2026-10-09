@@ -11,7 +11,7 @@
  * - the hand-off prepare is refused when nothing is saved or nothing is
  *   earned (the button is disabled — the authority gate read as UI state).
  */
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReceiveLedgerResponse } from '@/types/transactions'
 
@@ -33,6 +33,15 @@ vi.mock('@/components/ui/Toast', () => ({
 
 vi.mock('@/lib/signer', () => ({
   useActiveSigner: () => null,
+  // Read by `pickSigningPath` (#3812): no passkey marker on this device.
+  hasPasskeyCredentialOnDevice: () => false,
+  credentialIdFromKeyId: (keyId: string) => keyId,
+}))
+
+// #3812: stubbed so the hand-off tests can assert WHEN it is offered;
+// `WalletConnectAction.test.tsx` covers what it does.
+vi.mock('@/components/WalletConnectAction', () => ({
+  default: () => <button type="button">Connect wallet</button>,
 }))
 
 import ReceivePanel from '@/components/haven/ReceivePanel'
@@ -181,5 +190,53 @@ describe('ReceivePanel (#3333)', () => {
       (b) => b.textContent === 'Prepare transfer',
     )
     expect(prepare?.disabled).toBe(false)
+  })
+
+  // #3812: the hand-off is owner-signed. With the signer set known and nobody
+  // here able to sign, it offers the owner wallet connect in place — never
+  // while the set is unknown, and never to an account a passkey can sign for.
+  describe('the hand-off signature (#3812)', () => {
+    const PREPARED = {
+      submit: { token_address: LEDGER.usdc_address, to: '0x5555555555555555555555555555555555555555', amount_atomic: '2500000' },
+      prepared: {},
+    }
+
+    async function openHandoff(signersResponse: () => Promise<unknown>) {
+      vi.mocked(useReceiveLedger).mockReturnValue({ ledger: LEDGER, loading: false, error: null, refetch: vi.fn() })
+      vi.mocked(api.get).mockImplementation((url: string) =>
+        url.includes('/signers') ? (signersResponse() as never) : (Promise.resolve([]) as never),
+      )
+      vi.mocked(api.post).mockResolvedValue(PREPARED as never)
+      render(<ReceivePanel accountAddress={ADDRESS} chainId={8453} />)
+      fireEvent.click(screen.getByRole('button', { name: 'Prepare transfer' }))
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Sign transfer' })).toBeTruthy())
+    }
+
+    it('an owner-only account with no wallet here is offered the connect, and Sign waits', async () => {
+      await openHandoff(() =>
+        Promise.resolve({ account_address: ADDRESS, chain_id: 8453, owner_address: '0x' + 'ee'.repeat(20), passkeys: [] }),
+      )
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeTruthy())
+      expect(screen.getByText(/Connect your account owner wallet to sign this transfer/)).toBeTruthy()
+      expect((screen.getByRole('button', { name: 'Sign transfer' }) as HTMLButtonElement).disabled).toBe(true)
+    })
+
+    it('a passkey account is offered no connect', async () => {
+      await openHandoff(() =>
+        Promise.resolve({
+          account_address: ADDRESS,
+          chain_id: 8453,
+          owner_address: null,
+          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+        }),
+      )
+      expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
+      expect((screen.getByRole('button', { name: 'Sign transfer' }) as HTMLButtonElement).disabled).toBe(false)
+    })
+
+    it('a failed signer read offers no connect — connecting would not fix it', async () => {
+      await openHandoff(() => Promise.reject(new Error('boom')))
+      expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
+    })
   })
 })

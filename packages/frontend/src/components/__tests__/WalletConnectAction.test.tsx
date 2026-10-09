@@ -6,12 +6,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // assert what each click REACHES — the picker, the disconnect — not markup.
 const mocks = vi.hoisted(() => ({
   isConnected: false,
+  walletClient: null as null | object,
   openConnectModal: vi.fn() as undefined | (() => void),
   disconnectAsync: vi.fn(async () => {}),
 }))
 
 vi.mock('wagmi', () => ({
   useAccount: () => ({ isConnected: mocks.isConnected }),
+  useWalletClient: () => ({ data: mocks.walletClient }),
   useDisconnect: () => ({ disconnectAsync: mocks.disconnectAsync }),
 }))
 
@@ -23,6 +25,7 @@ const WalletConnectAction = (await import('../WalletConnectAction')).default
 
 beforeEach(() => {
   mocks.isConnected = false
+  mocks.walletClient = null
   mocks.openConnectModal = vi.fn()
   // Disconnecting does not flip the connection by itself here: the test
   // flips it, to model wagmi committing `isConnected=false` on a later render.
@@ -39,6 +42,7 @@ describe('WalletConnectAction (#3812)', () => {
 
   it('with a (wrong) wallet connected, "Switch wallet" disconnects it, then opens the picker', async () => {
     mocks.isConnected = true
+    mocks.walletClient = {}
     const { rerender } = render(<WalletConnectAction />)
     expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
     await act(async () => {
@@ -53,6 +57,14 @@ describe('WalletConnectAction (#3812)', () => {
       rerender(<WalletConnectAction />)
     })
     expect(mocks.openConnectModal).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers nothing while a connected wallet has no client yet — it may be the owner, mid-reconnect', () => {
+    mocks.isConnected = true
+    mocks.walletClient = null
+    const { container } = render(<WalletConnectAction />)
+    expect(container).toBeEmptyDOMElement()
+    expect(mocks.disconnectAsync).not.toHaveBeenCalled()
   })
 
   it('stays inert, not broken, while RainbowKit has no picker to open', () => {

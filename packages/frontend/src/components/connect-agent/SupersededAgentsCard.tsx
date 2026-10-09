@@ -87,8 +87,9 @@ function RevokeAndEndBudgetDialog({
           <RevokeConfirmBody linked />
           {!ready && !signersLoading && (
             <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
-              This device cannot sign for the account. Its key will still be revoked, but the
-              budget stays active until you finish on a device that can.
+              This device cannot sign for the account yet. Connect the owner wallet below to end
+              the budget too, or revoke now: the key is still revoked, but the budget stays active
+              until you finish on a device that can.
             </p>
           )}
           {/* #3812: the budget half needs the owner's signature — connect or

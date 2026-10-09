@@ -10,8 +10,9 @@ vi.mock('@/components/WalletConnectAction', () => ({
   default: () => <button type="button">Connect wallet</button>,
 }))
 
-const { mockEditBudget, mockSignersError, mockReloadSigners, mockReady } = vi.hoisted(() => ({
+const { mockEditBudget, mockSignersError, mockReloadSigners, mockReady, mockSignersLoading } = vi.hoisted(() => ({
   mockReady: vi.fn(() => true),
+  mockSignersLoading: vi.fn(() => false),
   mockEditBudget: vi.fn(),
   mockSignersError: vi.fn(() => false),
   mockReloadSigners: vi.fn(),
@@ -22,7 +23,7 @@ vi.mock('@/hooks/useDelegationBudget', () => ({
     editBudget: mockEditBudget,
     busy: false,
     ready: mockReady(),
-    signersLoading: false,
+    signersLoading: mockSignersLoading(),
     signersError: mockSignersError(),
     reloadSigners: mockReloadSigners,
   }),
@@ -59,6 +60,7 @@ beforeEach(() => {
   mockEditBudget.mockResolvedValue({ ok: true, newDelegationHash: '0x' + 'be'.repeat(32), oldDelegationRevoked: true })
   mockSignersError.mockReturnValue(false)
   mockReady.mockReturnValue(true)
+  mockSignersLoading.mockReturnValue(false)
   mockReloadSigners.mockReset()
 })
 
@@ -121,11 +123,21 @@ describe('EditBudgetModal (#3166) — review', () => {
     toReview()
     expect(screen.getByText(/Connect your account owner wallet to sign the new budget/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeInTheDocument()
+    // Same gate as BudgetGrantAction: the signature is dead while the hint shows.
+    expect(screen.getByRole('button', { name: 'Sign new budget' })).toBeDisabled()
+  })
+
+  it('no wallet connect while the signer set loads — connecting would not fix it', () => {
+    mockReady.mockReturnValue(false)
+    mockSignersLoading.mockReturnValue(true)
+    toReview()
+    expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
   })
 
   it('a signable review offers no wallet connect', () => {
     toReview()
     expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Sign new budget' })).toBeEnabled()
   })
 
   it('shows a RAISE explicitly before signing', () => {

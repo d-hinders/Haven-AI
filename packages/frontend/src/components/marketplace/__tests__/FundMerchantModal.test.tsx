@@ -12,7 +12,8 @@ vi.mock('@/components/WalletConnectAction', () => ({
   default: () => <button type="button">Connect wallet</button>,
 }))
 
-const { mockGrant, mockReady, mockBudgets, mockBudgetsError, mockReload } = vi.hoisted(() => ({
+const { mockGrant, mockReady, mockBudgets, mockBudgetsError, mockReload, mockSignersLoading } = vi.hoisted(() => ({
+  mockSignersLoading: vi.fn(() => false),
   mockGrant: vi.fn(),
   mockReady: vi.fn(() => true),
   mockBudgets: vi.fn((): unknown[] | null => []),
@@ -28,6 +29,8 @@ vi.mock('@/hooks/useDelegationBudget', () => ({
     grant: mockGrant,
     busy: false,
     ready: mockReady(),
+    signersLoading: mockSignersLoading(),
+    signersError: null,
   }),
 }))
 
@@ -140,6 +143,7 @@ beforeEach(() => {
   mockGrant.mockResolvedValue({ ok: true })
   mockReady.mockReset()
   mockReady.mockReturnValue(true)
+  mockSignersLoading.mockReturnValue(false)
   mockBudgets.mockReset()
   mockBudgets.mockReturnValue([])
   mockBudgetsError.mockReset()
@@ -348,6 +352,17 @@ describe('FundMerchantModal (#3331)', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
     expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeDefined()
     mockReady.mockReturnValue(true)
+  })
+
+  it('review step: no wallet connect while the signer set loads', async () => {
+    mockBudgets.mockReturnValue([])
+    mockReady.mockReturnValue(false)
+    mockSignersLoading.mockReturnValue(true)
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
+    expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
   })
 
   it('review step: a signable budget offers no wallet connect', async () => {

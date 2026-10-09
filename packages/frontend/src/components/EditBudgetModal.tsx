@@ -493,7 +493,13 @@ export default function EditBudgetModal({
                 <Button variant="ghost" onClick={() => setStep('form')} className="flex-1" disabled={busy}>
                   Back
                 </Button>
-                <Button onClick={() => void run()} disabled={busy} className="flex-1">
+                <Button
+                  onClick={() => void run()}
+                  // #3812 design review: dead while the hint above says no one
+                  // here can sign, the same gate BudgetGrantAction applies.
+                  disabled={busy || (!ready && !signersError && !signersLoading)}
+                  className="flex-1"
+                >
                   Sign new budget
                 </Button>
               </div>

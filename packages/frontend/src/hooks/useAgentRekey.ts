@@ -234,6 +234,9 @@ export function useAgentRekey(agentId: string, chainId: number) {
   const [rekeyId, setRekeyId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [signers, setSigners] = useState<AccountSigners | null>(null)
+  // #3812: `signers === null` means loading AND failed — `signingBlockedReason`
+  // cannot tell them apart, so a connect offer needs this to be honest.
+  const [signersState, setSignersState] = useState<'loading' | 'loaded' | 'error'>('loading')
   const [issued, setIssued] = useState<IssueResult | null>(null)
 
   const signer = useActiveSigner({
@@ -244,8 +247,10 @@ export function useAgentRekey(agentId: string, chainId: number) {
   const loadSigners = useCallback(async () => {
     try {
       setSigners(await api.get<AccountSigners>(`/agents/${agentId}/account-signers`))
+      setSignersState('loaded')
     } catch {
       setSigners(null)
+      setSignersState('error')
     }
   }, [agentId])
 
@@ -482,6 +487,7 @@ export function useAgentRekey(agentId: string, chainId: number) {
     issued,
     loadSigners,
     signingBlockedReason,
+    signersState,
     pointOfNoReturnCrossed: isPastRevoke(stage),
     resumeMode: resumeModeFor(stage),
     preflight,

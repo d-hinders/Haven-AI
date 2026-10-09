@@ -33,6 +33,7 @@ const { mockRevokeAll, mockBudgetState, mockBalanceState } = vi.hoisted(() => ({
     budgets: null as null | Array<{ id: string; status: string }>,
     budgetsError: false,
     signersLoading: false,
+    signersError: null as string | null,
   },
   mockBalanceState: {
     balance: null as null | Record<string, unknown>,
@@ -53,7 +54,7 @@ vi.mock('@/hooks/useDelegationBudget', () => ({
     busy: mockBudgetState.busy,
     ready: mockBudgetState.ready,
     reload: vi.fn(),
-    signersError: null,
+    signersError: mockBudgetState.signersError,
     signersLoading: mockBudgetState.signersLoading,
     reloadSigners: vi.fn(),
   }),
@@ -112,6 +113,7 @@ beforeEach(() => {
   mockBudgetState.budgets = [{ id: 'd-1', status: 'active' }]
   mockBudgetState.budgetsError = false
   mockBudgetState.signersLoading = false
+  mockBudgetState.signersError = null
   mockBalanceState.balance = null
   mockBalanceState.hasRecoverableUsdc = false
 })
@@ -307,6 +309,13 @@ describe('RemoveAgentDialog', () => {
   it('offers no wallet connect while the signer set is still loading (#3812)', () => {
     mockBudgetState.ready = false
     mockBudgetState.signersLoading = true
+    renderDialog(agentFixture({ status: 'revoked' }))
+    expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
+  })
+
+  it('offers no wallet connect when the signer set failed to load (#3812)', () => {
+    mockBudgetState.ready = false
+    mockBudgetState.signersError = 'failed'
     renderDialog(agentFixture({ status: 'revoked' }))
     expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
   })

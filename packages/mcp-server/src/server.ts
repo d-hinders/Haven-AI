@@ -1,5 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { CallToolRequestSchema, type ServerResult } from '@modelcontextprotocol/sdk/types.js'
 import { HavenClient, havenClientIdentity, strictMerchantEgressPolicy, type MerchantEgressPolicy } from '@haven_ai/sdk'
+import { HOSTED_CONTRACT_FINGERPRINT } from './contract-fingerprint.js'
 import { hostedConnectorUpgradeCommand } from './connector-channel.js'
 import {
   assertHostedToolRegistry,
@@ -14,6 +16,7 @@ import { runTool } from './tools/support/index.js'
 import { IDENTITY_GATE_EXEMPT, requireAgentIdentity } from './tools/identity-gate.js'
 
 export { AGENT_IDENTITY_UNVERIFIED, IDENTITY_GATE_EXEMPT } from './tools/identity-gate.js'
+export { HOSTED_CONTRACT_FINGERPRINT } from './contract-fingerprint.js'
 
 export const HOSTED_SERVER_NAME = '@haven_ai/mcp-server'
 export const HOSTED_SERVER_VERSION = '0.9.0-alpha.0'
@@ -149,6 +152,22 @@ export const HOSTED_INSTRUCTIONS = [
   'retry, re-sign, or re-pay — and ask them to grant or raise the budget in Haven.',
   'Spend authority is enforced on-chain by the user\'s account; Haven',
   'never holds keys and cannot override it.',
+  '',
+  'Contract fingerprint ' + HOSTED_CONTRACT_FINGERPRINT + ': every result from this',
+  'server carries contract_fingerprint and server_version at the top level of',
+  'its JSON. If a result contract_fingerprint differs from the fingerprint',
+  'above, your tool list is STALE — the server moved on after you loaded it.',
+  'Reconnect or restart the session before continuing (during a rolling deploy',
+  'the fingerprint may alternate once: reconnect once, and if it still',
+  'alternates, continue and report it). The list is stale in the same way when',
+  'a next_arguments does not fit the schema YOUR client loaded for the HOSTED',
+  'tool it names: never hand-build or reshape a payload to make it fit — defer',
+  'to the live schema and the next_arguments Haven returns. A misfit on a',
+  'SIGNER tool is signer skew, not a stale list: use the connector-upgrade',
+  'guidance above. If a payment is already prepared or funded, keep its',
+  'payment_id: after reconnecting, resume through haven_get_payment_status or',
+  'haven_resume_x402_payment (haven_sweep_delegate for a stranded bridge',
+  'balance). Never pay again.',
 ].join('\n')
 
 export interface HostedClientOptions {
@@ -274,7 +293,82 @@ export function buildHostedMcpServer(haven: HavenClient): McpServer {
     )
   }
 
+  // #3816: the strict-input and unknown-tool refusals a STALE client actually
+  // hits are answered by the SDK's own CallTool handler (its
+  // `validateToolInput` and the `_registeredTools` miss) BEFORE our handler
+  // runs, so they never pass through `toMcpResult` and would carry neither the
+  // fingerprint nor the version. Wrap that handler: re-register the CallTool
+  // route with an annotating pass-through. The SDK's handler is read back out
+  // of the request-handler map it was installed into (the same private map
+  // `assertCanSetRequestHandler` guards) and remains the sole dispatcher —
+  // the wrapper only post-processes the result it returns. Results our own
+  // handlers produced are recognised by their JSON payload and left verbatim;
+  // every remaining error text is an SDK-generated refusal and gains the
+  // fingerprint plus the reconnect hint.
+  const sdkCallTool = (
+    server.server as unknown as {
+      _requestHandlers: Map<string, (request: unknown, extra: unknown) => Promise<unknown>>
+    }
+  )._requestHandlers.get('tools/call')
+  if (sdkCallTool) {
+    server.server.setRequestHandler(CallToolRequestSchema, async (request, extra) =>
+      annotateStaleToolList(
+        (await sdkCallTool(request, extra)) as CallToolResult,
+      ) as unknown as ServerResult,
+    )
+  }
+
   return server
+}
+
+/** The shape of the CallTool result the SDK returns (only what we read). */
+interface CallToolResult {
+  isError?: boolean
+  content?: { type: string; text?: string }[]
+}
+
+/**
+ * True when the text is a JSON payload `toMcpResult` serialised — our handlers
+ * already embed the fingerprint and version at its top level.
+ */
+function isHostedPayloadText(text: string): boolean {
+  if (!text.startsWith('{')) return false
+  try {
+    const parsed: unknown = JSON.parse(text)
+    return (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      typeof (parsed as { success?: unknown }).success === 'boolean' &&
+      typeof (parsed as { contract_fingerprint?: unknown }).contract_fingerprint === 'string'
+    )
+  } catch {
+    return false
+  }
+}
+
+const STALE_TOOL_LIST_SUFFIX =
+  `\n\ncontract_fingerprint ${HOSTED_CONTRACT_FINGERPRINT} — your tool list may be stale. ` +
+  'Reconnect or restart the session before continuing; if a payment is already ' +
+  'prepared or funded, keep its payment_id and resume via haven_get_payment_status ' +
+  'or haven_resume_x402_payment — never pay again.'
+
+/**
+ * Append the fingerprint and the stale-list hint to an SDK-generated refusal
+ * (unknown tool, strict-input refusal). Hosted handler results are returned
+ * unchanged: their payload already carries both fields inside its JSON.
+ */
+function annotateStaleToolList(result: CallToolResult): CallToolResult {
+  if (!result?.isError) return result
+  const first = result.content?.[0]
+  if (first?.type !== 'text' || typeof first.text !== 'string') return result
+  if (isHostedPayloadText(first.text)) return result
+  return {
+    ...result,
+    content: [
+      { ...first, text: first.text + STALE_TOOL_LIST_SUFFIX },
+      ...(result.content?.slice(1) ?? []),
+    ],
+  }
 }
 
 function toMcpResult(payload: ToolPayload) {
@@ -283,7 +377,15 @@ function toMcpResult(payload: ToolPayload) {
     content: [
       {
         type: 'text' as const,
-        text: JSON.stringify(payload, null, 2),
+        text: JSON.stringify(
+          {
+            contract_fingerprint: HOSTED_CONTRACT_FINGERPRINT,
+            server_version: HOSTED_SERVER_VERSION,
+            ...payload,
+          },
+          null,
+          2,
+        ),
       },
     ],
   }

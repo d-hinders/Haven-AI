@@ -3360,11 +3360,35 @@ current, and the failure mode differs by which half is stale:
 | Signer older than the backend, **signer predating #1138** | `MCP error -32602: Input validation error: Invalid arguments for tool haven_sign_x402: Invalid literal value, expected 1 at x402_expected.auth.version` |
 | Signer with #1138 but predating #1143 (forward-looking — see below) | `… Invalid input at x402_expected.auth.version` — Zod says nothing at all about a failing literal *union* |
 | Backend older than the signer | `Refusing to sign typed data under an expected context that does not commit to it` |
+| Hosted tool list (client loaded `tools/list` before a hosted deploy) | A result's `contract_fingerprint` differs from the one in the server instructions the client loaded at `initialize`; or a `next_arguments` doesn't fit the schema the client loaded for the **hosted** tool it names (a misfit on a signer tool is signer skew — the rows above). The server cannot push `notifications/tools/list_changed` (stateless transport, `sessionIdGenerator: undefined`), so the SDK's `-32602` / unknown-tool refusals arrive before any Haven handler and now carry the fingerprint plus a reconnect hint. |
 
 All of these fail closed, which is the point: none produces a signature. Treat any
 of them on the delegation rail as a version-skew report, not a credential
 problem — and note the last is also what a *legacy-rail* intent looks like if
 a caller passes `typed_data` that the context never committed to.
+
+### Hosted tool lists — the contract fingerprint and the reconnect rule (#3816)
+
+The hosted transport is stateless, so a deploy cannot tell connected clients
+that the contract moved. Instead every hosted tool result carries
+`contract_fingerprint` and `server_version` as top-level fields of its JSON
+payload (and the SDK-generated strict-input / unknown-tool refusals, which a
+stale client is exactly the one to hit, carry both plus a one-line reconnect
+hint via a CallTool wrapper in `packages/mcp-server/src/server.ts`). The same
+16-hex fingerprint is computed at boot from what `tools/list` advertises —
+name, the SDK's converted input schema, description; the instructions are
+excluded — and is embedded in `HOSTED_INSTRUCTIONS`, delivered at
+`initialize`. A client compares the fingerprint it loaded in the instructions
+against the one on any result; a difference, or a `next_arguments` that does
+not fit the schema it loaded for the hosted tool named, means the tool list
+is stale: reconnect or restart the session before continuing, and never
+hand-build or reshape a payload to make it fit. The in-flight carve-out: a
+prepared or funded payment keeps its `payment_id` and resumes through
+`haven_get_payment_status` / `haven_resume_x402_payment`
+(`haven_sweep_delegate` for a stranded bridge balance) — never pay again.
+During a rolling deploy the fingerprint may alternate once across replicas;
+reconnect once, and if it still alternates, continue and report. The
+published `haven-pay` skill carries the same rule.
 
 ### Task budgets — a third sign-context, and the tool set moves (#3329)
 

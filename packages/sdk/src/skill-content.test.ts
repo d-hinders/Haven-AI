@@ -61,6 +61,25 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).toContain('needs_approval')
   })
 
+  it('carries the stale-tool-list reconnect rule with the in-flight carve-out (#3816)', () => {
+    // The hosted surface is stateless: a client that loaded tools/list before
+    // a deploy is never told the schema moved. The skill is the agent's own
+    // notes — exactly where the field case wrote a permanent "schema
+    // conflict" — so the rule here must point at the live schema, not freeze
+    // a field list.
+    expect(HAVEN_SKILL_MD).toContain('## Stale tool list')
+    expect(HAVEN_SKILL_MD).toContain('contract_fingerprint')
+    expect(HAVEN_SKILL_MD).toContain('server_version')
+    expect(HAVEN_SKILL_MD).toMatch(/reconnect or restart\s+the session before continuing/)
+    expect(HAVEN_SKILL_MD).toContain('never hand-build or reshape a payload')
+    expect(HAVEN_SKILL_MD).toContain('signer skew, not a stale list')
+    expect(HAVEN_SKILL_MD).toContain('keep its')
+    expect(HAVEN_SKILL_MD).toContain('after reconnecting,')
+    expect(HAVEN_SKILL_MD).toContain('resume through')
+    expect(HAVEN_SKILL_MD).toContain('haven_resume_x402_payment')
+    expect(HAVEN_SKILL_MD).toContain('Never pay again')
+  })
+
   it('tells a later session what to do with client_update, in the runbook\'s own words', () => {
     // The runbook is read once at onboarding; the skill loads every session.
     // Without this, an agent past setup meets client_update with no instruction.

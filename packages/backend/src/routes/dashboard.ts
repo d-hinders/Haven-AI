@@ -103,7 +103,11 @@ function accumulateGroup(
   target.netSek += Number(group[`net_sek_${suffix}`] ?? '0')
   target.payments += Number(group[`payments_${suffix}`] ?? '0')
 
-  const rate = rates.get(`${group.chain_key}:${group.token_key}`) ?? null
+  // String-concat, not a template literal: the route-module inventory regex
+  // reads any `x.get(` followed by a quoted string as a Fastify registration,
+  // and a backtick here fabricated a `GET /dashboard${chain}:${token}` route
+  // in `route-modules.generated.ts` (#3803 round-2).
+  const rate = rates.get(group.chain_key + ':' + group.token_key) ?? null
   const fbUsd = Number(group[`fb_usd_${suffix}`] ?? '0')
   const fbEur = Number(group[`fb_eur_${suffix}`] ?? '0')
   const fbSek = Number(group[`fb_sek_${suffix}`] ?? '0')

@@ -12,6 +12,13 @@ vi.mock('../../db.js', () => ({
   },
 }))
 
+// #3824: the payment rows are priced at serve time through the CoinGecko
+// read — a collaborator, stubbed here so the harness never reaches the
+// network and the approx figures are deterministic.
+vi.mock('../../infra/prices.js', () => ({
+  getTokenPrice: async () => ({ usd: 1, eur: 0.9, sek: 10.76 }),
+}))
+
 import agentActivityRoutes from '../agent-activity.js'
 import { installRequestValidation } from '../../openapi/request-validation.js'
 

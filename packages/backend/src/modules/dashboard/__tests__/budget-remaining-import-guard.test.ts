@@ -47,7 +47,9 @@ const CACHE_MODULE = 'budget-remaining-cache'
  */
 function importSpecifiers(source: string): string[] {
   const specifiers: string[] = []
-  for (const m of source.matchAll(/(?:^|\n)\s*import\s[^;'"]*?from\s*['"]([^'"]+)['"]/g)) {
+  // `[^;]*?` (not `[^;'"]`) — a comment inside the import braces may carry an
+  // apostrophe (the dep-lint-exempt note in the route does).
+  for (const m of source.matchAll(/(?:^|\n)\s*import\s[^;]*?from\s*['"]([^'"]+)['"]/g)) {
     specifiers.push(m[1])
   }
   for (const m of source.matchAll(/import\(\s*['"]([^'"]+)['"]\s*\)/g)) {

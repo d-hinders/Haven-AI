@@ -46,6 +46,11 @@ import {
   mapWithConcurrency,
 } from '../infra/chain/delegation-budget-reader.js'
 import {
+  // dep-lint-exempt: #3804's owner decision places the display cache in
+  // modules/dashboard and this route as its ONLY importer (pinned by
+  // modules/dashboard/__tests__/budget-remaining-import-guard.test.ts) — a
+  // display-only cache must never be reachable from the money path, which is
+  // exactly what this one-file edge guarantees.
   fetchBudgetRemaining,
   type BudgetRemainingOutcome,
 } from '../modules/dashboard/budget-remaining-cache.js'

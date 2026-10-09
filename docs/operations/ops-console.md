@@ -16,6 +16,11 @@ covers:
 last-verified: "2026-10-06"
 ---
 
+> **Re-verified #3821 (2026-10-09):** only the Ignored Build Step paragraph
+> changed — the frontend project takes the first-preview path for opt-in
+> `preview/*` branches only. Nothing else in this document was re-verified,
+> and `last-verified` is not bumped.
+
 # Ops console
 
 The private operations console (`@haven/ops`, epic #3507): a founders-only,

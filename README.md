@@ -500,7 +500,7 @@ All changes go through pull requests — no direct pushes to `main` or `dev`. Fe
 1. Branch off `dev` → make your changes
 2. Push the branch and open a PR **into `dev`** on GitHub
 3. CI runs automatically (type-check + build per surface: SDK, CLI, backend, frontend, MCP, connect, signer)
-4. Need a live frontend preview? Push the branch as `preview/<name>` (PR previews are opt-in, [`dev-environment.md` § PR previews are opt-in](docs/operations/dev-environment.md#pr-previews-are-opt-in)); Vercel then posts its URL on the PR
+4. Need a live frontend preview? Push the branch as `preview/<name>` (PR previews are opt-in, [`dev-environment.md` § PR previews are opt-in](docs/operations/dev-environment.md#pr-previews-are-opt-in)); Vercel then reports its URL in the PR's checks
 5. Once CI is green, the PR can merge into `dev` and auto-deploys to the dev environment
 6. **Promote `dev → main`** with a separate PR (the only normal path into `main`); merging triggers automatic production deploys to Vercel + Railway (~2 min). Emergency fixes can use a `hotfix/*` branch straight into `main`.
 

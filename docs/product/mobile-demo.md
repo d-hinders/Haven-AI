@@ -60,7 +60,7 @@ so the presenter can tell them apart at arm's length.
 The dev install points at the **stable branch alias, never a preview
 URL** (an opt-in `preview/*` deployment). A preview is a different domain for every branch, and a different
 domain is a different installed app: the phone would accumulate a dead icon
-per PR and the session cookie would not follow the alias. If the label under
+per preview and the session cookie would not follow the alias. If the label under
 the icon is not exactly "Haven" or "Haven Dev", the wrong URL was installed —
 delete it and start over.
 

@@ -18,6 +18,12 @@
  * entry when probed, which may not be the agent's chain, and a stale row keeps
  * its old set. The live quote's `expected_funding_leg` is authoritative.
  *
+ * Matched EXACTLY (`erc7710`, after trimming), like everything that acts on
+ * the column: the settlement selector (`isErc7710Option`, `x402.ts`) and the
+ * backend's merchant-locked aggregate (`'erc7710' = ANY(...)`). The backend
+ * stores each option's method verbatim, so a case-folding reading here would
+ * call a row erc7710-capable that the quote and prepare do not.
+ *
  * The dashboard's `needsUnpinnedBudget` (frontend `lib/marketplace.ts`) reads
  * the same column; a frontend test asserts it agrees with this function.
  */
@@ -27,7 +33,7 @@ export function catalogFundingLegExpected(assetTransferMethods: string | null | 
   if (typeof assetTransferMethods !== 'string') return 'unknown'
   const methods = assetTransferMethods
     .split(',')
-    .map((method) => method.trim().toLowerCase())
+    .map((method) => method.trim())
     .filter((method) => method.length > 0)
   if (methods.length === 0) return 'unknown'
   return !methods.includes('erc7710')

@@ -5,7 +5,13 @@ describe('catalogFundingLegExpected (#3839)', () => {
   it('erc7710 in the recorded set: no funding leg expected', () => {
     expect(catalogFundingLegExpected('eip3009,erc7710')).toBe(false)
     expect(catalogFundingLegExpected('erc7710')).toBe(false)
-    expect(catalogFundingLegExpected(' eip3009 , ERC7710 ')).toBe(false)
+    expect(catalogFundingLegExpected(' eip3009 , erc7710 ')).toBe(false)
+  })
+
+  it('matches exactly, like the settlement selector and the backend: "ERC7710" is not erc7710', () => {
+    // The quote's `isErc7710Option` and the merchant-locked SQL both compare
+    // `=== 'erc7710'`; a case-folding hint would contradict them.
+    expect(catalogFundingLegExpected('eip3009,ERC7710')).toBe(true)
   })
 
   it('a recorded set without erc7710 (eip3009-only): a funding leg is expected', () => {

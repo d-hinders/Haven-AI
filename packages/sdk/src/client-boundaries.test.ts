@@ -540,6 +540,7 @@ describe('HavenClient structural boundary', () => {
       'buildSweepAuthorizationMessage',
       'buildSweepTypedData',
       'buildX402ExpectedMessage',
+      'catalogFundingLegExpected', // #3839
       'compareNodeVersions',
       'composeDescription',
       'connectorRerunCommand',
@@ -643,6 +644,7 @@ describe('HavenClient structural boundary', () => {
       'AgentPaymentWarning',
       'AgentPurchaseSummary',
       'BudgetPrecheckResult',
+      'CatalogFundingLegHint', // #3839
       'CatalogSubmissionAccepted',
       'ClaudeTool',
       'EvidenceReportOutcome', // #2970

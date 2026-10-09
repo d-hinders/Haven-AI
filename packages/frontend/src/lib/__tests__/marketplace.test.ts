@@ -205,7 +205,9 @@ describe('needsUnpinnedBudget agrees with the agents\' funding_leg_expected hint
     'eip3009',
     'erc7710',
     'eip3009,erc7710',
-    'eip3009, ERC7710',
+    'eip3009, erc7710',
+    // Exact match on both sides, like the settlement selector: not erc7710.
+    'eip3009,ERC7710',
     'eip3009,permit2',
     'erc77100',
   ]

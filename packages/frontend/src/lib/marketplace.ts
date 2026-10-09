@@ -168,7 +168,7 @@ export function needsUnpinnedBudget(assetTransferMethods: string | null): boolea
   if (!assetTransferMethods) return true
   return !assetTransferMethods
     .split(',')
-    .map((m) => m.trim().toLowerCase())
+    .map((m) => m.trim())
     .includes('erc7710')
 }
 

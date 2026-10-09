@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { formatFiat } from '../format'
 import {
   buildDashboardSummary,
   merchantDisplayName,
@@ -90,9 +91,11 @@ describe('buildDashboardSummary (#3807) — the exact sentences', () => {
           payments: 12,
           distinctMerchants: 4,
           agents: [
-            { id: 'a', name: 'Atlas', netSpend: 4 },
+            // The largest share is 39% — under the 40% naming threshold, so
+            // no agent is named and the sentence is a plain count.
+            { id: 'a', name: 'Atlas', netSpend: 3.9 },
             { id: 'b', name: 'Robin', netSpend: 3.2 },
-            { id: 'c', name: 'Merkel', netSpend: 2.8 },
+            { id: 'c', name: 'Merkel', netSpend: 2.9 },
           ],
           topMerchant: hostMerchant,
         }),
@@ -200,7 +203,9 @@ describe('buildDashboardSummary (#3807) — the exact sentences', () => {
           topMerchant: hostMerchant,
         }),
       ),
-    ).toBe('Atlas spent 119,46 kr at research.example in the last 7 days.')
+      // Read off the real formatter — sv-SE's separator bytes are the
+      // formatter's business, not the sentence's.
+    ).toBe(`Atlas spent ${formatFiat(119.46, 'SEK')} at research.example in the last 7 days.`)
   })
 })
 

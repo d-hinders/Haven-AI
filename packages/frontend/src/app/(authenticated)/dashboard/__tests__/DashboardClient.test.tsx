@@ -296,7 +296,7 @@ describe('DashboardClient', () => {
       })
     }
 
-    it('renders the SEK total, its change line, and the monthly spend from the SEK keys', () => {
+    it('renders the SEK total and its change line from the SEK keys', () => {
       mockSekOverview({ sekAmount: 130, sekPercent: 1 })
       render(<DashboardClient />)
 
@@ -311,7 +311,10 @@ describe('DashboardClient', () => {
       // to a plain space by getByText). The kr half was already sv-SE; the
       // line no longer mixes a hand-rolled English percent scaffold into it.
       expect(screen.getByText('+130,00 kr (+1,00 %) since yesterday')).toBeInTheDocument()
-      expect(screen.getByText('440,00 kr')).toBeInTheDocument()
+      // #3807: the monthly-spend SEK figure lives in the spending block now,
+      // read from `spend.d30` — this fixture carries no spend block, so the
+      // block renders its quiet placeholder instead of a number.
+      expect(screen.getAllByText('—').length).toBeGreaterThan(0)
       // The USD total must not leak onto a SEK hero under any label.
       expect(screen.queryByText('$1,234.56')).toBeNull()
     })
@@ -793,12 +796,18 @@ describe('DashboardClient', () => {
         merchantName: null,
       },
       failedIntents7d: 1,
-      balance_by_day: Array.from({ length: 30 }, (_, i) => ({
-        snapshotDate: `2026-09-${String(10 + i).padStart(2, '0')}`,
-        totalUsd: 1200 + i,
-        totalEur: 1100 + i,
-        totalSek: null as number | null,
-      })),
+      balance_by_day: Array.from({ length: 30 }, (_, i) => {
+        // Real calendar days (Sep 10 + i, rolling into October) — a naive
+        // string pad produces '2026-09-39' and the sparkline's Date.parse
+        // goes NaN.
+        const day = new Date(Date.UTC(2026, 8, 10 + i))
+        return {
+          snapshotDate: day.toISOString().slice(0, 10),
+          totalUsd: 1200 + i,
+          totalEur: 1100 + i,
+          totalSek: null as number | null,
+        }
+      }),
     }
 
     function mockOverviewWithSpend(spend: typeof baseSpend) {
@@ -831,10 +840,13 @@ describe('DashboardClient', () => {
       mockOverviewWithSpend(baseSpend)
       render(<DashboardClient />)
 
-      // d7: one spending agent would be needed to name one — the fixture has
-      // no agents, so the spread-out count form renders off the totals.
+      // d7: the fixture has no agents, so the spread-out count form renders
+      // off the totals — and the fixture's 1 budget stop rides along as its
+      // own neutral sentence.
       expect(
-        screen.getByText('Agents spent $11.10 in the last 7 days.'),
+        screen.getByText(
+          'Agents spent $11.10 in the last 7 days. 1 payment attempt was stopped by a budget limit.',
+        ),
       ).toBeInTheDocument()
     })
 
@@ -850,10 +862,13 @@ describe('DashboardClient', () => {
       render(<DashboardClient />)
 
       // d30.approx is true in the fixture, and the Amount primitive's
-      // title carries the reason (owner decision 1).
-      const total = screen.getByTitle("Converted at today's rate")
-      expect(total).toBeInTheDocument()
-      expect(total.textContent).toContain('48.10')
+      // title carries the reason (owner decision 1). The title sits on the
+      // inner ≈ mark; the figure is its sibling inside the Amount root, so
+      // read the enclosing span's text.
+      const marks = screen.getAllByTitle("Converted at today's rate")
+      expect(marks.length).toBeGreaterThan(0)
+      const amounts = marks.map((mark) => mark.parentElement?.textContent ?? '')
+      expect(amounts.join(' ')).toContain('48.10')
     })
   })
 

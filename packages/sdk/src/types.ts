@@ -1840,7 +1840,9 @@ export const AgentPaymentFailureCode = {
    * challenge — e.g. its settlement wallet is out of gas. No 402 was ever
    * issued and no payment was created; this is honest and (per
    * `retry_after_s`, when present) usually transient, unlike a permanent
-   * endpoint miss.
+   * endpoint miss — except out of gas (`reason_code:
+   * settlement_wallet_out_of_gas`), which needs the merchant's operator to
+   * top up its settlement wallet first (#3834).
    */
   MerchantNotReady: 'MERCHANT_NOT_READY',
 } as const

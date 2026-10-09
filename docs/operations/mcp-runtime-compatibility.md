@@ -3866,9 +3866,9 @@ Hosted text only. The `haven_settle_mcp_tool` description and the server instruc
 Message text and one next-step reason only. When a merchant refuses with `reason_code: settlement_wallet_out_of_gas`:
 
 - The hosted runtime (on deploy) and the local runtime (`@haven_ai/mcp`, once released) both say the merchant's operator must top up its settlement wallet, and give `fail_floor` beside `settlements_remaining`. They no longer say "retry after approximately 60s"; the wallet does not refill itself, so retrying before a top-up is refused again.
-- The hosted `next_tool_omitted_reason` names the top-up. The paid-retry refusal on `haven_settle_mcp_tool` / `haven_complete_mcp_tool` follows the same rule.
+- Both runtimes' `next_tool_omitted_reason` names the top-up. The erc7710 paid-retry refusal on `haven_settle_mcp_tool` follows the same rule; the eip3009 paid retry (`haven_complete_mcp_tool`) is unchanged.
 - Every other reason code keeps its wording. The code, `next_action: stop_and_tell_user` and `retry_with_new_quote: true` are unchanged.
-- The demo merchant's 503 body gains an additive `recovery: 'operator_top_up'`; Haven's wording is keyed on `reason_code`, not on that field.
+- Haven's wording is keyed on `reason_code`; it does not read the merchant's `recovery` field.
 
 No tool, schema, refusal code or consent-hash change. A local client on an older `@haven_ai/mcp` keeps the old "retry after" text until it updates.
 

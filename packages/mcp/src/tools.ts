@@ -1224,7 +1224,8 @@ class MerchantNotReadyError extends Error {
  * #2983: mirrors mcp-server's `merchantNotReadyErrorFor` (`mcp-context.ts`)
  * for the local runtime. Only the merchant's OWN refusal shape — `503
  * { error: 'merchant_not_ready', reason_code, settlements_remaining,
- * retry_after_s }` — maps here. A bare 503 (a load balancer, an HTML outage
+ * fail_floor, retry_after_s }` — maps here (`fail_floor` is read for the
+ * out-of-gas message, #3834). A bare 503 (a load balancer, an HTML outage
  * page, a non-JSON body) is not a capacity signal and keeps going through
  * the #1301 discovery path. `response.clone()` because the caller still
  * needs to read the ORIGINAL response (for `discoveryMissError`'s status)

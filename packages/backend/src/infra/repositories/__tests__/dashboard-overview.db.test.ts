@@ -19,6 +19,7 @@
 import fs from 'node:fs'
 import { beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../db.js'
+import { sumTotalsSpendForUser } from '../../../infra/repositories/analytics.js'
 import { deriveDelegationBudgets } from '../../../rails/delegation-budget-view.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import {
@@ -265,6 +266,41 @@ describeDb('#3803 overview statements', () => {
     expect(group.payments_30).toBe('1')
     // pace: Σ confirmed − min(swept, confirmed) = 10_000_000 − 4_000_000
     expect(group.pace_atomic).toBe('6000000')
+  })
+
+  // #3807 AC "totals agree": the money panel's 30-day spend total and the
+  // analytics page's 30-day figure are the SAME number for the SAME fixture —
+  // both carry #3803's net definition, so neither surface may drift from the
+  // other. The overview side is the route's own accumulate path; the analytics
+  // side is `sumTotalsSpendForUser` over the identical window.
+  it('the 30-day net total agrees with the analytics figure on the same fixture (#3807)', async () => {
+    const userId = await seedUser()
+    const { from7, from30, to } = window()
+    const seed = await seedAccountAndAgent(userId)
+    await seedDelegation(seed)
+    await confirmedIntent(seed, {
+      amountAtomic: '10000000',
+      amountHuman: '10.00',
+      usd: '10',
+      eur: '9',
+      sek: '100',
+    })
+    await seedSweep(seed, '4000000')
+
+    const groups = await listDashboardSpendGroups(userId, [84532], from30, from7, to)
+    const overviewNet30 = groups.reduce(
+      (sum, group) => sum + Number(group.net_usd_30 ?? '0'),
+      0,
+    )
+    const analytics = await sumTotalsSpendForUser(
+      userId,
+      { from: from30, to },
+      { from: from7, to },
+    )
+    expect(overviewNet30).toBeGreaterThan(0)
+    expect(overviewNet30).toBe(Number(analytics.spent_usd))
+    // The pinned fixture: gross 10.00, swept 4.00 → net 6.00 on BOTH sides.
+    expect(overviewNet30).toBe(6)
   })
 
   it("an account's USDC pace counts only that account's agents and chain", async () => {

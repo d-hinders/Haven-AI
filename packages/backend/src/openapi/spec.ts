@@ -8609,7 +8609,7 @@ export const openapiSpec = {
       get: {
         tags: ['Dashboard'],
         operationId: 'getDashboardOverview',
-        summary: 'Aggregated dashboard overview: totals, day change, metrics, previews.',
+        summary: 'Aggregated dashboard overview: totals, day change, spend windows, previews.',
         security: [{ DashboardJwt: [] }],
         responses: {
           '200': {
@@ -12929,7 +12929,7 @@ export const openapiSpec = {
       },
       DashboardAgentAllowance: {
         type: 'object',
-        required: ['tokenSymbol', 'allowanceAmount', 'resetPeriodMin'],
+        required: ['tokenSymbol', 'allowanceAmount'],
         properties: {
           tokenSymbol: { type: 'string' },
           // #2400: was a bare `{ type: 'string' }`, while the identical value
@@ -12948,9 +12948,6 @@ export const openapiSpec = {
           // round trip. The literal STAYS, now as belt-and-braces rather than
           // as the sole guard.
           allowanceAmount: allowanceHumanAmount,
-          // #3803: deprecated with the allowances array (see
-          // DashboardAgentPreview) — removed in #3807.
-          resetPeriodMin: { type: 'integer', deprecated: true },
         },
         additionalProperties: false,
       },
@@ -13108,7 +13105,7 @@ export const openapiSpec = {
       },
       DashboardOverviewResponse: {
         type: 'object',
-        required: ['totals', 'change', 'metrics', 'actionableApprovals', 'pendingApprovals', 'onboardingProgress', 'agents', 'transactions', 'agentCount', 'accounts', 'spotRates', 'spend'],
+        required: ['totals', 'change', 'actionableApprovals', 'pendingApprovals', 'onboardingProgress', 'agents', 'transactions', 'agentCount', 'accounts', 'spotRates', 'spend'],
         properties: {
           totals: {
             type: 'object',
@@ -13141,19 +13138,11 @@ export const openapiSpec = {
             },
             additionalProperties: false,
           },
-          metrics: {
-            type: 'object',
-            required: ['connectedAgents', 'monthlyAgentSpendUsd', 'monthlyAgentSpendEur', 'successfulTransactions', 'activeAccounts'],
-            properties: {
-              connectedAgents: { type: 'integer', deprecated: true, description: "Agents with status 'active' only. Deprecated (#3803): superseded by agentCount — removed with its tile in #3807." },
-              monthlyAgentSpendUsd: { type: 'number', deprecated: true, description: 'Deprecated (#3803): superseded by spend.d30 — removed with its tile in #3807.' },
-              monthlyAgentSpendEur: { type: 'number', deprecated: true, description: 'Deprecated (#3803): superseded by spend.d30 — removed with its tile in #3807.' },
-              monthlyAgentSpendSek: { type: 'number', deprecated: true, description: 'Deprecated (#3803): superseded by spend.d30 — removed with its tile in #3807.' },
-              successfulTransactions: { type: 'integer', deprecated: true, description: 'Deprecated (#3803): removed with its tile in #3807.' },
-              activeAccounts: { type: 'integer', deprecated: true, description: 'All linked Safes, regardless of activity. Deprecated (#3803): superseded by accounts — removed with its tile in #3807.' },
-            },
-            additionalProperties: false,
-          },
+          // #3807: the metrics block is gone with the four KPI tiles —
+          // agentCount.active supersedes connectedAgents, spend.d30 supersedes
+          // the monthly agent spend triple, and the "Successful transactions"
+          // all-time count counted receives too (the issue's Method note) to
+          // survive as a figure. activeAccounts was every linked Safe.
           actionableApprovals: { type: 'integer', description: 'Always 0 since #2055 — the approval queue died with the Safe rail and its table is dropped; the field survives for wire compatibility.' },
           pendingApprovals: { type: 'integer', description: 'Duplicate of actionableApprovals; always 0 since #2055, kept for compatibility.' },
           onboardingProgress: {

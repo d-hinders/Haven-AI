@@ -14,10 +14,8 @@ import {
   listPendingAgentSetupStatuses,
   listReceivedSubBudgetsForAgents,
   listRefusalBucketsByAgent,
-  sumMonthlyPaymentSpend,
   type DashboardAllowanceRow,
   type DashboardSpendGroupRow,
-  type MonthlySpendRow,
   type RefusalBucketRow,
 } from '../infra/repositories/dashboard.js'
 import { listBalanceByDayForUser, listReceiptMerchantNamesForUser } from '../infra/repositories/analytics.js'
@@ -25,7 +23,6 @@ import { listContactsForUser } from '../infra/repositories/contacts.js'
 import { getTokenPrice } from '../infra/prices.js'
 import { currentPeriodBounds } from '../infra/chain/delegation-budget-reader.js'
 import { deriveDelegationAllowances, deriveDelegationBudgets } from '../rails/delegation-budget-view.js'
-import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
 import {
   combineBalanceFreshness,
   fetchPortfolioForAccount,
@@ -154,50 +151,6 @@ function computePercentChange(current: number, previous: number): number {
   return ((current - previous) / previous) * 100
 }
 
-async function accumulateMonthlySpend(
-  rows: MonthlySpendRow[],
-): Promise<{ usd: number; eur: number; sek: number }> {
-  let usd = 0
-  let eur = 0
-  let sek = 0
-
-  for (const row of rows) {
-    usd += Number(row.usd_sum ?? '0')
-    eur += Number(row.eur_sum ?? '0')
-    sek += Number(row.sek_sum ?? '0')
-
-    // Two INDEPENDENT re-price buckets. `getFiatValuesForTokenAmount` prices
-    // the token amount into all three currencies, but each bucket may only
-    // land its own currency: `sek_sum` already holds every row's booked
-    // `sek_value`, and pricing SEK from the USD/EUR bucket's read is the
-    // double-count the round-2 review measured (21 vs 10.5) — migration 090
-    // backfills rows whose usd/eur are NULL, so the USD/EUR predicate
-    // collects rows SEK has already priced. The buckets' predicates agree
-    // per row shape (#3195): NULL, or zero-booked beside a real amount,
-    // collects into BOTH buckets; a priced row into neither.
-    const fallbackAmount = Number(row.fallback_amount ?? '0')
-    if (fallbackAmount > 0) {
-      const fallback = await getFiatValuesForTokenAmount(
-        row.token_symbol,
-        fallbackAmount.toString(),
-      )
-      usd += fallback.usd ?? 0
-      eur += fallback.eur ?? 0
-    }
-
-    const fallbackAmountSek = Number(row.fallback_amount_sek ?? '0')
-    if (fallbackAmountSek > 0) {
-      const sekFallback = await getFiatValuesForTokenAmount(
-        row.token_symbol,
-        fallbackAmountSek.toString(),
-      )
-      sek += sekFallback.sek ?? 0
-    }
-  }
-
-  return { usd, eur, sek }
-}
-
 export default async function dashboardRoutes(
   app: FastifyInstance,
 ): Promise<void> {
@@ -218,8 +171,6 @@ export default async function dashboardRoutes(
     // #2055: structurally zero — the approval queue died with the
     // AllowanceModule rail; both wire fields survive for compatibility.
     const actionableApprovals = 0
-
-    const activeAgents = agents.filter((agent) => agent.status === 'active')
 
     // Delegation-rail agents: the live budget is the active delegation set
     // (#1090). Legacy-rail agents get no allowance entries — the Safe rail is
@@ -501,12 +452,6 @@ export default async function dashboardRoutes(
     const changeAvailable = Boolean(yesterdaySnapshot)
     const sekChangeAvailable = changeAvailable && yesterdaySnapshot?.total_sek != null
     const previousSek = Number(yesterdaySnapshot?.total_sek ?? '0')
-    const paymentSpendRows = await sumMonthlyPaymentSpend(sub)
-    const paymentSpend = await accumulateMonthlySpend(paymentSpendRows)
-
-    const monthlySpendUsd = paymentSpend.usd
-    const monthlySpendEur = paymentSpend.eur
-    const monthlySpendSek = paymentSpend.sek
 
     const mergedTransactions: EnrichedTransaction[] = []
     const transactionResults = await Promise.allSettled(
@@ -566,8 +511,6 @@ export default async function dashboardRoutes(
       currency,
     )
 
-    const successfulTransactions = dedupedTransactions.filter((tx) => !tx.isError).length
-
     return {
       totals: {
         usd: totalUsd,
@@ -602,14 +545,6 @@ export default async function dashboardRoutes(
         // stale or unavailable; absent on a clean read.
         ...(balancesDegraded ? { balancesFreshness: balancesDegraded } : {}),
       },
-      metrics: {
-        connectedAgents: activeAgents.length,
-        monthlyAgentSpendUsd: monthlySpendUsd,
-        monthlyAgentSpendEur: monthlySpendEur,
-        monthlyAgentSpendSek: monthlySpendSek,
-        successfulTransactions,
-        activeAccounts: accounts.length,
-      },
       actionableApprovals,
       pendingApprovals: actionableApprovals,
       onboardingProgress: {
@@ -641,11 +576,12 @@ export default async function dashboardRoutes(
           accountName: agent.account_name,
           accountChainId: agent.account_chain_id,
           // Deprecated with #3807's tile removal; still emitted (the frontend
-          // reads it with `?? 0` today).
+          // reads it with `?? 0` today). `resetPeriodMin` left the wire in
+          // #3807 — the reset label it fed was removed with the KPI tiles,
+          // and #3809's budget-caption rows replace this subtitle.
           allowances: (allowancesByAgent.get(agent.id) ?? []).map((allowance) => ({
             tokenSymbol: allowance.token_symbol,
             allowanceAmount: allowance.allowance_amount,
-            resetPeriodMin: allowance.reset_period_min,
           })),
           // #3803: every budget with its identity and live window. The 6-row
           // preview cap moved to the client; the expired-row predicate is

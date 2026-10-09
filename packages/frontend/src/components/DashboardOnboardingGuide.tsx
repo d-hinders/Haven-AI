@@ -125,7 +125,7 @@ export default function DashboardOnboardingGuide({
     detail: hasFunds ? undefined : fundingDetail,
     completedBody: 'Funded — your agents can spend.',
     cta:
-      activeStep === 1 ? { label: 'Receive funds', onClick: onReceiveFunds } : undefined,
+      activeStep === 1 ? { label: 'Deposit address', onClick: onReceiveFunds } : undefined,
   }
 
   const step2: StepProps = {

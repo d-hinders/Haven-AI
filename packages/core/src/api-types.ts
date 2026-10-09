@@ -3379,7 +3379,7 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** Aggregated dashboard overview: totals, day change, metrics, previews. */
+        /** Aggregated dashboard overview: totals, day change, spend windows, previews. */
         get: operations["getDashboardOverview"];
         put?: never;
         post?: never;
@@ -6029,8 +6029,6 @@ export type components = {
             tokenSymbol: string;
             /** @description HUMAN-DECIMAL token amount — whole token units, NOT the atomic integer (25 USDC is "25.00", a zero budget is "0"). Projected from the agent's active delegation by rails/delegation-budget-view.ts via formatTokenValue(budget_atomic, decimals), whose output is always "0" or <integer>.<2–6 fraction digits> — so this pattern REJECTS an atomic value such as "500" (#2408). "0" is the one value both shapes share. Do not BigInt() this value: it is the shape that made #2283 a production bug. To compare it against an atomic price, scale it by the token's decimals first (#2295). */
             allowanceAmount: string;
-            /** @deprecated */
-            resetPeriodMin: number;
         };
         DashboardAgentPreview: {
             /** Format: uuid */
@@ -6195,38 +6193,6 @@ export type components = {
                 sekPercent?: number;
                 /** @description Present only when at least one of the totals' balance reads failed (#3295): stale with the oldest served as-of time, or unavailable when some token has no known value. Absent on a clean read. */
                 balancesFreshness?: components["schemas"]["BalanceFreshness"];
-            };
-            metrics: {
-                /**
-                 * @deprecated
-                 * @description Agents with status 'active' only. Deprecated (#3803): superseded by agentCount — removed with its tile in #3807.
-                 */
-                connectedAgents: number;
-                /**
-                 * @deprecated
-                 * @description Deprecated (#3803): superseded by spend.d30 — removed with its tile in #3807.
-                 */
-                monthlyAgentSpendUsd: number;
-                /**
-                 * @deprecated
-                 * @description Deprecated (#3803): superseded by spend.d30 — removed with its tile in #3807.
-                 */
-                monthlyAgentSpendEur: number;
-                /**
-                 * @deprecated
-                 * @description Deprecated (#3803): superseded by spend.d30 — removed with its tile in #3807.
-                 */
-                monthlyAgentSpendSek?: number;
-                /**
-                 * @deprecated
-                 * @description Deprecated (#3803): removed with its tile in #3807.
-                 */
-                successfulTransactions: number;
-                /**
-                 * @deprecated
-                 * @description All linked Safes, regardless of activity. Deprecated (#3803): superseded by accounts — removed with its tile in #3807.
-                 */
-                activeAccounts: number;
             };
             /** @description Always 0 since #2055 — the approval queue died with the Safe rail and its table is dropped; the field survives for wire compatibility. */
             actionableApprovals: number;

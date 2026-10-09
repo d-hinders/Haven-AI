@@ -777,6 +777,30 @@ longest supported value (`13 000,50 kr`) fits without truncation, and the
 tiles stack. The figure still carries no colour in any state — the card
 tile's contract, at a smaller scale.
 
+### Money panel (#3807)
+
+The dashboard's top section is `dashboard/MoneyPanel.tsx`, built from four
+registered pieces: `PageHeader` (the heading carries the templated 7-day
+summary sentence from `lib/dashboard-summary.ts` — fixed templates over the
+overview's own figures, never model-written, naming at most two agents and
+one merchant and describing budget stops neutrally), the anchor-surface
+balance hero (the same raised tinted card the hero always used), the
+§ AreaChart sparkline fed from `spend.balance_by_day` (absent days are
+gaps; under 3 measured days the flat placeholder draws), and three
+§ StatTile inline tiles (payments, distinct merchants, stopped by budget)
+under a 30-day spend total. That total — and the per-agent split above the
+tiles — renders through § Amount: currency mode with `approx` from the
+wire's `spend` windows, so a total that includes rows priced at today's
+rate carries the `≈` and a booked total does not. The four KPI tiles and
+their `metrics.*` wire fields are gone with this panel: agent counts live
+in the agents section (#3809), the spend total is the analytics page's own
+#3803 net figure, and "Successful transactions" counted receives, so it
+has no honest successor. When every linked account is a test account
+(`spend.scope === 'testnet'`, #3803 owner decision 3) the balance carries
+a quiet "Test network" label rather than a silently mislabelled total,
+and the hero's change line reads "since yesterday" — the diff is against
+the yesterday snapshot.
+
 ### Buttons
 
 **`Button` has four variants, and that is the whole set — but read the next sentence before

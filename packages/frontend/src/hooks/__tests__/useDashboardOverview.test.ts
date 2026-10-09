@@ -22,13 +22,7 @@ function overview(id: string): DashboardOverviewResponse {
       usdPercent: 0,
       eurPercent: 0,
     },
-    metrics: {
-      connectedAgents: 0,
-      monthlyAgentSpendUsd: 0,
-      monthlyAgentSpendEur: 0,
-      successfulTransactions: 0,
-      activeAccounts: 0,
-    },
+    // #3807: the metrics block is gone with the KPI tiles.
     actionableApprovals: 0,
     pendingApprovals: 0,
     onboardingProgress: { hasFirstAgentPayment: false },

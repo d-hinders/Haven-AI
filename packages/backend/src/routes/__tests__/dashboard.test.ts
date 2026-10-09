@@ -420,7 +420,9 @@ describe('dashboard routes', () => {
 
     expect(response.statusCode).toBe(200)
     const body = response.json()
-    expect(body.metrics.successfulTransactions).toBe(2)
+    // #3807: the "Successful transactions" metric left the wire with its tile
+    // (it counted every non-error row, receives included); the feed rows are
+    // what the dashboard shows now.
     expect(body.transactions).toHaveLength(2)
     expect(body.transactions.map((item: { chainId: number }) => item.chainId).sort()).toEqual([
       100,
@@ -559,9 +561,8 @@ describe('dashboard derives delegation-rail budgets from active delegations (#10
     // the enum and the uuid formats of the whole overview envelope, against
     // the same schema the dashboard's generated wire types are built from.
     expectMatchesSpec('GET', '/dashboard/overview', body)
-    expect(agent.allowances).toEqual([
-      { tokenSymbol: 'USDC', allowanceAmount: '1.00', resetPeriodMin: 1440 },
-    ])
+    // #3807: `resetPeriodMin` left the wire with the KPI tiles.
+    expect(agent.allowances).toEqual([{ tokenSymbol: 'USDC', allowanceAmount: '1.00' }])
   })
 })
 

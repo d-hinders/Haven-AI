@@ -1078,7 +1078,8 @@ export const FIXTURE_OVERVIEW = {
   // hero's change line renders in every capture this harness takes.
   totals: { usd: 12_640.55, eur: 11_690.21, sek: 136_050.75 },
   change: { available: true, usdAmount: 214.3, eurAmount: 198.2, usdPercent: 1.7, eurPercent: 1.7, sekAmount: 2_285.4, sekPercent: 1.7 },
-  metrics: { connectedAgents: 2, monthlyAgentSpendUsd: 482.5, monthlyAgentSpendEur: 446.3, monthlyAgentSpendSek: 5_192.5, successfulTransactions: 37, activeAccounts: 1 },
+  // #3807: the metrics block is gone with the KPI tiles — the SEK spend
+  // figure the old "Monthly agent spend" tile read lives in `spend.d30`.
   // #2120: 0, not 1. `routes/dashboard.ts:84` hardcodes `actionableApprovals
   // = 0` (and mirrors it into `pendingApprovals`) — the queue died with the
   // AllowanceModule rail and `approval_requests` is dropped. Both fields

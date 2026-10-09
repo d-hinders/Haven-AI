@@ -91,7 +91,6 @@ describe('fixture shape parity (screenshot dataset ↔ e2e dataset)', () => {
   it('dashboard overview + transactions align structurally', () => {
     expect(keysOf(FIXTURE_OVERVIEW)).toEqual(keysOf(dashboardOverview))
     expect(keysOf(FIXTURE_OVERVIEW.totals)).toEqual(keysOf(dashboardOverview.totals))
-    expect(keysOf(FIXTURE_OVERVIEW.metrics)).toEqual(keysOf(dashboardOverview.metrics))
     expect(keysOf(FIXTURE_OVERVIEW.agents[0])).toEqual(keysOf(dashboardOverview.agents[0]))
     for (const t of FIXTURE_TXS) expectKeySuperset(dashboardTransaction, t, 'transaction')
     // #3127 (finding 8): the SEK figures the SERVED DEFAULT renders exist in
@@ -101,10 +100,8 @@ describe('fixture shape parity (screenshot dataset ↔ e2e dataset)', () => {
     // for shapes, now also stopped for the SEK values.
     expect(FIXTURE_OVERVIEW.totals.sek).toBeGreaterThan(0)
     expect(FIXTURE_OVERVIEW.change.sekAmount).toBeGreaterThan(0)
-    expect(FIXTURE_OVERVIEW.metrics.monthlyAgentSpendSek).toBeGreaterThan(0)
     expect(dashboardOverview.totals.sek).toBeGreaterThan(0)
     expect(dashboardOverview.change.sekAmount).toBeGreaterThan(0)
-    expect(dashboardOverview.metrics.monthlyAgentSpendSek).toBeGreaterThan(0)
   })
 
   /**
@@ -506,7 +503,6 @@ describe('fixture shape parity (apiMock builder ↔ e2e dataset, #3027)', () => 
     const overview = API_MOCK_DEFAULTS['/dashboard/overview']
     expect(keysOf(overview)).toEqual(keysOf(dashboardOverview))
     expect(keysOf(overview.totals)).toEqual(keysOf(dashboardOverview.totals))
-    expect(keysOf(overview.metrics)).toEqual(keysOf(dashboardOverview.metrics))
     expect(keysOf(overview.agents[0])).toEqual(keysOf(dashboardOverview.agents[0]))
     expect(keysOf(overview.transactions[0])).toEqual(keysOf(dashboardTransaction))
   })

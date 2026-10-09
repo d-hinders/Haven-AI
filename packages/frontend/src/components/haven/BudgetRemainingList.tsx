@@ -97,4 +97,4 @@ export function BudgetRemainingList({ budgets }: BudgetRemainingListProps) { // 
   )
 }
 
-export default BudgetRemainingList
+export default BudgetRemainingList // design-system-exempt: same live-data wire composite as above (#3804)

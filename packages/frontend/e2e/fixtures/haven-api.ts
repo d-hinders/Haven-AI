@@ -795,6 +795,17 @@ export async function mockHavenApi(page: Page) {
       return
     }
 
+    // #3808: `DashboardClient` mounts `useBudgetRemaining`, which reads
+    // `GET /dashboard/budget-remaining` on every dashboard render. The
+    // #3804 fixture default is the same two-row shape the API serves (one
+    // KNOWN row, one UNKNOWN row) — without a handler here the read falls
+    // through to `fulfillUnmockedRoute` → 599 and `unexpectedBrowserErrors`
+    // fails every dashboard-rendering spec.
+    if (method === 'GET' && path === '/dashboard/budget-remaining') {
+      await fulfillJson(route, dashboardBudgetRemaining)
+      return
+    }
+
     if (method === 'GET' && path === '/agents') {
       await fulfillJson(route, { agents: [testAgent] })
       return

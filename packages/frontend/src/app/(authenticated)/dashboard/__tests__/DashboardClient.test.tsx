@@ -47,6 +47,13 @@ vi.mock('@/hooks/useAccountOperationGate', () => ({
   useAccountOperationGate: () => mockUseAccountOperationGate(),
 }))
 
+// #3808: the rules read the budget-remaining poll for the ≥90% arm; the
+// dashboard tests here exercise the wiring, not the poll (its contract has
+// its own suite).
+vi.mock('@/hooks/useBudgetRemaining', () => ({
+  useBudgetRemaining: () => ({ data: null, loading: false, error: null, refetch: vi.fn() }),
+}))
+
 
 vi.mock('@/components/DashboardOnboardingGuide', () => ({
   default: ({ hasFirstAgentPayment }: { hasFirstAgentPayment: boolean }) => (
@@ -111,7 +118,12 @@ const SAFE = {
   account_type: 'delegator_hybrid' as const,
 }
 
-function mockBaseState(overviewAgents: DashboardAgentPreview[] = []) {
+function mockBaseState(
+  overviewAgents: DashboardAgentPreview[] = [],
+  // #3808: the rules read the #3803 wire fields (accounts, spend) that the
+  // base shape predates; tests that exercise them pass them here.
+  overviewExtras: Record<string, unknown> = {},
+) {
   mockUseAuth.mockReturnValue({
     user: {
       id: 'user-1',
@@ -158,6 +170,7 @@ function mockBaseState(overviewAgents: DashboardAgentPreview[] = []) {
       },
       agents: overviewAgents,
       transactions: [],
+      ...overviewExtras,
     },
     loading: false,
     error: null,
@@ -579,193 +592,50 @@ describe('DashboardClient', () => {
     expect(screen.queryByText('No transactions yet')).not.toBeInTheDocument()
   })
 
-  describe('backup-signer recovery nudge (#1153 funded-state trigger)', () => {
-    const DELEGATOR_ACCOUNT = { ...SAFE, account_type: 'delegator_hybrid' }
-
-    /** The signer set AuthContext resolves on login, as the dashboard reads it. */
-    const storeSigners = (passkeys: number, owner: string | null) => {
-      window.localStorage.setItem(
-        `haven_hybrid_signers_${DELEGATOR_ACCOUNT.account_address.toLowerCase()}_${DELEGATOR_ACCOUNT.chain_id}`,
-        JSON.stringify({
-          account_address: DELEGATOR_ACCOUNT.account_address,
-          chain_id: DELEGATOR_ACCOUNT.chain_id,
-          owner_address: owner,
-          passkeys: Array.from({ length: passkeys }, (_, i) => ({ key_id: `0x0${i}`, x: '0x1', y: '0x2' })),
-        }),
-      )
+  // ── The backup item lives in the NeedsYou card now (#3808) ────────────────
+  // The RecoveryNudge component is deleted; its per-account rule reads the
+  // overview's `needs_backup_recommendation` (#1205) through the shared rules
+  // in `lib/dashboard-attention.ts`. Rule-level truth (per-account items,
+  // testnet silence, unknown reads) is pinned there; these tests pin the
+  // DASHBOARD WIRING — the legacy global dismissal key and the render path.
+  describe('backup item wiring (#3808)', () => {
+    const RECOMMENDED_ACCOUNT = {
+      accountId: 'safe-1',
+      chainId: 8453,
+      isTestnet: false,
+      usdcBalanceAtomic: '1250000000',
+      usdcDecimals: 6,
+      funded: true,
+      needs_backup_recommendation: true,
+      usdcPace7dAtomic: '6250000',
     }
 
-    const asDelegationUser = () =>
-      mockUseAuth.mockReturnValue({
-        user: {
-          id: 'user-1',
-          name: 'Ada',
-          email: 'ada@example.com',
-          wallet_address: '0x5555555555555555555555555555555555555555',
-          accounts: [DELEGATOR_ACCOUNT],
-        },
-      })
-
-    it('shows the nudge for a funded, single-signer delegation-rail account', () => {
-      asDelegationUser()
-      storeSigners(1, null) // one passkey, no owner → no recovery
-      // mockBaseState() already sets a non-zero aggregated balance.
+    it('shows the backup item for a funded account the server recommends a backup for', () => {
+      mockBaseState([], { accounts: [RECOMMENDED_ACCOUNT], spend: { failedIntents7d: 0 } })
 
       render(<DashboardClient />)
 
-      expect(screen.getByText('Add a backup soon')).toBeInTheDocument()
+      expect(screen.getByText('Main account has one way to approve payments')).toBeInTheDocument()
     })
 
-    it('stays silent when the account ALREADY has a backup', () => {
-      // Recommending a backup to someone who enrolled one teaches them to
-      // ignore the banner — and it is the state the nudge is asking for.
-      asDelegationUser()
-      storeSigners(2, null)
-
-      render(<DashboardClient />)
-
-      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
-    })
-
-    it('counts an EOA owner as the second signer', () => {
-      asDelegationUser()
-      storeSigners(1, '0x5555555555555555555555555555555555555555')
-
-      render(<DashboardClient />)
-
-      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
-    })
-
-    /**
-     * #1989 (epic #1440) removed the LEGACY-rail arm of this nudge, and this
-     * test is the inversion of the four #1229/#1205 tests that used to live
-     * here.
-     *
-     * Those four are deleted rather than kept, and the distinction matters:
-     * three of them ('stays silent once the passkey Safe has a second
-     * approver', 'keeps the safe-rail nudge off testnet chains', 'leaves an
-     * imported wallet-owned Safe alone') all asserted that NO nudge renders
-     * for some legacy configuration. Every one of them is now true by
-     * CONSTRUCTION — no legacy configuration can produce a nudge at all — so
-     * keeping them would have left three green tests guarding the empty set,
-     * which is exactly the #1987 defect. They were removed and replaced by the
-     * single assertion that actually still has content: the arm is gone for
-     * the configuration it used to FIRE on.
-     *
-     * The positive control is in the same test on purpose. Without it, "no
-     * nudge for a legacy Safe" is satisfied by breaking the nudge outright.
-     */
-    it('shows no backup nudge for a funded single-owner passkey Safe, while the delegation nudge still fires', () => {
-      const asPasskeySafeUser = () => {
-        mockUseAuth.mockReturnValue({
-          user: {
-            id: 'user-1',
-            name: 'Ada',
-            email: 'ada@example.com',
-            wallet_address: null,
-            accounts: [{ ...SAFE, account_type: 'legacy_safe' as const }],
-          },
-          passkeys: [
-            {
-              id: 'passkey-1',
-              credential_id: 'cred-primary',
-              signer_address: '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2',
-              chain_id: SAFE.chain_id,
-              account_address: SAFE.account_address,
-              created_at: '2026-05-12T00:00:00Z',
-            },
-          ],
-        })
-      }
-
-      // The exact fixture that used to render the nudge: funded, legacy
-      // passkey-owned Safe, sole owner.
-      asPasskeySafeUser()
-      const { unmount } = render(<DashboardClient />)
-      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
-      // And it no longer points anywhere: 'Approvers' was the destination.
-      expect(screen.queryByText('Approvers')).not.toBeInTheDocument()
-      unmount()
-
-      // POSITIVE CONTROL — the nudge itself is alive on the delegation rail.
-      asDelegationUser()
-      storeSigners(1, null)
-      render(<DashboardClient />)
-      expect(screen.getByText('Add a backup soon')).toBeInTheDocument()
-      expect(screen.getByText('Backup & recovery')).toBeInTheDocument()
-    })
-
-    it('stays silent when the signer set is unknown — a failed read must not nag', () => {
-      asDelegationUser()
-      // Nothing stored: AuthContext skips per-safe failures silently, so an
-      // absent set means "we do not know", not "no backup".
-
-      render(<DashboardClient />)
-
-      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
-    })
-
-    it('does not show the nudge for an unfunded delegation-rail account', () => {
-      mockUseAuth.mockReturnValue({
-        user: {
-          id: 'user-1',
-          name: 'Ada',
-          email: 'ada@example.com',
-          wallet_address: '0x5555555555555555555555555555555555555555',
-          accounts: [DELEGATOR_ACCOUNT],
-        },
-      })
-      // The signer set must be KNOWN (here: one passkey, no owner — the
-      // nudge-worthy configuration) or the component stays silent on the
-      // unknown-signer state and this test passes whatever the funding gate
-      // does. With signers known, only the unfunded state suppresses the
-      // nudge, which is what this test's name claims.
-      storeSigners(1, null)
-      mockUseAggregatedBalances.mockReturnValue({
-        balances: [],
-        loading: false,
-        error: null,
-        refetch: vi.fn(),
+    it('never shows the backup item for a test-network account', () => {
+      mockBaseState([], {
+        accounts: [{ ...RECOMMENDED_ACCOUNT, accountId: 'acct-testnet', isTestnet: true }],
+        spend: { failedIntents7d: 0 },
       })
 
       render(<DashboardClient />)
 
-      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
+      expect(screen.queryByText(/has one way to approve payments/)).not.toBeInTheDocument()
     })
 
-    it('does not show the nudge when a transient balance-fetch failure makes funded state unknown', () => {
-      mockUseAuth.mockReturnValue({
-        user: {
-          id: 'user-1',
-          name: 'Ada',
-          email: 'ada@example.com',
-          wallet_address: '0x5555555555555555555555555555555555555555',
-          accounts: [DELEGATOR_ACCOUNT],
-        },
-      })
-      // Known single-signer set, same as above: without it the test passes
-      // via unknown-signer silence and the error branch is load-bearing for
-      // nothing. With it, the balance-fetch error is the only reason the
-      // nudge stays off.
-      storeSigners(1, null)
-      mockUseAggregatedBalances.mockReturnValue({
-        balances: [],
-        loading: false,
-        error: 'Failed to load balances',
-        refetch: vi.fn(),
-      })
+    it('honours the legacy global dismissal key', () => {
+      window.localStorage.setItem('haven.recovery-nudge.dismissed', '1')
+      mockBaseState([], { accounts: [RECOMMENDED_ACCOUNT], spend: { failedIntents7d: 0 } })
 
       render(<DashboardClient />)
 
-      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
-    })
-
-    it('does not show the nudge for a funded account that is not on the delegation rail', () => {
-      // mockBaseState() defaults to the live delegation rail; legacy cases
-      // supply an explicit `account_type: 'legacy_safe'` fixture.
-      render(<DashboardClient />)
-
-      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
+      expect(screen.queryByText(/has one way to approve payments/)).not.toBeInTheDocument()
     })
   })
 

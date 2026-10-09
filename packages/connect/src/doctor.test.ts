@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 import { acknowledgeLocalSignerConsent } from './signer-consent.js'
-import { CONNECT_OUTCOME_FILENAME } from './storage.js'
+import { CONNECT_OUTCOME_FILENAME, resolveAgentDirectoryBySlug, assertDirectoryRecordsSlug } from './storage.js'
 import { describeAccountAddressKey, rollUpLevel, runDoctor, runRepair, type DoctorDeps } from './doctor.js'
 
 const API_KEY = 'sk_agent_1234567890abcdef1234567890abcdef'
@@ -299,6 +299,9 @@ describe('runDoctor (#1589)', () => {
     expect(check?.ok).toBe(false)
     expect(check?.detail).toContain('consent')
     expect(check?.repair).toContain('--ack-local-tools')
+    // #3799: the setup-token form is gone — the offered fix is token-free.
+    expect(check?.repair).not.toContain('--setup')
+    expect(check?.repair).toContain('--ack < /dev/null')
     // The probe is never spawned against a gate that will refuse by design.
     expect(deps.probeSignerTools).not.toHaveBeenCalled()
   })
@@ -1003,6 +1006,10 @@ describe('runRepair writes the NAMED pair, not the bare one (#1910)', () => {
       version: 1, delegate_key: '0x' + '22'.repeat(32), delegate_address: '0x' + 'ef'.repeat(20),
       agent_id: agentId, chain_id: 84532, network: 'eip155:84532',
     }), { mode: 0o600 })
+    // #3799: a repairable agent is a consented one — the consent gate stops a
+    // repair whose signer would refuse to start, so the named-pair fixtures
+    // must model a healthy install (seedCredentials does the same for bare).
+    await acknowledgeLocalSignerConsent(join(dir, 'signer.json'))
     const runtime = await seedRuntime(homeDir, dir)
     // The sidecar is where the slug lives (#1696) — the fix reads it from here
     // rather than asking the user to repeat --name on every repair.
@@ -2603,5 +2610,211 @@ describe('tombstoned directory is never the primary (#3496)', () => {
     const credentials = report.checks.find((c) => c.id === 'credentials')
     expect(credentials?.ok).toBe(false)
     expect(credentials?.detail).toContain('missing or unparseable')
+  })
+})
+
+describe('#3799 — an agent updates its own pair in one command', () => {
+  /** A named agent with a consented signer, its sidecar recording the pair. */
+  async function seedNamedAgent(homeDir: string, slug: string, agentId = `agent-${slug}`) {
+    const dir = join(homeDir, '.haven', 'agents', slug)
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'identity.json'), JSON.stringify({
+      api_key: 'sk_agent_' + '44'.repeat(24),
+      agent_id: agentId,
+      api_url: 'https://api.haven.example',
+      hosted_mcp_url: HOSTED,
+    }))
+    await writeFile(join(dir, 'signer.json'), JSON.stringify({
+      version: 1, delegate_key: '0x' + '33'.repeat(32), delegate_address: '0x' + 'ee'.repeat(20),
+      agent_id: agentId, chain_id: 84532, network: 'eip155:84532',
+    }), { mode: 0o600 })
+    await acknowledgeLocalSignerConsent(join(dir, 'signer.json'))
+    const runtime = await seedRuntime(homeDir, dir)
+    // Overwrite the bare sidecar seedRuntime wrote with one that records the pair.
+    await writeFile(join(dir, 'signer-runtime.json'), JSON.stringify({
+      server_name: slug,
+      signer_package: MCP_RUNTIME_MANIFEST.signerPackage,
+      signer_version: MCP_RUNTIME_MANIFEST.signerVersion,
+      sdk_package: MCP_RUNTIME_MANIFEST.sdkPackage,
+      sdk_version: MCP_RUNTIME_MANIFEST.sdkVersion,
+      wrapper_path: runtime.wrapperPath,
+      runtime_directory: runtime.runtimeDirectory,
+      npm_cache_directory: join(homeDir, '.haven', 'npm-cache'),
+      cli_path: runtime.cliPath,
+    }))
+    return { dir, ...runtime }
+  }
+
+  /** One bare agent + one named agent, side by side — the field case. */
+  async function twoPairHome() {
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-3799-'))
+    const bare = await seedCredentials(homeDir, 'agent-bare')
+    // The bare pair's sidecar (no server_name) is what makes it the bare pair.
+    await seedRuntime(homeDir, bare)
+    const named = await seedNamedAgent(homeDir, 'research', 'agent-research')
+    await stampAgentMtimes(homeDir, ['agent-bare', 'research'])
+    return { homeDir, bare, named }
+  }
+
+  // ── Select by pair ─────────────────────────────────────────────────────────
+
+  it('--doctor --name resolves the directory by its RECORDED pair, not the folder name', async () => {
+    const { homeDir, named } = await twoPairHome()
+    const report = await runDoctor({ runtime: 'codex-cli', serverName: 'research' }, { homeDir, ...healthyDeps() })
+    expect(report.credentialDirectory).toBe(named.dir)
+    // Both directories are still inventoried; the named one is primary.
+    expect(report.agents).toHaveLength(2)
+  })
+
+  it('an unknown slug refuses, listing the slugs that exist and the bare pair', async () => {
+    const { homeDir } = await twoPairHome()
+    const err = await runRepair({ runtime: 'codex-cli', serverName: 'nope' }, { homeDir, runCommand: vi.fn() }).then(
+      () => null,
+      (e: unknown) => e as Error,
+    )
+    expect(err).not.toBeNull()
+    expect(err?.message).toContain("No agent directory on this machine records the pair 'haven-nope'")
+    expect(err?.message).toContain("'haven-research'")
+    expect(err?.message).toContain("1 unnamed 'haven' / 'haven-signer' pair")
+  })
+
+  it('two live directories claiming one slug refuse, listing both with their agent ids', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-3799-tie-'))
+    await seedNamedAgent(homeDir, 'research', 'agent-research')
+    // A second, differently-named folder whose BINDING record claims the same slug.
+    const dir2 = join(homeDir, '.haven', 'agents', 'rebound')
+    await mkdir(dir2, { recursive: true })
+    await writeFile(join(dir2, 'identity.json'), JSON.stringify({
+      api_key: 'sk_agent_' + '55'.repeat(24), agent_id: 'agent-2',
+      api_url: 'https://api.haven.example', hosted_mcp_url: HOSTED,
+    }))
+    await writeFile(join(dir2, 'mcp-server-binding.json'), JSON.stringify({ server_name: 'research', agent_id: 'agent-2' }))
+    await expect(resolveAgentDirectoryBySlug('research', { root: join(homeDir, '.haven', 'agents') })).rejects.toThrow(
+      /2 agent directories on this machine record the pair 'haven-research'/,
+    )
+    await expect(resolveAgentDirectoryBySlug('research', { root: join(homeDir, '.haven', 'agents') })).rejects.toThrow(
+      /agent agent-2[\s\S]*agent agent-research|agent agent-research[\s\S]*agent agent-2/,
+    )
+  })
+
+  it('a tombstoned directory never matches — the slug reads as unknown', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-3799-tombstone-'))
+    const dir = join(homeDir, '.haven', 'agents', 'research')
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'identity.json'), JSON.stringify({ agent_id: 'agent-gone' }))
+    await writeFile(join(dir, 'TOMBSTONE.json'), JSON.stringify({ agent_id: 'agent-gone' }))
+    await writeFile(join(dir, 'signer-runtime.json'), JSON.stringify({ server_name: 'research' }))
+    await expect(resolveAgentDirectoryBySlug('research', { root: join(homeDir, '.haven', 'agents') })).rejects.toThrow(
+      /No agent directory on this machine records the pair 'haven-research'/,
+    )
+    // --unwire is the one consumer that must still reach it.
+    await expect(resolveAgentDirectoryBySlug('research', { root: join(homeDir, '.haven', 'agents'), allowRetired: true })).resolves.toBe(dir)
+  })
+
+  it('a pre-#1696 folder named after the slug still resolves (no record anywhere)', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-3799-legacy-'))
+    const dir = join(homeDir, '.haven', 'agents', 'research')
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'identity.json'), JSON.stringify({
+      api_key: 'sk_agent_' + '66'.repeat(24), agent_id: 'agent-legacy',
+      api_url: 'https://api.haven.example', hosted_mcp_url: HOSTED,
+    }))
+    await expect(resolveAgentDirectoryBySlug('research', { root: join(homeDir, '.haven', 'agents') })).resolves.toBe(dir)
+  })
+
+  it('--name with --credentials-dir must agree — refused when they disagree, used when they do', async () => {
+    const { homeDir, bare, named } = await twoPairHome()
+    await expect(
+      runRepair({ runtime: 'codex-cli', serverName: 'research', credentialsDir: bare }, { homeDir, runCommand: vi.fn() }),
+    ).rejects.toThrow(/--name research and --credentials-dir .* disagree/)
+    await expect(
+      runRepair({ runtime: 'codex-cli', serverName: 'research', credentialsDir: named.dir }, { homeDir, runCommand: vi.fn() }),
+    ).resolves.toMatchObject({ ok: true })
+    await expect(assertDirectoryRecordsSlug(bare, 'research')).rejects.toThrow(/records no named pair/)
+  })
+
+  it('repair --name on a multi-agent machine rewrites the named pair — no mtime guess, no refusal', async () => {
+    const { homeDir, named } = await twoPairHome()
+    const repair = await runRepair({ runtime: 'codex-cli', serverName: 'research' }, { homeDir, runCommand: vi.fn() })
+    expect(repair.ok).toBe(true)
+    const text = repair.messages.join('\n')
+    expect(text).toContain('Rewriting MCP entries haven-research / haven-signer-research (agent "research")')
+    expect(text).not.toContain('Name the agent to repair')
+  })
+
+  // ── A refusal that names pairs ─────────────────────────────────────────────
+
+  it('the multi-directory refusal names each agent id AND its pair, offering --name for named pairs', async () => {
+    const { homeDir } = await twoPairHome()
+    const repair = await runRepair({ runtime: 'codex-cli' }, { homeDir, runCommand: vi.fn() })
+    expect(repair.ok).toBe(false)
+    const text = repair.messages.join('\n')
+    expect(text).toContain('Name the agent to repair with --name <slug> (its recorded pair) or --credentials-dir')
+    expect(text).toContain('agent agent-research')
+    expect(text).toContain('haven-research / haven-signer-research')
+    expect(text).toContain('--name research')
+    expect(text).toContain('agent agent-bare')
+    expect(text).toContain('owns the bare haven / haven-signer pair')
+    // Stays local: no backend call, no display name invented.
+    expect(text).not.toContain('display name')
+  })
+
+  // ── Truthful repair on Claude Code ─────────────────────────────────────────
+
+  it('repair on claude-code says what it actually changed — never "Rewriting MCP entries"', async () => {
+    const { homeDir, named } = await twoPairHome()
+    const repair = await runRepair({ runtime: 'claude-code', credentialsDir: named.dir }, { homeDir, runCommand: vi.fn() })
+    expect(repair.ok).toBe(true)
+    const text = repair.messages.join('\n')
+    expect(text).not.toContain('Rewriting MCP entries')
+    expect(text).toContain(`Re-pointed ${join(named.dir, 'bin', 'haven-signer.mjs')} at signer`)
+    expect(text).toContain("Claude Code's MCP entries were not touched")
+    expect(text).toContain('claude mcp get haven-signer-research')
+  })
+
+  it('doctor on claude-code names the recorded pair and how to confirm it', async () => {
+    const { homeDir, named } = await twoPairHome()
+    const report = await runDoctor({ runtime: 'claude-code', credentialsDir: named.dir }, { homeDir, ...healthyDeps() })
+    const rc = report.checks.find((c) => c.id === 'runtime_config')
+    expect(rc?.detail).toContain('The MCP pair recorded for this folder is haven-research / haven-signer-research')
+    expect(rc?.detail).toContain('claude mcp get haven-signer-research')
+  })
+
+  // ── Re-consent without a setup token ───────────────────────────────────────
+
+  it('a bare repair whose signer would refuse to start STOPS before writing, naming the token-free path', async () => {
+    const { homeDir, named } = await twoPairHome()
+    // The upgrade case: the stored ack no longer matches (here: ack file absent).
+    await rm(join(named.dir, 'signer.json.signer-ack.json'))
+    const repair = await runRepair({ runtime: 'codex-cli', credentialsDir: named.dir }, { homeDir, runCommand: vi.fn() })
+    expect(repair.ok).toBe(false)
+    const text = repair.messages.join('\n')
+    expect(text).toContain('Repair stopped before writing anything')
+    expect(text).toContain(`${join(named.dir, 'bin', 'haven-signer.mjs')} --ack < /dev/null`)
+    expect(text).toContain('--ack-local-tools')
+    // The tightened pin: the setup-token form is gone from every offered fix.
+    expect(text).not.toContain('--setup')
+  })
+
+  it('repair --ack-local-tools re-consents via the INSTALLED signer and prints the consent block', async () => {
+    const { homeDir, named } = await twoPairHome()
+    await rm(join(named.dir, 'signer.json.signer-ack.json'))
+    // The real path execs the wrapper; the installed signer writes the ack.
+    // The seam models the EFFECT (ack written by that signer), not the spawn.
+    const runSignerAck = vi.fn(async () => {
+      await acknowledgeLocalSignerConsent(join(named.dir, 'signer.json'))
+      return { stdout: '  Local Haven tools acknowledgement written.\n  - haven_pay: pays a prepared invoice…' }
+    })
+    const repair = await runRepair(
+      { runtime: 'codex-cli', credentialsDir: named.dir, ackLocalTools: true },
+      { homeDir, runCommand: vi.fn(), runSignerAck },
+    )
+    expect(repair.ok).toBe(true)
+    expect(runSignerAck).toHaveBeenCalledWith(join(named.dir, 'bin', 'haven-signer.mjs'))
+    const text = repair.messages.join('\n')
+    expect(text).toContain('Re-acknowledging local-tools consent with the installed signer')
+    expect(text).toContain('Local Haven tools acknowledgement written.')
+    expect(text).toContain('Local-tools consent acknowledged for the installed signer.')
+    expect(text).toContain('Rewriting MCP entries haven-research / haven-signer-research')
   })
 })

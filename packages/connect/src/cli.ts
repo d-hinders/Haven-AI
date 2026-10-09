@@ -175,12 +175,19 @@ export async function runCli(
     // when the bare pair is provably another agent's.
     const { unwireAgent } = await import('./unwire.js')
     const { tombstonesDirForAgentDirectory } = await import('./tombstone.js')
+    // #3799: --name resolves through the shared pair-record rule — the folder
+    // need not be named after the slug, and a retired directory stays
+    // reachable (unwire must reach a retired agent to release its name).
+    const { resolveAgentDirectoryBySlug } = await import('./storage.js')
     const { homedir } = await import('node:os')
     const { join } = await import('node:path')
     const homeDir = homedir()
     const root = parsed.options.credentialsDir ?? join(homeDir, '.haven', 'agents')
     const directory =
-      parsed.unwireDir ?? (parsed.options.serverName ? join(root, parsed.options.serverName) : root)
+      parsed.unwireDir ??
+      (parsed.options.serverName
+        ? await resolveAgentDirectoryBySlug(parsed.options.serverName, { root, allowRetired: true })
+        : root)
     const ledgerDir = tombstonesDirForAgentDirectory(directory, homeDir)
     try {
       const result = await unwireAgent({
@@ -396,13 +403,18 @@ export async function runCli(
     // --doctor since #3210; --repair never gets here without a flag (args.ts).
     const runtime = parsed.options.runtime ?? ''
     const credentialsDir = parsed.options.credentialsDir
+    // #3799: --name selects the agent directory by its recorded pair;
+    // --ack-local-tools on a repair re-consents the installed signer
+    // (explicit flag only — never automatic).
+    const serverName = parsed.options.serverName
+    const ackLocalTools = parsed.options.ackLocalTools === true
     try {
       if (parsed.repair) {
-        const repair = await runRepair({ runtime, credentialsDir })
+        const repair = await runRepair({ runtime, credentialsDir, serverName, ackLocalTools })
         for (const message of repair.messages) io.stderr(`${redactSecrets(message)}\n`)
         if (!repair.ok) return 1
       }
-      const report = await runDoctor({ runtime, credentialsDir })
+      const report = await runDoctor({ runtime, credentialsDir, serverName })
       // Defensively redacted like every other output path — the report is
       // secret-free by construction, but signerCapabilities is untrusted
       // process output and belts are cheap (#1589 review).

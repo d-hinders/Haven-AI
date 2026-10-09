@@ -17,6 +17,8 @@ import {
 import {
   CLIENT_OUTDATED_STATUS,
   CLIENT_REFUSAL_POINTS,
+  agentPairSuffix,
+  clientUpdateHint,
   findRefusalPoint,
   injectClientUpdate,
   registerClientCompatHooks,
@@ -321,5 +323,48 @@ describe('upgradeCommandFor', () => {
     expect(upgradeCommandFor('@haven_ai/connect', 'alpha')).toBe('npx -y @haven_ai/connect@alpha --doctor')
     expect(upgradeCommandFor('@haven_ai/cli', 'alpha')).toBe('npx -y @haven_ai/cli@alpha')
     expect(upgradeCommandFor('@haven_ai/sdk', 'alpha')).toBe('npm install @haven_ai/sdk@alpha')
+  })
+})
+
+describe('agentPairSuffix (#3799 — the pair-specific upgrade hint)', () => {
+  const behind: Parameters<typeof clientUpdateHint>[0] = {
+    kind: 'behind',
+    package: '@haven_ai/mcp',
+    version: '0.1.0',
+    recommended_version: '0.2.0',
+    min_version: null,
+  } as never
+
+  it('appends --name <slug> for connector packages, normalised from the hosted name', () => {
+    expect(agentPairSuffix('@haven_ai/mcp', 'haven-research')).toBe(' --name research')
+    expect(agentPairSuffix('@haven_ai/signer', 'haven-my-agent-2')).toBe(' --name my-agent-2')
+    expect(agentPairSuffix('@haven_ai/connect', 'haven-research')).toBe(' --name research')
+    // sdk and cli keep their bare forms — the suffix is connector-packages only.
+    expect(agentPairSuffix('@haven_ai/sdk', 'haven-research')).toBe('')
+    expect(agentPairSuffix('@haven_ai/cli', 'haven-research')).toBe('')
+  })
+
+  it('fails closed: bare pair, malformed, reserved or absent records name no flag', () => {
+    // The bare `haven` pair is selected by OMITTING --name — a suffix would
+    // mint `--name haven`, which the connector's own parser refuses.
+    expect(agentPairSuffix('@haven_ai/mcp', 'haven')).toBe('')
+    expect(agentPairSuffix('@haven_ai/mcp', null)).toBe('')
+    expect(agentPairSuffix('@haven_ai/mcp', undefined)).toBe('')
+    // Anything the connector's --name parser would refuse → no flag.
+    expect(agentPairSuffix('@haven_ai/mcp', 'weird')).toBe('')
+    expect(agentPairSuffix('@haven_ai/mcp', 'haven-')).toBe('')
+    expect(agentPairSuffix('@haven_ai/mcp', 'haven-UPPER')).toBe('')
+    expect(agentPairSuffix('@haven_ai/mcp', `haven-${'a'.repeat(33)}`)).toBe('')
+    expect(agentPairSuffix('@haven_ai/mcp', 'haven-signer')).toBe('')
+    expect(agentPairSuffix('@haven_ai/mcp', 'haven-signer-x')).toBe('')
+  })
+
+  it('clientUpdateHint appends the suffix only onto the connector doctor form', () => {
+    const hint = clientUpdateHint({ ...behind, package: '@haven_ai/mcp' }, { mcp_server_name: 'haven-research' })
+    expect(hint.upgrade_command).toBe('npx -y @haven_ai/connect@alpha --doctor --name research')
+    expect(hint.upgrade_command).not.toMatch(/ --doctor$/)
+    // The parity guard lives on core's bare command — the suffix is
+    // backend-only, so core and /discovery stay untouched.
+    expect(upgradeCommandFor('@haven_ai/mcp', 'alpha')).toMatch(/ --doctor$/)
   })
 })

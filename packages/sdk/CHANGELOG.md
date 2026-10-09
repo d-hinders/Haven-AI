@@ -15,6 +15,13 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Changed
+
+- `AGENT_CLIENT_UPDATE_SENTENCE` says a connector `upgrade_command` may name
+  the agent's pair with `--name <slug>` (#3799, backend-sourced suffix): an
+  agent on a multi-agent machine runs the update as one command. The runbook
+  copies were regenerated in lockstep (cli + frontend step files).
+
 ## 0.9.0-alpha.0 — 2026-10-09
 
 ### Added

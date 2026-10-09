@@ -889,7 +889,7 @@ export async function resumeAgent(
  */
 export const AGENT_BY_API_KEY_SQL = `
   SELECT a.id, a.user_id, a.name, a.delegate_address,
-         a.status, a.archived_at,
+         a.status, a.archived_at, a.mcp_server_name,
          COALESCE(us.account_address, u.account_address) as account_address,
          COALESCE(us.chain_id, ${DEFAULT_CHAIN_ID}) as chain_id,
          us.execution_rail, us.account_type,
@@ -908,6 +908,8 @@ export interface AgentAuthRow {
   chain_id: number
   status: string
   archived_at: string | null
+  /** The agent's recorded MCP pair name (migration 067) — a display aid, never identity. */
+  mcp_server_name: string | null
   execution_rail: string | null
   account_type: string | null
   has_bound_account: boolean

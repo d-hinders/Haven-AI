@@ -741,9 +741,10 @@ returns. Zero items renders nothing — the caller owns the empty state.
 
 `components/haven/NoticeRow` is one tinted notice line inside a card or
 modal: a sentence and, optionally, the one action that resolves it (a
-retry, or `WalletConnectAction`). It replaced three hand-copied rows on the
-owner-signing surfaces (`DelegationBudgetCard`'s failed signer load and its
-#3812 owner-wallet notice, and `EditBudgetModal`'s failed signer load). The
+retry, or the owner-wallet connect). It replaced three hand-copied rows on
+the owner-signing surfaces: the agent budget card's failed signer load and
+its #3812 owner-wallet notice, and the edit-budget modal's failed signer
+load. The
 tint is a callout, one of the reserved `--v2-surface` uses, not a grouping
 wrapper. Below `sm` the action sits on its own line under the text; from
 `sm` up they share one line, the action at the end. The caller sets the

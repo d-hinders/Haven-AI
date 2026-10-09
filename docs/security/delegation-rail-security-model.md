@@ -2757,7 +2757,7 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > rewords its not-ready line to "Connect your account owner wallet to send."
 > Elsewhere the change only rewords or de-duplicates: the remove dialog and the
 > merchant-budget modal stop offering a passkey to an account that has none,
-> and three tinted notice rows render through one `NoticeRow` composite.
+> and three tinted notice rows render through one shared component.
 > `useAgentRekey.ts` and `lib/signer.ts` are not touched. No new spender, no
 > authority grant, no custody change. Scope of this re-read: the three files
 > above and the sections whose claims rest on the hook's signing-path

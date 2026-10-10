@@ -384,9 +384,17 @@ describe('dashboard routes', () => {
 
     expect(response.statusCode).toBe(200)
     const body = response.json()
-    expect(body.metrics.successfulTransactions).toBe(2)
-    // #3858: the response no longer carries the per-row preview — the
-    // independent-chain counting shows through the metric only.
+    // #3807 + #3858: neither the retired metrics block nor the 5-row preview
+    // carries the count any more — the grouped `activity` feed does. The
+    // same-address rows must reach it UNSQUASHED: the route dedupes the
+    // merged feed before grouping, and the identity key keeps the chain, so
+    // the two chains' rows arrive as two rows — never collapsed into one.
+    expect(body.metrics).toBeUndefined()
+    expect(body.transactions).toBeUndefined()
+    const groupCalls = transactionMocks.buildActivityGroups.mock
+      .calls as unknown as Array<[{ transactions: { chainId: number }[] }]>
+    const feed = groupCalls.at(-1)?.[0].transactions
+    expect(feed?.map((item) => item.chainId).sort()).toEqual([100, 8453])
   })
 
   // #3803: an unavailable USDC leg answers null (unknown), NEVER 0 —
@@ -520,9 +528,8 @@ describe('dashboard derives delegation-rail budgets from active delegations (#10
     // the enum and the uuid formats of the whole overview envelope, against
     // the same schema the dashboard's generated wire types are built from.
     expectMatchesSpec('GET', '/dashboard/overview', body)
-    expect(agent.allowances).toEqual([
-      { tokenSymbol: 'USDC', allowanceAmount: '1.00', resetPeriodMin: 1440 },
-    ])
+    // #3807: `resetPeriodMin` left the wire with the KPI tiles.
+    expect(agent.allowances).toEqual([{ tokenSymbol: 'USDC', allowanceAmount: '1.00' }])
   })
 })
 

@@ -9,16 +9,15 @@
  *  - the daily snapshot UPSERT is conditional — it must NOT run when today's
  *    row already exists;
  *  - the day-over-day change is read from YESTERDAY's snapshot row;
- *  - month-to-date spend sums the payment aggregate alone (the approval
- *    aggregate is gone, #2055), including the fiat-fallback branch for rows
- *    with no stored usd/eur value;
  *  - the allowance read is SKIPPED entirely when the user has no agents.
  *
  * Written against the UNCHANGED route and passing before the extraction.
  * #2055 (epic #1440, #2021 readability waiver): `approval_requests` is
  * dropped — the approval-spend branch and `status IN ('pending','approved')`
  * actionable-count query this file used to stub are gone from the route, so
- * their stubs are removed rather than left dead.
+ * their stubs are removed rather than left dead. #3807: the month-to-date
+ * spend aggregate followed — its `metrics.*` wire fields are removed, so the
+ * block that characterized it is gone rather than left red.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
@@ -108,7 +107,6 @@ function installQueryMock(overrides: {
   accounts?: unknown[]
   agents?: unknown[]
   snapshots?: unknown[]
-  paymentSpend?: unknown[]
 } = {}) {
   mockQuery.mockImplementation((sql: string) => {
     if (sql.includes('AS has_first_agent_payment')) {
@@ -129,12 +127,9 @@ function installQueryMock(overrides: {
     if (sql.includes('INSERT INTO user_daily_portfolio_snapshots')) {
       return Promise.resolve({ rows: [] })
     }
-    // #2055: month-to-date spend is payment_intents alone — the
-    // approval_requests GROUP BY token_symbol branch this dispatcher used to
-    // route separately is gone with the query it stubbed.
-    if (sql.includes('GROUP BY token_symbol') && sql.includes('FROM payment_intents')) {
-      return Promise.resolve({ rows: overrides.paymentSpend ?? [] })
-    }
+    // #3807: no `GROUP BY token_symbol` FROM payment_intents branch — the
+    // month-to-date aggregate this dispatcher used to route separately is
+    // gone with the `metrics.*` fields it fed.
     // #3803: the new overview sections. Default: an EMPTY dataset — zero
     // spend, zero merchants, zero refusals, no last payments, no budgets,
     // no setups, no sub-budgets, no contacts. The sections' own real-DB
@@ -339,131 +334,10 @@ describe('dashboard aggregates (characterization, #1167)', () => {
     })
   })
 
-  describe('month-to-date agent spend', () => {
-    // #2055: was "sums the payment and approval aggregates into one total" —
-    // the approval aggregate is gone with `approval_requests`, so the total
-    // is the payment aggregate alone.
-    it('sums the payment aggregate alone — the approval aggregate is gone (#2055)', async () => {
-      installQueryMock({
-        paymentSpend: [
-          { token_symbol: 'USDC', usd_sum: '10', eur_sum: '9', sek_sum: '95', fallback_amount: '0', fallback_amount_sek: '0' },
-        ],
-      })
-
-      const body = (await getOverview()).json()
-
-      expect(body.metrics.monthlyAgentSpendUsd).toBeCloseTo(10, 10)
-      expect(body.metrics.monthlyAgentSpendEur).toBeCloseTo(9, 10)
-      expect(body.metrics.monthlyAgentSpendSek).toBeCloseTo(95, 10)
-      expect(fiatMocks.getFiatValuesForTokenAmount).not.toHaveBeenCalled()
-    })
-
-    it('prices rows carrying a fallback amount through the fiat lookup', async () => {
-      fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: 2, eur: 1.8, sek: 18 })
-      installQueryMock({
-        paymentSpend: [
-          { token_symbol: 'USDC', usd_sum: '0', eur_sum: '0', sek_sum: '0', fallback_amount: '2', fallback_amount_sek: '0' },
-        ],
-      })
-
-      const body = (await getOverview()).json()
-
-      expect(fiatMocks.getFiatValuesForTokenAmount).toHaveBeenCalledWith('USDC', '2')
-      expect(body.metrics.monthlyAgentSpendUsd).toBeCloseTo(2, 10)
-      expect(body.metrics.monthlyAgentSpendEur).toBeCloseTo(1.8, 10)
-      // A zero `fallback_amount_sek` prices NO SEK fallback even though the
-      // same fiat read returned one — the SEK bucket prices only what its
-      // OWN aggregate collected (#3127 round-2 review), never the USD/EUR
-      // read. `fallback_amount_sek` is 0 on this row because the row booked
-      // a real SEK figure — priced rows are collected into neither bucket.
-      expect(body.metrics.monthlyAgentSpendSek).toBeCloseTo(0, 10)
-    })
-
-    it('does NOT double-count a row migration 090 backfilled — the probe fixture, result 21 vs truth 10.5 pre-fix (#3127 round-2 review)', async () => {
-      // The reviewer's probe: one confirmed row with a backfilled
-      // `sek_value` of 10.5 and no booked USD/EUR. The pre-fix accumulator
-      // collected the row's token amount through `fallback_amount` (whose
-      // predicate never looks at `sek_value`), handed it to the fiat lookup,
-      // and added the read's SEK on top of `sek_sum` — 21 where the truth is
-      // 10.5. On the local dev DB this row shape is the common one after
-      // migration 090 (117 of 657 confirmed intents backfilled, 18 carry
-      // usd_value), and the suite stayed green with the probe present.
-      fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: 0.1, eur: 0.09, sek: 10.5 })
-      installQueryMock({
-        paymentSpend: [
-          { token_symbol: 'USDC', usd_sum: '0', eur_sum: '0', sek_sum: '10.5', fallback_amount: '1', fallback_amount_sek: '0' },
-        ],
-      })
-
-      const body = (await getOverview()).json()
-
-      expect(body.metrics.monthlyAgentSpendSek).toBeCloseTo(10.5, 10)
-      // The USD/EUR re-price still runs for the same row — the buckets are
-      // independent, the SEK half of the read is what may not land.
-      expect(body.metrics.monthlyAgentSpendUsd).toBeCloseTo(0.1, 10)
-      expect(body.metrics.monthlyAgentSpendEur).toBeCloseTo(0.09, 10)
-    })
-
-    it('prices SEK from its own bucket under the mirrored predicate — the A/B/C probe rows (#3195)', async () => {
-      // The probe rows #3195 measured on a real DB, now as aggregate output
-      // (what the mirrored SQL returns for them):
-      //   A: booked sek 10.5, usd/eur NULL, amount 1  → fallback 1, sek 0
-      //   B: sek NULL, booked usd 2 / eur 1.8, amt 2  → fallback 0, sek 2
-      //   C: 0/0/0 booked, amount 4 (the zeroPrice() shape)
-      //       → fallback 4, sek 4 under the MIRRORED predicate;
-      //         sek 0 under the pre-#3195 NULL-only predicate.
-      // Each bucket prices its own rows exactly once. One shared fiat answer
-      // serves every read (the ratchet forbids positional mocks here): the
-      // SEK figure each row contributes comes from the read its OWN bucket
-      // triggered, which the call-count assertions below pin.
-      fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: 0.1, eur: 0.09, sek: 1 })
-      installQueryMock({
-        paymentSpend: [
-          { token_symbol: 'USDC', usd_sum: '0', eur_sum: '0', sek_sum: '10.5', fallback_amount: '1', fallback_amount_sek: '0' },
-          { token_symbol: 'USDC', usd_sum: '2', eur_sum: '1.8', sek_sum: '0', fallback_amount: '0', fallback_amount_sek: '2' },
-          { token_symbol: 'USDC', usd_sum: '0', eur_sum: '0', sek_sum: '0', fallback_amount: '4', fallback_amount_sek: '4' },
-        ],
-      })
-
-      const body = (await getOverview()).json()
-
-      // A: the USD/EUR re-price; B: the SEK re-price; C: BOTH (the mirror).
-      expect(fiatMocks.getFiatValuesForTokenAmount).toHaveBeenCalledTimes(4)
-      expect(fiatMocks.getFiatValuesForTokenAmount).toHaveBeenNthCalledWith(1, 'USDC', '1')
-      expect(fiatMocks.getFiatValuesForTokenAmount).toHaveBeenNthCalledWith(2, 'USDC', '2')
-      expect(fiatMocks.getFiatValuesForTokenAmount).toHaveBeenNthCalledWith(3, 'USDC', '4')
-      expect(fiatMocks.getFiatValuesForTokenAmount).toHaveBeenNthCalledWith(4, 'USDC', '4')
-      // C is what the asymmetry hid: under a NULL-only SEK predicate the
-      // zero-booked row contributes 0 SEK (total 11.5) while USD/EUR still
-      // re-price it — the SEK tile reads LOWER than USD for the same rows.
-      expect(body.metrics.monthlyAgentSpendSek).toBeCloseTo(12.5, 10)
-      expect(body.metrics.monthlyAgentSpendUsd).toBeCloseTo(2.2, 10)
-      expect(body.metrics.monthlyAgentSpendEur).toBeCloseTo(1.98, 10)
-      // This file mocks db.query, so it pins what the CALLER does with the
-      // aggregate's columns; the row-C values here are only reachable if the
-      // SQL produced them. The SQL-side mutation proof — reverting the
-      // mirrored zero prong turns the db suite red — lives in
-      // infra/repositories/__tests__/dashboard-monthly-spend.db.test.ts,
-      // which executes the statement itself.
-    })
-
-    it('scopes the month-to-date aggregate to the authenticated user', async () => {
-      installQueryMock({})
-
-      await getOverview()
-
-      const paymentSpend = mockQuery.mock.calls.find(
-        ([sql]) =>
-          String(sql).includes('GROUP BY token_symbol') &&
-          String(sql).includes('FROM payment_intents'),
-      )
-      expect(paymentSpend?.[1]).toEqual(['user-1'])
-      // #2055: there is no second (approval) aggregate to scope any more.
-      expect(
-        mockQuery.mock.calls.some(([sql]) => /approval_requests/i.test(String(sql))),
-      ).toBe(false)
-    })
-  })
+  // #3807: the `month-to-date agent spend` block this suite used to
+  // characterize is gone with the `metrics.*` wire fields it fed — the
+  // route's spend figures now come from #3803's net-defined 7/30-day spend
+  // block, pinned by dashboard.test.ts and dashboard-overview.db.test.ts.
 
   describe('agent allowances', () => {
     // #2020 (epic #1440), reversing the byte-identical mirror pin this

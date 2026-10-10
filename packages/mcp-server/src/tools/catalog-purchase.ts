@@ -43,6 +43,7 @@ import {
   AgentPaymentWarningCode,
   HavenApiError,
   HavenClient,
+  catalogFundingLegExpected,
   HavenPaymentStateError,
   selectStandardPaymentOption,
   selectX402SettlementScheme,
@@ -190,6 +191,14 @@ export function createCatalogPurchaseHandlers(
           price_is_indicative: true,
           asset: entry.asset,
           network: entry.network,
+          // #3839: the transfer methods the merchant last advertised, and the
+          // catalog-based funding-leg hint from them — information at CHOICE
+          // time, before any quote. A hint, not a prediction: the live quote's
+          // `expected_funding_leg` stays authoritative. `"unknown"`, never
+          // null, when nothing is recorded (null means "agent read failed" on
+          // the quote tools).
+          asset_transfer_methods: entry.assetTransferMethods ?? null,
+          funding_leg_expected: catalogFundingLegExpected(entry.assetTransferMethods),
           status: entry.status,
           verified_at: entry.verifiedAt,
           source: entry.source,

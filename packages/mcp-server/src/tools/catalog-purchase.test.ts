@@ -3950,3 +3950,73 @@ describe('#2991 — expected_settlement_scheme / expected_funding_leg', () => {
   })
 })
 
+
+// ── #3839 — the discovery entry's catalog-based funding-leg hint. Information
+// at CHOICE time: which merchants avoid the EIP-3009 funding leg (#3777).
+describe('#3839 — funding_leg_expected on discovery entries', () => {
+  const FACILITATORS = ['0x4444444444444444444444444444444444444444']
+  const DELEGATION_AGENT = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
+  const base = {
+    description: 'd', category: 'api', rail: 'x402', protocol: 'mcp', tool_name: 'create_text',
+    tool_arguments: { prompt: 'Hello' }, price_display: '$0.01 USDC', price_atomic: '10000',
+    asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', network: 'eip155:84532', status: 'active',
+    verified_at: '2026-06-16T08:50:39.772Z',
+  }
+  const ROWS = [
+    { ...base, id: 'cat_7710', name: 'Takes erc7710', resource_url: 'http://merchant.test/m7710/mcp', asset_transfer_methods: 'eip3009,erc7710' },
+    { ...base, id: 'cat_3009', name: 'eip3009 only', resource_url: 'http://merchant.test/m3009/mcp', asset_transfer_methods: 'eip3009' },
+    { ...base, id: 'cat_none', name: 'Never probed', resource_url: 'http://merchant.test/none/mcp', asset_transfer_methods: null },
+    // A backend that does not send the field at all.
+    { ...base, id: 'cat_old', name: 'Older backend', resource_url: 'http://merchant.test/old/mcp' },
+  ]
+
+  type Row = { id: string; asset_transfer_methods: string | null; funding_leg_expected: boolean | 'unknown' }
+
+  it('emits asset_transfer_methods and the hint per row — "unknown", never null, when nothing is recorded', async () => {
+    stubFetch({ 'GET /catalog': { status: 200, body: { entries: ROWS } } })
+    const result = ok<Row[]>(await handlers().haven_discover_tools({}))
+    expect(result.data.map((e) => [e.id, e.asset_transfer_methods, e.funding_leg_expected])).toEqual([
+      ['cat_7710', 'eip3009,erc7710', false],
+      ['cat_3009', 'eip3009', true],
+      ['cat_none', null, 'unknown'],
+      ['cat_old', null, 'unknown'],
+    ])
+    // Listing order is the backend's (it also serves the marketplace): the
+    // hint never re-sorts or hides an entry.
+    expect(result.data.map((e) => e.id)).toEqual(ROWS.map((r) => r.id))
+  })
+
+  it('agrees with the live quote\'s expected_funding_leg for a delegation-rail agent — each side computed on its own', async () => {
+    // Discovery reads the stored set; the quote reads the merchant's live
+    // `accepts[]` through predictSettlementScheme. This test imports neither
+    // rule, so the two can only agree by being right.
+    const erc7710Merchant = {
+      ...PAYMENT_REQUIRED,
+      accepts: [
+        { ...PAYMENT_REQUIRED.accepts[0] },
+        { ...PAYMENT_REQUIRED.accepts[0], extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: FACILITATORS } },
+      ],
+    }
+    stubFetch({
+      'GET /catalog': { status: 200, body: { entries: ROWS.slice(0, 2) } },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+      'POST /m7710/mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(erc7710Merchant)) } },
+      'POST /m3009/mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(PAYMENT_REQUIRED)) } },
+    })
+    const discovered = ok<Array<Row & { resource_url: string }>>(await handlers().haven_discover_tools({}))
+    expect(discovered.data).toHaveLength(2)
+    for (const entry of discovered.data) {
+      const quote = ok<{ expected_funding_leg: boolean | null }>(
+        await handlers().haven_quote_mcp_tool({
+          merchant_url: entry.resource_url,
+          tool_name: 'create_text',
+          arguments: { prompt: 'Hello' },
+        }),
+      )
+      expect(quote.data.expected_funding_leg, entry.id).not.toBeNull()
+      expect(entry.funding_leg_expected, entry.id).toBe(quote.data.expected_funding_leg)
+    }
+    // Both outcomes are exercised, so agreement is not vacuous.
+    expect(discovered.data.map((e) => e.funding_leg_expected).sort()).toEqual([false, true])
+  })
+})

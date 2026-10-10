@@ -571,6 +571,28 @@ describe('catalog discovery + submission (#1716)', () => {
     expect('merchant' in older!).toBe(false)
   })
 
+  // #3839: the stored x402 transfer-method set rides along so discovery can
+  // hint at the funding leg. Absent (not null) against a backend that does not
+  // send it, like `merchant`.
+  it('maps asset_transfer_methods to assetTransferMethods, null kept, absent left absent', async () => {
+    installRoutes({
+      'GET https://haven.test/catalog': [
+        () =>
+          json({
+            entries: [
+              { ...MIXED.entries[1], asset_transfer_methods: 'eip3009,erc7710' },
+              { ...MIXED.entries[1], asset_transfer_methods: null },
+              MIXED.entries[1],
+            ],
+          }),
+      ],
+    })
+    const [recorded, unprobed, older] = await client().discoverTools({})
+    expect(recorded!.assetTransferMethods).toBe('eip3009,erc7710')
+    expect(unprobed!.assetTransferMethods).toBeNull()
+    expect('assetTransferMethods' in older!).toBe(false)
+  })
+
   it('maps badge fields and filters on verified/operator without an extra query param', async () => {
     const routes = installRoutes({
       'GET https://haven.test/catalog': [

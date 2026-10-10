@@ -2107,6 +2107,15 @@ directly), so the local stdio `haven_quote_x402` passthrough gains none of
 these fields — it has no server-side agent read to predict from, and a local
 caller already holds its own key/rail state.
 
+As of #3839, `haven_discover_tools` on BOTH the hosted and the local stdio
+surface returns two additive fields per entry: `asset_transfer_methods` (the
+catalog's stored set, `null` when none) and `funding_leg_expected: true |
+false | "unknown"`, computed by the SDK's `catalogFundingLegExpected`. No
+argument, ordering or existing field changed. The local surface gets them only
+from an SDK that carries the helper (published `@haven_ai/mcp` pins its SDK
+exactly, so after a release). The description gains one guidance sentence;
+`description-size.test.ts` was re-derived for it (round 26).
+
 One **deliberate local/hosted skew**, recorded because this table exists to
 catch exactly that: the **local stdio** `haven_quote_x402` is a bare
 passthrough of the SDK's `X402Quote`, so it now also QUOTES an erc7710-only

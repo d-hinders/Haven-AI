@@ -15,6 +15,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Added
+
+- `HavenCatalogEntry.assetTransferMethods` (optional, additive): the x402 transfer methods a catalog merchant last advertised, as the catalog stores them (`"eip3009"`, `"eip3009,erc7710"`; `null` until probed; absent against a backend that does not send it). New `catalogFundingLegExpected(methods)` turns it into the discovery hint `true | false | "unknown"` (#3839). The `discoverTools` description gains one sentence on how to use that hint.
+
 ### Changed
 
 - The haven-pay skill now prefers a merchant sign-in session over paying call

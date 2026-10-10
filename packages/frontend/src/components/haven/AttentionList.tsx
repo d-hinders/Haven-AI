@@ -87,7 +87,10 @@ export interface AttentionListItem {
  * Centre the 32px controls on the title's first line (#3880) without moving
  * anything by a negative margin: the row gives up 6px of top padding
  * (`pt-1.5` overrides Row's `py-3` top) and the title takes it back as a
- * margin (`mt-1.5`), so the text sits exactly where it did. The icon and,
+ * margin (`mt-1.5`), so the text sits exactly where it did — for any item
+ * with a subtitle, i.e. a body at least as tall as the 32px icon. Every
+ * Needs-you kind has one; a title-only item would sit 3px high in a 6px
+ * shorter row, and would need the body pinned too. The icon and,
  * beside the body, the trailing controls then align to the top of the row
  * — 6px above the first line, which is half of 32px minus half of the 20px
  * `text-sm` line, so their centres land on the line's centre. Controls that

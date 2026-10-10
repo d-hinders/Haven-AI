@@ -69,7 +69,7 @@ describe('DashboardOnboardingGuide — funding card (#2534)', () => {
     renderGuide({ funding: null })
 
     expect(document.body.textContent).toContain('Even $5 lets you try x402 micropayments.')
-    expect(screen.getByRole('button', { name: 'Receive funds' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Deposit address' })).toBeInTheDocument()
   })
 
   it('hides the address line once the account is funded', () => {

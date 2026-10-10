@@ -1091,7 +1091,8 @@ export const FIXTURE_OVERVIEW = {
   // hero's change line renders in every capture this harness takes.
   totals: { usd: 12_640.55, eur: 11_690.21, sek: 136_050.75 },
   change: { available: true, usdAmount: 214.3, eurAmount: 198.2, usdPercent: 1.7, eurPercent: 1.7, sekAmount: 2_285.4, sekPercent: 1.7 },
-  metrics: { connectedAgents: 2, monthlyAgentSpendUsd: 482.5, monthlyAgentSpendEur: 446.3, monthlyAgentSpendSek: 5_192.5, successfulTransactions: 37, activeAccounts: 1 },
+  // #3807: the metrics block is gone with the KPI tiles — the SEK spend
+  // figure the old "Monthly agent spend" tile read lives in `spend.d30`.
   // #2120: 0, not 1. `routes/dashboard.ts:84` hardcodes `actionableApprovals
   // = 0` (and mirrors it into `pendingApprovals`) — the queue died with the
   // AllowanceModule rail and `approval_requests` is dropped. Both fields
@@ -5760,10 +5761,10 @@ export const SCENARIOS = {
       await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
 
-      // The hero labels this button "Receive" when funded and "Receive funds"
-      // when not — both branches exist and which one renders depends on the
-      // fixture's balances, which this scenario deliberately does not pin.
-      await page.getByRole('button', { name: /^Receive( funds)?$/ }).first().click()
+      // The hero's deposit action is named "Deposit address" everywhere since
+      // #3807 (the funded/unfunded distinction moved to the meta-line under
+      // the sparkline, not the button label).
+      await page.getByRole('button', { name: /^Deposit address$/ }).first().click()
       const dialog = page.getByRole('dialog')
       // Confirmed by the RESOLVED sentence rather than by a bare timeout, so a
       // run that lands on the refusal fails here instead of being shot under
@@ -5807,7 +5808,7 @@ export const SCENARIOS = {
       await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
 
-      await page.getByRole('button', { name: /^Receive( funds)?$/ }).first().click()
+      await page.getByRole('button', { name: /^Deposit address$/ }).first().click()
       const dialog = page.getByRole('dialog')
       await dialog
         .getByText(/can't confirm which network this account uses/)

@@ -1,6 +1,6 @@
 'use client'
 
-import { Bot, ChevronRight, Coins, ShieldCheck, Wallet } from 'lucide-react'
+import { ArrowLeftRight } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
@@ -9,13 +9,19 @@ import { useAuth } from '@/context/AuthContext'
 import { usePreferences } from '@/hooks/usePreferences'
 import { useAgents } from '@/hooks/useAgents'
 import { useAggregatedBalances } from '@/hooks/useAggregatedPortfolio'
-import { useCountUp } from '@/hooks/useCountUp'
 import { useDashboardOverview } from '@/hooks/useDashboardOverview'
 import { useBalances } from '@/hooks/useBalances'
 import { useAccountFunding } from '@/hooks/useAccountFunding'
 import { useAccountOperationGate } from '@/hooks/useAccountOperationGate'
+import { timeAgo } from '@/lib/format'
+import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
+import type { AggregatedTransaction } from '@/types/transactions'
+import {
+  transactionMovement,
+  transactionStatus,
+  transactionTitle,
+} from '@/lib/transaction-presentation'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
-import { formatFiat, currencyLocale } from '@/lib/format'
 import { displayName } from '@/lib/user'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
@@ -23,13 +29,12 @@ import ConnectAgentModal from '@/components/ConnectAgentModal'
 import DashboardActionPickerModal from '@/components/DashboardActionPickerModal'
 import ReceiveFundsModal from '@/components/ReceiveFundsModal'
 import AddFundsModal from '@/components/AddFundsModal'
-import PasskeyOtherDeviceNotice from '@/components/PasskeyOtherDeviceNotice'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { PageHeader } from '@/components/ui/PageHeader'
-import { BalanceFreshnessIndicator } from '@/components/haven'
 import { useToast } from '@/components/ui/Toast'
+import { TransactionActivityRow } from '@/components/haven'
+import MoneyPanel from './MoneyPanel'
 import { ActivitySection } from './ActivitySection'
 import { AgentsSection } from './AgentsSection'
 import { resolveDefaultAccount } from '@/lib/default-account'
@@ -39,318 +44,133 @@ import NeedsYou from './NeedsYou'
 
 // #3127 (finding 6): the per-currency formatting itself lives in ONE place —
 // `lib/format.ts`'s `formatFiat`, shared with /accounts and /accounts/[id].
-// These two wrappers keep only what is dashboard-specific: the compact
-// notation for the metric tiles, and the signed change line.
-//
-// #3195 (round-2 finding a): the SEK compact tier renders in the UI's voice
-// (en-US), not the currency's — a big SEK tile read sv-SE's Swedish scale
-// words (`5,19 tn kr`, "tn" = tusen) in an otherwise English UI. Scoped to
-// the compact tier: the standard tier keeps `133,00 kr` (the #3127 voice,
-// byte-pinned by the SEK baseline), and EUR keeps its deliberate de-DE voice
-// at every tier (#3127's "the rule that puts EUR in de-DE" — untouched).
-function formatCompactCurrency(value: number, currency: 'USD' | 'EUR' | 'SEK'): string {
-  const compact = Math.abs(value) >= 1000
-  const locale = compact && currency === 'SEK' ? 'en-US' : currencyLocale(currency)
-  return new Intl.NumberFormat(locale, {
-    style: 'currency',
-    currency,
-    notation: compact ? 'compact' : 'standard',
-    maximumFractionDigits: 2,
-  }).format(value)
+// The dashboard's compact tile wrapper and the signed change/percent helpers
+// moved to `dashboard/MoneyPanel.tsx` with the money panel (#3807) — the
+// tiles that needed the compact tier are gone.
+
+// ── Metric card icon (1.5 stroke, 14px, currentColor) ────────────────────
+// The sidebar's "transactions" mark, so the empty state belongs to the same
+// visual family. (#3867: the agent row mark moved into AgentsSection.)
+
+function EmptyTransactionsIcon() {
+  // Arrows-in-out icon — mirrors the sidebar's "transactions" mark so the
+  // empty state belongs to the same visual family.
+  return (
+    <Icon icon={ArrowLeftRight} className="w-full h-full" />
+  )
 }
 
-function formatSignedCurrency(value: number, currency: 'USD' | 'EUR' | 'SEK'): string {
-  const sign = value > 0 ? '+' : value < 0 ? '-' : ''
-  return `${sign}${formatFiat(Math.abs(value), currency)}`
-}
-
-// #3195 (round-2 finding b): the percent half of the change line renders in
-// the currency's locale through `Intl` — `signDisplay: 'exceptZero'` keeps
-// the explicit sign the old `toFixed` branch built by hand. The USD render is
-// byte-identical (`+1.00%`); EUR now takes de-DE's voice (`+1,00 %`, its old
-// render was the same hand-rolled English scaffold) and a SEK change line
-// stops mixing voices: `+20,00 %` now, where the decimal comma came from
-// sv-SE and the `+`/`%` scaffold from that pattern.
-function formatPercent(value: number, currency: 'USD' | 'EUR' | 'SEK'): string {
-  return new Intl.NumberFormat(currencyLocale(currency), {
-    style: 'percent',
-    signDisplay: 'exceptZero',
-    useGrouping: false,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value / 100)
-}
-
-function DashboardHero({
+function TransactionsSection({
+  transactions,
+  hasAccounts,
   loading,
   unavailable,
-  totalFiat,
-  currency,
-  changeAvailable,
-  sekChangeUnavailable,
-  balancesFreshness,
-  changeUnavailable,
-  changeAmount,
-  changePercent,
-  hasAccounts,
-  hasFunds,
-  fundingStateKnown,
-  watchingForDeposit,
-  requiresOtherDevice,
-  canSend,
-  onSend,
-  onReceive,
-  onAddFunds,
+  onRetry,
+  resolveAddress,
 }: {
+  transactions: AggregatedTransaction[]
+  hasAccounts: boolean
   loading: boolean
   unavailable: boolean
-  totalFiat: number
-  currency: 'USD' | 'EUR' | 'SEK'
-  changeAvailable: boolean
-  /** True when the SEK baseline for yesterday predates migration 090 — no swing may be claimed. */
-  sekChangeUnavailable: boolean
-  /**
-   * The aggregated degraded-balance marker (#3295). `stale` renders a subtle
-   * "as of …" indicator beside the headline figure; `unavailable` means some
-   * token has never been read, so the day's change is reported unavailable
-   * rather than as a swing computed from an understated total.
-   */
-  balancesFreshness?: { status: 'stale'; asOf: string } | { status: 'unavailable' }
-  /** True when some token has no known value — the change line must step aside. */
-  changeUnavailable: boolean
-  changeAmount: number | null
-  changePercent: number
-  hasAccounts: boolean
-  hasFunds: boolean
-  fundingStateKnown: boolean
-  watchingForDeposit: boolean
-  requiresOtherDevice: boolean
-  /** False when no linked account supports owner send (delegation-only, #1079). */
-  canSend: boolean
-  onSend: () => void
-  onReceive: () => void
-  onAddFunds: () => void
+  onRetry: () => void
+  resolveAddress: (address: string) => string | null
 }) {
-  // Animate the balance from 0 → totalFiat on first paint after data loads.
-  // Subsequent changes (currency switches, polled refresh) snap instantly.
-  // Respects prefers-reduced-motion via the hook.
-  const animatedTotal = useCountUp(totalFiat, { enabled: !loading && !unavailable })
-
   return (
-    <section
-      className="relative overflow-hidden rounded-[24px] border border-[var(--v2-border-anchor)] bg-[var(--v2-surface-anchor)] shadow-card-raised"
-    >
-      {/*
-        Subtle ambient drift on the hero's gradient backdrop — the v2-mesh-drift
-        keyframe in globals.css alternates ~2% translation over 18s. Adds a
-        quiet sense of "alive" without being noticeable. Disabled by the same
-        keyframe under prefers-reduced-motion.
-
-        The backdrop extends 6% past the parent on every side so the drift's
-        translation never pulls the layer off-edge and exposes the underlying
-        anchor surface. The parent's `overflow-hidden` + rounded corners clip
-        the buffer away.
-      */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -inset-[6%] v2-mesh-drift"
-        style={{ background: 'var(--v2-surface-hero)' }}
+    <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card overflow-hidden">
+      <Card.Header
+        as="h2"
+        title="Recent transactions"
+        actions={
+          <Link href="/transactions" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
+            View all
+          </Link>
+        }
       />
-      <div className="relative grid gap-6 px-6 py-7 sm:px-8 sm:py-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-        <div>
-          <p className="text-sm font-medium text-[var(--v2-ink-2)]">Total balance</p>
-          {loading ? (
-            <div className="mt-3 h-12 w-56 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-          ) : unavailable ? (
-            <p className="mt-2 text-4xl font-semibold tracking-tight text-[var(--v2-ink-3)] sm:text-5xl">
-              Unavailable
-            </p>
-          ) : (
-            <p className="mt-2 text-4xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular sm:text-5xl">
-              {formatFiat(animatedTotal, currency)}
-            </p>
-            )}
-            {/* #3295: the headline figure is the last-known balance when the
-                live read failed — a subtle indicator says how old it is, rather
-                than the number silently claiming to be current. */}
-            {balancesFreshness && (
-              <div className="mt-2">
-                <BalanceFreshnessIndicator freshness={balancesFreshness} />
-              </div>
-            )}
-            {/*
-              Three meta-line states under the headline number:
-              1. Watching for a deposit (user opened Receive earlier, balance
-                 still 0) — shows a soft brand-tinted pill with a pulse so the
-                 user knows the dashboard is actively listening.
-              2. Funded with change data — show today's signed % change.
-              3. Funded without change data, OR no change available — quiet
-                 "Across all linked Haven accounts." caption.
-              #3295 adds a fourth input: when some token has never been read
-              (unavailable), the change line steps aside entirely — no swing may
-              be claimed from a total understated by an unknown amount. A merely
-              stale set of totals still diffs normally.
-            */}
-            {watchingForDeposit ? (
-              <p className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-[var(--v2-brand)]">
-                <span
-                  aria-hidden="true"
-                  className="inline-flex h-1.5 w-1.5 rounded-full bg-[var(--v2-brand)] animate-pending-pulse"
-                />
-                Watching for incoming deposits…
-              </p>
-            ) : changeAvailable && !sekChangeUnavailable && !changeUnavailable && changeAmount !== null ? (
-            <p className={`mt-3 text-sm font-medium ${changeAmount >= 0 ? 'text-[var(--v2-success)]' : 'text-[var(--v2-danger)]'}`}>
-              {formatSignedCurrency(changeAmount, currency)} ({formatPercent(changePercent, currency)}) today
-            </p>
-          ) : (
-            <p className="mt-3 text-sm text-[var(--v2-ink-3)]">
-              Across all linked Haven accounts.
-            </p>
-          )}
-        </div>
 
-        {hasAccounts ? (
-          requiresOtherDevice ? (
-            <PasskeyOtherDeviceNotice className="max-w-sm" />
-          ) : !fundingStateKnown || hasFunds ? (
-            // Funded: Send is primary, Receive + Add funds support.
-            // While balances are still loading, keep this neutral action order
-            // so the hero does not briefly claim the account needs funds.
-            <div className="flex flex-wrap gap-3">
-              {canSend ? (
-                <Button onClick={onSend} size="lg">
-                  Send
-                </Button>
-              ) : null}
-              <Button onClick={onReceive} variant={canSend ? 'ghost' : 'primary'} size="lg">
-                Receive
-              </Button>
-              <Button onClick={onAddFunds} variant="ghost" size="lg">
-                Add funds
-              </Button>
-            </div>
-          ) : (
-            // Unfunded: Receive becomes the primary action — Send is useless
-            // with $0 and a confusing offer. We keep Send visible but ghost
-            // so a user who already has off-flow plans can still find it.
-            <div className="flex flex-wrap gap-3">
-              <Button onClick={onReceive} size="lg">
-                Receive funds
-              </Button>
-              <Button onClick={onAddFunds} variant="ghost" size="lg">
-                Add funds
-              </Button>
-              {canSend ? (
-                <Button onClick={onSend} variant="ghost" size="lg">
-                  Send
-                </Button>
-              ) : null}
-            </div>
-          )
-        ) : (
-          <Button href="/accounts" size="lg">
-            Create Haven account
-          </Button>
-        )}
-      </div>
-    </section>
-  )
-}
-
-function MetricCard({
-  label,
-  value,
-  footer,
-  href,
-  icon,
-  loading,
-  unavailable,
-}: {
-  label: string
-  value: string
-  footer?: string
-  href?: string
-  icon?: ReactNode
-  loading?: boolean
-  unavailable?: boolean
-}) {
-  const content = (
-    <>
-      <div className="flex items-start justify-between gap-3">
-        <p className="text-xs font-medium text-[var(--v2-ink-3)]">{label}</p>
-        {icon ? (
-          <span
-            aria-hidden="true"
-            // Icon adopts brand color on hover via the group class on the parent link.
-            className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--v2-ink-3)] transition-colors duration-150 group-hover:text-[var(--v2-brand)]"
-          >
-            {icon}
-          </span>
-        ) : null}
-      </div>
       {loading ? (
-        <div className="mt-3 h-7 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+        <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-live="polite" aria-label="Loading recent transactions">
+          {[0, 1, 2].map((item) => (
+            // Same breakpoint-scoped height as the loaded row it stands in for
+            // (#1833). It does not currently overflow — the stacked skeleton is
+            // ~64px against the 72px clamp — but it is the identical shape:
+            // an `sm:`-gated two-column grid pinned unconditionally. Left
+            // clamped it would ALSO make the list jump on load, since the
+            // loaded row now grows to 116-164px below `sm` while this stayed
+            // at 72px.
+            <div key={item} className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5 sm:py-0 sm:h-[72px]">
+              <div className="flex items-center gap-3">
+                <div className="h-9 w-9 rounded-[10px] bg-[var(--v2-surface-2)] animate-pulse" />
+                <div>
+                  <div className="h-3.5 w-40 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                  <div className="mt-1.5 h-2.5 w-56 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                </div>
+              </div>
+              <div className="h-4 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse sm:justify-self-end" />
+            </div>
+          ))}
+        </div>
+      ) : unavailable ? (
+        <div className="p-6">
+          <EmptyState
+            size="compact"
+            title="Activity preview unavailable"
+            body="Haven could not refresh recent payments right now."
+            action={<Button variant="ghost" size="sm" onClick={onRetry}>Try again</Button>}
+          />
+        </div>
+      ) : transactions.length === 0 ? (
+        <div className="p-6">
+          <EmptyState
+            tone="brand"
+            icon={<EmptyTransactionsIcon />}
+            title="No transactions yet"
+            body={
+              hasAccounts
+                ? 'Get your deposit address or make your first payment to start building activity here.'
+                : 'Create a Haven account to start tracking transactions.'
+            }
+            action={
+              <Button
+                href={hasAccounts ? '/transactions' : '/accounts'}
+                variant="ghost"
+                size="sm"
+              >
+                {hasAccounts ? 'Open transactions' : 'Go to accounts'}
+              </Button>
+            }
+          />
+        </div>
       ) : (
-        <p className={`mt-2 text-2xl font-semibold tracking-tight v2-tabular v2-animate-fade-in ${unavailable ? 'text-[var(--v2-ink-3)]' : 'text-[var(--v2-ink)]'}`}>
-          {unavailable ? 'Unavailable' : value}
-        </p>
+        <div className="divide-y divide-[var(--v2-border)] v2-animate-fade-in">
+          {transactions.slice(0, 5).map((tx) => {
+            const lifecycle = machinePaymentLifecyclePresentation(tx)
+            const recovery = transactionStatus(tx)
+            return (
+              <Link
+                key={`${tx.hash}-${tx.type}-${tx.accountId}`}
+                href="/transactions"
+                className="block"
+              >
+                <TransactionActivityRow
+                  title={transactionTitle(tx)}
+                  description={transactionMovement(tx, resolveAddress)}
+                  value={tx.valueFormatted}
+                  asset={tx.asset}
+                  failed={tx.isError}
+                  status={recovery?.label ?? lifecycle?.label ?? (tx.isError ? 'Failed' : tx.direction === 'in' ? 'Received' : 'Sent')}
+                  statusTone={recovery?.tone ?? lifecycle?.tone ?? (
+                    tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'neutral'
+                  )}
+                  timestamp={timeAgo(tx.timestamp * 1000)}
+                  direction={tx.direction}
+                  density="compact"
+                />
+              </Link>
+            )
+          })}
+        </div>
       )}
-      {footer ? <p className="mt-2 text-xs text-[var(--v2-ink-3)]">{footer}</p> : null}
-    </>
-  )
-
-  // Every metric card is interactive now — the four-card grid was inconsistent
-  // before (two had href, two didn't). The hover lift (raised shadow + 1px
-  // translate) makes the affordance obvious and matches the Stripe-style
-  // hover treatment used on the dashboard hero.
-  const baseClass =
-    'group block rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-5 shadow-card transition-all duration-200 ease-out motion-reduce:transition-none motion-reduce:hover:translate-y-0'
-  const hoverClass =
-    'hover:-translate-y-px hover:shadow-card-raised hover:border-[var(--v2-border-strong)]'
-
-  if (href) {
-    return (
-      <Link href={href} className={`${baseClass} ${hoverClass}`}>
-        {content}
-      </Link>
-    )
-  }
-  return <div className={baseClass}>{content}</div>
-}
-
-// ── Metric card icons (1.5 stroke, 14px, currentColor) ───────────────────
-// These match the sidebar / Row visual language. AgentMarkIcon mirrors the
-// sidebar's "agents" robot mark so the dashboard reads the same as the nav.
-
-function AgentMarkIcon() {
-  return (
-    <Icon icon={Bot} className="w-full h-full" />
-  )
-}
-
-function SpendIcon() {
-  // #3127 (finding 7): the mark over "Monthly agent spend" was `DollarSign`.
-  // With SEK the no-preference default, that tile read `$` over `482,50 kr`
-  // for every new signup — a currency glyph has a currency opinion, and the
-  // figure beside it now carries a different one. The tile describes AGENT
-  // SPEND, not a currency, so the mark is currency-neutral: coins, the same
-  // family the sidebar/nav icons come from. `SpendIcon` itself keeps its name
-  // and call site so the MetricCard contract is untouched.
-  return (
-    <Icon icon={Coins} className="w-full h-full" />
-  )
-}
-
-function CheckIcon() {
-  return (
-    <Icon icon={ShieldCheck} className="w-full h-full" />
-  )
-}
-
-function WalletIcon() {
-  return (
-    <Icon icon={Wallet} className="w-full h-full" />
+    </div>
   )
 }
 
@@ -454,9 +274,9 @@ export default function DashboardClient() {
   // retired — the modal and its `useSendTransaction` hook are deleted. The
   // delegation rail's owner-send lives on the account detail page
   // (`DelegationSendModal`) and is untouched. #1079's "hidden, not disabled"
-  // mechanism is reused: the hero's `canSend` is now constantly false, so no
-  // Send affordance renders and nothing dead-ends.
-  const canSendFromDashboard = false
+  // mechanism is reused: no Send affordance renders anywhere on the dashboard
+  // and nothing dead-ends. The money panel (#3807) offers "Deposit address"
+  // and "Add funds" only.
 
   const [connectAgentOpen, setConnectAgentOpen] = useState(false)
   const [pickerAction, setPickerAction] = useState<'receive' | 'add-funds' | null>(null)
@@ -598,11 +418,6 @@ export default function DashboardClient() {
     : currency === 'SEK'
       ? (overview?.change.sekPercent ?? 0)
       : (overview?.change.usdPercent ?? 0)
-  const monthlySpend = currency === 'EUR'
-    ? (overview?.metrics.monthlyAgentSpendEur ?? 0)
-    : currency === 'SEK'
-      ? (overview?.metrics.monthlyAgentSpendSek ?? 0)
-      : (overview?.metrics.monthlyAgentSpendUsd ?? 0)
   const overviewUnavailable = Boolean(overviewError && !overview)
   // Render the guide whenever the user has at least one account and either:
   // (a) they have unfinished steps and haven't dismissed the checklist, OR
@@ -724,26 +539,30 @@ export default function DashboardClient() {
     setSessionDismissedIds((previous) => new Set(previous).add(item.id))
   }
 
-  const heroPanel = (
-    <DashboardHero
+  // #3807: the money panel replaces the hero + KPI tiles. The focused
+  // first-run view (an unfunded account) renders it without the spending
+  // block — the old render was hero + checklist only.
+  const isFocusedView = showOnboardingGuide && !hasFunds
+  const moneyPanel = (
+    <MoneyPanel
       loading={overviewInitialLoading}
       unavailable={overviewUnavailable}
-      totalFiat={totalFiat}
       currency={currency}
+      totalFiat={totalFiat}
       changeAvailable={Boolean(overview?.change.available)}
       sekChangeUnavailable={sekChangeUnavailable}
       balancesFreshness={balancesFreshness}
       changeUnavailable={changeUnavailable}
       changeAmount={changeAmount}
       changePercent={changePercent}
+      overview={overview}
       hasAccounts={accounts.length > 0}
       hasFunds={hasFunds}
       fundingStateKnown={fundingStateKnown}
       watchingForDeposit={fundingStateKnown && !hasFunds && hasOpenedReceive}
       requiresOtherDevice={requiresOtherDevice}
-      canSend={canSendFromDashboard}
-      onSend={() => {}}
-      onReceive={() => openHeroAction('receive')}
+      showSpending={!isFocusedView}
+      onDepositAddress={() => openHeroAction('receive')}
       onAddFunds={() => openHeroAction('add-funds')}
     />
   )
@@ -758,44 +577,6 @@ export default function DashboardClient() {
     />
   ) : null
   const showTopAside = attentionVisible
-
-  const metricsGrid = (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <MetricCard
-        label="Agents connected"
-        value={String(overview?.metrics.connectedAgents ?? 0)}
-        href="/agents"
-        icon={<AgentMarkIcon />}
-        loading={overviewInitialLoading}
-        unavailable={overviewUnavailable}
-      />
-      <MetricCard
-        label="Monthly agent spend"
-        value={formatCompactCurrency(monthlySpend, currency)}
-        footer="Current calendar month"
-        href="/transactions?direction=out"
-        icon={<SpendIcon />}
-        loading={overviewInitialLoading}
-        unavailable={overviewUnavailable}
-      />
-      <MetricCard
-        label="Successful transactions"
-        value={String(overview?.metrics.successfulTransactions ?? 0)}
-        footer="All time"
-        href="/transactions"
-        icon={<CheckIcon />}
-        loading={overviewInitialLoading}
-        unavailable={overviewUnavailable}
-      />
-      <MetricCard
-        label="Active accounts"
-        value={String(overview?.metrics.activeAccounts ?? accounts.length)}
-        href="/accounts"
-        icon={<WalletIcon />}
-        loading={false}
-      />
-    </div>
-  )
 
   const activityGrid = (
     <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-2">
@@ -824,7 +605,8 @@ export default function DashboardClient() {
 
   return (
     <div className="max-w-6xl">
-      <PageHeader title="Dashboard" subtitle="Your money, agents, and actions at a glance." />
+      {/* #3807: the "Dashboard" heading and its templated 7-day summary live
+          in the money panel, which owns the top of the page. */}
 
       {/*
         Hide metrics + activity only for a brand-new user (no progress at
@@ -834,10 +616,11 @@ export default function DashboardClient() {
       */}
       {(() => {
         const showGuide = showOnboardingGuide
-        // Focused first-run view: hero + checklist only, no metrics/activity.
-        // Triggered when the user hasn't funded their account yet — agent and
-        // payment steps need funded state to be useful.
-        const isFocusedView = showGuide && !hasFunds
+        // Focused first-run view: money panel (no spending block) + checklist
+        // only. Triggered when the user hasn't funded their account yet —
+        // agent and payment steps need funded state to be useful. The
+        // computation lives above the money panel (#3807); `showSpending`
+        // reads it there.
         const guide = showGuide ? (
           <DashboardOnboardingGuide
             hasFunds={hasFunds}
@@ -865,7 +648,7 @@ export default function DashboardClient() {
         if (isFocusedView) {
           return (
             <div className="space-y-6">
-              {heroPanel}
+              {moneyPanel}
               {attentionPanel}
               {guide}
             </div>
@@ -879,11 +662,10 @@ export default function DashboardClient() {
                 showTopAside ? 'xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.42fr)]' : ''
               }`}
             >
-              {heroPanel}
+              {moneyPanel}
               {attentionPanel}
             </div>
             {guide}
-            {metricsGrid}
             {activityGrid}
           </div>
         )

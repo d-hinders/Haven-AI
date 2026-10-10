@@ -736,6 +736,9 @@ item, or to the caller's list heading (`headingId`) when the list emptied.
 The title and the subtitle each line-clamp to two lines at every width
 (`Row` truncates both to one), so an item is never cut to a line that
 cannot be judged — the narrow desktop Needs-you panel included (#3876).
+The leading icon, and from `sm` up the trailing badge, action and dismiss,
+centre on the title's first line rather than on the whole body, so a
+four-line item still reads as one line with detail beneath (#3880).
 Below `sm` the trailing slot also wraps under the body. Zero items renders
 nothing — the caller owns the empty state.
 

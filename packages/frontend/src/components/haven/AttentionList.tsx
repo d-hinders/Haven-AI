@@ -40,6 +40,14 @@
  * with `line-clamp-none`: it sets `overflow: visible`, which defeats the
  * ellipsis (#3861).
  *
+ * ── First-line alignment (#3880) ──────────────────────────────────────────
+ *
+ * With two-line titles and subtitles a row body runs to four lines, and
+ * `Row`'s default centring left the icon beside the gap between title and
+ * subtitle. The leading icon — and, from `sm` up, the trailing badge, action
+ * and dismiss when they sit beside the body — are centred on the title's
+ * FIRST line instead, so the item reads as one line with detail beneath.
+ *
  * ── Mobile ────────────────────────────────────────────────────────────────
  *
  * Below `sm` the trailing slot wraps onto its own line under the body
@@ -74,6 +82,24 @@ export interface AttentionListItem {
   /** The caller's action — a button or link, rendered in `trailing` before the dismiss. */
   action?: ReactNode
 }
+
+/**
+ * Centre the 32px controls on the title's first line (#3880) without moving
+ * anything by a negative margin: the row gives up 6px of top padding
+ * (`pt-1.5` overrides Row's `py-3` top) and the title takes it back as a
+ * margin (`mt-1.5`), so the text sits exactly where it did — for any item
+ * with a subtitle, i.e. a body at least as tall as the 32px icon. Every
+ * Needs-you kind has one; a title-only item would sit 3px high in a 6px
+ * shorter row, and would need the body pinned too. The icon and,
+ * beside the body, the trailing controls then align to the top of the row
+ * — 6px above the first line, which is half of 32px minus half of the 20px
+ * `text-sm` line, so their centres land on the line's centre. Controls that
+ * wrap onto their own line keep Row's full 12px gap: nothing pulls them up
+ * (the #3880 code review caught a `-mt-1.5` version doing exactly that to
+ * three of the four dashboard rows).
+ */
+const ROW_TOP = 'pt-1.5'
+const TITLE_TOP = 'mt-1.5'
 
 /** Two lines, then an ellipsis — see the clamp rule above. */
 const CLAMP = 'whitespace-normal line-clamp-2'
@@ -132,12 +158,13 @@ export function AttentionList({
           <Row
             leading={item.icon ? <Icon icon={item.icon} className="h-4 w-4" /> : undefined}
             leadingTone={item.icon ? item.tone : undefined}
+            leadingClassName="self-start"
             title={item.title}
             subtitle={item.subtitle}
-            titleClassName={CLAMP}
+            titleClassName={`${CLAMP} ${TITLE_TOP}`}
             subtitleClassName={CLAMP}
-            trailingClassName="w-full basis-full self-start sm:w-auto sm:basis-auto sm:self-center"
-            className="flex-wrap"
+            trailingClassName="w-full basis-full self-start sm:w-auto sm:basis-auto"
+            className={`flex-wrap ${ROW_TOP}`}
             trailing={
               <div className="flex items-center justify-end gap-2">
                 {item.badge !== undefined ? (

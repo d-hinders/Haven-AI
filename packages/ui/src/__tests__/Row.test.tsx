@@ -21,15 +21,23 @@ describe('Row density', () => {
   })
 })
 
-describe('Row — titleClassName / trailingClassName (#3805)', () => {
+describe('Row — titleClassName / subtitleClassName / trailingClassName (#3805, #3876)', () => {
   it('lands the title override on the title paragraph, not the row root', () => {
-    // AttentionList clamps the title to two lines below `sm`; classes aimed at
-    // the row root would land on the flex container and do nothing.
+    // AttentionList clamps the title to two lines; classes aimed at the row
+    // root would land on the flex container and do nothing.
     const { container } = render(<Row title="Agent" titleClassName="line-clamp-2" />)
     const title = container.querySelector('p')!
     expect(title.className).toContain('line-clamp-2')
     expect(title.className).toContain('truncate')
     expect((container.firstElementChild as HTMLElement).className).not.toContain('line-clamp-2')
+  })
+
+  it('lands the subtitle override on the subtitle paragraph (#3876)', () => {
+    const { container } = render(<Row title="Agent" subtitle="Detail" subtitleClassName="line-clamp-2" />)
+    const [title, subtitle] = Array.from(container.querySelectorAll('p'))
+    expect(subtitle.className).toContain('line-clamp-2')
+    expect(subtitle.className).toContain('truncate')
+    expect(title.className).not.toContain('line-clamp-2')
   })
 
   it('lands the trailing override on the trailing wrapper', () => {
@@ -39,9 +47,11 @@ describe('Row — titleClassName / trailingClassName (#3805)', () => {
     expect(container.querySelector('.basis-full')).not.toBeNull()
   })
 
-  it('renders byte-identical classes when neither override is given', () => {
-    const { container } = render(<Row title="Agent" trailing={<span>x</span>} />)
-    expect(container.querySelector('p')!.className).toBe('truncate text-sm font-medium text-[var(--v2-ink)]')
+  it('renders byte-identical classes when no override is given', () => {
+    const { container } = render(<Row title="Agent" subtitle="Detail" trailing={<span>x</span>} />)
+    const [title, subtitle] = Array.from(container.querySelectorAll('p'))
+    expect(title.className).toBe('truncate text-sm font-medium text-[var(--v2-ink)]')
+    expect(subtitle.className).toBe('mt-0.5 truncate text-xs text-[var(--v2-ink-3)]')
     expect(container.innerHTML).not.toContain('undefined')
   })
 })

@@ -1,0 +1,873 @@
+{
+  "comment": "The hosted tools/list contract exactly as a client receives it (InMemoryTransport + client.listTools(), see tool-contract-snapshot.test.ts). Regenerate after an intended contract change: npm run snapshot:regen -w packages/mcp-server.",
+  "tools": {
+    "haven_check_funds": {
+      "description": "Check whether the agent's account actually holds at least the given amount of a token — funds held, not spend permitted.. Pass the token address or allowance symbol and ONE amount spelling: max_amount_human (whole tokens, preferred) or max_amount (atomic). Returns covered: true (holds at least the amount), false (a live chain read reports less — stop and tell the user the funds are missing), or null (the read failed — unverifiable, never absence; coverage_error says why). The balance itself is deliberately not returned — a sufficiency signal, not a balance read; budget_remaining_atomic is the PERMITTED figure (haven_get_allowances). Read-only: grants no authority, moves nothing; both retired rails answer 410.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ERC-20 contract address (0x…) or the symbol of one of this agent's allowances"
+          },
+          "max_amount": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "max_amount_human": {
+            "type": "string",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_close_task_budget": {
+      "description": "End a task budget early, releasing its unspent cap back to the agent's own budget. Pass task_budget_id. A never-signed or already-expired budget ends immediately with { task_budget, status: \"closed\" }; otherwise returns { task_budget, sign_data, next_action } — sign, then relay with haven_submit (task_budget_id); signer_compatibility carries the recovery route if the signer predates task budgets.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_budget_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "task_budget_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_complete_mcp_tool": {
+      "description": "Final step of the decomposed x402 MCP purchase: deliver the signed merchant payment header (both x402 wire names) and return the tool result. Pass payment_id and payment_header (from haven_x402_sign_header); merchant_url/tool_name/arguments/mcp_transport are optional — Haven rehydrates them by payment_id. Call only after haven_submit confirmed funding. The header is a signed, single-use, amount/merchant/nonce-bound authorization — not a key. Merchant-issued credentials in the returned `result` (JWTs, *_token/*_link/session fields) are withheld unless include_merchant_credentials=true — if you receive one, use it with the merchant it came from and never echo or log it. Optionally pass delivery_reference — a NON-SECRET pointer to what the merchant delivered (product, order id) shown on the owner's receipt; a credential-shaped value is refused before the call, so relay the secret to the owner yourself. On a settled x402 payment the allowance block reports the canonical names remainingAtomic / remainingDisplay / resetPeriodMin / tokenSymbol / tokenAddress (the SAME names and values haven_get_agent reports) beside the deprecated snake_case spellings (remaining_atomic, remaining_display, token_symbol, token_address, reset_period), kept for a deprecation window. Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true) when funding expired first; MERCHANT_REJECTED_AFTER_FUNDING on eip3009 means stranded delegate funds — recover with haven_sweep_delegate. erc7710 settles via haven_settle_mcp_tool. On success no further Haven tool is needed — return the merchant result to the user. If the delivered output was unusable or only partially usable, say so with haven_report_delivery_quality (evidence only; it moves no money).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "payment_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "merchant_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "tool_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "arguments": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "mcp_transport": {
+            "type": "object",
+            "properties": {
+              "handshake_required": {
+                "type": "boolean"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "path",
+                  "bazaar"
+                ]
+              }
+            },
+            "required": [
+              "handshake_required",
+              "source"
+            ],
+            "additionalProperties": false
+          },
+          "payment_header": {
+            "type": "string",
+            "minLength": 1
+          },
+          "include_merchant_credentials": {
+            "type": "boolean"
+          },
+          "delivery_reference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        },
+        "required": [
+          "payment_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_discover_tools": {
+      "description": "Step 1 of a purchase: discover payable services from Haven's curated merchant catalog — names, prices, the next call. Use this when the user asks what the agent can buy, pay for, or which paid services exist — or when you need a resource URL for a service the user described. Use verified=verified for entries Haven watched pass a live quote probe (operator-curated or self-submitted) — domain_verified is the only ownership claim; never treat these badges as proof of merchant honesty, quality, or reliability. Do NOT use for balance, budget, or spend-limit questions — use haven_get_allowances. Do NOT use to pay — each returned entry names the next tool to call. Use each entry's suggested_tool + suggested_arguments first; an entry without them says why. Read-only lookup against Haven's curated catalog; entries are periodically re-verified against the live merchant and degraded entries are flagged. Use category for a case-insensitive category filter (for example, VPN or vpn), or search for a product name, category, or description term. Returns name, description, price, rail, resource URL, tool_name, tool_arguments, the hint, and the provenance badges source/domain_verified/verified_payable. The catalog price (price_display/price_atomic, marked price_is_indicative) is a last-verified hint, NOT authoritative — the real price comes from the merchant's live 402 at pay time. Never creates a payment, signature, or approval. Call suggested_tool with suggested_arguments VERBATIM (no hint: read suggested_tool_omitted_reason). Confirm the price from the live quote or pay result, not the catalog; if the next tool takes a cap, pass the user's cap as max_amount_human in whole tokens (\"no more than 1 USDC\" → max_amount_human: \"1\"), never atomic units by hand. For an MCP entry with a spending cap in mind, prefer haven_prepare_catalog_purchase with its catalog_id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "search": {
+            "type": "string"
+          },
+          "rail": {
+            "type": "string",
+            "enum": [
+              "x402",
+              "mpp"
+            ]
+          },
+          "verified": {
+            "type": "string",
+            "enum": [
+              "any",
+              "verified",
+              "operator"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_get_agent": {
+      "description": "Return the authenticated agent identity AND its live spend authority in one call: Haven wallet, delegate, chain, raw status, spend_authority_readiness, per-token remaining allowance (atomic + human-readable). The recommended first call in a new session. Use this as the session bootstrap, or to confirm identity together with whether the agent has spend authority right now. For per-token detail (configured vs spent vs reset window) use haven_get_allowances. Reads identity plus the live spend-authority snapshot — the active on-chain budget delegation. spend_authority_readiness (readiness is a deprecated alias, same value) is \"ready\" when at least one token has remaining spend authority, \"needs_approval\" when the agent is active but has none, and \"revoked\" when the credential is not active. Readiness is AUTHORITY: it says a budget is live, not that the account holds funds. Each allowances[] row carries fundsCoverRemaining: false when the account's balance cannot back that row's whole remaining budget — a heads-up to mention to the user, not a refusal (budgets above the balance are a normal setup; an owner may top up weekly) — and null when the coverage read failed or the remaining figure was not read live; the key is absent when the remaining is 0, and rows for one token are compared alone. It covers hosted identity + on-chain spend authority ONLY — the hosted server cannot see the LOCAL signer, so \"ready\" does not mean the signer can start; verify the signer with a signer tool call or connect --doctor. An over-budget payment is declined before any money moves; there is no approval queue — ask the owner to grant or raise the budget in Haven. allowances[] carries id, tokenAddress, remainingAtomic, remainingDisplay per token. taskBudgets[] rows carry maxAtomic/maxDisplay plus spentAtomic/remainingAtomic/remainingDisplay — what the chain still allows that budget — and remainingIsFromChain: false marks a failed read (figures null, never the full cap); only live rows are listed (closed and expired omitted), each with its status (pending | open | closing) and isExpired, so a closing budget stays visible. pendingSubBudgetSignatures[] lists sub-budget rows awaiting YOUR signature, each with its haven_sign next step. Identity fields: id, name, status, accountAddress, delegateAddress, chainId.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_get_allowances": {
+      "description": "Return configured and on-chain allowance state for the authenticated agent. On-chain allowance is the real spend gate. Use this when the user asks about allowance, budget, spend limit, remaining amount, remaining allowance, remaining budget, daily limit, reset period, what can I spend, or what the agent can still spend. Returns the per-token spend authority for the account: the active budget delegation (remaining = the period budget, which re-arms natively at the period boundary), each with id, onchain.remaining, remainingDisplay, delegationHash, recipientAddress (null = open; a pinned budget pays only that recipient), merchantId (set only on a merchant-locked budget), reservedHavenAtomic — Haven-side task- and sub-budget reservations summed beside, never folded into, the on-chain figure — and fundsCoverRemaining: false when the account's balance cannot back that row's whole remaining budget (a heads-up to mention to the user, not a refusal — budgets above the balance are a normal setup), null when the coverage read failed or the remaining figure was not read live, absent when the remaining is 0, each row compared alone. An over-budget payment is declined before any money moves; nothing queues. Configured amounts from Haven are returned alongside. Open task budgets are not listed here: haven_get_agent's taskBudgets[] carries each one's spentAtomic/remainingAtomic and lifecycle status.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_get_payment_status": {
+      "description": "Fetch structured Haven payment status for agent recovery. State: phase, nextAction, rail, amount, merchant, resource, idempotency, message; delivered when the merchant answered; parties: treasury/delegate/delegateAccount/merchant. awaiting_settlement_evidence: poll once, else unverified. delivered_unverified: terminal, stop. For a settled x402 payment the allowance block reports remainingAtomic / remainingDisplay / resetPeriodMin / tokenSymbol / tokenAddress (the SAME names and values haven_get_agent reports) beside the deprecated snake_case spellings (remaining_atomic, remaining_display, token_symbol, token_address, reset_period), kept for a deprecation window.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "payment_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "payment_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_get_receipt": {
+      "description": "Fetch one settled payment's signed receipt bundle — the self-contained evidence an offline verifier checks. This agent's own settled payments only. Use when the signed bundle itself is needed — receipt verification (haven_verify_receipt reads it unchanged), attaching payment evidence to a report — not for status questions: haven_get_payment_status answers status, and haven_list_receipts rows are history metadata without the signature. Returns { receipt } — the signed haven-receipt-1 bundle. An unknown id, another agent's id, or the agent's own unsettled payment is a structured 404. Settlement is not proven by fetching: check settlementTxHash on an explorer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "payment_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "payment_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_get_resume_state": {
+      "description": "Rehydrate stored x402 resume_state by payment_id. Returns the x402 context the agent originally received when the payment was authorized, reconstructed from Haven's database. This is context only; signing still happens locally when a resume tool is called.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "payment_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "payment_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_get_task_budget": {
+      "description": "Read one task budget by id, any status. Returns { task_budget } with status (pending | open | closing | closed), isExpired, maxDisplay, recipientAddress, label and expiresAt — the check to run after a close or submit refusal says to re-check the budget's status. haven_get_agent lists live task budgets only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_budget_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "task_budget_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_list_receipts": {
+      "description": "List machine-payment receipts, newest first, by page. This agent's payment evidence, not the wallet's transaction history (sweeps, funding legs, other agents); use the allowance tool instead for remaining allowance or what-can-I-spend questions. Page { receipts, total, hasMore, nextCursor }; hasMore: pass nextCursor as cursor. parties.treasuryAccount is Haven's authoritative payer. protocolReceiptPayload is the merchant's PAYMENT-RESPONSE relayed verbatim: merchant-controlled, unverified, not Haven's record; payer may differ from payerAddress. Proof header values omitted.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1
+          },
+          "compact": {
+            "type": "boolean",
+            "description": "true drops challengePayload, selectedPayment and protocolReceiptPayload from each row; omit for the full row."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_open_task_budget": {
+      "description": "Open a one-task budget that ends by itself: a cap good for at most ttl_minutes, reserved from the agent's own budget, apart from its period reset. Pass max_amount_human (whole tokens), ttl_minutes (1-1440), optional recipient (pins every payment to one address; x402 then only by direct settlement), label, token (default USDC). Returns { task_budget, sign_data, next_action } — sign, then relay with haven_submit (task_budget_id); signer_compatibility carries the recovery route if the signer predates task budgets. Over-cap, late or wrong-recipient spend is declined; nothing is queued.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "max_amount_human": {
+            "type": "string",
+            "minLength": 1
+          },
+          "ttl_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1440
+          },
+          "recipient": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "max_amount_human",
+          "ttl_minutes"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_pay": {
+      "description": "Construct a direct wallet payment inside the agent budget and return the unsigned payload for the local signer. For read-only allowance/budget questions use haven_get_allowances instead. Returns { payment_id, status, idempotency_key, payload_hash, expires_at, next_tool, next_arguments, signer_compatibility } — compact by default, no typed_data / typed_data_b64; idempotency_key is generated when you pass none, and echoed here. Sign by payment_id; if haven_sign refuses that call — carrying fallback: 'typed_data_b64' (any code), or SIGN_CONTEXT_REFUSED / sign_context_unavailable from an older signer (it signed nothing either way) — re-run this tool with the SAME idempotency_key plus include_signing_payload=true — repeating token, amount, recipient, task_budget_id and sub_budget_id, or it answers 409 — then re-sign with { payload_hash, typed_data_b64 } from that result, UNCHANGED, then haven_submit. A payment outside the budget, recipient or expiry is declined at prepare — nothing to sign, nothing queued: ask the user to raise the budget in Haven. Haven never receives the signing key.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 1
+          },
+          "amount": {
+            "type": "string",
+            "minLength": 1
+          },
+          "to": {
+            "type": "string",
+            "minLength": 1
+          },
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "task_budget_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sub_budget_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "include_signing_payload": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "token",
+          "amount",
+          "to"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_pay_mcp_tool": {
+      "description": "Step 1 of the x402 MCP purchase flow: call a named tool on an MCP merchant that requires payment, probe the live price, and create the funding intent for the local signer to sign. Use this when the agent wants to call a specific tool on an MCP merchant (e.g. Soundside, Coinbase Bazaar) and payment is required. Prefer this over haven_pay_x402 when you know the merchant_url and tool_name — it builds the JSON-RPC envelope internally. Use haven_pay_x402 for arbitrary HTTP resources. Do NOT use for read-only allowance or budget questions — use haven_get_allowances. Inputs: merchant_url (exact MCP endpoint or base URL — a non-402 miss gets one bounded same-origin discovery pass; the response echoes the resolved endpoint to reuse downstream), tool_name, arguments, and exactly ONE cap: max_amount_human (whole tokens, preferred — \"no more than 1 USDC\" is \"1\") or max_amount (atomic units). Both or neither is refused before the merchant is contacted; with no user-stated cap, quote first (haven_quote_mcp_tool) and cap at the quoted amount. Returns the compact quote { payment_id, payload_hash, expires_at, x402, signer_compatibility, merchant_url, tool_name, arguments, mcp_transport }; the returned amount is the authorized CEILING the merchant settles at or below — present it as the maximum. Sign per the response guidance (payment_id-only), then settle with haven_settle_mcp_tool. Exceptional states: on expiry re-run with the SAME idempotency_key; include_signing_payload=true on a re-run returns the inline signing payload for an older signer — and a merchant that repriced in between makes the signer refuse the stale copy: re-quote fresh. Next: the signer tool named by the response guidance, then haven_settle_mcp_tool.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "merchant_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "tool_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "arguments": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "max_amount": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "max_amount_human": {
+            "type": "string",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$"
+          },
+          "idempotency_key": {
+            "type": "string"
+          },
+          "include_signing_payload": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "merchant_url",
+          "tool_name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_pay_x402_quote": {
+      "description": "Step 1 of a direct x402 purchase (plain HTTP, non-MCP): build the funding step for the local signer. Request mode (preferred): pass url, method, headers and body as quoted (haven_quote_x402's next_arguments) and no payment_required; Haven re-sends that unpaid request itself (https, no redirects) and pays the 402 it got, so nothing is copied. A cap is REQUIRED. Or pass payment_required from the merchant 402 UNCHANGED plus url. The paid retry goes to url, never the declared resource_url; public http:// is refused. Cap: max_amount_human (preferred) or max_amount, never both; with payment_required, neither accepts the quoted price and adds cap_warning. Returns { payment_id, payload_hash, expires_at, x402, signer_compatibility } — compact by default; include_signing_payload=true on a same-idempotency_key re-run returns the inline payload for an older signer. Over-budget is declined at prepare; nothing is held for later approval. On the delegation rail a successful result also carries allowance { rail, sufficient, remaining_atomic, source }: budget left before signing (sufficient null + warning if the read failed). Budget questions: haven_get_allowances. haven_sign_x402 (named in the guidance) returns payment_header INLINE with the signature — do NOT call haven_x402_sign_header afterwards; it can only refuse. Relay the signature via haven_submit, then retry the merchant YOURSELF with that payment_header, setting PAYMENT-SIGNATURE (v2); X-PAYMENT (v1) unless erc7710. Haven never sends the paid request or holds the key. The header is built before funding confirms, so its validity window starts at signing: retry promptly, and on PAYMENT_WINDOW_EXPIRED re-run this tool with the same arguments (request mode: the same request, cap and idempotency_key). When the merchant advertises extra.assetTransferMethod \"erc7710\" and the account is on the delegation rail, this returns settlement_scheme \"erc7710\" instead: sign, then haven_submit with settlement_scheme \"erc7710\" returns the payment_header directly. No funding leg on that path. On the funding-leg (EIP-3009) shape ONLY, report what the merchant answered to your retry with haven_report_x402_outcome. On erc7710 use haven_report_settlement_evidence instead. Sub-budgets (sub_budget_id) pay only through the local MCP's haven_pay_x402 tools. Several calls to this merchant? If a 402 or its docs offer a sign-in-with-x session, sign in FIRST: haven_sign_siwx { url, challenge }, then the waived calls YOURSELF with the SIGN-IN-WITH-X header — never pass a session token to haven_quote_x402 or this tool (probe refuses a 200); the delegate wallet signs in, no funds move. url is the FINAL URL after redirects; never follow a redirect with SIGN-IN-WITH-X (or a token) attached.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "method": {
+            "type": "string"
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "body": {
+            "type": "string"
+          },
+          "payment_required": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "max_amount": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "max_amount_human": {
+            "type": "string",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$"
+          },
+          "idempotency_key": {
+            "type": "string"
+          },
+          "include_signing_payload": {
+            "type": "boolean"
+          },
+          "task_budget_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_prepare_catalog_purchase": {
+      "description": "Step 1 of the guided catalog purchase: load one Haven catalog entry by catalog_id, run the LIVE merchant quote, verify chain/cap/rail-aware allowance, and return a ready-to-sign x402 payment. Prefer this over haven_pay_mcp_tool when you hold a catalog_id from haven_discover_tools. A degraded catalog row refuses and names haven_pay_mcp_tool as the manual fallback. Read-only budget questions: haven_get_allowances. Exactly ONE cap is REQUIRED — max_amount_human (whole tokens, preferred) or max_amount (atomic); both or neither refuses before any network call, and with no user-stated cap, quote first (haven_quote_catalog_purchase) and cap at the quoted amount. The cap is enforced against the LIVE quote before any funding intent exists. Returns the same compact quote shape as haven_pay_mcp_tool plus catalog fields and an allowance block { rail, sufficient, remainingAtomic (deprecated alias remaining_atomic — the name haven_get_agent reports; the snake_case key is kept for a deprecation window), source }: an over-budget quote REFUSES here, before any payment exists and with no approval queue to fall back on. sufficient can be null with a warning when the read itself failed — the on-chain policy remains the real gate. The response guidance says which settlement shape you are on (erc7710 direct settlement has no funding leg and no payment_header). Catalog prices are indicative; the live quote in this response is authoritative (CATALOG_PRICE_DIFFERS warns on mismatch). An unknown catalog_id, or one curated for a different chain, refuses with 404. Next: the signer tool named by the response guidance, then haven_settle_mcp_tool. On a refusal, tell the user the budget was exceeded and ask them to raise it in Haven — never re-quote, re-pay, or poll: nothing is queued.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "catalog_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "arguments": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "max_amount": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "max_amount_human": {
+            "type": "string",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "include_signing_payload": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "catalog_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_quote_catalog_purchase": {
+      "description": "Read the live x402 price for one curated catalog entry without creating any payment, approval, signature, or funding. Informational only. Use before haven_prepare_catalog_purchase to choose a cap — and always when the user stated no cap (cap at this quoted amount, never an invented number). Catalog prices are indicative; amount/amount_atomic here are the live merchant quote. A degraded row without MCP metadata: use haven_pay_mcp_tool manually instead. Next: haven_prepare_catalog_purchase with catalog_id and exactly one cap.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "catalog_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "catalog_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_quote_mcp_tool": {
+      "description": "Read the live x402 price for a named MCP merchant tool without creating any payment, approval, signature, or funding. Informational only — reserves nothing. Use it to tell the user the current price before choosing a cap. merchant_url may be exact or a base URL (one bounded same-origin discovery attempt; the response echoes the resolved endpoint). Next: choose a cap (or cap at this quote) and call haven_pay_mcp_tool.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "merchant_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "tool_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "arguments": {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "merchant_url",
+          "tool_name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_quote_x402": {
+      "description": "Inspect an HTTP 402 x402 paid resource without creating a Haven payment, signature, approval, or on-chain transaction. Probes the merchant directly from the hosted server and parses the 402. Haven is not contacted. Returns the quote and a next step naming haven_pay_x402_quote with this same request. Next: haven_pay_x402_quote with the next_arguments given (url, method, headers, body, and the cap). It fetches the challenge again itself, unpaid, so never copy payment_required across.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "method": {
+            "type": "string"
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "body": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_report_delivery_quality": {
+      "description": "Record what a settled payment actually DELIVERED, when you are the agent that paid: quality \"ok\" (the output served its purpose), \"unusable\" (paid but the output could not be used) or \"partial\" (only part of it usable), plus an optional note (max 2000 chars) saying what was wrong. Use it after a Haven-completed MCP purchase (haven_settle_mcp_tool / haven_complete_mcp_tool) or a plain-HTTP retry whose output disappointed — especially when a paid call returned an error body, empty content or gibberish, so the owner does not read the receipt as a success. Evidence only: it moves no money, never changes settled or any money field, and works only on your OWN settled payments (another agent's payment is refused). A re-report replaces your earlier verdict; receipts and the dashboard carry it beside the payment.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "payment_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quality": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "unusable",
+              "partial"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "payment_id",
+          "quality"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_report_settlement_evidence": {
+      "description": "Report a payment's real merchant settlement transaction hash so Haven can verify it on-chain and record it. Pass payment_id and, when you hold one, settlement_tx_hash (0x + 64 hex chars) — from PAYMENT-RESPONSE or a prior settlement_tx_hash. Omitting settlement_tx_hash succeeds as a no-op — nothing is checked or recorded, and no network call is made. Haven verifies on-chain before recording a hash; a zero, mismatched, or reverted hash is refused. Your own payments only. code SETTLEMENT_NOT_RECORDED (refusal_reason present): the payment's funding is confirmed and this hash was not accepted for it — do not retry it; refusal_reason carries why, verbatim. code DELIVERED_UNSETTLED: not verified, do not retry — poll haven_get_payment_status. code SETTLEMENT_PENDING (retryable:true): not mined or RPC unreachable — report the same hash again shortly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "payment_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "settlement_tx_hash": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          }
+        },
+        "required": [
+          "payment_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_report_x402_outcome": {
+      "description": "Report what a plain-HTTP x402 merchant answered to a retry YOU made; Haven never sends it the paid request, so nothing else can. Pass payment_id, outcome (\"accepted\" for a 2xx, else \"rejected\"), merchant_status, optional merchant_body. A rejection surfaces stranded funds on your next haven_get_payment_status instead of a 15-minute wait. On an accepted outcome you may fold the settlement evidence into this call: pass the raw base64 PAYMENT-RESPONSE header as payment_response and/or the settlement_tx_hash — Haven decodes it (transaction only), verifies the hash on-chain BEFORE recording (a hash that does not match the payment on-chain is refused), and the purchase is complete with no further tool. A rejected outcome records no evidence. Optionally pass delivery_reference — a NON-SECRET pointer to what the merchant delivered (product, order id) shown on the owner's receipt; code/token/key shapes are refused, so relay the secret to the owner yourself. Evidence only, your own payments only: it moves no money. Not for merchants Haven called for you — haven_complete_mcp_tool and haven_settle_mcp_tool already record what they observed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "payment_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "rejected"
+            ]
+          },
+          "merchant_status": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 599,
+            "description": "The HTTP status the merchant returned to your retry."
+          },
+          "merchant_body": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "settlement_tx_hash": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          },
+          "payment_response": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 131072
+          },
+          "delivery_reference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        },
+        "required": [
+          "payment_id",
+          "outcome",
+          "merchant_status"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_resume_x402_payment": {
+      "description": "Resume an authorized x402 payment: retrieve the signing context so the signer can rebuild the merchant payment header and the agent can retry the merchant. Only call this after haven_get_payment_status reports nextAction=retry_original_x402_request — Haven funding confirmed but no merchant response was recorded (a crash between funding and the retry). Any other nextAction reports a conflict; never call this speculatively or pay again. Optional url: the https URL you quoted, used as x402.retry_url over the merchant's declaration. Returns { payment_id, payment_required, x402 } in the haven_pay_x402_quote shape. Then call haven_sign_x402 with this payment_id — the funding leg is already spent, so this signs nothing new on-chain and its signature must not be re-submitted. Take payment_header from ITS result and retry x402.retry_url with it. Do NOT pass its x402_binding to haven_x402_sign_header: it can only refuse. Then report the outcome with haven_report_x402_outcome. Carries no signer_compatibility of its own; an incompatible signer refuses at signing time.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "payment_id": {
+            "type": "string"
+          },
+          "resume_state": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_send": {
+      "description": "Send ETH or USDC directly from the agent's Haven wallet to a recipient address. Use this for plain transfers — refunding a user, paying a freelancer, topping up a co-agent's wallet, or moving funds between addresses. Do NOT use for x402 paid endpoints — use haven_pay_x402 instead. Do NOT use for read-only allowance, budget, or what-can-I-spend questions — use haven_get_allowances. Do NOT use to check whether funds are held before sending — use haven_check_funds. Sends the amount by redeeming the agent's on-chain budget delegation, account to recipient with no funding leg. Budget, recipient and expiry are enforced on-chain while the transfer is prepared, so a request outside them is declined before any money moves or any signing — never queued for a human to approve. The agent's signing key signs the account's typed data; a current signer refuses any that does not match the payment's hash (USEROP_BINDING_MISMATCH), an older signer signs it and the account rejects it on-chain. Haven never receives the key. On a decline, report the reason to the user and ask them to grant or raise the budget in Haven — there is nothing to poll and no approval will arrive. After a successful send, poll haven_get_payment_status until nextAction=none.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "asset": {
+            "type": "string",
+            "enum": [
+              "ETH",
+              "USDC"
+            ]
+          },
+          "recipient": {
+            "type": "string",
+            "minLength": 1
+          },
+          "amount": {
+            "type": "string",
+            "minLength": 1
+          },
+          "idempotency_key": {
+            "type": "string"
+          },
+          "task_budget_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sub_budget_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "include_signing_payload": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "asset",
+          "recipient",
+          "amount"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_settle_mcp_tool": {
+      "description": "Fast-path final step of the x402 MCP purchase: fund and settle in one call — relay the funding signature, then deliver the merchant payment header and return the merchant tool result. Pass payment_id, signature, and (EIP-3009 shape only) payment_header; merchant/tool fields are optional — rehydrated by payment_id. If funding does not confirm it returns { payment_id, settled: false, funding_status } without contacting the merchant. Echoes payment_id on every outcome for reconciliation via haven_list_receipts / haven_get_payment_status. Merchant-issued credentials in the returned `result` (JWTs, *_token/*_link/session fields) are withheld unless include_merchant_credentials=true — if you receive one, use it with the merchant it came from and never echo or log it. Optionally pass delivery_reference — a NON-SECRET pointer to what the merchant delivered (product, order id) shown on the owner's receipt; a credential-shaped value is refused before funding, so relay the secret to the owner yourself. On a settled x402 payment the allowance block reports the canonical names remainingAtomic / remainingDisplay / resetPeriodMin / tokenSymbol / tokenAddress (the SAME names and values haven_get_agent reports) beside the deprecated snake_case spellings (remaining_atomic, remaining_display, token_symbol, token_address, reset_period), kept for a deprecation window. settled:true only after on-chain verification, never a merchant 2xx; unverified: settled:false, SETTLEMENT_UNCONFIRMED, null settlement_tx_hash. Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true); MERCHANT_REJECTED_AFTER_FUNDING on eip3009 — stranded funds, recover with haven_sweep_delegate; erc7710: nothing to sweep — check haven_get_payment_status after the window; re-quote only if unsettled. On success no further Haven tool is needed — return the merchant result to the user. If the delivered output was unusable or only partially usable, say so with haven_report_delivery_quality (evidence only; it moves no money).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "payment_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "signature": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]+$"
+          },
+          "merchant_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "tool_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "arguments": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "mcp_transport": {
+            "type": "object",
+            "properties": {
+              "handshake_required": {
+                "type": "boolean"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "path",
+                  "bazaar"
+                ]
+              }
+            },
+            "required": [
+              "handshake_required",
+              "source"
+            ],
+            "additionalProperties": false
+          },
+          "payment_header": {
+            "type": "string",
+            "minLength": 1
+          },
+          "include_merchant_credentials": {
+            "type": "boolean"
+          },
+          "delivery_reference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        },
+        "required": [
+          "payment_id",
+          "signature"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_submit": {
+      "description": "Relay a delegate signature from the local signer to execute a constructed payment. Pass payment_id (from haven_pay, haven_pay_x402_quote, or a resume tool) and the signature over its payload_hash. Returns { status, tx_hash }. In decomposed x402 flows, follow with haven_x402_sign_header on the signer once funding confirms. When the quote reported settlement_scheme \"erc7710\", pass settlement_scheme: \"erc7710\" here: the signature is the settlement child, not a funding authorization, and the response returns payment_header for you to retry the merchant with — no funding tx, no header to build locally. For a task budget pass task_budget_id, for a sub-budget (haven_get_agent pendingSubBudgetSignatures[]) sub_budget_id, INSTEAD of payment_id — exactly one id. Returns { task_budget | sub_budget, status }.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "payment_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "task_budget_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sub_budget_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "signature": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]+$"
+          },
+          "settlement_scheme": {
+            "type": "string",
+            "enum": [
+              "erc7710",
+              "eip3009"
+            ]
+          }
+        },
+        "required": [
+          "signature"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_submit_catalog_entry": {
+      "description": "Submit a merchant's payable (x402/MCP) endpoint to Haven's Verified Payable Directory for verification and listing. Use this when a merchant or seller asks to be listed in the directory, or when you have discovered a payable endpoint and want it registered. The submission is queue-only: it books a spot and returns a verify_token. The seller must then prove control of the domain (a well-known line or DNS TXT record); only after that plus a live quote probe does the entry become listed. Do NOT use to pay — check the returned status with getCatalogSubmissionStatus instead. Sends the https resource_url to Haven's public submission endpoint. The request path makes no outbound request to the merchant. Returns id + verify_token + status; the verify_token is shown exactly once. Ownership proof is always required later and cannot be skipped from the agent side. The website field is a honeypot for bots — leave it unset. Give the verify_token and the well-known instructions (from getCatalogSubmissionStatus) to the merchant so they can publish the proof line, then poll the submission status until it reaches verified_payable or failed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "resource_url": {
+            "type": "string",
+            "minLength": 1
+          },
+          "website": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "resource_url"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_sweep_delegate": {
+      "description": "Recover stranded USDC from the delegate wallet back to the Haven wallet, gaslessly. Use when a payment failed or expired after funding, or on nextAction=sweep_stranded_funds. Two keyless phases: (1) call with no arguments — returns { status: \"signature_required\", authorization, expected_auth } or { status: \"nothing_stranded\" }; (2) sign via the signer tool haven_sign_sweep_delegate, then call again with { authorization, signature }. Returns { status: \"swept\", tx_hash, amount }. USDC only — stranded native ETH is not recoverable through this path.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "authorization": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              },
+              "validAfter": {
+                "type": "string"
+              },
+              "validBefore": {
+                "type": "string"
+              },
+              "nonce": {
+                "type": "string"
+              },
+              "token": {
+                "type": "string"
+              },
+              "chainId": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "from",
+              "to",
+              "value",
+              "validAfter",
+              "validBefore",
+              "nonce",
+              "token",
+              "chainId"
+            ],
+            "additionalProperties": false
+          },
+          "signature": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "haven_verify_receipt": {
+      "description": "Verify a signed payment receipt offline — confirm the agent delegate signed its authorisation. The signed bundle comes from haven_get_receipt or GET /payments/{id}/receipt — that response is accepted as-is (whole, or its .receipt) — not a haven_list_receipts row: a row carries no signature and returns not_a_signed_receipt. No network. Never throws. An erc7710 bundle verifies over the delegation digest the delegate signed; a direct or eip3009 bundle returns not_verifiable_offline. verified true means only that the delegate signed the hash named by verifiedOver — payment facts are Haven-asserted and settlement is not proven; check settlementTxHash on an explorer. The endpoint wrapper's own verification field, when one rides along, is ignored — offline recovery is the only evidence.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "receipt": {},
+          "verification": {}
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  }
+}

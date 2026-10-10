@@ -30,7 +30,8 @@
     "build": "npm --prefix ../sdk run build && tsup",
     "start": "node dist/cli.js",
     "test": "npm --prefix ../core run build && npm --prefix ../sdk run build && npm --prefix ../mcp run build && npm --prefix ../signer run build && vitest run",
-    "typecheck": "npm --prefix ../core run build && npm --prefix ../sdk run build && npm --prefix ../mcp run build && npm --prefix ../signer run build && tsc --noEmit"
+    "typecheck": "npm --prefix ../core run build && npm --prefix ../sdk run build && npm --prefix ../mcp run build && npm --prefix ../signer run build && tsc --noEmit",
+    "snapshot:regen": "npm --prefix ../core run build && npm --prefix ../sdk run build && npm --prefix ../mcp run build && npm --prefix ../signer run build && UPDATE_TOOL_CONTRACT_SNAPSHOT=1 vitest run src/tool-contract-snapshot.test.ts"
   },
   "keywords": [
     "haven",

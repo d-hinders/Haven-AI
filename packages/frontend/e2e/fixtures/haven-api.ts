@@ -285,8 +285,11 @@ export const dashboardOverview = {
   },
   // #3803: the agentCount tiles read this — every preview agent is counted,
   // by status, including the pending ones the old LIMIT 6 preview dropped.
+  // #3809: the three listed agents are 1 active, 1 paused, 1 pending — the
+  // total must agree with `agents` or the section's "View all N agents"
+  // footer would promise an agent the list does not carry.
   agentCount: {
-    active: 2,
+    active: 1,
     paused: 1,
     pending_approval: 1,
   },

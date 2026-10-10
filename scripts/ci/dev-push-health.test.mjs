@@ -70,11 +70,26 @@ test('5: a later run where the job succeeds clears it', () => {
 })
 
 test('6: a successful RE-RUN attempt of the failed run clears it', () => {
-  // Same run, attempt 2: created_at unchanged, started after the next push's run.
-  const rerun = run(1, { MCP: 'success' }, { attemptStartedAt: new Date(Date.UTC(2026, 9, 10, 9, 5)).toISOString() })
-  rerun.run_attempt = 2
-  const r = evaluate([run(0, { MCP: 'success' }), run(2, { MCP: 'failure' }), rerun])
-  assert.equal(r.healthy, true)
+  // The list endpoint returns the run once, with its latest attempt: attempt 2
+  // is the same run object, same created_at, its job now `success`.
+  const failed = run(1, { MCP: 'failure' })
+  const rerun = { ...failed, run_attempt: 2, run_started_at: new Date(Date.UTC(2026, 9, 10, 9, 30)).toISOString(),
+                  jobs: failed.jobs.map((j) => (j.name === 'MCP' ? { ...j, conclusion: 'success' } : j)) }
+  assert.equal(evaluate([run(0, { MCP: 'success' }), failed]).healthy, false)
+  assert.equal(evaluate([run(0, { MCP: 'success' }), rerun]).healthy, true)
+})
+
+test('6b: a re-run of an OLDER run never leapfrogs a newer failure, nor blames itself over a green HEAD', () => {
+  const late = new Date(Date.UTC(2026, 9, 10, 9, 30)).toISOString()
+  // A fails, B (HEAD) fails, then old A is re-run and passes on a flake: HEAD is still red.
+  const aPassedOnRerun = run(1, { MCP: 'success' }, { attemptStartedAt: late })
+  aPassedOnRerun.run_attempt = 2
+  const r1 = evaluate([run(0, { MCP: 'success' }), aPassedOnRerun, run(2, { MCP: 'failure' })])
+  assert.deepEqual(r1.red.map((x) => x.job), ['MCP'])
+  // A passes, B (HEAD) passes, then old A is re-run and fails: HEAD is green.
+  const aFailedOnRerun = run(4, { MCP: 'failure' }, { attemptStartedAt: late })
+  aFailedOnRerun.run_attempt = 2
+  assert.equal(evaluate([run(3, { MCP: 'success' }), aFailedOnRerun, run(5, { MCP: 'success' })]).healthy, true)
 })
 
 test('7: a red job absent from a later completed run is dropped, not held open forever', () => {

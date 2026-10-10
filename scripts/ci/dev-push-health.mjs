@@ -67,12 +67,15 @@ const DECISIVE = new Set(['success', 'failure'])
 export const CI_HEALTH_LABEL_DESCRIPTION = 'Automated: a scheduled CI guard is failing or has stopped running'
 
 /**
- * When a run's outcome happened. A re-run attempt keeps its run's
- * `created_at` but starts later, and its result is the newer fact, so order by
- * the latest attempt's start.
+ * A run's place in `dev`'s history: when its commit was pushed. A re-run
+ * attempt keeps its run's `created_at` and the list endpoint already returns
+ * the latest attempt's conclusions, so a re-run updates its own run in place.
+ * Ordering by the attempt's start instead would let a re-run of an OLD commit
+ * leapfrog newer ones: a flaky pass would close the issue while HEAD is red
+ * (#3890 code review S1).
  */
 export function runTime(run) {
-  return Date.parse(run.run_started_at || run.created_at)
+  return Date.parse(run.created_at)
 }
 
 /** The PR number a squash merge names last in its subject — `… (#3855)`. */
@@ -328,21 +331,29 @@ if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
       return null
     }
   }
+  // `null` = the lookup itself failed, `undefined` = no such issue. Open issues
+  // come from the plain label list, never search: search lags behind a
+  // just-created issue, and evaluations run back to back (one per completed
+  // run), so a lagging search would file a duplicate (#3890 code review S2).
+  // Closed issues use search, as guard-freshness does; the closed set is old.
   const findByTitle = (state) => {
-    const listed = tryGh(
-      ['issue', 'list', '--label', 'ci-health', '--state', state, '--limit', '20',
-       '--search', `in:title "${ISSUE_TITLE}"`, '--json', 'number,title'],
-      `list ${state} ci-health issues`,
-    )
+    const args = ['issue', 'list', '--label', 'ci-health', '--state', state, '--limit', state === 'open' ? '100' : '20',
+                  '--json', 'number,title']
+    if (state === 'closed') args.push('--search', `in:title "${ISSUE_TITLE}"`)
+    const listed = tryGh(args, `list ${state} ci-health issues`)
+    if (listed === null) return null
     try {
-      return listed ? JSON.parse(listed).find((i) => i.title === ISSUE_TITLE) : undefined
+      return JSON.parse(listed).find((i) => i.title === ISSUE_TITLE)
     } catch (err) {
       console.error(`::warning::dev-push-health could not parse the ${state} issue list: ${err.message}`)
-      return undefined
+      return null
     }
   }
 
   const existing = findByTitle('open')
+  // Not knowing whether the issue exists is not the same as it not existing:
+  // stop rather than risk a duplicate. The next completed run re-evaluates.
+  if (existing === null) process.exit(0)
   if (result.healthy) {
     if (existing) {
       tryGh(['issue', 'comment', String(existing.number), '--body',

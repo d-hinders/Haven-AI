@@ -57,3 +57,13 @@ export const AGENT_PAUSED_TITLE = 'Paused in Haven'
  */
 export const AGENT_PAUSED_BODY =
   "Payments paused. Haven won't send payments for this agent until you resume. Its budget is still live on-chain. To end it, stop the budget or remove the agent."
+
+/**
+ * The short form for surfaces that carry one quiet line, not a banner
+ * (#3809's dashboard agent row): the same two facts as the banner's first and
+ * third sentences — only Haven's sending is paused, and the budget survives —
+ * with the resume/end actions left to the row's link into the agent page.
+ * Derived from the owner-approved sentence above, not an independent string:
+ * change the banner here and the row follows in the same commit.
+ */
+export const AGENT_PAUSED_SHORT = 'Payments paused in Haven — its budget is still live on-chain.'

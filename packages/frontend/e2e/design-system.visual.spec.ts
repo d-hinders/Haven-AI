@@ -795,9 +795,13 @@ test.describe('design-system visual regression', () => {
   async function assertClearOfTabBar(locator: Locator, viewportHeight: number, what: string) {
     const page = locator.page()
     const tabBarTop = await page.evaluate((vh) => {
-      const bar = document.querySelector('[data-mobile-tab-bar]')
-      if (!bar || getComputedStyle(bar).position !== 'fixed' || getComputedStyle(bar).display === 'none') return vh
-      return bar.getBoundingClientRect().top
+      // The live bar is the FIXED one: /design-system also renders a
+      // presentational copy carrying the same attribute (#3441 code review).
+      const bar = Array.from(document.querySelectorAll('[data-mobile-tab-bar]')).find((el) => {
+        const cs = getComputedStyle(el)
+        return cs.position === 'fixed' && cs.display !== 'none'
+      })
+      return bar ? bar.getBoundingClientRect().top : vh
     }, viewportHeight)
     const box = await locator.boundingBox()
     if (!box) throw new Error(`${what} rendered no box`)

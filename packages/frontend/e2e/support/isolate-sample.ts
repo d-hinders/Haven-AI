@@ -31,8 +31,8 @@ import type { Locator } from '@playwright/test'
  * or a `column` flex — not `column-reverse`, whose preceding siblings render
  * below): following siblings never move the sample, and a sibling in a row
  * (flex row, grid) can set the sample's width and x position, which hiding it
- * would change. In a grid or row parent a preceding sibling is hidden only
- * when it sits wholly above the sample in the same column — a grid that
+ * would change. In a grid that resolved to one track a preceding sibling is
+ * hidden when it sits wholly above the sample in the same column — a grid
  * collapsed to one column, like the activity-row sample's below `lg`, where
  * `WalletIdentityBlock` stacks above it (#3441 design review: left visible,
  * it pushed the mobile clip under the fixed tab bar). A sibling beside the
@@ -57,18 +57,24 @@ export async function isolateShowcaseSample(sample: Locator): Promise<void> {
         cs.display === 'block' ||
         cs.display === 'flow-root' ||
         ((cs.display === 'flex' || cs.display === 'inline-flex') && cs.flexDirection === 'column')
-      // In a grid or row parent only a sibling that sits wholly ABOVE this
-      // node, in the same column (same x and width), is hidden: that is a
-      // grid collapsed to one column, where the sibling stacks like a block.
+      // In a grid parent only a sibling that sits wholly ABOVE this node, in
+      // the same column (same x and width), is hidden: that is a grid
+      // collapsed to one column, where the sibling stacks like a block.
       // A sibling beside the node sets its track, so it stays. Measured
       // before anything at this level is hidden.
+      // …and only in a grid that resolved to ONE track: in a multi-track grid,
+      // hiding a cell above re-flows auto-placement and moves the sample into
+      // another column (#3441 code review).
+      const oneTrackGrid =
+        (cs.display === 'grid' || cs.display === 'inline-grid') &&
+        cs.gridTemplateColumns.trim().split(/\s+/).length === 1
       const box = node.getBoundingClientRect()
       const toHide: HTMLElement[] = []
       let sibling = node.previousElementSibling
       while (sibling) {
         const b = sibling.getBoundingClientRect()
         const sameColumn = Math.abs(b.left - box.left) < 0.5 && Math.abs(b.width - box.width) < 0.5
-        if (stacksVertically || (b.bottom <= box.top + 0.5 && sameColumn)) toHide.push(sibling as HTMLElement)
+        if (stacksVertically || (oneTrackGrid && b.bottom <= box.top + 0.5 && sameColumn)) toHide.push(sibling as HTMLElement)
         sibling = sibling.previousElementSibling
       }
       for (const el of toHide) el.style.setProperty('display', 'none', 'important')

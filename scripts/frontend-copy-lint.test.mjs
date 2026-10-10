@@ -197,6 +197,21 @@ test('the three rendered-copy modules #2333 found are on the allowlist', () => {
   }
 })
 
+test('the six prose-bearing lib/ files #3882 found are on the allowlist', () => {
+  // None matches the naming convention, so nothing else would notice an entry
+  // being dropped: the gate would go green while reading none of them again.
+  for (const f of [
+    'packages/frontend/src/lib/dashboard-attention.ts',
+    'packages/frontend/src/lib/agent-skill-steps.ts',
+    'packages/frontend/src/lib/agent-skill-index.ts',
+    'packages/frontend/src/lib/agent-list-filters.ts',
+    'packages/frontend/src/lib/agent-credential.ts',
+    'packages/frontend/src/lib/sub-budget.ts',
+  ]) {
+    assert.ok(SCAN_FILES.includes(f), `${f} must be scanned`)
+  }
+})
+
 test('matchesCopyConvention: the extracted-copy names match', () => {
   assert.ok(matchesCopyConvention('packages/frontend/src/lib/agent-pause-copy.ts'))
   assert.ok(matchesCopyConvention('packages/frontend/src/lib/transaction-labels.ts'))

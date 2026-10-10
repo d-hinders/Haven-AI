@@ -641,6 +641,21 @@ cross-reference fixes (a dangling "(below)"; a "Steps 1-3 … as above" that
 leaned on two other sections once split; a "the setup above"), not changes to
 what the runbook claims. Nothing else in this document was re-verified.
 
+Re-verified 2026-10-10 (#3882): the 2026-10-02 call above is reversed for
+the agent-skills index. Its slugs and builder code are not copy, but each
+step's `description`, the index's own first entry and its `mcp.note` are
+agent-read prose served in `/.well-known/agent-skills/index.json` that
+appears nowhere else (no description is in the runbook), which is the bar
+`agent-guidance.ts` and `for-agents.md` already meet. `agent-skill-steps.ts`
+and `agent-skill-index.ts` are now in `SCAN_FILES`, with four more `lib/`
+prose files the naming convention could not catch: `dashboard-attention.ts`
+(Needs-you titles and subtitles), `agent-list-filters.ts` (agent-list filter
+and sort labels), `agent-credential.ts` (the `notes` prose in the downloaded
+credential file) and `sub-budget.ts` (form validation and error copy). A pin
+test keeps all six listed. `src/hooks` prose (step headings, `setError`
+strings) stays unscanned — a separate follow-up. The script's `SCAN_FILES`
+is the list; the named files in the bullets above are examples.
+
 Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): the
 enforcement claims above match the code at this head: `npm run lint:copy` /
 `lint:copy:update` in the root `package.json`, the scan set (`src/app`,

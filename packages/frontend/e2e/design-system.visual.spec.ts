@@ -34,8 +34,9 @@
  * it did cost real coverage — no baseline diffed primitives BELOW the shell on
  * `/design-system` until #3064 scoped one clip to the StackedBarChart showcase
  * section (the section test below, whose assertions name tick voice, partial
- * day and swatch order); everything else below the shell on that page is still
- * compared against nothing. `product-routes.visual.spec.ts`'s whole-page
+ * day and swatch order), joined later by one clip per #3805 showcase sample;
+ * everything else below the shell on that page is still compared against
+ * nothing. `product-routes.visual.spec.ts`'s whole-page
  * `/dashboard` and `/transactions` baselines remain the only whole-page pixel
  * coverage in the suite. The scoped top-bar and sidebar clips below are what is left
  * of this spec, and they are unaffected by the removal — they were never the flaky

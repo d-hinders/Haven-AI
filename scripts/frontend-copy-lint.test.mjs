@@ -326,6 +326,7 @@ const copy = (text) => `export default function P() {\n  return <p>${text}</p>\n
 // refusal and would have looked like the copy rule firing.
 const OTHER = 'packages/frontend/src/components/Thing.tsx'
 const UI_FILE = 'packages/ui/src/Thing.tsx'
+const HOOK = 'packages/frontend/src/hooks/useThing.ts'
 
 // The guard carries THREE self-checks that fire before any copy rule, and each
 // one caught a draft of this fixture: a SCAN_DIRS entry matching no files, a
@@ -341,7 +342,23 @@ const scaffold = (files) => ({
   ...allowlisted,
   [OTHER]: copy('Nothing to see.'),
   [UI_FILE]: 'export const x = 1\n',
+  [HOOK]: 'export const x = 1\n',
   ...files,
+})
+
+test('CLI: src/hooks is scanned — a banned term in a hook fails and is named (#3884)', () => {
+  // A directory scan, not a membership pin: this fails if src/hooks leaves
+  // SCAN_DIRS AND if walk() ever stops reading the directory.
+  const { status, out } = runGuard('frontend-copy-lint.mjs', {
+    also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'],
+    files: scaffold({
+      [PAGE]: copy('Nothing to see.'),
+      [HOOK]: "export const msg = 'Edit your spending policy.'\n",
+      [BASE]: '{}',
+    }),
+  })
+  assert.notEqual(status, 0, out)
+  assert.match(out, /src\/hooks\/useThing\.ts/)
 })
 
 test('CLI: a new banned term beyond the baseline exits non-zero and names it', () => {

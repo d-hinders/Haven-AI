@@ -18,12 +18,15 @@
 // Two inputs: whole directories (SCAN_DIRS) and an explicit file allowlist
 // (SCAN_FILES). Read both before adding copy anywhere else.
 //
-// `src/lib` and `src/hooks` are scanned by DIRECTORY not at all, on purpose:
-// they are where the banned phrases are legitimate CODE rather than copy
+// `src/lib` is scanned by DIRECTORY not at all, on purpose: it is where the
+// banned phrases are legitimate CODE rather than copy
 // (`delegationPasskeySigner.ts` genuinely refers to a "passkey signer";
 // `allowance-module.ts` genuinely refers to the allowance module). Widening
 // SCAN_DIRS to all of `src/lib` would bury a high-signal blocking check in
-// false positives from real identifiers, so the exclusion stays.
+// false positives from real identifiers, so the exclusion stays. `src/hooks`
+// WAS excluded on the same reasoning until #3884 measured it: two code-only
+// hits across 49 files, now held by reviewed baseline entries (see the note
+// on SCAN_DIRS), so it is scanned as a directory.
 //
 // The exclusion's premise — "lib is utilities" — is FALSE for a growing
 // handful of files that hold nothing but user-facing prose, and for those the
@@ -73,16 +76,27 @@ export { newViolations }
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BASELINE_PATH = join(REPO_ROOT, 'packages', 'frontend', 'copy-lint-baseline.json')
-// Whole directories where user-facing copy lives — pages and components. NOT
-// lib/hooks, where these technical terms are legitimate code; see the header's
-// "WHAT IS SCANNED" note for that exclusion and for SCAN_FILES, the escape
-// hatch for prose that lives outside these two trees.
+// Whole directories where user-facing copy lives — pages, components, the
+// design system and hooks. NOT lib, where these technical terms are legitimate
+// code; see the header's "WHAT IS SCANNED" note for that exclusion and for
+// SCAN_FILES, the escape hatch for prose that lives outside these trees.
 const SCAN_DIRS = [
   join(REPO_ROOT, 'packages', 'frontend', 'src', 'app'),
   join(REPO_ROOT, 'packages', 'frontend', 'src', 'components'),
   // The shared design system (#3508): the primitives moved here still render
   // product copy, so their strings stay linted after the move.
   join(REPO_ROOT, 'packages', 'ui', 'src'),
+  // Hooks return rendered prose — step headings, `setError` messages (#3884).
+  // Measured before adding: 49 files, two hits, both code rather than copy,
+  // held in copy-lint-baseline.json as PERMANENT entries, not debt to shrink:
+  //   - useAgentRekey.ts "allowance module": a regex matching the backend's
+  //     legacy-rail refusal prose. The file is a money-path control surface
+  //     (.github/money-path-globs.json `controlGlobs`), so it is not edited
+  //     for a lint.
+  //   - useAccountSigners.ts "webauthn credential": a JSDoc comment; editing
+  //     it would re-open a contract doc (delegation-rail-security-model.md).
+  // Each is held at 1 for its phrase, so a new occurrence still fails.
+  join(REPO_ROOT, 'packages', 'frontend', 'src', 'hooks'),
 ]
 
 // Individual prose-bearing files OUTSIDE those directories (#2317). The bar is
@@ -291,9 +305,10 @@ export const BANNED = [
   // baseline entry and no false-positive cost. Both fire on the pre-sweep files.
   //
   // **Read the coverage honestly, because it is narrower than the rule.** This
-  // gate scans `src/app`, `src/components` and the SCAN_FILES prose list, so it
-  // holds the connect modal and both copies of the downloadable skill. It does
-  // NOT hold `src/hooks`, `packages/connect/src` or `packages/backend/src`
+  // gate scans `src/app`, `src/components`, `src/hooks` (since #3884) and the
+  // SCAN_FILES prose list, so it holds the connect modal and both copies of
+  // the downloadable skill. It does NOT hold `packages/connect/src` or
+  // `packages/backend/src`
   // (outside its trees), nor any `*.test.ts` (`walk` skips them by name) — the
   // sweep reached those by hand and nothing re-checks them. The other two rows
   // of that table (`setup prompt`, `agent credential`) get no entry at all: a

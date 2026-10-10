@@ -393,7 +393,8 @@ inside `mcp-server` is a public name that resolves to a private address
 
 **The agent sends the paid request — by decision
 ([#3776](https://github.com/d-hinders/Haven-AI/issues/3776), owner,
-2026-10-10).** In request mode a paid request costs the agent five steps:
+2026-10-10).** In request mode a paid request costs the agent five steps
+after the optional `haven_quote_x402`:
 `haven_pay_x402_quote`, the local signer's `haven_sign_x402` (eip3009) or
 `haven_sign` (erc7710), `haven_submit`, its own paid retry, and the report
 (`haven_report_x402_outcome` on eip3009, `haven_report_settlement_evidence` on
@@ -407,24 +408,30 @@ make it three. It was weighed and declined, for three reasons:
    Delivering the signed header would put Haven further into each payment on
    the user's behalf — the reading MiCA's *transfer services on behalf of
    clients* turns on, and, with USDC an e-money token, PSD2's. That is a
-   counsel decision, not an engineering step.
+   counsel decision, not an engineering step. Haven already delivers the paid
+   retry for MCP merchants (`haven_settle_mcp_tool`,
+   `haven_complete_mcp_tool`); this decision does not extend that to plain
+   HTTP, and it does not reassess the MCP path.
 2. **Merchant bodies.** The paid response is what the merchant sells. A
    Bitrefill `invoice/status` answer carries the gift card's redemption code
    and PIN. On this path it goes merchant → agent and never through Haven; a
    hosted retry would route value-bearing content through Haven's server, which
    the #3768 credential withholding does not recognise (it matches JWT shapes
    and credential-named fields).
-3. **Egress.** The proportionate egress posture (#3740) rests on hosted
-   merchant requests being unpaid probes whose non-402 bodies never reach an
-   agent. A completion tool would make the hosted server a forwarder of
-   authenticated requests with agent-chosen headers and bodies — the revisit
-   trigger for the parked resolution-time guard (#3742–#3744).
+3. **Egress.** The proportionate egress posture (#3740) accepts that a public
+   name resolving to a private address is not refused inside `mcp-server`,
+   partly because the plain-HTTP requests the hosted server makes are unpaid
+   probes whose non-402 bodies never reach an agent. A completion tool would
+   send an agent-chosen method, headers and body to any public https host and
+   return the response body. That undercuts the premise the parked
+   resolution-time guard (#3742–#3744) was deferred on, so it would need that
+   guard first.
 
 What keeps five steps affordable instead: on a multi-call merchant the agent
 signs in first (`haven_sign_siwx`, #3728 — on Bitrefill the session waives
-every micro-fee except `invoice/pay`), so a purchase pays one or two requests
-rather than five. On erc7710 a dropped report also costs nothing: the
-settlement sweep finds the payment on-chain
+every micro-fee except `invoice/pay`), so a Bitrefill purchase pays one
+request (`invoice/pay`) rather than five. On erc7710 a dropped report does not
+leave the payment unrecorded: the settlement sweep finds it on-chain
 ([Completing a settlement nobody reported](#completing-a-settlement-nobody-reported-2117)).
 On the eip3009 bridge it does not yet. Haven never learns the EIP-3009 nonce,
 so an unreported settlement reads as "merchant likely not paid" after the

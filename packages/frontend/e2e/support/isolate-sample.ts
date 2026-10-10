@@ -27,15 +27,22 @@ import type { Locator } from '@playwright/test'
  * position is fixed by the shell's own padding and margins. That makes the
  * stability a property of construction rather than of rounding.
  *
- * Only preceding siblings, and only in parents that stack vertically:
- * following siblings never move the sample, and a sibling in a row (flex row,
- * grid) sets the sample's WIDTH and x position, which hiding it would change.
- * Widths are untouched — the sample renders exactly as it does in the page,
- * only higher up. The scroll root is reset to the top afterwards so the
- * capture never inherits a fractional scroll offset.
+ * Only preceding siblings, and only in parents that stack vertically (block,
+ * or a `column` flex — not `column-reverse`, whose preceding siblings render
+ * below): following siblings never move the sample, and a sibling in a row
+ * (flex row, grid) can set the sample's width and x position, which hiding it
+ * would change. In a grid or row parent a preceding sibling is hidden only
+ * when it sits wholly above the sample in the same column — a grid that
+ * collapsed to one column, like the activity-row sample's below `lg`, where
+ * `WalletIdentityBlock` stacks above it (#3441 design review: left visible,
+ * it pushed the mobile clip under the fixed tab bar). A sibling beside the
+ * sample stays. Every current sample's ancestors take their width from their
+ * parent, so widths are untouched; a sample under a content-sized ancestor
+ * would need a second look. The scroll root is reset to the top afterwards so the capture never
+ * inherits a fractional scroll offset.
  *
- * Call it AFTER the sample's named-cause assertions (some read siblings the
- * walk hides) and BEFORE `assertFitsViewport` and the capture.
+ * Call it through the spec's `expectShowcaseClip`, AFTER the sample's
+ * named-cause assertions (some read siblings the walk hides).
  */
 export async function isolateShowcaseSample(sample: Locator): Promise<void> {
   await sample.evaluate((el) => {
@@ -49,14 +56,22 @@ export async function isolateShowcaseSample(sample: Locator): Promise<void> {
       const stacksVertically =
         cs.display === 'block' ||
         cs.display === 'flow-root' ||
-        ((cs.display === 'flex' || cs.display === 'inline-flex') && cs.flexDirection.startsWith('column'))
-      if (stacksVertically) {
-        let sibling = node.previousElementSibling
-        while (sibling) {
-          ;(sibling as HTMLElement).style.setProperty('display', 'none', 'important')
-          sibling = sibling.previousElementSibling
-        }
+        ((cs.display === 'flex' || cs.display === 'inline-flex') && cs.flexDirection === 'column')
+      // In a grid or row parent only a sibling that sits wholly ABOVE this
+      // node, in the same column (same x and width), is hidden: that is a
+      // grid collapsed to one column, where the sibling stacks like a block.
+      // A sibling beside the node sets its track, so it stays. Measured
+      // before anything at this level is hidden.
+      const box = node.getBoundingClientRect()
+      const toHide: HTMLElement[] = []
+      let sibling = node.previousElementSibling
+      while (sibling) {
+        const b = sibling.getBoundingClientRect()
+        const sameColumn = Math.abs(b.left - box.left) < 0.5 && Math.abs(b.width - box.width) < 0.5
+        if (stacksVertically || (b.bottom <= box.top + 0.5 && sameColumn)) toHide.push(sibling as HTMLElement)
+        sibling = sibling.previousElementSibling
       }
+      for (const el of toHide) el.style.setProperty('display', 'none', 'important')
       node = parent
     }
     root.scrollTop = 0

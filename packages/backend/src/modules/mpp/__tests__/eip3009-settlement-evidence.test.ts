@@ -215,7 +215,9 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
 
       expect(feedSettledPaymentBestEffort).toHaveBeenCalledTimes(1)
       expect(feedSettledPaymentBestEffort).toHaveBeenCalledWith(userId, id)
-      expect(metadataAtFire).toEqual([SETTLE_A])
+      // The feed is fire-and-forget, so `report` resolves before the mock's
+      // own read does: wait for that read rather than racing it.
+      await vi.waitFor(() => expect(metadataAtFire).toEqual([SETTLE_A]))
     })
 
     it('leaves the evidence row as it was: a settlement is not a merchant response', async () => {

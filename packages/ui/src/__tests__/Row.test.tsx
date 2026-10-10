@@ -47,7 +47,7 @@ describe('Row — titleClassName / subtitleClassName / trailingClassName (#3805,
     expect(container.querySelector('.basis-full')).not.toBeNull()
   })
 
-  it('renders byte-identical classes when neither override is given', () => {
+  it('renders byte-identical classes when no override is given', () => {
     const { container } = render(<Row title="Agent" subtitle="Detail" trailing={<span>x</span>} />)
     const [title, subtitle] = Array.from(container.querySelectorAll('p'))
     expect(title.className).toBe('truncate text-sm font-medium text-[var(--v2-ink)]')

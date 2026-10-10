@@ -29,7 +29,7 @@ import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
 
-// Roughly 3x the widest body column the sample renders at 1280 (~700px), so
+// At least 3x the widest body column the sample renders at 1280 (~700px), so
 // it overflows two lines at both measured widths, for the 14px title and the
 // 12px subtitle alike.
 const LONG_TEXT = Array.from(

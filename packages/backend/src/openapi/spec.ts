@@ -12825,7 +12825,7 @@ export const openapiSpec = {
         additionalProperties: false,
       },
       Transaction: {
-        description: 'Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe/account scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields (since #3132 it does carry the base-shape `timestampSource` / `confirmedAt`). Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why.',
+        description: 'Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe/account scope. Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why.',
         type: 'object',
         required: [...transactionBaseRequired, 'chainId', 'accountId', 'accountAddress', 'accountName'],
         properties: {
@@ -13210,7 +13210,7 @@ export const openapiSpec = {
       },
       DashboardOverviewResponse: {
         type: 'object',
-        required: ['totals', 'change', 'metrics', 'actionableApprovals', 'pendingApprovals', 'onboardingProgress', 'agents', 'transactions', 'agentCount', 'accounts', 'spotRates', 'spend'],
+        required: ['totals', 'change', 'metrics', 'actionableApprovals', 'pendingApprovals', 'onboardingProgress', 'agents', 'agentCount', 'accounts', 'spotRates', 'spend'],
         properties: {
           totals: {
             type: 'object',
@@ -13267,8 +13267,8 @@ export const openapiSpec = {
           agents: { type: 'array', items: { $ref: '#/components/schemas/DashboardAgentPreview' }, description: '#3803: EVERY delegation-rail agent in active/paused/pending_approval — the former at-most-6 cap moved to the client (#3809).' },
           // #3824: grouped dashboard activity — up to 8 groups over the last 7
           // user-local days (bucketed by the `tz` query parameter, default
-          // UTC), newest first, grouped server-side in memory over the same
-          // feed the `transactions` preview slices. Optional so pre-#3824
+          // UTC), newest first, grouped server-side in memory over the
+          // transaction feed. Optional so pre-#3824
           // consumers read the same response unchanged.
           activity: {
             type: 'array',
@@ -13276,7 +13276,8 @@ export const openapiSpec = {
             items: { $ref: '#/components/schemas/DashboardActivityGroup' },
             description: 'Grouped activity rows, newest first. Every count is a FLOOR (`countIsFloor`) when the explorer window was truncated.',
           },
-          transactions: { type: 'array', items: { $ref: '#/components/schemas/Transaction' }, description: 'At most 5. Payment-enrichment fields (paymentId, paymentFlowStatus, amountSek, …) are never populated in this projection.' },
+          // #3858: the former 5-row `transactions` preview is removed from the
+          // wire — no dashboard surface has read it since #3810.
           agentCount: {
             type: 'object',
             description: '#3803 — the overview\u2019s agents[] by status, so tiles do not derive counts from a client-side slice.',

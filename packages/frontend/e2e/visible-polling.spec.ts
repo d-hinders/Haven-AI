@@ -20,7 +20,8 @@ import type { Page, Route } from '@playwright/test'
  * The poll cadence is the production 10s (`VISIBLE_POLL_INTERVAL_MS`), so the
  * waits here budget a full cycle plus margin rather than racing the tick.
  *
- * #3810: the dashboard no longer reads `overview.transactions` — the rows are
+ * #3810: the dashboard stopped reading `overview.transactions` (removed from
+ * the wire by #3858) — the rows are
  * #3824's grouped activity (`overview.activity`), and a row's identity is its
  * MERCHANT title: the x402 resource's hostname, via `counterpartyLabel`'s
  * no-address mode (the dashboard never renders a truncated address). The

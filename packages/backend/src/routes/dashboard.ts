@@ -44,8 +44,6 @@ import {
   resolveTransactionCurrency,
 } from '../modules/transactions/index.js'
 
-const TRANSACTION_PREVIEW_LIMIT = 5
-
 // ── #3803: the 7/30-day spend block ──────────────────────────────────────────
 
 /** One window's figures. Fiat buckets are USD/EUR/SEK booked-or-netted sums. */
@@ -783,43 +781,10 @@ export default async function dashboardRoutes(
         balance_by_day: balanceByDay,
       },
       // #3824: up to 8 grouped-activity rows over the last 7 user-local days,
-      // newest first, grouped server-side over the feed above. The 5-row
-      // preview below stays on the wire unchanged until #3810 retires it.
+      // newest first, grouped server-side over the feed above.
+      // #3858: the former 5-row `transactions` preview is gone — nothing has
+      // read it since #3810 (the dashboard renders `activity`).
       activity,
-      transactions: enrichedTransactions.slice(0, TRANSACTION_PREVIEW_LIMIT).map((tx) =>
-        ({
-          hash: tx.hash,
-          type: tx.type,
-          from: tx.from,
-          to: tx.to,
-          value: tx.value,
-          valueFormatted: tx.valueFormatted,
-          asset: tx.asset,
-          decimals: tx.decimals,
-          direction: tx.direction,
-          timestamp: tx.timestamp,
-          // #3132: the preview carries the same synthesized x402 rows as the
-          // feed, so the marked fallback must reach it too (no `scope`: the
-          // preview is not a list query).
-          timestampSource: tx.timestampSource,
-          confirmedAt: tx.confirmedAt,
-          blockNumber: tx.blockNumber,
-          isError: tx.isError,
-          tokenAddress: tx.tokenAddress,
-          tokenSymbol: tx.tokenSymbol,
-          chainId: tx.chainId,
-          accountId: tx.accountId,
-          accountAddress: tx.accountAddress,
-          accountName: tx.accountName,
-          agentId: tx.agentId,
-          agentName: tx.agentName,
-          source: tx.source,
-          x402ResourceUrl: tx.x402ResourceUrl,
-          x402MerchantAddress: tx.x402MerchantAddress,
-          // #3778: the non-secret delivery pointer, when one was reported.
-          deliveryReference: tx.deliveryReference ?? null,
-        }),
-      ),
     }
   })
 }

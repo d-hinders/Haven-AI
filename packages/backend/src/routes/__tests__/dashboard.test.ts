@@ -257,10 +257,11 @@ describe('dashboard routes', () => {
   })
 
   // #2914 (naming epic #2906 phase 5, the contraction): the twin `#2907`
-  // dual-emitted is gone. DashboardAgentPreview and the preview transaction
-  // carry the account_* names ONLY, ON THE WIRE — a request-level check, not
-  // just the mapper's own unit test (the mapper itself is deleted).
-  it('#2914: agents[] and transactions[] carry the account_* names only, not the retired safe*', async () => {
+  // dual-emitted is gone. DashboardAgentPreview carries the account_* names
+  // ONLY, ON THE WIRE — a request-level check, not just the mapper's own unit
+  // test (the mapper itself is deleted). #3858: the former transactions[]
+  // half of this check rode the removed 5-row preview; agents[] keeps it.
+  it('#2914: agents[] carry the account_* names only, not the retired safe*', async () => {
     const tx = {
       hash: '0x72d03a8ff551e443c118c93c54d32260941deb613e51fcd2733cd3455e8fa1a1',
       type: 'native',
@@ -297,14 +298,6 @@ describe('dashboard routes', () => {
       expect(agent.accountName).toBeDefined()
       expect(agent.accountChainId).toBeDefined()
     }
-    expect(body.transactions.length).toBeGreaterThan(0)
-    for (const item of body.transactions) {
-      expect(item.safeId).toBeUndefined()
-      expect(item.safeAddress).toBeUndefined()
-      expect(item.safeName).toBeUndefined()
-      expect(item.accountId).toBeDefined()
-      expect(item.accountAddress).toBeDefined()
-    }
   })
 
   // #2055 (epic #1440, #2021 readability waiver): the approval queue is gone,
@@ -314,42 +307,9 @@ describe('dashboard routes', () => {
   // "scopes the approval count to the requesting user" tests, which pinned a
   // query (`status IN ('pending', 'approved')` against `approval_requests`)
   // that no longer runs.
-  // #3132: the preview carries the same synthesized x402 rows as the feed, so
-  // the MARKED fallback must reach it — a whitelist that drops the mark would
-  // put the silent substitution back on the surface a user looks at first.
-  it('#3132: the preview carries timestampSource and confirmedAt through its whitelist (no scope — not a list query)', async () => {
-    const synthesized = {
-      hash: '0x72d03a8ff551e443c118c93c54d32260941deb613e51fcd2733cd3455e8fa1a2',
-      type: 'erc20',
-      from: SAFE.account_address,
-      to: '0x15179876c595922999C2d5DC7c23Cc7711fE799a',
-      value: '20000',
-      valueFormatted: '0.02',
-      asset: 'USDC',
-      decimals: 6,
-      direction: 'out',
-      timestamp: 1778240999,
-      timestampSource: 'created_at',
-      confirmedAt: null,
-      blockNumber: null,
-      isError: false,
-      source: 'x402',
-    }
-    transactionMocks.fetchAccountTransactions.mockResolvedValue({ transactions: [] })
-    transactionMocks.mergeX402Transactions.mockImplementation(async () => [synthesized])
-
-    const response = await app.inject({
-      method: 'GET',
-      url: '/dashboard/overview',
-      headers: { authorization: `Bearer ${token}` },
-    })
-
-    expect(response.statusCode).toBe(200)
-    const [row] = response.json().transactions as Array<Record<string, unknown>>
-    expect(row.timestampSource).toBe('created_at')
-    expect(row.confirmedAt).toBeNull()
-    expect(row).not.toHaveProperty('scope')
-  })
+  // #3132 guarded the marked x402 fallback reaching the 5-row preview's
+  // whitelist; #3858 removed that preview (and its whitelist) from the wire,
+  // so the check retired with the surface it covered.
 
   it('reports actionableApprovals/pendingApprovals as hardcoded 0 — no approval query runs', async () => {
     const response = await app.inject({
@@ -425,11 +385,8 @@ describe('dashboard routes', () => {
     expect(response.statusCode).toBe(200)
     const body = response.json()
     expect(body.metrics.successfulTransactions).toBe(2)
-    expect(body.transactions).toHaveLength(2)
-    expect(body.transactions.map((item: { chainId: number }) => item.chainId).sort()).toEqual([
-      100,
-      8453,
-    ])
+    // #3858: the response no longer carries the per-row preview — the
+    // independent-chain counting shows through the metric only.
   })
 
   // #3803: an unavailable USDC leg answers null (unknown), NEVER 0 —

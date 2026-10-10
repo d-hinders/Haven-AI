@@ -277,7 +277,8 @@ test.describe('mobile viewport', () => {
    * a probe written against `.h-\[72px\]` would measure the shape it was
    * written for and then silently find nothing. #3810 moved the underlying
    * wire: the dashboard renders #3824's grouped activity
-   * (`overview.activity`), no longer the 5-row `transactions` preview —
+   * (`overview.activity`); the 5-row `transactions` preview is gone from the
+   * wire (#3858) —
    * seeding `overview.transactions` feeds a shape the page never reads and
    * the row count quietly drops to zero. The title filter also excludes the
    * section's "View all" link and the metrics card, which are

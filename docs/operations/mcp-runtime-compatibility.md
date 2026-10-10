@@ -5758,3 +5758,14 @@ to call next in structured fields, and those fields are typed end to end
 > byte-sensitive asset echo) are unchanged; only the nonce's provenance
 > moved from random to derived. Nothing else in this document was
 > re-verified; `last-verified` already reads today.
+
+> **Re-verified #3892 (2026-10-10):** the agent runbook's "Budget changes
+> later" hash sentence now names `haven budget show <agentId> --hashes`
+> (`HASH_DISCOVERY_HINT`, `packages/cli/src/commands.ts:778`) instead of
+> `haven agents show <agentId>`, which prints no delegation hash. Copy-only:
+> no `haven_*` tool, schema, strict-input list, expected-context version or
+> consent hash changes; `packages/cli/src/commands.ts` itself is untouched
+> (a test now imports its exported constant). The regenerated copies are
+> pinned by `lint:runbook-parity` (11/11) and the new drift-guard test.
+> Nothing else in this document was re-verified; `last-verified` already
+> reads today.

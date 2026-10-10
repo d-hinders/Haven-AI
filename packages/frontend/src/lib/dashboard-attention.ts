@@ -123,6 +123,68 @@ function hasUsableBudget(agent: DashboardAgent): boolean {
   )
 }
 
+/**
+ * #3818: the one definition of an agent that can actually pay — active or
+ * paused (paused is set up; Haven just is not sending its payments) and
+ * holding a usable budget. The first-run guide's step 2 completes on it, and
+ * it is the complement of the "Needs setup" rule below for the statuses that
+ * rule covers. A `pending_approval` agent never qualifies; revoked agents are
+ * not in the overview at all.
+ */
+export function agentIsSetUp(agent: DashboardAgent): boolean {
+  return (agent.status === 'active' || agent.status === 'paused') && hasUsableBudget(agent)
+}
+
+/** The agent the "Needs setup" rule offers "Finish setup" for (not "Remove"). */
+function agentAwaitsFinishSetup(agent: DashboardAgent): boolean {
+  if (agent.status === 'pending_approval') {
+    return agent.setupStatus !== 'expired' && agent.setupStatus !== 'failed'
+  }
+  return agent.status === 'active' && !hasUsableBudget(agent)
+}
+
+/** What the first-run guide needs from the overview (#3818). */
+export interface FirstRunSetupState {
+  /** Any account's own USDC above zero; `null` when no account says so and at least one read is unknown. */
+  usdcFunded: boolean | null
+  hasSetUpAgent: boolean
+  /** The most recently connected agent awaiting "Finish setup", and how many more do. */
+  pendingAgent: { id: string; name: string; moreCount: number } | null
+}
+
+/**
+ * #3818: the first-run guide's facts, from the same overview the rules read.
+ *
+ * - Step 1 reads each account's `funded` (#3803: its own USDC > 0, `null`
+ *   when the read is unavailable). Any account funded completes it (owner
+ *   decision 2026-10-09: any USDC above zero); it is `false` only when every
+ *   account is KNOWN to hold none, and `null` otherwise — never a guessed zero.
+ * - Step 2 names the newest agent awaiting setup. The overview carries no
+ *   timestamps, so `createdAtById` (from `GET /agents`) orders them; an agent
+ *   without one sorts last.
+ */
+export function firstRunSetupState(
+  overview: DashboardOverview,
+  createdAtById: Record<string, string> = {},
+): FirstRunSetupState {
+  const accounts = overview.accounts ?? []
+  const agents = overview.agents ?? []
+  const usdcFunded = accounts.some((account) => account.funded === true)
+    ? true
+    : accounts.length > 0 && accounts.every((account) => account.funded === false)
+      ? false
+      : null
+  const awaiting = agents
+    .filter(agentAwaitsFinishSetup)
+    .sort((a, b) => (createdAtById[b.id] ?? '').localeCompare(createdAtById[a.id] ?? ''))
+  const newest = awaiting[0]
+  return {
+    usdcFunded,
+    hasSetUpAgent: agents.some(agentIsSetUp),
+    pendingAgent: newest ? { id: newest.id, name: newest.name, moreCount: awaiting.length - 1 } : null,
+  }
+}
+
 function accountLabel(
   account: DashboardAccount,
   overview: DashboardOverview,

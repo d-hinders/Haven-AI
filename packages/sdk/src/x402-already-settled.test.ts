@@ -24,6 +24,7 @@
 import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest'
 import { HavenClient } from './client.js'
 import { X402AlreadySettledError } from './types.js'
+import { deriveX402PaymentNonce } from './x402-nonce.js'
 import type { X402PaymentRequired, X402PaymentOption } from './types.js'
 
 const { mockBalanceOf, mockCreateJsonRpcProvider, mockCreateErc20Contract } = vi.hoisted(() => {
@@ -349,6 +350,44 @@ describe('#1521 — replayed settled payment', () => {
       })
 
       expect(receipt.paymentHeader).toBeDefined()
+    })
+
+    it('re-signs the SAME derived nonce on resume, so a settled payment is refused as already used, not re-paid (#3475, #3888 AC 4)', async () => {
+      // The whole point of the derived nonce, pinned end-to-end through the
+      // REAL prepare → sign → encode trio (only the namespace is observable):
+      // the resume re-signs the payment the backend NAMED — this also pins
+      // `client.ts`'s `status.paymentId` pass-through into the header build,
+      // which a random nonce would not satisfy — and two re-signs of the same
+      // payment carry the SAME nonce, so the merchant's EIP-3009 check refuses
+      // the second settlement of an already-settled payment on-chain.
+      mockBalanceOf.mockResolvedValue(5000n)
+      // Not `mockResolvedValue`: a Response body is single-use, and the
+      // status read runs once per resume.
+      vi.spyOn(globalThis, 'fetch').mockImplementation(() => Promise.resolve(statusResponse()))
+
+      const first = await client(true).resumeAuthorizedX402({
+        paymentId: 'apr_first',
+        paymentRequired,
+        idempotencyKey: 'resume-nonce-a',
+      })
+      const second = await client(true).resumeAuthorizedX402({
+        paymentId: 'apr_first',
+        paymentRequired,
+        idempotencyKey: 'resume-nonce-b',
+      })
+
+      // v1 headers ARE the payload; v2 envelopes carry it under `payload`.
+      const nonceOf = (header: string): string | undefined => {
+        const decoded = JSON.parse(Buffer.from(header, 'base64').toString('utf8')) as {
+          payload?: { authorization?: { nonce?: string } }
+          authorization?: { nonce?: string }
+        }
+        return decoded.payload?.authorization?.nonce ?? decoded.authorization?.nonce
+      }
+      const nonce = nonceOf(first.paymentHeader!)
+      expect(nonce).toBeDefined()
+      expect(nonce).toBe(deriveX402PaymentNonce('apr_first'))
+      expect(nonceOf(second.paymentHeader!)).toBe(nonce)
     })
   })
 

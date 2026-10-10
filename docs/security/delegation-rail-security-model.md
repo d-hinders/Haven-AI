@@ -1522,8 +1522,8 @@ ATTRIBUTABLE. The backend's settlement sweep reads the pinned token's
 `AuthorizationUsed(delegate, derived nonce)` log (read-only chain
 observation, bounded block ranges, fail-closed on any RPC failure) and hands
 the transaction it finds to the same on-chain verifier and guarded writer the
-agent-reported path uses; it moves no money and grants nothing. Accepted
-grants nothing. Accepted residuals (stated on #3888): a party controlling `payment_id` can
+the agent-reported path uses; it moves no money and grants nothing. Accepted
+residuals (stated on #3888): a party controlling `payment_id` can
 force a nonce collision with an earlier authorization from the same delegate
 EOA, which makes EIP-3009 refuse the later settlement on-chain — denial of
 that ONE payment, not a double spend; and the derived nonce makes payments

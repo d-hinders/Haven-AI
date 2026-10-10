@@ -1837,9 +1837,10 @@ implemented one). Two side effects worth naming: a resumed or
 `retry_original_x402_request` re-sign of a settled payment carries the SAME
 derived nonce, so the merchant refuses it as already used — that closes the
 #3475 re-pay hazard for new signers — and the refusal cannot strand the
-payment at `sweep_stranded_funds`, because the recorded hash takes the
-payment out of the awaiting-merchant-leg state (`agent-payment-status.ts`'s
-`isFundedX402AwaitingMerchantLeg`) before the resume is attempted. A party
+payment at `sweep_stranded_funds`: `intentStateFor`'s stranded branch honours
+the verified settlement hash the same way its awaiting-merchant-leg branch
+does, so once the hash is recorded — before or after the refusal is reported —
+the payment reads as plain `payment_confirmed`, not stranded. A party
 controlling `payment_id` can force a nonce collision with an earlier
 authorization from the same delegate EOA, and EIP-3009 then refuses the
 later settlement on-chain: denial of that one payment (its funding stays

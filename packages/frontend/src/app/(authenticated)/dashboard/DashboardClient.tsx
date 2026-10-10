@@ -14,11 +14,8 @@ import { useDashboardOverview } from '@/hooks/useDashboardOverview'
 import { useBalances } from '@/hooks/useBalances'
 import { useAccountFunding } from '@/hooks/useAccountFunding'
 import { useAccountOperationGate } from '@/hooks/useAccountOperationGate'
-import { RESET_PERIODS } from '@/lib/budget-period'
-import { formatAllowanceForToken } from '@/lib/allowance-format'
-import { formatFiat, currencyLocale } from '@/lib/format'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
-import { agentStatusPresentation } from '@/lib/payment-status'
+import { formatFiat, currencyLocale } from '@/lib/format'
 import { displayName } from '@/lib/user'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
@@ -31,12 +28,10 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { Row } from '@/components/ui/Row'
-import { StatusBadge } from '@/components/ui/StatusBadge'
 import { BalanceFreshnessIndicator } from '@/components/haven'
 import { useToast } from '@/components/ui/Toast'
 import { ActivitySection } from './ActivitySection'
-import type { DashboardAgentPreview } from '@/types/dashboard'
+import { AgentsSection } from './AgentsSection'
 import { resolveDefaultAccount } from '@/lib/default-account'
 import { computeAttentionItems, type AttentionRuleItem } from '@/lib/dashboard-attention'
 import { useBudgetRemaining } from '@/hooks/useBudgetRemaining'
@@ -84,138 +79,6 @@ function formatPercent(value: number, currency: 'USD' | 'EUR' | 'SEK'): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value / 100)
-}
-
-function formatResetLabel(resetPeriodMin: number): string {
-  const preset = RESET_PERIODS.find((item) => item.value === resetPeriodMin)
-  if (preset) {
-    return preset.label.toLowerCase().replace('one-time', 'total')
-  }
-  return resetPeriodMin > 0 ? `${resetPeriodMin}m` : 'total'
-}
-
-function buildSpendSummary(agent: DashboardAgentPreview): string {
-  // #3802: "No budget" — the overview's allowance array already carries only
-  // live (unexpired, started) budgets, so an empty array means the agent
-  // cannot spend at all. The old copy said the opposite of the truth.
-  if (agent.allowances.length === 0) return 'No budget'
-
-  const summaries = agent.allowances.slice(0, 2).map((allowance) => {
-    const amount = formatAllowanceForToken(
-      allowance.allowanceAmount,
-      agent.accountChainId,
-      allowance.tokenSymbol,
-    )
-    return `${amount} ${allowance.tokenSymbol}/${formatResetLabel(allowance.resetPeriodMin)}`
-  })
-
-  if (agent.allowances.length > 2) {
-    summaries.push(`+${agent.allowances.length - 2} more`)
-  }
-
-  return summaries.join(' • ')
-}
-
-function ConnectedAgentsSection({
-  agents,
-  hasAnyAgents,
-  loading,
-  unavailable,
-  onRetry,
-  onConnectAgent,
-}: {
-  agents: DashboardAgentPreview[]
-  hasAnyAgents: boolean
-  loading: boolean
-  unavailable: boolean
-  onRetry: () => void
-  onConnectAgent: () => void
-}) {
-  return (
-    <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card overflow-hidden">
-      <Card.Header
-        as="h2"
-        title="Connected agents"
-        actions={
-          <Link href="/agents" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
-            View all
-          </Link>
-        }
-      />
-
-      {loading ? (
-        <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-live="polite" aria-label="Loading connected agents">
-          {[0, 1, 2].map((item) => (
-            <div key={item} className="flex items-center gap-3 px-5 h-[72px]">
-              <div className="h-8 w-8 rounded-full bg-[var(--v2-surface-2)] animate-pulse" />
-              <div className="min-w-0 flex-1">
-                <div className="h-3.5 w-36 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                <div className="mt-1.5 h-2.5 w-48 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : unavailable ? (
-        <div className="p-6">
-          <EmptyState
-            size="compact"
-            title="Agent preview unavailable"
-            body="Haven could not verify which agents are connected right now."
-            action={<Button variant="ghost" size="sm" onClick={onRetry}>Try again</Button>}
-          />
-        </div>
-      ) : agents.length === 0 ? (
-        <div className="p-6">
-          <EmptyState
-            size="compact"
-            title={hasAnyAgents ? 'No connected agents right now' : 'No agents connected yet'}
-            body={
-              hasAnyAgents
-                ? 'Reconnect or create an agent to bring automated spending back online.'
-                : 'Create your first agent to give it payment credentials and spend limits.'
-            }
-            action={
-              <div className="flex items-center justify-center gap-3">
-                <Button onClick={onConnectAgent} size="sm">
-                  Connect agent
-                </Button>
-                <Link href="/agents" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
-                  Go to Agents
-                </Link>
-              </div>
-            }
-          />
-        </div>
-      ) : (
-        <div className="divide-y divide-[var(--v2-border)] v2-animate-fade-in">
-          {agents.slice(0, 5).map((agent) => {
-            const status = agentStatusPresentation(agent.status)
-            return (
-              <Row
-                key={agent.id}
-                href={`/agents/${agent.id}`}
-                // Robot mark matches the sidebar's "agents" icon so the
-                // dashboard and nav read as the same system.
-                leading={<AgentMarkIcon />}
-                leadingTone="brand"
-                title={
-                  <span className="flex items-center gap-2">
-                    <span className="truncate">{agent.name}</span>
-                    <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
-                  </span>
-                }
-                subtitle={buildSpendSummary(agent)}
-                trailing={
-                  <Icon icon={ChevronRight} className="w-4 h-4 text-[var(--v2-ink-3)]" />
-                }
-                className="h-[72px] px-5"
-              />
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
 }
 
 function DashboardHero({
@@ -936,8 +799,12 @@ export default function DashboardClient() {
 
   const activityGrid = (
     <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-2">
-      <ConnectedAgentsSection
-        agents={overview?.agents ?? []}
+      <AgentsSection
+        overview={overview}
+        budgetRemaining={budgetRemaining}
+        attentionItems={attentionItems}
+        currency={currency}
+        accountNames={accountNames}
         hasAnyAgents={agents.length > 0}
         loading={overviewInitialLoading}
         unavailable={overviewUnavailable}

@@ -205,17 +205,17 @@ describe('DashboardClient', () => {
     mockBaseState()
   })
 
-  describe('spend summary copy (#3802)', () => {
+  describe('agents section wiring (#3809)', () => {
     /** `useAgents` knows an agent exists; the overview supplies the preview rows. */
-    const agentWithAllowances = (allowances: DashboardAgentPreview['allowances']): DashboardAgentPreview => ({
+    const previewAgent = (budgets: DashboardAgentPreview['budgets'] = []): DashboardAgentPreview => ({
       id: 'agent-1',
       name: 'Research agent',
       status: 'active',
       accountId: null,
       accountName: null,
       accountChainId: 8453,
-      allowances,
-      budgets: [],
+      allowances: [],
+      budgets,
       receivedSubBudgets: [],
       stats: {
         d7: {
@@ -237,11 +237,11 @@ describe('DashboardClient', () => {
       },
     })
 
-    it('reads "No budget" for an agent with zero live allowances — not "No spend limits"', () => {
-      // #3802: the overview's allowances array carries only live (unexpired,
+    it('reads "No budget" for an agent with zero live budgets — not "No spend limits"', () => {
+      // #3802: the overview's budgets array carries only live (unexpired,
       // started) budgets, so an empty array means the agent cannot spend at
       // all. "No spend limits" said the opposite of the truth.
-      mockBaseState([agentWithAllowances([])])
+      mockBaseState([previewAgent([])])
 
       render(<DashboardClient />)
 
@@ -249,15 +249,34 @@ describe('DashboardClient', () => {
       expect(screen.queryByText('No spend limits')).not.toBeInTheDocument()
     })
 
-    it('still summarizes the budgets of an agent that has them', () => {
+    it('renders the overview agents through the shared section (badge from the rules, never "Connected")', () => {
+      // The budget-remaining poll is mocked to null at the top of this file,
+      // so the row's budget read is UNKNOWN — an em dash, never a 0% bar.
+      // The old per-status "Connected" badge is gone with #3809.
       mockBaseState([
-        agentWithAllowances([{ allowanceAmount: '250.00', tokenSymbol: 'USDC', resetPeriodMin: 1440 }]),
+        previewAgent([
+          {
+            id: 'budget-1',
+            delegationHash: `0x${'11'.repeat(32)}`,
+            chainId: 8453,
+            tokenAddress: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            tokenSymbol: 'USDC',
+            decimals: 6,
+            budgetAtomic: '250000000',
+            periodSeconds: 86_400,
+            startDate: '2026-10-01T00:00:00.000Z',
+            expiresAt: '2027-01-01T00:00:00.000Z',
+            periodEnd: '2026-10-11T00:00:00.000Z',
+          },
+        ]),
       ])
 
       render(<DashboardClient />)
 
-      expect(screen.queryByText('No budget')).not.toBeInTheDocument()
-      expect(screen.getByText('250.00 USDC/daily')).toBeInTheDocument()
+      expect(screen.getByRole('heading', { level: 2, name: 'Agents' })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: /Research agent/ })).toBeInTheDocument()
+      expect(screen.getByText('—')).toBeInTheDocument()
+      expect(screen.queryByText('Connected')).not.toBeInTheDocument()
     })
   })
 

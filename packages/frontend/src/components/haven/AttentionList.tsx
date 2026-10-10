@@ -30,17 +30,21 @@
  * to the caller's list heading via `headingId`. A control that vanishes
  * under the pointer must not strand focus on `body`.
  *
+ * ── Two-line clamp, at every width ──────────────────────────────────────────
+ *
+ * The title and the subtitle each clamp to two lines instead of `Row`'s
+ * single-line truncate — an attention item cut to one line is an item that
+ * cannot be judged, and that holds in the narrow desktop Needs-you panel as
+ * much as at 390px (#3876, owner decision 2026-10-10: a clamp, not a hover
+ * `title`, so touch and keyboard users read it too). Never undo the clamp
+ * with `line-clamp-none`: it sets `overflow: visible`, which defeats the
+ * ellipsis (#3861).
+ *
  * ── Mobile ────────────────────────────────────────────────────────────────
  *
  * Below `sm` the trailing slot wraps onto its own line under the body
- * (`basis-full` on the trailing wrapper, in a `flex-wrap` row) and the title
- * line-clamps to two lines instead of `Row`'s single-line truncate — an
- * attention item cut to one line at 390px is an item that cannot be judged.
- * From `sm` up both revert to the plain `Row` rhythm.
- *
- * The clamp is scoped `max-sm:` rather than undone with `sm:line-clamp-none`
- * (#3861): that utility sets `overflow: visible`, which defeats the title's
- * `truncate`, so a long desktop title hard-clipped mid-word with no ellipsis.
+ * (`basis-full` on the trailing wrapper, in a `flex-wrap` row). From `sm` up
+ * it sits beside the body.
  *
  * Zero items renders nothing — the caller shows the empty state. Items
  * render in the order given.
@@ -70,6 +74,9 @@ export interface AttentionListItem {
   /** The caller's action — a button or link, rendered in `trailing` before the dismiss. */
   action?: ReactNode
 }
+
+/** Two lines, then an ellipsis — see the clamp rule above. */
+const CLAMP = 'whitespace-normal line-clamp-2'
 
 /** The `sr-only` tone words, for items without a badge label. */
 const TONE_TEXT: Record<AttentionTone, string> = {
@@ -127,7 +134,8 @@ export function AttentionList({
             leadingTone={item.icon ? item.tone : undefined}
             title={item.title}
             subtitle={item.subtitle}
-            titleClassName="max-sm:whitespace-normal max-sm:line-clamp-2"
+            titleClassName={CLAMP}
+            subtitleClassName={CLAMP}
             trailingClassName="w-full basis-full self-start sm:w-auto sm:basis-auto sm:self-center"
             className="flex-wrap"
             trailing={

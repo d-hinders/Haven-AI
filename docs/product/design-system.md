@@ -733,9 +733,11 @@ reached — the banner ladder above says the same), `brand`, `warning`, and
 `Dismiss: {title}` calling `onDismiss(id)`; the list holds no dismissal
 state (persistence is #3813's), and after a dismiss focus moves to the next
 item, or to the caller's list heading (`headingId`) when the list emptied.
-Below `sm` the trailing slot wraps under the body and the body line-clamps
-to two lines (`Row` truncates to one); from `sm` up the plain row rhythm
-returns. Zero items renders nothing — the caller owns the empty state.
+The title and the subtitle each line-clamp to two lines at every width
+(`Row` truncates both to one), so an item is never cut to a line that
+cannot be judged — the narrow desktop Needs-you panel included (#3876).
+Below `sm` the trailing slot also wraps under the body. Zero items renders
+nothing — the caller owns the empty state.
 
 ### NoticeRow (#3845)
 

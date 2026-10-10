@@ -349,7 +349,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     // need all four. That is the shape #2590/#2591 exist to prevent, and it is
     // recorded here rather than claimed solved. Prior: '2026-09-06' — see the
     // #2590 note above.
-    'last-verified': '2026-09-06',
+    'last-verified': '2026-10-10',
   },
   {
     doc: 'packages/mcp-server/README.md',

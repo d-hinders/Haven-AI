@@ -8,6 +8,17 @@ export function isDelegateSweep(tx: Pick<AggregatedTransaction, 'activityType'>)
   return tx.activityType === 'delegate_sweep'
 }
 
+/**
+ * The fields `counterpartyLabel` reads. A structural slice of
+ * `AggregatedTransaction` so the dashboard can label #3824's activity groups
+ * (which carry the counterparty fields of the group's newest member, not a
+ * full row) through the same helper the shared screens use.
+ */
+export type CounterpartyFields = Pick<
+  AggregatedTransaction,
+  'activityType' | 'agentName' | 'source' | 'x402ResourceUrl' | 'direction' | 'to' | 'from' | 'chainId'
+>
+
 export function transactionTitle(tx: AggregatedTransaction): string {
   if (tx.titleOverride) return tx.titleOverride
   if (isDelegateSweep(tx)) return 'Agent funds swept back'
@@ -70,11 +81,60 @@ export function transactionMovement(
   return <TransactionMovement from={from} to={to} />
 }
 
-function counterpartyLabel(
-  tx: AggregatedTransaction,
+/**
+ * The counterparty half of a movement line. `transactionMovement` renders it
+ * inside "From … → To …"; the dashboard (#3810) reads it DIRECTLY as the
+ * merchant-first row title.
+ *
+ * `options.noAddress` is the opt-in dashboard mode: the raw address never
+ * surfaces, so every `truncate()` fallback is replaced by calm copy — a sweep
+ * reads "Returned from <agent>", an x402 row without a recorded resource URL
+ * falls back to its source title ("Agent payment"), an inbound row reads
+ * "Deposit", and an address nothing resolves (no own-account name, no
+ * contact, no pre-resolved counterparty name) reads "New recipient" rather
+ * than `0xA873…DD35`. `options.resolvedName` carries a name resolved
+ * server-side for the counterparty (the activity groups' `merchantName`,
+ * #3824) — the groups expose no chain-scoped address map, so the client
+ * cannot re-run the `accountNamesByAddress` lookup itself.
+ *
+ * The default mode is byte-identical to the pre-#3810 behaviour:
+ * `TransactionsTable` and `TransactionDetailPanel` keep rendering truncated
+ * addresses until #3811 retires them.
+ */
+export function counterpartyLabel(
+  tx: CounterpartyFields,
   resolveAddress?: (address: string) => string | null,
   accountNamesByAddress?: Map<string, string>,
+  options?: { noAddress?: boolean; resolvedName?: string | null },
 ): string {
+  if (options?.noAddress) {
+    // Sweeps are agent-attributed inbound rows; the sweep check precedes the
+    // direction check for the same reason `transactionInitiator`'s does.
+    if (isDelegateSweep(tx)) {
+      return `Returned from ${tx.agentName ?? 'agent'}`
+    }
+    if (isMachinePaymentSource(tx.source)) {
+      return (
+        parseX402Hostname(tx.x402ResourceUrl) ??
+        paymentSourceTitle(tx.source) ??
+        'Agent payment'
+      )
+    }
+    if (tx.direction === 'in') return 'Deposit'
+
+    const address = tx.to
+    const addressKey = address.toLowerCase()
+    const accountName =
+      accountNamesByAddress?.get(`${addressKey}:${tx.chainId}`) ??
+      accountNamesByAddress?.get(addressKey)
+    return (
+      options.resolvedName ??
+      accountName ??
+      resolveAddress?.(address) ??
+      'New recipient'
+    )
+  }
+
   if (isMachinePaymentSource(tx.source)) {
     return parseX402Hostname(tx.x402ResourceUrl) ?? truncate(tx.to)
   }

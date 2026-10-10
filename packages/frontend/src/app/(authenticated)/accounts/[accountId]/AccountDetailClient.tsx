@@ -44,19 +44,16 @@ import { getExplorerUrlOrNull, resolveChainOrNull, DEFAULT_CHAIN_ID } from '@/li
 // rendered `13 000,50 kr` for the same figure.
 import { formatFiat, truncate } from '@/lib/format'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
+// #3844: the period words are the budget caption helper's (#3806) — the same
+// mapping every budget meter reads, so no surface can disagree about a period
+// length. The local roller this used to carry is gone.
+import { budgetPeriodLabel } from '@/lib/budget-period'
 import { agentStatusPresentation } from '@/lib/payment-status'
 import { isHalfRevoked } from '@/lib/half-revoked'
 import { formatAgentLastActivity } from '@/lib/agent-last-seen'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
-
-function formatResetPeriod(minutes: number): string {
-  if (minutes === 1440) return 'per day'
-  if (minutes === 10080) return 'per week'
-  if (minutes === 43200) return 'per month'
-  return `every ${minutes} minutes`
-}
 
 function agentBudgetSummary(agent: Agent, chainId: number | null): string {
   // #3542: "Access revoked" is false while a budget delegation is still
@@ -75,7 +72,7 @@ function agentBudgetSummary(agent: Agent, chainId: number | null): string {
     chainId,
     allowance.token_symbol,
   )
-  return `${amount} ${allowance.token_symbol} ${formatResetPeriod(allowance.reset_period_min)}`
+  return `${amount} ${allowance.token_symbol} ${budgetPeriodLabel(allowance.reset_period_min)}`
 }
 
 function agentAccessSummary(agent: Agent, chainId: number | null): ReactNode {

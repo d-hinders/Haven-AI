@@ -671,6 +671,30 @@ test.describe('design-system visual regression', () => {
       })
     })
 
+    // #3810: the transaction-activity card — the dashboard's merchant-first
+    // grouped row (countLabel ×N beside the title, the fiat amount in
+    // Amount's currency mode) renders ONLY here; no unit test sees the two
+    // optional props in one layout, and no other baseline covers this card.
+    test(`/design-system activity row sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-activity-row')
+      await expect(sample).toHaveCount(1)
+      await assertFitsViewport(sample, vp.height, 'the activity row sample')
+
+      await expect(sample).toHaveScreenshot(`design-system-activity-row-${vp.name}${schemeSuffix}.png`, {
+        animations: 'disabled',
+        caret: 'hide',
+        maxDiffPixels: SAMPLE_MAX_DIFF_PIXELS,
+        threshold: PIXEL_THRESHOLD,
+      })
+    })
+
     test(`/design-system AreaChart sparkline sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
       const scheme = schemeOf(testInfo)
       const schemeSuffix = scheme === 'dark' ? '-dark' : ''

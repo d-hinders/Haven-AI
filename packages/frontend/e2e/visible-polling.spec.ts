@@ -3,7 +3,6 @@ import {
   collectBrowserErrors,
   mockHavenApi,
   seedAuthenticatedSession,
-  testSafeAddress,
   unexpectedBrowserErrors,
 } from './fixtures/haven-api'
 import type { Page, Route } from '@playwright/test'
@@ -20,41 +19,92 @@ import type { Page, Route } from '@playwright/test'
  *
  * The poll cadence is the production 10s (`VISIBLE_POLL_INTERVAL_MS`), so the
  * waits here budget a full cycle plus margin rather than racing the tick.
+ *
+ * #3810: the dashboard no longer reads `overview.transactions` — the rows are
+ * #3824's grouped activity (`overview.activity`), and a row's identity is its
+ * MERCHANT title: the x402 resource's hostname, via `counterpartyLabel`'s
+ * no-address mode (the dashboard never renders a truncated address). The
+ * specs locate the arriving payment by that hostname, which also keeps the
+ * no-address guarantee honest: a raw or truncated address leaking into the
+ * row could never satisfy these locators.
  */
 
 const POLL_CYCLE_MS = 11_000
 
-function paymentRow(merchant: string) {
+/**
+ * The `to` address behind the mocked group. Never rendered — the dashboard's
+ * no-address mode means the row is titled by the x402 hostname — but kept
+ * real-looking so the wire body stays honest.
+ */
+const MERCHANT_TO = '0x9999999999999999999999999999999999999999'
+
+/**
+ * One #3824 activity group whose newest member is a confirmed x402 payment
+ * toward `merchantUrl`. `latestAt` is a minute ago so the group buckets under
+ * "Today" and `timeAgo` renders a real relative label.
+ */
+function activityGroup(merchantUrl: string) {
   return {
-    hash: `0x${'cd'.repeat(32)}`,
-    type: 'erc20',
-    from: testSafeAddress,
-    to: merchant,
-    value: '2500000',
-    valueFormatted: '2.50',
-    asset: 'USDC',
-    decimals: 6,
-    direction: 'out',
-    timestamp: 1_779_000_000,
-    blockNumber: 12_346,
-    isError: false,
-    tokenAddress: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
+    count: 1,
+    sumAtomic: '2500000',
     tokenSymbol: 'USDC',
-    chainId: 8453,
-    accountId: 'safe-main',
-    accountAddress: testSafeAddress,
-    accountName: 'Operations',
+    decimals: 6,
+    latestAt: new Date(Date.now() - 60_000).toISOString(),
+    agentId: null,
+    agentName: 'Scout',
     source: 'x402',
+    x402ResourceUrl: merchantUrl,
+    to: MERCHANT_TO,
+    merchantName: null,
+    activityType: null,
+    direction: 'out' as const,
+    status: 'confirmed' as const,
+    approxAmount: '25.0000',
+    approxCurrency: 'SEK' as const,
   }
 }
 
-/** The UI truncates addresses (`0x9999…9999`); this regex matches truncated AND full forms. */
-function merchantPrefix(merchant: string): string {
-  return `${merchant.slice(0, 6)}.*${merchant.slice(-4)}`
+/**
+ * The arriving payment row: a link whose accessible name carries the merchant
+ * hostname (the grouped row's TITLE — the x402 resource's host).
+ */
+function arrivingPayment(page: Page, merchantUrl: string) {
+  const hostname = new URL(merchantUrl).hostname
+  return page.getByRole('link', { name: new RegExp(hostname.split('.').join('\\.')) })
 }
 
-function paymentLink(page: Page, merchant: string) {
-  return page.getByRole('link', { name: new RegExp(merchantPrefix(merchant)) }).first()
+/**
+ * A complete overview shape per the CURRENT wire — everything the dashboard
+ * dereferences, with the grouped-activity list set explicitly. The dashboard
+ * reads `overview.activity` (not the retired `transactions` preview), so an
+ * empty feed is `activity: []`, not a `transactions: []` body.
+ */
+function overviewBody(
+  activity: ReturnType<typeof activityGroup>[],
+  metrics: {
+    connectedAgents: number
+    monthlyAgentSpendUsd: number
+    monthlyAgentSpendEur: number
+    successfulTransactions: number
+    activeAccounts: number
+  } = {
+    connectedAgents: 0,
+    monthlyAgentSpendUsd: 0,
+    monthlyAgentSpendEur: 0,
+    successfulTransactions: 0,
+    activeAccounts: 1,
+  },
+) {
+  return {
+    totals: { usd: 1250, eur: 1138 },
+    change: { available: false, usdAmount: 0, eurAmount: 0, usdPercent: 0, eurPercent: 0 },
+    metrics,
+    actionableApprovals: 0,
+    pendingApprovals: 0,
+    onboardingProgress: { hasFirstAgentPayment: true },
+    agents: [],
+    activity,
+  }
 }
 
 test.describe('visible-only polling on /dashboard (#2732)', () => {
@@ -68,46 +118,28 @@ test.describe('visible-only polling on /dashboard (#2732)', () => {
 
     let overviewReads = 0
     let flip = false
-    const MERCHANT = '0x9999999999999999999999999999999999999999'
-    // The pre-flip body must be a COMPLETE overview shape (the dashboard
-    // dereferences totals/metrics) — just with an empty transaction list.
-    const emptyBody = {
-      transactions: [],
-      totals: { usd: 1250, eur: 1138 },
-      change: { available: false, usdAmount: 0, eurAmount: 0, usdPercent: 0, eurPercent: 0 },
-      metrics: {
-        connectedAgents: 0,
-        monthlyAgentSpendUsd: 0,
-        monthlyAgentSpendEur: 0,
-        successfulTransactions: 0,
-        activeAccounts: 1,
-      },
-      actionableApprovals: 0,
-      pendingApprovals: 0,
-      onboardingProgress: { hasFirstAgentPayment: true },
-      agents: [],
-    }
-    const paidBody = {
-      ...emptyBody,
-      transactions: [paymentRow(MERCHANT)],
-      metrics: { ...emptyBody.metrics, successfulTransactions: 1 },
-    }
+    const MERCHANT_URL = 'https://merchant.example/data'
     await page.route('**/api/dashboard/overview**', async (route: Route) => {
       overviewReads += 1
-      const body = flip ? paidBody : emptyBody
+      const body = flip
+        ? {
+            ...overviewBody([activityGroup(MERCHANT_URL)]),
+            metrics: { ...overviewBody([]).metrics, successfulTransactions: 1 },
+          }
+        : overviewBody([])
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
     })
 
     await page.goto('/dashboard')
-    // The empty overview renders the transactions panel's empty state; that
-    // is the "page is up and the feed is empty" anchor (no region landmark
+    // The empty overview renders the activity section's empty state; that is
+    // the "page is up and the feed is empty" anchor (no region landmark
     // exists on this state).
-    await expect(page.getByText('No transactions yet')).toBeVisible()
+    await expect(page.getByText('No activity yet')).toBeVisible()
 
     // Let one full silent poll cycle pass on the EMPTY state, then prove the
     // purchase still has not appeared without the flip.
     await page.waitForTimeout(POLL_CYCLE_MS)
-    await expect(paymentLink(page, MERCHANT)).toHaveCount(0)
+    await expect(arrivingPayment(page, MERCHANT_URL)).toHaveCount(0)
 
     // The agent "buys" — the mocked overview starts returning the payment —
     // and the page must pick it up WITHOUT any user action. No click, no
@@ -117,7 +149,7 @@ test.describe('visible-only polling on /dashboard (#2732)', () => {
     await expect
       .poll(async () => overviewReads, { timeout: 20_000 })
       .toBeGreaterThan(readsAtFlip)
-    await expect(paymentLink(page, MERCHANT)).toBeVisible({ timeout: 15_000 })
+    await expect(arrivingPayment(page, MERCHANT_URL)).toBeVisible({ timeout: 15_000 })
 
     // No skeleton flip accompanies the arrival (the silent path).
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
@@ -127,23 +159,7 @@ test.describe('visible-only polling on /dashboard (#2732)', () => {
     const browserErrors = collectBrowserErrors(page)
 
     let failAll = false
-    const MERCHANT = '0x8888888888888888888888888888888888888888'
-    const goodBody = {
-      totals: { usd: 1250, eur: 1138 },
-      change: { available: false, usdAmount: 0, eurAmount: 0, usdPercent: 0, eurPercent: 0 },
-      metrics: {
-        connectedAgents: 0,
-        monthlyAgentSpendUsd: 2.5,
-        monthlyAgentSpendEur: 2.3,
-        successfulTransactions: 1,
-        activeAccounts: 1,
-      },
-      actionableApprovals: 0,
-      pendingApprovals: 0,
-      onboardingProgress: { hasFirstAgentPayment: true },
-      agents: [],
-      transactions: [paymentRow(MERCHANT)],
-    }
+    const MERCHANT_URL = 'https://supplier.example/api'
     await page.route('**/api/dashboard/overview**', async (route: Route) => {
       if (failAll) {
         // Every read after the flip: hard 500. A failed silent tick must
@@ -151,12 +167,24 @@ test.describe('visible-only polling on /dashboard (#2732)', () => {
         await route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"mid-demo 500"}' })
         return
       }
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(goodBody) })
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(
+          overviewBody([activityGroup(MERCHANT_URL)], {
+            connectedAgents: 0,
+            monthlyAgentSpendUsd: 2.5,
+            monthlyAgentSpendEur: 2.3,
+            successfulTransactions: 1,
+            activeAccounts: 1,
+          }),
+        ),
+      })
     })
 
     await page.goto('/dashboard')
-    await expect(paymentLink(page, MERCHANT)).toBeVisible()
-    const totalBefore = await paymentLink(page, MERCHANT).count()
+    await expect(arrivingPayment(page, MERCHANT_URL)).toBeVisible()
+    const rowsBefore = await arrivingPayment(page, MERCHANT_URL).count()
 
     // Only NOW does the backend start failing — the initial mount (including
     // StrictMode's double mount) already succeeded.
@@ -164,12 +192,12 @@ test.describe('visible-only polling on /dashboard (#2732)', () => {
 
     // Wait through at least one failed tick cycle.
     await page.waitForTimeout(POLL_CYCLE_MS)
-    await expect(paymentLink(page, MERCHANT)).toBeVisible()
-    expect(await paymentLink(page, MERCHANT).count()).toBe(totalBefore)
-    // No global error surface replaced the data. (The 500's own resource
-    // console error is expected — we mocked it deliberately — so it does not
-    // count as an unexpected browser error for this spec.)
-    await expect(page.getByText(/failed to load dashboard/i)).toHaveCount(0)
+    await expect(arrivingPayment(page, MERCHANT_URL)).toBeVisible()
+    expect(await arrivingPayment(page, MERCHANT_URL).count()).toBe(rowsBefore)
+    // No global error surface replaced the data — the "Needs attention"
+    // panel's overview-error row ("Dashboard data could not load") is the
+    // visible state a failed tick must NOT introduce.
+    await expect(page.getByText('Dashboard data could not load')).toHaveCount(0)
     expect(
       unexpectedBrowserErrors(browserErrors).filter(
         (error) => !/status of 500.*api\/dashboard\/overview/i.test(error),
@@ -178,36 +206,23 @@ test.describe('visible-only polling on /dashboard (#2732)', () => {
   })
 
   test('silent ticks do not reset scroll position', async ({ page }) => {
-    // A short viewport guarantees the page overflows vertically with the
-    // single mocked transaction, so there is a real scroll to preserve.
+    // A short viewport guarantees the page overflows vertically — the hero,
+    // metrics grid and the two activity columns stack well past 700px — so
+    // there is a real scroll to preserve. The mocked activity row is the
+    // identity that must still be visible after the silent ticks.
     await page.setViewportSize({ width: 420, height: 700 })
 
-    const MERCHANT = '0x7777777777777777777777777777777777777777'
+    const MERCHANT_URL = 'https://shop.example/checkout'
     await page.route('**/api/dashboard/overview**', async (route: Route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          totals: { usd: 1250, eur: 1138 },
-          change: { available: false, usdAmount: 0, eurAmount: 0, usdPercent: 0, eurPercent: 0 },
-          metrics: {
-            connectedAgents: 0,
-            monthlyAgentSpendUsd: 0,
-            monthlyAgentSpendEur: 0,
-            successfulTransactions: 0,
-            activeAccounts: 1,
-          },
-          actionableApprovals: 0,
-          pendingApprovals: 0,
-          onboardingProgress: { hasFirstAgentPayment: true },
-          agents: [],
-          transactions: [paymentRow(MERCHANT)],
-        }),
+        body: JSON.stringify(overviewBody([activityGroup(MERCHANT_URL)])),
       })
     })
 
     await page.goto('/dashboard')
-    await expect(paymentLink(page, MERCHANT)).toBeVisible()
+    await expect(arrivingPayment(page, MERCHANT_URL)).toBeVisible()
 
     // The dashboard may scroll an inner container rather than the window
     // (window.scrollY stayed 0 here in earlier runs). Find the element that
@@ -235,6 +250,6 @@ test.describe('visible-only polling on /dashboard (#2732)', () => {
       scrollBefore,
     )
     // The silent refetch did not swap the page for a skeleton either.
-    await expect(paymentLink(page, MERCHANT)).toBeVisible()
+    await expect(arrivingPayment(page, MERCHANT_URL)).toBeVisible()
   })
 })

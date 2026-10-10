@@ -200,7 +200,9 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
       // the feed ever ran before the UPDATE, it would read a settlement-less
       // entry and defer a payment that is already verified.
       const metadataAtFire: Array<string | null> = []
-      ;(feedSettledPaymentBestEffort as ReturnType<typeof vi.fn>).mockImplementation(
+      // Once only: a lasting implementation would leak an unawaited DB read
+      // into every later test that fires the feed, racing its resetDb().
+      ;(feedSettledPaymentBestEffort as ReturnType<typeof vi.fn>).mockImplementationOnce(
         async (_userId: string, paymentId: string) => {
           const intent = await readIntent(paymentId)
           metadataAtFire.push((intent.machine_metadata?.merchant_settlement_tx_hash as string | undefined) ?? null)
@@ -215,7 +217,9 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
 
       expect(feedSettledPaymentBestEffort).toHaveBeenCalledTimes(1)
       expect(feedSettledPaymentBestEffort).toHaveBeenCalledWith(userId, id)
-      expect(metadataAtFire).toEqual([SETTLE_A])
+      // The feed is fire-and-forget, so `report` resolves before the mock's
+      // own read does: wait for that read rather than racing it.
+      await vi.waitFor(() => expect(metadataAtFire).toEqual([SETTLE_A]))
     })
 
     it('leaves the evidence row as it was: a settlement is not a merchant response', async () => {

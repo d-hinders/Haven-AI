@@ -38,6 +38,10 @@
  * attention item cut to one line at 390px is an item that cannot be judged.
  * From `sm` up both revert to the plain `Row` rhythm.
  *
+ * The clamp is scoped `max-sm:` rather than undone with `sm:line-clamp-none`
+ * (#3861): that utility sets `overflow: visible`, which defeats the title's
+ * `truncate`, so a long desktop title hard-clipped mid-word with no ellipsis.
+ *
  * Zero items renders nothing — the caller shows the empty state. Items
  * render in the order given.
  */
@@ -123,7 +127,7 @@ export function AttentionList({
             leadingTone={item.icon ? item.tone : undefined}
             title={item.title}
             subtitle={item.subtitle}
-            titleClassName="whitespace-normal line-clamp-2 sm:whitespace-nowrap sm:line-clamp-none"
+            titleClassName="max-sm:whitespace-normal max-sm:line-clamp-2"
             trailingClassName="w-full basis-full self-start sm:w-auto sm:basis-auto sm:self-center"
             className="flex-wrap"
             trailing={

@@ -15,6 +15,23 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Changed
+
+- EIP-3009 merchant headers minted by the SDK now carry an EIP-3009 nonce
+  derived from the Haven payment id — `keccak256(utf8("haven-x402-payment-nonce:") || utf8(payment_id))`,
+  the shared `deriveX402PaymentNonce` on the edge surface — instead of the x402
+  library's random draw (#3888). That makes the merchant's settlement
+  attributable by the payment itself: Haven's backend finds the token's
+  `AuthorizationUsed(delegate, derived nonce)` log and records the verified
+  settlement even when the agent never reports it. The signed typed data is
+  still the library's own (the nonce is overwritten on the unsigned payload
+  `preparePaymentHeader` built). A header minted without a payment id keeps
+  the random nonce and today's behaviour, so no update is needed — but a
+  signer without this change leaves its settlements as undetectable as
+  before. A fixed nonce also closes the #3475 re-pay hazard: a resumed
+  payment re-signs the SAME nonce, so a settled payment is refused as
+  already used instead of paying twice.
+
 ### Added
 
 - `HavenCatalogEntry.assetTransferMethods` (optional, additive): the x402 transfer methods a catalog merchant last advertised, as the catalog stores them (`"eip3009"`, `"eip3009,erc7710"`; `null` until probed; absent against a backend that does not send it). New `catalogFundingLegExpected(methods)` turns it into the discovery hint `true | false | "unknown"` (#3839). The `discoverTools` description gains one sentence on how to use that hint.

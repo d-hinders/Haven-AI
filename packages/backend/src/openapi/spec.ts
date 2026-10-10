@@ -114,8 +114,9 @@ const transactionBaseProperties = {
   // CSV/CLI export key and the React keys — so the legs travel beside it.
   // `fundingTxHash` restates the funding hash explicitly (Haven's sponsored
   // UserOp, account → delegate); `settlementTxHash` is the merchant's own
-  // delegate → merchant transaction, present ONLY when an agent reported it
-  // and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`).
+  // delegate → merchant transaction, present when an agent reported it OR the
+  // backend's settlement sweep detected it on-chain (#3888), and it verified
+  // on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`).
   // Null is "not recorded", never "failed": the SDK's default evidence post
   // reports the funding hash, which the writer refuses, so many eip3009
   // payments legitimately never get one. Populated only on x402-synthesized
@@ -911,7 +912,7 @@ const activityPayment = {
     funding_tx_hash: { type: ['string', 'null'], description: '#3763: the EIP-3009 funding leg, named — same value as `tx_hash`.' },
     settlement_tx_hash: {
       type: ['string', 'null'],
-      description: '#3763: the merchant’s settlement transaction (delegate → merchant) when an agent reported one and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`). Null is "not recorded", never "failed" — the SDK’s default evidence post reports the funding hash, which the writer refuses, so many eip3009 payments legitimately never get one.',
+      description: '#3763: the merchant’s settlement transaction (delegate → merchant) when an agent reported one or the backend’s settlement sweep detected it on-chain (#3888), and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`). Null is "not recorded", never "failed" — the SDK’s default evidence post reports the funding hash, which the writer refuses, so many eip3009 payments legitimately never get one.',
     },
     settlement_scheme: {
       type: ['string', 'null'],

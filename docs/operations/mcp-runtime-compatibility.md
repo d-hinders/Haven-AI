@@ -5747,3 +5747,14 @@ to call next in structured fields, and those fields are typed end to end
 > doctor form and core's `/ --doctor$` parity command is unchanged.
 > `last-verified` stays 2026-10-08: this note is the scope. Nothing else in
 > this document was re-verified.
+
+> **Re-verified #3888 (2026-10-10):** the local signer's minted X-PAYMENT
+> header now carries an EIP-3009 nonce derived from the Haven payment id
+> (`signer/src/core.ts`, via the shared `deriveX402PaymentNonce`). This is
+> not a contract move: no `haven_*` tool, schema, strict-input list,
+> expected-context version or consent hash changes, the header stays opaque
+> to the merchant and facilitator, and the version-skew tables above stand.
+> The invariants the wire-format tests pin (window clamps, EIP-712 domain,
+> byte-sensitive asset echo) are unchanged; only the nonce's provenance
+> moved from random to derived. Nothing else in this document was
+> re-verified; `last-verified` already reads today.

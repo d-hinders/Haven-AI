@@ -844,25 +844,47 @@ const start = async () => {
     void runOutboundBump()
     setInterval(runOutboundBump, OUTBOUND_BUMP_INTERVAL_MS).unref()
 
-    // Passive erc7710 settlement observation (#2117, #2092 residual). On
-    // erc7710 direct settlement the merchant redeems the chain and Haven
-    // submits nothing, so an intent stays `submitted` until an AGENT reports
-    // the settlement hash. When that report never comes — no
-    // `PAYMENT-RESPONSE` transaction, or the generic plain-HTTP flow (#2041)
-    // where Haven never sees the header — the payment has no evidence row and
-    // is therefore permanently absent from the Fortnox feed. This tick finds
-    // such a settlement by looking its intent-unique settlement child (#2094)
-    // up in the pinned DelegationManager's `RedeemedDelegation` logs and
-    // completes it through the same seam the agent-reported path uses.
+    // Passive settlement observation for BOTH x402 schemes. On erc7710 direct
+    // settlement the merchant redeems the chain and Haven submits nothing, so
+    // an intent stays `submitted` until an AGENT reports the settlement hash.
+    // When that report never comes — no `PAYMENT-RESPONSE` transaction, or
+    // the generic plain-HTTP flow (#2041) where Haven never sees the header —
+    // the payment has no evidence row and is therefore permanently absent
+    // from the Fortnox feed. This tick finds such a settlement by looking its
+    // intent-unique settlement child (#2094) up in the pinned
+    // DelegationManager's `RedeemedDelegation` logs and completes it through
+    // the same seam the agent-reported path uses.
     //
-    // It never guesses: attribution is only ever the manager naming this
-    // intent's own child, never transfer shape. Bounded RPC, and an outage
-    // confirms nothing and waits for the next tick.
+    // On the eip3009 bridge (#3888) the merchant's settlement is a second
+    // transaction Haven never submits, and since #3888 its EIP-3009 nonce is
+    // derived from the payment id — so a settlement the agent never reported
+    // is found the same way: `AuthorizationUsed(delegate, derived nonce)` on
+    // the pinned token, handed to the same verifier and the same recording
+    // order (base row, verified hash, ONE feed fire) as an agent report.
+    //
+    // Neither pass ever guesses: attribution is only ever a chain event that
+    // names this intent's own key — the manager's child redemption, the
+    // token's burned authorization nonce — never transfer shape. Bounded RPC,
+    // and an outage confirms nothing and waits for the next tick.
     const runSettlementSweep = async () => {
       try {
         await runIfLeader(LEADER_LOCK_KEYS.settlementSweep, async () => {
-          const { runSettlementSweepTick } = await import('./modules/x402/index.js')
-          await runSettlementSweepTick(app.log)
+          const { runSettlementSweepTick, runEip3009SettlementSweepTick } = await import(
+            './modules/x402/index.js'
+          )
+          // Two passes under one leader gate — the builder decision #3888
+          // left open. Each with its own boundary, so a failure in one
+          // cannot silence the other.
+          try {
+            await runSettlementSweepTick(app.log)
+          } catch (err) {
+            app.log.warn({ err }, 'erc7710 settlement sweep pass failed')
+          }
+          try {
+            await runEip3009SettlementSweepTick(app.log)
+          } catch (err) {
+            app.log.warn({ err }, 'eip3009 settlement sweep pass failed')
+          }
         })
       } catch (err) {
         app.log.warn({ err }, 'Settlement sweep tick failed')

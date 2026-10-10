@@ -57,9 +57,10 @@ export interface ActivityPaymentRow {
   tx_hash: string | null
   /**
    * #3763: `machine_metadata.merchant_settlement_tx_hash` — the merchant's
-   * own settlement transaction when an agent reported one and it verified
-   * on-chain (#3475). `null` is "not recorded", never "failed". `tx_hash`
-   * keeps its funding meaning.
+   * own settlement transaction when an agent reported one or the #3888
+   * settlement sweep detected it on-chain, and it verified on-chain (#3475).
+   * `null` is "not recorded", never "failed". `tx_hash` keeps its funding
+   * meaning.
    */
   settlement_tx_hash: string | null
   /** #3763: `machine_metadata.settlement_scheme` (#1705) — no scheme selected before this read. */

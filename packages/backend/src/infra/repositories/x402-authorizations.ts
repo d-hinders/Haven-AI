@@ -461,19 +461,23 @@ export const SETTLEMENT_HASH_TAKEN_SQL = settlementHashTakenSql({ hash: '$1', id
  *
  * What it does NOT try to decide is which of two same-shaped payments (same
  * agent, token, delegate, merchant and amount, overlapping in time) a transfer
- * settled: Haven never sees the EIP-3009 nonce on this path, so it cannot. A
- * look-alike guard was tried and dropped in review: every payment it refused
- * stayed unrecorded and so refused the next one, and an unreportable payment
- * (merchant-rejected, or reported through the funding hash) blocked every later
- * same-price payment for good. What remains bounds the damage instead: one
- * hash backs at most one eip3009 payment (`settlementHashTakenSql`), a payment
- * takes one hash only (`merchant_settlement_tx_hash IS NULL` makes the UPDATE
- * a compare-and-set). The residual: a hash can be recorded on ANY payment
- * with the same agent, amount, token, delegate and merchant whose funding
- * confirmed before the transfer was mined (within the skew), including one
- * whose merchant leg failed, and that payment's receipt and funded-retry
- * remedy (`isFundedX402AwaitingMerchantLeg`) then follow the attribution. It
- * takes an agent misreporting a payment id; the record itself moves no money.
+ * settled. Since #3888 the nonce itself is attributable — signers derive it
+ * from the payment id, and the settlement sweep finds
+ * `AuthorizationUsed(delegate, derived nonce)` — but the AGENT-REPORTED path
+ * here still never sees the nonce (the report carries a hash, not a header),
+ * so a same-shaped sibling report cannot be told apart and this writer keeps
+ * the bounding rules: one hash backs at most one eip3009 payment
+ * (`settlementHashTakenSql`), a payment takes one hash only
+ * (`merchant_settlement_tx_hash IS NULL` makes the UPDATE a compare-and-set).
+ * The residual: a hash can be recorded on ANY payment with the same agent,
+ * amount, token, delegate and merchant whose funding confirmed before the
+ * transfer was mined (within the skew), including one whose merchant leg
+ * failed, and that payment's receipt and funded-retry remedy
+ * (`isFundedX402AwaitingMerchantLeg`) then follow the attribution. It takes
+ * an agent misreporting a payment id; the record itself moves no money. The
+ * sweep's nonce-proven attributions go through the same writer, and where
+ * they collide with an earlier agent-reported hash the tick logs and records
+ * nothing — the precedence is the owner's call, not this module's (#3888).
  */
 export const RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL = `UPDATE payment_intents target
            SET machine_metadata = COALESCE(target.machine_metadata, '{}'::jsonb)
@@ -689,6 +693,89 @@ export async function findSweepableErc7710Intents(
   db: Executor = pool,
 ): Promise<SweepableSettlementRow[]> {
   const result = await db.query<SweepableSettlementRow>(FIND_SWEEPABLE_ERC7710_INTENTS_SQL, [
+    minAgeSeconds,
+    recoveryHorizonSeconds,
+    limit,
+  ])
+  return result.rows
+}
+
+// ── passive eip3009 settlement sweep candidates (#3888) ─────────────────────
+
+/**
+ * The open eip3009 settlements the passive sweeper may look for on-chain
+ * (#3888): FUNDING confirmed (the intent is `confirmed` with its funding
+ * `tx_hash`), and the merchant's settlement hash not yet recorded.
+ *
+ * Anchored on `confirmed_at` — the FUNDING confirm, NOT the #2145 merchant
+ * report grace — so the chain-detected hash lands before the accounting
+ * feed's funding-hash selection can book the funding leg past grace. A small
+ * `$1` minimum age keeps the tick off the funding-confirm instant (the
+ * agent's own report usually lands first; this only pays for the ones that
+ * do not). `$2` is the recovery horizon, reusing the erc7710 sweep's
+ * semantics: it bounds how long Haven keeps LOOKING, not when the settlement
+ * could have been mined — a #2290 funded-merchant-retry re-sign can settle
+ * long after the funding confirm, and its genuine settlement must still be
+ * recordable. Look-back is not less safe: `verifySettlementTransferTx`
+ * (check `notBeforeSec` = funding confirm − skew) still binds the transfer
+ * to this payment's own funding, and the attribution is the chain's own
+ * `AuthorizationUsed(delegate, derived nonce)`, not transfer shape.
+ *
+ * `merchant_settlement_tx_hash IS NULL` is the CAS: a hash already recorded
+ * (agent-reported or chain-detected) leaves the candidate set for good —
+ * the writer's compare-and-set makes a second record a no-op anyway, but
+ * not scanning it at all is cheaper and quieter.
+ *
+ * `user_id` is selected so the sweeper can re-read the evidence source row
+ * without a second round-trip; `to_address` IS the delegate EOA the
+ * settlement's `AuthorizationUsed` names (the funding recipient).
+ */
+export const FIND_SWEEPABLE_EIP3009_INTENTS_SQL = `SELECT id, agent_id, user_id, chain_id, account_address,
+                to_address, token_symbol, token_address, amount_raw, amount_human,
+                status, tx_hash, created_at, confirmed_at,
+                source, payment_rail, execution_rail, machine_metadata
+           FROM payment_intents
+          WHERE status = 'confirmed'
+            AND tx_hash IS NOT NULL
+            AND COALESCE(payment_rail, source) = 'x402'
+            AND execution_rail = 'delegation'
+            AND machine_metadata->>'settlement_scheme' = 'eip3009'
+            AND machine_metadata->>'merchant_settlement_tx_hash' IS NULL
+            AND confirmed_at IS NOT NULL
+            AND confirmed_at <= NOW() - ($1 * interval '1 second')
+            AND confirmed_at >= NOW() - ($2 * interval '1 second')
+          ORDER BY confirmed_at ASC
+          LIMIT $3`
+
+export interface SweepableEip3009Row {
+  id: string
+  agent_id: string
+  user_id: string
+  chain_id: number
+  account_address: string
+  to_address: string
+  token_symbol: string
+  token_address: string
+  amount_raw: string
+  amount_human: string
+  status: string
+  /** The FUNDING hash. The settlement hash is discovered on-chain, never stored here until verified. */
+  tx_hash: string
+  created_at: string
+  confirmed_at: string
+  source: string | null
+  payment_rail: string | null
+  execution_rail: string | null
+  machine_metadata: Record<string, unknown> | string | null
+}
+
+export async function findSweepableEip3009Intents(
+  minAgeSeconds: number,
+  recoveryHorizonSeconds: number,
+  limit: number,
+  db: Executor = pool,
+): Promise<SweepableEip3009Row[]> {
+  const result = await db.query<SweepableEip3009Row>(FIND_SWEEPABLE_EIP3009_INTENTS_SQL, [
     minAgeSeconds,
     recoveryHorizonSeconds,
     limit,

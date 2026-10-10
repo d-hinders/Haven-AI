@@ -176,6 +176,27 @@ describeDb('#2145 — x402 eip3009 funded-but-undelivered status', () => {
     expect(status?.next_action).toBe('sweep_stranded_funds')
   })
 
+  it('a verified settlement outranks the open rejection event — a chain-proven-settled payment is never sweep_stranded_funds (#3888 round 2, AC 4)', async () => {
+    // The reviewer's sequence: the agent resumed a settled payment, the
+    // merchant refused the re-signed header as already used, the agent
+    // reported that refusal, and THEN the sweep recorded the verified hash.
+    // The rejection event is open (so `funded_but_unsettled` is true in the
+    // join) and the sweep never resolves it — but the chain proved the
+    // merchant was paid, so there are no stranded funds to reclaim and the
+    // answer is the plain confirmed mapping. The rejection landing BEFORE the
+    // hash is the order the naive precedence gets wrong; this pins it.
+    const { agent, paymentId } = await seedConfirmedX402({
+      settlementScheme: 'eip3009',
+      confirmedMinutesAgo: 60,
+      evidenceProofStatus: 'payment_confirmed',
+      merchantRejected: true,
+      merchantSettlementRecorded: true,
+    })
+    const status = await getAgentPaymentStatus(agent, paymentId)
+    expect(status?.phase).toBe('payment_confirmed')
+    expect(status?.next_action).toBe('none')
+  })
+
   // ── Behaviour that must NOT change with the fix ────────────────────────────
 
   it('merchant-rejected (client-reported) keeps the sweep override', async () => {
@@ -255,6 +276,7 @@ describeDb('#2290 — the resume predicate agrees with the status remedy', () =>
     { name: 'protocol receipt attached', seed: { settlementScheme: 'eip3009', confirmedMinutesAgo: 60, evidenceProofStatus: 'protocol_receipt_attached' } },
     { name: 'merchant rejected the retry', seed: { settlementScheme: 'eip3009', confirmedMinutesAgo: 60, merchantRejected: true } },
     { name: 'rejected AND never upgraded', seed: { settlementScheme: 'eip3009', confirmedMinutesAgo: 60, evidenceProofStatus: 'payment_confirmed', merchantRejected: true } },
+    { name: 'rejected AND chain-proven settled (#3888 round 2)', seed: { settlementScheme: 'eip3009', confirmedMinutesAgo: 60, evidenceProofStatus: 'payment_confirmed', merchantRejected: true, merchantSettlementRecorded: true } },
     { name: 'erc7710 (no funding leg)', seed: { settlementScheme: 'erc7710', confirmedMinutesAgo: 60 } },
     { name: 'no settlement_scheme metadata', seed: { confirmedMinutesAgo: 60 } },
     { name: 'inside the merchant-report grace window', seed: { settlementScheme: 'eip3009', confirmedMinutesAgo: 1 } },

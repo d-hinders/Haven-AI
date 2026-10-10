@@ -16290,7 +16290,7 @@ export interface operations {
                             tx_hash?: string | null;
                             /** @description #3763: the EIP-3009 funding leg, named — same value as `tx_hash`. */
                             funding_tx_hash?: string | null;
-                            /** @description #3763: the merchant’s settlement transaction (delegate → merchant) when an agent reported one and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`). Null is "not recorded", never "failed" — the SDK’s default evidence post reports the funding hash, which the writer refuses, so many eip3009 payments legitimately never get one. */
+                            /** @description #3763: the merchant’s settlement transaction (delegate → merchant) when an agent reported one or the backend’s settlement sweep detected it on-chain (#3888), and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`). Null is "not recorded", never "failed" — the SDK’s default evidence post reports the funding hash, which the writer refuses, so many eip3009 payments legitimately never get one. */
                             settlement_tx_hash?: string | null;
                             /** @description #3763: which settlement branch moved the money — `eip3009` or `erc7710` — read from the intent’s `machine_metadata`; null when none was recorded. */
                             settlement_scheme?: string | null;
@@ -16486,7 +16486,7 @@ export interface operations {
                             tx_hash?: string | null;
                             /** @description #3763: the EIP-3009 funding leg, named — same value as `tx_hash`. */
                             funding_tx_hash?: string | null;
-                            /** @description #3763: the merchant’s settlement transaction (delegate → merchant) when an agent reported one and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`). Null is "not recorded", never "failed" — the SDK’s default evidence post reports the funding hash, which the writer refuses, so many eip3009 payments legitimately never get one. */
+                            /** @description #3763: the merchant’s settlement transaction (delegate → merchant) when an agent reported one or the backend’s settlement sweep detected it on-chain (#3888), and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`). Null is "not recorded", never "failed" — the SDK’s default evidence post reports the funding hash, which the writer refuses, so many eip3009 payments legitimately never get one. */
                             settlement_tx_hash?: string | null;
                             /** @description #3763: which settlement branch moved the money — `eip3009` or `erc7710` — read from the intent’s `machine_metadata`; null when none was recorded. */
                             settlement_scheme?: string | null;

@@ -1339,3 +1339,13 @@ project owner — collaborators have Viewer access, not env-var write access.
 > environment variable or dev setup step this document describes moved. The
 > rest of this document was not re-read for it, and `last-verified` is not
 > bumped.
+
+> **Re-verified #3888 (2026-10-10):** `index.ts`'s existing leader-gated
+> settlement tick (`runSettlementSweep`, lock key `settlementSweep`) now runs
+> a SECOND pass beside the erc7710 one — `runEip3009SettlementSweepTick`
+> (`modules/x402/eip3009-settlement-sweeper.ts`), the passive observation
+> that records an eip3009 merchant settlement nobody reported. Same lock, no
+> new interval, no new route, `enforcedModules` untouched, and no environment
+> variable or dev setup step this document describes moves. Nothing else in
+> this file's coverage was touched; this note is the edit (the
+> `last-verified` date already reads today).

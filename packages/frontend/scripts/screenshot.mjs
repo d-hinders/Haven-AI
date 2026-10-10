@@ -821,8 +821,8 @@ const tx = (i, over = {}) => {
 const accounting = (status, extra = {}) => ({ provider: 'fortnox', status, externalRef: null, error: null, ...extra })
 export const FIXTURE_TXS = [
   // #3763: eip3009 WITH a recorded settlement — the drawer headlines it
-  // ("Merchant settlement (reported by the agent, verified on-chain)") and
-  // names the funding leg ("Funding from your account"). The
+  // ("Merchant settlement (reported by the agent or detected on-chain,
+  // verified)") and names the funding leg ("Funding from your account"). The
   // `transactions-detail-network` capture photographs THIS row's drawer, so
   // the regenerated evidence carries the recorded state's visible text.
   tx(1, {

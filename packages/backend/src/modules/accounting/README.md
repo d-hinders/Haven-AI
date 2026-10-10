@@ -189,12 +189,15 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
 same transaction ID the Haven UI (#3763) and the block explorer show. On an
 EIP-3009 bridge payment that is the verified merchant settlement leg
 (`machine_metadata.merchant_settlement_tx_hash`, written only after on-chain
-verification); the funding leg rides along as `fundingTxHash` for the receipt
-PDF. When no verified settlement was recorded inside the merchant-report grace
-window (15 minutes, `domain/merchant-report-grace.ts` — the same clock the
-payment status uses), the payment is pushed once under the FUNDING hash, and
-`txHashIsFunding` is true — render that as a labelled funding reference
-(Fortnox: `Tx 0x… (funding leg).`). The booked hash and its label are PINNED on
+verification — reported by the agent (#3475) or detected from the chain by
+the #3888 settlement sweep); the funding leg rides along as `fundingTxHash`
+for the receipt PDF. When no verified settlement was recorded inside the
+merchant-report grace window (15 minutes, `domain/merchant-report-grace.ts` —
+the same clock the payment status uses; the #3888 sweep scans from the
+funding confirm, so a chain-detected hash lands inside it), the payment is
+pushed once under the FUNDING hash, and `txHashIsFunding` is true — render
+that as a labelled funding reference (Fortnox: `Tx 0x… (funding leg).`). The
+booked hash and its label are PINNED on
 the payment's first claim (`pinAccountingBookedTx`), so a settlement that lands
 between two attempts never changes the bytes a retry renders — that is what
 keeps a `paymentId`-derived idempotency key from going terminal on a re-file

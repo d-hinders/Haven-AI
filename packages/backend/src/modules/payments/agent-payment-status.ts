@@ -120,11 +120,12 @@ export interface AgentPaymentStatus {
    * #3475 follow-up: `true` only when an eip3009 payment's merchant
    * settlement transaction is already recorded and on-chain-verified
    * (`machine_metadata.merchant_settlement_tx_hash`, written by
-   * `haven_report_settlement_evidence`'s eip3009 branch). Always absent on
-   * erc7710 — its one settlement transaction IS the confirmed intent, not a
-   * separately recorded hash, so this flag is not the right signal there.
-   * Absent — never `false` — when unknown, matching `delivered`'s own
-   * honesty rule.
+   * `haven_report_settlement_evidence`'s eip3009 branch or by the #3888
+   * settlement sweep when the chain names the settlement and the agent never
+   * reported it). Always absent on erc7710 — its one settlement transaction
+   * IS the confirmed intent, not a separately recorded hash, so this flag is
+   * not the right signal there. Absent — never `false` — when unknown,
+   * matching `delivered`'s own honesty rule.
    */
   merchant_settlement_recorded?: boolean
   /**
@@ -536,8 +537,10 @@ function delegateAccountAddressOf(machineMetadata: unknown): string | null {
 
 /**
  * #3475: an eip3009 merchant settlement the agent reported and Haven verified
- * on-chain (`modules/x402/eip3009-settlement-evidence.ts`). Its presence is
- * proof the merchant already pulled this payment's funds from the delegate.
+ * on-chain (`modules/x402/eip3009-settlement-evidence.ts`), or the #3888
+ * settlement sweep verified from the chain alone when no report ever came.
+ * Its presence is proof the merchant already pulled this payment's funds from
+ * the delegate.
  */
 function hasVerifiedMerchantSettlement(machineMetadata: unknown): boolean {
   return typeof parsedMachineMetadata(machineMetadata)?.merchant_settlement_tx_hash === 'string'
@@ -556,7 +559,8 @@ function hasVerifiedMerchantSettlement(machineMetadata: unknown): boolean {
  *
  * `!funded_but_unsettled` is load-bearing, not defensive: an open
  * `merchant_retry_rejected_after_payment` event means the merchant was asked
- * and said no, and case 1 below claims that row first. Its remedy is
+ * and said no, and case 1 below claims that row first (unless a verified
+ * merchant settlement outranks it — #3888 round 2). Its remedy is
  * `sweep_stranded_funds` — reclaiming the money, not re-signing a header for
  * a merchant that already refused it.
  *
@@ -653,6 +657,11 @@ export function isPastSettlementAttributionHorizonErc7710(
  * 1. **Merchant rejected the retry** (client-reported open
  *    `merchant_retry_rejected_after_payment` event) → the retry was tried and
  *    refused; the remedy is reclaiming the funds (`sweep_stranded_funds`).
+ *    Exception since #3888 round 2: a verified merchant settlement
+ *    (`hasVerifiedMerchantSettlement`) outranks the open event — the chain
+ *    proving the merchant was paid means there are no stranded funds, so the
+ *    refusal falls through to the plain mapping instead (the sweep never
+ *    resolves the event, so the flag alone proves nothing about the money).
  * 2. **Merchant leg never reported** (no evidence row upgraded past the
  *    server-written `payment_confirmed` base, and the grace window has
  *    passed) → the agent died between funding and retry — the #2145 crash
@@ -674,7 +683,12 @@ export function isPastSettlementAttributionHorizonErc7710(
  * writes the `merchant_response_observed` evidence row that makes
  * `merchant_leg_reported` true — so a delivered purchase leaves case 2's
  * predicate permanently, rather than entering it when the window elapses.
- * Neither report is trusted with anything financial: see
+ * Since #3888 the settlement sweep is a second exit: a payment the merchant
+ * settled but nobody ever reported gets its verified hash recorded from the
+ * chain, `hasVerifiedMerchantSettlement` goes true, and the payment reads as
+ * plain `payment_confirmed` — "the merchant has likely not been paid" is now
+ * said only about payments nothing has proven settled. Neither report is
+ * trusted with anything financial: see
  * `MerchantCompletion.reportMerchantOutcome` in the SDK for the boundary. Scoped to `settlement_scheme === 'eip3009'`: on
  * erc7710 there is no funding leg and `confirmed` IS merchant settlement, and
  * an intent with no scheme metadata fails closed to the plain mapping.
@@ -691,7 +705,28 @@ function intentStateFor(payment: PaymentIntentStatusRow): {
   nextAction: AgentPaymentNextActionValue
   message: string
 } {
-  if (payment.status === 'confirmed' && payment.funded_but_unsettled) {
+  // #3888 review round 2: a verified merchant settlement outranks the open
+  // rejection event. The `funded_but_unsettled` flag is join-derived from an
+  // open `merchant_retry_rejected_after_payment` row, and the sweep's
+  // recording path (unlike the reported attach path) never resolves that
+  // event — so the sequence "agent resumes a settled payment, the merchant
+  // refuses the re-signed header as already used, the agent reports the
+  // refusal, and THEN the sweep records the verified hash" would otherwise
+  // strand a payment the chain itself proved settled. A verified delegate →
+  // merchant pull means there are no stranded funds to reclaim: the money
+  // left the delegate for the merchant, so the honest answer falls through to
+  // the plain mapping. This is the same outranking rule #2292 gives a
+  // recorded merchant RESPONSE — the chain proof is the stronger fact — and
+  // it holds in both orders: when the hash lands first there is nothing to
+  // refuse (the sweep's `payment_confirmed` base row is deliberately not a
+  // response, so `hasMerchantResponseEvidence` does not gate the report), and
+  // when it lands second this branch is what keeps the stranded answer from
+  // returning. See the case-1 doc comment above.
+  if (
+    payment.status === 'confirmed' &&
+    payment.funded_but_unsettled &&
+    !hasVerifiedMerchantSettlement(payment.machine_metadata)
+  ) {
     return {
       phase: AgentPaymentPhase.FundedButUnsettled,
       nextAction: AgentPaymentNextAction.SweepStrandedFunds,

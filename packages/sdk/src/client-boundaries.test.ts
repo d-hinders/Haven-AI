@@ -527,6 +527,7 @@ describe('HavenClient structural boundary', () => {
       'X402_MAX_AUTHORIZATION_WINDOW_SECONDS',
       'X402_PAYMENT_HEADER_NAME',
       'X402_PAYMENT_HEADER_NAMES_SENT',
+      'X402_PAYMENT_NONCE_TAG', // #3888: the derivation's fixed domain tag
       'X402_PAYMENT_REQUIRED_HEADER_NAME',
       'X402_PAYMENT_RESPONSE_HEADER_NAME',
       'X402_SETTLEMENT_FORWARD_MARGIN_SECONDS',
@@ -551,6 +552,7 @@ describe('HavenClient structural boundary', () => {
       'decodeBase64Utf8',
       'defaultNextToolFor', // #3101
       'deriveDelegateAccountAddress', // #3283
+      'deriveX402PaymentNonce', // #3888: the settlement-attribution derivation
       'discoverMerchantMcpUrl',
       'encodeBase64Json',
       'encodeBase64Utf8',

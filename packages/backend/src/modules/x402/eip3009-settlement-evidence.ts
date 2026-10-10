@@ -1,5 +1,6 @@
 /**
- * Agent-reported merchant settlement for the eip3009 funding leg (#3475).
+ * Reported-or-chain-detected merchant settlement for the eip3009 funding leg
+ * (#3475, #3888).
  *
  * ## The gap this closes
  *
@@ -15,12 +16,15 @@
  *
  * ## Shape
  *
- * The agent reports the hash through the same door as erc7710,
- * `POST /machine-payments/evidence` (`haven_report_settlement_evidence`), per
- * the owner decision on #3475. Nothing about the intent's lifecycle changes: it
- * is already `confirmed` with Haven's funding hash, and that hash stays. The
- * verified settlement is recorded beside it, and the receipt read prefers it
- * over the merchant's unverified echo.
+ * The settlement reaches this seam two ways. The agent reports the hash
+ * through the same door as erc7710, `POST /machine-payments/evidence`
+ * (`haven_report_settlement_evidence`), per the owner decision on #3475. And
+ * since #3888 the passive settlement sweep finds the transaction the chain
+ * itself names — `AuthorizationUsed(delegate, derived nonce)`, the nonce the
+ * signer derived from the payment id — and hands it here. Nothing about the
+ * intent's lifecycle changes: it is already `confirmed` with Haven's funding
+ * hash, and that hash stays. The verified settlement is recorded beside it,
+ * and the receipt read prefers it over the merchant's unverified echo.
  *
  * ## Trust
  *
@@ -31,7 +35,10 @@
  * payment's funding confirmed. Fail closed: anything short of `verified`
  * records no hash. (Its caller has already written the payment's base evidence
  * row, an idempotent upsert that never touches proof status.) Haven still
- * never contacts the merchant.
+ * never contacts the merchant. The #3888 sweep hands its candidates through
+ * the same seam, so a chain-named transaction is held to the SAME proof
+ * standard as an agent-reported one — the sweep's only extra power is knowing
+ * which transaction to look at, not any weaker verification.
  *
  * The window's far edge is the report itself, not `expires_at`: a funded
  * payment whose merchant leg never completed can be re-signed long after its

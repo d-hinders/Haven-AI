@@ -391,6 +391,44 @@ request is still the agent's own retry. What the probe cannot refuse from
 inside `mcp-server` is a public name that resolves to a private address
 ([#3740](https://github.com/d-hinders/Haven-AI/issues/3740)).
 
+**The agent sends the paid request — by decision
+([#3776](https://github.com/d-hinders/Haven-AI/issues/3776), owner,
+2026-10-10).** In request mode a paid request costs the agent five steps:
+`haven_pay_x402_quote`, the local signer's `haven_sign_x402` (eip3009) or
+`haven_sign` (erc7710), `haven_submit`, its own paid retry, and the report
+(`haven_report_x402_outcome` on eip3009, `haven_report_settlement_evidence` on
+erc7710). A hosted completion tool that sent the paid retry
+from Haven's server — as `haven_settle_mcp_tool` does for MCP merchants — would
+make it three. It was weighed and declined, for three reasons:
+
+1. **Perimeter.** The CASP record says Haven never sends the paid request to a
+   plain-HTTP merchant
+   ([`2026-10-07-3739.md`](../regulatory/casp-changelog/2026-10-07-3739.md)).
+   Delivering the signed header would put Haven further into each payment on
+   the user's behalf — the reading MiCA's *transfer services on behalf of
+   clients* turns on, and, with USDC an e-money token, PSD2's. That is a
+   counsel decision, not an engineering step.
+2. **Merchant bodies.** The paid response is what the merchant sells. A
+   Bitrefill `invoice/status` answer carries the gift card's redemption code
+   and PIN. On this path it goes merchant → agent and never through Haven; a
+   hosted retry would route value-bearing content through Haven's server, which
+   the #3768 credential withholding does not recognise (it matches JWT shapes
+   and credential-named fields).
+3. **Egress.** The proportionate egress posture (#3740) rests on hosted
+   merchant requests being unpaid probes whose non-402 bodies never reach an
+   agent. A completion tool would make the hosted server a forwarder of
+   authenticated requests with agent-chosen headers and bodies — the revisit
+   trigger for the parked resolution-time guard (#3742–#3744).
+
+What keeps five steps affordable instead: on a multi-call merchant the agent
+signs in first (`haven_sign_siwx`, #3728 — on Bitrefill the session waives
+every micro-fee except `invoice/pay`), so a purchase pays one or two requests
+rather than five; and settlement does not hang on the report — see
+[Completing a settlement nobody reported](#completing-a-settlement-nobody-reported-2117).
+**Revisit** if a measured purchase on the current surface still shows agents
+dropping steps after both of those, or if counsel and a resolution-time egress
+guard are in place.
+
 ```mermaid
 sequenceDiagram
   autonumber

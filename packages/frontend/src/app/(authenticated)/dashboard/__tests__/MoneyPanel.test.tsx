@@ -112,7 +112,6 @@ function overview(overrides: {
       failedIntents7d: 0,
       balance_by_day: [],
     },
-    transactions: [],
   }
 }
 

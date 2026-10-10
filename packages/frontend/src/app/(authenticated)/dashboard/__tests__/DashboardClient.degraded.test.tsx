@@ -125,19 +125,12 @@ function overviewWith(change: Record<string, unknown>) {
       sekPercent: 0.9,
       ...change,
     },
-    metrics: {
-      connectedAgents: 1,
-      monthlyAgentSpendUsd: 42,
-      monthlyAgentSpendEur: 38,
-      monthlyAgentSpendSek: 440,
-      successfulTransactions: 4,
-      activeAccounts: 1,
-    },
+    // #3807 + #3858: neither `metrics` nor the `transactions` preview is on
+    // the overview wire any more — the fixture carries neither.
     actionableApprovals: 0,
     pendingApprovals: 0,
     onboardingProgress: { hasFirstAgentPayment: false },
     agents: [],
-    transactions: [],
   }
 }
 

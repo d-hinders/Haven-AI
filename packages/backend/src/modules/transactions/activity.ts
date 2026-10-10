@@ -82,19 +82,67 @@ export function isValidActivityTimeZone(tz: string): boolean {
   return tz === 'UTC' || Intl.supportedValuesOf('timeZone').includes(tz)
 }
 
-/** `YYYY-MM-DD` of `unixSeconds` in `tz` (en-CA yields ISO calendar dates). */
-export function localDayKey(unixSeconds: number, tz: string): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(
-    new Date(unixSeconds * 1000),
-  )
+/**
+ * One `en-CA` day-key formatter per zone, cached: `localDayKey` runs once per
+ * transaction in `buildActivityGroups` (and per hour-step in
+ * `activityWindowDays`), and the constructor dominates that cost. The map is
+ * bounded — the route only accepts zones from `Intl.supportedValuesOf` (or
+ * 'UTC'), a fixed list of a few hundred.
+ */
+const dayKeyFormatters = new Map<string, Intl.DateTimeFormat>()
+
+function dayKeyFormatter(tz: string): Intl.DateTimeFormat {
+  let formatter = dayKeyFormatters.get(tz)
+  if (formatter == null) {
+    formatter = new Intl.DateTimeFormat('en-CA', { timeZone: tz })
+    dayKeyFormatters.set(tz, formatter)
+  }
+  return formatter
 }
 
-/** The user-local days covered by "the last 7 days" ending now. */
-function activityWindowDays(nowMs: number, tz: string): Set<string> {
+/** `YYYY-MM-DD` of `unixSeconds` in `tz` (en-CA yields ISO calendar dates). */
+export function localDayKey(unixSeconds: number, tz: string): string {
+  return dayKeyFormatter(tz).format(new Date(unixSeconds * 1000))
+}
+
+/**
+ * The calendar day immediately before `dayKey` — pure `YYYY-MM-DD` arithmetic
+ * on the UTC clock. A date decrements by exactly one day in every zone, so
+ * no DST awareness belongs here.
+ */
+function previousDayKey(dayKey: string): string {
+  return new Date(Date.parse(`${dayKey}T00:00:00Z`) - 86_400_000)
+    .toISOString()
+    .slice(0, 10)
+}
+
+/**
+ * The user-local days covered by "the last 7 days" ending now.
+ *
+ * The walk is LOCAL: starting from `now`'s own day key, each step targets
+ * the previous calendar day and hour-steps an instant back until it lands
+ * there. Sampling fixed 24h offsets instead (`now - i * 86_400`) silently
+ * skips a local day: local days are 23/24/25h long, so on the morning after
+ * a 23h spring-forward day the samples land twice in one day and never in
+ * the transition day — and `buildActivityGroups` then drops every
+ * transaction of that day from the dashboard. An hourly step can never jump
+ * over a whole local day (none is shorter than 23h), so the walk always
+ * lands in the target day itself, transition or not.
+ *
+ * (`activityWindowDays` is exported for the pinned-clock regression tests —
+ * the window is the one piece of derived state a once-a-year wall-clock bug
+ * can silently corrupt.)
+ */
+export function activityWindowDays(nowMs: number, tz: string): Set<string> {
   const days = new Set<string>()
-  const nowSeconds = Math.floor(nowMs / 1000)
-  for (let i = 0; i < ACTIVITY_WINDOW_DAYS; i += 1) {
-    days.add(localDayKey(nowSeconds - i * 86_400, tz))
+  let cursor = Math.floor(nowMs / 1000)
+  let current = localDayKey(cursor, tz)
+  days.add(current)
+  while (days.size < ACTIVITY_WINDOW_DAYS) {
+    const target = previousDayKey(current)
+    while (localDayKey(cursor, tz) !== target) cursor -= 3_600
+    days.add(target)
+    current = target
   }
   return days
 }

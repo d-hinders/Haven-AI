@@ -11,7 +11,7 @@ covers:
   - .agents/skills/new-task/SKILL.md
   - .claude/commands/ship-next.md
   - .claude/commands/new-task.md
-last-verified: "2026-09-20"
+last-verified: "2026-10-10"
 ---
 
 # Autonomous PR loop
@@ -559,6 +559,19 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
    reddens the **push-to-`dev` CI run** (already in `ci.yml`) within about five
    minutes, to be fixed forward. `main` keeps the strict rule, so the promotion
    is still gated on the exact tested tree.
+
+   **How a red push run gets noticed (#3890).** Nothing watched that run until
+   #3886: #3855's merge broke `MCP server checks` on its own push and it sat red
+   for five hours, until an unrelated PR inherited it. `dev-push-health.yml` now
+   wakes on every completed CI run on `dev` and upserts one `ci-health` +
+   `code-quality` issue, *🩺 dev is red: a push-to-dev CI job is failing*,
+   naming the red job, the commits that may have broken it and the failing
+   test. It reads **jobs**, not the run conclusion: a superseded run concludes
+   `cancelled` even when a job in it failed, and the `if: always()` aggregator
+   (`Lint, Type-check & Build`) reads `failure` on every superseded run, so it
+   is excluded. The issue closes only when each red job has **run and passed**
+   again. A later `skipped` (a push that routes nothing to that job) is not a
+   recovery. That was how `dev` looked green while #3886 stood.
 
    This inventory was verified on **2026-09-07**, after O1/O2, with:
 

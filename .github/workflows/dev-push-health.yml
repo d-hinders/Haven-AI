@@ -1,0 +1,65 @@
+name: Push-to-dev CI health
+
+# Makes a red push-to-`dev` CI run NOTICED (#3890).
+#
+# `dev` merges do not require an up-to-date branch (#2632 O1), so two
+# individually green PRs can break `dev` together. That was accepted on the
+# condition that the push-to-`dev` CI run goes red and the break is fixed
+# forward — but nothing watched that run. #3886: #3855's merge broke
+# `MCP server checks`, and it sat red for five hours until an unrelated PR
+# inherited it.
+#
+# Driven by `workflow_run`, not a cron: it wakes when each CI run on `dev`
+# completes — including a `cancelled` one, since a superseded run can hold a
+# job that already FAILED. The script is stateless (it re-reads a window of
+# recent runs every time), so a dropped or out-of-order event does no harm, and
+# `cancel-in-progress: false` keeps an in-flight evaluation from being killed.
+#
+# `workflow_run` workflows run from the default branch's copy of this file and
+# check out the default branch, never the triggering commit: nothing from the
+# run under inspection is executed here.
+#
+# Report-only: it never fails the build. The signal is one upserted issue
+# labelled `ci-health` + `code-quality`, closed once every red job has RUN and
+# passed again (a later `skipped` is not a recovery).
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read # lists CI runs and their jobs
+  checks: read # reads the failing job's annotations (a job id is a check-run id)
+  issues: write
+
+concurrency:
+  group: dev-push-health
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    name: Report push-to-dev CI health
+    # `branches` matches head_branch, which a fork PR from a branch named `dev`
+    # would also satisfy: only push runs are evaluated.
+    if: >-
+      github.repository == 'd-hinders/Haven-AI' &&
+      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      # Dependency-free by design — no `npm ci`, the guard-freshness contract.
+      - name: Evaluate push-to-dev CI runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci/dev-push-health.mjs

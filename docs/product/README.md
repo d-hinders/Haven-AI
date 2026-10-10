@@ -19,7 +19,14 @@ covers:
   - packages/frontend/src/components/DelegationBudgetCard.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
   - packages/frontend/src/hooks/useEscapeToClose.ts
-last-verified: "2026-09-21"
+  - packages/ui/src/tokens.css
+  - packages/ui/src/Button.tsx
+  - packages/ui/src/Card.tsx
+  - packages/ui/src/Input.tsx
+  - packages/ui/src/Tooltip.tsx
+  - packages/frontend/src/app/(authenticated)/dashboard/**
+  - packages/frontend/src/components/DashboardOnboardingGuide.tsx
+last-verified: "2026-10-10"
 ---
 
 # Haven Product & UX Guide
@@ -44,7 +51,8 @@ When these docs overlap, use this order of authority:
 
 The old dark app system is retired. Dark mode since #2927 is a different thing:
 the sanctioned v2 token set now carries a dark palette (re-declared in the two
-mechanically-enforced blocks in `globals.css`), `ThemeProvider` and
+mechanically-enforced blocks in `packages/ui/src/tokens.css`, where the palette
+moved from `globals.css` in #3508), `ThemeProvider` and
 `ThemeToggle` exist, and users choose light, dark, or system in Settings → Theme. Do
 not extend old dark token patterns, gradient buttons, glow shadows, or hard
 dark-modal surfaces — dark styling comes from the v2 tokens flipping under the
@@ -77,6 +85,15 @@ explainers all at once just because those components exist. Add detail
 progressively inside the relevant action flow, detail page, modal, or after the
 user dismisses setup.
 
+On the dashboard today, a user with no funds in any account gets a focused view while the
+setup guide ("Your first 3 steps") is showing: the money panel without its
+spending block, the "Needs you" card, and the guide. The agents and activity
+sections stay hidden until funds arrive or the guide stops showing. The
+guide's only CTA sits on the first incomplete step, and the "Needs you" card
+holds back its low-balance and zero-USDC items while the funding step is open.
+The money panel's Deposit address and Add funds buttons still render above
+the guide.
+
 ---
 
 ## 2. Language
@@ -99,12 +116,12 @@ High-level voice rules:
 - `/analytics` is the reporting surface of the authenticated app (epic
   [#2944](https://github.com/d-hinders/Haven-AI/issues/2944)): what the
   account's agents did with their money in a chosen window, read-only, with
-  its sidebar entry after *Transactions* and its recipe in
+  its sidebar entry after *Dashboard* in the Overview group and its recipe in
   [screen-recipes.md](./screen-recipes.md#analytics).
 - Detail routes use an id: `/accounts/[accountId]`, `/agents/[agentId]`.
 - Legacy singular collection routes should redirect to the plural route.
 - Navigation items are stable nouns. Actions such as Send, Receive, Add funds, and Approve live inside the relevant screen.
-- Authenticated pages use the shared shell: sidebar navigation, TopBar breadcrumbs/back links on detail routes, and a PageHeader in the page body.
+- Authenticated pages use the shared shell: sidebar navigation, TopBar back links on the account and agent detail routes, and a PageHeader in the page body.
 - Every "View all" must resolve to a real page and preserve useful filters in the URL.
 - Empty states need a clear next action.
 - Reused concepts should share components. Transaction lists, action buttons, modals, and empty states should not fork visually without a reason.
@@ -122,7 +139,7 @@ Core rules:
   `color-scheme`/`data-theme` — never hard-coded light-only colors.
 - Primary buttons use solid brand color: `bg-[var(--v2-brand)]` with `hover:bg-[var(--v2-brand-strong)]`.
 - No gradient buttons. The brand gradient is reserved for the app wordmark and one restrained hero accent phrase.
-- Flat cards use the `--v2-surface` token (white in light, its dark counterpart
+- Flat cards use the `--v2-bg` token (white in light, its dark counterpart
   in dark) with `border-[var(--v2-border)]`, v2 radius, and the v2 card shadow.
 - Raised cards are prominent page anchors such as the account detail total balance card; the dashboard money panel (#3807) keeps the balance hero on the tinted anchor surface with the raised shadow rather than a white raised card, and adds the 30-day sparkline and the spending block beneath it.
 - Other elevations already present in the shared `Card` primitive, including
@@ -130,8 +147,8 @@ Core rules:
   reference and remain secondary to the page's primary anchor. The static
   `design-system.md` card table does not yet document `anchor`; treat that as
   documentation debt, not permission to invent another tier.
-- Modals use the themed surface token and a darkened blurred backdrop (the
-  backdrop darkens whichever theme is active).
+- Modals use the themed `--v2-bg` token and a solid darkened backdrop with no
+  blur (the backdrop darkens whichever theme is active).
 - Avoid old dark app classes for new work: `bg-gray-*`, `text-gray-*`, dark-only `zinc` surfaces, glow shadows, and white alpha borders.
 - Use semantic colors only for their meaning: success, warning, danger.
 - Use `.v2-tabular` on financial values, counters, percentages, addresses, and other numeric strings that need visual stability.
@@ -144,7 +161,7 @@ Before shipping a UI change, compare it against an existing v2 screen with the s
 
 ### Buttons
 
-- Primary: solid brand, white text, v2 button shadow.
+- Primary: solid brand, `--v2-ink-on-brand` text (white in light, dark ink in dark), v2 button shadow.
 - Secondary/ghost: themed surface background, subtle border, themed ink text.
 - Destructive: danger color and explicit verb label.
 - Loading buttons keep their dimensions and clearly indicate work is in progress.
@@ -179,8 +196,9 @@ Before shipping a UI change, compare it against an existing v2 screen with the s
 
 - Modal body should fit within the viewport and scroll internally when needed.
 - Close affordances: close button, Escape, and backdrop click unless an irreversible signing/execution step is running.
-- Backdrop should blur and slightly darken the page so the modal stands out on
-  the themed surfaces behind it.
+- Backdrop darkens the page with a solid overlay so the modal stands out on the
+  themed surfaces behind it. No `backdrop-filter` blur: it is deliberately left
+  out for performance (`.v2-modal-backdrop` in `globals.css`).
 - Modals must use dialog semantics, labelled titles, focus trap, and focus return after close.
 - Never nest modals. Use inline confirmation panels or close the parent before opening a confirm dialog.
 

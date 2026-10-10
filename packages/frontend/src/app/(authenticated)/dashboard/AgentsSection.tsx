@@ -22,10 +22,15 @@
  * owner-approved pause wording from `lib/agent-pause-copy.ts` in its short
  * form, so the row cannot drift from the agent page.
  *
- * Order: two groups, attention first. Within a group the order is FIXED at
- * the first data load by 30-day spend (descending) and later agents are
- * appended — a poll that changes spend within a group moves nothing; a row
- * moves only when it crosses groups. At most six rows render, then a
+ * Order: two groups, attention first. The WITHIN-GROUP order is fixed ONCE —
+ * a single anchor list sorted by 30-day spend (descending) that is computed
+ * WITHOUT reading the attention classification, so whichever poll lands
+ * first cannot choose it (#3871). Group membership is re-evaluated on every
+ * render from the current badges: a poll that changes spend within a group
+ * moves nothing; a row moves only when it crosses groups. And the rows do
+ * not render until the budget reads have settled (`budgetRemainingReady`) —
+ * the first rows render is already fully classified, so the DOM order cannot
+ * depend on query timing. At most six rows render, then a
  * "View all N agents" link (N from #3803's `agentCount`). Zero agents keeps
  * the old empty state with "Connect agent".
  */
@@ -73,45 +78,47 @@ export interface GroupOrder {
 }
 
 /**
- * Fold the current agents into the stored group order. On the first call
- * (`stored === null`, the first data load with agents) each group is fixed by
- * 30-day spend, descending. Afterwards the stored relative order is kept:
- * vanished agents are dropped, agents that crossed groups are appended to
- * their new group's tail, and newcomers are appended to their group — never
- * re-sorted, so a poll that moves spend within a group moves no row.
+ * Fold the current agents into the stored anchor and the CURRENT attention
+ * classification. The ANCHOR — the within-group order — is fixed on the
+ * first call (`stored === null`) by 30-day spend, descending, and is
+ * deliberately computed WITHOUT `isAttention`: the classification depends on
+ * `budgetRemaining`/`attentionItems`, which resolve independently of the
+ * overview, so an attention-keyed anchor would let query timing choose the
+ * row order (#3871). Afterwards the stored relative order is kept: vanished
+ * agents are dropped and newcomers are appended — never re-sorted, so a
+ * poll that moves spend within a group moves no row.
+ *
+ * Returns the anchor to store AND the group order to render: the anchor is
+ * partitioned by the current classification, so group membership is the only
+ * thing that ever moves a row between the two lists.
  */
 export function applyStableGroupOrder(
-  stored: GroupOrder | null,
+  stored: string[] | null,
   agents: DashboardAgent[],
   isAttention: (agent: DashboardAgent) => boolean,
   spend30: (agent: DashboardAgent) => number,
-): GroupOrder {
-  if (agents.length === 0) return { attention: [], rest: [] }
+): { anchor: string[]; order: GroupOrder } {
+  if (agents.length === 0) return { anchor: [], order: { attention: [], rest: [] } }
   const present = new Set(agents.map((agent) => agent.id))
-  const bySpend = (a: DashboardAgent, b: DashboardAgent) => spend30(b) - spend30(a)
 
+  let anchor: string[]
   if (!stored) {
-    return {
-      attention: agents.filter(isAttention).sort(bySpend).map((agent) => agent.id),
-      rest: agents.filter((agent) => !isAttention(agent)).sort(bySpend).map((agent) => agent.id),
+    const bySpend = (a: DashboardAgent, b: DashboardAgent) => spend30(b) - spend30(a)
+    anchor = [...agents].sort(bySpend).map((agent) => agent.id)
+  } else {
+    anchor = stored.filter((id) => present.has(id))
+    for (const agent of agents) {
+      if (!anchor.includes(agent.id)) anchor.push(agent.id)
     }
   }
 
-  const attention = stored.attention.filter((id) => present.has(id) && isAttentionById(agents, id))
-  const rest = stored.rest.filter((id) => present.has(id) && !isAttentionById(agents, id))
-  for (const agent of agents) {
-    // Group-changers were dropped from their old list above, so `includes`
-    // is false exactly for them and for newcomers — both append.
-    if (isAttention(agent)) {
-      if (!attention.includes(agent.id)) attention.push(agent.id)
-    } else if (!rest.includes(agent.id)) {
-      rest.push(agent.id)
-    }
-  }
-  return { attention, rest }
-
-  function isAttentionById(list: DashboardAgent[], id: string): boolean {
-    return isAttention(list.find((agent) => agent.id === id)!)
+  const isAttentionById = (id: string) => isAttention(agents.find((agent) => agent.id === id)!)
+  return {
+    anchor,
+    order: {
+      attention: anchor.filter(isAttentionById),
+      rest: anchor.filter((id) => !isAttentionById(id)),
+    },
   }
 }
 
@@ -252,6 +259,15 @@ export interface AgentsSectionProps {
   overview: DashboardOverview | null
   /** #3804's cached reads — the meters' used amounts and the ≥90% badge. */
   budgetRemaining: DashboardBudgetRemaining | null
+  /**
+   * Whether the budget-remaining read has SETTLED — resolved, or definitively
+   * failed (`null` forever is not a steady state; a failed first load renders
+   * the rows without the ≥90% badge). The badges — and through them the row
+   * order — read it, so until it settles the section keeps its loading
+   * skeleton: the first rows render is already fully classified, and the DOM
+   * order cannot depend on poll timing (#3871).
+   */
+  budgetRemainingReady: boolean
   /** The shared "Needs you" items (`lib/dashboard-attention.ts`) — the needs-setup badges' source. */
   attentionItems: AttentionRuleItem[]
   currency: DashboardCurrency
@@ -274,6 +290,7 @@ export interface AgentsSectionProps {
 export function AgentsSection({
   overview,
   budgetRemaining,
+  budgetRemainingReady,
   attentionItems,
   currency,
   accountNames,
@@ -291,29 +308,43 @@ export function AgentsSection({
     ? agentCount.active + agentCount.paused + agentCount.pending_approval
     : agents.length
 
-  const orderRef = useRef<GroupOrder | null>(null)
+  const anchorRef = useRef<string[] | null>(null)
   const orderedIds = useMemo(() => {
+    if (agents.length === 0) {
+      // A list that empties resets the anchor: the next load re-fixes the order.
+      anchorRef.current = null
+      return { attention: [], rest: [] }
+    }
+    if (budgetRemaining === null && !budgetRemainingReady) {
+      // The classification the order reads is still in flight — anchor
+      // nothing; the rows stay pending below (#3871).
+      return { attention: [], rest: [] }
+    }
     const attentionIds = new Set(
       agents
         .filter((agent) => agentBadge(agent, attentionItems, budgetRemaining) !== null)
         .map((agent) => agent.id),
     )
-    const next = applyStableGroupOrder(
-      orderRef.current,
+    const { anchor, order } = applyStableGroupOrder(
+      anchorRef.current,
       agents,
       (agent) => attentionIds.has(agent.id),
       (agent) => agent.stats?.d30?.net?.[CURRENCY_KEY[currency]] ?? 0,
     )
-    // A list that empties resets the anchor: the next load re-fixes the order.
-    orderRef.current = agents.length === 0 ? null : next
-    return next
-  }, [agents, attentionItems, budgetRemaining, currency])
+    anchorRef.current = anchor
+    return order
+  }, [agents, attentionItems, budgetRemaining, budgetRemainingReady, currency])
 
   const byId = useMemo(() => new Map(agents.map((agent) => [agent.id, agent])), [agents])
   const ordered = [...orderedIds.attention, ...orderedIds.rest]
     .map((id) => byId.get(id))
     .filter((agent): agent is DashboardAgent => agent !== undefined)
   const visible = ordered.slice(0, MAX_ROWS)
+  // Rows need the badge inputs settled before they may render (#3871): the
+  // same skeleton the overview's initial load shows, never a half-classified
+  // frame that a later poll would reorder.
+  const classificationPending =
+    agents.length > 0 && budgetRemaining === null && !budgetRemainingReady
 
   return (
     <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card overflow-hidden">
@@ -327,7 +358,7 @@ export function AgentsSection({
         }
       />
 
-      {loading ? (
+      {(loading || classificationPending) ? (
         <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-live="polite" aria-label="Loading agents">
           {[0, 1, 2].map((item) => (
             <div key={item} className="flex items-center gap-3 px-5 h-[72px]">

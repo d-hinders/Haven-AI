@@ -1,8 +1,10 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  activityCounterparty,
   counterpartyLabel,
   settlementSchemeLabel,
+  transactionFiat,
   transactionInitiator,
   transactionMovement,
   transactionStatus,
@@ -266,29 +268,29 @@ describe('counterpartyLabel no-address mode (#3810)', () => {
     expect(viaAccounts).toBe('Savings')
   })
 
-  it('CONTROL: the default mode still truncates — the shared screens are unchanged', () => {
-    // The no-address mode is opt-in. TransactionsTable and
-    // TransactionDetailPanel pass no options, so their counterparty fallback
-    // stays `truncate(to)` until #3811 retires it.
+  it('CONTROL: the default mode still truncates — the detail panel and other callers keep it', () => {
+    // The no-address mode stays opt-in on the helper itself. #3811 flips the
+    // LIST screens to pass `{ noAddress: true }` explicitly (below); the
+    // default is unchanged so any caller that wants the raw form still can.
     const label = counterpartyLabel(tx({ direction: 'out', to: UNKNOWN }))
     expect(label).toBe(truncate(UNKNOWN))
   })
 })
 
 /**
- * #3810 — shared screens unchanged. The presentation helpers are shared with
- * `TransactionsTable` and `TransactionDetailPanel`; rendering the SAME row
- * through both must still show the truncated address and the generic title —
- * byte-relevant output identical to pre-#3810.
+ * #3811 — the shared list screens ADOPT the no-address rules. The
+ * transactions table (and, through `activityCounterparty`, the agent detail
+ * Activity table) never render a truncated address in a row; the detail
+ * panel is where the address lives, in full, with a copy button.
  */
-describe('shared screens render unchanged (#3810)', () => {
+describe('shared screens adopt the no-address rules (#3811)', () => {
   const UNKNOWN = '0x9999999999999999999999999999999999999999'
   const TRUNCATED = truncate(UNKNOWN)
 
   const row = tx({ direction: 'out', source: 'direct', to: UNKNOWN, agentName: undefined })
 
-  it('TransactionsTable keeps the truncated counterparty', () => {
-    render(
+  function renderTable() {
+    return render(
       <TransactionsTable
         transactions={[row]}
         loading={false}
@@ -297,15 +299,18 @@ describe('shared screens render unchanged (#3810)', () => {
         hasActiveFilters={false}
       />,
     )
+  }
 
-    // The truncated counterparty renders in BOTH the desktop and the stacked
-    // mobile layout of the same table — unchanged from pre-#3810.
-    expect(screen.getAllByText(TRUNCATED).length).toBeGreaterThan(0)
-    expect(screen.getByText('Payment sent')).toBeInTheDocument()
-    expect(screen.queryByText('New recipient')).not.toBeInTheDocument()
+  it('TransactionsTable renders the calm counterparty — never a truncated address', () => {
+    renderTable()
+
+    // The counterparty falls back to calm copy in BOTH the desktop and the
+    // stacked mobile layout of the same table.
+    expect(screen.getAllByText('New recipient').length).toBeGreaterThan(0)
+    expect(screen.queryByText(TRUNCATED)).not.toBeInTheDocument()
   })
 
-  it('TransactionDetailPanel keeps the truncated counterparty', () => {
+  it('TransactionDetailPanel renders the FULL address with a copy affordance', () => {
     render(
       <TransactionDetailPanel
         transaction={row}
@@ -315,7 +320,131 @@ describe('shared screens render unchanged (#3810)', () => {
       />,
     )
 
-    expect(screen.getByText(TRUNCATED)).toBeInTheDocument()
-    expect(screen.queryByText('New recipient')).not.toBeInTheDocument()
+    // The full address is on the screen (not the truncated form)…
+    expect(screen.getAllByText(UNKNOWN).length).toBeGreaterThan(0)
+    expect(screen.queryByText(TRUNCATED)).not.toBeInTheDocument()
+    // …and the copy affordance names the thing, not the widget (the fixture
+    // carries token + account addresses too, so there are several).
+    expect(screen.getAllByRole('button', { name: 'Copy address' }).length).toBeGreaterThan(0)
+  })
+
+  it('activityCounterparty feeds a PaymentActivityItem to the shared helper', () => {
+    const label = counterpartyLabel(
+      activityCounterparty({
+        type: 'payment',
+        id: 'payment-1',
+        agent_name: 'Research agent',
+        token: 'USDC',
+        amount: '0.10',
+        to: UNKNOWN,
+        status: 'confirmed',
+        tx_hash: null,
+        source: 'x402',
+        x402_resource_url: 'https://api.vendor.com/data',
+        chain_id: 8453,
+        explorer_url: null,
+        created_at: '2026-05-08T11:49:00Z',
+      }),
+      undefined,
+      undefined,
+      { noAddress: true },
+    )
+    // The merchant's hostname, through the same mode the lists read.
+    expect(label).toBe('api.vendor.com')
+  })
+})
+
+/**
+ * #3811 — the user's currency on the shared tables (#3805's currency mode,
+ * #3824's amounts). The acceptance cases, verbatim from the issue: a sweep
+ * row and a direct row with no book-time fiat render `≈`; a confirmed x402
+ * row with `convertedAmount` renders without it; an unpriced row renders an
+ * em dash, never 0. The agent Activity table feeds the SAME path through
+ * `activityToTransaction` (covered in AgentDetailClient.test.tsx).
+ */
+describe('the transactions table renders the user currency (#3811)', () => {
+  function renderTable(rows: AggregatedTransaction[]) {
+    return render(
+      <TransactionsTable
+        transactions={rows}
+        loading={false}
+        error={null}
+        onRefresh={() => {}}
+        hasActiveFilters={false}
+      />,
+    )
+  }
+
+  it('renders "≈" on a sweep row priced serve-time (no book-time fiat)', () => {
+    renderTable([
+      tx({
+        activityType: 'delegate_sweep',
+        agentName: 'Research assistant',
+        approxAmount: '10.50',
+        approxCurrency: 'SEK',
+      }),
+    ])
+    expect(screen.getAllByText('≈').length).toBeGreaterThan(0)
+  })
+
+  it('renders "≈" on a direct row with no book-time fiat', () => {
+    renderTable([
+      tx({ direction: 'out', source: 'direct', approxAmount: '10.50', approxCurrency: 'SEK' }),
+    ])
+    expect(screen.getAllByText('≈').length).toBeGreaterThan(0)
+  })
+
+  it('renders no "≈" on a confirmed x402 row with book-time convertedAmount', () => {
+    renderTable([
+      tx({
+        direction: 'out',
+        source: 'x402',
+        agentName: 'Research assistant',
+        convertedAmount: '10.50',
+        convertedCurrency: 'SEK',
+        approxAmount: null,
+      }),
+    ])
+    expect(screen.queryByText('≈')).not.toBeInTheDocument()
+    // The plain book-time figure renders in the preference currency (sv-SE
+    // separates the suffix with an NBSP; the sign rides in front — matched
+    // on normalized text, as the dashboard's own tests do).
+    expect(
+      screen.getAllByText((_, element) =>
+        (element?.textContent ?? '').replace(/\u00a0/g, ' ').replace(/^[-+]/, '') === '10,50 kr',
+      ).length,
+    ).toBeGreaterThan(0)
+  })
+
+  it('renders an em dash — never 0 — for an unpriced row', () => {
+    renderTable([tx({ direction: 'out', source: 'direct', approxAmount: null })])
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0)
+  })
+})
+
+describe('transactionFiat (#3811)', () => {
+  it('prefers book-time convertedAmount, plain', () => {
+    expect(
+      transactionFiat({
+        convertedAmount: '134.5000',
+        convertedCurrency: 'SEK',
+        approxAmount: '99.00',
+        approxCurrency: 'USD',
+      }),
+    ).toEqual({ amount: 134.5, currency: 'SEK', approx: false })
+  })
+
+  it('falls back to the serve-time approxAmount with the ≈ mark', () => {
+    expect(
+      transactionFiat({ convertedAmount: null, convertedCurrency: undefined, approxAmount: '12.25', approxCurrency: 'USD' }),
+    ).toEqual({ amount: 12.25, currency: 'USD', approx: true })
+  })
+
+  it('prices an unknown valuation as null — never 0', () => {
+    expect(transactionFiat({ convertedAmount: null, approxAmount: null })).toEqual({
+      amount: null,
+      currency: 'SEK',
+      approx: true,
+    })
   })
 })

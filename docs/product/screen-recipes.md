@@ -507,7 +507,12 @@ Structure:
 4. Empty state with the next useful action.
 
 Money and risk clarity:
-- Each row should show amount, token, direction/status, and whether it ran automatically or was declined by the agent rules.
+- Each row shows the user's currency (through `<Amount>`'s currency mode —
+  `≈` for serve-time figures, an em dash when unpriced), direction/status,
+  and whether it ran automatically or was declined by the agent rules. List
+  rows show no addresses: the counterparty renders through
+  `counterpartyLabel`'s no-address mode, the same helper the transactions
+  page feeds (#3810, #3811).
 - Technical hashes stay in detail surfaces.
 - Use a card/compact `TransactionsTable` when the agent history needs semantic
   columns, sorting, or pagination. Use `TransactionActivityRow` for a short,
@@ -553,7 +558,18 @@ Structure:
 4. Empty state inside the table that preserves the current filters.
 
 Money and risk clarity:
-- Show amount, token, status, counterparty, account, and date.
+- **List rows show the user's currency, never the token (#3805, #3811).** The
+  amount renders through `<Amount>`'s currency mode via the shared
+  `transactionFiat` helper: book-time `convertedAmount` plain, serve-time
+  `approxAmount` with `≈`, and an unknown valuation as an em dash — never 0.
+  The token amount appears only where a budget is set and in the detail
+  drawer (owner decision, #3811).
+- **List rows show no addresses (#3810, #3811).** The counterparty half of
+  every row — `From -> To` line included — renders through
+  `counterpartyLabel`'s no-address mode: the merchant's hostname, the source
+  title, a resolved name, "Deposit", or "New recipient". A raw address never
+  ellipsises into a list row; the detail drawer is where the full address
+  lives.
 - Use external links for details, but do not make hashes the primary labels.
 - Use `TransactionActivityRow` for short non-sortable previews such as
   Dashboard. Use card/compact `TransactionsTable` for scoped sortable histories.
@@ -584,6 +600,12 @@ Money and risk clarity:
   carries the resource hostname, so an x402 row and an ordinary agent payment
   read the same at the title and are told apart by those two surfaces.
 - Show the money path as a compact `From [wallet/counterparty] -> To [wallet/counterparty]` line instead of repeating wallet, initiator, and counterparty in a separate metadata row.
+- **The detail drawer is where users verify (#3811).** Addresses and hashes
+  render IN FULL there — never ellipsised — and every address carries the
+  one copy affordance (`CopyButton`, "Copy address"); the explorer link
+  stays beside it. The headline is the user's currency figure with the
+  token amount beside it, signless (owner decision 2026-10-09, #3811): the
+  currency figure carries the sign.
 - Keep amount in its own cell **at `md` and up**; date and the external-details
   link are separate columns or controls. Below `md` the amount column collapses
   and the amount rides under the title inside the activity cell (#2734) — its

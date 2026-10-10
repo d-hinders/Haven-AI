@@ -134,6 +134,8 @@ vi.mock('@/components/transactions/TransactionsTable', () => ({
       hash: string
       accountName?: string
       movementOverride?: ReactNode
+      approxAmount?: string | null
+      approxCurrency?: string | null
     }>
   }) => (
     <div>
@@ -142,6 +144,18 @@ vi.mock('@/components/transactions/TransactionsTable', () => ({
         <div key={tx.hash}>
           <span>{tx.accountName}</span>
           {tx.movementOverride}
+          {/* #3811: the stub mirrors the adapter's fiat contract — the
+              activity rows carry #3824's serve-time amount, `≈`-marked, or
+              an em dash when unpriced. The real rendering is covered by the
+              TransactionsTable tests. */}
+          {tx.approxAmount != null ? (
+            <span>
+              {'≈ '}
+              {tx.approxAmount} {tx.approxCurrency}
+            </span>
+          ) : (
+            <span>—</span>
+          )}
         </div>
       ))}
     </div>
@@ -725,7 +739,97 @@ describe('AgentDetailClient last-activity metadata', () => {
 
     render(<AgentDetailClient agentId="agent-1" />)
 
-    expect(screen.getAllByText('Haven wallet 0x4444…4444').length).toBeGreaterThan(0)
+    // #3811: list rows carry no addresses — the unnamed-wallet fallback is
+    // the kind, not `Haven wallet 0x4444…4444`.
+    expect(screen.getAllByText('Haven wallet').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Haven wallet 0x4444…4444')).not.toBeInTheDocument()
+  })
+
+  // #3811: the activity rows adopt the shared rules — the movement's
+  // counterparty is `counterpartyLabel`'s no-address mode (never a truncated
+  // address), and the row's fiat is #3824's serve-time `approx_amount` with
+  // "≈" — or an em dash when unpriced, never 0.
+  it('renders the activity rows without addresses and with the serve-time "≈"', () => {
+    mockUseAgentActivity.mockReturnValue({
+      activity: [
+        {
+          type: 'payment',
+          id: 'payment-1',
+          agent_id: 'agent-1',
+          agent_name: 'Research agent',
+          token: 'USDC',
+          token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          amount_raw: '10000',
+          amount: '0.01',
+          approx_amount: '0.11',
+          approx_currency: 'SEK',
+          to: '0x2222222222222222222222222222222222222222',
+          status: 'confirmed',
+          tx_hash: '0x72d03a8ff551e443c118c93c54d32260941deb613e51fcd2733cd3455e8fa1a1',
+          source: 'direct',
+          chain_id: 8453,
+          account_id: 'safe-old',
+          account_address: '0x4444444444444444444444444444444444444444',
+          account_name: 'Previous wallet',
+          explorer_url: null,
+          confirmed_at: '2026-05-08T11:49:59Z',
+          created_at: '2026-05-08T11:49:00Z',
+        },
+      ],
+      stats: null,
+      loading: false,
+    })
+
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    // No truncated address anywhere in the rows…
+    expect(screen.queryByText('0x2222…2222')).not.toBeInTheDocument()
+    // …the unresolvable counterparty reads as calm copy, and the serve-time
+    // figure carries the "≈".
+    expect(screen.getAllByText('New recipient').length).toBeGreaterThan(0)
+    expect(
+      screen.getAllByText((_, element) =>
+        (element?.textContent ?? '').replace(/\u00a0/g, ' ').trim().startsWith('≈ 0.11 SEK'),
+      ).length,
+    ).toBeGreaterThan(0)
+  })
+
+  it('renders an unpriced activity row as an em dash, never 0', () => {
+    mockUseAgentActivity.mockReturnValue({
+      activity: [
+        {
+          type: 'payment',
+          id: 'payment-1',
+          agent_id: 'agent-1',
+          agent_name: 'Research agent',
+          token: 'USDC',
+          token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          amount_raw: '10000',
+          amount: '0.01',
+          approx_amount: null,
+          approx_currency: 'SEK',
+          to: '0x2222222222222222222222222222222222222222',
+          status: 'confirmed',
+          tx_hash: '0x72d03a8ff551e443c118c93c54d32260941deb613e51fcd2733cd3455e8fa1a1',
+          source: 'x402',
+          x402_resource_url: 'https://api.example.com/data',
+          chain_id: 8453,
+          account_id: 'safe-old',
+          account_address: '0x4444444444444444444444444444444444444444',
+          account_name: 'Previous wallet',
+          explorer_url: null,
+          confirmed_at: '2026-05-08T11:49:59Z',
+          created_at: '2026-05-08T11:49:00Z',
+        },
+      ],
+      stats: null,
+      loading: false,
+    })
+
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('api.example.com').length).toBeGreaterThan(0)
   })
 
   // ── Budget-affordance routing (#1079) ──────────────────────────────────

@@ -435,7 +435,10 @@ export default function DashboardClient() {
   // and #3818 (setup guide) import. The panel renders from the last good
   // overview (or the error row when the overview failed); it never renders
   // "nothing needs attention" while the first load is still in flight.
-  const { data: budgetRemaining } = useBudgetRemaining()
+  const {
+    data: budgetRemaining,
+    loading: budgetRemainingLoading,
+  } = useBudgetRemaining()
   // ── #3813: server-saved dismissals ───────────────────────────────────────
   // `useAttentionDismissals` reads and writes them (per account / per
   // agent, permanent, every device) and owns the one-time migration of
@@ -585,6 +588,7 @@ export default function DashboardClient() {
       <AgentsSection
         overview={overview}
         budgetRemaining={budgetRemaining}
+        budgetRemainingReady={!budgetRemainingLoading}
         attentionItems={attentionItems}
         currency={currency}
         accountNames={accountNames}

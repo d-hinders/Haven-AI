@@ -33,19 +33,17 @@
  * to the caller's list heading via `headingId`. A control that vanishes
  * under the pointer must not strand focus on `body`.
  *
- * ── Layout ────────────────────────────────────────────────────────────────
+ * ── Mobile ────────────────────────────────────────────────────────────────
  *
- * The trailing slot always wraps onto its own line under the body
+ * Below `sm` the trailing slot wraps onto its own line under the body
  * (`basis-full` on the trailing wrapper, in a `flex-wrap` row) and the title
- * line-clamps to two lines instead of `Row`'s single-line truncate. An
- * attention item cut to one line is an item that cannot be judged, and the
- * inline alternative is worse than cramped: if the trailing FITS beside the
- * body at some panel width, the `min-w-0 flex-1` body collapses to a sliver
- * and the now-truncating title paints across the badge and button (#3813 —
- * removing the ✕ from the payments-failed row shrank its trailing just under
- * the wrap threshold at 1280px). So a row keeps the same title / subtitle /
- * trailing rhythm at every width; `Row`'s inline-trailing rhythm remains
- * available to callers that want it.
+ * line-clamps to two lines instead of `Row`'s single-line truncate — an
+ * attention item cut to one line at 390px is an item that cannot be judged.
+ * From `sm` up both revert to the plain `Row` rhythm.
+ *
+ * The clamp is scoped `max-sm:` rather than undone with `sm:line-clamp-none`
+ * (#3861): that utility sets `overflow: visible`, which defeats the title's
+ * `truncate`, so a long desktop title hard-clipped mid-word with no ellipsis.
  *
  * Zero items renders nothing — the caller shows the empty state. Items
  * render in the order given.
@@ -141,8 +139,8 @@ export function AttentionList({
             leadingTone={item.icon ? item.tone : undefined}
             title={item.title}
             subtitle={item.subtitle}
-            titleClassName="whitespace-normal line-clamp-2"
-            trailingClassName="w-full basis-full self-start"
+            titleClassName="max-sm:whitespace-normal max-sm:line-clamp-2"
+            trailingClassName="w-full basis-full self-start sm:w-auto sm:basis-auto sm:self-center"
             className="flex-wrap"
             trailing={
               <div className="flex items-center justify-end gap-2">

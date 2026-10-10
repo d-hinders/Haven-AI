@@ -54,6 +54,14 @@ export interface PaymentActivityItem {
   source?: string
   x402_resource_url?: string | null
   x402_merchant_address?: string | null
+  /**
+   * #3824: the token amount at today's rate in `approx_currency` (the user's
+   * `currency_preference`) — the activity rows' only fiat. Null when the
+   * token has no usable quote; never 0.
+   */
+  approx_amount?: string | null
+  /** #3824: the currency `approx_amount` is denominated in. */
+  approx_currency?: 'SEK' | 'USD' | 'EUR'
   /** #3778: the non-secret delivery pointer reported with the x402 outcome. */
   delivery_reference?: string | null
   chain_id?: number | null

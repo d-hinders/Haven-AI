@@ -1,6 +1,7 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
+import { truncate } from '@/lib/format'
 import type { AggregatedTransaction } from '@/types/transactions'
 
 vi.mock('@/hooks/useEscapeToClose', () => ({ useEscapeToClose: vi.fn() }))
@@ -159,12 +160,64 @@ describe('TransactionDetailPanel', () => {
     expect(txLink).toHaveAttribute('href', expect.stringContaining('/tx/0xhash'))
   })
 
-  it('signs the headline amount by direction', () => {
-    const { rerender } = renderPanel(tx({ direction: 'out' }))
-    expect(screen.getByText(/^-1\.00 USDC$/)).toBeInTheDocument()
-    rerender(
-      <TransactionDetailPanel transaction={tx({ direction: 'in' })} open onClose={vi.fn()} />,
+  // #3811: the drawer is where users go to verify — the address renders in
+  // FULL with the working copy affordance, and the transaction hash renders
+  // in full too (never ellipsised behind a link).
+  it('shows the full recipient address with a working copy button', async () => {
+    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const address = '0x2222222222222222222222222222222222222222'
+    renderPanel(tx({ direction: 'out', source: 'direct' }))
+
+    expect(screen.getAllByText(address).length).toBeGreaterThan(0)
+    expect(screen.queryByText(truncate(address))).not.toBeInTheDocument()
+
+    const copyButton = screen.getAllByRole('button', { name: 'Copy address' })[0]
+    fireEvent.click(copyButton)
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(address))
+  })
+
+  it('shows the transaction hash in full', () => {
+    const hash = '0x' + 'ab'.repeat(32)
+    renderPanel(tx({ hash }))
+
+    expect(screen.getAllByText(hash).length).toBeGreaterThan(0)
+    const txLink = screen.getByRole('link', { name: new RegExp(hash.slice(0, 10)) })
+    expect(txLink).toHaveAttribute('href', expect.stringContaining(`/tx/${hash}`))
+  })
+
+  it('signs the headline currency figure by direction and keeps the token amount beside it', () => {
+    const { rerender } = renderPanel(
+      tx({ direction: 'out', source: 'direct', convertedAmount: '134.50', convertedCurrency: 'SEK' }),
     )
-    expect(screen.getByText(/^\+1\.00 USDC$/)).toBeInTheDocument()
+    expect(
+      screen.getAllByText((_, element) =>
+        (element?.textContent ?? '').replace(/\u00a0/g, ' ') === '-134,50 kr',
+      ).length,
+    ).toBeGreaterThan(0)
+    // The token amount rides beside the currency figure, signless — the
+    // currency figure carries the sign (owner decision, #3811). (The section
+    // rows repeat it; both count.)
+    expect(screen.getAllByText('1.00 USDC').length).toBeGreaterThan(0)
+
+    rerender(
+      <TransactionDetailPanel
+        transaction={tx({ direction: 'in', source: 'direct', convertedAmount: '134.50', convertedCurrency: 'SEK' })}
+        open
+        onClose={vi.fn()}
+      />,
+    )
+    expect(
+      screen.getAllByText((_, element) =>
+        (element?.textContent ?? '').replace(/\u00a0/g, ' ') === '+134,50 kr',
+      ).length,
+    ).toBeGreaterThan(0)
+  })
+
+  it('renders an unknown valuation as an em dash — the token amount still shows', () => {
+    renderPanel(tx({ direction: 'out', source: 'direct' }))
+
+    expect(screen.getByText('—')).toBeInTheDocument()
+    expect(screen.getAllByText('1.00 USDC').length).toBeGreaterThan(0)
   })
 })

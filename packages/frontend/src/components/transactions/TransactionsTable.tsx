@@ -5,6 +5,7 @@ import { getExplorerUrlOrNull } from '@/lib/chains'
 import { timeAgo } from '@/lib/format'
 import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
 import {
+  transactionFiat,
   transactionInitiator,
   transactionMovement,
   transactionStatus,
@@ -346,10 +347,21 @@ export default function TransactionsTable({
           </tr>
         ) : (
           sorted.map((tx, index) => {
-            const movement = transactionMovement(tx, resolveAddress, accountNamesByAddress)
+            // #3811: the list's rows adopt the dashboard's rules — the
+            // counterparty renders through `counterpartyLabel`'s no-address
+            // mode (a raw address never surfaces in a list row), and the
+            // amount is the user's currency through `<Amount>`'s currency
+            // mode (`convertedAmount` plain, serve-time `approxAmount` with
+            // `≈`, an unknown valuation as an em dash). The token amount
+            // lives in the detail drawer, where users verify a payment
+            // (owner decision, #3811).
+            const movement = transactionMovement(tx, resolveAddress, accountNamesByAddress, {
+              noAddress: true,
+            })
             const initiator = transactionInitiator(tx)
             const lifecycleBadge = machinePaymentLifecyclePresentation(tx)
             const statusBadge = transactionStatus(tx) ?? lifecycleBadge ?? tx.statusBadge
+            const fiat = transactionFiat(tx)
 
             const selectable = Boolean(onSelect)
 
@@ -482,8 +494,9 @@ export default function TransactionsTable({
                     {showCol('amount') ? (
                       <div className={`mt-1 text-sm ${tableHideFromClass('md')}`}>
                         <Amount
-                          value={tx.valueFormatted}
-                          symbol={tx.asset}
+                          amount={fiat.amount}
+                          currency={fiat.currency}
+                          approx={fiat.approx}
                           direction={tx.direction}
                           failed={tx.isError}
                         />
@@ -528,8 +541,9 @@ export default function TransactionsTable({
                   // unconditional.
                   <td className={`${tableColumnClass('md')} w-[110px] px-4 ${padY} text-right`}>
                     <Amount
-                      value={tx.valueFormatted}
-                      symbol={tx.asset}
+                      amount={fiat.amount}
+                      currency={fiat.currency}
+                      approx={fiat.approx}
                       direction={tx.direction}
                       failed={tx.isError}
                     />

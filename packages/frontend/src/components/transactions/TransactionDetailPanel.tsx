@@ -3,6 +3,7 @@
 import { type ReactNode } from 'react'
 import { SidePanel } from '@/components/ui/SidePanel'
 import { Amount } from '@/components/haven'
+import { CopyButton } from '@haven_ai/ui/CopyButton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { AccountingBadge } from '@/components/accounting/AccountingBadge'
 import { getExplorerUrlOrNull } from '@/lib/chains'
@@ -12,6 +13,7 @@ import { parseX402Hostname } from '@/lib/transaction-labels'
 import {
   isDelegateSweep,
   settlementSchemeLabel,
+  transactionFiat,
   transactionInitiator,
   transactionStatus,
   transactionTitle,
@@ -62,9 +64,12 @@ function ExplorerLink({
 }) {
   const href = getExplorerUrlOrNull(chainId, type, value)
   // A persisted row on a chain the registry does not know: show the value, no link.
+  // `break-all` because #3811 renders addresses and hashes IN FULL here — the
+  // drawer is where users verify, so the value must be readable (wrapped) and
+  // copyable, not ellipsised.
   if (!href) {
     return (
-      <span className="v2-tabular" title={value}>
+      <span className="v2-tabular break-all" title={value}>
         {label ?? truncate(value)}
       </span>
     )
@@ -74,7 +79,7 @@ function ExplorerLink({
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="v2-tabular text-[var(--v2-brand)] underline-offset-2 hover:underline"
+      className="v2-tabular break-all text-[var(--v2-brand)] underline-offset-2 hover:underline"
       title={value}
     >
       {label ?? truncate(value)}
@@ -112,7 +117,15 @@ function AddressValue({
   return (
     <span className="inline-flex flex-col items-end gap-0.5">
       {name ? <span className="text-[var(--v2-ink)]">{name}</span> : null}
-      <ExplorerLink chainId={tx.chainId} type="address" value={address} />
+      {/* #3811: the drawer is where users go to verify, so the address
+          renders IN FULL — the copy button is the one copy affordance
+          (`CopyButton` owns the hit area, the confirmation, and the silent
+          catch); the explorer link stays beside it. The row previously
+          ellipsised the address behind the link. */}
+      <span className="inline-flex items-center gap-1">
+        <ExplorerLink chainId={tx.chainId} type="address" value={address} label={address} />
+        <CopyButton value={address} label="address" />
+      </span>
     </span>
   )
 }
@@ -151,6 +164,14 @@ export default function TransactionDetailPanel({
     />
   )
 
+  // #3811: the headline is the user's currency — book-time `convertedAmount`
+  // plain, serve-time `approxAmount` with `≈`, an unknown valuation as an em
+  // dash — and the token amount stays beside it (owner decision, #3811): the
+  // drawer is where users verify a payment, so the exact on-chain figure is
+  // on the same glance as the valuation. The currency figure carries the
+  // sign; the token amount reads signless beside it.
+  const fiat = transactionFiat(tx)
+
   return (
     <SidePanel
       open={open}
@@ -159,13 +180,17 @@ export default function TransactionDetailPanel({
       subtitle={`${tx.accountName} · ${new Date(tx.timestamp * 1000).toLocaleString()}`}
     >
       <div className="mb-5 flex items-center justify-between gap-3">
-        <Amount
-          value={tx.valueFormatted}
-          symbol={tx.asset}
-          direction={tx.direction}
-          failed={tx.isError}
-          size="lg"
-        />
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+          <Amount
+            amount={fiat.amount}
+            currency={fiat.currency}
+            approx={fiat.approx}
+            direction={tx.direction}
+            failed={tx.isError}
+            size="lg"
+          />
+          <Amount value={tx.valueFormatted} symbol={tx.asset} />
+        </div>
         <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
       </div>
 
@@ -264,7 +289,14 @@ export default function TransactionDetailPanel({
             {tx.settlementTxHash ? (
               <DetailRow
                 label="Merchant settlement (reported by the agent, verified on-chain)"
-                value={<ExplorerLink chainId={tx.chainId} type="tx" value={tx.settlementTxHash} />}
+                value={
+                  <ExplorerLink
+                    chainId={tx.chainId}
+                    type="tx"
+                    value={tx.settlementTxHash}
+                    label={tx.settlementTxHash}
+                  />
+                }
               />
             ) : (
               <DetailRow
@@ -274,11 +306,22 @@ export default function TransactionDetailPanel({
             )}
             <DetailRow
               label="Funding from your account"
-              value={<ExplorerLink chainId={tx.chainId} type="tx" value={tx.fundingTxHash ?? tx.hash} />}
+              value={
+                <ExplorerLink
+                  chainId={tx.chainId}
+                  type="tx"
+                  value={tx.fundingTxHash ?? tx.hash}
+                  label={tx.fundingTxHash ?? tx.hash}
+                />
+              }
             />
           </>
         ) : (
-          <DetailRow label="Transaction" value={<ExplorerLink chainId={tx.chainId} type="tx" value={tx.hash} />} />
+          // #3811: the hash renders in full — the drawer is where users verify.
+          <DetailRow
+            label="Transaction"
+            value={<ExplorerLink chainId={tx.chainId} type="tx" value={tx.hash} label={tx.hash} />}
+          />
         )}
         <DetailRow label="Date" value={new Date(tx.timestamp * 1000).toLocaleString()} />
       </Section>

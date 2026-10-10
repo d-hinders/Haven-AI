@@ -136,6 +136,36 @@ function usdcRunsOutUnder7Days(balanceAtomic: string, pace7dAtomic: string): boo
 }
 
 /**
+ * The agent's highest KNOWN used percent across its budgets, from #3804's
+ * reads — null when no read is known. `used_atomic: null` (unknown read)
+ * never counts, a zero budget never divides. Rule 3's ≥90% arm below and
+ * #3809's "N% used" badge both read THIS one function, so the badge and the
+ * "Needs you" item cannot disagree about whether a budget is nearly spent.
+ */
+export function agentUsedPercent(
+  agentId: string,
+  budgetRemaining: DashboardBudgetRemaining | null,
+): number | null {
+  let best: number | null = null
+  for (const entry of budgetRemaining?.budgets ?? []) {
+    if (entry.agent_id !== agentId) continue
+    if (entry.used_atomic === null) continue
+    try {
+      const budget = BigInt(entry.budget_atomic)
+      if (budget <= 0n) continue
+      const used = BigInt(entry.used_atomic)
+      // Two decimals: floor(used×10000 / budget)/100. `floor(p×100) ≥ 9000`
+      // is the same integer comparison the ≥90% rule below makes — no drift.
+      const pct = Number((used * 10_000n) / budget) / 100
+      if (best === null || pct > best) best = pct
+    } catch {
+      continue
+    }
+  }
+  return best
+}
+
+/**
  * Rule 3's ≥90% arm: any of the agent's budgets whose KNOWN read shows at
  * least 90% of the period budget spent. `used_atomic: null` (unknown read,
  * #3804) never counts, and a zero budget never reads as "reached".
@@ -144,19 +174,8 @@ function usedAtLeast90Percent(
   agentId: string,
   budgetRemaining: DashboardBudgetRemaining | null,
 ): boolean {
-  for (const entry of budgetRemaining?.budgets ?? []) {
-    if (entry.agent_id !== agentId) continue
-    if (entry.used_atomic === null) continue
-    try {
-      const budget = BigInt(entry.budget_atomic)
-      if (budget <= 0n) continue
-      const used = BigInt(entry.used_atomic)
-      if (used * 100n >= budget * 90n) return true
-    } catch {
-      continue
-    }
-  }
-  return false
+  const pct = agentUsedPercent(agentId, budgetRemaining)
+  return pct !== null && pct >= 90
 }
 
 /**

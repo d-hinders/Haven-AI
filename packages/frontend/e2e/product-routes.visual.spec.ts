@@ -354,11 +354,15 @@ const ROUTES: ProductRoute[] = [
     /** The route's own H1 — present only once the client component has data. */
     anchor: (page: Page) => page.getByRole('heading', { name: 'Dashboard', exact: true }),
     /**
-     * The Recent transactions list renders `dashboardTransaction` — the SAME
-     * fixture row `/transactions` shows (`haven-api.ts:182`,
-     * `dashboardOverview.transactions`), through `timeAgo(tx.timestamp * 1000)`
-     * in `DashboardClient.tsx`. So this route needs the literal exactly as much
-     * as `/transactions` does.
+     * The dashboard's activity list renders the grouped-activity fixture
+     * (`haven-api.ts`, `dashboardOverview.activity`) — the SAME group the
+     * /transactions row feeds (`dashboardTransaction`, #3824) — through
+     * `timeAgo(group.latestAt)` in `ActivitySection.tsx`. #3810 dropped the
+     * 5-row preview this pin used to read; the ago literal now comes from the
+     * activity row, and the single-match property still holds because the
+     * fixture carries exactly one group (its latestAt IS the transaction's
+     * timestamp). So this route needs the literal exactly as much as
+     * /transactions does.
      *
      * Recorded because the first draft of this file asserted the opposite —
      * "the recent-transactions list is empty, so there is no literal to pin" —
@@ -366,7 +370,7 @@ const ROUTES: ProductRoute[] = [
      * against the fixture. The freeze was applied either way, so the baseline
      * was already deterministic; what was missing was the DETECTION, which is
      * the whole point of pinning a literal rather than trusting the freeze.
-     * Re-measured before fixing: `/dashboard` renders exactly one match for
+     * Re-measured on #3810: `/dashboard` still renders exactly one match for
      * `/\d+(m|h|d|mo|y) ago/`, and it is `3mo ago`.
      */
     frozenRelativeTime: '3mo ago',

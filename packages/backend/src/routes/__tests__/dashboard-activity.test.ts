@@ -94,6 +94,20 @@ let seq = 0
  * A unix-seconds timestamp guaranteed inside the user-local day
  * `dayOffsetBack` days before today IN `tz` — robust at any wall-clock time
  * (a fixed `now - N h` offset can straddle midnight).
+ *
+ * Offset 0 keeps "now" itself: the only instant of the current local day
+ * guaranteed not to sit in the future, and the route's 7-day windows are
+ * computed forward from now, so a future-dated seed would drop out of a
+ * `?tz=UTC` query run before local noon.
+ *
+ * Past days land in the FIRST hour of the target local day. Hour-stepping
+ * back from "now" stops at the latest hour of that day at or before now,
+ * which when the suite runs shortly after local midnight is ~23:00 the
+ * previous day — barely an hour behind "now" on the UTC clock, so the two
+ * seeds could share a UTC day and collapse the `?tz=UTC` cross-check (the
+ * #3824 midnight-split flake). The first hour of a past local day is a
+ * minimum of 23h behind any "now" inside the following local day, so the
+ * two seeds can never share a UTC day.
  */
 function tsInLocalDay(tz: string, dayOffsetBack: number): number {
   const dayKey = (ms: number) =>
@@ -105,7 +119,8 @@ function tsInLocalDay(tz: string, dayOffsetBack: number): number {
     while (dayKey(ms) === target) ms -= 3_600_000
     target = dayKey(ms)
   }
-  while (dayKey(ms) !== target) ms -= 3_600_000
+  if (dayOffsetBack === 0) return Math.floor(ms / 1000)
+  while (dayKey(ms - 3_600_000) === target) ms -= 3_600_000
   return Math.floor(ms / 1000)
 }
 
@@ -315,8 +330,6 @@ describeDb('#3824 — grouped activity + serve-time approx amounts on the wire',
     expect(activity[0].approxCurrency).toBe('SEK')
     expect(activity[0].convertedAmount).toBeUndefined()
     expect(activity[0].countIsFloor).toBeUndefined()
-    // The deprecated 5-row preview is untouched on the same response.
-    expect((body.transactions as unknown[]).length).toBe(5)
   })
 
   it('the same payments split across the user-local midnight return two groups, newest first', async () => {
@@ -344,8 +357,10 @@ describeDb('#3824 — grouped activity + serve-time approx amounts on the wire',
     expect(new Date(activity[0].latestAt as string).getTime()).toBeGreaterThan(
       new Date(activity[1].latestAt as string).getTime(),
     )
-    // The same day split in UTC proves the bucketing is the REQUESTED zone,
-    // not the server's: 00:30 Stockholm is the previous UTC day.
+    // The same seeds grouped in UTC also split 10+10: "today" is now itself
+    // and "yesterday" sits in the first hour of the previous local day, a
+    // minimum of 23h apart on the UTC clock, so they can never share a UTC
+    // day — whatever the wall clock when the suite runs.
     const utcBody = (await getOverview('?tz=UTC')).body
     const utcActivity = utcBody.activity as Array<Record<string, unknown>>
     expect(utcActivity).toHaveLength(2)

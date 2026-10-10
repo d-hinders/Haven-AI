@@ -777,6 +777,30 @@ longest supported value (`13 000,50 kr`) fits without truncation, and the
 tiles stack. The figure still carries no colour in any state — the card
 tile's contract, at a smaller scale.
 
+### Money panel (#3807)
+
+The dashboard's top section is `dashboard/MoneyPanel.tsx`, built from four
+registered pieces: `PageHeader` (the heading carries the templated 7-day
+summary sentence from `lib/dashboard-summary.ts` — fixed templates over the
+overview's own figures, never model-written, naming at most two agents and
+one merchant and describing budget stops neutrally), the anchor-surface
+balance hero (the same raised tinted card the hero always used), the
+§ AreaChart sparkline fed from `spend.balance_by_day` (absent days are
+gaps; under 3 measured days the flat placeholder draws), and three
+§ StatTile inline tiles (payments, distinct merchants, stopped by budget)
+under a 30-day spend total. That total — and the per-agent split above the
+tiles — renders through § Amount: currency mode with `approx` from the
+wire's `spend` windows, so a total that includes rows priced at today's
+rate carries the `≈` and a booked total does not. The four KPI tiles and
+their `metrics.*` wire fields are gone with this panel: agent counts live
+in the agents section (#3809), the spend total is the analytics page's own
+#3803 net figure, and "Successful transactions" counted receives, so it
+has no honest successor. When every linked account is a test account
+(`spend.scope === 'testnet'`, #3803 owner decision 3) the balance carries
+a quiet "Test network" label rather than a silently mislabelled total,
+and the hero's change line reads "since yesterday" — the diff is against
+the yesterday snapshot.
+
 ### Buttons
 
 **`Button` has four variants, and that is the whole set — but read the next sentence before
@@ -1651,6 +1675,26 @@ Use `components/transactions/TransactionsTable.tsx` for full transaction history
 - Empty state renders inside the table with the correct column span.
 
 Use `TransactionActivityRow` for compact dashboard, account detail, or agent detail previews.
+
+**Merchant-first titles (#3810).** The dashboard's activity list reads
+`counterpartyLabel` in `lib/transaction-presentation.tsx` with the opt-in
+`noAddress` mode, so a raw address never titles a row there: the merchant's
+site for x402, the receipt/contact name the backend resolved, "Deposit" for
+inbound, "New recipient" when nothing resolves, "Agent payment" when an x402
+row carries no resource URL, and "Returned from <agent>" for sweeps. The
+subtitle is the agent's name; "From My account" appears only when the user
+has more than one account. The shared screens (`TransactionsTable`,
+`TransactionDetailPanel`) pass no mode and keep the truncated address until
+#3811 — the two supports on the same helper must not drift apart silently,
+which is what the characterization tests in
+`lib/__tests__/transaction-presentation.test.tsx` pin. Two row props exist for
+the grouped dashboard shape: `countLabel` renders the muted ×N beside the
+title (×N+ when the count is a floor over a truncated window — a count is
+never presented as exact when it is not), and `fiat` switches the amount to
+`Amount`'s currency mode (book-time plain, serve-time `≈`, unknown valuation
+an em dash). Rows group under user-local day headings ("Today" /
+"Yesterday" / a short date); the server buckets the groups per day (#3824),
+the client only names the bucket.
 
 A collapsing table like this one has to **fit** at mobile widths, not scroll: the `overflow-x-auto` wrapper the `Table` primitive recommends for dense admin tables is mutually exclusive with `Table.Head sticky`, because `overflow-x: auto` forces the computed `overflow-y` to `auto` and the wrapper then becomes the sticky scroll ancestor. When such a table overflows, the cause is usually a `truncate`d cell — `truncate` is `white-space: nowrap`, and an auto-layout column can never be narrower than its min-content, so the untruncated text widens the table instead of ellipsising. Put `max-w-0` on the one flexible cell. Both findings, with their measured numbers, live in `components/ui/Table.tsx`'s docstring ([#1772](https://github.com/d-hinders/Haven-AI/issues/1772)).
 

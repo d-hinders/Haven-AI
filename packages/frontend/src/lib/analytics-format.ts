@@ -1,5 +1,9 @@
 import { timeAgo, truncate, isValidAddress, currencyLocale } from '@/lib/format'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
+// #3844: the instant voice is the budget caption helper's (#3806) — the same
+// three-distance phrasing a budget meter's "refills …" line uses, so a period
+// end can no longer be rendered in a private date dialect.
+import { formatNextEvent } from '@/lib/budget-caption'
 import type { AnalyticsDelegationBudget } from '@/types/analytics'
 
 /**
@@ -104,14 +108,26 @@ export function budgetUsedPercent(usedAtomic: string, budgetAtomic: string): num
 }
 
 /**
- * "14 Sep" for a budget period end. The year is off the caption on purpose:
- * a delegation period is short by nature (hours to weeks), so a year would
- * read as a period years away. The element carrying this also sets `title` to
- * the full local timestamp, so a reader who needs the date precisely can have
- * it without the table carrying it.
+ * When a budget's period ends, phrased by the caption helper's one instant
+ * voice (#3806, routed here in #3844): "in 45m" under 24 h away, "Thu 14:02"
+ * under 7 days, otherwise day and short month ("11 Jul") — the voice this
+ * formatter used to roll itself, now the helper's ≥ 7-day band. The year is
+ * off the far band on purpose: a delegation period is short by nature (hours
+ * to weeks), so a year would read as a period years away.
+ *
+ * `nowMs` is a required parameter — nothing here reads `Date.now()` (#1995)
+ * — and `timeZone` is the caption helper's: an explicit zone where a test or
+ * a frozen-clock capture needs one, the runtime's zone when omitted (a live
+ * render). The period end itself is the read's `period_end` — a boundary of
+ * `start_date + k × period` via `currentPeriodBounds` in `@haven_ai/core`,
+ * which the backend already computed; this formatter re-derives nothing.
+ *
+ * The element carrying this also sets `title` to the full local timestamp,
+ * so a reader who needs the date precisely can have it without the table
+ * carrying it.
  */
-export function formatBudgetResetDate(iso: string): string {
-  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' }).format(new Date(iso))
+export function formatBudgetResetDate(iso: string, nowMs: number, timeZone?: string): string {
+  return formatNextEvent(new Date(iso).getTime(), nowMs, timeZone)
 }
 
 /**
@@ -217,8 +233,9 @@ export function merchantLabel(label: string): { value: string; title?: string } 
 
 /**
  * The day label the balance chart and the merchants table print: "11 Jul",
- * the same `en-GB` day+short-month voice `formatBudgetResetDate` already uses,
- * so one page does not hold two dialects of a date. Takes the endpoint's
+ * the caption helper's ≥ 7-day band voice (`formatNextEvent`, `en-GB` day +
+ * short month) with a fixed UTC zone, so one page does not hold two dialects
+ * of a date. Takes the endpoint's
  * `YYYY-MM-DD` bucket string; `isValidDateString`-style validation is not
  * performed because the endpoint owns the format and the parity fixtures
  * prove it, and an unparseable date renders as its own raw string rather than

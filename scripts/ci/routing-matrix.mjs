@@ -527,6 +527,26 @@ export const ROUTING_MATRIX = [
     why: 'The ratchet’s self-test, same reason as dep-lint’s.',
   },
   {
+    files: ['scripts/ci/check-stale-client-compat.mjs'],
+    expect: ['code', 'mcp_server'],
+    kind: CONTRACT,
+    why:
+      'The hosted tool-contract compat guard (#3817). It reads packages/mcp-server\'s committed ' +
+      'tools-list snapshot and next-arguments corpus and compares them against origin/main, and ' +
+      'only mcp_server_checks runs it — as an ADVISORY job-summary report that exits 0 either ' +
+      'way. Before its manifest entry a PR touching only the guard routed nowhere, so a change ' +
+      'that weakened the check never re-ran it: the gated-guard shape #1626 closes.',
+  },
+  {
+    files: ['scripts/ci/check-stale-client-compat.test.mjs'],
+    expect: ['code', 'mcp_server'],
+    kind: CONTRACT,
+    why:
+      'The guard\'s self-test, registered beside it (#1626): mcp_server_checks runs it as a real ' +
+      'gate next to the advisory step, so the logic that decides what counts as ' +
+      'reconnect-required cannot be weakened in the same PR that keeps the report silent.',
+  },
+  {
     files: ['scripts/generate-api-types.mjs'],
     expect: ['code', 'backend'],
     kind: CONTRACT,

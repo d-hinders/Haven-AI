@@ -10,6 +10,7 @@ vi.mock('@/lib/api', () => ({
 }))
 
 import { useDashboardOverview } from '@/hooks/useDashboardOverview'
+import { browserTimeZone } from '@/lib/analytics-range'
 import type { DashboardOverviewResponse } from '@/types/dashboard'
 
 function overview(id: string): DashboardOverviewResponse {
@@ -22,20 +23,13 @@ function overview(id: string): DashboardOverviewResponse {
       usdPercent: 0,
       eurPercent: 0,
     },
-    metrics: {
-      connectedAgents: 0,
-      monthlyAgentSpendUsd: 0,
-      monthlyAgentSpendEur: 0,
-      successfulTransactions: 0,
-      activeAccounts: 0,
-    },
+    // #3807: the metrics block is gone with the KPI tiles.
     actionableApprovals: 0,
     pendingApprovals: 0,
     onboardingProgress: { hasFirstAgentPayment: false },
     agents: [],
     agentCount: { active: 0, paused: 0, pending_approval: 0 },
     accounts: [],
-    spotRates: {},
     spend: {
       scope: 'mainnet',
       d7: {
@@ -58,24 +52,9 @@ function overview(id: string): DashboardOverviewResponse {
       failedIntents7d: 0,
       balance_by_day: [],
     },
-    transactions: [{
-      hash: id,
-      type: 'native',
-      from: '0x1111111111111111111111111111111111111111',
-      to: '0x2222222222222222222222222222222222222222',
-      value: '1',
-      valueFormatted: '1',
-      asset: 'ETH',
-      decimals: 18,
-      direction: 'out',
-      timestamp: 1778240999,
-      blockNumber: 45725826,
-      isError: false,
-      chainId: 8453,
-      accountId: 'safe-1',
-      accountAddress: '0x1111111111111111111111111111111111111111',
-      accountName: 'Base wallet',
-    }],
+    // #3858: the 5-row transactions preview is off the wire; `spotRates` keyed
+    // by `id` is the per-overview marker the stale-swap assertions read.
+    spotRates: { [id]: 1 },
   }
 }
 
@@ -84,7 +63,7 @@ describe('useDashboardOverview', () => {
     mockApiGet.mockReset()
   })
 
-  it('uses canonical overview transactions and ignores stale overview data', async () => {
+  it('uses canonical overview data and ignores stale overview data', async () => {
     let resolveFirst!: (value: DashboardOverviewResponse) => void
     let resolveSecond!: (value: DashboardOverviewResponse) => void
     const firstOverview = overview('0xold')
@@ -104,15 +83,21 @@ describe('useDashboardOverview', () => {
       resolveSecond(secondOverview)
       await Promise.resolve()
     })
-    expect(result.current.data?.transactions[0]?.hash).toBe('0xnew')
+    expect(result.current.data?.spotRates['0xnew']).toBe(1)
 
     await act(async () => {
       resolveFirst(firstOverview)
       await Promise.resolve()
     })
-    expect(result.current.data?.transactions[0]?.hash).toBe('0xnew')
+    expect(result.current.data?.spotRates['0xnew']).toBe(1)
     expect(mockApiGet).toHaveBeenCalledTimes(2)
-    expect(mockApiGet).toHaveBeenCalledWith('/dashboard/overview')
+    // #3810: the request names the browser's IANA zone so the activity groups
+    // bucket on the user's local days — omitted entirely when the runtime
+    // cannot resolve one (the server's UTC default takes over).
+    const zone = browserTimeZone()
+    expect(mockApiGet).toHaveBeenCalledWith(
+      zone ? `/dashboard/overview?tz=${encodeURIComponent(zone)}` : '/dashboard/overview',
+    )
   })
 })
 
@@ -133,13 +118,13 @@ describe('useDashboardOverview visible-only polling (#2732)', () => {
       await Promise.resolve()
     })
     expect(result.current.loading).toBe(false)
-    expect(result.current.data?.transactions[0]?.hash).toBe('0xgood')
+    expect(result.current.data?.spotRates['0xgood']).toBe(1)
 
     mockApiGet.mockResolvedValueOnce(overview('0xnew'))
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000)
     })
-    expect(result.current.data?.transactions[0]?.hash).toBe('0xnew')
+    expect(result.current.data?.spotRates['0xnew']).toBe(1)
     expect(result.current.loading).toBe(false)
     expect(result.current.error).toBeNull()
   })
@@ -155,7 +140,7 @@ describe('useDashboardOverview visible-only polling (#2732)', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000)
     })
-    expect(result.current.data?.transactions[0]?.hash).toBe('0xgood')
+    expect(result.current.data?.spotRates['0xgood']).toBe(1)
     expect(result.current.error).toBeNull()
     expect(result.current.loading).toBe(false)
   })

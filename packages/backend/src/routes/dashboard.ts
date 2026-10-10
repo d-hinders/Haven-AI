@@ -14,10 +14,8 @@ import {
   listPendingAgentSetupStatuses,
   listReceivedSubBudgetsForAgents,
   listRefusalBucketsByAgent,
-  sumMonthlyPaymentSpend,
   type DashboardAllowanceRow,
   type DashboardSpendGroupRow,
-  type MonthlySpendRow,
   type RefusalBucketRow,
 } from '../infra/repositories/dashboard.js'
 import { listBalanceByDayForUser, listReceiptMerchantNamesForUser } from '../infra/repositories/analytics.js'
@@ -25,7 +23,6 @@ import { listContactsForUser } from '../infra/repositories/contacts.js'
 import { getTokenPrice } from '../infra/prices.js'
 import { currentPeriodBounds } from '../infra/chain/delegation-budget-reader.js'
 import { deriveDelegationAllowances, deriveDelegationBudgets } from '../rails/delegation-budget-view.js'
-import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
 import {
   combineBalanceFreshness,
   fetchPortfolioForAccount,
@@ -43,8 +40,6 @@ import {
   mergeX402Transactions,
   resolveTransactionCurrency,
 } from '../modules/transactions/index.js'
-
-const TRANSACTION_PREVIEW_LIMIT = 5
 
 // ── #3803: the 7/30-day spend block ──────────────────────────────────────────
 
@@ -156,50 +151,6 @@ function computePercentChange(current: number, previous: number): number {
   return ((current - previous) / previous) * 100
 }
 
-async function accumulateMonthlySpend(
-  rows: MonthlySpendRow[],
-): Promise<{ usd: number; eur: number; sek: number }> {
-  let usd = 0
-  let eur = 0
-  let sek = 0
-
-  for (const row of rows) {
-    usd += Number(row.usd_sum ?? '0')
-    eur += Number(row.eur_sum ?? '0')
-    sek += Number(row.sek_sum ?? '0')
-
-    // Two INDEPENDENT re-price buckets. `getFiatValuesForTokenAmount` prices
-    // the token amount into all three currencies, but each bucket may only
-    // land its own currency: `sek_sum` already holds every row's booked
-    // `sek_value`, and pricing SEK from the USD/EUR bucket's read is the
-    // double-count the round-2 review measured (21 vs 10.5) — migration 090
-    // backfills rows whose usd/eur are NULL, so the USD/EUR predicate
-    // collects rows SEK has already priced. The buckets' predicates agree
-    // per row shape (#3195): NULL, or zero-booked beside a real amount,
-    // collects into BOTH buckets; a priced row into neither.
-    const fallbackAmount = Number(row.fallback_amount ?? '0')
-    if (fallbackAmount > 0) {
-      const fallback = await getFiatValuesForTokenAmount(
-        row.token_symbol,
-        fallbackAmount.toString(),
-      )
-      usd += fallback.usd ?? 0
-      eur += fallback.eur ?? 0
-    }
-
-    const fallbackAmountSek = Number(row.fallback_amount_sek ?? '0')
-    if (fallbackAmountSek > 0) {
-      const sekFallback = await getFiatValuesForTokenAmount(
-        row.token_symbol,
-        fallbackAmountSek.toString(),
-      )
-      sek += sekFallback.sek ?? 0
-    }
-  }
-
-  return { usd, eur, sek }
-}
-
 export default async function dashboardRoutes(
   app: FastifyInstance,
 ): Promise<void> {
@@ -232,8 +183,6 @@ export default async function dashboardRoutes(
     // #2055: structurally zero — the approval queue died with the
     // AllowanceModule rail; both wire fields survive for compatibility.
     const actionableApprovals = 0
-
-    const activeAgents = agents.filter((agent) => agent.status === 'active')
 
     // Delegation-rail agents: the live budget is the active delegation set
     // (#1090). Legacy-rail agents get no allowance entries — the Safe rail is
@@ -515,12 +464,6 @@ export default async function dashboardRoutes(
     const changeAvailable = Boolean(yesterdaySnapshot)
     const sekChangeAvailable = changeAvailable && yesterdaySnapshot?.total_sek != null
     const previousSek = Number(yesterdaySnapshot?.total_sek ?? '0')
-    const paymentSpendRows = await sumMonthlyPaymentSpend(sub)
-    const paymentSpend = await accumulateMonthlySpend(paymentSpendRows)
-
-    const monthlySpendUsd = paymentSpend.usd
-    const monthlySpendEur = paymentSpend.eur
-    const monthlySpendSek = paymentSpend.sek
 
     const mergedTransactions: EnrichedTransaction[] = []
     // #3824: a capped explorer read makes every count the groups serve a
@@ -587,8 +530,6 @@ export default async function dashboardRoutes(
       // serve-time pricing in the SAME currency.
       currency,
     )
-
-    const successfulTransactions = dedupedTransactions.filter((tx) => !tx.isError).length
 
     // #3824: the grouped activity rows — server-side over the SAME feed the
     // preview slices, so the counts are not bounded by any client window.
@@ -659,14 +600,6 @@ export default async function dashboardRoutes(
         // stale or unavailable; absent on a clean read.
         ...(balancesDegraded ? { balancesFreshness: balancesDegraded } : {}),
       },
-      metrics: {
-        connectedAgents: activeAgents.length,
-        monthlyAgentSpendUsd: monthlySpendUsd,
-        monthlyAgentSpendEur: monthlySpendEur,
-        monthlyAgentSpendSek: monthlySpendSek,
-        successfulTransactions,
-        activeAccounts: accounts.length,
-      },
       actionableApprovals,
       pendingApprovals: actionableApprovals,
       onboardingProgress: {
@@ -698,11 +631,12 @@ export default async function dashboardRoutes(
           accountName: agent.account_name,
           accountChainId: agent.account_chain_id,
           // Deprecated with #3807's tile removal; still emitted (the frontend
-          // reads it with `?? 0` today).
+          // reads it with `?? 0` today). `resetPeriodMin` left the wire in
+          // #3807 — the reset label it fed was removed with the KPI tiles,
+          // and #3809's budget-caption rows replace this subtitle.
           allowances: (allowancesByAgent.get(agent.id) ?? []).map((allowance) => ({
             tokenSymbol: allowance.token_symbol,
             allowanceAmount: allowance.allowance_amount,
-            resetPeriodMin: allowance.reset_period_min,
           })),
           // #3803: every budget with its identity and live window. The 6-row
           // preview cap moved to the client; the expired-row predicate is
@@ -783,43 +717,10 @@ export default async function dashboardRoutes(
         balance_by_day: balanceByDay,
       },
       // #3824: up to 8 grouped-activity rows over the last 7 user-local days,
-      // newest first, grouped server-side over the feed above. The 5-row
-      // preview below stays on the wire unchanged until #3810 retires it.
+      // newest first, grouped server-side over the feed above.
+      // #3858: the former 5-row `transactions` preview is gone — nothing has
+      // read it since #3810 (the dashboard renders `activity`).
       activity,
-      transactions: enrichedTransactions.slice(0, TRANSACTION_PREVIEW_LIMIT).map((tx) =>
-        ({
-          hash: tx.hash,
-          type: tx.type,
-          from: tx.from,
-          to: tx.to,
-          value: tx.value,
-          valueFormatted: tx.valueFormatted,
-          asset: tx.asset,
-          decimals: tx.decimals,
-          direction: tx.direction,
-          timestamp: tx.timestamp,
-          // #3132: the preview carries the same synthesized x402 rows as the
-          // feed, so the marked fallback must reach it too (no `scope`: the
-          // preview is not a list query).
-          timestampSource: tx.timestampSource,
-          confirmedAt: tx.confirmedAt,
-          blockNumber: tx.blockNumber,
-          isError: tx.isError,
-          tokenAddress: tx.tokenAddress,
-          tokenSymbol: tx.tokenSymbol,
-          chainId: tx.chainId,
-          accountId: tx.accountId,
-          accountAddress: tx.accountAddress,
-          accountName: tx.accountName,
-          agentId: tx.agentId,
-          agentName: tx.agentName,
-          source: tx.source,
-          x402ResourceUrl: tx.x402ResourceUrl,
-          x402MerchantAddress: tx.x402MerchantAddress,
-          // #3778: the non-secret delivery pointer, when one was reported.
-          deliveryReference: tx.deliveryReference ?? null,
-        }),
-      ),
     }
   })
 }

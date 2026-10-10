@@ -3399,7 +3399,7 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** Aggregated dashboard overview: totals, day change, metrics, previews. */
+        /** Aggregated dashboard overview: totals, day change, spend windows, previews. */
         get: operations["getDashboardOverview"];
         put?: never;
         post?: never;
@@ -5836,7 +5836,7 @@ export type components = {
             /** @description Failure or skip reason; on a pushed row, a non-fatal note (#498). Null when clean. */
             error: string | null;
         };
-        /** @description Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe/account scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields (since #3132 it does carry the base-shape `timestampSource` / `confirmedAt`). Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why. */
+        /** @description Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe/account scope. Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why. */
         Transaction: {
             hash: string;
             /** @enum {string} */
@@ -6063,8 +6063,6 @@ export type components = {
             tokenSymbol: string;
             /** @description HUMAN-DECIMAL token amount — whole token units, NOT the atomic integer (25 USDC is "25.00", a zero budget is "0"). Projected from the agent's active delegation by rails/delegation-budget-view.ts via formatTokenValue(budget_atomic, decimals), whose output is always "0" or <integer>.<2–6 fraction digits> — so this pattern REJECTS an atomic value such as "500" (#2408). "0" is the one value both shapes share. Do not BigInt() this value: it is the shape that made #2283 a production bug. To compare it against an atomic price, scale it by the token's decimals first (#2295). */
             allowanceAmount: string;
-            /** @deprecated */
-            resetPeriodMin: number;
         };
         DashboardAgentPreview: {
             /** Format: uuid */
@@ -6230,38 +6228,6 @@ export type components = {
                 /** @description Present only when at least one of the totals' balance reads failed (#3295): stale with the oldest served as-of time, or unavailable when some token has no known value. Absent on a clean read. */
                 balancesFreshness?: components["schemas"]["BalanceFreshness"];
             };
-            metrics: {
-                /**
-                 * @deprecated
-                 * @description Agents with status 'active' only. Deprecated (#3803): superseded by agentCount — removed with its tile in #3807.
-                 */
-                connectedAgents: number;
-                /**
-                 * @deprecated
-                 * @description Deprecated (#3803): superseded by spend.d30 — removed with its tile in #3807.
-                 */
-                monthlyAgentSpendUsd: number;
-                /**
-                 * @deprecated
-                 * @description Deprecated (#3803): superseded by spend.d30 — removed with its tile in #3807.
-                 */
-                monthlyAgentSpendEur: number;
-                /**
-                 * @deprecated
-                 * @description Deprecated (#3803): superseded by spend.d30 — removed with its tile in #3807.
-                 */
-                monthlyAgentSpendSek?: number;
-                /**
-                 * @deprecated
-                 * @description Deprecated (#3803): removed with its tile in #3807.
-                 */
-                successfulTransactions: number;
-                /**
-                 * @deprecated
-                 * @description All linked Safes, regardless of activity. Deprecated (#3803): superseded by accounts — removed with its tile in #3807.
-                 */
-                activeAccounts: number;
-            };
             /** @description Always 0 since #2055 — the approval queue died with the Safe rail and its table is dropped; the field survives for wire compatibility. */
             actionableApprovals: number;
             /** @description Duplicate of actionableApprovals; always 0 since #2055, kept for compatibility. */
@@ -6273,8 +6239,6 @@ export type components = {
             agents: components["schemas"]["DashboardAgentPreview"][];
             /** @description Grouped activity rows, newest first. Every count is a FLOOR (`countIsFloor`) when the explorer window was truncated. */
             activity?: components["schemas"]["DashboardActivityGroup"][];
-            /** @description At most 5. Payment-enrichment fields (paymentId, paymentFlowStatus, amountSek, …) are never populated in this projection. */
-            transactions: components["schemas"]["Transaction"][];
             /** @description #3803 — the overview’s agents[] by status, so tiles do not derive counts from a client-side slice. */
             agentCount: {
                 active: number;

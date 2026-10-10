@@ -90,7 +90,7 @@ test.describe('currency preference renders SEK (#3127 finding 8)', () => {
   })
 
   for (const vp of VIEWPORTS) {
-    test(`/dashboard — the SEK hero, its change line, and the spend tile (${vp.name})`, async ({ page }) => {
+    test(`/dashboard — the SEK hero, its change line, and the spending block (${vp.name})`, async ({ page }) => {
       await page.setViewportSize({ width: vp.width, height: vp.height })
       await page.goto('/dashboard')
       const main = page.locator('#main-content')
@@ -107,10 +107,22 @@ test.describe('currency preference renders SEK (#3127 finding 8)', () => {
       // percent renders in sv-SE through Intl (#3195 round-2 finding b):
       // decimal comma, NBSP before `%` — getByText normalizes it, so the
       // needle is plain-space; the exact bytes are pinned on the formatter.
-      await expect(main.getByText('+30,00 kr (+0,20 %) today')).toHaveCount(1)
+      // #3807: the line reads "since yesterday" — the diff is against the
+      // yesterday snapshot, not a same-day one.
+      await expect(main.getByText('+30,00 kr (+0,20 %) since yesterday')).toHaveCount(1)
       await expect(main.getByText('Across all linked Haven accounts.')).toHaveCount(0)
-      // The "Monthly agent spend" tile reads the SEK metric.
-      await expect(main.getByText('133,00 kr')).toHaveCount(1)
+      // #3807: the "Monthly agent spend" tile is gone. The templated 7-day
+      // summary names the fixture's dominant agent beside its share of the
+      // week (Research agent's 80,70 of 119,46 kr is ≥ 40 %), and the 30-day
+      // spending block reads the same #3803 net definition — `≈` because the
+      // fixture's d30 window re-prices NULL-booked rows at today's rate.
+      await expect(
+        main.getByText(
+          'Research agent spent 80,70 kr of 119,46 kr in the last 7 days; Watcher agent spent the rest.',
+        ),
+      ).toHaveCount(1)
+      await expect(main.getByText('Spending, last 30 days')).toHaveCount(1)
+      await expect(main.getByText('517,66 kr')).toHaveCount(1)
       // The frozen clock is in effect — the transactions row renders its
       // literal, so the baseline cannot drift on a calendar boundary.
       await expect(main.getByText('3mo ago', { exact: true }).first()).toBeVisible()

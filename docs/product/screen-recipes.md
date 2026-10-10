@@ -515,6 +515,15 @@ Money and risk clarity:
   rejected`, or similar human event copy, not a raw recipient address.
 - Put recipient, source, and links in row metadata or detail actions.
 
+**The dashboard's activity list is grouped and merchant-first (#3810).** The
+preview renders `GET /dashboard/overview`'s `activity` groups — one row per
+group under user-local day headings, at most eight rows over the last seven
+days. The title is the counterparty through `counterpartyLabel`'s no-address
+mode (merchant site, receipt name, "Deposit", "New recipient" — never a
+truncated address); the subtitle is the agent's name; a group of N renders
+"×N" ("×N+" when the count is a floor). The 5-row `transactions` preview is
+removed from the wire (#3858) — no dashboard surface reads it.
+
 ## Policy Violation
 
 Use when an agent request is declined because it exceeds rules. There is no

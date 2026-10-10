@@ -262,16 +262,10 @@ export const dashboardOverview = {
     sekAmount: 30,
     sekPercent: 0.2,
   },
-  metrics: {
-    connectedAgents: 1,
-    monthlyAgentSpendUsd: 12.5,
-    monthlyAgentSpendEur: 11.38,
-    // #3127 (finding 8): the "Monthly agent spend" tile reads
-    // `monthlyAgentSpendSek ?? 0` under the served default.
-    monthlyAgentSpendSek: 133,
-    successfulTransactions: 3,
-    activeAccounts: 1,
-  },
+  // #3807: the metrics block is gone with the four KPI tiles — the SEK
+  // spend figure the old "Monthly agent spend" tile read now lives in
+  // `spend.d30.net.sek` (the same #3803 net definition the analytics page
+  // uses), and the visual spec pins it there.
   // #2120: 0, matching `routes/dashboard.ts:84`, which hardcodes both to 0 —
   // the approval queue died with the AllowanceModule rail and its table is
   // dropped (#2055). A seeded 1 fabricated a count no backend can emit. The
@@ -285,8 +279,11 @@ export const dashboardOverview = {
   },
   // #3803: the agentCount tiles read this — every preview agent is counted,
   // by status, including the pending ones the old LIMIT 6 preview dropped.
+  // #3809: the three listed agents are 1 active, 1 paused, 1 pending — the
+  // total must agree with `agents` or the section's "View all N agents"
+  // footer would promise an agent the list does not carry.
   agentCount: {
-    active: 2,
+    active: 1,
     paused: 1,
     pending_approval: 1,
   },
@@ -378,6 +375,11 @@ export const dashboardOverview = {
       // #3803: the full budget view beside the frozen mirror above —
       // identity, raw budget, and the LIVE window the client renders as
       // "resets in …". Two agents carry budgets with MIXED periods.
+      // #3809: the windows are pinned to the VISUAL HARNESS's frozen clock
+      // (FROZEN_NOW 2026-09-01T12:00Z in product-routes.visual.spec.ts) — a
+      // live budget renders its meter "in each budget's own period", so the
+      // dates must be around THAT instant, not the day the fixture was
+      // written, or the baseline photographs not-started rows.
       budgets: [
         {
           id: '9d1f4c0a-0000-4000-8000-000000000001',
@@ -388,9 +390,9 @@ export const dashboardOverview = {
           decimals: 6,
           budgetAtomic: '250000000',
           periodSeconds: 86_400,
-          startDate: '2026-10-08T10:00:00.000Z',
-          expiresAt: '2027-10-08T10:00:00.000Z',
-          periodEnd: '2026-10-10T10:00:00.000Z',
+          startDate: '2026-08-20T10:00:00.000Z',
+          expiresAt: '2027-08-20T10:00:00.000Z',
+          periodEnd: '2026-09-02T10:00:00.000Z',
         },
       ],
       receivedSubBudgets: [],
@@ -436,10 +438,11 @@ export const dashboardOverview = {
           decimals: 6,
           budgetAtomic: '50000000',
           // Mixed periods: a WEEKLY budget beside the daily one above.
+          // #3809: window dates pinned around the frozen clock (see above).
           periodSeconds: 604_800,
-          startDate: '2026-10-05T10:00:00.000Z',
-          expiresAt: '2027-10-05T10:00:00.000Z',
-          periodEnd: '2026-10-12T10:00:00.000Z',
+          startDate: '2026-08-27T10:00:00.000Z',
+          expiresAt: '2027-08-27T10:00:00.000Z',
+          periodEnd: '2026-09-03T10:00:00.000Z',
         },
       ],
       receivedSubBudgets: [
@@ -503,7 +506,8 @@ export const dashboardOverview = {
       },
     },
   ],
-  transactions: [dashboardTransaction],
+  // #3858: the former 5-row `transactions` preview is gone from the wire —
+  // the dashboard reads the grouped-activity rows below.
   // #3824: the grouped-activity rows the redesigned dashboard renders. One
   // group: the fixture's one confirmed x402 payment, keyed agent + token +
   // merchant + local day + outcome. approx (serve-time) rather than
@@ -533,30 +537,50 @@ export const dashboardOverview = {
 
 /**
  * `GET /dashboard/budget-remaining` (#3804) — the cached, display-only
- * budget-remaining read. Two rows: one KNOWN (fromChain, amounts populated,
- * a sub-budget attribution line) and one UNKNOWN (`remaining_from_chain:
- * false`, `remaining_atomic`/`used_atomic`/`read_at` null — never "0 left",
- * never the full budget). The screenshot harness and any spec seeding the
+ * budget-remaining read. THREE rows: two KNOWN (fromChain, amounts
+ * populated, a sub-budget attribution line) wired to the overview fixture's
+ * OWN delegation hashes (#3809 — the agents section meters the overview's
+ * budgets through these reads, so the harness photographs a real meter on
+ * both budgeted agents: the daily one at 92%, the weekly paused one at 40%)
+ * and one UNKNOWN (`remaining_from_chain: false`, `remaining_atomic`/
+ * `used_atomic`/`read_at` null — never "0 left", never the full budget).
+ * Read/period instants sit around the visual harness's frozen clock
+ * (2026-09-01T12:00Z). The screenshot harness and any spec seeding the
  * dashboard spread this same shape.
  */
 export const dashboardBudgetRemaining = {
   budgets: [
     {
       agent_id: testAgent.id,
-      chain_id: 84532,
-      delegation_hash: `0x${'c'.repeat(64)}`,
-      token_address: '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
+      chain_id: 8453,
+      delegation_hash: `0x${'11'.repeat(32)}`,
+      token_address: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
       token_symbol: 'USDC',
       token_decimals: 6,
-      budget_atomic: '3000000',
-      read_at: '2026-10-09T13:00:00.000Z',
-      period_end: '2026-10-10T00:00:00.000Z',
-      remaining_atomic: '1500000',
+      budget_atomic: '250000000',
+      read_at: '2026-09-01T11:00:00.000Z',
+      period_end: '2026-09-02T10:00:00.000Z',
+      remaining_atomic: '20000000',
       remaining_from_chain: true,
-      used_atomic: '1500000',
+      used_atomic: '230000000',
       sub_budget_spend: [
         { agent_id: '33333333-3333-4333-8333-333333333333', spent_atomic: '250000' },
       ],
+    },
+    {
+      agent_id: 'agent-e2e-watcher',
+      chain_id: 8453,
+      delegation_hash: `0x${'22'.repeat(32)}`,
+      token_address: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
+      token_symbol: 'USDC',
+      token_decimals: 6,
+      budget_atomic: '50000000',
+      read_at: '2026-09-01T11:00:00.000Z',
+      period_end: '2026-09-03T10:00:00.000Z',
+      remaining_atomic: '30000000',
+      remaining_from_chain: true,
+      used_atomic: '20000000',
+      sub_budget_spend: [],
     },
     {
       agent_id: '44444444-4444-4444-8444-444444444444',
@@ -1787,16 +1811,15 @@ export async function waitForDrawerOpen(page: Page) {
 export async function openReceiveFundsModal(page: Page) {
   await page.goto('/dashboard')
   await dismissMobileSidebar(page)
-  // The hero CTA renders as "Receive" for funded accounts and "Receive funds"
-  // only after the dashboard knows the account is unfunded. The onboarding
-  // checklist can also expose "Receive funds", so pin to the first exact match
-  // in DOM order.
+  // #3807: the hero CTA reads "Deposit address" everywhere (funded and
+  // unfunded alike), as do the onboarding checklist and the account-detail
+  // button. Pin to the first exact match in DOM order.
   await page
-    .getByRole('button', { name: /^Receive( funds)?$/ })
+    .getByRole('button', { name: /^Deposit address$/ })
     .first()
     .click()
 
-  const modal = page.getByRole('dialog', { name: 'Receive funds' })
+  const modal = page.getByRole('dialog', { name: 'Deposit address' })
   await modal.waitFor({ state: 'visible' })
   return modal
 }

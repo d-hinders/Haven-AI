@@ -8697,7 +8697,7 @@ export const openapiSpec = {
       get: {
         tags: ['Dashboard'],
         operationId: 'getDashboardOverview',
-        summary: 'Aggregated dashboard overview: totals, day change, metrics, previews.',
+        summary: 'Aggregated dashboard overview: totals, day change, spend windows, previews.',
         security: [{ DashboardJwt: [] }],
         // #3824: the grouped activity rows bucket by the USER's local day, so
         // the caller names the zone. Shape is a plain string; "a zone Intl
@@ -12825,7 +12825,7 @@ export const openapiSpec = {
         additionalProperties: false,
       },
       Transaction: {
-        description: 'Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe/account scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields (since #3132 it does carry the base-shape `timestampSource` / `confirmedAt`). Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why.',
+        description: 'Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe/account scope. Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why.',
         type: 'object',
         required: [...transactionBaseRequired, 'chainId', 'accountId', 'accountAddress', 'accountName'],
         properties: {
@@ -13031,7 +13031,7 @@ export const openapiSpec = {
       },
       DashboardAgentAllowance: {
         type: 'object',
-        required: ['tokenSymbol', 'allowanceAmount', 'resetPeriodMin'],
+        required: ['tokenSymbol', 'allowanceAmount'],
         properties: {
           tokenSymbol: { type: 'string' },
           // #2400: was a bare `{ type: 'string' }`, while the identical value
@@ -13050,9 +13050,6 @@ export const openapiSpec = {
           // round trip. The literal STAYS, now as belt-and-braces rather than
           // as the sole guard.
           allowanceAmount: allowanceHumanAmount,
-          // #3803: deprecated with the allowances array (see
-          // DashboardAgentPreview) — removed in #3807.
-          resetPeriodMin: { type: 'integer', deprecated: true },
         },
         additionalProperties: false,
       },
@@ -13066,9 +13063,9 @@ export const openapiSpec = {
           accountId: { type: ['string', 'null'], format: 'uuid' },
           accountName: { type: ['string', 'null'] },
           accountChainId: { type: ['integer', 'null'] },
-          // #3807 removes the allowances tile together with this field; until
-          // then it stays (the frontend reads it, and `resetPeriodMin` is
-          // deprecated with it).
+          // #3807 removed the allowances tile; this field stays because the
+          // frontend still reads it (and `resetPeriodMin` is deprecated with
+          // it).
           allowances: { type: 'array', items: { $ref: '#/components/schemas/DashboardAgentAllowance' }, deprecated: true },
           // #3803: the connection setup's own status, carried ONLY for a
           // `pending_approval` agent — the client shows "Remove" instead of
@@ -13210,7 +13207,7 @@ export const openapiSpec = {
       },
       DashboardOverviewResponse: {
         type: 'object',
-        required: ['totals', 'change', 'metrics', 'actionableApprovals', 'pendingApprovals', 'onboardingProgress', 'agents', 'transactions', 'agentCount', 'accounts', 'spotRates', 'spend'],
+        required: ['totals', 'change', 'actionableApprovals', 'pendingApprovals', 'onboardingProgress', 'agents', 'agentCount', 'accounts', 'spotRates', 'spend'],
         properties: {
           totals: {
             type: 'object',
@@ -13243,19 +13240,11 @@ export const openapiSpec = {
             },
             additionalProperties: false,
           },
-          metrics: {
-            type: 'object',
-            required: ['connectedAgents', 'monthlyAgentSpendUsd', 'monthlyAgentSpendEur', 'successfulTransactions', 'activeAccounts'],
-            properties: {
-              connectedAgents: { type: 'integer', deprecated: true, description: "Agents with status 'active' only. Deprecated (#3803): superseded by agentCount — removed with its tile in #3807." },
-              monthlyAgentSpendUsd: { type: 'number', deprecated: true, description: 'Deprecated (#3803): superseded by spend.d30 — removed with its tile in #3807.' },
-              monthlyAgentSpendEur: { type: 'number', deprecated: true, description: 'Deprecated (#3803): superseded by spend.d30 — removed with its tile in #3807.' },
-              monthlyAgentSpendSek: { type: 'number', deprecated: true, description: 'Deprecated (#3803): superseded by spend.d30 — removed with its tile in #3807.' },
-              successfulTransactions: { type: 'integer', deprecated: true, description: 'Deprecated (#3803): removed with its tile in #3807.' },
-              activeAccounts: { type: 'integer', deprecated: true, description: 'All linked Safes, regardless of activity. Deprecated (#3803): superseded by accounts — removed with its tile in #3807.' },
-            },
-            additionalProperties: false,
-          },
+          // #3807: the metrics block is gone with the four KPI tiles —
+          // agentCount.active supersedes connectedAgents, spend.d30 supersedes
+          // the monthly agent spend triple, and the "Successful transactions"
+          // all-time count counted receives too (the issue's Method note) to
+          // survive as a figure. activeAccounts was every linked Safe.
           actionableApprovals: { type: 'integer', description: 'Always 0 since #2055 — the approval queue died with the Safe rail and its table is dropped; the field survives for wire compatibility.' },
           pendingApprovals: { type: 'integer', description: 'Duplicate of actionableApprovals; always 0 since #2055, kept for compatibility.' },
           onboardingProgress: {
@@ -13267,8 +13256,8 @@ export const openapiSpec = {
           agents: { type: 'array', items: { $ref: '#/components/schemas/DashboardAgentPreview' }, description: '#3803: EVERY delegation-rail agent in active/paused/pending_approval — the former at-most-6 cap moved to the client (#3809).' },
           // #3824: grouped dashboard activity — up to 8 groups over the last 7
           // user-local days (bucketed by the `tz` query parameter, default
-          // UTC), newest first, grouped server-side in memory over the same
-          // feed the `transactions` preview slices. Optional so pre-#3824
+          // UTC), newest first, grouped server-side in memory over the
+          // transaction feed. Optional so pre-#3824
           // consumers read the same response unchanged.
           activity: {
             type: 'array',
@@ -13276,7 +13265,8 @@ export const openapiSpec = {
             items: { $ref: '#/components/schemas/DashboardActivityGroup' },
             description: 'Grouped activity rows, newest first. Every count is a FLOOR (`countIsFloor`) when the explorer window was truncated.',
           },
-          transactions: { type: 'array', items: { $ref: '#/components/schemas/Transaction' }, description: 'At most 5. Payment-enrichment fields (paymentId, paymentFlowStatus, amountSek, …) are never populated in this projection.' },
+          // #3858: the former 5-row `transactions` preview is removed from the
+          // wire — no dashboard surface has read it since #3810.
           agentCount: {
             type: 'object',
             description: '#3803 — the overview\u2019s agents[] by status, so tiles do not derive counts from a client-side slice.',

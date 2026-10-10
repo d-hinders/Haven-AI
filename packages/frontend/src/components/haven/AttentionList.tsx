@@ -22,8 +22,11 @@
  * ── Dismiss ───────────────────────────────────────────────────────────────
  *
  * A button labelled `Dismiss: {title}` (icon-only, so the label is the whole
- * accessible name) calling `onDismiss(id)`. The list holds NO dismissal
- * state — #3813 owns persistence; this component renders what it is given.
+ * accessible name) calling `onDismiss(id)` — rendered only when the item is
+ * `dismissible` (default true; #3813's dashboard passes the rules layer's
+ * `DISMISSIBLE_ATTENTION_KINDS`, so only "No backup signer" and "Needs
+ * setup" offer the control). The list holds NO dismissal state — #3813 owns
+ * persistence; this component renders what it is given.
  * What it does own is where focus lands: after a dismiss it moves to the
  * next item's dismiss button (the caller re-renders without the dismissed
  * item, and this effect runs after that render), or — when the list emptied —
@@ -54,6 +57,16 @@
  * (`basis-full` on the trailing wrapper, in a `flex-wrap` row). From `sm` up
  * it sits beside the body.
  *
+ * ── A readable body, even beside a wide trailing ───────────────────────────
+ *
+ * The body column carries a readable minimum (`min-w-[10rem]`). A row whose
+ * trailing is wider than the space left beside the body — a non-dismissible
+ * row's badge + action, which no longer shares the line with a dismiss X
+ * (#3813) — would otherwise squeeze `Row`'s `min-w-0` body down to a
+ * one-glyph column with the title and subtitle ellipsized to nothing. With
+ * the minimum in place the row's `flex-wrap` drops the trailing below the
+ * body instead — the same place it already sits below `sm`.
+ *
  * Zero items renders nothing — the caller shows the empty state. Items
  * render in the order given.
  */
@@ -79,6 +92,15 @@ export interface AttentionListItem {
   badge?: string
   /** Leading icon; renders in the row's tone-tinted circle. `aria-hidden` there — see the tone rule above. */
   icon?: LucideIcon
+  /**
+   * Whether the row offers the dismiss control (#3813). Defaults to TRUE —
+   * every item was dismissible when this list shipped (#3805) — so callers
+   * that do not say get today's behaviour. The dashboard passes
+   * `DISMISSIBLE_ATTENTION_KINDS.has(item.kind)`: "No backup signer" and
+   * "Needs setup" offer the control, low balance / budget reached /
+   * payments failed do not (those are states to resolve, not preferences).
+   */
+  dismissible?: boolean
   /** The caller's action — a button or link, rendered in `trailing` before the dismiss. */
   action?: ReactNode
 }
@@ -163,6 +185,7 @@ export function AttentionList({
             subtitle={item.subtitle}
             titleClassName={`${CLAMP} ${TITLE_TOP}`}
             subtitleClassName={CLAMP}
+            bodyClassName="min-w-[10rem]"
             trailingClassName="w-full basis-full self-start sm:w-auto sm:basis-auto"
             className={`flex-wrap ${ROW_TOP}`}
             trailing={
@@ -173,16 +196,18 @@ export function AttentionList({
                   <span className="sr-only">{TONE_TEXT[item.tone]}</span>
                 )}
                 {item.action}
-                <button
-                  type="button"
-                  data-attention-dismiss
-                  data-testid={`attention-dismiss-${item.id}`}
-                  aria-label={`Dismiss: ${item.title}`}
-                  onClick={() => handleDismiss(index)}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-                >
-                  <Icon icon={X} className="h-4 w-4" />
-                </button>
+                {item.dismissible !== false && (
+                  <button
+                    type="button"
+                    data-attention-dismiss
+                    data-testid={`attention-dismiss-${item.id}`}
+                    aria-label={`Dismiss: ${item.title}`}
+                    onClick={() => handleDismiss(index)}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+                  >
+                    <Icon icon={X} className="h-4 w-4" />
+                  </button>
+                )}
               </div>
             }
           />

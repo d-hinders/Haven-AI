@@ -431,16 +431,53 @@ describe('computeAttentionItems — backup signer (rule 5)', () => {
     expect(backup[1].title).toContain('Ops')
   })
 
-  it('stays hidden while the legacy global dismissal is set', () => {
+  it('stays hidden for an id in dismissedIds — the server-saved list (#3813)', () => {
     const items = computeAttentionItems({
       overview: makeOverview(
         [],
         [{ accountId: 'acct-1', needs_backup_recommendation: true, funded: true }],
       ),
       budgetRemaining: EMPTY_BUDGETS,
-      backupDismissed: true,
+      dismissedIds: new Set(['no-backup:acct-1']),
     })
     expect(items.filter((item) => item.kind === 'no-backup')).toHaveLength(0)
+  })
+
+  it('a backup dismissal for one account does not hide another account\u2019s item', () => {
+    const items = computeAttentionItems({
+      overview: makeOverview(
+        [],
+        [
+          { accountId: 'acct-1', needs_backup_recommendation: true, funded: true },
+          { accountId: 'acct-2', needs_backup_recommendation: true, funded: true },
+        ],
+      ),
+      budgetRemaining: EMPTY_BUDGETS,
+      // The dismissal belongs to the account it was made on: acct-2 still
+      // raises its own item (and an account funded after the dismissal
+      // elsewhere would too — its id is simply not in the set).
+      dismissedIds: new Set(['no-backup:acct-1']),
+    })
+    expect(items.filter((item) => item.kind === 'no-backup').map((item) => item.accountId)).toEqual([
+      'acct-2',
+    ])
+  })
+
+  it('a needs-setup dismissal hides only that agent\u2019s item', () => {
+    const items = computeAttentionItems({
+      overview: makeOverview(
+        [
+          { id: 'a1', name: 'Scout', status: 'active', accountId: 'acct-1' },
+          { id: 'a2', name: 'Runner', status: 'active', accountId: 'acct-1' },
+        ],
+        [],
+      ),
+      budgetRemaining: EMPTY_BUDGETS,
+      dismissedIds: new Set(['needs-setup:a1']),
+    })
+    expect(items.filter((item) => item.kind === 'needs-setup').map((item) => item.id)).toEqual([
+      'needs-setup:a2',
+    ])
   })
 })
 

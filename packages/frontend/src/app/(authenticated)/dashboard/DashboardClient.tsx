@@ -40,6 +40,7 @@ import { AgentsSection } from './AgentsSection'
 import { resolveDefaultAccount } from '@/lib/default-account'
 import { computeAttentionItems, type AttentionRuleItem } from '@/lib/dashboard-attention'
 import { useBudgetRemaining } from '@/hooks/useBudgetRemaining'
+import { useAttentionDismissals } from '@/hooks/useAttentionDismissals'
 import NeedsYou from './NeedsYou'
 
 // #3127 (finding 6): the per-currency formatting itself lives in ONE place —
@@ -438,13 +439,17 @@ export default function DashboardClient() {
     data: budgetRemaining,
     loading: budgetRemainingLoading,
   } = useBudgetRemaining()
-  const [backupDismissed, setBackupDismissed] = useState(false)
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    setBackupDismissed(window.localStorage.getItem('haven.recovery-nudge.dismissed') === '1')
-  }, [])
+  // ── #3813: server-saved dismissals ───────────────────────────────────────
+  // `useAttentionDismissals` reads and writes them (per account / per
+  // agent, permanent, every device) and owns the one-time migration of
+  // RecoveryNudge's legacy global key. The hook receives the accounts only
+  // once the overview has loaded — a failed load never decides what was
+  // "funded at that moment".
+  const { dismissedIds: serverDismissedIds, dismiss: dismissOnServer } = useAttentionDismissals({
+    accounts: overview?.accounts,
+  })
   // Session-only dismissal for everything the rules will re-fire on the next
-  // load anyway — until #3813, only the backup item's dismissal persists.
+  // load anyway — the non-dismissible kinds have no server persistence.
   const [sessionDismissedIds, setSessionDismissedIds] = useState<Set<string>>(() => new Set())
   const accountNames = useMemo(
     () => Object.fromEntries(accounts.map((account) => [account.id, account.name])),
@@ -452,16 +457,18 @@ export default function DashboardClient() {
   )
   const attentionItems = useMemo(() => {
     if (!overview) return []
+    const dismissedIds = new Set(sessionDismissedIds)
+    for (const id of serverDismissedIds) dismissedIds.add(id)
     return computeAttentionItems({
       overview,
       budgetRemaining: budgetRemaining ?? null,
       accountNames,
-      backupDismissed,
+      dismissedIds,
       // While the setup guide's "Add USDC" step is open, the guide IS the
       // funds ask — the low-balance and zero-USDC items step aside (#3808).
       holdBackLowBalance: showOnboardingGuide && !hasFunds,
-    }).filter((item) => !sessionDismissedIds.has(item.id))
-  }, [overview, budgetRemaining, accountNames, backupDismissed, showOnboardingGuide, hasFunds, sessionDismissedIds])
+    })
+  }, [overview, budgetRemaining, accountNames, serverDismissedIds, sessionDismissedIds, showOnboardingGuide, hasFunds])
 
   const attentionVisible = Boolean(overview) || Boolean(overviewError)
 
@@ -527,16 +534,11 @@ export default function DashboardClient() {
   }
 
   function handleDismissAttention(item: AttentionRuleItem) {
-    if (item.kind === 'no-backup') {
-      // The legacy global key: one flag hides the backup item for every
-      // account, exactly as RecoveryNudge's "Got it" did. #3813 replaces
-      // this with per-item persistence.
-      setBackupDismissed(true)
-      try {
-        window.localStorage.setItem('haven.recovery-nudge.dismissed', '1')
-      } catch {
-        /* private mode — the state flip above still hides it this session */
-      }
+    if (item.kind === 'no-backup' || item.kind === 'needs-setup') {
+      // #3813: server-saved — permanent, per account / per agent, visible
+      // from every device of the same user. The hook is optimistic: the
+      // item hides now, and comes back on a failed write.
+      dismissOnServer(item)
       return
     }
     setSessionDismissedIds((previous) => new Set(previous).add(item.id))

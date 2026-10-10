@@ -90,6 +90,55 @@ describe('NeedsYou', () => {
     )
   })
 
+  // ── #3813: only "No backup signer" and "Needs setup" offer the dismiss ────
+  // Owner decisions 2026-10-09: "Low balance", "Budget reached" and
+  // "Payments failed" offer NO dismiss — those are states the user resolves,
+  // not preferences. The control is asserted ABSENT, not just inert.
+  it('offers the dismiss control on the two dismissible kinds', () => {
+    render(
+      <NeedsYou
+        items={[
+          item({ id: 'needs-setup:a1', kind: 'needs-setup', tone: 'brand', title: 'Scout has no budget' }),
+          item({ id: 'no-backup:acct-1', kind: 'no-backup', title: 'Main has one way to approve payments' }),
+        ]}
+        hasOverviewError={false}
+        onRetry={() => {}}
+        onDismiss={() => {}}
+      />,
+    )
+    expect(screen.getByTestId('attention-dismiss-needs-setup:a1')).toBeInTheDocument()
+    expect(screen.getByTestId('attention-dismiss-no-backup:acct-1')).toBeInTheDocument()
+  })
+
+  it('offers no dismiss control on low balance, budget reached and payments failed', () => {
+    render(
+      <NeedsYou
+        items={[
+          item({ id: 'low-balance:acct-1', kind: 'low-balance', tone: 'warning', badge: 'Low balance', title: "Main's USDC is running low", accountId: 'acct-1' }),
+          item({ id: 'budget-reached:a1', kind: 'budget-reached', title: 'Scout reached its budget' }),
+          item({ id: 'budget-scope:a1', kind: 'budget-scope', title: 'Scout tried to pay outside its rules' }),
+          item({ id: 'zero-usdc:acct-1', kind: 'zero-usdc', tone: 'warning', badge: 'Low balance', title: 'Main is out of USDC', accountId: 'acct-1' }),
+          item({ id: 'haven-paused', kind: 'haven-paused', title: 'Haven paused sponsored payments' }),
+          item({ id: 'payments-failed:a1', kind: 'payments-failed', tone: 'danger', badge: 'Failed', title: 'Scout had a failed payment' }),
+        ]}
+        hasOverviewError={false}
+        onRetry={() => {}}
+        onDismiss={() => {}}
+      />,
+    )
+    for (const id of [
+      'low-balance:acct-1',
+      'budget-reached:a1',
+      'budget-scope:a1',
+      'zero-usdc:acct-1',
+      'haven-paused',
+      'payments-failed:a1',
+    ]) {
+      expect(screen.queryByTestId(`attention-dismiss-${id}`)).not.toBeInTheDocument()
+    }
+    expect(document.querySelector('[data-attention-dismiss]')).toBeNull()
+  })
+
   it('routes the Add-funds action through the account callback', async () => {
     const user = userEvent.setup()
     const onAddFunds = vi.fn()

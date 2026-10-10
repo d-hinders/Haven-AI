@@ -63,6 +63,19 @@ describe('Row — titleClassName / subtitleClassName / trailingClassName (#3805,
     expect((plain.container.firstElementChild as HTMLElement).className).not.toContain('self-start')
   })
 
+  it('lands the body override on the body column, not the row root (#3813)', () => {
+    // AttentionList gives the body a readable minimum so a wide trailing
+    // (badge + action, with no dismiss X to push it below) wraps instead of
+    // squeezing the title and subtitle to a one-glyph column; classes aimed
+    // at the row root would land on the flex container and do nothing.
+    const { container } = render(<Row title="Agent" subtitle="Detail" bodyClassName="min-w-[10rem]" />)
+    const title = container.querySelector('p')!
+    const body = title.parentElement as HTMLElement
+    expect(body.className).toContain('min-w-[10rem]')
+    expect(body.className).toContain('min-w-0')
+    expect((container.firstElementChild as HTMLElement).className).not.toContain('min-w-[10rem]')
+  })
+
   it('renders byte-identical classes when no override is given', () => {
     const { container } = render(<Row title="Agent" subtitle="Detail" trailing={<span>x</span>} />)
     const [title, subtitle] = Array.from(container.querySelectorAll('p'))

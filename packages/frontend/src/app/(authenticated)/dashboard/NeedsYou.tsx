@@ -16,9 +16,10 @@
  *   accessible name states the count.
  * - With no items and no error, one quiet line says nothing needs attention.
  * - Dismissal is handed back to the caller (`onDismiss`) — #3813 owns
- *   persistence; the caller decides what a dismissal means (the backup
- *   items' dismissal is the legacy global key, everything else is
- *   session-only for now).
+ *   persistence: "No backup signer" (per account) and "Needs setup" (per
+ *   agent) write server-saved dismissals; everything else stays
+ *   session-only. Which kinds are dismissible comes from the rules layer
+ *   (`DISMISSIBLE_ATTENTION_KINDS`).
  *
  * Every row action is a real `Button` (never a nested link), so the list is
  * fully keyboard-operable: rows are static, and the action + dismiss
@@ -40,7 +41,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { AttentionList } from '@/components/haven/AttentionList'
 import type { AttentionListItem } from '@/components/haven/AttentionList'
-import type { AttentionRuleItem } from '@/lib/dashboard-attention'
+import { DISMISSIBLE_ATTENTION_KINDS, type AttentionRuleItem } from '@/lib/dashboard-attention'
 
 /** Items shown before the "Show N more" collapse. */
 const MAX_VISIBLE_ITEMS = 4
@@ -99,8 +100,8 @@ export default function NeedsYou({
   onRetry: () => void
   /**
    * Called with the FULL rule item (not just its id) — the caller owns what a
-   * dismissal means per kind (backup → the legacy global key; everything
-   * else → session-only until #3813).
+   * dismissal means per kind (#3813: "no-backup" → per-account server-saved
+   * dismissal, "needs-setup" → per-agent; everything else → session-only).
    */
   onDismiss: (item: AttentionRuleItem) => void
   /** Opens the Add-funds modal pre-selected to this account. */
@@ -119,6 +120,9 @@ export default function NeedsYou({
     badge: item.badge,
     icon: KIND_ICON[item.kind],
     action: itemAction(item, onAddFunds),
+    // #3813: only the owner-approved kinds offer the control — the rules
+    // layer is the one definition of which those are.
+    dismissible: DISMISSIBLE_ATTENTION_KINDS.has(item.kind),
   }))
 
   return (

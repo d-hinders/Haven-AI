@@ -1329,3 +1329,13 @@ project owner — collaborators have Viewer access, not env-var write access.
 > request-validation mode, enforced-module list, environment variable or dev
 > setup step this document describes moved. The rest of this document was not
 > re-read for it, and `last-verified` is not bumped.
+
+> **Re-verified unchanged (#3813, 2026-10-10, server-saved dismissals):** this
+> diff regenerates `packages/backend/src/openapi/route-modules.generated.ts`
+> (`npm run generate:route-modules`) for two new operations in the existing
+> `routes/user.ts` module — `GET`/`POST /user/attention-dismissals` (#3813,
+> born ENFORCED: `routes/user.ts` is already in `index.ts`'s
+> `enforcedModules`). No request-validation mode, enforced-module list,
+> environment variable or dev setup step this document describes moved. The
+> rest of this document was not re-read for it, and `last-verified` is not
+> bumped.

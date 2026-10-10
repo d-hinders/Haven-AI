@@ -9,6 +9,12 @@ import {
   updateUserName,
   updateUserWalletAddress,
 } from '../infra/repositories/users.js'
+import {
+  dismissBackupSigner,
+  dismissNeedsSetup,
+  listAttentionDismissals,
+  type AttentionDismissalKind,
+} from '../infra/repositories/attention-dismissals.js'
 import { listAccountsForUser } from '../infra/repositories/smart-accounts.js'
 import { listAccountPasskeys, passkeyEnrollmentDates } from '../infra/repositories/hybrid-signers.js'
 import { loadHybridOwnerConfig } from '../rails/hybrid-account-config.js'
@@ -183,5 +189,64 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
     if (!updated) userRowVanished()
 
     return { currency_preference: updated.currency_preference }
+  })
+
+  // ── #3813: server-saved "Needs you" dismissals ───────────────────────────
+  // The only dismissal that existed before was RecoveryNudge's
+  // browser-storage key, which came back on every new device. These two
+  // endpoints store dismissals per account on the server (owner decisions,
+  // 2026-10-09): permanent, per user, visible from every device. There is
+  // deliberately NO undismiss — "Needs you" is a nagging surface, and the
+  // underlying state still shows where it belongs: the backup
+  // recommendation on the account page, a budget-less agent on the agent
+  // page. Dismissals gate dashboard presentation only; nothing here is on
+  // the payment path.
+  const toWireDismissal = (row: {
+    id: string
+    item_kind: AttentionDismissalKind
+    account_id: string | null
+    agent_id: string | null
+    created_at: string
+  }) => ({
+    id: row.id,
+    item_kind: row.item_kind,
+    account_id: row.account_id,
+    agent_id: row.agent_id,
+    created_at: row.created_at,
+  })
+
+  // GET /user/attention-dismissals — the caller's whole dismissal list; the
+  // client maps rows to rule-item ids (`no-backup:<accountId>`,
+  // `needs-setup:<agentId>`).
+  app.get('/attention-dismissals', async (request) => {
+    const { sub } = request.user as { sub: string }
+    const dismissals = await listAttentionDismissals(sub)
+    return { dismissals: dismissals.map(toWireDismissal) }
+  })
+
+  interface AttentionDismissalBody {
+    item_kind: AttentionDismissalKind
+    account_id?: string
+    agent_id?: string
+  }
+
+  // POST /user/attention-dismissals — idempotent (a re-dismiss answers the
+  // same 201 as the first write). The kind decides which id the body must
+  // carry; the shape is the spec's, refused before the handler (#3030), and
+  // the kind/shape pairing the repository's CHECK enforces again at the
+  // table edge. A foreign or unknown account/agent is a 404, never a 403 —
+  // the route does not confirm that an id exists (the same convention as
+  // contacts).
+  app.post<{ Body: AttentionDismissalBody }>('/attention-dismissals', async (request, reply) => {
+    const { sub } = request.user as { sub: string }
+    const { item_kind, account_id, agent_id } = request.body
+
+    const dismissed =
+      item_kind === 'no-backup'
+        ? await dismissBackupSigner(sub, account_id as string)
+        : await dismissNeedsSetup(sub, agent_id as string)
+
+    if (!dismissed) return reply.code(404).send({ error: 'Not found' })
+    return reply.code(201).send(toWireDismissal(dismissed))
   })
 }

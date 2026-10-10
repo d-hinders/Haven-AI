@@ -145,4 +145,30 @@ describe('AttentionList (#3805)', () => {
     expect(container.querySelector('ul')).toBeNull()
     expect(container.textContent).toBe('')
   })
+
+  // ── #3813: the dismiss control is per item ────────────────────────────────
+  // The flag defaults to present (the #3805 contract above pins that), so
+  // callers that do not say are unchanged. A `dismissible: false` row — the
+  // dashboard's low-balance / budget-reached / payments-failed items —
+  // renders NO dismiss control at all: its state is to be resolved, not
+  // opted out of.
+  it('omits the dismiss control on a dismissible: false row, keeping the rest', () => {
+    render(
+      <AttentionList
+        items={[
+          { ...ITEMS[0], dismissible: false },
+          { ...ITEMS[1] },
+        ]}
+        onDismiss={() => {}}
+      />,
+    )
+    expect(
+      screen.queryByRole('button', { name: 'Dismiss: Travel budget reached' }),
+    ).toBeNull()
+    expect(screen.queryByTestId('attention-dismiss-budget-reached')).toBeNull()
+    // The still-dismissible row keeps its control.
+    expect(
+      screen.getByRole('button', { name: 'Dismiss: Re-approval needed' }),
+    ).toBeTruthy()
+  })
 })

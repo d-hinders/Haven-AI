@@ -836,6 +836,32 @@ export async function mockHavenApi(page: Page) {
       return
     }
 
+    // #3813: `DashboardClient` mounts `useAttentionDismissals`, which reads
+    // `GET /user/attention-dismissals` on every dashboard render. The e2e
+    // default session holds no dismissals, so every "Needs you" item renders
+    // exactly as the baselines captured it; specs that need a dismissed
+    // item seed this route explicitly. The write is accepted and echoed in
+    // the stored shape (never re-read in the same fixture run).
+    if (method === 'GET' && path === '/user/attention-dismissals') {
+      await fulfillJson(route, { dismissals: [] })
+      return
+    }
+    if (method === 'POST' && path === '/user/attention-dismissals') {
+      const body = route.request().postDataJSON() as {
+        item_kind: string
+        account_id?: string
+        agent_id?: string
+      }
+      await fulfillJson(route, {
+        id: '00000000-0000-4000-8000-000000000000',
+        item_kind: body.item_kind,
+        account_id: body.account_id ?? null,
+        agent_id: body.agent_id ?? null,
+        created_at: '2026-10-09T00:00:00.000Z',
+      })
+      return
+    }
+
     if (method === 'GET' && path === '/agents') {
       await fulfillJson(route, { agents: [testAgent] })
       return

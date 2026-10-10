@@ -115,6 +115,23 @@ last-verified: "2026-10-10"
 > since #3855. Description-only, so the stale-client check stays silent by the
 > rule above; nothing else in this document moves.
 
+> **Re-verification (#3839 follow-up via #3864, 2026-10-10, hosted
+> `haven_discover_tools` description golden regen):** #3839 (22f49edd)
+> rewrote the hosted `haven_discover_tools` description in source (adding the
+> `funding_leg_expected` selection guidance) but missed the
+> `tools-list.snapshot.json` regen, leaving `tool-contract-snapshot.test.ts`
+> red until the golden was regenerated (`npm run snapshot:regen -w
+> packages/mcp-server`) on this branch. The description delta is exactly the
+> three guidance sentences the #3839 section above already documents
+> ("funding_leg_expected is a catalog hint…", "A recipient-pinned budget can
+> pay erc7710 merchants only.", "The quote's expected_funding_leg is
+> authoritative."); tool name, schema, arguments and strict-input decision are
+> untouched, and descriptions are not a skew axis (#2330 precedent). This
+> document already described the new sentence at #3839 and does not
+> contradict it, so no rule text moves; this entry is the re-verification
+> touch, not a contract change. `last-verified` stays 2026-10-10. Nothing else
+> in this document was re-verified.
+
 > **Re-verification (#3838, 2026-10-09, wording-only `haven_pay_x402_quote`
 > description edit):** the local tool's sign-in-with-x sentence was rewritten
 > (sign in FIRST for multi-call flows; the merchant session token never

@@ -72,20 +72,35 @@ Use these recipes when designing or refactoring Haven product screens. They tran
 
 Use after the user has created a Haven account but has not finished the first useful setup path.
 
-Structure:
-1. Normal dashboard header and balance hero.
-2. True attention/error state only if it needs action now.
-3. One compact setup sequence may show the first three steps, but only the
-   current step has a primary action: `Receive funds` or `Connect agent`.
-   Later steps remain subordinate or locked.
-4. Full dashboard metrics and activity only after setup is dismissed or the
-   user has enough product activity for those sections to be meaningful.
+Structure (#3818):
+1. Normal dashboard header and money panel.
+2. The setup steps ARE the "Needs you" card while setup is in progress — titled
+   `Get started`, three numbered steps, then the rule items that still apply
+   (another agent waiting for setup, a recommended backup signer once funded)
+   below them in the same card. Never a second card beside it.
+3. Only the next step is highlighted and carries the primary action. Connecting
+   an agent stays available before funding, at secondary weight and without the
+   highlight; step 3 stays locked until an agent can pay.
+4. When all three are done, one `You're set up` line takes the steps' place until
+   dismissed (the dismissal persists per user). "Hide for now" also persists
+   across reloads, until another step completes.
+
+What completes a step — never a weaker signal:
+- Step 1: USDC on an account (any amount above zero). ETH or another token's
+  dust does not count: agents spend USDC.
+- Step 2: an agent that can pay — active or paused, with a usable budget. A
+  connected agent still waiting for budget approval does not count; the step
+  names the newest such agent with `Finish setup`.
+- Step 3: the first agent payment.
 
 Money and risk clarity:
-- For the funding step, say that Receive shows the exact Haven wallet address and network. Do not show the raw address, token list, QR code, or network detail inline on the dashboard.
-- For the first-agent step, say the user will set a budget and connect the agent.
-  Do not show budget/risk explainers or wallet summaries on the dashboard.
-- Keep the next step honest, but move explanatory detail into the Receive or Connect Agent flow.
+- The funding step's action opens `Add funds`, which shows the exact address and
+  network and carries the test-network faucet. Do not show the raw address, token
+  list, QR code, or network detail in the guide; suggest an amount ("We suggest
+  N USDC") rather than require one.
+- For the first-agent step, say the user will connect an agent and approve a
+  budget. Do not show budget/risk explainers or wallet summaries on the dashboard.
+- Keep the next step honest, but move explanatory detail into the Add funds or Connect Agent flow.
 - Avoid `import account` copy in the first-run path unless an existing-account flow is actually supported in the UI.
 
 Avoid:
@@ -95,9 +110,12 @@ Avoid:
 - Repeating wallet, network, or activity facts that are not needed for the next action.
 
 States:
-- Loading balances: do not show a false zero or premature `Connect agent` step.
-- No funds: primary action is `Receive funds`.
+- Loading the overview: do not show the guide yet — no false zero, no premature step.
+- USDC read unavailable: the guide stays; step 1 says the balance could not be read
+  and offers no funding action until it can. Never read an unknown balance as zero.
+- No funds: primary action is `Add funds`.
 - Funded with no agents: primary action is `Connect agent`.
+- An agent waiting for setup: step 2 names it with `Finish setup`.
 - Dismissed: keep the dashboard usable; other empty states should still offer the same next action.
 
 ## Agent Budget Setup

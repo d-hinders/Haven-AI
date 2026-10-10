@@ -7,11 +7,15 @@ import { Icon } from '@/components/ui/Icon'
 import type { AccountFunding } from '@/hooks/useAccountFunding'
 
 /**
+ * `available` (#3818): a step that can be done now but is not the next one —
+ * connecting an agent before funding (owner decision 2026-10-09). Not
+ * highlighted, not dimmed; its action carries secondary weight.
+ *
  * `unknown` (#3818): the USDC read is unavailable, so step 1 can say neither
  * "done" nor "add funds" — it says it could not read the balance and offers no
  * funding action until the read recovers. Never a silent "not funded".
  */
-type StepStatus = 'complete' | 'active' | 'locked' | 'unknown'
+type StepStatus = 'complete' | 'active' | 'available' | 'locked' | 'unknown'
 
 interface StepCta {
   label: string
@@ -118,7 +122,7 @@ export default function DashboardOnboardingGuide({
       ? { label: 'Finish setup', href: `/agents/${pendingAgent.id}`, secondary: activeStep !== 2 }
       : { label: 'Connect agent', onClick: onAddAgent, secondary: activeStep !== 2 }
   const step2: StepProps = {
-    status: hasSetUpAgent ? 'complete' : 'active',
+    status: hasSetUpAgent ? 'complete' : activeStep === 2 ? 'active' : 'available',
     number: 2,
     title: 'Connect your first agent',
     body: pendingAgent
@@ -142,7 +146,7 @@ export default function DashboardOnboardingGuide({
 
   return (
     <div className="v2-animate-fade-in">
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-[var(--v2-ink-2)]">Your first 3 steps</p>
         <Button variant="tertiary" size="sm" onClick={onHide}>
           Hide for now
@@ -195,9 +199,10 @@ function ChecklistRow({ status, number, title, body, completedBody, cta }: StepP
       : 'rounded-[10px]'
 
   return (
-    <li
-      className={`flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${rowClass}`}
-    >
+    // #3818: always stacked — the guide lives in the Needs you card, which is
+    // the narrow aside column on desktop, so a side-by-side action squeezed
+    // the step text into a column of single words.
+    <li data-status={status} className={`flex flex-col gap-3 px-4 py-3 ${rowClass}`}>
       <div className="flex min-w-0 items-start gap-3">
         <StatusCircle status={status} number={number} />
         <div className="min-w-0">
@@ -218,7 +223,7 @@ function ChecklistRow({ status, number, title, body, completedBody, cta }: StepP
         </div>
       </div>
       {cta ? (
-        <div className="flex-shrink-0 sm:pl-4">
+        <div className="pl-10">
           <Button
             {...(cta.href ? { href: cta.href } : { onClick: cta.onClick })}
             variant={cta.secondary ? 'ghost' : 'primary'}

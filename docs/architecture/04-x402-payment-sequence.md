@@ -423,11 +423,16 @@ make it three. It was weighed and declined, for three reasons:
 What keeps five steps affordable instead: on a multi-call merchant the agent
 signs in first (`haven_sign_siwx`, #3728 — on Bitrefill the session waives
 every micro-fee except `invoice/pay`), so a purchase pays one or two requests
-rather than five; and settlement does not hang on the report — see
-[Completing a settlement nobody reported](#completing-a-settlement-nobody-reported-2117).
+rather than five. On erc7710 a dropped report also costs nothing: the
+settlement sweep finds the payment on-chain
+([Completing a settlement nobody reported](#completing-a-settlement-nobody-reported-2117)).
+On the eip3009 bridge it does not yet. Haven never learns the EIP-3009 nonce,
+so an unreported settlement reads as "merchant likely not paid" after the
+15-minute grace window. Closing that gap is
+[#3888](https://github.com/d-hinders/Haven-AI/issues/3888).
 **Revisit** if a measured purchase on the current surface still shows agents
-dropping steps after both of those, or if counsel and a resolution-time egress
-guard are in place.
+dropping steps after these, or if counsel and a resolution-time egress guard
+are in place.
 
 ```mermaid
 sequenceDiagram

@@ -34,7 +34,7 @@ export async function insertSponsoredUserOpGas(
   input: SponsoredUserOpGasInput,
   db: Executor = pool,
 ): Promise<string | null> {
-  const res = await pool.query<{ id: string }>(
+  const res = await db.query<{ id: string }>(
     `INSERT INTO sponsored_userop_gas_events
       (payment_intent_id, agent_id, user_id, chain_id, leg, outcome, user_op_hash, tx_hash, actual_gas_used, actual_gas_cost_wei)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)

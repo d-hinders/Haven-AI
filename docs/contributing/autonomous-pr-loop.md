@@ -5,13 +5,14 @@ covers:
   - .github/CODEOWNERS
   - .github/workflows/dev-gate.yml
   - .github/workflows/pr-ownership-gate.yml
+  - scripts/ci/dev-push-health.mjs
   - .github/ISSUE_TEMPLATE/loop-task.md
   - .github/ISSUE_TEMPLATE/loop-epic.md
   - .agents/skills/ship-next/SKILL.md
   - .agents/skills/new-task/SKILL.md
   - .claude/commands/ship-next.md
   - .claude/commands/new-task.md
-last-verified: "2026-09-20"
+last-verified: "2026-10-10"
 ---
 
 # Autonomous PR loop
@@ -577,6 +578,22 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
    `non_fast_forward` twice; `required_status_checks` comes back **once** on
    `dev` (only *Haven automerge rules* sets it) and **twice** on `main` (that
    ruleset plus *Dev gate*).
+
+   **How a red push run gets noticed (#3890).** Nothing watched that run.
+   #3886 is the case: #3855's merge broke `MCP server checks` on its own push,
+   and nobody noticed for about five hours (job failed 09:47Z; #3886 filed
+   14:46Z). It surfaced only when an unrelated PR (#3885) inherited it.
+   `dev-push-health.yml` now wakes on every completed CI run on `dev` and
+   upserts one `ci-health` + `code-quality` issue, *🩺 dev is red: a push-to-dev
+   CI job is failing*, naming the red job, the commits that may have broken it
+   and the failing test. It reads **jobs**, not the run conclusion: a
+   superseded run concludes `cancelled` even when a job in it failed. The
+   `if: always()` aggregator (`Lint, Type-check & Build`) is excluded, because
+   it reads `failure` whenever a superseded run cancelled its check jobs. A red
+   job clears only when it has **run and passed** again, or when a later
+   non-cancelled run no longer contains it (renamed or removed); the issue closes
+   once none is left. A later `skipped` (a push that routes nothing to that
+   job) is not a recovery: that is how `dev` looked green while #3886 stood.
 4. **Token/app permissions:** the active GitHub integration or CLI identity needs
    **contents: write, pull_requests: write, issues: write** (issues:write lets
    the loop read epics/labelled issues and close them via `Closes #`). If

@@ -161,4 +161,33 @@ test.describe('AttentionList first-line alignment (#3880)', () => {
       }
     })
   }
+
+  // The narrow desktop Needs-you panel wraps the controls of most rows onto
+  // their own line. Aligning controls that sit BESIDE the body must not pull
+  // wrapped ones toward the text: the #3880 code review caught a `-mt-1.5`
+  // version shrinking this gap from Row's 12px to 6px on three of the four
+  // dashboard rows.
+  test('desktop: controls that wrap onto their own line keep the row gap', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.goto('/design-system')
+    const sample = page.getByTestId('ds-attention-list')
+    await expect(sample.getByTestId(/^attention-dismiss-/)).toHaveCount(4)
+    const m = await sample.evaluate((el) => {
+      const li = el.querySelector('li') as HTMLElement
+      const subtitle = li.querySelector('p.text-xs') as HTMLElement
+      const trailing = (li.querySelector('[data-attention-dismiss]') as HTMLElement).closest('div.flex-shrink-0') as HTMLElement
+      // Narrow the sample until the controls cannot sit beside the body (the
+      // dashboard panel wraps rows with an action the same way): leave room
+      // for the icon and gaps but not for the trailing slot.
+      ;(el as HTMLElement).style.width = `${Math.ceil(trailing.getBoundingClientRect().width) + 40}px`
+      const rowGap = parseFloat(getComputedStyle(trailing.parentElement as HTMLElement).rowGap)
+      return {
+        gap: trailing.getBoundingClientRect().top - subtitle.getBoundingClientRect().bottom,
+        rowGap,
+        wrapped: trailing.getBoundingClientRect().top >= subtitle.getBoundingClientRect().bottom,
+      }
+    })
+    expect(m.wrapped, 'the narrowed row wraps its controls under the body').toBe(true)
+    expect(Math.abs(m.gap - m.rowGap)).toBeLessThanOrEqual(1)
+  })
 })

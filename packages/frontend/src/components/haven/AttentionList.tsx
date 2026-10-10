@@ -84,13 +84,19 @@ export interface AttentionListItem {
 }
 
 /**
- * Centre a 32px control on the title's first line (#3880): pinned to the top
- * of the row, then raised by half the difference between 32px and the 20px
- * `text-sm` line — the circle's centre lands on the first line's centre.
- * The trailing slot repeats it from `sm` up as literal classes (Tailwind
- * only generates classes it can read whole in the source).
+ * Centre the 32px controls on the title's first line (#3880) without moving
+ * anything by a negative margin: the row gives up 6px of top padding
+ * (`pt-1.5` overrides Row's `py-3` top) and the title takes it back as a
+ * margin (`mt-1.5`), so the text sits exactly where it did. The icon and,
+ * beside the body, the trailing controls then align to the top of the row
+ * — 6px above the first line, which is half of 32px minus half of the 20px
+ * `text-sm` line, so their centres land on the line's centre. Controls that
+ * wrap onto their own line keep Row's full 12px gap: nothing pulls them up
+ * (the #3880 code review caught a `-mt-1.5` version doing exactly that to
+ * three of the four dashboard rows).
  */
-const FIRST_LINE = 'self-start -mt-1.5'
+const ROW_TOP = 'pt-1.5'
+const TITLE_TOP = 'mt-1.5'
 
 /** Two lines, then an ellipsis — see the clamp rule above. */
 const CLAMP = 'whitespace-normal line-clamp-2'
@@ -149,13 +155,13 @@ export function AttentionList({
           <Row
             leading={item.icon ? <Icon icon={item.icon} className="h-4 w-4" /> : undefined}
             leadingTone={item.icon ? item.tone : undefined}
-            leadingClassName={FIRST_LINE}
+            leadingClassName="self-start"
             title={item.title}
             subtitle={item.subtitle}
-            titleClassName={CLAMP}
+            titleClassName={`${CLAMP} ${TITLE_TOP}`}
             subtitleClassName={CLAMP}
-            trailingClassName="w-full basis-full self-start sm:w-auto sm:basis-auto sm:-mt-1.5"
-            className="flex-wrap"
+            trailingClassName="w-full basis-full self-start sm:w-auto sm:basis-auto"
+            className={`flex-wrap ${ROW_TOP}`}
             trailing={
               <div className="flex items-center justify-end gap-2">
                 {item.badge !== undefined ? (

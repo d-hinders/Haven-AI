@@ -60,6 +60,7 @@ describe('Row — titleClassName / subtitleClassName / trailingClassName (#3805,
     const plainWrapper = plain.container.querySelector('[aria-hidden="true"]') as HTMLElement
     expect(plainWrapper.className).toContain('self-start')
     expect(plainWrapper.className).toContain('h-4 w-4')
+    expect((plain.container.firstElementChild as HTMLElement).className).not.toContain('self-start')
   })
 
   it('renders byte-identical classes when no override is given', () => {

@@ -211,6 +211,9 @@ function mapCatalogEntry(entry: RawCatalogEntry): HavenCatalogEntry {
     priceAtomic: entry.price_atomic,
     asset: entry.asset,
     network: entry.network,
+    // #3839: conditional like `merchant` — absent (not null) when the backend
+    // does not send the field, so an older backend's exact shape is unchanged.
+    ...(entry.asset_transfer_methods !== undefined ? { assetTransferMethods: entry.asset_transfer_methods } : {}),
     status: entry.status,
     verifiedAt: entry.verified_at,
     source: entry.source,

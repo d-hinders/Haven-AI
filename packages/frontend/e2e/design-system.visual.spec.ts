@@ -34,8 +34,10 @@
  * it did cost real coverage — no baseline diffed primitives BELOW the shell on
  * `/design-system` until #3064 scoped one clip to the StackedBarChart showcase
  * section (the section test below, whose assertions name tick voice, partial
- * day and swatch order); everything else below the shell on that page is still
- * compared against nothing. `product-routes.visual.spec.ts`'s whole-page
+ * day and swatch order), joined later by one clip per showcase sample from
+ * #3805 (four), #3845 (NoticeRow) and #3810 (activity row);
+ * everything else below the shell on that page is still compared against
+ * nothing. `product-routes.visual.spec.ts`'s whole-page
  * `/dashboard` and `/transactions` baselines remain the only whole-page pixel
  * coverage in the suite. The scoped top-bar and sidebar clips below are what is left
  * of this spec, and they are unaffected by the removal — they were never the flaky
@@ -51,9 +53,10 @@
  * ("Updating visual baselines") for the CI-artifact flow.
  */
 import { expect, test } from '@playwright/test'
-import type { Locator } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
 import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
+import { isolateShowcaseSample } from './support/isolate-sample'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports, so the
 // screenshot evidence (#896) and this pixel gate always render the same widths.
@@ -515,14 +518,7 @@ test.describe('design-system visual regression', () => {
       await expect(partialDay).toHaveAttribute('data-day-index', '6')
       await expect(wide.getByTestId('chart-hatch-pattern')).toHaveCount(2)
 
-      await assertFitsViewport(wide, vp.height, 'the wide sample')
-
-      await expect(wide).toHaveScreenshot(`design-system-stacked-bar-chart-${vp.name}${schemeSuffix}.png`, {
-        animations: 'disabled',
-        caret: 'hide',
-        maxDiffPixels: STACKED_BAR_MAX_DIFF_PIXELS,
-        threshold: PIXEL_THRESHOLD,
-      })
+      await expectShowcaseClip(wide, vp.height, 'the wide sample', `design-system-stacked-bar-chart-${vp.name}${schemeSuffix}.png`, STACKED_BAR_MAX_DIFF_PIXELS)
     })
 
     test(`/design-system StackedBarChart narrow sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
@@ -548,14 +544,7 @@ test.describe('design-system visual regression', () => {
       await expect(partialDay).toHaveAttribute('data-day-index', '6')
       await expect(narrow.getByTestId('chart-hatch-pattern')).toHaveCount(2)
 
-      await assertFitsViewport(narrow, vp.height, 'the narrow sample')
-
-      await expect(narrow).toHaveScreenshot(`design-system-stacked-bar-chart-narrow-${vp.name}${schemeSuffix}.png`, {
-        animations: 'disabled',
-        caret: 'hide',
-        maxDiffPixels: STACKED_BAR_MAX_DIFF_PIXELS,
-        threshold: PIXEL_THRESHOLD,
-      })
+      await expectShowcaseClip(narrow, vp.height, 'the narrow sample', `design-system-stacked-bar-chart-narrow-${vp.name}${schemeSuffix}.png`, STACKED_BAR_MAX_DIFF_PIXELS)
     })
 
     test(`/design-system StackedBarChart swatch list renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
@@ -575,31 +564,26 @@ test.describe('design-system visual regression', () => {
       await expect(swatches.nth(0)).toHaveAttribute('data-series-index', '0')
       await expect(swatches.nth(1)).toHaveAttribute('data-series-index', '1')
 
-      await assertFitsViewport(swatchList, vp.height, 'the swatch list')
-
-      await expect(swatchList).toHaveScreenshot(`design-system-stacked-bar-swatch-list-${vp.name}${schemeSuffix}.png`, {
-        animations: 'disabled',
-        caret: 'hide',
-        maxDiffPixels: STACKED_BAR_MAX_DIFF_PIXELS,
-        threshold: PIXEL_THRESHOLD,
-      })
+      await expectShowcaseClip(swatchList, vp.height, 'the swatch list', `design-system-stacked-bar-swatch-list-${vp.name}${schemeSuffix}.png`, STACKED_BAR_MAX_DIFF_PIXELS)
     })
   }
 
   /**
-   * ── The #3805 showcase clips — Amount currency, AttentionList, sparkline, inline StatTile ──
+   * ── The later showcase clips — #3805's Amount currency, AttentionList, sparkline, inline StatTile; #3845's NoticeRow; #3810's activity row ──
    *
-   * The four design-system pieces the redesigned dashboard (#3801) is built
-   * from, each photographed against its own sample the way the
-   * StackedBarChart clips above are: one clip per `data-testid` sample, per
-   * viewport, per scheme — 16 baselines in all. Each clip asserts its own box
+   * The design-system pieces the redesigned dashboard (#3801) is built from,
+   * each photographed against its own sample the way the StackedBarChart
+   * clips above are: one clip per `data-testid` sample, per viewport, per
+   * scheme — six samples, 24 baselines in all. Each clip asserts its own box
    * fits the viewport (the fold guarantee above), so an edit that pushes a
    * sample past the fold fails HERE, naming the sample.
    *
-   * Placement is load-bearing and recorded in the issue: the four samples sit
-   * AFTER the AreaChart section, so none of the 12 StackedBarChart clips
-   * shifts by a pixel (#3441). A clip above this point flipping in a PR that
-   * touches none of it is a placement defect, not a paint drift.
+   * Placement no longer matters (#3441). Every showcase clip is captured
+   * through `expectShowcaseClip`, which first takes the page above the
+   * sample out of layout, so an edit above a sample cannot move its clip —
+   * the guard at the end of this file proves the helper does that. A
+   * showcase clip that flips in a PR that touches none of its sample is a
+   * defect in that isolation, not paint drift.
    */
   const SAMPLE_MAX_DIFF_PIXELS = 100
 
@@ -614,14 +598,7 @@ test.describe('design-system visual regression', () => {
 
       const sample = page.getByTestId('ds-amount-currency')
       await expect(sample).toHaveCount(1)
-      await assertFitsViewport(sample, vp.height, 'the Amount currency sample')
-
-      await expect(sample).toHaveScreenshot(`design-system-amount-currency-${vp.name}${schemeSuffix}.png`, {
-        animations: 'disabled',
-        caret: 'hide',
-        maxDiffPixels: SAMPLE_MAX_DIFF_PIXELS,
-        threshold: PIXEL_THRESHOLD,
-      })
+      await expectShowcaseClip(sample, vp.height, 'the Amount currency sample', `design-system-amount-currency-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
     })
 
     test(`/design-system AttentionList sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
@@ -637,14 +614,7 @@ test.describe('design-system visual regression', () => {
       // All four tone items rendered — a dismiss here is interaction state,
       // and this gate photographs the resting page only.
       await expect(sample.getByTestId(/^attention-dismiss-/)).toHaveCount(4)
-      await assertFitsViewport(sample, vp.height, 'the AttentionList sample')
-
-      await expect(sample).toHaveScreenshot(`design-system-attention-list-${vp.name}${schemeSuffix}.png`, {
-        animations: 'disabled',
-        caret: 'hide',
-        maxDiffPixels: SAMPLE_MAX_DIFF_PIXELS,
-        threshold: PIXEL_THRESHOLD,
-      })
+      await expectShowcaseClip(sample, vp.height, 'the AttentionList sample', `design-system-attention-list-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
     })
 
     // #3845: NoticeRow is a shared haven/ primitive whose one layout decision
@@ -661,14 +631,7 @@ test.describe('design-system visual regression', () => {
       const sample = page.getByTestId('ds-notice-row')
       await expect(sample).toHaveCount(1)
       await expect(sample.getByRole('button')).toHaveCount(2)
-      await assertFitsViewport(sample, vp.height, 'the NoticeRow sample')
-
-      await expect(sample).toHaveScreenshot(`design-system-notice-row-${vp.name}${schemeSuffix}.png`, {
-        animations: 'disabled',
-        caret: 'hide',
-        maxDiffPixels: SAMPLE_MAX_DIFF_PIXELS,
-        threshold: PIXEL_THRESHOLD,
-      })
+      await expectShowcaseClip(sample, vp.height, 'the NoticeRow sample', `design-system-notice-row-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
     })
 
     // #3810: the transaction-activity card — the dashboard's merchant-first
@@ -685,14 +648,7 @@ test.describe('design-system visual regression', () => {
 
       const sample = page.getByTestId('ds-activity-row')
       await expect(sample).toHaveCount(1)
-      await assertFitsViewport(sample, vp.height, 'the activity row sample')
-
-      await expect(sample).toHaveScreenshot(`design-system-activity-row-${vp.name}${schemeSuffix}.png`, {
-        animations: 'disabled',
-        caret: 'hide',
-        maxDiffPixels: SAMPLE_MAX_DIFF_PIXELS,
-        threshold: PIXEL_THRESHOLD,
-      })
+      await expectShowcaseClip(sample, vp.height, 'the activity row sample', `design-system-activity-row-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
     })
 
     test(`/design-system AreaChart sparkline sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
@@ -705,14 +661,7 @@ test.describe('design-system visual regression', () => {
 
       const sample = page.getByTestId('ds-area-chart-sparkline')
       await expect(sample).toHaveCount(1)
-      await assertFitsViewport(sample, vp.height, 'the AreaChart sparkline sample')
-
-      await expect(sample).toHaveScreenshot(`design-system-area-chart-sparkline-${vp.name}${schemeSuffix}.png`, {
-        animations: 'disabled',
-        caret: 'hide',
-        maxDiffPixels: SAMPLE_MAX_DIFF_PIXELS,
-        threshold: PIXEL_THRESHOLD,
-      })
+      await expectShowcaseClip(sample, vp.height, 'the AreaChart sparkline sample', `design-system-area-chart-sparkline-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
     })
 
     test(`/design-system StatTile inline sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
@@ -725,15 +674,142 @@ test.describe('design-system visual regression', () => {
 
       const sample = page.getByTestId('ds-stat-tile-inline')
       await expect(sample).toHaveCount(1)
-      await assertFitsViewport(sample, vp.height, 'the StatTile inline sample')
-
-      await expect(sample).toHaveScreenshot(`design-system-stat-tile-inline-${vp.name}${schemeSuffix}.png`, {
-        animations: 'disabled',
-        caret: 'hide',
-        maxDiffPixels: SAMPLE_MAX_DIFF_PIXELS,
-        threshold: PIXEL_THRESHOLD,
-      })
+      await expectShowcaseClip(sample, vp.height, 'the StatTile inline sample', `design-system-stat-tile-inline-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
     })
+  }
+
+  /**
+   * ── The #3441 guard: content above a showcase sample cannot move its clip ──
+   *
+   * Every clip above is captured through `expectShowcaseClip`, which always
+   * runs `isolateShowcaseSample` first — a clip test cannot skip it, and a new
+   * showcase clip must use the same wrapper. This proves the helper works:
+   * for each sample, captures with a 0.25, 0.5 and 0.75px spacer at the top
+   * of the page must be byte-identical to one without. Measured on Linux
+   * Chromium before the fix (2026-10-10), the 0.5px spacer alone moved EVERY
+   * sample at both viewports (all 18 captures changed), so this fails when
+   * the helper stops hiding the content above, and it needs no baseline: it
+   * compares the render with itself.
+   *
+   * It stands in for the issue's per-run CI sweep, light scheme only: the
+   * mechanism is layout, not paint, so the dark project re-running it would
+   * double the cost for nothing. It cannot see content the helper
+   * deliberately leaves in place — a sibling in a grid row, see
+   * `isolate-sample.ts`.
+   */
+  const ISOLATED_SAMPLES: ReadonlyArray<[string, (p: Page) => Locator]> = [
+    ['StackedBarChart wide sample', (p) => p.getByTestId(SECTION_TEST_ID).getByTestId('stacked-bar-chart').nth(0)],
+    ['StackedBarChart narrow sample', (p) => p.getByTestId(SECTION_TEST_ID).getByTestId('stacked-bar-chart').nth(1)],
+    ['StackedBarChart swatch list', (p) => p.getByTestId('ds-stacked-bar-swatch-list')],
+    ['Amount currency sample', (p) => p.getByTestId('ds-amount-currency')],
+    ['AttentionList sample', (p) => p.getByTestId('ds-attention-list')],
+    ['NoticeRow sample', (p) => p.getByTestId('ds-notice-row')],
+    ['activity row sample', (p) => p.getByTestId('ds-activity-row')],
+    ['AreaChart sparkline sample', (p) => p.getByTestId('ds-area-chart-sparkline')],
+    ['StatTile inline sample', (p) => p.getByTestId('ds-stat-tile-inline')],
+  ]
+
+  const FRACTIONAL_SPACERS_PX = [0.25, 0.5, 0.75]
+
+  /** Loads the page once for a sample, isolates it, and returns a capture-at-spacer function. */
+  async function isolatedCapturer(page: Page, get: (p: Page) => Locator): Promise<(spacerPx: number) => Promise<Buffer>> {
+    await page.goto('/design-system')
+    await page.evaluate(() => document.fonts.ready)
+    await page.waitForLoadState('networkidle')
+    // The spacer stands in for any edit above the sample: first child of the
+    // page container, before the page header. `networkidle` does not promise
+    // the header has mounted, so wait for it rather than race it.
+    await expect(page.locator('#main-content header').first()).toBeVisible()
+    await page.evaluate(() => {
+      const container = document.querySelector('#main-content header')?.parentElement
+      if (!container) throw new Error('no page container under #main-content')
+      const spacer = document.createElement('div')
+      spacer.id = 'ds-3441-spacer'
+      spacer.style.height = '0px'
+      container.insertBefore(spacer, container.firstChild)
+    })
+    const sample = get(page)
+    await expect(sample).toHaveCount(1)
+    await isolateShowcaseSample(sample)
+    return async (spacerPx: number) => {
+      // Resized in place after isolation: if isolation stopped hiding the
+      // region above, the new height would move the sample.
+      await page.evaluate((px) => {
+        const spacer = document.getElementById('ds-3441-spacer')
+        if (!spacer) throw new Error('spacer vanished')
+        spacer.style.height = `${px}px`
+      }, spacerPx)
+      return sample.screenshot({ animations: 'disabled', caret: 'hide' })
+    }
+  }
+
+  for (const vp of VIEWPORTS) {
+    test(`/design-system showcase clips ignore content above them (${vp.name}) (#3441)`, async ({ page }, testInfo) => {
+      test.skip(schemeOf(testInfo) === 'dark', 'layout, not paint: the light run covers it')
+      test.setTimeout(150_000)
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      for (const [what, get] of ISOLATED_SAMPLES) {
+        const capture = await isolatedCapturer(page, get)
+        const flush = await capture(0)
+        for (const spacerPx of FRACTIONAL_SPACERS_PX) {
+          const shifted = await capture(spacerPx)
+          expect(shifted.equals(flush), `${what} moved when ${spacerPx}px of content was added above it`).toBe(true)
+        }
+      }
+    })
+  }
+
+  /**
+   * The ONE way a `/design-system` showcase clip is captured (#3441):
+   * isolate the sample, assert it fits the fold, then compare. Routing every
+   * clip through here is what makes the isolation unskippable — a clip test
+   * that called `toHaveScreenshot` directly would be back on the old 1px
+   * exposure, and the guard (which exercises the helper, not each test)
+   * would not notice.
+   */
+  async function expectShowcaseClip(
+    sample: Locator,
+    viewportHeight: number,
+    what: string,
+    baseline: string,
+    maxDiffPixels: number,
+  ) {
+    await isolateShowcaseSample(sample)
+    await assertFitsViewport(sample, viewportHeight, what)
+    await assertClearOfTabBar(sample, viewportHeight, what)
+    await expect(sample).toHaveScreenshot(baseline, {
+      animations: 'disabled',
+      caret: 'hide',
+      maxDiffPixels,
+      threshold: PIXEL_THRESHOLD,
+    })
+  }
+
+  /**
+   * Below `lg` the fixed mobile tab bar covers the bottom of the viewport, so
+   * "fits the viewport" is not enough: a sample whose bottom edge reaches
+   * under the bar is photographed with the bar painted over it (#3441 design
+   * review — the mobile activity-row clips lost their card's bottom edge
+   * that way). The sample, as isolated and scrolled to the top, must end
+   * above the bar.
+   */
+  async function assertClearOfTabBar(locator: Locator, viewportHeight: number, what: string) {
+    const page = locator.page()
+    const tabBarTop = await page.evaluate((vh) => {
+      // The live bar is the FIXED one: /design-system also renders a
+      // presentational copy carrying the same attribute (#3441 code review).
+      const bar = Array.from(document.querySelectorAll('[data-mobile-tab-bar]')).find((el) => {
+        const cs = getComputedStyle(el)
+        return cs.position === 'fixed' && cs.display !== 'none'
+      })
+      return bar ? bar.getBoundingClientRect().top : vh
+    }, viewportHeight)
+    const box = await locator.boundingBox()
+    if (!box) throw new Error(`${what} rendered no box`)
+    expect(
+      box.y + box.height,
+      `${what} ends at ${box.y + box.height}px, under the fixed tab bar at ${tabBarTop}px — the capture would show the bar over it`,
+    ).toBeLessThanOrEqual(tabBarTop)
   }
 
   /**

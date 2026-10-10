@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { composeDescription, toolDescriptions } from './tool-descriptions.js'
+import { FUNDING_LEG_DISCOVERY_GUIDANCE, composeDescription, toolDescriptions } from './tool-descriptions.js'
 import { AgentPaymentNextAction } from './types.js'
 import { readFileSync } from 'node:fs'
 
@@ -311,6 +311,18 @@ describe('shared Haven tool descriptions', () => {
     expect(desc).toContain('product name, category, or description term')
     expect(desc).toContain('NOT authoritative')
     expect(desc).toContain('Never creates a payment, signature, or approval')
+  })
+
+  it('tells the agent how to use the funding_leg_expected hint (#3839)', () => {
+    const desc = composeDescription(toolDescriptions.discoverTools)
+    expect(desc).toContain(FUNDING_LEG_DISCOVERY_GUIDANCE)
+    // The four things #3839 requires, pinned by meaning-bearing fragments.
+    expect(FUNDING_LEG_DISCOVERY_GUIDANCE).toContain('among equivalent entries prefer false')
+    expect(FUNDING_LEG_DISCOVERY_GUIDANCE).toContain('"unknown" is no preference')
+    expect(FUNDING_LEG_DISCOVERY_GUIDANCE).toContain('never hide true entries')
+    expect(FUNDING_LEG_DISCOVERY_GUIDANCE).toContain('A recipient-pinned budget can pay erc7710 merchants only')
+    // And that it is a hint: the quote decides.
+    expect(FUNDING_LEG_DISCOVERY_GUIDANCE).toContain("The quote's expected_funding_leg is authoritative")
   })
 })
 

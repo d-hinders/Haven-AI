@@ -161,6 +161,10 @@ export type DiscoveryEntry = {
   price_is_indicative: true
   asset: string | null
   network: string | null
+  /** #3839: comma-separated x402 assetTransferMethods last advertised; null when none recorded. */
+  asset_transfer_methods: string | null
+  /** #3839: catalog-based hint — false when erc7710 is advertised, true when not, "unknown" when nothing is recorded. */
+  funding_leg_expected: boolean | 'unknown'
   status: string
   verified_at: string | null
   source?: string

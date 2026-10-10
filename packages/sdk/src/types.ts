@@ -2637,6 +2637,14 @@ export interface HavenCatalogEntry {
   priceAtomic: string | null
   asset: string | null
   network: string | null
+  /**
+   * #3839: the x402 `assetTransferMethods` the merchant advertised on its last
+   * probe, comma-separated as the catalog stores them (`"eip3009"`,
+   * `"eip3009,erc7710"`); null until the first successful x402 probe and for
+   * ingestion/MPP rows. OPTIONAL on purpose: absent against a backend that does
+   * not send it. Feed it to `catalogFundingLegExpected` for the funding-leg hint.
+   */
+  assetTransferMethods?: string | null
   status: 'active' | 'degraded' | 'delisted'
   verifiedAt: string | null
   /**
@@ -2706,6 +2714,8 @@ export interface RawCatalogEntry {
   price_atomic: string | null
   asset: string | null
   network: string | null
+  /** #3839: comma-separated x402 assetTransferMethods; null until probed. Absent from an older backend. */
+  asset_transfer_methods?: string | null
   status: 'active' | 'degraded' | 'delisted'
   verified_at: string | null
   source: 'operator' | 'ingestion'

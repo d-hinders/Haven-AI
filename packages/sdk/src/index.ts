@@ -7,6 +7,7 @@ export { verifyPaymentReceipt, RECEIPT_VERSION } from './receipt.js'
 export type { PaymentReceipt, ReceiptVerification } from './receipt.js'
 
 export { toolDescriptions, composeDescription } from './tool-descriptions.js'
+export { catalogFundingLegExpected, type CatalogFundingLegHint } from './catalog-funding-leg.js'
 export type { ToolDescription, SharedToolKey } from './tool-descriptions.js'
 
 export { HAVEN_SKILL_MD, HAVEN_SKILL_BODY_MD, SKILL_FOLDER_NAME } from './skill-content.js'

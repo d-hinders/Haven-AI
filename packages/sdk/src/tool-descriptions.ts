@@ -41,6 +41,16 @@ export function composeDescription(d: ToolDescription): string {
     .join(' ')
 }
 
+/**
+ * #3839: how an agent uses a discovery entry's `funding_leg_expected` hint.
+ * Exported so a test pins the sentence: prefer entries with no funding leg,
+ * no preference on "unknown", never hide eip3009-only merchants, and the one
+ * hard constraint — a recipient-pinned budget can pay erc7710 merchants only.
+ */
+export const FUNDING_LEG_DISCOVERY_GUIDANCE =
+  'funding_leg_expected is a catalog hint: among equivalent entries prefer false (erc7710, no funding leg); "unknown" is no preference; never hide true entries. ' +
+  'A recipient-pinned budget can pay erc7710 merchants only. The quote\'s expected_funding_leg is authoritative.'
+
 export const toolDescriptions = {
   quoteX402: {
     summary:
@@ -191,6 +201,8 @@ export const toolDescriptions = {
       'Read-only lookup against Haven\'s curated catalog; entries are periodically re-verified against the live merchant and degraded entries are flagged. ' +
       'Use category for a case-insensitive category filter (for example, VPN or vpn), or search for a product name, category, or description term. ' +
       'Returns name, description, price, rail, resource URL, tool_name, tool_arguments, the hint, and the provenance badges source/domain_verified/verified_payable. ' +
+      FUNDING_LEG_DISCOVERY_GUIDANCE +
+      ' ' +
       'The catalog price (price_display/price_atomic, marked price_is_indicative) is a last-verified hint, NOT authoritative — the real price comes from the merchant\'s live 402 at pay time. ' +
       'Never creates a payment, signature, or approval.',
     nextActionGuidance:

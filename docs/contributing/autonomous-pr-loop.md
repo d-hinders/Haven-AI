@@ -591,7 +591,7 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
    `if: always()` aggregator (`Lint, Type-check & Build`) is excluded, because
    it reads `failure` whenever a superseded run cancelled its check jobs. A red
    job clears only when it has **run and passed** again, or when a later
-   completed run no longer contains it (renamed or removed); the issue closes
+   non-cancelled run no longer contains it (renamed or removed); the issue closes
    once none is left. A later `skipped` (a push that routes nothing to that
    job) is not a recovery: that is how `dev` looked green while #3886 stood.
 4. **Token/app permissions:** the active GitHub integration or CLI identity needs

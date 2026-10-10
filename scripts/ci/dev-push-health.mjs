@@ -18,7 +18,8 @@
 //    ONE group for every `dev` push, so a superseded run concludes `cancelled`
 //    even when a job in it already FAILED (#3855's run 38042422892). So this
 //    reads jobs, never the run conclusion.
-// 2. The aggregator fails on every superseded run. `Lint, Type-check & Build`
+// 2. The aggregator fails when a superseded run cancelled its check jobs.
+//    `Lint, Type-check & Build`
 //    is `if: always()` and needs every check job, so a run whose check jobs
 //    were cancelled reports it as `failure` (run 38025222136: 16 cancelled,
 //    only `Repo CI config checks` and `Detect changed surfaces` finished). It is

@@ -49,6 +49,16 @@
  * (`basis-full` on the trailing wrapper, in a `flex-wrap` row). From `sm` up
  * it sits beside the body.
  *
+ * ── A readable body, even beside a wide trailing ───────────────────────────
+ *
+ * The body column carries a readable minimum (`min-w-[10rem]`). A row whose
+ * trailing is wider than the space left beside the body — a non-dismissible
+ * row's badge + action, which no longer shares the line with a dismiss X
+ * (#3813) — would otherwise squeeze `Row`'s `min-w-0` body down to a
+ * one-glyph column with the title and subtitle ellipsized to nothing. With
+ * the minimum in place the row's `flex-wrap` drops the trailing below the
+ * body instead — the same place it already sits below `sm`.
+ *
  * Zero items renders nothing — the caller shows the empty state. Items
  * render in the order given.
  */
@@ -148,6 +158,7 @@ export function AttentionList({
             subtitle={item.subtitle}
             titleClassName={CLAMP}
             subtitleClassName={CLAMP}
+            bodyClassName="min-w-[10rem]"
             trailingClassName="w-full basis-full self-start sm:w-auto sm:basis-auto sm:self-center"
             className="flex-wrap"
             trailing={

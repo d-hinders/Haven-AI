@@ -24,6 +24,15 @@ interface BaseRowProps {
   subtitle?: ReactNode
   /** Extra classes for the subtitle paragraph — same contract as `titleClassName` (#3876). */
   subtitleClassName?: string
+  /**
+   * Extra classes for the body column — the `min-w-0 flex-1` div that holds
+   * the title and subtitle. Same contract as `titleClassName` (#3876). A
+   * caller whose trailing slot can be wider than the space left beside the
+   * body passes a readable minimum here: with `flex-wrap` on the row, the
+   * trailing then wraps onto its own line instead of squeezing the body to a
+   * one-glyph column (AttentionList's non-dismissible rows, #3813).
+   */
+  bodyClassName?: string
   /** Right-hand slot — value, badge, chevron, action button. */
   trailing?: ReactNode
   /**
@@ -88,6 +97,7 @@ export function Row(props: RowProps) {
     titleClassName = '',
     subtitle,
     subtitleClassName = '',
+    bodyClassName = '',
     trailing,
     trailingClassName = '',
     density = 'comfortable',
@@ -138,7 +148,7 @@ export function Row(props: RowProps) {
         />
       )}
       {leadingNode}
-      <div className="min-w-0 flex-1">
+      <div className={['min-w-0 flex-1', bodyClassName].filter(Boolean).join(' ')}>
         <p className={[titleClassName, 'truncate text-sm font-medium text-[var(--v2-ink)]'].filter(Boolean).join(' ')}>{title}</p>
         {subtitle ? (
           <p className={[subtitleClassName, 'mt-0.5 truncate text-xs text-[var(--v2-ink-3)]'].filter(Boolean).join(' ')}>{subtitle}</p>

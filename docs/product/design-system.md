@@ -880,7 +880,7 @@ distribution note below):
 Tertiary — **variant**, `variant="tertiary"`
 ([#1830](https://github.com/d-hinders/Haven-AI/issues/1830)). The *quiet* action: dismiss,
 cancel, "not now" — the escape hatch beside a committing action, never the committing action
-itself. Live at five product call sites plus the `/design-system` showcase — among them
+itself. Live at many product call sites plus the `/design-system` showcase — among them
 `ConfirmDialog`'s cancel, `ProfileClient`'s cancel edit and `DashboardOnboardingGuide`'s
 "Hide for now" (since #3818 the guide renders inside the dashboard's Needs you card, and
 its finished state is a one-line `SetupCompleteLine` with its own tertiary Dismiss). (It was eight until [#1989](https://github.com/d-hinders/Haven-AI/issues/1989)

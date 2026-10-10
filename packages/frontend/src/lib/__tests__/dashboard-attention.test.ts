@@ -547,7 +547,7 @@ describe('firstRunSetupState (#3818)', () => {
         makeOverview([{ id: 'p1', name: 'Pending', status: 'pending_approval' }], []),
       )
       expect(state.hasSetUpAgent).toBe(false)
-      expect(state.pendingAgent).toEqual({ id: 'p1', name: 'Pending', moreCount: 0 })
+      expect(state.pendingAgent).toEqual({ id: 'p1', name: 'Pending', moreCount: 0, awaiting: 'approval' })
     })
 
     it('an active agent without a usable budget does not complete it', () => {
@@ -587,7 +587,23 @@ describe('firstRunSetupState (#3818)', () => {
         new: '2026-10-09T00:00:00Z',
         mid: '2026-10-05T00:00:00Z',
       })
-      expect(state.pendingAgent).toEqual({ id: 'new', name: 'New', moreCount: 2 })
+      expect(state.pendingAgent).toEqual({ id: 'new', name: 'New', moreCount: 2, awaiting: 'approval' })
+    })
+
+    it('an agent missing from GET /agents is newer than that read, so it is the one named', () => {
+      const overview = makeOverview(
+        [
+          { id: 'known', name: 'Known', status: 'pending_approval' },
+          { id: 'fresh', name: 'Fresh', status: 'pending_approval' },
+        ],
+        [],
+      )
+      expect(firstRunSetupState(overview, { known: '2026-10-09T00:00:00Z' }).pendingAgent?.id).toBe('fresh')
+    })
+
+    it('an active agent without a budget is awaiting a budget, not an approval', () => {
+      const state = firstRunSetupState(makeOverview([{ id: 'x', name: 'X', status: 'active' }], []))
+      expect(state.pendingAgent?.awaiting).toBe('budget')
     })
 
     it('a pending agent whose setup expired or failed is not offered "Finish setup" (its row says Remove)', () => {

@@ -61,25 +61,31 @@ test.describe('first-run guide (#3818)', () => {
     // Named by step 2, so not listed again as its own row.
     await expect(guide.getByText('Connecting agent is waiting to be set up')).toHaveCount(0)
 
-    // ── 4. Budget approved and the first payment made: one line ───────────
+    // ── 4. Budget approved, no payment yet: step 3 is the action ──────────
+    state = 'agent-set-up'
+    await page.reload()
+    await expect(guide.getByText('An agent is connected with a budget.')).toBeVisible()
+    await expect(guide.getByRole('button', { name: 'Show me how' })).toBeVisible()
+
+    // ── 5. The first payment made: one line ───────────────────────────────
     state = 'set-up'
     await page.reload()
     await expect(card(page).getByRole('heading', { name: 'Needs you' })).toBeVisible()
     await expect(card(page).getByText(/You’re set up/)).toBeVisible()
-    await expect(page.getByRole('list', { name: 'Onboarding checklist' })).toHaveCount(0)
+    await expect(page.getByRole('list', { name: 'Your first 3 steps' })).toHaveCount(0)
   })
 
   test('"Hide for now" survives a reload and comes back when a step completes', async ({ page }) => {
     await page.goto('/dashboard')
     const guide = card(page)
     await guide.getByRole('button', { name: 'Hide for now' }).click()
-    await expect(page.getByRole('list', { name: 'Onboarding checklist' })).toHaveCount(0)
+    await expect(page.getByRole('list', { name: 'Your first 3 steps' })).toHaveCount(0)
     await page.reload()
     await expect(card(page).getByRole('heading', { name: 'Needs you' })).toBeVisible()
-    await expect(page.getByRole('list', { name: 'Onboarding checklist' })).toHaveCount(0)
+    await expect(page.getByRole('list', { name: 'Your first 3 steps' })).toHaveCount(0)
 
     state = 'funded'
     await page.reload()
-    await expect(page.getByRole('list', { name: 'Onboarding checklist' })).toBeVisible()
+    await expect(page.getByRole('list', { name: 'Your first 3 steps' })).toBeVisible()
   })
 })

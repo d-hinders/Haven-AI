@@ -1820,7 +1820,7 @@ export default function DesignSystemPage() {
             <DashboardOnboardingGuide
               usdcFunded
               hasSetUpAgent={false}
-              pendingAgent={{ id: 'agent-research', name: 'Research agent', moreCount: 1 }}
+              pendingAgent={{ id: 'agent-research', name: 'Research agent', moreCount: 1, awaiting: 'approval' }}
               hasFirstAgentPayment={false}
               onAddFunds={() => undefined}
               onAddAgent={() => undefined}

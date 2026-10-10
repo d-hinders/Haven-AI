@@ -148,8 +148,12 @@ export interface FirstRunSetupState {
   /** Any account's own USDC above zero; `null` when no account says so and at least one read is unknown. */
   usdcFunded: boolean | null
   hasSetUpAgent: boolean
-  /** The most recently connected agent awaiting "Finish setup", and how many more do. */
-  pendingAgent: { id: string; name: string; moreCount: number } | null
+  /**
+   * The most recently connected agent awaiting "Finish setup", and how many
+   * more do. `awaiting` says which half is missing: the budget approval of a
+   * `pending_approval` agent, or a budget for an active agent with none.
+   */
+  pendingAgent: { id: string; name: string; moreCount: number; awaiting: 'approval' | 'budget' } | null
 }
 
 /**
@@ -174,14 +178,30 @@ export function firstRunSetupState(
     : accounts.length > 0 && accounts.every((account) => account.funded === false)
       ? false
       : null
+  // An agent missing from GET /agents is newer than that read (it polls less
+  // often than the overview), so it sorts FIRST — '\uffff' outranks any ISO
+  // timestamp. Ties keep the overview's own order (newest first per status).
   const awaiting = agents
     .filter(agentAwaitsFinishSetup)
-    .sort((a, b) => (createdAtById[b.id] ?? '').localeCompare(createdAtById[a.id] ?? ''))
+    .map((agent, index) => ({ agent, index }))
+    .sort(
+      (a, b) =>
+        (createdAtById[b.agent.id] ?? '\uffff').localeCompare(createdAtById[a.agent.id] ?? '\uffff') ||
+        a.index - b.index,
+    )
+    .map(({ agent }) => agent)
   const newest = awaiting[0]
   return {
     usdcFunded,
     hasSetUpAgent: agents.some(agentIsSetUp),
-    pendingAgent: newest ? { id: newest.id, name: newest.name, moreCount: awaiting.length - 1 } : null,
+    pendingAgent: newest
+      ? {
+          id: newest.id,
+          name: newest.name,
+          moreCount: awaiting.length - 1,
+          awaiting: newest.status === 'pending_approval' ? 'approval' : 'budget',
+        }
+      : null,
   }
 }
 

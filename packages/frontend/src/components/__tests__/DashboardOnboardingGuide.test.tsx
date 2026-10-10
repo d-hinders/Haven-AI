@@ -121,7 +121,10 @@ describe('DashboardOnboardingGuide — step 2 and 3 (#3818)', () => {
   })
 
   it('connecting before funding stays allowed, at secondary weight', async () => {
-    const { props } = renderGuide({ usdcFunded: false })
+    const { props, container } = renderGuide({ usdcFunded: false })
+    // One next step at a time: step 2 is available, not a second "active".
+    const statuses = [...container.querySelectorAll('li[data-status]')].map((li) => li.getAttribute('data-status'))
+    expect(statuses).toEqual(['active', 'available', 'locked'])
     const connect = screen.getByRole('button', { name: 'Connect agent' })
     expect(connect).toHaveAttribute('data-variant', 'ghost')
     await userEvent.click(connect)

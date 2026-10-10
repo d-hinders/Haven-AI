@@ -34,7 +34,8 @@
  * it did cost real coverage — no baseline diffed primitives BELOW the shell on
  * `/design-system` until #3064 scoped one clip to the StackedBarChart showcase
  * section (the section test below, whose assertions name tick voice, partial
- * day and swatch order), joined later by one clip per #3805 showcase sample;
+ * day and swatch order), joined later by one clip per showcase sample from
+ * #3805 (four), #3845 (NoticeRow) and #3810 (activity row);
  * everything else below the shell on that page is still compared against
  * nothing. `product-routes.visual.spec.ts`'s whole-page
  * `/dashboard` and `/transactions` baselines remain the only whole-page pixel
@@ -568,12 +569,12 @@ test.describe('design-system visual regression', () => {
   }
 
   /**
-   * ── The #3805 showcase clips — Amount currency, AttentionList, sparkline, inline StatTile ──
+   * ── The later showcase clips — #3805's Amount currency, AttentionList, sparkline, inline StatTile; #3845's NoticeRow; #3810's activity row ──
    *
-   * The four design-system pieces the redesigned dashboard (#3801) is built
-   * from, each photographed against its own sample the way the
-   * StackedBarChart clips above are: one clip per `data-testid` sample, per
-   * viewport, per scheme — 16 baselines in all. Each clip asserts its own box
+   * The design-system pieces the redesigned dashboard (#3801) is built from,
+   * each photographed against its own sample the way the StackedBarChart
+   * clips above are: one clip per `data-testid` sample, per viewport, per
+   * scheme — six samples, 24 baselines in all. Each clip asserts its own box
    * fits the viewport (the fold guarantee above), so an edit that pushes a
    * sample past the fold fails HERE, naming the sample.
    *

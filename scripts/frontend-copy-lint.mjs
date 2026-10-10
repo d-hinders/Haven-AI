@@ -140,6 +140,25 @@ export const SCAN_FILES = [
   // its unit test. Lives in lib/ so the pure function is testable, so it is
   // here and not under the directory scan.
   'packages/frontend/src/lib/dashboard-summary.ts',
+  // #3882 — six more lib/ files whose strings reach a person or an agent, none
+  // of which the naming convention below catches. The dashboard's Needs-you
+  // titles and subtitles (#3808, #3880).
+  'packages/frontend/src/lib/dashboard-attention.ts',
+  // The agent-skills index served at /.well-known/agent-skills/index.json
+  // (#3596): each step's `description` and the index's own first entry and
+  // `mcp.note` are agent-read prose that appears nowhere else (the step
+  // TITLES duplicate runbook headings, harmlessly scanned twice). Reverses the
+  // 2026-10-02 "metadata, not copy" call recorded in copy-guidelines.md.
+  'packages/frontend/src/lib/agent-skill-steps.ts',
+  'packages/frontend/src/lib/agent-skill-index.ts',
+  // The agents page's filter and sort labels.
+  'packages/frontend/src/lib/agent-list-filters.ts',
+  // The `notes` prose written into the downloaded agent credential file —
+  // the same delivery shape as agent-handoff.ts above (#2106 fixed a
+  // CASP-relevant wording in exactly this block).
+  'packages/frontend/src/lib/agent-credential.ts',
+  // Sub-budget form validation and error messages, returned as strings.
+  'packages/frontend/src/lib/sub-budget.ts',
   // The CANONICAL copy of the skill above, byte-pinned to the frontend inline
   // copy by a parity test. It is not a frontend file, but it is the copy the
   // connector auto-installs — i.e. the PRIMARY delivery path, of which the

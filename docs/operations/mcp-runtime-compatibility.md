@@ -105,6 +105,15 @@ last-verified: "2026-10-10"
 > flags (the #3172 precedent). Until the first promotion publishes a golden
 > to `main`, the check prints a notice and skips.
 
+> **Re-verification (#3886, 2026-10-10, the golden caught up):** #3839
+> (#3855) added funding-leg sentences to the `haven_discover_tools`
+> description after #3817's golden was committed, so the snapshot test went
+> red on every PR touching `packages/mcp-server/**` (the job is skipped on
+> `dev` pushes, so `dev` itself stayed green). The golden was regenerated with
+> `snapshot:regen`; the one changed line is that description, already served
+> since #3855. Description-only, so the stale-client check stays silent by the
+> rule above; nothing else in this document moves.
+
 > **Re-verification (#3838, 2026-10-09, wording-only `haven_pay_x402_quote`
 > description edit):** the local tool's sign-in-with-x sentence was rewritten
 > (sign in FIRST for multi-call flows; the merchant session token never

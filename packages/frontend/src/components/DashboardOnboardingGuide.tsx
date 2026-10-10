@@ -1,6 +1,6 @@
 'use client'
 
-import type { ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Check } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
@@ -95,6 +95,8 @@ export default function DashboardOnboardingGuide({
   onShowAgentUsage,
   onHide,
 }: Props) {
+  // Per instance: the /design-system page renders several guides at once.
+  const labelId = useId()
   const funded = usdcFunded === true
   const activeStep = !funded ? 1 : !hasSetUpAgent ? 2 : !hasFirstAgentPayment ? 3 : null
   // Unlocked but not next (an agent set up before funding) is `available`:
@@ -159,7 +161,7 @@ export default function DashboardOnboardingGuide({
   return (
     <div className="v2-animate-fade-in">
       <div className="flex items-center justify-between gap-3">
-        <p id="first-run-steps-label" className="text-sm text-[var(--v2-ink-2)]">
+        <p id={labelId} className="text-sm text-[var(--v2-ink-2)]">
           Your first 3 steps
         </p>
         <Button variant="tertiary" size="sm" onClick={onHide}>
@@ -167,7 +169,7 @@ export default function DashboardOnboardingGuide({
         </Button>
       </div>
 
-      <ol className="mt-3 space-y-2" aria-labelledby="first-run-steps-label">
+      <ol className="mt-3 space-y-2" aria-labelledby={labelId}>
         <ChecklistRow {...step1} />
         <ChecklistRow {...step2} />
         <ChecklistRow {...step3} />
@@ -177,9 +179,12 @@ export default function DashboardOnboardingGuide({
 }
 
 /**
- * The finished state (#3818): one line, not a banner. Dismissal is the
- * caller's (`haven-onboarding-complete-dismissed:<userId>`, read as before so
- * an owner who dismissed the old banner does not see this again).
+ * The finished state (#3818): one line, not a banner. It shows from the first
+ * agent payment on, whatever happens after (USDC spent, a budget expiring) —
+ * so it claims only that fact; the Needs you rules below it speak for now.
+ * Dismissal is the caller's (`haven-onboarding-complete-dismissed:<userId>`,
+ * read as before so an owner who dismissed the old banner does not see this
+ * again).
  */
 export function SetupCompleteLine({ onDismiss }: { onDismiss: () => void }) {
   return (
@@ -191,7 +196,7 @@ export function SetupCompleteLine({ onDismiss }: { onDismiss: () => void }) {
         >
           <Icon icon={Check} className="h-3 w-3" />
         </span>
-        You&rsquo;re set up — your agents can pay within the budgets you approved.
+        You&rsquo;re set up — your first agent payment went through.
       </p>
       <Button variant="tertiary" size="sm" onClick={onDismiss}>
         Dismiss

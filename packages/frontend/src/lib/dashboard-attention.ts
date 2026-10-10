@@ -179,16 +179,19 @@ export function firstRunSetupState(
       ? false
       : null
   // An agent missing from GET /agents is newer than that read (it polls less
-  // often than the overview), so it sorts FIRST — '\uffff' outranks any ISO
-  // timestamp. Ties keep the overview's own order (newest first per status).
+  // often than the overview), so it sorts FIRST. Ties keep the overview's own
+  // order (newest first per status). Plain string comparison of ISO
+  // timestamps — no locale collation.
+  const newestFirst = (a?: string, b?: string): number => {
+    if (a === b) return 0
+    if (a === undefined) return -1
+    if (b === undefined) return 1
+    return a > b ? -1 : 1
+  }
   const awaiting = agents
     .filter(agentAwaitsFinishSetup)
     .map((agent, index) => ({ agent, index }))
-    .sort(
-      (a, b) =>
-        (createdAtById[b.agent.id] ?? '\uffff').localeCompare(createdAtById[a.agent.id] ?? '\uffff') ||
-        a.index - b.index,
-    )
+    .sort((a, b) => newestFirst(createdAtById[a.agent.id], createdAtById[b.agent.id]) || a.index - b.index)
     .map(({ agent }) => agent)
   const newest = awaiting[0]
   return {

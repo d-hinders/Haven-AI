@@ -120,11 +120,12 @@ export interface AgentPaymentStatus {
    * #3475 follow-up: `true` only when an eip3009 payment's merchant
    * settlement transaction is already recorded and on-chain-verified
    * (`machine_metadata.merchant_settlement_tx_hash`, written by
-   * `haven_report_settlement_evidence`'s eip3009 branch). Always absent on
-   * erc7710 — its one settlement transaction IS the confirmed intent, not a
-   * separately recorded hash, so this flag is not the right signal there.
-   * Absent — never `false` — when unknown, matching `delivered`'s own
-   * honesty rule.
+   * `haven_report_settlement_evidence`'s eip3009 branch or by the #3888
+   * settlement sweep when the chain names the settlement and the agent never
+   * reported it). Always absent on erc7710 — its one settlement transaction
+   * IS the confirmed intent, not a separately recorded hash, so this flag is
+   * not the right signal there. Absent — never `false` — when unknown,
+   * matching `delivered`'s own honesty rule.
    */
   merchant_settlement_recorded?: boolean
   /**
@@ -536,8 +537,10 @@ function delegateAccountAddressOf(machineMetadata: unknown): string | null {
 
 /**
  * #3475: an eip3009 merchant settlement the agent reported and Haven verified
- * on-chain (`modules/x402/eip3009-settlement-evidence.ts`). Its presence is
- * proof the merchant already pulled this payment's funds from the delegate.
+ * on-chain (`modules/x402/eip3009-settlement-evidence.ts`), or the #3888
+ * settlement sweep verified from the chain alone when no report ever came.
+ * Its presence is proof the merchant already pulled this payment's funds from
+ * the delegate.
  */
 function hasVerifiedMerchantSettlement(machineMetadata: unknown): boolean {
   return typeof parsedMachineMetadata(machineMetadata)?.merchant_settlement_tx_hash === 'string'
@@ -674,7 +677,12 @@ export function isPastSettlementAttributionHorizonErc7710(
  * writes the `merchant_response_observed` evidence row that makes
  * `merchant_leg_reported` true — so a delivered purchase leaves case 2's
  * predicate permanently, rather than entering it when the window elapses.
- * Neither report is trusted with anything financial: see
+ * Since #3888 the settlement sweep is a second exit: a payment the merchant
+ * settled but nobody ever reported gets its verified hash recorded from the
+ * chain, `hasVerifiedMerchantSettlement` goes true, and the payment reads as
+ * plain `payment_confirmed` — "the merchant has likely not been paid" is now
+ * said only about payments nothing has proven settled. Neither report is
+ * trusted with anything financial: see
  * `MerchantCompletion.reportMerchantOutcome` in the SDK for the boundary. Scoped to `settlement_scheme === 'eip3009'`: on
  * erc7710 there is no funding leg and `confirmed` IS merchant settlement, and
  * an intent with no scheme metadata fails closed to the plain mapping.

@@ -11,11 +11,24 @@ import { createToolHandlers, type ToolPayload, type ToolSuccess } from './tools.
 // so the re-check must (a) refuse with PaymentWindowExpired and (b) retire the
 // binding exactly like the first check, so a retry gets the precise remedy —
 // never a header, never a dangling binding.
+// #3888: the header build is now the prepare → sign → encode trio (the nonce
+// is derived and overwritten on the unsigned payload), so the guard lives on
+// the FIRST entry point — a mock of `createPaymentHeader` alone would pass
+// vacuously now that the signer no longer calls it.
 vi.mock('x402/schemes', () => {
   vi.setSystemTime(new Date('2099-06-01T00:00:00.000Z'))
   return {
     exact: {
       evm: {
+        preparePaymentHeader: () => {
+          throw new Error('an unsigned payload must not be prepared after the window closed during the load')
+        },
+        signPaymentHeader: async () => {
+          throw new Error('a header must not be signed after the window closed during the load')
+        },
+        encodePayment: () => {
+          throw new Error('a header must not be encoded after the window closed during the load')
+        },
         createPaymentHeader: async () => {
           throw new Error('a header must not be built after the window closed during the load')
         },

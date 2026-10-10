@@ -1600,7 +1600,10 @@ export class HavenClient {
       )
     }
 
-    const paymentHeader = await this.fundingLeg.createPaymentHeader(input.paymentRequired, option)
+    // #3888: the resume re-signs the SAME derived nonce the original header
+    // carried, so a settled payment's re-signed authorization is refused by
+    // the merchant as already used instead of paying twice (#3475).
+    const paymentHeader = await this.fundingLeg.createPaymentHeader(input.paymentRequired, option, status.paymentId)
     const receipt = this.fundingLeg.receiptFromStatus(input.paymentRequired, option, paymentHeader, status)
     this.fundingLeg.cacheReceipt(idempotencyKey, paymentHeader, receipt, input.taskBudgetId)
     return receipt

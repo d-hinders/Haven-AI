@@ -1795,6 +1795,56 @@ the silence got there. At the sweep's own call site there is no legitimate
 "nothing to record" left — it has just established every precondition itself —
 so it treats every non-`recorded` outcome as a failure.
 
+#### The eip3009 bridge: a settlement the chain itself names (#3888)
+
+The #3776 owner decision keeps the plain-HTTP paid retry on the agent, which
+is safe only if a dropped final report costs nothing — and on the eip3009
+bridge it used to cost everything. Haven never learned the EIP-3009 nonce
+(both header builders let the x402 library draw it randomly), so when the
+agent never reported the settlement the 15-minute grace passed, the status
+read said "the merchant has likely not been paid" for a payment the merchant
+DID settle, and the accounting feed booked — and pinned — the FUNDING hash.
+
+Both halves are fixed. **Signers now name their payments on-chain**: the
+nonce is `keccak256(utf8("haven-x402-payment-nonce:") || utf8(payment_id))`
+(`deriveX402PaymentNonce`, exported from the SDK's edge surface and used by
+the signer, the SDK and the backend — one derivation, one pinned encoding).
+**And a second sweep pass finds the settlement**: `runEip3009SettlementSweepTick`
+runs in the same leader-gated tick as the erc7710 sweep, scans the pinned
+token's `AuthorizationUsed(delegate EOA, derived nonce)` log (both arguments
+are indexed, so one bounded, batched `eth_getLogs` per candidate names the
+transaction exactly), and hands it to the SAME seam the agent-reported path
+uses — `observeEip3009MerchantSettlement`, with its full
+`verifySettlementTransferTx` checks and the guarded compare-and-set writer.
+The recording order is the reported path's order verbatim: base
+`machine_payment_evidence` row with the feed SUPPRESSED, verified hash beside
+the funding hash, then ONE feed fire — so the feed never books the funding
+hash ahead of a settlement that exists. The candidate window anchors on the
+FUNDING confirm (not on the report grace), so the hash lands before the
+feed's funding-hash selection runs; a hash already pinned is left alone
+(the writer's CAS refuses it anyway).
+
+`authorizationState` is a cheap pre-check, never proof — `cancelAuthorization`
+sets it too — so a `false` answer only skips the log scan and a `true` answer
+only licenses one. Attribution is ONLY the `AuthorizationUsed` log for this
+payment's delegate and derived nonce, never transfer shape; a payment signed
+by a pre-#3888 signer (random nonce) behaves exactly as before and stays
+outside the sweep's reach — its remedy is still the agent report, which is
+not horizon-bound. A nonce-proven attribution that collides with an earlier
+agent-reported hash on a same-shaped sibling payment is LOGGED and recorded
+nowhere (the owner question is open; the conservative answer is the
+implemented one). Two side effects worth naming: a resumed or
+`retry_original_x402_request` re-sign of a settled payment carries the SAME
+derived nonce, so the merchant refuses it as already used — that closes the
+#3475 re-pay hazard for new signers — and the refusal cannot strand the
+payment at `sweep_stranded_funds`, because the recorded hash takes the
+payment out of the awaiting-merchant-leg state (`agent-payment-status.ts`'s
+`isFundedX402AwaitingMerchantLeg`) before the resume is attempted. A party
+controlling `payment_id` can force a nonce collision with an earlier
+authorization from the same delegate EOA, and EIP-3009 then refuses the
+later settlement on-chain: denial of that one payment (its funding stays
+sweepable), never a double spend.
+
 ### What the settlement child delegation actually constrains
 
 The child built by

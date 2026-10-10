@@ -22,6 +22,7 @@ import {
   x402V2PaymentEnvelope,
 } from './x402.js'
 import { paymentStateFromRaw, throwPaymentStateError } from './payment-state.js'
+import { deriveX402PaymentNonce } from './x402-nonce.js'
 import { createErc20Contract, createJsonRpcProvider } from './provider.js'
 import { decodeBase64Json, encodeBase64Json } from './base64.js'
 import { readX402ReceiptPayer } from './account-naming.js'
@@ -279,7 +280,10 @@ export class X402FundingLeg {
       }
     }
 
-    const paymentHeader = await this.createPaymentHeader(paymentRequired, option)
+    // #3888: the header names the payment (derived nonce) so the merchant's
+    // settlement stays attributable when the agent never reports it — and so
+    // a resume of a settled payment re-signs the SAME nonce.
+    const paymentHeader = await this.createPaymentHeader(paymentRequired, option, raw.payment_id ?? state?.paymentId)
 
     if (raw.success && raw.tx_hash) {
       const receipt = this.receiptFromAuthorization(paymentRequired, option, paymentHeader, raw)
@@ -331,9 +335,25 @@ export class X402FundingLeg {
 
   // ── Header minting ───────────────────────────────────────────────
 
+  /**
+   * Mint the merchant-facing X-PAYMENT header with the delegate key.
+   *
+   * #3888: when `paymentId` is given, the EIP-3009 nonce is the shared
+   * derivation from that Haven payment id instead of the x402 library's
+   * random draw — that is what lets the backend attribute the merchant's
+   * `AuthorizationUsed(delegate, nonce)` settlement to this payment when the
+   * agent never reports it, and what makes a resume/retry re-sign of a
+   * settled payment carry the SAME nonce (the merchant refuses it as already
+   * used, closing the #3475 re-pay hazard). The signed typed data stays the
+   * library's own: the nonce only overwrites the field on the unsigned
+   * payload `preparePaymentHeader` built. Without a payment id the library's
+   * random nonce is kept — an install too old to name its payment behaves
+   * exactly as before.
+   */
   async createPaymentHeader(
     paymentRequired: X402PaymentRequired,
     option: X402PaymentOption,
+    paymentId?: string,
   ): Promise<string> {
     if (!this.delegateKey) {
       throw new HavenSigningError('delegateKey is required to sign x402 payment headers.')
@@ -342,11 +362,23 @@ export class X402FundingLeg {
     const account = privateKeyToAccount(this.delegateKey as `0x${string}`)
     const requirements = toStandardPaymentRequirements(paymentRequired, option)
 
-    const header = await exact.evm.createPaymentHeader(
-      account,
-      paymentRequired.x402Version,
-      requirements,
-    )
+    let header: string
+    if (paymentId) {
+      const unsigned = exact.evm.preparePaymentHeader(
+        account.address,
+        paymentRequired.x402Version,
+        requirements,
+      )
+      unsigned.payload.authorization.nonce = deriveX402PaymentNonce(paymentId)
+      const signed = await exact.evm.signPaymentHeader(account, requirements, unsigned)
+      header = exact.evm.encodePayment(signed)
+    } else {
+      header = await exact.evm.createPaymentHeader(
+        account,
+        paymentRequired.x402Version,
+        requirements,
+      )
+    }
     if (paymentRequired.x402Version < 2) return header
 
     const payment = decodeBase64Json<{ payload: unknown }>(header)

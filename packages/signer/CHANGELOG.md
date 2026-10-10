@@ -15,6 +15,20 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Changed
+
+- The EIP-3009 merchant header the signer builds now carries an EIP-3009
+  nonce derived from the Haven payment id inside the verified binding —
+  `keccak256(utf8("haven-x402-payment-nonce:") || utf8(payment_id))`, the
+  shared `deriveX402PaymentNonce` from `@haven_ai/sdk/edge` — instead of the
+  x402 library's random draw (#3888). Haven's backend uses that to find and
+  record the merchant's settlement when the agent never reports it, and a
+  resumed payment re-signs the SAME nonce so a settled payment cannot settle
+  twice (#3475). The signed typed data stays the library's own; the binding
+  gains no new input (the payment id was already committed). Headers for
+  payments without a binding payment id keep the random nonce. No update
+  needed — an older signer's settlements are simply not chain-detectable.
+
 ## 0.9.0-alpha.0 — 2026-10-09
 
 ### Added

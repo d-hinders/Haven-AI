@@ -235,6 +235,8 @@ export { isZeroSettlementTxHash } from './merchant-completion.js'
 // #3727: the PAYMENT-RESPONSE decoder the hosted outcome report reuses —
 // it takes `transaction` (or its aliases) only and never surfaces `payer`.
 export { parseMerchantSettlement } from './merchant-completion.js'
+// #3888: the shared EIP-3009 nonce derivation (also on the edge surface).
+export { deriveX402PaymentNonce, X402_PAYMENT_NONCE_TAG } from './x402-nonce.js'
 export {
   resolveX402RetryTarget,
   isSecureX402RetryTarget,

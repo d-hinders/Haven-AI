@@ -279,16 +279,17 @@ export default function TransactionDetailPanel({
           "failed" — the SDK's default evidence post reports the funding hash
           (refused by the writer), so many eip3009 rows never get one, and the
           copy must not promise a later record. The attribution wording states
-          only what the record proves: the hash was reported by the agent and
-          verified on-chain (#3475) — nothing here claims the merchant's own
-          books agree. erc7710 and scheme-less rows are one transaction and
-          keep the plain "Transaction" row.
+          only what the record proves: the hash was reported by the agent or
+          detected by Haven's settlement sweep (#3888) and verified on-chain
+          (#3475) — nothing here claims the merchant's own books agree.
+          erc7710 and scheme-less rows are one transaction and keep the plain
+          "Transaction" row.
         */}
         {tx.settlementScheme === 'eip3009' ? (
           <>
             {tx.settlementTxHash ? (
               <DetailRow
-                label="Merchant settlement (reported by the agent, verified on-chain)"
+                label="Merchant settlement (reported by the agent or detected on-chain, verified)"
                 value={
                   <ExplorerLink
                     chainId={tx.chainId}

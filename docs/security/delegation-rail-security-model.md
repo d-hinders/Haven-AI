@@ -1510,6 +1510,28 @@ key, and sponsorship can pay gas but never move value. The scheme is recorded
 per intent (`machine_metadata.settlement_scheme`) so 3009-mode usage is
 auditable and its retirement measurable.
 
+**Since #3888 the 3009 header's nonce is derived, not random** — and neither
+half of that adds authority. The delegate's signed header carries
+`nonce = keccak256(utf8("haven-x402-payment-nonce:") || utf8(payment_id))`
+(`deriveX402PaymentNonce`, SDK edge surface; the signer overwrites the nonce
+on the unsigned payload the x402 library prepared, so the typed data it signs
+stays the library's own). `payment_id` is already inside the Haven-signed
+binding the signer verifies, so the signer gains no new input from Haven, and
+the derivation grants no spend capability — it only makes the settlement
+ATTRIBUTABLE. The backend's settlement sweep reads the pinned token's
+`AuthorizationUsed(delegate, derived nonce)` log (read-only chain
+observation, bounded block ranges, fail-closed on any RPC failure) and hands
+the transaction it finds to the same on-chain verifier and guarded writer the
+agent-reported path uses; it moves no money and grants nothing. Accepted
+grants nothing. Accepted residuals (stated on #3888): a party controlling `payment_id` can
+force a nonce collision with an earlier authorization from the same delegate
+EOA, which makes EIP-3009 refuse the later settlement on-chain — denial of
+that ONE payment, not a double spend; and the derived nonce makes payments
+publicly linkable to Haven, which the delegate EOA's funding legs already
+are. A fixed nonce also closes the #3475 re-pay hazard for new signers: a
+resumed payment re-signs the same nonce, so a settled payment is refused as
+already used instead of paying twice.
+
 Hardening shipped with #961: the per-agent hourly x402 cap now guards the
 delegation branch too (every authorize costs a sponsored bundler estimation,
 so the cap is sponsorship-cost protection on the #717 surface — placed after

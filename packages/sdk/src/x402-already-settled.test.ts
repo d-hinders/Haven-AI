@@ -45,23 +45,38 @@ vi.mock('./provider.js', () => ({
 // behaviour (the funded-resume case below needs a genuine header) while
 // becoming observable, so "was a spend authorization created at all?" can be
 // asserted. `x402/schemes` exports a frozen ESM namespace, so `vi.spyOn`
-// cannot do this.
-const { mockCreatePaymentHeader, realCreatePaymentHeader } = vi.hoisted(() => ({
+// cannot do this. #3888: the header build is now the
+// prepare → sign → encode trio (the nonce is overwritten on the unsigned
+// payload), so the guard moved to ALL THREE entry points — a mock of
+// `createPaymentHeader` alone would pass vacuously. `createPaymentHeader`
+// stays mocked too: it is the no-payment-id fallback's entry.
+const { mockCreatePaymentHeader, mockPreparePaymentHeader, mockSignPaymentHeader, real } = vi.hoisted(() => ({
   mockCreatePaymentHeader: vi.fn(),
+  mockPreparePaymentHeader: vi.fn(),
+  mockSignPaymentHeader: vi.fn(),
   // `afterEach`'s `restoreAllMocks` wipes a `vi.fn()` implementation, so the
-  // real one is stashed here and re-applied per test rather than set once in
-  // the factory.
-  realCreatePaymentHeader: { current: undefined as undefined | ((...args: never[]) => unknown) },
+  // real ones are stashed here and re-applied per test rather than set once in
+  // the factory. Hoisted because the mock factory runs before module consts.
+  real: { current: undefined as undefined | Record<string, (...args: never[]) => unknown> },
 }))
 
 vi.mock('x402/schemes', async (importOriginal) => {
   const actual = await importOriginal<typeof import('x402/schemes')>()
-  realCreatePaymentHeader.current = actual.exact.evm.createPaymentHeader as never
+  real.current = {
+    createPaymentHeader: actual.exact.evm.createPaymentHeader as never,
+    preparePaymentHeader: actual.exact.evm.preparePaymentHeader as never,
+    signPaymentHeader: actual.exact.evm.signPaymentHeader as never,
+  }
   return {
     ...actual,
     exact: {
       ...actual.exact,
-      evm: { ...actual.exact.evm, createPaymentHeader: mockCreatePaymentHeader },
+      evm: {
+        ...actual.exact.evm,
+        createPaymentHeader: mockCreatePaymentHeader,
+        preparePaymentHeader: mockPreparePaymentHeader,
+        signPaymentHeader: mockSignPaymentHeader,
+      },
     },
   }
 })
@@ -127,8 +142,14 @@ function client(withRpc = false): HavenClient {
 describe('#1521 — replayed settled payment', () => {
   beforeEach(() => {
     mockBalanceOf.mockReset()
-    mockCreatePaymentHeader.mockReset()
-    mockCreatePaymentHeader.mockImplementation(realCreatePaymentHeader.current!)
+    for (const mock of [mockCreatePaymentHeader, mockPreparePaymentHeader, mockSignPaymentHeader]) {
+      mock.mockReset()
+    }
+    const impls = real.current
+    if (!impls) throw new Error('x402/schemes mock did not capture the real implementations')
+    mockCreatePaymentHeader.mockImplementation(impls.createPaymentHeader!)
+    mockPreparePaymentHeader.mockImplementation(impls.preparePaymentHeader!)
+    mockSignPaymentHeader.mockImplementation(impls.signPaymentHeader!)
   })
   afterEach(() => {
     vi.restoreAllMocks()
@@ -211,6 +232,8 @@ describe('#1521 — replayed settled payment', () => {
     await client(true).authorizeX402(paymentRequired).catch(() => undefined)
 
     expect(mockCreatePaymentHeader).not.toHaveBeenCalled()
+    expect(mockPreparePaymentHeader).not.toHaveBeenCalled()
+    expect(mockSignPaymentHeader).not.toHaveBeenCalled()
   })
 
   // ── The legacy (AllowanceModule) rail's approval-queue replay ──────────
@@ -249,6 +272,8 @@ describe('#1521 — replayed settled payment', () => {
       expect((error as X402AlreadySettledError).basis).toBe('settled')
       expect((error as X402AlreadySettledError).receipt.paymentHeader).toBeUndefined()
       expect(mockCreatePaymentHeader).not.toHaveBeenCalled()
+      expect(mockPreparePaymentHeader).not.toHaveBeenCalled()
+      expect(mockSignPaymentHeader).not.toHaveBeenCalled()
     })
 
     it('proceeds on an unverifiable balance — this IS the documented retry loop', async () => {
@@ -309,6 +334,8 @@ describe('#1521 — replayed settled payment', () => {
       expect(error).toBeInstanceOf(X402AlreadySettledError)
       expect((error as X402AlreadySettledError).basis).toBe('settled')
       expect(mockCreatePaymentHeader).not.toHaveBeenCalled()
+      expect(mockPreparePaymentHeader).not.toHaveBeenCalled()
+      expect(mockSignPaymentHeader).not.toHaveBeenCalled()
     })
 
     it('resumes when the delegate is still funded', async () => {

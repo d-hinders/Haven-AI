@@ -173,11 +173,12 @@ const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/
  *   is booked as before, never deferred (#3763's rule).
  * - **eip3009** is a two-leg bridge: the verified merchant settlement
  *   (`machine_metadata.merchant_settlement_tx_hash`, written only after
- *   on-chain verification by `observeEip3009MerchantSettlement`) is THE
- *   payment — the same hash #3763's Haven UI and the explorer headline. A
- *   PINNED hash (written at the payment's first feed claim) wins over
- *   anything recorded since, so retries render identical bytes (B2). With
- *   neither, the funding hash is booked and LABELLED as funding.
+ *   on-chain verification by `observeEip3009MerchantSettlement` — reported by
+ *   the agent (#3475) or detected from the chain by the #3888 settlement
+ *   sweep) is THE payment — the same hash #3763's Haven UI and the explorer
+ *   headline. A PINNED hash (written at the payment's first feed claim) wins
+ *   over anything recorded since, so retries render identical bytes (B2).
+ *   With neither, the funding hash is booked and LABELLED as funding.
  * - **Retired / scheme-less rails are unchanged**: `bookedTxHash` null and
  *   every rendering falls back to the raw `tx_hash`, exactly as before this
  *   contract existed (characterization-tested).

@@ -132,8 +132,8 @@ export const dashboardTransaction = {
   // #3763: the two EIP-3009 legs, named. `hash` stays the FUNDING hash; the
   // recorded settlement — the transaction the MERCHANT names — headlines the
   // drawer's On-chain section and the table link. Visible text: the drawer
-  // renders "Merchant settlement (reported by the agent, verified
-  // on-chain)" + "Funding from your account" on this row.
+  // renders "Merchant settlement (reported by the agent or detected
+  // on-chain, verified)" + "Funding from your account" on this row.
   fundingTxHash: `0x${'ab'.repeat(32)}`,
   settlementTxHash: `0x${'22'.repeat(32)}`,
   settlementScheme: 'eip3009' as const,

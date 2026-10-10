@@ -81,21 +81,26 @@ Structure (#3818):
 3. Only the next step is highlighted and carries the primary action. Connecting
    an agent stays available before funding, at secondary weight and without the
    highlight; step 3 stays locked until an agent can pay.
-4. When all three are done, one `You're set up` line takes the steps' place until
-   dismissed (the dismissal persists per user). "Hide for now" also persists
-   across reloads, until another step completes.
+4. The steps own the card only until the first agent payment. After it, one
+   `You're set up` line takes their place until dismissed (the dismissal persists
+   per user), and the steps never return: USDC spent to zero, an expired budget
+   or an unreadable balance belongs to the Needs you rules from then on. "Hide
+   for now" persists across reloads, until another step completes.
+5. Before the first agent payment, the money panel's spending block says what it
+   will show instead of three zero tiles.
 
 What completes a step — never a weaker signal:
-- Step 1: USDC on an account (any amount above zero). ETH or another token's
-  dust does not count: agents spend USDC.
+- Step 1: USDC on an account (any amount above zero), testnet accounts included.
+  ETH or another token's dust does not count: agents spend USDC.
 - Step 2: an agent that can pay — active or paused, with a usable budget. A
   connected agent still waiting for budget approval does not count; the step
   names the newest such agent with `Finish setup`.
 - Step 3: the first agent payment.
 
 Money and risk clarity:
-- The funding step's action opens `Add funds`, which shows the exact address and
-  network and carries the test-network faucet. Do not show the raw address, token
+- The funding step's action opens `Add funds` (after the account picker when the
+  user has several accounts), which shows the exact address and network and
+  carries the test-network faucet. Do not show the raw address, token
   list, QR code, or network detail in the guide; suggest an amount ("We suggest
   N USDC") rather than require one.
 - For the first-agent step, say the user will connect an agent and approve a

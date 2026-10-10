@@ -273,11 +273,14 @@ export default function DashboardClient() {
     overview?.onboardingProgress?.hasFirstAgentPayment,
   )
   // #3818: the guide no longer waits on the aggregate balance read — a
-  // balance error used to hide it. Its facts are the overview's, and an
-  // unknown USDC read is a state the guide shows.
-  const setupProgressReady = Boolean(firstRun) && !agentsLoading && firstAgentPaymentKnown
-  const allOnboardingComplete =
-    setupProgressReady && usdcFunded === true && hasSetUpAgent && hasFirstAgentPayment
+  // balance error used to hide it — nor on GET /agents, which only orders the
+  // waiting agents (a refetch must not flip the card). Its facts are the
+  // overview's, and an unknown USDC read is a state the guide shows.
+  const setupProgressReady = Boolean(firstRun) && firstAgentPaymentKnown
+  // The steps own the card only UNTIL the first agent payment. After it, a
+  // regression — USDC spent to zero, an expired budget, an unreadable balance
+  // — belongs to the Needs you rules (#3808), never to "Get started" again.
+  const allOnboardingComplete = setupProgressReady && hasFirstAgentPayment
 
   // #3719: no global active account. The default account pre-selects the
   // hero's Receive / Add funds (which ask when there is more than one) and the
@@ -555,7 +558,14 @@ export default function DashboardClient() {
     setPickerAction(null)
   }
 
+  // The hide and dismiss buttons unmount themselves; focus moves to the
+  // card's heading (tabIndex -1) rather than dropping to <body>.
+  function focusAttentionHeading() {
+    window.requestAnimationFrame(() => document.getElementById('needs-you-heading')?.focus())
+  }
+
   function hideSetupGuide() {
+    focusAttentionHeading()
     setSetupHideState({ userId: user?.id ?? null, hiddenAtCount: completedCount })
     if (!user?.id) return
     try {
@@ -566,6 +576,7 @@ export default function DashboardClient() {
   }
 
   function dismissCompleteBanner() {
+    focusAttentionHeading()
     setCompleteDismissalState({ userId: user?.id ?? null, dismissed: true })
     if (typeof window !== 'undefined' && user?.id) {
       window.localStorage.setItem(`haven-onboarding-complete-dismissed:${user.id}`, '1')
@@ -591,7 +602,9 @@ export default function DashboardClient() {
   // #3807: the money panel replaces the hero + KPI tiles. The focused
   // first-run view (an unfunded account) renders it without the spending
   // block — the old render was hero + checklist only.
-  const isFocusedView = showSetupSteps && !hasFunds
+  // Focused only when the account is KNOWN to hold no USDC — a failed
+  // balance read must not collapse the page.
+  const isFocusedView = showSetupSteps && usdcFunded === false
   const moneyPanel = (
     <MoneyPanel
       loading={overviewInitialLoading}
@@ -611,6 +624,7 @@ export default function DashboardClient() {
       watchingForDeposit={fundingStateKnown && !hasFunds && hasOpenedReceive}
       requiresOtherDevice={requiresOtherDevice}
       showSpending={!isFocusedView}
+      noPaymentsYet={firstAgentPaymentKnown && !hasFirstAgentPayment}
       onDepositAddress={() => openHeroAction('receive')}
       onAddFunds={() => openHeroAction('add-funds')}
     />

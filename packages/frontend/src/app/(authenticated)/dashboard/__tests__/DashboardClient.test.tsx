@@ -310,6 +310,9 @@ describe('DashboardClient', () => {
   })
 
   it('leads with total balance, the money panel, and its two actions', () => {
+    // A user whose agents have paid: the spending block shows its figures
+    // (before the first payment it explains itself instead, #3818).
+    mockBaseState([], { onboardingProgress: { hasFirstAgentPayment: true } })
     render(<DashboardClient />)
 
     expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument()
@@ -577,10 +580,54 @@ describe('DashboardClient', () => {
     expect(screen.queryByText('Setup complete line')).not.toBeInTheDocument()
   })
 
-  it('does not show the guide while the overview is still loading', () => {
-    mockUseDashboardOverview.mockReturnValue({ data: null, loading: true, error: null, refetch: vi.fn() })
+  it('does not show the guide before first-payment progress is known', () => {
+    // The overview arrived but without onboarding progress (an old cached
+    // shape): the gate, not a missing card, keeps the guide out.
+    mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, funded: false, usdcBalanceAtomic: '0' }], onboardingProgress: undefined })
+    render(<DashboardClient />)
+    expect(screen.getByRole('heading', { name: 'Needs you' })).toBeInTheDocument()
+    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+  })
+
+  it('after the first agent payment the steps never return — a regression is the rules\' job (#3818 review)', () => {
+    // A veteran whose USDC read is unavailable, whose budget expired, who
+    // has paid before: before this rule they got "Get started" again.
+    mockBaseState([], {
+      accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: null, funded: null }],
+      onboardingProgress: { hasFirstAgentPayment: true },
+    })
     render(<DashboardClient />)
     expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+    expect(screen.getByText('Setup complete line')).toBeInTheDocument()
+  })
+
+  it('a balance-read error mid-setup does not collapse the page into the focused view (#3818 review)', () => {
+    mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: null, funded: null }] })
+    mockUseAggregatedBalances.mockReturnValue({ balances: [], loading: false, error: 'boom', refetch: vi.fn() })
+    render(<DashboardClient />)
+    expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
+    // The full layout keeps the activity section.
+    expect(screen.getByRole('heading', { name: 'Activity' })).toBeInTheDocument()
+  })
+
+  it('before the first agent payment the spending block says what will appear there, not three zeros (#3818)', () => {
+    mockBaseState([], { accounts: [FUNDED_ACCOUNT] })
+    render(<DashboardClient />)
+    expect(screen.getByText(/After your agents’ first payment, this shows what they spent/)).toBeInTheDocument()
+    expect(screen.queryByText('Stopped by budget')).not.toBeInTheDocument()
+  })
+
+  it('a revoked agent with a budget does not complete step 2 — GET /agents lists it, the overview does not', () => {
+    // The original bug: step 2 completed on `agents.length > 0`, and GET
+    // /agents returns every status.
+    mockBaseState([], { accounts: [FUNDED_ACCOUNT] })
+    mockUseAgents.mockReturnValue({
+      agents: [{ id: 'agent-r', name: 'Gone', status: 'revoked', allowances: [{ id: 'x' }], created_at: '2026-10-01T00:00:00Z' }],
+      loading: false,
+      refetch: vi.fn(),
+    })
+    render(<DashboardClient />)
+    expect(screen.getByText('agent-not-set-up')).toBeInTheDocument()
   })
 
   it('keeps the guide visible when the USDC read is unavailable — step 1 unknown, never "unfunded" (#3818)', () => {
@@ -640,6 +687,8 @@ describe('DashboardClient', () => {
   })
 
   it('shows a focused first-run guide instead of the full dashboard when the account needs funds', () => {
+    // #3818: focused only when the account is KNOWN to hold no USDC.
+    mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: '0', funded: false }] })
     mockUseAggregatedBalances.mockReturnValue({
       balances: [],
       loading: false,
@@ -675,7 +724,7 @@ describe('DashboardClient', () => {
     expect(screen.getByText('usdc-true')).toBeInTheDocument()
   })
 
-  it('does not show the connect-agent guide before agents finish loading', () => {
+  it('does not wait on GET /agents — the overview carries the agents, so a refetch never flips the card (#3818)', () => {
     mockUseAgents.mockReturnValue({
       agents: [],
       loading: true,
@@ -684,7 +733,7 @@ describe('DashboardClient', () => {
 
     render(<DashboardClient />)
 
-    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+    expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
   })
 
   it('does not show a zero balance when dashboard totals fail to load', () => {

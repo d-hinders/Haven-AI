@@ -13,7 +13,7 @@
 import type { Page, Route } from '@playwright/test'
 import { dashboardOverview } from '../fixtures/haven-api'
 
-export type FirstRunState = 'no-funds' | 'funded' | 'agent-needs-setup' | 'set-up'
+export type FirstRunState = 'no-funds' | 'funded' | 'agent-needs-setup' | 'agent-set-up' | 'set-up'
 
 const [activeAgent, , pendingAgent] = dashboardOverview.agents
 
@@ -28,13 +28,17 @@ function accountsWith(funded: boolean) {
 export function firstRunOverview(state: FirstRunState) {
   const funded = state !== 'no-funds'
   const agents =
-    state === 'set-up' ? [activeAgent] : state === 'agent-needs-setup' ? [pendingAgent] : []
+    state === 'set-up' || state === 'agent-set-up'
+      ? [activeAgent]
+      : state === 'agent-needs-setup'
+        ? [pendingAgent]
+        : []
   return {
     ...dashboardOverview,
     accounts: accountsWith(funded),
     agents,
     agentCount: {
-      active: state === 'set-up' ? 1 : 0,
+      active: state === 'set-up' || state === 'agent-set-up' ? 1 : 0,
       paused: 0,
       pending_approval: state === 'agent-needs-setup' ? 1 : 0,
     },

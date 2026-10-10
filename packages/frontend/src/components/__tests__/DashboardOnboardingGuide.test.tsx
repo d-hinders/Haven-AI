@@ -111,7 +111,7 @@ describe('DashboardOnboardingGuide — step 1 (#2534, #3818)', () => {
 
 describe('DashboardOnboardingGuide — step 2 and 3 (#3818)', () => {
   it('names the agent waiting for setup with the approve action, and "and N more"', () => {
-    renderGuide({ usdcFunded: true, pendingAgent: { id: 'agt-1', name: 'Research agent', moreCount: 2 } })
+    renderGuide({ usdcFunded: true, pendingAgent: { id: 'agt-1', name: 'Research agent', moreCount: 2, awaiting: 'approval' as const } })
     expect(document.body.textContent).toContain('Finish setting up Research agent and 2 more')
     const action = screen.getByRole('link', { name: 'Finish setup' })
     expect(action).toHaveAttribute('href', '/agents/agt-1')
@@ -131,6 +131,18 @@ describe('DashboardOnboardingGuide — step 2 and 3 (#3818)', () => {
     expect(props.onAddAgent).toHaveBeenCalledTimes(1)
   })
 
+  it('an agent set up BEFORE funding: step 3 is available, not a second highlighted step', () => {
+    const { container } = renderGuide({ usdcFunded: false, hasSetUpAgent: true })
+    const statuses = [...container.querySelectorAll('li[data-status]')].map((li) => li.getAttribute('data-status'))
+    expect(statuses).toEqual(['active', 'complete', 'available'])
+    expect(container.querySelectorAll('[aria-current="step"]')).toHaveLength(1)
+  })
+
+  it('an active agent with no budget is asked for a budget, not an approval', () => {
+    renderGuide({ usdcFunded: true, pendingAgent: { id: 'b', name: 'Bot', moreCount: 0, awaiting: 'budget' } })
+    expect(document.body.textContent).toContain('Finish setting up Bot: set a budget so it can pay.')
+  })
+
   it('a set-up agent completes step 2 and unlocks step 3', () => {
     renderGuide({ usdcFunded: true, hasSetUpAgent: true })
     expect(document.body.textContent).toContain('An agent is connected with a budget.')
@@ -139,7 +151,7 @@ describe('DashboardOnboardingGuide — step 2 and 3 (#3818)', () => {
   })
 
   it('without a set-up agent step 3 stays locked', () => {
-    renderGuide({ usdcFunded: true, pendingAgent: { id: 'a', name: 'A', moreCount: 0 } })
+    renderGuide({ usdcFunded: true, pendingAgent: { id: 'a', name: 'A', moreCount: 0, awaiting: 'approval' as const } })
     expect(document.body.textContent).toContain('Set up an agent first to unlock this step.')
     expect(screen.queryByRole('button', { name: 'Show me how' })).not.toBeInTheDocument()
   })

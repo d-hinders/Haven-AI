@@ -39,6 +39,8 @@ export interface PendingSetupAgent {
   id: string
   name: string
   moreCount: number
+  /** Which half is missing: a `pending_approval` agent's approval, or an active agent's budget. */
+  awaiting: 'approval' | 'budget'
 }
 
 interface Props {
@@ -94,8 +96,16 @@ export default function DashboardOnboardingGuide({
   onHide,
 }: Props) {
   const funded = usdcFunded === true
-  const step3Status: StepStatus = hasFirstAgentPayment ? 'complete' : !hasSetUpAgent ? 'locked' : 'active'
   const activeStep = !funded ? 1 : !hasSetUpAgent ? 2 : !hasFirstAgentPayment ? 3 : null
+  // Unlocked but not next (an agent set up before funding) is `available`:
+  // one highlighted step at a time.
+  const step3Status: StepStatus = hasFirstAgentPayment
+    ? 'complete'
+    : !hasSetUpAgent
+      ? 'locked'
+      : activeStep === 3
+        ? 'active'
+        : 'available'
 
   const fundingToken = funding?.tokens.find((t) => t.minimum_useful_human !== null) ?? null
   const fundingBody = fundingToken
@@ -126,7 +136,9 @@ export default function DashboardOnboardingGuide({
     number: 2,
     title: 'Connect your first agent',
     body: pendingAgent
-      ? `Finish setting up ${pendingAgent.name}${pendingAgent.moreCount > 0 ? ` and ${pendingAgent.moreCount} more` : ''}: approve its budget so it can pay.`
+      ? `Finish setting up ${pendingAgent.name}${pendingAgent.moreCount > 0 ? ` and ${pendingAgent.moreCount} more` : ''}: ${
+          pendingAgent.awaiting === 'approval' ? 'approve its budget' : 'set a budget'
+        } so it can pay.`
       : 'Connect an agent and approve a budget it can spend from.',
     completedBody: 'An agent is connected with a budget.',
     cta: step2Cta,
@@ -147,13 +159,15 @@ export default function DashboardOnboardingGuide({
   return (
     <div className="v2-animate-fade-in">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-[var(--v2-ink-2)]">Your first 3 steps</p>
+        <p id="first-run-steps-label" className="text-sm text-[var(--v2-ink-2)]">
+          Your first 3 steps
+        </p>
         <Button variant="tertiary" size="sm" onClick={onHide}>
           Hide for now
         </Button>
       </div>
 
-      <ol className="mt-3 space-y-2" aria-label="Onboarding checklist">
+      <ol className="mt-3 space-y-2" aria-labelledby="first-run-steps-label">
         <ChecklistRow {...step1} />
         <ChecklistRow {...step2} />
         <ChecklistRow {...step3} />
@@ -202,7 +216,11 @@ function ChecklistRow({ status, number, title, body, completedBody, cta }: StepP
     // #3818: always stacked — the guide lives in the Needs you card, which is
     // the narrow aside column on desktop, so a side-by-side action squeezed
     // the step text into a column of single words.
-    <li data-status={status} className={`flex flex-col gap-3 px-4 py-3 ${rowClass}`}>
+    <li
+      data-status={status}
+      aria-current={isActive ? 'step' : undefined}
+      className={`flex flex-col gap-3 px-4 py-3 ${rowClass}`}
+    >
       <div className="flex min-w-0 items-start gap-3">
         <StatusCircle status={status} number={number} />
         <div className="min-w-0">

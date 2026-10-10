@@ -345,6 +345,8 @@ describe('computeAttentionItems — budget reached (rule 3)', () => {
     const paused = items.filter((item) => item.kind === 'haven-paused')
     expect(paused).toHaveLength(1)
     expect(paused[0].tone).toBe('neutral')
+    // #3880: the reassurance leads, so a clamped line still carries it.
+    expect(paused[0].subtitle?.startsWith('Your budgets are untouched')).toBe(true)
   })
 })
 

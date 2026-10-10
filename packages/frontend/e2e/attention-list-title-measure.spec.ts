@@ -104,3 +104,61 @@ test.describe('AttentionList text overflow (#3861, #3876)', () => {
     }
   }
 })
+
+/**
+ * First-line alignment (#3880). With both lines clamped to two, a row body
+ * runs to four lines; the leading icon — and, beside the body from `sm` up,
+ * the dismiss — must be centred on the title's FIRST line, not on the body.
+ * The arm first makes the body at least two lines taller than the 32px icon:
+ * the unmodified sample rows (~38px bodies) would pass by accident, ~3px off.
+ */
+const FIRST_LINE_TOLERANCE_PX = 2
+
+test.describe('AttentionList first-line alignment (#3880)', () => {
+  test.beforeEach(async ({ page }) => {
+    await mockHavenApi(page)
+    await seedAuthenticatedSession(page)
+  })
+
+  for (const vp of WIDTHS) {
+    test(`${vp.name}: the icon${vp.width >= 640 ? ' and the dismiss' : ''} sit on the title's first line`, async ({ page }) => {
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      const sample = page.getByTestId('ds-attention-list')
+      await expect(sample.getByTestId(/^attention-dismiss-/)).toHaveCount(4)
+      const m = await sample
+        .locator('li')
+        .first()
+        .evaluate((li, text) => {
+          const title = li.querySelector('p.font-medium') as HTMLElement
+          const subtitle = li.querySelector('p.text-xs') as HTMLElement
+          title.textContent = text
+          subtitle.textContent = text
+          const icon = li.querySelector('span[aria-hidden="true"]') as HTMLElement
+          const dismiss = li.querySelector('[data-attention-dismiss]') as HTMLElement
+          const t = title.getBoundingClientRect()
+          const s = subtitle.getBoundingClientRect()
+          const i = icon.getBoundingClientRect()
+          const d = dismiss.getBoundingClientRect()
+          const lineHeight = parseFloat(getComputedStyle(title).lineHeight)
+          return {
+            bodyHeight: s.bottom - t.top,
+            iconHeight: i.height,
+            lineHeight,
+            firstLineCentre: t.top + lineHeight / 2,
+            iconCentre: i.top + i.height / 2,
+            dismissCentre: d.top + d.height / 2,
+            dismissBesideBody: d.top < s.bottom,
+          }
+        }, LONG_TEXT)
+      // Precondition: the body is far taller than the icon, so centring on
+      // the body and centring on the first line give different answers.
+      expect(m.bodyHeight).toBeGreaterThanOrEqual(m.iconHeight + 2 * m.lineHeight)
+      expect(Math.abs(m.iconCentre - m.firstLineCentre)).toBeLessThanOrEqual(FIRST_LINE_TOLERANCE_PX)
+      if (vp.width >= 640) {
+        expect(m.dismissBesideBody, 'from sm up the dismiss sits beside the body').toBe(true)
+        expect(Math.abs(m.dismissCentre - m.firstLineCentre)).toBeLessThanOrEqual(FIRST_LINE_TOLERANCE_PX)
+      }
+    })
+  }
+})

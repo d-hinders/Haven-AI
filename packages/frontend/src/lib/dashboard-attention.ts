@@ -322,7 +322,9 @@ export function computeAttentionItems(input: DashboardAttentionInput): Attention
       kind: 'haven-paused',
       tone: 'neutral',
       title: 'Haven paused sponsored payments',
-      subtitle: "Haven's own cap stopped a payment. Your agents' budgets are untouched.",
+      // Reassurance first (owner decision 2026-10-10, #3880): the two-line
+      // clamp can cut the end of this line in the narrow desktop panel.
+      subtitle: "Your budgets are untouched. Haven's own cap stopped a payment.",
     })
   }
 

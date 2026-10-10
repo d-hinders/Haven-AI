@@ -40,6 +40,14 @@
  * with `line-clamp-none`: it sets `overflow: visible`, which defeats the
  * ellipsis (#3861).
  *
+ * ── First-line alignment (#3880) ──────────────────────────────────────────
+ *
+ * With two-line titles and subtitles a row body runs to four lines, and
+ * `Row`'s default centring left the icon beside the gap between title and
+ * subtitle. The leading icon — and, from `sm` up, the trailing badge, action
+ * and dismiss when they sit beside the body — are centred on the title's
+ * FIRST line instead, so the item reads as one line with detail beneath.
+ *
  * ── Mobile ────────────────────────────────────────────────────────────────
  *
  * Below `sm` the trailing slot wraps onto its own line under the body
@@ -74,6 +82,15 @@ export interface AttentionListItem {
   /** The caller's action — a button or link, rendered in `trailing` before the dismiss. */
   action?: ReactNode
 }
+
+/**
+ * Centre a 32px control on the title's first line (#3880): pinned to the top
+ * of the row, then raised by half the difference between 32px and the 20px
+ * `text-sm` line — the circle's centre lands on the first line's centre.
+ * The trailing slot repeats it from `sm` up as literal classes (Tailwind
+ * only generates classes it can read whole in the source).
+ */
+const FIRST_LINE = 'self-start -mt-1.5'
 
 /** Two lines, then an ellipsis — see the clamp rule above. */
 const CLAMP = 'whitespace-normal line-clamp-2'
@@ -132,11 +149,12 @@ export function AttentionList({
           <Row
             leading={item.icon ? <Icon icon={item.icon} className="h-4 w-4" /> : undefined}
             leadingTone={item.icon ? item.tone : undefined}
+            leadingClassName={FIRST_LINE}
             title={item.title}
             subtitle={item.subtitle}
             titleClassName={CLAMP}
             subtitleClassName={CLAMP}
-            trailingClassName="w-full basis-full self-start sm:w-auto sm:basis-auto sm:self-center"
+            trailingClassName="w-full basis-full self-start sm:w-auto sm:basis-auto sm:-mt-1.5"
             className="flex-wrap"
             trailing={
               <div className="flex items-center justify-end gap-2">

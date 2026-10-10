@@ -76,9 +76,34 @@ covers:
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-10-09"
+  - packages/mcp-server/src/tools-list.snapshot.json
+  - scripts/ci/check-stale-client-compat.mjs
+  - packages/mcp-server/src/next-arguments-corpus.json
+  - packages/mcp-server/src/tool-contract-snapshot.test.ts
+last-verified: "2026-10-10"
 ---
 
+
+> **#3817 (2026-10-10, the hosted `tools/list` contract is snapshotted and
+> stale-client impact is reported in CI):** CI-only, tests and skill text —
+> no runtime behaviour changes. The hosted `tools/list` payload (names,
+> input schemas, descriptions) is now captured through the SDK
+> (`InMemoryTransport` + `client.listTools()`) into the committed golden
+> `packages/mcp-server/src/tools-list.snapshot.json` and pinned by
+> `tool-contract-snapshot.test.ts` (regenerate with
+> `npm run snapshot:regen -w packages/mcp-server`); a companion corpus
+> (`next-arguments-corpus.json`) carries every `next_arguments` the server
+> emits for a hosted `next_tool`. `mcp_server_checks` gains an ADVISORY step
+> (`scripts/ci/check-stale-client-compat.mjs`) that validates the corpus and
+> the branch snapshot against `origin/main`'s golden and writes
+> reconnect-required findings to the job summary — never a failure: a
+> contract change is legitimate, it only needs announcing. Nothing in this
+> document's skew rules moves: the check is the MEASURING instrument for the
+> stale-client half of the existing reconnect rule (contract fingerprint §
+> above), not a new contract. Description-only changes and additive optional
+> fields no emission carries are silent by design; a narrowed `enum`/`pattern`
+> flags (the #3172 precedent). Until the first promotion publishes a golden
+> to `main`, the check prints a notice and skips.
 
 > **Re-verification (#3838, 2026-10-09, wording-only `haven_pay_x402_quote`
 > description edit):** the local tool's sign-in-with-x sentence was rewritten

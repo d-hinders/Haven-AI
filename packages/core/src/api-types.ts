@@ -5894,7 +5894,7 @@ export type components = {
             /** @description Failure or skip reason; on a pushed row, a non-fatal note (#498). Null when clean. */
             error: string | null;
         };
-        /** @description Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe/account scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields (since #3132 it does carry the base-shape `timestampSource` / `confirmedAt`). Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why. */
+        /** @description Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe/account scope. Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why. */
         Transaction: {
             hash: string;
             /** @enum {string} */
@@ -6331,8 +6331,6 @@ export type components = {
             agents: components["schemas"]["DashboardAgentPreview"][];
             /** @description Grouped activity rows, newest first. Every count is a FLOOR (`countIsFloor`) when the explorer window was truncated. */
             activity?: components["schemas"]["DashboardActivityGroup"][];
-            /** @description At most 5. Payment-enrichment fields (paymentId, paymentFlowStatus, amountSek, …) are never populated in this projection. */
-            transactions: components["schemas"]["Transaction"][];
             /** @description #3803 — the overview’s agents[] by status, so tiles do not derive counts from a client-side slice. */
             agentCount: {
                 active: number;

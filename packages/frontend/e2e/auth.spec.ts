@@ -39,7 +39,7 @@ test.describe('authentication flows', () => {
     await dismissMobileSidebar(page)
     await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
     await expect(page.getByText('$1,250.00')).toBeVisible()
-    await expect(page.getByRole('link', { name: /Research agent Connected/ })).toBeVisible()
+    await expect(page.getByRole('link', { name: /Research agent 92% used/ })).toBeVisible()
     // #1989: the "Open approvals" alert link is DELETED with the Safe rail.
     // #2120 set this fixture's `actionableApprovals` to 0 — the value the real
     // route hardcodes — so this absence no longer rests on an impossible seed.

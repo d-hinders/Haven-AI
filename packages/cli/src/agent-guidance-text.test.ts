@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { HAVEN_AGENT_RUNBOOK_MD } from './agent-guidance-text.js'
+import { HASH_DISCOVERY_HINT } from './commands.js'
 // The canonical string lives in the SDK. The CLI keeps a generated copy so it
 // can stay dependency-free (see agent-guidance-text.ts), so parity is asserted
 // against the SDK source — read through the generator's own reader, so the
@@ -107,8 +108,28 @@ describe('haven guide text (#2525)', () => {
     // connector command's optional `--name <slug>` pair suffix, so an agent
     // on a multi-agent machine runs the upgrade as one command. Lands at
     // 11694/11599.
-    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(11694)
-    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(11599)
+    // #3892: +9 bytes / +9 units — the "Budget changes later" hash sentence
+    // now names the only command that prints the delegation hash,
+    // `haven budget show <agentId> --hashes` (HASH_DISCOVERY_HINT), instead
+    // of `haven agents show <agentId>`, which prints none. All-ASCII edit,
+    // so bytes and units move together. Lands at 11703/11608.
+    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(11703)
+    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(11608)
+  })
+
+  it('names the command that actually prints the revoke hash (#3892)', () => {
+    // #3892: the runbook sent agents to `haven agents show <agentId>` for the
+    // delegation hash `haven budget revoke` needs — a command that prints no
+    // hash, stranding the agent mid-revocation. The only command that prints
+    // one is `budget show --hashes`, which the CLI exports verbatim as
+    // HASH_DISCOVERY_HINT (its revoke error and usage path already cite it).
+    // Pinning the prose to the exported constant means a rename of either
+    // side reddens here instead of drifting apart again. The CLI copy is
+    // itself pinned byte-for-byte to the SDK source above, so this pins the
+    // canonical runbook too; the agent-skills slices are pinned by
+    // lint:runbook-parity and /for-agents.md by the frontend's own test.
+    expect(HAVEN_AGENT_RUNBOOK_MD).toContain(HASH_DISCOVERY_HINT)
+    expect(HAVEN_AGENT_RUNBOOK_MD).not.toContain('agents show <agentId>')
   })
 
   it('keeps the CLI free of runtime dependencies', () => {

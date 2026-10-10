@@ -208,7 +208,14 @@ describe('/for-agents.md (#2523)', () => {
     // claiming "you can pay" — it states readiness is authority and names
     // `funds_cover_remaining` as the heads-up it is (+189 bytes). Nothing
     // unrelated was trimmed to fit.
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(11700)
+    //
+    // 11700 -> 11800 for #3892 (2026-10-10; the page is 11703 bytes at this
+    // commit, 11694 before it): the "Budget changes later" hash sentence now
+    // names `haven budget show <agentId> --hashes`, the only command that
+    // prints the delegation hash `haven budget revoke` needs, instead of
+    // `haven agents show <agentId>`, which prints none (+9 bytes). Nothing
+    // unrelated was trimmed to fit.
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(11800)
   })
 
   it('treats chains.default as expected only and confirms funding after login', () => {

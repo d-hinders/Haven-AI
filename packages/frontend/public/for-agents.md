@@ -28,7 +28,7 @@ haven budget grant <agentId> --amount <n> --token USDC --period <minutes> [--rec
 haven budget revoke <agentId> <delegationHash> [--wait]
 ```
 
-The CLI never signs: it prints a dashboard link, your user opens it and signs with their passkey or wallet. `--wait` polls until the human's signature lands. The hash for `revoke` is in `haven agents show <agentId>`.
+The CLI never signs: it prints a dashboard link, your user opens it and signs with their passkey or wallet. `--wait` polls until the human's signature lands. The hash for `revoke` is in `haven budget show <agentId> --hashes`.
 
 ## Hand-off scripts
 

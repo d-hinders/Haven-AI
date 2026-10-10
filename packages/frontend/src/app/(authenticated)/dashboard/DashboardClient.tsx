@@ -1,6 +1,6 @@
 'use client'
 
-import { ArrowLeftRight, Bot, ChevronRight } from 'lucide-react'
+import { ArrowLeftRight } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
@@ -13,7 +13,6 @@ import { useDashboardOverview } from '@/hooks/useDashboardOverview'
 import { useBalances } from '@/hooks/useBalances'
 import { useAccountFunding } from '@/hooks/useAccountFunding'
 import { useAccountOperationGate } from '@/hooks/useAccountOperationGate'
-import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { timeAgo } from '@/lib/format'
 import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
 import type { AggregatedTransaction } from '@/types/transactions'
@@ -23,7 +22,6 @@ import {
   transactionTitle,
 } from '@/lib/transaction-presentation'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
-import { agentStatusPresentation } from '@/lib/payment-status'
 import { displayName } from '@/lib/user'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
@@ -34,13 +32,11 @@ import AddFundsModal from '@/components/AddFundsModal'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { Row } from '@/components/ui/Row'
-import { StatusBadge } from '@/components/ui/StatusBadge'
 import { useToast } from '@/components/ui/Toast'
 import { TransactionActivityRow } from '@/components/haven'
 import MoneyPanel from './MoneyPanel'
 import { ActivitySection } from './ActivitySection'
-import type { DashboardAgentPreview } from '@/types/dashboard'
+import { AgentsSection } from './AgentsSection'
 import { resolveDefaultAccount } from '@/lib/default-account'
 import { computeAttentionItems, type AttentionRuleItem } from '@/lib/dashboard-attention'
 import { useBudgetRemaining } from '@/hooks/useBudgetRemaining'
@@ -52,140 +48,9 @@ import NeedsYou from './NeedsYou'
 // moved to `dashboard/MoneyPanel.tsx` with the money panel (#3807) — the
 // tiles that needed the compact tier are gone.
 
-function buildSpendSummary(agent: DashboardAgentPreview): string {
-  // #3802: "No budget" — the overview's allowance array already carries only
-  // live (unexpired, started) budgets, so an empty array means the agent
-  // cannot spend at all. The old copy said the opposite of the truth.
-  if (agent.allowances.length === 0) return 'No budget'
-
-  const summaries = agent.allowances.slice(0, 2).map((allowance) => {
-    const amount = formatAllowanceForToken(
-      allowance.allowanceAmount,
-      agent.accountChainId,
-      allowance.tokenSymbol,
-    )
-    // #3807: no reset label — `resetPeriodMin` left the wire with the KPI
-    // tiles, and #3809's budget-caption row replaces this subtitle outright.
-    return `${amount} ${allowance.tokenSymbol}`
-  })
-
-  if (agent.allowances.length > 2) {
-    summaries.push(`+${agent.allowances.length - 2} more`)
-  }
-
-  return summaries.join(' • ')
-}
-
-function ConnectedAgentsSection({
-  agents,
-  hasAnyAgents,
-  loading,
-  unavailable,
-  onRetry,
-  onConnectAgent,
-}: {
-  agents: DashboardAgentPreview[]
-  hasAnyAgents: boolean
-  loading: boolean
-  unavailable: boolean
-  onRetry: () => void
-  onConnectAgent: () => void
-}) {
-  return (
-    <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card overflow-hidden">
-      <Card.Header
-        as="h2"
-        title="Connected agents"
-        actions={
-          <Link href="/agents" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
-            View all
-          </Link>
-        }
-      />
-
-      {loading ? (
-        <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-live="polite" aria-label="Loading connected agents">
-          {[0, 1, 2].map((item) => (
-            <div key={item} className="flex items-center gap-3 px-5 h-[72px]">
-              <div className="h-8 w-8 rounded-full bg-[var(--v2-surface-2)] animate-pulse" />
-              <div className="min-w-0 flex-1">
-                <div className="h-3.5 w-36 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                <div className="mt-1.5 h-2.5 w-48 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : unavailable ? (
-        <div className="p-6">
-          <EmptyState
-            size="compact"
-            title="Agent preview unavailable"
-            body="Haven could not verify which agents are connected right now."
-            action={<Button variant="ghost" size="sm" onClick={onRetry}>Try again</Button>}
-          />
-        </div>
-      ) : agents.length === 0 ? (
-        <div className="p-6">
-          <EmptyState
-            size="compact"
-            title={hasAnyAgents ? 'No connected agents right now' : 'No agents connected yet'}
-            body={
-              hasAnyAgents
-                ? 'Reconnect or create an agent to bring automated spending back online.'
-                : 'Create your first agent to give it payment credentials and spend limits.'
-            }
-            action={
-              <div className="flex items-center justify-center gap-3">
-                <Button onClick={onConnectAgent} size="sm">
-                  Connect agent
-                </Button>
-                <Link href="/agents" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
-                  Go to Agents
-                </Link>
-              </div>
-            }
-          />
-        </div>
-      ) : (
-        <div className="divide-y divide-[var(--v2-border)] v2-animate-fade-in">
-          {agents.slice(0, 5).map((agent) => {
-            const status = agentStatusPresentation(agent.status)
-            return (
-              <Row
-                key={agent.id}
-                href={`/agents/${agent.id}`}
-                // Robot mark matches the sidebar's "agents" icon so the
-                // dashboard and nav read as the same system.
-                leading={<AgentMarkIcon />}
-                leadingTone="brand"
-                title={
-                  <span className="flex items-center gap-2">
-                    <span className="truncate">{agent.name}</span>
-                    <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
-                  </span>
-                }
-                subtitle={buildSpendSummary(agent)}
-                trailing={
-                  <Icon icon={ChevronRight} className="w-4 h-4 text-[var(--v2-ink-3)]" />
-                }
-                className="h-[72px] px-5"
-              />
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-// ── Metric card icons (1.5 stroke, 14px, currentColor) ───────────────────
-// These match the sidebar / Row visual language. AgentMarkIcon mirrors the
-// sidebar's "agents" robot mark so the dashboard reads the same as the nav.
-
-function AgentMarkIcon() {
-  return (
-    <Icon icon={Bot} className="w-full h-full" />
-  )
-}
+// ── Metric card icon (1.5 stroke, 14px, currentColor) ────────────────────
+// The sidebar's "transactions" mark, so the empty state belongs to the same
+// visual family. (#3867: the agent row mark moved into AgentsSection.)
 
 function EmptyTransactionsIcon() {
   // Arrows-in-out icon — mirrors the sidebar's "transactions" mark so the
@@ -715,8 +580,12 @@ export default function DashboardClient() {
 
   const activityGrid = (
     <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-2">
-      <ConnectedAgentsSection
-        agents={overview?.agents ?? []}
+      <AgentsSection
+        overview={overview}
+        budgetRemaining={budgetRemaining}
+        attentionItems={attentionItems}
+        currency={currency}
+        accountNames={accountNames}
         hasAnyAgents={agents.length > 0}
         loading={overviewInitialLoading}
         unavailable={overviewUnavailable}

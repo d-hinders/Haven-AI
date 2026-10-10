@@ -109,7 +109,8 @@ import {
 type Agent = ApiSchema<'Agent'>
 type DashboardOverview = ApiSchema<'DashboardOverviewResponse'>
 type DashboardBudgetRemaining = ApiSchema<'DashboardBudgetRemainingResponse'>
-type DashboardTransaction = DashboardOverview['transactions'][number]
+// #3858: DashboardOverview no longer carries the 5-row transactions preview,
+// so there is no DashboardTransaction projection to derive.
 type DashboardAgentPreview = DashboardOverview['agents'][number]
 
 type ListProvidersResponse =
@@ -136,14 +137,13 @@ const DASHBOARD_AGENT_DEFAULT = {
   ...dashboardOverview.agents[0]!,
 } satisfies DashboardAgentPreview
 
-const DASHBOARD_TRANSACTION_DEFAULT = {
-  ...dashboardOverview.transactions[0]!,
-} satisfies DashboardTransaction
+// #3858: the former DASHBOARD_TRANSACTION_DEFAULT (derived from
+// dashboardOverview.transactions[0]) is gone with the removed preview — the
+// overview mock no longer carries the field.
 
 const DASHBOARD_OVERVIEW_DEFAULT = {
   ...dashboardOverview,
   agents: [DASHBOARD_AGENT_DEFAULT],
-  transactions: [DASHBOARD_TRANSACTION_DEFAULT],
 } satisfies DashboardOverview
 
 const DASHBOARD_BUDGET_REMAINING_DEFAULT = {

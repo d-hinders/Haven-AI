@@ -1216,9 +1216,9 @@ export const FIXTURE_OVERVIEW = {
       },
     },
   })),
-  transactions: FIXTURE_TXS.slice(0, 4),
-  // #3824: the grouped-activity rows — SAME top-level key set as the e2e
-  // `dashboardOverview` (the parity suite compares them exactly). Two groups
+  // #3858: the former 5-row `transactions` preview is gone from the wire —
+  // SAME top-level key set as the e2e `dashboardOverview` (the parity suite
+  // compares them exactly). Two groups
   // over the dataset's rows: the Research agent's USDC stream at the merchant
   // (a floor count — the screenshot story includes a truncated-window render
   // beside it) and one deposit day. approx (serve-time) fiat throughout: no

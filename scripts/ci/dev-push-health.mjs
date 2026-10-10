@@ -8,8 +8,9 @@
 // accepted on the understanding that it "reddens the push-to-`dev` CI run … to
 // be fixed forward" (autonomous-pr-loop.md). Nothing watched that run. #3886:
 // #3855's merge broke `MCP server checks` on its own `dev` push, #3875's push
-// inherited it, and nobody noticed for five hours, until an unrelated PR
-// (#3885) inherited the failure.
+// inherited it, and nobody noticed for about five hours (job failed 09:47Z;
+// #3886 filed 14:46Z). It surfaced only when an unrelated PR (#3885) inherited
+// the failure.
 //
 // ## Three traps, each one measured
 //
@@ -19,7 +20,8 @@
 //    reads jobs, never the run conclusion.
 // 2. The aggregator fails on every superseded run. `Lint, Type-check & Build`
 //    is `if: always()` and needs every check job, so a run whose check jobs
-//    were all cancelled reports it as `failure` (run 38025222136). It is
+//    were cancelled reports it as `failure` (run 38025222136: 16 cancelled,
+//    only `Repo CI config checks` and `Detect changed surfaces` finished). It is
 //    derived from the leaves, so it is excluded by name: counting it would open
 //    an issue several times a day.
 // 3. A skipped job looks green. A later push that routes nothing to the broken

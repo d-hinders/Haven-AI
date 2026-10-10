@@ -6,8 +6,8 @@ name: Push-to-dev CI health
 # individually green PRs can break `dev` together. That was accepted on the
 # condition that the push-to-`dev` CI run goes red and the break is fixed
 # forward — but nothing watched that run. #3886: #3855's merge broke
-# `MCP server checks`, and it sat red for five hours until an unrelated PR
-# inherited it.
+# `MCP server checks` on its own push, and nobody noticed for about five hours;
+# it surfaced only when an unrelated PR (#3885) inherited it.
 #
 # Driven by `workflow_run`, not a cron: it wakes when each CI run on `dev`
 # completes — including a `cancelled` one, since a superseded run can hold a

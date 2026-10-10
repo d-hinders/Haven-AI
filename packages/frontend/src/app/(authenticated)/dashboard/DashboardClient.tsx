@@ -7,7 +7,6 @@ import Link from 'next/link'
 import type { Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
 import { usePreferences } from '@/hooks/usePreferences'
-import { useContacts } from '@/hooks/useContacts'
 import { useAgents } from '@/hooks/useAgents'
 import { useAggregatedBalances } from '@/hooks/useAggregatedPortfolio'
 import { useDashboardOverview } from '@/hooks/useDashboardOverview'
@@ -16,6 +15,8 @@ import { useAccountFunding } from '@/hooks/useAccountFunding'
 import { useAccountOperationGate } from '@/hooks/useAccountOperationGate'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { timeAgo } from '@/lib/format'
+import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
+import type { AggregatedTransaction } from '@/types/transactions'
 import {
   transactionMovement,
   transactionStatus,
@@ -23,7 +24,6 @@ import {
 } from '@/lib/transaction-presentation'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { agentStatusPresentation } from '@/lib/payment-status'
-import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
 import { displayName } from '@/lib/user'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
@@ -39,8 +39,8 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { useToast } from '@/components/ui/Toast'
 import { TransactionActivityRow } from '@/components/haven'
 import MoneyPanel from './MoneyPanel'
+import { ActivitySection } from './ActivitySection'
 import type { DashboardAgentPreview } from '@/types/dashboard'
-import type { AggregatedTransaction } from '@/types/transactions'
 import { resolveDefaultAccount } from '@/lib/default-account'
 import { computeAttentionItems, type AttentionRuleItem } from '@/lib/dashboard-attention'
 import { useBudgetRemaining } from '@/hooks/useBudgetRemaining'
@@ -314,7 +314,6 @@ export default function DashboardClient() {
   const { toast } = useToast()
   const accounts = user?.accounts ?? []
   const { currency } = usePreferences()
-  const { contacts, error: contactsError, resolveAddress } = useContacts()
   const { agents, loading: agentsLoading, refetch: refetchAgents } = useAgents()
   const {
     balances,
@@ -724,13 +723,13 @@ export default function DashboardClient() {
         onRetry={refetchOverview}
         onConnectAgent={openConnectAgent}
       />
-      <TransactionsSection
-        transactions={overview?.transactions ?? []}
+      <ActivitySection
+        activity={overview?.activity ?? []}
+        accountCount={accounts.length}
         hasAccounts={accounts.length > 0}
         loading={overviewInitialLoading}
         unavailable={overviewUnavailable}
         onRetry={refetchOverview}
-        resolveAddress={resolveAddress}
       />
     </div>
   )

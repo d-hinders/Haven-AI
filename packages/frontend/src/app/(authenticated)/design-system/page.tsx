@@ -52,7 +52,7 @@ import { useToast } from '@/components/ui/Toast'
 import { THEME_TOKENS, contrastTable } from '@/lib/theme-tokens'
 import { formatAnalyticsTick } from '@/lib/analytics-format'
 import { budgetCaption, type BudgetCaptionRow } from '@/lib/budget-caption'
-import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
+import DashboardOnboardingGuide, { SetupCompleteLine } from '@/components/DashboardOnboardingGuide'
 
 import { WalletPopover } from '@/components/WalletButton'
 import {
@@ -1800,35 +1800,50 @@ export default function DesignSystemPage() {
 
       <Section
         title="First-run setup"
-        description="A three-step checklist anchors a new user. Each step's status is computed independently from real state — agents and funds can be completed in any order. The active step gets the primary CTA; later steps lock until their prerequisite lands. When all three are done, the guide collapses to a Setup complete banner."
+        description="While setup is in progress the guide IS the Needs you card (titled Get started), with the rule items that still apply listed below it. Step 1 completes on any USDC on an account — other tokens never count — and reads as unknown, with no funding action, when the USDC read is unavailable; its action opens Add funds, which carries the test-network faucet. Step 2 completes only on an agent that can pay (active or paused, with a usable budget) and names the newest agent still waiting for setup; it can be done before funding, at secondary weight. Step 3 unlocks on the same rule. Hide for now survives a reload until another step completes. The guide never shows an address. When all three are done, one You're set up line takes its place."
       >
         <div className="max-w-3xl space-y-4">
-          {/* Active: fund step open, agent + payment steps still pending. */}
-          <DashboardOnboardingGuide
-            hasFunds={false}
-            hasAgents={false}
-            hasFirstAgentPayment={false}
-            onReceiveFunds={() => undefined}
-            onAddAgent={() => undefined}
-            onShowAgentUsage={() => undefined}
-            onDismiss={() => undefined}
-            onDismissComplete={() => undefined}
-            inProgressDismissed={false}
-            completeDismissed={false}
-          />
-          {/* All three done — the celebration banner. */}
-          <DashboardOnboardingGuide
-            hasFunds
-            hasAgents
-            hasFirstAgentPayment
-            onReceiveFunds={() => undefined}
-            onAddAgent={() => undefined}
-            onShowAgentUsage={() => undefined}
-            onDismiss={() => undefined}
-            onDismissComplete={() => undefined}
-            inProgressDismissed={false}
-            completeDismissed={false}
-          />
+          {/* A new account: no USDC yet, nothing connected. */}
+          <div className="rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-5">
+            <DashboardOnboardingGuide
+              usdcFunded={false}
+              hasSetUpAgent={false}
+              hasFirstAgentPayment={false}
+              onAddFunds={() => undefined}
+              onAddAgent={() => undefined}
+              onShowAgentUsage={() => undefined}
+              onHide={() => undefined}
+            />
+          </div>
+          {/* Funded, an agent connected but waiting for its budget approval. */}
+          <div className="rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-5">
+            <DashboardOnboardingGuide
+              usdcFunded
+              hasSetUpAgent={false}
+              pendingAgent={{ id: 'agent-research', name: 'Research agent', moreCount: 1 }}
+              hasFirstAgentPayment={false}
+              onAddFunds={() => undefined}
+              onAddAgent={() => undefined}
+              onShowAgentUsage={() => undefined}
+              onHide={() => undefined}
+            />
+          </div>
+          {/* The USDC read is unavailable: step 1 says so, no funding action. */}
+          <div className="rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-5">
+            <DashboardOnboardingGuide
+              usdcFunded={null}
+              hasSetUpAgent={false}
+              hasFirstAgentPayment={false}
+              onAddFunds={() => undefined}
+              onAddAgent={() => undefined}
+              onShowAgentUsage={() => undefined}
+              onHide={() => undefined}
+            />
+          </div>
+          {/* All three done. */}
+          <div className="rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-5">
+            <SetupCompleteLine onDismiss={() => undefined} />
+          </div>
         </div>
       </Section>
 

@@ -66,12 +66,32 @@ vi.mock('@/hooks/useAttentionDismissals', () => ({
 
 
 vi.mock('@/components/DashboardOnboardingGuide', () => ({
-  default: ({ hasFirstAgentPayment }: { hasFirstAgentPayment: boolean }) => (
+  // #3818: the mock prints the inputs the dashboard derives, so the wiring
+  // (USDC state, set-up agent, the named pending agent, hide) is assertable
+  // here; the component's own rendering is tested in its suite.
+  default: ({
+    hasFirstAgentPayment,
+    usdcFunded,
+    hasSetUpAgent,
+    pendingAgent,
+    onHide,
+  }: {
+    hasFirstAgentPayment: boolean
+    usdcFunded: boolean | null
+    hasSetUpAgent: boolean
+    pendingAgent?: { name: string; moreCount: number } | null
+    onHide: () => void
+  }) => (
     <div>
       <span>Onboarding guide</span>
       <span>{hasFirstAgentPayment ? 'first-payment-complete' : 'first-payment-pending'}</span>
+      <span>{`usdc-${String(usdcFunded)}`}</span>
+      <span>{hasSetUpAgent ? 'agent-set-up' : 'agent-not-set-up'}</span>
+      {pendingAgent ? <span>{`pending-${pendingAgent.name}-${pendingAgent.moreCount}`}</span> : null}
+      <button type="button" onClick={onHide}>Hide for now</button>
     </div>
   ),
+  SetupCompleteLine: () => <span>Setup complete line</span>,
 }))
 
 vi.mock('@/components/ConnectAgentModal', () => ({
@@ -502,55 +522,70 @@ describe('DashboardClient', () => {
     expect(screen.getByText('first-payment-pending')).toBeInTheDocument()
   })
 
-  it('does not flash the guide for completed setup after the completion banner was dismissed', () => {
-    window.localStorage.setItem('haven-onboarding-complete-dismissed:user-1', '1')
-    mockUseDashboardOverview.mockReturnValue({
-      data: {
-        totals: { usd: 1234.56, eur: 1100, sek: 13000.5 },
-        change: {
-          available: true,
-          usdAmount: 12.34,
-          eurAmount: 11,
-          sekAmount: null,
-          usdPercent: 1.23,
-          eurPercent: 1,
-          sekPercent: 0,
-        },
-      // #3807: the metrics block is gone with the KPI tiles.
-        actionableApprovals: 0,
-        pendingApprovals: 0,
-        onboardingProgress: {
-          hasFirstAgentPayment: true,
-        },
-        agents: [],
-        transactions: [],
+  // #3818: a finished setup — USDC on the account, an agent with a budget,
+  // the first payment made.
+  const FUNDED_ACCOUNT = {
+    accountId: 'safe-1',
+    chainId: 8453,
+    isTestnet: false,
+    usdcBalanceAtomic: '5000000',
+    usdcDecimals: 6,
+    funded: true,
+    needs_backup_recommendation: false,
+    usdcPace7dAtomic: '0',
+  }
+  function setUpAgentPreview(): DashboardAgentPreview {
+    return {
+      id: 'agent-1',
+      name: 'Research agent',
+      status: 'active',
+      accountId: null,
+      accountName: null,
+      accountChainId: 8453,
+      allowances: [],
+      budgets: [{ id: 'budget-1' }] as never,
+      receivedSubBudgets: [],
+      stats: {
+        d7: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+        d30: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+        lastPaymentAt: null,
+        lastCounterparty: null,
       },
-      loading: false,
-      error: null,
-      refetch: vi.fn(),
+    }
+  }
+  function mockCompletedSetup() {
+    mockBaseState([setUpAgentPreview()], {
+      accounts: [FUNDED_ACCOUNT],
+      onboardingProgress: { hasFirstAgentPayment: true },
     })
+  }
 
+  it('shows one "You\'re set up" line, not the steps, once all three are done', () => {
+    mockCompletedSetup()
     render(<DashboardClient />)
-
-    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
-    expect(screen.queryByText('first-payment-complete')).not.toBeInTheDocument()
-  })
-
-  it('does not show the unfunded receive CTA before balances finish loading', () => {
-    mockUseAggregatedBalances.mockReturnValue({
-      balances: [],
-      loading: true,
-      error: null,
-      refetch: vi.fn(),
-    })
-
-    render(<DashboardClient />)
-
-    expect(screen.getByRole('button', { name: 'Deposit address' })).toBeInTheDocument()
+    expect(screen.getByText('Setup complete line')).toBeInTheDocument()
     expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
   })
 
-  it('does not mark the account unfunded when aggregate balances fail to load', () => {
+  it('does not flash the guide for completed setup after the completion banner was dismissed', () => {
+    // The pre-#3818 banner's key is read as is: an owner who dismissed the
+    // old banner does not see the new line either.
+    window.localStorage.setItem('haven-onboarding-complete-dismissed:user-1', '1')
+    mockCompletedSetup()
+    render(<DashboardClient />)
+    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+    expect(screen.queryByText('Setup complete line')).not.toBeInTheDocument()
+  })
+
+  it('does not show the guide while the overview is still loading', () => {
+    mockUseDashboardOverview.mockReturnValue({ data: null, loading: true, error: null, refetch: vi.fn() })
+    render(<DashboardClient />)
+    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+  })
+
+  it('keeps the guide visible when the USDC read is unavailable — step 1 unknown, never "unfunded" (#3818)', () => {
+    // Before #3818 a balance-read error hid the guide entirely.
+    mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: null, funded: null }] })
     mockUseAggregatedBalances.mockReturnValue({
       balances: [],
       loading: false,
@@ -560,9 +595,48 @@ describe('DashboardClient', () => {
 
     render(<DashboardClient />)
 
+    expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
+    expect(screen.getByText('usdc-null')).toBeInTheDocument()
+    // The hero's own actions are unaffected.
     expect(screen.getByRole('button', { name: 'Deposit address' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add funds' })).toBeInTheDocument()
-    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+  })
+
+  it('ETH or other-token dust does not complete step 1 — only USDC on the account does (#3818)', () => {
+    // The aggregate read shows a balance (ETH); the account's own USDC is zero.
+    mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: '0', funded: false }] })
+    render(<DashboardClient />)
+    expect(screen.getByText('usdc-false')).toBeInTheDocument()
+  })
+
+  it('a pending_approval agent leaves step 2 open and is named, not listed twice (#3818)', () => {
+    const pending = (id: string, name: string): DashboardAgentPreview => ({
+      ...setUpAgentPreview(),
+      id,
+      name,
+      status: 'pending_approval',
+      budgets: [],
+    })
+    mockBaseState([pending('agent-a', 'Alpha'), pending('agent-b', 'Beta')], {
+      accounts: [FUNDED_ACCOUNT],
+    })
+    mockUseAgents.mockReturnValue({
+      agents: [
+        { id: 'agent-a', name: 'Alpha', created_at: '2026-10-01T00:00:00Z' },
+        { id: 'agent-b', name: 'Beta', created_at: '2026-10-08T00:00:00Z' },
+      ],
+      loading: false,
+      refetch: vi.fn(),
+    })
+
+    render(<DashboardClient />)
+
+    expect(screen.getByText('agent-not-set-up')).toBeInTheDocument()
+    // The newest waiting agent is the one step 2 names…
+    expect(screen.getByText('pending-Beta-1')).toBeInTheDocument()
+    // …so its "Needs setup" row is not repeated; the other agent keeps its row.
+    expect(screen.queryByText('Beta is waiting to be set up')).not.toBeInTheDocument()
+    expect(screen.getByText('Alpha is waiting to be set up')).toBeInTheDocument()
   })
 
   it('shows a focused first-run guide instead of the full dashboard when the account needs funds', () => {
@@ -581,18 +655,24 @@ describe('DashboardClient', () => {
     expect(screen.queryByText('Spending, last 30 days')).not.toBeInTheDocument()
   })
 
-  it('does not persist first-run guide dismissal across browser sessions', () => {
-    window.localStorage.setItem('haven_dashboard_onboarding_dismissed:user-1:fund', '1')
-    mockUseAggregatedBalances.mockReturnValue({
-      balances: [],
-      loading: false,
-      error: null,
-      refetch: vi.fn(),
-    })
+  it('"Hide for now" survives a reload and comes back when a step completes (#3818)', async () => {
+    const user = userEvent.setup()
+    mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: '0', funded: false }] })
+    const first = render(<DashboardClient />)
+    await user.click(screen.getByRole('button', { name: 'Hide for now' }))
+    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+    first.unmount()
 
+    // A reload: still hidden — it was session-only before #3818.
+    const second = render(<DashboardClient />)
+    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+    second.unmount()
+
+    // USDC arrives: step 1 completes, so the guide comes back.
+    mockBaseState([], { accounts: [FUNDED_ACCOUNT] })
     render(<DashboardClient />)
-
     expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
+    expect(screen.getByText('usdc-true')).toBeInTheDocument()
   })
 
   it('does not show the connect-agent guide before agents finish loading', () => {
@@ -692,6 +772,10 @@ describe('DashboardClient', () => {
 
     it('writes a needs-setup dismissal through the hook when a setup item is dismissed', async () => {
       const user = userEvent.setup()
+      // #3818: with the first-run steps showing, the agent step 2 names has
+      // no row of its own; this test is about the card's dismissal wiring, so
+      // the steps are hidden ("Hide for now" at 0 completed steps).
+      window.localStorage.setItem('haven-setup-guide-hidden:user-1', '0')
       // An active agent with no usable budget raises "Needs setup"
       // (dashboard-attention rule 1) — the agent a user keeps without a
       // budget on purpose.

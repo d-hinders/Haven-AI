@@ -6,7 +6,20 @@ import { Check } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import type { AccountFunding } from '@/hooks/useAccountFunding'
 
-type StepStatus = 'complete' | 'active' | 'locked'
+/**
+ * `unknown` (#3818): the USDC read is unavailable, so step 1 can say neither
+ * "done" nor "add funds" — it says it could not read the balance and offers no
+ * funding action until the read recovers. Never a silent "not funded".
+ */
+type StepStatus = 'complete' | 'active' | 'locked' | 'unknown'
+
+interface StepCta {
+  label: string
+  onClick?: () => void
+  href?: string
+  /** Secondary weight: the step can be done now but is not the next one. */
+  secondary?: boolean
+}
 
 interface StepProps {
   status: StepStatus
@@ -14,129 +27,105 @@ interface StepProps {
   title: string
   body: string
   completedBody: string
-  /** A second line under the body — the paste-ready facts (address, explorer). */
-  detail?: string
-  cta?: { label: string; onClick: () => void }
+  cta?: StepCta
+}
+
+/** The most recently connected agent still waiting for setup, and how many more are. */
+export interface PendingSetupAgent {
+  id: string
+  name: string
+  moreCount: number
 }
 
 interface Props {
-  hasFunds: boolean
-  hasAgents: boolean
+  /**
+   * #3818: any USDC above zero on one of the user's delegation accounts
+   * (owner decision 2026-10-09), from the overview's per-account USDC (#3803).
+   * `null` when that read is unavailable — the guide stays and says so, it
+   * never reads an unknown balance as unfunded. Other tokens never count:
+   * agents spend USDC, so ETH dust does not complete this step.
+   */
+  usdcFunded: boolean | null
+  /**
+   * An agent that can actually pay: active or paused, holding a usable budget
+   * (`agentIsSetUp` in `lib/dashboard-attention.ts`, the one definition shared
+   * with the "Needs you" rules). A `pending_approval` or revoked agent never
+   * completes step 2.
+   */
+  hasSetUpAgent: boolean
+  /** When step 2 is open and an agent is waiting for setup, it names that agent. */
+  pendingAgent?: PendingSetupAgent | null
   hasFirstAgentPayment: boolean
   /**
-   * #2534: the funding facts from `GET /user/accounts/:accountId/funding` — the same
-   * object `haven wallets funding` prints. The instruction text, the address
-   * and the minimum are rendered FROM this payload, so the card and the CLI
-   * cannot disagree: `@haven_ai/core` owns the minimum, the endpoint owns the
-   * sentence's inputs, this card owns only the layout. Optional so the card
-   * still renders (with the old general copy) while the read is in flight or
-   * failed — the checklist must not go blank because one GET did.
+   * #2534: the funding facts from `GET /user/accounts/:accountId/funding`. Only
+   * `minimum_useful_human` is read here — the SUGGESTED amount (owner decision
+   * 2026-10-09: suggested, not required). The deposit address belongs to the
+   * Add-funds dialog, never this card (#3818). Optional: the card keeps its
+   * general copy while the read is in flight or failed.
    */
   funding?: AccountFunding | null
-  onReceiveFunds: () => void
+  /** Opens Add funds — the dialog that carries the test-network faucet (#3478). */
+  onAddFunds: () => void
   onAddAgent: () => void
   onShowAgentUsage: () => void
-  onDismiss: () => void
-  onDismissComplete: () => void
-  /** When true the in-progress checklist is hidden (user clicked "Hide for now"). */
-  inProgressDismissed: boolean
-  /** When true the setup-complete banner is hidden (user has dismissed the celebration). */
-  completeDismissed: boolean
+  /** "Hide for now" — the caller persists it per user until a step completes. */
+  onHide: () => void
 }
 
+/**
+ * The first-run steps (#3818). Rendered INSIDE the "Needs you" card while
+ * setup is in progress (the guide is that card), so it draws no card of its
+ * own; `NeedsYou` lists the rule items that still apply below it. The
+ * finished state is `SetupCompleteLine`, not a branch of this component.
+ */
 export default function DashboardOnboardingGuide({
-  hasFunds,
-  hasAgents,
+  usdcFunded,
+  hasSetUpAgent,
+  pendingAgent = null,
   hasFirstAgentPayment,
   funding = null,
-  onReceiveFunds,
+  onAddFunds,
   onAddAgent,
   onShowAgentUsage,
-  onDismiss,
-  onDismissComplete,
-  inProgressDismissed,
-  completeDismissed,
+  onHide,
 }: Props) {
-  const allComplete = hasFunds && hasAgents && hasFirstAgentPayment
+  const funded = usdcFunded === true
+  const step3Status: StepStatus = hasFirstAgentPayment ? 'complete' : !hasSetUpAgent ? 'locked' : 'active'
+  const activeStep = !funded ? 1 : !hasSetUpAgent ? 2 : !hasFirstAgentPayment ? 3 : null
 
-  // Setup-complete banner — celebrate, then get out of the way.
-  if (allComplete) {
-    if (completeDismissed) return null
-    return (
-      <section className="v2-animate-slide-in flex flex-col gap-3 rounded-[14px] border border-success/20 bg-[var(--v2-success-soft)] px-5 py-4 shadow-card sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
-          <span
-            aria-hidden="true"
-            className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-success)] text-[var(--v2-ink-on-brand)]"
-          >
-            <CheckIcon />
-          </span>
-          <div>
-            <p className="text-sm font-semibold text-[var(--v2-ink)]">Setup complete</p>
-            <p className="text-xs text-[var(--v2-ink-2)]">
-              Your agents are live. Keep an eye on their recent activity below.
-            </p>
-          </div>
-        </div>
-        <Button variant="ghost" size="sm" onClick={onDismissComplete}>
-          Dismiss
-        </Button>
-      </section>
-    )
-  }
-
-  // User chose "Hide for now" — respect it until a step changes.
-  if (inProgressDismissed) return null
-
-  // Step 3 is locked until an agent exists — it can't be acted on otherwise.
-  const step3Status: StepStatus = hasFirstAgentPayment
-    ? 'complete'
-    : !hasAgents
-      ? 'locked'
-      : 'active'
-
-  // Active step is the first incomplete one in canonical order.
-  const activeStep = !hasFunds ? 1 : !hasAgents ? 2 : !hasFirstAgentPayment ? 3 : null
-
-  // #2534: the funding instruction is rendered from the endpoint payload — the
-  // same object the CLI prints — so the card holds no second copy of the
-  // minimum-useful constant (`@haven_ai/core` owns it; the endpoint reads it).
-  // While the read is in flight or failed, the step keeps the general copy and
-  // stays actionable: the "Deposit address" CTA below does not depend on it.
-  const fundingToken = funding?.tokens.find((t) => t.minimum_useful_human !== null)
-  const fundingBody = funding
-    ? fundingToken
-      ? `Add ${fundingToken.minimum_useful_human} ${fundingToken.symbol} — ${
-          funding.native.needed
-            ? `plus ${funding.native.symbol} for gas`
-            : 'no gas token needed: Haven sponsors it'
-        }. Even a little less lets you start.`
-      : `Add USDC so your agents have money to spend.`
-    : 'Add USDC so your agents have money to spend. Even $5 lets you try x402 micropayments.'
-  const fundingDetail = funding
-    ? `Send to ${funding.account_address} — see it on ${funding.chain.explorer_url.replace(/^https?:\/\//, '')}`
-    : undefined
+  const fundingToken = funding?.tokens.find((t) => t.minimum_useful_human !== null) ?? null
+  const fundingBody = fundingToken
+    ? `We suggest ${fundingToken.minimum_useful_human} ${fundingToken.symbol} — no gas token needed: Haven sponsors it. Any amount gets you started.`
+    : 'Add USDC so your agents have money to spend. Any amount gets you started.'
 
   const step1: StepProps = {
-    status: hasFunds ? 'complete' : 'active',
+    status: funded ? 'complete' : usdcFunded === null ? 'unknown' : 'active',
     number: 1,
-    title: 'Fund your Haven account',
-    body: fundingBody,
-    detail: hasFunds ? undefined : fundingDetail,
+    title: 'Add USDC to your account',
+    body:
+      usdcFunded === null
+        ? 'Haven could not read your USDC balance just now. This step updates when it can.'
+        : fundingBody,
     completedBody: 'Funded — your agents can spend.',
-    cta:
-      activeStep === 1 ? { label: 'Deposit address', onClick: onReceiveFunds } : undefined,
+    cta: usdcFunded === false ? { label: 'Add funds', onClick: onAddFunds } : undefined,
   }
 
+  // Connecting before funding stays allowed (owner decision 2026-10-09): the
+  // action shows from the start, at secondary weight until step 1 is done.
+  const step2Cta: StepCta | undefined = hasSetUpAgent
+    ? undefined
+    : pendingAgent
+      ? { label: 'Finish setup', href: `/agents/${pendingAgent.id}`, secondary: activeStep !== 2 }
+      : { label: 'Connect agent', onClick: onAddAgent, secondary: activeStep !== 2 }
   const step2: StepProps = {
-    status: hasAgents ? 'complete' : 'active',
+    status: hasSetUpAgent ? 'complete' : 'active',
     number: 2,
     title: 'Connect your first agent',
-    body:
-      'Set a budget and give your agent a Haven credential. It can pay for APIs and services within your rules.',
-    completedBody: 'Agent connected.',
-    cta:
-      activeStep === 2 ? { label: 'Connect agent', onClick: onAddAgent } : undefined,
+    body: pendingAgent
+      ? `Finish setting up ${pendingAgent.name}${pendingAgent.moreCount > 0 ? ` and ${pendingAgent.moreCount} more` : ''}: approve its budget so it can pay.`
+      : 'Connect an agent and approve a budget it can spend from.',
+    completedBody: 'An agent is connected with a budget.',
+    cta: step2Cta,
   }
 
   const step3: StepProps = {
@@ -145,50 +134,65 @@ export default function DashboardOnboardingGuide({
     title: 'Make your first agent payment',
     body:
       step3Status === 'locked'
-        ? 'Connect an agent first to unlock this step.'
-        : 'Wire up your Haven credential in your agent code and let it pay an x402-enabled service.',
-    completedBody: 'First agent payment made.',
-    cta:
-      activeStep === 3 && step3Status !== 'locked'
-        ? { label: 'Show me how', onClick: onShowAgentUsage }
-        : undefined,
+        ? 'Set up an agent first to unlock this step.'
+        : 'Ask your agent to buy something within its budget.',
+    completedBody: 'Your first agent payment went through.',
+    cta: activeStep === 3 ? { label: 'Show me how', onClick: onShowAgentUsage } : undefined,
   }
 
   return (
-    <section className="v2-animate-fade-in rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-5 shadow-card">
+    <div className="v2-animate-fade-in">
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--v2-brand)]">
-            Get started
-          </p>
-          <h2 className="mt-1 text-lg font-semibold tracking-tight text-[var(--v2-ink)]">
-            Your first 3 steps
-          </h2>
-        </div>
-        <Button variant="tertiary" size="sm" onClick={onDismiss}>
+        <p className="text-sm text-[var(--v2-ink-2)]">Your first 3 steps</p>
+        <Button variant="tertiary" size="sm" onClick={onHide}>
           Hide for now
         </Button>
       </div>
 
-      <ol className="mt-5 space-y-2" aria-label="Onboarding checklist">
+      <ol className="mt-3 space-y-2" aria-label="Onboarding checklist">
         <ChecklistRow {...step1} />
         <ChecklistRow {...step2} />
         <ChecklistRow {...step3} />
       </ol>
-    </section>
+    </div>
   )
 }
 
-function ChecklistRow({ status, number, title, body, detail, completedBody, cta }: StepProps) {
+/**
+ * The finished state (#3818): one line, not a banner. Dismissal is the
+ * caller's (`haven-onboarding-complete-dismissed:<userId>`, read as before so
+ * an owner who dismissed the old banner does not see this again).
+ */
+export function SetupCompleteLine({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <div className="flex items-center justify-between gap-3 v2-animate-fade-in">
+      <p className="flex items-center gap-2 text-sm text-[var(--v2-ink)]">
+        <span
+          aria-hidden="true"
+          className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-success)] text-[var(--v2-ink-on-brand)]"
+        >
+          <Icon icon={Check} className="h-3 w-3" />
+        </span>
+        You&rsquo;re set up — your agents can pay within the budgets you approved.
+      </p>
+      <Button variant="tertiary" size="sm" onClick={onDismiss}>
+        Dismiss
+      </Button>
+    </div>
+  )
+}
+
+function ChecklistRow({ status, number, title, body, completedBody, cta }: StepProps) {
   const isActive = status === 'active'
   const isComplete = status === 'complete'
   const isLocked = status === 'locked'
 
+  // `unknown` is not dimmed like `locked`: it is a state the owner should read.
   const rowClass = isActive
     ? 'rounded-[10px] border border-brand/15 bg-brand-soft/40'
-    : isComplete
-      ? 'rounded-[10px]'
-      : 'rounded-[10px] opacity-60'
+    : isLocked
+      ? 'rounded-[10px] opacity-60'
+      : 'rounded-[10px]'
 
   return (
     <li
@@ -211,16 +215,16 @@ function ChecklistRow({ status, number, title, body, detail, completedBody, cta 
           >
             {isComplete ? completedBody : body}
           </p>
-          {detail && !isComplete ? (
-            <p className="mt-1 break-all font-mono text-xs leading-relaxed text-[var(--v2-ink-2)]">
-              {detail}
-            </p>
-          ) : null}
         </div>
       </div>
       {cta ? (
         <div className="flex-shrink-0 sm:pl-4">
-          <Button onClick={cta.onClick} size="sm" className="w-full sm:w-auto">
+          <Button
+            {...(cta.href ? { href: cta.href } : { onClick: cta.onClick })}
+            variant={cta.secondary ? 'ghost' : 'primary'}
+            size="sm"
+            className="w-full sm:w-auto"
+          >
             {cta.label}
           </Button>
         </div>

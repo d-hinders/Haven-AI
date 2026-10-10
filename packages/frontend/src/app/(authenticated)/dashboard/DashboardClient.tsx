@@ -23,7 +23,7 @@ import {
 } from '@/lib/transaction-presentation'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { displayName } from '@/lib/user'
-import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
+import DashboardOnboardingGuide, { SetupCompleteLine } from '@/components/DashboardOnboardingGuide'
 import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
 import ConnectAgentModal from '@/components/ConnectAgentModal'
 import DashboardActionPickerModal from '@/components/DashboardActionPickerModal'
@@ -38,7 +38,7 @@ import MoneyPanel from './MoneyPanel'
 import { ActivitySection } from './ActivitySection'
 import { AgentsSection } from './AgentsSection'
 import { resolveDefaultAccount } from '@/lib/default-account'
-import { computeAttentionItems, type AttentionRuleItem } from '@/lib/dashboard-attention'
+import { computeAttentionItems, firstRunSetupState, type AttentionRuleItem } from '@/lib/dashboard-attention'
 import { useBudgetRemaining } from '@/hooks/useBudgetRemaining'
 import { useAttentionDismissals } from '@/hooks/useAttentionDismissals'
 import NeedsYou from './NeedsYou'
@@ -175,6 +175,9 @@ function TransactionsSection({
   )
 }
 
+/** #3818: "Hide for now", per user, holding the completed-step count at hide time. */
+const SETUP_GUIDE_HIDDEN_KEY = 'haven-setup-guide-hidden'
+
 export default function DashboardClient() {
   const { user, passkeys: enrolledPasskeys } = useAuth()
   const { toast } = useToast()
@@ -242,27 +245,39 @@ export default function DashboardClient() {
 
   // The DELEGATION-rail nudge above is untouched — `Backup & recovery` is live
   // and this is still the rail where new accounts land.
-  const hasAgents = dataReady && agents.length > 0
-  // #2534: the funding facts for the onboarding card's step 1, read from the
-  // same endpoint `haven wallets funding` prints — one source for the
-  // instruction copy (address, chain, the minimum `@haven_ai/core` owns).
-  // Fetched only while the account is unfunded: a funded account has no
-  // instruction to show, and the hero/`hasFunds` state already settles the
-  // checklist. The hook surfaces errors instead of throwing so the card keeps
-  // its general copy when the read fails, exactly as the balance read does.
+  // #3818: the first-run guide's facts come from the overview through the
+  // shared rules module — the same per-account USDC (#3803) and agent list the
+  // "Needs you" rules read, so the guide and the card cannot disagree. Step 1
+  // is USDC on the account (agents spend USDC; ETH dust does not count), step 2
+  // an agent that can actually pay. `hasFunds` above stays as it is: the hero,
+  // the funded toast and the focused view read it.
+  const createdAtById = useMemo(
+    () => Object.fromEntries(agents.map((agent) => [agent.id, agent.created_at])),
+    [agents],
+  )
+  const firstRun = useMemo(
+    () => (overview ? firstRunSetupState(overview, createdAtById) : null),
+    [overview, createdAtById],
+  )
+  const usdcFunded = firstRun?.usdcFunded ?? null
+  const hasSetUpAgent = Boolean(firstRun?.hasSetUpAgent)
+  const pendingSetupAgent = firstRun?.pendingAgent ?? null
+  // #2534: the suggested amount for step 1, from the endpoint `haven wallets
+  // funding` prints. Fetched only while the account is known to hold no USDC.
   const { funding: fundingForOnboarding } = useAccountFunding(
-    !fundingStateKnown || hasFunds ? undefined : delegationAccount?.id,
+    usdcFunded === false ? delegationAccount?.id : undefined,
   )
   const overviewInitialLoading = overviewLoading && !overview
   const firstAgentPaymentKnown = Boolean(overview?.onboardingProgress)
   const hasFirstAgentPayment = Boolean(
     overview?.onboardingProgress?.hasFirstAgentPayment,
   )
-  const setupProgressReady =
-    dataReady &&
-    (!hasFunds || !hasAgents || firstAgentPaymentKnown)
+  // #3818: the guide no longer waits on the aggregate balance read — a
+  // balance error used to hide it. Its facts are the overview's, and an
+  // unknown USDC read is a state the guide shows.
+  const setupProgressReady = Boolean(firstRun) && !agentsLoading && firstAgentPaymentKnown
   const allOnboardingComplete =
-    setupProgressReady && hasFunds && hasAgents && hasFirstAgentPayment
+    setupProgressReady && usdcFunded === true && hasSetUpAgent && hasFirstAgentPayment
 
   // #3719: no global active account. The default account pre-selects the
   // hero's Receive / Add funds (which ask when there is more than one) and the
@@ -289,9 +304,15 @@ export default function DashboardClient() {
   // hint so the user knows the dashboard is actively listening.
   const [hasOpenedReceive, setHasOpenedReceive] = useState(false)
   const [actionAccountId, setActionAccountId] = useState<string | null>(null)
-  // In-progress dismissal is session-only — refreshing brings the checklist
-  // back so we keep nudging the user toward completing setup.
-  const [inProgressDismissed, setInProgressDismissed] = useState(false)
+  // #3818: "Hide for now" survives a reload. Stored per user WITH the number
+  // of completed steps at the time; the guide comes back as soon as another
+  // step completes. A per-device convenience in browser storage — not the
+  // #3813 server store, which holds permanent per-account decisions.
+  const [setupHideState, setSetupHideState] = useState<{
+    userId: string | null
+    hiddenAtCount: number | null
+  }>({ userId: null, hiddenAtCount: null })
+  const setupHideReady = Boolean(user?.id) && setupHideState.userId === user?.id
   // Setup-complete dismissal IS persisted — once the user has done all three
   // steps and dismissed the celebration, we don't show it again on reload.
   const [completeDismissalState, setCompleteDismissalState] = useState<{
@@ -320,17 +341,27 @@ export default function DashboardClient() {
     setCompleteDismissalState({ userId: user.id, dismissed: stored === '1' })
   }, [user?.id])
 
-  // If the user makes progress after dismissing the in-progress checklist,
-  // bring it back so they see the next step. We track the completed count in
-  // a ref and reset the dismiss whenever it grows.
-  const completedCount = (hasFunds ? 1 : 0) + (hasAgents ? 1 : 0) + (hasFirstAgentPayment ? 1 : 0)
-  const previousCompletedRef = useRef(completedCount)
   useEffect(() => {
-    if (completedCount > previousCompletedRef.current && inProgressDismissed) {
-      setInProgressDismissed(false)
+    if (!user?.id) {
+      setSetupHideState({ userId: null, hiddenAtCount: null })
+      return
     }
-    previousCompletedRef.current = completedCount
-  }, [completedCount, inProgressDismissed])
+    let hiddenAtCount: number | null = null
+    try {
+      const stored = window.localStorage.getItem(`${SETUP_GUIDE_HIDDEN_KEY}:${user.id}`)
+      const parsed = stored === null ? NaN : Number(stored)
+      hiddenAtCount = Number.isInteger(parsed) && parsed >= 0 ? parsed : null
+    } catch {
+      // Storage blocked (private window): the guide simply shows.
+    }
+    setSetupHideState({ userId: user.id, hiddenAtCount })
+  }, [user?.id])
+
+  // Hidden only while no further step has completed since "Hide for now".
+  const completedCount =
+    (usdcFunded === true ? 1 : 0) + (hasSetUpAgent ? 1 : 0) + (hasFirstAgentPayment ? 1 : 0)
+  const setupHidden =
+    setupHideState.hiddenAtCount !== null && completedCount <= setupHideState.hiddenAtCount
 
   // Celebrate the first-fund moment: when hasFunds flips false → true, fire
   // a success toast. Only after data is ready, to avoid firing on initial
@@ -423,12 +454,16 @@ export default function DashboardClient() {
   // Render the guide whenever the user has at least one account and either:
   // (a) they have unfinished steps and haven't dismissed the checklist, OR
   // (b) they've just finished all three steps and haven't dismissed the celebration.
-  const showOnboardingGuide =
+  const setupGuideEligible =
     setupProgressReady &&
     hasDelegationAccounts &&
     completeDismissalReady &&
-    !requiresOtherDevice &&
-    (allOnboardingComplete ? !completeDismissed : !inProgressDismissed)
+    setupHideReady &&
+    !requiresOtherDevice
+  // #3818: while setup is in progress the guide IS the "Needs you" card; once
+  // done, one "You're set up" line takes its place until dismissed.
+  const showSetupSteps = setupGuideEligible && !allOnboardingComplete && !setupHidden
+  const showSetupComplete = setupGuideEligible && allOnboardingComplete && !completeDismissed
 
   // ── #3808: the "Needs you" items ─────────────────────────────────────────
   // One definition: `lib/dashboard-attention.ts` — the same rules #3809 (badges)
@@ -466,9 +501,19 @@ export default function DashboardClient() {
       dismissedIds,
       // While the setup guide's "Add USDC" step is open, the guide IS the
       // funds ask — the low-balance and zero-USDC items step aside (#3808).
-      holdBackLowBalance: showOnboardingGuide && !hasFunds,
+      // The zero-USDC warning waits while step 1 is open: the step says it.
+      holdBackLowBalance: showSetupSteps && usdcFunded !== true,
     })
-  }, [overview, budgetRemaining, accountNames, serverDismissedIds, sessionDismissedIds, showOnboardingGuide, hasFunds])
+  }, [overview, budgetRemaining, accountNames, serverDismissedIds, sessionDismissedIds, showSetupSteps, usdcFunded])
+  // The agent step 2 names is not listed twice: its "Needs setup" row drops
+  // while the steps show. Other waiting agents keep theirs.
+  const cardItems = useMemo(
+    () =>
+      showSetupSteps && pendingSetupAgent
+        ? attentionItems.filter((item) => item.id !== `needs-setup:${pendingSetupAgent.id}`)
+        : attentionItems,
+    [attentionItems, showSetupSteps, pendingSetupAgent],
+  )
 
   const attentionVisible = Boolean(overview) || Boolean(overviewError)
 
@@ -503,13 +548,6 @@ export default function DashboardClient() {
     if (action === 'add-funds') setAddFundsOpen(true)
   }
 
-  function openReceiveForDefaultAccount() {
-    if (!defaultAccount) return
-    setActionAccountId(defaultAccount.id)
-    setHasOpenedReceive(true)
-    setReceiveOpen(true)
-  }
-
   function handleActionAccountSelected(accountId: string) {
     setActionAccountId(accountId)
     if (pickerAction === 'receive') setReceiveOpen(true)
@@ -517,8 +555,14 @@ export default function DashboardClient() {
     setPickerAction(null)
   }
 
-  function dismissInProgressGuide() {
-    setInProgressDismissed(true)
+  function hideSetupGuide() {
+    setSetupHideState({ userId: user?.id ?? null, hiddenAtCount: completedCount })
+    if (!user?.id) return
+    try {
+      window.localStorage.setItem(`${SETUP_GUIDE_HIDDEN_KEY}:${user.id}`, String(completedCount))
+    } catch {
+      // Storage blocked: hidden for this session only.
+    }
   }
 
   function dismissCompleteBanner() {
@@ -547,7 +591,7 @@ export default function DashboardClient() {
   // #3807: the money panel replaces the hero + KPI tiles. The focused
   // first-run view (an unfunded account) renders it without the spending
   // block — the old render was hero + checklist only.
-  const isFocusedView = showOnboardingGuide && !hasFunds
+  const isFocusedView = showSetupSteps && !hasFunds
   const moneyPanel = (
     <MoneyPanel
       loading={overviewInitialLoading}
@@ -574,7 +618,25 @@ export default function DashboardClient() {
 
   const attentionPanel = attentionVisible ? (
     <NeedsYou
-      items={attentionItems}
+      items={cardItems}
+      title={showSetupSteps ? 'Get started' : undefined}
+      guide={
+        showSetupSteps ? (
+          <DashboardOnboardingGuide
+            usdcFunded={usdcFunded}
+            hasSetUpAgent={hasSetUpAgent}
+            pendingAgent={pendingSetupAgent}
+            hasFirstAgentPayment={hasFirstAgentPayment}
+            funding={fundingForOnboarding}
+            onAddFunds={() => openHeroAction('add-funds')}
+            onAddAgent={openConnectAgent}
+            onShowAgentUsage={() => setAgentUsageOpen(true)}
+            onHide={hideSetupGuide}
+          />
+        ) : showSetupComplete ? (
+          <SetupCompleteLine onDismiss={dismissCompleteBanner} />
+        ) : null
+      }
       hasOverviewError={Boolean(overviewError)}
       onRetry={refetchOverview}
       onDismiss={handleDismissAttention}
@@ -621,27 +683,6 @@ export default function DashboardClient() {
         of the dashboard.
       */}
       {(() => {
-        const showGuide = showOnboardingGuide
-        // Focused first-run view: money panel (no spending block) + checklist
-        // only. Triggered when the user hasn't funded their account yet —
-        // agent and payment steps need funded state to be useful. The
-        // computation lives above the money panel (#3807); `showSpending`
-        // reads it there.
-        const guide = showGuide ? (
-          <DashboardOnboardingGuide
-            hasFunds={hasFunds}
-            hasAgents={hasAgents}
-            hasFirstAgentPayment={hasFirstAgentPayment}
-            funding={fundingForOnboarding}
-            onReceiveFunds={openReceiveForDefaultAccount}
-            onAddAgent={openConnectAgent}
-            onShowAgentUsage={() => setAgentUsageOpen(true)}
-            onDismiss={dismissInProgressGuide}
-            onDismissComplete={dismissCompleteBanner}
-            inProgressDismissed={inProgressDismissed}
-            completeDismissed={completeDismissed}
-          />
-        ) : null
 
         // The backup-signer prompt lives INSIDE the NeedsYou card now (#3808):
         // one item per funded account without a backup signer, dismissed via
@@ -656,7 +697,6 @@ export default function DashboardClient() {
             <div className="space-y-6">
               {moneyPanel}
               {attentionPanel}
-              {guide}
             </div>
           )
         }
@@ -671,7 +711,6 @@ export default function DashboardClient() {
               {moneyPanel}
               {attentionPanel}
             </div>
-            {guide}
             {activityGrid}
           </div>
         )

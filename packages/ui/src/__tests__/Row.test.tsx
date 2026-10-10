@@ -45,6 +45,22 @@ describe('Row — titleClassName / subtitleClassName / trailingClassName (#3805,
       <Row title="Agent" trailing={<span>x</span>} trailingClassName="basis-full" />,
     )
     expect(container.querySelector('.basis-full')).not.toBeNull()
+    expect((container.firstElementChild as HTMLElement).className).not.toContain('basis-full')
+  })
+
+  it('lands the leading override on the outer leading wrapper, toned or plain (#3880)', () => {
+    const toned = render(<Row title="Agent" leading={<i />} leadingTone="brand" leadingClassName="self-start" />)
+    const tonedWrapper = toned.container.querySelector('[aria-hidden="true"]') as HTMLElement
+    expect(tonedWrapper.className).toContain('self-start')
+    expect(tonedWrapper.className).toContain('h-8 w-8')
+    expect((toned.container.firstElementChild as HTMLElement).className).not.toContain('self-start')
+    toned.unmount()
+
+    const plain = render(<Row title="Agent" leading={<i />} leadingClassName="self-start" />)
+    const plainWrapper = plain.container.querySelector('[aria-hidden="true"]') as HTMLElement
+    expect(plainWrapper.className).toContain('self-start')
+    expect(plainWrapper.className).toContain('h-4 w-4')
+    expect((plain.container.firstElementChild as HTMLElement).className).not.toContain('self-start')
   })
 
   it('lands the body override on the body column, not the row root (#3813)', () => {
@@ -66,5 +82,17 @@ describe('Row — titleClassName / subtitleClassName / trailingClassName (#3805,
     expect(title.className).toBe('truncate text-sm font-medium text-[var(--v2-ink)]')
     expect(subtitle.className).toBe('mt-0.5 truncate text-xs text-[var(--v2-ink-3)]')
     expect(container.innerHTML).not.toContain('undefined')
+  })
+
+  it('renders byte-identical leading wrappers when no override is given (#3880)', () => {
+    const toned = render(<Row title="Agent" leading={<i />} leadingTone="brand" />)
+    expect((toned.container.querySelector('[aria-hidden="true"]') as HTMLElement).className).toBe(
+      'inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]',
+    )
+    toned.unmount()
+    const plain = render(<Row title="Agent" leading={<i />} />)
+    expect((plain.container.querySelector('[aria-hidden="true"]') as HTMLElement).className).toBe(
+      'inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--v2-ink-3)]',
+    )
   })
 })

@@ -9,6 +9,13 @@ interface BaseRowProps {
   leading?: ReactNode
   /** Optional tone for the leading icon background — renders the icon inside a 32px soft circle. */
   leadingTone?: Tone
+  /**
+   * Extra classes for the leading wrapper (the 32px circle, or the 16px icon
+   * span without a tone). The row centres it on the whole body by default; a
+   * caller whose body runs to several lines can pin it to the first line
+   * instead (AttentionList, #3880).
+   */
+  leadingClassName?: string
   /** Primary label. Rendered as 14px medium ink. */
   title: ReactNode
   /**
@@ -93,6 +100,7 @@ export function Row(props: RowProps) {
   const {
     leading,
     leadingTone,
+    leadingClassName = '',
     title,
     titleClassName = '',
     subtitle,
@@ -124,7 +132,7 @@ export function Row(props: RowProps) {
       ? (
           <span
             aria-hidden="true"
-            className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full ${TONE_BG[leadingTone]}`}
+            className={[`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full ${TONE_BG[leadingTone]}`, leadingClassName].filter(Boolean).join(' ')}
           >
             <span className="inline-flex h-4 w-4 items-center justify-center">{leading}</span>
           </span>
@@ -132,7 +140,7 @@ export function Row(props: RowProps) {
       : (
           <span
             aria-hidden="true"
-            className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--v2-ink-3)]"
+            className={['inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--v2-ink-3)]', leadingClassName].filter(Boolean).join(' ')}
           >
             {leading}
           </span>

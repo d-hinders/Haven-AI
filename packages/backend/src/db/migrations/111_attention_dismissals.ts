@@ -1,8 +1,12 @@
 import type { PoolClient } from 'pg'
 
 /**
- * 110 — server-saved dismissals for the dashboard's recurring "Needs you"
+ * 111 — server-saved dismissals for the dashboard's recurring "Needs you"
  * items (#3813).
+ *
+ * (Numbered 111, not 110: dev landed its own migration 110 —
+ * `110_sponsored_userop_gas_events` from #3837/#3875 — while this table was
+ * still only on the PR branch, and landed migration numbers are immutable.)
  *
  * The only dismissal that existed before was `RecoveryNudge`'s
  * browser-storage key (`haven.recovery-nudge.dismissed`), which came back on
@@ -37,7 +41,7 @@ import type { PoolClient } from 'pg'
  * undismiss (#3813 scope): a user sees the backup recommendation again on
  * the account page, and a budget-less agent's state on the agent page.
  */
-export const version = '110_attention_dismissals'
+export const version = '111_attention_dismissals'
 
 export async function up(client: PoolClient): Promise<void> {
   await client.query(`

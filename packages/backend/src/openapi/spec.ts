@@ -1975,6 +1975,30 @@ export const openapiSpec = {
         },
       },
     },
+    '/ops/sponsored-gas': {
+      get: {
+        tags: ['Ops'],
+        operationId: 'getOpsSponsoredGas',
+        summary: 'Sponsored UserOp gas cost per merchant per day.',
+        description:
+          'What the delegation-rail gas sponsorship costs (#3837): every UserOp submitted through the payment path, ' +
+          'tagged direct vs x402 funding leg, bucketed per UTC day — x402 funding legs by the merchant host from the ' +
+          'joined payment intent (null when the intent has no resource URL), direct payments as their own null-host bucket. ' +
+          'Gas is the EntryPoint receipt actualGasCost (includes preVerificationGas; the l1Fee is not added) and is priced ' +
+          'at VIEW time — eth_priced_at says so. Value moved is the confirmed intents\' usd_value. Reads through the ' +
+          'read-only ops database role and writes one audit row before answering.',
+        security: [{ OpsJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The per-merchant-per-day buckets for the trailing window.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/OpsSponsoredGas' } } },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'The ops console (or its read-only database) is not configured.' },
+          '503': { ...errorResponse, description: 'The read could not be audited, so nothing was returned.' },
+        },
+      },
+    },
     '/ops/feedback': {
       get: {
         tags: ['Ops'],
@@ -10581,6 +10605,37 @@ export const openapiSpec = {
             },
           },
           generated_at: isoDateTime,
+        },
+        additionalProperties: false,
+      },
+      OpsSponsoredGas: {
+        type: 'object',
+        required: ['days', 'eth_price_usd', 'eth_priced_at', 'gas_basis', 'rows', 'generated_at'],
+        properties: {
+          days: { type: 'integer' },
+          eth_price_usd: { type: ['number', 'null'], description: 'The view-time ETH/USD quote; null when the price feed returned nothing usable.' },
+          eth_priced_at: { type: 'string', enum: ['view_time'] },
+          gas_basis: { type: 'string', description: 'Which on-chain figure the gas numbers are and how ETH is priced.' },
+          rows: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['day', 'merchant_host', 'leg', 'funding_legs', 'gas_cost_wei', 'gas_eth', 'gas_usd', 'value_moved_usd', 'gas_value_ratio'],
+              properties: {
+                day: { type: 'string', format: 'date', description: 'UTC day bucket.' },
+                merchant_host: { type: ['string', 'null'], description: 'The merchant host from the intent resource URL; null for direct payments.' },
+                leg: { type: 'string', enum: ['direct', 'x402_funding'] },
+                funding_legs: { type: 'integer' },
+                gas_cost_wei: { type: ['string', 'null'], description: 'Sum of actualGasCost in wei; null while no leg in the bucket has a known cost.' },
+                gas_eth: { type: ['number', 'null'] },
+                gas_usd: { type: ['number', 'null'], description: 'gas_eth priced at view time; null when no usable ETH quote.' },
+                value_moved_usd: { type: 'number', description: 'The confirmed intents\' usd_value; reverted legs moved nothing.' },
+                gas_value_ratio: { type: ['number', 'null'], description: 'gas_usd / value_moved_usd; null when gas was not priced or nothing moved.' },
+              },
+              additionalProperties: false,
+            },
+          },
+          generated_at: { type: 'string', format: 'date-time' },
         },
         additionalProperties: false,
       },

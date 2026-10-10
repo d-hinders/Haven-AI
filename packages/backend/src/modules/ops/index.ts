@@ -29,6 +29,7 @@ export {
 export { maskEmail, maskFreeText, maskHex, maskName, maskSearchTerm } from './masking.js'
 
 export { buildOpsOverview, type OpsOverview } from './overview.js'
+export { buildOpsSponsoredGas, OPS_SPONSORED_GAS_DEFAULT_DAYS, type OpsSponsoredGas, type OpsSponsoredGasRow } from './sponsored-gas.js'
 export { buildOpsFeedbackList, type OpsFeedbackList } from './feedback.js'
 export {
   detectOpsSearchKey,

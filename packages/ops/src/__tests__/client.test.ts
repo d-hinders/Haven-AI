@@ -43,7 +43,7 @@ describe('the ops client exposes only reads, the audited reveal, and auth (#3516
     // POST /ops/reveal, and the sign-in navigation. Nothing else may appear,
     // because anything here is one call away from an unaudited write.
     expect(Object.keys(client).sort()).toEqual(
-      ['authStart', 'docHealth', 'feedback', 'health', 'me', 'onchain', 'overview', 'reveal', 'search', 'user'].sort(),
+      ['authStart', 'docHealth', 'feedback', 'health', 'me', 'onchain', 'overview', 'reveal', 'search', 'sponsoredGas', 'user'].sort(),
     )
   })
 

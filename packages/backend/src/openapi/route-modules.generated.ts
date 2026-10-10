@@ -81,6 +81,7 @@ export const ROUTE_MODULE_BY_OPERATION: Readonly<Record<string, string>> = Objec
   "GET /ops/me": "routes/ops.ts",
   "GET /ops/overview": "routes/ops.ts",
   "GET /ops/search": "routes/ops.ts",
+  "GET /ops/sponsored-gas": "routes/ops.ts",
   "GET /ops/users/{id}": "routes/ops.ts",
   "GET /ops/users/{id}/onchain": "routes/ops.ts",
   "GET /organizations": "routes/agent-organizations.ts",

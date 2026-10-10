@@ -1,5 +1,5 @@
 /**
- * Real-Postgres proof for migration 110 — the server-saved "Needs you"
+ * Real-Postgres proof for migration 111 — the server-saved "Needs you"
  * dismissals table (#3813). No mocks — #1219's rule.
  *
  * Pins: the table and its two partial unique indexes exist; the kind/shape
@@ -20,7 +20,7 @@ import {
   initDbHarness,
   resetDb,
 } from '../../../infra/__tests__/helpers/db-harness.js'
-import { down, up, version } from '../110_attention_dismissals.js'
+import { down, up, version } from '../111_attention_dismissals.js'
 
 async function run(step: typeof up): Promise<void> {
   const client = await db.connect()
@@ -64,7 +64,7 @@ async function insertTestAgent(userId: string): Promise<string> {
 const BACKUP_ROW = `INSERT INTO attention_dismissals (user_id, item_kind, account_id)
                     VALUES ($1, 'no-backup', $2)`
 
-describeDb('migration 110 — attention_dismissals (#3813)', () => {
+describeDb('migration 111 — attention_dismissals (#3813)', () => {
   beforeAll(async () => {
     await initDbHarness()
   })
@@ -73,8 +73,8 @@ describeDb('migration 110 — attention_dismissals (#3813)', () => {
     await resetDb()
   })
 
-  it('is registered as version 110_attention_dismissals', () => {
-    expect(version).toBe('110_attention_dismissals')
+  it('is registered as version 111_attention_dismissals', () => {
+    expect(version).toBe('111_attention_dismissals')
   })
 
   it('the schema is at head with the table and its indexes in place', async () => {

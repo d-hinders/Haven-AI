@@ -254,15 +254,25 @@ export class SubmittedUserOpFailedError extends Error {
    * must be added here before any caller can see it.
    */
   readonly outcome: 'receipt_unconfirmed' | 'included_reverted'
+  /**
+   * #3837: the EntryPoint receipt's `actualGasCost` when the op LANDED and
+   * reverted — the sponsored gas the failed op burned, which the caller
+   * records in the sponsored-gas ledger. Null on `receipt_unconfirmed` (no
+   * receipt was ever seen, so no cost is known) and on any thrower that
+   * predates this field.
+   */
+  readonly actualGasCost: bigint | null
   constructor(
     message: string,
     userOpHash: Hex,
     outcome: 'receipt_unconfirmed' | 'included_reverted',
+    actualGasCost: bigint | null = null,
   ) {
     super(message)
     this.name = 'SubmittedUserOpFailedError'
     this.userOpHash = userOpHash
     this.outcome = outcome
+    this.actualGasCost = actualGasCost
   }
   /** #3494's classification predicate, derived from `outcome` (#3564): the
    * op landed and reverted (nothing moved) vs the outcome-unknown variant. */
@@ -553,10 +563,13 @@ export async function createDelegationRail(cfg: DelegationRailConfig): Promise<D
     if (!receipt.success) {
       // #3564: the op LANDED and reverted — nothing moved, and terminal
       // failure is the honest booking. Distinct from the variant above.
+      // #3837: the receipt's `actualGasCost` rides the error so the caller
+      // can record the sponsored gas a reverted op still burned.
       throw new SubmittedUserOpFailedError(
         `redemption UserOp ${userOpHash} included but reverted`,
         userOpHash,
         'included_reverted',
+        receipt.actualGasCost ?? null,
       )
     }
     return {

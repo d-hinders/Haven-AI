@@ -262,6 +262,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/ops/sponsored-gas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sponsored UserOp gas cost per merchant per day.
+         * @description What the delegation-rail gas sponsorship costs (#3837): every UserOp submitted through the payment path, tagged direct vs x402 funding leg, bucketed per UTC day — x402 funding legs by the merchant host from the joined payment intent (null when the intent has no resource URL), direct payments as their own null-host bucket. Gas is the EntryPoint receipt actualGasCost (includes preVerificationGas; the l1Fee is not added) and is priced at VIEW time — eth_priced_at says so. Value moved is the confirmed intents' usd_value. Reads through the read-only ops database role and writes one audit row before answering.
+         */
+        get: operations["getOpsSponsoredGas"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ops/feedback": {
         parameters: {
             query?: never;
@@ -4460,6 +4480,38 @@ export type components = {
             /** Format: date-time */
             generated_at: string;
         };
+        OpsSponsoredGas: {
+            days: number;
+            /** @description The view-time ETH/USD quote; null when the price feed returned nothing usable. */
+            eth_price_usd: number | null;
+            /** @enum {string} */
+            eth_priced_at: "view_time";
+            /** @description Which on-chain figure the gas numbers are and how ETH is priced. */
+            gas_basis: string;
+            rows: {
+                /**
+                 * Format: date
+                 * @description UTC day bucket.
+                 */
+                day: string;
+                /** @description The merchant host from the intent resource URL; null for direct payments. */
+                merchant_host: string | null;
+                /** @enum {string} */
+                leg: "direct" | "x402_funding";
+                funding_legs: number;
+                /** @description Sum of actualGasCost in wei; null while no leg in the bucket has a known cost. */
+                gas_cost_wei: string | null;
+                gas_eth: number | null;
+                /** @description gas_eth priced at view time; null when no usable ETH quote. */
+                gas_usd: number | null;
+                /** @description The confirmed intents' usd_value; reverted legs moved nothing. */
+                value_moved_usd: number;
+                /** @description gas_usd / value_moved_usd; null when gas was not priced or nothing moved. */
+                gas_value_ratio: number | null;
+            }[];
+            /** Format: date-time */
+            generated_at: string;
+        };
         OpsFeedbackList: {
             feedback: components["schemas"]["OpsFeedback"][];
             /** Format: date-time */
@@ -7202,6 +7254,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OpsOverview"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The ops console (or its read-only database) is not configured. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The read could not be audited, so nothing was returned. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getOpsSponsoredGas: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The per-merchant-per-day buckets for the trailing window. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsSponsoredGas"];
                 };
             };
             /** @description Error response */

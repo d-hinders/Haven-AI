@@ -204,6 +204,16 @@ availability while funds stay caveat-gated on-chain regardless — failing
 closed would let a DB hiccup take down the very operations it exists to keep
 up.
 
+The sponsored-UserOp gas of the PAYMENT path is a separate ledger, not rows in
+that table (#3837, migration `sponsored_userop_gas_events`): every UserOp
+submitted through `submitDelegationPayment` (both direct payments and the x402
+EIP-3009 funding leg) records its EntryPoint `actualGasCost` there, including a
+landed-but-reverted op and a cost-NULL `receipt_unconfirmed` one. It is
+monitoring only — no budget counts it, no reader of `relayer_gas_events`
+(`gas_sponsored_ops`, `relayerSpendSummary`, `assertRelayerBudget`) sees it —
+and a recording failure is swallowed: metrics can never gate a payment. See
+`docs/operations/sponsored-gas.md`.
+
 ## 3. Delegation custody semantics (#828's contract)
 
 > **Re-verified #2929 (dark-mode epic #2925, slice 3/3):** the dark-token sweep
@@ -2874,7 +2884,7 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > **Re-verified (#3813, 2026-10-10, server-saved "Needs you" dismissals):** this
 > diff touches one file in this document's coverage list,
 > `packages/backend/src/routes/user.ts` — it adds `GET`/`POST
-> /user/attention-dismissals` (migration 110's `attention_dismissals` table
+> /user/attention-dismissals` (migration 111's `attention_dismissals` table
 > behind them). Both endpoints are presentation-only: a dismissal hides a
 > nagging dashboard row and nothing else — it grants no spending ability, does
 > not touch `pickSigningPath`, budgets, allowances, signers or any §3/§6

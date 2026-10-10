@@ -12,7 +12,7 @@ export type { Executor }
  * with optional columns: each INSERT selects through an ownership EXISTS
  * (a dismissal row for an account or agent the caller does not own is never
  * written — the route answers 404), and each targets its own partial unique
- * index (migration 110) as the ON CONFLICT arbiter, so a re-dismiss from a
+ * index (migration 111) as the ON CONFLICT arbiter, so a re-dismiss from a
  * second device or a retried request is a no-op row count, not a duplicate.
  *
  * Reads are whole-list per user — the dashboard fetches every dismissal on

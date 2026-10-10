@@ -27,6 +27,7 @@ import type {
   OpsRevealRequest,
   OpsRevealResponse,
   OpsSearchResponse,
+  OpsSponsoredGas,
   OpsUserDetail,
 } from './ops-types'
 
@@ -94,6 +95,7 @@ export interface OpsClient {
   user: (id: string) => Promise<OpsRead<OpsUserDetail | null>>
   onchain: (userId: string) => Promise<OpsRead<OpsOnchainView | null>>
   health: () => Promise<OpsRead<OpsHealth>>
+  sponsoredGas: () => Promise<OpsRead<OpsSponsoredGas>>
   docHealth: () => Promise<OpsRead<DocHealthJson>>
   me: () => Promise<OpsRead<OpsMe>>
   reveal: (request: OpsRevealRequest) => Promise<OpsRead<OpsRevealResponse>>
@@ -134,6 +136,7 @@ export function createOpsClient(storage: Storage, origin: string, onUnauthorized
     user: (id) => get<OpsUserDetail | null>(`/ops/users/${encodeURIComponent(id)}`),
     onchain: (userId) => get<OpsOnchainView | null>(`/ops/users/${encodeURIComponent(userId)}/onchain`),
     health: () => get<OpsHealth>('/ops/health'),
+    sponsoredGas: () => get<OpsSponsoredGas>('/ops/sponsored-gas'),
     // The doc-health JSON is a build-time static file (#3511); `same-origin`
     // reads it from THIS deployment, and a missing build wrote nothing.
     docHealth: async () => {

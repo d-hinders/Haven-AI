@@ -14,12 +14,16 @@ interface BaseRowProps {
   /**
    * Extra classes for the title paragraph. The title is a single-line
    * `truncate` by default; a caller that needs it to wrap (e.g. AttentionList's
-   * below-`sm` two-line clamp) passes the override here rather than to the row
-   * root, where the classes would land on the flex container and do nothing.
+   * two-line clamp) passes the override here rather than to the row root, where
+   * the classes would land on the flex container and do nothing. `truncate`
+   * stays appended: `whitespace-normal` still wins over its `nowrap` because
+   * Tailwind emits whitespace utilities after `truncate`.
    */
   titleClassName?: string
   /** Secondary line below the title (12px ink-3). */
   subtitle?: ReactNode
+  /** Extra classes for the subtitle paragraph — same contract as `titleClassName` (#3876). */
+  subtitleClassName?: string
   /** Right-hand slot — value, badge, chevron, action button. */
   trailing?: ReactNode
   /**
@@ -83,6 +87,7 @@ export function Row(props: RowProps) {
     title,
     titleClassName = '',
     subtitle,
+    subtitleClassName = '',
     trailing,
     trailingClassName = '',
     density = 'comfortable',
@@ -136,7 +141,7 @@ export function Row(props: RowProps) {
       <div className="min-w-0 flex-1">
         <p className={[titleClassName, 'truncate text-sm font-medium text-[var(--v2-ink)]'].filter(Boolean).join(' ')}>{title}</p>
         {subtitle ? (
-          <p className="mt-0.5 truncate text-xs text-[var(--v2-ink-3)]">{subtitle}</p>
+          <p className={[subtitleClassName, 'mt-0.5 truncate text-xs text-[var(--v2-ink-3)]'].filter(Boolean).join(' ')}>{subtitle}</p>
         ) : null}
       </div>
       {trailing ? <div className={['flex-shrink-0', trailingClassName].filter(Boolean).join(' ')}>{trailing}</div> : null}

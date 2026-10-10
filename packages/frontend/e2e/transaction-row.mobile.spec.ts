@@ -280,23 +280,44 @@ test(`${route}: the amount rides under the title below md, and the title stops w
           Array.from(range.getClientRects()).map((r) => Math.round(r.top)),
         ).size
         const titleCell = p.closest('td')
-        // Anchor on the rendered currency text, not on a class or a component
+        // Anchor on the rendered amount text, not on a class or a component
         // name: this file's own lesson is that a probe written against the
-        // shape it was made for finds nothing after the shape changes.
-        // Excluding the title `<p>` is load-bearing, not tidiness. This takes
-        // the FIRST visible leaf in document order and the title precedes the
-        // stacked amount inside the same cell — so a fixture title containing
-        // "USDC" or "ETH" (a token name, an `ETHGlobal`-style merchant) would
-        // resolve to the title and make `amountInTitleCell` trivially true.
-        // The structural half would then be unable to fail while still
-        // reporting green, which is the one thing this test exists to prevent.
-        const amounts = Array.from(tr.querySelectorAll('*')).filter(
+        // shape it was made for finds nothing after the shape changes. Since
+        // #3811 the rows render the user's currency through `<Amount>`'s
+        // currency mode — an optional `≈ ` mark (its own child span),
+        // a direction sign, then the `formatFiat` output (`$1,234.56`
+        // en-US, `1.100,00 €` de-DE, `13 450,00 kr` sv-SE, whose separators
+        // are NBSP) — so the pattern below recognises the voices `formatFiat`
+        // produces plus the token form the column used to render, not a
+        // hard-coded fixture string. Excluding the title `<p>` is still
+        // load-bearing: a fixture title containing "USDC" or "ETH" (an
+        // `ETHGlobal`-style merchant) would otherwise resolve to the title
+        // and make `amountInTitleCell` trivially true — the structural half
+        // would then be unable to fail while still reporting green, the one
+        // thing this test exists to prevent.
+        //
+        // The `≈` mark is a child `<span>`, so in currency mode the amount
+        // element is NOT a leaf — a `children.length === 0` filter would
+        // never match a row whose valuation is approximate, which is exactly
+        // the fixture shape this suite runs against. Instead of anchoring on
+        // leafness, take the INNERMOST matches: an element that CONTAINS
+        // another match is a wrapper, not the amount itself. The `≈` span's
+        // own text (`≈ `) matches nothing, so the outer `<Amount>` span is
+        // the single innermost match and `amountMatches` still counts ONE.
+        // One pattern for every voice the amount column renders as
+        // textContent: `≈` mark + direction sign + `formatFiat` output, or
+        // the token form the column rendered before #3811.
+        const AMOUNT_TEXT =
+          /^(?:≈\s*)?[-+]?(?:\$\s*[\d.,\u00a0\u202f ]+|[\d.,\u00a0\u202f ]+\s*(?:USDC|ETH|USD|EUR|SEK|kr|€))\s*$/u
+        const matches = Array.from(tr.querySelectorAll('*')).filter(
           (el) =>
             visible(el) &&
             el !== p &&
             !el.contains(p) &&
-            el.children.length === 0 &&
-            /^[-+]?[\d,.]+\s*(USDC|ETH)$/.test((el.textContent ?? '').trim()),
+            AMOUNT_TEXT.test((el.textContent ?? '').trim()),
+        )
+        const amounts = matches.filter(
+          (el) => !matches.some((other) => other !== el && el.contains(other)),
         )
         const amount = amounts[0]
         return {

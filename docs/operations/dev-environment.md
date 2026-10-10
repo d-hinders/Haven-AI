@@ -31,7 +31,7 @@ covers:
   - packages/frontend/vercel.json
   - packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts
   - scripts/vercel/**
-last-verified: "2026-10-08"
+last-verified: "2026-10-10"
 ---
 
 > **Re-verified #3825 (2026-10-09, `GET /user/signers`):** this diff touched
@@ -1280,6 +1280,17 @@ project owner — collaborators have Viewer access, not env-var write access.
 > moved, `enforcedModules` is untouched, and the shadow/enforce semantics this
 > document describes are unchanged. Nothing else in this file's coverage was
 > touched; this note and the `last-verified` date are the only edits.
+
+> **Re-verified #3837 (2026-10-10):** `route-modules.generated.ts` was
+> regenerated in the same commit as a new route — `GET /ops/sponsored-gas`
+> (ops console, `routes/ops.ts`), registered through the same data-read
+> builder as the other ops reads and covered by an OpenAPI operation, so
+> `check:route-modules` and `lint:request-schemas` stayed green with no
+> baseline change. The generate/check workflow and the ENFORCED-from-birth
+> rule this section describes are unchanged — no new MODULE was added, only
+> a route inside the already-enforced `routes/ops.ts`. Nothing else in this
+> file's coverage was touched; this note and the `last-verified` date are
+> the only edits.
 
 > **Re-verified #3333 (2026-09-27):** `index.ts`'s `enforcedModules` grew by
 > exactly one entry — `routes/receive.ts`, born ENFORCED per the rule above

@@ -2093,6 +2093,15 @@ receipt's gas numbers for cost attribution. Availability guard, not a funds
 gate: it fails open on database errors because funds stay caveat-gated
 on-chain either way.
 
+The payment path's sponsored UserOps do NOT land in `relayer_gas_events`
+(#3837): every UserOp `submitDelegationPayment` submits — direct payments and
+the x402 EIP-3009 funding leg — records its receipt's `actualGasCost` in the
+separate `sponsored_userop_gas_events` ledger (migration 110), tagged direct
+vs funding leg; reverted ops record their burned gas, `receipt_unconfirmed`
+ops a cost-NULL row. Monitoring only: no budget reads it, and the
+`gas_sponsored_ops` figure and `relayerSpendSummary` are untouched. See
+`docs/operations/sponsored-gas.md`.
+
 Since #994 the x402 route reaches the chain only through the `ChainClient`
 port and `infra/chain/` modules (binding-signer consolidated there) — the
 route file itself imports no chain SDK.

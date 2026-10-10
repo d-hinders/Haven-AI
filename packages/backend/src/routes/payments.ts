@@ -67,6 +67,7 @@ import {
   submitDelegationPayment,
 } from '../rails/delegation-authorization.js'
 import { readRemainingBudget } from '../infra/chain/delegation-budget-reader.js'
+import { recordSponsoredUserOpGas, sponsoredLegOf } from '../modules/payments/index.js'
 import { getAgentPaymentResumeState } from '../modules/payments/index.js'
 import { getPaymentReceipt, verifyPaymentReceipt } from '../modules/payments/index.js'
 import { quoteFee } from '../modules/fee/index.js'
@@ -1039,11 +1040,28 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         if (intent.prepared_user_op == null || !intent.delegation_hash) {
           throw new Error('delegation-rail intent is missing its prepared UserOperation state')
         }
-        const { txHash } = await submitDelegationPayment(
+        // #3837: record the sponsored UserOp's gas cost — best-effort,
+        // awaited-and-swallowed (a recording failure never fails a
+        // payment), and OUTSIDE the confirmSubmittedIntent booking flow
+        // (this sits on the submit seam, before any booking runs).
+        const submission = await submitDelegationPayment(
           { chain_id: intent.chain_id, delegate_address: intent.delegate_address },
           deserializeUserOp(intent.prepared_user_op),
           signature as `0x${string}`,
         )
+        await recordSponsoredUserOpGas({
+          paymentIntentId: id,
+          agentId: agent.id,
+          userId: intent.user_id ?? agent.user_id,
+          chainId: intent.chain_id,
+          leg: sponsoredLegOf(intent.payment_rail),
+          outcome: 'confirmed',
+          userOpHash: submission.userOpHash,
+          txHash: submission.txHash,
+          actualGasUsed: submission.actualGasUsed,
+          actualGasCost: submission.actualGasCost,
+        })
+        const { txHash } = submission
 
         const fiatValues = await getFiatValuesForTokenAmount(
           intent.token_symbol,
@@ -1109,6 +1127,27 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           )
           await releaseSubmittedClaim(intent.id)
           return refused
+        }
+        // #3837: a POST-SEND failure still burned sponsored gas — record it
+        // before the booking split, covering BOTH variants:
+        // `included_reverted` carries the receipt's `actualGasCost` on the
+        // widened error; `receipt_unconfirmed` has no known cost (recorded
+        // cost-NULL). Pre-send bundler rejections are NOT recorded — the op
+        // never entered the mempool, so nothing was sponsored. Same
+        // awaited-and-swallowed rule as the success path.
+        if (err instanceof SubmittedUserOpFailedError) {
+          await recordSponsoredUserOpGas({
+            paymentIntentId: id,
+            agentId: agent.id,
+            userId: intent.user_id ?? agent.user_id,
+            chainId: intent.chain_id,
+            leg: sponsoredLegOf(intent.payment_rail),
+            outcome: err.outcome,
+            userOpHash: err.userOpHash,
+            txHash: null,
+            actualGasUsed: null,
+            actualGasCost: err.actualGasCost,
+          })
         }
         // 6. Failure — CLASSIFIED first (#3564). Session-rail (bundler) errors
         // echo the request URL, which embeds the API key — scrub before

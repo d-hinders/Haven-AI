@@ -396,9 +396,9 @@ export default function AccountDetailClient() {
           ) : breakdown.length === 0 ? (
             <EmptyState
               title="No token balances yet"
-              body="Receive funds to see tokens in this Haven wallet."
+              body="Deposit funds to see tokens in this Haven wallet."
               className="py-8"
-              action={accountAddress ? <Button size="sm" onClick={() => setReceiveOpen(true)}>Receive funds</Button> : null}
+              action={accountAddress ? <Button size="sm" onClick={() => setReceiveOpen(true)}>Deposit address</Button> : null}
             />
           ) : (
             <>

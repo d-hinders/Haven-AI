@@ -135,6 +135,11 @@ export const SCAN_FILES = [
   // it lived one level up in `components/`.
   'packages/frontend/src/lib/transaction-labels.ts',
   'packages/frontend/src/lib/transaction-presentation.tsx',
+  // The dashboard's 7-day summary sentences (#3807) — fixed templates built
+  // from the overview's own figures; every branch's exact output is pinned by
+  // its unit test. Lives in lib/ so the pure function is testable, so it is
+  // here and not under the directory scan.
+  'packages/frontend/src/lib/dashboard-summary.ts',
   // The CANONICAL copy of the skill above, byte-pinned to the frontend inline
   // copy by a parity test. It is not a frontend file, but it is the copy the
   // connector auto-installs — i.e. the PRIMARY delivery path, of which the

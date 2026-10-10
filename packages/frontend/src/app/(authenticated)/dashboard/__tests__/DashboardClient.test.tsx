@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -172,14 +172,7 @@ function mockBaseState(
         eurPercent: 1,
         sekPercent: 0,
       },
-      metrics: {
-        connectedAgents: 1,
-        monthlyAgentSpendUsd: 42,
-        monthlyAgentSpendEur: 38,
-        monthlyAgentSpendSek: 440,
-        successfulTransactions: 4,
-        activeAccounts: 1,
-      },
+      // #3807: the metrics block is gone with the KPI tiles.
       actionableApprovals: 2,
       pendingApprovals: 2,
       onboardingProgress: {
@@ -289,47 +282,26 @@ describe('DashboardClient', () => {
 
       expect(screen.getByRole('heading', { level: 2, name: 'Agents' })).toBeInTheDocument()
       expect(screen.getByRole('link', { name: /Research agent/ })).toBeInTheDocument()
-      expect(screen.getByText('—')).toBeInTheDocument()
+      // The page's money-panel tiles also render em dashes for zero windows —
+      // scope to the agent row's own caption.
+      expect(within(screen.getByRole('link', { name: /Research agent/ })).getByText('—')).toBeInTheDocument()
       expect(screen.queryByText('Connected')).not.toBeInTheDocument()
     })
   })
 
-  it('leads with total balance, primary actions, attention, and metric cards', () => {
+  it('leads with total balance, the money panel, and its two actions', () => {
     render(<DashboardClient />)
 
     expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument()
     expect(screen.getByText('$1,234.56')).toBeInTheDocument()
-    // Send and the approvals attention row are DELETED (#1989) — asserted as
-    // absences in their own dedicated test below, where the fixture is set up
-    // to make a regression visible rather than merely unasserted.
-    expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
+    // #3807: the four KPI tiles are gone; the money panel renders the
+    // templated 7-day summary and the 30-day spending block in their place.
+    expect(screen.getByRole('button', { name: 'Deposit address' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add funds' })).toBeInTheDocument()
-    expect(screen.getByText('Agents connected')).toBeInTheDocument()
-    expect(screen.getByText('Monthly agent spend')).toBeInTheDocument()
-    expect(screen.getByText('$42.00')).toBeInTheDocument()
-    expect(screen.getByText('Successful transactions')).toBeInTheDocument()
-    expect(screen.getByText('Active accounts')).toBeInTheDocument()
-  })
-
-  /**
-   * #3127 review round 2, finding 7: the "Monthly agent spend" mark must not
-   * be a currency glyph. It was lucide's `DollarSign`, which under the SEK
-   * no-preference default painted `$` over `482,50 kr` on every new signup.
-   * The tile describes spend, not a currency, so the mark is
-   * currency-neutral (`Coins`) — pinned by the generated class the Icon
-   * primitive stamps per lucide glyph, exactly the headless equivalent the
-   * AGENTS.md closeout asks for when browser verification is skipped.
-   */
-  it('renders a currency-neutral mark on the Monthly agent spend tile (no $ glyph)', () => {
-    render(<DashboardClient />)
-
-    const label = screen.getByText('Monthly agent spend')
-    const card = label.closest('div.group') ?? label.closest('[class*="group"]')!
-    const icon = card.querySelector('span[aria-hidden="true"] svg')
-    expect(icon).not.toBeNull()
-    // The coins glyph, not the dollar one.
-    expect(icon!.getAttribute('class')).toContain('lucide-coins')
-    expect(icon!.getAttribute('class')).not.toContain('lucide-dollar-sign')
+    expect(screen.getByText('Spending, last 30 days')).toBeInTheDocument()
+    expect(screen.getByText('Payments')).toBeInTheDocument()
+    expect(screen.getByText('Merchants')).toBeInTheDocument()
+    expect(screen.getByText('Stopped by budget')).toBeInTheDocument()
   })
 
   /**
@@ -357,14 +329,7 @@ describe('DashboardClient', () => {
             sekPercent: 0,
             ...overrides,
           },
-          metrics: {
-            connectedAgents: 1,
-            monthlyAgentSpendUsd: 42,
-            monthlyAgentSpendEur: 38,
-            monthlyAgentSpendSek: 440,
-            successfulTransactions: 4,
-            activeAccounts: 1,
-          },
+      // #3807: the metrics block is gone with the KPI tiles.
           actionableApprovals: 0,
           pendingApprovals: 0,
           onboardingProgress: {
@@ -379,7 +344,7 @@ describe('DashboardClient', () => {
       })
     }
 
-    it('renders the SEK total, its change line, and the monthly spend from the SEK keys', () => {
+    it('renders the SEK total and its change line from the SEK keys', () => {
       mockSekOverview({ sekAmount: 130, sekPercent: 1 })
       render(<DashboardClient />)
 
@@ -393,8 +358,11 @@ describe('DashboardClient', () => {
       // locale — sv-SE under SEK: decimal comma, NBSP before `%` (normalized
       // to a plain space by getByText). The kr half was already sv-SE; the
       // line no longer mixes a hand-rolled English percent scaffold into it.
-      expect(screen.getByText('+130,00 kr (+1,00 %) today')).toBeInTheDocument()
-      expect(screen.getByText('440,00 kr')).toBeInTheDocument()
+      expect(screen.getByText('+130,00 kr (+1,00 %) since yesterday')).toBeInTheDocument()
+      // #3807: the monthly-spend SEK figure lives in the spending block now,
+      // read from `spend.d30` — this fixture carries no spend block, so the
+      // block renders its quiet placeholder instead of a number.
+      expect(screen.getAllByText('—').length).toBeGreaterThan(0)
       // The USD total must not leak onto a SEK hero under any label.
       expect(screen.queryByText('$1,234.56')).toBeNull()
     })
@@ -409,7 +377,7 @@ describe('DashboardClient', () => {
       render(<DashboardClient />)
 
       expect(screen.getByText('13 000,50 kr')).toBeInTheDocument()
-      expect(screen.queryByText(/today/)).toBeNull()
+      expect(screen.queryByText(/since yesterday/)).toBeNull()
       expect(screen.getByText('Across all linked Haven accounts.')).toBeInTheDocument()
     })
 
@@ -468,14 +436,7 @@ describe('DashboardClient', () => {
           eurPercent: 1,
           sekPercent: 0,
         },
-        metrics: {
-          connectedAgents: 1,
-          monthlyAgentSpendUsd: 42,
-          monthlyAgentSpendEur: 38,
-          monthlyAgentSpendSek: 440,
-          successfulTransactions: 4,
-          activeAccounts: 1,
-        },
+      // #3807: the metrics block is gone with the KPI tiles.
         actionableApprovals: 1,
         pendingApprovals: 1,
         onboardingProgress: {
@@ -495,7 +456,7 @@ describe('DashboardClient', () => {
     // Without this the four absences below would all be satisfied by a blank
     // screen — the failure mode #1987 paid for.
     expect(screen.getByText('$1,234.56')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Deposit address' })).toBeInTheDocument()
 
     expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
     expect(screen.queryByText('1 agent payment needs your action')).toBeNull()
@@ -555,14 +516,7 @@ describe('DashboardClient', () => {
           eurPercent: 1,
           sekPercent: 0,
         },
-        metrics: {
-          connectedAgents: 1,
-          monthlyAgentSpendUsd: 42,
-          monthlyAgentSpendEur: 38,
-          monthlyAgentSpendSek: 440,
-          successfulTransactions: 4,
-          activeAccounts: 1,
-        },
+      // #3807: the metrics block is gone with the KPI tiles.
         actionableApprovals: 0,
         pendingApprovals: 0,
         onboardingProgress: {
@@ -592,8 +546,7 @@ describe('DashboardClient', () => {
 
     render(<DashboardClient />)
 
-    expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Receive funds' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Deposit address' })).toBeInTheDocument()
     expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
   })
 
@@ -607,9 +560,8 @@ describe('DashboardClient', () => {
 
     render(<DashboardClient />)
 
-    expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Deposit address' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add funds' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Receive funds' })).not.toBeInTheDocument()
     expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
   })
 
@@ -626,7 +578,7 @@ describe('DashboardClient', () => {
     expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
     expect(screen.queryByText('Agents connected')).not.toBeInTheDocument()
     expect(screen.queryByText('Recent transactions')).not.toBeInTheDocument()
-    expect(screen.queryByText('Monthly agent spend')).not.toBeInTheDocument()
+    expect(screen.queryByText('Spending, last 30 days')).not.toBeInTheDocument()
   })
 
   it('does not persist first-run guide dismissal across browser sessions', () => {
@@ -780,6 +732,109 @@ describe('DashboardClient', () => {
       expect(mockDismissOnServer).toHaveBeenCalledWith(
         expect.objectContaining({ kind: 'needs-setup', agentId: 'agent-9' }),
       )
+    })
+  })
+
+  describe('money panel (#3807)', () => {
+    /** The full wire shape the panel's spending block and summary read. */
+    const baseSpend = {
+      scope: 'mainnet' as 'mainnet' | 'testnet',
+      d7: {
+        gross: { usd: 18.5, eur: 16.84, sek: 199.1 },
+        net: { usd: 11.1, eur: 10.1, sek: 119.46 },
+        approx: false,
+        payments: 6,
+        distinctMerchants: 3,
+        budgetStops: 1,
+      },
+      d30: {
+        gross: { usd: 74, eur: 67.34, sek: 796.4 },
+        net: { usd: 48.1, eur: 43.77, sek: 517.66 },
+        approx: true,
+        payments: 21,
+        distinctMerchants: 5,
+        budgetStops: 3,
+      },
+      topMerchant7d: {
+        key: 'research.example',
+        x402ResourceUrl: 'https://research.example/report',
+        to: '0x3333333333333333333333333333333333333333',
+        merchantName: null,
+      },
+      failedIntents7d: 1,
+      balance_by_day: Array.from({ length: 30 }, (_, i) => {
+        // Real calendar days (Sep 10 + i, rolling into October) — a naive
+        // string pad produces '2026-09-39' and the sparkline's Date.parse
+        // goes NaN.
+        const day = new Date(Date.UTC(2026, 8, 10 + i))
+        return {
+          snapshotDate: day.toISOString().slice(0, 10),
+          totalUsd: 1200 + i,
+          totalEur: 1100 + i,
+          totalSek: null as number | null,
+        }
+      }),
+    }
+
+    function mockOverviewWithSpend(spend: typeof baseSpend) {
+      mockUseDashboardOverview.mockReturnValue({
+        data: {
+          totals: { usd: 1234.56, eur: 1100, sek: 13000.5 },
+          change: {
+            available: true,
+            usdAmount: 12.34,
+            eurAmount: 11,
+            sekAmount: null,
+            usdPercent: 1.23,
+            eurPercent: 1,
+            sekPercent: 0,
+          },
+          actionableApprovals: 0,
+          pendingApprovals: 0,
+          onboardingProgress: { hasFirstAgentPayment: true },
+          agents: [],
+          transactions: [],
+          spend,
+        },
+        loading: false,
+        error: null,
+        refetch: vi.fn(),
+      })
+    }
+
+    it('renders the templated 7-day summary under the heading', () => {
+      mockOverviewWithSpend(baseSpend)
+      render(<DashboardClient />)
+
+      // d7: the fixture has no agents, so the spread-out count form renders
+      // off the totals — and the fixture's 1 budget stop rides along as its
+      // own neutral sentence.
+      expect(
+        screen.getByText(
+          'Agents spent $11.10 in the last 7 days. 1 payment attempt was stopped by a budget limit.',
+        ),
+      ).toBeInTheDocument()
+    })
+
+    it('labels a test-network-only overview "Test network"', () => {
+      mockOverviewWithSpend({ ...baseSpend, scope: 'testnet' as const })
+      render(<DashboardClient />)
+
+      expect(screen.getByText('Test network')).toBeInTheDocument()
+    })
+
+    it('marks a re-priced 30-day total with ≈ and never presents it as booked', () => {
+      mockOverviewWithSpend(baseSpend)
+      render(<DashboardClient />)
+
+      // d30.approx is true in the fixture, and the Amount primitive's
+      // title carries the reason (owner decision 1). The title sits on the
+      // inner ≈ mark; the figure is its sibling inside the Amount root, so
+      // read the enclosing span's text.
+      const marks = screen.getAllByTitle("Converted at today's rate")
+      expect(marks.length).toBeGreaterThan(0)
+      const amounts = marks.map((mark) => mark.parentElement?.textContent ?? '')
+      expect(amounts.join(' ')).toContain('48.10')
     })
   })
 

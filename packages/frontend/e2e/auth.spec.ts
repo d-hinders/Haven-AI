@@ -69,10 +69,11 @@ test.describe('authentication flows', () => {
     await expect(page.getByText('Total balance')).toBeVisible()
     // #1989: the dashboard hero's Send button is gone — it opened `SendModal`,
     // deleted with the Safe rail. `canSend` is now constantly false, so the
-    // affordance is HIDDEN rather than disabled (#1079's pattern). Receive is
-    // the positive control: the hero still renders its action row.
+    // affordance is HIDDEN rather than disabled (#1079's pattern). The
+    // deposit-address action (#3807's rename of Receive) is the positive
+    // control: the money panel still renders its action row.
     await expect(page.getByRole('button', { name: 'Send' })).toHaveCount(0)
-    await expect(page.getByRole('button', { name: 'Receive' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Deposit address' })).toBeVisible()
     expect(await expectNoHorizontalOverflow(page)).toMatchObject({
       hasOverflow: false,
       contentRegionFound: true,

@@ -644,6 +644,31 @@ would reintroduce exactly the surface #2656 removed, so a stranded tag catches u
 at the next release that publishes, and an operator moves it by hand when that
 window matters.
 
+### Hosted tool contract — when the promoted range changed it
+
+The hosted MCP's `tools/list` contract — tool names, input schemas,
+descriptions — is snapshotted at
+`packages/mcp-server/src/tools-list.snapshot.json` and pinned by
+`tool-contract-snapshot.test.ts`, so a contract change lands as a reviewed
+diff (#3817). A release can still be the thing that ships it: read the
+snapshot diff over the promoted range — the `main` the promotion started
+from against the new `main`:
+
+```sh
+git diff <last-main-sha>..<new-main-sha> -- packages/mcp-server/src/tools-list.snapshot.json
+```
+
+Empty output and this step is done — it is false for a promotion that did
+not change the contract. A non-empty diff is a RECONNECT EVENT. The closeout
+says **"hosted tool contract changed — connected agents must reconnect"**
+and lists the changed tools (the tool names whose entries the diff touches),
+both to the owner in the closeout report AND in the promotion PR body, with
+a link to the `haven-reset` skill
+([`../haven-reset/SKILL.md`](../haven-reset/SKILL.md)) as the
+how-to-reconnect step. The `mcp_server_checks` job summary on the promoted
+PR already reported which emissions a client holding the old schema would
+refuse — carry those findings, not a re-derivation.
+
 ## Guardrails
 
 - **Never `npm publish` by hand**, and never hand-edit versions or pins.

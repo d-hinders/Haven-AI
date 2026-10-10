@@ -125,19 +125,12 @@ function overviewWith(change: Record<string, unknown>) {
       sekPercent: 0.9,
       ...change,
     },
-    metrics: {
-      connectedAgents: 1,
-      monthlyAgentSpendUsd: 42,
-      monthlyAgentSpendEur: 38,
-      monthlyAgentSpendSek: 440,
-      successfulTransactions: 4,
-      activeAccounts: 1,
-    },
+    // #3807 + #3858: neither `metrics` nor the `transactions` preview is on
+    // the overview wire any more — the fixture carries neither.
     actionableApprovals: 0,
     pendingApprovals: 0,
     onboardingProgress: { hasFirstAgentPayment: false },
     agents: [],
-    transactions: [],
   }
 }
 
@@ -214,7 +207,7 @@ describe('DashboardClient — degraded balance reads (#3295)', () => {
 
     render(<DashboardClient />)
 
-    expect(screen.getByText('+$12.34 (+1.23%) today')).toBeInTheDocument()
+    expect(screen.getByText('+$12.34 (+1.23%) since yesterday')).toBeInTheDocument()
   })
 
   it('reports the change as unavailable when some token has no known value — never a swing from a zero', () => {
@@ -230,7 +223,7 @@ describe('DashboardClient — degraded balance reads (#3295)', () => {
     // The figure still renders (never an understated zero), but no swing is
     // claimed from a total understated by an unknown amount.
     expect(screen.getByText('$1,234.56')).toBeInTheDocument()
-    expect(screen.queryByText('+$12.34 (+1.23%) today')).not.toBeInTheDocument()
+    expect(screen.queryByText('+$12.34 (+1.23%) since yesterday')).not.toBeInTheDocument()
     expect(screen.getByText('Across all linked Haven accounts.')).toBeInTheDocument()
     // 'unavailable' renders the word, not a fake timestamp.
     expect(screen.getByText('Unavailable')).toBeInTheDocument()
@@ -252,10 +245,11 @@ describe('DashboardClient — degraded balance reads (#3295)', () => {
 
     render(<DashboardClient />)
 
-    // Funding KNOWN + has funds → the funded action order ("Receive"), never
-    // the unfunded prompt ("Receive funds").
-    expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Receive funds' })).not.toBeInTheDocument()
+    // Funding KNOWN + has funds → the funded meta-line renders, never the
+    // watching-for-deposit prompt (#3295 keeps its teeth: a failed read with
+    // a known balance is funded).
+    expect(screen.getByRole('button', { name: 'Deposit address' })).toBeInTheDocument()
+    expect(screen.queryByText('Watching for incoming deposits…')).not.toBeInTheDocument()
   })
 
   it('all-zero balances with an unread token count as funding-unknown, not unfunded (AC 4)', () => {
@@ -274,9 +268,11 @@ describe('DashboardClient — degraded balance reads (#3295)', () => {
 
     render(<DashboardClient />)
 
-    // fundingStateKnown=false → the NEUTRAL action order, not "Receive funds".
+    // fundingStateKnown=false → no watching-for-deposit prompt yet (it waits
+    // for a KNOWN unfunded state), and the neutral action pair renders.
     expect(screen.queryByRole('button', { name: 'Receive funds' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
+    expect(screen.queryByText('Watching for incoming deposits…')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Deposit address' })).toBeInTheDocument()
   })
 
   it('a clean read renders no indicator and keeps the change line', () => {
@@ -285,6 +281,6 @@ describe('DashboardClient — degraded balance reads (#3295)', () => {
     expect(screen.getByText('$1,234.56')).toBeInTheDocument()
     expect(screen.queryByText(/as of /)).not.toBeInTheDocument()
     expect(screen.queryByText('Unavailable')).not.toBeInTheDocument()
-    expect(screen.getByText('+$12.34 (+1.23%) today')).toBeInTheDocument()
+    expect(screen.getByText('+$12.34 (+1.23%) since yesterday')).toBeInTheDocument()
   })
 })

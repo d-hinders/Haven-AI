@@ -402,6 +402,26 @@
         "design:lint -w packages/frontend"
       ],
       "reason": "The shared escape-marker helper for the frontend line-scanning gates: design-lint and the copy lint both import isEscaped from it. The copy lint runs unconditionally, but design:lint runs inside the gated frontend_checks job, so a PR that only weakens escape recognition skipped the one gated job that consumes it (quality scan 2026-09-22, candidate C4). ops joined in #3515: ops_checks runs the same design:lint gate, because the design lint's scan spans packages/ops/src and an ops-only diff never routes frontend_checks."
+    },
+    {
+      "path": "scripts/ci/check-stale-client-compat.mjs",
+      "jobs": [
+        "mcp_server"
+      ],
+      "runsVia": [
+        "ci:stale-client-compat"
+      ],
+      "reason": "The hosted tool-contract compat guard (#3817). It reads packages/mcp-server's committed tools-list snapshot and next-arguments corpus, compares them against origin/main's golden and writes reconnect-required findings into the mcp_server_checks JOB SUMMARY. The step is advisory (exit 0 either way), so nothing else would ever run it: before this entry a PR that only weakened the check routed nowhere and the weakened check never executed. mcp_server owns it because the contract surface it polices is that package's, and the npm wrapper exists so the runsVia claim is a whole `npm run` command ci.yml actually contains."
+    },
+    {
+      "path": "scripts/ci/check-stale-client-compat.test.mjs",
+      "jobs": [
+        "mcp_server"
+      ],
+      "runsVia": [
+        "ci:stale-client-compat:test"
+      ],
+      "reason": "The guard's self-test, registered beside it under the manifest's paired-registration rule: a self-test that does not route is a self-test that can be weakened without running. mcp_server_checks runs it as a real gate beside the advisory step it polices, so the check's logic cannot drift while its report stays green."
     }
   ]
 }

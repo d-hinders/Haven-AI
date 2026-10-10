@@ -262,16 +262,10 @@ export const dashboardOverview = {
     sekAmount: 30,
     sekPercent: 0.2,
   },
-  metrics: {
-    connectedAgents: 1,
-    monthlyAgentSpendUsd: 12.5,
-    monthlyAgentSpendEur: 11.38,
-    // #3127 (finding 8): the "Monthly agent spend" tile reads
-    // `monthlyAgentSpendSek ?? 0` under the served default.
-    monthlyAgentSpendSek: 133,
-    successfulTransactions: 3,
-    activeAccounts: 1,
-  },
+  // #3807: the metrics block is gone with the four KPI tiles — the SEK
+  // spend figure the old "Monthly agent spend" tile read now lives in
+  // `spend.d30.net.sek` (the same #3803 net definition the analytics page
+  // uses), and the visual spec pins it there.
   // #2120: 0, matching `routes/dashboard.ts:84`, which hardcodes both to 0 —
   // the approval queue died with the AllowanceModule rail and its table is
   // dropped (#2055). A seeded 1 fabricated a count no backend can emit. The
@@ -1843,16 +1837,15 @@ export async function waitForDrawerOpen(page: Page) {
 export async function openReceiveFundsModal(page: Page) {
   await page.goto('/dashboard')
   await dismissMobileSidebar(page)
-  // The hero CTA renders as "Receive" for funded accounts and "Receive funds"
-  // only after the dashboard knows the account is unfunded. The onboarding
-  // checklist can also expose "Receive funds", so pin to the first exact match
-  // in DOM order.
+  // #3807: the hero CTA reads "Deposit address" everywhere (funded and
+  // unfunded alike), as do the onboarding checklist and the account-detail
+  // button. Pin to the first exact match in DOM order.
   await page
-    .getByRole('button', { name: /^Receive( funds)?$/ })
+    .getByRole('button', { name: /^Deposit address$/ })
     .first()
     .click()
 
-  const modal = page.getByRole('dialog', { name: 'Receive funds' })
+  const modal = page.getByRole('dialog', { name: 'Deposit address' })
   await modal.waitFor({ state: 'visible' })
   return modal
 }

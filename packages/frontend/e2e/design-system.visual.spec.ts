@@ -51,9 +51,10 @@
  * ("Updating visual baselines") for the CI-artifact flow.
  */
 import { expect, test } from '@playwright/test'
-import type { Locator } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
 import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
+import { isolateShowcaseSample } from './support/isolate-sample'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports, so the
 // screenshot evidence (#896) and this pixel gate always render the same widths.
@@ -515,6 +516,8 @@ test.describe('design-system visual regression', () => {
       await expect(partialDay).toHaveAttribute('data-day-index', '6')
       await expect(wide.getByTestId('chart-hatch-pattern')).toHaveCount(2)
 
+      // #3441: nothing above the sample may move it — see isolate-sample.ts.
+      await isolateShowcaseSample(wide)
       await assertFitsViewport(wide, vp.height, 'the wide sample')
 
       await expect(wide).toHaveScreenshot(`design-system-stacked-bar-chart-${vp.name}${schemeSuffix}.png`, {
@@ -548,6 +551,8 @@ test.describe('design-system visual regression', () => {
       await expect(partialDay).toHaveAttribute('data-day-index', '6')
       await expect(narrow.getByTestId('chart-hatch-pattern')).toHaveCount(2)
 
+      // #3441: nothing above the sample may move it — see isolate-sample.ts.
+      await isolateShowcaseSample(narrow)
       await assertFitsViewport(narrow, vp.height, 'the narrow sample')
 
       await expect(narrow).toHaveScreenshot(`design-system-stacked-bar-chart-narrow-${vp.name}${schemeSuffix}.png`, {
@@ -575,6 +580,8 @@ test.describe('design-system visual regression', () => {
       await expect(swatches.nth(0)).toHaveAttribute('data-series-index', '0')
       await expect(swatches.nth(1)).toHaveAttribute('data-series-index', '1')
 
+      // #3441: nothing above the sample may move it — see isolate-sample.ts.
+      await isolateShowcaseSample(swatchList)
       await assertFitsViewport(swatchList, vp.height, 'the swatch list')
 
       await expect(swatchList).toHaveScreenshot(`design-system-stacked-bar-swatch-list-${vp.name}${schemeSuffix}.png`, {
@@ -596,10 +603,12 @@ test.describe('design-system visual regression', () => {
    * fits the viewport (the fold guarantee above), so an edit that pushes a
    * sample past the fold fails HERE, naming the sample.
    *
-   * Placement is load-bearing and recorded in the issue: the four samples sit
-   * AFTER the AreaChart section, so none of the 12 StackedBarChart clips
-   * shifts by a pixel (#3441). A clip above this point flipping in a PR that
-   * touches none of it is a placement defect, not a paint drift.
+   * Placement no longer matters (#3441). Every showcase clip is captured
+   * through `isolateShowcaseSample`, which takes the page above the sample
+   * out of layout, so an edit above a sample cannot move its clip — the guard
+   * at the end of this file proves it. A showcase clip that flips in a PR
+   * that touches none of its sample is a defect in that isolation, not
+   * paint drift.
    */
   const SAMPLE_MAX_DIFF_PIXELS = 100
 
@@ -614,6 +623,8 @@ test.describe('design-system visual regression', () => {
 
       const sample = page.getByTestId('ds-amount-currency')
       await expect(sample).toHaveCount(1)
+      // #3441: nothing above the sample may move it — see isolate-sample.ts.
+      await isolateShowcaseSample(sample)
       await assertFitsViewport(sample, vp.height, 'the Amount currency sample')
 
       await expect(sample).toHaveScreenshot(`design-system-amount-currency-${vp.name}${schemeSuffix}.png`, {
@@ -637,6 +648,8 @@ test.describe('design-system visual regression', () => {
       // All four tone items rendered — a dismiss here is interaction state,
       // and this gate photographs the resting page only.
       await expect(sample.getByTestId(/^attention-dismiss-/)).toHaveCount(4)
+      // #3441: nothing above the sample may move it — see isolate-sample.ts.
+      await isolateShowcaseSample(sample)
       await assertFitsViewport(sample, vp.height, 'the AttentionList sample')
 
       await expect(sample).toHaveScreenshot(`design-system-attention-list-${vp.name}${schemeSuffix}.png`, {
@@ -661,6 +674,8 @@ test.describe('design-system visual regression', () => {
       const sample = page.getByTestId('ds-notice-row')
       await expect(sample).toHaveCount(1)
       await expect(sample.getByRole('button')).toHaveCount(2)
+      // #3441: nothing above the sample may move it — see isolate-sample.ts.
+      await isolateShowcaseSample(sample)
       await assertFitsViewport(sample, vp.height, 'the NoticeRow sample')
 
       await expect(sample).toHaveScreenshot(`design-system-notice-row-${vp.name}${schemeSuffix}.png`, {
@@ -685,6 +700,8 @@ test.describe('design-system visual regression', () => {
 
       const sample = page.getByTestId('ds-activity-row')
       await expect(sample).toHaveCount(1)
+      // #3441: nothing above the sample may move it — see isolate-sample.ts.
+      await isolateShowcaseSample(sample)
       await assertFitsViewport(sample, vp.height, 'the activity row sample')
 
       await expect(sample).toHaveScreenshot(`design-system-activity-row-${vp.name}${schemeSuffix}.png`, {
@@ -705,6 +722,8 @@ test.describe('design-system visual regression', () => {
 
       const sample = page.getByTestId('ds-area-chart-sparkline')
       await expect(sample).toHaveCount(1)
+      // #3441: nothing above the sample may move it — see isolate-sample.ts.
+      await isolateShowcaseSample(sample)
       await assertFitsViewport(sample, vp.height, 'the AreaChart sparkline sample')
 
       await expect(sample).toHaveScreenshot(`design-system-area-chart-sparkline-${vp.name}${schemeSuffix}.png`, {
@@ -725,6 +744,8 @@ test.describe('design-system visual regression', () => {
 
       const sample = page.getByTestId('ds-stat-tile-inline')
       await expect(sample).toHaveCount(1)
+      // #3441: nothing above the sample may move it — see isolate-sample.ts.
+      await isolateShowcaseSample(sample)
       await assertFitsViewport(sample, vp.height, 'the StatTile inline sample')
 
       await expect(sample).toHaveScreenshot(`design-system-stat-tile-inline-${vp.name}${schemeSuffix}.png`, {
@@ -733,6 +754,71 @@ test.describe('design-system visual regression', () => {
         maxDiffPixels: SAMPLE_MAX_DIFF_PIXELS,
         threshold: PIXEL_THRESHOLD,
       })
+    })
+  }
+
+  /**
+   * ── The #3441 guard: content above a showcase sample cannot move its clip ──
+   *
+   * Every clip above runs through `isolateShowcaseSample`, which takes the
+   * page above the sample out of layout. This proves it does: for each
+   * sample, captures with a 0.25, 0.5 and 0.75px spacer at the top of the page
+   * must be byte-identical to one without — the issue's fractional sweep, run
+   * on every visual job. Measured on Linux Chromium before the fix
+   * (2026-10-10), the 0.5px spacer alone moved EVERY sample at both viewports
+   * (all 18 captures changed), so this test fails the moment isolation stops
+   * working, and it needs no baseline: it compares the render with itself.
+   *
+   * Light scheme only: the mechanism is layout, not paint, and the dark
+   * project re-running it would double the cost for nothing.
+   */
+  const ISOLATED_SAMPLES: ReadonlyArray<[string, (p: Page) => Locator]> = [
+    ['StackedBarChart wide sample', (p) => p.getByTestId(SECTION_TEST_ID).getByTestId('stacked-bar-chart').nth(0)],
+    ['StackedBarChart narrow sample', (p) => p.getByTestId(SECTION_TEST_ID).getByTestId('stacked-bar-chart').nth(1)],
+    ['StackedBarChart swatch list', (p) => p.getByTestId('ds-stacked-bar-swatch-list')],
+    ['Amount currency sample', (p) => p.getByTestId('ds-amount-currency')],
+    ['AttentionList sample', (p) => p.getByTestId('ds-attention-list')],
+    ['NoticeRow sample', (p) => p.getByTestId('ds-notice-row')],
+    ['activity row sample', (p) => p.getByTestId('ds-activity-row')],
+    ['AreaChart sparkline sample', (p) => p.getByTestId('ds-area-chart-sparkline')],
+    ['StatTile inline sample', (p) => p.getByTestId('ds-stat-tile-inline')],
+  ]
+
+  const FRACTIONAL_SPACERS_PX = [0.25, 0.5, 0.75]
+
+  async function captureIsolated(page: Page, get: (p: Page) => Locator, spacerPx: number): Promise<Buffer> {
+    await page.goto('/design-system')
+    await page.evaluate(() => document.fonts.ready)
+    await page.waitForLoadState('networkidle')
+    // The spacer stands in for any edit above the sample: first child of the
+    // page container, before the page header. `networkidle` does not promise
+    // the header has mounted, so wait for it rather than race it.
+    await expect(page.locator('#main-content header').first()).toBeVisible()
+    await page.evaluate((px) => {
+      const container = document.querySelector('#main-content header')?.parentElement
+      if (!container) throw new Error('no page container under #main-content')
+      const spacer = document.createElement('div')
+      spacer.style.height = `${px}px`
+      container.insertBefore(spacer, container.firstChild)
+    }, spacerPx)
+    const sample = get(page)
+    await expect(sample).toHaveCount(1)
+    await isolateShowcaseSample(sample)
+    return sample.screenshot({ animations: 'disabled', caret: 'hide' })
+  }
+
+  for (const vp of VIEWPORTS) {
+    test(`/design-system showcase clips ignore content above them (${vp.name}) (#3441)`, async ({ page }, testInfo) => {
+      test.skip(schemeOf(testInfo) === 'dark', 'layout, not paint: the light run covers it')
+      test.setTimeout(360_000)
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      for (const [what, get] of ISOLATED_SAMPLES) {
+        const flush = await captureIsolated(page, get, 0)
+        for (const spacerPx of FRACTIONAL_SPACERS_PX) {
+          const shifted = await captureIsolated(page, get, spacerPx)
+          expect(shifted.equals(flush), `${what} moved when ${spacerPx}px of content was added above it`).toBe(true)
+        }
+      }
     })
   }
 

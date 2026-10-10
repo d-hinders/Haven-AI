@@ -705,10 +705,18 @@ jobs:
         # findings land in the job summary and the step never fails the job.
         # The checkout is fetch-depth 1, so the script fetches origin/main
         # itself and skips with a notice until main carries a snapshot. The
-        # check's logic is scripts/ci/check-stale-client-compat.test.mjs's
-        # job (in the preflight battery); the goldens are pinned by
-        # tool-contract-snapshot.test.ts.
-        run: node scripts/ci/check-stale-client-compat.mjs --base origin/main | tee -a "$GITHUB_STEP_SUMMARY"
+        # goldens are pinned by tool-contract-snapshot.test.ts. The step goes
+        # through the npm wrapper so the guard-ownership manifest's runsVia
+        # claim is a checkable `npm run` command (#1626); the tee lives in the
+        # script body so the summary append survives the wrapper.
+        run: npm run ci:stale-client-compat
+
+      - name: Stale-client tool-contract self-test — the gate on the check's logic
+        # The advisory step above must never fail the job, but its LOGIC is
+        # load-bearing: this is the half allowed to go red. Registered in
+        # .github/root-guard-ownership.json beside the guard (#1626), which
+        # makes mcp_server_checks its named owner.
+        run: npm run ci:stale-client-compat:test
 
       - name: Typed next-step ratchet (#3104, epic #3105)
         # Same gate as in backend_checks: this package is one of the three the

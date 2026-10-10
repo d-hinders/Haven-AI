@@ -128,6 +128,7 @@ function baseProps(overrides: Partial<AgentsSectionProps> = {}): AgentsSectionPr
   return {
     overview: makeOverview(),
     budgetRemaining: null,
+    budgetRemainingReady: true,
     attentionItems: [],
     currency: 'USD',
     accountNames: { 'acct-1': 'Main account', 'acct-2': 'Showcase account' },
@@ -382,5 +383,81 @@ describe('AgentsSection (#3809)', () => {
     )
     expect(rowNames(first.container)).toEqual(['Agent B', 'Agent C', 'Agent A'])
     first.unmount()
+  })
+
+  it('renders the same final order whether the budget read settles before or after the agents (#3871)', () => {
+    // #3871's race, pinned: the row order must not depend on WHEN the
+    // budget-remaining poll resolves relative to the agents render. The e2e
+    // dashboard fixture's shape — Research (a KNOWN 92% read), Watcher
+    // (paused), Connecting (needs setup) — with 30-day spends 32.5 / 15.6 / 0.
+    const agents = [
+      makeAgent({ id: 'r', name: 'Research agent', stats: makeStats(32.5), budgets: [makeBudget()] }),
+      makeAgent({ id: 'w', name: 'Watcher agent', status: 'paused', stats: makeStats(15.6), budgets: [makeBudget()] }),
+      makeAgent({ id: 'c', name: 'Connecting agent', status: 'pending_approval', stats: makeStats(0) }),
+    ]
+    const attentionItems: AttentionRuleItem[] = [
+      {
+        id: 'needs-setup:c',
+        kind: 'needs-setup',
+        tone: 'brand',
+        badge: 'Needs setup',
+        title: 'Connecting agent is waiting to be set up',
+        agentId: 'c',
+      },
+    ]
+    const settled = {
+      budgets: [makeRead({ agent_id: 'r', used_atomic: '230000000' })], // 92%
+    }
+
+    // Settles BEFORE the agents render: the first render is fully classified.
+    const before = render(
+      <AgentsSection
+        {...baseProps({ overview: makeOverview({ agents }), budgetRemaining: settled, attentionItems })}
+      />,
+    )
+    expect(rowNames(before.container)).toEqual(['Research agent', 'Watcher agent', 'Connecting agent'])
+    before.unmount()
+
+    // Settles AFTER: the read is still in flight on the first render — the
+    // section keeps its skeleton and anchors nothing — and once it resolves
+    // the rows appear in the SAME order. (The pre-fix behaviour anchored a
+    // half-classified frame here: Watcher, Connecting, Research.)
+    const after = render(
+      <AgentsSection
+        {...baseProps({
+          overview: makeOverview({ agents }),
+          budgetRemaining: null,
+          budgetRemainingReady: false,
+          attentionItems,
+        })}
+      />,
+    )
+    expect(rowNames(after.container)).toEqual([])
+    expect(screen.getByRole('status', { name: 'Loading agents' })).toBeInTheDocument()
+    after.rerender(
+      <AgentsSection
+        {...baseProps({ overview: makeOverview({ agents }), budgetRemaining: settled, attentionItems })}
+      />,
+    )
+    expect(rowNames(after.container)).toEqual(['Research agent', 'Watcher agent', 'Connecting agent'])
+    after.unmount()
+  })
+
+  it('renders rows once the read has definitively failed — a settled null is a steady state, not a skeleton forever', () => {
+    const agents = [
+      makeAgent({ id: 'r', name: 'Research agent', stats: makeStats(32.5) }),
+      makeAgent({ id: 'w', name: 'Watcher agent', status: 'paused', stats: makeStats(15.6) }),
+    ]
+
+    const { container } = render(
+      <AgentsSection
+        {...baseProps({ overview: makeOverview({ agents }), budgetRemaining: null })}
+      />,
+    )
+
+    // Watcher's pause badge needs no read — attention; Research follows in
+    // spend order. The ≥90% badge is simply absent (no reads exist).
+    expect(rowNames(container)).toEqual(['Watcher agent', 'Research agent'])
+    expect(screen.queryByRole('status', { name: 'Loading agents' })).not.toBeInTheDocument()
   })
 })

@@ -434,7 +434,10 @@ export default function DashboardClient() {
   // and #3818 (setup guide) import. The panel renders from the last good
   // overview (or the error row when the overview failed); it never renders
   // "nothing needs attention" while the first load is still in flight.
-  const { data: budgetRemaining } = useBudgetRemaining()
+  const {
+    data: budgetRemaining,
+    loading: budgetRemainingLoading,
+  } = useBudgetRemaining()
   const [backupDismissed, setBackupDismissed] = useState(false)
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -583,6 +586,7 @@ export default function DashboardClient() {
       <AgentsSection
         overview={overview}
         budgetRemaining={budgetRemaining}
+        budgetRemainingReady={!budgetRemainingLoading}
         attentionItems={attentionItems}
         currency={currency}
         accountNames={accountNames}

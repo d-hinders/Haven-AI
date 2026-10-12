@@ -5,7 +5,7 @@
  * state, and `/dashboard/overview` for the headline figure, so both seams
  * carry the #3295 markers here.
  */
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockUseAuth = vi.fn()
@@ -224,7 +224,9 @@ describe('DashboardClient — degraded balance reads (#3295)', () => {
     // claimed from a total understated by an unknown amount.
     expect(screen.getByText('$1,234.56')).toBeInTheDocument()
     expect(screen.queryByText('+$12.34 (+1.23%) since yesterday')).not.toBeInTheDocument()
-    expect(screen.getByText('Across all linked Haven accounts.')).toBeInTheDocument()
+    // #3897: no filler caption takes the change line's place — the balance
+    // card holds the figure and nothing claims a day's movement.
+    expect(within(screen.getByRole('region', { name: 'Balance' })).getByText('$1,234.56')).toBeInTheDocument()
     // 'unavailable' renders the word, not a fake timestamp.
     expect(screen.getByText('Unavailable')).toBeInTheDocument()
     expect(screen.queryByText(/as of /)).not.toBeInTheDocument()

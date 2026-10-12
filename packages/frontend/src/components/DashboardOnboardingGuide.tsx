@@ -166,8 +166,10 @@ export default function DashboardOnboardingGuide({
 
   return (
     <div className="v2-animate-fade-in">
-      <div className="flex items-center justify-between gap-3">
-        <p id={labelId} className="text-sm text-[var(--v2-ink-2)]">
+      {/* #3897: the card's heading already says "Get started" — the list's
+          own label is for assistive tech only, so the card is labelled once. */}
+      <div className="flex items-center justify-end gap-3">
+        <p id={labelId} className="sr-only">
           Your first 3 steps
         </p>
         <Button variant="tertiary" size="sm" onClick={onHide}>
@@ -194,7 +196,9 @@ export default function DashboardOnboardingGuide({
  */
 export function SetupCompleteLine({ onDismiss }: { onDismiss: () => void }) {
   return (
-    <div className="flex items-center justify-between gap-3 v2-animate-fade-in">
+    // px-4: the step rows' and rule rows' inset, so the check icon shares
+    // their left edge (#3897).
+    <div className="flex items-center justify-between gap-3 px-4 v2-animate-fade-in">
       <p className="flex items-center gap-2 text-sm text-[var(--v2-ink)]">
         <span
           aria-hidden="true"
@@ -224,9 +228,10 @@ function ChecklistRow({ status, number, title, body, completedBody, cta }: StepP
       : 'rounded-[10px]'
 
   return (
-    // #3818: always stacked — the guide lives in the Needs you card, which is
-    // the narrow aside column on desktop, so a side-by-side action squeezed
-    // the step text into a column of single words.
+    // #3818: always stacked. The guide lived in the narrow aside column on
+    // desktop then, where a side-by-side action squeezed the step text into a
+    // column of single words; the card is full width since #3897, and the
+    // stacked row keeps one shape at every width.
     <li
       data-status={status}
       aria-current={isActive ? 'step' : undefined}

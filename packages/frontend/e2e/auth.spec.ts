@@ -66,7 +66,8 @@ test.describe('authentication flows', () => {
     await dismissMobileSidebar(page)
 
     await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
-    await expect(page.getByText('Total balance')).toBeVisible()
+    // #3897: the money card's label reads "Balance" (was "Total balance").
+    await expect(page.getByRole('region', { name: 'Balance' })).toBeVisible()
     // #1989: the dashboard hero's Send button is gone — it opened `SendModal`,
     // deleted with the Safe rail. `canSend` is now constantly false, so the
     // affordance is HIDDEN rather than disabled (#1079's pattern). The

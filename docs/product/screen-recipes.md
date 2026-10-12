@@ -73,7 +73,8 @@ Use these recipes when designing or refactoring Haven product screens. They tran
 Use after the user has created a Haven account but has not finished the first useful setup path.
 
 Structure (#3818):
-1. Normal dashboard header and money panel.
+1. Normal dashboard header and money card, with the card below it at full width
+   (#3897) — never a side column beside the balance.
 2. The setup steps ARE the "Needs you" card while setup is in progress — titled
    `Get started`, three numbered steps, then the rule items that still apply
    (another agent waiting for setup, a recommended backup signer once funded)

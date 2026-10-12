@@ -204,6 +204,16 @@ describe('AgentsSection (#3809)', () => {
     expect(screen.getByText('Paused')).toBeInTheDocument()
   })
 
+  it('reads "No budget" for a zero-cap budget, never "≈$0.00 of $0.00 used" (#3897 item 8)', () => {
+    const agent = makeAgent({ budgets: [makeBudget({ budgetAtomic: '0' })] })
+
+    render(<AgentsSection {...baseProps({ overview: makeOverview({ agents: [agent] }) })} />)
+
+    expect(screen.getByText('No budget')).toBeInTheDocument()
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+    expect(screen.queryByText(/\$0\.00 of \$0\.00/)).not.toBeInTheDocument()
+  })
+
   it('badges a pending agent "Needs setup" and reads "No budget"', () => {
     const agent = makeAgent({ id: AGENT_IDS.pending, name: 'Connecting agent', status: 'pending_approval' })
     const attentionItems: AttentionRuleItem[] = [

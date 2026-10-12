@@ -1,4 +1,4 @@
-import { formatFiat } from '@/lib/format'
+import { formatFiatDisplay, SUB_CENT_THRESHOLD } from '@/lib/format'
 
 /**
  * The dashboard's 7-day summary sentence (#3807, epic #3801).
@@ -17,7 +17,13 @@ import { formatFiat } from '@/lib/format'
  *    attempt "was stopped by a budget limit" and nothing more. It NEVER says
  *    "within budget" — an over-budget payment cannot execute, so the phrase
  *    carries no information.
- * 3. **No raw address is ever named.** The merchant renders through #3810's
+ * 3. **A week under a cent reads as a count, never as `$0.00` (#3897, owner
+ *    decision 2026-10-12).** When the 7-day net total is below
+ *    `SUB_CENT_THRESHOLD`, every money branch says how many payments were
+ *    made instead ("Atlas and Helper made 3 payments …"), still naming at
+ *    most two agents. The dominant split prints figures only when both the
+ *    agent's share and the total are at or above the threshold.
+ * 4. **No raw address is ever named.** The merchant renders through #3810's
  *    counterparty rules (`merchantDisplayName`): contact name, else receipt
  *    name, else the x402 resource HOST. A bare recipient address has no
  *    displayable name — the sentence falls back to a count, not the address.
@@ -95,7 +101,7 @@ function budgetStopClause(stops: number): string {
  * Every branch's exact output is pinned by `lib/__tests__/dashboard-summary.test.ts`.
  */
 export function buildDashboardSummary(input: DashboardSummaryInput): string {
-  const money = (value: number): string => formatFiat(value, input.currency)
+  const money = (value: number): string => formatFiatDisplay(value, input.currency)
 
   if (input.payments === 0 && input.budgetStops === 0) {
     return 'No agent payments in the last 7 days.'
@@ -109,23 +115,39 @@ export function buildDashboardSummary(input: DashboardSummaryInput): string {
     .filter((agent) => agent.netSpend > 0)
     .sort((a, b) => b.netSpend - a.netSpend)
 
+  const merchantClause = (): string => {
+    const merchantName =
+      input.distinctMerchants === 1 && input.topMerchant
+        ? merchantDisplayName(input.topMerchant)
+        : null
+    return merchantName !== null
+      ? `at ${merchantName}`
+      : `across ${input.distinctMerchants} ${input.distinctMerchants === 1 ? 'merchant' : 'merchants'}`
+  }
+  const atOrAboveCent = (value: number): boolean => Math.abs(value) >= SUB_CENT_THRESHOLD
+
   let sentence: string
-  if (spenders.length === 0) {
+  if (!atOrAboveCent(input.netSpend)) {
+    // Rule 3: a total under a cent would print "$0.00" — say how many
+    // payments were made instead, in every branch.
+    const made = `made ${input.payments} ${input.payments === 1 ? 'payment' : 'payments'}`
+    if (spenders.length === 0) {
+      sentence = `Agents ${made} in the last 7 days.`
+    } else if (spenders.length === 1) {
+      sentence = `${spenders[0].name} ${made} ${merchantClause()} in the last 7 days.`
+    } else if (spenders.length === 2) {
+      sentence = `${spenders[0].name} and ${spenders[1].name} ${made} in the last 7 days.`
+    } else {
+      sentence = `${spenders.length} agents ${made} in the last 7 days.`
+    }
+  } else if (spenders.length === 0) {
     // Defensive: payments > 0 always leaves at least one spending agent on
     // the wire. If a future wire change breaks that, say the true thing —
     // a total — rather than naming a phantom agent.
     sentence = `Agents spent ${money(input.netSpend)} in the last 7 days.`
   } else if (spenders.length === 1) {
-    const merchantName =
-      input.distinctMerchants === 1 && input.topMerchant
-        ? merchantDisplayName(input.topMerchant)
-        : null
-    const merchant =
-      merchantName !== null
-        ? `at ${merchantName}`
-        : `across ${input.distinctMerchants} ${input.distinctMerchants === 1 ? 'merchant' : 'merchants'}`
-    sentence = `${spenders[0].name} spent ${money(input.netSpend)} ${merchant} in the last 7 days.`
-  } else if (spenders[0].netSpend / input.netSpend >= 0.4) {
+    sentence = `${spenders[0].name} spent ${money(input.netSpend)} ${merchantClause()} in the last 7 days.`
+  } else if (atOrAboveCent(spenders[0].netSpend) && spenders[0].netSpend / input.netSpend >= 0.4) {
     const rest = spenders.slice(1)
     const otherCount = rest.length - 1
     const restClause =

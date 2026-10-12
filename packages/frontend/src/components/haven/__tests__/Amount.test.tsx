@@ -7,6 +7,18 @@ function renderAmount(props: Parameters<typeof Amount>[0]) {
   return container.querySelector('span')!
 }
 
+describe('Amount currency mode under a cent (#3897)', () => {
+  it('an outgoing sub-cent figure reads "-<$0.01", never "-$0.00"', () => {
+    const el = renderAmount({ amount: 0.004, currency: 'USD', direction: 'out' })
+    expect(el.textContent).toBe('-<$0.01')
+  })
+
+  it('zero stays "$0.00"', () => {
+    const el = renderAmount({ amount: 0, currency: 'USD' })
+    expect(el.textContent).toBe('$0.00')
+  })
+})
+
 describe('Amount (#853)', () => {
   it('renders a signless neutral figure by default (budgets, balances)', () => {
     const el = renderAmount({ value: '250.00', symbol: 'USDC' })

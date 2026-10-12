@@ -45,7 +45,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { StatusBadge, type StatusTone } from '@/components/ui/StatusBadge'
 import { BudgetMeter } from '@/components/haven'
 import type { AttentionRuleItem, DashboardBudgetRemaining, DashboardOverview } from '@/lib/dashboard-attention'
-import { agentUsedPercent } from '@/lib/dashboard-attention'
+import { agentUsedPercent, hasPositiveCap } from '@/lib/dashboard-attention'
 import {
   budgetCaption,
   selectPrimaryBudgets,
@@ -216,7 +216,12 @@ function AgentBudget({
   currency: DashboardCurrency
   nowMs: number
 }) {
-  const rows = agent.budgets.map((budget) => toCaptionRow(agent.id, budget, budgetRemaining))
+  // A zero cap is no authority (#3802's rule): it reads "No budget", never a
+  // meter captioned "≈$0.00 of $0.00 used" (#3897 item 8 — the exact string
+  // reported on dev, and what a zero-cap row renders through the caption).
+  const rows = agent.budgets
+    .filter((budget) => hasPositiveCap(budget.budgetAtomic))
+    .map((budget) => toCaptionRow(agent.id, budget, budgetRemaining))
   const selected = selectPrimaryBudgets(rows, nowMs)
 
   if (!selected) {

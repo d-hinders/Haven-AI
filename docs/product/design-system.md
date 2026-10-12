@@ -706,9 +706,20 @@ The **currency mode** (#3805) is for a figure that is already a fiat
 valuation server-side (book-time `convertedAmount`, or `approxAmount`): pass
 the unsigned magnitude (`amount`), the currency it is IN (`currency: 'SEK' |
 'USD' | 'EUR'` — e.g. `convertedCurrency`, never read from preferences inside
-the component), and optionally `approx`. It formats through `formatFiat` —
-no second `Intl.NumberFormat` exists — so `9,09 kr`, `$0.96` and `0,88 €`
-are byte-for-byte the formatter's output, NBSPs included. The sign comes only
+the component), and optionally `approx`. It formats through
+`formatFiatDisplay` (`lib/format.ts`) — `formatFiat`'s output, no second
+`Intl.NumberFormat` — so `9,09 kr`, `$0.96` and `0,88 €` are byte-for-byte
+the formatter's output, NBSPs included.
+
+**Under a cent (#3897, owner decision 2026-10-12):** a non-zero figure with
+`|value| < 0.005`, which would round to `0.00`, renders `<$0.01` (`<0,01 kr`,
+`<0,01 €`); the sign still comes from the caller (`-<$0.01` in activity,
+`≈<$0.01 of $1.00` in a budget caption). Zero stays `$0.00`. The rule lives
+in `formatFiatDisplay`, not `formatFiat`, which also drives the balance
+count-up, the "since yesterday" line and /accounts and keeps plain rounding.
+`Amount`'s currency mode, the budget caption's fiat mode and the dashboard
+summary use it; the summary goes further and reads a week under a cent as a
+payment count rather than any figure. The sign comes only
 from `direction` (a negative magnitude cannot double-sign it); `symbol` is
 not allowed in this mode. `≈` (with `title="Converted at today's rate"`) goes
 before the sign: `≈ -9,09 kr`. Unknown — `null` or a non-finite value —
@@ -765,8 +776,10 @@ alone, in a box the caller sizes (`height`, default 40px). No gridlines,
 ticks, x labels, delta annotation, tooltip or caret — a dot on the last
 point only. It is `role="img"` with a **required** `ariaLabel` summary
 sentence and is not a tab stop: there is no hidden data table, the sentence
-is the data access. Days with no snapshot (`value: null`) are **gaps** in
-the line, never zeros. Below `MIN_CHARTABLE_DAYS` it renders a flat
+is the data access. A day with no snapshot (`value: null`) is **skipped,
+never zero; the line connects across it**, and each measured day keeps its
+true x position in the window (#3897 — #3805 broke the line at every gap,
+which drew sparse snapshots as scattered dashes). Below `MIN_CHARTABLE_DAYS` it renders a flat
 placeholder line of the same height instead of nothing, so a layout that
 reserved the box does not jump. No draw animation on data refresh.
 
@@ -788,12 +801,17 @@ The dashboard's top section is `dashboard/MoneyPanel.tsx`, built from four
 registered pieces: `PageHeader` (the heading carries the templated 7-day
 summary sentence from `lib/dashboard-summary.ts` — fixed templates over the
 overview's own figures, never model-written, naming at most two agents and
-one merchant and describing budget stops neutrally), the anchor-surface
-balance hero (the same raised tinted card the hero always used), the
-§ AreaChart sparkline fed from `spend.balance_by_day` (absent days are
-gaps; under 3 measured days the flat placeholder draws), and three
-§ StatTile inline tiles (payments, distinct merchants, stopped by budget)
-under a 30-day spend total. That total — and the per-agent split above the
+one merchant and describing budget stops neutrally), then ONE money card
+(#3897): `Card elevation="raised"` — the page's single most prominent
+surface — with the balance on the left (the figure, the "since yesterday"
+line, the § AreaChart sparkline fed from `spend.balance_by_day` — a missing
+day is skipped, never zero; under 3 measured days the flat placeholder
+draws — and the two actions, "Add funds" primary and "Deposit address"
+secondary) and the 30-day spending on the right as a `Card.Section divided`,
+stacked below `lg`. The spending half is three § StatTile inline tiles
+(payments, distinct merchants, stopped by budget) under a 30-day spend
+total. The "Needs you" card (`anchor`) follows at full width — never a side
+column beside the balance — then Agents and Activity. That total — and the per-agent split above the
 tiles — renders through § Amount: currency mode with `approx` from the
 wire's `spend` windows, so a total that includes rows priced at today's
 rate carries the `≈` and a booked total does not. The four KPI tiles and
@@ -1310,7 +1328,7 @@ The link stays available while an adjacent action is busy, and normal link behav
 intact. Prove body and control hit targets with a real browser at desktop and 390px;
 jsdom cannot evaluate the pseudo-element's stacking or hit testing.
 
-`Card` supports `elevation="flat" | "raised"` and `hover={false}`. Use `raised` only for prominent page anchors, and keep nested or data-dense cards flat.
+`Card` supports `elevation="flat" | "raised" | "anchor"` and `hover={false}`. Use `raised` only for the page's single most prominent surface (the dashboard money card, #3897), `anchor` for the second (the dashboard's "Needs you" card), and keep nested or data-dense cards flat.
 
 **A card in a grid has to fit its track, and by default it cannot ([#2251](https://github.com/d-hinders/Haven-AI/issues/2251)).** This is the card sibling of the `truncate`d-table-cell rule under *Transaction tables* below, and it has the same shape: a `truncate` descendant is `white-space: nowrap`, so its min-content is the whole string, and a container that is never allowed to go below its min-content grows instead of ellipsising.
 

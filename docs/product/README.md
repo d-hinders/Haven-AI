@@ -126,7 +126,7 @@ Core rules:
 - No gradient buttons. The brand gradient is reserved for the app wordmark and one restrained hero accent phrase.
 - Flat cards use the `--v2-surface` token (white in light, its dark counterpart
   in dark) with `border-[var(--v2-border)]`, v2 radius, and the v2 card shadow.
-- Raised cards are prominent page anchors such as the account detail total balance card; the dashboard money panel (#3807) keeps the balance hero on the tinted anchor surface with the raised shadow rather than a white raised card, and adds the 30-day sparkline and the spending block beneath it.
+- Raised cards are prominent page anchors such as the account detail total balance card; the dashboard money panel is ONE raised card (#3897): balance, sparkline and actions on the left, the 30-day spending on the right as a divided section, stacked below `lg`.
 - Other elevations already present in the shared `Card` primitive, including
   the restrained tinted `anchor` tier, must match the live `/design-system`
   reference and remain secondary to the page's primary anchor. The static

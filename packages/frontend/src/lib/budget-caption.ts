@@ -1,6 +1,6 @@
 import { currentPeriodBounds } from '@haven_ai/core'
 import { formatAllowanceAmount, getTokenDecimals } from './allowance-format'
-import { formatFiat } from './format'
+import { formatFiatDisplay } from './format'
 
 /**
  * The ONE budget caption (#3806, epic #3801) — every budget meter in the app
@@ -142,13 +142,16 @@ function tokenAmount(atomic: string, symbol: string, chainId: number | null | un
   })
 }
 
-/** Bare fiat — "$1.25". An unparseable amount falls back to token mode. */
+/** Bare fiat — "$1.25", or "<$0.01" under a cent (#3897). An unparseable amount falls back to token mode. */
 function fiatValue(atomic: string, symbol: string, rate: BudgetRate, chainId: number | null | undefined): string {
   const decimals = chainId != null ? getTokenDecimals(chainId, symbol) : undefined
-  const decimal = formatAllowanceAmount(atomic, decimals ?? 18, {})
+  // Every token decimal, not the 4-digit display default (#3897): truncating
+  // first turned a sub-cent amount into "0" before it was converted, so the
+  // caption printed "≈$0.00" where "≈<$0.01" is the true figure.
+  const decimal = formatAllowanceAmount(atomic, decimals ?? 18, { maximumFractionDigits: decimals ?? 18 })
   const human = Number.parseFloat(decimal)
   if (!Number.isFinite(human)) return tokenAmount(atomic, symbol, chainId)
-  return formatFiat(human * rate.perToken, rate.currency)
+  return formatFiatDisplay(human * rate.perToken, rate.currency)
 }
 
 /**

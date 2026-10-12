@@ -52,6 +52,41 @@ export function formatFiat(value: number, currency: 'USD' | 'EUR' | 'SEK'): stri
 }
 
 /**
+ * Below this magnitude a non-zero figure would round to `0.00` (#3897).
+ * `|value| < SUB_CENT_THRESHOLD` is the ONE sub-cent test: the display helper
+ * below and the dashboard summary's count form both key on it.
+ */
+export const SUB_CENT_THRESHOLD = 0.005
+
+/** True for a non-zero figure that `formatFiat` would print as `0.00`. */
+export function isSubCent(value: number): boolean {
+  return value !== 0 && Math.abs(value) < SUB_CENT_THRESHOLD
+}
+
+/**
+ * `formatFiat` for DISPLAY (#3897, owner decision 2026-10-12): a non-zero
+ * figure under a cent renders "<$0.01" ("<0,01 kr", "<0,01 €") instead of a
+ * `0.00` that states nothing was spent. Zero stays `$0.00`; everything else
+ * is `formatFiat`'s output unchanged. A negative sub-cent figure keeps its
+ * sign in the locale's minus glyph ("-<$0.01", "\u2212<0,01 kr"); callers
+ * that sign by direction (`Amount`) pass the magnitude.
+ *
+ * Deliberately NOT folded into `formatFiat`: that one also drives the
+ * balance count-up (which would flash "<$0.01" while counting from 0), the
+ * "since yesterday" line and /accounts, which keep plain rounding.
+ */
+export function formatFiatDisplay(value: number, currency: 'USD' | 'EUR' | 'SEK'): string {
+  if (!isSubCent(value)) return formatFiat(value, currency)
+  // The locale's own minus glyph (U+2212 in sv-SE, '-' in en-US and de-DE),
+  // so a negative sub-cent figure signs the same way `formatFiat` does.
+  const minus =
+    new Intl.NumberFormat(currencyLocale(currency))
+      .formatToParts(-1)
+      .find((part) => part.type === 'minusSign')?.value ?? '-'
+  return `${value < 0 ? minus : ''}<${formatFiat(0.01, currency)}`
+}
+
+/**
  * Humanised "x minutes ago" relative time. For the absolute value, pair
  * the result with `title={new Date(iso).toLocaleString()}` on the element.
  *

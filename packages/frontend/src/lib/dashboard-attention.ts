@@ -115,10 +115,23 @@ export const DISMISSIBLE_ATTENTION_KINDS: ReadonlySet<AttentionItemKind> = new S
   'no-backup',
 ])
 
-/** A usable budget: a live delegation budget, or an open received sub-budget. */
+/**
+ * A budget cap above zero (#3897). A zero cap is no authority — the agents
+ * section reads it "No budget" (#3802's rule) and it never completes setup.
+ * An unparseable cap is kept: the caption shows it as unknown.
+ */
+export function hasPositiveCap(budgetAtomic: string): boolean {
+  try {
+    return BigInt(budgetAtomic) > 0n
+  } catch {
+    return true
+  }
+}
+
+/** A usable budget: a live delegation budget with a cap above zero, or an open received sub-budget. */
 function hasUsableBudget(agent: DashboardAgent): boolean {
   return (
-    (agent.budgets?.length ?? 0) > 0 ||
+    (agent.budgets ?? []).some((budget) => hasPositiveCap(budget.budgetAtomic)) ||
     (agent.receivedSubBudgets ?? []).some((sub) => sub.open)
   )
 }

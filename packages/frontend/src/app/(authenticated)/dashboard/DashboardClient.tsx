@@ -1,9 +1,6 @@
 'use client'
 
-import { ArrowLeftRight } from 'lucide-react'
-import { Icon } from '@/components/ui/Icon'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import Link from 'next/link'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
 import { usePreferences } from '@/hooks/usePreferences'
@@ -13,15 +10,6 @@ import { useDashboardOverview } from '@/hooks/useDashboardOverview'
 import { useBalances } from '@/hooks/useBalances'
 import { useAccountFunding } from '@/hooks/useAccountFunding'
 import { useAccountOperationGate } from '@/hooks/useAccountOperationGate'
-import { timeAgo } from '@/lib/format'
-import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
-import type { AggregatedTransaction } from '@/types/transactions'
-import {
-  transactionMovement,
-  transactionStatus,
-  transactionTitle,
-} from '@/lib/transaction-presentation'
-import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { displayName } from '@/lib/user'
 import DashboardOnboardingGuide, { SetupCompleteLine } from '@/components/DashboardOnboardingGuide'
 import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
@@ -30,10 +18,7 @@ import DashboardActionPickerModal from '@/components/DashboardActionPickerModal'
 import ReceiveFundsModal from '@/components/ReceiveFundsModal'
 import AddFundsModal from '@/components/AddFundsModal'
 import { Button } from '@/components/ui/Button'
-import { Card } from '@/components/ui/Card'
-import { EmptyState } from '@/components/ui/EmptyState'
 import { useToast } from '@/components/ui/Toast'
-import { TransactionActivityRow } from '@/components/haven'
 import MoneyPanel from './MoneyPanel'
 import { ActivitySection } from './ActivitySection'
 import { AgentsSection } from './AgentsSection'
@@ -48,132 +33,6 @@ import NeedsYou from './NeedsYou'
 // The dashboard's compact tile wrapper and the signed change/percent helpers
 // moved to `dashboard/MoneyPanel.tsx` with the money panel (#3807) — the
 // tiles that needed the compact tier are gone.
-
-// ── Metric card icon (1.5 stroke, 14px, currentColor) ────────────────────
-// The sidebar's "transactions" mark, so the empty state belongs to the same
-// visual family. (#3867: the agent row mark moved into AgentsSection.)
-
-function EmptyTransactionsIcon() {
-  // Arrows-in-out icon — mirrors the sidebar's "transactions" mark so the
-  // empty state belongs to the same visual family.
-  return (
-    <Icon icon={ArrowLeftRight} className="w-full h-full" />
-  )
-}
-
-function TransactionsSection({
-  transactions,
-  hasAccounts,
-  loading,
-  unavailable,
-  onRetry,
-  resolveAddress,
-}: {
-  transactions: AggregatedTransaction[]
-  hasAccounts: boolean
-  loading: boolean
-  unavailable: boolean
-  onRetry: () => void
-  resolveAddress: (address: string) => string | null
-}) {
-  return (
-    <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card overflow-hidden">
-      <Card.Header
-        as="h2"
-        title="Recent transactions"
-        actions={
-          <Link href="/transactions" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
-            View all
-          </Link>
-        }
-      />
-
-      {loading ? (
-        <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-live="polite" aria-label="Loading recent transactions">
-          {[0, 1, 2].map((item) => (
-            // Same breakpoint-scoped height as the loaded row it stands in for
-            // (#1833). It does not currently overflow — the stacked skeleton is
-            // ~64px against the 72px clamp — but it is the identical shape:
-            // an `sm:`-gated two-column grid pinned unconditionally. Left
-            // clamped it would ALSO make the list jump on load, since the
-            // loaded row now grows to 116-164px below `sm` while this stayed
-            // at 72px.
-            <div key={item} className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5 sm:py-0 sm:h-[72px]">
-              <div className="flex items-center gap-3">
-                <div className="h-9 w-9 rounded-[10px] bg-[var(--v2-surface-2)] animate-pulse" />
-                <div>
-                  <div className="h-3.5 w-40 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                  <div className="mt-1.5 h-2.5 w-56 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                </div>
-              </div>
-              <div className="h-4 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse sm:justify-self-end" />
-            </div>
-          ))}
-        </div>
-      ) : unavailable ? (
-        <div className="p-6">
-          <EmptyState
-            size="compact"
-            title="Activity preview unavailable"
-            body="Haven could not refresh recent payments right now."
-            action={<Button variant="ghost" size="sm" onClick={onRetry}>Try again</Button>}
-          />
-        </div>
-      ) : transactions.length === 0 ? (
-        <div className="p-6">
-          <EmptyState
-            tone="brand"
-            icon={<EmptyTransactionsIcon />}
-            title="No transactions yet"
-            body={
-              hasAccounts
-                ? 'Get your deposit address or make your first payment to start building activity here.'
-                : 'Create a Haven account to start tracking transactions.'
-            }
-            action={
-              <Button
-                href={hasAccounts ? '/transactions' : '/accounts'}
-                variant="ghost"
-                size="sm"
-              >
-                {hasAccounts ? 'Open transactions' : 'Go to accounts'}
-              </Button>
-            }
-          />
-        </div>
-      ) : (
-        <div className="divide-y divide-[var(--v2-border)] v2-animate-fade-in">
-          {transactions.slice(0, 5).map((tx) => {
-            const lifecycle = machinePaymentLifecyclePresentation(tx)
-            const recovery = transactionStatus(tx)
-            return (
-              <Link
-                key={`${tx.hash}-${tx.type}-${tx.accountId}`}
-                href="/transactions"
-                className="block"
-              >
-                <TransactionActivityRow
-                  title={transactionTitle(tx)}
-                  description={transactionMovement(tx, resolveAddress)}
-                  value={tx.valueFormatted}
-                  asset={tx.asset}
-                  failed={tx.isError}
-                  status={recovery?.label ?? lifecycle?.label ?? (tx.isError ? 'Failed' : tx.direction === 'in' ? 'Received' : 'Sent')}
-                  statusTone={recovery?.tone ?? lifecycle?.tone ?? (
-                    tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'neutral'
-                  )}
-                  timestamp={timeAgo(tx.timestamp * 1000)}
-                  direction={tx.direction}
-                  density="compact"
-                />
-              </Link>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
 
 /** #3818: "Hide for now", per user, holding the completed-step count at hide time. */
 const SETUP_GUIDE_HIDDEN_KEY = 'haven-setup-guide-hidden'
@@ -603,8 +462,9 @@ export default function DashboardClient() {
   }
 
   // #3807: the money panel replaces the hero + KPI tiles. The focused
-  // first-run view (an unfunded account) renders it without the spending
-  // block — the old render was hero + checklist only.
+  // first-run view (an unfunded account) keeps its spending half: before the
+  // first payment that half explains what it will show (#3818's
+  // `noPaymentsYet`), never zero tiles — the mockup's new-user card (#3897).
   // Focused only when the account is KNOWN to hold no USDC — a failed
   // balance read must not collapse the page.
   const isFocusedView = showSetupSteps && usdcFunded === false
@@ -626,7 +486,6 @@ export default function DashboardClient() {
       fundingStateKnown={fundingStateKnown}
       watchingForDeposit={fundingStateKnown && !hasFunds && hasOpenedReceive}
       requiresOtherDevice={requiresOtherDevice}
-      showSpending={!isFocusedView}
       noPaymentsYet={firstAgentPaymentKnown && !hasFirstAgentPayment}
       onDepositAddress={() => openHeroAction('receive')}
       onAddFunds={() => openHeroAction('add-funds')}
@@ -637,6 +496,18 @@ export default function DashboardClient() {
     <NeedsYou
       items={cardItems}
       title={showSetupSteps ? 'Get started' : undefined}
+      titleMeta={
+        showSetupSteps ? (
+          <span className="text-xs text-[var(--v2-ink-3)] v2-tabular">{completedCount} of 3 done</span>
+        ) : undefined
+      }
+      titleAction={
+        showSetupSteps ? (
+          <Button variant="tertiary" size="sm" onClick={hideSetupGuide}>
+            Hide for now
+          </Button>
+        ) : undefined
+      }
       guide={
         showSetupSteps ? (
           <DashboardOnboardingGuide
@@ -648,7 +519,6 @@ export default function DashboardClient() {
             onAddFunds={() => openHeroAction('add-funds')}
             onAddAgent={openConnectAgent}
             onShowAgentUsage={() => setAgentUsageOpen(true)}
-            onHide={hideSetupGuide}
           />
         ) : showSetupComplete ? (
           <SetupCompleteLine onDismiss={dismissCompleteBanner} />
@@ -660,7 +530,6 @@ export default function DashboardClient() {
       onAddFunds={openAddFundsForAccount}
     />
   ) : null
-  const showTopAside = attentionVisible
 
   const activityGrid = (
     <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-2">
@@ -690,48 +559,18 @@ export default function DashboardClient() {
 
   return (
     <div className="max-w-6xl">
-      {/* #3807: the "Dashboard" heading and its templated 7-day summary live
-          in the money panel, which owns the top of the page. */}
-
-      {/*
-        Hide metrics + activity only for a brand-new user (no progress at
-        all). Once any step is done, the full dashboard renders alongside
-        the checklist so the user can see their progress against the rest
-        of the dashboard.
-      */}
-      {(() => {
-
-        // The backup-signer prompt lives INSIDE the NeedsYou card now (#3808):
-        // one item per funded account without a backup signer, dismissed via
-        // the legacy global key. The focused view keeps the guide first — the
-        // items that still apply (load error, backup once funded, extra
-        // pending agents) render below its steps, and the low-balance /
-        // zero-USDC items are held back while the guide's "Add USDC" step is
-        // open (`holdBackLowBalance` on the rules).
-
-        if (isFocusedView) {
-          return (
-            <div className="space-y-6">
-              {moneyPanel}
-              {attentionPanel}
-            </div>
-          )
-        }
-
-        return (
-          <div className="space-y-6">
-            <div
-              className={`grid items-start gap-4 ${
-                showTopAside ? 'xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.42fr)]' : ''
-              }`}
-            >
-              {moneyPanel}
-              {attentionPanel}
-            </div>
-            {activityGrid}
-          </div>
-        )
-      })()}
+      {/* #3897: the mockup's order, one column at every width — the heading
+          and its 7-day summary with the money panel, then "Needs you" (and
+          the setup guide inside it) at full width, then Agents and Activity.
+          The old hero-plus-aside row put "Needs you" in a side column beside
+          the balance. A brand-new, unfunded user (the focused view) sees the
+          money panel and the guide only; the backup and pending-agent items
+          that still apply render below the guide's steps (#3808). */}
+      <div className="space-y-6">
+        {moneyPanel}
+        {attentionPanel}
+        {isFocusedView ? null : activityGrid}
+      </div>
 
       <ConnectAgentModal
         open={connectAgentOpen}

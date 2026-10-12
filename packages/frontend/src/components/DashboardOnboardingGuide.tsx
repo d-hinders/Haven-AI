@@ -74,8 +74,6 @@ interface Props {
   onAddFunds: () => void
   onAddAgent: () => void
   onShowAgentUsage: () => void
-  /** "Hide for now" — the caller persists it per user until a step completes. */
-  onHide: () => void
 }
 
 /**
@@ -93,7 +91,6 @@ export default function DashboardOnboardingGuide({
   onAddFunds,
   onAddAgent,
   onShowAgentUsage,
-  onHide,
 }: Props) {
   // Per instance: the /design-system page renders several guides at once.
   const labelId = useId()
@@ -166,16 +163,14 @@ export default function DashboardOnboardingGuide({
 
   return (
     <div className="v2-animate-fade-in">
-      <div className="flex items-center justify-between gap-3">
-        <p id={labelId} className="text-sm text-[var(--v2-ink-2)]">
-          Your first 3 steps
-        </p>
-        <Button variant="tertiary" size="sm" onClick={onHide}>
-          Hide for now
-        </Button>
-      </div>
+      {/* #3897: the card's heading already says "Get started", and "Hide
+          for now" sits in that header (NeedsYou's `titleAction`). The list's
+          own label is for assistive tech only, so the card is labelled once. */}
+      <p id={labelId} className="sr-only">
+        Your first 3 steps
+      </p>
 
-      <ol className="mt-3 space-y-2" aria-labelledby={labelId}>
+      <ol className="space-y-2" aria-labelledby={labelId}>
         <ChecklistRow {...step1} />
         <ChecklistRow {...step2} />
         <ChecklistRow {...step3} />
@@ -194,7 +189,9 @@ export default function DashboardOnboardingGuide({
  */
 export function SetupCompleteLine({ onDismiss }: { onDismiss: () => void }) {
   return (
-    <div className="flex items-center justify-between gap-3 v2-animate-fade-in">
+    // px-4: the step rows' and rule rows' inset, so the check icon shares
+    // their left edge (#3897).
+    <div className="flex items-center justify-between gap-3 px-4 v2-animate-fade-in">
       <p className="flex items-center gap-2 text-sm text-[var(--v2-ink)]">
         <span
           aria-hidden="true"
@@ -224,9 +221,10 @@ function ChecklistRow({ status, number, title, body, completedBody, cta }: StepP
       : 'rounded-[10px]'
 
   return (
-    // #3818: always stacked — the guide lives in the Needs you card, which is
-    // the narrow aside column on desktop, so a side-by-side action squeezed
-    // the step text into a column of single words.
+    // #3818: always stacked. The guide lived in the narrow aside column on
+    // desktop then, where a side-by-side action squeezed the step text into a
+    // column of single words; the card is full width since #3897, and the
+    // stacked row keeps one shape at every width.
     <li
       data-status={status}
       aria-current={isActive ? 'step' : undefined}

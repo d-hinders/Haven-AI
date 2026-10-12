@@ -579,6 +579,14 @@ describe('firstRunSetupState (#3818)', () => {
       ).toBe(true)
     })
 
+    it('a zero-cap budget does not complete it — the agents section reads it "No budget" (#3897)', () => {
+      expect(
+        firstRunSetupState(
+          makeOverview([{ id: 'z', name: 'Z', status: 'active', budgets: [{ id: 'b0', budgetAtomic: '0' }] }], []),
+        ).hasSetUpAgent,
+      ).toBe(false)
+    })
+
     it('an open received sub-budget counts as a usable budget', () => {
       const overview = makeOverview(
         [{ id: 's', name: 'S', status: 'active', receivedSubBudgets: [{ open: true }] }],

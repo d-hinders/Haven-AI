@@ -276,8 +276,9 @@ const DS_BALANCE_SUMMARY = `Balance over 7 days: ends at ${dsMoney(DS_BALANCE_EN
 
 /**
  * Sparkline sample data (#3805). Two of the fourteen days carry no snapshot —
- * `null`, the gap the sparkline draws as a break in the line rather than a
- * zero, because a zero would state a balance nobody measured.
+ * `null`, a missing day the sparkline skips and connects across (#3897)
+ * rather than drawing a zero, because a zero would state a balance nobody
+ * measured.
  */
 const DS_SPARKLINE_POINTS: SparklinePoint[] = [
   { label: 'Sep 24', value: 1180 },
@@ -1812,7 +1813,6 @@ export default function DesignSystemPage() {
               onAddFunds={() => undefined}
               onAddAgent={() => undefined}
               onShowAgentUsage={() => undefined}
-              onHide={() => undefined}
             />
           </div>
           {/* Funded, an agent connected but waiting for its budget approval. */}
@@ -1825,7 +1825,6 @@ export default function DesignSystemPage() {
               onAddFunds={() => undefined}
               onAddAgent={() => undefined}
               onShowAgentUsage={() => undefined}
-              onHide={() => undefined}
             />
           </div>
           {/* The USDC read is unavailable: step 1 says so, no funding action. */}
@@ -1837,7 +1836,6 @@ export default function DesignSystemPage() {
               onAddFunds={() => undefined}
               onAddAgent={() => undefined}
               onShowAgentUsage={() => undefined}
-              onHide={() => undefined}
             />
           </div>
           {/* All three done. */}
@@ -2222,7 +2220,9 @@ export default function DesignSystemPage() {
             {/* #3810: the grouped dashboard row — `countLabel` renders the
                 muted ×N beside the title, and `fiat` switches the amount to
                 Amount's currency mode (≈ marks a serve-time valuation). The
-                dashboard's merchant-first activity list is this shape. */}
+                dashboard's merchant-first activity list is this shape, and a
+                confirmed row there carries no badge (#3897) — only pending
+                and failed name their state. */}
             <TransactionActivityRow
               direction="out"
               title="api.vendor.com"
@@ -2230,8 +2230,6 @@ export default function DesignSystemPage() {
               value="36.00"
               countLabel="×3"
               fiat={{ amount: 134.5, currency: 'SEK', approx: true }}
-              status="Sent"
-              statusTone="neutral"
             />
             <TransactionActivityRow
               direction="out"
@@ -2837,7 +2835,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Amount: currency mode"
-        description="The other half of the Amount contract (#3805): for a figure that is already a fiat valuation server-side, pass the unsigned magnitude (amount) and the currency it is in — never a symbol string, never a conversion done here. It formats through formatFiat, the one formatter, so a SEK figure reads the same on every screen; the sign comes only from direction, and a negative magnitude can never double-sign it. ≈ marks a figure converted at today's rate rather than booked, and it goes before the sign. Unknown — null, or a non-finite value — renders an em dash in secondary ink, never 0,00 kr: an unknown valuation is not a zero. A currency figure is a valuation of a token amount, not a fiat balance Haven holds."
+        description="The other half of the Amount contract (#3805): for a figure that is already a fiat valuation server-side, pass the unsigned magnitude (amount) and the currency it is in — never a symbol string, never a conversion done here. It formats through formatFiatDisplay — formatFiat's output, plus <$0.01 for a non-zero figure under a cent (zero stays $0.00, #3897) — the one formatter, so a SEK figure reads the same on every screen; the sign comes only from direction, and a negative magnitude can never double-sign it. ≈ marks a figure converted at today's rate rather than booked, and it goes before the sign. Unknown — null, or a non-finite value — renders an em dash in secondary ink, never 0,00 kr: an unknown valuation is not a zero. A currency figure is a valuation of a token amount, not a fiat balance Haven holds."
       >
         {/* The testid rides a plain wrapper: `Card` forwards no extra props,
             and the visual spec clips this sample by it. */}
@@ -2873,7 +2871,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="AreaChart — sparkline"
-        description="The sparkline variant of AreaChart (#3805): the balance line alone, in a box the caller sizes (height, default 40px). No gridlines, ticks, x labels, delta annotation, tooltip or caret — one dot on the last point. It is role=img with the required ariaLabel summary sentence and is not a tab stop: there is no hidden data table, the sentence is the data access. Days with no snapshot are gaps in the line, never zeros. Below three points it renders a flat placeholder line of the same height instead of nothing, so the layout does not jump, and there is no draw animation on data refresh."
+        description="The sparkline variant of AreaChart (#3805): the balance line alone, in a box the caller sizes (height, default 40px). No gridlines, ticks, x labels, delta annotation, tooltip or caret — one dot on the last point. It is role=img with the required ariaLabel summary sentence and is not a tab stop: there is no hidden data table, the sentence is the data access. A day with no snapshot is skipped, never zero: the line connects across it at the measured days' true positions (#3897). Below three points it renders a flat placeholder line of the same height instead of nothing, so the layout does not jump, and there is no draw animation on data refresh."
       >
         <div data-testid="ds-area-chart-sparkline">
           <Card hover={false} className="p-5">
@@ -2916,7 +2914,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="StatTile — inline"
-        description="The inline variant of StatTile (#3805): no card border, ground or shadow, and the figure at text-base — the tile a larger card sets beside peers, three of which row up from sm and stack below it. It shows no delta chip: passing polarity or delta with inline throws, because a judgement colour smuggled into a plain-reading tile is the defect the polarity rule exists to prevent. The figure still carries no colour in any state — the value is ink, the label secondary, exactly the card tile's contract at a smaller scale."
+        description="The inline variant of StatTile (#3805): no card border, ground or shadow, and the figure at text-base — the tile a larger card sets beside peers. Tiles carrying money-length values (13 000,50 kr) row up from sm and stack below it; tiles carrying only short counts, like the dashboard money card's payments / merchants / stopped by budget (#3897), stay three across at every width. It shows no delta chip: passing polarity or delta with inline throws, because a judgement colour smuggled into a plain-reading tile is the defect the polarity rule exists to prevent. The figure still carries no colour in any state — the value is ink, the label secondary, exactly the card tile's contract at a smaller scale."
       >
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3" data-testid="ds-stat-tile-inline">
           <StatTile variant="inline" label="Spent today" value="13 000,50 kr" />

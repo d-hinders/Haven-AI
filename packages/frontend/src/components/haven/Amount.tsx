@@ -17,7 +17,8 @@
  * ALREADY a fiat valuation server-side (book-time `convertedAmount`, or
  * #3824's `approxAmount`), the caller passes the unsigned magnitude and the
  * currency it is denominated in, and the component formats through
- * `formatFiat` (`lib/format.ts`) — the one formatter, so a SEK figure on one
+ * `formatFiatDisplay` (`lib/format.ts`: `formatFiat`, plus "<$0.01" for a
+ * non-zero figure under a cent, #3897) — the one formatter, so a SEK figure on one
  * screen cannot disagree with the same figure on the next. It never converts
  * and never fetches a rate: the sign comes only from `direction` (a negative
  * input magnitude cannot double-sign it), `symbol` is not allowed, and the
@@ -35,7 +36,7 @@
  * this mode must not.
  */
 
-import { formatFiat } from '@/lib/format'
+import { formatFiatDisplay } from '@/lib/format'
 import type { ReactNode } from 'react'
 
 const SIZE_CLASS = {
@@ -104,8 +105,9 @@ export function Amount(props: AmountProps) {
       unknown = true
     } else {
       // The sign comes only from `direction`, so a negative magnitude is
-      // formatted through its absolute value: no double sign.
-      body = formatFiat(Math.abs(props.amount), props.currency)
+      // formatted through its absolute value: no double sign. A non-zero
+      // figure under a cent reads "<$0.01", never "$0.00" (#3897).
+      body = formatFiatDisplay(Math.abs(props.amount), props.currency)
       if (props.approx) {
         approxMark = (
           <span title="Converted at today's rate">{'\u2248 '}</span>

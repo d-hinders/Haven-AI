@@ -201,6 +201,19 @@ describe('states', () => {
     expect(caption.caption).toBe('≈$1.25 of $5.00 used this period · refills in 3h')
     expect(caption.caption.match(/≈/g)).toHaveLength(1)
   })
+
+  it('a used amount under a cent reads "≈<$0.01", never "≈$0.00" (#3897)', () => {
+    // 3 atomic units of USDC (0.000003) at $1 — the "≈$0.00 of $0.00" class
+    // reported on dev, which the display helper now renders honestly.
+    const caption = budgetCaption(row({ usedAtomic: '3', budgetAtomic: '4000' }), {
+      nowMs: ANCHOR_NOW,
+      timeZone: 'UTC',
+      rate: { currency: 'USD', perToken: 1 },
+    })
+    expect(caption.kind).toBe('meter')
+    if (caption.kind !== 'meter') return
+    expect(caption.caption).toBe('≈<$0.01 of <$0.01 used this period · refills in 3h')
+  })
 })
 
 describe('notes', () => {

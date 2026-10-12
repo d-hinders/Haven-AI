@@ -7,6 +7,18 @@ function renderAmount(props: Parameters<typeof Amount>[0]) {
   return container.querySelector('span')!
 }
 
+describe('Amount currency mode under a cent (#3897)', () => {
+  it('an outgoing sub-cent figure reads "-<$0.01", never "-$0.00"', () => {
+    const el = renderAmount({ amount: 0.004, currency: 'USD', direction: 'out' })
+    expect(el.textContent).toBe('-<$0.01')
+  })
+
+  it('zero stays "$0.00"', () => {
+    const el = renderAmount({ amount: 0, currency: 'USD' })
+    expect(el.textContent).toBe('$0.00')
+  })
+})
+
 describe('Amount (#853)', () => {
   it('renders a signless neutral figure by default (budgets, balances)', () => {
     const el = renderAmount({ value: '250.00', symbol: 'USDC' })
@@ -50,11 +62,12 @@ describe('Amount (#853)', () => {
  * The currency mode's exact code points (#3805), including the NBSP that
  * `Intl` emits — sv-SE and de-DE set a no-break space before the symbol, and
  * a test that typed a plain space would pass a render that reads differently
- * from the pinned one. The mode formats through `formatFiat` and nothing
- * else: the figures below are byte-for-byte what that formatter produces.
+ * from the pinned one. The mode formats through `formatFiatDisplay` —
+ * `formatFiat`'s output above a cent (#3897): the figures below are
+ * byte-for-byte what that formatter produces.
  */
 describe('Amount — currency mode (#3805)', () => {
-  it('formats the magnitude through formatFiat in the given currency', () => {
+  it('formats the magnitude through formatFiatDisplay (formatFiat above a cent) in the given currency', () => {
     expect(renderAmount({ amount: 9.09, currency: 'SEK' }).textContent).toBe('9,09\u00a0kr')
     expect(renderAmount({ amount: 0.96, currency: 'USD' }).textContent).toBe('$0.96')
     expect(renderAmount({ amount: 0.88, currency: 'EUR' }).textContent).toBe('0,88\u00a0\u20ac')

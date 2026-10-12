@@ -74,13 +74,11 @@ vi.mock('@/components/DashboardOnboardingGuide', () => ({
     usdcFunded,
     hasSetUpAgent,
     pendingAgent,
-    onHide,
   }: {
     hasFirstAgentPayment: boolean
     usdcFunded: boolean | null
     hasSetUpAgent: boolean
     pendingAgent?: { name: string; moreCount: number } | null
-    onHide: () => void
   }) => (
     <div>
       <span>Onboarding guide</span>
@@ -88,7 +86,6 @@ vi.mock('@/components/DashboardOnboardingGuide', () => ({
       <span>{`usdc-${String(usdcFunded)}`}</span>
       <span>{hasSetUpAgent ? 'agent-set-up' : 'agent-not-set-up'}</span>
       {pendingAgent ? <span>{`pending-${pendingAgent.name}-${pendingAgent.moreCount}`}</span> : null}
-      <button type="button" onClick={onHide}>Hide for now</button>
     </div>
   ),
   SetupCompleteLine: () => <span>Setup complete line</span>,
@@ -309,7 +306,7 @@ describe('DashboardClient', () => {
     })
   })
 
-  it('leads with total balance, the money panel, and its two actions', () => {
+  it('leads with the balance, the money panel, and its two actions', () => {
     // A user whose agents have paid: the spending block shows its figures
     // (before the first payment it explains itself instead, #3818).
     mockBaseState([], { onboardingProgress: { hasFirstAgentPayment: true } })
@@ -325,6 +322,42 @@ describe('DashboardClient', () => {
     expect(screen.getByText('Payments')).toBeInTheDocument()
     expect(screen.getByText('Merchants')).toBeInTheDocument()
     expect(screen.getByText('Stopped by budget')).toBeInTheDocument()
+  })
+
+  it('makes "Add funds" the primary action, ahead of "Deposit address" (#3897)', () => {
+    mockBaseState([], { onboardingProgress: { hasFirstAgentPayment: true } })
+    render(<DashboardClient />)
+
+    const balance = screen.getByRole('region', { name: 'Balance' })
+    const actions = within(balance)
+      .getAllByRole('button')
+      .map((button) => button.textContent)
+    expect(actions).toEqual(['Add funds', 'Deposit address'])
+    // Primary is the brand fill; the secondary is the ghost outline.
+    expect(within(balance).getByRole('button', { name: 'Add funds' }).className).toContain('bg-[var(--v2-brand)]')
+    expect(within(balance).getByRole('button', { name: 'Deposit address' }).className).not.toContain(
+      'bg-[var(--v2-brand)]',
+    )
+  })
+
+  it('renders "Needs you" below the money card at full width, never in a side column (#3897)', () => {
+    mockBaseState([], { onboardingProgress: { hasFirstAgentPayment: true } })
+    const { container } = render(<DashboardClient />)
+
+    const balance = screen.getByRole('region', { name: 'Balance' })
+    const needsYou = screen.getByRole('article')
+    // DOM order: the money card, then "Needs you", then the agents/activity grid.
+    expect(balance.compareDocumentPosition(needsYou) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // The old hero-plus-aside row is gone, and "Needs you" sits in the page's
+    // single column — its parent lays children out vertically, not in a grid.
+    expect(container.innerHTML).not.toContain('minmax(320px,0.42fr)')
+    expect(needsYou.parentElement?.className).toContain('space-y-6')
+    expect(needsYou.parentElement?.className).not.toMatch(/grid-cols/)
+    // Balance and spending share ONE raised card (#3897), spending a divided section.
+    const card = balance.closest('.shadow-card-raised')
+    expect(card).not.toBeNull()
+    expect(within(card as HTMLElement).getByRole('region', { name: 'Spending' })).toBeInTheDocument()
+    expect(screen.queryByText('Total balance')).toBeNull()
   })
 
   /**
@@ -401,7 +434,8 @@ describe('DashboardClient', () => {
 
       expect(screen.getByText('13 000,50 kr')).toBeInTheDocument()
       expect(screen.queryByText(/since yesterday/)).toBeNull()
-      expect(screen.getByText('Across all linked Haven accounts.')).toBeInTheDocument()
+      // #3897: no filler caption takes the change line's place.
+      expect(within(screen.getByRole('region', { name: 'Balance' })).getByText('13 000,50 kr')).toBeInTheDocument()
     })
 
     it('keeps the USD hero for a USD preference', () => {
@@ -699,9 +733,25 @@ describe('DashboardClient', () => {
     render(<DashboardClient />)
 
     expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
-    expect(screen.queryByText('Agents connected')).not.toBeInTheDocument()
-    expect(screen.queryByText('Recent transactions')).not.toBeInTheDocument()
-    expect(screen.queryByText('Spending, last 30 days')).not.toBeInTheDocument()
+    // The agents and activity sections wait until the account is funded.
+    expect(screen.queryByRole('heading', { name: 'Agents' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Activity' })).not.toBeInTheDocument()
+    // #3897 (changed on purpose, the mockup's new-user card): the spending
+    // half stays, explaining what it will show — never zero tiles.
+    const spending = screen.getByRole('region', { name: 'Spending' })
+    expect(within(spending).getByText(/After your agents’ first payment/)).toBeInTheDocument()
+    expect(within(spending).queryByText('Payments')).not.toBeInTheDocument()
+  })
+
+  it('puts "Hide for now" and the progress in the card header, beside "Get started" (#3897)', () => {
+    mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: '0', funded: false }] })
+    render(<DashboardClient />)
+    const heading = screen.getByRole('heading', { name: 'Get started' })
+    // The progress sits beside the title; the header row holds both.
+    expect(within(heading.parentElement as HTMLElement).getByText('0 of 3 done')).toBeInTheDocument()
+    const header = (heading.parentElement as HTMLElement).parentElement as HTMLElement
+    expect(within(header).getByRole('button', { name: 'Hide for now' })).toBeInTheDocument()
+    expect(within(header).getByText('0 of 3 done')).toBeInTheDocument()
   })
 
   it('"Hide for now" survives a reload and comes back when a step completes (#3818)', async () => {

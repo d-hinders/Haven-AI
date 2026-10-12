@@ -95,6 +95,8 @@ export default function NeedsYou({
   onAddFunds,
   headingId = 'needs-you-heading',
   title = 'Needs you',
+  titleMeta = null,
+  titleAction = null,
   guide = null,
 }: {
   items: AttentionRuleItem[]
@@ -111,6 +113,13 @@ export default function NeedsYou({
   headingId?: string
   /** The card's heading — "Get started" while the first-run guide is the card (#3818). */
   title?: string
+  /**
+   * #3897: right side of the header row — the guide's progress and "Hide for
+   * now" while it is the card, as the mockup draws it.
+   */
+  titleAction?: ReactNode
+  /** #3897: muted text beside the heading — the guide's "N of 3 done". */
+  titleMeta?: ReactNode
   /**
    * #3818: the first-run steps (or the "You're set up" line). While setup is
    * in progress the guide IS this card: it renders first, and the rule items
@@ -140,10 +149,14 @@ export default function NeedsYou({
     // surface on the dashboard after the balance hero (carried over from the
     // error-only AttentionSection this card replaces).
     <Card as="article" elevation="anchor" className="overflow-hidden v2-animate-slide-in">
-      <div className="border-b border-[var(--v2-border)] px-5 py-4">
-        <h2 id={headingId} tabIndex={-1} className="text-sm font-semibold text-[var(--v2-ink)]">
-          {title}
-        </h2>
+      <div className="flex min-h-[3.25rem] items-center justify-between gap-3 border-b border-[var(--v2-border)] px-5 py-2.5">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <h2 id={headingId} tabIndex={-1} className="text-sm font-semibold text-[var(--v2-ink)]">
+            {title}
+          </h2>
+          {titleMeta}
+        </div>
+        {titleAction}
       </div>
       <div className="px-5 py-4">
         {hasOverviewError ? (

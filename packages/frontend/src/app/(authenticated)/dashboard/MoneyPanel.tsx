@@ -2,8 +2,8 @@
 
 /**
  * The top of the dashboard (#3807, epic #3801): the "Dashboard" heading with
- * its templated 7-day summary sentence, the balance panel, and the 30-day
- * spending block. Lives in its own file so `DashboardClient.tsx` stops
+ * its templated 7-day summary sentence, then ONE money card (#3897) — the
+ * balance on the left, the 30-day spending on the right, stacked below `lg`. Lives in its own file so `DashboardClient.tsx` stops
  * growing — the hero it replaces (`DashboardHero`), the four KPI tiles
  * (`metricsGrid`/`MetricCard`) and their deprecated `metrics.*` wire fields
  * were removed with this panel.
@@ -20,23 +20,24 @@
  *   shows, so the two surfaces cannot disagree. `≈` marks a window whose
  *   NULL-booked rows were priced at today's rate (owner decision 1): a
  *   re-priced total is never shown as booked.
- * - **The sparkline is #3805's**, fed from `spend.balance_by_day`: days with
- *   no snapshot are GAPS in a dense 30-day window, never zeros, and fewer
- *   than 3 measured days renders the flat placeholder rather than a line
- *   pretending to be data.
+ * - **The sparkline is #3805's**, fed from `spend.balance_by_day`: a day with
+ *   no snapshot is skipped, never zero, and the line connects across it
+ *   (#3897) in a dense 30-day window; fewer than 3 measured days renders the
+ *   flat placeholder rather than a line pretending to be data.
  * - **Fresh data shows no indicator; stale data shows
  *   `BalanceFreshnessIndicator`** — the same #3295 contract the hero had.
  */
 
 import { useCountUp } from '@/hooks/useCountUp'
 import { Button } from '@/components/ui/Button'
+import { Card } from '@/components/ui/Card'
 import { StatTile } from '@/components/ui/StatTile'
 import { AreaChart, type SparklinePoint } from '@/components/ui/AreaChart'
 import { Amount } from '@/components/haven'
 import { BalanceFreshnessIndicator } from '@/components/haven'
 import PasskeyOtherDeviceNotice from '@/components/PasskeyOtherDeviceNotice'
 import { PageHeader } from '@haven_ai/ui/PageHeader'
-import { formatFiat, currencyLocale } from '@/lib/format'
+import { formatFiat, currencyLocale, SUB_CENT_THRESHOLD } from '@/lib/format'
 import {
   buildDashboardSummary,
   type DashboardSummaryAgent,
@@ -82,7 +83,9 @@ function snapshotDate(offset: number): string {
  * the NEWEST snapshot in the data (today when none exists — a window
  * anchored on the clock alone would draw nothing whenever the newest
  * snapshot lags the clock, e.g. a frozen-clock capture). `null` where no
- * snapshot exists: a GAP, never a zero. Fewer than 3 measured days
+ * snapshot exists: a missing day is skipped, never zero, and the sparkline
+ * connects across it, so the dense window keeps each measured day at its
+ * true x position (#3897). Fewer than 3 measured days
  * collapses to just the measured points so the sparkline renders its flat
  * placeholder — a line drawn from 2 points would claim a trend nobody
  * measured.
@@ -111,6 +114,11 @@ function balanceSparkPoints(
   }
   const measured = dense.filter((point) => point.value !== null)
   return measured.length >= 3 ? dense : measured
+}
+
+/** The `--v2-series-*` colour for a ranked agent — the analytics palette's order. */
+function seriesColor(index: number): string {
+  return `var(--v2-series-${(index % 6) + 1})`
 }
 
 function sparklineAriaLabel(points: SparklinePoint[], currency: 'USD' | 'EUR' | 'SEK'): string {
@@ -150,10 +158,10 @@ export interface MoneyPanelProps {
   watchingForDeposit: boolean
   requiresOtherDevice: boolean
   /**
-   * False in the focused first-run view (an unfunded account's hero +
-   * checklist only, #3807's shape for the old hero-only render): the
-   * spending block is a funded user's surface, and a week of zeros under a
-   * "get funded" checklist reads as a verdict, not a summary.
+   * False hides the spending half. The dashboard always shows it since
+   * #3897 — before the first payment it explains itself (`noPaymentsYet`),
+   * as the mockup's new-user card does — so only the component's own tests
+   * pass false.
    */
   showSpending?: boolean
   /**
@@ -247,200 +255,243 @@ export default function MoneyPanel({
   const attributedValue = perAgentSpend.reduce((sum, row) => sum + row.value, 0)
   const unattributedValue =
     d30 && perAgentSpend.length > 0 ? d30.net[bucket] - attributedValue : 0
-  const showUnattributed = d30 !== null && unattributedValue > 0.005
+  const showUnattributed = d30 !== null && unattributedValue >= SUB_CENT_THRESHOLD
+
+  // The split bar's segments (#3897): the named agents in series colours,
+  // then everything else (other agents, agents since removed) in one
+  // neutral segment, as shares of what the list itself adds up to.
+  const restValue = otherAgentValue + (showUnattributed ? unattributedValue : 0)
+  const splitTotal = topAgents.reduce((sum, row) => sum + row.value, 0) + restValue
+  const splitSegments =
+    splitTotal > 0
+      ? [
+          ...topAgents.map((row, index) => ({
+            key: row.id,
+            share: (row.value / splitTotal) * 100,
+            color: seriesColor(index),
+          })),
+          ...(restValue > 0
+            ? [{ key: 'rest', share: (restValue / splitTotal) * 100, color: 'var(--v2-ink-3)' }]
+            : []),
+        ]
+      : []
+
+  // #3807's spending block, now the right half of the money card (#3897).
+  // The total is #3803's NET figure — the same definition /analytics uses —
+  // so the two surfaces cannot disagree. The three inline StatTiles carry the
+  // window's activity counts; the agent split names the top three plus the
+  // count of the rest (the wire carries every delegation-rail agent; revoked
+  // agents' spend is inside the total and surfaces as the "Agents since
+  // removed" row so the breakdown reconciles with the headline).
+  const spending = noPaymentsYet && !loading && !unavailable ? (
+    <>
+      <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Spending, last 30 days</h2>
+      <p className="mt-2 text-sm text-[var(--v2-ink-2)]">
+        After your agents&rsquo; first payment, this shows what they spent, at how many merchants,
+        and how often a budget stopped a payment.
+      </p>
+    </>
+  ) : (
+    <div className="flex h-full flex-col">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
+        <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Spending, last 30 days</h2>
+        {loading ? (
+          <div className="h-6 w-28 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+        ) : unavailable ? (
+          <p className="text-2xl font-semibold tracking-tight text-[var(--v2-ink-3)] v2-tabular">—</p>
+        ) : d30 ? (
+          <Amount
+            amount={d30.net[bucket]}
+            currency={currency}
+            approx={d30.approx}
+            size="lg"
+          />
+        ) : null}
+      </div>
+
+      {!loading && !unavailable && topAgents.length > 0 ? (
+        <>
+        {/* #3897: the mockup's split bar — one segment per named agent in
+            its `--v2-series-*` colour (colour identifies the series, never
+            the meaning), the rest in neutral ink. Decorative: the list
+            below carries every figure, so the bar is aria-hidden. */}
+        <div aria-hidden="true" className="mt-4 flex h-2.5 gap-0.5 overflow-hidden rounded-full bg-[var(--v2-surface-2)]">
+          {splitSegments.map((segment) => (
+            <span
+              key={segment.key}
+              className="block h-full"
+              style={{ width: `${segment.share}%`, background: segment.color }}
+            />
+          ))}
+        </div>
+        <dl className="mt-3 space-y-1.5">
+          {topAgents.map((row, index) => (
+            <div key={row.id} className="flex items-baseline justify-between gap-4">
+              <dt className="flex min-w-0 items-center gap-2 text-sm text-[var(--v2-ink-2)]">
+                <span
+                  aria-hidden="true"
+                  className="h-2 w-2 flex-shrink-0 rounded-sm"
+                  style={{ background: seriesColor(index) }}
+                />
+                <span className="min-w-0 truncate">{row.name}</span>
+              </dt>
+              <dd className="v2-tabular shrink-0">
+                <Amount amount={row.value} currency={currency} approx={row.approx} />
+              </dd>
+            </div>
+          ))}
+          {otherAgentCount > 0 ? (
+            <div className="flex items-baseline justify-between gap-4">
+              <dt className="flex min-w-0 items-center gap-2 text-sm text-[var(--v2-ink-3)]">
+                <span aria-hidden="true" className="h-2 w-2 flex-shrink-0 rounded-sm bg-[var(--v2-ink-3)]" />
+                <span className="min-w-0 truncate">
+                  {otherAgentCount} other agent{otherAgentCount === 1 ? '' : 's'}
+                </span>
+              </dt>
+              <dd className="v2-tabular shrink-0">
+                <Amount amount={otherAgentValue} currency={currency} />
+              </dd>
+            </div>
+          ) : null}
+          {showUnattributed ? (
+            <div className="flex items-baseline justify-between gap-4">
+              <dt className="flex min-w-0 items-center gap-2 text-sm text-[var(--v2-ink-3)]">
+                <span aria-hidden="true" className="h-2 w-2 flex-shrink-0 rounded-sm bg-[var(--v2-ink-3)]" />
+                <span className="min-w-0 truncate">Agents since removed</span>
+              </dt>
+              <dd className="v2-tabular shrink-0">
+                <Amount amount={unattributedValue} currency={currency} approx={d30?.approx} />
+              </dd>
+            </div>
+          ) : null}
+        </dl>
+        </>
+      ) : null}
+
+      <div className="mt-5 grid grid-cols-3 gap-4 lg:mt-auto lg:pt-5">
+        <StatTile
+          variant="inline"
+          label="Payments"
+          value={loading || unavailable || !d30 ? '—' : String(d30.payments)}
+        />
+        <StatTile
+          variant="inline"
+          label="Merchants"
+          value={loading || unavailable || !d30 ? '—' : String(d30.distinctMerchants)}
+        />
+        <StatTile
+          variant="inline"
+          label="Stopped by budget"
+          value={loading || unavailable || !d30 ? '—' : String(d30.budgetStops)}
+        />
+      </div>
+    </div>
+  )
 
   return (
     <div className="space-y-6">
       <PageHeader title="Dashboard" subtitle={summary ?? undefined} />
 
-      <section
-        className="relative overflow-hidden rounded-[24px] border border-[var(--v2-border-anchor)] bg-[var(--v2-surface-anchor)] shadow-card-raised"
-      >
-        {/*
-          Subtle ambient drift on the gradient backdrop — the v2-mesh-drift
-          keyframe in globals.css. The backdrop extends 6% past the parent on
-          every side so the drift's translation never exposes the underlying
-          anchor surface (the parent's `overflow-hidden` clips it away).
-        */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -inset-[6%] v2-mesh-drift"
-          style={{ background: 'var(--v2-surface-hero)' }}
-        />
-        <div className="relative grid gap-6 px-6 py-7 sm:px-8 sm:py-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-          <div>
-            <p className="text-sm font-medium text-[var(--v2-ink-2)]">Total balance</p>
-            {loading ? (
-              <div className="mt-3 h-12 w-56 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-            ) : unavailable ? (
-              <p className="mt-2 text-4xl font-semibold tracking-tight text-[var(--v2-ink-3)] sm:text-5xl">
-                Unavailable
-              </p>
-            ) : (
-              <p className="mt-2 text-4xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular sm:text-5xl">
-                {formatFiat(animatedTotal, currency)}
-              </p>
-            )}
-            {isTestNetwork && !loading && !unavailable ? (
-              <p className="mt-2 text-sm font-medium text-[var(--v2-ink-2)]">Test network</p>
-            ) : null}
-            {/* #3295: the headline figure is the last-known balance when the
-                live read failed — a subtle indicator says how old it is, rather
-                than the number silently claiming to be current. Fresh data
-                shows no indicator at all. */}
-            {balancesFreshness && (
-              <div className="mt-2">
-                <BalanceFreshnessIndicator freshness={balancesFreshness} />
-              </div>
-            )}
-            {spend ? (
-              <div className="mt-3 max-w-xs">
-                <AreaChart
-                  variant="sparkline"
-                  points={sparkPoints}
-                  ariaLabel={sparklineAriaLabel(sparkPoints, currency)}
-                />
-              </div>
-            ) : null}
-            {/*
-              Meta-line states under the sparkline:
-              1. Watching for a deposit — a soft brand-tinted pill with a pulse
-                 so the user knows the dashboard is actively listening.
-              2. Funded with change data — the signed change SINCE YESTERDAY.
-              3. Funded without change data, OR no change available — a quiet
-                 caption.
-              #3295: when some token has never been read (unavailable), the
-              change line steps aside entirely — no swing may be claimed from
-              a total understated by an unknown amount. A merely stale set of
-              totals still diffs normally.
-            */}
-            {watchingForDeposit ? (
-              <p className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-[var(--v2-brand)]">
-                <span
-                  aria-hidden="true"
-                  className="inline-flex h-1.5 w-1.5 rounded-full bg-[var(--v2-brand)] animate-pending-pulse"
-                />
-                Watching for incoming deposits…
-              </p>
-            ) : changeAvailable && !sekChangeUnavailable && !changeUnavailable && changeAmount !== null ? (
-              <p className={`mt-3 text-sm font-medium ${changeAmount >= 0 ? 'text-[var(--v2-success)]' : 'text-[var(--v2-danger)]'}`}>
-                {formatSignedCurrency(changeAmount, currency)} ({formatPercent(changePercent, currency)}) since yesterday
-              </p>
-            ) : (
-              <p className="mt-3 text-sm text-[var(--v2-ink-3)]">
-                Across all linked Haven accounts.
-              </p>
-            )}
-          </div>
-
-          {hasAccounts ? (
-            requiresOtherDevice ? (
-              <PasskeyOtherDeviceNotice className="max-w-sm" />
-            ) : (
-              <div className="flex flex-wrap gap-3">
-                <Button onClick={onDepositAddress} size="lg">
-                  Deposit address
-                </Button>
-                <Button onClick={onAddFunds} variant="ghost" size="lg">
-                  Add funds
-                </Button>
-              </div>
-            )
-          ) : (
-            <Button href="/accounts" size="lg">
-              Create Haven account
-            </Button>
-          )}
-        </div>
-      </section>
-
       {/*
-        Spending, last 30 days. The total is #3803's NET figure — the same
-        definition /analytics uses — so the two surfaces cannot disagree. The
-        three inline StatTiles carry the window's activity counts; the
-        agent split names the top three plus the count of the rest (the wire
-        carries every delegation-rail agent; revoked agents' spend is inside
-        the total and surfaces as the "Agents since removed" row so the
-        breakdown reconciles with the headline).
+        #3897: ONE money card, as the mockup draws it — `raised`, the page's
+        single most prominent surface (Card.tsx: "the dashboard total"); the
+        "Needs you" card below is `anchor`. Balance left, spending right as a
+        `Card.Section divided` (a hairline, never a nested filled card),
+        stacked below `lg`. The focused first-run view keeps the spending half,
+        which explains itself before the first payment (`noPaymentsYet`).
       */}
-      {showSpending && noPaymentsYet && !loading && !unavailable ? (
-        <section className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card p-5">
-          <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Spending, last 30 days</h2>
-          <p className="mt-2 text-sm text-[var(--v2-ink-2)]">
-            After your agents&rsquo; first payment, this shows what they spent, at how many merchants,
-            and how often a budget stopped a payment.
-          </p>
-        </section>
-      ) : showSpending ? (
-        <section className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card p-5">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
-          <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Spending, last 30 days</h2>
-          {loading ? (
-            <div className="h-6 w-28 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-          ) : unavailable ? (
-            <p className="text-2xl font-semibold tracking-tight text-[var(--v2-ink-3)] v2-tabular">—</p>
-          ) : d30 ? (
-            <Amount
-              amount={d30.net[bucket]}
-              currency={currency}
-              approx={d30.approx}
-              size="lg"
-            />
+      <Card elevation="raised" hover={false} className="overflow-hidden">
+        <div className={showSpending ? 'grid lg:grid-cols-2' : undefined}>
+          <section aria-label="Balance" className="flex min-w-0 flex-col gap-4 p-5 sm:p-6">
+            <div>
+              <p className="text-sm font-medium text-[var(--v2-ink-2)]">Balance</p>
+              {loading ? (
+                <div className="mt-3 h-11 w-56 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+              ) : unavailable ? (
+                <p className="mt-2 text-4xl font-semibold tracking-tight text-[var(--v2-ink-3)]">
+                  Unavailable
+                </p>
+              ) : (
+                <p className="mt-2 text-4xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
+                  {formatFiat(animatedTotal, currency)}
+                </p>
+              )}
+              {isTestNetwork && !loading && !unavailable ? (
+                <p className="mt-2 text-sm font-medium text-[var(--v2-ink-2)]">Test network</p>
+              ) : null}
+              {/* #3295: the headline figure is the last-known balance when the
+                  live read failed — a subtle indicator says how old it is, rather
+                  than the number silently claiming to be current. Fresh data
+                  shows no indicator at all. */}
+              {balancesFreshness && (
+                <div className="mt-2">
+                  <BalanceFreshnessIndicator freshness={balancesFreshness} />
+                </div>
+              )}
+              {/*
+                Meta-line states under the figure:
+                1. Watching for a deposit — a soft brand-tinted pill with a pulse
+                   so the user knows the dashboard is actively listening.
+                2. Funded with change data — the signed change SINCE YESTERDAY.
+                3. Otherwise nothing: the old filler caption is gone with
+                   the redesign (#3897).
+                #3295: when some token has never been read (unavailable), the
+                change line steps aside entirely — no swing may be claimed from
+                a total understated by an unknown amount. A merely stale set of
+                totals still diffs normally.
+              */}
+              {watchingForDeposit ? (
+                <p className="mt-2 inline-flex items-center gap-2 text-sm font-medium text-[var(--v2-brand)]">
+                  <span
+                    aria-hidden="true"
+                    className="inline-flex h-1.5 w-1.5 rounded-full bg-[var(--v2-brand)] animate-pending-pulse"
+                  />
+                  Watching for incoming deposits…
+                </p>
+              ) : changeAvailable && !sekChangeUnavailable && !changeUnavailable && changeAmount !== null ? (
+                <p className={`mt-2 text-sm font-medium ${changeAmount >= 0 ? 'text-[var(--v2-success)]' : 'text-[var(--v2-danger)]'}`}>
+                  {formatSignedCurrency(changeAmount, currency)} ({formatPercent(changePercent, currency)}) since yesterday
+                </p>
+              ) : null}
+            </div>
+
+            {spend ? (
+              <AreaChart
+                variant="sparkline"
+                points={sparkPoints}
+                ariaLabel={sparklineAriaLabel(sparkPoints, currency)}
+              />
+            ) : null}
+
+            {/* #3897: "Add funds" is the primary action, "Deposit address" the
+                secondary (#3807, the mockup). */}
+            {hasAccounts ? (
+              requiresOtherDevice ? (
+                <PasskeyOtherDeviceNotice className="max-w-sm" />
+              ) : (
+                <div className="flex flex-wrap gap-3">
+                  <Button onClick={onAddFunds}>Add funds</Button>
+                  <Button onClick={onDepositAddress} variant="ghost">
+                    Deposit address
+                  </Button>
+                </div>
+              )
+            ) : (
+              <div>
+                <Button href="/accounts">Create Haven account</Button>
+              </div>
+            )}
+          </section>
+
+          {showSpending ? (
+            <Card.Section divided className="min-w-0 lg:border-l lg:border-t-0">
+              <section aria-label="Spending" className="h-full p-5 sm:p-6">
+                {spending}
+              </section>
+            </Card.Section>
           ) : null}
         </div>
-
-        {!loading && !unavailable && topAgents.length > 0 ? (
-          <dl className="mt-4 space-y-1.5">
-            {topAgents.map((row) => (
-              <div key={row.id} className="flex items-baseline justify-between gap-4">
-                <dt className="min-w-0 truncate text-sm text-[var(--v2-ink-2)]">{row.name}</dt>
-                <dd className="v2-tabular shrink-0">
-                  <Amount amount={row.value} currency={currency} approx={row.approx} />
-                </dd>
-              </div>
-            ))}
-            {otherAgentCount > 0 ? (
-              <div className="flex items-baseline justify-between gap-4">
-                <dt className="min-w-0 truncate text-sm text-[var(--v2-ink-3)]">
-                  {otherAgentCount} other agent{otherAgentCount === 1 ? '' : 's'}
-                </dt>
-                <dd className="v2-tabular shrink-0">
-                  <Amount amount={otherAgentValue} currency={currency} />
-                </dd>
-              </div>
-            ) : null}
-            {showUnattributed ? (
-              <div className="flex items-baseline justify-between gap-4">
-                <dt className="min-w-0 truncate text-sm text-[var(--v2-ink-3)]">
-                  Agents since removed
-                </dt>
-                <dd className="v2-tabular shrink-0">
-                  <Amount amount={unattributedValue} currency={currency} approx={d30?.approx} />
-                </dd>
-              </div>
-            ) : null}
-          </dl>
-        ) : null}
-
-        <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <StatTile
-            variant="inline"
-            label="Payments"
-            value={loading || unavailable || !d30 ? '—' : String(d30.payments)}
-          />
-          <StatTile
-            variant="inline"
-            label="Merchants"
-            value={loading || unavailable || !d30 ? '—' : String(d30.distinctMerchants)}
-          />
-          <StatTile
-            variant="inline"
-            label="Stopped by budget"
-            value={loading || unavailable || !d30 ? '—' : String(d30.budgetStops)}
-          />
-        </div>
-        </section>
-      ) : null}
+      </Card>
     </div>
   )
 }

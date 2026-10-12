@@ -209,6 +209,117 @@ describe('buildDashboardSummary (#3807) — the exact sentences', () => {
   })
 })
 
+describe('buildDashboardSummary (#3897) — a week under a cent reads as a count', () => {
+  // Each fixture's 7-day total is 0.004: below SUB_CENT_THRESHOLD (0.005),
+  // which every money branch keys on — the condition is the input, not the
+  // formatted "$0.00" the old sentence printed.
+  it('no spending agent on the wire — "Agents made …"', () => {
+    expect(
+      buildDashboardSummary(
+        input({ netSpend: 0.004, payments: 2, distinctMerchants: 1, agents: [{ ...atlas, netSpend: 0 }] }),
+      ),
+    ).toBe('Agents made 2 payments in the last 7 days.')
+  })
+
+  it('one spender — named, with the merchant, and the payment counted', () => {
+    expect(
+      buildDashboardSummary(
+        input({
+          netSpend: 0.004,
+          payments: 1,
+          distinctMerchants: 1,
+          agents: [{ ...atlas, netSpend: 0.004 }],
+          topMerchant: hostMerchant,
+        }),
+      ),
+    ).toBe('Atlas made 1 payment at research.example in the last 7 days.')
+  })
+
+  it('the dominant-agent branch — two names, no "$0.00 of $0.00"', () => {
+    expect(
+      buildDashboardSummary(
+        input({
+          netSpend: 0.004,
+          payments: 3,
+          distinctMerchants: 2,
+          agents: [
+            { ...atlas, netSpend: 0.003 },
+            { ...robin, netSpend: 0.001 },
+          ],
+        }),
+      ),
+    ).toBe('Atlas and Robin made 3 payments in the last 7 days.')
+  })
+
+  it('three or more spenders — a count, at most two agents named (none here)', () => {
+    expect(
+      buildDashboardSummary(
+        input({
+          netSpend: 0.004,
+          payments: 22,
+          distinctMerchants: 5,
+          agents: [
+            { ...atlas, netSpend: 0.001 },
+            { ...robin, netSpend: 0.001 },
+            { ...merkel, netSpend: 0.001 },
+            { id: 'd', name: 'Delta', netSpend: 0.001 },
+          ],
+        }),
+      ),
+    ).toBe('4 agents made 22 payments in the last 7 days.')
+  })
+
+  it('keeps the budget-stop clause on the count form', () => {
+    expect(
+      buildDashboardSummary(
+        input({ netSpend: 0.004, payments: 1, budgetStops: 1, distinctMerchants: 1, agents: [{ ...atlas, netSpend: 0.004 }], topMerchant: hostMerchant }),
+      ),
+    ).toBe('Atlas made 1 payment at research.example in the last 7 days. 1 payment attempt was stopped by a budget limit.')
+  })
+
+  it('at the threshold the money form is back', () => {
+    expect(
+      buildDashboardSummary(
+        input({ netSpend: 0.005, payments: 1, distinctMerchants: 1, agents: [{ ...atlas, netSpend: 0.005 }], topMerchant: hostMerchant }),
+      ),
+    ).toBe('Atlas spent $0.01 at research.example in the last 7 days.')
+  })
+
+  it('the dominant split prints figures only when the agent\'s share is at or above the threshold too', () => {
+    // Total 0.007 is above the threshold, Atlas's 0.004 is not: no "spent
+    // <$0.01 of $0.01" — the spread-out count form takes over.
+    expect(
+      buildDashboardSummary(
+        input({
+          netSpend: 0.007,
+          payments: 2,
+          distinctMerchants: 2,
+          agents: [
+            { ...atlas, netSpend: 0.004 },
+            { ...robin, netSpend: 0.003 },
+          ],
+        }),
+      ),
+    ).toBe('2 agents spent $0.01 in the last 7 days.')
+  })
+
+  it('the dominant split still names the share when both figures are at or above the threshold', () => {
+    expect(
+      buildDashboardSummary(
+        input({
+          netSpend: 0.04,
+          payments: 2,
+          distinctMerchants: 2,
+          agents: [
+            { ...atlas, netSpend: 0.03 },
+            { ...robin, netSpend: 0.01 },
+          ],
+        }),
+      ),
+    ).toBe('Atlas spent $0.03 of $0.04 in the last 7 days; Robin spent the rest.')
+  })
+})
+
 describe('merchantDisplayName (#3807, #3810 counterparty rules)', () => {
   it('prefers the contact/receipt name', () => {
     expect(

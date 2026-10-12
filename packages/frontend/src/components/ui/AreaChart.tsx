@@ -108,9 +108,10 @@ export interface AreaPoint {
 }
 
 /**
- * A sparkline point. `value: null` is a day with no snapshot — a GAP, drawn
- * as a break in the line, never as a zero: a zero would state a balance of
- * nothing on a day nobody measured (#3805).
+ * A sparkline point. `value: null` is a day with no snapshot — a missing day
+ * is skipped, never zero; the line connects across it (#3805, #3897): a zero
+ * would state a balance of nothing on a day nobody measured, and a break at
+ * every missing day left sparse data as scattered dashes.
  */
 export interface SparklinePoint {
   label: string
@@ -183,8 +184,9 @@ export function AreaChart(props: AreaChartProps) {
  * SVG of the correct dimensions, no placeholder line and no dot. That is
  * accepted for #3805: a fully-missing window is a transient data gap, and
  * the box stays quiet until a measured value arrives.
- * Gaps are breaks in the line,
- * and there is no draw animation: a shape that redraws itself on every data
+ * A missing day is skipped, never
+ * zero; the line connects across it at the measured days' true x positions
+ * (#3897), and there is no draw animation: a shape that redraws itself on every data
  * refresh is noise, not information.
  */
 function Sparkline({
@@ -216,21 +218,19 @@ function Sparkline({
     points.length <= 1 ? SPARKLINE_VIEW_W / 2 : (SPARKLINE_VIEW_W * index) / (points.length - 1)
   const yOf = (value: number) => (span <= 0 ? height / 2 : height - ((value - floor) / span) * height)
 
-  // Line segments, split at gaps: each run of consecutive measured days is
-  // its own path, so a day with no snapshot is a break, not a drop to zero.
-  const segments: string[] = []
-  let run: string[] = []
+  // One line through every measured day (#3897). A missing day is skipped,
+  // never zero; the line connects across it, and each point keeps its true
+  // x position in the window, so the spacing still says which days were
+  // measured. (#3805 broke the line at every gap, which drew sparse data as
+  // short dashes and a lone measured day as nothing at all.)
+  const commands: string[] = []
   let lastIndex = -1
   points.forEach((p, i) => {
-    if (p.value === null || !Number.isFinite(p.value)) {
-      if (run.length > 1) segments.push(run.join(' '))
-      run = []
-      return
-    }
+    if (p.value === null || !Number.isFinite(p.value)) return
     lastIndex = i
-    run.push(`${run.length === 0 ? 'M' : 'L'}${xOf(i).toFixed(2)} ${yOf(p.value).toFixed(2)}`)
+    commands.push(`${commands.length === 0 ? 'M' : 'L'}${xOf(i).toFixed(2)} ${yOf(p.value).toFixed(2)}`)
   })
-  if (run.length > 1) segments.push(run.join(' '))
+  const linePath = commands.length > 1 ? commands.join(' ') : null
 
   return (
     <div data-testid="area-chart-sparkline" className={`w-full ${className}`.trim()}>
@@ -253,17 +253,16 @@ function Sparkline({
           />
         ) : (
           <>
-            {segments.map((d, i) => (
+            {linePath !== null && (
               <path
-                key={i}
-                d={d}
+                d={linePath}
                 fill="none"
                 stroke={LINE_COLOR}
                 strokeWidth={2}
                 strokeLinecap="round"
                 strokeLinejoin="round"
               />
-            ))}
+            )}
             {lastIndex >= 0 && points[lastIndex].value !== null && (
               <circle
                 cx={xOf(lastIndex)}

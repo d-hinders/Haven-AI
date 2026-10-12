@@ -54,6 +54,16 @@ export const RELAYER_TOPUP_MAX_CLAIMS = 300
 export const TOPUP_RUN_BUDGET_MS = 6 * 60_000
 export const TOPUP_CALL_TIMEOUT_MS = 10_000
 export const TOPUP_DELAY_MS = 250
+/**
+ * The longest the job waits for the merchant's accepted claims to be mined
+ * before re-reading it (#3896), and the pause between receipt sweeps. The wait
+ * also ends at the shared top-up deadline: past it, no receipt read starts and
+ * none outlives it, so the run is lengthened by at most one poll pause.
+ */
+export const CLAIM_CONFIRM_CAP_MS = 60_000
+export const CLAIM_CONFIRM_POLL_MS = 3_000
+/** Receipt reads in flight at once: the bounded provider retries only once. */
+const CLAIM_CONFIRM_CONCURRENCY = 5
 /** The only chain the CDP faucet serves; the merchant must report it before a claim. */
 const FAUCET_CHAIN_ID = 84532
 
@@ -139,6 +149,8 @@ interface TopUpDeps {
   nowMs?: () => number
   /** Epoch ms after which no further claim starts; shared by both wallets' loops. */
   deadlineAt?: number
+  /** Receives each accepted claim's transaction hash (kept off the report). */
+  onClaimed?: (wallet: TopUpWallet, transactionHash: string) => void
 }
 
 function cdpCredentials(env: NodeJS.ProcessEnv): { apiKeyId: string; apiKeySecret: string } | null {
@@ -181,7 +193,7 @@ async function claimToTarget(
       break
     }
     try {
-      await requestFaucet({
+      const { transactionHash } = await requestFaucet({
         address,
         chainId: FAUCET_CHAIN_ID,
         ...credentials,
@@ -189,6 +201,7 @@ async function claimToTarget(
         timeoutMs: TOPUP_CALL_TIMEOUT_MS,
       })
       claimsMade++
+      deps.onClaimed?.(wallet, transactionHash)
     } catch (error) {
       stopReason = error instanceof CdpFaucetError && error.status === 429 ? 'rate-limited' : 'faucet-error'
       reason = safeReason('faucet request failed', error)
@@ -276,6 +289,65 @@ export async function runTopUps(
 }
 
 /**
+ * Wait for accepted faucet claims to be mined, so the re-read sees them (#3896).
+ * A faucet response carries a transaction hash, not a confirmation: re-reading
+ * straight away recorded the PRE-top-up balance on 2026-10-10 and 10-11.
+ *
+ * Haven's own poll, deliberately NOT `provider.waitForTransaction`: in ethers
+ * 6.16 that awaits `getBlockNumber()` inside an async Promise executor, so one
+ * failed RPC call is an unhandled rejection that kills the job. Here every
+ * receipt read is caught (an error means "not yet") and cut off at `capAt`, no
+ * batch starts once `capAt` has passed, and the wait also ends after a bounded
+ * number of sweeps. A hung RPC therefore cannot hold the job past `capAt`.
+ *
+ * Returns how many claims were still unconfirmed when the wait ended. A
+ * malformed hash is never polled and counts as unconfirmed.
+ */
+export async function waitForClaims(
+  hashes: readonly string[],
+  provider: Pick<ethers.Provider, 'getTransactionReceipt'>,
+  opts: { capAt: number; nowMs?: () => number; sleep?: (ms: number) => Promise<void> },
+): Promise<number> {
+  const nowMs = opts.nowMs ?? Date.now
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
+  const malformed = hashes.filter((h) => !ethers.isHexString(h, 32)).length
+  let pending: string[] = hashes.filter((h) => ethers.isHexString(h, 32))
+  const maxSweeps = Math.ceil(CLAIM_CONFIRM_CAP_MS / CLAIM_CONFIRM_POLL_MS) + 1
+  for (let sweep = 0; pending.length > 0 && sweep < maxSweeps; sweep++) {
+    if (sweep > 0) {
+      if (nowMs() >= opts.capAt) break
+      await sleep(CLAIM_CONFIRM_POLL_MS)
+    }
+    const stillPending: string[] = []
+    for (let i = 0; i < pending.length; i += CLAIM_CONFIRM_CONCURRENCY) {
+      const batch = pending.slice(i, i + CLAIM_CONFIRM_CONCURRENCY)
+      const left = opts.capAt - nowMs()
+      if (left <= 0) {
+        stillPending.push(...pending.slice(i))
+        break
+      }
+      const mined = await Promise.all(
+        batch.map(async (hash) => {
+          try {
+            // Defensive: the race already subscribes to `read`, but a read that
+            // never rejects needs no reasoning about a late failure after the cut-off.
+            const read = provider.getTransactionReceipt(hash).then((r) => r !== null, () => false)
+            return await withDeadline(read, left, () => false)
+          } catch {
+            return false
+          }
+        }),
+      )
+      batch.forEach((hash, j) => {
+        if (!mined[j]) stillPending.push(hash)
+      })
+    }
+    pending = stillPending
+  }
+  return pending.length + malformed
+}
+
+/**
  * Re-read one wallet after the top-ups. A failed or timed-out re-read keeps the
  * PRE-top-up reading: replacing a `critical` reading with `unknown` would hide
  * it, since `unknown` never opens the standing issue (#3836).
@@ -329,9 +401,31 @@ export async function runBalances(
   const history = readHistory(arg('history'))
   const readings = await collectBalanceReadings(sources, deps.deadlineMs)
   const provisional = buildBalancesReport(readings, history, deps.now)
-  const topUps = await runTopUps(readings, provisional, env, deps)
-  // Re-read only after BOTH loops: a faucet call returns a transaction hash,
-  // not a confirmation, so this gives the merchant's claims time to be mined.
+  const nowMs = deps.nowMs ?? Date.now
+  const deadlineAt = nowMs() + TOPUP_RUN_BUDGET_MS
+  const merchantHashes: string[] = []
+  const topUps = await runTopUps(readings, provisional, env, {
+    ...deps,
+    deadlineAt,
+    onClaimed: (wallet, hash) => {
+      if (wallet === 'merchant') merchantHashes.push(hash)
+    },
+  })
+  // A faucet call returns a transaction hash, not a confirmation: wait for the
+  // merchant's claims to be mined before its re-read (#3896). The relayer's
+  // claims are spread over minutes, and up to 300 of them; its re-read stays
+  // immediate. The wait shares the top-up deadline (plus at most one poll pause).
+  if (topUps.merchant.status === 'attempted' && topUps.merchant.claimsMade > 0) {
+    const unconfirmed = await waitForClaims(merchantHashes, sources.provider, {
+      capAt: Math.min(nowMs() + CLAIM_CONFIRM_CAP_MS, deadlineAt),
+      nowMs,
+      sleep: deps.sleep,
+    })
+    if (unconfirmed > 0) {
+      const note = `${unconfirmed} claim(s) unconfirmed at re-read`
+      topUps.merchant.reason = topUps.merchant.reason ? `${topUps.merchant.reason}; ${note}` : note
+    }
+  }
   for (const wallet of TOP_UP_WALLETS) {
     if (topUps[wallet].status !== 'attempted') continue
     readings[wallet] = await rereadAfterTopUp(wallet, readings[wallet], topUps[wallet], sources, deps.deadlineMs ?? 30_000)

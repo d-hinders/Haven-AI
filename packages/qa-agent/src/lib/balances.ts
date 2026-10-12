@@ -52,13 +52,19 @@ export const RELAYER_FALLBACK_FLOOR_WEI = 10_000_000_000_000_000n
 export const RELAYER_TOPUP_TARGET_WEI = 30_000_000_000_000_000n
 
 /**
- * The demo merchant's automatic faucet target, 0.002 ETH (#3836): about 800
- * settlements at a 0.0000025 ETH `cost_per_settlement_wei`, about 5.9 days at
- * the ~0.00034 ETH/day burn #3654 recorded (2026-10-05 → 10-09). The merchant
- * is topped up whenever it is BELOW this, whatever its band: its `critical`
- * floor is its own payment-refusal point, so a band trigger fires too late.
+ * The demo merchant's automatic faucet target, 0.004 ETH (#3896; 0.002 ETH in
+ * #3836): 1,600 settlements at a 0.0000025 ETH `cost_per_settlement_wei`. The
+ * merchant is topped up whenever it is BELOW this, whatever its band: its
+ * `critical` floor is its own payment-refusal point, so a band trigger fires
+ * too late.
+ *
+ * In steady state the job refills it daily, so the history holds post-top-up
+ * readings and the observed burn is rounding noise: the merchant's band is a
+ * top-up-FAILURE alarm, not a runway measure. The target sets that alarm's
+ * notice. At ~0.00038 ETH/day, failed top-ups first read `warn` 7 days before
+ * the balance is below the critical floor at 0.004 ETH, against 3 days at 0.002.
  */
-export const MERCHANT_TOPUP_TARGET_WEI = 2_000_000_000_000_000n
+export const MERCHANT_TOPUP_TARGET_WEI = 4_000_000_000_000_000n
 
 /** The treasury's warn floor until enough history exists: 1.0 USDC, ~30 runs. */
 export const TREASURY_FALLBACK_FLOOR_ATOMIC = 1_000_000n

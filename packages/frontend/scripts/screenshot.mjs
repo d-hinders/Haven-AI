@@ -6218,7 +6218,7 @@ export const SCENARIOS = {
   // give the design review the mockup's other states as full pages.
   'dashboard-new-user': {
     description:
-      '#3897: a brand-new account — no USDC, no agents — as a whole page: the money card without its spending half and the setup guide as the "Needs you" card (mockup "New user")',
+      '#3897: a brand-new account — no USDC, no agents — as a whole page: the money card with its spending half explaining what it will show, and the setup guide as the "Needs you" card (mockup "New user")',
     api(apiPath) {
       if (apiPath === '/dashboard/overview') {
         return {
@@ -6246,12 +6246,6 @@ export const SCENARIOS = {
           activity: [],
         }
       }
-      // The add-funds scenario's reason, unchanged: the shared account's
-      // signer set marks the passkey as on another device, which hides the
-      // guide (`requiresOtherDevice`) — the legacy type keeps it reachable.
-      if (apiPath === '/auth/me') {
-        return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
-      }
       return undefined
     },
     async run({ page, vp, shoot }) {
@@ -6263,7 +6257,7 @@ export const SCENARIOS = {
   },
   'dashboard-all-clear': {
     description:
-      '#3897: one healthy agent, nothing to flag — the quiet "Nothing needs your attention" line under the money card (mockup "All clear")',
+      '#3897: one healthy agent, nothing to flag, the "You\'re set up" line already dismissed — the quiet "Nothing needs your attention" line under the money card (mockup "All clear")',
     api(apiPath) {
       if (apiPath === '/dashboard/overview') {
         const research = FIXTURE_OVERVIEW.agents.find((agent) => agent.id === 'agent-research')
@@ -6282,21 +6276,23 @@ export const SCENARIOS = {
         }
       }
       if (apiPath === '/dashboard/budget-remaining') return { budgets: [] }
-      if (apiPath === '/auth/me') {
-        return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
-      }
       return undefined
     },
     async run({ page, vp, shoot }) {
+      // The set-up line holds the guide slot until dismissed; seed the
+      // dismissal so the slot is empty and the quiet line renders.
+      await page.addInitScript((userId) => {
+        window.localStorage.setItem(`haven-onboarding-complete-dismissed:${userId}`, '1')
+      }, FIXTURE_USER.id)
       await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
-      await page.getByRole('heading', { name: 'Needs you' }).waitFor({ timeout: 30_000 })
+      await page.getByText('Nothing needs your attention right now.').waitFor({ timeout: 30_000 })
       await shoot(page.locator('main').first(), 'page')
     },
   },
   'dashboard-sub-cent': {
     description:
-      '#3897: a week of sub-cent agent payments — the count-form summary, "<$0.01" in the spending half, the agent caption and the activity row, never "$0.00"',
+      '#3897: a week of sub-cent agent payments — the count-form summary and "<$0.01" in the spending half and the activity row, never "$0.00" (the agent caption\'s sub-cent form is unit-tested; this fixture has no budget read)',
     api(apiPath) {
       if (apiPath === '/dashboard/overview') {
         // Under a cent in EVERY display currency (the fixture user's default is SEK).

@@ -397,7 +397,8 @@ export default function MoneyPanel({
         single most prominent surface (Card.tsx: "the dashboard total"); the
         "Needs you" card below is `anchor`. Balance left, spending right as a
         `Card.Section divided` (a hairline, never a nested filled card),
-        stacked below `lg`. The focused first-run view has no spending half.
+        stacked below `lg`. The focused first-run view keeps the spending half,
+        which explains itself before the first payment (`noPaymentsYet`).
       */}
       <Card elevation="raised" hover={false} className="overflow-hidden">
         <div className={showSpending ? 'grid lg:grid-cols-2' : undefined}>

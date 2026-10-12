@@ -790,9 +790,11 @@ reserved the box does not jump. No draw animation on data refresh.
 **no delta chip** — passing `polarity` or `delta` with `inline` throws, the
 same render-time refusal the missing-polarity case uses, because a judgement
 colour smuggled into a plain-reading tile is the defect the polarity rule
-exists to prevent. Three inline tiles row up from `sm`; below `sm` the
-longest supported value (`13 000,50 kr`) fits without truncation, and the
-tiles stack. The figure still carries no colour in any state — the card
+exists to prevent. Tiles carrying money-length values row up from `sm`;
+below `sm` the longest supported value (`13 000,50 kr`) fits without
+truncation, and the tiles stack. Tiles carrying only short counts — the
+dashboard money card's payments / merchants / stopped by budget (#3897) —
+stay three across at every width. The figure still carries no colour in any state — the card
 tile's contract, at a smaller scale.
 
 ### Money panel (#3807)
@@ -904,9 +906,10 @@ Tertiary — **variant**, `variant="tertiary"`
 ([#1830](https://github.com/d-hinders/Haven-AI/issues/1830)). The *quiet* action: dismiss,
 cancel, "not now" — the escape hatch beside a committing action, never the committing action
 itself. Live at many product call sites plus the `/design-system` showcase — among them
-`ConfirmDialog`'s cancel, `ProfileClient`'s cancel edit and `DashboardOnboardingGuide`'s
-"Hide for now" (since #3818 the guide renders inside the dashboard's Needs you card, and
-its finished state is a one-line `SetupCompleteLine` with its own tertiary Dismiss). (It was eight until [#1989](https://github.com/d-hinders/Haven-AI/issues/1989)
+`ConfirmDialog`'s cancel, `ProfileClient`'s cancel edit and the dashboard's "Hide for
+now" (in the Needs you card header — `NeedsYou`'s `titleAction` since #3897; the guide
+renders inside that card, and its finished state is a one-line `SetupCompleteLine` with
+its own tertiary Dismiss). (It was eight until [#1989](https://github.com/d-hinders/Haven-AI/issues/1989)
 deleted `settings/ManageApprovers`, which held three of them.):
 - `bg-transparent text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface)] hover:text-[var(--v2-ink)]`
 - focus ring `focus-visible:ring-brand/80`

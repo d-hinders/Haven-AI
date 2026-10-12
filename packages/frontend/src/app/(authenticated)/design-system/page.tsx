@@ -2914,7 +2914,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="StatTile — inline"
-        description="The inline variant of StatTile (#3805): no card border, ground or shadow, and the figure at text-base — the tile a larger card sets beside peers, three of which row up from sm and stack below it. It shows no delta chip: passing polarity or delta with inline throws, because a judgement colour smuggled into a plain-reading tile is the defect the polarity rule exists to prevent. The figure still carries no colour in any state — the value is ink, the label secondary, exactly the card tile's contract at a smaller scale."
+        description="The inline variant of StatTile (#3805): no card border, ground or shadow, and the figure at text-base — the tile a larger card sets beside peers. Tiles carrying money-length values (13 000,50 kr) row up from sm and stack below it; tiles carrying only short counts, like the dashboard money card's payments / merchants / stopped by budget (#3897), stay three across at every width. It shows no delta chip: passing polarity or delta with inline throws, because a judgement colour smuggled into a plain-reading tile is the defect the polarity rule exists to prevent. The figure still carries no colour in any state — the value is ink, the label secondary, exactly the card tile's contract at a smaller scale."
       >
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3" data-testid="ds-stat-tile-inline">
           <StatTile variant="inline" label="Spent today" value="13 000,50 kr" />

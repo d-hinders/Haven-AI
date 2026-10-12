@@ -109,8 +109,10 @@ test.describe('currency preference renders SEK (#3127 finding 8)', () => {
       // needle is plain-space; the exact bytes are pinned on the formatter.
       // #3807: the line reads "since yesterday" — the diff is against the
       // yesterday snapshot, not a same-day one.
+      // #3897: the filler caption is gone, so the positive check is the one
+      // that proves the change line rendered: exactly one "since yesterday".
       await expect(main.getByText('+30,00 kr (+0,20 %) since yesterday')).toHaveCount(1)
-      await expect(main.getByText('Across all linked Haven accounts.')).toHaveCount(0)
+      await expect(main.getByText(/since yesterday$/)).toHaveCount(1)
       // #3807: the "Monthly agent spend" tile is gone. The templated 7-day
       // summary names the fixture's dominant agent beside its share of the
       // week (Research agent's 80,70 of 119,46 kr is ≥ 40 %), and the 30-day

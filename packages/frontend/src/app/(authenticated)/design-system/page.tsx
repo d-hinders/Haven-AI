@@ -276,8 +276,9 @@ const DS_BALANCE_SUMMARY = `Balance over 7 days: ends at ${dsMoney(DS_BALANCE_EN
 
 /**
  * Sparkline sample data (#3805). Two of the fourteen days carry no snapshot —
- * `null`, the gap the sparkline draws as a break in the line rather than a
- * zero, because a zero would state a balance nobody measured.
+ * `null`, a missing day the sparkline skips and connects across (#3897)
+ * rather than drawing a zero, because a zero would state a balance nobody
+ * measured.
  */
 const DS_SPARKLINE_POINTS: SparklinePoint[] = [
   { label: 'Sep 24', value: 1180 },
@@ -2873,7 +2874,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="AreaChart — sparkline"
-        description="The sparkline variant of AreaChart (#3805): the balance line alone, in a box the caller sizes (height, default 40px). No gridlines, ticks, x labels, delta annotation, tooltip or caret — one dot on the last point. It is role=img with the required ariaLabel summary sentence and is not a tab stop: there is no hidden data table, the sentence is the data access. Days with no snapshot are gaps in the line, never zeros. Below three points it renders a flat placeholder line of the same height instead of nothing, so the layout does not jump, and there is no draw animation on data refresh."
+        description="The sparkline variant of AreaChart (#3805): the balance line alone, in a box the caller sizes (height, default 40px). No gridlines, ticks, x labels, delta annotation, tooltip or caret — one dot on the last point. It is role=img with the required ariaLabel summary sentence and is not a tab stop: there is no hidden data table, the sentence is the data access. A day with no snapshot is skipped, never zero: the line connects across it at the measured days' true positions (#3897). Below three points it renders a flat placeholder line of the same height instead of nothing, so the layout does not jump, and there is no draw animation on data refresh."
       >
         <div data-testid="ds-area-chart-sparkline">
           <Card hover={false} className="p-5">

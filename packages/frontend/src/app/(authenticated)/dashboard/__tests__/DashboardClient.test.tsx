@@ -327,6 +327,42 @@ describe('DashboardClient', () => {
     expect(screen.getByText('Stopped by budget')).toBeInTheDocument()
   })
 
+  it('makes "Add funds" the primary action, ahead of "Deposit address" (#3897)', () => {
+    mockBaseState([], { onboardingProgress: { hasFirstAgentPayment: true } })
+    render(<DashboardClient />)
+
+    const balance = screen.getByRole('region', { name: 'Balance' })
+    const actions = within(balance)
+      .getAllByRole('button')
+      .map((button) => button.textContent)
+    expect(actions).toEqual(['Add funds', 'Deposit address'])
+    // Primary is the brand fill; the secondary is the ghost outline.
+    expect(within(balance).getByRole('button', { name: 'Add funds' }).className).toContain('bg-[var(--v2-brand)]')
+    expect(within(balance).getByRole('button', { name: 'Deposit address' }).className).not.toContain(
+      'bg-[var(--v2-brand)]',
+    )
+  })
+
+  it('renders "Needs you" below the money card at full width, never in a side column (#3897)', () => {
+    mockBaseState([], { onboardingProgress: { hasFirstAgentPayment: true } })
+    const { container } = render(<DashboardClient />)
+
+    const balance = screen.getByRole('region', { name: 'Balance' })
+    const needsYou = screen.getByRole('article')
+    // DOM order: the money card, then "Needs you", then the agents/activity grid.
+    expect(balance.compareDocumentPosition(needsYou) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // The old hero-plus-aside row is gone, and "Needs you" sits in the page's
+    // single column — its parent lays children out vertically, not in a grid.
+    expect(container.innerHTML).not.toContain('minmax(320px,0.42fr)')
+    expect(needsYou.parentElement?.className).toContain('space-y-6')
+    expect(needsYou.parentElement?.className).not.toMatch(/grid-cols/)
+    // Balance and spending share ONE raised card (#3897), spending a divided section.
+    const card = balance.closest('.shadow-card-raised')
+    expect(card).not.toBeNull()
+    expect(within(card as HTMLElement).getByRole('region', { name: 'Spending' })).toBeInTheDocument()
+    expect(screen.queryByText('Total balance')).toBeNull()
+  })
+
   /**
    * #3127 direction A: SEK is a first-class display currency on the
    * dashboard. Every figure comes from the SEK keys the overview route
@@ -401,7 +437,8 @@ describe('DashboardClient', () => {
 
       expect(screen.getByText('13 000,50 kr')).toBeInTheDocument()
       expect(screen.queryByText(/since yesterday/)).toBeNull()
-      expect(screen.getByText('Across all linked Haven accounts.')).toBeInTheDocument()
+      // #3897: no filler caption takes the change line's place.
+      expect(within(screen.getByRole('region', { name: 'Balance' })).getByText('13 000,50 kr')).toBeInTheDocument()
     })
 
     it('keeps the USD hero for a USD preference', () => {

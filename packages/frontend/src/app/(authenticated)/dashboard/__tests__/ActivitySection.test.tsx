@@ -48,6 +48,32 @@ function renderSection(overrides: Partial<Parameters<typeof ActivitySection>[0]>
   )
 }
 
+describe('ActivitySection badges only when something is off (#3897)', () => {
+  it('a confirmed row carries no status badge, in either direction', () => {
+    renderSection({
+      activity: [group(), group({ direction: 'in', agentId: 'agent-2', latestAt: new Date(Date.now() - 60_000).toISOString() })],
+    })
+    expect(screen.queryByText('Sent')).not.toBeInTheDocument()
+    expect(screen.queryByText('Received')).not.toBeInTheDocument()
+  })
+
+  it('pending and failed rows keep theirs', () => {
+    renderSection({
+      activity: [
+        group({ status: 'pending' }),
+        group({ status: 'failed', agentId: 'agent-2', latestAt: new Date(Date.now() - 60_000).toISOString() }),
+      ],
+    })
+    expect(screen.getByText('Pending')).toBeInTheDocument()
+    expect(screen.getByText('Failed')).toBeInTheDocument()
+  })
+
+  it('a sub-cent amount reads "-<…", never "0,00"', () => {
+    renderSection({ activity: [group({ approxAmount: '0.0040' })] })
+    expect(screen.getByText(/-<0,01/)).toBeInTheDocument()
+  })
+})
+
 describe('ActivitySection (#3810)', () => {
   it('renders one "×40" row for a group of 40, titled by the merchant site', () => {
     renderSection({ activity: [group({ count: 40, sumAtomic: '500000000' })] })

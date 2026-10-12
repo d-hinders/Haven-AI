@@ -6219,7 +6219,7 @@ export const SCENARIOS = {
       // suite owns the byte-level voice.
       await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
-      await page.getByText('Total balance').waitFor({ timeout: 20_000 })
+      await page.getByRole('region', { name: 'Balance' }).waitFor({ timeout: 20_000 })
       await page.getByText('136 050,75 kr').first().waitFor({ timeout: 20_000 })
       // The change line renders the SEK swing, not the quiet caption. The
       // percent renders in sv-SE through Intl (#3195 round-2 finding b):

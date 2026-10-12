@@ -245,20 +245,20 @@ function ActivityRow({
 }
 
 /**
- * Derived outcome → badge. Confirmed rows read like the old preview did
- * ("Sent"/"Received" by direction); pending and failed name the state —
- * the amounts stay unsigned facts, the tone carries the verdict.
+ * Derived outcome → badge, only when something is off (#3897, epic #3801's
+ * #3810 rule): a confirmed row carries no badge — its direction is already
+ * the sign and tone of the amount — while pending and failed name the state.
  */
-function statusLabel(group: ActivityGroup): string {
+function statusLabel(group: ActivityGroup): string | undefined {
   if (group.status === 'failed') return 'Failed'
   if (group.status === 'pending') return 'Pending'
-  return group.direction === 'in' ? 'Received' : 'Sent'
+  return undefined
 }
 
-function statusTone(group: ActivityGroup): StatusTone {
+function statusTone(group: ActivityGroup): StatusTone | undefined {
   if (group.status === 'failed') return 'danger'
   if (group.status === 'pending') return 'warning'
-  return group.direction === 'in' ? 'success' : 'neutral'
+  return undefined
 }
 
 function EmptyActivityIcon() {

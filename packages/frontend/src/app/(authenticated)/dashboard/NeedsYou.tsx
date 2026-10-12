@@ -52,7 +52,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
-import { EmptyState, StatusBadge } from '@haven_ai/ui'
+import { StatusBadge } from '@haven_ai/ui'
 import { AttentionList } from '@/components/haven/AttentionList'
 import type { AttentionListItem } from '@/components/haven/AttentionList'
 import {
@@ -242,13 +242,22 @@ export default function NeedsYou({
           ) : null}
         </div>
       ) : showEmpty && emptyState?.kind === 'caught-up' ? (
-        <div className="px-5 py-4">
-          <EmptyState
-            tone="success"
-            icon={<Check className="h-5 w-5" aria-hidden="true" />}
-            title={emptyState.title}
-            body={emptyState.body}
-          />
+        // An unboxed success row on the attention rows' geometry (20px inset,
+        // 32px icon centred on the title's first line) — the mockup's clear
+        // card. Not a dashed EmptyState tile: that is the "nothing here yet"
+        // placeholder, and nested in this anchor card it stacks a second
+        // tinted surface (#3902 design review).
+        <div className="flex items-start gap-3 px-5 py-3">
+          <span
+            aria-hidden="true"
+            className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-success-soft)] text-[var(--v2-success)]"
+          >
+            <Check className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <h3 className="mt-1.5 text-sm font-semibold text-[var(--v2-ink)]">{emptyState.title}</h3>
+            <p className="mt-0.5 text-sm text-[var(--v2-ink-2)]">{emptyState.body}</p>
+          </div>
         </div>
       ) : showEmpty && emptyState?.kind === 'quiet' ? (
         <p className="px-5 py-4 text-sm text-[var(--v2-ink-2)]">{emptyState.body}</p>

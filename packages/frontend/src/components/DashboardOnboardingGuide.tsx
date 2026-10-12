@@ -189,9 +189,10 @@ export default function DashboardOnboardingGuide({
  */
 export function SetupCompleteLine({ onDismiss }: { onDismiss: () => void }) {
   return (
-    // px-4: the step rows' and rule rows' inset, so the check icon shares
-    // their left edge (#3897).
-    <div className="flex items-center justify-between gap-3 px-4 v2-animate-fade-in">
+    // Inside the card's 20px inset, `pl-1.5` centres the 20px check on the
+    // full-bleed rows' 32px icon axis below it (#3902; it was `px-4` while
+    // the rows were inset, #3897). Dismiss ends at the rows' action column.
+    <div className="flex items-center justify-between gap-3 pl-1.5 v2-animate-fade-in">
       <p className="flex items-center gap-2 text-sm text-[var(--v2-ink)]">
         <span
           aria-hidden="true"

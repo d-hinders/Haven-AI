@@ -220,6 +220,11 @@ describe('MoneyPanel — spending half to the mockup (#3902)', () => {
 
     const counts = screen.getByTestId('spending-counts')
     expect(counts).toHaveClass('border-t', 'border-[var(--v2-border)]')
+    // #3902 design review: the gap above the rule is padding on the pinned
+    // wrapper, so it survives `lg:mt-auto` resolving to 0 — never a margin on
+    // the ruled element itself.
+    expect(counts.parentElement).toHaveClass('pt-5', 'lg:mt-auto')
+    expect(counts.className).not.toMatch(/(^|\s)(lg:)?mt-/)
     for (const name of ['Payments', 'Merchants', 'Stopped by budget']) {
       expect(within(counts).getByText(name)).toBeInTheDocument()
     }

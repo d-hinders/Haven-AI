@@ -378,26 +378,32 @@ export default function MoneyPanel({
       ) : null}
 
       {/* The activity counts sit below a hairline, pinned to the bottom of
-          the half at `lg` so they line up with the balance half's actions. */}
-      <div
-        data-testid="spending-counts"
-        className="mt-5 grid grid-cols-3 gap-4 border-t border-[var(--v2-border)] pt-5 lg:mt-auto"
-      >
-        <StatTile
-          variant="inline"
-          label="Payments"
-          value={loading || unavailable || !d30 ? '—' : String(d30.payments)}
-        />
-        <StatTile
-          variant="inline"
-          label="Merchants"
-          value={loading || unavailable || !d30 ? '—' : String(d30.distinctMerchants)}
-        />
-        <StatTile
-          variant="inline"
-          label="Stopped by budget"
-          value={loading || unavailable || !d30 ? '—' : String(d30.budgetStops)}
-        />
+          the half at `lg` so they line up with the balance half's actions.
+          The wrapper's padding is the floor: when this half is the taller
+          one, `lg:mt-auto` resolves to 0, and a margin alone would let the
+          rule touch the legend (#3902 design review). `items-end` keeps the
+          three values on one line when a label wraps at 390px. */}
+      <div className="pt-5 lg:mt-auto">
+        <div
+          data-testid="spending-counts"
+          className="grid grid-cols-3 items-end gap-4 border-t border-[var(--v2-border)] pt-5"
+        >
+          <StatTile
+            variant="inline"
+            label="Payments"
+            value={loading || unavailable || !d30 ? '—' : String(d30.payments)}
+          />
+          <StatTile
+            variant="inline"
+            label="Merchants"
+            value={loading || unavailable || !d30 ? '—' : String(d30.distinctMerchants)}
+          />
+          <StatTile
+            variant="inline"
+            label="Stopped by budget"
+            value={loading || unavailable || !d30 ? '—' : String(d30.budgetStops)}
+          />
+        </div>
       </div>
     </div>
   )

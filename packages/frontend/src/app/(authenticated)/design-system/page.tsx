@@ -315,7 +315,7 @@ const DS_ATTENTION_ITEMS: AttentionListItem[] = [
     title: 'Re-approval needed',
     subtitle: 'Spending paused while Travel planner awaits your approval of the new agent rules.',
     tone: 'warning',
-    badge: 'Needs attention',
+    badge: 'Review needed',
     icon: TriangleAlert,
     action: (
       <Button size="sm" variant="ghost">

@@ -572,6 +572,17 @@ function runwayFact(accounts: DashboardAccount[]): 'month' | 'no-spend' | null {
   return anySpend ? 'month' : 'no-spend'
 }
 
+/** A read is known only when it is present AND parses — a malformed one is unknown (#3295). */
+function isKnownAtomic(value: string | null): boolean {
+  if (value === null) return false
+  try {
+    BigInt(value)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function budgetRoomFact(
   agents: DashboardAgent[],
   budgetRemaining: DashboardBudgetRemaining | null,
@@ -585,7 +596,7 @@ function budgetRoomFact(
     // returns the highest KNOWN percent, so one known 10% beside an unknown
     // read would otherwise claim room in a budget nobody measured.
     const reads = (budgetRemaining?.budgets ?? []).filter((entry) => entry.agent_id === agent.id)
-    if (reads.some((entry) => entry.used_atomic === null)) return false
+    if (reads.some((entry) => !isKnownAtomic(entry.used_atomic))) return false
     const pct = agentUsedPercent(agent.id, budgetRemaining)
     return pct !== null && pct < 90
   })

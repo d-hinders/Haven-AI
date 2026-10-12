@@ -722,6 +722,14 @@ describe('attentionEmptyState (#3902) — the achievement only on measured facts
     expect(state(makeOverview([scout], [month]), mixed).kind).toBe('quiet')
   })
 
+  it('treats a malformed used amount as unknown, never as room (#3295)', () => {
+    const malformed = budgetRemaining([
+      { agent_id: 'a1', budget_atomic: '10000000', used_atomic: '1000000' },
+      { agent_id: 'a1', budget_atomic: '10000000', used_atomic: 'not-a-number' },
+    ])
+    expect(state(makeOverview([scout], [month]), malformed).kind).toBe('quiet')
+  })
+
   it('is the neutral line after a scope refusal this week', () => {
     const refused = { ...scout, refusalBuckets: { budget: 0, scope: 1, failed: 0, haven: 0 } }
     expect(state(makeOverview([refused], [month]), roomy).kind).toBe('quiet')

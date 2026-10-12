@@ -6295,6 +6295,24 @@ export const SCENARIOS = {
       await shoot(page.locator('main').first(), 'page')
     },
   },
+  'dashboard-quiet': {
+    description:
+      '#3902: the all-clear data with NO budget read — nothing to flag, but the budget room is unmeasured, so the card shows only the neutral line ("No items to review right now."), never the achievement',
+    api(apiPath) {
+      if (apiPath === '/dashboard/overview') return SCENARIOS['dashboard-all-clear'].api(apiPath)
+      if (apiPath === '/dashboard/budget-remaining') return { budgets: [] }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.addInitScript((userId) => {
+        window.localStorage.setItem(`haven-onboarding-complete-dismissed:${userId}`, '1')
+      }, FIXTURE_USER.id)
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByText('No items to review right now.').waitFor({ timeout: 30_000 })
+      await shoot(page.locator('main').first(), 'page')
+    },
+  },
   'dashboard-sub-cent': {
     description:
       '#3897: a week of sub-cent agent payments — the count-form summary and "<$0.01" in the spending half and the activity row, never "$0.00" (the agent caption\'s sub-cent form is unit-tested, not shown here: the shared budget read is not sub-cent)',

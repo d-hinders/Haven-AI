@@ -923,8 +923,8 @@ is 0.01 ETH.
 4. With the dev demo merchant's settlement wallet below 0.004 ETH, run
    **QA wallet balances** (scheduled or dispatched) and require a
    `merchant top-up:` log line with accepted claims and more than 0 ETH
-   received, and a post-top-up merchant balance of at least 0.0039 ETH (the
-   target minus one claim), before closing #3836 and #3896.
+   received, a post-top-up merchant balance of at least 0.0039 ETH (the target
+   minus one claim), and an `ok` merchant row, before closing #3836 and #3896.
 
 ## Automation & gating
 

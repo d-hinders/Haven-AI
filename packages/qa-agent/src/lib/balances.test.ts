@@ -355,5 +355,8 @@ describe('merchant top-up target (#3896)', () => {
   it('when top-ups stop, the target gives at least 5 days of warn before the critical floor (0.002 gives fewer)', () => {
     expect(noticeDays(MERCHANT_TOPUP_TARGET_WEI)).toBeGreaterThanOrEqual(5)
     expect(noticeDays(ETH(0.002))).toBeLessThan(5)
+    // The figures agent-qa.md and the MERCHANT_TOPUP_TARGET_WEI comment state, at this burn.
+    expect(noticeDays(MERCHANT_TOPUP_TARGET_WEI)).toBe(7)
+    expect(noticeDays(ETH(0.002))).toBe(3)
   })
 })

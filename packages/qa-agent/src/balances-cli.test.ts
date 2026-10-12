@@ -23,6 +23,7 @@ import {
   topUpRelayer,
   TOPUP_RUN_BUDGET_MS,
   CLAIM_CONFIRM_CAP_MS,
+  CLAIM_CONFIRM_POLL_MS,
   waitForClaims,
 } from './balances-cli.js'
 
@@ -238,7 +239,7 @@ describe('qa:balances merchant top-up (#3836)', () => {
     const { report } = await runBalances([], { ...FULL, ...CDP }, {
       ...deps(),
       fetchImpl: h.fetchImpl,
-      requestFaucet: async () => ({ transactionHash: `0x${'ab'.repeat(32)}` }),
+      requestFaucet: async () => ({ transactionHash: nextHash() }),
       sleep: async () => {},
     })
     expect(h.calls()).toBe(2)
@@ -347,11 +348,83 @@ describe('qa:balances merchant claim confirmation (#3896)', () => {
     expect(now).toBeLessThanOrEqual(7_000 + 3_000)
   })
 
+  it('the shared top-up deadline caps the wait in runBalances, not only the 60 s cap', async () => {
+    const c = chain(MERCHANT_TOPUP_TARGET_WEI - CDP_FAUCET_CLAIM_WEI, { never: true })
+    let now = 0
+    const { report } = await runBalances([], { ...FULL, ...CDP }, {
+      ...deps(), provider: c.provider, fetchImpl: c.fetchImpl,
+      // The claim itself uses up all but 5 s of the six-minute budget.
+      requestFaucet: async () => { now = TOPUP_RUN_BUDGET_MS - 5_000; return c.requestFaucet() },
+      nowMs: () => now,
+      sleep: async (ms) => { now += ms },
+    })
+    expect(report.topUps?.merchant?.reason).toMatch(/1 claim\(s\) unconfirmed at re-read/)
+    expect(now).toBeLessThanOrEqual(TOPUP_RUN_BUDGET_MS + CLAIM_CONFIRM_POLL_MS)
+  })
+
+  it('waitForClaims starts no batch once the cap has passed, so a slow RPC cannot hold the job', async () => {
+    let now = 0
+    let calls = 0
+    const hashes = Array.from({ length: 12 }, () => nextHash())
+    const unconfirmed = await waitForClaims(hashes, {
+      // Every read takes 20 s of the injected clock, as a hung RPC hitting its timeout would.
+      getTransactionReceipt: async () => { calls++; now += 20_000; return null },
+    }, { capAt: 10_000, nowMs: () => now, sleep: async (ms) => { now += ms } })
+    expect(unconfirmed).toBe(12)
+    expect(calls).toBe(5) // one batch, then the cap stops the rest
+  })
+
+  it('waitForClaims keeps at most 5 receipt reads in flight', async () => {
+    let inFlight = 0
+    let maxInFlight = 0
+    await waitForClaims(Array.from({ length: 12 }, () => nextHash()), {
+      getTransactionReceipt: async () => {
+        maxInFlight = Math.max(maxInFlight, ++inFlight)
+        await new Promise((r) => setTimeout(r, 1))
+        inFlight--
+        return { status: 1 } as never
+      },
+    }, { capAt: Date.now() + 60_000 })
+    expect(maxInFlight).toBe(5)
+  })
+
+  it('waitForClaims ends after its sweep bound even with a no-op sleep and the real clock', async () => {
+    let calls = 0
+    const unconfirmed = await waitForClaims([nextHash()], {
+      getTransactionReceipt: async () => { calls++; throw new Error('rpc down') },
+    }, { capAt: Date.now() + 60_000, sleep: async () => {} })
+    expect(unconfirmed).toBe(1)
+    expect(calls).toBe(Math.ceil(CLAIM_CONFIRM_CAP_MS / CLAIM_CONFIRM_POLL_MS) + 1)
+  })
+
+  it('the relayer\'s claims are never waited on', async () => {
+    const receipts: string[] = []
+    const relayerHashes = new Set<string>()
+    const low = {
+      ...provider(),
+      getBalance: async () => ethers.parseEther('0.005'),
+      getTransactionReceipt: async (h: string) => { receipts.push(h); return { status: 1 } },
+    } as unknown as ethers.Provider
+    await runBalances([], { ...FULL, ...CDP }, {
+      ...deps(), provider: low,
+      fetchImpl: merchantHealthz([MERCHANT_TOPUP_TARGET_WEI - CDP_FAUCET_CLAIM_WEI, MERCHANT_TOPUP_TARGET_WEI]).fetchImpl,
+      requestFaucet: async ({ address }) => {
+        const h = nextHash()
+        if (address !== MERCHANT) relayerHashes.add(h)
+        return { transactionHash: h }
+      },
+      sleep: async () => {},
+    })
+    expect(relayerHashes.size).toBeGreaterThan(0)
+    expect(receipts.length).toBe(1)
+    expect(receipts.filter((h) => relayerHashes.has(h))).toEqual([])
+  })
+
   it('waitForClaims never polls a malformed hash and counts it unconfirmed', async () => {
     let calls = 0
     const unconfirmed = await waitForClaims(['0x1234', nextHash()], {
       getTransactionReceipt: async () => { calls++; return { status: 1 } as never },
-    }, { capAt: 0, sleep: async () => {} })
+    }, { capAt: Date.now() + 60_000, sleep: async () => {} })
     expect(unconfirmed).toBe(1)
     expect(calls).toBe(1)
   })

@@ -57,7 +57,8 @@ export const TOPUP_DELAY_MS = 250
 /**
  * The longest the job waits for the merchant's accepted claims to be mined
  * before re-reading it (#3896), and the pause between receipt sweeps. The wait
- * also ends at the shared top-up deadline, so it never lengthens the run.
+ * also ends at the shared top-up deadline: past it, no receipt read starts and
+ * none outlives it, so the run is lengthened by at most one poll pause.
  */
 export const CLAIM_CONFIRM_CAP_MS = 60_000
 export const CLAIM_CONFIRM_POLL_MS = 3_000
@@ -295,8 +296,9 @@ export async function runTopUps(
  * Haven's own poll, deliberately NOT `provider.waitForTransaction`: in ethers
  * 6.16 that awaits `getBlockNumber()` inside an async Promise executor, so one
  * failed RPC call is an unhandled rejection that kills the job. Here every
- * receipt read is caught (an error means "not yet"), and the wait ends at
- * `capAt` or after a bounded number of sweeps, whichever comes first.
+ * receipt read is caught (an error means "not yet") and cut off at `capAt`, no
+ * batch starts once `capAt` has passed, and the wait also ends after a bounded
+ * number of sweeps. A hung RPC therefore cannot hold the job past `capAt`.
  *
  * Returns how many claims were still unconfirmed when the wait ended. A
  * malformed hash is never polled and counts as unconfirmed.
@@ -319,10 +321,18 @@ export async function waitForClaims(
     const stillPending: string[] = []
     for (let i = 0; i < pending.length; i += CLAIM_CONFIRM_CONCURRENCY) {
       const batch = pending.slice(i, i + CLAIM_CONFIRM_CONCURRENCY)
+      const left = opts.capAt - nowMs()
+      if (left <= 0) {
+        stillPending.push(...pending.slice(i))
+        break
+      }
       const mined = await Promise.all(
         batch.map(async (hash) => {
           try {
-            return (await provider.getTransactionReceipt(hash)) !== null
+            // The rejection handler is on the read itself: if the cut-off wins
+            // the race, a late failure must not become an unhandled rejection.
+            const read = provider.getTransactionReceipt(hash).then((r) => r !== null, () => false)
+            return await withDeadline(read, left, () => false)
           } catch {
             return false
           }
@@ -404,7 +414,7 @@ export async function runBalances(
   // A faucet call returns a transaction hash, not a confirmation: wait for the
   // merchant's claims to be mined before its re-read (#3896). The relayer's
   // claims are spread over minutes, and up to 300 of them; its re-read stays
-  // immediate. The wait shares the top-up deadline, so it never lengthens the run.
+  // immediate. The wait shares the top-up deadline (plus at most one poll pause).
   if (topUps.merchant.status === 'attempted' && topUps.merchant.claimsMade > 0) {
     const unconfirmed = await waitForClaims(merchantHashes, sources.provider, {
       capAt: Math.min(nowMs() + CLAIM_CONFIRM_CAP_MS, deadlineAt),

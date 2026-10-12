@@ -68,7 +68,8 @@ export function isSubCent(value: number): boolean {
  * figure under a cent renders "<$0.01" ("<0,01 kr", "<0,01 €") instead of a
  * `0.00` that states nothing was spent. Zero stays `$0.00`; everything else
  * is `formatFiat`'s output unchanged. A negative sub-cent figure keeps its
- * sign ("-<$0.01"); callers that sign by direction pass the magnitude.
+ * sign in the locale's minus glyph ("-<$0.01", "\u2212<0,01 kr"); callers
+ * that sign by direction (`Amount`) pass the magnitude.
  *
  * Deliberately NOT folded into `formatFiat`: that one also drives the
  * balance count-up (which would flash "<$0.01" while counting from 0), the
@@ -76,7 +77,13 @@ export function isSubCent(value: number): boolean {
  */
 export function formatFiatDisplay(value: number, currency: 'USD' | 'EUR' | 'SEK'): string {
   if (!isSubCent(value)) return formatFiat(value, currency)
-  return `${value < 0 ? '-' : ''}<${formatFiat(0.01, currency)}`
+  // The locale's own minus glyph (U+2212 in sv-SE, '-' in en-US and de-DE),
+  // so a negative sub-cent figure signs the same way `formatFiat` does.
+  const minus =
+    new Intl.NumberFormat(currencyLocale(currency))
+      .formatToParts(-1)
+      .find((part) => part.type === 'minusSign')?.value ?? '-'
+  return `${value < 0 ? minus : ''}<${formatFiat(0.01, currency)}`
 }
 
 /**

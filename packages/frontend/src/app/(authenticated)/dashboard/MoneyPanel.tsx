@@ -37,7 +37,7 @@ import { Amount } from '@/components/haven'
 import { BalanceFreshnessIndicator } from '@/components/haven'
 import PasskeyOtherDeviceNotice from '@/components/PasskeyOtherDeviceNotice'
 import { PageHeader } from '@haven_ai/ui/PageHeader'
-import { formatFiat, currencyLocale } from '@/lib/format'
+import { formatFiat, currencyLocale, SUB_CENT_THRESHOLD } from '@/lib/format'
 import {
   buildDashboardSummary,
   type DashboardSummaryAgent,
@@ -255,7 +255,7 @@ export default function MoneyPanel({
   const attributedValue = perAgentSpend.reduce((sum, row) => sum + row.value, 0)
   const unattributedValue =
     d30 && perAgentSpend.length > 0 ? d30.net[bucket] - attributedValue : 0
-  const showUnattributed = d30 !== null && unattributedValue > 0.005
+  const showUnattributed = d30 !== null && unattributedValue >= SUB_CENT_THRESHOLD
 
   // The split bar's segments (#3897): the named agents in series colours,
   // then everything else (other agents, agents since removed) in one
@@ -342,8 +342,11 @@ export default function MoneyPanel({
           ))}
           {otherAgentCount > 0 ? (
             <div className="flex items-baseline justify-between gap-4">
-              <dt className="min-w-0 truncate text-sm text-[var(--v2-ink-3)]">
-                {otherAgentCount} other agent{otherAgentCount === 1 ? '' : 's'}
+              <dt className="flex min-w-0 items-center gap-2 text-sm text-[var(--v2-ink-3)]">
+                <span aria-hidden="true" className="h-2 w-2 flex-shrink-0 rounded-sm bg-[var(--v2-ink-3)]" />
+                <span className="min-w-0 truncate">
+                  {otherAgentCount} other agent{otherAgentCount === 1 ? '' : 's'}
+                </span>
               </dt>
               <dd className="v2-tabular shrink-0">
                 <Amount amount={otherAgentValue} currency={currency} />
@@ -352,8 +355,9 @@ export default function MoneyPanel({
           ) : null}
           {showUnattributed ? (
             <div className="flex items-baseline justify-between gap-4">
-              <dt className="min-w-0 truncate text-sm text-[var(--v2-ink-3)]">
-                Agents since removed
+              <dt className="flex min-w-0 items-center gap-2 text-sm text-[var(--v2-ink-3)]">
+                <span aria-hidden="true" className="h-2 w-2 flex-shrink-0 rounded-sm bg-[var(--v2-ink-3)]" />
+                <span className="min-w-0 truncate">Agents since removed</span>
               </dt>
               <dd className="v2-tabular shrink-0">
                 <Amount amount={unattributedValue} currency={currency} approx={d30?.approx} />

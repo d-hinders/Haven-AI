@@ -728,6 +728,9 @@ describe('attentionEmptyState (#3902) — the achievement only on measured facts
       { agent_id: 'a1', budget_atomic: '10000000', used_atomic: 'not-a-number' },
     ])
     expect(state(makeOverview([scout], [month]), malformed).kind).toBe('quiet')
+    // BigInt('') is 0n — an empty string must not read as "nothing used".
+    const empty = budgetRemaining([{ agent_id: 'a1', budget_atomic: '10000000', used_atomic: '' }])
+    expect(state(makeOverview([scout], [month]), empty).kind).toBe('quiet')
   })
 
   it('is the neutral line after a scope refusal this week', () => {

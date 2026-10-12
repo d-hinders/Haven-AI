@@ -574,7 +574,8 @@ function runwayFact(accounts: DashboardAccount[]): 'month' | 'no-spend' | null {
 
 /** A read is known only when it is present AND parses — a malformed one is unknown (#3295). */
 function isKnownAtomic(value: string | null): boolean {
-  if (value === null) return false
+  // `BigInt('')` is `0n`: an empty string is no reading, not a zero.
+  if (value === null || value.trim() === '') return false
   try {
     BigInt(value)
     return true

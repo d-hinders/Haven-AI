@@ -179,4 +179,11 @@ describe('SetupCompleteLine (#3818)', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
     expect(onDismiss).toHaveBeenCalledTimes(1)
   })
+
+  it('sits on the full-bleed rows\' icon axis: a 6px left pad inside the card\'s 20px inset, no inset of its own (#3902)', () => {
+    const { container } = render(<SetupCompleteLine onDismiss={() => {}} />)
+    const line = container.firstElementChild as HTMLElement
+    expect(line.className).toMatch(/(^|\s)pl-1\.5(\s|$)/)
+    expect(line.className).not.toMatch(/(^|\s)px-/)
+  })
 })

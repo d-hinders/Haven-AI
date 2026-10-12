@@ -329,8 +329,8 @@ export async function waitForClaims(
       const mined = await Promise.all(
         batch.map(async (hash) => {
           try {
-            // The rejection handler is on the read itself: if the cut-off wins
-            // the race, a late failure must not become an unhandled rejection.
+            // Defensive: the race already subscribes to `read`, but a read that
+            // never rejects needs no reasoning about a late failure after the cut-off.
             const read = provider.getTransactionReceipt(hash).then((r) => r !== null, () => false)
             return await withDeadline(read, left, () => false)
           } catch {

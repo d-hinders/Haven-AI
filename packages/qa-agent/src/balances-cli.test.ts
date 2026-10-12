@@ -374,6 +374,15 @@ describe('qa:balances merchant claim confirmation (#3896)', () => {
     expect(calls).toBe(5) // one batch, then the cap stops the rest
   })
 
+  it('waitForClaims cuts off a hung receipt read at the cap', async () => {
+    const t0 = Date.now()
+    const unconfirmed = await waitForClaims([nextHash()], {
+      getTransactionReceipt: () => new Promise(() => {}),
+    } as never, { capAt: Date.now() + 100 })
+    expect(unconfirmed).toBe(1)
+    expect(Date.now() - t0).toBeLessThan(1_000)
+  }, 5_000)
+
   it('waitForClaims keeps at most 5 receipt reads in flight', async () => {
     let inFlight = 0
     let maxInFlight = 0

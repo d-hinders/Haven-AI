@@ -533,7 +533,7 @@ export function computeAttentionItems(input: DashboardAttentionInput): Attention
  *   `balance ÷ (pace7d ÷ 7)` days `> 30`). With no spend this week on any
  *   account the line says that instead of quoting a runway.
  * - **Room in budgets.** At least one agent holds a usable budget, and every
- *   such agent has a KNOWN budget read below 90% (`agentUsedPercent`, the
+ *   such agent has every budget read KNOWN, the highest below 90% (`agentUsedPercent`, the
  *   one function rule 3 and the agent badges read) and no budget or scope
  *   stop in the last 7 days.
  *
@@ -581,6 +581,11 @@ function budgetRoomFact(
   return budgeted.every((agent) => {
     const refusals = agent.stats?.d7?.refusals
     if ((refusals?.budget ?? 0) > 0 || (refusals?.scope ?? 0) > 0) return false
+    // EVERY read of the agent's budgets must be known: `agentUsedPercent`
+    // returns the highest KNOWN percent, so one known 10% beside an unknown
+    // read would otherwise claim room in a budget nobody measured.
+    const reads = (budgetRemaining?.budgets ?? []).filter((entry) => entry.agent_id === agent.id)
+    if (reads.some((entry) => entry.used_atomic === null)) return false
     const pct = agentUsedPercent(agent.id, budgetRemaining)
     return pct !== null && pct < 90
   })

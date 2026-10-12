@@ -714,6 +714,19 @@ describe('attentionEmptyState (#3902) — the achievement only on measured facts
     expect(state(makeOverview([scout], [month]), unknown).kind).toBe('quiet')
   })
 
+  it('is the neutral line when ANY of an agent\'s budget reads is unknown, even beside a known one', () => {
+    const mixed = budgetRemaining([
+      { agent_id: 'a1', budget_atomic: '10000000', used_atomic: '1000000' },
+      { agent_id: 'a1', budget_atomic: '10000000', used_atomic: null },
+    ])
+    expect(state(makeOverview([scout], [month]), mixed).kind).toBe('quiet')
+  })
+
+  it('is the neutral line after a scope refusal this week', () => {
+    const refused = { ...scout, refusalBuckets: { budget: 0, scope: 1, failed: 0, haven: 0 } }
+    expect(state(makeOverview([refused], [month]), roomy).kind).toBe('quiet')
+  })
+
   it('is the neutral line at 90% used, or after a budget stop this week', () => {
     const nearly = budgetRemaining([{ agent_id: 'a1', budget_atomic: '10000000', used_atomic: '9000000' }])
     expect(state(makeOverview([scout], [month]), nearly).kind).toBe('quiet')

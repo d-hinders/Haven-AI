@@ -99,6 +99,23 @@ describe('NeedsYou', () => {
     const list = screen.getAllByRole('listitem')[0].closest('ul')
     expect(list).toHaveAttribute('data-full-bleed')
     expect(list?.className).toContain('divide-y')
+    // The rows take the card's 20px inset (px-5) over Row's own px-4.
+    const row = screen.getByText('Scout is waiting to be set up').closest('li')?.firstElementChild
+    expect(row?.className).toMatch(/(^|\s)px-5(\s|$)/)
+  })
+
+  it('never shows an empty state beside the load-error row', () => {
+    render(
+      <NeedsYou
+        items={[]}
+        hasOverviewError
+        onRetry={() => {}}
+        onDismiss={() => {}}
+        emptyState={{ kind: 'caught-up', title: "You're all caught up", body: 'measured' }}
+      />,
+    )
+    expect(screen.getByText('Dashboard data could not load')).toBeInTheDocument()
+    expect(screen.queryByText("You're all caught up")).not.toBeInTheDocument()
   })
 
   it('shows the achievement state only when the rules layer says every fact holds', () => {

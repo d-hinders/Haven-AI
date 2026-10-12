@@ -51,8 +51,11 @@ vi.mock('@/hooks/useAccountOperationGate', () => ({
 // #3808: the rules read the budget-remaining poll for the ≥90% arm; the
 // dashboard tests here exercise the wiring, not the poll (its contract has
 // its own suite).
+// #3902: per-test state — the "still loading" hand-off to the empty state is
+// tested through the real component. Reset in beforeEach.
+const mockBudgetRemainingState: { data: unknown; loading: boolean } = { data: null, loading: false }
 vi.mock('@/hooks/useBudgetRemaining', () => ({
-  useBudgetRemaining: () => ({ data: null, loading: false, error: null, refetch: vi.fn() }),
+  useBudgetRemaining: () => ({ ...mockBudgetRemainingState, error: null, refetch: vi.fn() }),
 }))
 
 // #3813: server-saved dismissals are a hook with its own suite — here the
@@ -219,6 +222,8 @@ function mockBaseState(
 
 describe('DashboardClient', () => {
   beforeEach(() => {
+    mockBudgetRemainingState.data = null
+    mockBudgetRemainingState.loading = false
     vi.clearAllMocks()
     window.localStorage.clear()
     window.sessionStorage.clear()
@@ -597,6 +602,31 @@ describe('DashboardClient', () => {
       onboardingProgress: { hasFirstAgentPayment: true },
     })
   }
+
+  it('holds the empty card back while budget reads load, then shows the achievement once they are known (#3902)', () => {
+    // Every fact holds except that the budget read has not settled yet.
+    window.localStorage.setItem('haven-onboarding-complete-dismissed:user-1', '1')
+    mockCompletedSetup()
+    mockBudgetRemainingState.loading = true
+    const first = render(<DashboardClient />)
+    expect(screen.getByRole('heading', { level: 2, name: 'Needs attention' })).toBeInTheDocument()
+    expect(screen.queryByText("You're all caught up")).not.toBeInTheDocument()
+    expect(screen.queryByText('No items to review right now.')).not.toBeInTheDocument()
+    first.unmount()
+
+    // Positive control: the same data once the read settles at 10% used.
+    mockBudgetRemainingState.loading = false
+    mockBudgetRemainingState.data = {
+      budgets: [{
+        agent_id: 'agent-1', chain_id: 8453, delegation_hash: '0xhash', token_address: '0xtoken',
+        token_symbol: 'USDC', token_decimals: 6, budget_atomic: '10000000', used_atomic: '1000000',
+        read_at: '2026-10-09T00:00:00Z', period_end: '2026-10-16T00:00:00Z',
+        remaining_atomic: '9000000', remaining_from_chain: true, sub_budget_spend: [],
+      }],
+    }
+    render(<DashboardClient />)
+    expect(screen.getByRole('heading', { level: 3, name: "You're all caught up" })).toBeInTheDocument()
+  })
 
   it('shows one "You\'re set up" line, not the steps, once all three are done', () => {
     mockCompletedSetup()

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  agentIsSetUp,
   computeAttentionItems,
+  firstRunSetupState,
   type DashboardBudgetRemaining,
   type DashboardOverview,
 } from '../dashboard-attention'
@@ -16,7 +18,7 @@ import {
 type AgentSlice = {
   id: string
   name: string
-  status: 'active' | 'paused' | 'pending_approval'
+  status: 'active' | 'paused' | 'pending_approval' | 'revoked'
   accountId?: string | null
   accountName?: string | null
   setupStatus?: string
@@ -512,5 +514,135 @@ describe('computeAttentionItems — ordering', () => {
       'payments-failed',
       'no-backup',
     ])
+  })
+})
+
+// ── #3818: the first-run guide's facts, from the same overview the rules read ──
+describe('firstRunSetupState (#3818)', () => {
+  // #3818 review: the overview admits only active/paused/pending agents
+  // (backend SQL), but the frontend rule must hold on its own — a revoked
+  // agent that still carries a budget never completes step 2.
+  it('a revoked agent with a budget is never set up', () => {
+    const overview = makeOverview(
+      [{ id: 'r1', name: 'Gone', status: 'revoked', budgets: [{ budgetAtomic: '1' }] }],
+      [{ accountId: 'a1', funded: true }],
+    )
+    expect(agentIsSetUp(overview.agents![0] as never)).toBe(false)
+    expect(firstRunSetupState(overview).hasSetUpAgent).toBe(false)
+  })
+
+  const BUDGET = [{ id: 'b1' }]
+
+  describe('step 1 — USDC on an account, never another token, never a guessed zero', () => {
+    it('any account funded completes it (owner decision: any USDC above zero)', () => {
+      const overview = makeOverview([], [
+        { accountId: 'a1', funded: false },
+        { accountId: 'a2', funded: true },
+      ])
+      expect(firstRunSetupState(overview).usdcFunded).toBe(true)
+    })
+
+    it('false only when EVERY account is known to hold no USDC', () => {
+      expect(firstRunSetupState(makeOverview([], [{ accountId: 'a1', funded: false }])).usdcFunded).toBe(false)
+    })
+
+    it('an unavailable read with nothing funded is unknown (null), not unfunded', () => {
+      const overview = makeOverview([], [
+        { accountId: 'a1', funded: false },
+        { accountId: 'a2', funded: null },
+      ])
+      expect(firstRunSetupState(overview).usdcFunded).toBeNull()
+    })
+  })
+
+  describe('step 2 — an agent that can actually pay', () => {
+    it('a pending_approval agent does not complete it, and is named for "Finish setup"', () => {
+      const state = firstRunSetupState(
+        makeOverview([{ id: 'p1', name: 'Pending', status: 'pending_approval' }], []),
+      )
+      expect(state.hasSetUpAgent).toBe(false)
+      expect(state.pendingAgent).toEqual({ id: 'p1', name: 'Pending', moreCount: 0, awaiting: 'approval' })
+    })
+
+    it('an active agent without a usable budget does not complete it', () => {
+      const state = firstRunSetupState(makeOverview([{ id: 'x', name: 'X', status: 'active' }], []))
+      expect(state.hasSetUpAgent).toBe(false)
+      expect(state.pendingAgent?.id).toBe('x')
+    })
+
+    it('an active agent with a budget completes it; so does a paused one (set up, payments held)', () => {
+      expect(
+        firstRunSetupState(makeOverview([{ id: 'a', name: 'A', status: 'active', budgets: BUDGET }], [])).hasSetUpAgent,
+      ).toBe(true)
+      expect(
+        firstRunSetupState(makeOverview([{ id: 'p', name: 'P', status: 'paused', budgets: BUDGET }], [])).hasSetUpAgent,
+      ).toBe(true)
+    })
+
+    it('an open received sub-budget counts as a usable budget', () => {
+      const overview = makeOverview(
+        [{ id: 's', name: 'S', status: 'active', receivedSubBudgets: [{ open: true }] }],
+        [],
+      )
+      expect(firstRunSetupState(overview).hasSetUpAgent).toBe(true)
+    })
+
+    it('names the NEWEST waiting agent by GET /agents created_at, with "and N more"', () => {
+      const overview = makeOverview(
+        [
+          { id: 'old', name: 'Old', status: 'pending_approval' },
+          { id: 'new', name: 'New', status: 'pending_approval' },
+          { id: 'mid', name: 'Mid', status: 'active' },
+        ],
+        [],
+      )
+      const state = firstRunSetupState(overview, {
+        old: '2026-10-01T00:00:00Z',
+        new: '2026-10-09T00:00:00Z',
+        mid: '2026-10-05T00:00:00Z',
+      })
+      expect(state.pendingAgent).toEqual({ id: 'new', name: 'New', moreCount: 2, awaiting: 'approval' })
+    })
+
+    it('an agent missing from GET /agents is newer than that read, so it is the one named', () => {
+      const overview = makeOverview(
+        [
+          { id: 'known', name: 'Known', status: 'pending_approval' },
+          { id: 'fresh', name: 'Fresh', status: 'pending_approval' },
+        ],
+        [],
+      )
+      expect(firstRunSetupState(overview, { known: '2026-10-09T00:00:00Z' }).pendingAgent?.id).toBe('fresh')
+    })
+
+    it('an active agent without a budget is awaiting a budget, not an approval', () => {
+      const state = firstRunSetupState(makeOverview([{ id: 'x', name: 'X', status: 'active' }], []))
+      expect(state.pendingAgent?.awaiting).toBe('budget')
+    })
+
+    it('a pending agent whose setup expired or failed is not offered "Finish setup" (its row says Remove)', () => {
+      const state = firstRunSetupState(
+        makeOverview([{ id: 'f', name: 'F', status: 'pending_approval', setupStatus: 'expired' }], []),
+      )
+      expect(state.pendingAgent).toBeNull()
+      expect(state.hasSetUpAgent).toBe(false)
+    })
+  })
+
+  it('agentIsSetUp is the complement of the "Needs setup" rule for the agents that rule covers', () => {
+    const agents = [
+      { id: 'p', name: 'P', status: 'pending_approval' as const },
+      { id: 'n', name: 'N', status: 'active' as const },
+      { id: 'b', name: 'B', status: 'active' as const, budgets: BUDGET },
+    ]
+    const overview = makeOverview(agents, [])
+    const needsSetup = new Set(
+      computeAttentionItems({ overview, budgetRemaining: null })
+        .filter((item) => item.kind === 'needs-setup')
+        .map((item) => item.agentId),
+    )
+    for (const agent of overview.agents) {
+      expect(agentIsSetUp(agent), agent.id).toBe(!needsSetup.has(agent.id))
+    }
   })
 })

@@ -26,7 +26,7 @@
  * controls are focusable buttons.
  */
 
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import {
   Bot,
   CircleDollarSign,
@@ -94,6 +94,8 @@ export default function NeedsYou({
   onDismiss,
   onAddFunds,
   headingId = 'needs-you-heading',
+  title = 'Needs you',
+  guide = null,
 }: {
   items: AttentionRuleItem[]
   hasOverviewError: boolean
@@ -107,6 +109,14 @@ export default function NeedsYou({
   /** Opens the Add-funds modal pre-selected to this account. */
   onAddFunds?: (accountId: string) => void
   headingId?: string
+  /** The card's heading — "Get started" while the first-run guide is the card (#3818). */
+  title?: string
+  /**
+   * #3818: the first-run steps (or the "You're set up" line). While setup is
+   * in progress the guide IS this card: it renders first, and the rule items
+   * that still apply list below it.
+   */
+  guide?: ReactNode
 }) {
   const [expanded, setExpanded] = useState(false)
   const hiddenCount = Math.max(items.length - MAX_VISIBLE_ITEMS, 0)
@@ -132,7 +142,7 @@ export default function NeedsYou({
     <Card as="article" elevation="anchor" className="overflow-hidden v2-animate-slide-in">
       <div className="border-b border-[var(--v2-border)] px-5 py-4">
         <h2 id={headingId} tabIndex={-1} className="text-sm font-semibold text-[var(--v2-ink)]">
-          Needs you
+          {title}
         </h2>
       </div>
       <div className="px-5 py-4">
@@ -149,6 +159,8 @@ export default function NeedsYou({
             </Button>
           </div>
         ) : null}
+
+        {guide ? <div className={items.length > 0 ? 'mb-4 border-b border-[var(--v2-border)] pb-4' : ''}>{guide}</div> : null}
 
         {items.length > 0 ? (
           <>
@@ -176,7 +188,7 @@ export default function NeedsYou({
               </div>
             ) : null}
           </>
-        ) : !hasOverviewError ? (
+        ) : !hasOverviewError && !guide ? (
           <p className="text-sm text-[var(--v2-ink-2)]">
             Nothing needs your attention right now.
           </p>

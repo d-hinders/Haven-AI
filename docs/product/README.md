@@ -67,9 +67,11 @@ Use technical infrastructure terms only when they add transparency for a technic
 Brand-new users should not see the full operational dashboard until it helps
 them. A first-run state should lead with one balance or account status, one
 active setup action, and only the context needed to take that action. A compact
-setup sequence is acceptable when exactly one step has a CTA. Other steps may
-show their independently computed status but remain non-actionable until their
-prerequisites make them current.
+setup sequence is acceptable when exactly one step is highlighted and carries
+the primary action. A step that can already be done may offer a secondary-weight
+action (#3818: connecting an agent before funding stays allowed). Other steps
+show their independently computed status and stay subordinate or locked until
+their prerequisites make them current.
 
 Avoid showing competing analytics cards, empty management panels, transaction
 previews, multiple simultaneous CTAs, account/network summaries, or risk

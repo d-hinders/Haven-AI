@@ -156,6 +156,12 @@ export interface MoneyPanelProps {
    * "get funded" checklist reads as a verdict, not a summary.
    */
   showSpending?: boolean
+  /**
+   * #3818: no agent has paid yet. The spending block then says what will
+   * appear there instead of three zero tiles and a $0.00 — an empty section
+   * explains itself rather than reading as a summary of nothing.
+   */
+  noPaymentsYet?: boolean
   onDepositAddress: () => void
   onAddFunds: () => void
 }
@@ -178,6 +184,7 @@ export default function MoneyPanel({
   watchingForDeposit,
   requiresOtherDevice,
   showSpending = true,
+  noPaymentsYet = false,
   onDepositAddress,
   onAddFunds,
 }: MoneyPanelProps) {
@@ -356,7 +363,15 @@ export default function MoneyPanel({
         the total and surfaces as the "Agents since removed" row so the
         breakdown reconciles with the headline).
       */}
-      {showSpending ? (
+      {showSpending && noPaymentsYet && !loading && !unavailable ? (
+        <section className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card p-5">
+          <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Spending, last 30 days</h2>
+          <p className="mt-2 text-sm text-[var(--v2-ink-2)]">
+            After your agents&rsquo; first payment, this shows what they spent, at how many merchants,
+            and how often a budget stopped a payment.
+          </p>
+        </section>
+      ) : showSpending ? (
         <section className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card p-5">
         <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
           <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Spending, last 30 days</h2>

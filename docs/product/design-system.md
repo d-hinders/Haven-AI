@@ -907,7 +907,7 @@ Tertiary — **variant**, `variant="tertiary"`
 cancel, "not now" — the escape hatch beside a committing action, never the committing action
 itself. Live at many product call sites plus the `/design-system` showcase — among them
 `ConfirmDialog`'s cancel, `ProfileClient`'s cancel edit and the dashboard's "Hide for
-now" (in the Needs you card header — `NeedsYou`'s `titleAction` since #3897; the guide
+now" (in the Needs you card's header since #3897; the guide
 renders inside that card, and its finished state is a one-line `SetupCompleteLine` with
 its own tertiary Dismiss). (It was eight until [#1989](https://github.com/d-hinders/Haven-AI/issues/1989)
 deleted `settings/ManageApprovers`, which held three of them.):

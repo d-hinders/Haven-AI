@@ -1,7 +1,8 @@
 'use client'
 
 /**
- * The dashboard's "Needs you" card (#3808) — the wired AttentionSection.
+ * The dashboard's "Needs attention" card (#3808; "Needs you" until #3902) —
+ * the wired AttentionSection.
  *
  * The OLD panel rendered only when the overview failed to load. This one
  * renders the real conditions: `computeAttentionItems` (#3808, one
@@ -12,9 +13,20 @@
  * - The load-error row stays at the top when the overview failed, exactly as
  *   before — rail-independent, and it coexists with items from the last good
  *   data.
+ * - A neutral count badge sits BESIDE the heading (#3902), never inside the
+ *   `<h2>`, so the heading's accessible name stays exactly "Needs attention".
+ *   It counts every rule item, including those behind "Show N more", and
+ *   nothing else (not the guide, the "You're set up" line or the error row).
+ *   Neutral, not the mockup's warning tint: the card holds neutral items too.
+ * - The rows run full-bleed with dividers (#3902); the error row, the guide
+ *   and "Show N more" keep their own inset.
  * - More than four items collapse behind a "Show N more" button whose
  *   accessible name states the count.
- * - With no items and no error, one quiet line says nothing needs attention.
+ * - With no items the card says only what was measured (#3902):
+ *   `attentionEmptyState` in the rules layer decides between the
+ *   "You're all caught up" achievement, whose reason line is backed by
+ *   measured facts, a neutral line that claims nothing, and — while the
+ *   budget reads load — nothing at all.
  * - Dismissal is handed back to the caller (`onDismiss`) — #3813 owns
  *   persistence: "No backup signer" (per account) and "Needs setup" (per
  *   agent) write server-saved dismissals; everything else stays
@@ -29,6 +41,7 @@
 import { useState, type ReactNode } from 'react'
 import {
   Bot,
+  Check,
   CircleDollarSign,
   Coins,
   Gauge,
@@ -39,9 +52,14 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { EmptyState, StatusBadge } from '@haven_ai/ui'
 import { AttentionList } from '@/components/haven/AttentionList'
 import type { AttentionListItem } from '@/components/haven/AttentionList'
-import { DISMISSIBLE_ATTENTION_KINDS, type AttentionRuleItem } from '@/lib/dashboard-attention'
+import {
+  DISMISSIBLE_ATTENTION_KINDS,
+  type AttentionEmptyState,
+  type AttentionRuleItem,
+} from '@/lib/dashboard-attention'
 
 /** Items shown before the "Show N more" collapse. */
 const MAX_VISIBLE_ITEMS = 4
@@ -93,10 +111,12 @@ export default function NeedsYou({
   onRetry,
   onDismiss,
   onAddFunds,
-  headingId = 'needs-you-heading',
-  title = 'Needs you',
+  headingId = 'needs-attention-heading',
+  title = 'Needs attention',
   titleMeta = null,
   titleAction = null,
+  showCount = true,
+  emptyState = null,
   guide = null,
 }: {
   items: AttentionRuleItem[]
@@ -121,6 +141,16 @@ export default function NeedsYou({
   /** #3897: muted text beside the heading — the guide's "N of 3 done". */
   titleMeta?: ReactNode
   /**
+   * #3902: the count badge beside the heading. Off while the card is "Get
+   * started" — its header already says "N of 3 done".
+   */
+  showCount?: boolean
+  /**
+   * #3902: what the card says with no items, from `attentionEmptyState`.
+   * `null` (no overview yet) renders nothing, the same as `pending`.
+   */
+  emptyState?: AttentionEmptyState | null
+  /**
    * #3818: the first-run steps (or the "You're set up" line). While setup is
    * in progress the guide IS this card: it renders first, and the rule items
    * that still apply list below it.
@@ -144,69 +174,85 @@ export default function NeedsYou({
     dismissible: DISMISSIBLE_ATTENTION_KINDS.has(item.kind),
   }))
 
+  const count = items.length
+  const showEmpty = count === 0 && !hasOverviewError && !guide
+
   return (
-    // Anchor elevation — the "Needs you" panel is the second-most important
-    // surface on the dashboard after the balance hero (carried over from the
-    // error-only AttentionSection this card replaces).
+    // Anchor elevation — the "Needs attention" panel is the second-most
+    // important surface on the dashboard after the balance hero (carried over
+    // from the error-only AttentionSection this card replaces).
     <Card as="article" elevation="anchor" className="overflow-hidden v2-animate-slide-in">
       <div className="flex min-h-[3.25rem] items-center justify-between gap-3 border-b border-[var(--v2-border)] px-5 py-2.5">
-        <div className="flex min-w-0 items-baseline gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <h2 id={headingId} tabIndex={-1} className="text-sm font-semibold text-[var(--v2-ink)]">
             {title}
           </h2>
+          {showCount && count > 0 ? (
+            <StatusBadge tone="neutral" className="v2-tabular">
+              {count}
+              <span className="sr-only">{count === 1 ? ' item' : ' items'}</span>
+            </StatusBadge>
+          ) : null}
           {titleMeta}
         </div>
         {titleAction}
       </div>
-      <div className="px-5 py-4">
-        {hasOverviewError ? (
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-medium text-[var(--v2-danger)]">Dashboard data could not load</p>
-              <p className="mt-1 text-sm text-[var(--v2-ink-2)]">
-                Haven could not refresh balances, agents, and activity.
-              </p>
-            </div>
-            <Button variant="ghost" size="sm" onClick={onRetry}>
-              Try again
-            </Button>
+
+      {hasOverviewError ? (
+        <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-medium text-[var(--v2-danger)]">Dashboard data could not load</p>
+            <p className="mt-1 text-sm text-[var(--v2-ink-2)]">
+              Haven could not refresh balances, agents, and activity.
+            </p>
           </div>
-        ) : null}
+          <Button variant="ghost" size="sm" onClick={onRetry}>
+            Try again
+          </Button>
+        </div>
+      ) : null}
 
-        {guide ? <div className={items.length > 0 ? 'mb-4 border-b border-[var(--v2-border)] pb-4' : ''}>{guide}</div> : null}
+      {guide ? <div className="px-5 py-4">{guide}</div> : null}
 
-        {items.length > 0 ? (
-          <>
-            <AttentionList
-              items={listItems}
-              headingId={headingId}
-              onDismiss={(id) => {
-                const item = items.find((candidate) => candidate.id === id)
-                if (item) onDismiss(item)
-              }}
-            />
-            {hiddenCount > 0 && !expanded ? (
-              <div className="mt-3">
-                {/* The accessible name states the count — "Show 3 more" says
-                    what the button reveals without sight of the list. */}
-                <Button
-                  variant="tertiary"
-                  size="sm"
-                  aria-label={`Show ${hiddenCount} more items`}
-                  aria-expanded={expanded}
-                  onClick={() => setExpanded(true)}
-                >
-                  Show {hiddenCount} more
-                </Button>
-              </div>
-            ) : null}
-          </>
-        ) : !hasOverviewError && !guide ? (
-          <p className="text-sm text-[var(--v2-ink-2)]">
-            Nothing needs your attention right now.
-          </p>
-        ) : null}
-      </div>
+      {count > 0 ? (
+        <div className={hasOverviewError || guide ? 'border-t border-[var(--v2-border)]' : ''}>
+          <AttentionList
+            items={listItems}
+            headingId={headingId}
+            fullBleed
+            onDismiss={(id) => {
+              const item = items.find((candidate) => candidate.id === id)
+              if (item) onDismiss(item)
+            }}
+          />
+          {hiddenCount > 0 && !expanded ? (
+            <div className="border-t border-[var(--v2-border)] px-5 py-3">
+              {/* The accessible name states the count — "Show 3 more" says
+                  what the button reveals without sight of the list. */}
+              <Button
+                variant="tertiary"
+                size="sm"
+                aria-label={`Show ${hiddenCount} more items`}
+                aria-expanded={expanded}
+                onClick={() => setExpanded(true)}
+              >
+                Show {hiddenCount} more
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      ) : showEmpty && emptyState?.kind === 'caught-up' ? (
+        <div className="px-5 py-4">
+          <EmptyState
+            tone="success"
+            icon={<Check className="h-5 w-5" aria-hidden="true" />}
+            title={emptyState.title}
+            body={emptyState.body}
+          />
+        </div>
+      ) : showEmpty && emptyState?.kind === 'quiet' ? (
+        <p className="px-5 py-4 text-sm text-[var(--v2-ink-2)]">{emptyState.body}</p>
+      ) : null}
     </Card>
   )
 }

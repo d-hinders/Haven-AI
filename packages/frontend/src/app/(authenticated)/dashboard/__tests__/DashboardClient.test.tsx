@@ -318,7 +318,8 @@ describe('DashboardClient', () => {
     // templated 7-day summary and the 30-day spending block in their place.
     expect(screen.getByRole('button', { name: 'Deposit address' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add funds' })).toBeInTheDocument()
-    expect(screen.getByText('Spending, last 30 days')).toBeInTheDocument()
+    // #3902 (changed on purpose): the mockup's muted label, still the heading.
+    expect(screen.getByRole('heading', { level: 2, name: 'Agent spending, last 30 days' })).toBeInTheDocument()
     expect(screen.getByText('Payments')).toBeInTheDocument()
     expect(screen.getByText('Merchants')).toBeInTheDocument()
     expect(screen.getByText('Stopped by budget')).toBeInTheDocument()
@@ -340,15 +341,15 @@ describe('DashboardClient', () => {
     )
   })
 
-  it('renders "Needs you" below the money card at full width, never in a side column (#3897)', () => {
+  it('renders "Needs attention" below the money card at full width, never in a side column (#3897, #3902)', () => {
     mockBaseState([], { onboardingProgress: { hasFirstAgentPayment: true } })
     const { container } = render(<DashboardClient />)
 
     const balance = screen.getByRole('region', { name: 'Balance' })
     const needsYou = screen.getByRole('article')
-    // DOM order: the money card, then "Needs you", then the agents/activity grid.
+    // DOM order: the money card, then "Needs attention", then the agents/activity grid.
     expect(balance.compareDocumentPosition(needsYou) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    // The old hero-plus-aside row is gone, and "Needs you" sits in the page's
+    // The old hero-plus-aside row is gone, and "Needs attention" sits in the page's
     // single column — its parent lays children out vertically, not in a grid.
     expect(container.innerHTML).not.toContain('minmax(320px,0.42fr)')
     expect(needsYou.parentElement?.className).toContain('space-y-6')
@@ -619,7 +620,7 @@ describe('DashboardClient', () => {
     // shape): the gate, not a missing card, keeps the guide out.
     mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, funded: false, usdcBalanceAtomic: '0' }], onboardingProgress: undefined })
     render(<DashboardClient />)
-    expect(screen.getByRole('heading', { name: 'Needs you' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Needs attention' })).toBeInTheDocument()
     expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
   })
 
@@ -741,6 +742,38 @@ describe('DashboardClient', () => {
     const spending = screen.getByRole('region', { name: 'Spending' })
     expect(within(spending).getByText(/After your agents’ first payment/)).toBeInTheDocument()
     expect(within(spending).queryByText('Payments')).not.toBeInTheDocument()
+  })
+
+  it('shows exactly one primary "Add funds" while step 1 is the active step: the money card\'s steps back (#3902)', () => {
+    mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: '0', funded: false }] })
+    render(<DashboardClient />)
+    expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
+    // Step 1's own "Add funds" is the guide's primary (DashboardOnboardingGuide.test);
+    // the money card's renders ghost beside it.
+    const balance = screen.getByRole('region', { name: 'Balance' })
+    const addFunds = within(balance).getByRole('button', { name: 'Add funds' })
+    expect(addFunds.className).not.toContain('bg-[var(--v2-brand)]')
+    expect(addFunds.className).toContain('border-[var(--v2-border-strong)]')
+  })
+
+  it('makes the money card\'s "Add funds" primary again once step 1 is done or the guide is hidden (#3902)', () => {
+    // Funded: step 1 is done, so the guide (still showing) no longer asks for funds.
+    mockBaseState([], { accounts: [FUNDED_ACCOUNT] })
+    const funded = render(<DashboardClient />)
+    expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
+    expect(
+      within(screen.getByRole('region', { name: 'Balance' })).getByRole('button', { name: 'Add funds' }).className,
+    ).toContain('bg-[var(--v2-brand)]')
+    funded.unmount()
+
+    // Unfunded but the guide hidden: the money card's button is the only one.
+    window.localStorage.setItem('haven-setup-guide-hidden:user-1', '0')
+    mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: '0', funded: false }] })
+    render(<DashboardClient />)
+    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+    expect(
+      within(screen.getByRole('region', { name: 'Balance' })).getByRole('button', { name: 'Add funds' }).className,
+    ).toContain('bg-[var(--v2-brand)]')
   })
 
   it('puts "Hide for now" and the progress in the card header, beside "Get started" (#3897)', () => {

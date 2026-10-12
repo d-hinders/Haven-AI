@@ -161,7 +161,15 @@ export type AreaChartProps = FullChartProps | SparklineProps
 
 /** The sparkline's default height, and its viewBox width (see `pct`). */
 const SPARKLINE_HEIGHT = 40
-const SPARKLINE_VIEW_W = 640
+export const SPARKLINE_VIEW_W = 640
+/**
+ * The sparkline plot's inset from the viewBox edge, on every side (#3902). The
+ * end dot is `DOT_R` plus half its 1-unit stroke, and the 2-unit line adds a
+ * half-width of its own, so the plot keeps `DOT_R + 1.5` clear of every edge:
+ * a last value of 0 (bottom) or the maximum (top), and the last day's x, all
+ * draw whole instead of being clipped by the svg.
+ */
+export const SPARKLINE_INSET = DOT_R + 1.5
 
 export function AreaChart(props: AreaChartProps) {
   if (props.variant === 'sparkline') {
@@ -172,7 +180,8 @@ export function AreaChart(props: AreaChartProps) {
 }
 
 /**
- * The sparkline variant (#3805): the balance line alone — no gridlines, ticks,
+ * The sparkline variant (#3805): the balance line and a faint fill beneath it
+ * (#3902) — no gridlines, ticks,
  * x labels, delta annotation, tooltip or caret; one dot on the last point.
  * `role="img"` with the required `ariaLabel`, NOT a tab stop, and no hidden
  * data table — a glanceable shape, whose data access is the summary sentence.
@@ -214,9 +223,14 @@ function Sparkline({
   const scale = chartScaleRange(Math.max(0, min - pad), max + pad)
   const floor = scale.min
   const span = scale.max - floor
+  const plotW = SPARKLINE_VIEW_W - 2 * SPARKLINE_INSET
+  const plotH = Math.max(height - 2 * SPARKLINE_INSET, 0)
   const xOf = (index: number) =>
-    points.length <= 1 ? SPARKLINE_VIEW_W / 2 : (SPARKLINE_VIEW_W * index) / (points.length - 1)
-  const yOf = (value: number) => (span <= 0 ? height / 2 : height - ((value - floor) / span) * height)
+    points.length <= 1
+      ? SPARKLINE_VIEW_W / 2
+      : SPARKLINE_INSET + (plotW * index) / (points.length - 1)
+  const yOf = (value: number) =>
+    span <= 0 ? height / 2 : height - SPARKLINE_INSET - ((value - floor) / span) * plotH
 
   // One line through every measured day (#3897). A missing day is skipped,
   // never zero; the line connects across it, and each point keeps its true
@@ -225,12 +239,21 @@ function Sparkline({
   // short dashes and a lone measured day as nothing at all.)
   const commands: string[] = []
   let lastIndex = -1
+  let firstIndex = -1
   points.forEach((p, i) => {
     if (p.value === null || !Number.isFinite(p.value)) return
+    if (firstIndex < 0) firstIndex = i
     lastIndex = i
     commands.push(`${commands.length === 0 ? 'M' : 'L'}${xOf(i).toFixed(2)} ${yOf(p.value).toFixed(2)}`)
   })
   const linePath = commands.length > 1 ? commands.join(' ') : null
+  // The area under the line (#3902): its top edge IS the line's own commands,
+  // so a missing day is skipped exactly as the line skips it and never drops
+  // to the baseline; only the two closing corners sit on the viewBox floor.
+  const areaPath =
+    linePath === null || firstIndex < 0
+      ? null
+      : `M${xOf(firstIndex).toFixed(2)} ${height} L${linePath.slice(1)} L${xOf(lastIndex).toFixed(2)} ${height} Z`
 
   return (
     <div data-testid="area-chart-sparkline" className={`w-full ${className}`.trim()}>
@@ -253,8 +276,18 @@ function Sparkline({
           />
         ) : (
           <>
+            {areaPath !== null && (
+              <path
+                data-sparkline-area=""
+                d={areaPath}
+                fill={LINE_COLOR}
+                fillOpacity={AREA_OPACITY}
+                stroke="none"
+              />
+            )}
             {linePath !== null && (
               <path
+                data-sparkline-line=""
                 d={linePath}
                 fill="none"
                 stroke={LINE_COLOR}

@@ -11,7 +11,7 @@
  * states is never contradicted by its own rows.
  */
 
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import MoneyPanel from '../MoneyPanel'
@@ -176,5 +176,94 @@ describe('MoneyPanel — spending breakdown reconciles with the headline (#3807 
     )
 
     expect(screen.queryByText('Agents since removed')).not.toBeInTheDocument()
+  })
+})
+
+describe('MoneyPanel — spending half to the mockup (#3902)', () => {
+  const twoAgents = () =>
+    overview({
+      d30NetUsd: 34.97,
+      agents: [agent('a1', 'Research agent', 17.485), agent('a2', 'Data-feed agent', 17.485)],
+    })
+
+  const follows = (a: Element, b: Element) =>
+    Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
+
+  it('labels the half "Agent spending, last 30 days" and keeps it the section heading', () => {
+    render(<MoneyPanel {...baseProps} overview={twoAgents()} />)
+
+    const heading = screen.getByRole('heading', { name: 'Agent spending, last 30 days' })
+    expect(heading.textContent).toBe('Agent spending, last 30 days')
+    expect(heading.closest('section')).toHaveAttribute('aria-label', 'Spending')
+    expect(heading).toHaveClass('text-[var(--v2-ink-2)]')
+  })
+
+  it('orders label, total, split bar, then the counts', () => {
+    render(<MoneyPanel {...baseProps} overview={twoAgents()} />)
+
+    const label = screen.getByRole('heading', { name: 'Agent spending, last 30 days' })
+    const total = within(screen.getByRole('region', { name: 'Spending' })).getByText('$34.97', {
+      selector: 'span.text-2xl',
+    })
+    const bar = screen.getByTestId('spending-split-bar')
+    const counts = screen.getByTestId('spending-counts')
+
+    expect(follows(label, total)).toBe(true)
+    expect(follows(total, bar)).toBe(true)
+    expect(follows(bar, counts)).toBe(true)
+    // Left-aligned below the label: no justify-between row pushing it right.
+    expect(total.closest('.justify-between')).toBeNull()
+  })
+
+  it('puts Payments, Merchants and Stopped by budget below a hairline divider', () => {
+    render(<MoneyPanel {...baseProps} overview={twoAgents()} />)
+
+    const counts = screen.getByTestId('spending-counts')
+    expect(counts).toHaveClass('border-t', 'border-[var(--v2-border)]')
+    for (const name of ['Payments', 'Merchants', 'Stopped by budget']) {
+      expect(within(counts).getByText(name)).toBeInTheDocument()
+    }
+  })
+
+  it('shows the muted "Agent spending" label before the first payment', () => {
+    render(<MoneyPanel {...baseProps} noPaymentsYet overview={overview({ d30NetUsd: 0, agents: [] })} />)
+
+    const heading = screen.getByRole('heading', { name: 'Agent spending' })
+    expect(heading.textContent).toBe('Agent spending')
+    expect(heading).toHaveClass('text-[var(--v2-ink-2)]')
+    expect(screen.getByText(/After your agents/)).toBeInTheDocument()
+    expect(screen.queryByTestId('spending-counts')).not.toBeInTheDocument()
+  })
+})
+
+describe('MoneyPanel — exactly one primary "Add funds" (#3902)', () => {
+  const addFunds = () => screen.getByRole('button', { name: 'Add funds' })
+
+  it('renders "Add funds" primary by default', () => {
+    render(<MoneyPanel {...baseProps} overview={null} />)
+
+    expect(addFunds()).toHaveClass('bg-[var(--v2-brand)]')
+    expect(addFunds()).not.toHaveClass('border-[var(--v2-border-strong)]')
+  })
+
+  it('renders "Add funds" primary when addFundsSecondary is false', () => {
+    render(<MoneyPanel {...baseProps} addFundsSecondary={false} overview={null} />)
+
+    expect(addFunds()).toHaveClass('bg-[var(--v2-brand)]')
+  })
+
+  it('steps "Add funds" down to ghost when addFundsSecondary is true', () => {
+    render(<MoneyPanel {...baseProps} addFundsSecondary overview={null} />)
+
+    expect(addFunds()).toHaveClass('border-[var(--v2-border-strong)]')
+    expect(addFunds()).not.toHaveClass('bg-[var(--v2-brand)]')
+  })
+
+  it('keeps "Deposit address" ghost either way', () => {
+    const { rerender } = render(<MoneyPanel {...baseProps} overview={null} />)
+    const deposit = () => screen.getByRole('button', { name: 'Deposit address' })
+    expect(deposit()).toHaveClass('border-[var(--v2-border-strong)]')
+    rerender(<MoneyPanel {...baseProps} addFundsSecondary overview={null} />)
+    expect(deposit()).toHaveClass('border-[var(--v2-border-strong)]')
   })
 })

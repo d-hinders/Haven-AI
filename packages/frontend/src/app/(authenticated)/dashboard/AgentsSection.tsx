@@ -8,7 +8,7 @@
  * green "Connected" badge every row wore is gone — a badge appears ONLY when
  * something is off: "Needs setup" (the shared rules' needs-setup items,
  * `lib/dashboard-attention.ts`), "Paused", or "N% used" (#3808's ≥90% arm —
- * read through the SAME `agentUsedPercent` the "Needs you" item fires on, so
+ * read through the SAME `agentUsedPercent` the "Needs attention" item fires on, so
  * the badge and the item cannot disagree).
  *
  * Each row's meter is `BudgetMeter` captioned through `lib/budget-caption.ts`
@@ -127,7 +127,7 @@ export function applyStableGroupOrder(
 /**
  * The row's badge — only when something is off, and the same three states the
  * section docblock names. The ≥90% badge reads the shared `agentUsedPercent`,
- * the exact function rule 3's arm fires on, so this badge and the "Needs you"
+ * the exact function rule 3's arm fires on, so this badge and the "Needs attention"
  * item cannot disagree.
  */
 export function agentBadge(
@@ -273,7 +273,7 @@ export interface AgentsSectionProps {
    * order cannot depend on poll timing (#3871).
    */
   budgetRemainingReady: boolean
-  /** The shared "Needs you" items (`lib/dashboard-attention.ts`) — the needs-setup badges' source. */
+  /** The shared "Needs attention" items (`lib/dashboard-attention.ts`) — the needs-setup badges' source. */
   attentionItems: AttentionRuleItem[]
   currency: DashboardCurrency
   /** accountId → display name, the same map the attention rules receive. */

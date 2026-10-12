@@ -37,7 +37,7 @@
  *
  * The title and the subtitle each clamp to two lines instead of `Row`'s
  * single-line truncate — an attention item cut to one line is an item that
- * cannot be judged, and that holds in the narrow desktop Needs-you panel as
+ * cannot be judged, and that holds in the narrow desktop Needs attention panel as
  * much as at 390px (#3876, owner decision 2026-10-10: a clamp, not a hover
  * `title`, so touch and keyboard users read it too). Never undo the clamp
  * with `line-clamp-none`: it sets `overflow: visible`, which defeats the
@@ -66,6 +66,16 @@
  * one-glyph column with the title and subtitle ellipsized to nothing. With
  * the minimum in place the row's `flex-wrap` drops the trailing below the
  * body instead — the same place it already sits below `sm`.
+ *
+ * ── Full-bleed (#3902) ────────────────────────────────────────────────────
+ *
+ * `fullBleed` is for a list that IS the card body: rows run edge to edge
+ * with hairline dividers between them and the card's own 20px side inset
+ * (`px-5`), as the dashboard's "Needs attention" card draws them. Only the
+ * horizontal padding changes — `ROW_TOP` still owns the top, so the
+ * first-line alignment above holds. The `/design-system` showcase renders the
+ * same prop, so `e2e/attention-list-title-measure.spec.ts` measures the shape
+ * the dashboard uses. Without it the list keeps its inset, spaced rows.
  *
  * Zero items renders nothing — the caller shows the empty state. Items
  * render in the order given.
@@ -111,7 +121,7 @@ export interface AttentionListItem {
  * (`pt-1.5` overrides Row's `py-3` top) and the title takes it back as a
  * margin (`mt-1.5`), so the text sits exactly where it did — for any item
  * with a subtitle, i.e. a body at least as tall as the 32px icon. Every
- * Needs-you kind has one; a title-only item would sit 3px high in a 6px
+ * Needs attention kind has one; a title-only item would sit 3px high in a 6px
  * shorter row, and would need the body pinned too. The icon and,
  * beside the body, the trailing controls then align to the top of the row
  * — 6px above the first line, which is half of 32px minus half of the 20px
@@ -126,6 +136,9 @@ const TITLE_TOP = 'mt-1.5'
 /** Two lines, then an ellipsis — see the clamp rule above. */
 const CLAMP = 'whitespace-normal line-clamp-2'
 
+/** Full-bleed rows take the card's 20px side inset instead of `Row`'s 16px. */
+const FULL_BLEED_ROW = 'px-5'
+
 /** The `sr-only` tone words, for items without a badge label. */
 const TONE_TEXT: Record<AttentionTone, string> = {
   neutral: 'Informational',
@@ -138,6 +151,7 @@ export function AttentionList({
   items,
   onDismiss,
   headingId,
+  fullBleed = false,
   className = '',
 }: {
   items: AttentionListItem[]
@@ -147,6 +161,8 @@ export function AttentionList({
    * focus moves there — the caller owns the heading and the empty state.
    */
   headingId?: string
+  /** Edge-to-edge rows with dividers, for a list that is the card's body (#3902). */
+  fullBleed?: boolean
   className?: string
 }) {
   const listRef = useRef<HTMLUListElement | null>(null)
@@ -174,7 +190,11 @@ export function AttentionList({
   }
 
   return (
-    <ul ref={listRef} className={`space-y-1 ${className}`.trim()}>
+    <ul
+      ref={listRef}
+      data-full-bleed={fullBleed ? '' : undefined}
+      className={`${fullBleed ? 'divide-y divide-[var(--v2-border)]' : 'space-y-1'} ${className}`.trim()}
+    >
       {items.map((item, index) => (
         <li key={item.id}>
           <Row
@@ -187,7 +207,7 @@ export function AttentionList({
             subtitleClassName={CLAMP}
             bodyClassName="min-w-[10rem]"
             trailingClassName="w-full basis-full self-start sm:w-auto sm:basis-auto"
-            className={`flex-wrap ${ROW_TOP}`}
+            className={`flex-wrap ${ROW_TOP}${fullBleed ? ` ${FULL_BLEED_ROW}` : ''}`}
             trailing={
               <div className="flex items-center justify-end gap-2">
                 {item.badge !== undefined ? (

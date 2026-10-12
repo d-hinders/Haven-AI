@@ -838,7 +838,7 @@ export async function mockHavenApi(page: Page) {
 
     // #3813: `DashboardClient` mounts `useAttentionDismissals`, which reads
     // `GET /user/attention-dismissals` on every dashboard render. The e2e
-    // default session holds no dismissals, so every "Needs you" item renders
+    // default session holds no dismissals, so every "Needs attention" item renders
     // exactly as the baselines captured it; specs that need a dismissed
     // item seed this route explicitly. The write is accepted and echoed in
     // the stored shape (never re-read in the same fixture run).

@@ -55,7 +55,7 @@ interface Props {
   /**
    * An agent that can actually pay: active or paused, holding a usable budget
    * (`agentIsSetUp` in `lib/dashboard-attention.ts`, the one definition shared
-   * with the "Needs you" rules). A `pending_approval` or revoked agent never
+   * with the "Needs attention" rules). A `pending_approval` or revoked agent never
    * completes step 2.
    */
   hasSetUpAgent: boolean
@@ -77,7 +77,7 @@ interface Props {
 }
 
 /**
- * The first-run steps (#3818). Rendered INSIDE the "Needs you" card while
+ * The first-run steps (#3818). Rendered INSIDE the "Needs attention" card while
  * setup is in progress (the guide is that card), so it draws no card of its
  * own; `NeedsYou` lists the rule items that still apply below it. The
  * finished state is `SetupCompleteLine`, not a branch of this component.
@@ -182,7 +182,7 @@ export default function DashboardOnboardingGuide({
 /**
  * The finished state (#3818): one line, not a banner. It shows from the first
  * agent payment on, whatever happens after (USDC spent, a budget expiring) —
- * so it claims only that fact; the Needs you rules below it speak for now.
+ * so it claims only that fact; the Needs attention rules below it speak for now.
  * Dismissal is the caller's (`haven-onboarding-complete-dismissed:<userId>`,
  * read as before so an owner who dismissed the old banner does not see this
  * again).

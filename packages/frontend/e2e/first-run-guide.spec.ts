@@ -1,7 +1,7 @@
 /**
  * #3818: the first-run guide, walked from an unfunded account to an approved
  * budget against the real dashboard (mocked API, the shared fixtures). The
- * guide IS the Needs you card while setup is in progress — titled
+ * guide IS the Needs attention card while setup is in progress — titled
  * "Get started" — and becomes one "You're set up" line when it is done.
  *
  * Each stage swaps the overview (`support/first-run-states.ts`) and reloads,
@@ -14,7 +14,7 @@ import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
 import { serveFirstRunOverview, type FirstRunState } from './support/first-run-states'
 
 function card(page: Page) {
-  return page.getByRole('article').filter({ has: page.getByRole('heading', { name: /^(Get started|Needs you)$/ }) })
+  return page.getByRole('article').filter({ has: page.getByRole('heading', { name: /^(Get started|Needs attention)$/ }) })
 }
 
 test.describe('first-run guide (#3818)', () => {
@@ -70,7 +70,7 @@ test.describe('first-run guide (#3818)', () => {
     // ── 5. The first payment made: one line ───────────────────────────────
     state = 'set-up'
     await page.reload()
-    await expect(card(page).getByRole('heading', { name: 'Needs you' })).toBeVisible()
+    await expect(card(page).getByRole('heading', { name: 'Needs attention' })).toBeVisible()
     await expect(card(page).getByText(/You’re set up/)).toBeVisible()
     await expect(page.getByRole('list', { name: 'Your first 3 steps' })).toHaveCount(0)
   })
@@ -81,7 +81,7 @@ test.describe('first-run guide (#3818)', () => {
     await guide.getByRole('button', { name: 'Hide for now' }).click()
     await expect(page.getByRole('list', { name: 'Your first 3 steps' })).toHaveCount(0)
     await page.reload()
-    await expect(card(page).getByRole('heading', { name: 'Needs you' })).toBeVisible()
+    await expect(card(page).getByRole('heading', { name: 'Needs attention' })).toBeVisible()
     await expect(page.getByRole('list', { name: 'Your first 3 steps' })).toHaveCount(0)
 
     state = 'funded'

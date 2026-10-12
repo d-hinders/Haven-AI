@@ -75,6 +75,9 @@ describe('DashboardOnboardingGuide — step 1 (#2534, #3818)', () => {
     expect(document.body.textContent).toContain('We suggest 5 USDC')
     expect(document.body.textContent).toContain('Haven pays the network fees')
     expect(document.body.textContent).not.toContain('Even $5')
+    // #3902: step 1's "Add funds" is THE primary while it is the active step
+    // (the money card's steps back to ghost beside it).
+    expect(screen.getByRole('button', { name: 'Add funds' })).toHaveAttribute('data-variant', 'primary')
     await userEvent.click(screen.getByRole('button', { name: 'Add funds' }))
     expect(props.onAddFunds).toHaveBeenCalledTimes(1)
   })

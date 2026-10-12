@@ -74,8 +74,6 @@ interface Props {
   onAddFunds: () => void
   onAddAgent: () => void
   onShowAgentUsage: () => void
-  /** "Hide for now" — the caller persists it per user until a step completes. */
-  onHide: () => void
 }
 
 /**
@@ -93,7 +91,6 @@ export default function DashboardOnboardingGuide({
   onAddFunds,
   onAddAgent,
   onShowAgentUsage,
-  onHide,
 }: Props) {
   // Per instance: the /design-system page renders several guides at once.
   const labelId = useId()
@@ -166,18 +163,14 @@ export default function DashboardOnboardingGuide({
 
   return (
     <div className="v2-animate-fade-in">
-      {/* #3897: the card's heading already says "Get started" — the list's
+      {/* #3897: the card's heading already says "Get started", and "Hide
+          for now" sits in that header (NeedsYou's `titleAction`). The list's
           own label is for assistive tech only, so the card is labelled once. */}
-      <div className="flex items-center justify-end gap-3">
-        <p id={labelId} className="sr-only">
-          Your first 3 steps
-        </p>
-        <Button variant="tertiary" size="sm" onClick={onHide}>
-          Hide for now
-        </Button>
-      </div>
+      <p id={labelId} className="sr-only">
+        Your first 3 steps
+      </p>
 
-      <ol className="mt-3 space-y-2" aria-labelledby={labelId}>
+      <ol className="space-y-2" aria-labelledby={labelId}>
         <ChecklistRow {...step1} />
         <ChecklistRow {...step2} />
         <ChecklistRow {...step3} />

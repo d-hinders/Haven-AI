@@ -158,10 +158,10 @@ export interface MoneyPanelProps {
   watchingForDeposit: boolean
   requiresOtherDevice: boolean
   /**
-   * False in the focused first-run view (an unfunded account's hero +
-   * checklist only, #3807's shape for the old hero-only render): the
-   * spending block is a funded user's surface, and a week of zeros under a
-   * "get funded" checklist reads as a verdict, not a summary.
+   * False hides the spending half. The dashboard always shows it since
+   * #3897 — before the first payment it explains itself (`noPaymentsYet`),
+   * as the mockup's new-user card does — so only the component's own tests
+   * pass false.
    */
   showSpending?: boolean
   /**
@@ -368,7 +368,7 @@ export default function MoneyPanel({
         </>
       ) : null}
 
-      <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3 lg:mt-auto lg:pt-5">
+      <div className="mt-5 grid grid-cols-3 gap-4 lg:mt-auto lg:pt-5">
         <StatTile
           variant="inline"
           label="Payments"

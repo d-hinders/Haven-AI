@@ -64,7 +64,6 @@ function renderGuide(overrides: Partial<Parameters<typeof DashboardOnboardingGui
     onAddFunds: vi.fn(),
     onAddAgent: vi.fn(),
     onShowAgentUsage: vi.fn(),
-    onHide: vi.fn(),
     ...overrides,
   }
   return { ...render(<DashboardOnboardingGuide {...props} />), props }
@@ -161,10 +160,11 @@ describe('DashboardOnboardingGuide — step 2 and 3 (#3818)', () => {
     expect(screen.queryByRole('button', { name: 'Show me how' })).not.toBeInTheDocument()
   })
 
-  it('Hide for now calls the caller, which owns persistence', async () => {
-    const { props } = renderGuide()
-    await userEvent.click(screen.getByRole('button', { name: 'Hide for now' }))
-    expect(props.onHide).toHaveBeenCalledTimes(1)
+  it('draws no "Hide for now" of its own — the card header carries it (#3897)', () => {
+    renderGuide()
+    expect(screen.queryByRole('button', { name: 'Hide for now' })).not.toBeInTheDocument()
+    // The list keeps its accessible name, once.
+    expect(screen.getByRole('list', { name: 'Your first 3 steps' })).toBeInTheDocument()
   })
 })
 

@@ -98,7 +98,7 @@ covers:
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
-last-verified: "2026-10-06"
+last-verified: "2026-10-12"
 ---
 
 # Haven Design System
@@ -329,7 +329,7 @@ nothing" verdict is a measurement rather than a broken reader.
 Cards on hover get a brand‑tinted lift only when interactive:
 `hover:shadow-[0_8px_24px_-12px_rgba(16,24,40,0.12)]` (neutral) or `hover:shadow-[0_12px_32px_-16px_rgba(79,70,229,0.30)]` (protocol cards, navigational). These are literal values rather than tokens, so they were never affected — an arbitrary value that carries its own shadow list is unambiguous and compiles fine. It is only a bare `var()` that Tailwind cannot type.
 
-Raised card elevation is reserved for the few surfaces that anchor a page, such as the dashboard hero and account balance card. Popover shadow is for floating menus, tooltips, and toasts.
+Raised card elevation is reserved for the few surfaces that anchor a page, such as the dashboard money card and account balance card. Popover shadow is for floating menus, tooltips, and toasts.
 
 **No glow shadows on text**, no colored shadows on buttons.
 
@@ -821,7 +821,7 @@ in the agents section (#3809), the spend total is the analytics page's own
 has no honest successor. When every linked account is a test account
 (`spend.scope === 'testnet'`, #3803 owner decision 3) the balance carries
 a quiet "Test network" label rather than a silently mislabelled total,
-and the hero's change line reads "since yesterday" — the diff is against
+and the balance's change line reads "since yesterday" — the diff is against
 the yesterday snapshot.
 
 ### Buttons
@@ -1707,7 +1707,9 @@ site for x402, the receipt/contact name the backend resolved, "Deposit" for
 inbound, "New recipient" when nothing resolves, "Agent payment" when an x402
 row carries no resource URL, and "Returned from <agent>" for sweeps. The
 subtitle is the agent's name; "From My account" appears only when the user
-has more than one account. The shared screens (`TransactionsTable`,
+has more than one account. A confirmed row carries no status badge — its
+direction is already the amount's sign and tone; only "Pending" and "Failed"
+name a state (#3897). The shared screens (`TransactionsTable`,
 `TransactionDetailPanel`) pass no mode and keep the truncated address until
 #3811 — the two supports on the same helper must not drift apart silently,
 which is what the characterization tests in

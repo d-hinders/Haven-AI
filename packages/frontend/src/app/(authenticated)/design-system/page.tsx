@@ -1813,7 +1813,6 @@ export default function DesignSystemPage() {
               onAddFunds={() => undefined}
               onAddAgent={() => undefined}
               onShowAgentUsage={() => undefined}
-              onHide={() => undefined}
             />
           </div>
           {/* Funded, an agent connected but waiting for its budget approval. */}
@@ -1826,7 +1825,6 @@ export default function DesignSystemPage() {
               onAddFunds={() => undefined}
               onAddAgent={() => undefined}
               onShowAgentUsage={() => undefined}
-              onHide={() => undefined}
             />
           </div>
           {/* The USDC read is unavailable: step 1 says so, no funding action. */}
@@ -1838,7 +1836,6 @@ export default function DesignSystemPage() {
               onAddFunds={() => undefined}
               onAddAgent={() => undefined}
               onShowAgentUsage={() => undefined}
-              onHide={() => undefined}
             />
           </div>
           {/* All three done. */}
@@ -2838,7 +2835,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Amount: currency mode"
-        description="The other half of the Amount contract (#3805): for a figure that is already a fiat valuation server-side, pass the unsigned magnitude (amount) and the currency it is in — never a symbol string, never a conversion done here. It formats through formatFiat, the one formatter, so a SEK figure reads the same on every screen; the sign comes only from direction, and a negative magnitude can never double-sign it. ≈ marks a figure converted at today's rate rather than booked, and it goes before the sign. Unknown — null, or a non-finite value — renders an em dash in secondary ink, never 0,00 kr: an unknown valuation is not a zero. A currency figure is a valuation of a token amount, not a fiat balance Haven holds."
+        description="The other half of the Amount contract (#3805): for a figure that is already a fiat valuation server-side, pass the unsigned magnitude (amount) and the currency it is in — never a symbol string, never a conversion done here. It formats through formatFiatDisplay — formatFiat's output, plus <$0.01 for a non-zero figure under a cent (zero stays $0.00, #3897) — the one formatter, so a SEK figure reads the same on every screen; the sign comes only from direction, and a negative magnitude can never double-sign it. ≈ marks a figure converted at today's rate rather than booked, and it goes before the sign. Unknown — null, or a non-finite value — renders an em dash in secondary ink, never 0,00 kr: an unknown valuation is not a zero. A currency figure is a valuation of a token amount, not a fiat balance Haven holds."
       >
         {/* The testid rides a plain wrapper: `Card` forwards no extra props,
             and the visual spec clips this sample by it. */}

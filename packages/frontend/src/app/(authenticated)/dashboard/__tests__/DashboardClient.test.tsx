@@ -74,13 +74,11 @@ vi.mock('@/components/DashboardOnboardingGuide', () => ({
     usdcFunded,
     hasSetUpAgent,
     pendingAgent,
-    onHide,
   }: {
     hasFirstAgentPayment: boolean
     usdcFunded: boolean | null
     hasSetUpAgent: boolean
     pendingAgent?: { name: string; moreCount: number } | null
-    onHide: () => void
   }) => (
     <div>
       <span>Onboarding guide</span>
@@ -88,7 +86,6 @@ vi.mock('@/components/DashboardOnboardingGuide', () => ({
       <span>{`usdc-${String(usdcFunded)}`}</span>
       <span>{hasSetUpAgent ? 'agent-set-up' : 'agent-not-set-up'}</span>
       {pendingAgent ? <span>{`pending-${pendingAgent.name}-${pendingAgent.moreCount}`}</span> : null}
-      <button type="button" onClick={onHide}>Hide for now</button>
     </div>
   ),
   SetupCompleteLine: () => <span>Setup complete line</span>,
@@ -736,9 +733,25 @@ describe('DashboardClient', () => {
     render(<DashboardClient />)
 
     expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
-    expect(screen.queryByText('Agents connected')).not.toBeInTheDocument()
-    expect(screen.queryByText('Recent transactions')).not.toBeInTheDocument()
-    expect(screen.queryByText('Spending, last 30 days')).not.toBeInTheDocument()
+    // The agents and activity sections wait until the account is funded.
+    expect(screen.queryByRole('heading', { name: 'Agents' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Activity' })).not.toBeInTheDocument()
+    // #3897 (changed on purpose, the mockup's new-user card): the spending
+    // half stays, explaining what it will show — never zero tiles.
+    const spending = screen.getByRole('region', { name: 'Spending' })
+    expect(within(spending).getByText(/After your agents’ first payment/)).toBeInTheDocument()
+    expect(within(spending).queryByText('Payments')).not.toBeInTheDocument()
+  })
+
+  it('puts "Hide for now" and the progress in the card header, beside "Get started" (#3897)', () => {
+    mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: '0', funded: false }] })
+    render(<DashboardClient />)
+    const heading = screen.getByRole('heading', { name: 'Get started' })
+    // The progress sits beside the title; the header row holds both.
+    expect(within(heading.parentElement as HTMLElement).getByText('0 of 3 done')).toBeInTheDocument()
+    const header = (heading.parentElement as HTMLElement).parentElement as HTMLElement
+    expect(within(header).getByRole('button', { name: 'Hide for now' })).toBeInTheDocument()
+    expect(within(header).getByText('0 of 3 done')).toBeInTheDocument()
   })
 
   it('"Hide for now" survives a reload and comes back when a step completes (#3818)', async () => {

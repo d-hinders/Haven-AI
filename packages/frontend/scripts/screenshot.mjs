@@ -2030,6 +2030,10 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (pathname === '/chains') return { deployable: [FIXTURE_ACCOUNT.chain_id] }
   if (pathname === '/dashboard/overview') return FIXTURE_OVERVIEW
   if (pathname === '/dashboard/budget-remaining') return FIXTURE_BUDGET_REMAINING
+  // #3813's server-saved "Needs you" dismissals — read on every dashboard
+  // render. Without this key the generic fallback answered an object with no
+  // `dismissals` array and the dashboard hit its error boundary (#3897).
+  if (pathname === '/user/attention-dismissals') return { dismissals: [] }
   if (pathname.startsWith('/portfolio/')) return FIXTURE_PORTFOLIO
   if (pathname.startsWith('/balances/')) return FIXTURE_BALANCES
   if (pathname === '/agents') {
@@ -6208,6 +6212,122 @@ export const SCENARIOS = {
   // own session above is now the SEK user, so this scenario photographs the
   // three fiat surfaces the finding names, in the currency the served
   // default puts on them, for the design-reviewer pass.
+  // ── #3897: the dashboard as whole pages, one per mockup state ──────────
+  // The committed baselines photograph one data state (the busy shared
+  // fixture) as a page; the first-run baselines crop the card. These three
+  // give the design review the mockup's other states as full pages.
+  'dashboard-new-user': {
+    description:
+      '#3897: a brand-new account — no USDC, no agents — as a whole page: the money card without its spending half and the setup guide as the "Needs you" card (mockup "New user")',
+    api(apiPath) {
+      if (apiPath === '/dashboard/overview') {
+        return {
+          ...FIXTURE_OVERVIEW,
+          totals: { usd: 0, eur: 0, sek: 0 },
+          change: { available: false, usdAmount: 0, eurAmount: 0, usdPercent: 0, eurPercent: 0, sekAmount: 0, sekPercent: 0 },
+          onboardingProgress: { hasFirstAgentPayment: false },
+          agentCount: { active: 0, paused: 0, pending_approval: 0 },
+          accounts: FIXTURE_OVERVIEW.accounts.slice(0, 1).map((account) => ({
+            ...account,
+            usdcBalanceAtomic: '0',
+            usdcBalanceFreshness: undefined,
+            funded: false,
+            usdcPace7dAtomic: '0',
+          })),
+          spend: {
+            ...FIXTURE_OVERVIEW.spend,
+            d7: { ...FIXTURE_OVERVIEW.spend.d7, gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, payments: 0, distinctMerchants: 0, budgetStops: 0 },
+            d30: { ...FIXTURE_OVERVIEW.spend.d30, gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, distinctMerchants: 0, budgetStops: 0 },
+            topMerchant7d: null,
+            failedIntents7d: 0,
+            balance_by_day: [],
+          },
+          agents: [],
+          activity: [],
+        }
+      }
+      // The add-funds scenario's reason, unchanged: the shared account's
+      // signer set marks the passkey as on another device, which hides the
+      // guide (`requiresOtherDevice`) — the legacy type keeps it reachable.
+      if (apiPath === '/auth/me') {
+        return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByRole('heading', { name: 'Get started' }).waitFor({ timeout: 30_000 })
+      await shoot(page.locator('main').first(), 'page')
+    },
+  },
+  'dashboard-all-clear': {
+    description:
+      '#3897: one healthy agent, nothing to flag — the quiet "Nothing needs your attention" line under the money card (mockup "All clear")',
+    api(apiPath) {
+      if (apiPath === '/dashboard/overview') {
+        const research = FIXTURE_OVERVIEW.agents.find((agent) => agent.id === 'agent-research')
+        const calm = (window) => ({ ...window, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } })
+        return {
+          ...FIXTURE_OVERVIEW,
+          agentCount: { active: 1, paused: 0, pending_approval: 0 },
+          accounts: FIXTURE_OVERVIEW.accounts.slice(0, 1).map((account) => ({ ...account, usdcBalanceFreshness: undefined })),
+          spend: {
+            ...FIXTURE_OVERVIEW.spend,
+            d7: { ...FIXTURE_OVERVIEW.spend.d7, budgetStops: 0 },
+            d30: { ...FIXTURE_OVERVIEW.spend.d30, budgetStops: 0 },
+            failedIntents7d: 0,
+          },
+          agents: [{ ...research, stats: { ...research.stats, d7: calm(research.stats.d7), d30: calm(research.stats.d30) } }],
+        }
+      }
+      if (apiPath === '/dashboard/budget-remaining') return { budgets: [] }
+      if (apiPath === '/auth/me') {
+        return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByRole('heading', { name: 'Needs you' }).waitFor({ timeout: 30_000 })
+      await shoot(page.locator('main').first(), 'page')
+    },
+  },
+  'dashboard-sub-cent': {
+    description:
+      '#3897: a week of sub-cent agent payments — the count-form summary, "<$0.01" in the spending half, the agent caption and the activity row, never "$0.00"',
+    api(apiPath) {
+      if (apiPath === '/dashboard/overview') {
+        // Under a cent in EVERY display currency (the fixture user's default is SEK).
+        const tiny = { usd: 0.004, eur: 0.004, sek: 0.004 }
+        const window = (stats) => ({ ...stats, gross: tiny, net: tiny, approx: false })
+        return {
+          ...FIXTURE_OVERVIEW,
+          spend: {
+            ...FIXTURE_OVERVIEW.spend,
+            d7: { ...FIXTURE_OVERVIEW.spend.d7, gross: tiny, net: tiny, payments: 3, distinctMerchants: 1, budgetStops: 0 },
+            d30: { ...FIXTURE_OVERVIEW.spend.d30, gross: tiny, net: tiny, approx: false, payments: 3, distinctMerchants: 1, budgetStops: 0 },
+          },
+          agents: FIXTURE_OVERVIEW.agents.map((agent) =>
+            agent.id === 'agent-research'
+              ? { ...agent, stats: { ...agent.stats, d7: window(agent.stats.d7), d30: window(agent.stats.d30) } }
+              : { ...agent, stats: { ...agent.stats, d7: { ...agent.stats.d7, net: { usd: 0, eur: 0, sek: 0 } }, d30: { ...agent.stats.d30, net: { usd: 0, eur: 0, sek: 0 } } } },
+          ),
+          activity: FIXTURE_OVERVIEW.activity.map((group) =>
+            group.direction === 'out' ? { ...group, sumAtomic: '4000', approxAmount: '0.0040' } : group,
+          ),
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByText(/made 3 payments/).waitFor({ timeout: 30_000 })
+      await shoot(page.locator('main').first(), 'page')
+    },
+  },
   'currency-preference-sek': {
     description:
       '#3127 finding 8: the SEK no-preference default (migration 091) rendering on the fiat surfaces — the /dashboard hero with its SEK total and change line, the Settings → Preferences card with the kr SEK radio active, the accounts overview and the account detail page priced in SEK (#3195 adds the overview)',

@@ -17,6 +17,7 @@ import ConnectAgentModal from '@/components/ConnectAgentModal'
 import DashboardActionPickerModal from '@/components/DashboardActionPickerModal'
 import ReceiveFundsModal from '@/components/ReceiveFundsModal'
 import AddFundsModal from '@/components/AddFundsModal'
+import { Button } from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
 import MoneyPanel from './MoneyPanel'
 import { ActivitySection } from './ActivitySection'
@@ -461,8 +462,9 @@ export default function DashboardClient() {
   }
 
   // #3807: the money panel replaces the hero + KPI tiles. The focused
-  // first-run view (an unfunded account) renders it without the spending
-  // block — the old render was hero + checklist only.
+  // first-run view (an unfunded account) keeps its spending half: before the
+  // first payment that half explains what it will show (#3818's
+  // `noPaymentsYet`), never zero tiles — the mockup's new-user card (#3897).
   // Focused only when the account is KNOWN to hold no USDC — a failed
   // balance read must not collapse the page.
   const isFocusedView = showSetupSteps && usdcFunded === false
@@ -484,7 +486,6 @@ export default function DashboardClient() {
       fundingStateKnown={fundingStateKnown}
       watchingForDeposit={fundingStateKnown && !hasFunds && hasOpenedReceive}
       requiresOtherDevice={requiresOtherDevice}
-      showSpending={!isFocusedView}
       noPaymentsYet={firstAgentPaymentKnown && !hasFirstAgentPayment}
       onDepositAddress={() => openHeroAction('receive')}
       onAddFunds={() => openHeroAction('add-funds')}
@@ -495,6 +496,18 @@ export default function DashboardClient() {
     <NeedsYou
       items={cardItems}
       title={showSetupSteps ? 'Get started' : undefined}
+      titleMeta={
+        showSetupSteps ? (
+          <span className="text-xs text-[var(--v2-ink-3)] v2-tabular">{completedCount} of 3 done</span>
+        ) : undefined
+      }
+      titleAction={
+        showSetupSteps ? (
+          <Button variant="tertiary" size="sm" onClick={hideSetupGuide}>
+            Hide for now
+          </Button>
+        ) : undefined
+      }
       guide={
         showSetupSteps ? (
           <DashboardOnboardingGuide
@@ -506,7 +519,6 @@ export default function DashboardClient() {
             onAddFunds={() => openHeroAction('add-funds')}
             onAddAgent={openConnectAgent}
             onShowAgentUsage={() => setAgentUsageOpen(true)}
-            onHide={hideSetupGuide}
           />
         ) : showSetupComplete ? (
           <SetupCompleteLine onDismiss={dismissCompleteBanner} />

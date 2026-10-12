@@ -309,7 +309,7 @@ describe('DashboardClient', () => {
     })
   })
 
-  it('leads with total balance, the money panel, and its two actions', () => {
+  it('leads with the balance, the money panel, and its two actions', () => {
     // A user whose agents have paid: the spending block shows its figures
     // (before the first payment it explains itself instead, #3818).
     mockBaseState([], { onboardingProgress: { hasFirstAgentPayment: true } })

@@ -161,7 +161,7 @@ export type AreaChartProps = FullChartProps | SparklineProps
 
 /** The sparkline's default height, and its viewBox width (see `pct`). */
 const SPARKLINE_HEIGHT = 40
-export const SPARKLINE_VIEW_W = 640
+export const SPARKLINE_VIEW_W = 640 // design-system-exempt: sparkline geometry constant, exported for its test
 /**
  * The sparkline plot's inset from the viewBox edge, on every side (#3902). The
  * end dot is `DOT_R` plus half its 1-unit stroke, and the 2-unit line adds a
@@ -169,7 +169,7 @@ export const SPARKLINE_VIEW_W = 640
  * a last value of 0 (bottom) or the maximum (top), and the last day's x, all
  * draw whole instead of being clipped by the svg.
  */
-export const SPARKLINE_INSET = DOT_R + 1.5
+export const SPARKLINE_INSET = DOT_R + 1.5 // design-system-exempt: sparkline geometry constant, exported for its test
 
 export function AreaChart(props: AreaChartProps) {
   if (props.variant === 'sparkline') {

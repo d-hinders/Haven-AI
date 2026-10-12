@@ -141,7 +141,9 @@ export function DelegationApprovalStep({
 
       {confirmFailed && (
         <WarningCallout
-          title="Budget set — finishing up"
+          // #3895: the body already says "approved"; the title says it too
+          // instead of "Budget set", which is the agent page's verb.
+          title="Budget approved — finishing up"
           body={
             <>
               Your budget is approved and the agent can spend within it. Haven just could not finish
@@ -173,6 +175,9 @@ export function DelegationApprovalStep({
           input={grantInput}
           label="Approve budget"
           busyLabel={confirming ? 'Finishing…' : 'Waiting for signature…'}
+          // #3895: this screen approves; the agent page sets. Each caller
+          // supplies the failure sentence its own button's verb carries.
+          failureMessage="Haven could not approve the budget. Nothing changed — try again."
           // Same footer shape as the legacy step: equal-width ghost-then-
           // primary, with the money-authority action carrying the weight.
           leadingAction={

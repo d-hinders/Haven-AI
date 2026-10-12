@@ -71,7 +71,7 @@ covers:
   - packages/backend/src/modules/ops/**
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
-last-verified: "2026-10-09"
+last-verified: "2026-10-12"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -2918,3 +2918,19 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > change. Scope of this re-read: the `routes/user.ts` coverage and the
 > endpoints above; nothing else in this document was re-read for it.
 > `last-verified` is bumped to 2026-10-10 for exactly this coverage.
+
+> **Re-verified unchanged (#3895, 2026-10-12, connect-step failure copy):**
+> this diff touches one covered file, display-layer only:
+> `components/DelegationBudgetCard.tsx` passes the budget grant's failure
+> sentence to the shared grant control as a prop instead of that control
+> hard-coding it — so each surface renders the verb of its own button. This
+> card's sentence is byte-identical to the one that was hard-coded ("Haven
+> could not set the budget. Nothing changed — try again."); the connect
+> modal's approval step now passes its own approve-verb sentence through the
+> same prop. No signing step, gate, input or authority surface moves; the
+> grant call and its inputs are untouched, as are the Stop and Edit paths.
+> No new spender, no new authority grant, no custody change (Red Line #4:
+> the chain remains the only spend authority). Scope of this re-read:
+> `DelegationBudgetCard.tsx` and the sections whose claims rest on the
+> card's grant rendering; nothing else in this document was re-read for it,
+> and `last-verified` is bumped to 2026-10-12 for exactly this coverage.

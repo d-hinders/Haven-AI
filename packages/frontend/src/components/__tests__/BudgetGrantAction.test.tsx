@@ -20,6 +20,7 @@ function renderAction(overrides: Partial<React.ComponentProps<typeof BudgetGrant
       input={INPUT}
       label="Approve budget"
       busyLabel="Waiting for signature…"
+      failureMessage="Haven could not set the budget. Nothing changed — try again."
       {...overrides}
     />,
   )
@@ -52,15 +53,31 @@ describe('BudgetGrantAction (#1073)', () => {
     expect(onGranted).not.toHaveBeenCalled()
   })
 
-  it('a FAILED signature reads as an error and says nothing changed', async () => {
+  it('a FAILED signature reads as an error and renders the CALLER’S failure sentence (#3895)', async () => {
     const grant = vi.fn().mockResolvedValue({ ok: false, reason: 'failed' })
-    renderAction({ grant })
+    // #3895: the sentence is supplied per surface — the verb of the button
+    // the user clicked, not a hard-coded one. The agent page's "set" wording
+    // rides through unchanged; the modal passes its own approve sentence.
+    renderAction({
+      grant,
+      failureMessage: 'Haven could not set the budget. Nothing changed — try again.',
+    })
 
     fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
 
     const message = await screen.findByText(/could not set the budget/i)
     expect(message.className).toMatch(/danger/)
     expect(screen.getByRole('button', { name: 'Approve budget' })).toBeEnabled()
+  })
+
+  it('the supplied failure sentence is rendered verbatim (#3895)', async () => {
+    const grant = vi.fn().mockResolvedValue({ ok: false, reason: 'failed' })
+    renderAction({ grant, failureMessage: 'Haven could not approve the budget. Nothing changed — try again.' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
+
+    expect(await screen.findByText(/could not approve the budget/i)).toBeTruthy()
+    expect(screen.queryByText(/could not set the budget/i)).toBeNull()
   })
 
   it('a retry clears the previous attempt’s outcome', async () => {
@@ -86,6 +103,7 @@ describe('BudgetGrantAction (#1073)', () => {
         input={INPUT}
         label="Approve budget"
         busyLabel="Waiting for signature…"
+        failureMessage="Haven could not set the budget. Nothing changed — try again."
       />,
     )
     expect(screen.getByRole('button', { name: 'Waiting for signature…' })).toBeDisabled()

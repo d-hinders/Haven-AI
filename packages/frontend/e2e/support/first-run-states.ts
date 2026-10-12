@@ -17,11 +17,16 @@ export type FirstRunState = 'no-funds' | 'funded' | 'agent-needs-setup' | 'agent
 
 const [activeAgent, , pendingAgent] = dashboardOverview.agents
 
-function accountsWith(funded: boolean) {
+function accountsWith(funded: boolean, needsBackup = false) {
   return dashboardOverview.accounts.map((account) => ({
     ...account,
     usdcBalanceAtomic: funded ? account.usdcBalanceAtomic : '0',
     funded,
+    // The backup-signer extra appears under the steps once an account holds
+    // money; the `funded` state shows it so a baseline renders that row
+    // (#3818 design review). The server never recommends it on a testnet, so
+    // this is the flag's answer as a mainnet account would get it.
+    needs_backup_recommendation: needsBackup,
   }))
 }
 
@@ -35,7 +40,7 @@ export function firstRunOverview(state: FirstRunState) {
         : []
   return {
     ...dashboardOverview,
-    accounts: accountsWith(funded),
+    accounts: accountsWith(funded, state === 'funded'),
     agents,
     agentCount: {
       active: state === 'set-up' || state === 'agent-set-up' ? 1 : 0,

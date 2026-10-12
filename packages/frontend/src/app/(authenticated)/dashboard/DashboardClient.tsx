@@ -316,8 +316,9 @@ export default function DashboardClient() {
     hiddenAtCount: number | null
   }>({ userId: null, hiddenAtCount: null })
   const setupHideReady = Boolean(user?.id) && setupHideState.userId === user?.id
-  // Setup-complete dismissal IS persisted — once the user has done all three
-  // steps and dismissed the celebration, we don't show it again on reload.
+  // The "You're set up" line's dismissal IS persisted — once the first agent
+  // payment has gone through and the user dismissed that line, it stays gone
+  // on reload (key unchanged from the old banner, so earlier dismissals hold).
   const [completeDismissalState, setCompleteDismissalState] = useState<{
     userId: string | null
     dismissed: boolean
@@ -455,8 +456,10 @@ export default function DashboardClient() {
       : (overview?.change.usdPercent ?? 0)
   const overviewUnavailable = Boolean(overviewError && !overview)
   // Render the guide whenever the user has at least one account and either:
-  // (a) they have unfinished steps and haven't dismissed the checklist, OR
-  // (b) they've just finished all three steps and haven't dismissed the celebration.
+  // (a) the first agent payment hasn't happened and the steps aren't hidden
+  //     ("Hide for now", persisted until another step completes), OR
+  // (b) the first agent payment has happened and the "You're set up" line
+  //     hasn't been dismissed.
   const setupGuideEligible =
     setupProgressReady &&
     hasDelegationAccounts &&

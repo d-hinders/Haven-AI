@@ -40,7 +40,7 @@ const FROZEN_NOW = new Date('2026-09-01T12:00:00.000Z')
 
 const STATES: ReadonlyArray<{ state: FirstRunState; anchor: RegExp }> = [
   { state: 'no-funds', anchor: /Add USDC to your account/ },
-  { state: 'funded', anchor: /Funded — your agents can spend\./ },
+  { state: 'funded', anchor: /Your account holds USDC\./ },
   { state: 'agent-needs-setup', anchor: /Finish setting up Connecting agent/ },
   { state: 'set-up', anchor: /You’re set up/ },
 ]

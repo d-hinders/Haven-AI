@@ -111,8 +111,8 @@ export default function DashboardOnboardingGuide({
 
   const fundingToken = funding?.tokens.find((t) => t.minimum_useful_human !== null) ?? null
   const fundingBody = fundingToken
-    ? `We suggest ${fundingToken.minimum_useful_human} ${fundingToken.symbol} — no gas token needed: Haven sponsors it. Any amount gets you started.`
-    : 'Add USDC so your agents have money to spend. Any amount gets you started.'
+    ? `We suggest ${fundingToken.minimum_useful_human} ${fundingToken.symbol}. Haven pays the network fees, and any amount gets you started.`
+    : 'Your agents spend from this balance. Any amount gets you started.'
 
   const step1: StepProps = {
     status: funded ? 'complete' : usdcFunded === null ? 'unknown' : 'active',
@@ -122,7 +122,9 @@ export default function DashboardOnboardingGuide({
       usdcFunded === null
         ? 'Haven could not read your USDC balance just now. This step updates when it can.'
         : fundingBody,
-    completedBody: 'Funded — your agents can spend.',
+    // Funding alone gives no agent spend authority — that is step 2's budget —
+    // so the done line states the fact, not a capability (#3818 design review).
+    completedBody: 'Your account holds USDC.',
     cta: usdcFunded === false ? { label: 'Add funds', onClick: onAddFunds } : undefined,
   }
 
@@ -136,11 +138,15 @@ export default function DashboardOnboardingGuide({
   const step2: StepProps = {
     status: hasSetUpAgent ? 'complete' : activeStep === 2 ? 'active' : 'available',
     number: 2,
-    title: 'Connect your first agent',
+    // A connected agent waiting for its budget is named in the heading, not
+    // buried mid-sentence; the body keeps only the action (#3818 design review).
+    title: pendingAgent
+      ? `Finish setting up ${pendingAgent.name}${pendingAgent.moreCount > 0 ? ` and ${pendingAgent.moreCount} more` : ''}`
+      : 'Connect your first agent',
     body: pendingAgent
-      ? `Finish setting up ${pendingAgent.name}${pendingAgent.moreCount > 0 ? ` and ${pendingAgent.moreCount} more` : ''}: ${
-          pendingAgent.awaiting === 'approval' ? 'approve its budget' : 'set a budget'
-        } so it can pay.`
+      ? pendingAgent.awaiting === 'approval'
+        ? 'Approve its budget so it can pay.'
+        : 'Set a budget so it can pay.'
       : 'Connect an agent and approve a budget it can spend from.',
     completedBody: 'An agent is connected with a budget.',
     cta: step2Cta,

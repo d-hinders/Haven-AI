@@ -18,7 +18,7 @@ import {
 type AgentSlice = {
   id: string
   name: string
-  status: 'active' | 'paused' | 'pending_approval'
+  status: 'active' | 'paused' | 'pending_approval' | 'revoked'
   accountId?: string | null
   accountName?: string | null
   setupStatus?: string
@@ -519,6 +519,18 @@ describe('computeAttentionItems — ordering', () => {
 
 // ── #3818: the first-run guide's facts, from the same overview the rules read ──
 describe('firstRunSetupState (#3818)', () => {
+  // #3818 review: the overview admits only active/paused/pending agents
+  // (backend SQL), but the frontend rule must hold on its own — a revoked
+  // agent that still carries a budget never completes step 2.
+  it('a revoked agent with a budget is never set up', () => {
+    const overview = makeOverview(
+      [{ id: 'r1', name: 'Gone', status: 'revoked', budgets: [{ budgetAtomic: '1' }] }],
+      [{ accountId: 'a1', funded: true }],
+    )
+    expect(agentIsSetUp(overview.agents![0] as never)).toBe(false)
+    expect(firstRunSetupState(overview).hasSetUpAgent).toBe(false)
+  })
+
   const BUDGET = [{ id: 'b1' }]
 
   describe('step 1 — USDC on an account, never another token, never a guessed zero', () => {

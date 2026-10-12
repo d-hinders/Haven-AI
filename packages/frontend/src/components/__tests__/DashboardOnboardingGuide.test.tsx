@@ -74,7 +74,7 @@ describe('DashboardOnboardingGuide — step 1 (#2534, #3818)', () => {
   it('suggests the endpoint\'s amount and offers Add funds, which opens the dialog with the faucet', async () => {
     const { props } = renderGuide({ funding: FUNDING })
     expect(document.body.textContent).toContain('We suggest 5 USDC')
-    expect(document.body.textContent).toContain('no gas token needed')
+    expect(document.body.textContent).toContain('Haven pays the network fees')
     expect(document.body.textContent).not.toContain('Even $5')
     await userEvent.click(screen.getByRole('button', { name: 'Add funds' }))
     expect(props.onAddFunds).toHaveBeenCalledTimes(1)
@@ -82,7 +82,7 @@ describe('DashboardOnboardingGuide — step 1 (#2534, #3818)', () => {
 
   it('keeps the general copy while the funding read is absent', () => {
     renderGuide()
-    expect(document.body.textContent).toContain('Add USDC so your agents have money to spend.')
+    expect(document.body.textContent).toContain('Your agents spend from this balance.')
     expect(screen.getByRole('button', { name: 'Add funds' })).toBeInTheDocument()
   })
 
@@ -104,7 +104,8 @@ describe('DashboardOnboardingGuide — step 1 (#2534, #3818)', () => {
 
   it('USDC on the account completes step 1', () => {
     renderGuide({ usdcFunded: true })
-    expect(document.body.textContent).toContain('Funded — your agents can spend.')
+    expect(document.body.textContent).toContain('Your account holds USDC.')
+    expect(document.body.textContent).not.toContain('your agents can spend')
     expect(screen.queryByRole('button', { name: 'Add funds' })).not.toBeInTheDocument()
   })
 })
@@ -112,7 +113,10 @@ describe('DashboardOnboardingGuide — step 1 (#2534, #3818)', () => {
 describe('DashboardOnboardingGuide — step 2 and 3 (#3818)', () => {
   it('names the agent waiting for setup with the approve action, and "and N more"', () => {
     renderGuide({ usdcFunded: true, pendingAgent: { id: 'agt-1', name: 'Research agent', moreCount: 2, awaiting: 'approval' as const } })
-    expect(document.body.textContent).toContain('Finish setting up Research agent and 2 more')
+    // The agent is named in the step's heading; the body keeps only the action.
+    expect(screen.getByText('Finish setting up Research agent and 2 more')).toBeInTheDocument()
+    expect(screen.getByText('Approve its budget so it can pay.')).toBeInTheDocument()
+    expect(screen.queryByText('Connect your first agent')).not.toBeInTheDocument()
     const action = screen.getByRole('link', { name: 'Finish setup' })
     expect(action).toHaveAttribute('href', '/agents/agt-1')
     // Step 2 is the active step once funded: primary weight.
@@ -140,7 +144,8 @@ describe('DashboardOnboardingGuide — step 2 and 3 (#3818)', () => {
 
   it('an active agent with no budget is asked for a budget, not an approval', () => {
     renderGuide({ usdcFunded: true, pendingAgent: { id: 'b', name: 'Bot', moreCount: 0, awaiting: 'budget' } })
-    expect(document.body.textContent).toContain('Finish setting up Bot: set a budget so it can pay.')
+    expect(screen.getByText('Finish setting up Bot')).toBeInTheDocument()
+    expect(screen.getByText('Set a budget so it can pay.')).toBeInTheDocument()
   })
 
   it('a set-up agent completes step 2 and unlocks step 3', () => {

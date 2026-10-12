@@ -165,7 +165,7 @@ export interface FirstRunSetupState {
  *   account is KNOWN to hold none, and `null` otherwise — never a guessed zero.
  * - Step 2 names the newest agent awaiting setup. The overview carries no
  *   timestamps, so `createdAtById` (from `GET /agents`) orders them; an agent
- *   without one sorts last.
+ *   without one sorts FIRST — it is newer than that read.
  */
 export function firstRunSetupState(
   overview: DashboardOverview,

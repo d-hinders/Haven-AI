@@ -46,7 +46,7 @@ test.describe('first-run guide (#3818)', () => {
     // ── 2. USDC arrives: step 1 done, step 2 is next ──────────────────────
     state = 'funded'
     await page.reload()
-    await expect(guide.getByText('Funded — your agents can spend.')).toBeVisible()
+    await expect(guide.getByText('Your account holds USDC.')).toBeVisible()
     await expect(guide.getByRole('button', { name: 'Add funds' })).toHaveCount(0)
     await expect(guide.getByRole('button', { name: 'Connect agent' })).toBeVisible()
 

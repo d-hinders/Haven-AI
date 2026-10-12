@@ -180,10 +180,12 @@ describe('SetupCompleteLine (#3818)', () => {
     expect(onDismiss).toHaveBeenCalledTimes(1)
   })
 
-  it('sits on the full-bleed rows\' icon axis: a 6px left pad inside the card\'s 20px inset, no inset of its own (#3902)', () => {
+  it('sits on the full-bleed rows\' icon slot and title column: a 32px slot, gap-3, no inset of its own (#3902)', () => {
     const { container } = render(<SetupCompleteLine onDismiss={() => {}} />)
     const line = container.firstElementChild as HTMLElement
-    expect(line.className).toMatch(/(^|\s)pl-1\.5(\s|$)/)
-    expect(line.className).not.toMatch(/(^|\s)px-/)
+    expect(line.className).not.toMatch(/(^|\s)p[xl]-/)
+    const sentence = line.querySelector('p') as HTMLElement
+    expect(sentence.className).toMatch(/(^|\s)gap-3(\s|$)/)
+    expect((sentence.firstElementChild as HTMLElement).className).toMatch(/(^|\s)w-8(\s|$)/)
   })
 })

@@ -189,16 +189,17 @@ export default function DashboardOnboardingGuide({
  */
 export function SetupCompleteLine({ onDismiss }: { onDismiss: () => void }) {
   return (
-    // Inside the card's 20px inset, `pl-1.5` centres the 20px check on the
-    // full-bleed rows' 32px icon axis below it (#3902; it was `px-4` while
-    // the rows were inset, #3897). Dismiss ends at the rows' action column.
-    <div className="flex items-center justify-between gap-3 pl-1.5 v2-animate-fade-in">
-      <p className="flex items-center gap-2 text-sm text-[var(--v2-ink)]">
-        <span
-          aria-hidden="true"
-          className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-success)] text-[var(--v2-ink-on-brand)]"
-        >
-          <Icon icon={Check} className="h-3 w-3" />
+    // The 20px check sits centred in a 32px slot with `gap-3` — the
+    // full-bleed rows' icon slot and gap — so inside the card's 20px inset
+    // the check shares their icon axis and the sentence starts on their title
+    // column (#3902; it was `px-4` while the rows were inset, #3897). Dismiss
+    // ends at the rows' action column.
+    <div className="flex items-center justify-between gap-3 v2-animate-fade-in">
+      <p className="flex items-center gap-3 text-sm text-[var(--v2-ink)]">
+        <span aria-hidden="true" className="inline-flex w-8 flex-shrink-0 justify-center">
+          <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[var(--v2-success)] text-[var(--v2-ink-on-brand)]">
+            <Icon icon={Check} className="h-3 w-3" />
+          </span>
         </span>
         You&rsquo;re set up — your first agent payment went through.
       </p>

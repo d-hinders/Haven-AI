@@ -155,8 +155,8 @@ export const SCAN_FILES = [
   // here and not under the directory scan.
   'packages/frontend/src/lib/dashboard-summary.ts',
   // #3882 — six more lib/ files whose strings reach a person or an agent, none
-  // of which the naming convention below catches. The dashboard's Needs-you
-  // titles and subtitles (#3808, #3880).
+  // of which the naming convention below catches. The dashboard's "Needs
+  // attention" titles, subtitles and empty-state lines (#3808, #3880, #3902).
   'packages/frontend/src/lib/dashboard-attention.ts',
   // The agent-skills index served at /.well-known/agent-skills/index.json
   // (#3596): each step's `description` and the index's own first entry and

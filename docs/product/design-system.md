@@ -830,7 +830,12 @@ merchants, stopped by budget) below a hairline divider, pinned to the bottom
 of the half at `lg`; before the first payment the same muted label reads
 "Agent spending" over its explanation. The "Needs attention" card
 (`anchor`) follows at full width — never a side column beside the balance —
-then Agents and Activity. That total — and the per-agent split below it —
+then Agents and Activity. Its count badge is neutral, never a warning tint
+(the card holds neutral items too), sits beside the heading, and hides at
+zero and while the card is "Get started". With nothing listed it shows
+"You're all caught up" only when every fact its reason line states was
+measured and holds (`attentionEmptyState`, #3902); otherwise a neutral line
+that claims nothing, and nothing at all while the budget reads load. That total — and the per-agent split below it —
 renders through § Amount: currency mode with `approx` from the
 wire's `spend` windows, so a total that includes rows priced at today's
 rate carries the `≈` and a booked total does not. The four KPI tiles and

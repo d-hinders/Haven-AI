@@ -148,9 +148,15 @@ export function WaitingForConnector({
       id: 'paste',
       // On the server-credential path there is nothing to paste: row 3 is
       // the current step, so this one never is (one current row per list).
-      state: promptCopied && !manualInProgress ? 'active' : 'pending',
-      title: 'Paste it into your agent',
-      children: (
+      // #3895: the credential IS issued on this path, so the row reads done —
+      // "Credentials created", the same words connectedRows uses — and drops
+      // the paste body that describes a step this path never takes. The row
+      // is retitled, not hidden: hiding renumbers the approve row and makes
+      // the list jump 3 → 2 → 3 when the approval screen appears.
+      state: manualInProgress ? 'done' : promptCopied ? 'active' : 'pending',
+      title: manualInProgress ? 'Credentials created' : 'Paste it into your agent',
+      children:
+        manualInProgress ? undefined : (
         // #1720: one command for every environment, so the approval heads-up
         // is universal; it sharpens only once the connector names the
         // runtime. "Connector command" is the canonical term

@@ -222,6 +222,23 @@ describe('DelegationBudgetCard (#833)', () => {
     await waitFor(() => expect(mockGrant.mock.calls[0][0].recipientAddress).toBe(R))
   })
 
+  // #3895: this surface's verb is "set" (label "Set budget" / "Setting…"), so
+  // its failure sentence keeps the exact wording the shared grant control used
+  // to hard-code. The modal passes its own approve sentence — see its test.
+  it('a failed grant says "could not set the budget" — the agent page keeps its verb', async () => {
+    mockGet.mockReturnValue([])
+    mockGrant.mockResolvedValue({ ok: false, reason: 'failed' })
+    render(<DelegationBudgetCard {...PROPS} />)
+    await waitFor(() => expect(screen.getByText('Set budget')).toBeTruthy())
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '1' } })
+    fireEvent.click(screen.getByText('Set budget'))
+
+    const message = await screen.findByText(
+      'Haven could not set the budget. Nothing changed — try again.',
+    )
+    expect(message.className).toMatch(/danger/)
+  })
+
   it('Set budget stays disabled without a valid amount', async () => {
     mockGet.mockReturnValue([])
     render(<DelegationBudgetCard {...PROPS} />)

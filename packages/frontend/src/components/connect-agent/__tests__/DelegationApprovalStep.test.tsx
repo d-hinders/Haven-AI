@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentConnectionSetupStatusResponse } from '@/hooks/useAgentConnectionSetupStatus'
 
@@ -8,13 +8,14 @@ import type { AgentConnectionSetupStatusResponse } from '@/hooks/useAgentConnect
  * the top bar, and #1969 declined offering that passkey silently.
  */
 
-const { budgetState } = vi.hoisted(() => ({
+const { budgetState, grant } = vi.hoisted(() => ({
   budgetState: { ready: true, passkeyElsewhere: false },
+  grant: vi.fn<() => Promise<unknown>>(),
 }))
 
 vi.mock('@/hooks/useDelegationBudget', () => ({
   useDelegationBudget: () => ({
-    grant: vi.fn(),
+    grant,
     busy: false,
     ready: budgetState.ready,
     passkeyElsewhere: budgetState.passkeyElsewhere,
@@ -40,13 +41,27 @@ const STATUS = {
   approval: { status: 'pending_approval', account_tx_hash: null, tx_hash: null },
 } as unknown as AgentConnectionSetupStatusResponse
 
-function renderStep() {
+// #3895: the grant control stays disabled while the input is incomplete
+// (agent_budget empty), so the failed-grant test needs a budget on the setup.
+const STATUS_WITH_BUDGET = {
+  ...STATUS,
+  agent_budget: [
+    {
+      token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+      allowance_amount: '5000000',
+      token_symbol: 'USDC',
+      reset_period_min: 1440,
+    },
+  ],
+} as unknown as AgentConnectionSetupStatusResponse
+
+function renderStep(status: AgentConnectionSetupStatusResponse = STATUS) {
   render(
     <DelegationApprovalStep
       agentId="agent-1"
       setupId="setup-1"
       chainId={84532}
-      status={STATUS}
+      status={status}
       walletName="Operating wallet"
       onApproved={vi.fn().mockResolvedValue(undefined)}
       onCancel={vi.fn()}
@@ -62,6 +77,7 @@ function renderStep() {
 beforeEach(() => {
   budgetState.ready = true
   budgetState.passkeyElsewhere = false
+  grant.mockReset()
 })
 
 describe('DelegationApprovalStep cross-device hint (#3825)', () => {
@@ -76,5 +92,20 @@ describe('DelegationApprovalStep cross-device hint (#3825)', () => {
     renderStep()
     expect(screen.getByRole('button', { name: 'Approve budget' })).toBeTruthy()
     expect(screen.queryByText(/passkey may be on another device/)).toBeNull()
+  })
+})
+
+describe('DelegationApprovalStep failed grant (#3895)', () => {
+  it('a failed grant reads in the approve verb — no "set" anywhere in the error', async () => {
+    // The button on this screen is "Approve budget"; the failure sentence must
+    // carry the same verb. The agent page's "set" sentence lives in ITS caller.
+    grant.mockResolvedValue({ ok: false, reason: 'failed' })
+    renderStep(STATUS_WITH_BUDGET)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
+
+    const message = await screen.findByText(/could not approve the budget/i)
+    expect(message.textContent).toMatch(/Nothing changed — try again\./)
+    expect(message.textContent).not.toMatch(/set/i)
   })
 })

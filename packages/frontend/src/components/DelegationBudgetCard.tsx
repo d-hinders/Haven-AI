@@ -471,6 +471,9 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
             input={budgetsError ? null : grantInput}
             label="Set budget"
             busyLabel="Setting…"
+            // #3895: the agent page's verb is "set" — its failure sentence
+            // keeps the exact wording the shared control used to hard-code.
+            failureMessage="Haven could not set the budget. Nothing changed — try again."
             helper={
               budgetsError
                 ? 'Reload the current budgets before setting one — a new budget replaces the one it matches.'

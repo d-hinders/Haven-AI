@@ -547,6 +547,50 @@ describe('the numbered step list on the waiting screen (#3832)', () => {
     expect(paste.textContent).toContain('connector command')
     expect(paste.textContent).not.toMatch(/Claude|Cursor|ChatGPT|Codex/)
   })
+
+  // #3895: on the server-credential path the paste row describes a step the
+  // user is not taking. It is retitled, not hidden — hiding renumbers the
+  // approve row and jumps the list 3 → 2 → 3 when the approval screen appears.
+  it('server path: row 2 is done — "Credentials created", no connector-command sentence', () => {
+    const { container } = render(
+      <WaitingForConnector
+        setup={SETUP}
+        runtime="claude-code"
+        copied={null}
+        promptCopied={false}
+        keyMadeInBrowser={true}
+        onCopy={() => {}}
+        manualCredential={{ apiKey: 'k', delegatePrivateKey: '0x1', delegateAddress: '0x2', prompt: 'p', env: 'e' }}
+        manualCredentialAcknowledged={false}
+        manualCreating={false}
+        manualError={null}
+        onCreateManualCredential={() => {}}
+        onContinueAfterManualCredential={() => {}}
+        loading={false}
+        error={null}
+        connectionStage="starting"
+        expiresAt={EXPIRES_AT}
+        onCancel={() => {}}
+      />,
+    )
+    const rows = container.querySelectorAll('ol[aria-label="Connection steps"] > li')
+    expect(rows[1].getAttribute('data-step-state')).toBe('done')
+    expect(within(rows[1] as HTMLElement).getByText('Credentials created')).toBeTruthy()
+    expect(rows[1].textContent).not.toMatch(/Paste it into your agent|connector command/)
+    // Still exactly one current row, and it is row 3 (the positional pin at
+    // the #2482 tests above).
+    const current = container.querySelectorAll('[aria-current="step"]')
+    expect(current).toHaveLength(1)
+    expect(rows[2]).toBe(current[0])
+  })
+
+  it('no credential: row 2 still reads "Paste it into your agent" with its body', () => {
+    const { container } = render(renderWaiting(false, 'starting', () => {}, false))
+    const rows = container.querySelectorAll('ol[aria-label="Connection steps"] > li')
+    expect(rows[1].getAttribute('data-step-state')).toBe('pending')
+    expect(within(rows[1] as HTMLElement).getByText('Paste it into your agent')).toBeTruthy()
+    expect(rows[1].textContent).toContain('connector command')
+  })
 })
 
 describe('TerminalSetupState badge (#1377 review finding)', () => {

@@ -22,6 +22,8 @@ import {
   topUpMerchant,
   topUpRelayer,
   TOPUP_RUN_BUDGET_MS,
+  CLAIM_CONFIRM_CAP_MS,
+  waitForClaims,
 } from './balances-cli.js'
 
 const TREASURY = '0x9281d7c312e67859c65f4A3449F0548ea2f90974'
@@ -37,7 +39,14 @@ const provider = (fail = false) =>
       if (fail) throw new Error('rpc down')
       return ethers.parseEther('0.5')
     },
+    // Every claim is mined at once unless a test says otherwise (#3896): a stub
+    // without this method would make the confirmation wait pass vacuously.
+    getTransactionReceipt: async () => ({ status: 1 }),
   }) as unknown as ethers.Provider
+
+/** Distinct, well-formed transaction hashes, so a wait cannot pass by de-duplicating. */
+let hashSeq = 0
+const nextHash = () => ethers.zeroPadValue(ethers.toBeHex(++hashSeq), 32)
 
 const healthz = (async () => ({
   ok: true,
@@ -182,7 +191,7 @@ describe('qa:balances merchant top-up (#3836)', () => {
     const { report } = await runBalances([], { ...FULL, ...CDP }, {
       ...deps(),
       fetchImpl: h.fetchImpl,
-      requestFaucet: async ({ address }) => { addresses.push(address); return { transactionHash: `0x${'ab'.repeat(32)}` } },
+      requestFaucet: async ({ address }) => { addresses.push(address); return { transactionHash: nextHash() } },
       sleep: async () => {},
     })
     expect(h.calls()).toBe(2)
@@ -190,7 +199,7 @@ describe('qa:balances merchant top-up (#3836)', () => {
     expect(new Set(addresses)).toEqual(new Set([MERCHANT]))
     const row = report.rows.find((r) => r.key === 'merchant')!
     expect(row.band).not.toBe('critical')
-    expect(row.balance).toBe('0.002')
+    expect(row.balance).toBe('0.004')
     expect(report.history.at(-1)?.balances.merchant).toBe(MERCHANT_TOPUP_TARGET_WEI.toString())
     expect(report.topUps?.merchant).toMatchObject({
       status: 'attempted',
@@ -199,7 +208,7 @@ describe('qa:balances merchant top-up (#3836)', () => {
     })
   })
 
-  it('re-reads the merchant only after the relayer loop too (time for the faucet transactions to be mined)', async () => {
+  it('re-reads the merchant only after both loops have run', async () => {
     const events: string[] = []
     let fetches = 0
     const fetchImpl = (async () => {
@@ -215,7 +224,7 @@ describe('qa:balances merchant top-up (#3836)', () => {
       ...deps(),
       provider: low,
       fetchImpl,
-      requestFaucet: async ({ address }) => { events.push(address === MERCHANT ? 'merchant-claim' : 'relayer-claim'); return { transactionHash: `0x${'ab'.repeat(32)}` } },
+      requestFaucet: async ({ address }) => { events.push(address === MERCHANT ? 'merchant-claim' : 'relayer-claim'); return { transactionHash: nextHash() } },
       sleep: async () => {},
     })
     const reread = events.indexOf('merchant-reread')
@@ -236,6 +245,115 @@ describe('qa:balances merchant top-up (#3836)', () => {
     expect(report.rows.find((r) => r.key === 'merchant')).toMatchObject({ band: 'critical' })
     expect(report.history.at(-1)?.balances.merchant).toBe(low.toString())
     expect(report.topUps?.merchant?.reason).toMatch(/post-top-up read failed/)
+  })
+})
+
+describe('qa:balances merchant claim confirmation (#3896)', () => {
+  /**
+   * A chain where each claim is mined only after `mineAfter` receipt reads of
+   * it, and a `/healthz` that shows the claims' ETH only once EVERY claim is
+   * mined, so a re-read that skips the wait sees the pre-top-up balance.
+   */
+  const chain = (start: bigint, { mineAfter = 2, throwFirst = false, never = false } = {}) => {
+    const claims = new Map<string, number>()
+    let receiptCalls = 0
+    const mined = (h: string) => !never && (claims.get(h) ?? 0) > mineAfter
+    const provider = {
+      ...provider_(),
+      getTransactionReceipt: async (h: string) => {
+        receiptCalls++
+        const n = (claims.get(h) ?? 0) + 1
+        claims.set(h, n)
+        if (throwFirst && n === 1) throw new Error('rpc 429')
+        return mined(h) ? { status: 1 } : null
+      },
+    } as unknown as ethers.Provider
+    const requestFaucet = async () => {
+      const h = nextHash()
+      claims.set(h, 0)
+      return { transactionHash: h }
+    }
+    let fetches = 0
+    const fetchImpl = (async () => {
+      fetches++
+      const all = claims.size > 0 && [...claims.keys()].every(mined)
+      const wei = all ? start + BigInt(claims.size) * CDP_FAUCET_CLAIM_WEI : start
+      return {
+        ok: true, status: 200,
+        json: async () => ({ chain_id: 84532, settlement: { address: MERCHANT, native_balance_wei: wei.toString(), cost_per_settlement_wei: '2500000000000', warn_floor: 25, fail_floor: 12 } }),
+      }
+    }) as unknown as typeof fetch
+    return { provider, requestFaucet, fetchImpl, receiptCalls: () => receiptCalls, fetches: () => fetches, claims }
+  }
+  const provider_ = provider
+
+  it('waits for every claim to be mined, then the row, history and amount show the increase', async () => {
+    const start = MERCHANT_TOPUP_TARGET_WEI - 3n * CDP_FAUCET_CLAIM_WEI
+    const c = chain(start)
+    const { report } = await runBalances([], { ...FULL, ...CDP }, {
+      ...deps(), provider: c.provider, fetchImpl: c.fetchImpl, requestFaucet: c.requestFaucet, sleep: async () => {},
+    })
+    expect(c.claims.size).toBe(3)
+    expect(report.rows.find((r) => r.key === 'merchant')?.balance).toBe('0.004')
+    expect(report.history.at(-1)?.balances.merchant).toBe(MERCHANT_TOPUP_TARGET_WEI.toString())
+    expect(report.topUps?.merchant).toMatchObject({ amountReceivedAtomic: (3n * CDP_FAUCET_CLAIM_WEI).toString() })
+    expect(report.topUps?.merchant?.reason).toBeUndefined()
+  })
+
+  it('a receipt read that throws is retried, never fatal', async () => {
+    const start = MERCHANT_TOPUP_TARGET_WEI - CDP_FAUCET_CLAIM_WEI
+    const c = chain(start, { throwFirst: true })
+    const { report, exitCode } = await runBalances([], { ...FULL, ...CDP }, {
+      ...deps(), provider: c.provider, fetchImpl: c.fetchImpl, requestFaucet: c.requestFaucet, sleep: async () => {},
+    })
+    expect(exitCode).toBe(0)
+    expect(report.topUps?.merchant?.amountReceivedAtomic).toBe(CDP_FAUCET_CLAIM_WEI.toString())
+  })
+
+  it('a claim that never confirms ends the wait at the cap; the re-read still happens and says so', async () => {
+    const start = MERCHANT_TOPUP_TARGET_WEI - CDP_FAUCET_CLAIM_WEI
+    const c = chain(start, { never: true })
+    let now = 0
+    const { report } = await runBalances([], { ...FULL, ...CDP }, {
+      ...deps(), provider: c.provider, fetchImpl: c.fetchImpl, requestFaucet: c.requestFaucet,
+      nowMs: () => now,
+      sleep: async (ms) => { now += ms },
+    })
+    expect(now).toBeGreaterThanOrEqual(CLAIM_CONFIRM_CAP_MS)
+    expect(now).toBeLessThan(CLAIM_CONFIRM_CAP_MS + 10_000)
+    expect(c.fetches()).toBe(2)
+    expect(report.topUps?.merchant?.reason).toMatch(/1 claim\(s\) unconfirmed at re-read/)
+    expect(report.topUps?.merchant?.amountReceivedAtomic).toBe('0')
+  })
+
+  it('an attempted top-up with no accepted claim makes no receipt call', async () => {
+    const c = chain(MERCHANT_TOPUP_TARGET_WEI - CDP_FAUCET_CLAIM_WEI)
+    const { report } = await runBalances([], { ...FULL, ...CDP }, {
+      ...deps(), provider: c.provider, fetchImpl: c.fetchImpl, sleep: async () => {},
+      requestFaucet: async () => { throw new CdpFaucetError('rate_limited', 'CDP faucet returned HTTP 429', 429) },
+    })
+    expect(report.topUps?.merchant).toMatchObject({ status: 'attempted', claimsMade: 0, stopReason: 'rate-limited' })
+    expect(c.receiptCalls()).toBe(0)
+  })
+
+  it('waitForClaims stops at an early cap (the shared top-up deadline), not only after its sweep bound', async () => {
+    let now = 0
+    const unconfirmed = await waitForClaims([nextHash()], { getTransactionReceipt: async () => null }, {
+      capAt: 7_000,
+      nowMs: () => now,
+      sleep: async (ms) => { now += ms },
+    })
+    expect(unconfirmed).toBe(1)
+    expect(now).toBeLessThanOrEqual(7_000 + 3_000)
+  })
+
+  it('waitForClaims never polls a malformed hash and counts it unconfirmed', async () => {
+    let calls = 0
+    const unconfirmed = await waitForClaims(['0x1234', nextHash()], {
+      getTransactionReceipt: async () => { calls++; return { status: 1 } as never },
+    }, { capAt: 0, sleep: async () => {} })
+    expect(unconfirmed).toBe(1)
+    expect(calls).toBe(1)
   })
 })
 
@@ -284,11 +402,11 @@ describe('merchant faucet top-up loop (#3836)', () => {
     expect(calls).toHaveLength(4)
     expect(result.claimsMade).toBe(4)
     // With the real constants, the most a zero balance can need.
-    expect(Number(MERCHANT_TOPUP_TARGET_WEI / CDP_FAUCET_CLAIM_WEI)).toBe(20)
+    expect(Number(MERCHANT_TOPUP_TARGET_WEI / CDP_FAUCET_CLAIM_WEI)).toBe(40)
   })
 
   for (const [label, readings, stopReason, reason] of [
-    ['at the target', merchantReadings(MERCHANT_TOPUP_TARGET_WEI), 'not-needed', /at or above its 0\.002 ETH target/],
+    ['at the target', merchantReadings(MERCHANT_TOPUP_TARGET_WEI), 'not-needed', /at or above its 0\.004 ETH target/],
     ['unknown', merchantReadings(null), 'unreadable', /could not be read/],
     ['on chain 8453', merchantReadings(0n, { chainId: 8453 }), 'wrong-chain', /reports chain 8453/],
     ['with no chain_id', merchantReadings(0n, { chainId: undefined }), 'wrong-chain', /reports no chain_id/],

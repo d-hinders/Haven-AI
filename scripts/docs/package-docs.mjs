@@ -435,7 +435,9 @@ export const GOVERNED_PACKAGE_DOCS = [
     // #3836: the balances-check paragraph re-read against the merchant
     // settlement-wallet faucet top-up (below-target trigger, 0.002 ETH target).
     // Other QA scenario prose was not re-read.
-    'last-verified': '2026-10-09',
+    // #3896: the balances-check paragraph re-read against the raised 0.004 ETH
+    // merchant target. Other QA scenario prose was not re-read.
+    'last-verified': '2026-10-12',
   },
   {
     doc: 'packages/demo-merchant-mcp/README.md',

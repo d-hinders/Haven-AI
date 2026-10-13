@@ -514,17 +514,26 @@ function AgentRow({
     // #3910: one grid, two flows. Below `sm` the last-payment time sits on the
     // name line and the body (bar, caption, paused line) spans the row's full
     // width — a 390px paused row ran ~9 lines squeezed beside the column.
-    // From `sm` the column spans both lines beside the body, up to 40% of the
-    // row (`fit-content(40%)`), so a long merchant host shows in full where
-    // it fits instead of "demo-merchant-…". The column renders once.
+    // From `sm` the column sits beside the body (the name line spans the row)
+    // at ONE fixed width, 10rem, in every row (#3912): each row is its own
+    // grid, so a content-sized column (`fit-content(40%)`, #3910) gave every
+    // bar a different length depending on its merchant. The merchant truncates
+    // and carries its full name as a tooltip. Below `sm` the time-only column
+    // stays content-sized. The column renders once.
     <Link
       href={`/agents/${agent.id}`}
-      className={`grid grid-cols-[2rem_minmax(0,1fr)_fit-content(40%)_1rem] items-center gap-x-3 px-5 py-3.5 transition-colors hover:bg-[var(--v2-surface-hover)] ${
+      className={`grid grid-cols-[2rem_minmax(0,1fr)_fit-content(40%)_1rem] items-center sm:grid-cols-[2rem_minmax(0,1fr)_10rem_1rem] gap-x-3 px-5 py-3.5 transition-colors hover:bg-[var(--v2-surface-hover)] ${
         hasLastPaymentColumn
-          ? "[grid-template-areas:'icon_name_time_chev'_'icon_body_body_chev'] sm:[grid-template-areas:'icon_name_time_chev'_'icon_body_time_chev']"
-          : // No time cell (a setup row): the name and body span the empty
-            // column and its gap, or the badge wraps at 390 (#3910 review).
-            "[grid-template-areas:'icon_name_name_chev'_'icon_body_body_chev']"
+          ? // From `sm` the name line spans the row and the time column sits
+            // beside the body only: with a fixed 10rem column, a name sharing
+            // the 1fr track pushed a "92% used" badge under the name (#3912).
+            "[grid-template-areas:'icon_name_time_chev'_'icon_body_body_chev'] sm:[grid-template-areas:'icon_name_name_chev'_'icon_body_time_chev']"
+          : // No time cell (a setup row, or no stats): below `sm` the name and
+            // body span the empty column and its gap, or the badge wraps at 390
+            // (#3910 review). From `sm` the column is a fixed 10rem, so the
+            // body stays out of it — or this row's bar would run 172px longer
+            // than everyone else's (#3912). The name may still span it.
+            "[grid-template-areas:'icon_name_name_chev'_'icon_body_body_chev'] sm:[grid-template-areas:'icon_name_name_chev'_'icon_body_._chev']"
       }`}
     >
       {/* Robot mark matches the sidebar's "agents" icon so the dashboard and
@@ -571,7 +580,9 @@ function AgentRow({
                 {timeAgo(agent.stats.lastPaymentAt)}
               </p>
               {counterpartyLabelValue ? (
-                <p className="mt-0.5 hidden truncate text-xs text-[var(--v2-ink-3)] sm:block">{counterpartyLabelValue}</p>
+                <p className="mt-0.5 hidden truncate text-xs text-[var(--v2-ink-3)] sm:block" title={counterpartyLabelValue}>
+                  {counterpartyLabelValue}
+                </p>
               ) : null}
             </>
           ) : (

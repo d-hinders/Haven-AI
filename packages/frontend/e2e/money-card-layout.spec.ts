@@ -84,15 +84,21 @@ test('at 390 every agent row keeps its name whole beside the last-payment column
 })
 
 /**
- * #3910: from `sm` the last-payment column may take up to 40% of the row,
- * so a long merchant host shows in full where it fits. The fixture's own
- * hosts ("research.example", "Example Shop AB") already fit the old 7rem cap
- * and prove nothing, so this arm serves one agent a long host. Fails on the
- * 7rem cap: the merchant line was ~24% of the row (112px of 474px).
+ * #3912: every agent row's budget bar is the same length. Each row is its
+ * own grid, and from `sm` the last-payment column was content-sized
+ * (`fit-content(40%)`, #3910), so a long merchant host shortened that row's
+ * bar. The column is now a fixed 10rem in every row; the merchant truncates
+ * with a tooltip.
+ *
+ * The clock is frozen at the fixture's day: its budget reads end on 09-02 /
+ * 09-03, and on the real clock they read as "refilled, updating", which
+ * renders no bar at all — an "every bar equal" loop would pass on nothing.
  */
-test('from sm a long merchant host gets up to 40% of the row (1280)', async ({ page }) => {
+const FROZEN_NOW = new Date('2026-09-01T12:00:00.000Z')
+
+/** The fixture overview with a long host on the research agent and no payment on the watcher. */
+function overviewWithLongHostAndNoPayment() {
   const body = JSON.parse(JSON.stringify(dashboardOverview)) as typeof dashboardOverview
-  // The fixture's first agent is the active research agent (`testAgent`).
   const research = body.agents[0]
   research.stats.lastCounterparty = {
     source: 'x402',
@@ -100,31 +106,91 @@ test('from sm a long merchant host gets up to 40% of the row (1280)', async ({ p
     to: research.stats.lastCounterparty?.to ?? '0x' + '9'.repeat(40),
     merchantName: null,
   }
+  const watcher = body.agents.find((agent) => agent.id === 'agent-e2e-watcher')!
+  watcher.stats.lastPaymentAt = null
+  return { body, researchId: research.id }
+}
+
+async function serveOverview(page: import('@playwright/test').Page, body: unknown) {
   // Registered after mockHavenApi, so it wins this path alone.
   await page.route('**/api/dashboard/overview*', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) }),
   )
+}
+
+test('from sm every agent row\'s budget bar has the same length and right edge (1280)', async ({ page }) => {
+  await page.clock.setFixedTime(FROZEN_NOW)
+  const { body } = overviewWithLongHostAndNoPayment()
+  await serveOverview(page, body)
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto('/dashboard')
-  // The agents-section row, not a "Needs attention" action linking to the same page.
-  const row = page.locator(`a[href="/agents/${research.id}"]`).filter({ has: page.getByTestId('agent-row-last-payment') })
-  const merchant = row.getByTestId('agent-row-last-payment').locator('p').nth(1)
+  await expect(page.locator('a[href^="/agents/"] [role="progressbar"]').nth(1)).toBeVisible()
+  const bars = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('a[href^="/agents/"] [role="progressbar"]')).map((el) => {
+      const r = el.getBoundingClientRect()
+      return { width: r.width, right: r.right }
+    }),
+  )
+  // Guard first: at least two bars, or "all equal" proves nothing.
+  expect(bars.length, 'fewer than two budget bars rendered').toBeGreaterThanOrEqual(2)
+  for (const bar of bars) {
+    expect(Math.abs(bar.width - bars[0].width), `bar widths ${bars.map((b) => b.width).join(', ')}`).toBeLessThanOrEqual(1)
+    expect(Math.abs(bar.right - bars[0].right), `bar right edges ${bars.map((b) => b.right).join(', ')}`).toBeLessThanOrEqual(1)
+  }
+})
+
+test('from sm a setup row\'s body ends where the other rows\' bodies end (1280)', async ({ page }) => {
+  await page.clock.setFixedTime(FROZEN_NOW)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('/dashboard')
+  await expect(page.locator('a[href="/agents/agent-e2e-pending"]').filter({ hasText: 'Connecting agent' })).toBeVisible()
+  // The fixture's setup row has no bar, so the proof is structural: the body
+  // cell (the `[grid-area:body]` div, the second child after the name line)
+  // ends at the same right edge as every other row's body.
+  const rights = await page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href^="/agents/"]'))
+      .filter((a) => a.firstElementChild?.getAttribute('aria-hidden') === 'true' && a.querySelector('p span.truncate'))
+      .map((a) => ({
+        href: a.getAttribute('href'),
+        right: (a.children[2] as HTMLElement).getBoundingClientRect().right,
+      })),
+  )
+  expect(rights.length, 'fewer than two agent rows').toBeGreaterThanOrEqual(2)
+  const setup = rights.find((r) => r.href === '/agents/agent-e2e-pending')!
+  const other = rights.find((r) => r.href !== '/agents/agent-e2e-pending')!
+  expect(Math.abs(setup.right - other.right), `setup body ends at ${setup.right}, others at ${other.right}`).toBeLessThanOrEqual(1)
+})
+
+test('from sm a long host truncates with its full name as a tooltip, and "No payments yet" fits (1280)', async ({ page }) => {
+  await page.clock.setFixedTime(FROZEN_NOW)
+  const { body, researchId } = overviewWithLongHostAndNoPayment()
+  await serveOverview(page, body)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('/dashboard')
+  const research = page.locator(`a[href="/agents/${researchId}"]`).filter({ has: page.getByTestId('agent-row-last-payment') })
+  const merchant = research.getByTestId('agent-row-last-payment').locator('p').nth(1)
   await expect(merchant).toBeVisible()
-  const widths = await row.evaluate((rowEl) => {
-    const line = rowEl.querySelector('[data-testid="agent-row-last-payment"] p:nth-child(2)') as HTMLElement
-    return {
-      row: rowEl.getBoundingClientRect().width,
-      merchant: line.getBoundingClientRect().width,
-      whole: line.scrollWidth <= line.clientWidth + 1,
-    }
+  await expect(merchant).toHaveAttribute('title', 'demo-merchant-dev-84e4.up.railway.app')
+  expect(await merchant.evaluate((el) => el.scrollWidth > el.clientWidth + 1), 'the long host is not truncated').toBe(true)
+  const none = page.locator('a[href="/agents/agent-e2e-watcher"]').filter({ has: page.getByTestId('agent-row-last-payment') }).getByText('No payments yet')
+  await expect(none).toBeVisible()
+  expect(await none.evaluate((el) => el.scrollWidth <= el.clientWidth + 1), '"No payments yet" is clipped').toBe(true)
+})
+
+test('at 390 a budget bar still spans the row (frozen clock)', async ({ page }) => {
+  await page.clock.setFixedTime(FROZEN_NOW)
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.goto('/dashboard')
+  await dismissMobileSidebar(page)
+  const row = page.locator('a[href^="/agents/"]').filter({ has: page.getByRole('progressbar') }).first()
+  await expect(row).toBeVisible()
+  const ratio = await row.evaluate((rowEl) => {
+    const icon = rowEl.firstElementChild as HTMLElement
+    const chev = rowEl.lastElementChild as Element
+    const bar = rowEl.querySelector('[role="progressbar"]') as HTMLElement
+    return bar.getBoundingClientRect().width / (chev.getBoundingClientRect().left - icon.getBoundingClientRect().right)
   })
-  // Either the host shows whole, or the column took its share: ≥35% of the
-  // row (the 7rem cap gave ~24%). A wider Agents card that fits the host
-  // whole must not fail this.
-  expect(
-    widths.whole || widths.merchant / widths.row >= 0.35,
-    `merchant line ${widths.merchant}px of a ${widths.row}px row, cut short`,
-  ).toBe(true)
+  expect(ratio, 'the bar does not span the row at 390').toBeGreaterThanOrEqual(0.85)
 })
 
 /**
@@ -186,4 +252,26 @@ test('at 390 a setup row\'s name line spans the empty time column', async ({ pag
     return { span, name: nameLine.getBoundingClientRect().width }
   })
   expect(m.name, `name line ${m.name}px in a ${m.span}px span`).toBeGreaterThanOrEqual(m.span - 24 - 1)
+})
+
+/**
+ * #3912: from `sm` the name line spans the row (the time column sits beside
+ * the body only), so a badge such as "92% used" stays on the name's line
+ * instead of wrapping under a name squeezed into the 1fr track.
+ */
+test('from sm every agent row\'s name line spans the row (1280)', async ({ page }) => {
+  await page.clock.setFixedTime(FROZEN_NOW)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('/dashboard')
+  await expect(page.getByTestId('agent-row-last-payment').first()).toBeVisible()
+  const rows = await page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href^="/agents/"]'))
+      .filter((a) => a.firstElementChild?.getAttribute('aria-hidden') === 'true' && a.querySelector('p span.truncate'))
+      .map((a) => {
+        const span = (a.lastElementChild as Element).getBoundingClientRect().left - (a.firstElementChild as HTMLElement).getBoundingClientRect().right
+        return { span, name: (a.children[1] as HTMLElement).getBoundingClientRect().width }
+      }),
+  )
+  expect(rows.length, 'fewer than two agent rows').toBeGreaterThanOrEqual(2)
+  for (const r of rows) expect(r.name, `name line ${r.name}px in a ${r.span}px span`).toBeGreaterThanOrEqual(r.span - 24 - 1)
 })

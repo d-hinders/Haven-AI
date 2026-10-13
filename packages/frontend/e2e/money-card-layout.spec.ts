@@ -9,7 +9,7 @@
  * the visual gate is advisory on `dev`, so a baseline alone would not hold it.
  */
 import { expect, test } from '@playwright/test'
-import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
+import { dismissMobileSidebar, mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
 
 test.beforeEach(async ({ page }) => {
   await mockHavenApi(page)
@@ -62,4 +62,22 @@ test('below lg the stacked card keeps the sparkline at its fixed 40px (900)', as
   )
   expect(height, 'no sparkline drawing rendered').not.toBeNull()
   expect(Math.abs(height! - 40), `sparkline drawing is ${height}px tall at 900`).toBeLessThanOrEqual(0.5)
+})
+
+test('at 390 every agent row keeps its name whole beside the last-payment column', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.goto('/dashboard')
+  await dismissMobileSidebar(page)
+  await expect(page.getByTestId('agent-row-last-payment').first()).toBeVisible()
+  // #3908 design review: a 40% right column left "Research agent" as "R…".
+  // The name span truncates by design when it truly cannot fit; with the
+  // column capped at 7rem the fixture's names fit whole.
+  const names = await page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLElement>('a[href^="/agents/"] p span.truncate')).map((el) => ({
+      text: el.textContent,
+      clipped: el.scrollWidth > el.clientWidth + 1,
+    })),
+  )
+  expect(names.length, 'no agent rows rendered').toBeGreaterThan(0)
+  expect(names.filter((n) => n.clipped), 'agent names clipped at 390').toEqual([])
 })

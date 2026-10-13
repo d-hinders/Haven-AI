@@ -36,7 +36,7 @@
  */
 
 import Link from 'next/link'
-import { useMemo, useRef } from 'react'
+import { Fragment, useMemo, useRef } from 'react'
 import { Bot, ChevronRight } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { Button } from '@/components/ui/Button'
@@ -251,9 +251,22 @@ function AgentBudget({
     selected.extraCount > 0
       ? ` · +${selected.extraCount} ${selected.extraCount === 1 ? 'budget' : 'budgets'}`
       : ''
+  // Each "·" segment stays whole (#3908 design review): a narrow row may wrap
+  // the caption, but only at a separator — never between "refills in" and
+  // "22h", which would strand a time apart from its verb.
+  const segments = `${caption.caption}${extra}`.split(' · ')
   return (
     <div className="mt-1.5">
-      <BudgetMeter usedPercent={caption.usedPercent} label={caption.label} caption={`${caption.caption}${extra}`} />
+      <BudgetMeter
+        usedPercent={caption.usedPercent}
+        label={caption.label}
+        caption={segments.map((segment, index) => (
+          <Fragment key={index}>
+            {index > 0 ? ' · ' : null}
+            <span className="whitespace-nowrap">{segment}</span>
+          </Fragment>
+        ))}
+      />
     </div>
   )
 }
@@ -498,8 +511,10 @@ function AgentRow({
         <Icon icon={Bot} className="h-4 w-4" />
       </span>
       <div className="min-w-0 flex-1">
-        <p className="flex items-center gap-2 text-sm font-medium text-[var(--v2-ink)]">
-          <span className="truncate">{agent.name}</span>
+        {/* flex-wrap (#3908): on a narrow row the badge drops under the name
+            rather than squeezing the name to a few letters. */}
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm font-medium text-[var(--v2-ink)]">
+          <span className="max-w-full truncate">{agent.name}</span>
           {badge && <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>}
         </p>
         {accountCount > 1 && accountName && (
@@ -520,10 +535,12 @@ function AgentRow({
       </div>
       {/* #3908: the last payment in a right-hand column, as the mockup draws
           it — the time on top, the merchant (never a raw address) under it,
-          width-capped so a long host cannot crush the meter at 390px. A
+          capped at 7rem, 5.5rem below `sm` (the mockup's ~80–90px column; a
+          40% cap left a 390px row's name as "R…"), so a long host truncates
+          instead of the agent's name. A
           setup row has nothing to say here yet. */}
       {agent.status !== 'pending_approval' && agent.stats ? (
-        <div data-testid="agent-row-last-payment" className="min-w-0 max-w-[40%] flex-shrink-0 text-right">
+        <div data-testid="agent-row-last-payment" className="min-w-0 max-w-[5.5rem] flex-shrink-0 text-right sm:max-w-[7rem]">
           {agent.stats.lastPaymentAt ? (
             <>
               <p className="text-sm font-medium text-[var(--v2-ink)] whitespace-nowrap">

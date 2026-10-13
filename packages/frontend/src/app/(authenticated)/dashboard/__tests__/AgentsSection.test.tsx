@@ -182,11 +182,15 @@ describe('AgentsSection (#3809)', () => {
     // #3908: the compact row caption — one leading ≈, the period word in place
     // of "used this period", the extra-budget count inside the caption line
     // and never inside the progressbar's accessible name.
-    expect(
-      within(container).getByText(/^≈\$0\.95 of \$1\.00 · per week · (refills|expires) .+ · \+1 budget$/),
-    ).toBeInTheDocument()
-    expect(within(container).queryByText(/used this period/)).toBeNull()
+    const caption = meter.parentElement!.querySelector('p')!
+    expect(caption.textContent).toMatch(/^≈\$0\.95 of \$1\.00 · per week · (refills|expires) .+ · \+1 budget$/)
+    expect(container.textContent).not.toMatch(/used this period/)
     expect(meter).toHaveAccessibleName('USDC budget used')
+    // The caption wraps only at a "·": every segment is one unbreakable span,
+    // so "refills in" never strands its time on the next line.
+    const segments = Array.from(caption.querySelectorAll('span'))
+    expect(segments.map((segment) => segment.textContent)).toEqual(caption.textContent!.split(' · '))
+    for (const segment of segments) expect(segment).toHaveClass('whitespace-nowrap')
   })
 
   it("keeps the paused agent's live meter and uses the shared pause wording", () => {
@@ -388,8 +392,9 @@ describe('AgentsSection (#3809)', () => {
         })}
       />,
     )
-    expect(within(container).getByText(/^125\.00 of 250\.00 USDC · every 4 hours · /)).toBeInTheDocument()
-    expect(within(container).queryByText(/used this period/)).toBeNull()
+    const caption = screen.getByRole('progressbar').parentElement!.querySelector('p')!
+    expect(caption.textContent).toMatch(/^125\.00 of 250\.00 USDC · every 4 hours · /)
+    expect(container.textContent).not.toMatch(/used this period/)
   })
 
   it('keeps rows still within a group when spend changes, and moves an agent that crosses into attention', () => {

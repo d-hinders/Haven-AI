@@ -514,11 +514,11 @@ function AgentRow({
     // #3910: one grid, two flows. Below `sm` the last-payment time sits on the
     // name line and the body (bar, caption, paused line) spans the row's full
     // width — a 390px paused row ran ~9 lines squeezed beside the column.
-    // From `sm` the column spans both lines beside the body at ONE fixed width,
-    // 10rem, in every row (#3912): each row is its own grid, so a
-    // content-sized column (`fit-content(40%)`, #3910) gave every bar a
-    // different length depending on its merchant. The merchant truncates and
-    // carries its full name as a tooltip. Below `sm` the time-only column
+    // From `sm` the column sits beside the body (the name line spans the row)
+    // at ONE fixed width, 10rem, in every row (#3912): each row is its own
+    // grid, so a content-sized column (`fit-content(40%)`, #3910) gave every
+    // bar a different length depending on its merchant. The merchant truncates
+    // and carries its full name as a tooltip. Below `sm` the time-only column
     // stays content-sized. The column renders once.
     <Link
       href={`/agents/${agent.id}`}

@@ -673,7 +673,12 @@ shows when the budget starts. The dashboard's agent rows ask for the compact
 `style: 'row'` wording (#3908), as the mockup draws a row: the period word in
 place of "used this period" ("≈$0.40 of $1.00 · per day · refills in 5h"),
 with an extra-budget count riding in the same line ("· +1 budget"); every
-other surface keeps the full wording. The label row above the bar (token value,
+other surface keeps the full wording. In token mode the row joins the cap and
+its symbol with a no-break space (#3910), so "3.00 USDC" never splits. Beside
+the caption the row has a right-hand column: the last payment's time, and the
+merchant under it from `sm` (up to 40% of the row); below `sm` the time sits
+on the name line and the merchant is hidden, so the bar and caption span the
+row (#3910). The label row above the bar (token value,
 percentage) belongs to the caller: it is the caller's tabular typography, not
 part of the measurement. The fill is a token surface colour, never a series
 colour — a budget bar measures one delegation against its own period, it is
@@ -851,7 +856,7 @@ of the half at `lg`. Beside it at `lg` the balance half's sparkline grows
 into the spare height (`fill`), so the actions sit level with that row and
 never above an empty band (#3908); before the first payment the same muted label reads
 "Agent spending" over its explanation. The "Needs attention" card
-(`anchor`) follows at full width — never a side column beside the balance —
+(a normal flat card with the shared header band, like Agents and Activity, #3910) follows at full width — never a side column beside the balance —
 then Agents and Activity. Its count badge is neutral, never a warning tint
 (the card holds neutral items too), sits beside the heading, and hides at
 zero and while the card is "Get started". With nothing listed it shows
@@ -1376,7 +1381,7 @@ The link stays available while an adjacent action is busy, and normal link behav
 intact. Prove body and control hit targets with a real browser at desktop and 390px;
 jsdom cannot evaluate the pseudo-element's stacking or hit testing.
 
-`Card` supports `elevation="flat" | "raised" | "anchor"` and `hover={false}`. Use `raised` only for the page's single most prominent surface (the dashboard money card, #3897), `anchor` for the second (the dashboard's "Needs attention" card), and keep nested or data-dense cards flat.
+`Card` supports `elevation="flat" | "raised" | "anchor"` and `hover={false}`. Use `raised` only for the page's single most prominent surface (the dashboard money card, #3897), `anchor` for a second focal point where a page has one (the sweep page's "How to recover" card; the dashboard has none since #3910, when "Needs attention" became a normal card), and keep nested or data-dense cards flat.
 
 **A card in a grid has to fit its track, and by default it cannot ([#2251](https://github.com/d-hinders/Haven-AI/issues/2251)).** This is the card sibling of the `truncate`d-table-cell rule under *Transaction tables* below, and it has the same shape: a `truncate` descendant is `white-space: nowrap`, so its min-content is the whole string, and a container that is never allowed to go below its min-content grows instead of ellipsising.
 

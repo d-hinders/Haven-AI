@@ -257,7 +257,8 @@ function AgentBudget({
   // The amounts segment may wrap at its own spaces ("… of …"): it is the
   // widest, and a large SEK budget kept whole would overflow a 390px row.
   // Each figure is still unbroken — the currency formats separate digits
-  // and symbol with no-break spaces.
+  // and symbol with no-break spaces, and token mode joins the cap and its
+  // symbol with one too (#3910).
   const segments = `${caption.caption}${extra}`.split(' · ')
   return (
     <div className="mt-1.5">
@@ -508,19 +509,28 @@ function AgentRow({
     : null
 
   return (
-    <Link href={`/agents/${agent.id}`} className="flex items-center gap-3 px-5 py-3.5 transition-colors hover:bg-[var(--v2-surface-hover)]">
+    // #3910: one grid, two flows. Below `sm` the last-payment time sits on the
+    // name line and the body (bar, caption, paused line) spans the row's full
+    // width — a 390px paused row ran ~9 lines squeezed beside the column.
+    // From `sm` the column spans both lines beside the body, up to 40% of the
+    // row (`fit-content(40%)`), so a long merchant host shows in full where
+    // it fits instead of "demo-merchant-…". The column renders once.
+    <Link
+      href={`/agents/${agent.id}`}
+      className="grid grid-cols-[2rem_minmax(0,1fr)_fit-content(40%)_1rem] items-center gap-x-3 px-5 py-3.5 transition-colors [grid-template-areas:'icon_name_time_chev'_'icon_body_body_chev'] hover:bg-[var(--v2-surface-hover)] sm:[grid-template-areas:'icon_name_time_chev'_'icon_body_time_chev']"
+    >
       {/* Robot mark matches the sidebar's "agents" icon so the dashboard and
           nav read as the same system (carried from the old section). */}
-      <span aria-hidden="true" className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]">
+      <span aria-hidden="true" className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] [grid-area:icon]">
         <Icon icon={Bot} className="h-4 w-4" />
       </span>
-      <div className="min-w-0 flex-1">
-        {/* flex-wrap (#3908): on a narrow row the badge drops under the name
-            rather than squeezing the name to a few letters. */}
-        <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm font-medium text-[var(--v2-ink)]">
-          <span className="max-w-full truncate">{agent.name}</span>
-          {badge && <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>}
-        </p>
+      {/* flex-wrap (#3908): on a narrow row the badge drops under the name
+          rather than squeezing the name to a few letters. */}
+      <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-sm font-medium text-[var(--v2-ink)] [grid-area:name]">
+        <span className="max-w-full truncate">{agent.name}</span>
+        {badge && <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>}
+      </p>
+      <div className="min-w-0 [grid-area:body]">
         {accountCount > 1 && accountName && (
           <p className="mt-0.5 truncate text-xs text-[var(--v2-ink-3)]">{`From ${accountName}`}</p>
         )}
@@ -538,13 +548,12 @@ function AgentRow({
         )}
       </div>
       {/* #3908: the last payment in a right-hand column, as the mockup draws
-          it — the time on top, the merchant (never a raw address) under it,
-          capped at 7rem, 5.5rem below `sm` (the mockup's ~80–90px column; a
-          40% cap left a 390px row's name as "R…"), so a long host truncates
-          instead of the agent's name. A
-          setup row has nothing to say here yet. */}
+          it — the time on top, the merchant (never a raw address) under it.
+          The merchant shows from `sm` only (#3910): at 390 it truncated to a
+          few characters, and it stays on the agent page. A setup row has
+          nothing to say here yet. */}
       {agent.status !== 'pending_approval' && agent.stats ? (
-        <div data-testid="agent-row-last-payment" className="min-w-0 max-w-[5.5rem] flex-shrink-0 text-right sm:max-w-[7rem]">
+        <div data-testid="agent-row-last-payment" className="min-w-0 self-start text-right [grid-area:time] sm:self-center">
           {agent.stats.lastPaymentAt ? (
             <>
               <p className="text-sm font-medium text-[var(--v2-ink)] whitespace-nowrap">
@@ -554,7 +563,7 @@ function AgentRow({
                 {timeAgo(agent.stats.lastPaymentAt)}
               </p>
               {counterpartyLabelValue ? (
-                <p className="mt-0.5 truncate text-xs text-[var(--v2-ink-3)]">{counterpartyLabelValue}</p>
+                <p className="mt-0.5 hidden truncate text-xs text-[var(--v2-ink-3)] sm:block">{counterpartyLabelValue}</p>
               ) : null}
             </>
           ) : (
@@ -562,7 +571,7 @@ function AgentRow({
           )}
         </div>
       ) : null}
-      <Icon icon={ChevronRight} className="h-4 w-4 flex-shrink-0 text-[var(--v2-ink-3)]" />
+      <Icon icon={ChevronRight} className="h-4 w-4 flex-shrink-0 text-[var(--v2-ink-3)] [grid-area:chev]" />
     </Link>
   )
 }

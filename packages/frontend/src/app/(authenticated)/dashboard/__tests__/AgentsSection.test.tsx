@@ -186,7 +186,8 @@ describe('AgentsSection (#3809)', () => {
     expect(caption.textContent).toMatch(/^≈\$0\.95 of \$1\.00 · per week · (refills|expires) .+ · \+1 budget$/)
     expect(container.textContent).not.toMatch(/used this period/)
     expect(meter).toHaveAccessibleName('USDC budget used')
-    // The caption wraps only at a "·": every segment is one unbreakable span,
+    // The caption wraps at a "·", or inside the amounts segment only: every
+    // segment after the amounts is one unbreakable span,
     // so "refills in" never strands its time on the next line.
     const segments = Array.from(caption.querySelectorAll('span'))
     expect(segments.map((segment) => segment.textContent)).toEqual(caption.textContent!.split(' · '))
@@ -396,7 +397,8 @@ describe('AgentsSection (#3809)', () => {
       />,
     )
     const caption = screen.getByRole('progressbar').parentElement!.querySelector('p')!
-    expect(caption.textContent).toMatch(/^125\.00 of 250\.00 USDC · every 4 hours · /)
+    // #3910: the cap and its symbol stay together (U+00A0).
+    expect(caption.textContent).toMatch(/^125\.00 of 250\.00\u00a0USDC · every 4 hours · /)
     expect(container.textContent).not.toMatch(/used this period/)
   })
 

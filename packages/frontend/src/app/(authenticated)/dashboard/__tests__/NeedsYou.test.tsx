@@ -52,6 +52,46 @@ describe('NeedsYou', () => {
     expect(screen.getByText('Ops has one way to approve payments')).toBeInTheDocument()
   })
 
+  // ── #3910: a normal card, like Agents and Activity ──────────────────────
+
+  it('is a flat card with the shared header band — no anchor tint on the body (Needs attention mode)', () => {
+    render(
+      <NeedsYou items={[SIX_ITEMS[0]]} hasOverviewError={false} onRetry={() => {}} onDismiss={() => {}} />,
+    )
+    const card = screen.getByRole('article')
+    expect(card.className).toContain('bg-[var(--v2-bg)]')
+    // No anchor surface anywhere in the card (it used to tint the body too,
+    // so a single row read as a second header).
+    expect(card.outerHTML).not.toContain('--v2-surface-anchor')
+    const heading = screen.getByRole('heading', { level: 2, name: 'Needs attention' })
+    expect(heading).toHaveAttribute('id', 'needs-attention-heading')
+    expect(heading).toHaveAttribute('tabindex', '-1')
+    // Card.Header's band: the surface tint and the bottom hairline.
+    const band = heading.closest('div.border-b') as HTMLElement
+    expect(band.className).toContain('bg-[var(--v2-surface)]')
+    expect(band.contains(screen.getByText('1', { selector: 'span' }))).toBe(true)
+  })
+
+  it('keeps "N of 3 done" and "Hide for now" in the same header band (Get started mode)', () => {
+    render(
+      <NeedsYou
+        items={[]}
+        hasOverviewError={false}
+        onRetry={() => {}}
+        onDismiss={() => {}}
+        title="Get started"
+        titleMeta={<span>1 of 3 done</span>}
+        titleAction={<button type="button">Hide for now</button>}
+        guide={<p>steps</p>}
+      />,
+    )
+    const heading = screen.getByRole('heading', { level: 2, name: 'Get started' })
+    const band = heading.closest('div.border-b') as HTMLElement
+    expect(band.className).toContain('bg-[var(--v2-surface)]')
+    expect(band.contains(screen.getByText('1 of 3 done'))).toBe(true)
+    expect(band.contains(screen.getByRole('button', { name: 'Hide for now' }))).toBe(true)
+  })
+
   // ── #3902: the title, the count badge and the empty state ────────────────
 
   it('titles the card "Needs attention", with the count beside the heading, not inside it', () => {

@@ -15,7 +15,8 @@ interface CardProps {
    *   already prominent.
    * - `anchor`: secondary focal point. Cooler off-white background + brand-tinted
    *   hairline border. Use for the second-most-important surface on a page
-   *   (the dashboard's "Needs attention" card). Don't sprinkle.
+   *   (the sweep page's "How to recover" card, an agent status banner). Don't
+   *   sprinkle — the dashboard has none since #3910.
    */
   elevation?: Elevation
 }

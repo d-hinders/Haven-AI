@@ -6691,7 +6691,7 @@ export const openapiSpec = {
         operationId: 'recordRetiredAgents',
         summary: 'Report agents this connector retired on replacement (#3772).',
         description:
-          'Called by `@haven_ai/connect --replace` after it retires old agent directories on a machine: the NEW agent, authenticated with its own API key, names the retired agent ids. Each id that belongs to the same user is stamped superseded-by-this-agent, and that agent\'s later identity and allowances reads carry `superseded_by`. WARNING ONLY: nothing is granted, revoked or paused, and no payment path consults it. Agent API key only — a setup token is not accepted. Ids owned by another user, the caller itself, or unknown are silently omitted from `recorded_agent_ids`; a later replace overwrites an earlier stamp.',
+          'Called by `@haven_ai/connect --replace` after it retires old agent directories on a machine: the NEW agent, authenticated with its own API key, names the retired agent ids. Each id that belongs to the same user is stamped superseded-by-this-agent, and that agent\'s later identity and allowances reads carry `superseded_by`. WARNING ONLY: nothing is granted, revoked or paused, and no payment path consults it. Agent API key only — a setup token is not accepted — and accepted only within 30 minutes of the setup\'s registration (409 after). Ids owned by another user, the caller itself, or unknown are silently omitted from `recorded_agent_ids`; a later replace overwrites an earlier stamp.',
         security: [{ AgentApiKey: [] }],
         parameters: [{ $ref: '#/components/parameters/SetupId' }],
         requestBody: {
@@ -11603,7 +11603,7 @@ export const openapiSpec = {
         },
         additionalProperties: false,
         description:
-          '#3772: set when `@haven_ai/connect --replace` retired this agent in favour of a newer one — a stale-duplicate WARNING. Reporting metadata only: this agent\'s budget, status and credentials are unchanged. Null when never superseded (or the read failed).',
+          '#3772: set when `@haven_ai/connect --replace` retired this agent in favour of a newer one — a stale-duplicate WARNING. Reporting metadata only: this agent\'s budget, status and credentials are unchanged. Null when never superseded, when the replacement has since been revoked or archived, or when the read failed.',
       },
       UpdateConnectorInstallStatusResponse: {
         type: 'object',

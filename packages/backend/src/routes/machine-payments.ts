@@ -119,7 +119,8 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       // names its parent agent and the effective (narrower) limits. Empty
       // unless agent A actually re-delegated to this agent.
       // #3772: set when `connect --replace` retired this agent in favour of a
-      // newer one. Always present (null = not superseded). A stale-duplicate
+      // newer one. Always present (null = not superseded, the
+      // replacement since revoked or archived, or the read failed). A stale-duplicate
       // WARNING only — it changes nothing about this agent's authority.
       superseded_by,
       parent_sub_budgets: parent_sub_budgets.map((g) => ({

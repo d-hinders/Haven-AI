@@ -2030,7 +2030,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (pathname === '/chains') return { deployable: [FIXTURE_ACCOUNT.chain_id] }
   if (pathname === '/dashboard/overview') return FIXTURE_OVERVIEW
   if (pathname === '/dashboard/budget-remaining') return FIXTURE_BUDGET_REMAINING
-  // #3813's server-saved "Needs you" dismissals — read on every dashboard
+  // #3813's server-saved "Needs attention" dismissals — read on every dashboard
   // render. Without this key the generic fallback answered an object with no
   // `dismissals` array and the dashboard hit its error boundary (#3897).
   if (pathname === '/user/attention-dismissals') return { dismissals: [] }
@@ -6218,7 +6218,7 @@ export const SCENARIOS = {
   // give the design review the mockup's other states as full pages.
   'dashboard-new-user': {
     description:
-      '#3897: a brand-new account — no USDC, no agents — as a whole page: the money card with its spending half explaining what it will show, and the setup guide as the "Needs you" card (mockup "New user")',
+      '#3897: a brand-new account — no USDC, no agents — as a whole page: the money card with its spending half explaining what it will show, and the setup guide as the "Needs attention" card (mockup "New user")',
     api(apiPath) {
       if (apiPath === '/dashboard/overview') {
         return {
@@ -6257,7 +6257,7 @@ export const SCENARIOS = {
   },
   'dashboard-all-clear': {
     description:
-      '#3897: one healthy agent, nothing to flag, the "You\'re set up" line already dismissed — the quiet "Nothing needs your attention" line under the money card (mockup "All clear")',
+      '#3897, #3902: one healthy agent, nothing to flag, the "You\'re set up" line already dismissed — the "You\'re all caught up" achievement under the money card, backed by a funded account with well over a month of runway and a known budget read below 90% (mockup "All clear")',
     api(apiPath) {
       if (apiPath === '/dashboard/overview') {
         const research = FIXTURE_OVERVIEW.agents.find((agent) => agent.id === 'agent-research')
@@ -6275,18 +6275,41 @@ export const SCENARIOS = {
           agents: [{ ...research, stats: { ...research.stats, d7: calm(research.stats.d7), d30: calm(research.stats.d30) } }],
         }
       }
-      if (apiPath === '/dashboard/budget-remaining') return { budgets: [] }
+      // #3902: a KNOWN read below 90% for the one budgeted agent — the
+      // achievement only shows on measured facts, so an empty read would
+      // (correctly) render the neutral line instead.
+      if (apiPath === '/dashboard/budget-remaining') {
+        return { budgets: FIXTURE_BUDGET_REMAINING.budgets.filter((row) => row.agent_id === 'agent-research') }
+      }
       return undefined
     },
     async run({ page, vp, shoot }) {
       // The set-up line holds the guide slot until dismissed; seed the
-      // dismissal so the slot is empty and the quiet line renders.
+      // dismissal so the slot is empty and the achievement renders.
       await page.addInitScript((userId) => {
         window.localStorage.setItem(`haven-onboarding-complete-dismissed:${userId}`, '1')
       }, FIXTURE_USER.id)
       await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
-      await page.getByText('Nothing needs your attention right now.').waitFor({ timeout: 30_000 })
+      await page.getByRole('heading', { name: "You're all caught up" }).waitFor({ timeout: 30_000 })
+      await shoot(page.locator('main').first(), 'page')
+    },
+  },
+  'dashboard-quiet': {
+    description:
+      '#3902: the all-clear data with NO budget read — nothing to flag, but the budget room is unmeasured, so the card shows only the neutral line ("No items to review right now."), never the achievement',
+    api(apiPath) {
+      if (apiPath === '/dashboard/overview') return SCENARIOS['dashboard-all-clear'].api(apiPath)
+      if (apiPath === '/dashboard/budget-remaining') return { budgets: [] }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.addInitScript((userId) => {
+        window.localStorage.setItem(`haven-onboarding-complete-dismissed:${userId}`, '1')
+      }, FIXTURE_USER.id)
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByText('No items to review right now.').waitFor({ timeout: 30_000 })
       await shoot(page.locator('main').first(), 'page')
     },
   },

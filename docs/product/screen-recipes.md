@@ -73,9 +73,9 @@ Use these recipes when designing or refactoring Haven product screens. They tran
 Use after the user has created a Haven account but has not finished the first useful setup path.
 
 Structure (#3818):
-1. Normal dashboard header and money card, with the "Needs you" card below it at
+1. Normal dashboard header and money card, with the "Needs attention" card below it at
    full width (#3897) — never a side column beside the balance.
-2. The setup steps ARE the "Needs you" card while setup is in progress — titled
+2. The setup steps ARE the "Needs attention" card while setup is in progress — titled
    `Get started`, three numbered steps, then the rule items that still apply
    (another agent waiting for setup, a recommended backup signer once funded)
    below them in the same card. Never a second card beside it.
@@ -85,7 +85,7 @@ Structure (#3818):
 4. The steps own the card only until the first agent payment. After it, one
    `You're set up` line takes their place until dismissed (the dismissal persists
    per user), and the steps never return: USDC spent to zero, an expired budget
-   or an unreadable balance belongs to the Needs you rules from then on. "Hide
+   or an unreadable balance belongs to the Needs attention rules from then on. "Hide
    for now" persists across reloads, until another step completes.
 5. Before the first agent payment, the money panel's spending block says what it
    will show instead of three zero tiles.

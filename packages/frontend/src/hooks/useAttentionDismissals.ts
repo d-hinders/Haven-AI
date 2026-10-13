@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * The dashboard's server-saved "Needs you" dismissals (#3813).
+ * The dashboard's server-saved "Needs attention" dismissals (#3813).
  *
  * Reads `GET /user/attention-dismissals` once per mount and writes through
  * `POST /user/attention-dismissals` — permanent, stored per account (the

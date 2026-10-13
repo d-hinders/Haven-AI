@@ -52,11 +52,101 @@ describe('NeedsYou', () => {
     expect(screen.getByText('Ops has one way to approve payments')).toBeInTheDocument()
   })
 
-  it('shows one quiet line when nothing needs attention', () => {
+  // ── #3902: the title, the count badge and the empty state ────────────────
+
+  it('titles the card "Needs attention", with the count beside the heading, not inside it', () => {
     render(
-      <NeedsYou items={[]} hasOverviewError={false} onRetry={() => {}} onDismiss={() => {}} />,
+      <NeedsYou items={[SIX_ITEMS[0]]} hasOverviewError={false} onRetry={() => {}} onDismiss={() => {}} />,
     )
-    expect(screen.getByText('Nothing needs your attention right now.')).toBeInTheDocument()
+    // The badge must not change the heading's accessible name.
+    const heading = screen.getByRole('heading', { level: 2, name: 'Needs attention' })
+    expect(heading).toHaveAttribute('id', 'needs-attention-heading')
+    const badge = screen.getByText('1', { selector: 'span' })
+    expect(heading.contains(badge)).toBe(false)
+    expect(badge).toHaveTextContent('1 item')
+  })
+
+  it('counts every item, including those behind "Show N more", and announces "N items"', () => {
+    render(
+      <NeedsYou items={SIX_ITEMS} hasOverviewError={false} onRetry={() => {}} onDismiss={() => {}} />,
+    )
+    // Four rows are visible; the badge counts all six.
+    expect(screen.getAllByRole('listitem')).toHaveLength(4)
+    expect(screen.getByText('6', { selector: 'span' })).toHaveTextContent('6 items')
+    expect(screen.getByRole('heading', { level: 2, name: 'Needs attention' })).toBeInTheDocument()
+  })
+
+  it('shows no badge at zero items, while "Get started", or for the load-error row alone', () => {
+    const { rerender } = render(
+      <NeedsYou items={[]} hasOverviewError={false} onRetry={() => {}} onDismiss={() => {}} emptyState={{ kind: 'quiet', body: 'No items to review right now.' }} />,
+    )
+    expect(screen.queryByText(/\bitems?\b/, { selector: 'span.sr-only' })).not.toBeInTheDocument()
+    rerender(
+      <NeedsYou items={SIX_ITEMS} title="Get started" showCount={false} hasOverviewError={false} onRetry={() => {}} onDismiss={() => {}} />,
+    )
+    expect(screen.queryByText(/\bitems?\b/, { selector: 'span.sr-only' })).not.toBeInTheDocument()
+    rerender(
+      <NeedsYou items={[]} hasOverviewError onRetry={() => {}} onDismiss={() => {}} />,
+    )
+    expect(screen.getByText('Dashboard data could not load')).toBeInTheDocument()
+    expect(screen.queryByText(/\bitems?\b/, { selector: 'span.sr-only' })).not.toBeInTheDocument()
+  })
+
+  it('renders the rows full-bleed, with dividers', () => {
+    render(
+      <NeedsYou items={SIX_ITEMS} hasOverviewError={false} onRetry={() => {}} onDismiss={() => {}} />,
+    )
+    const list = screen.getAllByRole('listitem')[0].closest('ul')
+    expect(list).toHaveAttribute('data-full-bleed')
+    expect(list?.className).toContain('divide-y')
+    // The rows take the card's 20px inset (px-5) over Row's own px-4.
+    const row = screen.getByText('Scout is waiting to be set up').closest('li')?.firstElementChild
+    expect(row?.className).toMatch(/(^|\s)px-5(\s|$)/)
+  })
+
+  it('never shows an empty state beside the load-error row', () => {
+    render(
+      <NeedsYou
+        items={[]}
+        hasOverviewError
+        onRetry={() => {}}
+        onDismiss={() => {}}
+        emptyState={{ kind: 'caught-up', title: "You're all caught up", body: 'measured' }}
+      />,
+    )
+    expect(screen.getByText('Dashboard data could not load')).toBeInTheDocument()
+    expect(screen.queryByText("You're all caught up")).not.toBeInTheDocument()
+  })
+
+  it('shows the achievement state only when the rules layer says every fact holds', () => {
+    render(
+      <NeedsYou
+        items={[]}
+        hasOverviewError={false}
+        onRetry={() => {}}
+        onDismiss={() => {}}
+        emptyState={{ kind: 'caught-up', title: "You're all caught up", body: 'Your balance lasts well over a month at the current pace, and your agents have room in their budgets.' }}
+      />,
+    )
+    // The section header stays above it (owner decision 2026-10-12).
+    expect(screen.getByRole('heading', { level: 2, name: 'Needs attention' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 3, name: "You're all caught up" })).toBeInTheDocument()
+    expect(screen.getByText(/lasts well over a month/)).toBeInTheDocument()
+  })
+
+  it('shows only the neutral line when a fact is unmeasured, and nothing while budget reads load', () => {
+    const { rerender } = render(
+      <NeedsYou items={[]} hasOverviewError={false} onRetry={() => {}} onDismiss={() => {}} emptyState={{ kind: 'quiet', body: 'No items to review right now.' }} />,
+    )
+    expect(screen.getByText('No items to review right now.')).toBeInTheDocument()
+    expect(screen.queryByText("You're all caught up")).not.toBeInTheDocument()
+    rerender(
+      <NeedsYou items={[]} hasOverviewError={false} onRetry={() => {}} onDismiss={() => {}} emptyState={{ kind: 'pending' }} />,
+    )
+    expect(screen.queryByText('No items to review right now.')).not.toBeInTheDocument()
+    expect(screen.queryByText("You're all caught up")).not.toBeInTheDocument()
+    // The old sentence claimed what nobody measured; it is gone for good.
+    expect(screen.queryByText('Nothing needs your attention right now.')).not.toBeInTheDocument()
   })
 
   it('keeps the load-error row alongside items from the last good data', () => {

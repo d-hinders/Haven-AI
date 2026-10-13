@@ -170,6 +170,14 @@ export interface MoneyPanelProps {
    * explains itself rather than reading as a summary of nothing.
    */
   noPaymentsYet?: boolean
+  /**
+   * True only while the first-run guide's step 1 ("Add funds") is the active
+   * step (#3902, captain decision 2026-10-12): the guide then carries the one
+   * primary "Add funds" and this card's button steps down to the ghost
+   * variant, so exactly one primary "Add funds" shows. Default false — the
+   * card's "Add funds" is the primary action.
+   */
+  addFundsSecondary?: boolean
   onDepositAddress: () => void
   onAddFunds: () => void
 }
@@ -193,6 +201,7 @@ export default function MoneyPanel({
   requiresOtherDevice,
   showSpending = true,
   noPaymentsYet = false,
+  addFundsSecondary = false,
   onDepositAddress,
   onAddFunds,
 }: MoneyPanelProps) {
@@ -285,7 +294,7 @@ export default function MoneyPanel({
   // removed" row so the breakdown reconciles with the headline).
   const spending = noPaymentsYet && !loading && !unavailable ? (
     <>
-      <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Spending, last 30 days</h2>
+      <h2 className="text-sm font-medium text-[var(--v2-ink-2)]">Agent spending</h2>
       <p className="mt-2 text-sm text-[var(--v2-ink-2)]">
         After your agents&rsquo; first payment, this shows what they spent, at how many merchants,
         and how often a budget stopped a payment.
@@ -293,10 +302,10 @@ export default function MoneyPanel({
     </>
   ) : (
     <div className="flex h-full flex-col">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
-        <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Spending, last 30 days</h2>
+      <h2 className="text-sm font-medium text-[var(--v2-ink-2)]">Agent spending, last 30 days</h2>
+      <div className="mt-2">
         {loading ? (
-          <div className="h-6 w-28 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+          <div className="h-8 w-32 rounded bg-[var(--v2-surface-2)] animate-pulse" />
         ) : unavailable ? (
           <p className="text-2xl font-semibold tracking-tight text-[var(--v2-ink-3)] v2-tabular">—</p>
         ) : d30 ? (
@@ -315,7 +324,7 @@ export default function MoneyPanel({
             its `--v2-series-*` colour (colour identifies the series, never
             the meaning), the rest in neutral ink. Decorative: the list
             below carries every figure, so the bar is aria-hidden. */}
-        <div aria-hidden="true" className="mt-4 flex h-2.5 gap-0.5 overflow-hidden rounded-full bg-[var(--v2-surface-2)]">
+        <div aria-hidden="true" data-testid="spending-split-bar" className="mt-4 flex h-2.5 gap-0.5 overflow-hidden rounded-full bg-[var(--v2-surface-2)]">
           {splitSegments.map((segment) => (
             <span
               key={segment.key}
@@ -368,22 +377,33 @@ export default function MoneyPanel({
         </>
       ) : null}
 
-      <div className="mt-5 grid grid-cols-3 gap-4 lg:mt-auto lg:pt-5">
-        <StatTile
-          variant="inline"
-          label="Payments"
-          value={loading || unavailable || !d30 ? '—' : String(d30.payments)}
-        />
-        <StatTile
-          variant="inline"
-          label="Merchants"
-          value={loading || unavailable || !d30 ? '—' : String(d30.distinctMerchants)}
-        />
-        <StatTile
-          variant="inline"
-          label="Stopped by budget"
-          value={loading || unavailable || !d30 ? '—' : String(d30.budgetStops)}
-        />
+      {/* The activity counts sit below a hairline, pinned to the bottom of
+          the half at `lg` so they line up with the balance half's actions.
+          The wrapper's padding is the floor: when this half is the taller
+          one, `lg:mt-auto` resolves to 0, and a margin alone would let the
+          rule touch the legend (#3902 design review). `items-end` keeps the
+          three values on one line when a label wraps at 390px. */}
+      <div className="pt-5 lg:mt-auto">
+        <div
+          data-testid="spending-counts"
+          className="grid grid-cols-3 items-end gap-4 border-t border-[var(--v2-border)] pt-5"
+        >
+          <StatTile
+            variant="inline"
+            label="Payments"
+            value={loading || unavailable || !d30 ? '—' : String(d30.payments)}
+          />
+          <StatTile
+            variant="inline"
+            label="Merchants"
+            value={loading || unavailable || !d30 ? '—' : String(d30.distinctMerchants)}
+          />
+          <StatTile
+            variant="inline"
+            label="Stopped by budget"
+            value={loading || unavailable || !d30 ? '—' : String(d30.budgetStops)}
+          />
+        </div>
       </div>
     </div>
   )
@@ -395,7 +415,7 @@ export default function MoneyPanel({
       {/*
         #3897: ONE money card, as the mockup draws it — `raised`, the page's
         single most prominent surface (Card.tsx: "the dashboard total"); the
-        "Needs you" card below is `anchor`. Balance left, spending right as a
+        "Needs attention" card below is `anchor`. Balance left, spending right as a
         `Card.Section divided` (a hairline, never a nested filled card),
         stacked below `lg`. The focused first-run view keeps the spending half,
         which explains itself before the first payment (`noPaymentsYet`).
@@ -470,7 +490,9 @@ export default function MoneyPanel({
                 <PasskeyOtherDeviceNotice className="max-w-sm" />
               ) : (
                 <div className="flex flex-wrap gap-3">
-                  <Button onClick={onAddFunds}>Add funds</Button>
+                  <Button onClick={onAddFunds} variant={addFundsSecondary ? 'ghost' : 'primary'}>
+                    Add funds
+                  </Button>
                   <Button onClick={onDepositAddress} variant="ghost">
                     Deposit address
                   </Button>

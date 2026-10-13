@@ -1,5 +1,6 @@
 /**
- * "Needs you" rules (#3808) — the ONE definition of "needs attention".
+ * "Needs attention" rules (#3808; the card was "Needs you" until #3902) — the
+ * ONE definition of "needs attention".
  *
  * Pure functions over the #3803 overview and the #3804 budget-remaining
  * responses. No React, no hooks, no fetches: the dashboard's NeedsYou card
@@ -255,7 +256,7 @@ function usdcRunsOutUnder7Days(balanceAtomic: string, pace7dAtomic: string): boo
  * reads — null when no read is known. `used_atomic: null` (unknown read)
  * never counts, a zero budget never divides. Rule 3's ≥90% arm below and
  * #3809's "N% used" badge both read THIS one function, so the badge and the
- * "Needs you" item cannot disagree about whether a budget is nearly spent.
+ * "Needs attention" item cannot disagree about whether a budget is nearly spent.
  */
 export function agentUsedPercent(
   agentId: string,
@@ -294,7 +295,7 @@ function usedAtLeast90Percent(
 }
 
 /**
- * Compute the "Needs you" items, in the issue's fixed order. Each item fires
+ * Compute the "Needs attention" items, in the issue's fixed order. Each item fires
  * only when its condition holds on KNOWN values.
  */
 export function computeAttentionItems(input: DashboardAttentionInput): AttentionRuleItem[] {
@@ -512,4 +513,112 @@ export function computeAttentionItems(input: DashboardAttentionInput): Attention
   }
 
   return items
+}
+
+/**
+ * #3902: what the "Needs attention" card says when it lists nothing.
+ *
+ * An empty item list is not a measurement. `computeAttentionItems` returns
+ * `[]` when a balance read is unknown, when a zero balance has no budgeted
+ * agents behind it, when nothing was spent this week, while the budget reads
+ * are still loading or came back unknown, after a dismissal, and for a paused
+ * agent with no budget. So the achievement state is driven by the FACTS its
+ * reason line states, each measured and holding — never by the list being
+ * empty:
+ *
+ * - **Runway, per account.** Agents cannot spend across accounts, so a summed
+ *   balance would be wrong. Every account's USDC must be known and above zero.
+ *   "Lasts well over a month" means each account with spend this week has
+ *   `balance × 7 > pace7d × 30` (BigInt — the pace is the 7-day spend, so
+ *   `balance ÷ (pace7d ÷ 7)` days `> 30`). With no spend this week on any
+ *   account the line says that instead of quoting a runway.
+ * - **Room in budgets.** At least one agent holds a usable budget, and every
+ *   such agent has every budget read KNOWN, the highest below 90% (`agentUsedPercent`, the
+ *   one function rule 3 and the agent badges read) and no budget or scope
+ *   stop in the last 7 days.
+ *
+ * Anything short of that gets the neutral line, which states only that the
+ * list is empty. While the budget reads are loading the card says neither:
+ * `pending` renders nothing until they settle.
+ */
+export type AttentionEmptyState =
+  | { kind: 'pending' }
+  | { kind: 'caught-up'; title: string; body: string }
+  | { kind: 'quiet'; body: string }
+
+export const ATTENTION_CAUGHT_UP_TITLE = "You're all caught up"
+export const ATTENTION_QUIET_LINE = 'No items to review right now.'
+
+/** `balance × 7 > pace7d × 30` for every account with spend; `null` when any read is unknown or zero. */
+function runwayFact(accounts: DashboardAccount[]): 'month' | 'no-spend' | null {
+  if (accounts.length === 0) return null
+  let anySpend = false
+  for (const account of accounts) {
+    if (account.usdcBalanceAtomic === null) return null
+    let balance: bigint
+    let pace: bigint
+    try {
+      balance = BigInt(account.usdcBalanceAtomic)
+      pace = BigInt(account.usdcPace7dAtomic)
+    } catch {
+      // A malformed read is an unknown read (#3295).
+      return null
+    }
+    if (balance <= 0n) return null
+    if (pace <= 0n) continue
+    anySpend = true
+    if (balance * 7n <= pace * 30n) return null
+  }
+  return anySpend ? 'month' : 'no-spend'
+}
+
+/** A read is known only when it is present AND parses — a malformed one is unknown (#3295). */
+function isKnownAtomic(value: string | null): boolean {
+  // `BigInt('')` is `0n`: an empty string is no reading, not a zero.
+  if (value === null || value.trim() === '') return false
+  try {
+    BigInt(value)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function budgetRoomFact(
+  agents: DashboardAgent[],
+  budgetRemaining: DashboardBudgetRemaining | null,
+): boolean {
+  const budgeted = agents.filter(hasUsableBudget)
+  if (budgeted.length === 0) return false
+  return budgeted.every((agent) => {
+    const refusals = agent.stats?.d7?.refusals
+    if ((refusals?.budget ?? 0) > 0 || (refusals?.scope ?? 0) > 0) return false
+    // EVERY read of the agent's budgets must be known: `agentUsedPercent`
+    // returns the highest KNOWN percent, so one known 10% beside an unknown
+    // read would otherwise claim room in a budget nobody measured.
+    const reads = (budgetRemaining?.budgets ?? []).filter((entry) => entry.agent_id === agent.id)
+    if (reads.some((entry) => !isKnownAtomic(entry.used_atomic))) return false
+    const pct = agentUsedPercent(agent.id, budgetRemaining)
+    return pct !== null && pct < 90
+  })
+}
+
+export function attentionEmptyState(input: {
+  overview: DashboardOverview
+  budgetRemaining: DashboardBudgetRemaining | null
+  budgetRemainingLoading: boolean
+}): AttentionEmptyState {
+  const { overview, budgetRemaining, budgetRemainingLoading } = input
+  if (budgetRemainingLoading) return { kind: 'pending' }
+  const runway = runwayFact(overview.accounts ?? [])
+  const room = budgetRoomFact(overview.agents ?? [], budgetRemaining)
+  if (runway === null || !room) return { kind: 'quiet', body: ATTENTION_QUIET_LINE }
+  return {
+    kind: 'caught-up',
+    title: ATTENTION_CAUGHT_UP_TITLE,
+    body:
+      runway === 'month'
+        ? 'Your balance lasts well over a month at the current pace, and your agents have room in their budgets.'
+        : 'No agent spending this week, and your agents have room in their budgets.',
+  }
 }

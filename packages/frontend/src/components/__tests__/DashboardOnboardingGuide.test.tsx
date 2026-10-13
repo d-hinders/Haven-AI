@@ -75,6 +75,9 @@ describe('DashboardOnboardingGuide — step 1 (#2534, #3818)', () => {
     expect(document.body.textContent).toContain('We suggest 5 USDC')
     expect(document.body.textContent).toContain('Haven pays the network fees')
     expect(document.body.textContent).not.toContain('Even $5')
+    // #3902: step 1's "Add funds" is THE primary while it is the active step
+    // (the money card's steps back to ghost beside it).
+    expect(screen.getByRole('button', { name: 'Add funds' })).toHaveAttribute('data-variant', 'primary')
     await userEvent.click(screen.getByRole('button', { name: 'Add funds' }))
     expect(props.onAddFunds).toHaveBeenCalledTimes(1)
   })
@@ -175,5 +178,14 @@ describe('SetupCompleteLine (#3818)', () => {
     expect(document.body.textContent).toContain('You’re set up')
     await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
     expect(onDismiss).toHaveBeenCalledTimes(1)
+  })
+
+  it('sits on the full-bleed rows\' icon slot and title column: a 32px slot, gap-3, no inset of its own (#3902)', () => {
+    const { container } = render(<SetupCompleteLine onDismiss={() => {}} />)
+    const line = container.firstElementChild as HTMLElement
+    expect(line.className).not.toMatch(/(^|\s)p[xl]-/)
+    const sentence = line.querySelector('p') as HTMLElement
+    expect(sentence.className).toMatch(/(^|\s)gap-3(\s|$)/)
+    expect((sentence.firstElementChild as HTMLElement).className).toMatch(/(^|\s)w-8(\s|$)/)
   })
 })

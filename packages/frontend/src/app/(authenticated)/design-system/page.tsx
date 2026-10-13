@@ -315,7 +315,7 @@ const DS_ATTENTION_ITEMS: AttentionListItem[] = [
     title: 'Re-approval needed',
     subtitle: 'Spending paused while Travel planner awaits your approval of the new agent rules.',
     tone: 'warning',
-    badge: 'Needs attention',
+    badge: 'Review needed',
     icon: TriangleAlert,
     action: (
       <Button size="sm" variant="ghost">
@@ -350,6 +350,7 @@ function AttentionListShowcase() {
   return (
     <AttentionList
       items={items}
+      fullBleed
       onDismiss={(id) => setDismissed((prev) => [...prev, id])}
       headingId="ds-attention-list-heading"
     />
@@ -1779,7 +1780,7 @@ export default function DesignSystemPage() {
             icon={<DotIcon />}
             tone="success"
             title="You're all caught up"
-            body="Nothing needs your attention. Agents keep working within their budgets."
+            body="Your balance lasts well over a month at the current pace, and your agents have room in their budgets."
           />
         </div>
         <div className="mt-5 grid gap-5 lg:grid-cols-2">
@@ -1801,7 +1802,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="First-run setup"
-        description="While setup is in progress the guide IS the Needs you card (titled Get started), with the rule items that still apply listed below it. Step 1 completes on any USDC on an account — other tokens never count — and reads as unknown, with no funding action, when the USDC read is unavailable; its action opens Add funds, which carries the test-network faucet. Step 2 completes only on an agent that can pay (active or paused, with a usable budget) and names the newest agent still waiting for setup; it can be done before funding, at secondary weight. Step 3 unlocks on the same rule. Hide for now survives a reload until another step completes. The guide never shows an address. The steps own the card only until the first agent payment; from then on they never return — one You're set up line takes their place until dismissed, and the Needs you rules speak for anything that changes later."
+        description="While setup is in progress the guide IS the Needs attention card (titled Get started), with the rule items that still apply listed below it. Step 1 completes on any USDC on an account — other tokens never count — and reads as unknown, with no funding action, when the USDC read is unavailable; its action opens Add funds, which carries the test-network faucet. Step 2 completes only on an agent that can pay (active or paused, with a usable budget) and names the newest agent still waiting for setup; it can be done before funding, at secondary weight. Step 3 unlocks on the same rule. Hide for now survives a reload until another step completes. The guide never shows an address. The steps own the card only until the first agent payment; from then on they never return — one You're set up line takes their place until dismissed, and the Needs attention rules speak for anything that changes later."
       >
         <div className="max-w-3xl space-y-4">
           {/* A new account: no USDC yet, nothing connected. */}
@@ -2855,23 +2856,25 @@ export default function DesignSystemPage() {
 
       <Section
         title="AttentionList"
-        description="The list of things that need your eye (#3805), built from Row, StatusBadge and Icon. The rows are static — the action and the dismiss live in trailing, never on the row itself, so an action is never nested inside another control. The tone always rides text as well as colour (Row's leading icon is aria-hidden): a StatusBadge label, or an sr-only tone word when the item has no badge. Budget reached is neutral — the budget did its job; danger is for real failures only. Dismiss is labelled Dismiss: {title} and calls onDismiss(id); the list holds no dismissal state, and after a dismiss focus moves to the next item, or to the list heading when the list empties. The title and subtitle each line-clamp to two lines at every width; the icon (and, from sm up, the trailing controls) centre on the title's first line; below sm the trailing slot wraps under the body. Zero items renders nothing — the caller shows the empty state."
+        description="The list of things that need your eye (#3805), built from Row, StatusBadge and Icon. The rows are static — the action and the dismiss live in trailing, never on the row itself, so an action is never nested inside another control. The tone always rides text as well as colour (Row's leading icon is aria-hidden): a StatusBadge label, or an sr-only tone word when the item has no badge. Budget reached is neutral — the budget did its job; danger is for real failures only. Dismiss is labelled Dismiss: {title} and calls onDismiss(id); the list holds no dismissal state, and after a dismiss focus moves to the next item, or to the list heading when the list empties. The title and subtitle each line-clamp to two lines at every width; the icon (and, from sm up, the trailing controls) centre on the title's first line; below sm the trailing slot wraps under the body. fullBleed is for a list that is the card's body, as on the dashboard: rows run edge to edge with hairline dividers and the card's 20px side inset, and this sample renders it so the first-line and clamp measurements cover the dashboard's shape. Zero items renders nothing — the caller shows the empty state."
       >
         <div data-testid="ds-attention-list">
-          <Card hover={false} className="p-5">
-            <h3 id="ds-attention-list-heading" className="text-sm font-medium text-[var(--v2-ink)]">
+          <Card hover={false} className="overflow-hidden">
+            <h3
+              id="ds-attention-list-heading"
+              tabIndex={-1}
+              className="border-b border-[var(--v2-border)] px-5 py-3 text-sm font-medium text-[var(--v2-ink)]"
+            >
               Needs attention
             </h3>
-            <div className="mt-2">
-              <AttentionListShowcase />
-            </div>
+            <AttentionListShowcase />
           </Card>
         </div>
       </Section>
 
       <Section
         title="AreaChart — sparkline"
-        description="The sparkline variant of AreaChart (#3805): the balance line alone, in a box the caller sizes (height, default 40px). No gridlines, ticks, x labels, delta annotation, tooltip or caret — one dot on the last point, drawn in HTML rather than as an SVG circle so it stays round at every box width; the box keeps an inset on every side in CSS px, at least the dot's radius plus stroke, and the line draws edge to edge inside it, so the dot's centre stays on the line's endpoint without the dot ever leaving the box (#3903). It is role=img with the required ariaLabel summary sentence and is not a tab stop: there is no hidden data table, the sentence is the data access. A day with no snapshot is skipped, never zero: the line connects across it at the measured days' true positions (#3897). Below three points it renders a flat placeholder line of the same height instead of nothing, so the layout does not jump, and there is no draw animation on data refresh."
+        description="The sparkline variant of AreaChart (#3805): the balance line over a faint area of the same colour (#3902), in a box the caller sizes (height, default 40px). No gridlines, ticks, x labels, delta annotation, tooltip or caret — one dot on the last point, drawn in HTML rather than as an SVG circle so it stays round at every box width; the box keeps an inset on every side in CSS px, at least the dot's radius plus stroke, and the line draws edge to edge inside it, so the dot's centre stays on the line's endpoint without the dot ever leaving the box (#3903). It is role=img with the required ariaLabel summary sentence and is not a tab stop: there is no hidden data table, the sentence is the data access. A day with no snapshot is skipped, never zero: the line connects across it at the measured days' true positions (#3897), and the area's top edge is the line itself, so it never dips to the baseline there either. Below three points it renders a flat placeholder line of the same height instead of nothing, so the layout does not jump, and there is no draw animation on data refresh."
       >
         <div data-testid="ds-area-chart-sparkline">
           <Card hover={false} className="p-5">

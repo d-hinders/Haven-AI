@@ -746,12 +746,18 @@ state (persistence is #3813's), and after a dismiss focus moves to the next
 item, or to the caller's list heading (`headingId`) when the list emptied.
 The title and the subtitle each line-clamp to two lines at every width
 (`Row` truncates both to one), so an item is never cut to a line that
-cannot be judged — the narrow desktop Needs-you panel included (#3876).
+cannot be judged — the narrow desktop "Needs attention" card included (#3876).
 The leading icon, and from `sm` up the trailing badge, action and dismiss,
 centre on the title's first line rather than on the whole body, so a
 four-line item still reads as one line with detail beneath (#3880).
-Below `sm` the trailing slot also wraps under the body. Zero items renders
-nothing — the caller owns the empty state.
+Below `sm` the trailing slot also wraps under the body. `fullBleed` is for
+a list that **is** the card's body, as on the dashboard (#3902): rows run
+edge to edge with hairline dividers and take the card's 20px side inset
+instead of `Row`'s 16px; only the horizontal padding changes, so the
+first-line alignment holds. The `/design-system` sample renders it, so the
+geometry guards in `e2e/attention-list-title-measure.spec.ts` measure the
+dashboard's shape. Zero items renders nothing — the caller owns the empty
+state.
 
 ### NoticeRow (#3845)
 
@@ -772,14 +778,16 @@ until its cause is gone.
 
 `variant="sparkline"` inside `ui/AreaChart.tsx` (no new file, so the chart
 home's design-lint `raw-svg` exemption already covers it): the balance line
-alone, in a box the caller sizes (`height`, default 40px). No gridlines,
+over a faint area of the same series colour (`AREA_OPACITY`), in a box the
+caller sizes (`height`, default 40px). No gridlines,
 ticks, x labels, delta annotation, tooltip or caret — a dot on the last
-point only. It is `role="img"` with a **required** `ariaLabel` summary
+point only (see below for how it stays round and inside the box). It is `role="img"` with a **required** `ariaLabel` summary
 sentence and is not a tab stop: there is no hidden data table, the sentence
 is the data access. A day with no snapshot (`value: null`) is **skipped,
 never zero; the line connects across it**, and each measured day keeps its
 true x position in the window (#3897 — #3805 broke the line at every gap,
-which drew sparse snapshots as scattered dashes). Below `MIN_CHARTABLE_DAYS` it renders a flat
+which drew sparse snapshots as scattered dashes). The area's top edge is the
+line itself, so it never dips to the baseline at a missing day either. Below `MIN_CHARTABLE_DAYS` it renders a flat
 placeholder line of the same height instead of nothing, so a layout that
 reserved the box does not jump. No draw animation on data refresh.
 
@@ -824,12 +832,24 @@ surface — with the balance on the left (the figure, the "since yesterday"
 line, the § AreaChart sparkline fed from `spend.balance_by_day` — a missing
 day is skipped, never zero; under 3 measured days the flat placeholder
 draws — and the two actions, "Add funds" primary and "Deposit address"
-secondary) and the 30-day spending on the right as a `Card.Section divided`,
-stacked below `lg`. The spending half is three § StatTile inline tiles
-(payments, distinct merchants, stopped by budget) under a 30-day spend
-total. The "Needs you" card (`anchor`) follows at full width — never a side
-column beside the balance — then Agents and Activity. That total — and the per-agent split above the
-tiles — renders through § Amount: currency mode with `approx` from the
+secondary; "Add funds" steps down to ghost through `addFundsSecondary` while
+the first-run guide's step 1 is the active step, so exactly one primary
+"Add funds" shows, #3902) and the 30-day spending on the right as a
+`Card.Section divided`, stacked below `lg`. The spending half (#3902) is a
+muted "Agent spending, last 30 days" label — still the section's heading —
+with the 30-day total large and left-aligned beneath it, the per-agent split
+bar and legend, then three § StatTile inline tiles (payments, distinct
+merchants, stopped by budget) below a hairline divider, pinned to the bottom
+of the half at `lg`; before the first payment the same muted label reads
+"Agent spending" over its explanation. The "Needs attention" card
+(`anchor`) follows at full width — never a side column beside the balance —
+then Agents and Activity. Its count badge is neutral, never a warning tint
+(the card holds neutral items too), sits beside the heading, and hides at
+zero and while the card is "Get started". With nothing listed it shows
+"You're all caught up" only when every fact its reason line states was
+measured and holds (`attentionEmptyState`, #3902); otherwise a neutral line
+that claims nothing, and nothing at all while the budget reads load. That total — and the per-agent split below it —
+renders through § Amount: currency mode with `approx` from the
 wire's `spend` windows, so a total that includes rows priced at today's
 rate carries the `≈` and a booked total does not. The four KPI tiles and
 their `metrics.*` wire fields are gone with this panel: agent counts live
@@ -922,7 +942,7 @@ Tertiary — **variant**, `variant="tertiary"`
 cancel, "not now" — the escape hatch beside a committing action, never the committing action
 itself. Live at many product call sites plus the `/design-system` showcase — among them
 `ConfirmDialog`'s cancel, `ProfileClient`'s cancel edit and the dashboard's "Hide for
-now" (in the Needs you card's header since #3897; the guide
+now" (in the "Needs attention" card's header since #3897; the guide
 renders inside that card, and its finished state is a one-line `SetupCompleteLine` with
 its own tertiary Dismiss). (It was eight until [#1989](https://github.com/d-hinders/Haven-AI/issues/1989)
 deleted `settings/ManageApprovers`, which held three of them.):
@@ -1346,7 +1366,7 @@ The link stays available while an adjacent action is busy, and normal link behav
 intact. Prove body and control hit targets with a real browser at desktop and 390px;
 jsdom cannot evaluate the pseudo-element's stacking or hit testing.
 
-`Card` supports `elevation="flat" | "raised" | "anchor"` and `hover={false}`. Use `raised` only for the page's single most prominent surface (the dashboard money card, #3897), `anchor` for the second (the dashboard's "Needs you" card), and keep nested or data-dense cards flat.
+`Card` supports `elevation="flat" | "raised" | "anchor"` and `hover={false}`. Use `raised` only for the page's single most prominent surface (the dashboard money card, #3897), `anchor` for the second (the dashboard's "Needs attention" card), and keep nested or data-dense cards flat.
 
 **A card in a grid has to fit its track, and by default it cannot ([#2251](https://github.com/d-hinders/Haven-AI/issues/2251)).** This is the card sibling of the `truncate`d-table-cell rule under *Transaction tables* below, and it has the same shape: a `truncate` descendant is `white-space: nowrap`, so its min-content is the whole string, and a container that is never allowed to go below its min-content grows instead of ellipsising.
 

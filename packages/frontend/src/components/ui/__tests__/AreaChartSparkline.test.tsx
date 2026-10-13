@@ -46,21 +46,44 @@ describe('AreaChart sparkline across missing days (#3897)', () => {
   // here (every run was a single point).
   const sparse = window({ 2: 100, 9: 120, 15: 90, 22: 140, 28: 130 })
 
-  it('draws exactly one path through every measured day, at its true x', () => {
+  // #3902 added the area under the line, so paths are selected by data
+  // attribute: a bare `querySelector('path')` would test whichever came first.
+  it('draws exactly one line through every measured day, at its true x', () => {
     const { container } = renderSparkline(sparse)
-    const paths = container.querySelectorAll('path')
-    expect(paths).toHaveLength(1)
-    const xs = pathXs(paths[0].getAttribute('d') ?? '')
+    const lines = container.querySelectorAll('path[data-sparkline-line]')
+    expect(lines).toHaveLength(1)
+    const xs = pathXs(lines[0].getAttribute('d') ?? '')
     expect(xs).toEqual([2, 9, 15, 22, 28].map((i) => Number(xOf(i).toFixed(2))))
   })
 
-  it('never plots a missing day at zero', () => {
+  it('never plots a missing day at zero, in the line or the area top edge', () => {
     const { container } = renderSparkline(sparse)
-    const d = container.querySelector('path')?.getAttribute('d') ?? ''
+    const line = container.querySelector('path[data-sparkline-line]')?.getAttribute('d') ?? ''
+    const area = container.querySelector('path[data-sparkline-area]')?.getAttribute('d') ?? ''
     // Five commands for five measured days — no point for any of the 25
     // missing ones — and none of them at the baseline a zero would sit on.
-    expect(pathXs(d)).toHaveLength(5)
-    for (const y of pathYs(d)) expect(y).toBeLessThan(HEIGHT)
+    expect(pathXs(line)).toHaveLength(5)
+    for (const y of pathYs(line)) expect(y).toBeLessThan(HEIGHT)
+    // The area is the line's commands between two baseline corners: its top
+    // edge is exactly the line, with no vertex of its own at a missing day.
+    const areaXs = pathXs(area)
+    const areaYs = pathYs(area)
+    expect(areaXs).toHaveLength(7)
+    expect(areaXs.slice(1, -1)).toEqual(pathXs(line))
+    expect(areaYs.slice(1, -1)).toEqual(pathYs(line))
+    for (const y of areaYs.slice(1, -1)) expect(y).toBeLessThan(HEIGHT)
+    expect(areaYs[0]).toBe(HEIGHT)
+    expect(areaYs[areaYs.length - 1]).toBe(HEIGHT)
+  })
+
+  it('fills under the line once there are three or more points (#3902)', () => {
+    const { container } = renderSparkline(sparse)
+    const area = container.querySelector('path[data-sparkline-area]')
+    expect(area).not.toBeNull()
+    expect(area?.getAttribute('fill')).not.toBe('none')
+    expect(Number(area?.getAttribute('fill-opacity'))).toBeGreaterThan(0)
+    expect(area?.getAttribute('stroke')).toBe('none')
+    expect(container.querySelector('path[data-sparkline-line]')?.getAttribute('fill')).toBe('none')
   })
 
   it('ends with the dot on the last measured day, as HTML — a `<circle>` would stretch into an oval (#3903)', () => {

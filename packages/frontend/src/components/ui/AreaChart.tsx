@@ -206,7 +206,8 @@ export function AreaChart(props: AreaChartProps) {
 }
 
 /**
- * The sparkline variant (#3805): the balance line alone — no gridlines, ticks,
+ * The sparkline variant (#3805): the balance line over a faint area of the same
+ * colour (#3902) — no gridlines, ticks,
  * x labels, delta annotation, tooltip or caret; one dot on the last point.
  * `role="img"` with the required `ariaLabel`, NOT a tab stop, and no hidden
  * data table — a glanceable shape, whose data access is the summary sentence.
@@ -265,6 +266,15 @@ function Sparkline({
     commands.push(`${commands.length === 0 ? 'M' : 'L'}${xOf(i).toFixed(2)} ${yOf(p.value).toFixed(2)}`)
   })
   const linePath = commands.length > 1 ? commands.join(' ') : null
+  // #3902: the faint area under the line, as the mockup fills it. Its top
+  // edge IS the line — the line's own commands between two baseline corners —
+  // so a missing day is skipped exactly as the line skips it and never drops
+  // to the baseline; only the two closing corners sit on the floor.
+  const firstIndex = points.findIndex((p) => p.value !== null && Number.isFinite(p.value))
+  const areaPath =
+    linePath === null || firstIndex < 0
+      ? null
+      : `M${xOf(firstIndex).toFixed(2)} ${height} L${linePath.slice(1)} L${xOf(lastIndex).toFixed(2)} ${height} Z`
 
   return (
     <div
@@ -290,17 +300,29 @@ function Sparkline({
             strokeWidth={2}
           />
         ) : (
-          linePath !== null && (
-            <path
-              d={linePath}
-              fill="none"
-              stroke={LINE_COLOR}
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              vectorEffect="non-scaling-stroke"
-            />
-          )
+          <>
+            {areaPath !== null && (
+              <path
+                data-sparkline-area=""
+                d={areaPath}
+                fill={LINE_COLOR}
+                fillOpacity={AREA_OPACITY}
+                stroke="none"
+              />
+            )}
+            {linePath !== null && (
+              <path
+                data-sparkline-line=""
+                d={linePath}
+                fill="none"
+                stroke={LINE_COLOR}
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
+          </>
         )}
       </svg>
       {chartable && lastIndex >= 0 && points[lastIndex].value !== null && (

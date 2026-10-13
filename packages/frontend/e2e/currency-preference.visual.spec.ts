@@ -123,7 +123,9 @@ test.describe('currency preference renders SEK (#3127 finding 8)', () => {
           'Research agent spent 80,70 kr of 119,46 kr in the last 7 days; Watcher agent spent the rest.',
         ),
       ).toHaveCount(1)
-      await expect(main.getByText('Spending, last 30 days')).toHaveCount(1)
+      // #3902: exact — as a substring the old "Spending, last 30 days" would
+      // still match the new label.
+      await expect(main.getByText('Agent spending, last 30 days', { exact: true })).toHaveCount(1)
       await expect(main.getByText('517,66 kr')).toHaveCount(1)
       // The frozen clock is in effect — the transactions row renders its
       // literal, so the baseline cannot drift on a calendar boundary.

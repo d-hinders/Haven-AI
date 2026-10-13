@@ -649,7 +649,7 @@ appears nowhere else (no description is in the runbook), which is the bar
 `agent-guidance.ts` and `for-agents.md` already meet. `agent-skill-steps.ts`
 and `agent-skill-index.ts` are now in `SCAN_FILES`, with four more `lib/`
 prose files the naming convention could not catch: `dashboard-attention.ts`
-(Needs-you titles and subtitles), `agent-list-filters.ts` (agent-list filter
+(the "Needs attention" titles, subtitles and empty-state lines), `agent-list-filters.ts` (agent-list filter
 and sort labels), `agent-credential.ts` (the `notes` prose in the downloaded
 credential file) and `sub-budget.ts` (form validation and error copy). A pin
 test keeps all six listed. `src/hooks` prose (step headings, `setError`

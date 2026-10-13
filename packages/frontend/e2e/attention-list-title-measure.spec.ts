@@ -10,7 +10,7 @@
  * with no `…`. The fix scoped the clamp `max-sm:`, leaving a one-line
  * ellipsis from `sm` up.
  *
- * #3876 — that one line still hid the item: in the narrow desktop Needs-you
+ * #3876 — that one line still hid the item: in the narrow desktop Needs attention
  * panel a title read "Haven paused spon…" and the subtitle truncated too, so
  * the full text was on screen nowhere. The owner chose a two-line clamp
  * everywhere, for the title AND the subtitle (2026-10-10), over a hover-only
@@ -162,7 +162,7 @@ test.describe('AttentionList first-line alignment (#3880)', () => {
     })
   }
 
-  // The narrow desktop Needs-you panel wraps the controls of most rows onto
+  // The narrow desktop Needs attention panel wraps the controls of most rows onto
   // their own line. Aligning controls that sit BESIDE the body must not pull
   // wrapped ones toward the text: the #3880 code review caught a `-mt-1.5`
   // version shrinking this gap from Row's 12px to 6px on three of the four

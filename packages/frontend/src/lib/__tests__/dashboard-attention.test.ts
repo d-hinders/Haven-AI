@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   agentIsSetUp,
+  ATTENTION_CAUGHT_UP_TITLE,
+  ATTENTION_QUIET_LINE,
+  attentionEmptyState,
   computeAttentionItems,
   firstRunSetupState,
   type DashboardBudgetRemaining,
@@ -652,5 +655,109 @@ describe('firstRunSetupState (#3818)', () => {
     for (const agent of overview.agents) {
       expect(agentIsSetUp(agent), agent.id).toBe(!needsSetup.has(agent.id))
     }
+  })
+})
+
+describe('attentionEmptyState (#3902) — the achievement only on measured facts', () => {
+  // One funded account, one budgeted agent at 10% used: every fact measured and holding.
+  const scout = { id: 'a1', name: 'Scout', status: 'active' as const, accountId: 'acct-1', budgets: [{ budgetAtomic: '10000000' }] }
+  const roomy = budgetRemaining([{ agent_id: 'a1', budget_atomic: '10000000', used_atomic: '1000000' }])
+  // 100 USDC at 10 USDC a week: 70 days — well over a month.
+  const month = { accountId: 'acct-1', usdcBalanceAtomic: '100000000', usdcPace7dAtomic: '10000000', funded: true }
+  const state = (overview: DashboardOverview, reads: DashboardBudgetRemaining | null, loading = false) =>
+    attentionEmptyState({ overview, budgetRemaining: reads, budgetRemainingLoading: loading })
+
+  it('is the achievement when the runway and the budget room are both measured and holding', () => {
+    const result = state(makeOverview([scout], [month]), roomy)
+    expect(result).toEqual({
+      kind: 'caught-up',
+      title: ATTENTION_CAUGHT_UP_TITLE,
+      body: 'Your balance lasts well over a month at the current pace, and your agents have room in their budgets.',
+    })
+  })
+
+  it('says "no agent spending this week" at a zero pace, never quoting a runway', () => {
+    const result = state(makeOverview([scout], [{ ...month, usdcPace7dAtomic: '0' }]), roomy)
+    expect(result.kind).toBe('caught-up')
+    expect(result.kind === 'caught-up' && result.body).toBe(
+      'No agent spending this week, and your agents have room in their budgets.',
+    )
+  })
+
+  it('holds back both states while the budget reads load', () => {
+    expect(state(makeOverview([scout], [month]), roomy, true)).toEqual({ kind: 'pending' })
+    expect(state(makeOverview([scout], [month]), null, true)).toEqual({ kind: 'pending' })
+  })
+
+  it('is the neutral line for an unknown USDC balance', () => {
+    expect(state(makeOverview([scout], [{ ...month, usdcBalanceAtomic: null }]), roomy)).toEqual({
+      kind: 'quiet',
+      body: ATTENTION_QUIET_LINE,
+    })
+  })
+
+  it('is the neutral line for zero USDC, with or without budgeted agents', () => {
+    expect(state(makeOverview([scout], [{ ...month, usdcBalanceAtomic: '0' }]), roomy).kind).toBe('quiet')
+    expect(state(makeOverview([], [{ ...month, usdcBalanceAtomic: '0' }]), null).kind).toBe('quiet')
+    // No spend this week and nothing to spend: never "no agent spending, all good".
+    expect(state(makeOverview([scout], [{ ...month, usdcBalanceAtomic: '0', usdcPace7dAtomic: '0' }]), roomy).kind).toBe('quiet')
+  })
+
+  it('is the neutral line with no agents, or no budgeted agent', () => {
+    expect(state(makeOverview([], [month]), roomy).kind).toBe('quiet')
+    expect(state(makeOverview([{ ...scout, status: 'paused', budgets: [] }], [month]), roomy).kind).toBe('quiet')
+  })
+
+  it('is the neutral line for unknown budget reads — a failed read, or an unknown used amount', () => {
+    expect(state(makeOverview([scout], [month]), null).kind).toBe('quiet')
+    const unknown = budgetRemaining([{ agent_id: 'a1', budget_atomic: '10000000', used_atomic: null }])
+    expect(state(makeOverview([scout], [month]), unknown).kind).toBe('quiet')
+  })
+
+  it('is the neutral line when ANY of an agent\'s budget reads is unknown, even beside a known one', () => {
+    const mixed = budgetRemaining([
+      { agent_id: 'a1', budget_atomic: '10000000', used_atomic: '1000000' },
+      { agent_id: 'a1', budget_atomic: '10000000', used_atomic: null },
+    ])
+    expect(state(makeOverview([scout], [month]), mixed).kind).toBe('quiet')
+  })
+
+  it('treats a malformed used amount as unknown, never as room (#3295)', () => {
+    const malformed = budgetRemaining([
+      { agent_id: 'a1', budget_atomic: '10000000', used_atomic: '1000000' },
+      { agent_id: 'a1', budget_atomic: '10000000', used_atomic: 'not-a-number' },
+    ])
+    expect(state(makeOverview([scout], [month]), malformed).kind).toBe('quiet')
+    // BigInt('') is 0n — an empty string must not read as "nothing used".
+    const empty = budgetRemaining([{ agent_id: 'a1', budget_atomic: '10000000', used_atomic: '' }])
+    expect(state(makeOverview([scout], [month]), empty).kind).toBe('quiet')
+  })
+
+  it('is the neutral line after a scope refusal this week', () => {
+    const refused = { ...scout, refusalBuckets: { budget: 0, scope: 1, failed: 0, haven: 0 } }
+    expect(state(makeOverview([refused], [month]), roomy).kind).toBe('quiet')
+  })
+
+  it('is the neutral line at 90% used, or after a budget stop this week', () => {
+    const nearly = budgetRemaining([{ agent_id: 'a1', budget_atomic: '10000000', used_atomic: '9000000' }])
+    expect(state(makeOverview([scout], [month]), nearly).kind).toBe('quiet')
+    const stopped = { ...scout, refusalBuckets: { budget: 1, scope: 0, failed: 0, haven: 0 } }
+    expect(state(makeOverview([stopped], [month]), roomy).kind).toBe('quiet')
+  })
+
+  it('is the neutral line when the runway is a month or less — under the boundary and exactly on it', () => {
+    // 3 weeks of balance: no low-balance item (over 7 days), but not "well over a month".
+    expect(state(makeOverview([scout], [{ ...month, usdcBalanceAtomic: '30000000' }]), roomy).kind).toBe('quiet')
+    // balance × 7 = pace × 30 exactly: 30 days is not OVER a month.
+    expect(state(makeOverview([scout], [{ ...month, usdcBalanceAtomic: '30000000', usdcPace7dAtomic: '7000000' }]), roomy).kind).toBe('quiet')
+    // One unit more crosses it.
+    expect(state(makeOverview([scout], [{ ...month, usdcBalanceAtomic: '30000001', usdcPace7dAtomic: '7000000' }]), roomy).kind).toBe('caught-up')
+  })
+
+  it('checks the runway per account — a rich account cannot cover a short one', () => {
+    const rich = { accountId: 'acct-1', usdcBalanceAtomic: '1000000000', usdcPace7dAtomic: '0', funded: true }
+    const short = { accountId: 'acct-2', usdcBalanceAtomic: '20000000', usdcPace7dAtomic: '10000000', funded: true }
+    // Summed: 1020 USDC at 10 a week is years. Per account: acct-2 has 14 days.
+    expect(state(makeOverview([scout], [rich, short]), roomy).kind).toBe('quiet')
   })
 })

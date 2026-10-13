@@ -1,7 +1,7 @@
 /**
  * Visual regression for the first-run guide (#3818): the four states the
  * issue names — no funds, funded, an agent waiting for setup, set up — each
- * as an ELEMENT-SCOPED clip of the card the guide lives in (the Needs you
+ * as an ELEMENT-SCOPED clip of the card the guide lives in (the Needs attention
  * card, titled "Get started" while setup is in progress). Element-scoped so
  * the money panel's figures and the page around it cannot leak into a clip;
  * the full-page dashboard baselines in `product-routes.visual.spec.ts` carry
@@ -46,7 +46,7 @@ const STATES: ReadonlyArray<{ state: FirstRunState; anchor: RegExp }> = [
 ]
 
 function card(page: Page) {
-  return page.getByRole('article').filter({ has: page.getByRole('heading', { name: /^(Get started|Needs you)$/ }) })
+  return page.getByRole('article').filter({ has: page.getByRole('heading', { name: /^(Get started|Needs attention)$/ }) })
 }
 
 test.describe('first-run guide states (#3818)', () => {

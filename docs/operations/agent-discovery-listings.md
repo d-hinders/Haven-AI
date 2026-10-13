@@ -97,7 +97,7 @@ right answer for an agent and a worse one for a person, who would get an
 unrendered file. The same-origin rule governs the agent-readable artifacts;
 this one is product UI pointing a human at a rendered page. (#3808 deleted
 `RecoveryNudge`, the other one; its backup prompt lives in the dashboard's
-NeedsYou card now, which links to the account page rather than the document.)
+"Needs attention" card now, which links to the account page rather than the document.)
 
 **A manifest key must never name a surface that 404s (#2531).** The manifest's
 whole value is that an agent's *code* can follow it without guessing, and a key

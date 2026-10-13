@@ -23,7 +23,12 @@ import MoneyPanel from './MoneyPanel'
 import { ActivitySection } from './ActivitySection'
 import { AgentsSection } from './AgentsSection'
 import { resolveDefaultAccount } from '@/lib/default-account'
-import { computeAttentionItems, firstRunSetupState, type AttentionRuleItem } from '@/lib/dashboard-attention'
+import {
+  attentionEmptyState,
+  computeAttentionItems,
+  firstRunSetupState,
+  type AttentionRuleItem,
+} from '@/lib/dashboard-attention'
 import { useBudgetRemaining } from '@/hooks/useBudgetRemaining'
 import { useAttentionDismissals } from '@/hooks/useAttentionDismissals'
 import NeedsYou from './NeedsYou'
@@ -95,7 +100,7 @@ export default function DashboardClient() {
   // account" is just the first account.
   const delegationAccount = accounts[0]
 
-  // #3808: the "Needs you" rules read the overview's per-account
+  // #3808: the "Needs attention" rules read the overview's per-account
   // `needs_backup_recommendation` (#1205) — the server's answer, computed next
   // to the chain classification, so no second copy of "which chains carry
   // value" lives here. The #1153/#1162 RecoveryNudge component is gone; its
@@ -106,7 +111,7 @@ export default function DashboardClient() {
   // and this is still the rail where new accounts land.
   // #3818: the first-run guide's facts come from the overview through the
   // shared rules module — the same per-account USDC (#3803) and agent list the
-  // "Needs you" rules read, so the guide and the card cannot disagree. Step 1
+  // "Needs attention" rules read, so the guide and the card cannot disagree. Step 1
   // is USDC on the account (agents spend USDC; ETH dust does not count), step 2
   // an agent that can actually pay. `hasFunds` above stays as it is: the hero,
   // the funded toast and the focused view read it.
@@ -138,7 +143,7 @@ export default function DashboardClient() {
   const setupProgressReady = Boolean(firstRun) && firstAgentPaymentKnown
   // The steps own the card only UNTIL the first agent payment. After it, a
   // regression — USDC spent to zero, an expired budget, an unreadable balance
-  // — belongs to the Needs you rules (#3808), never to "Get started" again.
+  // — belongs to the Needs attention rules (#3808), never to "Get started" again.
   const allOnboardingComplete = setupProgressReady && hasFirstAgentPayment
 
   // #3719: no global active account. The default account pre-selects the
@@ -325,12 +330,12 @@ export default function DashboardClient() {
     completeDismissalReady &&
     setupHideReady &&
     !requiresOtherDevice
-  // #3818: while setup is in progress the guide IS the "Needs you" card; once
+  // #3818: while setup is in progress the guide IS the "Needs attention" card; once
   // done, one "You're set up" line takes its place until dismissed.
   const showSetupSteps = setupGuideEligible && !allOnboardingComplete && !setupHidden
   const showSetupComplete = setupGuideEligible && allOnboardingComplete && !completeDismissed
 
-  // ── #3808: the "Needs you" items ─────────────────────────────────────────
+  // ── #3808: the "Needs attention" items ─────────────────────────────────────────
   // One definition: `lib/dashboard-attention.ts` — the same rules #3809 (badges)
   // and #3818 (setup guide) import. The panel renders from the last good
   // overview (or the error row when the overview failed); it never renders
@@ -370,6 +375,20 @@ export default function DashboardClient() {
       holdBackLowBalance: showSetupSteps && usdcFunded !== true,
     })
   }, [overview, budgetRemaining, accountNames, serverDismissedIds, sessionDismissedIds, showSetupSteps, usdcFunded])
+  // #3902: what the card says with no items — decided from measured facts,
+  // never from the list being empty, and held back while the budget reads
+  // load (an unknown read must not become "agents have room").
+  const attentionEmpty = useMemo(
+    () =>
+      overview
+        ? attentionEmptyState({
+            overview,
+            budgetRemaining: budgetRemaining ?? null,
+            budgetRemainingLoading,
+          })
+        : null,
+    [overview, budgetRemaining, budgetRemainingLoading],
+  )
   // The agent step 2 names is not listed twice: its "Needs setup" row drops
   // while the steps show. Other waiting agents keep theirs.
   const cardItems = useMemo(
@@ -423,7 +442,7 @@ export default function DashboardClient() {
   // The hide and dismiss buttons unmount themselves; focus moves to the
   // card's heading (tabIndex -1) rather than dropping to <body>.
   function focusAttentionHeading() {
-    window.requestAnimationFrame(() => document.getElementById('needs-you-heading')?.focus())
+    window.requestAnimationFrame(() => document.getElementById('needs-attention-heading')?.focus())
   }
 
   function hideSetupGuide() {
@@ -489,6 +508,9 @@ export default function DashboardClient() {
       noPaymentsYet={firstAgentPaymentKnown && !hasFirstAgentPayment}
       onDepositAddress={() => openHeroAction('receive')}
       onAddFunds={() => openHeroAction('add-funds')}
+      // #3902: one primary "Add funds" — while the guide's step 1 is the
+      // active step, its button is the primary one and this one steps back.
+      addFundsSecondary={isFocusedView}
     />
   )
 
@@ -496,6 +518,8 @@ export default function DashboardClient() {
     <NeedsYou
       items={cardItems}
       title={showSetupSteps ? 'Get started' : undefined}
+      showCount={!showSetupSteps}
+      emptyState={attentionEmpty}
       titleMeta={
         showSetupSteps ? (
           <span className="text-xs text-[var(--v2-ink-3)] v2-tabular">{completedCount} of 3 done</span>
@@ -560,9 +584,9 @@ export default function DashboardClient() {
   return (
     <div className="max-w-6xl">
       {/* #3897: the mockup's order, one column at every width — the heading
-          and its 7-day summary with the money panel, then "Needs you" (and
+          and its 7-day summary with the money panel, then "Needs attention" (and
           the setup guide inside it) at full width, then Agents and Activity.
-          The old hero-plus-aside row put "Needs you" in a side column beside
+          The old hero-plus-aside row put this card ("Needs you" then) in a side column beside
           the balance. A brand-new, unfunded user (the focused view) sees the
           money panel and the guide only; the backup and pending-agent items
           that still apply render below the guide's steps (#3808). */}

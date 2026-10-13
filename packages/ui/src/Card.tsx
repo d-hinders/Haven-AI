@@ -15,7 +15,7 @@ interface CardProps {
    *   already prominent.
    * - `anchor`: secondary focal point. Cooler off-white background + brand-tinted
    *   hairline border. Use for the second-most-important surface on a page
-   *   (the dashboard's "Needs you" card). Don't sprinkle.
+   *   (the dashboard's "Needs attention" card). Don't sprinkle.
    */
   elevation?: Elevation
 }

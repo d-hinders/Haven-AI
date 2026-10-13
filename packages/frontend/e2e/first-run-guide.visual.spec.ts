@@ -32,7 +32,12 @@ const SNAPSHOT_OPTIONS = {
   animations: 'disabled',
   caret: 'hide',
   maxDiffPixels: 50,
-  threshold: 0.02,
+  // 0.01, not 0.02 (#3910 design review): at 0.02 pixelmatch tolerates a
+  // YIQ delta of ~14, and the card's old `anchor` tint vs the flat page
+  // surface is ~8.5 — every body pixel "matched", so the crops could not tell
+  // the old card from the new one and `mode=changed` never refreshed them.
+  // 0.01 (~3.5) catches a surface change; `maxDiffPixels` absorbs antialiasing.
+  threshold: 0.01,
 } as const
 
 /** The same frozen clock the other dashboard visual specs use. */

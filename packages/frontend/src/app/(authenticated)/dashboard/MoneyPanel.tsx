@@ -414,8 +414,9 @@ export default function MoneyPanel({
 
       {/*
         #3897: ONE money card, as the mockup draws it — `raised`, the page's
-        single most prominent surface (Card.tsx: "the dashboard total"); the
-        "Needs attention" card below is `anchor`. Balance left, spending right as a
+        single most prominent surface (Card.tsx: "the dashboard money card"); the
+        "Needs attention" card below is a normal flat card like Agents and
+        Activity (#3910). Balance left, spending right as a
         `Card.Section divided` (a hairline, never a nested filled card),
         stacked below `lg`. The focused first-run view keeps the spending half,
         which explains itself before the first payment (`noPaymentsYet`).

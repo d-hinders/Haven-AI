@@ -178,11 +178,16 @@ export default function NeedsYou({
   const showEmpty = count === 0 && !hasOverviewError && !guide
 
   return (
-    // Anchor elevation — the "Needs attention" panel is the second-most
-    // important surface on the dashboard after the balance hero (carried over
-    // from the error-only AttentionSection this card replaces).
-    <Card as="article" elevation="anchor" className="overflow-hidden v2-animate-slide-in">
-      <div className="flex min-h-[3.25rem] items-center justify-between gap-3 border-b border-[var(--v2-border)] px-5 py-2.5">
+    // #3910: a normal card like Agents and Activity — flat, the shared
+    // `Card.Header` band, rows on the page background. The `anchor` tint used
+    // to cover the body too, so a single row read as a second header (owner,
+    // 2026-10-13); the mockup draws this card plain. `article` + the exact h2
+    // name are what the first-run specs and DashboardClient tests find it by.
+    <Card as="article" hover={false} className="overflow-hidden v2-animate-slide-in">
+      {/* `children` + `padding="none"`: the `title` slot cannot carry the
+          focus hand-off's id/tabIndex, and the default padding would grow
+          the Get started header (its h-9 "Hide for now") by ~13px. */}
+      <Card.Header padding="none" className="flex min-h-[3.25rem] items-center justify-between gap-3 px-5 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
           <h2 id={headingId} tabIndex={-1} className="text-sm font-semibold text-[var(--v2-ink)]">
             {title}
@@ -196,7 +201,7 @@ export default function NeedsYou({
           {titleMeta}
         </div>
         {titleAction}
-      </div>
+      </Card.Header>
 
       {hasOverviewError ? (
         <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
@@ -245,8 +250,8 @@ export default function NeedsYou({
         // An unboxed success row on the attention rows' geometry (20px inset,
         // 32px icon centred on the title's first line) — the mockup's clear
         // card. Not a dashed EmptyState tile: that is the "nothing here yet"
-        // placeholder, and nested in this anchor card it stacks a second
-        // tinted surface (#3902 design review).
+        // placeholder, and nested in this card it stacks a second surface
+        // (#3902 design review).
         <div className="flex items-center gap-3 px-5 py-3">
           <span
             aria-hidden="true"

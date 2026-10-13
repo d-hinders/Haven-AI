@@ -231,7 +231,8 @@ describe("the dashboard row's compact wording (#3908)", () => {
   it('names an odd period in token mode', () => {
     const compact = budgetCaption(row({ periodSeconds: 14_400 }), { nowMs: ANCHOR_NOW, timeZone: 'UTC', style: 'row' })
     if (compact.kind !== 'meter') throw new Error('expected a meter')
-    expect(compact.caption).toMatch(/^1\.25 of 5\.00 USDC · every 4 hours · /)
+    // #3910: a no-break space keeps the cap and its symbol on one line.
+    expect(compact.caption).toMatch(/^1\.25 of 5\.00\u00a0USDC · every 4 hours · /)
   })
 })
 

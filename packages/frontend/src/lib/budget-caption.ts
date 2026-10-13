@@ -248,7 +248,10 @@ function meterCaption(row: BudgetCaptionRow, options: BudgetCaptionOptions): str
     ? // Currency mode: ONE leading "≈" for the caption — a spot rate is an
       // estimate, and the estimate covers the line, not each figure.
       `≈${fiatValue(row.usedAtomic ?? '0', row.symbol, rate, row.chainId)} of ${fiatValue(row.budgetAtomic, row.symbol, rate, row.chainId)}`
-    : `${tokenAmount(row.usedAtomic ?? '0', row.symbol, row.chainId)} of ${tokenAmount(row.budgetAtomic, row.symbol, row.chainId)} ${row.symbol}`
+    : // The dashboard row (#3910) joins the cap and its symbol with a no-break
+      // space: its amounts segment may wrap at its own spaces, and "3.00" /
+      // "USDC" must not land on separate lines. Other surfaces keep a plain one.
+      `${tokenAmount(row.usedAtomic ?? '0', row.symbol, row.chainId)} of ${tokenAmount(row.budgetAtomic, row.symbol, row.chainId)}${style === 'row' ? '\u00a0' : ' '}${row.symbol}`
   const usedLine =
     style === 'row' ? `${figures} · ${budgetPeriodWords(row.periodSeconds)}` : `${figures} used this period`
   const refillMs = nextRefillAt(row.startSec, row.periodSeconds, nowMs)

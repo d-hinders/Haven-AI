@@ -817,6 +817,19 @@ describe('DashboardClient', () => {
     expect(within(header).getByText('0 of 3 done')).toBeInTheDocument()
   })
 
+  it('moves focus to the card heading after "Hide for now" — the button unmounts itself (#3910)', async () => {
+    const user = userEvent.setup()
+    mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: '0', funded: false }] })
+    render(<DashboardClient />)
+    await user.click(screen.getByRole('button', { name: 'Hide for now' }))
+    // The hand-off runs in a requestAnimationFrame; flush it.
+    await new Promise((resolve) => window.requestAnimationFrame(() => resolve(null)))
+    const heading = document.getElementById('needs-attention-heading')
+    expect(heading).not.toBeNull()
+    expect(heading).toHaveAttribute('tabindex', '-1')
+    expect(document.activeElement).toBe(heading)
+  })
+
   it('"Hide for now" survives a reload and comes back when a step completes (#3818)', async () => {
     const user = userEvent.setup()
     mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: '0', funded: false }] })

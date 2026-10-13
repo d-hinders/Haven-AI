@@ -524,7 +524,10 @@ function AgentRow({
       href={`/agents/${agent.id}`}
       className={`grid grid-cols-[2rem_minmax(0,1fr)_fit-content(40%)_1rem] items-center sm:grid-cols-[2rem_minmax(0,1fr)_10rem_1rem] gap-x-3 px-5 py-3.5 transition-colors hover:bg-[var(--v2-surface-hover)] ${
         hasLastPaymentColumn
-          ? "[grid-template-areas:'icon_name_time_chev'_'icon_body_body_chev'] sm:[grid-template-areas:'icon_name_time_chev'_'icon_body_time_chev']"
+          ? // From `sm` the name line spans the row and the time column sits
+            // beside the body only: with a fixed 10rem column, a name sharing
+            // the 1fr track pushed a "92% used" badge under the name (#3912).
+            "[grid-template-areas:'icon_name_time_chev'_'icon_body_body_chev'] sm:[grid-template-areas:'icon_name_name_chev'_'icon_body_time_chev']"
           : // No time cell (a setup row, or no stats): below `sm` the name and
             // body span the empty column and its gap, or the badge wraps at 390
             // (#3910 review). From `sm` the column is a fixed 10rem, so the

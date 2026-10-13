@@ -253,3 +253,25 @@ test('at 390 a setup row\'s name line spans the empty time column', async ({ pag
   })
   expect(m.name, `name line ${m.name}px in a ${m.span}px span`).toBeGreaterThanOrEqual(m.span - 24 - 1)
 })
+
+/**
+ * #3912: from `sm` the name line spans the row (the time column sits beside
+ * the body only), so a badge such as "92% used" stays on the name's line
+ * instead of wrapping under a name squeezed into the 1fr track.
+ */
+test('from sm every agent row\'s name line spans the row (1280)', async ({ page }) => {
+  await page.clock.setFixedTime(FROZEN_NOW)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('/dashboard')
+  await expect(page.getByTestId('agent-row-last-payment').first()).toBeVisible()
+  const rows = await page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href^="/agents/"]'))
+      .filter((a) => a.firstElementChild?.getAttribute('aria-hidden') === 'true' && a.querySelector('p span.truncate'))
+      .map((a) => {
+        const span = (a.lastElementChild as Element).getBoundingClientRect().left - (a.firstElementChild as HTMLElement).getBoundingClientRect().right
+        return { span, name: (a.children[1] as HTMLElement).getBoundingClientRect().width }
+      }),
+  )
+  expect(rows.length, 'fewer than two agent rows').toBeGreaterThanOrEqual(2)
+  for (const r of rows) expect(r.name, `name line ${r.name}px in a ${r.span}px span`).toBeGreaterThanOrEqual(r.span - 24 - 1)
+})

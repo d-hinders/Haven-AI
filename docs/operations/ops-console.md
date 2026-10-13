@@ -127,15 +127,28 @@ repo — record what you actually entered on the issue when you do them.
 
 **Deploys from `dev` only (#3681).** `packages/ops/vercel.json` sets
 `git.deploymentEnabled` to `{ "**": false, "dev": true }`: a push to any other
-branch creates no console build. Vercel may still record a "Skipped - Not
-affected" deployment, apparently from its monorepo skip (see
-[`dev-environment.md` § PR previews are opt-in](dev-environment.md#pr-previews-are-opt-in)). Vercel deploys a branch when any
-`true` rule matches it, so `dev` matches and nothing else does. Previews could
-never sign in (below), and every push used to spend one deployment of the
-Hobby plan's 100-a-day cap on this project even when the Ignored Build Step
-skipped it, because a skipped deployment still counts toward the cap. To
-review a console change before merge, run it locally
-(`npm run dev -w @haven/ops`).
+branch creates no console build. Vercel deploys a branch when any `true` rule
+matches it, so `dev` matches and nothing else does. Previews could never sign
+in (below), and every push used to spend one deployment of the Hobby plan's
+100-a-day cap on this project even when the Ignored Build Step skipped it,
+because a skipped deployment still counts toward the cap. To review a console
+change before merge, run it locally (`npm run dev -w @haven/ops`).
+
+**"Skipped - Not affected" records (#3913).** Feature-branch pushes that
+change none of the console's inputs still created haven-ops deployment
+records: every haven-ops record on a feature branch since #3682 is "Skipped -
+Not affected" (103 preview records, 8 of the 40 production ones), and not one
+of those SHAs touches an `ops.txt` path. Pushes that do touch a watched path
+get no record at all, so `git.deploymentEnabled` is doing its job; the
+records come from a per-project Vercel setting instead: **"Skip deployments
+when there are no changes to the root directory or its dependencies"**, which
+is on for haven-ops and off for haven-ai-frontend — inferred from GitHub's
+records; nobody has checked the dashboard yet. It is a dashboard setting that
+`vercel.json` cannot carry (expected under Settings → Build and Deployment →
+Root Directory section): its required value on haven-ops is **off**. Owner
+decision 2026-10-13: the operator turns it off and measures; a workflow
+fallback is built only if the records persist. (The frontend side of this is
+in [`dev-environment.md` § PR previews are opt-in](dev-environment.md#pr-previews-are-opt-in).)
 
 **Ignored Build Step.** `packages/ops/vercel.json` runs the shared
 `scripts/vercel/ignore-build.sh` (#3594), passing it `OPS_FORCE_BUILD` and

@@ -71,7 +71,7 @@ test('at 390 every agent row keeps its name whole beside the last-payment column
   await expect(page.getByTestId('agent-row-last-payment').first()).toBeVisible()
   // #3908 design review: a 40% right column left "Research agent" as "R…".
   // The name span truncates by design when it truly cannot fit; with the
-  // column capped at 7rem the fixture's names fit whole.
+  // column capped at 5.5rem below `sm` (7rem from `sm`) the fixture's names fit whole.
   const names = await page.evaluate(() =>
     Array.from(document.querySelectorAll<HTMLElement>('a[href^="/agents/"] p span.truncate')).map((el) => ({
       text: el.textContent,

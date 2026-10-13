@@ -251,9 +251,13 @@ function AgentBudget({
     selected.extraCount > 0
       ? ` · +${selected.extraCount} ${selected.extraCount === 1 ? 'budget' : 'budgets'}`
       : ''
-  // Each "·" segment stays whole (#3908 design review): a narrow row may wrap
-  // the caption, but only at a separator — never between "refills in" and
-  // "22h", which would strand a time apart from its verb.
+  // Each "·" segment after the amounts stays whole (#3908 design review): a
+  // narrow row may wrap the caption, but only at a separator — never between
+  // "refills in" and "22h", which would strand a time apart from its verb.
+  // The amounts segment may wrap at its own spaces ("… of …"): it is the
+  // widest, and a large SEK budget kept whole would overflow a 390px row.
+  // Each figure is still unbroken — the currency formats separate digits
+  // and symbol with no-break spaces.
   const segments = `${caption.caption}${extra}`.split(' · ')
   return (
     <div className="mt-1.5">
@@ -263,7 +267,7 @@ function AgentBudget({
         caption={segments.map((segment, index) => (
           <Fragment key={index}>
             {index > 0 ? ' · ' : null}
-            <span className="whitespace-nowrap">{segment}</span>
+            <span className={index === 0 ? undefined : 'whitespace-nowrap'}>{segment}</span>
           </Fragment>
         ))}
       />

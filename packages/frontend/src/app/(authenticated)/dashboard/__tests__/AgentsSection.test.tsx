@@ -190,7 +190,10 @@ describe('AgentsSection (#3809)', () => {
     // so "refills in" never strands its time on the next line.
     const segments = Array.from(caption.querySelectorAll('span'))
     expect(segments.map((segment) => segment.textContent)).toEqual(caption.textContent!.split(' · '))
-    for (const segment of segments) expect(segment).toHaveClass('whitespace-nowrap')
+    // The amounts segment may wrap at "of" (a large SEK budget kept whole
+    // would overflow a 390px row); every later segment is unbreakable.
+    expect(segments[0]).not.toHaveClass('whitespace-nowrap')
+    for (const segment of segments.slice(1)) expect(segment).toHaveClass('whitespace-nowrap')
   })
 
   it("keeps the paused agent's live meter and uses the shared pause wording", () => {

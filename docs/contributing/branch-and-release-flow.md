@@ -413,15 +413,29 @@ runs alongside the gates is
 **No sync-back; promotions merge behind (owner decision, 2026-09-26).**
 `Dev gate` (ruleset 18134280) sets `strict_required_status_checks_policy: true`,
 so a promotion PR whose `dev` lacks `main`'s earlier promotion merge commits
-reports BEHIND and **cannot merge through the ordinary button**. The old cure,
+reports BEHIND. The old cure,
 a merge-commit sync PR from `main` into `dev` after every promotion (#1231),
 cannot land since `Dev merge` (22449193) made `dev` squash-only on 2026-09-07,
-and direct pushes to `dev` are refused. The owner chose to drop it rather than
-loosen either ruleset: `dev` stays squash-only, `main` stays strict, and every
-promotion is merged **behind, by the owner**, from the web UI or the API. The
-GitHub mobile app offers no such merge. #3162 and #3325 (0.5.0-alpha.1) merged
-this way; `Dev gate` lists no bypass actors to an unauthenticated read (GitHub
-hides them from non-admins), so how GitHub admits it is unconfirmed. A
+and direct pushes to `dev` are refused. The owner chose to drop the sync-back
+rather than loosen either ruleset: `dev` stays squash-only, `main` stays
+strict, and every promotion is merged **behind, with no sync-back**. #3162
+and #3325 (0.5.0-alpha.1) merged this way; #3794 merged behind through the
+ordinary **Merge pull request** button (merge commit form).
+
+**Any of the three maintainers merges the promotion (owner decision,
+2026-10-09, #3798).** @d-hinders, @AntonioSaaranen and @PhilipEriksson all
+merge `dev → main` promotions, with the ordinary **Merge pull request**
+button (merge commit) in the web UI; the PR showing as BEHIND is expected,
+and no sync-back exists to undo it. (The 2026-09-26 decision reserved the
+merge to the owner — from the web UI or the API, never the GitHub mobile app,
+which offers no such merge — until the test on #3798 widens it.) Whether a
+partner can click that same button is the operator test recorded on #3798:
+a rule changes only if that test shows partners are blocked, and then only by
+a new owner decision. On the measured facts: an authenticated read
+(2026-10-09, #3798) shows `Dev gate` (18134280) with **no bypass actors**,
+while the admin-role `always` bypass sits only on *Haven automerge rules*
+(18021461) — so how GitHub admits the behind merge at all is unconfirmed
+until that test lands. A
 migration-carrying promotion still needs its code-owner approval
 first. `dev` falls one more promotion merge behind `main` each time
 (`git rev-list --count origin/dev..origin/main`); that is expected, not drift,

@@ -496,7 +496,10 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
      review" checkbox is ticked and inert while the approval count is zero.)
    - **"Dev gate"** (targets `main` only) — reinforces the pull-request and
      force-push protections on `main`, and carries the strict up-to-date policy,
-     one merge-method rule of its own, and **four** required checks:
+     one merge-method rule of its own, and **four** required checks. It carries
+     **no bypass actors** — an authenticated read on 2026-10-09 (#3798) shows
+     an empty bypass list, where the admin-role `always` bypass appears only on
+     *Haven automerge rules* (above):
      - **Strict status checks** — `strict_required_status_checks_policy: true`.
        This is the *only* ruleset still setting it, and it is why `main` stays
        up-to-date-gated after O1 turned the flag off on the shared ruleset. The
@@ -571,6 +574,13 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
    gh api repos/d-hinders/Haven-AI/rules/branches/main
    ```
 
+   Re-verified **2026-10-13** (#3798): the strict flags, the required-check
+   lists (15 on `dev`, 19 on `main`), the merge methods and the code-owner
+   requirements are unchanged. The 2026-10-09 authenticated read also shows
+   `Dev gate` with **no bypass actors** (the admin-role `always` bypass lives
+   only on *Haven automerge rules*) — see
+   [`branch-and-release-flow.md`](branch-and-release-flow.md) § *Promotion to
+   production*.
    The `rules/branches/{main,dev}` form is the fastest way to re-check the
    effective branch rules without admin UI access: it reports each rule once per
    matching ruleset, which is the union above seen from the other side. Two

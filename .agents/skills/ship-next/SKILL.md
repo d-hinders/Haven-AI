@@ -1147,9 +1147,11 @@ Do not burn fixed-timeout `sleep` loops against `gh pr checks`.
   `gh pr update-branch <pr>`. On `dev` that no longer matters: with the up-to-date
   rule off, an armed PR in `BEHIND` merges on its own checks and needs nothing from
   you. A **promotion PR into `main`** is still strict, and you cannot update it:
-  its head is `dev`, which refuses direct pushes. By owner decision it merges
-  behind, by the owner, with no sync-back
-  ([`branch-and-release-flow.md`](../../../docs/contributing/branch-and-release-flow.md)
+  its head is `dev`, which refuses direct pushes. It merges behind, with no
+  sync-back (owner decision, 2026-09-26) — since 2026-10-09 **any of the three
+  maintainers** does that merge, from the ordinary **Merge pull request**
+  (merge commit) button in the web UI; BEHIND is expected on it, not a defect
+  to clear ([`branch-and-release-flow.md`](../../../docs/contributing/branch-and-release-flow.md)
   § *Promotion to production*) — say so, never run `gh pr update-branch` on it.
 
 ## Closeout

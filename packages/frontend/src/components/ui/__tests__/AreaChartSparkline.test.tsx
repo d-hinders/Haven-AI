@@ -127,10 +127,11 @@ describe('AreaChart sparkline across missing days (#3897)', () => {
     expect(box.dataset.fill).toBe('')
     expect(box.className).toMatch(/\bh-full\b/)
     const svg = container.querySelector<SVGSVGElement>('svg')!
-    expect(svg.getAttribute('class')).toMatch(/\bflex-1\b/)
+    expect(svg.getAttribute('class')).toMatch(/\bgrow\b/)
     // HEIGHT is the minimum, not a fixed height.
     expect(svg.style.minHeight).toBe(`${HEIGHT}px`)
-    expect(svg.style.height).toBe('')
+    // The height stays too: below a stretching flex column it holds 40px.
+    expect(svg.style.height).toBe(`${HEIGHT}px`)
     // The dot's vertical fraction is the line endpoint's y over the viewBox
     // height — the same point, at any stretch.
     const line = container.querySelector('[data-sparkline-line]')!.getAttribute('d')!

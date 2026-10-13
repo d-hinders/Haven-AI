@@ -58,7 +58,9 @@
  * money card's sparkline). The dots are therefore HTML spans — round at
  * every width — positioned the same way the labels are: a percentage of the
  * viewBox for the full chart, and CSS px for the sparkline, whose vertical
- * scale is exactly 1. The sparkline's box carries a horizontal inset in CSS
+ * scale is exactly 1 in fixed-height mode (in `fill` mode, #3908, the
+ * vertical position is the endpoint's fraction of the inset box, like
+ * `left`). The sparkline's box carries a horizontal inset in CSS
  * px (`SPARKLINE_DOT_INSET`, at least the dot's radius plus stroke) and the
  * line draws edge to edge inside it, so the end dot's centre stays on the
  * line's endpoint while the whole dot stays inside the box — the #3902
@@ -299,8 +301,13 @@ function Sparkline({
         aria-label={ariaLabel}
         viewBox={`0 0 ${SPARKLINE_VIEW_W} ${height}`}
         preserveAspectRatio="none"
-        className={fill ? 'block w-full flex-1' : 'block w-full'}
-        style={fill ? { minHeight: height } : { height }}
+        // Fill: `grow` (basis auto), not `flex-1` (basis 0%) — with a 0% basis
+        // the browser sizes the svg from its viewBox ratio and ignores
+        // `height`, so a stacked layout below `lg` grew to ~50px at 900. With
+        // basis auto the svg starts at `height` and only a container with
+        // spare height (the money card's `lg` half) grows it (#3908 review).
+        className={fill ? 'block w-full grow' : 'block w-full'}
+        style={fill ? { height, minHeight: height } : { height }}
       >
         {!chartable ? (
           <line
@@ -340,7 +347,7 @@ function Sparkline({
       {chartable && lastIndex >= 0 && points[lastIndex].value !== null && (
         // The end dot, in HTML like the labels (#3903): a `<circle>` in this
         // stretched svg renders as an oval wherever the box is not 640px
-        // wide. CSS px on both axes — the vertical scale is exactly 1, and
+        // wide. Fixed mode: CSS px on both axes — the vertical scale is exactly 1, and
         // the horizontal position is the endpoint's fraction of the viewBox,
         // padded by the CSS-px inset (all sides: a last balance of 0 maps to
         // the bottom edge exactly) so the round dot stays inside the box

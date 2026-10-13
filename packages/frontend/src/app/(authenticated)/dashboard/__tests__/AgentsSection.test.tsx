@@ -355,7 +355,10 @@ describe('AgentsSection (#3809)', () => {
     const column = screen.getByTestId('agent-row-last-payment')
     expect(within(column).getByText(/ago$/)).toBeInTheDocument()
     expect(within(column).getByText('research.example')).toBeInTheDocument()
-    expect(screen.queryByText(/Last payment/)).toBeNull()
+    // The old under-the-bar sentence is gone; the column keeps "Last payment"
+    // for screen readers only.
+    expect(screen.queryByText(/Last payment .* to /)).toBeNull()
+    expect(within(column).getByText('Last payment')).toHaveClass('sr-only')
     expect(screen.queryByText(/0x9999/)).not.toBeInTheDocument()
   })
 

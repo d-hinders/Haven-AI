@@ -322,8 +322,9 @@ export function budgetReservedNote(reservedAtomic: string, symbol: string, optio
 
 export interface SelectedBudgets {
   primary: BudgetCaptionRow
-  /** "+N budgets" — visible text OUTSIDE the meter caption (the ARIA label
-      does not announce it), so the caller renders it, not the caption. */
+  /** "+N budgets" — a count the caller renders; the dashboard row appends it
+      to the meter's caption line (`· +N budgets`, #3908), which the
+      progressbar's ARIA label does not announce. */
   extraCount: number
 }
 

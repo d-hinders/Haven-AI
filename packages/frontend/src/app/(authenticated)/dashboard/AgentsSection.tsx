@@ -527,6 +527,9 @@ function AgentRow({
           {agent.stats.lastPaymentAt ? (
             <>
               <p className="text-sm font-medium text-[var(--v2-ink)] whitespace-nowrap">
+                {/* The column drops the visible "Last payment" words; a screen
+                    reader still hears what the time is. */}
+                <span className="sr-only">Last payment </span>
                 {timeAgo(agent.stats.lastPaymentAt)}
               </p>
               {counterpartyLabelValue ? (

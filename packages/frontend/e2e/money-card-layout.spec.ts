@@ -27,7 +27,7 @@ test('the balance half has no empty band under its actions at 1280', async ({ pa
     const actions = balanceEl?.lastElementChild
     const spending = document.querySelector('section[aria-label="Spending"]')
     // The spending half's content column; its last child is the counts row.
-    const counts = spending?.firstElementChild?.lastElementChild
+    const counts = spending?.querySelector('[data-testid="spending-counts"]')
     const sparkline = document.querySelector('[data-testid="money-card-sparkline"] svg')
     if (!actions || !counts || !sparkline) return null
     return {
@@ -51,4 +51,15 @@ test('the balance half has no empty band under its actions at 1280', async ({ pa
     bottoms!.actionsTop - bottoms!.sparklineBottom,
     `band between the sparkline drawing (${bottoms!.sparklineBottom}) and the actions (${bottoms!.actionsTop})`,
   ).toBeLessThanOrEqual(21)
+})
+
+test('below lg the stacked card keeps the sparkline at its fixed 40px (900)', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 900 })
+  await page.goto('/dashboard')
+  await expect(page.getByRole('region', { name: 'Balance' }).getByRole('button', { name: 'Add funds' })).toBeVisible()
+  const height = await page.evaluate(
+    () => document.querySelector('[data-testid="money-card-sparkline"] svg')?.getBoundingClientRect().height ?? null,
+  )
+  expect(height, 'no sparkline drawing rendered').not.toBeNull()
+  expect(Math.abs(height! - 40), `sparkline drawing is ${height}px tall at 900`).toBeLessThanOrEqual(0.5)
 })

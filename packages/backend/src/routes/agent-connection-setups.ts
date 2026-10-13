@@ -11,7 +11,7 @@ import type {
 import { isPgUniqueViolation } from '../infra/pg-errors.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { config } from '../config.js'
-import { findAgentAuthRowByApiKeyHash } from '../infra/repositories/agents.js'
+import { findAgentAuthRowByApiKeyHash, markAgentsSuperseded } from '../infra/repositories/agents.js'
 import {
   SETUP_TOKEN_TTL_MINUTES,
   apiKeyHash,
@@ -22,6 +22,8 @@ import {
   hashSetupSecret,
   isValidAddress,
   isValidHexHash,
+  MAX_RETIRED_AGENT_IDS,
+  parseRetiredAgentIds,
   sanitizeConnectorContext,
   sanitizeInstallStatus,
   verifySetupProof,
@@ -781,6 +783,49 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
     },
   )
 
+  // #3772: `@haven_ai/connect --replace` reports the agent directories it
+  // retired on this machine. The caller is the NEW agent (authenticated with
+  // its own API key — a setup token is deliberately NOT accepted here); each
+  // retired id is stamped "superseded by this agent" so a still-running old
+  // agent sees `superseded_by` on its next read. WARNING ONLY: nothing is
+  // granted, revoked or paused. Tenant scope is the setup's own user — an id
+  // belonging to another user is silently not recorded.
+  app.post<{ Params: { setupId: string }; Body: RetiredAgentsBody }>(
+    '/:setupId/retired-agents',
+    async (request, reply) => {
+      if (containsForbiddenPrivateKeyField(request.body)) {
+        return reply.code(400).send({ error: 'Credential material is not accepted in setup status' })
+      }
+      // API key ONLY: no setup-token path, in the body or the header.
+      const apiKey = extractAgentApiKey(request)
+      const setup = apiKey
+        ? await setups.findSetupByAgentApiKeyHash(request.params.setupId, apiKeyHash(apiKey))
+        : null
+      if (!setup) return reply.code(401).send({ error: 'Invalid setup status credential' })
+      if (setup.status === 'cancelled' || setup.status === 'expired' || setup.status === 'failed') {
+        return reply.code(409).send({ error: 'Setup cannot be updated' })
+      }
+      if (!setup.agent_id) {
+        return reply.code(409).send({ error: 'Setup has no registered agent' })
+      }
+
+      // Request validation may be shadow/off, so the shape is also checked here.
+      const ids = parseRetiredAgentIds(request.body)
+      if (!ids) {
+        return reply.code(400).send({
+          error: `retired_agent_ids must be 1-${MAX_RETIRED_AGENT_IDS} unique agent id (uuid) strings`,
+        })
+      }
+
+      const recorded = await markAgentsSuperseded({
+        userId: setup.user_id,
+        replacementAgentId: setup.agent_id,
+        agentIds: ids,
+      })
+      return { setup_id: setup.id, recorded_agent_ids: recorded }
+    },
+  )
+
   app.post<{ Params: { setupId: string } }>(
     '/:setupId/cancel',
     { onRequest: [authMiddleware] },
@@ -839,6 +884,10 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       return { success: true }
     },
   )
+}
+
+interface RetiredAgentsBody {
+  retired_agent_ids: string[]
 }
 
 function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {

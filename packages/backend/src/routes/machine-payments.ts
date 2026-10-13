@@ -5,6 +5,7 @@ import { getAgentPaymentStatus } from '../modules/payments/index.js'
 import { agentExecutionRailLabel } from '../rails/execution-rail.js'
 import { computeHybridAccountAddress } from '../rails/hybrid-provisioning.js'
 import { toCanonicalAddress } from '../modules/transactions/index.js'
+import { findAgentSupersession } from '../infra/repositories/agents.js'
 import { findOpenGrantsForAgent, type AgentParentSubBudget } from '../infra/repositories/sub-budgets.js'
 import {
   handleGetAllowances,
@@ -43,6 +44,15 @@ import {
  *  to the request schema (#3031, `format: uuid`); ownership stays semantic
  *  in `listReceipts`. */
 const RECEIPT_CURSOR_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** #3772: reconciliation metadata, never authority — a failed read is null. */
+async function readSupersededBy(agentId: string): Promise<{ agent_id: string; superseded_at: string } | null> {
+  try {
+    return await findAgentSupersession(agentId)
+  } catch {
+    return null
+  }
+}
 
 export default async function machinePaymentRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', agentAuthMiddleware)
@@ -83,6 +93,8 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       parent_sub_budgets = []
     }
 
+    const superseded_by = await readSupersededBy(agent.id)
+
     return ({
       id: agent.id,
       name: agent.name,
@@ -106,6 +118,10 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       // #3330 (additive only): the sub-budget grants this agent holds — each
       // names its parent agent and the effective (narrower) limits. Empty
       // unless agent A actually re-delegated to this agent.
+      // #3772: set when `connect --replace` retired this agent in favour of a
+      // newer one. Always present (null = not superseded). A stale-duplicate
+      // WARNING only — it changes nothing about this agent's authority.
+      superseded_by,
       parent_sub_budgets: parent_sub_budgets.map((g) => ({
         sub_budget_id: g.sub_budget_id,
         parent_agent_id: g.parent_agent_id,
@@ -123,6 +139,11 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
   app.get('/allowances', async (request, reply) => {
     const agent = request.agent as AgentContext
     const result = await handleGetAllowances(agent)
+    if (result.statusCode === 200) {
+      // #3772: additive to the 200 body only — the 410 retired-rail bodies are
+      // untouched. Same warning-only, degrade-to-null rule as GET /agent.
+      return reply.code(200).send({ ...result.body, superseded_by: await readSupersededBy(agent.id) })
+    }
     return reply.code(result.statusCode).send(result.body)
   })
 

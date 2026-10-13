@@ -1055,3 +1055,59 @@ export async function getAgentTaxDeclarationRow(
   const result = await db.query<AgentTaxDeclarationRow>(GET_AGENT_TAX_DECLARATION_SQL, [agentId])
   return result.rows[0] ?? null
 }
+
+// ── Supersession (#3772) ─────────────────────────────────────────────────────
+//
+// `@haven_ai/connect --replace` retires old agent directories; the connector,
+// authenticated as the NEW agent, reports the retired ids and we stamp each
+// with the agent that replaced it. WARNING METADATA ONLY — nothing here (or
+// anywhere on the payment path) reads these columns to grant, revoke or pause.
+
+export const MARK_AGENTS_SUPERSEDED_SQL = `UPDATE agents
+        SET superseded_by_agent_id = $2, superseded_at = now()
+      WHERE id = ANY($3::uuid[])
+        AND user_id = $1
+        AND id <> $2
+  RETURNING id`
+
+export const FIND_AGENT_SUPERSESSION_SQL = `SELECT superseded_by_agent_id, superseded_at
+   FROM agents
+  WHERE id = $1
+    AND superseded_by_agent_id IS NOT NULL
+    AND superseded_at IS NOT NULL`
+
+/**
+ * Stamp `agentIds` as superseded by `replacementAgentId`. Scoped to `userId`
+ * (another tenant's agent is never marked) and the replacement never marks
+ * itself. Latest replace wins: an already-marked agent is overwritten.
+ * Returns the ids actually marked.
+ */
+export async function markAgentsSuperseded(
+  input: { userId: string; replacementAgentId: string; agentIds: string[] },
+  db: Executor = pool,
+): Promise<string[]> {
+  const result = await db.query<{ id: string }>(MARK_AGENTS_SUPERSEDED_SQL, [
+    input.userId,
+    input.replacementAgentId,
+    input.agentIds,
+  ])
+  return result.rows.map((r) => r.id)
+}
+
+/** The supersession stamp for an agent, or null when it was never superseded. */
+export async function findAgentSupersession(
+  agentId: string,
+  db: Executor = pool,
+): Promise<{ agent_id: string; superseded_at: string } | null> {
+  const result = await db.query<{ superseded_by_agent_id: string; superseded_at: Date | string }>(
+    FIND_AGENT_SUPERSESSION_SQL,
+    [agentId],
+  )
+  const row = result.rows[0]
+  if (!row) return null
+  return {
+    agent_id: row.superseded_by_agent_id,
+    superseded_at:
+      row.superseded_at instanceof Date ? row.superseded_at.toISOString() : new Date(row.superseded_at).toISOString(),
+  }
+}

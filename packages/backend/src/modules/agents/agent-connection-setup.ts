@@ -219,3 +219,25 @@ function looksLikeRawPathOrSecret(value: string): boolean {
   if (value.includes('/') || value.includes('\\')) return true
   return false
 }
+
+/** #3772: the most retired agent ids one `--replace` report may carry. */
+export const MAX_RETIRED_AGENT_IDS = 32
+
+const RETIRED_AGENT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * #3772: the semantic half of `POST /:setupId/retired-agents` body validation,
+ * kept here (pure, no I/O) so it still holds when request validation is in
+ * shadow/off: exactly `{ retired_agent_ids: string[] }`, 1-32 unique uuids.
+ * Returns the ids, or null when the body is malformed.
+ */
+export function parseRetiredAgentIds(body: unknown): string[] | null {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null
+  const record = body as Record<string, unknown>
+  if (Object.keys(record).some((key) => key !== 'retired_agent_ids')) return null
+  const ids = record.retired_agent_ids
+  if (!Array.isArray(ids) || ids.length < 1 || ids.length > MAX_RETIRED_AGENT_IDS) return null
+  if (!ids.every((id): id is string => typeof id === 'string' && RETIRED_AGENT_UUID.test(id))) return null
+  if (new Set(ids).size !== ids.length) return null
+  return ids
+}

@@ -138,6 +138,7 @@ export const ROUTE_MODULE_BY_OPERATION: Readonly<Record<string, string>> = Objec
   "POST /agent-connection-setups/{setupId}/budget-approval": "routes/agent-connection-setups.ts",
   "POST /agent-connection-setups/{setupId}/cancel": "routes/agent-connection-setups.ts",
   "POST /agent-connection-setups/{setupId}/install-status": "routes/agent-connection-setups.ts",
+  "POST /agent-connection-setups/{setupId}/retired-agents": "routes/agent-connection-setups.ts",
   "POST /agents": "routes/agents.ts",
   "POST /agents/{id}/account-signers/prepare": "routes/agent-delegations.ts",
   "POST /agents/{id}/account-signers/submit": "routes/agent-delegations.ts",

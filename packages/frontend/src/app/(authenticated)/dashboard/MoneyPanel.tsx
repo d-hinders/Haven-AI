@@ -475,21 +475,32 @@ export default function MoneyPanel({
               ) : null}
             </div>
 
+            {/* #3908: side by side (lg), the balance half shares a grid row
+                with the taller spending half; the sparkline grows into the
+                spare height so the actions sit level with the spending
+                half's bottom row instead of leaving a gap under them. */}
             {spend ? (
-              <AreaChart
-                variant="sparkline"
-                points={sparkPoints}
-                ariaLabel={sparklineAriaLabel(sparkPoints, currency)}
-              />
+              <div data-testid="money-card-sparkline" className={showSpending ? 'min-h-0 lg:flex lg:flex-1 lg:flex-col' : undefined}>
+                <AreaChart
+                  variant="sparkline"
+                  points={sparkPoints}
+                  fill={showSpending}
+                  className={showSpending ? 'lg:flex-1' : undefined}
+                  ariaLabel={sparklineAriaLabel(sparkPoints, currency)}
+                />
+              </div>
             ) : null}
 
             {/* #3897: "Add funds" is the primary action, "Deposit address" the
                 secondary (#3807, the mockup). */}
             {hasAccounts ? (
               requiresOtherDevice ? (
-                <PasskeyOtherDeviceNotice className="max-w-sm" />
+                <PasskeyOtherDeviceNotice className="max-w-sm lg:mt-auto" />
               ) : (
-                <div className="flex flex-wrap gap-3">
+                // `lg:mt-auto`: with no sparkline (spend still loading or
+                // unavailable) the spare height sits above the actions,
+                // never below them (#3908).
+                <div className="flex flex-wrap gap-3 lg:mt-auto">
                   <Button onClick={onAddFunds} variant={addFundsSecondary ? 'ghost' : 'primary'}>
                     Add funds
                   </Button>
@@ -499,7 +510,7 @@ export default function MoneyPanel({
                 </div>
               )
             ) : (
-              <div>
+              <div className="lg:mt-auto">
                 <Button href="/accounts">Create Haven account</Button>
               </div>
             )}

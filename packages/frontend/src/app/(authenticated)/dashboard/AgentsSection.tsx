@@ -235,7 +235,9 @@ function AgentBudget({
   const perToken = spotRates?.[selected.primary.symbol]
   const rate: BudgetRate | null =
     typeof perToken === 'number' && perToken > 0 ? { currency, perToken } : null
-  const caption = budgetCaption(selected.primary, { nowMs, rate })
+  // #3908: the compact row wording, as the mockup draws it — the period word
+  // in place of "used this period"; every other surface keeps the full one.
+  const caption = budgetCaption(selected.primary, { nowMs, rate, style: 'row' })
 
   if (caption.kind !== 'meter') {
     // Unknown remaining, a failed read, a read past its period — an em dash,
@@ -243,17 +245,15 @@ function AgentBudget({
     return <p className="mt-1 text-sm text-[var(--v2-ink-3)]">—</p>
   }
 
+  // The extra-budget count rides in the caption line (#3908, the mockup's
+  // place for it) — a sibling of the bar, never inside its ARIA name.
+  const extra =
+    selected.extraCount > 0
+      ? ` · +${selected.extraCount} ${selected.extraCount === 1 ? 'budget' : 'budgets'}`
+      : ''
   return (
-    <div className="mt-1.5 flex items-center gap-3">
-      <div className="min-w-0 flex-1">
-        <BudgetMeter usedPercent={caption.usedPercent} label={caption.label} caption={caption.caption} />
-      </div>
-      {/* Outside the meter — the progressbar's ARIA name must not announce it. */}
-      {selected.extraCount > 0 && (
-        <span className="flex-shrink-0 text-xs text-[var(--v2-ink-3)] whitespace-nowrap">
-          {`+${selected.extraCount} ${selected.extraCount === 1 ? 'budget' : 'budgets'}`}
-        </span>
-      )}
+    <div className="mt-1.5">
+      <BudgetMeter usedPercent={caption.usedPercent} label={caption.label} caption={`${caption.caption}${extra}`} />
     </div>
   )
 }
@@ -517,14 +517,27 @@ function AgentRow({
           // agent page's banner reads, so the two cannot drift.
           <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{AGENT_PAUSED_SHORT}</p>
         )}
-        {agent.stats?.lastPaymentAt && (
-          <p className="mt-1 truncate text-xs text-[var(--v2-ink-3)]">
-            {counterpartyLabelValue
-              ? `Last payment ${timeAgo(agent.stats.lastPaymentAt)} to ${counterpartyLabelValue}`
-              : `Last payment ${timeAgo(agent.stats.lastPaymentAt)}`}
-          </p>
-        )}
       </div>
+      {/* #3908: the last payment in a right-hand column, as the mockup draws
+          it — the time on top, the merchant (never a raw address) under it,
+          width-capped so a long host cannot crush the meter at 390px. A
+          setup row has nothing to say here yet. */}
+      {agent.status !== 'pending_approval' && agent.stats ? (
+        <div data-testid="agent-row-last-payment" className="min-w-0 max-w-[40%] flex-shrink-0 text-right">
+          {agent.stats.lastPaymentAt ? (
+            <>
+              <p className="text-sm font-medium text-[var(--v2-ink)] whitespace-nowrap">
+                {timeAgo(agent.stats.lastPaymentAt)}
+              </p>
+              {counterpartyLabelValue ? (
+                <p className="mt-0.5 truncate text-xs text-[var(--v2-ink-3)]">{counterpartyLabelValue}</p>
+              ) : null}
+            </>
+          ) : (
+            <p className="text-sm font-medium text-[var(--v2-ink)] whitespace-nowrap">No payments yet</p>
+          )}
+        </div>
+      ) : null}
       <Icon icon={ChevronRight} className="h-4 w-4 flex-shrink-0 text-[var(--v2-ink-3)]" />
     </Link>
   )

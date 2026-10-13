@@ -1779,8 +1779,8 @@ export default function DesignSystemPage() {
           <EmptyState
             icon={<DotIcon />}
             tone="success"
-            title="You're all caught up"
-            body="Your balance lasts well over a month at the current pace, and your agents have room in their budgets."
+            title="Setup complete"
+            body="Your account is funded and your first agent has a budget it can spend from."
           />
         </div>
         <div className="mt-5 grid gap-5 lg:grid-cols-2">

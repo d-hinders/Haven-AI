@@ -24,8 +24,8 @@
  *   accessible name states the count.
  * - With no items the card says only what was measured (#3902):
  *   `attentionEmptyState` in the rules layer decides between the
- *   "You're all caught up" achievement, whose reason line is backed by
- *   measured facts, a neutral line that claims nothing, and — while the
+ *   "You're all caught up" achievement (title only since #3908, still gated
+ *   on measured facts), a neutral line that claims nothing, and — while the
  *   budget reads load — nothing at all.
  * - Dismissal is handed back to the caller (`onDismiss`) — #3813 owns
  *   persistence: "No backup signer" (per account) and "Needs setup" (per
@@ -247,17 +247,14 @@ export default function NeedsYou({
         // card. Not a dashed EmptyState tile: that is the "nothing here yet"
         // placeholder, and nested in this anchor card it stacks a second
         // tinted surface (#3902 design review).
-        <div className="flex items-start gap-3 px-5 py-3">
+        <div className="flex items-center gap-3 px-5 py-3">
           <span
             aria-hidden="true"
             className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-success-soft)] text-[var(--v2-success)]"
           >
             <Check className="h-4 w-4" />
           </span>
-          <div className="min-w-0">
-            <h3 className="mt-1.5 text-sm font-semibold text-[var(--v2-ink)]">{emptyState.title}</h3>
-            <p className="mt-0.5 text-sm text-[var(--v2-ink-2)]">{emptyState.body}</p>
-          </div>
+          <h3 className="min-w-0 text-sm font-semibold text-[var(--v2-ink)]">{emptyState.title}</h3>
         </div>
       ) : showEmpty && emptyState?.kind === 'quiet' ? (
         <p className="px-5 py-4 text-sm text-[var(--v2-ink-2)]">{emptyState.body}</p>

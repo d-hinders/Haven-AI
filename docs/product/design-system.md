@@ -98,7 +98,7 @@ covers:
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
-last-verified: "2026-10-12"
+last-verified: "2026-10-13"
 ---
 
 # Haven Design System
@@ -669,7 +669,11 @@ weekday and 24-hour time ("refills Thu 14:02"), otherwise day and month
 ("refills 14 Nov"). The states that replace the bar: a failed or stale read
 shows "Usage this period couldn't be read" (never a 0 % bar, never a
 "snapshot" claim), an expired budget its own line, and a future `start_date`
-shows when the budget starts. The label row above the bar (token value,
+shows when the budget starts. The dashboard's agent rows ask for the compact
+`style: 'row'` wording (#3908), as the mockup draws a row: the period word in
+place of "used this period" ("≈$0.40 of $1.00 · per day · refills in 5h"),
+with an extra-budget count riding in the same line ("· +1 budget"); every
+other surface keeps the full wording. The label row above the bar (token value,
 percentage) belongs to the caller: it is the caller's tabular typography, not
 part of the measurement. The fill is a token surface colour, never a series
 colour — a budget bar measures one delegation against its own period, it is
@@ -794,7 +798,10 @@ reserved the box does not jump. No draw animation on data refresh.
 The end dot is an **HTML span, not an SVG `<circle>`** (#3903): the drawing
 stretches with `preserveAspectRatio="none"`, and a circle stretches with it
 into an oval wherever the box is not 640 px wide. The dot is positioned in
-CSS px on both axes — the sparkline's vertical scale is exactly 1, and its
+CSS px on both axes — the sparkline's vertical scale is exactly 1 (in
+`fill` mode, #3908, the box grows to its container with the height as a
+minimum, the drawing stretches, and the dot's vertical position becomes the
+endpoint's fraction of the inset box instead, so it stays on the line), and its
 horizontal position is the endpoint's fraction of the viewBox, padded by a
 CSS-px box inset on every side (`SPARKLINE_DOT_INSET`, 4px, at least the
 dot's radius plus stroke) with the line drawn edge to edge inside it — so
@@ -840,14 +847,17 @@ muted "Agent spending, last 30 days" label — still the section's heading —
 with the 30-day total large and left-aligned beneath it, the per-agent split
 bar and legend, then three § StatTile inline tiles (payments, distinct
 merchants, stopped by budget) below a hairline divider, pinned to the bottom
-of the half at `lg`; before the first payment the same muted label reads
+of the half at `lg`. Beside it at `lg` the balance half's sparkline grows
+into the spare height (`fill`), so the actions sit level with that row and
+never above an empty band (#3908); before the first payment the same muted label reads
 "Agent spending" over its explanation. The "Needs attention" card
 (`anchor`) follows at full width — never a side column beside the balance —
 then Agents and Activity. Its count badge is neutral, never a warning tint
 (the card holds neutral items too), sits beside the heading, and hides at
 zero and while the card is "Get started". With nothing listed it shows
-"You're all caught up" only when every fact its reason line states was
-measured and holds (`attentionEmptyState`, #3902); otherwise a neutral line
+"You're all caught up" — the title alone, no reason line (#3908) — only when
+the runway and budget-room facts were measured and hold
+(`attentionEmptyState`, #3902); otherwise a neutral line
 that claims nothing, and nothing at all while the budget reads load. That total — and the per-agent split below it —
 renders through § Amount: currency mode with `approx` from the
 wire's `spend` windows, so a total that includes rows priced at today's

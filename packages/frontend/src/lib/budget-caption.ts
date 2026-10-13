@@ -5,7 +5,10 @@ import { formatFiatDisplay } from './format'
 /**
  * The ONE budget caption (#3806, epic #3801) — every budget meter in the app
  * phrases periods, refills, expiry and failed reads through this module, so
- * no two surfaces can disagree about what a budget row says.
+ * no two surfaces can disagree about what a budget row says. The dashboard's
+ * agent rows ask for the compact `style: 'row'` wording (#3908) — the same
+ * figures and next event, with the period word in place of "used this
+ * period"; every other surface keeps the full wording.
  *
  * Three rules bind everything here:
  *
@@ -199,6 +202,13 @@ export interface BudgetCaptionOptions {
   timeZone?: string
   /** Currency mode; absent or unresolvable → token mode. */
   rate?: BudgetRate | null
+  /**
+   * #3908: `'row'` is the dashboard agent row's compact meter caption, as the
+   * mockup draws it — "≈$0.40 of $1.00 · per day · refills in 5h". The bar
+   * already shows usage, so "used this period" gives way to the period word.
+   * Default `'full'` keeps every other surface's wording.
+   */
+  style?: 'full' | 'row'
 }
 
 export type BudgetCaption =
@@ -233,12 +243,14 @@ function usedPercentOf(usedAtomic: string, budgetAtomic: string): number | null 
 }
 
 function meterCaption(row: BudgetCaptionRow, options: BudgetCaptionOptions): string {
-  const { nowMs, timeZone, rate } = options
-  const usedLine = rate
+  const { nowMs, timeZone, rate, style = 'full' } = options
+  const figures = rate
     ? // Currency mode: ONE leading "≈" for the caption — a spot rate is an
       // estimate, and the estimate covers the line, not each figure.
-      `≈${fiatValue(row.usedAtomic ?? '0', row.symbol, rate, row.chainId)} of ${fiatValue(row.budgetAtomic, row.symbol, rate, row.chainId)} used this period`
-    : `${tokenAmount(row.usedAtomic ?? '0', row.symbol, row.chainId)} of ${tokenAmount(row.budgetAtomic, row.symbol, row.chainId)} ${row.symbol} used this period`
+      `≈${fiatValue(row.usedAtomic ?? '0', row.symbol, rate, row.chainId)} of ${fiatValue(row.budgetAtomic, row.symbol, rate, row.chainId)}`
+    : `${tokenAmount(row.usedAtomic ?? '0', row.symbol, row.chainId)} of ${tokenAmount(row.budgetAtomic, row.symbol, row.chainId)} ${row.symbol}`
+  const usedLine =
+    style === 'row' ? `${figures} · ${budgetPeriodWords(row.periodSeconds)}` : `${figures} used this period`
   const refillMs = nextRefillAt(row.startSec, row.periodSeconds, nowMs)
   const expiresMs = row.expiresSec != null ? row.expiresSec * 1000 : null
   // The earlier of the two wins; "expires" is the phrase at a tie — a re-key

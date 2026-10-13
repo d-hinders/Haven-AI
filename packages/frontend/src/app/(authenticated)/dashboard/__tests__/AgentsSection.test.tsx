@@ -179,9 +179,14 @@ describe('AgentsSection (#3809)', () => {
 
     const meter = screen.getByRole('progressbar')
     expect(meter).toHaveAttribute('aria-valuenow', '95')
-    expect(screen.getByText('+1 budget')).toBeInTheDocument()
-    // The caption is #3806's, in the user's currency with the #3803 spot rate.
-    expect(within(container).getByText(/≈\$0\.95 of \$1\.00 used this period/)).toBeInTheDocument()
+    // #3908: the compact row caption — one leading ≈, the period word in place
+    // of "used this period", the extra-budget count inside the caption line
+    // and never inside the progressbar's accessible name.
+    expect(
+      within(container).getByText(/^≈\$0\.95 of \$1\.00 · per week · (refills|expires) .+ · \+1 budget$/),
+    ).toBeInTheDocument()
+    expect(within(container).queryByText(/used this period/)).toBeNull()
+    expect(meter).toHaveAccessibleName('USDC budget used')
   })
 
   it("keeps the paused agent's live meter and uses the shared pause wording", () => {
@@ -346,8 +351,42 @@ describe('AgentsSection (#3809)', () => {
 
     render(<AgentsSection {...baseProps({ overview: makeOverview({ agents: [agent] }) })} />)
 
-    expect(screen.getByText(/Last payment .* to research\.example/)).toBeInTheDocument()
+    // #3908: the right-hand column — the time on top, the merchant under it.
+    const column = screen.getByTestId('agent-row-last-payment')
+    expect(within(column).getByText(/ago$/)).toBeInTheDocument()
+    expect(within(column).getByText('research.example')).toBeInTheDocument()
+    expect(screen.queryByText(/Last payment/)).toBeNull()
     expect(screen.queryByText(/0x9999/)).not.toBeInTheDocument()
+  })
+
+  it('says "No payments yet" in the right column for an agent that never paid (#3908)', () => {
+    render(<AgentsSection {...baseProps({ overview: makeOverview({ agents: [makeAgent()] }) })} />)
+    expect(within(screen.getByTestId('agent-row-last-payment')).getByText('No payments yet')).toBeInTheDocument()
+  })
+
+  it('keeps the right column on a paused row and leaves it off a setup row (#3908)', () => {
+    const paused = makeAgent({ id: AGENT_IDS.watcher, name: 'Watcher agent', status: 'paused' })
+    const pending = makeAgent({ id: AGENT_IDS.pending, name: 'Connecting agent', status: 'pending_approval' })
+    render(<AgentsSection {...baseProps({ overview: makeOverview({ agents: [paused, pending] }) })} />)
+    const rows = screen.getAllByRole('link').filter((row) => row.getAttribute('href')?.startsWith('/agents/'))
+    const pausedRow = rows.find((row) => row.textContent?.includes('Watcher agent')) as HTMLElement
+    const pendingRow = rows.find((row) => row.textContent?.includes('Connecting agent')) as HTMLElement
+    expect(within(pausedRow).getByTestId('agent-row-last-payment')).toBeInTheDocument()
+    expect(within(pendingRow).queryByTestId('agent-row-last-payment')).toBeNull()
+  })
+
+  it('captions token mode and an odd period in the compact row wording (#3908)', () => {
+    const agent = makeAgent({ budgets: [makeBudget({ periodSeconds: 14_400 })] })
+    const { container } = render(
+      <AgentsSection
+        {...baseProps({
+          overview: makeOverview({ agents: [agent], spotRates: {} as DashboardOverview['spotRates'] }),
+          budgetRemaining: { budgets: [makeRead()] },
+        })}
+      />,
+    )
+    expect(within(container).getByText(/^125\.00 of 250\.00 USDC · every 4 hours · /)).toBeInTheDocument()
+    expect(within(container).queryByText(/used this period/)).toBeNull()
   })
 
   it('keeps rows still within a group when spend changes, and moves an agent that crosses into attention', () => {

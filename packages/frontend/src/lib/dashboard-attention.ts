@@ -522,16 +522,16 @@ export function computeAttentionItems(input: DashboardAttentionInput): Attention
  * `[]` when a balance read is unknown, when a zero balance has no budgeted
  * agents behind it, when nothing was spent this week, while the budget reads
  * are still loading or came back unknown, after a dismissal, and for a paused
- * agent with no budget. So the achievement state is driven by the FACTS its
- * reason line states, each measured and holding — never by the list being
- * empty:
+ * agent with no budget. So the achievement state is driven by FACTS, each
+ * measured and holding — never by the list being empty. Since #3908 it shows
+ * its title alone (owner, 2026-10-13); the facts still gate it:
  *
  * - **Runway, per account.** Agents cannot spend across accounts, so a summed
  *   balance would be wrong. Every account's USDC must be known and above zero.
  *   "Lasts well over a month" means each account with spend this week has
  *   `balance × 7 > pace7d × 30` (BigInt — the pace is the 7-day spend, so
- *   `balance ÷ (pace7d ÷ 7)` days `> 30`). With no spend this week on any
- *   account the line says that instead of quoting a runway.
+ *   `balance ÷ (pace7d ÷ 7)` days `> 30`). No spend this week on any account
+ *   also holds: nothing is drawing the balance down.
  * - **Room in budgets.** At least one agent holds a usable budget, and every
  *   such agent has every budget read KNOWN, the highest below 90% (`agentUsedPercent`, the
  *   one function rule 3 and the agent badges read) and no budget or scope
@@ -543,7 +543,7 @@ export function computeAttentionItems(input: DashboardAttentionInput): Attention
  */
 export type AttentionEmptyState =
   | { kind: 'pending' }
-  | { kind: 'caught-up'; title: string; body: string }
+  | { kind: 'caught-up'; title: string }
   | { kind: 'quiet'; body: string }
 
 export const ATTENTION_CAUGHT_UP_TITLE = "You're all caught up"
@@ -613,12 +613,5 @@ export function attentionEmptyState(input: {
   const runway = runwayFact(overview.accounts ?? [])
   const room = budgetRoomFact(overview.agents ?? [], budgetRemaining)
   if (runway === null || !room) return { kind: 'quiet', body: ATTENTION_QUIET_LINE }
-  return {
-    kind: 'caught-up',
-    title: ATTENTION_CAUGHT_UP_TITLE,
-    body:
-      runway === 'month'
-        ? 'Your balance lasts well over a month at the current pace, and your agents have room in their budgets.'
-        : 'No agent spending this week, and your agents have room in their budgets.',
-  }
+  return { kind: 'caught-up', title: ATTENTION_CAUGHT_UP_TITLE }
 }

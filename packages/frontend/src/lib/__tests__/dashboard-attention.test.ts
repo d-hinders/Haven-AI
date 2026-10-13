@@ -669,19 +669,13 @@ describe('attentionEmptyState (#3902) — the achievement only on measured facts
 
   it('is the achievement when the runway and the budget room are both measured and holding', () => {
     const result = state(makeOverview([scout], [month]), roomy)
-    expect(result).toEqual({
-      kind: 'caught-up',
-      title: ATTENTION_CAUGHT_UP_TITLE,
-      body: 'Your balance lasts well over a month at the current pace, and your agents have room in their budgets.',
-    })
+    // #3908: the title alone — exact equality pins that no body rides along.
+    expect(result).toEqual({ kind: 'caught-up', title: ATTENTION_CAUGHT_UP_TITLE })
   })
 
-  it('says "no agent spending this week" at a zero pace, never quoting a runway', () => {
+  it('is the achievement at a zero pace too — nothing is drawing the balance down', () => {
     const result = state(makeOverview([scout], [{ ...month, usdcPace7dAtomic: '0' }]), roomy)
-    expect(result.kind).toBe('caught-up')
-    expect(result.kind === 'caught-up' && result.body).toBe(
-      'No agent spending this week, and your agents have room in their budgets.',
-    )
+    expect(result).toEqual({ kind: 'caught-up', title: ATTENTION_CAUGHT_UP_TITLE })
   })
 
   it('holds back both states while the budget reads load', () => {

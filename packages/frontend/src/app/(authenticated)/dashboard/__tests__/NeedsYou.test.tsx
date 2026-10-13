@@ -111,7 +111,7 @@ describe('NeedsYou', () => {
         hasOverviewError
         onRetry={() => {}}
         onDismiss={() => {}}
-        emptyState={{ kind: 'caught-up', title: "You're all caught up", body: 'measured' }}
+        emptyState={{ kind: 'caught-up', title: "You're all caught up" }}
       />,
     )
     expect(screen.getByText('Dashboard data could not load')).toBeInTheDocument()
@@ -125,13 +125,14 @@ describe('NeedsYou', () => {
         hasOverviewError={false}
         onRetry={() => {}}
         onDismiss={() => {}}
-        emptyState={{ kind: 'caught-up', title: "You're all caught up", body: 'Your balance lasts well over a month at the current pace, and your agents have room in their budgets.' }}
+        emptyState={{ kind: 'caught-up', title: "You're all caught up" }}
       />,
     )
     // The section header stays above it (owner decision 2026-10-12).
     expect(screen.getByRole('heading', { level: 2, name: 'Needs attention' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 3, name: "You're all caught up" })).toBeInTheDocument()
-    expect(screen.getByText(/lasts well over a month/)).toBeInTheDocument()
+    const title = screen.getByRole('heading', { level: 3, name: "You're all caught up" })
+    // #3908 (owner, 2026-10-13): the title alone — no reason line beside it.
+    expect(title.parentElement?.textContent).toBe("You're all caught up")
   })
 
   it('shows only the neutral line when a fact is unmeasured, and nothing while budget reads load', () => {

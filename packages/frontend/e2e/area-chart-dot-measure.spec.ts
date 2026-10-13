@@ -201,3 +201,46 @@ for (const width of [1280, 390]) {
     })
   }
 }
+
+/**
+ * #3908: at `lg` the money card's balance half grows the sparkline into the
+ * spare height (fill mode), so the svg stretches vertically as well as
+ * horizontally. The end dot must still sit ON the line's endpoint — a px
+ * placement that assumed a vertical scale of 1 would leave it at its
+ * 40px-based offset while every roundness and containment check above stays
+ * green. Measured: the line path's last point mapped through the svg's
+ * rendered box, against the dot's centre.
+ */
+test("the dashboard sparkline's end dot sits on the line's endpoint when the chart fills its half (1280)", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('/dashboard')
+  await expect.poll(async () => (await rectsOf(page, SPARKLINE_DOT)).length).toBeGreaterThanOrEqual(1)
+  const measured = await page.evaluate(() => {
+    const box = document.querySelector('[data-testid="area-chart-sparkline"]')
+    const svg = box?.querySelector('svg')
+    const line = svg?.querySelector('[data-sparkline-line]')
+    const dot = box?.querySelector('[data-testid="area-chart-sparkline-dot"]')
+    if (!box || !svg || !line || !dot) return null
+    const [, , vbW, vbH] = (svg.getAttribute('viewBox') ?? '').split(/\s+/).map(Number)
+    const points = [...(line.getAttribute('d') ?? '').matchAll(/[ML](-?[\d.]+) (-?[\d.]+)/g)]
+    const last = points[points.length - 1]
+    const s = svg.getBoundingClientRect()
+    const d = dot.getBoundingClientRect()
+    return {
+      fill: box.hasAttribute('data-fill'),
+      svgHeight: s.height,
+      endX: s.x + (Number(last[1]) / vbW) * s.width,
+      endY: s.y + (Number(last[2]) / vbH) * s.height,
+      dotX: d.x + d.width / 2,
+      dotY: d.y + d.height / 2,
+    }
+  })
+  expect(measured, 'no sparkline, line or dot rendered').not.toBeNull()
+  // The arm is only meaningful when the chart really stretched.
+  expect(measured!.fill, 'the money card did not pass fill at 1280').toBe(true)
+  expect(measured!.svgHeight, 'the sparkline did not grow past its 40px minimum').toBeGreaterThan(40)
+  expect(Math.abs(measured!.dotX - measured!.endX), 'dot centre x off the line endpoint').toBeLessThanOrEqual(1)
+  expect(Math.abs(measured!.dotY - measured!.endY), 'dot centre y off the line endpoint').toBeLessThanOrEqual(1)
+})

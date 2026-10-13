@@ -216,6 +216,25 @@ describe('states', () => {
   })
 })
 
+describe("the dashboard row's compact wording (#3908)", () => {
+  it('is opt-in: the same row reads in full by default and compact only with style "row"', () => {
+    const opts = { nowMs: ANCHOR_NOW, timeZone: 'UTC', rate: { currency: 'USD' as const, perToken: 1 } }
+    const full = budgetCaption(row(), opts)
+    const compact = budgetCaption(row(), { ...opts, style: 'row' })
+    if (full.kind !== 'meter' || compact.kind !== 'meter') throw new Error('expected meters')
+    // Every surface but the dashboard row keeps the full wording.
+    expect(full.caption).toBe('≈$1.25 of $5.00 used this period · refills in 3h')
+    // One leading ≈ still covers the line: the cap is a spot-rate estimate too.
+    expect(compact.caption).toBe('≈$1.25 of $5.00 · per day · refills in 3h')
+  })
+
+  it('names an odd period in token mode', () => {
+    const compact = budgetCaption(row({ periodSeconds: 14_400 }), { nowMs: ANCHOR_NOW, timeZone: 'UTC', style: 'row' })
+    if (compact.kind !== 'meter') throw new Error('expected a meter')
+    expect(compact.caption).toMatch(/^1\.25 of 5\.00 USDC · every 4 hours · /)
+  })
+})
+
 describe('notes', () => {
   const opts = { chainId: 8453 as number | null }
   it('incl. … by Helper, in the caption mode', () => {

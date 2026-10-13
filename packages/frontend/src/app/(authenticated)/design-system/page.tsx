@@ -1779,8 +1779,8 @@ export default function DesignSystemPage() {
           <EmptyState
             icon={<DotIcon />}
             tone="success"
-            title="You're all caught up"
-            body="Your balance lasts well over a month at the current pace, and your agents have room in their budgets."
+            title="Setup complete"
+            body="Your account is funded and your first agent has a budget it can spend from."
           />
         </div>
         <div className="mt-5 grid gap-5 lg:grid-cols-2">
@@ -2874,7 +2874,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="AreaChart — sparkline"
-        description="The sparkline variant of AreaChart (#3805): the balance line over a faint area of the same colour (#3902), in a box the caller sizes (height, default 40px). No gridlines, ticks, x labels, delta annotation, tooltip or caret — one dot on the last point, drawn in HTML rather than as an SVG circle so it stays round at every box width; the box keeps an inset on every side in CSS px, at least the dot's radius plus stroke, and the line draws edge to edge inside it, so the dot's centre stays on the line's endpoint without the dot ever leaving the box (#3903). It is role=img with the required ariaLabel summary sentence and is not a tab stop: there is no hidden data table, the sentence is the data access. A day with no snapshot is skipped, never zero: the line connects across it at the measured days' true positions (#3897), and the area's top edge is the line itself, so it never dips to the baseline there either. Below three points it renders a flat placeholder line of the same height instead of nothing, so the layout does not jump, and there is no draw animation on data refresh."
+        description="The sparkline variant of AreaChart (#3805): the balance line over a faint area of the same colour (#3902), in a box the caller sizes (height, default 40px) or, with fill, grows to its container with height as the minimum (#3908). No gridlines, ticks, x labels, delta annotation, tooltip or caret — one dot on the last point, drawn in HTML rather than as an SVG circle so it stays round at every box width; the box keeps an inset on every side in CSS px, at least the dot's radius plus stroke, and the line draws edge to edge inside it, so the dot's centre stays on the line's endpoint without the dot ever leaving the box (#3903). It is role=img with the required ariaLabel summary sentence and is not a tab stop: there is no hidden data table, the sentence is the data access. A day with no snapshot is skipped, never zero: the line connects across it at the measured days' true positions (#3897), and the area's top edge is the line itself, so it never dips to the baseline there either. Below three points it renders a flat placeholder line of the same height instead of nothing, so the layout does not jump, and there is no draw animation on data refresh."
       >
         <div data-testid="ds-area-chart-sparkline">
           <Card hover={false} className="p-5">

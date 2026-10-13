@@ -115,4 +115,39 @@ describe('AreaChart sparkline across missing days (#3897)', () => {
     expect(line?.getAttribute('y1')).toBe(String(HEIGHT / 2))
     expect(line?.getAttribute('y2')).toBe(String(HEIGHT / 2))
   })
+
+  // #3908: the money card's balance half grows the sparkline into the spare
+  // height. The viewBox keeps HEIGHT units and stretches, so the dot is placed
+  // as a fraction of the box — the px placement assumes a vertical scale of 1.
+  it('in fill mode grows with its container and keeps the dot on the line\'s endpoint', () => {
+    const { container } = render(
+      <AreaChart variant="sparkline" points={sparse} height={HEIGHT} fill ariaLabel="Balance over the last 30 days" />,
+    )
+    const box = container.querySelector<HTMLElement>('[data-testid="area-chart-sparkline"]')!
+    expect(box.dataset.fill).toBe('')
+    expect(box.className).toMatch(/\bh-full\b/)
+    const svg = container.querySelector<SVGSVGElement>('svg')!
+    expect(svg.getAttribute('class')).toMatch(/\bgrow\b/)
+    // HEIGHT is the minimum, not a fixed height.
+    expect(svg.style.minHeight).toBe(`${HEIGHT}px`)
+    // The height stays too: below a stretching flex column it holds 40px.
+    expect(svg.style.height).toBe(`${HEIGHT}px`)
+    // The dot's vertical fraction is the line endpoint's y over the viewBox
+    // height — the same point, at any stretch.
+    const line = container.querySelector('[data-sparkline-line]')!.getAttribute('d')!
+    const endY = pathYs(line).at(-1)!
+    const dot = container.querySelector<HTMLElement>('[data-testid="area-chart-sparkline-dot"]')!
+    expect(Number(dot.dataset.yFrac)).toBeCloseTo(endY / HEIGHT, 4)
+  })
+
+  it('without fill keeps its fixed height and px dot placement', () => {
+    const { container } = renderSparkline(sparse)
+    const box = container.querySelector<HTMLElement>('[data-testid="area-chart-sparkline"]')!
+    expect(box.dataset.fill).toBeUndefined()
+    expect(container.querySelector<SVGSVGElement>('svg')!.style.height).toBe(`${HEIGHT}px`)
+    const line = container.querySelector('[data-sparkline-line]')!.getAttribute('d')!
+    const dot = container.querySelector<HTMLElement>('[data-testid="area-chart-sparkline-dot"]')!
+    // inset 4px + the endpoint's y at scale 1
+    expect(parseFloat(dot.style.top)).toBeCloseTo(4 + pathYs(line).at(-1)!, 1)
+  })
 })

@@ -58,7 +58,9 @@
  * money card's sparkline). The dots are therefore HTML spans — round at
  * every width — positioned the same way the labels are: a percentage of the
  * viewBox for the full chart, and CSS px for the sparkline, whose vertical
- * scale is exactly 1. The sparkline's box carries a horizontal inset in CSS
+ * scale is exactly 1 in fixed-height mode (in `fill` mode, #3908, the
+ * vertical position is the endpoint's fraction of the inset box, like
+ * `left`). The sparkline's box carries a horizontal inset in CSS
  * px (`SPARKLINE_DOT_INSET`, at least the dot's radius plus stroke) and the
  * line draws edge to edge inside it, so the end dot's centre stays on the
  * line's endpoint while the whole dot stays inside the box — the #3902
@@ -185,6 +187,15 @@ interface SparklineProps {
    * scales to the row it sits in, not to the chart's own 140/200px treatment.
    */
   height?: number
+  /**
+   * #3908: grow to the container's height, with `height` as the minimum —
+   * the dashboard money card's balance half, which shares a grid row with a
+   * taller spending half. The viewBox keeps `height` units and stretches;
+   * the end dot is placed as a FRACTION of the box on both axes, so it stays
+   * on the line's endpoint at any stretch (the px placement below assumes a
+   * vertical scale of exactly 1, which a stretched box breaks).
+   */
+  fill?: boolean
   /** Required summary sentence: the sparkline is `role="img"` with no hidden
    *  data table and is not a tab stop — the sentence IS the data access. */
   ariaLabel: string
@@ -199,8 +210,8 @@ const SPARKLINE_VIEW_W = 640
 
 export function AreaChart(props: AreaChartProps) {
   if (props.variant === 'sparkline') {
-    const { points, height = SPARKLINE_HEIGHT, ariaLabel, className = '' } = props
-    return <Sparkline points={points} height={height} ariaLabel={ariaLabel} className={className} />
+    const { points, height = SPARKLINE_HEIGHT, fill = false, ariaLabel, className = '' } = props
+    return <Sparkline points={points} height={height} fill={fill} ariaLabel={ariaLabel} className={className} />
   }
   return <AreaChartFull {...props} />
 }
@@ -227,11 +238,13 @@ export function AreaChart(props: AreaChartProps) {
 function Sparkline({
   points,
   height,
+  fill = false,
   ariaLabel,
   className = '',
 }: {
   points: SparklinePoint[]
   height: number
+  fill?: boolean
   ariaLabel: string
   className?: string
 }) {
@@ -279,7 +292,8 @@ function Sparkline({
   return (
     <div
       data-testid="area-chart-sparkline"
-      className={`relative w-full ${className}`.trim()}
+      data-fill={fill ? '' : undefined}
+      className={`relative w-full ${fill ? 'flex h-full flex-col' : ''} ${className}`.replace(/\s+/g, ' ').trim()}
       style={{ padding: SPARKLINE_DOT_INSET }}
     >
       <svg
@@ -287,8 +301,13 @@ function Sparkline({
         aria-label={ariaLabel}
         viewBox={`0 0 ${SPARKLINE_VIEW_W} ${height}`}
         preserveAspectRatio="none"
-        className="block w-full"
-        style={{ height }}
+        // Fill: `grow` (basis auto), not `flex-1` (basis 0%) — with a 0% basis
+        // the browser sizes the svg from its viewBox ratio and ignores
+        // `height`, so a stacked layout below `lg` grew to ~50px at 900. With
+        // basis auto the svg starts at `height` and only a container with
+        // spare height (the money card's `lg` half) grows it (#3908 review).
+        className={fill ? 'block w-full grow' : 'block w-full'}
+        style={fill ? { height, minHeight: height } : { height }}
       >
         {!chartable ? (
           <line
@@ -328,7 +347,7 @@ function Sparkline({
       {chartable && lastIndex >= 0 && points[lastIndex].value !== null && (
         // The end dot, in HTML like the labels (#3903): a `<circle>` in this
         // stretched svg renders as an oval wherever the box is not 640px
-        // wide. CSS px on both axes — the vertical scale is exactly 1, and
+        // wide. Fixed mode: CSS px on both axes — the vertical scale is exactly 1, and
         // the horizontal position is the endpoint's fraction of the viewBox,
         // padded by the CSS-px inset (all sides: a last balance of 0 maps to
         // the bottom edge exactly) so the round dot stays inside the box
@@ -337,12 +356,20 @@ function Sparkline({
           data-testid="area-chart-sparkline-dot"
           aria-hidden="true"
           data-x-frac={(xOf(lastIndex) / SPARKLINE_VIEW_W).toFixed(6)}
+          data-y-frac={(yOf(points[lastIndex].value as number) / height).toFixed(6)}
           className="pointer-events-none absolute block rounded-full"
           style={{
             left: `calc(${SPARKLINE_DOT_INSET}px + (100% - ${
               SPARKLINE_DOT_INSET * 2
             }px) * ${(xOf(lastIndex) / SPARKLINE_VIEW_W).toFixed(6)})`,
-            top: SPARKLINE_DOT_INSET + yOf(points[lastIndex].value as number),
+            // Fill mode (#3908): the box's height is not `height`, so the
+            // vertical position is the endpoint's fraction of the inset box,
+            // like `left`. Fixed mode keeps the px placement (scale 1).
+            top: fill
+              ? `calc(${SPARKLINE_DOT_INSET}px + (100% - ${SPARKLINE_DOT_INSET * 2}px) * ${(
+                  yOf(points[lastIndex].value as number) / height
+                ).toFixed(6)})`
+              : SPARKLINE_DOT_INSET + yOf(points[lastIndex].value as number),
             width: DOT_DIAMETER,
             height: DOT_DIAMETER,
             transform: 'translate(-50%, -50%)',

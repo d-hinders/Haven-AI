@@ -36,7 +36,7 @@
  */
 
 import Link from 'next/link'
-import { useMemo, useRef } from 'react'
+import { Fragment, useMemo, useRef } from 'react'
 import { Bot, ChevronRight } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { Button } from '@/components/ui/Button'
@@ -235,7 +235,9 @@ function AgentBudget({
   const perToken = spotRates?.[selected.primary.symbol]
   const rate: BudgetRate | null =
     typeof perToken === 'number' && perToken > 0 ? { currency, perToken } : null
-  const caption = budgetCaption(selected.primary, { nowMs, rate })
+  // #3908: the compact row wording, as the mockup draws it — the period word
+  // in place of "used this period"; every other surface keeps the full one.
+  const caption = budgetCaption(selected.primary, { nowMs, rate, style: 'row' })
 
   if (caption.kind !== 'meter') {
     // Unknown remaining, a failed read, a read past its period — an em dash,
@@ -243,17 +245,32 @@ function AgentBudget({
     return <p className="mt-1 text-sm text-[var(--v2-ink-3)]">—</p>
   }
 
+  // The extra-budget count rides in the caption line (#3908, the mockup's
+  // place for it) — a sibling of the bar, never inside its ARIA name.
+  const extra =
+    selected.extraCount > 0
+      ? ` · +${selected.extraCount} ${selected.extraCount === 1 ? 'budget' : 'budgets'}`
+      : ''
+  // Each "·" segment after the amounts stays whole (#3908 design review): a
+  // narrow row may wrap the caption, but only at a separator — never between
+  // "refills in" and "22h", which would strand a time apart from its verb.
+  // The amounts segment may wrap at its own spaces ("… of …"): it is the
+  // widest, and a large SEK budget kept whole would overflow a 390px row.
+  // Each figure is still unbroken — the currency formats separate digits
+  // and symbol with no-break spaces.
+  const segments = `${caption.caption}${extra}`.split(' · ')
   return (
-    <div className="mt-1.5 flex items-center gap-3">
-      <div className="min-w-0 flex-1">
-        <BudgetMeter usedPercent={caption.usedPercent} label={caption.label} caption={caption.caption} />
-      </div>
-      {/* Outside the meter — the progressbar's ARIA name must not announce it. */}
-      {selected.extraCount > 0 && (
-        <span className="flex-shrink-0 text-xs text-[var(--v2-ink-3)] whitespace-nowrap">
-          {`+${selected.extraCount} ${selected.extraCount === 1 ? 'budget' : 'budgets'}`}
-        </span>
-      )}
+    <div className="mt-1.5">
+      <BudgetMeter
+        usedPercent={caption.usedPercent}
+        label={caption.label}
+        caption={segments.map((segment, index) => (
+          <Fragment key={index}>
+            {index > 0 ? ' · ' : null}
+            <span className={index === 0 ? undefined : 'whitespace-nowrap'}>{segment}</span>
+          </Fragment>
+        ))}
+      />
     </div>
   )
 }
@@ -498,8 +515,10 @@ function AgentRow({
         <Icon icon={Bot} className="h-4 w-4" />
       </span>
       <div className="min-w-0 flex-1">
-        <p className="flex items-center gap-2 text-sm font-medium text-[var(--v2-ink)]">
-          <span className="truncate">{agent.name}</span>
+        {/* flex-wrap (#3908): on a narrow row the badge drops under the name
+            rather than squeezing the name to a few letters. */}
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm font-medium text-[var(--v2-ink)]">
+          <span className="max-w-full truncate">{agent.name}</span>
           {badge && <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>}
         </p>
         {accountCount > 1 && accountName && (
@@ -517,14 +536,32 @@ function AgentRow({
           // agent page's banner reads, so the two cannot drift.
           <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{AGENT_PAUSED_SHORT}</p>
         )}
-        {agent.stats?.lastPaymentAt && (
-          <p className="mt-1 truncate text-xs text-[var(--v2-ink-3)]">
-            {counterpartyLabelValue
-              ? `Last payment ${timeAgo(agent.stats.lastPaymentAt)} to ${counterpartyLabelValue}`
-              : `Last payment ${timeAgo(agent.stats.lastPaymentAt)}`}
-          </p>
-        )}
       </div>
+      {/* #3908: the last payment in a right-hand column, as the mockup draws
+          it — the time on top, the merchant (never a raw address) under it,
+          capped at 7rem, 5.5rem below `sm` (the mockup's ~80–90px column; a
+          40% cap left a 390px row's name as "R…"), so a long host truncates
+          instead of the agent's name. A
+          setup row has nothing to say here yet. */}
+      {agent.status !== 'pending_approval' && agent.stats ? (
+        <div data-testid="agent-row-last-payment" className="min-w-0 max-w-[5.5rem] flex-shrink-0 text-right sm:max-w-[7rem]">
+          {agent.stats.lastPaymentAt ? (
+            <>
+              <p className="text-sm font-medium text-[var(--v2-ink)] whitespace-nowrap">
+                {/* The column drops the visible "Last payment" words; a screen
+                    reader still hears what the time is. */}
+                <span className="sr-only">Last payment </span>
+                {timeAgo(agent.stats.lastPaymentAt)}
+              </p>
+              {counterpartyLabelValue ? (
+                <p className="mt-0.5 truncate text-xs text-[var(--v2-ink-3)]">{counterpartyLabelValue}</p>
+              ) : null}
+            </>
+          ) : (
+            <p className="text-sm font-medium text-[var(--v2-ink)] whitespace-nowrap">No payments yet</p>
+          )}
+        </div>
+      ) : null}
       <Icon icon={ChevronRight} className="h-4 w-4 flex-shrink-0 text-[var(--v2-ink-3)]" />
     </Link>
   )

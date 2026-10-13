@@ -19,6 +19,20 @@ export interface ConnectApiClient {
    * of the dashboard hand-off — see {@link AgentIdentity}.
    */
   getAgentIdentity(apiKey: string): Promise<AgentIdentity>
+  /**
+   * #3772: tell Haven which agents this run's `--replace` retired locally, so
+   * their own reads can warn a still-running session. Authenticated with the
+   * NEW agent's key. `null` when the backend predates the route (404); any
+   * other failure throws for the caller to log. Warning-only on the backend:
+   * nothing is paused or revoked.
+   */
+  reportRetiredAgents?(input: ReportRetiredAgentsInput): Promise<{ recordedAgentIds: string[] } | null>
+}
+
+export interface ReportRetiredAgentsInput {
+  setupId: string
+  apiKey: string
+  retiredAgentIds: readonly string[]
 }
 
 export interface ConnectorStatusResponse {
@@ -251,6 +265,27 @@ export function createConnectApiClient(
         method: 'GET',
         headers: { Authorization: `Bearer ${apiKey}` },
       }),
+
+    reportRetiredAgents: async (input) => {
+      try {
+        const body = await send<{ recorded_agent_ids?: unknown } | null>(
+          `${root}/agent-connection-setups/${encodeURIComponent(input.setupId)}/retired-agents`,
+          {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${input.apiKey}` },
+            body: JSON.stringify({ retired_agent_ids: input.retiredAgentIds }),
+          },
+        )
+        const recorded = body?.recorded_agent_ids
+        return {
+          recordedAgentIds: Array.isArray(recorded) ? recorded.filter((id): id is string => typeof id === 'string') : [],
+        }
+      } catch (err) {
+        // An older backend has no such route: not a failure, nothing to retry.
+        if (err instanceof ConnectRequestError && err.status === 404) return null
+        throw err
+      }
+    },
 
     updateInstallStatus: async (setupId, apiKey, input) => {
       await send(`${root}/agent-connection-setups/${encodeURIComponent(setupId)}/install-status`, {

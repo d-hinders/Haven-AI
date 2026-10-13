@@ -147,6 +147,15 @@ const sqlCalls = () => mockQuery.mock.calls.map((c) => ({ sql: String(c[0]), par
 const findCall = (re: RegExp) => sqlCalls().find((c) => re.test(c.sql))
 
 const AUTH: DbRoute = [/api_key_hash = \$1/, () => ({ rows: [AGENT] })]
+
+/** #3772: findAgentSupersession answering a stamped agent (timestamptz arrives as a Date). */
+const REPLACEMENT_AGENT_ID = '66666666-6666-6666-6666-666666666666'
+function DB_SUPERSESSION_ROUTE(): DbRoute {
+  return [
+    /superseded_by_agent_id/,
+    () => ({ rows: [{ superseded_by_agent_id: REPLACEMENT_AGENT_ID, superseded_at: new Date('2026-10-13T08:00:00.000Z') }] }),
+  ]
+}
 /** Auth lookup answered with an overridden agent row (rail refusals, characterization). */
 const authAs = (row: Record<string, unknown>): DbRoute => [/api_key_hash = \$1/, () => ({ rows: [row] })]
 
@@ -391,7 +400,46 @@ describe('machine payment routes', () => {
       // #3330: the agent's open sub-budget grants (additive — B's view of its
       // parent's tree; empty for this legacy fixture).
       parent_sub_budgets: [],
+      // #3772: always present; null for an agent that was never superseded.
+      superseded_by: null,
     })
+  })
+
+  // ── #3772: superseded_by (warning only) ──────────────────────────────────
+  const SUPERSEDED = DB_SUPERSESSION_ROUTE()
+
+  it('GET /agent carries superseded_by when connect --replace retired this agent (#3772)', async () => {
+    primeDb(AUTH, SUPERSEDED)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/agent',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expectMatchesSpec('GET', '/machine-payments/agent', response.json())
+    expect(response.json().superseded_by).toEqual({
+      agent_id: REPLACEMENT_AGENT_ID,
+      superseded_at: '2026-10-13T08:00:00.000Z',
+    })
+    // Warning only: the agent's own identity/status is untouched.
+    expect(response.json().status).toBe(AGENT.status)
+    expect(findCall(/superseded_by_agent_id/)?.params).toEqual([AGENT.id])
+  })
+
+  it('GET /agent degrades superseded_by to null when the read fails (#3772)', async () => {
+    primeDb(AUTH, [/superseded_by_agent_id/, () => { throw new Error('db down') }])
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/agent',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expectMatchesSpec('GET', '/machine-payments/agent', response.json())
+    expect(response.json().superseded_by).toBeNull()
   })
 
   it('returns execution_rail: delegation for a delegation-rail agent (#1306)', async () => {
@@ -498,6 +546,8 @@ describe('machine payment routes', () => {
         account_address: AGENT.account_address,
         delegate_address: AGENT.delegate_address,
         chain_id: 84532,
+        // #3772: always present; null when never superseded.
+        superseded_by: null,
         allowances: [{
           id: 'd-1',
           // #3319: the read boundary checksums `token_address` (the seed stays
@@ -541,6 +591,39 @@ describe('machine payment routes', () => {
       // agent_allowances is a frozen onboarding mirror on this rail (#1090) —
       // consulting it would report the onboarding budget forever.
       expect(sqlCalls().some((c) => /FROM agent_allowances/.test(c.sql))).toBe(false)
+    })
+
+    it('delegation rail: carries superseded_by when stamped, null when the read fails (#3772)', async () => {
+      const seed = {
+        id: '44444444-4444-4444-4444-444444444444',
+        agent_id: AGENT.id,
+        chain_id: 84532,
+        token_address: SEPOLIA_USDC,
+        budget_atomic: '1234567',
+        period_seconds: 86_400,
+      }
+      primeDb(authAs(DELEGATION_AGENT), delegationRows([seed]), DB_SUPERSESSION_ROUTE())
+      const stamped = await app.inject({
+        method: 'GET',
+        url: '/machine-payments/allowances',
+        headers: { authorization: 'Bearer sk_agent_test' },
+      })
+      expect(stamped.statusCode).toBe(200)
+      expectMatchesSpec('GET', '/machine-payments/allowances', stamped.json())
+      expect(stamped.json().superseded_by).toEqual({
+        agent_id: REPLACEMENT_AGENT_ID,
+        superseded_at: '2026-10-13T08:00:00.000Z',
+      })
+
+      primeDb(authAs(DELEGATION_AGENT), delegationRows([seed]), [/superseded_by_agent_id/, () => { throw new Error('db down') }])
+      const degraded = await app.inject({
+        method: 'GET',
+        url: '/machine-payments/allowances',
+        headers: { authorization: 'Bearer sk_agent_test' },
+      })
+      expect(degraded.statusCode).toBe(200)
+      expectMatchesSpec('GET', '/machine-payments/allowances', degraded.json())
+      expect(degraded.json().superseded_by).toBeNull()
     })
 
     // #2328: the AllowanceSummary round trip. `GET /agents` and
@@ -654,6 +737,7 @@ describe('machine payment routes', () => {
         delegate_address: AGENT.delegate_address,
         chain_id: 84532,
         allowances: [],
+        superseded_by: null,
       })
     })
 

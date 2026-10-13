@@ -3262,7 +3262,13 @@ re-points wiring another agent held — such a rebind, or any `--replace` — an
 its install completed, `activation.instruction` also says that a session
 already running keeps acting as the previous agent(s) until it is restarted,
 and that they may still be active in Haven — text appended to an existing
-string field, no new key); and since #2528, also
+string field, no new key. Since #3772 part 1, such a `--replace` also posts
+the ids it actually retired (never `superseded_agent_ids`) to
+`POST /agent-connection-setups/{setupId}/retired-agents` with the new agent's
+key, accepted only within 30 minutes of the setup's registration; Haven records each as superseded by the new agent, and that agent's own
+`haven_get_agent` / `haven_get_allowances` then carry `supersededBy` with a
+restart-and-remove warning. Best-effort — an older backend's 404 is ignored
+silently, any other failure is one log line, and the outcome carries no new key); and since #2528, also
 additive, `approval.url` — the absolute link to
 this setup's budget approval, echoed from the register response and present
 only when `approval.required` is true AND the backend is new enough to return

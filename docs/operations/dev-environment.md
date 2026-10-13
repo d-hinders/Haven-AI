@@ -1349,3 +1349,12 @@ project owner — collaborators have Viewer access, not env-var write access.
 > variable or dev setup step this document describes moves. Nothing else in
 > this file's coverage was touched; this note is the edit (the
 > `last-verified` date already reads today).
+
+> **Re-verified #3772 (2026-10-13):** `route-modules.generated.ts` is
+> regenerated (`npm run generate:route-modules`) for one new operation in the
+> existing `routes/agent-connection-setups.ts` module —
+> `POST /agent-connection-setups/{setupId}/retired-agents` (born ENFORCED: the
+> module is already in `index.ts`'s `enforcedModules`). No request-validation
+> mode, enforced-module list, environment variable or dev setup step this
+> document describes moved. The rest of this document was not re-read for it,
+> and `last-verified` is not bumped.

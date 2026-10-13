@@ -34,6 +34,17 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Added
 
+- `getAgent()`, `getAgentSummary()` and `getAllowances()` carry `supersededBy`
+  (#3772): `null`, or — when a Connect `--replace` on the agent's machine retired
+  this agent and reported it — `{ replacementAgentId, supersededAt, warning,
+  nextAction: "stop_and_tell_user", nextToolOmittedReason }`. The warning tells
+  the agent that its session is still running as the replaced agent, to restart,
+  and to have the user remove the old agent, which keeps any budget it still
+  holds until then. Warning only: nothing is paused or revoked. An older backend
+  that sends no `superseded_by` reads as `null`. The field is required on the
+  two types, so code that builds `HavenAgent` / `HavenAllowanceSummary` objects
+  by hand (test mocks) adds `supersededBy: null`.
+
 - `HavenCatalogEntry.assetTransferMethods` (optional, additive): the x402 transfer methods a catalog merchant last advertised, as the catalog stores them (`"eip3009"`, `"eip3009,erc7710"`; `null` until probed; absent against a backend that does not send it). New `catalogFundingLegExpected(methods)` turns it into the discovery hint `true | false | "unknown"` (#3839). The `discoverTools` description gains one sentence on how to use that hint.
 
 ### Changed

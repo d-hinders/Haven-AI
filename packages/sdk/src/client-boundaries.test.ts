@@ -654,6 +654,7 @@ describe('HavenClient structural boundary', () => {
       'HavenAgentAllowanceSummary',
       'HavenAgentReadiness',
       'HavenAgentSummary',
+      'HavenAgentSupersession', // #3772
       'HavenAllowance',
       'HavenAllowanceSummary',
       'HavenBalanceCoverage', // #3126

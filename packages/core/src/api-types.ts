@@ -2512,6 +2512,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/agent-connection-setups/{setupId}/retired-agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report agents this connector retired on replacement (#3772).
+         * @description Called by `@haven_ai/connect --replace` after it retires old agent directories on a machine: the NEW agent, authenticated with its own API key, names the retired agent ids. Each id that belongs to the same user is stamped superseded-by-this-agent, and that agent's later identity and allowances reads carry `superseded_by`. WARNING ONLY: nothing is granted, revoked or paused, and no payment path consults it. Agent API key only — a setup token is not accepted — and accepted only within 30 minutes of the setup's registration (409 after). Ids owned by another user, the caller itself, or unknown are silently omitted from `recorded_agent_ids`; a later replace overwrites an earlier stamp.
+         */
+        post: operations["recordRetiredAgents"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent-connection-setups/{setupId}/connector-status": {
         parameters: {
             query?: never;
@@ -4956,6 +4976,26 @@ export type components = {
             /** @description Other agent directories the connector found on this machine (#2561, #3032: sent by `@haven_ai/connect`, `api.ts` `updateInstallStatus`). A tri-state: a list (found these), `[]` (scanned, found none), `null` (the scan could not run). Not trusted beyond its shape: entries are trimmed, path- or secret-shaped strings dropped, and the list capped server-side rather than refused. */
             superseded_agent_ids?: string[] | null;
         };
+        RecordRetiredAgentsRequest: {
+            /** @description Ids of the agents `--replace` retired on this machine. */
+            retired_agent_ids: string[];
+        };
+        RecordRetiredAgentsResponse: {
+            /** Format: uuid */
+            setup_id: string;
+            /** @description The subset of the reported ids that was stamped (same user, not the caller itself). */
+            recorded_agent_ids: string[];
+        };
+        /** @description #3772: set when `@haven_ai/connect --replace` retired this agent in favour of a newer one — a stale-duplicate WARNING. Reporting metadata only: this agent's budget, status and credentials are unchanged. Null when never superseded, when the replacement has since been revoked or archived, or when the read failed. */
+        AgentSupersession: {
+            /**
+             * Format: uuid
+             * @description The agent that replaced this one (#3772).
+             */
+            agent_id: string;
+            /** Format: date-time */
+            superseded_at: string;
+        } | null;
         UpdateConnectorInstallStatusResponse: {
             /** Format: uuid */
             setup_id: string;
@@ -5552,6 +5592,7 @@ export type components = {
             /** @example 0x1111111111111111111111111111111111111111 */
             delegate_address: string;
             delegate_account_address: string | null;
+            superseded_by: components["schemas"]["AgentSupersession"];
             chain_id: number;
             /**
              * @description Which rail this agent's account is on (#1306). `delegation` means spend is gated by the agent's active budget delegations, enforced on-chain by the caveat enforcers. `legacy` is the RETIRED Safe / AllowanceModule rail (#1986) and gates nothing any more — every payment entry point answers 410 for such an account, so read it as "this account cannot pay until it re-onboards via POST /accounts/hybrid", not as a second live policy primitive. Reporting only; the enum keeps both values because a retired-rail account can still read its own identity here.
@@ -5583,6 +5624,7 @@ export type components = {
             /** @example 0x1111111111111111111111111111111111111111 */
             delegate_address: string;
             chain_id: number;
+            superseded_by: components["schemas"]["AgentSupersession"];
             allowances: {
                 /** Format: uuid */
                 id: string;
@@ -17697,6 +17739,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UpdateConnectorInstallStatusResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    recordRetiredAgents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                setupId: components["parameters"]["SetupId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordRetiredAgentsRequest"];
+            };
+        };
+        responses: {
+            /** @description Retired agents recorded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordRetiredAgentsResponse"];
                 };
             };
             /** @description Error response */

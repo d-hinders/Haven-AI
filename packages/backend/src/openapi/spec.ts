@@ -6685,6 +6685,38 @@ export const openapiSpec = {
         },
       },
     },
+    '/agent-connection-setups/{setupId}/retired-agents': {
+      post: {
+        tags: ['Connect Agent 2'],
+        operationId: 'recordRetiredAgents',
+        summary: 'Report agents this connector retired on replacement (#3772).',
+        description:
+          'Called by `@haven_ai/connect --replace` after it retires old agent directories on a machine: the NEW agent, authenticated with its own API key, names the retired agent ids. Each id that belongs to the same user is stamped superseded-by-this-agent, and that agent\'s later identity and allowances reads carry `superseded_by`. WARNING ONLY: nothing is granted, revoked or paused, and no payment path consults it. Agent API key only — a setup token is not accepted — and accepted only within 30 minutes of the setup\'s registration (409 after). Ids owned by another user, the caller itself, or unknown are silently omitted from `recorded_agent_ids`; a later replace overwrites an earlier stamp.',
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ $ref: '#/components/parameters/SetupId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/RecordRetiredAgentsRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Retired agents recorded.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/RecordRetiredAgentsResponse' },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '409': errorResponse,
+        },
+      },
+    },
     '/agent-connection-setups/{setupId}/connector-status': {
       get: {
         tags: ['Connect Agent 2'],
@@ -11534,6 +11566,45 @@ export const openapiSpec = {
         },
         additionalProperties: false,
       },
+      RecordRetiredAgentsRequest: {
+        type: 'object',
+        required: ['retired_agent_ids'],
+        properties: {
+          retired_agent_ids: {
+            type: 'array',
+            items: uuid,
+            minItems: 1,
+            maxItems: 32,
+            uniqueItems: true,
+            description: 'Ids of the agents `--replace` retired on this machine.',
+          },
+        },
+        additionalProperties: false,
+      },
+      RecordRetiredAgentsResponse: {
+        type: 'object',
+        required: ['setup_id', 'recorded_agent_ids'],
+        properties: {
+          setup_id: uuid,
+          recorded_agent_ids: {
+            type: 'array',
+            items: uuid,
+            description: 'The subset of the reported ids that was stamped (same user, not the caller itself).',
+          },
+        },
+        additionalProperties: false,
+      },
+      AgentSupersession: {
+        type: ['object', 'null'],
+        required: ['agent_id', 'superseded_at'],
+        properties: {
+          agent_id: { ...uuid, description: 'The agent that replaced this one (#3772).' },
+          superseded_at: isoDateTime,
+        },
+        additionalProperties: false,
+        description:
+          '#3772: set when `@haven_ai/connect --replace` retired this agent in favour of a newer one — a stale-duplicate WARNING. Reporting metadata only: this agent\'s budget, status and credentials are unchanged. Null when never superseded, when the replacement has since been revoked or archived, or when the read failed.',
+      },
       UpdateConnectorInstallStatusResponse: {
         type: 'object',
         required: ['setup_id', 'status', 'install_status'],
@@ -12388,7 +12459,7 @@ export const openapiSpec = {
       },
       MachinePaymentAgent: {
         type: 'object',
-        required: ['id', 'name', 'status', 'account_address', 'delegate_address', 'delegate_account_address', 'chain_id', 'execution_rail'],
+        required: ['id', 'name', 'status', 'account_address', 'delegate_address', 'delegate_account_address', 'chain_id', 'execution_rail', 'superseded_by'],
         properties: {
           id: uuid,
           name: { type: 'string' },
@@ -12403,6 +12474,7 @@ export const openapiSpec = {
            * never authority).
            */
           delegate_account_address: { anyOf: [address, { type: 'null' }] },
+          superseded_by: { $ref: '#/components/schemas/AgentSupersession' },
           chain_id: { type: 'integer' },
           execution_rail: {
             type: 'string',
@@ -12452,12 +12524,13 @@ export const openapiSpec = {
       },
       AllowanceSummary: {
         type: 'object',
-        required: ['agent_id', 'account_address', 'delegate_address', 'chain_id', 'allowances'],
+        required: ['agent_id', 'account_address', 'delegate_address', 'chain_id', 'allowances', 'superseded_by'],
         properties: {
           agent_id: uuid,
           account_address: address,
           delegate_address: address,
           chain_id: { type: 'integer' },
+          superseded_by: { $ref: '#/components/schemas/AgentSupersession' },
           allowances: {
             type: 'array',
             items: {

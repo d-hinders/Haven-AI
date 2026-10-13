@@ -342,7 +342,11 @@ import {
   LIST_TOOL_INVOCATIONS_FOR_AGENT_SQL,
   LIST_TOOL_INVOCATIONS_FOR_AGENTS_SQL,
 } from '../src/infra/repositories/agent-tool-invocations.js'
-import { LIST_AGENT_NAMES_FOR_USER_SQL } from '../src/infra/repositories/agents.js'
+import {
+  LIST_AGENT_NAMES_FOR_USER_SQL,
+  MARK_AGENTS_SUPERSEDED_SQL,
+  FIND_AGENT_SUPERSESSION_SQL,
+} from '../src/infra/repositories/agents.js'
 import {
   COUNT_ACCOUNTS_FOR_USER_SQL,
   FIND_HYBRID_ACCOUNT_BY_ADDRESS_FOR_USER_SQL,
@@ -439,6 +443,8 @@ const QUERIES: SmokeQuery[] = [
   { name: 'agents: rotate API key', sql: ROTATE_AGENT_API_KEY_SQL },
   { name: 'agents: pause', sql: PAUSE_AGENT_SQL },
   { name: 'agents: resume', sql: RESUME_AGENT_SQL },
+  { name: 'agents: mark superseded (tenant-scoped, #3772)', sql: MARK_AGENTS_SUPERSEDED_SQL },
+  { name: 'agents: read supersession stamp (#3772)', sql: FIND_AGENT_SUPERSESSION_SQL },
   // #3426: the per-agent x402 tax-declaration opt-in. IMPORTED, like the rest
   // of the agents aggregate — the toggle's gate lives in the WHERE clause, so
   // a column or owner_company_details drift would only surface here.

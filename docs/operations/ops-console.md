@@ -16,6 +16,16 @@ covers:
 last-verified: "2026-10-06"
 ---
 
+> **Re-verified #3913 (2026-10-13, Vercel skip-setting doc corrections):** the
+> *Deploys from `dev` only* paragraph was reflowed and a new "Skipped - Not
+> affected" records paragraph added, naming the per-project Vercel setting
+> "Skip deployments when there are no changes to the root directory or its
+> dependencies" and its required value **off** on haven-ops. The setting's
+> on/off state per project and the record counts (103 preview, 8 of 40
+> production) come from #3913's GitHub deployment-records census — an
+> inference; nobody has checked the dashboard yet. Nothing else in this
+> document was re-verified, and `last-verified` is not bumped.
+
 > **Re-verified #3821 (2026-10-09):** only the *Deploys from `dev` only*
 > paragraph (the "Skipped - Not affected" residual) and the Ignored Build Step
 > paragraph changed — the frontend project takes the first-preview path for opt-in

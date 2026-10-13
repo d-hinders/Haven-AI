@@ -34,6 +34,15 @@ covers:
 last-verified: "2026-10-10"
 ---
 
+> **Re-verified #3913 (2026-10-13, Vercel skip-setting doc corrections):** the
+> edits are the "Skipped - Not affected" sentences in *Which pushes rebuild the
+> frontend* and § *PR previews are opt-in* — the frontend has never recorded
+> such a deployment, the records belong to haven-ops, and they came from the
+> per-project Vercel setting named in the diff with required value **off**
+> (per #3913's GitHub deployment-records census; inferred, dashboard
+> unchecked). Nothing else in this document was re-verified, and
+> `last-verified` is not bumped.
+
 > **Re-verified #3825 (2026-10-09, `GET /user/signers`):** this diff touched
 > one file in this document's coverage list,
 > `packages/backend/src/openapi/route-modules.generated.ts`, and none of this

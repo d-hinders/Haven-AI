@@ -5,7 +5,7 @@ covers:
   - .agents/skills/quality-scan/SKILL.md
   - .agents/skills/quality-scan/references/dimensions.md
   - scripts/test-support/guard-cli.mjs
-last-verified: "2026-09-21"
+last-verified: "2026-10-13"
 ---
 
 # Quality-Scan Ledger
@@ -1366,3 +1366,144 @@ Instrument lessons:
 - **S1 → filed** as epic [#3615](https://github.com/d-hinders/Haven-AI/issues/3615), slices #3616–#3620 (backlog, `pending-review`); spec-review verdict posted on the epic (34 claims re-run, 5 corrected, `## Threat model` added).
 - **C3 → folded into #3617** as an explicit acceptance item (declare `sub_budget_id` on hosted `haven_pay_x402_quote`, or delete the dead forwarding); that choice is owner decision 2 on the epic and blocks the slice.
 - **C1, C2 → not filed.** The owner chose to file S1 only; no `accepted-as-debt` or `rejected` disposition has been recorded for either, so both remain pending owner decision; as prior candidates they are excluded from re-surfacing unless they materially worsen.
+
+## 2026-10-13 — whole repo, weighted to the landings since 2026-10-03 (owner request 2026-10-13, no scope named)
+
+Full report: [`docs/bug-reports/quality-scan-2026-10-13-whole-repo.md`](../bug-reports/quality-scan-2026-10-13-whole-repo.md)
+— file:line evidence lives there; this entry stays path-free. Measured on
+`origin/dev` @ `641f527d` by the captain and three read-only workers (two
+census workers in detached worktrees, one GitHub worker). The clone arrived
+shallow at 50 commits and was unshallowed before any history figure was taken.
+Mutations used `cp` backups with `cmp` restores; real-database runs used a
+local Postgres 16 cluster and a disposable database; one temporary probe test
+was written, run and deleted. GitHub was read-only. No live call was made. At
+the end, `git status --porcelain` → 0.
+
+**Excluded this run:** every prior finding and candidate, whatever its
+disposition. None is re-surfaced. Deltas are in the coverage record below;
+none worsened materially.
+
+**Structural finding (pending owner decision):**
+- S1 — whether a budget is live is decided at about thirty sites with three
+  different answers, and the one shared predicate is four days old and
+  reaches seven of them.
+  - Three tables hold spend authority (delegations, task budgets, sub
+    budgets). The one helper encodes the expiry window only; it was
+    introduced by the #3802 fix (`0108c6d9`, 2026-10-09: 11 code files, 6
+    call sites) and today has 7 call sites in 5 files, beside 3 inline copies
+    of the same window on the same table. A second definition, the LIVE
+    status set with no expiry, has 7 SQL uses in 3 files plus 2 hand copies
+    in TypeScript (dashboard dialog, CLI). A third is status-only or no
+    predicate: the budget list route, the dashboard's received-sub read, the
+    merchant funding picker. Task and sub budgets have no helper: 10 SQL
+    expiry sites against an app clock, 2 of them payment selectors with no
+    production caller while TypeScript copies decide.
+  - 11 pairs of sites classify the same row differently; 7 are verdict
+    conflicts on one row. Two proven by execution on the real database: an
+    expired `active` delegation returns 0 rows from the budget view and
+    counts 1 in `live_delegation_count` (no budget, yet cannot be archived or
+    revoked); an expired `open` received grant reads `open = true` for the
+    dashboard and is absent from the agent's own open list, so the Needs-you
+    "usable budget" predicate is satisfied by an expired grant.
+  - Cost: #3542, #3553 (10-01), #3729 (10-07), #3773 (10-08), #3802 (10-09) —
+    five issues in nine days, each the same defect at a different site, each
+    fixed at that site; the #3615 resolver (the 10-03 S1) consolidated which
+    delegation the pre-check reads and still reads liveness through the
+    inline by-hash SQL and the task/sub TypeScript predicates. No open issue
+    names the predicate (semantic search → the four closed fixes only).
+  - Five slices: name the two delegation sets in one module and adopt the
+    spendable one at the inline copies and the list route; one predicate per
+    table for task and sub budgets with one clock; liveness on the wire
+    consumed by SDK/CLI/frontend instead of recomputed; the proven and hard
+    conflicts fixed as behaviour with real-DB tests; a shrink-only census
+    ratchet.
+
+**Improvement candidates (one PR each), pending owner decision:**
+- C1 — the agent-reported EIP-3009 merchant settlement hash is attributed by
+  shape (the evidence module passes no delegation hash or nonce) while the
+  passive sweep attributes by the derived nonce since #3888; the writer's own
+  comment names the residual. Hypothesis, no incident. One PR.
+- C2 — the 2026-10-03 scan report never landed: the entry above links a path
+  absent from the tree ten days after the owner's decision, so #3615's
+  file:line evidence and that run's two undecided candidates are recoverable
+  only outside the repository. One docs PR.
+- C3 — block-1 survivor: removing the `merchant_settlement_tx_hash IS NULL`
+  compare-and-set left 56 / 56 green. Diagnosis: *not load-bearing at the
+  tested condition* — the writer pre-reads under an advisory lock keyed by
+  the hash, so only a two-different-hashes-one-payment race reaches the
+  clause, and the one concurrency test drives the opposite race. One PR (a
+  real-DB concurrency test, optionally a lock on the intent id).
+- Notes, not proposed: two `status: archived` docs outside the archive
+  folders make `docs:covers-gaps` warn on every run; the advisory visual job
+  is 7 of 13 determinable CI failures in the window (decided on #3231);
+  the tools/list golden went red on `dev` when two green PRs crossed (#3886;
+  up-to-date off by O1; #3890 watcher shipped); the sign route's `failed`
+  booking after a landed UserOp is reachable only through the confirm's own
+  DB write (read, not executed).
+- Refused under the bar: settlement evidence per leg — no write is gated on a
+  merchant's 200, two of three chain-verifying legs share the #2092
+  verifier, and the EIP-3009 wave (10 issues) is a shipped feature.
+
+**Dispositions observed (upkeep the ledger lacked):** 2026-10-03 C2 →
+`shipped` via #3624 (`0224c883`, 2026-10-04). 2026-10-03 S1 → epic #3615
+closed (all five slices) → `shipped`. 2026-09-25 S1 → #3335 closed
+2026-09-29 → `shipped`. 2026-09-22 F1 → #3231 closed 2026-09-26 → `shipped`.
+2026-09-15 F1 → #3028 closed 2026-09-29 → `shipped`. 2026-09-16 F1 → #3056
+closed 2026-09-20 and 2026-09-17 F1 → #3105 closed 2026-09-20 → `shipped`.
+
+**Probed clean** (block → command → number, all at `641f527d`):
+- sizing → the 09-22 command, pinned with `git ls-tree`/`git show` → backend
+  109,321 / 140,397 (10-03: 101,373 / 127,733; +7.8 % / +9.9 %); frontend
+  62,690 / 61,829; sdk 18,387 / 19,977; core 24,845 / 607; qa-agent 9,693 /
+  7,784; mcp-server 12,586 / 23,237; signer 5,271 / 8,404; connect 12,436 /
+  15,676; cli 3,159 / 3,454; ops 3,127 / 2,114; ui 2,203 / 1,639.
+- block 1 (guard falsifiability) → examined. The census script gives 31
+  candidate files over 4 of the last 20 landings. 5 mutations, one per file,
+  newest landing first → **4 caught** (supersession read 2 red of 98;
+  verified-settlement outranking 1 of 28; dismissal user scoping 1 of 15,
+  real DB; SDK supersession mapping 1 of 58), **1 survivor** (C3, diagnosed).
+  26 census files not mutated (budget is 5).
+- block 2 (`covers:` completeness) → examined. The reference loop under bash
+  with `set -f`, each miss confirmed with the strict gate → 18 across 6 of 8
+  contract docs (unchanged from 10-03 and 09-25); 2 raw misses were glob
+  strings. `npm run docs:covers-gaps` → 130 pairs / 35 docs (10-03: 134 / 36).
+- block 3 (stale numbers) → partial. Positive control 3 / 3. The 25 newest
+  shards → 20 figure lines, 6 with a command (10-03: 1 / 0). `any` 30 → 37
+  (code lines 10 → 16). db-mock gauge 54 / 270 / 57 (unchanged). Guard
+  scripts 69 (09-15: 49); non-spawning self-tests 23 of 71 (09-15: 20). zod 0.
+- block 4 (retired vocabulary) → examined. Positive control 36 shards. 195
+  files, 46 historical / 149 live (10-03: 194 / 46 / 148). Ratchet green,
+  33 / 31. Code half unchanged.
+- block 5 (merge-method drift) → examined. Since 2026-10-03T00:00:00Z → 0
+  merge-commit / 162 squash (clean). Since 2026-08-10T00:00:00Z → 282 /
+  1,054 of 1,339.
+- block 6 (nets with holes) → examined, all four halves → copy lint 52
+  unscanned / 4 with hits (10-03: 98 / 6); money perimeter 32 verb files / 20
+  outside (unchanged); visual gate 15 of 28 app routes (10-03: 15 of 31; the
+  site switch-over deleted pages), 8 ops routes outside the measure; docs
+  boundary 39 (unchanged); freshness-gate exit branches unchanged.
+- incident clustering → issues created since 2026-10-03 → 138 (9 open /
+  129 closed); dashboard redesign 39, connect pair naming 12, budget
+  lifecycle 11, EIP-3009 settlement 10, Gnosis removal 10, the rest smaller.
+  The untracked recurring class is S1.
+- workflow archaeology → `ci.yml` newest 100 → 77 / 15 / 8; 13 with attempt
+  > 1 (all feature branches); `dev` 35 → 30 / 1 / 4, the failure the #3886
+  golden skew; failing jobs: visual 7, MCP server 3, browser smoke 3, backend
+  1, CI-config 1. qa-dev at the `money-flow` job level → 25 newest runs: ran
+  10 / 10 success, 15 gate-skipped; attempt-2 passes 0 of 5 logs; scheduled
+  runs 30 → 4 failures (3 wallet preflight 10-02..10-04, 1 backend 09-24),
+  nine green days since #3631.
+- comment archaeology → TODO / FIXME / HACK / XXX → 0 (control `import` →
+  1,994 files).
+- live exercise → not taken.
+- Novelty: tracker checked (138 issues, 0 open PRs, one semantic search).
+  Bug-report bodies were not re-read, so novelty against them is unverified.
+
+Instrument lessons: the cloud checkout is shallow (50 commits) — unshallow
+before block 5 or any `git show` at a prior SHA; an empty variable in
+`rg -l "$fn"` matches every file; a sub-budget grant row needs its
+parent-child row or the self-parent check refuses the seed; the coupling
+gate's `--changed=` is shell-expanded, so glob-string misses must be dropped
+before confirmation.
+
+**Disposition: pending owner decision** (S1, C1, C2, C3).

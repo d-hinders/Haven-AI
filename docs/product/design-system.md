@@ -676,7 +676,9 @@ with an extra-budget count riding in the same line ("· +1 budget"); every
 other surface keeps the full wording. In token mode the row joins the cap and
 its symbol with a no-break space (#3910), so "3.00 USDC" never splits. Beside
 the caption the row has a right-hand column: the last payment's time, and the
-merchant under it from `sm` (up to 40% of the row); below `sm` the time sits
+merchant under it from `sm`, in one fixed 10rem column in every row so every
+budget bar has the same length (#3912; the merchant truncates with its full
+name as a tooltip); below `sm` the time sits
 on the name line and the merchant is hidden, so the bar and caption span the
 row (#3910). The label row above the bar (token value,
 percentage) belongs to the caller: it is the caller's tabular typography, not

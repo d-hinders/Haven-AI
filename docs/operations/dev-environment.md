@@ -34,6 +34,15 @@ covers:
 last-verified: "2026-10-10"
 ---
 
+> **Re-verified #3913 (2026-10-13, Vercel skip-setting doc corrections):** the
+> edits are the "Skipped - Not affected" sentences in *Which pushes rebuild the
+> frontend* and § *PR previews are opt-in* — the frontend has never recorded
+> such a deployment, the records belong to haven-ops, and they came from the
+> per-project Vercel setting named in the diff with required value **off**
+> (per #3913's GitHub deployment-records census; inferred, dashboard
+> unchecked). Nothing else in this document was re-verified, and
+> `last-verified` is not bumped.
+
 > **Re-verified #3825 (2026-10-09, `GET /user/signers`):** this diff touched
 > one file in this document's coverage list,
 > `packages/backend/src/openapi/route-modules.generated.ts`, and none of this
@@ -355,8 +364,9 @@ since the ops project runs the same script. For this project that means:
   deployments a day** (#3681): the step saves build minutes and keeps the
   host current, not deployments. Each push to `dev`, `main` or a `preview/*`
   branch creates a frontend deployment, built or skipped; other branches create
-  none (#3821), bar the occasional "Skipped - Not affected" record from Vercel's
-  monorepo skip ([below](#pr-previews-are-opt-in)), and the ops console deploys from `dev` only (see
+  none (#3821). Unlike haven-ops, the frontend project has never recorded a
+  "Skipped - Not affected" deployment ([below](#pr-previews-are-opt-in)), and
+  the ops console deploys from `dev` only (see
   [`ops-console.md` § 1](ops-console.md#1-the-vercel-project)). When the cap is
   hit, Vercel refuses the deployment: its status reads "Resource is limited"
   (`api-deployments-free-per-day`), where a skip reads "Canceled by Ignored
@@ -380,9 +390,17 @@ production), redeploy the latest deployment of that branch, then delete
 Since #3821 the frontend project deploys only three kinds of branch
 (`git.deploymentEnabled` in `packages/frontend/vercel.json`): `dev` (the dev
 host), `main` (production) and `preview/*`. A push to any other branch, a
-`feat/*` PR or a `hotfix/*` included, gets no frontend preview and no build.
-Vercel may still record a "Skipped - Not affected" deployment for some of these
-pushes, apparently from its monorepo skip. #3821's Method counted 22–38
+`feat/*` PR or a `hotfix/*` included, gets no frontend preview and no build —
+and no "Skipped - Not affected" record either: the frontend project has never
+recorded one. Those records belong to haven-ops, and they came from the
+per-project Vercel setting **"Skip deployments when there are no changes to
+the root directory or its dependencies"** — a dashboard setting under
+Settings → Build and Deployment (Root Directory section) that `vercel.json`
+cannot carry — which is on for haven-ops and off for the frontend (inferred
+from GitHub's records; nobody has checked the dashboard yet). Its required
+value on haven-ops is **off** (owner decision 2026-10-13, #3913); see
+[`ops-console.md` § 1](ops-console.md#1-the-vercel-project).
+#3821's Method counted 22–38
 haven-ops deployments a day before #3681 took effect and 3 on 2026-10-08. No
 required check reads a preview: browser smoke and visual regression run against
 their own local server.

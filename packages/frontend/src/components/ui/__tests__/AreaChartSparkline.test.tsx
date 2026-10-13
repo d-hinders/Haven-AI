@@ -63,10 +63,22 @@ describe('AreaChart sparkline across missing days (#3897)', () => {
     for (const y of pathYs(d)) expect(y).toBeLessThan(HEIGHT)
   })
 
-  it('ends with the dot on the last measured day', () => {
+  it('ends with the dot on the last measured day, as HTML — a `<circle>` would stretch into an oval (#3903)', () => {
     const { container } = renderSparkline(sparse)
-    const dot = container.querySelector('circle')
-    expect(Number(dot?.getAttribute('cx'))).toBeCloseTo(xOf(28), 2)
+    const dot = container.querySelector<HTMLElement>(
+      '[data-testid="area-chart-sparkline-dot"]',
+    )
+    expect(dot).not.toBeNull()
+    expect(container.querySelectorAll('circle')).toHaveLength(0)
+    // The dot's horizontal position is the endpoint's fraction of the
+    // viewBox — the same fraction the old circle's `cx` divided by the
+    // viewBox width was. (Read from the data attribute: jsdom's CSSOM
+    // re-serialises the calc() and drops the multiplier's precision.)
+    expect(dot!.dataset.xFrac).toBe((28 / 29).toFixed(6))
+    // And the dot keeps the circle's rendered footprint (2·r plus the
+    // stroke), sized as inline style so it stays round at every width.
+    expect(dot!.style.width).toBe('6px')
+    expect(dot!.style.height).toBe('6px')
   })
 
   it('keeps the flat placeholder below three points', () => {
@@ -75,7 +87,7 @@ describe('AreaChart sparkline across missing days (#3897)', () => {
       { label: 'b', value: 120 },
     ])
     expect(container.querySelectorAll('path')).toHaveLength(0)
-    expect(container.querySelectorAll('circle')).toHaveLength(0)
+    expect(container.querySelector('[data-testid="area-chart-sparkline-dot"]')).toBeNull()
     const line = container.querySelector('line')
     expect(line?.getAttribute('y1')).toBe(String(HEIGHT / 2))
     expect(line?.getAttribute('y2')).toBe(String(HEIGHT / 2))

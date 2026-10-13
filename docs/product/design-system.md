@@ -783,6 +783,21 @@ which drew sparse snapshots as scattered dashes). Below `MIN_CHARTABLE_DAYS` it 
 placeholder line of the same height instead of nothing, so a layout that
 reserved the box does not jump. No draw animation on data refresh.
 
+The end dot is an **HTML span, not an SVG `<circle>`** (#3903): the drawing
+stretches with `preserveAspectRatio="none"`, and a circle stretches with it
+into an oval wherever the box is not 640 px wide. The dot is positioned in
+CSS px on both axes — the sparkline's vertical scale is exactly 1, and its
+horizontal position is the endpoint's fraction of the viewBox, padded by a
+CSS-px box inset on every side (`SPARKLINE_DOT_INSET`, 4px, at least the
+dot's radius plus stroke) with the line drawn edge to edge inside it — so
+the dot stays round
+at every width, its centre stays on the line's endpoint, and it never
+leaves the box (#3902's containment guarantee, restated in CSS px). The
+line itself takes `vector-effect: non-scaling-stroke`, so its 2px weight no
+longer depends on the segment's slope. The same treatment applies to the
+full chart's point dots, positioned as a percentage of the viewBox like the
+tick labels; the sparkline's flat placeholder still draws no dot.
+
 ### StatTile inline (#3805)
 
 `variant="inline"`: no card border, ground or shadow; the value at

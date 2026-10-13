@@ -1202,7 +1202,7 @@ export default function DesignSystemPage() {
             <p className="text-xs font-semibold uppercase tracking-wider text-[var(--v2-brand)]">Anchor</p>
             <p className="mt-2 text-sm font-semibold text-[var(--v2-ink)]">Secondary focal point</p>
             <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-              Use for the second-most-important surface on a page (recoverable funds, agent status). Cooler off-white background, brand-tinted hairline.
+              Use for the second-most-important surface on a page (the sweep page&rsquo;s How to recover card). Cooler off-white background, brand-tinted hairline.
             </p>
           </Card>
 

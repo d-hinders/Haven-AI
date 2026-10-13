@@ -112,12 +112,19 @@ test('from sm a long merchant host gets up to 40% of the row (1280)', async ({ p
   await expect(merchant).toBeVisible()
   const widths = await row.evaluate((rowEl) => {
     const line = rowEl.querySelector('[data-testid="agent-row-last-payment"] p:nth-child(2)') as HTMLElement
-    return { row: rowEl.getBoundingClientRect().width, merchant: line.getBoundingClientRect().width }
+    return {
+      row: rowEl.getBoundingClientRect().width,
+      merchant: line.getBoundingClientRect().width,
+      whole: line.scrollWidth <= line.clientWidth + 1,
+    }
   })
+  // Either the host shows whole, or the column took its share: ≥35% of the
+  // row (the 7rem cap gave ~23%). A wider Agents card that fits the host
+  // whole must not fail this.
   expect(
-    widths.merchant / widths.row,
-    `merchant line ${widths.merchant}px of a ${widths.row}px row`,
-  ).toBeGreaterThanOrEqual(0.35)
+    widths.whole || widths.merchant / widths.row >= 0.35,
+    `merchant line ${widths.merchant}px of a ${widths.row}px row, cut short`,
+  ).toBe(true)
 })
 
 /**

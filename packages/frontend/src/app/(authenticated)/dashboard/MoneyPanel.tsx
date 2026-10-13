@@ -414,7 +414,7 @@ export default function MoneyPanel({
 
       {/*
         #3897: ONE money card, as the mockup draws it — `raised`, the page's
-        single most prominent surface (Card.tsx: "the dashboard total"); the
+        single most prominent surface (Card.tsx: "the dashboard money card"); the
         "Needs attention" card below is a normal flat card like Agents and
         Activity (#3910). Balance left, spending right as a
         `Card.Section divided` (a hairline, never a nested filled card),

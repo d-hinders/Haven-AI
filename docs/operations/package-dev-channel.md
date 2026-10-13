@@ -206,6 +206,16 @@ and the `release` skill.
 > dist-tag, version-order or publish behaviour moves. Scope of this note: that
 > file — nothing else in this document was re-verified.
 >
+> **Re-verification (#3772 part 1, retired-agents report, 2026-10-13):** this
+> doc is coupled through `routes/agent-connection-setups.ts` and
+> `packages/connect/src/runtime.ts`. The change adds
+> `POST /agent-connection-setups/{setupId}/retired-agents` and, after a
+> completed `--replace`, one best-effort connector call to it (an older
+> backend's 404 is one log line). The setup, register and install-status flow
+> this document describes for the dev channel is unchanged, and no channel,
+> dist-tag, version-order or publish behaviour moves. Scope of this note: those
+> two files — nothing else in this document was re-verified.
+>
 > **Re-verification (#3259, failed tombstone mirror, 2026-09-23):** this doc is
 > coupled through `packages/connect/src/{cli,runtime}.ts`. The change: a failed
 > ledger mirror no longer aborts a retirement, so `--replace` still removes the

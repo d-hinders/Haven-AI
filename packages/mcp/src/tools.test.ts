@@ -966,6 +966,45 @@ describe('Haven MCP tool handlers', () => {
     })
   })
 
+  it('#3772: haven_get_agent and haven_get_allowances carry supersededBy with the warning, null otherwise', async () => {
+    const mark = { agent_id: '11111111-2222-4333-8444-555555555555', superseded_at: '2026-10-13T10:00:00.000Z' }
+    const serve = (superseded: typeof mark | undefined) =>
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+        const u = String(url)
+        const extra = superseded ? { superseded_by: superseded } : {}
+        if (u.endsWith('/machine-payments/agent')) {
+          return jsonResponse({
+            id: 'agt_1', name: 'Test', status: 'active', account_address: safeAddress,
+            delegate_address: delegateAddress, chain_id: 8453, execution_rail: 'delegation', ...extra,
+          })
+        }
+        if (u.includes('/allowances')) {
+          return jsonResponse({
+            agent_id: 'agt_1', account_address: safeAddress, delegate_address: delegateAddress,
+            chain_id: 8453, allowances: [], ...extra,
+          })
+        }
+        return jsonResponse({ task_budgets: [] })
+      })
+    type Marked = { supersededBy: { replacementAgentId: string; warning: string; nextAction: string } | null }
+    const run = async (): Promise<[Marked, Marked]> => {
+      const handlers = createToolHandlers(new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl }))
+      const agent = await handlers.haven_get_agent({})
+      const allowances = await handlers.haven_get_allowances({})
+      if (!agent.success || !allowances.success) throw new Error('expected success')
+      return [agent.data as Marked, allowances.data as Marked]
+    }
+
+    serve(mark)
+    for (const data of await run()) {
+      expect(data.supersededBy).toMatchObject({ replacementAgentId: mark.agent_id, nextAction: 'stop_and_tell_user' })
+      expect(data.supersededBy?.warning).toContain('still running as the old agent')
+    }
+    vi.restoreAllMocks()
+    serve(undefined)
+    for (const data of await run()) expect(data.supersededBy).toBeNull()
+  })
+
   it('negative control: assertNoDelegateKeyLeak fails when the key is present', () => {
     // Without these the non-custody assertion could be silently weakened
     // (e.g. comparing against a stripped version of the key) and still pass.

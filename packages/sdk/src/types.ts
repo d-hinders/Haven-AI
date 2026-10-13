@@ -722,6 +722,24 @@ export interface HavenAgent {
    * mechanism a caller should read/derive from.
    */
   executionRail: 'legacy' | 'delegation'
+  /**
+   * #3772: non-null when a later `connect --replace` on this machine retired
+   * this agent's directory and installed a replacement — the session reading
+   * this is still running as the OLD agent. Warning only: nothing is paused or
+   * revoked, and the old agent keeps its live budget until the user removes
+   * it. Null when not superseded, and on an older backend that sends nothing.
+   */
+  supersededBy: HavenAgentSupersession | null
+}
+
+/** #3772: the "this agent was replaced" notice carried by agent reads. */
+export interface HavenAgentSupersession {
+  replacementAgentId: string
+  supersededAt: string
+  warning: string
+  nextAction: typeof AgentPaymentNextAction.StopAndTellUser
+  /** Why no Haven tool follows: the next step is the user's. */
+  nextToolOmittedReason: string
 }
 
 export interface HavenAllowance {
@@ -798,6 +816,8 @@ export interface HavenAllowanceSummary {
   delegateAddress: string
   chainId: number
   allowances: HavenAllowance[]
+  /** #3772: see {@link HavenAgent.supersededBy}. */
+  supersededBy: HavenAgentSupersession | null
 }
 
 /**
@@ -2521,6 +2541,8 @@ export interface RawHavenAgent {
   delegate_address: string
   chain_id: number
   execution_rail: string
+  /** #3772: absent on an older backend. */
+  superseded_by?: { agent_id: string; superseded_at: string } | null
 }
 
 /** @internal */
@@ -2567,6 +2589,8 @@ export interface RawHavenAllowanceSummary {
   delegate_address: string
   chain_id: number
   allowances: RawHavenAllowance[]
+  /** #3772: absent on an older backend. */
+  superseded_by?: { agent_id: string; superseded_at: string } | null
 }
 
 /** @internal */

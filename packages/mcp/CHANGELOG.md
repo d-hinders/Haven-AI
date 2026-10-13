@@ -17,6 +17,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Added
 
+- **`haven_get_agent` and `haven_get_allowances` warn a replaced agent (#3772).** When a Connect `--replace` retired this agent on its machine, both outputs carry `supersededBy` with a warning to restart the session and have the user remove the old agent; otherwise `supersededBy` is `null`. Same field as the hosted runtime. Warning only.
+
 - **`haven_discover_tools` says which merchants avoid the funding leg (#3839).** Each entry now carries `asset_transfer_methods` and `funding_leg_expected: true | false | "unknown"` — `false` when the merchant advertises erc7710 — and the description tells the agent to prefer `false` among equivalent entries. It is a catalog hint; the quote's `expected_funding_leg` stays authoritative. Same fields as the hosted runtime; listing order is unchanged.
 
 ### Changed

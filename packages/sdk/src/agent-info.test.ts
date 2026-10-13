@@ -31,6 +31,7 @@ describe('agent info helpers', () => {
       delegateAddress: '0xDelegate',
       chainId: 8453,
       executionRail: 'legacy',
+      supersededBy: null,
     })
     expect(fetchMock).toHaveBeenCalledWith(
       `${baseUrl}/machine-payments/agent`,
@@ -211,6 +212,7 @@ describe('agent info helpers', () => {
       delegateAddress: '0xDelegate',
       chainId: 8453,
       executionRail: 'legacy',
+      supersededBy: null,
       readiness: 'ready',
       // #1590: same value under the honest name; `readiness` is the
       // deprecated alias and stays byte-identical.
@@ -791,6 +793,7 @@ const mappedAllowances = {
   accountAddress: '0xSafe',
   delegateAddress: '0xDelegate',
   chainId: 8453,
+  supersededBy: null,
   allowances: [{
     id: 'allowance-1',
     tokenAddress: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',

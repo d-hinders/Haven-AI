@@ -3174,6 +3174,9 @@ describe('existing-agent wiring collision at setup (#2551)', () => {
       updateInstallStatus: vi.fn(async () => {}),
       getConnectorStatus: vi.fn(),
       getAgentIdentity: vi.fn(),
+      reportRetiredAgents: vi.fn(async (_input: { setupId: string; apiKey: string; retiredAgentIds: readonly string[] }) => ({
+        recordedAgentIds: [] as string[],
+      })),
     }
   }
 
@@ -3364,6 +3367,108 @@ describe('existing-agent wiring collision at setup (#2551)', () => {
     expect(result.outcome.superseded_agents_retired_locally).toBe(true)
     await expect(stat(join(opsDir, 'TOMBSTONE.json'))).rejects.toThrow()
     expect(JSON.parse(await readFile(join(opsDir, 'identity.json'), 'utf8')).api_key).toBe('sk_agent_agent-ops')
+  })
+
+  describe('#3772 retired agents are reported to Haven', () => {
+    const OLD_A = '11111111-2222-4333-8444-555555555555'
+    const OLD_B = '66666666-7777-4888-8999-aaaaaaaaaaaa'
+    const NAMED = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff'
+
+    it('reports exactly the retired ids, once, authenticated with the NEW agent key', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3772-report-'))
+      await seedDir(root, 'old-a', liveBare(OLD_A))
+      await seedDir(root, 'old-b', liveBare(OLD_B))
+      const h = harness(root)
+
+      const result = await runConnect({ ...baseOptions(root), replaceExistingWiring: true }, h.deps)
+
+      expect(h.api.reportRetiredAgents).toHaveBeenCalledTimes(1)
+      const input = h.api.reportRetiredAgents.mock.calls[0][0]
+      expect(input.setupId).toBe('setup-2551')
+      expect(input.apiKey).toBe('sk_agent_newsecret')
+      expect([...input.retiredAgentIds].sort()).toEqual([OLD_A, OLD_B].sort())
+      // After the complete install-status report, never before.
+      expect(h.api.reportRetiredAgents.mock.invocationCallOrder[0]).toBeGreaterThan(
+        h.api.updateInstallStatus.mock.invocationCallOrder.at(-1)!,
+      )
+      expect([...(result.outcome.retired_agent_ids ?? [])].sort()).toEqual([OLD_A, OLD_B].sort())
+    })
+
+    it('MUTATION PROOF: a coexisting NAMED agent (superseded-only) is never reported', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3772-superseded-only-'))
+      await seedDir(root, 'old-a', liveBare(OLD_A))
+      await seedDir(root, 'ops', { ...liveBare(NAMED), 'signer-runtime.json': { server_name: 'ops', wrapper_path: '/w' } })
+      const h = harness(root)
+
+      const result = await runConnect({ ...baseOptions(root), replaceExistingWiring: true }, h.deps)
+
+      expect(result.outcome.superseded_agent_ids).toContain(NAMED)
+      expect(h.api.reportRetiredAgents).toHaveBeenCalledTimes(1)
+      expect(h.api.reportRetiredAgents.mock.calls[0][0].retiredAgentIds).toEqual([OLD_A])
+    })
+
+    it('is not called without --replace, even when other agent directories exist', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3772-no-replace-'))
+      await seedDir(root, 'ops', { ...liveBare(NAMED), 'signer-runtime.json': { server_name: 'ops', wrapper_path: '/w' } })
+      const h = harness(root)
+
+      const result = await runConnect({ ...baseOptions(root), serverName: 'payment-agent' }, h.deps)
+
+      expect(result.outcome.superseded_agent_ids).toContain(NAMED)
+      expect(h.api.reportRetiredAgents).not.toHaveBeenCalled()
+    })
+
+    it('is not called when nothing was retired (clean machine, or install error skipped retirement)', async () => {
+      const clean = await mkdtemp(join(tmpdir(), 'haven-3772-clean-'))
+      const hClean = harness(clean)
+      await runConnect({ ...baseOptions(clean), replaceExistingWiring: true }, hClean.deps)
+      expect(hClean.api.reportRetiredAgents).not.toHaveBeenCalled()
+
+      const failed = await mkdtemp(join(tmpdir(), 'haven-3772-install-err-'))
+      await seedDir(failed, 'old-a', liveBare(OLD_A))
+      const hFailed = harness(failed, { installErrorCode: 'runtime_config_write_failed' })
+      await runConnect({ ...baseOptions(failed), replaceExistingWiring: true }, hFailed.deps)
+      expect(hFailed.api.reportRetiredAgents).not.toHaveBeenCalled()
+    })
+
+    it('drops ids that are not uuids (a directory-name identity fallback)', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3772-non-uuid-'))
+      await seedDir(root, 'old-a', liveBare(OLD_A))
+      await seedDir(root, 'old-b', liveBare('agent-old-not-a-uuid'))
+      const h = harness(root)
+
+      const result = await runConnect({ ...baseOptions(root), replaceExistingWiring: true }, h.deps)
+
+      expect(result.outcome.retired_agent_ids).toHaveLength(2)
+      expect(h.api.reportRetiredAgents.mock.calls[0][0].retiredAgentIds).toEqual([OLD_A])
+    })
+
+    it('an older backend (null answer) is tolerated silently', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3772-null-'))
+      await seedDir(root, 'old-a', liveBare(OLD_A))
+      const h = harness(root)
+      h.api.reportRetiredAgents.mockResolvedValue(null as never)
+
+      await runConnect({ ...baseOptions(root), replaceExistingWiring: true }, h.deps)
+
+      expect(h.api.reportRetiredAgents).toHaveBeenCalledTimes(1)
+      expect(h.logs.join('\n')).not.toContain('Could not tell Haven')
+    })
+
+    it('a thrown report is logged in one line and the run outcome is unaffected', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3772-throw-'))
+      await seedDir(root, 'old-a', liveBare(OLD_A))
+      const h = harness(root)
+      h.api.reportRetiredAgents.mockRejectedValue(new Error('boom 500'))
+
+      const result = await runConnect({ ...baseOptions(root), replaceExistingWiring: true }, h.deps)
+
+      expect(h.logs.filter((line) => line.includes('Could not tell Haven which agents were retired: boom 500'))).toHaveLength(1)
+      expect(result.outcome.retired_agent_ids).toEqual([OLD_A])
+      expect(result.outcome.superseded_agents_retired_locally).toBe(true)
+      expect(result.outcome.outcome).not.toBe('failed')
+      expect(result.outcome).not.toHaveProperty('retired_agents_reported')
+    })
   })
 
   it('--replace on a clean machine is a harmless no-op — no prompt, no retirement, no outcome flag', async () => {

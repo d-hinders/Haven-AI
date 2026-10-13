@@ -64,6 +64,8 @@ export const CONNECTOR_VERSION = '0.9.0-alpha.0'
  * exotic chain is merely cosmetic.
  */
 const PRODUCTION_CHAIN_ID = 8453
+/** #3772: agent ids are uuids; an identity that fell back to a directory name is not one. */
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /** #3303: the `X-Haven-Client` value every Haven API request from this connector carries. */
 export const CONNECTOR_CLIENT_IDENTITY = `@haven_ai/connect/${CONNECTOR_VERSION}`
@@ -1029,6 +1031,25 @@ async function executeConnect(
     })
   } catch (err) {
     log(`Could not report install status to Haven: ${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  // #3772: tell Haven which agents THIS run retired, so a session still running
+  // as one of them is warned on its own reads. Only `retiredAgentIds` (the
+  // directories whose tombstone and teardown succeeded) — never the
+  // `supersededScan`, which names every other agent on the machine. Identity can
+  // fall back to a directory name, so non-uuid ids are dropped. Best-effort: a
+  // failure (or an older backend's 404) is a note, never a change of outcome.
+  const reportableRetiredIds = [...new Set(retiredAgentIds.filter((id) => UUID_SHAPE.test(id)))]
+  if (reportableRetiredIds.length > 0 && api.reportRetiredAgents) {
+    try {
+      await api.reportRetiredAgents({
+        setupId: registration.setup_id,
+        apiKey: localApiKey,
+        retiredAgentIds: reportableRetiredIds,
+      })
+    } catch (err) {
+      log(`Could not tell Haven which agents were retired: ${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 
   // #1377 D: stay alive through the approval instead of going dead exactly

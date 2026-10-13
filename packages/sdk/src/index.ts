@@ -135,6 +135,7 @@ export type {
   ResumeX402PaymentInput,
   MachinePaymentRail,
   HavenAgent,
+  HavenAgentSupersession,
   HavenAgentSummary,
   HavenAgentAllowanceSummary,
   HavenAgentReadiness,

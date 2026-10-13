@@ -2,6 +2,7 @@ import { verifyPaymentReceipt, type PaymentReceipt, type ReceiptVerification } f
 import type {
   AgentPaymentWarning,
   HavenAgent,
+  HavenAgentSupersession,
   HavenAgentAllowanceSummary,
   HavenAgentReadiness,
   HavenAgentSummary,
@@ -22,7 +23,7 @@ import type {
   RawTaskBudget,
   HavenPaymentReceiptsPage,
 } from './types.js'
-import { AgentPaymentWarningCode, HavenApiError } from './types.js'
+import { AgentPaymentNextAction, AgentPaymentWarningCode, HavenApiError } from './types.js'
 import { HavenApiTransport } from './haven-api-transport.js'
 import { mapPaymentReceipt } from './payment-mappers.js'
 import { resolveTokenFromAddress } from './x402.js'
@@ -88,6 +89,31 @@ export function formatTokenAmount(atomic: string, decimals: number): string {
   const intPart = digits.slice(0, digits.length - decimals) || '0'
   const fracPart = digits.slice(digits.length - decimals).replace(/0+$/, '')
   return fracPart ? `${intPart}.${fracPart}` : intPart
+}
+
+/**
+ * #3772: the ONE mapping behind `supersededBy` on agent and allowance reads.
+ * Absent, null or malformed (non-string / empty ids) → null: an older backend
+ * or a bad body must never invent a warning.
+ */
+export function mapSupersession(raw: unknown): HavenAgentSupersession | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const { agent_id: replacementAgentId, superseded_at: supersededAt } = raw as Record<string, unknown>
+  if (typeof replacementAgentId !== 'string' || replacementAgentId === '') return null
+  if (typeof supersededAt !== 'string' || supersededAt === '') return null
+  return {
+    replacementAgentId,
+    supersededAt,
+    warning:
+      `This agent was replaced on its machine by agent ${replacementAgentId} at ${supersededAt}. ` +
+      'This session is still running as the old agent: restart the agent runtime so it loads the new agent, ' +
+      'and ask the user to remove this agent on its Haven agent page if it is no longer used — ' +
+      'it keeps its live budget until then.',
+    nextAction: AgentPaymentNextAction.StopAndTellUser,
+    nextToolOmittedReason:
+      "The next step is the user's: restart this session, and remove the superseded agent in the Haven dashboard. " +
+      'No Haven tool does either.',
+  }
 }
 
 /** #3329: `RawTaskBudget` (snake_case wire) → `HavenTaskBudget` (camelCase). */
@@ -371,6 +397,7 @@ export class AccountReads {
       accountAddress: raw.account_address as string,
       delegateAddress: raw.delegate_address,
       chainId: raw.chain_id,
+      supersededBy: mapSupersession(raw.superseded_by),
       allowances: raw.allowances.map((allowance) => ({
         id: allowance.id,
         tokenAddress: allowance.token_address,
@@ -590,6 +617,7 @@ export class AccountReads {
       delegateAddress: raw.delegate_address,
       chainId: raw.chain_id,
       executionRail: raw.execution_rail === 'delegation' ? 'delegation' : 'legacy',
+      supersededBy: mapSupersession(raw.superseded_by),
     }
   }
 }

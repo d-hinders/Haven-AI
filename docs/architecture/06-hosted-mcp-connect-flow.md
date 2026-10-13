@@ -115,6 +115,19 @@ permissions require action by the Safe owner outside Haven.
 6. Later hosted requests use the locally stored API key as Bearer identity;
    the local signer retains the delegate key as authority.
 
+A bare-pair `--replace` that retired a previous agent's directory reports the
+retired ids once its install completes
+([#3772](https://github.com/d-hinders/Haven-AI/issues/3772)):
+`POST /agent-connection-setups/{setupId}/retired-agents`, authenticated by the
+NEW agent's API key only (a setup token is refused). Haven marks each of the
+same user's agents in the list — never the reporter — as superseded by it, and
+that agent's `GET /machine-payments/agent` and `/allowances` carry
+`superseded_by`, which `haven_get_agent` / `haven_get_allowances` render as a
+restart-and-remove warning. It is a warning and nothing else: the superseded
+agent keeps its key, status and on-chain budget until the owner removes it, so
+the worst a misused report can do is warn one of the reporter's own owner's
+agents.
+
 Manual credential generation is a supported integration path for servers and
 hosted backends (#2482), surfaced as its own top-level disclosure in the
 connect flow rather than hidden inside a warning-gated fallback — the UI no

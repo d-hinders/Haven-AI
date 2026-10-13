@@ -156,4 +156,38 @@ describe('createConnectApiClient', () => {
     })
   })
 
+  describe('reportRetiredAgents (#3772)', () => {
+    const IDS = ['11111111-2222-4333-8444-555555555555']
+
+    it('posts the ids with the new agent key as a Bearer header only', async () => {
+      const calls: Array<{ url: string; init: RequestInit }> = []
+      const fetchImpl = vi.fn(async (url: string, init: RequestInit) => {
+        calls.push({ url, init })
+        return new Response(JSON.stringify({ setup_id: 'setup 1', recorded_agent_ids: IDS }), { status: 200 })
+      }) as unknown as typeof fetch
+      const api = createConnectApiClient('https://api.haven.example/', fetchImpl)
+
+      await expect(api.reportRetiredAgents!({ setupId: 'setup 1', apiKey: 'sk_agent_new', retiredAgentIds: IDS }))
+        .resolves.toEqual({ recordedAgentIds: IDS })
+
+      expect(calls[0].url).toBe('https://api.haven.example/agent-connection-setups/setup%201/retired-agents')
+      expect(calls[0].init.method).toBe('POST')
+      expect((calls[0].init.headers as Record<string, string>).Authorization).toBe('Bearer sk_agent_new')
+      expect(JSON.parse(String(calls[0].init.body))).toEqual({ retired_agent_ids: IDS })
+      expect(String(calls[0].init.body)).not.toContain('sk_agent_new')
+    })
+
+    it('an older backend (404) returns null without throwing', async () => {
+      const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ error: 'Not found' }), { status: 404 })) as unknown as typeof fetch
+      const api = createConnectApiClient('https://api.haven.example', fetchImpl)
+      await expect(api.reportRetiredAgents!({ setupId: 's', apiKey: 'k', retiredAgentIds: IDS })).resolves.toBeNull()
+    })
+
+    it.each([401, 500])('a %i is thrown for the caller to log', async (status) => {
+      const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ error: 'nope' }), { status })) as unknown as typeof fetch
+      const api = createConnectApiClient('https://api.haven.example', fetchImpl)
+      await expect(api.reportRetiredAgents!({ setupId: 's', apiKey: 'k', retiredAgentIds: IDS })).rejects.toMatchObject({ status })
+    })
+  })
+
 })

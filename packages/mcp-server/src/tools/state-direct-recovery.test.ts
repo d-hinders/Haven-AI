@@ -606,6 +606,33 @@ describe('haven_get_agent', () => {
     expect(result.data).not.toHaveProperty('safeAddress')
   })
 
+  // #3772: a superseded agent's reads carry the warning; an unmarked one null.
+  it('#3772: haven_get_agent and haven_get_allowances carry supersededBy with the warning, null otherwise', async () => {
+    const mark = { agent_id: '11111111-2222-4333-8444-555555555555', superseded_at: '2026-10-13T10:00:00.000Z' }
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: { ...AGENT_RESPONSE, superseded_by: mark } },
+      'GET /machine-payments/allowances': { status: 200, body: { ...AGENT_ALLOWANCES_RESPONSE, superseded_by: mark } },
+    })
+    type Marked = { supersededBy: { replacementAgentId: string; supersededAt: string; warning: string; nextAction: string } | null }
+    const agent = ok<Marked>(await handlers().haven_get_agent({}))
+    const allowances = ok<Marked>(await handlers().haven_get_allowances({}))
+    for (const data of [agent.data, allowances.data]) {
+      expect(data.supersededBy).toMatchObject({
+        replacementAgentId: mark.agent_id,
+        supersededAt: mark.superseded_at,
+        nextAction: 'stop_and_tell_user',
+      })
+      expect(data.supersededBy?.warning).toContain('still running as the old agent')
+    }
+
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: AGENT_ALLOWANCES_RESPONSE },
+    })
+    expect(ok<Marked>(await handlers().haven_get_agent({})).data.supersededBy).toBeNull()
+    expect(ok<Marked>(await handlers().haven_get_allowances({})).data.supersededBy).toBeNull()
+  })
+
   it('haven_get_agent: an OLD-only server (safe_address alone) no longer resolves an account address', async () => {
     stubFetch({
       'GET /machine-payments/agent': { status: 200, body: { ...AGENT_RESPONSE, safe_address: '0xAcct' } },

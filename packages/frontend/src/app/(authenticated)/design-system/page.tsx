@@ -2821,7 +2821,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="AreaChart"
-        description="Balance over time (#2948): one line on the first series token with a faint area beneath it, and the range's spend annotated as the endpoint delta. The y-scale runs from the data with headroom rather than from zero, so a quiet range still reads as a range. Below three points it renders nothing. Same keyboard treatment and narrow-screen panel as StackedBarChart, and the same pointer treatment too: the callout takes no pointer, a tap pins a day, and a second tap on the pinned day or Escape releases it (#3070)."
+        description="Balance over time (#2948): one line on the first series token with a faint area beneath it, and the range's spend annotated as the endpoint delta. The y-scale runs from the data with headroom rather than from zero, so a quiet range still reads as a range. The point dots are HTML spans positioned like the labels — a `<circle>` in the stretched svg would render as an oval wherever the box's aspect differs from the viewBox's (#3903). Below three points it renders nothing. Same keyboard treatment and narrow-screen panel as StackedBarChart, and the same pointer treatment too: the callout takes no pointer, a tap pins a day, and a second tap on the pinned day or Escape releases it (#3070)."
       >
         <Card hover={false} className="p-5">
           <AreaChart
@@ -2871,7 +2871,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="AreaChart — sparkline"
-        description="The sparkline variant of AreaChart (#3805): the balance line alone, in a box the caller sizes (height, default 40px). No gridlines, ticks, x labels, delta annotation, tooltip or caret — one dot on the last point. It is role=img with the required ariaLabel summary sentence and is not a tab stop: there is no hidden data table, the sentence is the data access. A day with no snapshot is skipped, never zero: the line connects across it at the measured days' true positions (#3897). Below three points it renders a flat placeholder line of the same height instead of nothing, so the layout does not jump, and there is no draw animation on data refresh."
+        description="The sparkline variant of AreaChart (#3805): the balance line alone, in a box the caller sizes (height, default 40px). No gridlines, ticks, x labels, delta annotation, tooltip or caret — one dot on the last point, drawn in HTML rather than as an SVG circle so it stays round at every box width; the box keeps an inset on every side in CSS px, at least the dot's radius plus stroke, and the line draws edge to edge inside it, so the dot's centre stays on the line's endpoint without the dot ever leaving the box (#3903). It is role=img with the required ariaLabel summary sentence and is not a tab stop: there is no hidden data table, the sentence is the data access. A day with no snapshot is skipped, never zero: the line connects across it at the measured days' true positions (#3897). Below three points it renders a flat placeholder line of the same height instead of nothing, so the layout does not jump, and there is no draw animation on data refresh."
       >
         <div data-testid="ds-area-chart-sparkline">
           <Card hover={false} className="p-5">

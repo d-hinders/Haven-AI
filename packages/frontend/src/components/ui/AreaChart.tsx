@@ -50,6 +50,26 @@
  * stretched type at a 390px viewport is exactly the defect that rule
  * prevents; see the bar chart's header, which spells it out.
  *
+ * ## The dots are HTML, not `<circle>`s (#3903)
+ *
+ * The drawing stretches with `preserveAspectRatio="none"`, and a `<circle>`
+ * stretches with it: wherever the box's aspect differs from the viewBox's,
+ * the dot renders as an oval (measured ~3.5 × 5.5 CSS px on the dashboard
+ * money card's sparkline). The dots are therefore HTML spans — round at
+ * every width — positioned the same way the labels are: a percentage of the
+ * viewBox for the full chart, and CSS px for the sparkline, whose vertical
+ * scale is exactly 1. The sparkline's box carries a horizontal inset in CSS
+ * px (`SPARKLINE_DOT_INSET`, at least the dot's radius plus stroke) and the
+ * line draws edge to edge inside it, so the end dot's centre stays on the
+ * line's endpoint while the whole dot stays inside the box — the #3902
+ * containment guarantee, restated in CSS px rather than viewBox units. The
+ * inset runs on ALL sides, not just the horizontal one: the scale floors at
+ * zero, so a last balance of 0 maps to the box's bottom edge exactly, and a
+ * round dot centred there would straddle it.
+ * The line's own stroke takes `vector-effect: non-scaling-stroke` for the
+ * same reason: without it the 2-unit stroke is 2 px on flat segments and
+ * stretched on steep ones.
+ *
  * ## Accessibility
  *
  * The svg carries `role="img"` with an `aria-label` summary sentence, and
@@ -91,6 +111,20 @@ const LINE_SERIES = 1
  *  fill reads as the line's shadow and not as a second claim. */
 const AREA_OPACITY = 0.12
 const DOT_R = 2.5
+/** The `<circle>`s drew a default 1-unit stroke around the 2.5-unit fill;
+ *  the HTML dots keep the same rendered footprint — the diameter INCLUDING
+ *  the stroke — as inline style (#3903). */
+const DOT_STROKE = 1
+const DOT_DIAMETER = 2 * DOT_R + DOT_STROKE
+const ACTIVE_DOT_DIAMETER = 2 * DOT_R * 1.6 + DOT_STROKE
+/** The sparkline's inset in CSS px on every side (#3903). The dot's
+ *  half-width (radius + half the stroke) must clear the box edge at EVERY
+ *  width, and on the horizontal axis viewBox units no longer are CSS px;
+ *  vertically the scale floors at zero, so a last balance of 0 maps to the
+ *  bottom edge exactly and would straddle it. 4 ≥ 3.5 with a hair to spare;
+ *  the line draws edge to edge of the inset box, so the line's endpoint
+ *  stays the dot's centre. */
+const SPARKLINE_DOT_INSET = 4
 
 const AXIS_COLOR = 'var(--v2-border)'
 const LINE_COLOR = `var(--v2-series-${LINE_SERIES})`
@@ -161,15 +195,7 @@ export type AreaChartProps = FullChartProps | SparklineProps
 
 /** The sparkline's default height, and its viewBox width (see `pct`). */
 const SPARKLINE_HEIGHT = 40
-export const SPARKLINE_VIEW_W = 640 // design-system-exempt: sparkline geometry constant, exported for its test
-/**
- * The sparkline plot's inset from the viewBox edge, on every side (#3902). The
- * end dot is `DOT_R` plus half its 1-unit stroke, and the 2-unit line adds a
- * half-width of its own, so the plot keeps `DOT_R + 1.5` clear of every edge:
- * a last value of 0 (bottom) or the maximum (top), and the last day's x, all
- * draw whole instead of being clipped by the svg.
- */
-export const SPARKLINE_INSET = DOT_R + 1.5 // design-system-exempt: sparkline geometry constant, exported for its test
+const SPARKLINE_VIEW_W = 640
 
 export function AreaChart(props: AreaChartProps) {
   if (props.variant === 'sparkline') {
@@ -180,8 +206,8 @@ export function AreaChart(props: AreaChartProps) {
 }
 
 /**
- * The sparkline variant (#3805): the balance line and a faint fill beneath it
- * (#3902) — no gridlines, ticks,
+ * The sparkline variant (#3805): the balance line over a faint area of the same
+ * colour (#3902) — no gridlines, ticks,
  * x labels, delta annotation, tooltip or caret; one dot on the last point.
  * `role="img"` with the required `ariaLabel`, NOT a tab stop, and no hidden
  * data table — a glanceable shape, whose data access is the summary sentence.
@@ -223,14 +249,9 @@ function Sparkline({
   const scale = chartScaleRange(Math.max(0, min - pad), max + pad)
   const floor = scale.min
   const span = scale.max - floor
-  const plotW = SPARKLINE_VIEW_W - 2 * SPARKLINE_INSET
-  const plotH = Math.max(height - 2 * SPARKLINE_INSET, 0)
   const xOf = (index: number) =>
-    points.length <= 1
-      ? SPARKLINE_VIEW_W / 2
-      : SPARKLINE_INSET + (plotW * index) / (points.length - 1)
-  const yOf = (value: number) =>
-    span <= 0 ? height / 2 : height - SPARKLINE_INSET - ((value - floor) / span) * plotH
+    points.length <= 1 ? SPARKLINE_VIEW_W / 2 : (SPARKLINE_VIEW_W * index) / (points.length - 1)
+  const yOf = (value: number) => (span <= 0 ? height / 2 : height - ((value - floor) / span) * height)
 
   // One line through every measured day (#3897). A missing day is skipped,
   // never zero; the line connects across it, and each point keeps its true
@@ -239,24 +260,28 @@ function Sparkline({
   // short dashes and a lone measured day as nothing at all.)
   const commands: string[] = []
   let lastIndex = -1
-  let firstIndex = -1
   points.forEach((p, i) => {
     if (p.value === null || !Number.isFinite(p.value)) return
-    if (firstIndex < 0) firstIndex = i
     lastIndex = i
     commands.push(`${commands.length === 0 ? 'M' : 'L'}${xOf(i).toFixed(2)} ${yOf(p.value).toFixed(2)}`)
   })
   const linePath = commands.length > 1 ? commands.join(' ') : null
-  // The area under the line (#3902): its top edge IS the line's own commands,
+  // #3902: the faint area under the line, as the mockup fills it. Its top
+  // edge IS the line — the line's own commands between two baseline corners —
   // so a missing day is skipped exactly as the line skips it and never drops
-  // to the baseline; only the two closing corners sit on the viewBox floor.
+  // to the baseline; only the two closing corners sit on the floor.
+  const firstIndex = points.findIndex((p) => p.value !== null && Number.isFinite(p.value))
   const areaPath =
     linePath === null || firstIndex < 0
       ? null
       : `M${xOf(firstIndex).toFixed(2)} ${height} L${linePath.slice(1)} L${xOf(lastIndex).toFixed(2)} ${height} Z`
 
   return (
-    <div data-testid="area-chart-sparkline" className={`w-full ${className}`.trim()}>
+    <div
+      data-testid="area-chart-sparkline"
+      className={`relative w-full ${className}`.trim()}
+      style={{ padding: SPARKLINE_DOT_INSET }}
+    >
       <svg
         role="img"
         aria-label={ariaLabel}
@@ -294,20 +319,37 @@ function Sparkline({
                 strokeWidth={2}
                 strokeLinecap="round"
                 strokeLinejoin="round"
-              />
-            )}
-            {lastIndex >= 0 && points[lastIndex].value !== null && (
-              <circle
-                cx={xOf(lastIndex)}
-                cy={yOf(points[lastIndex].value as number)}
-                r={DOT_R}
-                fill={LINE_COLOR}
-                stroke={LINE_COLOR}
+                vectorEffect="non-scaling-stroke"
               />
             )}
           </>
         )}
       </svg>
+      {chartable && lastIndex >= 0 && points[lastIndex].value !== null && (
+        // The end dot, in HTML like the labels (#3903): a `<circle>` in this
+        // stretched svg renders as an oval wherever the box is not 640px
+        // wide. CSS px on both axes — the vertical scale is exactly 1, and
+        // the horizontal position is the endpoint's fraction of the viewBox,
+        // padded by the CSS-px inset (all sides: a last balance of 0 maps to
+        // the bottom edge exactly) so the round dot stays inside the box
+        // (#3902's containment guarantee, restated in CSS px).
+        <span
+          data-testid="area-chart-sparkline-dot"
+          aria-hidden="true"
+          data-x-frac={(xOf(lastIndex) / SPARKLINE_VIEW_W).toFixed(6)}
+          className="pointer-events-none absolute block rounded-full"
+          style={{
+            left: `calc(${SPARKLINE_DOT_INSET}px + (100% - ${
+              SPARKLINE_DOT_INSET * 2
+            }px) * ${(xOf(lastIndex) / SPARKLINE_VIEW_W).toFixed(6)})`,
+            top: SPARKLINE_DOT_INSET + yOf(points[lastIndex].value as number),
+            width: DOT_DIAMETER,
+            height: DOT_DIAMETER,
+            transform: 'translate(-50%, -50%)',
+            background: LINE_COLOR,
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -475,6 +517,7 @@ function AreaChartFull({
             strokeWidth={2}
             strokeLinecap="round"
             strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
             className="v2-chart-draw v2-chart-draw-stroke"
           />
           {points.map((p, i) => (
@@ -499,7 +542,11 @@ function AreaChartFull({
               }}
             >
               {/* The hit strip is the day's whole slice of the plot, not the
-                  dot: a day has to be selectable where the day is drawn. */}
+                  dot: a day has to be selectable where the day is drawn. The
+                  dot itself is NOT drawn here (#3903): a `<circle>` in this
+                  stretched svg renders as an oval wherever the box's aspect
+                  differs from the viewBox's — it is an HTML span in the plot
+                  wrapper below, positioned like the labels. */}
               <rect
                 x={plot.xOf(i) - plot.plotW / Math.max(1, points.length - 1) / 2}
                 y={plot.pad.top}
@@ -508,16 +555,30 @@ function AreaChartFull({
                 fill="transparent"
                 stroke="none"
               />
-              <circle
-                cx={plot.xOf(i)}
-                cy={plot.yOf(p.value)}
-                r={active === i ? DOT_R * 1.6 : DOT_R}
-                fill={LINE_COLOR}
-                stroke={LINE_COLOR}
-              />
             </g>
           ))}
         </svg>
+
+        {/* The point dots, in HTML like the labels (#3903): round at every
+            width, on the same percentage-of-viewBox positioning the type
+            uses. pointer-events off — the hit strips in the svg own
+            selection (#3070). */}
+        {points.map((p, i) => (
+          <span
+            key={`dot-${i}-${p.label}`}
+            data-testid="area-point-dot"
+            aria-hidden="true"
+            className="pointer-events-none absolute block rounded-full"
+            style={{
+              left: pct(plot.xOf(i), VIEW_W),
+              top: pct(plot.yOf(p.value), VIEW_H),
+              width: active === i ? ACTIVE_DOT_DIAMETER : DOT_DIAMETER,
+              height: active === i ? ACTIVE_DOT_DIAMETER : DOT_DIAMETER,
+              transform: 'translate(-50%, -50%)',
+              background: LINE_COLOR,
+            }}
+          />
+        ))}
 
         {/* The labels, in HTML: the drawing stretches and the type does not
             (see the header). */}

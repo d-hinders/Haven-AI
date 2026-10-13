@@ -187,11 +187,15 @@ so this is a rule to point at rather than a question to ask the release runner.
       - **Frontend browser smoke** — required here since the same change.
 
       `main` is also the only branch still requiring the head to be up to date,
-      so a `BEHIND` promotion PR cannot merge through the ordinary button. By
-      owner decision there is no sync-back
-      ([`branch-and-release-flow.md`](../contributing/branch-and-release-flow.md#promotion-to-production-dev--main)):
-      the owner merges it behind from the web UI or API — never the mobile
-      app, which offers no such merge.
+      so a promotion PR reports `BEHIND` once `main` moves past `dev`. That is
+      expected, not something to fix: by owner decision there is no sync-back
+      ([`branch-and-release-flow.md`](../contributing/branch-and-release-flow.md#promotion-to-production-dev--main)),
+      and **any of the three maintainers** — @d-hinders, @AntonioSaaranen,
+      @PhilipEriksson (#3798, 2026-10-09) — merges it behind with the ordinary
+      **Merge pull request** button (merge commit) in the web UI, exactly as
+      the owner did on #3794, or `gh pr merge --merge` from a terminal. (Until
+      2026-10-09 this said only the owner merges, from the web UI or API —
+      never the mobile app, which offers no such merge.)
       The per-branch inventory and the `gh api` command that produced it are in
       [`../contributing/autonomous-pr-loop.md`](../contributing/autonomous-pr-loop.md#one-time-github-setup-required)
       step 3.

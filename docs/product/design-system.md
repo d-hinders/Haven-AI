@@ -781,9 +781,7 @@ home's design-lint `raw-svg` exemption already covers it): the balance line
 over a faint area of the same series colour (`AREA_OPACITY`), in a box the
 caller sizes (`height`, default 40px). No gridlines,
 ticks, x labels, delta annotation, tooltip or caret — a dot on the last
-point only. The plot is inset by `SPARKLINE_INSET` on every side, so the dot
-and its stroke are never clipped at the top, the bottom or the right edge
-(#3902). It is `role="img"` with a **required** `ariaLabel` summary
+point only (see below for how it stays round and inside the box). It is `role="img"` with a **required** `ariaLabel` summary
 sentence and is not a tab stop: there is no hidden data table, the sentence
 is the data access. A day with no snapshot (`value: null`) is **skipped,
 never zero; the line connects across it**, and each measured day keeps its
@@ -792,6 +790,21 @@ which drew sparse snapshots as scattered dashes). The area's top edge is the
 line itself, so it never dips to the baseline at a missing day either. Below `MIN_CHARTABLE_DAYS` it renders a flat
 placeholder line of the same height instead of nothing, so a layout that
 reserved the box does not jump. No draw animation on data refresh.
+
+The end dot is an **HTML span, not an SVG `<circle>`** (#3903): the drawing
+stretches with `preserveAspectRatio="none"`, and a circle stretches with it
+into an oval wherever the box is not 640 px wide. The dot is positioned in
+CSS px on both axes — the sparkline's vertical scale is exactly 1, and its
+horizontal position is the endpoint's fraction of the viewBox, padded by a
+CSS-px box inset on every side (`SPARKLINE_DOT_INSET`, 4px, at least the
+dot's radius plus stroke) with the line drawn edge to edge inside it — so
+the dot stays round
+at every width, its centre stays on the line's endpoint, and it never
+leaves the box (#3902's containment guarantee, restated in CSS px). The
+line itself takes `vector-effect: non-scaling-stroke`, so its 2px weight no
+longer depends on the segment's slope. The same treatment applies to the
+full chart's point dots, positioned as a percentage of the viewBox like the
+tick labels; the sparkline's flat placeholder still draws no dot.
 
 ### StatTile inline (#3805)
 

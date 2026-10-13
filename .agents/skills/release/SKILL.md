@@ -445,32 +445,70 @@ tell that PR's author what changed underneath them.
 Publishing happens on the `dev → main` promotion. **Follow
 `branch-and-release-flow.md` § *Promotion to production*** — it owns the
 sequence, why a promotion merges with a merge commit rather than a squash, and
-why it merges BEHIND by the owner with no sync-back (owner decision,
-2026-09-26). Do not restate it; read it.
+why it merges BEHIND with no sync-back (owner decision, 2026-09-26; since
+2026-10-09 any of the three maintainers merges it — #3798). Do not restate it;
+read it. The one-page operator checklist — every step doable by any of the
+three maintainers — is
+[`docs/operations/release-checklist.md`](../../../docs/operations/release-checklist.md).
 
 **Promotion preflight** — run before opening the promotion PR; each line cost
 0.5.0-alpha.1 (#3325) a round-trip with the owner.
 
-- [ ] **BEHIND is a blocker, not noise.** `git rev-list --count origin/dev..origin/main`
+- [ ] **BEHIND is expected, not noise.** `git rev-list --count origin/dev..origin/main`
       non-zero plus `strict_required_status_checks_policy: true` on `Dev gate`
       (`curl -sS https://api.github.com/repos/d-hinders/Haven-AI/rules/branches/main`)
-      means the ordinary merge button is refused, and by design only the owner
-      merges it (no sync-back). Tell the owner so up front.
+      means the promotion PR reports BEHIND — say so up front, and merge it
+      behind anyway: that is by design (no sync-back), and since 2026-10-09
+      any of the three maintainers does the merge (#3798), not only the owner.
 - [ ] **Code-owner review.** `git diff --name-only origin/main origin/dev -- ':(glob)packages/backend/src/db/migrations/*.ts'`
       non-empty means an approving review from a code owner other than the PR
       author is required — request it when opening, not when it blocks.
 - [ ] **Decide `qa-override` before opening, and apply it at open.**
       `qa-freshness` reads labels only on `opened`/`synchronize`/`reopened`, and
       a re-run replays the old payload; a label added later takes a
-      close/reopen, which is the owner's call, never an agent's.
-- [ ] **The owner merges from the web UI or the API**, not the GitHub mobile
-      app — it offers no bypass merge and reports only "Some checks did not
-      pass".
+      close/reopen, which is a maintainer decision — any of the three
+      (#3798, 2026-10-09) — never an agent's.
+- [ ] **Any of the three maintainers merges from the web UI** — the ordinary
+      **Merge pull request** button with the merge-commit form; the PR showing
+      BEHIND is expected. `gh pr merge --merge` from a terminal works too.
+      (The GitHub mobile app offers no merge form at all — reported 2026-09-26;
+      kept as history, not as an instruction to anyone.)
 
 Since #2165 the merge-method half is enforced by the `Dev gate` ruleset rather
 than by you remembering it: a PR based on `main` can only be merge-merged. Treat
 a squash or rebase button appearing there as a sign the rule has been dropped,
 not as permission.
+
+**Promotion PR body template.** None existed before #3798 — #3794's body was
+written ad hoc. Open the promotion PR with this shape: the two lines under
+*How to merge* are the whole merge instruction, and the preflight detail sits
+below them where it belongs.
+
+```markdown
+## How to merge
+
+Any of the three maintainers: **Merge pull request** (merge commit) in the web
+UI. This PR showing as BEHIND `main` is expected — merge it anyway (no sync-back).
+
+## Scope
+
+<one paragraph: the packages/version bumps in range, or "no version bump —
+publishes nothing"; paste `npm run release:scope` output>
+
+## Preflight
+
+- [ ] `dev` held while this PR is open (no merges to `dev`)
+- [ ] Migrations in range: <list, or "none"> → prod DB snapshot taken before deploy
+- [ ] Code-owner approval (someone other than the PR author) — migrations in range
+- [ ] Money-flow QA green at this head, or `qa-override` applied at open
+- [ ] Docs staleness audit dispositions recorded on this PR
+
+## After merge
+
+- [ ] `npm view @haven_ai/<pkg> dist-tags` — all five on `alpha` and `latest`
+- [ ] Migrations confirmed applied in the Railway log
+- [ ] Real-payment canary
+```
 
 What it leaves to you:
 

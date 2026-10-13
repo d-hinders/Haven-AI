@@ -220,6 +220,27 @@ function looksLikeRawPathOrSecret(value: string): boolean {
   return false
 }
 
+/**
+ * #3772: a retired-agents report is accepted only this long after the
+ * connector REGISTERED the setup (`setup_token_consumed_at`). The connector
+ * sends it seconds-to-minutes later, right after the install-status report;
+ * closing the window afterwards means a long-lived agent key cannot stamp its
+ * owner's other agents as superseded months later (code review, round 1).
+ */
+export const RETIRED_AGENTS_REPORT_WINDOW_MINUTES = SETUP_TOKEN_TTL_MINUTES
+
+/** Whether a setup registered at `registeredAt` may still report retired agents at `now`. */
+export function retiredAgentsReportWindowOpen(
+  registeredAt: Date | string | null | undefined,
+  now: Date = new Date(),
+): boolean {
+  if (!registeredAt) return false
+  const registered = registeredAt instanceof Date ? registeredAt : new Date(registeredAt)
+  const ms = registered.getTime()
+  if (!Number.isFinite(ms)) return false
+  return now.getTime() - ms <= RETIRED_AGENTS_REPORT_WINDOW_MINUTES * 60_000
+}
+
 /** #3772: the most retired agent ids one `--replace` report may carry. */
 export const MAX_RETIRED_AGENT_IDS = 32
 

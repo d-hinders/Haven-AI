@@ -23,6 +23,7 @@ import {
   isValidAddress,
   isValidHexHash,
   MAX_RETIRED_AGENT_IDS,
+  retiredAgentsReportWindowOpen,
   parseRetiredAgentIds,
   sanitizeConnectorContext,
   sanitizeInstallStatus,
@@ -808,6 +809,11 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       if (!setup.agent_id) {
         return reply.code(409).send({ error: 'Setup has no registered agent' })
       }
+      // Only the connector run that registered this setup may report: the
+      // window closes RETIRED_AGENTS_REPORT_WINDOW_MINUTES after registration.
+      if (!retiredAgentsReportWindowOpen(setup.setup_token_consumed_at)) {
+        return reply.code(409).send({ error: 'The retired-agent report window for this setup has closed' })
+      }
 
       // Request validation may be shadow/off, so the shape is also checked here.
       const ids = parseRetiredAgentIds(request.body)
@@ -822,6 +828,11 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
         replacementAgentId: setup.agent_id,
         agentIds: ids,
       })
+      // Audit trail: who marked whom (a later replace overwrites the columns).
+      request.log.info(
+        { setup_id: setup.id, replacement_agent_id: setup.agent_id, recorded_agent_ids: recorded },
+        'retired agents recorded as superseded (#3772)',
+      )
       return { setup_id: setup.id, recorded_agent_ids: recorded }
     },
   )

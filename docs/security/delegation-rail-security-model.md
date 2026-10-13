@@ -2940,8 +2940,10 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > `markAgentsSuperseded` / `findAgentSupersession` over two new nullable
 > `agents` columns (migration 112, `superseded_by_agent_id`, `superseded_at`).
 > A connector `--replace` reports the ids it retired with the NEW agent's API
-> key; the UPDATE is scoped to the setup's own user and excludes the reporter,
-> so an agent credential can only put a warning on a sibling of its own owner.
+> key, within 30 minutes of that setup's registration; the UPDATE is scoped to
+> the setup's own user and excludes the reporter, so an agent credential can
+> only put a warning on a sibling of its own owner, and only while freshly
+> connected.
 > The record is read nowhere on the auth path (`AGENT_BY_API_KEY_SQL` is
 > untouched) and by no delegation, enforcer, budget, signer-set or custody
 > decision: the superseded agent keeps its key, status and on-chain budget,

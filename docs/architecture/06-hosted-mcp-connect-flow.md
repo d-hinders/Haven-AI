@@ -121,11 +121,14 @@ A bare-pair `--replace` that retired a previous agent's directory reports the
 retired ids once its install completes
 ([#3772](https://github.com/d-hinders/Haven-AI/issues/3772)):
 `POST /agent-connection-setups/{setupId}/retired-agents`, authenticated by the
-NEW agent's API key only (a setup token is refused). Haven marks each of the
+NEW agent's API key only (a setup token is refused), and only within 30
+minutes of that setup's registration — a long-lived agent key cannot report
+later. Haven marks each of the
 same user's agents in the list — never the reporter — as superseded by it, and
 that agent's `GET /machine-payments/agent` and `/allowances` carry
 `superseded_by`, which `haven_get_agent` / `haven_get_allowances` render as a
-restart-and-remove warning. It is a warning and nothing else: the superseded
+restart-and-remove warning (null again once that replacement is revoked or
+archived, and each report is logged). It is a warning and nothing else: the superseded
 agent keeps its key, status and on-chain budget until the owner removes it, so
 the worst a misused report can do is warn any of its own owner's other
 agents — never another user's.

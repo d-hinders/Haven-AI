@@ -468,7 +468,7 @@ describe('AccountReads', () => {
         warning: `This agent was replaced on its machine by agent ${MARK.agent_id} at ${MARK.superseded_at}. ` +
           'This session is still running as the old agent: restart the agent runtime so it loads the new agent, ' +
           'and ask the user to remove this agent on its Haven agent page if it is no longer used — ' +
-          'it keeps its live budget until then.',
+          'it keeps any budget it still holds until then.',
         nextToolOmittedReason:
           "The next step is the user's: restart this session, and remove the superseded agent in the Haven dashboard. No Haven tool does either.",
       }

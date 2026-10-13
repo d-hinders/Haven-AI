@@ -98,4 +98,16 @@ describeDb('agent supersession (#3772, real DB)', () => {
     await db.query(`DELETE FROM agents WHERE id = $1`, [y])
     expect(await findAgentSupersession(x)).toBeNull()
   })
+
+  it.each([
+    ['revoked', `UPDATE agents SET status = 'revoked' WHERE id = $1`],
+    ['archived', `UPDATE agents SET archived_at = now() WHERE id = $1`],
+  ])('reads null while the replacement is %s (the warning would point at a dead agent)', async (_label, sql) => {
+    const user = await insertUser()
+    const x = await insertAgent(user)
+    const y = await insertAgent(user)
+    await markAgentsSuperseded({ userId: user, replacementAgentId: y, agentIds: [x] })
+    await db.query(sql, [y])
+    expect(await findAgentSupersession(x)).toBeNull()
+  })
 })

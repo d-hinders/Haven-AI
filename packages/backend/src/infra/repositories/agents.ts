@@ -1070,11 +1070,15 @@ export const MARK_AGENTS_SUPERSEDED_SQL = `UPDATE agents
         AND id <> $2
   RETURNING id`
 
-export const FIND_AGENT_SUPERSESSION_SQL = `SELECT superseded_by_agent_id, superseded_at
-   FROM agents
-  WHERE id = $1
-    AND superseded_by_agent_id IS NOT NULL
-    AND superseded_at IS NOT NULL`
+// The warning tells the agent to restart into its replacement, so a
+// replacement that has since been revoked or archived reads as no stamp.
+export const FIND_AGENT_SUPERSESSION_SQL = `SELECT a.superseded_by_agent_id, a.superseded_at
+   FROM agents a
+   JOIN agents r ON r.id = a.superseded_by_agent_id
+  WHERE a.id = $1
+    AND a.superseded_at IS NOT NULL
+    AND r.status <> 'revoked'
+    AND r.archived_at IS NULL`
 
 /**
  * Stamp `agentIds` as superseded by `replacementAgentId`. Scoped to `userId`

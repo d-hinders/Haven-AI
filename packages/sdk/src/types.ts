@@ -726,8 +726,8 @@ export interface HavenAgent {
    * #3772: non-null when a later `connect --replace` on this machine retired
    * this agent's directory and installed a replacement — the session reading
    * this is still running as the OLD agent. Warning only: nothing is paused or
-   * revoked, and the old agent keeps its live budget until the user removes
-   * it. Null when not superseded, and on an older backend that sends nothing.
+   * revoked, and the old agent keeps any budget it still holds until the user
+   * removes it. Null when not superseded, and on an older backend that sends nothing.
    */
   supersededBy: HavenAgentSupersession | null
 }

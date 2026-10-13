@@ -39,6 +39,8 @@ const SETUP_ROW = {
   user_id: USER_ID,
   agent_id: NEW_AGENT_ID,
   status: 'connected_local',
+  // Registered moments ago: inside the report window.
+  setup_token_consumed_at: new Date().toISOString(),
 }
 
 let markedWith: unknown[][] = []
@@ -112,6 +114,18 @@ describe.each([['enforce'], ['off']] as const)('POST /:setupId/retired-agents (#
     setupRow = null
     const unknown = await post({ retired_agent_ids: [X1] })
     expect(unknown.statusCode).toBe(401)
+    expect(markedWith).toEqual([])
+  })
+
+  it('409s once the report window after registration has closed, and writes nothing', async () => {
+    setupRow = { ...SETUP_ROW, setup_token_consumed_at: new Date(Date.now() - 31 * 60_000).toISOString() }
+    const late = await post({ retired_agent_ids: [X1] })
+    expect(late.statusCode).toBe(409)
+    expect(late.json()).toEqual({ error: 'The retired-agent report window for this setup has closed' })
+
+    setupRow = { ...SETUP_ROW, setup_token_consumed_at: null }
+    const unregistered = await post({ retired_agent_ids: [X1] })
+    expect(unregistered.statusCode).toBe(409)
     expect(markedWith).toEqual([])
   })
 

@@ -508,6 +508,8 @@ function AgentRow({
       })
     : null
 
+  const hasLastPaymentColumn = agent.status !== 'pending_approval' && Boolean(agent.stats)
+
   return (
     // #3910: one grid, two flows. Below `sm` the last-payment time sits on the
     // name line and the body (bar, caption, paused line) spans the row's full
@@ -517,7 +519,13 @@ function AgentRow({
     // it fits instead of "demo-merchant-…". The column renders once.
     <Link
       href={`/agents/${agent.id}`}
-      className="grid grid-cols-[2rem_minmax(0,1fr)_fit-content(40%)_1rem] items-center gap-x-3 px-5 py-3.5 transition-colors [grid-template-areas:'icon_name_time_chev'_'icon_body_body_chev'] hover:bg-[var(--v2-surface-hover)] sm:[grid-template-areas:'icon_name_time_chev'_'icon_body_time_chev']"
+      className={`grid grid-cols-[2rem_minmax(0,1fr)_fit-content(40%)_1rem] items-center gap-x-3 px-5 py-3.5 transition-colors hover:bg-[var(--v2-surface-hover)] ${
+        hasLastPaymentColumn
+          ? "[grid-template-areas:'icon_name_time_chev'_'icon_body_body_chev'] sm:[grid-template-areas:'icon_name_time_chev'_'icon_body_time_chev']"
+          : // No time cell (a setup row): the name and body span the empty
+            // column and its gap, or the badge wraps at 390 (#3910 review).
+            "[grid-template-areas:'icon_name_name_chev'_'icon_body_body_chev']"
+      }`}
     >
       {/* Robot mark matches the sidebar's "agents" icon so the dashboard and
           nav read as the same system (carried from the old section). */}
@@ -552,7 +560,7 @@ function AgentRow({
           The merchant shows from `sm` only (#3910): at 390 it truncated to a
           few characters, and it stays on the agent page. A setup row has
           nothing to say here yet. */}
-      {agent.status !== 'pending_approval' && agent.stats ? (
+      {hasLastPaymentColumn && agent.stats ? (
         <div data-testid="agent-row-last-payment" className="min-w-0 self-start text-right [grid-area:time] sm:self-center">
           {agent.stats.lastPaymentAt ? (
             <>

@@ -88,7 +88,7 @@ test('at 390 every agent row keeps its name whole beside the last-payment column
  * so a long merchant host shows in full where it fits. The fixture's own
  * hosts ("research.example", "Example Shop AB") already fit the old 7rem cap
  * and prove nothing, so this arm serves one agent a long host. Fails on the
- * 7rem cap: the merchant line was ~22% of the row.
+ * 7rem cap: the merchant line was ~24% of the row (112px of 474px).
  */
 test('from sm a long merchant host gets up to 40% of the row (1280)', async ({ page }) => {
   const body = JSON.parse(JSON.stringify(dashboardOverview)) as typeof dashboardOverview
@@ -119,7 +119,7 @@ test('from sm a long merchant host gets up to 40% of the row (1280)', async ({ p
     }
   })
   // Either the host shows whole, or the column took its share: ≥35% of the
-  // row (the 7rem cap gave ~23%). A wider Agents card that fits the host
+  // row (the 7rem cap gave ~24%). A wider Agents card that fits the host
   // whole must not fail this.
   expect(
     widths.whole || widths.merchant / widths.row >= 0.35,
@@ -158,4 +158,32 @@ test('at 390 the paused row body spans the row and the time sits on the name lin
   expect(m.ratio, 'the paused line does not span the row').toBeGreaterThanOrEqual(0.85)
   expect(m.topDelta, 'the time is not on the name line').toBeLessThanOrEqual(2)
   expect(m.merchantShown, 'the merchant is visible at 390').toBe(false)
+})
+
+/**
+ * #3910 design review: a setup row has no time cell. Its name now spans the
+ * empty column and that column's gap, so at 390 "Needs setup" stays on the
+ * name's line instead of wrapping under it (~20px taller row).
+ */
+test('at 390 a setup row\'s name line spans the empty time column', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.goto('/dashboard')
+  await dismissMobileSidebar(page)
+  const row = page
+    .locator('a[href="/agents/agent-e2e-pending"]')
+    .filter({ hasNot: page.getByTestId('agent-row-last-payment') })
+    .filter({ hasText: 'Connecting agent' })
+  await expect(row.getByText('Needs setup')).toBeVisible()
+  // Structural, so it holds whatever the font metrics: with no time cell the
+  // name line spans everything between the icon and the chevron except their
+  // two 12px gaps. On the old template the empty column kept a third gap,
+  // which on CI's Linux fonts wrapped "Needs setup" under the name.
+  const m = await row.evaluate((rowEl) => {
+    const icon = rowEl.firstElementChild as HTMLElement
+    const chev = rowEl.lastElementChild as Element
+    const nameLine = rowEl.querySelector('p') as HTMLElement
+    const span = chev.getBoundingClientRect().left - icon.getBoundingClientRect().right
+    return { span, name: nameLine.getBoundingClientRect().width }
+  })
+  expect(m.name, `name line ${m.name}px in a ${m.span}px span`).toBeGreaterThanOrEqual(m.span - 24 - 1)
 })

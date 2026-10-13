@@ -22,8 +22,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
   Only the retired directories are reported — never the coexisting agents
   `superseded_agent_ids` lists. Haven then warns the retired agent's own reads
   (`haven_get_agent` / `haven_get_allowances`), so a session still running as
-  it learns to restart. Best-effort: an older backend (404) or a failed call is
-  one log line and the outcome is unchanged. Nothing is paused or revoked.
+  it learns to restart. Best-effort: an older backend's 404 is ignored silently, any other
+  failure is one log line, and the outcome is unchanged. Nothing is paused or revoked.
 
 - `--doctor` and `--repair` accept `--name <slug>` and select the agent
   directory by its RECORDED MCP pair — one rule shared with `--rekey --name`

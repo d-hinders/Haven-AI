@@ -8,6 +8,8 @@ covers:
   - packages/frontend/src/components/ConnectAgentModal.tsx
   - packages/frontend/src/hooks/useAgentConnectionSetup.ts
   - packages/backend/src/routes/agent-connection-setups.ts
+  - packages/backend/src/routes/machine-payments.ts
+  - packages/backend/src/infra/repositories/agents.ts
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/rails/sweep.ts
@@ -125,8 +127,8 @@ that agent's `GET /machine-payments/agent` and `/allowances` carry
 `superseded_by`, which `haven_get_agent` / `haven_get_allowances` render as a
 restart-and-remove warning. It is a warning and nothing else: the superseded
 agent keeps its key, status and on-chain budget until the owner removes it, so
-the worst a misused report can do is warn one of the reporter's own owner's
-agents.
+the worst a misused report can do is warn any of its own owner's other
+agents — never another user's.
 
 Manual credential generation is a supported integration path for servers and
 hosted backends (#2482), surfaced as its own top-level disclosure in the

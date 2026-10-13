@@ -211,7 +211,7 @@ and the `release` skill.
 > `packages/connect/src/runtime.ts`. The change adds
 > `POST /agent-connection-setups/{setupId}/retired-agents` and, after a
 > completed `--replace`, one best-effort connector call to it (an older
-> backend's 404 is one log line). The setup, register and install-status flow
+> backend's 404 is ignored silently; any other failure is one log line). The setup, register and install-status flow
 > this document describes for the dev channel is unchanged, and no channel,
 > dist-tag, version-order or publish behaviour moves. Scope of this note: those
 > two files — nothing else in this document was re-verified.

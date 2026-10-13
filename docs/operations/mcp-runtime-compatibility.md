@@ -3267,8 +3267,8 @@ the ids it actually retired (never `superseded_agent_ids`) to
 `POST /agent-connection-setups/{setupId}/retired-agents` with the new agent's
 key; Haven records each as superseded by the new agent, and that agent's own
 `haven_get_agent` / `haven_get_allowances` then carry `supersededBy` with a
-restart-and-remove warning. Best-effort — an older backend's 404 or a failed
-call is one log line, and the outcome carries no new key); and since #2528, also
+restart-and-remove warning. Best-effort — an older backend's 404 is ignored
+silently, any other failure is one log line, and the outcome carries no new key); and since #2528, also
 additive, `approval.url` — the absolute link to
 this setup's budget approval, echoed from the register response and present
 only when `approval.required` is true AND the backend is new enough to return

@@ -458,8 +458,8 @@ revoked. Separately, since #3772 a run that retired at least one directory tells
 Haven which ones (`POST /agent-connection-setups/{setupId}/retired-agents`, with
 the new agent's key, `retired_agent_ids` only), so a session still running as a
 retired agent sees a `supersededBy` warning on its own `haven_get_agent` /
-`haven_get_allowances`. That report is best-effort — an older backend or a
-failed call is one log line — and it still pauses and revokes nothing.
+`haven_get_allowances`. That report is best-effort — an older backend's 404 is
+ignored silently and any other failure is one log line — and it still pauses and revokes nothing.
 
 A `wiring_collision` refusal (a non-interactive bare setup over a live
 previous agent, #2551) carries `error.superseded_agent_ids` and

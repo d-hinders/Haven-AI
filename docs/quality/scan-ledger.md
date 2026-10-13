@@ -1384,7 +1384,7 @@ disposition. None is re-surfaced. Deltas are in the coverage record below;
 none worsened materially.
 
 **Structural finding (pending owner decision):**
-- S1 — whether a budget is live is decided at about thirty sites with three
+- S1 — whether a budget is live is decided at about forty sites with three
   different answers, and the one shared predicate is four days old and
   reaches seven of them.
   - Three tables hold spend authority (delegations, task budgets, sub
@@ -1398,8 +1398,8 @@ none worsened materially.
     merchant funding picker. Task and sub budgets have no helper: 10 SQL
     expiry sites against an app clock, 2 of them payment selectors with no
     production caller while TypeScript copies decide.
-  - 11 pairs of sites classify the same row differently; 7 are verdict
-    conflicts on one row. Two proven by execution on the real database: an
+  - 11 pairs of sites classify the same row differently (enumerated with
+    file:line in the report); 7 are verdict conflicts on one row. Two proven by execution on the real database: an
     expired `active` delegation returns 0 rows from the budget view and
     counts 1 in `live_delegation_count` (no budget, yet cannot be archived or
     revoked); an expired `open` received grant reads `open = true` for the
@@ -1410,7 +1410,8 @@ none worsened materially.
     fixed at that site; the #3615 resolver (the 10-03 S1) consolidated which
     delegation the pre-check reads and still reads liveness through the
     inline by-hash SQL and the task/sub TypeScript predicates. No open issue
-    names the predicate (semantic search → the four closed fixes only).
+    names the predicate (semantic search → two of the fixes and two unrelated
+    issues).
   - Five slices: name the two delegation sets in one module and adopt the
     spendable one at the inline copies and the list route; one predicate per
     table for task and sub budgets with one clock; liveness on the wire
@@ -1423,12 +1424,12 @@ none worsened materially.
   shape (the evidence module passes no delegation hash or nonce) while the
   passive sweep attributes by the derived nonce since #3888; the writer's own
   comment names the residual. Hypothesis, no incident. One PR.
-- C2 — the 2026-10-03 scan report never landed: the entry above links a path
+- C2 — the 2026-10-03 scan report never landed: the entry above names a path
   absent from the tree ten days after the owner's decision, so #3615's
-  file:line evidence and that run's two undecided candidates are recoverable
-  only outside the repository. One docs PR.
+  file:line evidence and that run's one still-undecided candidate (its C1)
+  are recoverable only outside the repository. One docs PR.
 - C3 — block-1 survivor: removing the `merchant_settlement_tx_hash IS NULL`
-  compare-and-set left 56 / 56 green. Diagnosis: *not load-bearing at the
+  compare-and-set left 76 / 76 green across the five suites that reach it. Diagnosis: *not load-bearing at the
   tested condition* — the writer pre-reads under an advisory lock keyed by
   the hash, so only a two-different-hashes-one-payment race reaches the
   clause, and the one concurrency test drives the opposite race. One PR (a
@@ -1461,7 +1462,8 @@ closed 2026-09-20 and 2026-09-17 F1 → #3105 closed 2026-09-20 → `shipped`.
   candidate files over 4 of the last 20 landings. 5 mutations, one per file,
   newest landing first → **4 caught** (supersession read 2 red of 98;
   verified-settlement outranking 1 of 28; dismissal user scoping 1 of 15,
-  real DB; SDK supersession mapping 1 of 58), **1 survivor** (C3, diagnosed).
+  real DB; SDK supersession mapping 1 of 58), **1 survivor** (C3, diagnosed;
+  76 / 76 green under the mutation).
   26 census files not mutated (budget is 5).
 - block 2 (`covers:` completeness) → examined. The reference loop under bash
   with `set -f`, each miss confirmed with the strict gate → 18 across 6 of 8
@@ -1469,7 +1471,8 @@ closed 2026-09-20 and 2026-09-17 F1 → #3105 closed 2026-09-20 → `shipped`.
   strings. `npm run docs:covers-gaps` → 130 pairs / 35 docs (10-03: 134 / 36).
 - block 3 (stale numbers) → partial. Positive control 3 / 3. The 25 newest
   shards → 20 figure lines, 6 with a command (10-03: 1 / 0). `any` 30 → 37
-  (code lines 10 → 16). db-mock gauge 54 / 270 / 57 (unchanged). Guard
+  (lines not led by a comment marker 16, about 6 of them prose; no code-line
+  delta claimed). db-mock gauge 54 / 270 / 57 (unchanged). Guard
   scripts 69 (09-15: 49); non-spawning self-tests 23 of 71 (09-15: 20). zod 0.
 - block 4 (retired vocabulary) → examined. Positive control 36 shards. 195
   files, 46 historical / 149 live (10-03: 194 / 46 / 148). Ratchet green,
@@ -1489,10 +1492,13 @@ closed 2026-09-20 and 2026-09-17 F1 → #3105 closed 2026-09-20 → `shipped`.
 - workflow archaeology → `ci.yml` newest 100 → 77 / 15 / 8; 13 with attempt
   > 1 (all feature branches); `dev` 35 → 30 / 1 / 4, the failure the #3886
   golden skew; failing jobs: visual 7, MCP server 3, browser smoke 3, backend
-  1, CI-config 1. qa-dev at the `money-flow` job level → 25 newest runs: ran
-  10 / 10 success, 15 gate-skipped; attempt-2 passes 0 of 5 logs; scheduled
-  runs 30 → 4 failures (3 wallet preflight 10-02..10-04, 1 backend 09-24),
-  nine green days since #3631.
+  1, CI-config 1. qa-dev at the `money-flow` job level → 60 newest runs all
+  `success` at run level, so 0 `money-flow` failures; of the 25 newest created
+  at or before 2026-10-13T15:42Z, `money-flow` ran in 5 (5 success) and was
+  gate-skipped in 20; attempt-2 passes 0 of 5 logs; 31 scheduled runs 09-13
+  → 10-13 → 4 failures (3 wallet preflight 10-02..10-04, 1 backend 09-24),
+  nine green days since #3631. *Corrected in review:* first written as "25
+  looked up, 10 ran" from a hand-chosen run set.
 - comment archaeology → TODO / FIXME / HACK / XXX → 0 (control `import` →
   1,994 files).
 - live exercise → not taken.

@@ -43,7 +43,8 @@ last-verified: "2026-10-13"
 
 Scope (owner request 2026-10-13, "do a quality scan", no scope named): the
 whole repository, weighted toward the 159 first-parent landings on `dev` since
-the 2026-10-03 scan (the dashboard redesign epics, the EIP-3009 settlement
+the 2026-10-03 scan (`git rev-list --first-parent --count b00d75bd7..641f527d`
+→ 159) (the dashboard redesign epics, the EIP-3009 settlement
 wave, the connect pair-naming wave, the Gnosis removal, two releases) and
 toward the surfaces those landings touched most: the budget tables and their
 readers, the x402 settlement evidence seams, CI.
@@ -63,7 +64,7 @@ disposition. The re-measurable deltas are in §5. None worsened materially.
 
 ## 1. Structural finding
 
-### S1 — whether a budget is live is decided at about thirty sites with three different answers, and the one shared predicate is four days old and reaches seven of them
+### S1 — whether a budget is live is decided at about forty sites with three different answers, and the one shared predicate is four days old and reaches seven of them
 
 **Claim.** Three tables hold spend authority — `agent_delegations`,
 `agent_task_budgets`, `agent_sub_budgets` — and every reader decides for
@@ -102,7 +103,7 @@ moment, and two were reproduced here by execution against the real database.
   `packages/cli/src/commands.ts:1088`. It drives `live_delegation_count`, the
   archive guard, the account-delete guard and the CLI revoke gate.
 - A third, status-only or no predicate at all: the budget list route
-  `packages/backend/src/routes/agent-delegations.ts:258` returns every status
+  `packages/backend/src/routes/agent-delegations.ts:262` returns every status
   and gates its chain-remaining read on `status === 'active'` alone
   (`:278`, `:286`); the dashboard's received-sub-budget read
   `packages/backend/src/infra/repositories/dashboard.ts:365` is
@@ -130,10 +131,28 @@ moment, and two were reproduced here by execution against the real database.
   rows render "ends" from expiry alone, so a `closed` row with a future
   expiry reads as live (`DelegationBudgetCard.tsx:851,876`).
 - Disagreement pairs: **11**, of which **7** are verdict conflicts on the same
-  row (the census's P1, P2, P3, P5, P6, P9, P12; the other four are clock,
-  `start_date` and naming differences). Two were proven by execution on the
-  real database with a temporary repository test (seed, call the repo's own
-  SQL, assert, delete the file):
+  row (P1, P2, P3, P5, P6, P9, P12 below; P4, P7, P8 and P11 are naming,
+  clock, `start_date` and dead-copy differences). Each pair, with the sites
+  that disagree:
+
+  | # | one site says | the other says | kind |
+  |---|---|---|---|
+  | P1 | `routes/agent-delegations.ts:262` lists every status; `:278`, `:286` read chain remaining for `status === 'active'` with no expiry | `delegation-budgets.ts:106-108` drops an expired `active` row | verdict |
+  | P2 | `FundMerchantModal.tsx:173` picks a budget on `status === 'active'` alone | `DelegationBudgetCard.tsx:312-314`, `sub-budget.ts:133` require `expires_at > now` | verdict |
+  | P3 | `dashboard.ts:365` `(asb.status = 'open') AS open` | `sub-budgets.ts:184` `status = 'open' AND expires_at > $2` | verdict (proven) |
+  | P4 | `sub-budgets.ts:184` "open" = open and unexpired | `sub-budgets.ts:254-260` "open" = `open` or `closing`, no expiry; `dashboard.ts:365` status only | naming |
+  | P5 | `task-budgets.ts:139` drops an expired `closing` task row (since `2dd8a91d`) | `sdk/src/account-reads.ts:360` keeps `closing` whatever its expiry | verdict |
+  | P6 | `sub-budgets.ts:218` lists `closing` for signature regardless of expiry | `sub-budget-service.ts:267-268` says an expired `closing` row needs no signature; `:363` serves a sign context for `closing` with no expiry check | verdict |
+  | P7 | `delegation-budgets.ts:108`, `:307-308` compare against the database clock | `task-budgets.ts:128` and the other nine task/sub sites compare against an app-clock parameter | clock |
+  | P8 | `delegation-budgets.ts:307`, `:384`, `:421-431` require `start_date <= now` | `delegation-budgets.ts:106-108`, `:684-685` do not | `start_date` |
+  | P9 | `agents.ts:320` counts `('pending','active','replaced')` with no expiry | `delegation-budgets.ts:106-108` returns only unexpired `active` rows | verdict (proven) |
+  | P11 | `task-budgets.ts:271`, `sub-budgets.ts:409` payment selectors (no production caller) | `task-budget-service.ts:131`, `sub-budget-service.ts:182` decide in TypeScript | dead copy |
+  | P12 | `DelegationBudgetCard.tsx:851`, `:876` render "ends" from expiry alone | the tree payload carries `closed` rows (`sub-budgets.ts:304-322`, no status filter) | verdict |
+
+  (The census's P10 — the CLI and dialog copies of the LIVE set agree with the
+  SQL constant — is an agreement, not a pair.) Two pairs were proven by
+  execution on the real database with a temporary repository test (seed,
+  call the repo's own SQL, assert, delete the file):
   - **P9** — one `active` delegation with `expires_at = now − 60`:
     `listActiveDelegations([agentId])` → 0 rows; the `live_delegation_count`
     subquery from `agents.ts:320` → **1**. The agent "has no budget" and
@@ -160,7 +179,8 @@ resolver still reads liveness through the inline by-hash SQL
 (`packages/backend/src/modules/budget-scope/resolver.ts:242,271`) and the
 task and sub TypeScript predicates. No open issue names the predicate
 itself: a semantic issue search for a shared budget-liveness predicate returns
-only the four closed fixes.
+two of the fixes above (#3773, #3802) and two unrelated issues, and no issue
+for the predicate.
 
 **Why the bar is met.** Structural (a pattern, not a defect list); measured;
 costed by the issue record and by the fix shape (one predicate, eleven files);
@@ -199,7 +219,7 @@ can start now; 5 lands last.
 
 ### C1 — the agent-reported EIP-3009 merchant settlement hash is attributed by shape, while the nonce proof the sweep uses since #3888 sits one call away
 
-- **Observed.** `packages/backend/src/modules/x402/eip3009-settlement-evidence.ts:35`
+- **Observed.** `packages/backend/src/modules/x402/eip3009-settlement-evidence.ts:130-139`
   verifies a reported hash for existence, status, block window and an exact
   delegate→merchant `Transfer`, and passes no delegation hash or nonce, so
   *which payment* the transfer settled rests on the agent's `payment_id`.
@@ -224,14 +244,15 @@ can start now; 5 lands last.
   transfer is reported against the wrong payment id and is refused with the
   attribution reason, and the right one recorded.
 
-### C2 — the 2026-10-03 scan report never landed, and the ledger links a path that is not in the tree
+### C2 — the 2026-10-03 scan report never landed, and the ledger names a path that is not in the tree
 
 - **Observed.** The ledger's 2026-10-03 entry says the full report "is held
   outside the repo until the owner decides"; the owner decided the same day
   (epic #3615, five slices, all closed). `ls docs/bug-reports | grep
-  2026-10-03` → nothing at `641f527d`. The entry is path-free by convention,
-  so the file:line evidence behind #3615's S1 and behind its two undecided
-  candidates (C1, C2 of that run) is recoverable only outside the repository.
+  2026-10-03` → nothing at `641f527d`. The entry carries the path and no
+  file:line evidence of its own, so the evidence behind #3615's S1 and behind
+  that run's one still-undecided candidate (its C1; its C2 shipped via #3624,
+  §4) is recoverable only outside the repository.
 - **Expected benefit.** `new-task` sweeps the bug reports as prior art before
   filing; a reader rediscovering either 10-03 candidate live will file a
   sibling.
@@ -244,8 +265,10 @@ can start now; 5 lands last.
 - **Observed by execution.** Removing
   `AND target.machine_metadata->>'merchant_settlement_tx_hash' IS NULL` from
   `RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL`
-  (`x402-authorizations.ts:493`) left the three suites that reach it green:
-  **56 / 56** (sweeper, evidence, repository). Diagnosis: *not load-bearing at
+  (`x402-authorizations.ts:493`) left every suite that reaches it green:
+  **56 / 56** across the sweeper, evidence and repository suites, and
+  **20 / 20** across the two outcome-handler suites the independent review
+  added (76 / 76 in all). Diagnosis: *not load-bearing at
   the tested condition*. The writer pre-reads the recorded hash inside a
   transaction that holds an advisory lock keyed by the **hash**
   (`x402-authorizations.ts:529-536`), so a same-hash race serialises and the
@@ -275,7 +298,7 @@ can start now; 5 lands last.
   failures in the 3.5-day window (advisory on `dev` by owner decision on
   #3231); #3871 and #3872 (nondeterministic baselines) were fixed 2026-10-10.
   Tracked, decided; not proposed.
-- The hosted tools/list golden (#3817, landed 2026-10-10 03:35Z) went red on
+- The hosted tools/list golden (#3817, merged 2026-10-10 04:46Z) went red on
   `dev` the same morning when a green PR crossed it (#3886): `dev` does not
   require up-to-date branches (owner step O1), and #3890 shipped a watcher
   rather than a gate. One incident; context, not a finding. There are now 11
@@ -290,12 +313,18 @@ can start now; 5 lands last.
 
 ## 3. Context for tracked work (not new items)
 
-- **qa-dev is healthy at the job level.** Of the 25 newest runs looked up,
-  `money-flow` ran 10 times (10 success, 0 failure), 15 were gate-skipped; 0
-  of the 5 newest success logs carry `passed on attempt 2/2`. The scheduled
-  runs show 4 failures in 30 days: 10-02, 10-03, 10-04 all at the QA-wallet
-  balance preflight, and 09-24 a backend 502. #3631 (daily balance check)
-  shipped 10-05; nine green scheduled days since.
+- **qa-dev is healthy at the job level.** The 60 newest runs
+  (2026-10-12T10:59Z → 10-13T15:44Z) all concluded `success` at run level, and
+  a `money-flow` job failure fails its run, so `money-flow` failed in none of
+  the 60. Of the 25 newest runs created at or before 2026-10-13T15:42Z,
+  `money-flow` ran in **5** (5 success) and was gate-skipped in **20** (the
+  gate dedups by deployment SHA; read per run from each run's jobs list).
+  Every success log read (5) says `passed on attempt 1/2`; none carries
+  `attempt 2/2`. The 31 scheduled runs from 09-13 to 10-13 show 4 failures:
+  10-02, 10-03, 10-04 all at the QA-wallet balance preflight, and 09-24 a
+  backend 502. #3631 (daily balance check) shipped 10-05; nine green
+  scheduled days since. *Corrected in review:* first written as "25 looked
+  up, 10 ran", a hand-chosen run set with no command.
 - **The dashboard redesign cluster** — 39 of the 138 issues filed since
   10-03, including four "match the mockup" re-fixes between 10-12 and 10-13
   (#3897, #3908, #3910, #3912) — is runtime-UX surfaced by the owner's own
@@ -339,7 +368,8 @@ can start now; 5 lands last.
   - M3 `attention-dismissals.ts` user scoping on the backup-signer insert
     dropped: **caught**, 1 red of 15 (real DB).
   - M4 `x402-authorizations.ts:493` CAS clause → `AND TRUE`: **survived**,
-    56 / 56 green — diagnosed in C3.
+    56 / 56 green (76 / 76 with the two suites the review added) — diagnosed
+    in C3.
   - M5 `sdk/account-reads.ts:103` supersession mapping → always null:
     **caught**, 1 red of 58.
   - Every restore byte-identical (`cmp`); 26 census files not mutated (budget
@@ -357,7 +387,10 @@ can start now; 5 lands last.
   newest shards (`2026-10-08-3781` … `2026-10-13-3772`) → **20**
   figure-bearing lines, **6** with a command (10-03: 1 / 0 — the release
   record and verification notes now quote their commands); `any` → 37 (10-03:
-  30), code lines 16 (10); db-mock gauge 54 / 270 / 57 (unchanged); guard
+  30); lines not led by a comment marker → 16
+  (`rg -n ': any\b|as any' packages/*/src --type ts -g '!*test*' | rg -v ':[0-9]+:\s*(//|\*|/\*)' | wc -l`),
+  of which about 6 are string or JSX prose, so the 10-03 "code lines 10" is
+  not comparable and no delta is claimed; db-mock gauge 54 / 270 / 57 (unchanged); guard
   scripts 69 (09-15: 49), non-spawning self-tests 23 of 71 (09-15: 20 — the
   `|guard-cli` term included); zod in backend 0. The 09-08 refusal-bearing
   count not re-taken.
@@ -390,7 +423,8 @@ can start now; 5 lands last.
   all feature branches; `dev` runs 35 → 30 / 1 / 4, the one failure the
   #3886 golden skew. Failing jobs over the 13 determinable failures: visual 7,
   MCP server 3, browser smoke 3, backend 1, repo-CI-config 1. qa-dev read at
-  the `money-flow` job level (§3).
+  the `money-flow` job level (§3); 31 scheduled runs 09-13 → 10-13, 4
+  failures.
 - **comment archaeology** → `git grep -c -w -E 'TODO|FIXME|HACK|XXX' -- 'packages/*/src/*'`
   → 0 (control `import` → 1,994 files).
 - **live exercise** → not taken.

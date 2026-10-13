@@ -308,6 +308,11 @@ from branches; `@haven_ai/core` is workspace-private.
   production release, including a promotion that moves no version and publishes
   nothing, and its closeout covers production and not only npm;
   [`scripts/README.md`](scripts/README.md) has the full rationale.
+- The one-page release checklist — ask an agent session to release, approve,
+  hold `dev`, click Merge, verify tags, migrations and the real-payment
+  canary — is
+  [`docs/operations/release-checklist.md`](docs/operations/release-checklist.md);
+  every step on it can be done by any of the three maintainers (#3798).
 
 ## UI Surface Hierarchy
 

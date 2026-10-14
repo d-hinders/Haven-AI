@@ -23,7 +23,7 @@ import PasskeyElsewhereHint from './PasskeyElsewhereHint'
 import EditBudgetModal from './EditBudgetModal'
 import IssueSubBudgetModal from './IssueSubBudgetModal'
 import ConfirmDialog from './ConfirmDialog'
-import { delegationIsLive, eligibleSubBudgetParents, subBudgetStillRunning } from '@/lib/sub-budget'
+import { delegationIsLive, eligibleSubBudgetParents, subBudgetEndLabel } from '@/lib/sub-budget'
 import { Card } from './ui/Card'
 import { Skeleton } from './ui/Skeleton'
 import { Button } from './ui/Button'
@@ -838,6 +838,12 @@ function TaskBudgetRow({ taskBudget, tokens }: { taskBudget: TaskBudget; tokens:
   )
 }
 
+/** "ends in 3d" / "ended" / "closed" for a sub-budget row (#3923: closed wins). */
+function subBudgetEndText(b: { is_live?: boolean; status: string; expires_at: number }): string {
+  const label = subBudgetEndLabel(b)
+  return label === 'ends' ? `ends ${timeUntil(b.expires_at * 1000)}` : label
+}
+
 /**
  * One sub-budget tree (#3330): the parent agent's own narrowing row with the
  * grants to sub-agents nested under it. Reuses the `Row` primitive (the
@@ -850,7 +856,7 @@ function SubBudgetTreeRow({ tree, tokens }: { tree: SubBudgetTree; tokens: Token
   const amount = t ? formatUnits(BigInt(parent.period_amount_atomic), t.decimals) : parent.period_amount_atomic
   const parentParts = [
     `${amount} ${t?.symbol ?? ''}`.trim(),
-    subBudgetStillRunning(parent) ? `ends ${timeUntil(parent.expires_at * 1000)}` : 'ended',
+    subBudgetEndText(parent),
   ]
   if (parent.recipient_address) parentParts.push(`to ${truncateAddress(parent.recipient_address)}`)
   if (parent.status === 'pending') parentParts.push('waiting for signature')
@@ -874,7 +880,7 @@ function SubBudgetGrantRow({ grant, tokens }: { grant: SubBudgetTree['grants'][n
   const amount = t ? formatUnits(BigInt(grant.period_amount_atomic), t.decimals) : grant.period_amount_atomic
   const parts = [
     `up to ${amount} ${t?.symbol ?? ''}`.trim(),
-    subBudgetStillRunning(grant) ? `ends ${timeUntil(grant.expires_at * 1000)}` : 'ended',
+    subBudgetEndText(grant),
   ]
   // #3506: a freshly issued slice is pending until the sharing agent signs.
   if (grant.status === 'pending') parts.push('waiting for signature')

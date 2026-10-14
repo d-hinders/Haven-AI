@@ -165,3 +165,17 @@ export function subBudgetStillRunning(
   // — which also covers a row from a backend that predates `is_live`.
   return b.is_live === true || b.status !== 'closed'
 }
+
+/**
+ * The word a sub-budget row shows beside its amount (#3923): `closed` when the
+ * row is closed — status wins over expiry, a closed grant with a future expiry
+ * is not "ends in 7 days" — otherwise `ends` while it is still running
+ * ({@link subBudgetStillRunning}) and `ended` once it is not.
+ */
+export function subBudgetEndLabel(
+  b: { is_live?: boolean; status: string; expires_at: number },
+  nowSec: number = Date.now() / 1000,
+): 'ends' | 'ended' | 'closed' {
+  if (b.status === 'closed') return 'closed'
+  return subBudgetStillRunning(b, nowSec) ? 'ends' : 'ended'
+}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   subBudgetStillRunning,
+  subBudgetEndLabel,
   delegationIsLive,
   expiryDateToUnixSeconds,
   parseSubBudgetAmount,
@@ -134,6 +135,28 @@ describe('subBudgetStillRunning (#3922)', () => {
   it('a backend that sends no is_live: an open, unexpired row still runs', () => {
     expect(subBudgetStillRunning({ status: 'open', expires_at: ahead }, NOW)).toBe(true)
     expect(subBudgetStillRunning({ status: 'closed', expires_at: ahead }, NOW)).toBe(false)
+  })
+})
+
+// #3923 P12: status wins over expiry for a closed row.
+describe('subBudgetEndLabel (#3923)', () => {
+  const NOW = 1_800_000_000
+  const ahead = NOW + 3600
+  const past = NOW - 1
+  it('a closed row reads "closed" whatever its expiry', () => {
+    expect(subBudgetEndLabel({ is_live: false, status: 'closed', expires_at: ahead }, NOW)).toBe('closed')
+    expect(subBudgetEndLabel({ is_live: false, status: 'closed', expires_at: past }, NOW)).toBe('closed')
+    expect(subBudgetEndLabel({ status: 'closed', expires_at: ahead }, NOW)).toBe('closed')
+  })
+  it('a running row reads "ends": live, pending or closing with a future expiry', () => {
+    expect(subBudgetEndLabel({ is_live: true, status: 'open', expires_at: ahead }, NOW)).toBe('ends')
+    expect(subBudgetEndLabel({ is_live: false, status: 'pending', expires_at: ahead }, NOW)).toBe('ends')
+    expect(subBudgetEndLabel({ is_live: false, status: 'closing', expires_at: ahead }, NOW)).toBe('ends')
+  })
+  it('an expired non-closed row reads "ended"', () => {
+    expect(subBudgetEndLabel({ is_live: false, status: 'pending', expires_at: past }, NOW)).toBe('ended')
+    expect(subBudgetEndLabel({ is_live: false, status: 'closing', expires_at: past }, NOW)).toBe('ended')
+    expect(subBudgetEndLabel({ is_live: true, status: 'open', expires_at: past }, NOW)).toBe('ended')
   })
 })
 

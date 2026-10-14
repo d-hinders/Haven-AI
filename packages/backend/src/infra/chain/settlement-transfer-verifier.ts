@@ -77,6 +77,30 @@
  * because the caller's ambiguity guard is narrowed only for a settlement that
  * was actually bound this way.
  *
+ * ## Check 9 — WHICH EIP-3009 authorization was burned (#3925)
+ *
+ * The eip3009 twin of check 8, and the sweep's own standard (#3888) extended
+ * to every merchant-settlement record: an optional
+ * `expectedAuthorizationUsed: { authorizer, nonce }` on the expected shape
+ * makes the token's own `AuthorizationUsed` log in THIS transaction's receipt
+ * part of the verdict. Runs BEFORE the transfer scan, for the same reason
+ * check 8 does — the chain's attribution key outranks transfer shape:
+ *
+ * - `(authorizer, nonce)` present → verified with `nonceBound: true`.
+ * - The token burned other nonce(s) for this authorizer → `mismatch` with
+ *   `authorizationUsedNonces`, so the caller can tell a mere wrong-nonce
+ *   report from one that settles ANOTHER payment's derived nonce.
+ * - No `AuthorizationUsed` from the token for this authorizer at all →
+ *   `mismatch`: USDC's `transferWithAuthorization` /
+ *   `receiveWithAuthorization` always emit it, so its absence means this is
+ *   not an EIP-3009 settlement at all.
+ *
+ * The authorizer and nonce are the CALLER's to derive: the agent-reported
+ * path takes them from the posted X-PAYMENT header's own authorization
+ * (signer-checked against the delegate before use), the passive sweep from
+ * `deriveX402PaymentNonce(payment_id)`. Both name the same fact: the
+ * transaction burned a nonce provably bound to THIS payment.
+ *
  * ## What is deliberately NOT checked, and why
  *
  * - **The DelegationManager CALLDATA.** Check 8 reads the manager's own EVENT,
@@ -116,6 +140,10 @@ import { ethers } from 'ethers'
 import { getProvider } from '../../infra/chain/relayer-reads.js'
 import { getDelegationContracts } from '../../rails/delegation-contracts.js'
 import { delegationHashFromLog } from './redeemed-delegation-scanner.js'
+// #3925: the same event decoder the sweep's forward scan uses, so the two
+// attribution directions can never drift apart on what an `AuthorizationUsed`
+// log means (mirrors the #2117 sharing of `delegationHashFromLog`).
+import { AUTHORIZATION_USED_IFACE } from './authorization-used-scanner.js'
 
 const ERC20_TRANSFER_IFACE = new ethers.Interface([
   'event Transfer(address indexed from, address indexed to, uint256 value)',
@@ -182,6 +210,17 @@ export interface ExpectedSettlementTransfer {
    * pre-#2092 row) leaves the verdict at checks 1–7.
    */
   delegationHash?: string | null
+  /**
+   * #3925: the EIP-3009 nonce this payment's settlement is expected to burn,
+   * with the delegate that burned it. When present, check 9 requires the
+   * receipt to carry the token's own `AuthorizationUsed(authorizer, nonce)`
+   * log — the sweep's attribution proof (#3888), now required of every
+   * merchant-settlement record. Mirrors `delegationHash` above: conditional,
+   * so callers that cannot name a nonce (none today — the agent path derives
+   * it from the posted X-PAYMENT header, the sweep from the payment id) leave
+   * the verdict at the earlier checks.
+   */
+  expectedAuthorizationUsed?: { authorizer: string; nonce: string }
 }
 
 export type SettlementVerification =
@@ -190,14 +229,22 @@ export type SettlementVerification =
    * check 8 also ran and matched — i.e. whether the pinned DelegationManager
    * itself named THIS intent's child. Only a bound settlement may be treated
    * as attributable to one intent rather than to any look-alike of it.
+   * `nonceBound` reports the same for check 9 (#3925): whether the token's own
+   * `AuthorizationUsed` log names the expected `(authorizer, nonce)`.
    */
-  | { outcome: 'verified'; delegationBound: boolean }
+  | { outcome: 'verified'; delegationBound: boolean; nonceBound?: boolean }
   /** Unknown hash, or not mined yet on this chain. Retryable. */
   | { outcome: 'not_found'; reason: string }
   /** Mined and reverted. Permanent — nothing settled. */
   | { outcome: 'reverted'; reason: string }
-  /** Mined and successful, but it is not this payment. Permanent. */
-  | { outcome: 'mismatch'; reason: string }
+  /**
+   * Mined and successful, but it is not this payment. Permanent. When the
+   * refusal is check 9's, `authorizationUsedNonces` carries every nonce the
+   * token reports burning for the expected authorizer — the caller needs them
+   * to tell "wrong nonce, this payment" from "settles ANOTHER payment"
+   * (#3925).
+   */
+  | { outcome: 'mismatch'; reason: string; authorizationUsedNonces?: string[] }
   /** The chain could not be reached. NOT a verdict — retryable. */
   | { outcome: 'rpc_unavailable'; reason: string }
 
@@ -282,6 +329,64 @@ export async function verifySettlementTransferTx(
     // route that does not surface one.
   }
 
+  // ── Check 9 (#3925): WHICH EIP-3009 authorization this settlement burned ─
+  // The same principle as check 8, one rail over: runs BEFORE the transfer
+  // scan so a transaction that demonstrably burned someone else's nonce is
+  // refused on the chain's own attribution key rather than on transfer shape.
+  // The token's `AuthorizationUsed(authorizer, nonce)` log is the proof the
+  // passive sweep has always been held to (#3888); requiring it of the
+  // agent-reported path too is what closes the same-shaped-sibling residual.
+  //
+  // Three outcomes, mirroring the issue's three receipt cases:
+  // (a) the expected `(authorizer, nonce)` is present → `nonceBound: true`;
+  // (b) the token burned OTHER nonce(s) for this authorizer → mismatch with
+  //     `authorizationUsedNonces` so the caller can name a stolen sibling;
+  // (c) no `AuthorizationUsed` from the token for this authorizer at all →
+  //     not an EIP-3009 settlement (USDC's transferWithAuthorization /
+  //     receiveWithAuthorization always emit it).
+  let nonceBound = false
+  if (expected.expectedAuthorizationUsed) {
+    const tokenLower = expected.tokenAddress.toLowerCase()
+    const authorizerLower = expected.expectedAuthorizationUsed.authorizer.toLowerCase()
+    const nonceLower = expected.expectedAuthorizationUsed.nonce.toLowerCase()
+    const burned: string[] = []
+    for (const log of receipt.logs) {
+      if (log.address.toLowerCase() !== tokenLower) continue
+      let parsed: ethers.LogDescription | null = null
+      try {
+        parsed = AUTHORIZATION_USED_IFACE.parseLog({ topics: [...log.topics], data: log.data })
+      } catch {
+        continue // not an AuthorizationUsed event on this contract
+      }
+      if (parsed?.name !== 'AuthorizationUsed') continue
+      if ((parsed.args.authorizer as string).toLowerCase() !== authorizerLower) continue
+      const burnedNonce = (parsed.args.nonce as string).toLowerCase()
+      if (burnedNonce === nonceLower) {
+        nonceBound = true
+        break
+      }
+      burned.push(burnedNonce)
+    }
+    if (!nonceBound) {
+      return burned.length > 0
+        ? {
+            outcome: 'mismatch',
+            authorizationUsedNonces: burned,
+            reason:
+              `Transaction ${txHash} burned AuthorizationUsed nonce(s) ${burned.join(', ')} for this ` +
+              `delegate, not the reported authorization's ${expected.expectedAuthorizationUsed.nonce} — ` +
+              `the nonce does not match the reported authorization`,
+          }
+        : {
+            outcome: 'mismatch',
+            reason:
+              `Transaction ${txHash} carries no ${expected.tokenAddress} AuthorizationUsed for ` +
+              `${expected.expectedAuthorizationUsed.authorizer} — not an EIP-3009 settlement of this ` +
+              `delegate's authorization`,
+          }
+    }
+  }
+
   const token = expected.tokenAddress.toLowerCase()
   const from = expected.fromAddress.toLowerCase()
   const to = expected.toAddress.toLowerCase()
@@ -304,7 +409,7 @@ export async function verifySettlementTransferTx(
     if ((parsed.args.from as string).toLowerCase() !== from) continue
     if ((parsed.args.to as string).toLowerCase() !== to) continue
     if ((parsed.args.value as bigint) !== amount) continue
-    return { outcome: 'verified', delegationBound }
+    return { outcome: 'verified', delegationBound, nonceBound }
   }
 
   return {

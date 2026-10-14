@@ -66,15 +66,21 @@
  * implemented: a nonce-proven attribution does NOT override an earlier
  * agent-reported hash on a same-shaped sibling payment.
  * `observeEip3009MerchantSettlement` answers `hash_taken`, the tick logs it
- * loudly and records nothing — the agent-reported record is shape-verified
- * client input that already passed its own guards, and silently rewriting
- * recorded evidence is not a decision this module takes for itself.
+ * loudly and records nothing — the agent-reported record is nonce-proven
+ * client input (since #3925: its header's authorization is signature-checked
+ * against the delegate) that already passed its own guards, and silently
+ * rewriting recorded evidence is not a decision this module takes for itself.
  *
  * ## Residuals
  *
  * - A signer older than #3888 drew random nonces; those settlements stay
- *   unattributable here (the status read and the agent-reported path are
- *   unchanged for them) — exactly today's behaviour.
+ *   unattributable HERE (the status read is unchanged for them) — and since
+ *   #3925 the agent-reported path refuses a report whose posted X-PAYMENT
+ *   header does not prove the burned nonce, so a random-nonce settlement is
+ *   unattributable there too. Exactly the accepted residual.
+ * - Since #3925 the observe call passes THIS payment's derived nonce as the
+ *   proof (`nonceDerived: true`), so a recorded settlement is always
+ *   nonce-bound — the sweep can no longer be the weaker attribution path.
  * - Past the recovery horizon the tick stops looking; the payment is still
  *   reachable through the agent-reported path, which is not horizon-bound.
  * - The cursor and the backoff are in-memory on purpose (losing them costs
@@ -506,7 +512,14 @@ async function recordOne(
   }
   result.evidencePushed += 1
 
-  const settled = await fns.observe(source, txHash)
+  // #3925: the sweep's proof is the nonce it derived from the payment id —
+  // the very key `findAuthorizationUsedTx` found this transaction by. Passed
+  // explicitly so the observe call is held to the same nonce-bound standard
+  // it now enforces on the agent-reported path.
+  const settled = await fns.observe(source, txHash, undefined, {
+    nonce: deriveX402PaymentNonce(row.id),
+    nonceDerived: true,
+  })
   if (settled.outcome !== 'recorded') {
     if (settled.outcome === 'unverified' && settled.reason.includes('already recorded for another payment')) {
       // Owner question 2's conservative default: a nonce-proven attribution

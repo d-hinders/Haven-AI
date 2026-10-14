@@ -245,6 +245,36 @@ describe('NeedsYou', () => {
     await user.click(screen.getByRole('button', { name: 'Dismiss: Main has one way to approve payments' }))
     expect(screen.queryByRole('list')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: 'Needs attention' })).toHaveFocus()
+    // The empty state still follows the always-mounted list.
+    expect(screen.getByText('Nothing needs you right now.')).toBeInTheDocument()
+  })
+
+  it('draws no divider for the always-mounted list once the guide is the card and no items remain', async () => {
+    const user = userEvent.setup()
+    function Caller() {
+      const [items, setItems] = useState<AttentionRuleItem[]>([
+        item({ id: 'needs-setup:a1', kind: 'needs-setup', tone: 'brand', title: 'Scout has no budget' }),
+      ])
+      return (
+        <NeedsYou
+          items={items}
+          hasOverviewError={false}
+          onRetry={() => {}}
+          onDismiss={(dismissed) => setItems((prev) => prev.filter((i) => i.id !== dismissed.id))}
+          title="Get started"
+          showCount={false}
+          guide={<p>Onboarding guide</p>}
+        />
+      )
+    }
+    render(<Caller />)
+    const card = screen.getByRole('article')
+    // With an item under the guide, the list's divider separates them...
+    expect(card.querySelector('.border-t')).not.toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Dismiss: Scout has no budget' }))
+    // ...and with none, the empty wrapper draws no stray hairline.
+    expect(card.querySelector('.border-t')).toBeNull()
+    expect(screen.getByRole('heading', { level: 2, name: 'Get started' })).toHaveFocus()
   })
 
   // ── #3813: only "No backup signer" and "Needs setup" offer the dismiss ────

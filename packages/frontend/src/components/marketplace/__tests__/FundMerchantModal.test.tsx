@@ -703,6 +703,37 @@ describe('FundMerchantModal — occupied slot routes to the edit flow (#3933)', 
     expect(screen.queryByText(/activates the new budget in its place/)).toBeNull()
   })
 
+  it('#3971: a re-keyed budget (carry + steady, two live rows in the slot) is two Stops — the warning says so', async () => {
+    mockBudgets.mockReturnValue([
+      budget({ merchant_id: null }),
+      budget({
+        merchant_id: null,
+        delegation_hash: '0x' + 'a2'.repeat(32),
+        // The re-key's steady row: newer, its period not started yet — still live.
+        start_date: '4102358400',
+        created_at: '2026-10-02T00:00:00Z',
+      }),
+    ])
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '9' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit current budget' })).toBeDefined())
+    expect(screen.getByText(/sign the new limits, then sign two more times to stop the old budget, once for each of its two parts/)).toBeDefined()
+    expect(screen.queryByText(/sign once more/)).toBeNull()
+  })
+
+  it('#3971: UNCONFIRMED never claims a retry adds a second budget — since #3933 the backend refuses one', async () => {
+    mockBudgets.mockReturnValue([])
+    mockGrant.mockResolvedValue({ ok: false, reason: 'unconfirmed' })
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign budget' }))
+    await waitFor(() => expect(screen.getByText(/could not be confirmed/)).toBeDefined())
+    expect(screen.getByText(/a retry never adds a second budget for the same token and recipient/)).toBeDefined()
+    expect(screen.queryByText(/a second grant would add a second budget/)).toBeNull()
+  })
+
   it('Edit current budget opens the edit flow on that budget with the typed limits and this merchant — no grant', async () => {
     mockBudgets.mockReturnValue([budget({ merchant_id: null })])
     render(<FundMerchantModal {...PROPS} />)

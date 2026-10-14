@@ -185,12 +185,16 @@ export default function BudgetGrantAction({
         what happened. The grant may already be in place, so this is NOT the
         generic failure: the sentence never says "nothing changed", never names
         Haven as the approver, and sends the owner to check the agent's budgets
-        BEFORE trying again — a second grant would add a second budget.
+        BEFORE trying again. #3971: it no longer warns that a retry adds a
+        second budget — since #3933 the backend refuses a second live budget in
+        the same (token, recipient) slot, and the retry re-reads the attempt
+        first.
       */}
       {outcome === 'unconfirmed' && (
         <p className="mb-3 rounded-[10px] border border-danger/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-xs text-[var(--v2-danger)]">
-          The budget could not be confirmed. Check the agent&apos;s budgets before trying again — it
-          may already be in place, and a second grant would add a second budget.
+          The budget could not be confirmed — it may already be in place. Check the agent&apos;s
+          budgets before trying again; a retry never adds a second budget for the same token and
+          recipient.
         </p>
       )}
 

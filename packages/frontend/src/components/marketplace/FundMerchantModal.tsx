@@ -28,7 +28,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { parseUnits, formatUnits } from 'viem'
 import type { Address } from 'viem'
 import { useDelegationBudget, type DelegationBudget, type GrantInput, type GrantResult } from '@/hooks/useDelegationBudget'
-import { findOccupyingBudget, occupiesSlot } from '@/lib/budget-slot'
+import { countWord, findOccupyingBudget, occupiesSlot, slotOccupantHashesForEdit } from '@/lib/budget-slot'
 import type { Agent } from '@/hooks/useAgents'
 import type { CatalogEntry, Merchant, MerchantFundingTarget } from '@/hooks/useCatalog'
 import { getChainConfig } from '@/lib/chains'
@@ -275,6 +275,16 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
   const budgetsKnown = budgets !== null
 
   const replacedBudget = useMemo(() => findReplacedBudget(budgets, payTo, token), [budgets, payTo, token])
+  // #3971: the rows the edit will Stop, one owner signature each — the same
+  // set `EditBudgetModal` counts before it asks (a re-keyed budget is two).
+  const replacedStopCount = replacedBudget
+    ? slotOccupantHashesForEdit(
+        budgets,
+        replacedBudget.delegation_hash,
+        { tokenAddress: replacedBudget.token_address, recipientAddress: replacedBudget.recipient_address },
+        Math.floor(Date.now() / 1000),
+      ).length
+    : 0
 
   const amountTrimmed = amount.trim()
 
@@ -596,12 +606,17 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                     {periodLabel(replacedBudget.period_seconds)}.
                   </p>
                   {/* #3933: what happens on-chain. A plain grant here is
-                      refused, so the change is an edit: two signatures, and
-                      the old budget stays spendable until the second. */}
+                      refused, so the change is an edit: the new limits, then
+                      one Stop signature per row the edit replaces (#3971: a
+                      re-keyed budget is a carry/steady pair, two Stops), and
+                      the old budget stays spendable until they land. */}
                   <p>
-                    To change it, you edit it: sign the new limits, then sign once more to stop the old
-                    budget. Until it is stopped, it can still be spent outside Haven. Stopping it also ends any
-                    open task budget or sub-budget taken from it.
+                    To change it, you edit it: sign the new limits, then{' '}
+                    {replacedStopCount > 1
+                      ? `sign ${countWord(replacedStopCount)} more times to stop the old budget, once for each of its ${countWord(replacedStopCount)} parts`
+                      : 'sign once more to stop the old budget'}
+                    . Until it is stopped, it can still be spent outside Haven. Stopping it also ends any open
+                    task budget or sub-budget taken from it.
                   </p>
                 </div>
               )}
@@ -679,7 +694,7 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                   {outcome.reason === 'slot_occupied'
                     ? `${selectedAgent?.name ?? 'This agent'} already has a live budget that pays ${merchant.name}'s address. Nothing was signed. Edit that budget to change its limits.`
                     : outcome.reason === 'unconfirmed'
-                    ? 'The budget could not be confirmed. Check the agent budgets before trying again — it may already be in place, and a second grant would add a second budget.'
+                    ? "The budget could not be confirmed — it may already be in place. Check the agent's budgets before trying again; a retry never adds a second budget for the same token and recipient."
                     : `${
                         outcome.reason === 'refused'
                           ? refusalCopy(outcome.detail, merchant.name)

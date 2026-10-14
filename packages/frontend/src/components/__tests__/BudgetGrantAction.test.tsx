@@ -114,6 +114,11 @@ describe('BudgetGrantAction (#1073)', () => {
     // Directs the owner to check the agent's budgets BEFORE trying again,
     // and never names Haven as the approver.
     expect(message.textContent).toMatch(/check the agent's budgets before trying again/i)
+    // #3971: since #3933 the backend refuses a second live budget in the same
+    // slot, and the retry re-reads the attempt first — the old warning that a
+    // second grant "would add a second budget" is no longer true.
+    expect(message.textContent).toMatch(/a retry never adds a second budget for the same token and recipient/i)
+    expect(message.textContent).not.toMatch(/a second grant would add a second budget/i)
     expect(message.textContent).not.toMatch(/haven/i)
     expect(screen.queryByText(/could not set the budget/i)).toBeNull()
   })

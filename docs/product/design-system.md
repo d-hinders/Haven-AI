@@ -98,7 +98,7 @@ covers:
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
-last-verified: "2026-10-13"
+last-verified: "2026-10-14"
 ---
 
 # Haven Design System
@@ -754,7 +754,9 @@ reached — the banner ladder above says the same), `brand`, `warning`, and
 `danger` for real failures only. The dismiss is a button labelled
 `Dismiss: {title}` calling `onDismiss(id)`; the list holds no dismissal
 state (persistence is #3813's), and after a dismiss focus moves to the next
-item, or to the caller's list heading (`headingId`) when the list emptied.
+dismissible item's dismiss button — counted among dismissible rows only, so
+non-dismissible rows above it never push focus past it — or to the caller's
+list heading (`headingId`) when no dismiss button remains.
 The title and the subtitle each line-clamp to two lines at every width
 (`Row` truncates both to one), so an item is never cut to a line that
 cannot be judged — the narrow desktop "Needs attention" card included (#3876).

@@ -231,4 +231,35 @@ describe('AttentionList (#3805)', () => {
     )
     expect(container.querySelector('[data-attention-dismiss-slot]')).toBeNull()
   })
+
+  // Focus after a dismiss is counted among the dismiss BUTTONS, not among the
+  // rows: with non-dismissible rows above, an index into `items` overshoots
+  // and skips the next dismissible row.
+  it('moves focus to the next DISMISSIBLE row when non-dismissible rows precede it', async () => {
+    const user = userEvent.setup()
+    const fixed = (id: string): AttentionListItem => ({
+      id,
+      title: `Fixed ${id}`,
+      tone: 'neutral',
+      dismissible: false,
+    })
+    const open = (id: string): AttentionListItem => ({
+      id,
+      title: `Open ${id}`,
+      tone: 'brand',
+    })
+    renderList([fixed('n1'), fixed('n2'), fixed('n3'), open('a'), open('b'), open('c')])
+    await user.click(screen.getByRole('button', { name: 'Dismiss: Open a' }))
+    expect(screen.queryByRole('button', { name: 'Dismiss: Open a' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Dismiss: Open b' })).toHaveFocus()
+  })
+
+  it('moves focus to the heading when the last dismissible row goes, even with rows left', async () => {
+    const user = userEvent.setup()
+    renderList([{ ...ITEMS[0], dismissible: false }, ITEMS[1]], 'list-heading')
+    await user.click(screen.getByRole('button', { name: 'Dismiss: Re-approval needed' }))
+    // The non-dismissible row stays; there is no dismiss button left to land on.
+    expect(screen.getByRole('list')).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Needs attention' })).toHaveFocus()
+  })
 })

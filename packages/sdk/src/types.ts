@@ -1163,9 +1163,9 @@ export interface HavenSubBudgetCloseSignData {
 /** #3506: `POST /sub-budgets/:id/close`. */
 export interface CloseSubBudgetResult {
   subBudget: HavenSubBudget
-  /** `closed` on a trivial close (never signed, or already expired); absent when a close signature is pending. */
+  /** `closed` on a trivial close (never signed, or `open` and already expired) or when the chain already shows it disabled; absent when a close signature is pending. */
   status?: 'closed'
-  /** Present only when the close needed a signature (a live child). */
+  /** Present only when the close needed a signature (a live child, or any `closing` row — #3923). */
   signData?: HavenSubBudgetCloseSignData
   nextAction?: string
 }

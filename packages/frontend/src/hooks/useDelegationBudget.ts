@@ -107,9 +107,9 @@ export interface DelegationBudget {
    */
   is_live: boolean
   /**
-   * #3693: remaining-this-period for ACTIVE rows. `remaining_from_chain: false`
-   * means the on-chain read failed and `remaining_atomic` is the full budget.
-   * All three are null for non-active rows.
+   * #3693: remaining-this-period for LIVE rows (#3923). `remaining_from_chain:
+   * false` means the on-chain read failed and `remaining_atomic` is the full
+   * budget. All three are null for non-live rows (an expired active one too).
    */
   remaining_atomic?: string | null
   remaining_from_chain?: boolean | null

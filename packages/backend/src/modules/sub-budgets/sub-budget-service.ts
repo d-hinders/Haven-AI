@@ -257,7 +257,8 @@ export interface CloseOutcome {
  * parent-child (which strands B's child — its chain's middle link is
  * disabled on-chain once this lands), and B closing its own grant (which
  * leaves A intact). Trivial when the row is `pending` (never signed,
- * nothing on-chain) or already expired.
+ * nothing on-chain) or an `open` row already past its expiry; an expired
+ * `closing` row is NOT trivial — its close signature is still owed (#3923).
  */
 export async function prepareSubBudgetClose(
   agent: { chain_id: number; delegate_address: string },
@@ -265,7 +266,11 @@ export async function prepareSubBudgetClose(
   nowSec: number,
 ): Promise<CloseOutcome> {
   if (row.status === 'pending') return { trivial: true }
-  if ((row.status === 'open' || row.status === 'closing') && Number(row.expires_at) <= nowSec) {
+  // #3923 P6: only an expired `open` row is trivial. An expired `closing`
+  // row already has a prepared disable op the awaiting list still lists and
+  // the sign context still serves (`awaitingSignatureSubBudgetSql`), so it
+  // needs the delegating agent's close signature — it re-prepares below.
+  if (row.status === 'open' && Number(row.expires_at) <= nowSec) {
     return { trivial: true }
   }
   const child = JSON.parse(row.delegation_json) as Delegation

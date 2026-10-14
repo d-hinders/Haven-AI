@@ -324,7 +324,8 @@ export class AccountReads {
    * an agent can still act on, and read-by-id (`haven_get_task_budget`) is
    * the any-status surface for everything else:
    *
-   * - `closing` stays visible until its expiry (#3773) — the close submit is
+   * - `closing` stays visible until its expiry (#3773; an expired `closing`
+   *   row drops, #3923) — the close submit is
    *   in flight and the signer's close refusal tells the caller to re-check
    *   exactly this row's status;
    * - `closed` rows drop (terminal — `closed_at` names what happened, and
@@ -336,7 +337,8 @@ export class AccountReads {
    * A filter also runs here, client-side. A row carrying the backend's
    * `is_live` (#3922) is kept exactly when it is true — the server's own
    * `status=live` verdict. A row without it (an older backend) is derived by
-   * the earlier rule, which keeps a `closing` row whatever its expiry. That is
+   * the same rule: `closing` stays until its expiry, then drops (#3923), as
+   * the backend does since #3773. That is
    * what keeps the list bounded against a backend that predates `status=live`,
    * which refuses the value with a 400 — that refusal (and only that) falls
    * back to `status=all`. A row whose wire carries
@@ -360,14 +362,15 @@ export class AccountReads {
       // The boundedness filter (comment above). #3922: a row carrying the
       // backend's `is_live` is kept exactly when it is true (an expired
       // `closing` row is false there — the backend dropped it in 2dd8a91d). A
-      // row WITHOUT the field (older backend) derives as before: closing
-      // always rides; closed and expired rows drop. Missing is never false.
+      // row WITHOUT the field (older backend) derives the same way (#3923):
+      // closed and expired rows drop, closing included; a missing
+      // `is_expired` counts as unexpired. Missing is never false.
       return rows
         .map((row) => mapTaskBudget(row))
         .filter((tb) =>
           tb.isLive !== undefined
             ? tb.isLive
-            : tb.status === 'closing' || (!tb.isExpired && tb.status !== 'closed'),
+            : !tb.isExpired && tb.status !== 'closed',
         )
         .map((tb) => summarizeTaskBudget(tb))
     } catch {

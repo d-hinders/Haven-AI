@@ -990,8 +990,8 @@ describe('DelegationBudgetCard sub-budget entry in the Add budget panel (#3716)'
 })
 
 // #3922: "ends" is only for a row the server calls live (or a still-pending
-// unexpired slice). A closed row with a FUTURE expiry must read "ended", not
-// count down as if it were running.
+// unexpired slice). A closed row with a FUTURE expiry reads "closed" (#3923:
+// status wins over expiry), not a countdown as if it were running.
 describe('DelegationBudgetCard sub-budget "ends" follows is_live (#3922)', () => {
   const future = Math.floor(Date.now() / 1000) + 7 * 86_400
   const sub = (overrides: Record<string, unknown>) => ({
@@ -1014,12 +1014,23 @@ describe('DelegationBudgetCard sub-budget "ends" follows is_live (#3922)', () =>
     expect(document.body.textContent).toMatch(/up to 2 USDC · ends /)
   })
 
-  it('a closed grant with a future expiry reads "ended", never "ends"', () => {
+  it('a closed grant with a future expiry reads "closed", never "ends" or "ended"', () => {
     mockGet.mockReturnValue([budget()])
     mockTrees.mockReturnValue(tree(sub({ status: 'closed', is_live: false })))
     render(<DelegationBudgetCard {...PROPS} />)
+    expect(document.body.textContent).toMatch(/up to 2 USDC · closed/)
+    expect(document.body.textContent).not.toMatch(/up to 2 USDC · ends/)
+  })
+
+  it('a closed parent narrowing row reads "closed" too; an expired non-closed grant keeps "ended"', () => {
+    mockGet.mockReturnValue([budget()])
+    mockTrees.mockReturnValue([{
+      parent_child_sub_budget: sub({ id: 'p1', label: 'Parent narrowing', status: 'closed', is_live: false, period_amount_atomic: '5000000' }),
+      grants: [sub({ status: 'open', is_live: false, is_expired: true, expires_at: Math.floor(Date.now() / 1000) - 60 })],
+    }])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(document.body.textContent).toMatch(/5 USDC · closed/)
     expect(document.body.textContent).toMatch(/up to 2 USDC · ended/)
-    expect(document.body.textContent).not.toMatch(/up to 2 USDC · ends /)
   })
 
   it('a pending, unexpired grant still shows when it ends, beside "waiting for signature"', () => {

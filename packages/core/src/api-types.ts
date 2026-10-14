@@ -722,7 +722,7 @@ export type paths = {
         };
         /**
          * List an agent's budget delegations with lifecycle status.
-         * @description Every grant the agent has, newest first, including pending (built but not owner-signed), replaced and revoked rows — the dashboard renders exactly what is and isn't live (#802). Without the include parameter the response is the plain lifecycle list, byte-identical to the pre-#3693 shape. With include=remaining, ACTIVE rows additionally carry the on-chain remaining-this-period figure: remaining_atomic, remaining_from_chain and period_end (#3693); non-active rows carry null for all three. The route is polled every 10 s, so the chain reads behind those fields run only when asked for. The signed delegation object itself is deliberately NOT in the list: it is api_key_hash-class data returned only by the explicit flows that need it.
+         * @description Every grant the agent has, newest first, including pending (built but not owner-signed), replaced and revoked rows — the dashboard renders exactly what is and isn't live (#802). Without the include parameter the response is the plain lifecycle list, byte-identical to the pre-#3693 shape. With include=remaining, LIVE rows (`is_live`: active and unexpired, #3923) additionally carry the on-chain remaining-this-period figure: remaining_atomic, remaining_from_chain and period_end (#3693); every other row (an expired active one included) carries null for all three. The route is polled every 10 s, so the chain reads behind those fields run only when asked for. The signed delegation object itself is deliberately NOT in the list: it is api_key_hash-class data returned only by the explicit flows that need it.
          */
         get: operations["listAgentDelegations"];
         put?: never;
@@ -909,7 +909,7 @@ export type paths = {
         post?: never;
         /**
          * Revoke one sub-budget row (the parent-child, or a single grant).
-         * @description Authority-reducing only (#3329-2's rule): the delegating agent's own delegate account prepares disableDelegation of THIS row's child. Revoking a PARENT-CHILD row strands every grant under it (their chain's middle link dies — revoking A's budget delegation closes this row too, which is what makes B's child unredeemable); revoking a GRANT row ends B's slice and leaves A intact. status=pending or expired: closes immediately, nothing signed. status=open and live: returns the prepared close operation for the agent to sign (then relay via the agent close endpoint).
+         * @description Authority-reducing only (#3329-2's rule): the delegating agent's own delegate account prepares disableDelegation of THIS row's child. Revoking a PARENT-CHILD row strands every grant under it (their chain's middle link dies — revoking A's budget delegation closes this row too, which is what makes B's child unredeemable); revoking a GRANT row ends B's slice and leaves A intact. status=pending, or status=open past its expiry: closes immediately, nothing signed. status=closing: an EXPIRED closing row whose delegating agent is revoked or archived closes immediately, nothing signed, no chain read (owner decision, #3923: nobody is left to sign and the child can no longer spend); otherwise first checks the chain — a child already disabled answers status='closed'. status=open and live, or any other status=closing row (#3923): returns the prepared close operation for the agent to sign (then relay via the agent close endpoint).
          */
         delete: operations["revokeAgentSubBudget"];
         options?: never;
@@ -2601,7 +2601,7 @@ export type paths = {
         };
         /**
          * List task budgets for the authenticated agent.
-         * @description Default status=open: OPEN and not expired. status=live (#3518): every row the agent can still act on — closing rows always, pending and open rows while not expired; closed and expired rows are omitted, so the read (and its per-row chain reads) is bounded by live work rather than history. status=all: every row regardless of status or expiry. #3501: open rows carry spent_atomic and remaining_atomic, read live from the enforcer's spentMap for the child's delegation hash (the same authority the chain applies at redemption), so the agent can tell BEFORE paying whether its next payment will be refused. A failed on-chain read reports spent/remaining as null with remaining_is_from_chain: false — never the full cap as remaining.
+         * @description Default status=open: OPEN and not expired. status=live (#3518): every row the agent can still act on — pending, open and closing rows while not expired (#3773); closed and expired rows are omitted, so the read (and its per-row chain reads) is bounded by live work rather than history. status=all: every row regardless of status or expiry. #3501: open rows carry spent_atomic and remaining_atomic, read live from the enforcer's spentMap for the child's delegation hash (the same authority the chain applies at redemption), so the agent can tell BEFORE paying whether its next payment will be refused. A failed on-chain read reports spent/remaining as null with remaining_is_from_chain: false — never the full cap as remaining.
          */
         get: operations["listTaskBudgets"];
         put?: never;
@@ -2783,8 +2783,8 @@ export type paths = {
         get?: never;
         put?: never;
         /**
-         * Close a sub-budget row — trivially if never signed or already expired, otherwise prepares the revocation.
-         * @description DELEGATOR-scoped (the delegating agent closes either row of its tree). status=pending, or status=open/closing past its expiry: closes immediately, nothing signed, nothing on-chain (200, status='closed'). status=open and live: prepares disableDelegation(child) from the delegating agent's own delegate account and returns sign_data to sign, then submit via POST /sub-budgets/{id}/submit. status=closing: first checks the chain; if the child is already disabled, answers 200 status='closed'; otherwise re-prepares a fresh close operation (idempotent in EFFECT, never in bytes). Closing the parent-child row strands every grant under it; closing a grant row leaves the delegating agent intact. status=closed: 409.
+         * Close a sub-budget row — trivially if never signed or open and already expired, otherwise prepares the revocation.
+         * @description DELEGATOR-scoped (the delegating agent closes either row of its tree). status=pending, or status=open past its expiry: closes immediately, nothing signed, nothing on-chain (200, status='closed'). status=open and live: prepares disableDelegation(child) from the delegating agent's own delegate account and returns sign_data to sign, then submit via POST /sub-budgets/{id}/submit. status=closing (expired or not — its disable signature is still owed, #3923): first checks the chain; if the child is already disabled, answers 200 status='closed'; otherwise re-prepares a fresh close operation (idempotent in EFFECT, never in bytes). Closing the parent-child row strands every grant under it; closing a grant row leaves the delegating agent intact. status=closed: 409.
          */
         post: operations["closeSubBudget"];
         delete?: never;
@@ -3796,11 +3796,11 @@ export type components = {
             merchant_name: string | null;
             /** @description Derived server-side (#3922) from the budget-VIEW predicate: status active and expires_at in the future (the start date is NOT consulted, so a dormant future-start re-key row is live, as the budget views show it). pending, replaced and revoked rows are false. */
             is_live: boolean;
-            /** @description Atomic units the on-chain caveat enforcer will still allow this period, read for ACTIVE rows — present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. When remaining_from_chain is false the read failed and this is the full budget. null for non-active rows when included. */
+            /** @description Atomic units the on-chain caveat enforcer will still allow this period, read for LIVE rows (`is_live`, #3923) — present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. When remaining_from_chain is false the read failed and this is the full budget. null for non-live rows (an expired active one included) when included. */
             remaining_atomic?: string | null;
-            /** @description Present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. False means the on-chain read failed and remaining_atomic is the budget, exactly as readRemainingBudget reports it. null for non-active rows when included. */
+            /** @description Present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. False means the on-chain read failed and remaining_atomic is the budget, exactly as readRemainingBudget reports it. null for non-live rows (an expired active one included) when included. */
             remaining_from_chain?: boolean | null;
-            /** @description Present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. When the current period refills (ISO 8601), computed the same way as the analytics budget views. Still the PERIOD boundary when the delegation expires earlier — the row expires_at then shows the earlier expiry. null for non-active rows when included. */
+            /** @description Present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. When the current period refills (ISO 8601), computed the same way as the analytics budget views. Still the PERIOD boundary when the delegation expires earlier — the row expires_at then shows the earlier expiry. null for non-live rows (an expired active one included) when included. */
             period_end?: string | null;
         };
         MerchantFundingTarget: {
@@ -9531,7 +9531,7 @@ export interface operations {
     listAgentDelegations: {
         parameters: {
             query?: {
-                /** @description Opt-in enrichment. remaining: each ACTIVE delegation carries the on-chain remaining-this-period fields (remaining_atomic, remaining_from_chain, period_end); non-active rows carry them as null. Anything outside the enum is refused with the 400 envelope before the handler runs. */
+                /** @description Opt-in enrichment. remaining: each LIVE delegation (`is_live`: active and unexpired, #3923) carries the on-chain remaining-this-period fields (remaining_atomic, remaining_from_chain, period_end); every other row — an expired active one included — carries them as null and costs no chain read. Anything outside the enum is refused with the 400 envelope before the handler runs. */
                 include?: "remaining";
             };
             header?: never;

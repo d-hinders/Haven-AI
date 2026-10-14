@@ -1214,9 +1214,10 @@ export class HavenClient {
   }
 
   /**
-   * Close a sub-budget row (delegating agent only). A `pending` or expired row
-   * closes immediately; a live child returns `signData` for the on-chain
-   * revocation — sign it (`haven_sign` with `sub_budget_id`) and call
+   * Close a sub-budget row (delegating agent only). A `pending` row, or an
+   * `open` one already expired, closes immediately; otherwise (a live child, or
+   * any `closing` row — its disable is still owed, #3923) it returns `signData`
+   * for the on-chain revocation — sign it (`haven_sign` with `sub_budget_id`) and call
    * `submitSubBudget`.
    */
   async closeSubBudget(id: string): Promise<CloseSubBudgetResult> {

@@ -570,6 +570,8 @@ describe('machine payment routes', () => {
           delegation_hash: `0x${'dd'.repeat(32)}`,
           recipient_address: null,
           merchant_id: null,
+          // #3922: shape parity — true by construction on this read.
+          is_live: true,
           reserved_haven_atomic: '0',
           // #3731: the remaining was NOT read live (no delegation_json row —
           // the same fallback path #1145 takes on an RPC failure), so the

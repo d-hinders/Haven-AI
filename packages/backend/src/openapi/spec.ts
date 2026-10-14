@@ -9439,7 +9439,7 @@ export const openapiSpec = {
         required: [
           'id', 'chain_id', 'token_address', 'recipient_address', 'delegation_hash',
           'version', 'status', 'budget_atomic', 'period_seconds', 'start_date',
-          'expires_at', 'created_at', 'merchant_id', 'merchant_slug', 'merchant_name',
+          'expires_at', 'created_at', 'merchant_id', 'merchant_slug', 'merchant_name', 'is_live',
         ],
         properties: {
           id: { type: 'string', format: 'uuid' },
@@ -9464,6 +9464,10 @@ export const openapiSpec = {
           },
           merchant_slug: { anyOf: [{ type: 'string' }, { type: 'null' }], description: 'That merchant\u2019s slug, or null.' },
           merchant_name: { anyOf: [{ type: 'string' }, { type: 'null' }], description: 'That merchant\u2019s display name, or null.' },
+          is_live: {
+            type: 'boolean',
+            description: 'Derived server-side (#3922) from the budget-VIEW predicate: status active and expires_at in the future (the start date is NOT consulted, so a dormant future-start re-key row is live, as the budget views show it). pending, replaced and revoked rows are false.',
+          },
           remaining_atomic: {
             anyOf: [{ type: 'string', pattern: '^[0-9]+$' }, { type: 'null' }],
             description: 'Atomic units the on-chain caveat enforcer will still allow this period, read for ACTIVE rows — present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. When remaining_from_chain is false the read failed and this is the full budget. null for non-active rows when included.',
@@ -9512,7 +9516,7 @@ export const openapiSpec = {
         required: [
           'id', 'agent_id', 'chain_id', 'token_address', 'recipient_address',
           'parent_delegation_hash', 'delegation_hash', 'label', 'max_atomic',
-          'status', 'expires_at', 'is_expired', 'created_at', 'opened_at',
+          'status', 'expires_at', 'is_expired', 'is_live', 'created_at', 'opened_at',
           'closed_at', 'close_tx_hash',
         ],
         properties: {
@@ -9562,6 +9566,7 @@ export const openapiSpec = {
           status: { type: 'string', enum: ['pending', 'open', 'closing', 'closed'] },
           expires_at: { type: 'integer', description: 'Unix seconds.' },
           is_expired: { type: 'boolean', description: 'Derived: expires_at <= now.' },
+          is_live: { type: 'boolean', description: 'Derived server-side (#3922): the row passes the live filter — status pending/open/closing and not expired, exactly the rows `?status=live` returns. Clients read this instead of recomputing from status and expires_at.' },
           created_at: { type: 'string', format: 'date-time' },
           opened_at: { type: ['string', 'null'], format: 'date-time' },
           closed_at: { type: ['string', 'null'], format: 'date-time' },
@@ -9580,7 +9585,7 @@ export const openapiSpec = {
           'id', 'agent_id', 'parent_agent_id', 'parent_sub_budget_id', 'chain_id',
           'token_address', 'recipient_address', 'parent_delegation_hash',
           'delegation_hash', 'label', 'period_amount_atomic', 'status',
-          'expires_at', 'is_expired', 'created_at', 'opened_at', 'closed_at',
+          'expires_at', 'is_expired', 'is_live', 'created_at', 'opened_at', 'closed_at',
           'close_tx_hash',
         ],
         properties: {
@@ -9602,6 +9607,7 @@ export const openapiSpec = {
           status: { type: 'string', enum: ['pending', 'open', 'closing', 'closed'] },
           expires_at: { type: 'integer', description: 'Unix seconds.' },
           is_expired: { type: 'boolean', description: 'Derived: expires_at <= now.' },
+          is_live: { type: 'boolean', description: 'Derived server-side (#3922): the row is an OPEN sub-budget inside its spend window (status open and not expired). A pending, closing, closed or expired row is false.' },
           created_at: { type: 'string', format: 'date-time' },
           opened_at: { type: ['string', 'null'], format: 'date-time' },
           closed_at: { type: ['string', 'null'], format: 'date-time' },
@@ -12499,7 +12505,7 @@ export const openapiSpec = {
             type: 'array',
             items: {
               type: 'object',
-              required: ['sub_budget_id', 'parent_agent_id', 'parent_agent_name', 'token_address', 'period_amount_atomic', 'expires_at', 'status', 'is_expired'],
+              required: ['sub_budget_id', 'parent_agent_id', 'parent_agent_name', 'token_address', 'period_amount_atomic', 'expires_at', 'status', 'is_expired', 'is_live'],
               properties: {
                 sub_budget_id: uuid,
                 parent_agent_id: uuid,
@@ -12510,6 +12516,7 @@ export const openapiSpec = {
                 expires_at: { type: 'integer' },
                 status: { type: 'string', enum: ['open', 'closing'] },
                 is_expired: { type: 'boolean' },
+                is_live: { type: 'boolean', description: 'Derived server-side (#3922): an OPEN grant inside its spend window. A `closing` grant (listed while its disable op may be owed) is false.' },
               },
               additionalProperties: false,
             },
@@ -12566,6 +12573,11 @@ export const openapiSpec = {
                   format: 'uuid',
                   description:
                     '#3518: the merchant this budget was issued for (#3331), null for every other budget. Never set without a recipient pin.',
+                },
+                is_live: {
+                  type: 'boolean',
+                  description:
+                    '#3922: shape parity with the other budget wires — always true here (this read lists only active, unexpired budgets). Optional on the schema so an older backend that omits it stays valid.',
                 },
                 reserved_haven_atomic: {
                   type: 'string',

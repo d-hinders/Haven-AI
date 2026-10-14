@@ -44,6 +44,7 @@ import {
 import {
   findForDelegatingAgent,
   insertPendingSubBudget,
+  isOpenSubBudget,
   listForOwner,
   listTreeForOwner,
   markClosed,
@@ -103,6 +104,7 @@ function toWire(row: SubBudgetRow, nowSec: number) {
     status: row.status,
     expires_at: Number(row.expires_at),
     is_expired: Number(row.expires_at) <= nowSec,
+    is_live: isOpenSubBudget(row, nowSec),
     created_at: row.created_at,
     opened_at: row.opened_at,
     closed_at: row.closed_at,

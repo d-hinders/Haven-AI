@@ -3794,6 +3794,8 @@ export type components = {
             merchant_slug: string | null;
             /** @description That merchant’s display name, or null. */
             merchant_name: string | null;
+            /** @description Derived server-side (#3922) from the budget-VIEW predicate: status active and expires_at in the future (the start date is NOT consulted, so a dormant future-start re-key row is live, as the budget views show it). pending, replaced and revoked rows are false. */
+            is_live: boolean;
             /** @description Atomic units the on-chain caveat enforcer will still allow this period, read for ACTIVE rows — present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. When remaining_from_chain is false the read failed and this is the full budget. null for non-active rows when included. */
             remaining_atomic?: string | null;
             /** @description Present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. False means the on-chain read failed and remaining_atomic is the budget, exactly as readRemainingBudget reports it. null for non-active rows when included. */
@@ -3847,6 +3849,8 @@ export type components = {
             expires_at: number;
             /** @description Derived: expires_at <= now. */
             is_expired: boolean;
+            /** @description Derived server-side (#3922): the row passes the live filter — status pending/open/closing and not expired, exactly the rows `?status=live` returns. Clients read this instead of recomputing from status and expires_at. */
+            is_live: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -3880,6 +3884,8 @@ export type components = {
             expires_at: number;
             /** @description Derived: expires_at <= now. */
             is_expired: boolean;
+            /** @description Derived server-side (#3922): the row is an OPEN sub-budget inside its spend window (status open and not expired). A pending, closing, closed or expired row is false. */
+            is_live: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -5614,6 +5620,8 @@ export type components = {
                 /** @enum {string} */
                 status: "open" | "closing";
                 is_expired: boolean;
+                /** @description Derived server-side (#3922): an OPEN grant inside its spend window. A `closing` grant (listed while its disable op may be owed) is false. */
+                is_live: boolean;
             }[];
         };
         AllowanceSummary: {
@@ -5643,6 +5651,8 @@ export type components = {
                  * @description #3518: the merchant this budget was issued for (#3331), null for every other budget. Never set without a recipient pin.
                  */
                 merchant_id?: string | null;
+                /** @description #3922: shape parity with the other budget wires — always true here (this read lists only active, unexpired budgets). Optional on the schema so an older backend that omits it stays valid. */
+                is_live?: boolean;
                 /** @description #3518: Haven-side reservation — the sum of this budget's OPEN, unexpired task- and sub-budget children's caps (`agent_task_budgets` + `agent_sub_budgets`, joined by delegation_hash), in ATOMIC units. Reported BESIDE `onchain.remaining` and never folded into it: the on-chain figure stays authoritative, a reservation releases on close/expire without any chain event, and "0" covers both no-reservation and a failed read (the sum is best-effort). */
                 reserved_haven_atomic?: string;
                 /** @description #3731: whether the account's balance can back THIS row's whole remaining period budget. One `balanceOf` read per distinct token; each row is compared ALONE (several rows for one token do not add up, so two `true` rows do not mean both are backed at once). `false` means the account cannot back the whole remaining budget — a heads-up to mention to the user, NOT a refusal and NOT proof the next payment fails: a budget larger than the balance is a normal setup (an owner may top up weekly). `null` means unverifiable: the chain read failed, or `onchain.remaining` was not read live (`remaining_is_from_chain` false — the fallback figure cannot answer a holdings question). Absent when `onchain.remaining` is 0 (the compare would be vacuously true). Only the boolean rides the wire; the balance itself never does. */

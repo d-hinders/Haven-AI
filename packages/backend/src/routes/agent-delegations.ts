@@ -173,6 +173,13 @@ export const BUDGET_SLOT_OCCUPIED_REFUSAL =
 export const BUDGET_SLOT_OCCUPIED_ERROR_CODE = 'BUDGET_SLOT_OCCUPIED'
 
 /**
+ * #3933: the per-hash revoke's already-done answer — the row is revoked, or
+ * the chain shows it disabled and the route healed the record. Named so a
+ * client finishing a Stop can treat it as met without reading the sentence.
+ */
+export const DELEGATION_ALREADY_REVOKED_ERROR_CODE = 'DELEGATION_ALREADY_REVOKED'
+
+/**
  * The slot rule (#3933), one definition for build and activate: allowed into
  * an empty slot, or as an edit whose `replaces` is one of the slot's live
  * grants; otherwise the named refusal with the grant to edit.
@@ -1151,7 +1158,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       const target = row.rows[0]
       if (!target) return reply.code(404).send({ error: 'Delegation not found' })
       if (target.status === 'revoked') {
-        return reply.code(409).send({ error: 'Already revoked' })
+        return reply.code(409).send({ error: 'Already revoked', error_code: DELEGATION_ALREADY_REVOKED_ERROR_CODE })
       }
 
       // #1423: same crash-window hardening as revoke-all — disableDelegation
@@ -1169,7 +1176,10 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
             { agentId: request.params.id, healed },
             'per-hash revoke reconciled an on-chain-disabled delegation to revoked (no signature — chain state was already disabled)',
           )
-          return reply.code(409).send({ error: 'Already revoked — the delegation was disabled on-chain and the record has been reconciled.' })
+          return reply.code(409).send({
+            error: 'Already revoked — the delegation was disabled on-chain and the record has been reconciled.',
+            error_code: DELEGATION_ALREADY_REVOKED_ERROR_CODE,
+          })
         }
       } catch (err) {
         request.log.warn({ err }, 'disabled-delegation read failed; proceeding with the normal prepare')

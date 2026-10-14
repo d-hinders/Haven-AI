@@ -3054,7 +3054,7 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '404': errorResponse,
-          '409': errorResponse,
+          '409': { ...errorResponse, description: 'Already revoked — the row is revoked, or it was disabled on-chain and the record has been healed to revoked. Both carry `error_code: "DELEGATION_ALREADY_REVOKED"` (#3933), so a client finishing a Stop can treat the goal as met.' },
           '502': errorResponse,
         },
       },

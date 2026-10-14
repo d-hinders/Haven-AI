@@ -216,14 +216,17 @@ describeDb('expired closing sub-budget keeps its signature path (#3923 P6)', () 
     expect(mockPrepareAccountCall).not.toHaveBeenCalled()
   })
 
-  it('owner DELETE (b): expired closing row, delegating agent REVOKED -> closed in Haven, no prepare', async () => {
+  it('owner DELETE (b): expired closing row, delegating agent REVOKED -> closed in Haven, no prepare, no chain probe', async () => {
     const id = await seedRow('closing', -60)
     await db.query(`UPDATE agents SET status = 'revoked' WHERE id = $1`, [issuerId])
+    // The retired branch runs before the probe, so an RPC failure cannot 502 it.
+    mockDisabled.mockRejectedValue(new Error('rpc down'))
     const res = await app.inject({ method: 'DELETE', url: `/agents/${issuerId}/sub-budgets/${id}`, headers: ownerHeaders() })
     expect(res.statusCode).toBe(200)
     expect(res.json().status).toBe('closed')
     expect(await statusOf(id)).toBe('closed')
     expect(mockPrepareAccountCall).not.toHaveBeenCalled()
+    expect(mockDisabled).not.toHaveBeenCalled()
   })
 
   it('owner DELETE (c): expired closing row, delegating agent ARCHIVED -> closed in Haven, no prepare', async () => {

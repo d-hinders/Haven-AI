@@ -32,7 +32,12 @@ unclear; this page is the order, not the reasoning.
 6. **Click Merge.** Any of the three maintainers: the ordinary **Merge pull
    request** button, **merge commit** form, in the web UI (`gh pr merge
    --merge` from a terminal works too). The PR showing as BEHIND `main` is
-   expected — merge it anyway; there is no sync-back to undo it. Never squash
+   expected — merge it anyway; there is no sync-back to undo it. A promotion
+   PR opened before its required checks and code-owner approval are in shows
+   only **Update branch** and **Enable auto-merge**, with no merge button —
+   that is the gate working, not a blocker: never **Update branch** a
+   promotion (that is the forbidden sync-back); wait for checks and approval
+   and the merge button appears. Never squash
    a promotion. `qa-override` is a maintainer decision, not owner-only: decide
    before opening and apply the label at open (a later label needs a
    close/reopen to be re-read) — it is never an agent's call.

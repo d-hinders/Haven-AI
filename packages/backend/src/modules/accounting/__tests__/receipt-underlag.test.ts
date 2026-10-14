@@ -15,6 +15,7 @@ const DATA = {
   settledAt: '2026-07-15T09:30:00.000Z',
   token: 'USDC',
   amountAtomic: '1000',
+  amount: '0.001',
   amountSek: '10.42',
   fxRate: '10.42',
   fxSource: 'riksbank',
@@ -42,6 +43,7 @@ const TX = {
   resourceUrl: 'https://merchant.example/vpn',
   token: 'USDC',
   amountAtomic: '1000',
+  amount: '0.001',
   amountSek: '10.42',
   ledgerCurrency: 'SEK' as const,
   amountLedger: '10.42',
@@ -239,5 +241,30 @@ describe('receipt-underlag #3767 booked hash', () => {
     expect(s).toContain(`Tx hash        ${'0x' + 'cd'.repeat(32)}`)
     expect(s).not.toContain('Funding tx')
     expect(s).not.toContain(SETTLEMENT)
+  })
+})
+
+/**
+ * #3917: the Amount figure on the underlag is the token amount in WHOLE
+ * units — the same human figure the Book value line is computed from —
+ * with the atomic value kept only as a labelled annotation. Feeding
+ * `amountAtomic` through as if it were whole tokens is what made
+ * Accounted's archive and AI extraction show 1 500,00 US$ (TOTALT 1500,00)
+ * for a 1 500-atomic-0.0015 USDC payment (CloudNest, 2026-10-14) while the
+ * Book value on the same document was already correct at 0.0149 SEK.
+ */
+describe('underlag amount scaling (#3917)', () => {
+  it('renders the scaled token amount first, the atomic figure as a labelled annotation', () => {
+    const pdf = underlagFromData({ ...DATA, amountAtomic: '1500', amount: '0.0015' }).pdf.toString('latin1')
+    // MUTATION TARGET: putting `amountAtomic` back on the leading figure
+    // (or dropping the annotation) re-opens the 1 500,00 US$ extraction bug.
+    // Parens are PDF-escaped in the content stream (see pdfEscape).
+    expect(pdf).toContain('Amount         0.0015 USDC \\(1500 atomic units\\)')
+    expect(pdf).toContain('Book value     10.42 SEK')
+  })
+
+  it('labels the atomic figure explicitly when no human amount was captured, never implying a scale', () => {
+    const pdf = underlagFromData({ ...DATA, amount: null }).pdf.toString('latin1')
+    expect(pdf).toContain('Amount         1000 USDC \\(atomic units\\)')
   })
 })

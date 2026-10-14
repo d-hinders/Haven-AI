@@ -2830,7 +2830,7 @@ export const openapiSpec = {
         operationId: 'listAgentDelegations',
         summary: "List an agent's budget delegations with lifecycle status.",
         description:
-          "Every grant the agent has, newest first, including pending (built but not owner-signed), replaced and revoked rows — the dashboard renders exactly what is and isn't live (#802). Without the include parameter the response is the plain lifecycle list, byte-identical to the pre-#3693 shape. With include=remaining, ACTIVE rows additionally carry the on-chain remaining-this-period figure: remaining_atomic, remaining_from_chain and period_end (#3693); non-active rows carry null for all three. The route is polled every 10 s, so the chain reads behind those fields run only when asked for. The signed delegation object itself is deliberately NOT in the list: it is api_key_hash-class data returned only by the explicit flows that need it.",
+          "Every grant the agent has, newest first, including pending (built but not owner-signed), replaced and revoked rows — the dashboard renders exactly what is and isn't live (#802). Without the include parameter the response is the plain lifecycle list, byte-identical to the pre-#3693 shape. With include=remaining, LIVE rows (`is_live`: active and unexpired, #3923) additionally carry the on-chain remaining-this-period figure: remaining_atomic, remaining_from_chain and period_end (#3693); non-active rows carry null for all three. The route is polled every 10 s, so the chain reads behind those fields run only when asked for. The signed delegation object itself is deliberately NOT in the list: it is api_key_hash-class data returned only by the explicit flows that need it.",
         security: [{ DashboardJwt: [] }],
         parameters: [
           { $ref: '#/components/parameters/AgentId' },
@@ -2840,7 +2840,7 @@ export const openapiSpec = {
             required: false,
             schema: { type: 'string', enum: ['remaining'] },
             description:
-              'Opt-in enrichment. remaining: each ACTIVE delegation carries the on-chain remaining-this-period fields (remaining_atomic, remaining_from_chain, period_end); non-active rows carry them as null. Anything outside the enum is refused with the 400 envelope before the handler runs.',
+              'Opt-in enrichment. remaining: each LIVE delegation (`is_live`: active and unexpired, #3923) carries the on-chain remaining-this-period fields (remaining_atomic, remaining_from_chain, period_end); every other row — an expired active one included — carries them as null and costs no chain read. Anything outside the enum is refused with the 400 envelope before the handler runs.',
           },
         ],
         responses: {
@@ -9470,7 +9470,7 @@ export const openapiSpec = {
           },
           remaining_atomic: {
             anyOf: [{ type: 'string', pattern: '^[0-9]+$' }, { type: 'null' }],
-            description: 'Atomic units the on-chain caveat enforcer will still allow this period, read for ACTIVE rows — present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. When remaining_from_chain is false the read failed and this is the full budget. null for non-active rows when included.',
+            description: 'Atomic units the on-chain caveat enforcer will still allow this period, read for LIVE rows (`is_live`, #3923) — present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. When remaining_from_chain is false the read failed and this is the full budget. null for non-live rows (an expired active one included) when included.',
           },
           remaining_from_chain: {
             anyOf: [{ type: 'boolean' }, { type: 'null' }],

@@ -722,7 +722,7 @@ export type paths = {
         };
         /**
          * List an agent's budget delegations with lifecycle status.
-         * @description Every grant the agent has, newest first, including pending (built but not owner-signed), replaced and revoked rows — the dashboard renders exactly what is and isn't live (#802). Without the include parameter the response is the plain lifecycle list, byte-identical to the pre-#3693 shape. With include=remaining, ACTIVE rows additionally carry the on-chain remaining-this-period figure: remaining_atomic, remaining_from_chain and period_end (#3693); non-active rows carry null for all three. The route is polled every 10 s, so the chain reads behind those fields run only when asked for. The signed delegation object itself is deliberately NOT in the list: it is api_key_hash-class data returned only by the explicit flows that need it.
+         * @description Every grant the agent has, newest first, including pending (built but not owner-signed), replaced and revoked rows — the dashboard renders exactly what is and isn't live (#802). Without the include parameter the response is the plain lifecycle list, byte-identical to the pre-#3693 shape. With include=remaining, LIVE rows (`is_live`: active and unexpired, #3923) additionally carry the on-chain remaining-this-period figure: remaining_atomic, remaining_from_chain and period_end (#3693); non-active rows carry null for all three. The route is polled every 10 s, so the chain reads behind those fields run only when asked for. The signed delegation object itself is deliberately NOT in the list: it is api_key_hash-class data returned only by the explicit flows that need it.
          */
         get: operations["listAgentDelegations"];
         put?: never;
@@ -3796,7 +3796,7 @@ export type components = {
             merchant_name: string | null;
             /** @description Derived server-side (#3922) from the budget-VIEW predicate: status active and expires_at in the future (the start date is NOT consulted, so a dormant future-start re-key row is live, as the budget views show it). pending, replaced and revoked rows are false. */
             is_live: boolean;
-            /** @description Atomic units the on-chain caveat enforcer will still allow this period, read for ACTIVE rows — present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. When remaining_from_chain is false the read failed and this is the full budget. null for non-active rows when included. */
+            /** @description Atomic units the on-chain caveat enforcer will still allow this period, read for LIVE rows (`is_live`, #3923) — present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. When remaining_from_chain is false the read failed and this is the full budget. null for non-live rows (an expired active one included) when included. */
             remaining_atomic?: string | null;
             /** @description Present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. False means the on-chain read failed and remaining_atomic is the budget, exactly as readRemainingBudget reports it. null for non-active rows when included. */
             remaining_from_chain?: boolean | null;
@@ -9531,7 +9531,7 @@ export interface operations {
     listAgentDelegations: {
         parameters: {
             query?: {
-                /** @description Opt-in enrichment. remaining: each ACTIVE delegation carries the on-chain remaining-this-period fields (remaining_atomic, remaining_from_chain, period_end); non-active rows carry them as null. Anything outside the enum is refused with the 400 envelope before the handler runs. */
+                /** @description Opt-in enrichment. remaining: each LIVE delegation (`is_live`: active and unexpired, #3923) carries the on-chain remaining-this-period fields (remaining_atomic, remaining_from_chain, period_end); every other row — an expired active one included — carries them as null and costs no chain read. Anything outside the enum is refused with the 400 envelope before the handler runs. */
                 include?: "remaining";
             };
             header?: never;

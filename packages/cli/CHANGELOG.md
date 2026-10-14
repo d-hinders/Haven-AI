@@ -15,6 +15,14 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.10.0-alpha.0 — 2026-10-14
+
+### Changed
+
+- Agent runbook text: the revoke hash is read from `haven budget show <agentId> --hashes`
+  (#3892), and a connector `upgrade_command` may name the pair with `--name <slug>`
+  (#3799). Text only; no update needed.
+
 ## 0.9.0-alpha.0 — 2026-10-09
 
 ### Changed

@@ -871,6 +871,27 @@ chain.
 >
 > Scope of this note: those reads only. Nothing else in this document was
 > re-verified, and `last-verified` is not bumped.
+>
+> **Re-verified #3923 (2026-10-14: budget liveness, epic #3919 slice D).**
+> The diff touches covered paths:
+> - `routes/agent-delegations.ts`: under `?include=remaining`, the existing
+>   `readRemainingBudget` chain read now runs only for LIVE rows. An expired
+>   `active` row stays in the list with its three remaining fields null and
+>   no read. That narrows a read-only enrichment; nothing is signed, prepared
+>   or redeemed.
+> - `sdk/src/account-reads.ts`: the summary's older-backend filter drops an
+>   expired `closing` task budget.
+> - `DelegationBudgetCard.tsx`: a `closed` sub-budget reads "closed".
+>
+> Outside this document's coverage, `modules/sub-budgets/sub-budget-service.ts`
+> no longer closes an expired `closing` sub-budget trivially. Its disable is
+> re-prepared and signed by the agent's own delegate key (owner decision
+> 2026-10-14), so the child is disabled on-chain rather than left to lapse.
+> That is authority-reducing only, and Haven still signs nothing.
+>
+> No payment selector, enforcer, refusal or signer-set decision moves. Scope
+> of this note: those reads and that close path; nothing else in this
+> document was re-verified, and `last-verified` is not bumped.
 
 The unlink guard also refuses while an agent re-key is in flight, so the Safe
 binding cannot disappear between re-key stages. This is a database

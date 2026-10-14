@@ -130,6 +130,13 @@ last-verified: "2026-10-10"
 > task budget, and `haven_get_task_budget`; hosted and local) carries an
 > additive `isLive`, absent against an older backend. Nothing else in this document moves.
 
+> **Re-verification (#3923, 2026-10-14).** Against an older backend that
+> sends no `is_live`, the SDK summary's task-budget filter now drops an
+> expired `closing` row as well, matching the backend's `status=live` since
+> #3773. A current backend already omits that row, so nothing visible
+> changes there. No tool, description, input schema or wire field changes,
+> so the contract fingerprint does not move.
+
 > **Re-verification (#3839 follow-up via #3864, 2026-10-10, hosted
 > `haven_discover_tools` description golden regen):** #3839 (22f49edd)
 > rewrote the hosted `haven_discover_tools` description in source (adding the

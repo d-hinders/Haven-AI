@@ -40,20 +40,114 @@ import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/hel
 import { attachEvidenceHandler, attachMachinePaymentEvidence, listReceipts } from '../evidence.js'
 import { RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL } from '../../../infra/repositories/x402-authorizations.js'
 import { feedSettledPaymentBestEffort } from '../../accounting/index.js'
+import { deriveX402PaymentNonce } from '@haven_ai/sdk/edge'
 
 const TOKEN = '0x036cbd53842c5426634e7929541ec2318f3dcf7e'
 const TREASURY = '0x00000000000000000000000000000000000000b1'
-const DELEGATE = '0x00000000000000000000000000000000000000d1'
+// #3925: the delegate is a REAL key now — the settlement report must carry an
+// X-PAYMENT header whose authorization is signed by it, so the fixture wallet
+// is fixed and `DELEGATE` is its address (the sweep/verifier compare
+// case-insensitively; the funding seed stores it verbatim).
+const DELEGATE_WALLET = new ethers.Wallet(
+  '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d',
+)
+const DELEGATE = DELEGATE_WALLET.address
 const MERCHANT = '0x00000000000000000000000000000000000000aa'
 const OTHER = '0x00000000000000000000000000000000000000ee'
 const AMOUNT_RAW = '1000'
 const RESOURCE = 'http://merchant.example/api/joke'
 const SETTLE_A = `0x${'a'.repeat(64)}`
 const SETTLE_B = `0x${'b'.repeat(64)}`
+/** A nonce no payment derives — the default fixtures' shared burn. */
+const TEST_NONCE = `0x${'77'.repeat(32)}`
 
 const TRANSFER_IFACE = new ethers.Interface([
   'event Transfer(address indexed from, address indexed to, uint256 value)',
 ])
+
+const AUTHORIZATION_USED_IFACE = new ethers.Interface([
+  'event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce)',
+])
+
+function authorizationUsedLog(authorizer: string, nonce: string, token?: string) {
+  const encoded = AUTHORIZATION_USED_IFACE.encodeEventLog('AuthorizationUsed', [authorizer, nonce])
+  return { address: token ?? TOKEN, topics: encoded.topics, data: encoded.data }
+}
+
+/** The EIP-712 domain the pinned Base Sepolia USDC signs under. */
+const SETTLEMENT_DOMAIN = {
+  name: 'USDC',
+  version: '2',
+  chainId: 84532,
+  verifyingContract: TOKEN,
+} as const
+
+const TRANSFER_WITH_AUTHORIZATION_TYPES: Record<string, ethers.TypedDataField[]> = {
+  TransferWithAuthorization: [
+    { name: 'from', type: 'address' },
+    { name: 'to', type: 'address' },
+    { name: 'value', type: 'uint256' },
+    { name: 'validAfter', type: 'uint256' },
+    { name: 'validBefore', type: 'uint256' },
+    { name: 'nonce', type: 'bytes32' },
+  ],
+}
+
+/**
+ * The X-PAYMENT header a settlement report posts: base64 JSON, `payload`
+ * carrying the delegate's EIP-3009 signature over an authorization whose
+ * nonce names the payment. Mirrors what `exact.evm.encodePayment` emits.
+ */
+async function settlementHeader(
+  opts: {
+    nonce: string
+    signer?: ethers.Wallet
+    from?: string
+    to?: string
+    value?: string
+    validAfter?: string
+    validBefore?: string
+    domainVerifyingContract?: string
+  },
+): Promise<string> {
+  const authorization = {
+    from: opts.from ?? DELEGATE,
+    to: opts.to ?? MERCHANT,
+    value: opts.value ?? AMOUNT_RAW,
+    validAfter: opts.validAfter ?? '0',
+    validBefore: opts.validBefore ?? '9999999999',
+    nonce: opts.nonce,
+  }
+  const signature = await (opts.signer ?? DELEGATE_WALLET).signTypedData(
+    opts.domainVerifyingContract
+      ? { ...SETTLEMENT_DOMAIN, verifyingContract: opts.domainVerifyingContract }
+      : SETTLEMENT_DOMAIN,
+    TRANSFER_WITH_AUTHORIZATION_TYPES,
+    {
+      ...authorization,
+      value: BigInt(authorization.value),
+      validAfter: BigInt(authorization.validAfter),
+      validBefore: BigInt(authorization.validBefore),
+    },
+  )
+  return Buffer.from(
+    JSON.stringify({
+      x402Version: 1,
+      scheme: 'exact',
+      network: 'eip155:84532',
+      payload: { signature, authorization },
+    }),
+    'utf8',
+  ).toString('base64')
+}
+
+/**
+ * The default header: the payment's own derived nonce, signed by its
+ * delegate — the shape a deriving client posts. The receipt mock must carry
+ * the same nonce's `AuthorizationUsed` (see `settleReceipt`).
+ */
+const derivedSettlementHeader = (paymentId: string) =>
+  settlementHeader({ nonce: deriveX402PaymentNonce(paymentId) })
 
 function transferLog(opts: { token?: string; from?: string; to?: string; value?: string } = {}) {
   const encoded = TRANSFER_IFACE.encodeEventLog('Transfer', [
@@ -64,10 +158,32 @@ function transferLog(opts: { token?: string; from?: string; to?: string; value?:
   return { address: opts.token ?? TOKEN, topics: encoded.topics, data: encoded.data }
 }
 
-/** A successful receipt carrying exactly the delegate → merchant settlement. */
-function goodReceipt(overrides: Parameters<typeof transferLog>[0] = {}) {
-  return { status: 1, blockNumber: 42, logs: [transferLog(overrides)] }
+/**
+ * A successful receipt carrying exactly the delegate → merchant settlement.
+ * Since #3925 a recordable settlement also carries the token's own
+ * `AuthorizationUsed` log for the burned nonce — `authUsed` lists them
+ * (`undefined` plants the DEFAULT test nonce the default header burns; `[]`
+ * is the explicit no-burn case-(c) receipt).
+ */
+function goodReceipt(
+  overrides: Parameters<typeof transferLog>[0] = {},
+  authUsed?: string[],
+) {
+  const used = authUsed === undefined ? [TEST_NONCE] : authUsed
+  return {
+    status: 1,
+    blockNumber: 42,
+    logs: [transferLog(overrides), ...used.map((nonce) => authorizationUsedLog(DELEGATE, nonce))],
+  }
 }
+
+/**
+ * Point the receipt mock at the settlement of ONE payment: the transfer plus
+ * `AuthorizationUsed(delegate, deriveX402PaymentNonce(id))` — the pair the
+ * default derived header proves.
+ */
+const settleReceiptFor = (paymentId: string) =>
+  getTransactionReceipt.mockResolvedValue(goodReceipt({}, [deriveX402PaymentNonce(paymentId)]))
 
 /** The settlement block, mined `offsetSec` from now. */
 const blockAt = (offsetSec = 0) => ({ number: 42, timestamp: Math.floor(Date.now() / 1000) + offsetSec })
@@ -141,9 +257,20 @@ async function seedFunded(seed: {
   return { id: result.rows[0].id, funding }
 }
 
-/** What `haven_report_settlement_evidence` posts: rail and hash, nothing else. */
-const report = (agentId: string, paymentId: string, txHash: string) =>
-  attachMachinePaymentEvidence({ agentId, paymentId, rail: 'x402', txHash })
+/**
+ * What `haven_report_settlement_evidence` posts: rail, hash — and since
+ * #3925 the X-PAYMENT header proving the burned nonce. The default header
+ * signs the DEFAULT test nonce (the one `goodReceipt()` plants in the
+ * receipt); tests pass an explicit header for any other proof shape.
+ */
+const report = async (agentId: string, paymentId: string, txHash: string, header?: string) =>
+  attachMachinePaymentEvidence({
+    agentId,
+    paymentId,
+    rail: 'x402',
+    txHash,
+    paymentProofHeader: header ?? (await settlementHeader({ nonce: TEST_NONCE })),
+  })
 
 /** What `haven_report_x402_outcome` records first: the merchant answered 200. */
 const reportOutcome = (agentId: string, paymentId: string, funding: string) =>
@@ -256,7 +383,12 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
       const { agentId, userId } = await seedAgent()
       const { id, funding } = await seedFunded({ agentId, userId })
 
-      const result = await attachEvidenceHandler(agentId, { paymentId: id, rail: 'x402', txHash: SETTLE_A })
+      const result = await attachEvidenceHandler(agentId, {
+        paymentId: id,
+        rail: 'x402',
+        txHash: SETTLE_A,
+        paymentProofHeader: await settlementHeader({ nonce: TEST_NONCE }),
+      })
 
       expect(result.statusCode).toBe(202)
       expect((result.body as { evidence: Record<string, unknown> }).evidence).toMatchObject({
@@ -418,7 +550,7 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
       const holder = await seedFunded({ agentId, userId })
       const { id } = await seedFunded({ agentId, userId })
 
-      const written = await db.query(RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL, [holder.funding, id, agentId])
+      const written = await db.query(RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL, [holder.funding, id, agentId, null])
 
       expect(written.rows).toHaveLength(0)
       expect(await recordedHash(id)).toBeNull()
@@ -431,7 +563,12 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
       const second = await seedFunded({ agentId, userId })
       await report(agentId, first.id, SETTLE_A)
 
-      const result = await attachEvidenceHandler(agentId, { paymentId: second.id, rail: 'x402', txHash: SETTLE_A })
+      const result = await attachEvidenceHandler(agentId, {
+        paymentId: second.id,
+        rail: 'x402',
+        txHash: SETTLE_A,
+        paymentProofHeader: await settlementHeader({ nonce: TEST_NONCE }),
+      })
 
       expect(result.statusCode).toBe(409)
       const body = result.body as { error: string; reason: string }
@@ -550,6 +687,154 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
       await expect(report(agentId, id, SETTLE_A)).rejects.toThrow('payment_not_confirmed')
       expect(getTransactionReceipt).not.toHaveBeenCalled()
       expect(await recordedHash(id)).toBeNull()
+    })
+  })
+
+  describe('nonce attribution (#3925)', () => {
+    it('a hash whose receipt burned A’s nonce is refused against same-shaped B — the sibling accusation, nothing written (red on 641f527d)', async () => {
+      const { agentId, userId } = await seedAgent()
+      const a = await seedFunded({ agentId, userId })
+      const b = await seedFunded({ agentId, userId })
+      // The transaction burned A's derived nonce; B's own header names B.
+      getTransactionReceipt.mockResolvedValue(goodReceipt({}, [deriveX402PaymentNonce(a.id)]))
+
+      const answered = await attachEvidenceHandler(agentId, {
+        paymentId: b.id,
+        rail: 'x402',
+        txHash: SETTLE_A,
+        paymentProofHeader: await derivedSettlementHeader(b.id),
+      })
+
+      expect(answered.statusCode).toBe(409)
+      // The burned nonce IS the derived nonce of B's same-shaped sibling.
+      expect((answered.body as { reason?: string }).reason).toMatch(/settles another payment/)
+      expect(await recordedHash(b.id)).toBeNull()
+      expect(await recordedHash(a.id)).toBeNull()
+    })
+
+    it('the same hash against A — the payment whose nonce it burned — is recorded, nonce-bound', async () => {
+      const { agentId, userId } = await seedAgent()
+      const a = await seedFunded({ agentId, userId })
+      getTransactionReceipt.mockResolvedValue(goodReceipt({}, [deriveX402PaymentNonce(a.id)]))
+
+      await report(agentId, a.id, SETTLE_A, await derivedSettlementHeader(a.id))
+
+      expect(await recordedHash(a.id)).toBe(SETTLE_A)
+      const meta = (await readIntent(a.id)).machine_metadata
+      expect(meta.merchant_settlement_nonce_bound).toBe(true)
+    })
+
+    it('a header whose nonce equals the payment’s derived nonce records the consistency flag', async () => {
+      const { agentId, userId } = await seedAgent()
+      const a = await seedFunded({ agentId, userId })
+      settleReceiptFor(a.id)
+
+      await report(agentId, a.id, SETTLE_A, await derivedSettlementHeader(a.id))
+
+      expect(await recordedHash(a.id)).toBe(SETTLE_A)
+      const meta = (await readIntent(a.id)).machine_metadata
+      expect(meta.merchant_settlement_nonce_derived).toBe(true)
+    })
+
+    it('a header nonce that is properly signed and burned but NOT derived records nonceBound without the derived flag', async () => {
+      const { agentId, userId } = await seedAgent()
+      const a = await seedFunded({ agentId, userId })
+      getTransactionReceipt.mockResolvedValue(goodReceipt({}, [TEST_NONCE]))
+
+      await report(agentId, a.id, SETTLE_A) // default header: TEST_NONCE, signed by the delegate
+
+      expect(await recordedHash(a.id)).toBe(SETTLE_A)
+      const meta = (await readIntent(a.id)).machine_metadata
+      expect(meta.merchant_settlement_nonce_bound).toBe(true)
+      expect(meta.merchant_settlement_nonce_derived).toBeUndefined()
+    })
+
+    it('a header signed by a key other than the delegate is refused before the chain is used', async () => {
+      const { agentId, userId } = await seedAgent()
+      const a = await seedFunded({ agentId, userId })
+      const impostor = new ethers.Wallet(ethers.Wallet.createRandom().privateKey)
+      getTransactionReceipt.mockResolvedValue(goodReceipt({}, [TEST_NONCE]))
+
+      await expect(
+        report(agentId, a.id, SETTLE_A, await settlementHeader({ nonce: TEST_NONCE, signer: impostor })),
+      ).rejects.toThrow('settlement_unverified')
+
+      expect(await recordedHash(a.id)).toBeNull()
+    })
+
+    it('a report with no header is refused, the reason naming the header and the retry that carries it', async () => {
+      const { agentId, userId } = await seedAgent()
+      const a = await seedFunded({ agentId, userId })
+      settleReceiptFor(a.id)
+
+      const answered = await attachEvidenceHandler(agentId, {
+        paymentId: a.id,
+        rail: 'x402',
+        txHash: SETTLE_A,
+      })
+
+      expect(answered.statusCode).toBe(409)
+      expect((answered.body as { reason?: string }).reason).toMatch(/no X-PAYMENT payment header/)
+      expect((answered.body as { reason?: string }).reason).toMatch(/payment header that was sent to the merchant/)
+      expect(await recordedHash(a.id)).toBeNull()
+    })
+
+    it('a receipt whose Transfer burns no AuthorizationUsed for the delegate is refused as not an EIP-3009 settlement (case c)', async () => {
+      const { agentId, userId } = await seedAgent()
+      const a = await seedFunded({ agentId, userId })
+      getTransactionReceipt.mockResolvedValue(goodReceipt({}, []))
+
+      const answered = await attachEvidenceHandler(agentId, {
+        paymentId: a.id,
+        rail: 'x402',
+        txHash: SETTLE_A,
+        paymentProofHeader: await settlementHeader({ nonce: TEST_NONCE }),
+      })
+
+      expect(answered.statusCode).toBe(409)
+      expect((answered.body as { reason?: string }).reason).toMatch(/not an EIP-3009 settlement/)
+      expect(await recordedHash(a.id)).toBeNull()
+    })
+
+    it('an AuthorizationUsed from a contract other than the payment’s token binds nothing', async () => {
+      const { agentId, userId } = await seedAgent()
+      const a = await seedFunded({ agentId, userId })
+      getTransactionReceipt.mockResolvedValue({
+        status: 1,
+        blockNumber: 42,
+        logs: [transferLog(), authorizationUsedLog(DELEGATE, TEST_NONCE, OTHER)],
+      })
+
+      const answered = await attachEvidenceHandler(agentId, {
+        paymentId: a.id,
+        rail: 'x402',
+        txHash: SETTLE_A,
+        paymentProofHeader: await settlementHeader({ nonce: TEST_NONCE }),
+      })
+
+      expect(answered.statusCode).toBe(409)
+      expect((answered.body as { reason?: string }).reason).toMatch(/not an EIP-3009 settlement/)
+      expect(await recordedHash(a.id)).toBeNull()
+    })
+
+    it('a burned nonce that matches no sibling’s derived nonce is refused as a plain nonce mismatch', async () => {
+      const { agentId, userId } = await seedAgent()
+      const a = await seedFunded({ agentId, userId })
+      // The receipt burned TEST_NONCE; the header names A's derived nonce; no
+      // sibling holds that nonce, so the refusal stays a nonce mismatch.
+      getTransactionReceipt.mockResolvedValue(goodReceipt({}, [TEST_NONCE]))
+
+      const answered = await attachEvidenceHandler(agentId, {
+        paymentId: a.id,
+        rail: 'x402',
+        txHash: SETTLE_A,
+        paymentProofHeader: await derivedSettlementHeader(a.id),
+      })
+
+      expect(answered.statusCode).toBe(409)
+      expect((answered.body as { reason?: string }).reason).toMatch(/nonce does not match the reported authorization/)
+      expect((answered.body as { reason?: string }).reason).not.toMatch(/settles another payment/)
+      expect(await recordedHash(a.id)).toBeNull()
     })
   })
 })

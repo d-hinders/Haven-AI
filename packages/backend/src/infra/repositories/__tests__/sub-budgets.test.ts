@@ -254,6 +254,8 @@ describeDb('agent_sub_budgets repository (#3330)', () => {
     expect(grants[0].parent_agent_name).toContain('parent-a')
     expect(grants[0].period_amount_atomic).toBe('500000')
     expect(grants[0].is_expired).toBe(false)
+    // #3922: is_live is openSubBudgetSql, selected from SQL — an open unexpired grant is live.
+    expect(grants[0].is_live).toBe(true)
     // The delegating agent does not see its own parent-child as a "grant".
     expect(await findOpenGrantsForAgent(a.agentId)).toEqual([])
   })
@@ -284,6 +286,8 @@ describeDb('agent_sub_budgets repository (#3330)', () => {
     expect(grants[0].sub_budget_id).toBe(grant.id)
     expect(grants[0].status).toBe('closing')
     expect(grants[0].is_expired).toBe(true)
+    // #3922: a closing row is listed but is NOT live (openSubBudgetSql wants status open).
+    expect(grants[0].is_live).toBe(false)
   })
 
   /**

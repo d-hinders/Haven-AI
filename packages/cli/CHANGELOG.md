@@ -15,6 +15,14 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Changed
+
+- Waiting for a budget grant now reads the backend's `is_live` flag (#3922),
+  so an expired `active` row no longer counts as the grant landing. It falls
+  back to the row's status against an older backend. The revoke refusal is
+  unchanged: it still checks every status still enabled on-chain, not
+  `is_live`. No update needed.
+
 ## 0.10.0-alpha.0 — 2026-10-14
 
 ### Changed

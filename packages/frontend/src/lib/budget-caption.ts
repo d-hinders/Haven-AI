@@ -183,6 +183,15 @@ export interface BudgetCaptionRow {
   periodSeconds: number
   /** Unix seconds; null when the row carries no expiry (the analytics read). */
   expiresSec: number | null
+  /**
+   * #3922: the server's liveness for the row (`is_live`). `false` means the
+   * backend no longer counts it as a live budget — for an active row, past its
+   * expiry — and it reads as expired even if this render's clock disagrees.
+   * Undefined (analytics, allowance rows) defers to `expiresSec` alone. It is
+   * a fetch-time snapshot, so the clock comparison stays: a page left open
+   * past `expiresSec` still flips to expired.
+   */
+  isLive?: boolean | null
   budgetAtomic: string
   /** The used amount when a read exists, else null — "no figure" ≠ "failed". */
   usedAtomic: string | null
@@ -266,6 +275,10 @@ function meterCaption(row: BudgetCaptionRow, options: BudgetCaptionOptions): str
   return `${usedLine} · ${when}`
 }
 
+function rowIsExpired(row: BudgetCaptionRow, nowMs: number): boolean {
+  return row.isLive === false || (row.expiresSec != null && row.expiresSec * 1000 <= nowMs)
+}
+
 /**
  * The caption for one budget row (#3806). Every budget meter in the app — the
  * agent detail card, the edit modals, the analytics table, the dashboard row
@@ -275,7 +288,7 @@ export function budgetCaption(row: BudgetCaptionRow, options: BudgetCaptionOptio
   const { nowMs } = options
   // An `active` row can outlive its `expires_at` — nothing flips the status.
   // Such a budget can no longer spend: no meter, no countdown.
-  if (row.expiresSec != null && row.expiresSec * 1000 <= nowMs) return { kind: 'expired', caption: EXPIRED_CAPTION }
+  if (rowIsExpired(row, nowMs)) return { kind: 'expired', caption: EXPIRED_CAPTION }
   // The dormant half of a re-key: the steady grant has not begun.
   if (row.startSec * 1000 > nowMs) {
     return { kind: 'not-started', caption: `Starts ${formatNextEvent(row.startSec * 1000, nowMs, options.timeZone)}` }
@@ -349,7 +362,7 @@ export function selectPrimaryBudgets(rows: BudgetCaptionRow[], nowMs: number): S
   const nowSec = Math.floor(nowMs / 1000)
   const live = rows.filter(
     (r) =>
-      !(r.expiresSec != null && r.expiresSec <= nowSec) && // expired (#3802)
+      !rowIsExpired(r, nowMs) && // expired (#3802; the server's `is_live` too, #3922)
       r.startSec <= nowSec, // future start — the dormant half of a re-key
   )
   if (live.length === 0) return null

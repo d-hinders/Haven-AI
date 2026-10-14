@@ -22,6 +22,7 @@ import { selectDelegationForPayment } from '../infra/repositories/delegation-bud
 import {
   findForAgent,
   insertPendingTaskBudget,
+  isLiveTaskBudget,
   listForAgent,
   markClosed,
   markClosing,
@@ -90,6 +91,7 @@ function toWire(row: TaskBudgetRow, nowSec: number) {
     status: row.status,
     expires_at: Number(row.expires_at),
     is_expired: Number(row.expires_at) <= nowSec,
+    is_live: isLiveTaskBudget(row, nowSec),
     created_at: row.created_at,
     opened_at: row.opened_at,
     closed_at: row.closed_at,

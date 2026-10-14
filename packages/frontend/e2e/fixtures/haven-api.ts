@@ -1135,6 +1135,8 @@ export async function mockHavenApi(page: Page) {
               delegation_hash: `0x${'4d'.repeat(32)}`,
               version: 1,
               status: 'active',
+              // #3922: the server's budget-view liveness (active, unexpired).
+              is_live: true,
               budget_atomic: '250000000',
               period_seconds: 43_200 * 60,
               // #3806: the wire carries `start_date` as a Unix-seconds digit
@@ -1554,6 +1556,7 @@ export async function serveAgentDetailResponses(
             delegation_hash: `0x${'4d'.repeat(32)}`,
             version: 1,
             status: 'active',
+            is_live: true,
             budget_atomic: '250000000',
             period_seconds: 604_800,
             // #3806: Unix-seconds digit string on the wire, never ISO.

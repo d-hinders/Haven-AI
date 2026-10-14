@@ -186,7 +186,10 @@ function chainCarries(opts: { authorizer?: string; nonce?: string; txHash?: stri
       return {
         status: 1,
         blockNumber: SETTLE_BLOCK,
-        logs: [transferLog()],
+        // #3925: the settlement's receipt carries the token's own
+        // `AuthorizationUsed(authorizer, nonce)` log — the proof the observe
+        // call now requires (the nonce the sweep derived for this payment).
+        logs: [transferLog(), { ...authorizationUsedLog(authorizer, nonce, txHash), transactionHash: undefined }],
       }
     }
     return null

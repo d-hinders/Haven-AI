@@ -1221,6 +1221,12 @@ export interface RawTaskBudget {
   status: HavenTaskBudgetStatus
   expires_at: number
   is_expired: boolean
+  /**
+   * #3922: the backend's single liveness answer (pending/open/closing and not
+   * expired — the `status=live` set). Optional: an older backend omits it, and
+   * a missing value means "derive from `status` + `is_expired`", never false.
+   */
+  is_live?: boolean
   created_at: string
   opened_at: string | null
   closed_at: string | null
@@ -1257,6 +1263,8 @@ export interface HavenTaskBudget {
   status: HavenTaskBudgetStatus
   expiresAt: number
   isExpired: boolean
+  /** #3922: camelCase `is_live`; absent when the backend predates it (presence preserved). */
+  isLive?: boolean
   createdAt: string
   openedAt: string | null
   closedAt: string | null

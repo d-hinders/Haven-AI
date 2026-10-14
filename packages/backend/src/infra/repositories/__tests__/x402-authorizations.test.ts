@@ -483,12 +483,12 @@ describeDb('eip3009 merchant-settlement writer: one hash per payment (#3927)', (
     const b = await db.connect()
     try {
       await a.query('BEGIN')
-      const first = await a.query(RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL, [HASH_A, id, agentId])
+      const first = await a.query(RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL, [HASH_A, id, agentId, null])
       expect(first.rows).toHaveLength(1)
 
       await b.query('BEGIN')
       const pidB = await pidOf(b)
-      const second = b.query(RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL, [HASH_B, id, agentId])
+      const second = b.query(RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL, [HASH_B, id, agentId, null])
       await waitUntilBlocked([pidB])
       await a.query('COMMIT')
 

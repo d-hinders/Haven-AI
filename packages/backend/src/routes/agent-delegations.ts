@@ -65,6 +65,7 @@ import {
   revokeDelegationsByHashes,
   selectDelegationRowForAgentByHash,
   listDelegationJsonByIds,
+  spendableDelegationSql,
 } from '../infra/repositories/delegation-budgets.js'
 import {
   readRemainingBudget,
@@ -115,6 +116,8 @@ interface AgentDelegationListRow {
   merchant_id: string | null
   merchant_slug: string | null
   merchant_name: string | null
+  /** #3922: `spendableDelegationSql(…, { requireStarted: false })`, selected from SQL. */
+  is_live: boolean
 }
 
 // Serialize a prepared UserOperation to wire JSON: bigint → "123n" string,
@@ -256,7 +259,8 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       `SELECT d.id, d.chain_id, d.token_address, d.recipient_address, d.delegation_hash,
               d.version, d.status, d.budget_atomic, d.period_seconds, d.start_date,
               d.expires_at, d.created_at,
-              d.merchant_id, m.slug AS merchant_slug, m.name AS merchant_name
+              d.merchant_id, m.slug AS merchant_slug, m.name AS merchant_name,
+              (${spendableDelegationSql('d', { requireStarted: false })}) AS is_live
        FROM agent_delegations d
        LEFT JOIN merchants m ON m.id = d.merchant_id
        WHERE d.agent_id = $1
@@ -265,7 +269,11 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     )
 
     // #3693 (corrected body): the plain pollers' default. The rows go back
-    // exactly as the SELECT produced them — the enrichment keys are absent
+    // exactly as the SELECT produced them — the one derived field is #3922's
+    // `is_live`, selected as the budget-VIEW predicate itself
+    // (`spendableDelegationSql`, `requireStarted: false`, so a dormant
+    // future-start re-key row is live as the budget views show it) so the
+    // wire flag cannot drift from the SQL; the enrichment keys are absent
     // (not null), the delegation_json fetch below never runs, and the chain
     // reader is never called.
     if (request.query.include !== 'remaining') {

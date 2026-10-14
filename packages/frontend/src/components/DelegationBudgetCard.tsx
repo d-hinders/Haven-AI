@@ -101,7 +101,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
   // #3922: `is_live` is the server's answer (pending/open/closing and not
   // expired); an OPEN live row is the open, unexpired set this card lists.
   const openTaskBudgets = useMemo(
-    () => (taskBudgets ?? []).filter((t) => t.status === 'open' && t.is_live),
+    () => (taskBudgets ?? []).filter((t) => t.status === 'open' && (t.is_live ?? !t.is_expired)),
     [taskBudgets],
   )
   const { toast } = useToast()

@@ -131,6 +131,10 @@ describe('subBudgetStillRunning (#3922)', () => {
     // is_live is a fetch-time snapshot: a page left open past expiry still flips.
     expect(subBudgetStillRunning({ is_live: true, status: 'open', expires_at: past }, NOW)).toBe(false)
   })
+  it('a backend that sends no is_live: an open, unexpired row still runs', () => {
+    expect(subBudgetStillRunning({ status: 'open', expires_at: ahead }, NOW)).toBe(true)
+    expect(subBudgetStillRunning({ status: 'closed', expires_at: ahead }, NOW)).toBe(false)
+  })
 })
 
 describe('delegationIsLive (#3922)', () => {

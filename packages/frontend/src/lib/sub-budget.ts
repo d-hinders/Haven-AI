@@ -157,9 +157,11 @@ export function eligibleSubBudgetParents<
  * `closed` row, or an expired one, reads "ended".
  */
 export function subBudgetStillRunning(
-  b: { is_live: boolean; status: string; expires_at: number },
+  b: { is_live?: boolean; status: string; expires_at: number },
   nowSec: number = Date.now() / 1000,
 ): boolean {
   if (b.expires_at <= nowSec) return false
-  return b.is_live || b.status === 'pending' || b.status === 'closing'
+  // Past the expiry check, live/pending/closing is every status but `closed`
+  // — which also covers a row from a backend that predates `is_live`.
+  return b.is_live === true || b.status !== 'closed'
 }

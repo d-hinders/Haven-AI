@@ -5,7 +5,7 @@ covers:
   - .agents/skills/quality-scan/SKILL.md
   - .agents/skills/quality-scan/references/dimensions.md
   - scripts/test-support/guard-cli.mjs
-last-verified: "2026-10-13"
+last-verified: "2026-10-14"
 ---
 
 # Quality-Scan Ledger
@@ -1514,3 +1514,16 @@ gate's `--changed=` is shell-expanded, so glob-string misses must be dropped
 before confirmation.
 
 **Disposition: pending owner decision** (S1, C1, C2, C3).
+
+**Disposition (owner, 2026-10-14): file all four.** S1 → epic
+[#3919](https://github.com/d-hinders/Haven-AI/issues/3919) (`epic`, `money-path`,
+`area:backend`, `area:sdk`, `area:frontend`, `area:docs`) with slices #3920 (A,
+delegation predicates named and adopted), #3921 (B, task and sub predicates),
+#3922 (C, liveness on the wire), #3923 (D, the five verdict conflicts, held on
+its owner questions), #3924 (E, the census ratchet); spec-review verdict posted
+on the epic. C1 → #3925 (`money-path`, `area:backend`; threat model pending the
+owner's confirmation). C2 → #3926 (`area:docs`; waiting on where the 10-03 report
+lives). C3 → #3927 (`money-path`, `area:backend`; lock-widening question open).
+Filed to the backlog (no `code-quality`); each issue carries a spec-review
+verdict. Drive: `ship-next epic=#3919`, `ship-next 3925`, `ship-next 3926`,
+`ship-next 3927` once each issue's `pending-review` is lifted.

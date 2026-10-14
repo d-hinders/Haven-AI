@@ -45,6 +45,11 @@ methods (`pay()`, `sign()`, `authorizeX402()`) are unavailable by construction.
 
 ## Tools
 
+Every hosted result carries `contract_fingerprint` and `server_version` at the
+top level of its JSON; a fingerprint that differs from the one in the server's
+instructions means the agent's tool list is stale — reconnect. See
+[the contract fingerprint and the reconnect rule](../../docs/operations/mcp-runtime-compatibility.md#hosted-tool-lists--the-contract-fingerprint-and-the-reconnect-rule-3816).
+
 | Tool | Maps to | Signs? |
 |---|---|---|
 | `haven_get_agent` | `GET /machine-payments/agent` | no |

@@ -18,7 +18,10 @@ import { insertPendingSubBudget } from '../../infra/repositories/sub-budgets.js'
 import { serializeUserOp } from '../../rails/execution-rail.js'
 
 const DELEGATE_ACCOUNT = '0x1111111111111111111111111111111111111111'
-const { mockPrepareAccountCall } = vi.hoisted(() => ({ mockPrepareAccountCall: vi.fn() }))
+const { mockPrepareAccountCall, mockDisabled } = vi.hoisted(() => ({
+  mockPrepareAccountCall: vi.fn(),
+  mockDisabled: vi.fn(),
+}))
 
 vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../rails/hybrid-provisioning.js')>()),
@@ -30,7 +33,7 @@ vi.mock('../../rails/delegation-rail.js', async (importOriginal) => ({
 }))
 vi.mock('../../modules/sub-budgets/index.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../modules/sub-budgets/index.js')>()),
-  isSubBudgetChildDisabledOnChain: vi.fn(async () => false),
+  isSubBudgetChildDisabledOnChain: (...a: unknown[]) => mockDisabled(...a),
 }))
 
 const subBudgetRoutes = (await import('../sub-budgets.js')).default
@@ -76,6 +79,8 @@ describeDb('expired closing sub-budget keeps its signature path (#3923 P6)', () 
   beforeEach(async () => {
     await resetDb()
     mockPrepareAccountCall.mockReset()
+    mockDisabled.mockReset()
+    mockDisabled.mockResolvedValue(false)
     mockPrepareAccountCall.mockResolvedValue({
       userOperation: { sender: DELEGATE_ACCOUNT },
       userOpHash: `0x${'ab'.repeat(32)}`,
@@ -199,5 +204,45 @@ describeDb('expired closing sub-budget keeps its signature path (#3923 P6)', () 
     expect(res.json().status).toBe('closed')
     expect(await statusOf(id)).toBe('closed')
     expect(mockPrepareAccountCall).not.toHaveBeenCalled()
+  })
+
+  it('owner DELETE (a): closing row whose child is already disabled on-chain -> closed, no prepare', async () => {
+    const id = await seedRow('closing', 3600)
+    mockDisabled.mockResolvedValue(true)
+    const res = await app.inject({ method: 'DELETE', url: `/agents/${issuerId}/sub-budgets/${id}`, headers: ownerHeaders() })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().status).toBe('closed')
+    expect(await statusOf(id)).toBe('closed')
+    expect(mockPrepareAccountCall).not.toHaveBeenCalled()
+  })
+
+  it('owner DELETE (b): expired closing row, delegating agent REVOKED -> closed in Haven, no prepare', async () => {
+    const id = await seedRow('closing', -60)
+    await db.query(`UPDATE agents SET status = 'revoked' WHERE id = $1`, [issuerId])
+    const res = await app.inject({ method: 'DELETE', url: `/agents/${issuerId}/sub-budgets/${id}`, headers: ownerHeaders() })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().status).toBe('closed')
+    expect(await statusOf(id)).toBe('closed')
+    expect(mockPrepareAccountCall).not.toHaveBeenCalled()
+  })
+
+  it('owner DELETE (c): expired closing row, delegating agent ARCHIVED -> closed in Haven, no prepare', async () => {
+    const id = await seedRow('closing', -60)
+    await db.query(`UPDATE agents SET archived_at = NOW() WHERE id = $1`, [issuerId])
+    const res = await app.inject({ method: 'DELETE', url: `/agents/${issuerId}/sub-budgets/${id}`, headers: ownerHeaders() })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().status).toBe('closed')
+    expect(await statusOf(id)).toBe('closed')
+    expect(mockPrepareAccountCall).not.toHaveBeenCalled()
+  })
+
+  it('owner DELETE: UNEXPIRED closing row of a revoked agent is unchanged — re-prepared, still closing', async () => {
+    const id = await seedRow('closing', 3600)
+    await db.query(`UPDATE agents SET status = 'revoked' WHERE id = $1`, [issuerId])
+    const res = await app.inject({ method: 'DELETE', url: `/agents/${issuerId}/sub-budgets/${id}`, headers: ownerHeaders() })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().next_action).toBe('agent_signs_close_then_submits')
+    expect(await statusOf(id)).toBe('closing')
+    expect(mockPrepareAccountCall).toHaveBeenCalledTimes(1)
   })
 })

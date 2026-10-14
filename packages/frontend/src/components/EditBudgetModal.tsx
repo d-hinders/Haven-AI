@@ -692,8 +692,9 @@ export default function EditBudgetModal({
                   // #3933 round 4: an earlier attempt landed first, with the
                   // limits the owner set then — say so, never "the new limits".
                   <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-                    Your earlier change went through first, so the budget has the limits you set
-                    then, and the previous budget is stopped. Edit it again to set these limits.
+                    Your earlier change went through first, so the budget has the amount, period and
+                    recipient you chose then, and the previous budget is stopped. Edit it again to
+                    make this change.
                   </p>
                 ) : (
                   <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
@@ -726,13 +727,14 @@ export default function EditBudgetModal({
                         still do, and offer the Stop right here. */}
                     {earlierLimits ? (
                       <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                        The budget has the limits you set then, not these. The previous{' '}
+                        The budget has the amount, period and recipient you chose then, not the ones
+                        you entered now. The previous{' '}
                         {previousBudgetPhrase} budget{' '}
                         {outcomeMoved
                           ? 'pays a different recipient, so it keeps working, in Haven and outside it,'
                           : 'can still be spent outside Haven'}{' '}
                         until it is stopped. Stopping it also ends any open task budget or
-                        sub-budget taken from it. Then edit the budget again to set these limits.
+                        sub-budget taken from it. Then edit the budget again to make this change.
                       </p>
                     ) : outcomeMoved ? (
                       <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">

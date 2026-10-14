@@ -218,7 +218,7 @@ describe('EditBudgetModal (#3166) — review', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
     fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
     await waitFor(() => expect(screen.getByText('Your earlier change went through')).toBeInTheDocument())
-    expect(screen.getByText(/The budget has the limits you set then, not these/)).toBeInTheDocument()
+    expect(screen.getByText(/The budget has the amount, period and recipient you chose then, not the ones you entered now/)).toBeInTheDocument()
     expect(screen.queryByText(/The new limits took effect/)).toBeNull()
     expect(mockRevoke).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Stop old budget' }))

@@ -2344,10 +2344,10 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 >   out-of-gas `MERCHANT_NOT_READY` refusal names the operator top-up (#3834).
 > - **Connect.** `--doctor` / `--repair --name <slug>` update one named pair,
 >   refuse ambiguous multi-agent repairs, and re-consent without a token
->   (#3827). Coexisting agents are listed rather than called "replaced"
+>   (#3799, PR #3827). Coexisting agents are listed rather than called "replaced"
 >   (#3830). After a completed `--replace`, Haven is told which agent replaced
 >   which (#3772). Existing installs are left as they are.
-> - **CLI.** Agent guidance text and command wording only.
+> - **CLI.** Agent runbook text only (`commands.ts` changes a code comment).
 > - **Not moved.** `CLIENT_COMPAT` is unchanged (`git diff origin/main
 >   origin/dev -- packages/core/src/client-compat.ts` is empty), so no installed
 >   client is forced to update.

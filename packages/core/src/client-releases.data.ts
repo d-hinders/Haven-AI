@@ -252,10 +252,34 @@ export const CLIENT_RELEASE_DATA = {
       {
         "version": "0.10.0-alpha.0",
         "date": "2026-10-14",
-        "summary": "No changes to this package in this release.",
+        "summary": "Agent runbook text: the revoke hash is read from haven budget show <agentId> --hashes, and a connector upgrade_command may name the pair with --name <slug>. Text only; no update needed.",
         "summary_segments": [
           {
-            "text": "No changes to this package in this release.",
+            "text": "Agent runbook text: the revoke hash is read from ",
+            "code": false
+          },
+          {
+            "text": "haven budget show <agentId> --hashes",
+            "code": true
+          },
+          {
+            "text": ", and a connector ",
+            "code": false
+          },
+          {
+            "text": "upgrade_command",
+            "code": true
+          },
+          {
+            "text": " may name the pair with ",
+            "code": false
+          },
+          {
+            "text": "--name <slug>",
+            "code": true
+          },
+          {
+            "text": ". Text only; no update needed.",
             "code": false
           }
         ],

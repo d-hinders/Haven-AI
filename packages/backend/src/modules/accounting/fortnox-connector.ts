@@ -158,7 +158,11 @@ export function feedDescription(tx: FeedTransaction): string {
   })()
   const parts = [
     'Agent payment, already settled on-chain.',
-    `Amount ${tx.amountAtomic} ${tx.token} atomic.`,
+    // #3917: scaled token amount first, the atomic figure as a labelled
+    // annotation — same reasoning as the receipt underlag's Amount line.
+    tx.amount != null
+      ? `Amount ${tx.amount} ${tx.token} (${tx.amountAtomic} atomic).`
+      : `Amount ${tx.amountAtomic} ${tx.token} atomic.`,
     resourceHost ? `Resource ${resourceHost}.` : null,
     `Haven payment ${tx.paymentId}.`,
   ].filter(Boolean)

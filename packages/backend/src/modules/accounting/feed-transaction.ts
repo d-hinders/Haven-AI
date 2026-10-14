@@ -28,6 +28,16 @@ export interface FeedTransaction {
   resourceUrl: string | null
   token: string
   amountAtomic: string
+  /**
+   * The token amount in human decimals (`machine_payment_evidence.amount_human`),
+   * i.e. the same figure the ledger/FX amounts are computed from (#3917). The
+   * underlag renders THIS on the Amount line, with the atomic figure as a
+   * secondary annotation — feeding `amountAtomic` as if it were whole tokens
+   * is what put 1 500,00 US$ on Accounted for a 0.0015 USDC payment. Null on
+   * rows that never captured it: the fallback line labels the atomic number
+   * explicitly instead of inventing a scale.
+   */
+  amount: string | null
   amountSek: string | null
   /** The destination ledger's booking currency (#2877). */
   ledgerCurrency: LedgerCurrency
@@ -152,6 +162,7 @@ export function toFeedTransaction(
     resourceUrl: entry.resourceUrl,
     token: entry.token,
     amountAtomic: entry.amountAtomic,
+    amount: entry.amountHuman,
     amountSek: entry.amountSek,
     ledgerCurrency,
     amountLedger: ledger.amount,

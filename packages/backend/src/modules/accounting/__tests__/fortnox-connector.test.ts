@@ -48,6 +48,7 @@ const TX = {
   resourceUrl: 'https://merchant.example/vpn',
   token: 'USDC',
   amountAtomic: '1000',
+  amount: '0.001',
   amountSek: '10.42',
   ledgerCurrency: 'SEK' as const,
   amountLedger: '10.42',
@@ -380,6 +381,14 @@ describe('helpers', () => {
     expect(desc).not.toMatch(/:\/\//) // full URLs rejected — host only
     expect(desc).toMatch(/merchant\.example/)
     expect(desc).toMatch(/pay-123/)
+  })
+
+  it('feedDescription states the scaled token amount, atomic only as a labelled annotation (#3917)', () => {
+    // MUTATION TARGET: leading with `amountAtomic` again reads as whole
+    // tokens — the same bug that put 1 500,00 US$ on the underlag.
+    expect(feedDescription({ ...TX, amountAtomic: '1500', amount: '0.0015' }))
+      .toContain('Amount 0.0015 USDC (1500 atomic).')
+    expect(feedDescription({ ...TX, amount: null })).toContain('Amount 1000 USDC atomic.')
   })
 
   it('supplierNameFor falls back from name to truncated address to unknown', () => {

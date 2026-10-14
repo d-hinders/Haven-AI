@@ -23,6 +23,15 @@ export interface ReceiptUnderlagData {
   settledAt: string
   token: string
   amountAtomic: string
+  /**
+   * The token amount in human decimals, rendered as the Amount figure (#3917).
+   * The atomic value stays on the line as a secondary annotation — it is the
+   * verifiable settlement fact — but it must never be the number an extraction
+   * or a consultant reads as the invoice amount. Null when the row carried no
+   * human amount (pre-#2877 rows): the line then labels the atomic figure
+   * explicitly instead of scaling it with an invented decimals assumption.
+   */
+  amount: string | null
   amountSek: string | null
   fxRate: string | null
   fxSource: string | null
@@ -102,7 +111,15 @@ export function underlagFromData(data: ReceiptUnderlagData): ReceiptUnderlag {
     '',
     `Payment id     ${data.paymentId}`,
     `Settled at     ${data.settledAt}`,
-    `Amount         ${data.amountAtomic} ${data.token} (atomic units)`,
+    // #3917: the Amount figure is the scaled token amount (the same human
+    // figure the book value below is computed from) — `amountAtomic` on this
+    // line is what made Accounted's extraction read 1 500,00 US$ off a
+    // 0.0015 USDC payment. The atomic figure stays, labelled, as the
+    // verifiable settlement fact; when no human amount was captured the line
+    // says so instead of implying a scale.
+    ...(data.amount != null
+      ? [`Amount         ${data.amount} ${data.token} (${data.amountAtomic} atomic units)`]
+      : [`Amount         ${data.amountAtomic} ${data.token} (atomic units)`]),
     data.amountLedger != null
       ? `Book value     ${data.amountLedger} ${data.ledgerCurrency} (rate ${data.fxRateLedger ?? 'n/a'}, ${data.fxSource ?? 'n/a'}, ${data.fxAt ?? 'n/a'})`
       : 'Book value     not captured',
@@ -232,6 +249,7 @@ export async function loadReceiptUnderlag(
     settledAt: tx.settledAt,
     token: tx.token,
     amountAtomic: tx.amountAtomic,
+    amount: tx.amount,
     amountSek: tx.amountSek,
     fxRate: tx.fxRate,
     fxSource: tx.fxSource,

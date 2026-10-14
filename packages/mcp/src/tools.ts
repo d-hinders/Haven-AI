@@ -21,10 +21,15 @@ import {
   discoverMerchantMcpUrl,
   resolveTokenFromAddress,
   sameUrl,
+  selectErc7710PaymentOption,
+  selectStandardPaymentOption,
   toolDescriptions as sharedDescriptions,
   verifyPaymentReceipt,
+  x402AuthorizationAmount,
+  type HavenAgent,
   type HavenClientUpdate,
   type PaymentReceipt,
+  type X402PaymentOption,
   type X402Quote,
   type X402ResumeState,
 } from '@haven_ai/sdk'
@@ -32,6 +37,36 @@ import { taskSignerCompatibilityNotice } from './signer-compat.js'
 import { z } from 'zod/v3'
 
 const headersSchema = z.record(z.string(), z.string()).optional()
+
+/**
+ * #3967: the option pay will actually authorize for this agent — the same
+ * #1450/#2051 preference rule the hosted quote's `selectedSettlement` runs
+ * (delegation rail prefers erc7710, standard entry otherwise). Re-declared
+ * here because `@haven_ai/mcp` cannot import `@haven_ai/mcp-server` support.
+ */
+function selectQuoteOption(
+  accepts: X402PaymentOption[],
+  agent: HavenAgent,
+): X402PaymentOption | null {
+  if (agent.executionRail === 'delegation') {
+    const erc7710 = selectErc7710PaymentOption(accepts)
+    if (erc7710) return erc7710
+  }
+  return selectStandardPaymentOption(accepts)
+}
+
+/**
+ * #3967: human decimal → atomic, mirroring `cap-price.ts`'s `humanToAtomic`
+ * (same regex, same excess-precision null). Re-declared for the same reason —
+ * the hosted helper is mcp-server support, and the local surface ships alone.
+ */
+function humanDecimalToAtomic(human: string, decimals: number): bigint | null {
+  const match = /^([0-9]+)(?:\.([0-9]+))?$/.exec(human)
+  if (!match) return null
+  const fraction = match[2] ?? ''
+  if (fraction.length > decimals) return null
+  return BigInt(match[1] + fraction.padEnd(decimals, '0'))
+}
 
 export type HavenMcpToolName =
   | 'haven_send'
@@ -128,6 +163,20 @@ export const toolSchemas = {
     headers: headersSchema,
     body: z.string().optional(),
     idempotency_key: z.string().optional(),
+    /**
+     * #3967: the price the agent EXPECTS, in whole tokens ("0.10" = 0.1 USDC),
+     * compared against the amount of the option pay will actually select. A
+     * mismatch stops the agent — the same stop signals the hosted quote
+     * carries. Local parity: a hosted-only input would split the two tools'
+     * contracts. Same shape and name as the hosted surface's.
+     */
+    expected_amount: z
+      .string()
+      .regex(
+        /^[0-9]+(\.[0-9]+)?$/,
+        'expected_amount must be a plain decimal amount in whole tokens, e.g. "0.10"',
+      )
+      .optional(),
     /** REMOVED (#3411): declared only so the resolver can refuse it by name, never accepted. */
     idempotencyKey: z.string().optional().describe('REMOVED (#3411): refused — send idempotency_key'),
   },
@@ -643,8 +692,68 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
       const pf = preflight('haven_quote_x402', input)
       if ('success' in pf) return pf
       const { args, warnings } = pf
+      // #3967: the agent rail is needed ONLY when the caller stated an
+      // expected price — the comparison asks about the option pay will
+      // actually select (#2051), which the rail determines. Non-throwing,
+      // same `.then(a => a, () => undefined)` convention as the hosted quote.
+      const agentPromise =
+        args.expected_amount !== undefined
+          ? haven.getAgent().then(
+              (a) => a,
+              () => undefined,
+            )
+          : null
       try {
         const data = await haven.quoteX402(args.url, requestInit(args), { idempotencyKey: args.resolvedIdempotencyKey })
+        // #3967: expected_price check — mirrors the hosted haven_quote_x402
+        // (plain-http-x402.ts) field for field: compare the stated human
+        // decimal against the SELECTED option's atomic amount through the
+        // quote's own decimals; a mismatch stops the agent with
+        // `next_action: stop_and_tell_user` and names the deposit-address
+        // fallback's one condition (the user's explicit go-ahead). A quote
+        // makes no budget call locally — the local surface's budget gates
+        // live in the pay/prepare paths, and a quote is a read.
+        if (args.expected_amount !== undefined) {
+          const agent = agentPromise ? await agentPromise : undefined
+          const option = agent ? selectQuoteOption(data.paymentRequired.accepts, agent) : null
+          if (option && data.decimals !== null) {
+            const expectedAtomic = humanDecimalToAtomic(args.expected_amount as string, data.decimals)
+            let optionAmount: bigint | null = null
+            try {
+              // The AUTHORIZATION amount — maxAmountRequired when named.
+              optionAmount = BigInt(x402AuthorizationAmount(option))
+            } catch {
+              optionAmount = null
+            }
+            if (optionAmount !== null && expectedAtomic !== null) {
+              const priceDiffers = optionAmount !== expectedAtomic
+              const payload = {
+                ...data,
+                price_differs_from_expected: priceDiffers,
+                ...(priceDiffers
+                  ? {
+                      safe_to_continue: false,
+                      next_action: AgentPaymentNextAction.StopAndTellUser,
+                      next_tool_omitted_reason:
+                        'no Haven tool follows: the quoted price does not match the stated ' +
+                        'expectation — the user decides before any payment',
+                      reason:
+                        `The merchant's quoted price (${data.amount} ${data.asset}) does not match ` +
+                        `the expected price (${args.expected_amount as string}) stated with this quote. ` +
+                        'Stop and tell the user before any payment; do not re-quote, re-pay, or poll. ' +
+                        'If the x402 challenge itself is wrong and nothing has been paid via x402 on ' +
+                        "this invoice, the invoice's own deposit address MAY be an alternative — but " +
+                        "only with the user's explicit go-ahead, never automatically, and never once " +
+                        'anything has been paid via x402.',
+                    }
+                  : {}),
+              }
+              return warnings.length > 0
+                ? { success: true, data: payload, warnings }
+                : { success: true, data: payload }
+            }
+          }
+        }
         return warnings.length > 0 ? { success: true, data, warnings } : { success: true, data }
       } catch (err) {
         // #1328: quoteX402 still refuses a MACHINE-PAYMENT-CHALLENGE response as

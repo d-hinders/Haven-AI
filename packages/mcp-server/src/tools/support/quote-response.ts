@@ -23,6 +23,7 @@ import {
   HavenClient,
   selectErc7710PaymentOption,
   selectX402SettlementScheme,
+  x402AuthorizationAmount,
   type AgentPaymentWarning,
   type HavenAgent,
   type HavenCatalogEntry,
@@ -55,7 +56,19 @@ import { serializeMcpTransport } from './mcp-context.js'
 function predictSettlementScheme(
   accepts: X402PaymentOption[],
   agent: HavenAgent | undefined,
-): { scheme: 'erc7710' | 'eip3009'; fundingLeg: boolean; settleable?: false } | null {
+): {
+  scheme: 'erc7710' | 'eip3009'
+  fundingLeg: boolean
+  settleable?: false
+  /**
+   * #3967: the option the selection picked — the one pay will actually
+   * authorize, so the quote-time budget pre-check and the `expected_amount`
+   * comparison ask about IT (`amount`, `payTo`, `asset`), never about
+   * `quote.accepted`, which describes the merchant's preferred entry and can
+   * differ from what a delegation-rail account selects (#2051).
+   */
+  option: X402PaymentOption
+} | null {
   if (!agent) return null
   const selection = selectX402SettlementScheme(accepts, {
     delegationRail: agent.executionRail === 'delegation',
@@ -70,6 +83,7 @@ function predictSettlementScheme(
       scheme: selection.scheme,
       fundingLeg: selection.scheme === 'eip3009',
       ...(agent.executionRail === 'delegation' ? {} : { settleable: false as const }),
+      option: selection.option,
     }
   }
   // No settleable option for THIS agent's rail: an erc7710-only merchant and
@@ -77,9 +91,27 @@ function predictSettlementScheme(
   // ERC7710_RAIL_REQUIRED (`requireSettleableSelection`), so the honest
   // prediction is the scheme the merchant demands plus `settleable: false`
   // — not a bare 'erc7710' that reads as "prepare will settle it".
-  return selectErc7710PaymentOption(accepts)
-    ? { scheme: 'erc7710', fundingLeg: false, settleable: false }
+  const erc7710 = selectErc7710PaymentOption(accepts)
+  return erc7710
+    ? { scheme: 'erc7710', fundingLeg: false, settleable: false, option: erc7710 }
     : null
+}
+
+/**
+ * #3967: what `haven_prepare_catalog_purchase` / `haven_pay_mcp_tool` /
+ * `haven_pay_x402_quote` will ACTUALLY authorize for this account — the same
+ * `selectX402SettlementScheme` selection `predictSettlementScheme` above runs,
+ * exposed so the quote surfaces can aim the quote-time budget pre-check and
+ * the `expected_amount` comparison at the option pay selects (#2051) rather
+ * than at `quote.accepted`. `null` exactly when the prediction above is null
+ * (the agent read failed, or no compatible option exists).
+ */
+export function selectedSettlement(
+  accepts: X402PaymentOption[],
+  agent: HavenAgent | undefined,
+): { scheme: 'erc7710' | 'eip3009'; option: X402PaymentOption } | null {
+  const prediction = predictSettlementScheme(accepts, agent)
+  return prediction ? { scheme: prediction.scheme, option: prediction.option } : null
 }
 
 /**
@@ -126,6 +158,254 @@ export function settlementPredictionFields(
 }
 
 /**
+ * #3967 — the outcome of the quote-time budget pre-check, in the three-outcome
+ * shape `catalog-purchase.ts`'s prepare preflight established (sufficient /
+ * decided refusal / unavailable degrade) plus `skipped` for when the check was
+ * not ASKED (chain or token mismatch, no agent, retired rail): a quote must
+ * never refuse on a question it did not ask, so a skip reports
+ * `sufficient: null` with no warning.
+ */
+export type QuoteBudgetPrecheckOutcome =
+  | { kind: 'sufficient'; requestedAtomic: string; remainingAtomic?: string }
+  | { kind: 'refused'; requestedAtomic: string; remainingAtomic: string }
+  | { kind: 'unavailable'; requestedAtomic: string; detail?: string }
+  | { kind: 'skipped'; requestedAtomic: string }
+
+/**
+ * #3967: the `budget_check` block and its advisory warning, shared by ALL
+ * THREE quote surfaces (`haven_quote_x402`, `haven_quote_mcp_tool`,
+ * `haven_quote_catalog_purchase`). The figures ride in the block —
+ * `AgentPaymentWarning` is `{ code, message }` — in the same shape as catalog
+ * prepare's allowance block. The warning is advisory and never replaces the
+ * next step; the stop decision is the caller's, read off
+ * `budget_check.sufficient === false`.
+ */
+export function quoteBudgetCheckFields(outcome: QuoteBudgetPrecheckOutcome): {
+  budget_check: {
+    sufficient: boolean | null
+    remaining_atomic?: string
+    requested_atomic: string
+  }
+  warnings: AgentPaymentWarning[]
+} {
+  if (outcome.kind === 'refused') {
+    return {
+      budget_check: {
+        sufficient: false,
+        remaining_atomic: outcome.remainingAtomic,
+        requested_atomic: outcome.requestedAtomic,
+      },
+      warnings: [
+        {
+          code: AgentPaymentWarningCode.QuoteExceedsRemainingBudget,
+          message:
+            `The quoted amount (${outcome.requestedAtomic} atomic) exceeds the agent's remaining ` +
+            `delegation budget (${outcome.remainingAtomic} atomic), decided by Haven's server-side ` +
+            'budget pre-check — the same compare the payment path runs before funding. An ' +
+            'over-budget redemption would revert on-chain. Stop and tell the user before any ' +
+            'payment; the wallet owner can grant or raise the budget in Haven.',
+        },
+      ],
+    }
+  }
+  if (outcome.kind === 'unavailable') {
+    return {
+      budget_check: { sufficient: null, requested_atomic: outcome.requestedAtomic },
+      warnings: [
+        {
+          code: AgentPaymentWarningCode.AllowanceCheckUnavailable,
+          message:
+            'The quote-time budget pre-check could not be read' +
+            (outcome.detail ? ` (${outcome.detail})` : '') +
+            ' — no budget figure is reported. FAILING OPEN: the quote proceeds as if the check ' +
+            'had passed, and the on-chain policy remains the actual spend gate. This degrades ' +
+            'guidance only, never a refusal.',
+        },
+      ],
+    }
+  }
+  // sufficient, or skipped (chain/token mismatch, no agent, retired rail):
+  // no warning — a skipped check was never asked, and a sufficient one needs
+  // no caveat beyond the block itself.
+  return {
+    budget_check: {
+      sufficient: outcome.kind === 'sufficient' ? true : null,
+      ...(outcome.kind === 'sufficient' && outcome.remainingAtomic !== undefined
+        ? { remaining_atomic: outcome.remainingAtomic }
+        : {}),
+      requested_atomic: outcome.requestedAtomic,
+    },
+    warnings: [],
+  }
+}
+
+/**
+ * #3967 — the denial keys Haven recognizes in `accepts[].extra`. The list
+ * STARTS with `issuanceDenied` (the Bitrefill x402 invoice denial that
+ * motivated the check: a 402 advertising 1000 USDC whose Lightning entry
+ * carried `extra.issuanceDenied: "invoice_not_found"`) and is deliberately a
+ * named, extensible list — not "any key" — so merchant-internal metadata that
+ * happens to look like a denial never reads as one. A hit is INFORMATIONAL
+ * ONLY: it flips neither `safe_to_continue` nor `expected_settleable`.
+ */
+const MERCHANT_DENIAL_KEYS: readonly string[] = ['issuanceDenied']
+
+/**
+ * #3967: surface a known merchant-reported denial from any `accepts[].extra`
+ * as an informational warning naming the key, its value and the entry's
+ * network. One warning per hit; an entry with no `extra`, or `extra` without
+ * a listed key, contributes nothing.
+ */
+export function merchantDenialWarnings(accepts: X402PaymentOption[]): AgentPaymentWarning[] {
+  const warnings: AgentPaymentWarning[] = []
+  for (const option of accepts ?? []) {
+    if (option === null || typeof option !== 'object') continue
+    const extra = (option as { extra?: Record<string, unknown> }).extra
+    if (extra === null || typeof extra !== 'object') continue
+    for (const key of MERCHANT_DENIAL_KEYS) {
+      if (!(key in extra)) continue
+      const value = extra[key]
+      warnings.push({
+        code: AgentPaymentWarningCode.MerchantReportedDenial,
+        message:
+          `The merchant itself reported '${key}: ${String(value)}' on its ${option.network} ` +
+          'payment option — a denial the MERCHANT recorded, not Haven. Informational only: ' +
+          'it does not change whether this quote is safe to continue or settleable, but the ' +
+          'agent should surface it to the user before paying.',
+      })
+    }
+  }
+  return warnings
+}
+
+/**
+ * #3967: RUN the quote-time budget pre-check and map it to the shared outcome,
+ * the three-outcome pattern `catalog-purchase.ts`'s prepare preflight
+ * established, plus `skipped` for a question that was never askable. Shared by
+ * all three quote surfaces.
+ *
+ * Money-path gates this implements (issue #3967):
+ * - It can only ever STOP the agent (a decided refusal) — never widen
+ *   authority. The later on-chain `evaluatePeriodPrecheck` is untouched and
+ *   remains the actual gate.
+ * - An unavailable check degrades with a warning, NEVER a refusal.
+ * - The chain/token guards exist so the quote does not refuse FALSELY: the
+ *   backend compares against the agent's own chain budgets, so a quote whose
+ *   chain differs from the agent's must not be measured against them. The
+ *   token asked about is the SELECTED option's asset — the option pay will
+ *   authorize (#2051) — and only when it is a well-formed address the route
+ *   can accept.
+ * - `record_refusal: false` — a quote is not a payment attempt and never
+ *   writes to the refusals ledger; a later prepare records its own refusal.
+ * - NO idempotency key: a quote is a fresh read, and passing the quote's key
+ *   could match an earlier settled row and answer `replay: true` for what is
+ *   really a repeat purchase.
+ */
+export async function runQuoteBudgetPrecheck(
+  haven: HavenClient,
+  quote: X402Quote,
+  agent: HavenAgent | undefined,
+): Promise<QuoteBudgetPrecheckOutcome> {
+  if (!agent) {
+    return {
+      kind: 'unavailable',
+      requestedAtomic: quote.amountAtomic,
+      detail: 'the agent could not be read from Haven',
+    }
+  }
+  if (agent.executionRail !== 'delegation') {
+    // The route 410s retired rails (`budget-precheck-guards.ts`), so asking
+    // would be a wasted round trip that always degrades — say so directly.
+    return {
+      kind: 'unavailable',
+      requestedAtomic: quote.amountAtomic,
+      detail: `the agent's account is on the '${agent.executionRail}' rail, which is retired and cannot purchase`,
+    }
+  }
+  if (quote.chainId === null || quote.chainId !== agent.chainId) {
+    // Chain mismatch — the backend derives budgets scoped to the AGENT's
+    // chain; measuring this quote against them would answer a question about
+    // a different network. Skip: sufficient null, no warning, no call.
+    return { kind: 'skipped', requestedAtomic: quote.amountAtomic }
+  }
+  const selection = selectedSettlement(quote.paymentRequired.accepts, agent)
+  if (!selection) return { kind: 'skipped', requestedAtomic: quote.amountAtomic }
+  let optionAmount: bigint
+  try {
+    // The AUTHORIZATION amount — `maxAmountRequired` when the merchant names
+    // one, exactly what prepare/pay would authorize (x402AuthorizationAmount).
+    optionAmount = BigInt(x402AuthorizationAmount(selection.option))
+  } catch {
+    // A non-integer option amount is unpayable data — the pay path refuses it
+    // on its own; the budget question is not askable about it.
+    return { kind: 'skipped', requestedAtomic: quote.amountAtomic }
+  }
+  const requestedAtomic = optionAmount.toString()
+  if (!/^0x[0-9a-fA-F]{40}$/.test(selection.option.asset)) {
+    // The route refuses a non-address token with a 400 — a question that can
+    // never be answered is a skip, not an unavailable check.
+    return { kind: 'skipped', requestedAtomic }
+  }
+  try {
+    const precheck = await haven.precheckBudget({
+      chainId: agent.chainId,
+      token: selection.option.asset,
+      amountAtomic: requestedAtomic,
+      merchantTo: selection.option.payTo,
+      // Same per-scheme resource rule the prepare preflight follows (#3527):
+      // the value authorize will persist for THIS scheme — erc7710 the quote's
+      // resourceUrl, eip3009 the challenge's own resource.url.
+      resourceUrl:
+        selection.scheme === 'erc7710'
+          ? quote.resourceUrl
+          : (quote.paymentRequired.resource?.url ?? quote.resourceUrl),
+      recordRefusal: false,
+    })
+    // Only an EXPLICIT answer is trusted: a 200 whose body carries no
+    // sufficient flag (an old backend, a stub) is a malformed answer, not a
+    // decision — degrade, never refuse on a shape we cannot read.
+    if (precheck.sufficient === true) {
+      return { kind: 'sufficient', requestedAtomic, remainingAtomic: precheck.remaining_atomic }
+    }
+    if (precheck.sufficient === false) {
+      return {
+        kind: 'refused',
+        requestedAtomic,
+        remainingAtomic: precheck.remaining_atomic ?? '0',
+      }
+    }
+    return {
+      kind: 'unavailable',
+      requestedAtomic,
+      detail: 'the pre-check answer carried no sufficient decision',
+    }
+  } catch (err: unknown) {
+    // The decided over-budget refusal is the ONE failure that is not a
+    // degrade (catalog-purchase.ts, verbatim in semantics): a typed 403
+    // delegation_budget_exceeded. Everything else — transport down, a retired
+    // rail's 410, an older backend without the route — fails OPEN.
+    const decided =
+      err instanceof HavenApiError &&
+      err.statusCode === 403 &&
+      (err.body as { error_code?: string } | undefined)?.error_code ===
+        'delegation_budget_exceeded'
+    if (decided) {
+      return {
+        kind: 'refused',
+        requestedAtomic,
+        remainingAtomic:
+          (err.body as { remaining_atomic?: string } | undefined)?.remaining_atomic ?? '0',
+      }
+    }
+    return {
+      kind: 'unavailable',
+      requestedAtomic,
+      detail: err instanceof Error ? err.message : String(err),
+    }
+  }
+}
+
+/**
  * Build the compact, non-authorizing response shared by the generic and
  * catalog MCP quote tools. Deliberately omit payment_required, idempotency,
  * and every signing/funding field: callers must start a fresh paid flow after
@@ -143,9 +423,26 @@ export function buildMcpToolQuoteResponse(input: {
   // to change accepted_scheme/erc7710_only, which describe the MERCHANT's
   // offer and stay exactly as `buildX402Quote` computed them.
   agent: HavenAgent | undefined
+  // #3967: the quote-time budget pre-check's outcome, when the caller ran it
+  // (the two handlers do, with `record_refusal: false` — a quote never writes
+  // to the refusals ledger). Absent: no budget_check block and
+  // `safe_to_continue` reads only the rest of this builder — the shape stays
+  // honest for any caller that has not migrated.
+  budgetPrecheck?: QuoteBudgetPrecheckOutcome
 }) {
   const { quote, merchantUrl, requestedMerchantUrl, toolName, toolArguments, catalog, agent } = input
   const prediction = settlementPredictionFields(quote.paymentRequired.accepts, agent)
+  // #3967: the budget pre-check's block and warning, plus the merchant
+  // denial hints, MERGED with the prediction's own warnings — never a second
+  // `warnings` key overwriting `X402_SCHEME_UNKNOWN`.
+  const budget = input.budgetPrecheck ? quoteBudgetCheckFields(input.budgetPrecheck) : null
+  const denialWarnings = merchantDenialWarnings(quote.paymentRequired.accepts)
+  const mergedWarnings = [
+    ...(prediction.warnings ?? []),
+    ...(budget?.warnings ?? []),
+    ...denialWarnings,
+  ]
+  const overBudget = budget?.budget_check.sufficient === false
   return {
     rail: quote.rail,
     merchant_url: merchantUrl,
@@ -183,6 +480,14 @@ export function buildMcpToolQuoteResponse(input: {
     // from settlementPredictionFields (see above) instead of being derived
     // inline, so a third quote surface can share the exact same shape.
     ...prediction,
+    // #3967: merged, never overwritten — see mergedWarnings above.
+    ...(mergedWarnings.length > 0 ? { warnings: mergedWarnings } : {}),
+    // #3967: always present on the MCP quote tools. `false` when the budget
+    // pre-check refused — the agent should stop and involve the user before
+    // continuing. The tools stay INFORMATIONAL: no next-step block is added
+    // either way (quote_is_informational below is unchanged).
+    safe_to_continue: !overBudget,
+    ...(budget ? { budget_check: budget.budget_check } : {}),
     ...(quote.mcpTransport ? { mcp_transport: serializeMcpTransport(quote.mcpTransport) } : {}),
     ...(catalog
       ? {

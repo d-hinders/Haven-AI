@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  AgentPaymentNextAction,
   HavenClient,
   addressFromKey,
   toolDescriptions as sharedDescriptions,
@@ -924,6 +925,74 @@ describe('Haven MCP tool handlers', () => {
       expect(all, `read-only tool: delegate key must not appear in request to ${req.url}`)
         .not.toContain(delegateKey)
     }
+  })
+
+  // ── #3967: expected_amount on the LOCAL quote — same stop signals as hosted ──
+
+  it('haven_quote_x402 with a matching expected_amount returns price_differs_from_expected: false', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      const u = String(url)
+      if (u === x402PaymentRequired.resource.url) {
+        return new Response(null, {
+          status: 402,
+          headers: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(x402PaymentRequired)) },
+        })
+      }
+      if (u.endsWith('/machine-payments/agent')) {
+        return jsonResponse({
+          id: 'agt_1', name: 'Test', delegate_address: delegateAddress,
+          account_address: safeAddress, chain_id: 8453, status: 'active',
+          execution_rail: 'delegation',
+        })
+      }
+      return jsonResponse({})
+    })
+    const haven = new HavenClient({ apiKey: 'sk_test', delegateKey, baseUrl })
+    const handlers = createToolHandlers(haven)
+    const quote = await handlers.haven_quote_x402({
+      url: x402PaymentRequired.resource.url,
+      expected_amount: '0.01', // challenge.amount.atomic = 10000 = 0.01 USDC
+    })
+    expect(quote.success).toBe(true)
+    if (!quote.success) throw new Error('quote failed')
+    expect((quote.data as Record<string, unknown>).price_differs_from_expected).toBe(false)
+    expect((quote.data as Record<string, unknown>).safe_to_continue).toBeUndefined()
+  })
+
+  it('haven_quote_x402 with a MISMATCHED expected_amount stops the agent (hosted-parity stop signals)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      const u = String(url)
+      if (u === x402PaymentRequired.resource.url) {
+        return new Response(null, {
+          status: 402,
+          headers: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(x402PaymentRequired)) },
+        })
+      }
+      if (u.endsWith('/machine-payments/agent')) {
+        return jsonResponse({
+          id: 'agt_1', name: 'Test', delegate_address: delegateAddress,
+          account_address: safeAddress, chain_id: 8453, status: 'active',
+          execution_rail: 'delegation',
+        })
+      }
+      return jsonResponse({})
+    })
+    const haven = new HavenClient({ apiKey: 'sk_test', delegateKey, baseUrl })
+    const handlers = createToolHandlers(haven)
+    const quote = await handlers.haven_quote_x402({
+      url: x402PaymentRequired.resource.url,
+      expected_amount: '5', // wildly off the 0.01 USDC challenge
+    })
+    expect(quote.success).toBe(true)
+    if (!quote.success) throw new Error('quote failed')
+    const data = quote.data as Record<string, unknown>
+    expect(data.price_differs_from_expected).toBe(true)
+    expect(data.safe_to_continue).toBe(false)
+    expect(data.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(data.next_tool_omitted_reason).toBeDefined()
+    // Owner decision: the reason names the deposit-address fallback's ONE
+    // condition — the user's explicit go-ahead.
+    expect(String(data.reason)).toContain('explicit go-ahead')
   })
 
   it('haven_get_agent returns the enriched bootstrap summary (identity + readiness + remaining)', async () => {

@@ -68,6 +68,7 @@ import {
   resolveTokenFromAddress,
   resolveX402RetryTarget,
   strictMerchantEgressPolicy,
+  x402AuthorizationAmount,
   type MerchantEgressPolicy,
   isSecureX402RetryTarget,
   isZeroSettlementTxHash,
@@ -102,7 +103,11 @@ import {
 import { buildX402SigningContext, coerceJsonField } from './support/mcp-context.js'
 import {
   isPendingApproval,
+  merchantDenialWarnings,
+  quoteBudgetCheckFields,
   resolveResumeState,
+  runQuoteBudgetPrecheck,
+  selectedSettlement,
   settlementPredictionFields,
   wrongTool,
 } from './support/quote-response.js'
@@ -854,6 +859,59 @@ export function createPlainHttpX402Handlers(
           agent,
           'haven_pay_x402_quote',
         )
+        // #3967: the option pay will ACTUALLY authorize for this account —
+        // the budget pre-check and the `expected_amount` comparison ask about
+        // IT (its amount, its payTo), never about `quote.accepted`, which
+        // describes the merchant's preferred entry (#2051).
+        const selected = selectedSettlement(quote.paymentRequired.accepts, agent)
+        // #3967: the agent's stated expectation about the price. A mismatch
+        // STOPS the agent — the plain-HTTP analogue of the MCP quote tools'
+        // `catalog_price_differs`. Compared against the SELECTED option's
+        // atomic amount through the quote's own decimals; when the quote's
+        // asset is not a token Haven recognises (`decimals: null`) the
+        // comparison is not made rather than guessed at a scale, and when the
+        // stated price is finer than the token's own scale can express it
+        // cannot equal any option amount, so the mismatch is decided.
+        // `undefined` = no comparison was made (no field is emitted).
+        let priceDiffers: boolean | undefined
+        if (args.expected_amount !== undefined && selected && quote.decimals !== null) {
+          const expectedAtomic = humanToAtomic(args.expected_amount as string, quote.decimals)
+          if (expectedAtomic === null) {
+            priceDiffers = true
+          } else {
+            let optionAmount: bigint | null = null
+            try {
+              // The AUTHORIZATION amount — maxAmountRequired when named —
+              // exactly what the pay path would authorize.
+              optionAmount = BigInt(x402AuthorizationAmount(selected.option))
+            } catch {
+              optionAmount = null
+            }
+            if (optionAmount !== null) priceDiffers = optionAmount !== expectedAtomic
+          }
+        }
+        // #3967: the quote-time budget pre-check, on the option pay selects.
+        // SKIPPED entirely when the stated expectation already mismatches —
+        // the agent stops on the price, and a budget answer about a wrong
+        // amount is moot (and the extra Haven call is saved). Never widens
+        // authority: its only STOP outcome is a refusal that the later
+        // on-chain evaluatePeriodPrecheck would reach anyway; any failure
+        // degrades with a warning, never a refusal.
+        const budgetOutcome = priceDiffers
+          ? null
+          : await runQuoteBudgetPrecheck(haven, quote, agent)
+        const budget = budgetOutcome ? quoteBudgetCheckFields(budgetOutcome) : null
+        const overBudget = budget?.budget_check.sufficient === false
+        // #3967: the merchant's own denial hints, merged with the prediction's
+        // warnings and the budget warning — never a second `warnings` key
+        // overwriting `X402_SCHEME_UNKNOWN`.
+        const denialWarnings = merchantDenialWarnings(quote.paymentRequired.accepts)
+        const mergedWarnings = [
+          ...(prediction.warnings ?? []),
+          ...(budget?.warnings ?? []),
+          ...denialWarnings,
+        ]
+        const stop = overBudget || priceDiffers === true
         // #3739: the result names its next tool for the first time — the pay
         // tool in REQUEST MODE, with the request exactly as the caller sent
         // it (url, method, headers, body), so the agent never copies the
@@ -902,15 +960,57 @@ export function createPlainHttpX402Handlers(
             merchant_address: quote.merchantAddress,
             max_timeout_seconds: quote.maxTimeoutSeconds,
             ...prediction,
-            ...taskBudgetNextStep({
-              nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
-              nextTool: 'haven_pay_x402_quote',
-              nextArguments: payNextArguments,
-              reason:
-                'Pay with next_tool and next_arguments: Haven fetches the payment challenge itself ' +
-                'from this same request, so do not copy payment_required. The cap is prefilled ' +
-                'with the quoted amount; lower it to any cap the user stated.',
-            }),
+            // #3967: merged, never overwritten — see mergedWarnings above.
+            ...(mergedWarnings.length > 0 ? { warnings: mergedWarnings } : {}),
+            // #3967: the budget figures ride in a block, not on the warning
+            // (`AgentPaymentWarning` is { code, message }). Present whenever
+            // the check was asked (any outcome) — absent when skipped for an
+            // already-decided price mismatch.
+            ...(budget ? { budget_check: budget.budget_check } : {}),
+            ...(priceDiffers !== undefined ? { price_differs_from_expected: priceDiffers } : {}),
+            // #3967: a stop (over budget, or the price differs from the
+            // stated expectation) names NO tool and pre-fills NO cap —
+            // `fund_account_or_raise_allowance` would invite raising the
+            // budget to cover what may be a wrong price. The quote data
+            // itself is still returned. Both stop paths are
+            // `stop_and_tell_user`, and both reason texts name the
+            // deposit-address fallback's ONE condition: the user's explicit
+            // go-ahead (owner decision, #3967) — never automatic, and never
+            // once anything has been paid via x402 on the invoice.
+            ...(stop
+              ? taskBudgetNextStep({
+                  nextAction: AgentPaymentNextAction.StopAndTellUser,
+                  nextTool: null,
+                  nextToolOmittedReason:
+                    'no Haven tool follows: the quoted price does not fit the agent\'s budget ' +
+                    'or the stated expectation — the user decides before any payment',
+                  safeToContinue: false,
+                  reason:
+                    (priceDiffers
+                      ? `The merchant's quoted price (${quote.amount} ${quote.asset}) does not match ` +
+                        `the expected price (${args.expected_amount as string}) stated with this quote. `
+                      : '') +
+                    (overBudget && budget
+                      ? `The quoted amount (${budget.budget_check.requested_atomic} atomic) exceeds ` +
+                        `the agent's remaining budget (${budget.budget_check.remaining_atomic} atomic), ` +
+                        'decided by Haven\'s server-side budget pre-check — the same compare the ' +
+                        'payment path runs before funding. '
+                      : '') +
+                    'Stop and tell the user before any payment; do not re-quote, re-pay, or poll. ' +
+                    'If the x402 challenge itself is wrong and nothing has been paid via x402 on ' +
+                    'this invoice, the invoice\'s own deposit address MAY be an alternative — but ' +
+                    'only with the user\'s explicit go-ahead, never automatically, and never once ' +
+                    'anything has been paid via x402.',
+                })
+              : taskBudgetNextStep({
+                  nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+                  nextTool: 'haven_pay_x402_quote',
+                  nextArguments: payNextArguments,
+                  reason:
+                    'Pay with next_tool and next_arguments: Haven fetches the payment challenge itself ' +
+                    'from this same request, so do not copy payment_required. The cap is prefilled ' +
+                    'with the quoted amount; lower it to any cap the user stated.',
+                })),
           },
         }
       } catch (err) {

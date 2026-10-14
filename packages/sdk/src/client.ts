@@ -871,6 +871,14 @@ export class HavenClient {
      * spec. Omitted: unchanged behavior.
      */
     idempotencyKey?: string
+    /**
+     * #3967: false answers the SAME decision WITHOUT writing a
+     * `payment_refusals` row (`source: 'hosted_prepare'`). The quote surfaces
+     * use this — a quote is not a payment attempt, and a later prepare
+     * records its own refusal if the agent goes ahead anyway. Default true:
+     * the catalog prepare call sites are unchanged.
+     */
+    recordRefusal?: boolean
   }): Promise<BudgetPrecheckResult> {
     return this.post<BudgetPrecheckResult>('/machine-payments/budget-precheck', {
       chainId: input.chainId,
@@ -879,6 +887,7 @@ export class HavenClient {
       ...(input.merchantTo !== undefined ? { merchantTo: input.merchantTo } : {}),
       ...(input.resourceUrl !== undefined ? { resourceUrl: input.resourceUrl } : {}),
       ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
+      ...(input.recordRefusal !== undefined ? { recordRefusal: input.recordRefusal } : {}),
     })
   }
 

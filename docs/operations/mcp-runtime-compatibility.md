@@ -5855,3 +5855,27 @@ to call next in structured fields, and those fields are typed end to end
 > pinned by `lint:runbook-parity` (11/11) and the new drift-guard test.
 > Nothing else in this document was re-verified; `last-verified` already
 > reads today.
+
+> **Re-verified #3967 (2026-10-14, the quote-time budget gate):** the diff
+> touches covered files (`packages/mcp-server/src/tools/**`,
+> `packages/sdk/src/client.ts`, `packages/backend/src/modules/mpp/budget-precheck.ts`,
+> `packages/backend/src/routes/machine-payments.ts`) additively. The three
+> quote surfaces gain a quote-time budget pre-check (`budget_check` block +
+> `QUOTE_EXCEEDS_REMAINING_BUDGET` / `MERCHANT_REPORTED_DENIAL` warning codes,
+> an always-present `safe_to_continue` on the two MCP quote tools) and
+> `haven_quote_x402` gains an optional `expected_amount`; the pre-check route
+> gains an optional `recordRefusal` (default true — quotes send false so a
+> quote writes no refusal row; the body guard rejects a non-boolean with the
+> same 400 shape as the other field guards). No tool is added or renamed; the
+> new inputs are optional and the new response fields additive, so an older
+> local MCP and an older hosted server are unaffected. Version skew both
+> ways: an OLD backend ignores `recordRefusal` (unknown body key) and
+> records the refusal — a quote against an old backend may land one
+> `hosted_prepare` row, which the quote surfaces tolerate (the agent already
+> stopped); an old hosted server never sends the new fields. No
+> expected-context version, consent hash or version floor moves. The new
+> tests: the quote-surface fixtures in
+> `packages/mcp-server/src/tools/{plain-http-x402,catalog-purchase}.test.ts`
+> and the real-Postgres `record_refusal` route tests in
+> `routes/__tests__/budget-precheck.test.ts`. Nothing else in this document
+> was re-verified; `last-verified` already reads today.

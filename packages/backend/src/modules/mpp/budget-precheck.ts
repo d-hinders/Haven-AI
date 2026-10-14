@@ -414,6 +414,12 @@ export async function handleBudgetPrecheck(
   // legs' pre-check refusals. #3619: the body is the #3616 builder's `mpp`
   // flavor, equal field for field to the body this file hand-built (the
   // hosted tool parses it — #3504 — so the equality is wire).
+  //
+  // #3967: `recordRefusal: false` skips ONLY the ledger write — the QUOTE
+  // surfaces' opt-out. The decision body is byte-identical either way: a
+  // quote is not a payment attempt, so it must not write to the refusals
+  // ledger, and the later prepare records its own refusal if the agent goes
+  // ahead. No new `source` value, no migration.
   const refusalBody = buildPeriodExceededBody({
     flavor: 'mpp',
     chainId: agent.chain_id,
@@ -438,6 +444,10 @@ export async function handleBudgetPrecheck(
         }
       : undefined,
   })
+  if (body.recordRefusal === false) {
+    // #3967: same decided 403, no ledger write — see the comment above.
+    return { statusCode: 403, body: refusalBody as Record<string, unknown> }
+  }
   const decided: DecidedResponse = refuse(
     {
       code: 403,

@@ -147,6 +147,15 @@ describe('states', () => {
     expect(caption).toEqual({ kind: 'expired', caption: 'This budget has expired and can no longer be spent.' })
   })
 
+  // #3922: the server's `is_live: false` is honoured even where this render's
+  // clock says the row has not expired; `true`/absent defer to the clock.
+  it('is_live false reads expired even before expires_at; is_live true still flips on the clock (#3922)', () => {
+    const future = Math.floor(ANCHOR_NOW / 1000) + 86_400 * 30
+    expect(budgetCaption(row({ expiresSec: future, isLive: false }), { nowMs: ANCHOR_NOW }).kind).toBe('expired')
+    expect(budgetCaption(row({ expiresSec: future, isLive: true }), { nowMs: ANCHOR_NOW }).kind).toBe('meter')
+    expect(budgetCaption(row({ expiresSec: Math.floor(ANCHOR_NOW / 1000) - 60, isLive: true }), { nowMs: ANCHOR_NOW }).kind).toBe('expired')
+  })
+
   it('not-started: a future start_date — the dormant half of a re-key', () => {
     const caption = budgetCaption(row({ startSec: Math.floor(ANCHOR_NOW / 1000) + 3 * 86_400 }), {
       nowMs: ANCHOR_NOW,
@@ -276,6 +285,14 @@ describe('several budgets (the dashboard row)', () => {
   it('expired rows are excluded from the count (#3802)', () => {
     const live = row({})
     const dead = row({ token: 'USDC', recipient: null, expiresSec: nowSec - 60 })
+    const selected = selectPrimaryBudgets([live, dead], now)
+    expect(selected!.extraCount).toBe(0)
+    expect(selected!.primary).toBe(live)
+  })
+
+  it('a row the server says is not live is excluded from the count (#3922)', () => {
+    const live = row({ isLive: true })
+    const dead = row({ isLive: false })
     const selected = selectPrimaryBudgets([live, dead], now)
     expect(selected!.extraCount).toBe(0)
     expect(selected!.primary).toBe(live)

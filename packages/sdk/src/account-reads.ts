@@ -138,6 +138,7 @@ export function mapTaskBudget(raw: RawTaskBudget): HavenTaskBudget {
     status: raw.status,
     expiresAt: raw.expires_at,
     isExpired: raw.is_expired,
+    ...(raw.is_live === undefined ? {} : { isLive: raw.is_live }),
     createdAt: raw.created_at,
     openedAt: raw.opened_at,
     closedAt: raw.closed_at,
@@ -353,11 +354,18 @@ export class AccountReads {
       })
       const rows = raw?.task_budgets
       if (!Array.isArray(rows)) return []
-      // The boundedness filter (comment above): closing rows always ride;
-      // closed and expired rows drop. A no-op on a `status=live` answer.
+      // The boundedness filter (comment above). #3922: a row carrying the
+      // backend's `is_live` is kept exactly when it is true (an expired
+      // `closing` row is false there — the backend dropped it in 2dd8a91d). A
+      // row WITHOUT the field (older backend) derives as before: closing
+      // always rides; closed and expired rows drop. Missing is never false.
       return rows
         .map((row) => mapTaskBudget(row))
-        .filter((tb) => tb.status === 'closing' || (!tb.isExpired && tb.status !== 'closed'))
+        .filter((tb) =>
+          tb.isLive !== undefined
+            ? tb.isLive
+            : tb.status === 'closing' || (!tb.isExpired && tb.status !== 'closed'),
+        )
         .map((tb) => summarizeTaskBudget(tb))
     } catch {
       // #3093: any transport failure (404, network error, malformed body) —

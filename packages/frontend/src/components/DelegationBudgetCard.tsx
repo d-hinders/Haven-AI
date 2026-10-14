@@ -23,7 +23,7 @@ import PasskeyElsewhereHint from './PasskeyElsewhereHint'
 import EditBudgetModal from './EditBudgetModal'
 import IssueSubBudgetModal from './IssueSubBudgetModal'
 import ConfirmDialog from './ConfirmDialog'
-import { eligibleSubBudgetParents } from '@/lib/sub-budget'
+import { eligibleSubBudgetParents, subBudgetStillRunning } from '@/lib/sub-budget'
 import { Card } from './ui/Card'
 import { Skeleton } from './ui/Skeleton'
 import { Button } from './ui/Button'
@@ -98,10 +98,12 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
   const { trees: subBudgetTrees, reload: reloadSubBudgets } = useSubBudgetTrees(agentId)
   // #3506: the issue-sub-budget modal's open flag.
   const [issuingSubBudget, setIssuingSubBudget] = useState(false)
-  const openTaskBudgets = useMemo(() => {
-    const nowSec = Math.floor(Date.now() / 1000)
-    return (taskBudgets ?? []).filter((t) => t.status === 'open' && !t.is_expired && t.expires_at > nowSec)
-  }, [taskBudgets])
+  // #3922: `is_live` is the server's answer (pending/open/closing and not
+  // expired); an OPEN live row is the open, unexpired set this card lists.
+  const openTaskBudgets = useMemo(
+    () => (taskBudgets ?? []).filter((t) => t.status === 'open' && t.is_live),
+    [taskBudgets],
+  )
   const { toast } = useToast()
   // #3166: the ACTIVE budget whose limits are being edited in place, and the
   // modal's open flag — one state so closing the modal and clearing the
@@ -310,13 +312,13 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
   // keep the form hidden behind "Add budget" forever for an agent whose only
   // budget expired.
   const active = (budgets ?? []).filter((b) => b.status === 'active')
-  const nowSec = Math.floor(Date.now() / 1000)
-  const hasActive = active.some((b) => b.expires_at > nowSec)
+  // #3922: the owner predicate is the server's `is_live` (active AND unexpired).
+  const hasActive = active.some((b) => b.is_live)
   // #3506: a sub-budget is carved from a LIVE budget — the entry point, now
   // inside the Add budget panel below (#3716), exists only when this agent
   // has an active, unexpired one (the card itself renders only on the
   // delegation rail). The modal offers a picker when several qualify.
-  const subBudgetParents = retired ? [] : eligibleSubBudgetParents(budgets, Math.floor(Date.now() / 1000))
+  const subBudgetParents = retired ? [] : eligibleSubBudgetParents(budgets)
 
   // #3695: with no active budget the grant form IS the section's content;
   // with one, it waits behind "Add budget" unless opened (or `?grant=` opened
@@ -799,6 +801,7 @@ function budgetCaptionFor(budget: DelegationBudget, chainId: number, symbol: str
       startSec: Number(budget.start_date),
       periodSeconds: budget.period_seconds,
       expiresSec: budget.expires_at,
+      isLive: budget.is_live,
       budgetAtomic: budget.budget_atomic,
       usedAtomic,
       readFromChain: budget.remaining_from_chain !== false,
@@ -845,10 +848,9 @@ function SubBudgetTreeRow({ tree, tokens }: { tree: SubBudgetTree; tokens: Token
   const parent = tree.parent_child_sub_budget
   const t = tokens.find((x) => x.address.toLowerCase() === parent.token_address.toLowerCase())
   const amount = t ? formatUnits(BigInt(parent.period_amount_atomic), t.decimals) : parent.period_amount_atomic
-  const nowSec = Math.floor(Date.now() / 1000)
   const parentParts = [
     `${amount} ${t?.symbol ?? ''}`.trim(),
-    parent.expires_at > nowSec ? `ends ${timeUntil(parent.expires_at * 1000)}` : 'ended',
+    subBudgetStillRunning(parent) ? `ends ${timeUntil(parent.expires_at * 1000)}` : 'ended',
   ]
   if (parent.recipient_address) parentParts.push(`to ${truncateAddress(parent.recipient_address)}`)
   if (parent.status === 'pending') parentParts.push('waiting for signature')
@@ -870,10 +872,9 @@ function SubBudgetTreeRow({ tree, tokens }: { tree: SubBudgetTree; tokens: Token
 function SubBudgetGrantRow({ grant, tokens }: { grant: SubBudgetTree['grants'][number]; tokens: TokenOption[] }) {
   const t = tokens.find((x) => x.address.toLowerCase() === grant.token_address.toLowerCase())
   const amount = t ? formatUnits(BigInt(grant.period_amount_atomic), t.decimals) : grant.period_amount_atomic
-  const nowSec = Math.floor(Date.now() / 1000)
   const parts = [
     `up to ${amount} ${t?.symbol ?? ''}`.trim(),
-    grant.expires_at > nowSec ? `ends ${timeUntil(grant.expires_at * 1000)}` : 'ended',
+    subBudgetStillRunning(grant) ? `ends ${timeUntil(grant.expires_at * 1000)}` : 'ended',
   ]
   // #3506: a freshly issued slice is pending until the sharing agent signs.
   if (grant.status === 'pending') parts.push('waiting for signature')

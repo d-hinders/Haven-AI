@@ -123,6 +123,8 @@ function budget(overrides: Partial<DelegationBudget> = {}): DelegationBudget {
     delegation_hash: '0x' + 'ab'.repeat(32),
     version: 1,
     status: 'active',
+    // #3922: the server's liveness — overrides pair it with status/expiry.
+    is_live: true,
     budget_atomic: '5000000',
     period_seconds: 86_400,
     expires_at: 9_999_999_999,
@@ -308,7 +310,7 @@ describe('FundMerchantModal (#3331)', () => {
   // not live and must not warn either.
   it('review step: no warning for a revoked (inactive) budget in the same slot', async () => {
     mockBudgets.mockReturnValue([
-      budget({ merchant_id: null, recipient_address: PAY_TO, token_address: USDC_SEPOLIA, status: 'revoked' }),
+      budget({ merchant_id: null, recipient_address: PAY_TO, token_address: USDC_SEPOLIA, status: 'revoked', is_live: false }),
     ])
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })

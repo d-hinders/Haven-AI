@@ -172,7 +172,7 @@ function findReplacedBudget(
   return (
     (budgets ?? []).find(
       (b) =>
-        b.status === 'active' &&
+        b.is_live &&
         (b.recipient_address ?? '').toLowerCase() === payTo.toLowerCase() &&
         b.token_address.toLowerCase() === token.address.toLowerCase(),
     ) ?? null

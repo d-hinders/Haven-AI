@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  subBudgetStillRunning,
   expiryDateToUnixSeconds,
   parseSubBudgetAmount,
   subBudgetRefusalCopy,
@@ -108,5 +109,17 @@ describe('end-date clamp disclosure (#3506 design review)', () => {
 
   it('formats a date for people, in UTC, the same in every timezone', () => {
     expect(formatSubBudgetDate(parentEnd)).toBe('2 Jun 2027')
+  })
+})
+
+// #3922: "ends" shows only for a running slice.
+describe('subBudgetStillRunning (#3922)', () => {
+  it('live rows run; pending unexpired rows run; closed/closing/expired rows do not', () => {
+    expect(subBudgetStillRunning({ is_live: true, status: 'open', is_expired: false })).toBe(true)
+    expect(subBudgetStillRunning({ is_live: false, status: 'pending', is_expired: false })).toBe(true)
+    expect(subBudgetStillRunning({ is_live: false, status: 'pending', is_expired: true })).toBe(false)
+    expect(subBudgetStillRunning({ is_live: false, status: 'closed', is_expired: false })).toBe(false)
+    expect(subBudgetStillRunning({ is_live: false, status: 'closing', is_expired: false })).toBe(false)
+    expect(subBudgetStillRunning({ is_live: false, status: 'open', is_expired: true })).toBe(false)
   })
 })

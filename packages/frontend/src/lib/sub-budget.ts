@@ -124,11 +124,23 @@ export function subBudgetRefusalCopy(
 }
 
 /**
- * The budgets a sub-budget can be carved from (#3506 S4): active, unexpired and
- * not merchant-locked. Order is preserved, so the first is the default.
+ * The budgets a sub-budget can be carved from (#3506 S4): live (the server's
+ * `is_live` — active and unexpired, #3922) and not merchant-locked. Order is
+ * preserved, so the first is the default.
  */
-export function eligibleSubBudgetParents<
-  B extends { status: string; expires_at: number; merchant_slug?: string | null },
->(budgets: readonly B[] | null | undefined, nowSec: number): B[] {
-  return (budgets ?? []).filter((b) => b.status === 'active' && b.expires_at > nowSec && !b.merchant_slug)
+export function eligibleSubBudgetParents<B extends { is_live: boolean; merchant_slug?: string | null }>(
+  budgets: readonly B[] | null | undefined,
+): B[] {
+  return (budgets ?? []).filter((b) => b.is_live && !b.merchant_slug)
+}
+
+/**
+ * Whether a sub-budget row still has a future "ends" to show (#3922): the
+ * server's `is_live` (open and unexpired), or a `pending` row that has not
+ * expired — a slice awaiting its signature still ends on its expiry. A closed
+ * or closing row with a future `expires_at` is NOT running, so it never reads
+ * as live.
+ */
+export function subBudgetStillRunning(b: { is_live: boolean; status: string; is_expired: boolean }): boolean {
+  return b.is_live || (b.status === 'pending' && !b.is_expired)
 }

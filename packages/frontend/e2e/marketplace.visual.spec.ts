@@ -379,6 +379,7 @@ test.describe('marketplace visual regression', () => {
                 delegation_hash: `0x${'5e'.repeat(32)}`,
                 version: 1,
                 status: 'active',
+                is_live: true,
                 budget_atomic: '20000000',
                 period_seconds: 2_592_000,
                 start_date: '2026-05-02T10:00:00.000Z',

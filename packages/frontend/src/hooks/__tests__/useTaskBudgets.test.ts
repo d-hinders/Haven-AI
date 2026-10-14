@@ -6,7 +6,7 @@ function row(agentId: string, id: string) {
     id, agent_id: agentId, chain_id: 84532, token_address: '0x' + 'aa'.repeat(20),
     recipient_address: null, parent_delegation_hash: '0x' + 'bb'.repeat(32),
     delegation_hash: '0x' + 'cc'.repeat(32), label: null, max_atomic: '1000000',
-    status: 'open', expires_at: 9_999_999_999, is_expired: false,
+    status: 'open', expires_at: 9_999_999_999, is_expired: false, is_live: true,
     created_at: '2026-01-01T00:00:00Z', opened_at: null, closed_at: null, close_tx_hash: null,
   }
 }
@@ -34,7 +34,7 @@ beforeEach(() => {
 describe('useTaskBudgets (#3329)', () => {
   it('loads task budgets for the agent', async () => {
     mockGet.mockResolvedValue({
-      task_budgets: [{ id: 't1', agent_id: AGENT, chain_id: 84532, token_address: '0x' + 'aa'.repeat(20), recipient_address: null, parent_delegation_hash: '0x' + 'bb'.repeat(32), delegation_hash: '0x' + 'cc'.repeat(32), label: null, max_atomic: '1000000', status: 'open', expires_at: 9_999_999_999, is_expired: false, created_at: '2026-01-01T00:00:00Z', opened_at: null, closed_at: null, close_tx_hash: null }],
+      task_budgets: [{ id: 't1', agent_id: AGENT, chain_id: 84532, token_address: '0x' + 'aa'.repeat(20), recipient_address: null, parent_delegation_hash: '0x' + 'bb'.repeat(32), delegation_hash: '0x' + 'cc'.repeat(32), label: null, max_atomic: '1000000', status: 'open', expires_at: 9_999_999_999, is_expired: false, is_live: true, created_at: '2026-01-01T00:00:00Z', opened_at: null, closed_at: null, close_tx_hash: null }],
     })
     const { result } = renderHook(() => useTaskBudgets(AGENT))
     await waitFor(() => expect(result.current.taskBudgets).not.toBeNull())

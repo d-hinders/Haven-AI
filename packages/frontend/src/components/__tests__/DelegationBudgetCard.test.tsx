@@ -8,7 +8,7 @@ vi.mock('@/components/WalletConnectAction', () => ({
   default: () => <button type="button">Connect wallet</button>,
 }))
 
-const { mockGet, mockGrant, mockRevoke, mockReload, mockBudgetsError, mockTaskBudgets, mockHookArgs, mockToast, mockSigner } =
+const { mockGet, mockGrant, mockRevoke, mockReload, mockBudgetsError, mockTaskBudgets, mockTrees, mockHookArgs, mockToast, mockSigner } =
   vi.hoisted(() => ({
   // #3812: whether this device can sign, and whether the signer set is known.
   mockSigner: { ready: true, signersLoading: false, signersError: null as string | null, passkeyElsewhere: false },
@@ -19,6 +19,8 @@ const { mockGet, mockGrant, mockRevoke, mockReload, mockBudgetsError, mockTaskBu
   mockReload: vi.fn(),
   mockBudgetsError: vi.fn(() => false),
   mockTaskBudgets: vi.fn(() => [] as unknown[]),
+  // #3922: the sub-budget trees the card renders; null = nothing read (default).
+  mockTrees: vi.fn(() => null as unknown[] | null),
   // Shared so the revoke-toast tests can assert on it; the component only
   // ever calls the namespaced methods (success/info/error).
   mockToast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn() }),
@@ -46,6 +48,10 @@ vi.mock('@/hooks/useDelegationBudget', () => ({
 vi.mock('@/hooks/useTaskBudgets', () => ({
   useTaskBudgets: () => ({ taskBudgets: mockTaskBudgets(), error: false, reload: vi.fn() }),
 }))
+vi.mock('@/hooks/useSubBudgets', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/useSubBudgets')>()),
+  useSubBudgetTrees: () => ({ trees: mockTrees(), error: false, reload: vi.fn() }),
+}))
 vi.mock('@/components/ui/Toast', () => ({
   useToast: () => ({ toast: mockToast }),
 }))
@@ -64,7 +70,7 @@ const PROPS = {
 function budget(overrides: Record<string, unknown> = {}) {
   return {
     id: 'b1', token_address: USDC, recipient_address: '0x' + 'cc'.repeat(20),
-    delegation_hash: '0x' + 'ab'.repeat(32), version: 1, status: 'active',
+    delegation_hash: '0x' + 'ab'.repeat(32), version: 1, status: 'active', is_live: true,
     budget_atomic: '5000000', period_seconds: 86_400, expires_at: 9_999_999_999,
     // #3806: the anchor — 2026-09-01T02:00:00Z, so the daily boundary after the
     // frozen clock (2026-09-01T12:00Z) is 2026-09-02T02:00Z, 14h out.
@@ -78,7 +84,7 @@ function taskBudget(overrides: Record<string, unknown> = {}) {
     id: 't1', agent_id: 'agent-1', chain_id: 84532, token_address: USDC,
     recipient_address: null, parent_delegation_hash: '0x' + 'ab'.repeat(32),
     delegation_hash: '0x' + 'dd'.repeat(32), label: null, max_atomic: '1000000',
-    status: 'open', expires_at: Math.floor(Date.now() / 1000) + 3600, is_expired: false,
+    status: 'open', expires_at: Math.floor(Date.now() / 1000) + 3600, is_expired: false, is_live: true,
     created_at: '2026-01-01T00:00:00Z', opened_at: '2026-01-01T00:00:00Z',
     closed_at: null, close_tx_hash: null,
     ...overrides,
@@ -91,6 +97,8 @@ beforeEach(() => {
   mockSigner.signersLoading = false
   mockSigner.signersError = null
   mockGet.mockReset()
+  mockTrees.mockReset()
+  mockTrees.mockReturnValue(null)
   mockGrant.mockReset()
   mockRevoke.mockReset()
   mockReload.mockReset()
@@ -176,7 +184,7 @@ describe('DelegationBudgetCard (#833)', () => {
     unmount()
 
     // A pending (not yet active) budget is not something to slice either.
-    mockGet.mockReturnValue([budget({ status: 'pending' })])
+    mockGet.mockReturnValue([budget({ status: 'pending', is_live: false })])
     const second = render(<DelegationBudgetCard {...PROPS} />)
     await waitFor(() => expect(screen.getByText('Set budget')).toBeTruthy())
     expect(screen.queryByText('Issue sub-budget')).toBeNull()
@@ -610,6 +618,7 @@ describe('DelegationBudgetCard task budgets (#3329)', () => {
       taskBudget({
         parent_delegation_hash: '0x' + 'ab'.repeat(32),
         is_expired: true,
+        is_live: false,
         expires_at: Math.floor(Date.now() / 1000) - 3600,
       }),
     ])
@@ -840,6 +849,7 @@ describe('DelegationBudgetCard Spending section (#3695)', () => {
         remaining_atomic: '4000000',
         remaining_from_chain: true,
         period_end: '2026-09-01T10:00:00Z',
+        is_live: false,
         expires_at: Math.floor(Date.parse('2026-08-31T00:00:00Z') / 1000),
       }),
     ])
@@ -858,6 +868,7 @@ describe('DelegationBudgetCard Spending section (#3695)', () => {
       budget({
         remaining_atomic: '4000000',
         remaining_from_chain: true,
+        is_live: false,
         expires_at: Math.floor(Date.now() / 1000) - 3600,
       }),
     ])
@@ -933,7 +944,7 @@ describe('DelegationBudgetCard sub-budget entry in the Add budget panel (#3716)'
   })
 
   it('is absent when the form shows by default over a pending-only budget', () => {
-    mockGet.mockReturnValue([budget({ status: 'pending' })])
+    mockGet.mockReturnValue([budget({ status: 'pending', is_live: false })])
     render(<DelegationBudgetCard {...PROPS} />)
     expect(screen.getByText('Set budget')).toBeTruthy()
     expect(screen.queryByText('Issue sub-budget')).toBeNull()
@@ -975,5 +986,46 @@ describe('DelegationBudgetCard sub-budget entry in the Add budget panel (#3716)'
     })
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Add budget' }))
+  })
+})
+
+// #3922: "ends" is only for a row the server calls live (or a still-pending
+// unexpired slice). A closed row with a FUTURE expiry must read "ended", not
+// count down as if it were running.
+describe('DelegationBudgetCard sub-budget "ends" follows is_live (#3922)', () => {
+  const future = Math.floor(Date.now() / 1000) + 7 * 86_400
+  const sub = (overrides: Record<string, unknown>) => ({
+    id: 's1', agent_id: 'agent-2', parent_agent_id: 'agent-1', parent_sub_budget_id: null, chain_id: 84532,
+    token_address: USDC, recipient_address: null, parent_delegation_hash: '0x' + 'ab'.repeat(32),
+    delegation_hash: '0x' + 'ee'.repeat(32), label: 'Scraper slice', period_amount_atomic: '2000000',
+    status: 'open', expires_at: future, is_expired: false, is_live: true,
+    created_at: '2026-01-01T00:00:00Z', opened_at: '2026-01-01T00:00:00Z', closed_at: null, close_tx_hash: null,
+    ...overrides,
+  })
+  const tree = (grant: Record<string, unknown>) => [{
+    parent_child_sub_budget: sub({ id: 'p1', label: 'Parent narrowing' }),
+    grants: [grant],
+  }]
+
+  it('a live grant reads "ends …"', () => {
+    mockGet.mockReturnValue([budget()])
+    mockTrees.mockReturnValue(tree(sub({})))
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(document.body.textContent).toMatch(/up to 2 USDC · ends /)
+  })
+
+  it('a closed grant with a future expiry reads "ended", never "ends"', () => {
+    mockGet.mockReturnValue([budget()])
+    mockTrees.mockReturnValue(tree(sub({ status: 'closed', is_live: false })))
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(document.body.textContent).toMatch(/up to 2 USDC · ended/)
+    expect(document.body.textContent).not.toMatch(/up to 2 USDC · ends /)
+  })
+
+  it('a pending, unexpired grant still shows when it ends, beside "waiting for signature"', () => {
+    mockGet.mockReturnValue([budget()])
+    mockTrees.mockReturnValue(tree(sub({ status: 'pending', is_live: false })))
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(document.body.textContent).toMatch(/up to 2 USDC · ends .*waiting for signature/)
   })
 })

@@ -192,6 +192,18 @@ export function openSubBudgetSql(tableAlias: string | undefined, nowParam: strin
 }
 
 /**
+ * The wire `is_live` flag (#3922): {@link openSubBudgetSql} evaluated in JS
+ * for rows the route already holds, against the same app-clock `nowSec` the
+ * route uses for `is_expired`. A real-DB test pins JS == SQL on seeded rows.
+ */
+export function isOpenSubBudget(
+  row: { status: string; expires_at: string | number },
+  nowSec: number,
+): boolean {
+  return row.status === 'open' && Number(row.expires_at) > nowSec
+}
+
+/**
  * The rows the DELEGATING agent still has to SIGN (#3506): its own
  * parent-child row and every grant it issued, while `pending` (an open
  * signature is owed) or `closing` (a close signature is owed). A `pending`
@@ -272,6 +284,8 @@ export interface AgentParentSubBudget {
   expires_at: string
   status: SubBudgetRow['status']
   is_expired: boolean
+  /** #3922: {@link openSubBudgetSql}, selected from SQL (`closing` rows are false). */
+  is_live: boolean
 }
 
 /**
@@ -291,12 +305,13 @@ export async function findOpenGrantsForAgent(
   nowSec: number = Math.floor(Date.now() / 1000),
   executor: Executor = pool,
 ): Promise<AgentParentSubBudget[]> {
-  const result = await executor.query<SubBudgetRow & { parent_agent_name: string }>(
+  const result = await executor.query<SubBudgetRow & { parent_agent_name: string; is_live: boolean }>(
     `SELECT b.id, b.agent_id, b.parent_agent_id, b.parent_sub_budget_id, b.chain_id,
        b.token_address, b.recipient_address, b.parent_delegation_hash, b.delegation_hash,
        b.delegation_json, b.label, b.period_amount_atomic, b.status, b.expires_at,
        b.prepared_user_op, b.close_tx_hash, b.created_at, b.updated_at, b.opened_at,
-       b.closed_at, a.name AS parent_agent_name
+       b.closed_at, a.name AS parent_agent_name,
+       (${openSubBudgetSql('b', '$2')}) AS is_live
      FROM agent_sub_budgets b
      JOIN agents a ON a.id = b.parent_agent_id
      WHERE b.agent_id = $1 AND b.parent_sub_budget_id IS NOT NULL
@@ -314,6 +329,7 @@ export async function findOpenGrantsForAgent(
     expires_at: r.expires_at,
     status: r.status,
     is_expired: Number(r.expires_at) <= nowSec,
+    is_live: r.is_live,
   }))
 }
 

@@ -145,16 +145,17 @@ describe('IssueSubBudgetModal (#3506)', () => {
 })
 
 describe('eligibleSubBudgetParents (#3506 S4)', () => {
-  const now = 1_000
-  const b = (o: Record<string, unknown>) => ({ status: 'active', expires_at: 2_000, merchant_slug: null, ...o })
-  it('excludes expired, merchant-locked and non-active budgets', () => {
+  // #3922: liveness is the server's `is_live` (active and unexpired), never
+  // recomputed from status/expires_at here.
+  const b = (o: Record<string, unknown>) => ({ is_live: true, status: 'active', expires_at: 9_999_999_999, merchant_slug: null, ...o })
+  it('keeps only live, non-merchant-locked budgets', () => {
     const rows = [
       b({ id: 'ok' }),
-      b({ id: 'expired', expires_at: 999 }),
+      b({ id: 'expired', is_live: false }),
       b({ id: 'merchant', merchant_slug: 'acme' }),
-      b({ id: 'pending', status: 'pending' }),
+      b({ id: 'pending', is_live: false }),
     ]
-    expect(eligibleSubBudgetParents(rows, now).map((r) => (r as { id?: string }).id)).toEqual(['ok'])
-    expect(eligibleSubBudgetParents(null, now)).toEqual([])
+    expect(eligibleSubBudgetParents(rows).map((r) => (r as { id?: string }).id)).toEqual(['ok'])
+    expect(eligibleSubBudgetParents(null)).toEqual([])
   })
 })

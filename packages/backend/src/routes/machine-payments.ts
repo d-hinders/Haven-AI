@@ -133,6 +133,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
         expires_at: Number(g.expires_at),
         status: g.status,
         is_expired: g.is_expired,
+        is_live: g.is_live,
       })),
     })
   })

@@ -45,6 +45,7 @@ import PasskeyElsewhereHint from '@/components/PasskeyElsewhereHint'
 import { Select } from '@/components/ui/Select'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
+import { delegationIsLive } from '@/lib/sub-budget'
 
 interface TokenOption {
   address: string
@@ -162,6 +163,9 @@ function refusalCopy(detail: string | undefined, merchantName: string): string {
  * predicates this used to be split into; it is replaced exactly the same as
  * a plain budget or one already locked to THIS merchant, so it must warn too
  * — the copy just names whichever merchant (or none) it is about to retire.
+ * Since #3922 only a LIVE row (active and unexpired, {@link delegationIsLive})
+ * warns: an expired `active` row in the slot is still retired when the new
+ * grant activates, but it can no longer spend, so nothing current is replaced.
  */
 function findReplacedBudget(
   budgets: DelegationBudget[] | null,
@@ -172,7 +176,7 @@ function findReplacedBudget(
   return (
     (budgets ?? []).find(
       (b) =>
-        b.status === 'active' &&
+        delegationIsLive(b) &&
         (b.recipient_address ?? '').toLowerCase() === payTo.toLowerCase() &&
         b.token_address.toLowerCase() === token.address.toLowerCase(),
     ) ?? null

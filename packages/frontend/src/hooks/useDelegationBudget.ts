@@ -101,6 +101,12 @@ export interface DelegationBudget {
   merchant_slug?: string | null
   merchant_name?: string | null
   /**
+   * #3922: the server's budget-VIEW liveness — `active` and unexpired (the start
+   * date is not consulted, so a dormant re-key row is live). Clients read this
+   * instead of recomputing from `status` and `expires_at`.
+   */
+  is_live: boolean
+  /**
    * #3693: remaining-this-period for ACTIVE rows. `remaining_from_chain: false`
    * means the on-chain read failed and `remaining_atomic` is the full budget.
    * All three are null for non-active rows.

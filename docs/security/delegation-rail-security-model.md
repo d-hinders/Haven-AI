@@ -840,6 +840,37 @@ chain.
 > still report `open = false` rather than being dropped), and no write,
 > signing path or permission changes. Scope of this note: that one statement
 > and its signature. Nothing else in this document was re-verified.
+>
+> **Re-verified #3922 (2026-10-14: budget liveness, epic #3919 slice C).**
+> The diff touches covered paths:
+> - `routes/agent-delegations.ts`, whose list now selects `is_live` from
+>   `spendableDelegationSql(…, { requireStarted: false })`, the view
+>   definition;
+> - (outside this document's coverage) `infra/repositories/task-budgets.ts`
+>   and `sub-budgets.ts`, which add JS mirrors pinned to their SQL
+>   predicates by a real-DB matrix test;
+> - the `DelegationBudgetCard.tsx` and `useDelegationBudget.ts` readers.
+>
+> `is_live` is a REPORT field, additive, and read by no payment path: the
+> spend-time selectors keep `requireStarted: true`, and every refusal and
+> enforcer is untouched.
+>
+> The still-enabled set gains one exported copy,
+> `STILL_ENABLED_DELEGATION_STATUSES` in `@haven_ai/core`, pinned to
+> `stillEnabledDelegationSql()` by a test. The CLI revoke refusal and the
+> remove dialog stay STATUS-based on purpose: they guard against leaving
+> on-chain authority behind (#3343, #3542) and must hold against an older
+> backend that sends no `is_live`.
+>
+> Two display changes narrow what is shown as live. A `closed` sub-budget
+> with a future expiry reads "ended" instead of "ends"; a `closing` one still
+> reads "ends", because its grant stays enabled until the disable signature
+> lands. The fund-merchant "This replaces…" warning no longer fires for an
+> expired `active` row, which is still retired on activation but can no
+> longer spend. No signing input, permission or custody decision moves.
+>
+> Scope of this note: those reads only. Nothing else in this document was
+> re-verified, and `last-verified` is not bumped.
 
 The unlink guard also refuses while an agent re-key is in flight, so the Safe
 binding cannot disappear between re-key stages. This is a database

@@ -55,6 +55,13 @@ export {
 // the same module path.
 export { currentPeriodBounds } from './period-bounds.js'
 
+// The still-enabled delegation status set (#3922) — the TS mirror of the
+// backend's `stillEnabledDelegationSql`, pinned to it by a backend test.
+export {
+  STILL_ENABLED_DELEGATION_STATUSES,
+  type StillEnabledDelegationStatus,
+} from './delegation-statuses.js'
+
 // Machine-payment lifecycle domain (#987) — rails, status unions, derivation.
 export {
   MACHINE_PAYMENT_RAILS,

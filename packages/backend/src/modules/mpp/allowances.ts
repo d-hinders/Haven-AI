@@ -218,6 +218,12 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
             delegation_hash: b.delegation_hash,
             recipient_address: b.recipient_address,
             merchant_id: b.merchant_id,
+            // #3922: shape parity with the other budget wires. `true` BY
+            // CONSTRUCTION — `deriveDelegationBudgets` reads
+            // `listActiveDelegations`, which filters on
+            // `spendableDelegationSql({ requireStarted: false })`, so every
+            // row here passes the live filter.
+            is_live: true,
             // #3518: the Haven-side reservation figure (task + sub-budget
             // children, joined by delegation_hash) — additive, labelled
             // Haven-side by its name (`reserved_haven_atomic`), NEVER

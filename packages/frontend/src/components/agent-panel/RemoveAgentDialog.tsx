@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { STILL_ENABLED_DELEGATION_STATUSES } from '@haven_ai/core'
 import type { Agent } from '@/hooks/useAgents'
 import { useDelegationBudget } from '@/hooks/useDelegationBudget'
 import { useDelegateBalance } from '@/hooks/useDelegateBalance'
@@ -16,8 +17,12 @@ import PasskeyElsewhereHint from '../PasskeyElsewhereHint'
 import { ApprovalRequiredBanner } from '../haven/ApprovalRequiredBanner'
 import { InlineAlert } from '../ui/InlineAlert'
 
-/** Delegation rows `revoke-all` targets — the same set the backend counts as live. */
-const LIVE_DELEGATION_STATUSES: ReadonlySet<string> = new Set(['pending', 'active', 'replaced'])
+/**
+ * Delegation rows `revoke-all` targets — the same set the backend counts as
+ * live (#3922: ONE constant in `@haven_ai/core`, pinned to the SQL by a backend
+ * test). Status, not the wire `is_live`: this guards on-chain authority.
+ */
+const LIVE_DELEGATION_STATUSES: ReadonlySet<string> = new Set(STILL_ENABLED_DELEGATION_STATUSES)
 
 /**
  * #1402: "Remove agent" — ONE action with three effects, in an order that is

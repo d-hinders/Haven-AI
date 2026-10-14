@@ -115,6 +115,21 @@ last-verified: "2026-10-10"
 > since #3855. Description-only, so the stale-client check stays silent by the
 > rule above; nothing else in this document moves.
 
+> **Re-verification (#3922, 2026-10-14, additive `is_live`).** The SDK
+> (`account-reads.ts`, `types.ts`) and the CLI (`commands.ts`) read a new
+> additive wire field, `is_live`, on budget rows. Each falls back to its
+> previous derivation when an older backend omits it:
+> - the SDK task-budget summary and the CLI grant wait both fall back this
+>   way;
+> - the CLI revoke refusal stays status-based and never reads the field.
+>
+> So every client/backend skew pair keeps working. No tool, description,
+> input schema or signer surface changes, so the contract fingerprint does
+> not move. One output field is added: every `task_budget` result
+> (`haven_open_task_budget`, `haven_close_task_budget`, `haven_submit` for a
+> task budget, and `haven_get_task_budget`; hosted and local) carries an
+> additive `isLive`, absent against an older backend. Nothing else in this document moves.
+
 > **Re-verification (#3839 follow-up via #3864, 2026-10-10, hosted
 > `haven_discover_tools` description golden regen):** #3839 (22f49edd)
 > rewrote the hosted `haven_discover_tools` description in source (adding the

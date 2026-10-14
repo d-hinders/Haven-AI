@@ -198,8 +198,9 @@ for the modal's own shape.
   make selection ambiguous. Activating a plain pinned budget to a merchant's
   payTo therefore replaces that merchant's budget, and drops its merchant
   label. The fund-merchant modal's review step warns about this before the
-  owner signs — a warning fires whichever kind of active row already occupies
-  the slot (plain, locked to this merchant, or locked to another merchant),
+  owner signs — a warning fires whichever kind of live (active and unexpired,
+  #3922) row already occupies the slot (plain, locked to this merchant, or
+  locked to another merchant),
   naming whichever one it is. A budget for THIS merchant in a *different*
   token, or one still pinned to a payTo the merchant has since rotated away
   from (`stale`, below), is a *different* slot and survives with no warning.
@@ -443,7 +444,7 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   — the same build → sign → activate composition the agent page's budget form
   uses, extended with `merchant_slug` rather than forked. The review step
   states which payments this budget pays and which still use the open budget
-  (see "Which budget pays" above) and, if an ACTIVE row already occupies the same
+  (see "Which budget pays" above) and, if a LIVE (active and unexpired, #3922) row already occupies the same
   `(agent, token, recipient)` slot — plain, locked to this merchant, or locked
   to a DIFFERENT merchant — warns that signing replaces it, naming whichever
   one it is; a budget for this merchant in another token, or one pinned to a

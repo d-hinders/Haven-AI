@@ -389,6 +389,43 @@ describe('AccountReads', () => {
     expect(taskBudgetQueries).toEqual(refusesLive ? ['?status=live', '?status=all'] : ['?status=live'])
   })
 
+  // #3922: a row carrying the backend's `is_live` is kept exactly when it is
+  // true — including an EXPIRED `closing` row (false: the backend drops it) —
+  // and a row without the field derives as before (never treated as false).
+  it('#3922: is_live is honoured when present and the older-backend derivation applies when absent', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input))
+      if (url.pathname === '/machine-payments/agent') return json(agent('delegation'))
+      if (url.pathname === '/machine-payments/allowances') return json(allowance())
+      if (url.pathname === '/task-budgets') {
+        const row = (id: string, status: string, isExpired: boolean, isLive?: boolean) => ({
+          id, agent_id: 'agent_1', chain_id: 8453, token_address: USDC,
+          recipient_address: null, parent_delegation_hash: `0x${'ab'.repeat(32)}`,
+          delegation_hash: `0x${'cd'.repeat(32)}`, label: id, max_atomic: '1500',
+          status, expires_at: isExpired ? 1000 : 9999999999, is_expired: isExpired,
+          ...(isLive === undefined ? {} : { is_live: isLive }),
+          created_at: '2026-09-30T00:00:00.000Z', opened_at: '2026-09-30T00:00:00.000Z',
+          closed_at: null, close_tx_hash: null,
+        })
+        return json({ task_budgets: [
+          row('live-open', 'open', false, true),
+          row('closing-expired-flagged', 'closing', true, false), // the bug: is_live=false must drop it
+          row('closing-live', 'closing', false, true),
+          row('open-flag-false', 'open', false, false),           // the flag wins over the derivation
+          row('legacy-closing-expired', 'closing', true),         // no flag: derive as today -> rides
+          row('legacy-open-expired', 'open', true),               // no flag: derive as today -> drops
+          row('legacy-open', 'open', false),                      // no flag: derive as today -> rides
+          row('legacy-closed', 'closed', false),                  // no flag: derive as today -> drops
+        ] })
+      }
+      throw new Error(`Unexpected ${url.pathname}`)
+    }))
+    const summary = await reads(async () => ({}) as PaymentStatusResult).getAgentSummary()
+    expect(summary.taskBudgets.map((row) => row.id)).toEqual([
+      'live-open', 'closing-live', 'legacy-closing-expired', 'legacy-open',
+    ])
+  })
+
   it('#3518: a non-400 failure of status=live is NOT retried as the unbounded status=all read — the list soft-fails to []', async () => {
     const taskBudgetQueries: string[] = []
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {

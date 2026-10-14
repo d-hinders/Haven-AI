@@ -70,6 +70,8 @@ async function serveIssueResponse(page: Page, outcome: Outcome) {
       id,
       agent_id: agentId,
       status: 'pending',
+      // #3922: a pending slice is not live until it opens.
+      is_live: false,
       period_amount_atomic: '25000000',
       // 2027-01-15 end of day, UTC — what the form asked for.
       expires_at: 1800057599,

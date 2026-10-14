@@ -143,6 +143,22 @@ export function liveTaskBudgetSql(tableAlias: string | undefined, nowParam: stri
   return `${prefix}status IN ('pending', 'open', 'closing') AND ${prefix}expires_at > ${nowParam}`
 }
 
+/**
+ * The wire `is_live` flag (#3922): {@link liveTaskBudgetSql} evaluated in JS
+ * for rows the route already holds (RETURNING rows, enriched reads), against
+ * the same app-clock `nowSec` the route uses for `is_expired`. A real-DB test
+ * pins JS == SQL on seeded rows, so the two cannot drift.
+ */
+export function isLiveTaskBudget(
+  row: { status: string; expires_at: string | number },
+  nowSec: number,
+): boolean {
+  return (
+    (row.status === 'pending' || row.status === 'open' || row.status === 'closing') &&
+    Number(row.expires_at) > nowSec
+  )
+}
+
 export interface ListForAgentOptions {
   /**
    * 'open' = {@link openTaskBudgetSql} (the default the routes use).

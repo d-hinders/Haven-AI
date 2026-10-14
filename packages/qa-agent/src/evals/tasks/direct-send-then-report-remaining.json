@@ -4,7 +4,7 @@
   "category": "direct-payment",
   "instruction": "Pay {amount} USDC to {recipient} on Base Sepolia. Afterwards, check your allowances and tell me exactly how much of your period budget remains.",
   "requires": ["delegation-agent-open-budget", "funded-period-budget", "payment-recipient"],
-  "amount": { "rule": "remaining_period_budget", "delta_atomic": "0" },
+  "amount": { "rule": "fraction_of_remaining", "fraction": "1/4" },
   "graders": [
     { "name": "transfer_settled", "options": {} },
     { "name": "tool_called", "options": { "name": "haven_get_allowances", "after": "haven_submit" } }

@@ -64,15 +64,20 @@ export interface AgentRunLog {
  * (#2016's discipline, inherited by #3958: never a hardcoded budget number).
  *
  * `remaining_period_budget` — the agent's live remaining period budget in
- * atomic units. `delta_atomic` shifts it: `0` for exact-remaining sends,
- * positive to go over budget (the `over-budget-refused` leg derives
- * remaining + 1 USDC the same way).
+ * atomic units. `delta_atomic` shifts it: `0` for exact-remaining sends
+ * (the `direct-send-full-remaining` task), positive to go over budget (the
+ * `over-budget-refused` leg derives remaining + 1 USDC the same way).
+ *
+ * `fraction_of_remaining` — a STRICT fraction (numerator < denominator) of
+ * the live remaining budget, floored. A success task that must leave the
+ * sequence payable: 30 nightly sessions share ONE period budget (#3958
+ * § 4), so a slice that spends everything makes every later success task a
+ * guaranteed refusal. Full-remaining sends are the other rule's job, not
+ * `fraction: "1/1"`'s.
  */
-export interface AmountRule {
-  rule: 'remaining_period_budget'
-  /** bigint-as-string. Added to the live remaining budget. */
-  delta_atomic: string
-}
+export type AmountRule =
+  | { rule: 'remaining_period_budget'; delta_atomic: string }
+  | { rule: 'fraction_of_remaining'; fraction: string }
 
 export interface TaskSource {
   /** Where this task's expectation comes from — the citation is mandatory. */
@@ -84,15 +89,18 @@ export interface TaskSource {
 }
 
 /** The instruction placeholders the runner renders before launch. */
-export type InstructionPlaceholder = 'amount' | 'recipient'
+export type InstructionPlaceholder = 'amount' | 'recipient' | 'target'
 
 /**
  * One eval task — the file the runner loads (JSON, never Markdown, #3958).
  *
- * `instruction` may carry `{amount}` / `{recipient}` placeholders, rendered
- * from the resolved amount rule + run config. Tasks that phrase the amount
- * verbally ("your entire remaining budget") leave the placeholder out; the
- * resolved amount still feeds the graders.
+ * `instruction` may carry `{amount}` / `{recipient}` / `{target}`
+ * placeholders, rendered from the resolved amount rule + run config: an
+ * address (direct sends read `{recipient}`), an HTTP URL (the x402 tasks
+ * read `{target}`, `QA_EVAL_X402_TARGET` — one QA_EVAL_RECIPIENT cannot be
+ * both). Tasks that phrase the amount verbally ("your entire remaining
+ * budget") leave the placeholder out; the resolved amount still feeds the
+ * graders.
  */
 export interface EvalTask {
   id: string
@@ -112,7 +120,7 @@ export interface EvalTask {
 /** The task after the runner resolved its amount rule + instruction. */
 export interface ResolvedTask {
   task: EvalTask
-  /** Atomic units. The live remaining budget + delta. */
+  /** Atomic units. Per the amount rule: remaining + delta, or floor(remaining × fraction). */
   amountAtomic: bigint
   /** The rendered instruction the agent actually received. */
   instruction: string

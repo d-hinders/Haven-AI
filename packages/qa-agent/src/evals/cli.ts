@@ -12,13 +12,16 @@
  * by convention — the runbook names the exact env), the recipient
  * (QA_PAYMENT_TO), the agent account (QA_DELEGATION_ACCOUNT) and — for the
  * chain probe — QA_RPC_URL_BASE_SEPOLIA is inherited from `lib/chain.ts`.
+ * The x402 URL tasks additionally read QA_EVAL_X402_TARGET (the `{target}`
+ * placeholder — an address and a URL cannot be one env var); required only
+ * when the loaded task set renders it.
  * Missing config fails BEFORE the first agent session, not mid-night.
  */
 
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { hermesAdapterConfigFromEnv, runHermesTask } from './hermes.js'
-import { loadTasks, resolveTask } from './tasks.js'
+import { anyTaskUsesTarget, loadTasks, orderTasksForSequence, resolveTask } from './tasks.js'
 import { renderSummary, runSuite, type EvalAdapter } from './runner.js'
 import { observerProvider, describeObserverRpc } from '../lib/chain.js'
 import { HavenApi } from '../lib/haven-api.js'
@@ -61,6 +64,14 @@ async function main() {
   const apiKey = env('QA_EVAL_AGENT_API_KEY')
   const recipient = env('QA_EVAL_RECIPIENT')
   const agentAccount = env('QA_EVAL_AGENT_ACCOUNT')
+  // The x402 URL tasks render {target}, not {recipient}: an address and an
+  // HTTP target cannot be one env var. Required only when a loaded task
+  // actually renders it, and checked BEFORE the first agent session.
+  const x402Target = process.env.QA_EVAL_X402_TARGET?.trim() || undefined
+  if (anyTaskUsesTarget(tasks) && !x402Target) {
+    console.error('Missing QA_EVAL_X402_TARGET — a loaded task renders {target} (the x402 URL tasks); see docs/operations/agent-evals.md.')
+    process.exit(2)
+  }
   const outPath = args.find((a) => a.startsWith('--out='))?.split('=')[1] ?? `evals-report-${Date.now()}.json`
 
   // The budget read: live, or nothing — a guessed amount would turn a
@@ -75,8 +86,8 @@ async function main() {
   const startedAtBlock = await provider.getBlockNumber()
 
   const resolved = []
-  for (const task of tasks) {
-    const r = await resolveTask(task, { budget: budgetSource, recipient, agentAccount, startedAtBlock })
+  for (const task of orderTasksForSequence(tasks)) {
+    const r = await resolveTask(task, { budget: budgetSource, recipient, x402Target, agentAccount, startedAtBlock })
     if ('error' in r) {
       console.error(r.error)
       process.exit(2)

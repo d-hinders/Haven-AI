@@ -10,10 +10,12 @@
  * hours into a nightly run.
  *
  * Resolution is the budget-aware half (#3958 § 4): the amount comes from a
- * LIVE read of the remaining period budget + the task's delta, so 30 nightly
- * sessions on one period budget do not turn later success tasks into
- * refusals, and over-budget tasks genuinely go over (remaining + 1, the
- * `over-budget-refused` derivation). The read is injected; a caller that
+ * LIVE read of the remaining period budget. Success tasks take a SLICE of
+ * the remaining budget (`fraction_of_remaining`) — 30 nightly sessions
+ * share ONE period budget, so a success task that spends the whole
+ * remaining budget turns every later success task into a refusal. Full-
+ * remaining (`delta_atomic: 0`) and over-budget (`remaining + delta`)
+ * tasks use `remaining_period_budget`. The read is injected; a caller that
  * cannot read the budget gets an ERROR, not a guessed amount — same refusal
  * as `lib/delegation-budget.ts`'s fallback discipline.
  */
@@ -36,6 +38,28 @@ export interface LoadTasksResult {
   invalid: Array<{ file: string; error: string }>
 }
 
+/**
+ * A fraction is `"N/D"` — positive BigInt-safe integers, N < D. A STRICT
+ * fraction on purpose: `N >= D` is the full-remaining send, and that is
+ * `remaining_period_budget` with `delta_atomic: "0"`'s job, not a
+ * masquerading slice that leaves later success tasks nothing.
+ */
+function validateFraction(fraction: unknown, file: string): string | null {
+  if (typeof fraction !== 'string' || !/^\d+\/[1-9]\d*$/.test(fraction)) {
+    return `${file}: amount.fraction must be "N/D" — positive integers as a string (bigint-safe JSON, e.g. "1/4")`
+  }
+  const [num, den] = fraction.split('/').map((s) => BigInt(s))
+  if (num === 0n) return `${file}: amount.fraction must be non-zero — a 0 amount is unpayable`
+  if (num >= den) return `${file}: amount.fraction must be a STRICT fraction (N < D) — the whole remaining budget is remaining_period_budget's job`
+  return null
+}
+
+/** floor(remaining × N/D) in pure bigint math — no float, no rounding surprise. */
+export function fractionOfRemaining(remaining: bigint, fraction: string): bigint {
+  const [num, den] = fraction.split('/').map((s) => BigInt(s))
+  return (remaining * num) / den
+}
+
 /** Structural + coherence validation. Returns the error string, or null. */
 export function validateTask(raw: unknown, file: string): string | null {
   if (typeof raw !== 'object' || raw === null) return `${file}: not a JSON object`
@@ -49,11 +73,15 @@ export function validateTask(raw: unknown, file: string): string | null {
     return `${file}: category must be direct-payment | x402-paywall | over-budget`
   }
   const amount = t.amount as Record<string, unknown> | undefined
-  if (amount?.rule !== 'remaining_period_budget') {
-    return `${file}: amount.rule must be "remaining_period_budget" — the suite has no other budget-aware rule (#3958 § 4)`
-  }
-  if (typeof amount.delta_atomic !== 'string' || !/^\d+$/.test(amount.delta_atomic)) {
-    return `${file}: amount.delta_atomic must be a non-negative integer as a string (bigint-safe JSON)`
+  if (amount?.rule === 'remaining_period_budget') {
+    if (typeof amount.delta_atomic !== 'string' || !/^\d+$/.test(amount.delta_atomic)) {
+      return `${file}: amount.delta_atomic must be a non-negative integer as a string (bigint-safe JSON)`
+    }
+  } else if (amount?.rule === 'fraction_of_remaining') {
+    const fractionError = validateFraction(amount.fraction, file)
+    if (fractionError) return fractionError
+  } else {
+    return `${file}: amount.rule must be "remaining_period_budget" (delta_atomic) or "fraction_of_remaining" (fraction) — the suite has no other budget-aware rule (#3958 § 4)`
   }
   const graders = t.graders as Array<{ name?: unknown }> | undefined
   if (!Array.isArray(graders) || graders.length === 0) return `${file}: graders must be a non-empty array`
@@ -81,9 +109,15 @@ export function validateTask(raw: unknown, file: string): string | null {
   // inflating a rendered {amount} (remaining + delta) or by requiring a
   // budget exhaustion its setup provides (the x402/price-driven cases,
   // where the refusal comes from the live budget vs. the merchant's price).
-  const delta = BigInt(amount.delta_atomic as string)
-  if (t.category === 'over-budget' && delta === 0n && typeof t.instruction === 'string' && (t.instruction as string).includes('{amount}')) {
-    return `${file}: over-budget task renders {amount} with delta_atomic 0 — it must go OVER the live remaining budget`
+  // A fraction can never go over, so an over-budget task may not carry one.
+  if (t.category === 'over-budget') {
+    if (amount?.rule === 'fraction_of_remaining') {
+      return `${file}: over-budget task with a fraction_of_remaining amount — a slice of the remaining budget can never go OVER it; use remaining_period_budget with a positive delta_atomic`
+    }
+    const delta = BigInt((amount as { delta_atomic: string }).delta_atomic)
+    if (delta === 0n && typeof t.instruction === 'string' && (t.instruction as string).includes('{amount}')) {
+      return `${file}: over-budget task renders {amount} with delta_atomic 0 — it must go OVER the live remaining budget`
+    }
   }
   return null
 }
@@ -110,31 +144,63 @@ export async function loadTasks(dir: string = TASKS_DIR): Promise<LoadTasksResul
 }
 
 /**
- * Render the instruction: `{amount}` → human USDC, `{recipient}` → address.
- * Unknown placeholders are left alone (a task may legitimately mention
- * `{...}` prose we do not own); a MISSING amount placeholder on an
- * over-budget task is left alone too — the grader still knows the amount.
+ * Render the instruction: `{amount}` → human USDC, `{recipient}` → address,
+ * `{target}` → the x402 HTTP target (`QA_EVAL_X402_TARGET` — an address and
+ * a URL cannot be one env var). Unknown placeholders are left alone (a task
+ * may legitimately mention `{...}` prose we do not own); a MISSING amount
+ * placeholder on an over-budget task is left alone too — the grader still
+ * knows the amount.
  */
-export function renderInstruction(task: EvalTask, amountAtomic: bigint, recipient?: string): string {
+export function renderInstruction(task: EvalTask, amountAtomic: bigint, recipient?: string, target?: string): string {
   const human = (Number(amountAtomic) / 1_000_000).toString()
   return task.instruction
     .replaceAll('{amount}', human)
     .replaceAll('{recipient}', recipient ?? '(recipient not configured)')
+    .replaceAll('{target}', target ?? '(x402 target not configured)')
+}
+
+/** True when any task renders `{target}` — the run then needs QA_EVAL_X402_TARGET set. */
+export const anyTaskUsesTarget = (tasks: EvalTask[]): boolean =>
+  tasks.some((t) => t.instruction.includes('{target}'))
+
+/**
+ * Full-remaining senders (`remaining_period_budget` with `delta_atomic: 0`)
+ * consume the ENTIRE period budget by definition — every task resolved after
+ * one reads ~0 and is doomed to refuse (#3958 § 4). The task files sort
+ * alphabetically, which puts `direct-send-full-remaining` FIRST; the run
+ * order must not. Stable sort: drainers last, everything else in file order.
+ * (The x402 tasks also ship `delta_atomic: 0`, but their resolved amount
+ * feeds graders, not a spend against the period budget — they are not
+ * drainers.)
+ */
+export const orderTasksForSequence = (tasks: EvalTask[]): EvalTask[] => {
+  const drainsBudget = (t: EvalTask): boolean =>
+    t.category === 'direct-payment' && t.amount.rule === 'remaining_period_budget' && t.amount.delta_atomic === '0'
+  return [...tasks].sort((a, b) => Number(drainsBudget(a)) - Number(drainsBudget(b)))
 }
 
 /** Resolve the task against a live budget read. */
 export async function resolveTask(
   task: EvalTask,
-  opts: { budget: BudgetSource; recipient?: string; agentAccount?: string; startedAtBlock?: number },
+  opts: {
+    budget: BudgetSource
+    recipient?: string
+    x402Target?: string
+    agentAccount?: string
+    startedAtBlock?: number
+  },
 ): Promise<{ resolved: ResolvedTask } | { error: string }> {
   const read = await opts.budget()
   if ('error' in read) return { error: `budget read failed for task ${task.id}: ${read.error}` }
-  const amountAtomic = read.remaining + BigInt(task.amount.delta_atomic)
+  const amountAtomic =
+    task.amount.rule === 'fraction_of_remaining'
+      ? fractionOfRemaining(read.remaining, task.amount.fraction)
+      : read.remaining + BigInt(task.amount.delta_atomic)
   return {
     resolved: {
       task,
       amountAtomic,
-      instruction: renderInstruction(task, amountAtomic, opts.recipient),
+      instruction: renderInstruction(task, amountAtomic, opts.recipient, opts.x402Target),
       recipient: opts.recipient,
       agentAccount: opts.agentAccount,
       startedAtBlock: opts.startedAtBlock,

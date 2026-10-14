@@ -133,3 +133,10 @@ export function bareToolName(recorded: string): string {
 export function isPaymentTool(recorded: string): boolean {
   return PAYMENT_TOOL_SET.has(bareToolName(recorded))
 }
+
+const SIGNER_TOOL_SET = new Set<string>(SIGNER_TOOLS)
+
+/** The bare name is a signer tool? (`SIGNER_TOOLS` — signing is money movement.) */
+export function isSignerTool(recorded: string): boolean {
+  return SIGNER_TOOL_SET.has(bareToolName(recorded))
+}

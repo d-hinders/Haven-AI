@@ -42,13 +42,22 @@ backend**. No payment code is changed by this suite; the graders only READ.
 | Hermes adapter | `packages/qa-agent/src/evals/hermes.ts` | Runs one task through Hermes, collects the tool-call log, parses it into the grader model. |
 | Runner | `packages/qa-agent/src/evals/runner.ts` + `cli.ts` | k trials per task, applies graders, writes JSON report + readable summary with per-task pass rate, pass^k and wall time per session. |
 
-Amounts are **budget-aware** (#3958 § 4): success tasks are sized from the
-live remaining period budget at launch, over-budget tasks from remaining + 1
-USDC (the `over-budget-refused` scenario's own derivation). The budget read
-is refused, not guessed, when the chain/backend does not supply the number —
-the #2016 discipline. Size the eval agent's period budget for a full night:
-10 tasks x 3 trials plus margin, and remember 30 nightly sessions share ONE
-period budget unless the owner resets it.
+Amounts are **budget-aware** (#3958 § 4): success tasks take a **slice** of
+the live remaining period budget (`fraction_of_remaining`, floored) so a
+sequence of success tasks never spends the whole budget on the first one —
+30 nightly sessions share ONE period budget unless the owner resets it, and
+a later success task that resolves to ~0 becomes a guaranteed refusal.
+Full-remaining sends (`direct-send-full-remaining`,
+`remaining_period_budget` with `delta_atomic: 0`) and over-budget tasks
+(remaining + 1 USDC, the `over-budget-refused` scenario's own derivation)
+are the exceptions, on purpose. `direct-send-full-remaining` consumes the
+ENTIRE period budget by definition, so the run order puts it LAST
+(`orderTasksForSequence` in `tasks.ts`) — the task files sort alphabetically,
+which would otherwise zero the budget before the slice tasks resolve. The
+budget read is refused, not guessed,
+when the chain/backend does not supply the number — the #2016 discipline.
+Size the eval agent's period budget for a full night: 10 tasks x 3 trials
+plus margin.
 
 ## Provisioning: connect, not seed.ts
 
@@ -122,7 +131,16 @@ Env the run needs (all dev/testnet):
 - `QA_API_URL` — the shared dev backend (from the standard `QA_*` contract,
   `packages/qa-agent/src/config.ts`).
 - `QA_EVAL_AGENT_API_KEY` — the eval agent's `sk_agent_...` key (item 1 above).
-- `QA_EVAL_RECIPIENT` — the address transfer graders expect the money to reach.
+- `QA_EVAL_RECIPIENT` — the Base Sepolia ADDRESS the direct-send transfer
+  graders expect the money to reach (rendered into `{recipient}`). Address
+  tasks only — the x402 URL tasks read `QA_EVAL_X402_TARGET`, because one
+  env var cannot be both an address and an HTTP target.
+- `QA_EVAL_X402_TARGET` — the HTTP URL rendered into `{target}` by the two
+  plain-HTTP x402 tasks (`x402-plain-http-request-mode`,
+  `x402-price-cap-below-price`); required only when the loaded task set
+  renders `{target}`, and checked before the first agent session. With
+  `QA_EVAL_RECIPIENT` + `QA_EVAL_X402_TARGET` set, ONE suite invocation
+  covers all 10 tasks — no per-task config or task filter needed.
 - `QA_EVAL_AGENT_ACCOUNT` — the eval agent's account/delegate address (the
   payer the chain probe accepts).
 - `QA_EVAL_HERMES_COMMAND` — how ONE task runs through Hermes, non-interactively:

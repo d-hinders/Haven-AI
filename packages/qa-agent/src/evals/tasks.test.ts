@@ -7,8 +7,9 @@
 import { describe, expect, it } from 'vitest'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { loadTasks, renderInstruction, resolveTask, validateTask } from './tasks.js'
+import { anyTaskUsesTarget, loadTasks, orderTasksForSequence, renderInstruction, resolveTask, validateTask } from './tasks.js'
 import { HOSTED_TOOLS, SIGNER_TOOLS } from './tools.js'
+import type { EvalTask } from './types.js'
 
 const TASKS_DIR = join(fileURLToPath(import.meta.url), '..', 'tasks')
 
@@ -141,5 +142,177 @@ describe('renderInstruction', () => {
   it('leaves unknown placeholders alone', () => {
     const t = { instruction: 'Buy {thing} for {amount}.', amount: { rule: 'remaining_period_budget' as const, delta_atomic: '0' } } as never
     expect(renderInstruction(t as never, 1_000_000n)).toBe('Buy {thing} for 1.')
+  })
+
+  it('renders {target} when the x402 target is configured', () => {
+    const t = { instruction: 'Buy the paid resource at {target}.', amount: { rule: 'remaining_period_budget' as const, delta_atomic: '0' } } as never
+    expect(renderInstruction(t as never, 0n, '0xabc', 'https://demo.example')).toBe('Buy the paid resource at https://demo.example.')
+  })
+
+  it('leaves {target} visibly unconfigured when the env is missing — never silently empty', () => {
+    const t = { instruction: 'Buy the paid resource at {target}.', amount: { rule: 'remaining_period_budget' as const, delta_atomic: '0' } } as never
+    expect(renderInstruction(t as never, 0n)).toContain('(x402 target not configured)')
+  })
+})
+
+describe('validateTask — the fraction_of_remaining amount rule', () => {
+  const base = {
+    id: 'test-task',
+    title: 'T',
+    category: 'direct-payment',
+    instruction: 'Pay {amount} to {recipient}.',
+    requires: [],
+    amount: { rule: 'fraction_of_remaining', fraction: '1/4' },
+    graders: [{ name: 'transfer_settled' }],
+    expectTransfer: true,
+    source: { kind: 'scenario', ref: 'x.ts', note: 'n' },
+  }
+
+  it('accepts a strict fraction', () => {
+    expect(validateTask(structuredClone(base), 'x.json')).toBeNull()
+  })
+
+  it('rejects fraction "1/1" — the whole budget is remaining_period_budget with delta 0', () => {
+    const t = { ...structuredClone(base), amount: { rule: 'fraction_of_remaining', fraction: '1/1' } }
+    expect(validateTask(t, 'x.json')).toContain('STRICT fraction')
+  })
+
+  it('rejects fraction "0/4" — a 0 amount is unpayable', () => {
+    const t = { ...structuredClone(base), amount: { rule: 'fraction_of_remaining', fraction: '0/4' } }
+    expect(validateTask(t, 'x.json')).toContain('non-zero')
+  })
+
+  it('rejects a malformed fraction', () => {
+    const t = { ...structuredClone(base), amount: { rule: 'fraction_of_remaining', fraction: 'quarter' } }
+    expect(validateTask(t, 'x.json')).toContain('"N/D"')
+  })
+
+  it('rejects an over-budget task with a fraction — a slice can never go over', () => {
+    const t = { ...structuredClone(base), category: 'over-budget', graders: [{ name: 'no_payment_retry_after_refusal' }], expectTransfer: false }
+    expect(validateTask(t, 'x.json')).toContain('can never go OVER')
+  })
+})
+
+describe('resolveTask — fraction_of_remaining slices the live remaining budget', () => {
+  const task = {
+    id: 'test-task',
+    title: 'T',
+    category: 'direct-payment' as const,
+    instruction: 'Pay {amount} USDC to {recipient}.',
+    requires: [],
+    amount: { rule: 'fraction_of_remaining' as const, fraction: '1/4' },
+    graders: [],
+    expectTransfer: false,
+    source: { kind: 'scenario' as const, ref: 'x', note: 'n' },
+  }
+
+  it('resolves floor(remaining × fraction) — bigint math, no float', async () => {
+    const r = await resolveTask(task, { budget: async () => ({ remaining: 10_000_001n }), recipient: '0xabc' })
+    expect('resolved' in r).toBe(true)
+    if ('resolved' in r) {
+      expect(r.resolved.amountAtomic).toBe(2_500_000n) // 10.000001 × 1/4 floored
+      expect(r.resolved.instruction).toContain('2.5 USDC')
+    }
+  })
+
+  it('the § 4 sequence property: every success task still resolves a PAYABLE amount after the earlier transfers', async () => {
+    // 30 nightly sessions share ONE period budget — resolve the suite the way
+    // the CLI does (one live read per task, each transfer deducted from the
+    // next read) and assert no later success task collapses to a refusal.
+    const slice1 = { ...task } as typeof task
+    const slice2 = { ...task, id: 'slice-2' }
+    const slice3 = { ...task, id: 'slice-3' }
+    let remaining = 10_000_000n // 10 USDC of period budget for the whole night
+    for (const t of [slice1, slice2, slice3]) {
+      const r = await resolveTask(t, { budget: async () => ({ remaining }) })
+      expect('resolved' in r).toBe(true)
+      if (!('resolved' in r)) continue
+      expect(r.resolved.amountAtomic).toBeGreaterThan(0n) // payable, not a guaranteed refusal
+      expect(r.resolved.amountAtomic).toBeLessThan(remaining) // a slice, never the whole remaining budget
+      remaining -= r.resolved.amountAtomic // the transfer landed; the next read sees less
+    }
+    // And the budget did NOT hit zero after the success legs.
+    expect(remaining).toBeGreaterThan(0n)
+  })
+
+  it('orderTasksForSequence runs the full-remaining drainer LAST — the real 10-task set is payable in one invocation', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    const ordered = orderTasksForSequence(tasks)
+    expect(ordered[ordered.length - 1]!.id).toBe('direct-send-full-remaining')
+    // Simulate the CLI: one live read per task, every transfer deducted.
+    let remaining = 10_000_000n
+    for (const t of ordered) {
+      if (t.category === 'over-budget') continue // over-budget legs refuse by design; skip the deduction
+      const r = await resolveTask(t, { budget: async () => ({ remaining }) })
+      expect('resolved' in r).toBe(true)
+      if (!('resolved' in r)) continue
+      if (t.id === 'direct-send-full-remaining') {
+        expect(r.resolved.amountAtomic).toBe(remaining) // the drainer, on purpose
+      } else {
+        expect(r.resolved.amountAtomic).toBeGreaterThan(0n) // every earlier task still payable
+      }
+      remaining -= r.resolved.amountAtomic
+    }
+  })
+
+  it('orderTasksForSequence is stable for tasks that do not drain', () => {
+    const mk = (id: string, amount: EvalTask['amount']) =>
+      ({ id, title: id, category: 'direct-payment', instruction: 'x', requires: [], amount, graders: [], expectTransfer: true, source: { kind: 'issue', ref: '1', note: 'n' } }) as EvalTask
+    const ordered = orderTasksForSequence([
+      mk('a-fraction', { rule: 'fraction_of_remaining', fraction: '1/4' }),
+      mk('b-drainer', { rule: 'remaining_period_budget', delta_atomic: '0' }),
+      mk('c-over', { rule: 'remaining_period_budget', delta_atomic: '1000000' }),
+    ])
+    expect(ordered.map((t) => t.id)).toEqual(['a-fraction', 'c-over', 'b-drainer'])
+  })
+})
+
+describe('anyTaskUsesTarget — the single-invocation target config (#3958 AC: one 10×3 run)', () => {
+  it('is true when any task instruction renders {target} (the two x402 URL tasks)', () => {
+    const tasks = [
+      { instruction: 'Pay {amount} to {recipient}.' },
+      { instruction: 'Buy the paid resource at {target}.' },
+    ] as never[]
+    expect(anyTaskUsesTarget(tasks)).toBe(true)
+  })
+
+  it('is false for an address-only suite', () => {
+    const tasks = [
+      { instruction: 'Pay {amount} to {recipient}.' },
+      { instruction: 'Pay your entire remaining budget to {recipient}.' },
+    ] as never[]
+    expect(anyTaskUsesTarget(tasks)).toBe(false)
+  })
+
+  it('the real task dir: exactly the two x402 URL tasks use {target}, and the loader validates them', async () => {
+    const { tasks, invalid } = await loadTasks(TASKS_DIR)
+    expect(invalid).toEqual([])
+    expect(tasks.filter((t) => t.instruction.includes('{target}')).map((t) => t.id).sort()).toEqual([
+      'x402-plain-http-request-mode',
+      'x402-price-cap-below-price',
+    ])
+    // And the direct sends still render {recipient} — the two placeholder kinds
+    // cannot be one env var.
+    expect(tasks.filter((t) => t.instruction.includes('{recipient}')).length).toBeGreaterThanOrEqual(4)
+  })
+
+  it('resolveTask renders the x402 target into the instruction', async () => {
+    const task = {
+      id: 'x402-test',
+      title: 'T',
+      category: 'x402-paywall' as const,
+      instruction: 'Buy the paid resource at {target}.',
+      requires: [],
+      amount: { rule: 'remaining_period_budget' as const, delta_atomic: '0' },
+      graders: [],
+      expectTransfer: false,
+      source: { kind: 'issue' as const, ref: '3958', note: 'n' },
+    }
+    const r = await resolveTask(task, {
+      budget: async () => ({ remaining: 5_000_000n }),
+      x402Target: 'https://demo-merchant.example',
+    })
+    expect('resolved' in r).toBe(true)
+    if ('resolved' in r) expect(r.resolved.instruction).toContain('https://demo-merchant.example')
   })
 })

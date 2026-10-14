@@ -1,10 +1,10 @@
 {
   "id": "direct-send-partial-budget",
-  "title": "Direct send of a fixed amount well inside the period budget",
+  "title": "Direct send of a slice of the remaining period budget",
   "category": "direct-payment",
   "instruction": "Pay {amount} USDC to {recipient} on Base Sepolia using your Haven payment tools. Confirm what happened to me when it is done, including the payment id.",
   "requires": ["delegation-agent-open-budget", "funded-period-budget", "payment-recipient"],
-  "amount": { "rule": "remaining_period_budget", "delta_atomic": "0" },
+  "amount": { "rule": "fraction_of_remaining", "fraction": "1/4" },
   "graders": [
     { "name": "transfer_settled", "options": {} },
     { "name": "payment_status_settled", "options": {} }

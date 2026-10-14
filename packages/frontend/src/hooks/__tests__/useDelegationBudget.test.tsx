@@ -829,7 +829,12 @@ describe('editBudget — REPLACE composition (#3166)', () => {
     await waitFor(() => expect(result.current.ready).toBe(true))
     await act(async () => {
       const res = await result.current.editBudget(OLD_HASH, INPUT)
-      expect(res).toEqual({ ok: false, reason: 'revoke_unfinished', newDelegationHash: NEW_HASH })
+      expect(res).toEqual({
+        ok: false,
+        reason: 'revoke_unfinished',
+        newDelegationHash: NEW_HASH,
+        unstoppedDelegationHashes: [OLD_HASH],
+      })
     })
     // The stop was prepared but never submitted — the owner finishes it later.
     expect(mockPost.mock.calls.some((c) => String(c[0]).includes('/revoke/submit'))).toBe(false)
@@ -863,7 +868,12 @@ describe('editBudget — REPLACE composition (#3166)', () => {
     await waitFor(() => expect(result.current.ready).toBe(true))
     await act(async () => {
       const res = await result.current.editBudget(OLD_HASH, INPUT)
-      expect(res).toEqual({ ok: false, reason: 'revoke_unfinished', newDelegationHash: NEW_HASH })
+      expect(res).toEqual({
+        ok: false,
+        reason: 'revoke_unfinished',
+        newDelegationHash: NEW_HASH,
+        unstoppedDelegationHashes: [OLD_HASH],
+      })
     })
   })
 
@@ -1374,6 +1384,7 @@ describe('#3930 — a lost activate response: re-read before report, no double g
         ok: false,
         reason: 'revoke_unfinished',
         newDelegationHash: HASH,
+        unstoppedDelegationHashes: [OLD_HASH],
       })
     })
   })
@@ -1527,8 +1538,10 @@ describe('#3933 — refuse a silent replace', () => {
     })
     const build = mockPost.mock.calls.find((c) => String(c[0]).endsWith('/build'))!
     const activate = mockPost.mock.calls.find((c) => String(c[0]).endsWith('/activate'))!
-    expect(build[1].replaces).toBe(OLD_HASH)
-    expect(activate[1].replaces).toBe(OLD_HASH)
+    // A list since review finding 1 — with no loaded row beside it, just the
+    // budget being edited.
+    expect(build[1].replaces).toEqual([OLD_HASH])
+    expect(activate[1].replaces).toEqual([OLD_HASH])
     // The activation still carries the owner's signature beside it.
     expect(activate[1].signature).toBe('0x' + 'aa'.repeat(100))
   })
@@ -1619,6 +1632,185 @@ describe('#3933 — refuse a silent replace', () => {
       expect(res).toMatchObject({ ok: false, reason: 'slot_occupied', existingDelegationHash: EXISTING })
     })
     expect(mockPost.mock.calls.some((c) => String(c[0]).includes('/revoke'))).toBe(false)
+  })
+
+  // ── Review finding 1: a re-key carry/steady pair; finding 2: a recipient change ──
+
+  const TOKEN = '0x' + 'cc'.repeat(20)
+  const PAIR_HASH = '0x' + 'a2'.repeat(32)
+  const RECIPIENT = '0x' + 'dd'.repeat(20)
+  const FAR = 4_102_444_800
+
+  function row(hash: string, over: Record<string, unknown> = {}) {
+    return {
+      id: hash.slice(2, 10),
+      token_address: TOKEN,
+      recipient_address: null,
+      delegation_hash: hash,
+      version: 1,
+      status: 'active',
+      budget_atomic: '1000',
+      period_seconds: 86_400,
+      expires_at: FAR,
+      start_date: '0',
+      created_at: '2026-10-01T00:00:00Z',
+      ...over,
+    }
+  }
+
+  /** The delegations list holds `rows`; the signer set is the passkey one. */
+  function mockApiWith(rows: unknown[]) {
+    mockGet.mockImplementation((url: string) => {
+      if (url.endsWith('/delegations')) return Promise.resolve({ delegations: rows })
+      if (url.endsWith('/account-signers')) return Promise.resolve(PASSKEY_SIGNERS)
+      return Promise.reject(new Error('unexpected ' + url))
+    })
+  }
+
+  /** The OLD budget carried as a re-key pair: carry (current) + steady (dormant, newer). */
+  const PAIR = [
+    row(OLD_HASH),
+    row(PAIR_HASH, { start_date: String(FAR - 86_400), created_at: '2026-10-02T00:00:00Z' }),
+  ]
+
+  function revokeUrls(): string[] {
+    return mockPost.mock.calls.map((c) => String(c[0])).filter((u) => u.includes('/revoke'))
+  }
+
+  it('a pair: `replaces` names BOTH rows on build and activate, and each row gets its own Stop signature', async () => {
+    mockApiWith(PAIR)
+    mockFlow()
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.budgets).toHaveLength(2))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.editBudget(OLD_HASH, INPUT)
+      expect(res).toEqual({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: true })
+    })
+    const build = mockPost.mock.calls.find((c) => String(c[0]).endsWith('/build'))!
+    const activate = mockPost.mock.calls.find((c) => String(c[0]).endsWith('/activate'))!
+    expect(build[1].replaces).toEqual([OLD_HASH, PAIR_HASH])
+    expect(activate[1].replaces).toEqual([OLD_HASH, PAIR_HASH])
+    // The set stopped is the set activate swept — one signature per row.
+    expect(revokeUrls()).toEqual([
+      expect.stringContaining(`/delegations/${OLD_HASH}/revoke`),
+      expect.stringContaining(`/delegations/${OLD_HASH}/revoke/submit`),
+      expect.stringContaining(`/delegations/${PAIR_HASH}/revoke`),
+      expect.stringContaining(`/delegations/${PAIR_HASH}/revoke/submit`),
+    ])
+    expect(mockSignUserOp).toHaveBeenCalledTimes(2)
+  })
+
+  it('a pair: the SECOND Stop cancelled is revoke_unfinished naming only the row still enabled', async () => {
+    mockApiWith(PAIR)
+    mockFlow()
+    mockSignUserOp.mockReset()
+    mockSignUserOp.mockResolvedValueOnce('0x' + 'bb'.repeat(100)).mockRejectedValueOnce(new Error('User rejected the request'))
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.budgets).toHaveLength(2))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.editBudget(OLD_HASH, INPUT)
+      expect(res).toEqual({
+        ok: false,
+        reason: 'revoke_unfinished',
+        newDelegationHash: NEW_HASH,
+        unstoppedDelegationHashes: [PAIR_HASH],
+      })
+    })
+    // The first row's Stop was submitted; the second was never submitted.
+    expect(revokeUrls()).toEqual([
+      expect.stringContaining(`/delegations/${OLD_HASH}/revoke`),
+      expect.stringContaining(`/delegations/${OLD_HASH}/revoke/submit`),
+      expect.stringContaining(`/delegations/${PAIR_HASH}/revoke`),
+    ])
+  })
+
+  it('a pair: the FIRST Stop failing stops the loop — the owner is not asked for the next one, both rows stay to stop', async () => {
+    mockApiWith(PAIR)
+    mockFlow()
+    mockSignUserOp.mockReset()
+    mockSignUserOp.mockRejectedValue(new Error('User rejected the request'))
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.budgets).toHaveLength(2))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.editBudget(OLD_HASH, INPUT)
+      expect(res).toMatchObject({ reason: 'revoke_unfinished', unstoppedDelegationHashes: [OLD_HASH, PAIR_HASH] })
+    })
+    expect(mockSignUserOp).toHaveBeenCalledTimes(1)
+  })
+
+  it('a pair: a row the route answers "Already revoked" for is done — the other is signed, and the result is a clean success', async () => {
+    mockApiWith(PAIR)
+    mockFlow()
+    const base = mockPost.getMockImplementation()!
+    mockPost.mockImplementation((url: string, body: unknown) =>
+      url.endsWith(`/delegations/${OLD_HASH}/revoke`)
+        ? Promise.reject(apiError('Already revoked', 409, { error: 'Already revoked', error_code: 'DELEGATION_ALREADY_REVOKED' }))
+        : base(url, body),
+    )
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.budgets).toHaveLength(2))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.editBudget(OLD_HASH, INPUT)
+      expect(res).toEqual({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: true })
+    })
+    expect(mockSignUserOp).toHaveBeenCalledTimes(1)
+    expect(revokeUrls()).toContain(`/agents/${AGENT}/delegations/${PAIR_HASH}/revoke/submit`)
+  })
+
+  it('a recipient change into an EMPTY slot sends no `replaces` and then Stops the edited budget itself', async () => {
+    mockApiWith([row(OLD_HASH)])
+    mockFlow()
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.budgets).toHaveLength(1))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.editBudget(OLD_HASH, { ...INPUT, recipientAddress: RECIPIENT as never })
+      expect(res).toEqual({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: true })
+    })
+    const build = mockPost.mock.calls.find((c) => String(c[0]).endsWith('/build'))!
+    const activate = mockPost.mock.calls.find((c) => String(c[0]).endsWith('/activate'))!
+    expect(Object.keys(build[1])).not.toContain('replaces')
+    expect(Object.keys(activate[1])).not.toContain('replaces')
+    // Activate's sweep cannot reach the old slot: the edit's own Stop does.
+    expect(revokeUrls()).toEqual([
+      expect.stringContaining(`/delegations/${OLD_HASH}/revoke`),
+      expect.stringContaining(`/delegations/${OLD_HASH}/revoke/submit`),
+    ])
+  })
+
+  it('a recipient change into an OCCUPIED slot is target_slot_occupied before anything is built or signed', async () => {
+    const TARGET = '0x' + 'f1'.repeat(32)
+    mockApiWith([row(OLD_HASH), row(TARGET, { recipient_address: RECIPIENT.toUpperCase().replace('0X', '0x') })])
+    mockFlow()
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.budgets).toHaveLength(2))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.editBudget(OLD_HASH, { ...INPUT, recipientAddress: RECIPIENT as never })
+      expect(res).toEqual({ ok: false, reason: 'target_slot_occupied', existingDelegationHash: TARGET })
+    })
+    expect(mockPost).not.toHaveBeenCalled()
+    expect(mockSignDelegation).not.toHaveBeenCalled()
+  })
+
+  it("a recipient change the stale list missed: the backend's 409 is target_slot_occupied (slots compared, not words) — no Stop", async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockFlow({ build: () => Promise.reject(occupied()) })
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.editBudget(
+        OLD_HASH,
+        { ...INPUT, recipientAddress: RECIPIENT as never },
+        { oldSlot: { tokenAddress: TOKEN, recipientAddress: null } },
+      )
+      expect(res).toMatchObject({ ok: false, reason: 'target_slot_occupied', existingDelegationHash: EXISTING })
+    })
+    expect(revokeUrls()).toEqual([])
   })
 
   it('revoke: the per-hash "Already revoked" 409 is FINISHED (alreadyStopped), with no signature', async () => {

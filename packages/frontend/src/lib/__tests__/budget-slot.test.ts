@@ -5,6 +5,8 @@ import {
   isReplacedButEnabled,
   occupiesSlot,
   replacedButEnabledBudgets,
+  sameSlot,
+  slotOccupantHashesForEdit,
 } from '../budget-slot'
 
 const NOW = 1_800_000_000
@@ -108,5 +110,47 @@ describe('findOccupyingBudget', () => {
     const newer = row({ delegation_hash: '0x02', created_at: '2026-09-02T00:00:00Z' })
     expect(findOccupyingBudget([older, newer], { tokenAddress: USDC }, NOW)).toBe(newer)
     expect(findOccupyingBudget([newer, older], { tokenAddress: USDC }, NOW)).toBe(newer)
+  })
+})
+
+/**
+ * #3933 review finding 1: the rows an edit names as `replaces` and then Stops
+ * — every live row of the edited budget's slot, the edited hash always first.
+ */
+describe('slotOccupantHashesForEdit', () => {
+  const EDITED = '0x' + 'ab'.repeat(32)
+  const STEADY = '0x' + 'a2'.repeat(32)
+
+  it('a re-key pair: both rows, the edited one first, a dormant steady row included', () => {
+    const carry = row({ delegation_hash: EDITED, created_at: '2026-09-01T00:00:00Z' })
+    const steady = row({ delegation_hash: STEADY, start_date: String(NOW + 86_400), created_at: '2026-09-02T00:00:00Z' })
+    expect(slotOccupantHashesForEdit([steady, carry], EDITED, { tokenAddress: USDC }, NOW)).toEqual([EDITED, STEADY])
+  })
+
+  it('keeps the edited hash even when the list is stale, empty or not loaded — once, whatever its case', () => {
+    expect(slotOccupantHashesForEdit(null, EDITED, { tokenAddress: USDC }, NOW)).toEqual([EDITED])
+    expect(slotOccupantHashesForEdit([], EDITED, { tokenAddress: USDC }, NOW)).toEqual([EDITED])
+    expect(
+      slotOccupantHashesForEdit([row({ delegation_hash: EDITED.toUpperCase().replace('0X', '0x') })], EDITED, { tokenAddress: USDC }, NOW),
+    ).toEqual([EDITED])
+  })
+
+  it('leaves out other slots, other tokens, and rows that do not occupy (replaced, expired)', () => {
+    const rows = [
+      row({ delegation_hash: EDITED }),
+      row({ delegation_hash: '0x01', recipient_address: PAY_TO }),
+      row({ delegation_hash: '0x02', token_address: '0x' + '77'.repeat(20) }),
+      row({ delegation_hash: '0x03', status: 'replaced' }),
+      row({ delegation_hash: '0x04', expires_at: NOW - 1 }),
+    ]
+    expect(slotOccupantHashesForEdit(rows, EDITED, { tokenAddress: USDC }, NOW)).toEqual([EDITED])
+  })
+})
+
+describe('sameSlot', () => {
+  it('compares token and recipient case-insensitively; null and empty are both the open slot', () => {
+    expect(sameSlot({ tokenAddress: USDC, recipientAddress: null }, { tokenAddress: USDC.toLowerCase(), recipientAddress: '' })).toBe(true)
+    expect(sameSlot({ tokenAddress: USDC, recipientAddress: PAY_TO.toUpperCase().replace('0X', '0x') }, { tokenAddress: USDC, recipientAddress: PAY_TO })).toBe(true)
+    expect(sameSlot({ tokenAddress: USDC }, { tokenAddress: USDC, recipientAddress: PAY_TO })).toBe(false)
   })
 })

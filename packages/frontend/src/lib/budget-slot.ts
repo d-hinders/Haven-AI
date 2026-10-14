@@ -69,3 +69,51 @@ export function findOccupyingBudget<T extends SlotRow & Pick<DelegationBudget, '
     Date.parse(row.created_at) > Date.parse(newest.created_at) ? row : newest,
   )
 }
+
+type SlotRowWithIdentity = SlotRow & Pick<DelegationBudget, 'token_address' | 'recipient_address' | 'created_at' | 'delegation_hash'>
+
+/** A (token, recipient) slot; a null or empty recipient is the open slot. */
+export interface BudgetSlot {
+  tokenAddress: string
+  recipientAddress?: string | null
+}
+
+/** Whether two slots are the same (token, recipient), compared case-insensitively. */
+export function sameSlot(a: BudgetSlot, b: BudgetSlot): boolean {
+  return (
+    a.tokenAddress.toLowerCase() === b.tokenAddress.toLowerCase() &&
+    (a.recipientAddress ?? '').toLowerCase() === (b.recipientAddress ?? '').toLowerCase()
+  )
+}
+
+/**
+ * #3933 review finding 1: the budgets an edit of `editedHash` replaces — every
+ * row occupying the edited budget's slot, newest first, with `editedHash`
+ * itself always included (first) even when the list is stale or not loaded.
+ *
+ * A slot can hold more than one live row: after "Replace signing key" a
+ * budget is carried as a pair (the current period's carry row and the next
+ * period's steady row). The backend's activate marks EVERY active row in the
+ * slot `replaced`, and it accepts an edit only when `replaces` names exactly
+ * the slot's occupying rows, so the edit sends this whole list and then Stops
+ * each one. Duplicates are dropped case-insensitively; each hash keeps the
+ * casing it came with (the per-hash revoke routes take it verbatim).
+ */
+export function slotOccupantHashesForEdit<T extends SlotRowWithIdentity>(
+  rows: T[] | null | undefined,
+  editedHash: string,
+  slot: BudgetSlot,
+  nowSec: number,
+): string[] {
+  const occupants = (rows ?? [])
+    .filter((row) => occupiesSlot(row, nowSec) && sameSlot({ tokenAddress: row.token_address, recipientAddress: row.recipient_address }, slot))
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
+    .map((row) => row.delegation_hash)
+  const seen = new Set<string>()
+  return [editedHash, ...occupants].filter((hash) => {
+    const key = hash.toLowerCase()
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}

@@ -555,6 +555,16 @@ export default function EditBudgetModal({
                       stopped. Use Stop budget next to it in the budget list when you are ready.
                     </p>
                   </>
+                ) : outcome.reason === 'unconfirmed' ? (
+                  <>
+                    <p className="text-sm font-medium text-[var(--v2-ink)]">
+                      The change could not be confirmed
+                    </p>
+                    <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
+                      The new budget may already be in place. Check the agent&apos;s budgets before
+                      trying again — a second grant would add a second budget.
+                    </p>
+                  </>
                 ) : outcome.reason === 'refused' ? (
                   <>
                     <p className="text-sm font-medium text-[var(--v2-ink)]">

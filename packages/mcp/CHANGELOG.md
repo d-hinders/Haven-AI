@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.10.0-alpha.0 — 2026-10-14
+
 ### Added
 
 - **`haven_get_agent` and `haven_get_allowances` warn a replaced agent (#3772).** When a Connect `--replace` retired this agent on its machine, both outputs carry `supersededBy` with a warning to restart the session and have the user remove the old agent; otherwise `supersededBy` is `null`. Same field as the hosted runtime. Warning only.

@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.10.0-alpha.0 — 2026-10-14
+
 ### Changed
 
 - The EIP-3009 merchant header the signer builds now carries an EIP-3009

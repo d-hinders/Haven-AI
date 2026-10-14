@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.10.0-alpha.0 — 2026-10-14
+
 ### Changed
 
 - EIP-3009 merchant headers minted by the SDK now carry an EIP-3009 nonce

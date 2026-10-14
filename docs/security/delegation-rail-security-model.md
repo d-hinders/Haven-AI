@@ -2420,6 +2420,20 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > text, copy-only) and #3524 (compact `haven_send`/`haven_pay` results), were
 > re-verified where they merged. Nothing else in this document was re-verified.
 
+> **Re-verified (0.10.0-alpha.0 release, 2026-10-14):** the release bump's only
+> covered-file edit is the `SIGNER_VERSION` literal in `packages/signer/src/tools.ts`
+> (`0.10.0-alpha.0`). No signing check, refusal or allowlist moves in that edit.
+> One commit in the range changes signer source (`git log origin/main..origin/dev
+> -- packages/signer/src` at `641f527d`): #3888 (#3893), in `core.ts`. It is
+> recorded above where it merged ("Since #3888 the 3009 header's nonce is
+> derived, not random"), and it was read again for this release:
+> - the nonce is overwritten on the unsigned payload that `preparePaymentHeader`
+>   built;
+> - the typed data is signed by the library's own `signPaymentHeader`;
+> - the binding and expiry checks before it are unchanged.
+>
+> Nothing else in this document was re-verified.
+
 > **Re-verified (0.9.0-alpha.0 release, 2026-10-09):** the release bump's only
 > covered-file edit is the `SIGNER_VERSION` literal in `packages/signer/src/tools.ts`
 > (`0.9.0-alpha.0`). No signing check, refusal or allowlist moves in that edit.

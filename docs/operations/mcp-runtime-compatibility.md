@@ -2317,6 +2317,45 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > **Re-read, not rubber-stamped:** the Node floor and the Codex and Claude Code
 > rows are unchanged. `last-verified` is not bumped.
 
+> **Re-verification (0.10.0-alpha.0 release, 2026-10-14):** the manifest table
+> above is re-pinned by the bump to `0.10.0-alpha.0` for `connect`, `mcp`, `sdk`
+> and `signer`, with `SDK_VERSION` rewritten beside it. The step from
+> `0.9.0-alpha.0` is **MINOR**: the range adds surfaces and removes none, and no
+> CHANGELOG entry is marked **Update required**.
+>
+> One type-level change for SDK consumers: `supersededBy` is a required field on
+> `HavenAgent` and `HavenAllowanceSummary` (#3772). Code that only reads them is
+> unaffected; code that builds them by hand (test mocks) adds
+> `supersededBy: null`. The `.d.ts` diff against the published `0.9.0-alpha.0`
+> removes no declaration name and adds five.
+>
+> **Surfaces this release moves:**
+> - **Signer.** An EIP-3009 merchant header now carries a nonce derived from the
+>   Haven payment id instead of a random one (#3888), so the backend can
+>   attribute the merchant's settlement on-chain. The signed typed data is still
+>   the x402 library's own. The tool list and consent text are unchanged.
+> - **SDK.** Sign-in to a merchant's SIWX session before a multi-call flow
+>   (#3838). Discovery entries carry `funding_leg_expected` /
+>   `asset_transfer_methods` (#3839). `getAgent()`, `getAgentSummary()` and
+>   `getAllowances()` carry `supersededBy` (#3772). The derived EIP-3009 nonce
+>   (#3888) and runbook wording (#3894) are also in range. All additive.
+> - **Local MCP.** `haven_get_agent` / `haven_get_allowances` warn a replaced
+>   agent (#3772), discovery shows the funding-leg hint (#3839), and an
+>   out-of-gas `MERCHANT_NOT_READY` refusal names the operator top-up (#3834).
+> - **Connect.** `--doctor` / `--repair --name <slug>` update one named pair,
+>   refuse ambiguous multi-agent repairs, and re-consent without a token
+>   (#3827). Coexisting agents are listed rather than called "replaced"
+>   (#3830). After a completed `--replace`, Haven is told which agent replaced
+>   which (#3772). Existing installs are left as they are.
+> - **CLI.** Agent guidance text and command wording only.
+> - **Not moved.** `CLIENT_COMPAT` is unchanged (`git diff origin/main
+>   origin/dev -- packages/core/src/client-compat.ts` is empty), so no installed
+>   client is forced to update.
+>
+> **Re-read, not rubber-stamped:** the Node floor and the Codex and Claude Code
+> rows are unchanged. `last-verified` already reads 2026-10-10 from an earlier
+> change and is not bumped.
+
 > **Re-verification (0.9.0-alpha.0 release, 2026-10-09):** the manifest table
 > above is re-pinned by the bump to `0.9.0-alpha.0` for `connect`, `mcp`, `sdk`
 > and `signer`, with `SDK_VERSION` rewritten beside it. The step from
@@ -2614,10 +2653,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.9.0-alpha.0` |
-| `@haven_ai/mcp` | `0.9.0-alpha.0` |
-| `@haven_ai/sdk` | `0.9.0-alpha.0` |
-| `@haven_ai/signer` | `0.9.0-alpha.0` |
+| `@haven_ai/connect` | `0.10.0-alpha.0` |
+| `@haven_ai/mcp` | `0.10.0-alpha.0` |
+| `@haven_ai/sdk` | `0.10.0-alpha.0` |
+| `@haven_ai/signer` | `0.10.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

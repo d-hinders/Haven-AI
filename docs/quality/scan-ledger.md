@@ -1519,11 +1519,13 @@ before confirmation.
 [#3919](https://github.com/d-hinders/Haven-AI/issues/3919) (`epic`, `money-path`,
 `area:backend`, `area:sdk`, `area:frontend`, `area:docs`) with slices #3920 (A,
 delegation predicates named and adopted), #3921 (B, task and sub predicates),
-#3922 (C, liveness on the wire), #3923 (D, the five verdict conflicts, held on
-its owner questions), #3924 (E, the census ratchet); spec-review verdict posted
-on the epic. C1 → #3925 (`money-path`, `area:backend`; threat model pending the
-owner's confirmation). C2 → #3926 (`area:docs`; waiting on where the 10-03 report
-lives). C3 → #3927 (`money-path`, `area:backend`; lock-widening question open).
-Filed to the backlog (no `code-quality`); each issue carries a spec-review
-verdict. Drive: `ship-next epic=#3919`, `ship-next 3925`, `ship-next 3926`,
-`ship-next 3927` once each issue's `pending-review` is lifted.
+#3922 (C, liveness on the wire), #3923 (D, the five verdict conflicts; the
+owner's five semantics decisions recorded on the issue the same day), #3924 (E,
+the census ratchet); one spec-review verdict posted on the epic. C1 → #3925
+(`money-path`, `area:backend`, `area:docs`; threat model confirmed, attribution
+by the posted header's own nonce). C2 → #3926 (`area:docs`; one partner
+question on where the 10-03 report lives, not a hold). C3 → #3927 (`money-path`,
+`area:backend`; the lock is widened to a prefixed intent key). Filed to the
+backlog (no `code-quality`); each issue carries a spec-review verdict and no
+owner question remains open, so `pending-review` is lifted on all nine. Drive:
+`ship-next epic=#3919`, `ship-next 3925`, `ship-next 3926`, `ship-next 3927`.

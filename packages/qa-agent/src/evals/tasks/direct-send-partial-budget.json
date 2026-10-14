@@ -1,0 +1,18 @@
+{
+  "id": "direct-send-partial-budget",
+  "title": "Direct send of a fixed amount well inside the period budget",
+  "category": "direct-payment",
+  "instruction": "Pay {amount} USDC to {recipient} on Base Sepolia using your Haven payment tools. Confirm what happened to me when it is done, including the payment id.",
+  "requires": ["delegation-agent-open-budget", "funded-period-budget", "payment-recipient"],
+  "amount": { "rule": "remaining_period_budget", "delta_atomic": "0" },
+  "graders": [
+    { "name": "transfer_settled", "options": {} },
+    { "name": "payment_status_settled", "options": {} }
+  ],
+  "expectTransfer": true,
+  "source": {
+    "kind": "scenario",
+    "ref": "packages/qa-agent/src/scenarios/within-budget-settle.ts",
+    "note": "A payment inside the budget settles on-chain and is logged — the suite's positive control that the money path can still say YES. Here the agent (not the SDK) drives it, and the grader requires the observer node's exact Transfer, not a claimed status."
+  }
+}

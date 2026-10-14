@@ -1,0 +1,18 @@
+{
+  "id": "x402-plain-http-request-mode",
+  "title": "x402 paywall on a plain-HTTP endpoint, request mode end to end",
+  "category": "x402-paywall",
+  "instruction": "Fetch the paid resource at {recipient} (a plain-HTTP x402 endpoint). It will answer 402 Payment Required: get a quote, replay the request the way the quote tells you, and bring me the actual response body. Do not pay twice for the same request.",
+  "requires": ["delegation-agent-open-budget", "funded-period-budget", "plain-http-x402-target"],
+  "amount": { "rule": "remaining_period_budget", "delta_atomic": "0" },
+  "graders": [
+    { "name": "x402_request_mode_replay", "options": {} },
+    { "name": "payment_status_settled", "options": {} }
+  ],
+  "expectTransfer": false,
+  "source": {
+    "kind": "bug-report",
+    "ref": "docs/bug-reports/2026-10-08T114910Z-manual-qa-dev-3739-request-mode.md",
+    "note": "Goals B+C: haven_quote_x402 returns request-mode next_arguments (url, method, headers, body — NO payment_required) and the agent replays them verbatim; goal D: the same idempotency key replays to the same payment_id with 'Do NOT pay again'. The demo merchant answers a sessionless tools/call with the 402."
+  }
+}

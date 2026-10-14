@@ -1,0 +1,18 @@
+{
+  "id": "direct-send-then-report-remaining",
+  "title": "Direct send, then report the budget impact",
+  "category": "direct-payment",
+  "instruction": "Pay {amount} USDC to {recipient} on Base Sepolia. Afterwards, check your allowances and tell me exactly how much of your period budget remains.",
+  "requires": ["delegation-agent-open-budget", "funded-period-budget", "payment-recipient"],
+  "amount": { "rule": "remaining_period_budget", "delta_atomic": "0" },
+  "graders": [
+    { "name": "transfer_settled", "options": {} },
+    { "name": "tool_called", "options": { "name": "haven_get_allowances", "after": "haven_submit" } }
+  ],
+  "expectTransfer": true,
+  "source": {
+    "kind": "bug-report",
+    "ref": "docs/bug-reports/2026-10-08T114910Z-manual-qa-dev-3739-request-mode.md",
+    "note": "The run's Budget table tracked remaining/spent (1000000 → 998000 atomic) via haven_get_allowances after each leg — an agent that reports budget impact the same way is what these tasks grade. Also the delegation_budget_exceeded refusal guidance requires reporting remaining and shortfall."
+  }
+}

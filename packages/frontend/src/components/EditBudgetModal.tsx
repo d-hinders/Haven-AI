@@ -297,7 +297,7 @@ export default function EditBudgetModal({
   const targetOccupant =
     moved && input
       ? findOccupyingBudget(
-          (budgets ?? []).filter((b) => !isOwnAttemptedGrant(b.delegation_hash)),
+          (budgets ?? []).filter((b) => !isOwnAttemptedGrant(b.delegation_hash, budget.delegation_hash)),
           { tokenAddress: input.tokenAddress, recipientAddress: input.recipientAddress },
           nowSec,
         )
@@ -746,7 +746,7 @@ export default function EditBudgetModal({
                     </p>
                     <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
                       This agent&apos;s budgets changed after you opened this, so nothing was
-                      signed. Close this and edit the current budget.
+                      changed. Close this and edit the current budget.
                     </p>
                   </>
                 ) : outcome.reason === 'target_slot_occupied' ? (
@@ -758,7 +758,7 @@ export default function EditBudgetModal({
                     </p>
                     <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
                       The recipient you chose already has a live budget for this token, so nothing
-                      was signed and this budget is unchanged. Edit that budget instead, or pick
+                      was changed and this budget is still the same. Edit that budget instead, or pick
                       another recipient.
                     </p>
                   </>

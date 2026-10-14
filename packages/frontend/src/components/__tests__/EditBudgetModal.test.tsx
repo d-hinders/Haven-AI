@@ -568,7 +568,7 @@ describe('EditBudgetModal — replace without a silent leftover (#3933)', () => 
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
     fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
     await waitFor(() => expect(screen.getByText('This budget has changed')).toBeInTheDocument())
-    expect(screen.getByText(/nothing was signed\. Close this and edit the current budget/)).toBeInTheDocument()
+    expect(screen.getByText(/nothing was changed\. Close this and edit the current budget/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
     expect(onBudgetChange).toHaveBeenCalled()
   })
@@ -672,7 +672,7 @@ describe('EditBudgetModal — a re-key pair and a recipient change (#3933 review
     await waitFor(() => expect(screen.getByText('This recipient already has a budget')).toBeInTheDocument())
     expect(
       screen.getByText(
-        'The recipient you chose already has a live budget for this token, so nothing was signed and this budget is unchanged. Edit that budget instead, or pick another recipient.',
+        'The recipient you chose already has a live budget for this token, so nothing was changed and this budget is still the same. Edit that budget instead, or pick another recipient.',
       ),
     ).toBeInTheDocument()
     expect(screen.queryByText('This budget has changed')).toBeNull()

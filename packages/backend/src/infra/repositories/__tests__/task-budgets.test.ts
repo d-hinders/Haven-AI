@@ -15,10 +15,11 @@ import {
   markClosed,
   markClosing,
   markOpen,
-  selectOpenForPayment,
+  openTaskBudgetSql,
   sumOpenReservedAtomic,
   type InsertPendingTaskBudgetInput,
 } from '../task-budgets.js'
+import { checkTaskBudgetForPayment } from '../../../modules/task-budgets/task-budget-service.js'
 
 const USDC = '0x036cbd53842c5426634e7929541ec2318f3dcf7e'
 const PARENT_HASH = `0x${'a'.repeat(64)}`
@@ -243,17 +244,42 @@ describeDb('agent_task_budgets repository (#3329)', () => {
     expect(await sumOpenReservedAtomic(seeded.agentId, PARENT_HASH, now)).toBe(3_000_000n)
   })
 
-  it('selectOpenForPayment matches only open, unexpired, token-matching rows for the agent', async () => {
+  /**
+   * #3919 S-B: the TypeScript payment-time decision is pinned to the named
+   * SQL predicate. For every cell of the status × expiry matrix, the
+   * service's verdict (`checkTaskBudgetForPayment`, seeded so token,
+   * recipient and parent all match) equals `openTaskBudgetSql`'s row
+   * membership evaluated by the SAME database on the SAME app clock — the
+   * two spellings of "open" are one answer, whatever the row is.
+   */
+  it("#3919 S-B: checkTaskBudgetForPayment's verdict equals openTaskBudgetSql's row membership across the status × expiry matrix", async () => {
     const seeded = await seedAgent()
     const now = Math.floor(Date.now() / 1000)
-    const row = await insertPendingTaskBudget(pendingInput(seeded.agentId))
-    await markOpen(row.id, seeded.agentId, JSON.stringify({}))
+    const signed = JSON.stringify({ signed: true })
+    const statuses = ['pending', 'open', 'closing', 'closed'] as const
 
-    expect(await selectOpenForPayment(row.id, seeded.agentId, USDC, now)).not.toBeNull()
-    expect(await selectOpenForPayment(row.id, seeded.agentId, '0x' + 'f'.repeat(40), now)).toBeNull()
-    expect(await selectOpenForPayment(row.id, seeded.agentId, USDC, now + 100_000)).toBeNull()
+    for (const status of statuses) {
+      for (const expired of [false, true]) {
+        const row = await insertPendingTaskBudget(
+          pendingInput(seeded.agentId, { expiresAt: expired ? now - 60 : now + 3600 }),
+        )
+        if (status !== 'pending') await markOpen(row.id, seeded.agentId, signed)
+        if (status === 'closing' || status === 'closed') {
+          await markClosing(row.id, seeded.agentId, JSON.stringify({}))
+        }
+        if (status === 'closed') await markClosed(row.id, seeded.agentId, '0xtx')
 
-    const other = await seedAgent()
-    expect(await selectOpenForPayment(row.id, other.agentId, USDC, now)).toBeNull()
+        const stored = (await findForAgent(row.id, seeded.agentId))!
+        expect(stored.status).toBe(status)
+        const verdict = checkTaskBudgetForPayment(stored, USDC, '0x' + 'e'.repeat(40), PARENT_HASH, now)
+        const membership = await db.query<{ live: boolean }>(
+          `SELECT (${openTaskBudgetSql('t', '$1')}) AS live FROM agent_task_budgets t WHERE t.id = $2`,
+          [now, row.id],
+        )
+        expect(`${status}:${expired ? 'expired' : 'unexpired'}`).toBeDefined()
+        expect(membership.rows[0].live).toBe(verdict.ok)
+        if (!verdict.ok) expect(verdict.refusal).toBe('task_budget_not_open')
+      }
+    }
   })
 })

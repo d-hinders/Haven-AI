@@ -33,6 +33,7 @@
 import pool from '../../db.js'
 import type { Executor } from '../transaction.js'
 import { DELEGATION_RAIL_JOIN, spendNetFactorSql } from './analytics.js'
+import { openSubBudgetSql } from './sub-budgets.js'
 
 export type { Executor }
 
@@ -354,15 +355,17 @@ export async function listPendingAgentSetupStatuses(
 /**
  * Sub-budget grants an agent RECEIVED — `{ parentAgentId, parentAgentName,
  * open }` per row (#3803), so an agent whose only authority is a received
- * sub-budget does not read "No budget". `open` is the stored `status =
- * 'open'`; `pending`/`closing`/`closed` grant rows report `open = false`
- * rather than being dropped, because a pending grant is still authority the
- * owner can act on.
+ * sub-budget does not read "No budget". `open` is {@link openSubBudgetSql} —
+ * the SAME predicate the agent's own open list uses (#3919 P3): an EXPIRED
+ * `open` grant answers `open = false` (an expired grant is not a usable
+ * budget), while `pending`/`closing`/`closed` grant rows report
+ * `open = false` rather than being dropped, because a pending grant is still
+ * authority the owner can act on.
  */
 export const RECEIVED_SUB_BUDGETS_FOR_AGENTS_SQL = `SELECT asb.agent_id,
          asb.parent_agent_id,
          pa.name AS parent_agent_name,
-         (asb.status = 'open') AS open
+         (${openSubBudgetSql('asb', '$3')}) AS open
   FROM agent_sub_budgets asb
   JOIN agents pa ON pa.id = asb.parent_agent_id
   JOIN agents a ON a.id = asb.agent_id
@@ -380,12 +383,13 @@ export interface ReceivedSubBudgetRow {
 export async function listReceivedSubBudgetsForAgents(
   userId: string,
   agentIds: string[],
+  nowSec: number = Math.floor(Date.now() / 1000),
   db: Executor = pool,
 ): Promise<ReceivedSubBudgetRow[]> {
   if (agentIds.length === 0) return []
   const result = await db.query<ReceivedSubBudgetRow>(
     RECEIVED_SUB_BUDGETS_FOR_AGENTS_SQL,
-    [userId, agentIds],
+    [userId, agentIds, nowSec],
   )
   return result.rows
 }

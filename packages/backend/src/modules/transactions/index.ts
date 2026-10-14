@@ -47,10 +47,12 @@ export { serveTimeAmount } from './serve-time.js'
 export {
   ACTIVITY_GROUP_LIMIT,
   ACTIVITY_WINDOW_DAYS,
+  buildActivityFeed,
   buildActivityGroups,
   isValidActivityTimeZone,
   localDayKey,
   activityOutcome,
+  type ActivityFeed,
   type ActivityOutcome,
   type BuildActivityGroupsParams,
   type DashboardActivityGroup,

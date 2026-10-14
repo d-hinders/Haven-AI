@@ -6391,6 +6391,10 @@ export type components = {
             agents: components["schemas"]["DashboardAgentPreview"][];
             /** @description Grouped activity rows, newest first. Every count is a FLOOR (`countIsFloor`) when the explorer window was truncated. */
             activity?: components["schemas"]["DashboardActivityGroup"][];
+            /** @description True when the merged transaction feed carries any transaction outside the `activityWindowDays` window — activity exists, just not in it. False (not absent) when an account read failed, the same degradation as the rows. */
+            hasOlderActivity?: boolean;
+            /** @description The window (in days) `activity` is bucketed over — the backend’s `ACTIVITY_WINDOW_DAYS`, carried on the wire so the client names the window without hard-coding it. */
+            activityWindowDays?: number;
             /** @description #3803 — the overview’s agents[] by status, so tiles do not derive counts from a client-side slice. */
             agentCount: {
                 active: number;

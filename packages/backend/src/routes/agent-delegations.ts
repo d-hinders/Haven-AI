@@ -180,20 +180,55 @@ export const BUDGET_SLOT_OCCUPIED_ERROR_CODE = 'BUDGET_SLOT_OCCUPIED'
 export const DELEGATION_ALREADY_REVOKED_ERROR_CODE = 'DELEGATION_ALREADY_REVOKED'
 
 /**
- * The slot rule (#3933), one definition for build and activate: allowed into
- * an empty slot, or as an edit whose `replaces` is one of the slot's live
- * grants; otherwise the named refusal with the grant to edit.
+ * The edit flow's `replaces` on the wire: one hash (the original shape, which
+ * the qa-agent seed and lifecycle scenario still send) or a list of hashes
+ * (#3933 review finding 1: a re-key's carry and steady rows share one slot,
+ * so replacing that slot replaces both). Lower-cased, de-duplicated.
+ */
+function namedReplaces(replaces: string | string[] | null | undefined): string[] {
+  // The request schema (enforced on this module) guarantees the shape.
+  const list = Array.isArray(replaces) ? replaces : replaces ? [replaces] : []
+  return [...new Set(list.map((hash) => hash.toLowerCase()))]
+}
+
+/**
+ * The slot rule (#3933), one definition for build and activate. Allowed into
+ * an empty slot; into an occupied slot only as an edit whose `replaces` names
+ * EXACTLY the slot's occupying grants — every one of them, and nothing else.
+ *
+ * - Every one (review finding 1): activate's sweep marks EVERY active row in
+ *   the slot `replaced`, and the edit flow stops what it named. A re-key's
+ *   carry/steady pair is two occupying rows; naming one would sweep both and
+ *   stop one, leaving the other enabled on-chain behind a `replaced` label.
+ * - Nothing else: a named hash that does not occupy this slot (already
+ *   replaced, another slot, another agent, invented) is a stale or wrong
+ *   declaration — the client's picture of the slot is not the server's.
+ *
+ * An empty slot ignores `replaces`: nothing is swept, so nothing can be
+ * replaced silently, and the edit flow's Stop of a hash that was already
+ * revoked answers "Already revoked" (its #3166 success race).
  */
 function slotOccupiedRefusal(
   occupying: string[],
-  replaces: string | null | undefined,
-): { error: string; error_code: string; existing_delegation_hash: string } | null {
+  replaces: string | string[] | null | undefined,
+): {
+  error: string
+  error_code: string
+  existing_delegation_hash: string
+  occupying_delegation_hashes: string[]
+} | null {
   if (occupying.length === 0) return null
-  if (replaces && occupying.some((hash) => hash.toLowerCase() === replaces.toLowerCase())) return null
+  const named = new Set(namedReplaces(replaces))
+  const occupied = new Set(occupying.map((hash) => hash.toLowerCase()))
+  const namesEveryOccupant = [...occupied].every((hash) => named.has(hash))
+  const namesOnlyOccupants = [...named].every((hash) => occupied.has(hash))
+  if (namesEveryOccupant && namesOnlyOccupants) return null
   return {
     error: BUDGET_SLOT_OCCUPIED_REFUSAL,
     error_code: BUDGET_SLOT_OCCUPIED_ERROR_CODE,
+    // Back-compat: the newest occupying grant, the budget to edit.
     existing_delegation_hash: occupying[0],
+    occupying_delegation_hashes: occupying,
   }
 }
 // #3439: a re-key's own replacement row is activated only by that re-key's
@@ -465,8 +500,8 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       period_seconds: number
       expires_at?: number
       merchant_slug?: string
-      /** #3933: the edit flow names the live budget this grant replaces. */
-      replaces?: string | null
+      /** #3933: the edit flow names the live budget(s) this grant replaces. */
+      replaces?: string | string[] | null
     }
   }>('/:id/delegations/build', async (request, reply) => {
     const { sub } = request.user as { sub: string }
@@ -712,7 +747,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
   })
 
   // ── POST /:id/delegations/:hash/activate — grant step 2 ───────────────────
-  app.post<{ Params: { id: string; hash: string }; Body: { signature?: string; replaces?: string | null } }>(
+  app.post<{ Params: { id: string; hash: string }; Body: { signature?: string; replaces?: string | string[] | null } }>(
     '/:id/delegations/:hash/activate',
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
@@ -882,9 +917,11 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
           signed.delegate.toLowerCase() !== expectedDelegateAccountAddress.toLowerCase()
         // #3933: under the agent lock (activations for one agent serialize),
         // so the slot read is authoritative: a plain grant into a slot that
-        // holds a live grant is refused, and only an edit naming that grant
-        // as `replaces` goes on to the sweep below. Folded into the rotated-key
-        // refusal's one `if` — same transaction, still one ROLLBACK site.
+        // holds a live grant is refused, and only an edit naming EVERY live
+        // grant there as `replaces` goes on to the sweep below — the sweep
+        // retires all of them, so the edit must stop all of them. Folded into
+        // the rotated-key refusal's one `if` — same transaction, still one
+        // ROLLBACK site.
         const slotRefusal = rotated
           ? null
           : slotOccupiedRefusal(

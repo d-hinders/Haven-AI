@@ -75,19 +75,23 @@ describeDb('a plain grant into an occupied budget slot (#3933)', () => {
     return { userId, agentId: agent.rows[0].id }
   }
 
-  /** One `agent_delegations` row in the open USDC slot (recipient NULL). */
+  /**
+   * One `agent_delegations` row — in the open USDC slot (recipient NULL)
+   * unless `recipient` pins it. `startDate` in the future is a re-key's
+   * dormant steady row; `createdAt` orders a pair deterministically.
+   */
   async function seedDelegation(
     agentId: string,
     status: 'pending' | 'active',
-    opts: { expiresAt?: number; version?: number } = {},
+    opts: { expiresAt?: number; version?: number; recipient?: string; startDate?: number; createdAt?: Date } = {},
   ): Promise<string> {
     const hash = nextHash()
     await db.query(
       `INSERT INTO agent_delegations (
          agent_id, chain_id, token_address, recipient_address, delegation_hash,
          delegation_json, version, status, budget_atomic, period_seconds,
-         start_date, expires_at
-       ) VALUES ($1, 84532, $2, NULL, $3, $4, $5, $6, '1000000', 86400, 0, $7)`,
+         start_date, expires_at, created_at
+       ) VALUES ($1, 84532, $2, $8, $3, $4, $5, $6, '1000000', 86400, $9, $7, COALESCE($10, NOW()))`,
       [
         agentId,
         USDC,
@@ -102,6 +106,9 @@ describeDb('a plain grant into an occupied budget slot (#3933)', () => {
         opts.version ?? seq,
         status,
         opts.expiresAt ?? FAR_FUTURE,
+        opts.recipient ?? null,
+        opts.startDate ?? 0,
+        opts.createdAt ?? null,
       ],
     )
     return hash
@@ -224,6 +231,156 @@ describeDb('a plain grant into an occupied budget slot (#3933)', () => {
 
       const other = await seedAgent()
       expect((await build(other.agentId, other.userId)).statusCode).toBe(201)
+    })
+  })
+  // ── Review findings 1, 2 and 4: which rows occupy a slot, and what an edit must name ──
+
+  const RECIPIENT = '0x' + 'cc'.repeat(20)
+  const OTHER_RECIPIENT = '0x' + 'ce'.repeat(20)
+
+  it('(a) a recipient-pinned grant beside a live OPEN budget is a different slot: a plain grant activates, the open budget is untouched', async () => {
+    const { userId, agentId } = await seedAgent()
+    const open = await seedDelegation(agentId, 'active')
+    const pinned = await seedDelegation(agentId, 'pending', { recipient: RECIPIENT })
+
+    const res = await activate(agentId, userId, pinned)
+
+    expect(res.statusCode).toBe(200)
+    expect(await statusOf(pinned)).toBe('active')
+    expect(await statusOf(open)).toBe('active')
+  })
+
+  it('(b) an active row whose period has not started (a re-key\'s dormant steady row) still occupies the slot', async () => {
+    const { userId, agentId } = await seedAgent()
+    const steady = await seedDelegation(agentId, 'active', { startDate: Math.floor(Date.now() / 1000) + 86_400 })
+    const fresh = await seedDelegation(agentId, 'pending')
+
+    const res = await activate(agentId, userId, fresh)
+
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toMatchObject({
+      error_code: 'BUDGET_SLOT_OCCUPIED',
+      existing_delegation_hash: steady,
+      occupying_delegation_hashes: [steady],
+    })
+    expect(await statusOf(steady)).toBe('active')
+    expect(await statusOf(fresh)).toBe('pending')
+  })
+
+  it("(c) a `replaces` naming another agent's live budget is refused, alone or beside this slot's own", async () => {
+    const { userId, agentId } = await seedAgent()
+    const old = await seedDelegation(agentId, 'active')
+    const fresh = await seedDelegation(agentId, 'pending')
+    const other = await seedAgent()
+    const foreign = await seedDelegation(other.agentId, 'active')
+
+    for (const replaces of [foreign, [foreign], [old, foreign]]) {
+      const res = await activate(agentId, userId, fresh, { replaces })
+      expect(res.statusCode, JSON.stringify(replaces)).toBe(409)
+      expect(res.json().error_code).toBe('BUDGET_SLOT_OCCUPIED')
+    }
+    expect(await statusOf(old)).toBe('active')
+    expect(await statusOf(fresh)).toBe('pending')
+    expect(await statusOf(foreign)).toBe('active')
+  })
+
+  describe('(d) a re-key carry/steady pair is two occupying rows, and an edit must name both', () => {
+    async function seedPair(agentId: string): Promise<{ carry: string; steady: string }> {
+      const now = Date.now()
+      const carry = await seedDelegation(agentId, 'active', { createdAt: new Date(now - 2_000) })
+      const steady = await seedDelegation(agentId, 'active', {
+        startDate: Math.floor(now / 1000) + 86_400,
+        createdAt: new Date(now - 1_000),
+      })
+      return { carry, steady }
+    }
+
+    it('naming only one half is refused at activate — the sweep would retire both and the edit stop one', async () => {
+      const { userId, agentId } = await seedAgent()
+      const { carry, steady } = await seedPair(agentId)
+      const fresh = await seedDelegation(agentId, 'pending')
+
+      for (const replaces of [carry, steady, [steady]]) {
+        const res = await activate(agentId, userId, fresh, { replaces })
+        expect(res.statusCode, JSON.stringify(replaces)).toBe(409)
+        expect(res.json()).toMatchObject({
+          error_code: 'BUDGET_SLOT_OCCUPIED',
+          // Back-compat: the newest occupying row; the list is every one.
+          existing_delegation_hash: steady,
+          occupying_delegation_hashes: [steady, carry],
+        })
+      }
+      expect(await statusOf(carry)).toBe('active')
+      expect(await statusOf(steady)).toBe('active')
+      expect(await statusOf(fresh)).toBe('pending')
+    })
+
+    it('naming both (any order, any case) activates, and both end up replaced', async () => {
+      const { userId, agentId } = await seedAgent()
+      const { carry, steady } = await seedPair(agentId)
+      const fresh = await seedDelegation(agentId, 'pending')
+
+      const res = await activate(agentId, userId, fresh, { replaces: [steady.toUpperCase().replace('0X', '0x'), carry] })
+
+      expect(res.statusCode).toBe(200)
+      expect(await statusOf(fresh)).toBe('active')
+      expect(await statusOf(carry)).toBe('replaced')
+      expect(await statusOf(steady)).toBe('replaced')
+    })
+
+    it('build applies the same rule: one half refused, both built', async () => {
+      const { userId, agentId } = await seedAgent()
+      const { carry, steady } = await seedPair(agentId)
+      const build = (replaces: unknown) =>
+        app.inject({
+          method: 'POST',
+          url: `/agents/${agentId}/delegations/build`,
+          headers: userHeaders(userId),
+          payload: { token_address: USDC, recipient_address: null, budget_atomic: '2000000', period_seconds: 86_400, replaces },
+        })
+
+      const half = await build(carry)
+      expect(half.statusCode).toBe(409)
+      expect(half.json().occupying_delegation_hashes).toEqual([steady, carry])
+      expect((await build([carry, steady])).statusCode).toBe(201)
+    })
+  })
+
+  describe("(e) an edit that changes the recipient: the rule reads the TARGET slot", () => {
+    it('into an occupied slot: refused even when `replaces` names the edited budget — that budget is in another slot', async () => {
+      const { userId, agentId } = await seedAgent()
+      const edited = await seedDelegation(agentId, 'active')
+      const target = await seedDelegation(agentId, 'active', { recipient: RECIPIENT })
+      const fresh = await seedDelegation(agentId, 'pending', { recipient: RECIPIENT })
+
+      for (const replaces of [undefined, edited]) {
+        const res = await activate(agentId, userId, fresh, replaces ? { replaces } : {})
+        expect(res.statusCode, String(replaces)).toBe(409)
+        expect(res.json()).toMatchObject({
+          error_code: 'BUDGET_SLOT_OCCUPIED',
+          existing_delegation_hash: target,
+          occupying_delegation_hashes: [target],
+        })
+      }
+      expect(await statusOf(edited)).toBe('active')
+      expect(await statusOf(target)).toBe('active')
+      expect(await statusOf(fresh)).toBe('pending')
+    })
+
+    it('into an empty slot: activates, and the edited budget in the OLD slot stays active — the sweep is scoped to the new slot, so the edit flow must Stop it itself', async () => {
+      const { userId, agentId } = await seedAgent()
+      const edited = await seedDelegation(agentId, 'active')
+      const elsewhere = await seedDelegation(agentId, 'active', { recipient: OTHER_RECIPIENT })
+      const fresh = await seedDelegation(agentId, 'pending', { recipient: RECIPIENT })
+
+      const res = await activate(agentId, userId, fresh)
+
+      expect(res.statusCode).toBe(200)
+      expect(await statusOf(fresh)).toBe('active')
+      // Not `replaced`: nothing marks the edited budget retired until its
+      // Stop lands, so the dashboard keeps showing it as a live budget.
+      expect(await statusOf(edited)).toBe('active')
+      expect(await statusOf(elsewhere)).toBe('active')
     })
   })
 })

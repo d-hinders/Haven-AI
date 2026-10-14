@@ -152,6 +152,26 @@
       "reason": "The ratchet's self-test, for the same reason as dep-lint's: a ratchet whose test is weakened can ratchet nothing."
     },
     {
+      "path": "scripts/lint-budget-liveness.mjs",
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "lint:budget-liveness"
+      ],
+      "reason": "The shrink-only census ratchet over inline budget-liveness predicates (#3924, epic #3919 slice E). It scans packages/backend SQL and the client packages' TypeScript but only backend_checks runs it."
+    },
+    {
+      "path": "scripts/lint-budget-liveness.test.mjs",
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "lint:budget-liveness:test"
+      ],
+      "reason": "The ratchet's self-test, for the same reason as dep-lint's: a ratchet whose test is weakened can ratchet nothing."
+    },
+    {
       "path": "scripts/lint-next-steps.mjs",
       "jobs": [
         "backend",
@@ -376,6 +396,16 @@
         "lint:request-schemas"
       ],
       "reason": "The committed baseline the request-schema ratchet (#3029, epic #3028) compares packages/backend route counts against. Lowering a count without the code change that earns it is the exact weakening the ratchet refuses, and the gate runs only in backend_checks — the ratchet and its self-test were registered but the data they compare against was not, so a baseline-only edit routed nowhere (quality scan 2026-09-22, candidate C4)."
+    },
+    {
+      "path": "scripts/lint-budget-liveness-baseline.json",
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "lint:budget-liveness"
+      ],
+      "reason": "The committed baseline the budget-liveness ratchet (#3924, epic #3919 slice E) compares inline-predicate counts against. Lowering a count without the code change that earns it is the exact weakening the ratchet refuses, and lint:budget-liveness runs only in backend_checks — the same baseline-not-registered hole the request-schema ratchet's was (quality scan 2026-09-22, candidate C4)."
     },
     {
       "path": "scripts/lint-next-steps-baseline.json",

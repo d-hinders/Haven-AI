@@ -536,6 +536,18 @@ export const ROUTING_MATRIX = [
     why: 'The ratchet’s self-test, same reason as dep-lint’s.',
   },
   {
+    files: ['scripts/lint-budget-liveness.mjs'],
+    expect: ['code', 'backend'],
+    kind: CONTRACT,
+    why: 'The shrink-only budget-liveness census (#3924, epic #3919 slice E) polices packages/backend SQL and the client packages’ TypeScript but only the backend job runs it.',
+  },
+  {
+    files: ['scripts/lint-budget-liveness.test.mjs'],
+    expect: ['code', 'backend'],
+    kind: CONTRACT,
+    why: 'The ratchet’s self-test, same reason as dep-lint’s.',
+  },
+  {
     files: ['scripts/lint-next-steps.mjs'],
     expect: ['code', 'backend', 'mcp_server', 'signer', 'mcp', 'connect', 'qa_agent'],
     kind: CONTRACT,
@@ -590,8 +602,8 @@ export const ROUTING_MATRIX = [
     expect: ['code', 'backend', 'frontend', 'ops'],
     kind: CONTRACT,
     why:
-      'The shared ratchet engine backs NINE gates as of #3131 (eight as of #3104, ' +
-      'seven as of #3029, six as of #2747): the ' +
+      'The shared ratchet engine backs TEN gates as of #3924 (nine as of #3131, ' +
+      'eight as of #3104, ' +
       'backend db-mock gate, the ' +
       'frontend wire-type gate (#1447), the retired-rail prose ratchet, the frontend copy ' +
       'lint, packages/frontend/scripts/design-lint.mjs — which an earlier draft of this row ' +
@@ -693,6 +705,13 @@ export const ROUTING_MATRIX = [
     kind: CONTRACT,
     why:
       'The committed baseline the request-schema ratchet (#3029) compares against. Lowering a count here without the code change that earns it is exactly the weakening the ratchet refuses, and lint:request-schemas runs only in backend_checks — the ratchet and its self-test were registered but the data they read was not, so a baseline-only edit routed nowhere.',
+  },
+  {
+    files: ['scripts/lint-budget-liveness-baseline.json'],
+    expect: ['code', 'backend'],
+    kind: CONTRACT,
+    why:
+      'The committed baseline the budget-liveness census (#3924) compares against. Lowering a count here without the code change that earns it is exactly the weakening the ratchet refuses, and lint:budget-liveness runs only in backend_checks — the same baseline-not-registered hole the request-schema baseline closed.',
   },
   {
     files: ['scripts/lint-next-steps-baseline.json'],

@@ -26,6 +26,7 @@ covers:
   - packages/sdk/src/delegate-sweep.ts
   - packages/signer/src/tools.ts
   - packages/signer/src/core.ts
+  - packages/backend/src/infra/chain/settlement-transfer-verifier.ts
   - packages/backend/src/middleware/auth.ts
   - packages/backend/src/routes/auth.ts
   - packages/backend/src/infra/repositories/device-authorizations.ts

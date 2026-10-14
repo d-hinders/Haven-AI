@@ -71,7 +71,7 @@ covers:
   - packages/backend/src/modules/ops/**
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
-+last-verified: "2026-10-14"
+last-verified: "2026-10-14"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)

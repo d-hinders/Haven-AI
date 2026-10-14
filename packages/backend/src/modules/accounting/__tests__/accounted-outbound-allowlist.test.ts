@@ -49,6 +49,7 @@ function tx() {
     resourceUrl: 'https://merchant.example/vpn',
     token: 'USDC',
     amountAtomic: '1000',
+    amount: '0.001',
     amountSek: '10.42',
     ledgerCurrency: 'SEK' as const,
     amountLedger: '10.42',

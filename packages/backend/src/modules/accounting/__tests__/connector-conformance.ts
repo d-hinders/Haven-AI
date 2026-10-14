@@ -217,6 +217,7 @@ export function feedTransaction(paymentId: string, over: Partial<FeedTransaction
     resourceUrl: 'https://merchant.example/vpn',
     token: 'USDC',
     amountAtomic: '1000',
+    amount: '0.001',
     amountSek: '10.42',
     ledgerCurrency: 'SEK',
     amountLedger: '10.42',

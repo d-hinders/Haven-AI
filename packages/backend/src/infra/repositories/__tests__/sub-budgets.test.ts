@@ -20,11 +20,13 @@ import {
   markClosed,
   markClosing,
   markOpen,
-  selectOpenForPayment,
+  openSubBudgetSql,
   sumOpenReservedForBudgetDelegation,
   sumOpenReservedForParent,
   type InsertPendingSubBudgetInput,
 } from '../sub-budgets.js'
+import { checkSubBudgetForPayment } from '../../../modules/sub-budgets/sub-budget-service.js'
+import { listReceivedSubBudgetsForAgents } from '../dashboard.js'
 
 const USDC = '0x036cbd53842c5426634e7929541ec2318f3dcf7e'
 const BUDGET_HASH = `0x${'a'.repeat(64)}`
@@ -89,6 +91,15 @@ async function seedTree(a: Seeded, b: Seeded, over: Partial<InsertPendingSubBudg
     }),
   )
   return { parentChild, grant }
+}
+
+/** Whether the named open predicate counts this grant row live, on the app clock. */
+async function openGrantLive(grantId: string, now: number): Promise<boolean> {
+  const result = await db.query<{ live: boolean }>(
+    `SELECT (${openSubBudgetSql('g', '$1')}) AS live FROM agent_sub_budgets g WHERE g.id = $2`,
+    [now, grantId],
+  )
+  return result.rows[0].live
 }
 
 describeDb('agent_sub_budgets repository (#3330)', () => {
@@ -181,7 +192,7 @@ describeDb('agent_sub_budgets repository (#3330)', () => {
     expect(openedGrant?.status).toBe('open')
 
     // B's grant is resolvable through the open middle link...
-    expect(await selectOpenForPayment(grant.id, b.agentId, USDC, Math.floor(Date.now() / 1000))).not.toBeNull()
+    expect(await openGrantLive(grant.id, Math.floor(Date.now() / 1000))).toBe(true)
 
     // ...A revokes its parent-child (owner DELETE, or the close path)...
     await markClosing(parentChild.id, a.agentId, JSON.stringify({ userOp: true }))
@@ -202,7 +213,7 @@ describeDb('agent_sub_budgets repository (#3330)', () => {
     await markOpen(grant.id, a.agentId, JSON.stringify({ signed: true }))
 
     // B's grant is resolvable through the open middle link...
-    expect(await selectOpenForPayment(grant.id, b.agentId, USDC, Math.floor(Date.now() / 1000))).not.toBeNull()
+    expect(await openGrantLive(grant.id, Math.floor(Date.now() / 1000))).toBe(true)
 
     // ...B's own child is revoked (B's request, or the owner DELETE on the
     // grant — the delegating agent A's delegate prepares the disable)...
@@ -213,7 +224,7 @@ describeDb('agent_sub_budgets repository (#3330)', () => {
     // still resolves by hash: A's budget delegation is intact, A itself keeps
     // spending against it, and any future grant re-issued under the same
     // parent-child hashes back into the tree.
-    expect(await selectOpenForPayment(grant.id, b.agentId, USDC, Math.floor(Date.now() / 1000))).toBeNull()
+    expect(await openGrantLive(grant.id, Math.floor(Date.now() / 1000))).toBe(false)
     expect(
       (await findOpenParentChildByHash(parentChild.delegation_hash, Math.floor(Date.now() / 1000)))?.id,
     ).toBe(parentChild.id)
@@ -247,10 +258,11 @@ describeDb('agent_sub_budgets repository (#3330)', () => {
     expect(await findOpenGrantsForAgent(a.agentId)).toEqual([])
   })
 
-  it('findOpenGrantsForAgent reports is_expired for a past-expiry open row (derived, never hidden)', async () => {
+  it('#3919 P3: findOpenGrantsForAgent drops an expired OPEN grant — it is not an open grant; a past-expiry closing row stays with is_expired derived', async () => {
     const a = await seedAgent('parent-a')
     const b = await seedAgent('sub-b')
-    const { parentChild, grant } = await seedTree(a, b, { expiresAt: Math.floor(Date.now() / 1000) - 10 })
+    const now = Math.floor(Date.now() / 1000)
+    const { parentChild, grant } = await seedTree(a, b, { expiresAt: now - 10 })
     await markOpen(parentChild.id, a.agentId, JSON.stringify({ signed: true }))
     // markOpen is DELEGATOR-scoped (parent_agent_id): A opens BOTH rows of
     // its tree — its parent-child AND B's grant (A signs both children,
@@ -259,9 +271,120 @@ describeDb('agent_sub_budgets repository (#3330)', () => {
     const openedGrant = await markOpen(grant.id, a.agentId, JSON.stringify({ signed: true }))
     expect(openedGrant?.status).toBe('open')
 
-    const grants = await findOpenGrantsForAgent(b.agentId)
+    // Expired open: dropped — the same verdict the payment path
+    // (checkSubBudgetForPayment) and the agent's own open list reach.
+    expect(await findOpenGrantsForAgent(b.agentId, now)).toEqual([])
+    expect(await listForAgent(b.agentId, { status: 'open', nowSec: now })).toEqual([])
+
+    // Closing past expiry: still listed — its disable op may still be owed —
+    // and is_expired stays derived (`expires_at <= now`), never hidden.
+    await markClosing(grant.id, a.agentId, JSON.stringify({}))
+    const grants = await findOpenGrantsForAgent(b.agentId, now)
     expect(grants).toHaveLength(1)
+    expect(grants[0].sub_budget_id).toBe(grant.id)
+    expect(grants[0].status).toBe('closing')
     expect(grants[0].is_expired).toBe(true)
+  })
+
+  /**
+   * #3919 S-B: the TypeScript payment-time decision is pinned to the named
+   * SQL predicate. For every cell of the status × expiry matrix — with the
+   * middle link live in every cell, so grant liveness is the only variable —
+   * the service's verdict (`checkSubBudgetForPayment`, seeded so token,
+   * recipient and both chain edges match) equals `openSubBudgetSql`'s row
+   * membership evaluated by the SAME database on the SAME app clock.
+   */
+  it("#3919 S-B: checkSubBudgetForPayment's grant verdict equals openSubBudgetSql's row membership across the status × expiry matrix", async () => {
+    const a = await seedAgent('a')
+    const b = await seedAgent('b')
+    const now = Math.floor(Date.now() / 1000)
+    const signed = JSON.stringify({ signed: true })
+    const statuses = ['pending', 'open', 'closing', 'closed'] as const
+
+    for (const status of statuses) {
+      for (const expired of [false, true]) {
+        // The middle link stays UNEXPIRED in every cell — only the grant's
+        // own status × expiry varies.
+        const parentChild = await insertPendingSubBudget(subInput(a.agentId))
+        const grant = await insertPendingSubBudget(
+          subInput(b.agentId, {
+            parentAgentId: a.agentId,
+            parentSubBudgetId: parentChild.id,
+            parentDelegationHash: parentChild.delegation_hash,
+            delegationHash: `0x${randomUUID().replaceAll('-', '0')}`,
+            expiresAt: expired ? now - 60 : now + 3600,
+          }),
+        )
+        await markOpen(parentChild.id, a.agentId, signed)
+        if (status !== 'pending') await markOpen(grant.id, a.agentId, signed)
+        if (status === 'closing' || status === 'closed') {
+          await markClosing(grant.id, a.agentId, JSON.stringify({}))
+        }
+        if (status === 'closed') await markClosed(grant.id, a.agentId, '0xtx')
+
+        const stored = (await findForAgent(grant.id, b.agentId))!
+        expect(stored.status).toBe(status)
+        const parentChildRow = (await findForAgent(parentChild.id, a.agentId))!
+        const verdict = checkSubBudgetForPayment(
+          stored,
+          parentChildRow,
+          USDC,
+          '0x' + 'e'.repeat(40),
+          parentChild.parent_delegation_hash,
+          now,
+        )
+        const membership = await db.query<{ live: boolean }>(
+          `SELECT (${openSubBudgetSql('g', '$1')}) AS live FROM agent_sub_budgets g WHERE g.id = $2`,
+          [now, grant.id],
+        )
+        expect(`${status}:${expired ? 'expired' : 'unexpired'}`).toBeDefined()
+        expect(membership.rows[0].live).toBe(verdict.ok)
+        if (!verdict.ok) expect(verdict.refusal).toBe('sub_budget_not_open')
+      }
+    }
+  })
+
+  /**
+   * #3919 P3, committed: an expired `open` grant behind a LIVE parent-child
+   * row. The dashboard's received read answers `open = false` and the
+   * agent's own open list returns nothing — the two readers agree, where
+   * pre-#3919 the received read answered `open = true` off `status` alone.
+   */
+  it('#3919 P3: an expired OPEN grant behind a live parent-child — received read and the open list both refuse it', async () => {
+    const a = await seedAgent('parent-a')
+    const b = await seedAgent('sub-b')
+    const now = Math.floor(Date.now() / 1000)
+    const signed = JSON.stringify({ signed: true })
+    // Parent-child UNEXPIRED (the "live middle link" of the probe); only the
+    // grant is past its expiry.
+    const parentChild = await insertPendingSubBudget(subInput(a.agentId))
+    const grant = await insertPendingSubBudget(
+      subInput(b.agentId, {
+        parentAgentId: a.agentId,
+        parentSubBudgetId: parentChild.id,
+        parentDelegationHash: parentChild.delegation_hash,
+        delegationHash: `0x${randomUUID().replaceAll('-', '0')}`,
+        expiresAt: now - 60,
+      }),
+    )
+    await markOpen(parentChild.id, a.agentId, signed)
+    await markOpen(grant.id, a.agentId, signed)
+
+    const received = await listReceivedSubBudgetsForAgents(b.userId, [b.agentId], now)
+    expect(received).toHaveLength(1)
+    expect(received[0]).toMatchObject({ agent_id: b.agentId, parent_agent_id: a.agentId, open: false })
+    expect(await listForAgent(b.agentId, { status: 'open', nowSec: now })).toEqual([])
+
+    // Control: the same tree UNEXPIRED answers open = true on both readers.
+    const c = await seedAgent('parent-c')
+    const d = await seedAgent('sub-d')
+    const liveTree = await seedTree(c, d)
+    await markOpen(liveTree.parentChild.id, c.agentId, signed)
+    await markOpen(liveTree.grant.id, c.agentId, signed)
+    const liveReceived = await listReceivedSubBudgetsForAgents(d.userId, [d.agentId], now)
+    expect(liveReceived).toHaveLength(1)
+    expect(liveReceived[0]).toMatchObject({ agent_id: d.agentId, parent_agent_id: c.agentId, open: true })
+    expect(await listForAgent(d.agentId, { status: 'open', nowSec: now })).toHaveLength(1)
   })
 
   it('#3506 listAwaitingSignatureForDelegatingAgent: pending/closing rows for the DELEGATING agent only, parent-child first, never the sub-agent', async () => {

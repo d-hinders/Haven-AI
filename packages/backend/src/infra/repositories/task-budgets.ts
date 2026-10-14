@@ -9,6 +9,18 @@
  * migration header. Callers that need the wire shape's `is_expired` compute
  * it themselves from `expires_at`; this file only ever compares against
  * `nowSec` for the queries that must (open/closing selection, remainder sum).
+ *
+ * The module owns the TWO named liveness predicates every reader of
+ * `agent_task_budgets` uses (#3919 S-B): {@link openTaskBudgetSql} — an
+ * `open` row inside its spend window, the open list, the reserved sum — and
+ * {@link liveTaskBudgetSql} — every row an agent can still act on (#3518),
+ * the `status=live` list. No reader spells the window inline. Unlike the
+ * delegation predicates (slice A), BOTH take the app clock as a `$n`
+ * parameter placeholder rather than `NOW()`: the payment-time decision lives
+ * in TypeScript (`modules/task-budgets/task-budget-service.ts`) against the
+ * same `nowSec` the callers already hold, and the real-DB pin test passes
+ * the identical value to both sides — one clock per table, and it is the
+ * app's.
  */
 
 import pool from '../../db.js'
@@ -101,16 +113,40 @@ export async function findForAgent(
   return result.rows[0] ?? null
 }
 
+/**
+ * The ONE open predicate for `agent_task_budgets` (#3919 S-B): an `open`
+ * row inside its spend window — what a payment may redeem against, what the
+ * owner-facing remainder counts as reserved, what the agent's own open list
+ * returns. `nowParam` is a `$n` placeholder the CALLER indexes (the app
+ * clock — see the module header), not a value.
+ *
+ * Unqualified on purpose — every interpolating query here filters
+ * `agent_task_budgets` alone; a join that reuses it passes the alias.
+ */
+export function openTaskBudgetSql(tableAlias: string | undefined, nowParam: string): string {
+  const prefix = tableAlias ? `${tableAlias}.` : ''
+  return `${prefix}status = 'open' AND ${prefix}expires_at > ${nowParam}`
+}
+
+/**
+ * Every row an agent can still ACT on (#3518): `pending`, `open` and
+ * `closing` rows while not expired. An expired closing row stays out
+ * (#3773): `prepareTaskBudgetClose` treats an expired open/closing row as a
+ * trivial close (#3329 finding N2(c)) — no close signature can be owed on
+ * it, so it is dead work, not live work. Closed rows and expired rows —
+ * which nothing ever moves out of 'open' — stay out too, so the read is
+ * bounded by live work, not history. `nowParam` is the caller's `$n`
+ * placeholder, the same app clock as {@link openTaskBudgetSql}.
+ */
+export function liveTaskBudgetSql(tableAlias: string | undefined, nowParam: string): string {
+  const prefix = tableAlias ? `${tableAlias}.` : ''
+  return `${prefix}status IN ('pending', 'open', 'closing') AND ${prefix}expires_at > ${nowParam}`
+}
+
 export interface ListForAgentOptions {
   /**
-   * 'open' = status open AND not expired (the default the routes use).
-   * 'live' (#3518) = every row an agent can still act on: pending, open and
-   * closing rows while not expired. An expired closing row stays out (#3773):
-   * `prepareTaskBudgetClose` treats an expired open/closing row as a trivial
-   * close (#3329 finding N2(c)) — no close signature can be owed on it, so
-   * it is dead work, not live work. Closed rows and expired rows — which
-   * nothing ever moves out of 'open' — stay out too, so the read is bounded
-   * by live work, not history.
+   * 'open' = {@link openTaskBudgetSql} (the default the routes use).
+   * 'live' (#3518) = {@link liveTaskBudgetSql}.
    */
   status?: 'open' | 'live' | 'all'
   nowSec?: number
@@ -125,7 +161,7 @@ export async function listForAgent(
     const nowSec = options.nowSec ?? Math.floor(Date.now() / 1000)
     const result = await executor.query<TaskBudgetRow>(
       `SELECT ${SELECT_COLUMNS} FROM agent_task_budgets
-       WHERE agent_id = $1 AND status = 'open' AND expires_at > $2
+       WHERE agent_id = $1 AND ${openTaskBudgetSql(undefined, '$2')}
        ORDER BY created_at DESC`,
       [agentId, nowSec],
     )
@@ -136,7 +172,7 @@ export async function listForAgent(
     const result = await executor.query<TaskBudgetRow>(
       `SELECT ${SELECT_COLUMNS} FROM agent_task_budgets
        WHERE agent_id = $1
-         AND status IN ('pending', 'open', 'closing') AND expires_at > $2
+         AND ${liveTaskBudgetSql(undefined, '$2')}
        ORDER BY created_at DESC`,
       [agentId, nowSec],
     )
@@ -179,7 +215,7 @@ export async function listForOwner(
  */
 export const SUM_OPEN_RESERVED_ATOMIC_SQL = `SELECT COALESCE(SUM(max_atomic::numeric), 0)::text AS total
      FROM agent_task_budgets
-     WHERE agent_id = $1 AND parent_delegation_hash = $2 AND status = 'open' AND expires_at > $3`
+     WHERE agent_id = $1 AND parent_delegation_hash = $2 AND ${openTaskBudgetSql(undefined, '$3')}`
 
 export async function sumOpenReservedAtomic(
   agentId: string,
@@ -266,28 +302,11 @@ export async function markClosed(
   return result.rows[0] ?? null
 }
 
-export const SELECT_OPEN_TASK_BUDGET_FOR_PAYMENT_SQL = `SELECT ${SELECT_COLUMNS} FROM agent_task_budgets
-     WHERE id = $1 AND agent_id = $2 AND token_address = LOWER($3)
-       AND status = 'open' AND expires_at > $4`
-
-/**
- * The row a payment may redeem against: OPEN, unexpired, and matching the
- * token being spent. Recipient pin (if any) and parent-budget match are
- * checked by the caller (`modules/task-budgets/task-budget-service.ts`) —
- * this is the storage-scoped read only.
+/*
+ * The former payment-time storage selector (#3329) is deleted (#3919 S-B):
+ * it had NO production caller — the live payment-time decision is
+ * `checkTaskBudgetForPayment` (`modules/task-budgets/task-budget-service.ts`),
+ * whose liveness half is pinned to {@link openTaskBudgetSql} by a real-DB
+ * matrix test. Keeping a second storage-scoped spelling of "open" beside the
+ * named predicate is exactly the drift slice B exists to remove.
  */
-export async function selectOpenForPayment(
-  id: string,
-  agentId: string,
-  tokenAddress: string,
-  nowSec: number,
-  executor: Executor = pool,
-): Promise<TaskBudgetRow | null> {
-  const result = await executor.query<TaskBudgetRow>(SELECT_OPEN_TASK_BUDGET_FOR_PAYMENT_SQL, [
-    id,
-    agentId,
-    tokenAddress,
-    nowSec,
-  ])
-  return result.rows[0] ?? null
-}

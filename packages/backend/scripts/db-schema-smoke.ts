@@ -47,7 +47,6 @@ import {
   MARK_TASK_BUDGET_CLOSED_SQL,
   MARK_TASK_BUDGET_CLOSING_SQL,
   MARK_TASK_BUDGET_OPEN_SQL,
-  SELECT_OPEN_TASK_BUDGET_FOR_PAYMENT_SQL,
   SUM_OPEN_RESERVED_ATOMIC_SQL,
 } from '../src/infra/repositories/task-budgets.js'
 import {
@@ -711,10 +710,10 @@ const QUERIES: SmokeQuery[] = [
     name: 'task budgets: mark closed (open/closing/pending, #3329)',
     sql: MARK_TASK_BUDGET_CLOSED_SQL,
   },
-  {
-    name: 'task budgets: select open for payment (#3329)',
-    sql: SELECT_OPEN_TASK_BUDGET_FOR_PAYMENT_SQL,
-  },
+  // #3919 S-B: the former 'task budgets: select open for payment (#3329)'
+  // PREPARE is gone with the deleted payment-time selector — no production
+  // caller, and the named openTaskBudgetSql predicate is the one spelling of
+  // "open" now (it PREPAREs inside the statements above).
   {
     name: 'agents: lock before opening re-key',
     sql: LOCK_OWNED_AGENT_FOR_REKEY_OPENING_SQL,

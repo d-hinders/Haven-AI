@@ -11,6 +11,8 @@ covers:
   - packages/backend/vitest.global-setup.ts
   - scripts/db-mock-ratchet.mjs
   - scripts/lib/ratchet.mjs
+  - scripts/lint-budget-liveness.mjs
+  - scripts/lint-budget-liveness-baseline.json
   - packages/backend/db-mock-baseline.json
 last-verified: "2026-09-16"
 ---
@@ -750,6 +752,26 @@ it directly; a non-empty scan requires review and the explicit
 existing baseline. Rare, justified exceptions: a file-level
 `// db-mock-exempt: <reason>` with a reason of at least 20 characters — a
 suite that characterizes the exact SQL text sent is the canonical example.
+
+## The budget-liveness ratchet
+
+`npm run lint:budget-liveness` (`scripts/lint-budget-liveness.mjs`,
+blocking in CI beside `lint:request-schemas`) is the same shrink-only
+engine applied to a different debt (#3924, epic #3919 slice E): inline
+restatements of the budget-liveness comparisons the epic's slices A–C
+named once — `SELECT … WHERE` clauses on `agent_delegations`,
+`agent_task_budgets` or `agent_sub_budgets` that compare `status` to a
+liveness literal or compare `expires_at`/`start_date` to now, and
+budget-shaped TypeScript sites in the client packages doing the same.
+Status transitions (`INSERT`, `UPDATE … SET status`, the slot sweeps) are
+not counted, and the named predicate definitions are excluded **by export
+name, not by file** — so a new inline copy inside `delegation-budgets.ts`
+itself still counts. The accepted delegation-budgets.ts payment-window
+mirror is ratcheted at its measured count; the reason lives in the script
+header. The debt this guards against is real: the same inline-copy pattern
+regrew between #3542 (2026-10-01) and #3802 (2026-10-09). After a
+legitimate reduction, lock it in with
+`node scripts/lint-budget-liveness.mjs --update`.
 
 ## What this does NOT replace
 

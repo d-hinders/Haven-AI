@@ -356,11 +356,13 @@ describe('shared screens adopt the no-address rules (#3811)', () => {
 
 /**
  * #3811 — the user's currency on the shared tables (#3805's currency mode,
- * #3824's amounts). The acceptance cases, verbatim from the issue: a sweep
- * row and a direct row with no book-time fiat render `≈`; a confirmed x402
- * row with `convertedAmount` renders without it; an unpriced row renders an
- * em dash, never 0. The agent Activity table feeds the SAME path through
- * `activityToTransaction` (covered in AgentDetailClient.test.tsx).
+ * #3824's amounts). The acceptance cases, verbatim from the issue as amended
+ * by #3950: a sweep row and a direct row with no book-time fiat render the
+ * converted figure with NO `≈` mark (the owner dropped the mark so the
+ * figure cannot wrap); a confirmed x402 row with `convertedAmount` renders
+ * plain; an unpriced row renders an em dash, never 0. The agent Activity
+ * table feeds the SAME path through `activityToTransaction` (covered in
+ * AgentDetailClient.test.tsx).
  */
 describe('the transactions table renders the user currency (#3811)', () => {
   function renderTable(rows: AggregatedTransaction[]) {
@@ -375,7 +377,14 @@ describe('the transactions table renders the user currency (#3811)', () => {
     )
   }
 
-  it('renders "≈" on a sweep row priced serve-time (no book-time fiat)', () => {
+  // #3950 (owner decision 2026-10-14): list rows render the converted figure
+  // with NO `≈` mark. The mark — a span plus a breakable space in front of
+  // an otherwise-NBSP figure — was the only break opportunity a list amount
+  // had, so every approx-valued row wrapped onto two lines. Both inverted
+  // tests below assert BOTH renderings (the `md`+ column and the narrow
+  // block under the title) show the converted figure, sign stripped and
+  // NBSP-normalised, and that no `≈` survives anywhere in the table.
+  it('renders the converted figure without "≈" on a sweep row priced serve-time (no book-time fiat)', () => {
     renderTable([
       tx({
         activityType: 'delegate_sweep',
@@ -384,13 +393,49 @@ describe('the transactions table renders the user currency (#3811)', () => {
         approxCurrency: 'SEK',
       }),
     ])
-    expect(screen.getAllByText('≈').length).toBeGreaterThan(0)
+    expect(screen.queryByText('≈')).not.toBeInTheDocument()
+    // Exactly two matches — the row renders the amount twice (the `md`+
+    // column and the narrow block under the title). The matcher anchors on
+    // `<Amount>`'s own span (`v2-tabular`): a function matcher sees every
+    // ancestor's full textContent, so the cell wrappers would otherwise
+    // double the count.
+    expect(
+      screen.getAllByText((_, element) =>
+        element?.classList.contains('v2-tabular') === true &&
+        (element?.textContent ?? '').replace(/\u00a0/g, ' ').replace(/^[-+]/, '') === '10,50 kr',
+      ).length,
+    ).toBe(2)
   })
 
-  it('renders "≈" on a direct row with no book-time fiat', () => {
+  it('renders the converted figure without "≈" on a direct row with no book-time fiat', () => {
     renderTable([
       tx({ direction: 'out', source: 'direct', approxAmount: '10.50', approxCurrency: 'SEK' }),
     ])
+    expect(screen.queryByText('≈')).not.toBeInTheDocument()
+    expect(
+      screen.getAllByText((_, element) =>
+        element?.classList.contains('v2-tabular') === true &&
+        (element?.textContent ?? '').replace(/\u00a0/g, ' ').replace(/^[-+]/, '') === '10,50 kr',
+      ).length,
+    ).toBe(2)
+  })
+
+  // #3950 guard: the mark moved OFF the list rows and nowhere else. The
+  // detail panel is where `≈` stays — beside the token amount, it explains
+  // why the two figures differ (`≈ +0,10 kr  0.10 USDC`).
+  it('the detail panel still renders "≈" on an approx-valued transaction', () => {
+    render(
+      <TransactionDetailPanel
+        transaction={tx({
+          direction: 'in',
+          approxAmount: '0.10',
+          approxCurrency: 'SEK',
+        })}
+        open
+        onClose={() => {}}
+        resolveAddress={() => null}
+      />,
+    )
     expect(screen.getAllByText('≈').length).toBeGreaterThan(0)
   })
 

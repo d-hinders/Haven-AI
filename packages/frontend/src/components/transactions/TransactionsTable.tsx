@@ -351,10 +351,12 @@ export default function TransactionsTable({
             // counterparty renders through `counterpartyLabel`'s no-address
             // mode (a raw address never surfaces in a list row), and the
             // amount is the user's currency through `<Amount>`'s currency
-            // mode (`convertedAmount` plain, serve-time `approxAmount` with
-            // `≈`, an unknown valuation as an em dash). The token amount
-            // lives in the detail drawer, where users verify a payment
-            // (owner decision, #3811).
+            // mode: the converted figure — book-time or serve-time alike —
+            // rendered PLAIN (no `≈` mark, #3950, so the figure has no break
+            // opportunity left and never wraps), an unknown valuation as an
+            // em dash. The token amount and the `≈` provenance mark live in
+            // the detail drawer, where users verify a payment (owner
+            // decisions, #3811 and #3950).
             const movement = transactionMovement(tx, resolveAddress, accountNamesByAddress, {
               noAddress: true,
             })
@@ -493,10 +495,14 @@ export default function TransactionsTable({
                         indent it twice. */}
                     {showCol('amount') ? (
                       <div className={`mt-1 text-sm ${tableHideFromClass('md')}`}>
+                        {/* #3950: no `≈` on list rows — the converted figure
+                            alone, so (its separators being NBSP) there is no
+                            break opportunity left and it cannot wrap inside
+                            the Activity cell. The mark stays on the detail
+                            panel, where it explains the two figures. */}
                         <Amount
                           amount={fiat.amount}
                           currency={fiat.currency}
-                          approx={fiat.approx}
                           direction={tx.direction}
                           failed={tx.isError}
                         />
@@ -539,11 +545,20 @@ export default function TransactionsTable({
                   // narrow rendering that no longer exists; `md:px-4` is now
                   // the only stage this cell is visible at, so `px-4` is
                   // unconditional.
-                  <td className={`${tableColumnClass('md')} w-[110px] px-4 ${padY} text-right`}>
+                  //
+                  // #3950: `whitespace-nowrap` — a money figure never
+                  // truncates (that hides digits) and never wraps (`≈ ` used
+                  // to be the one break opportunity; the mark is gone). The
+                  // auto-layout table WIDENS the column to the figure's
+                  // min-content instead — the same mechanism the date cell's
+                  // nowrap uses — and the Activity column (`max-w-0`) is the
+                  // flexible one that absorbs the difference.
+                  <td
+                    className={`${tableColumnClass('md')} w-[110px] px-4 ${padY} text-right whitespace-nowrap`}
+                  >
                     <Amount
                       amount={fiat.amount}
                       currency={fiat.currency}
-                      approx={fiat.approx}
                       direction={tx.direction}
                       failed={tx.isError}
                     />

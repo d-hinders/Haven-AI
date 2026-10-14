@@ -192,9 +192,11 @@ export function activityCounterparty(item: PaymentActivityItem): CounterpartyFie
 
 /**
  * The fiat figure a transaction row renders in the user's currency (#3805,
- * #3824), as `<Amount>`'s currency mode wants it: book-time `convertedAmount`
- * plain, or the serve-time `approxAmount` with `≈` — one or the other, never
- * both on the wire. A row with neither prices to `amount: null`, which
+ * #3824), as `<Amount>`'s currency mode wants it: book-time `convertedAmount`,
+ * or the serve-time `approxAmount` with `approx: true` — one or the other,
+ * never both on the wire. The flag is a provenance bit for callers; since
+ * #3950 the list rows do NOT render the `≈` mark on it (only the detail
+ * panel does). A row with neither prices to `amount: null`, which
  * `<Amount>` renders as an em dash: an unknown valuation is never 0.
  *
  * The backend strikes both amounts in the user's `currency_preference`, so

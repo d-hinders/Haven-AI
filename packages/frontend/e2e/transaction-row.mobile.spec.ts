@@ -284,29 +284,32 @@ test(`${route}: the amount rides under the title below md, and the title stops w
         // name: this file's own lesson is that a probe written against the
         // shape it was made for finds nothing after the shape changes. Since
         // #3811 the rows render the user's currency through `<Amount>`'s
-        // currency mode — an optional `≈ ` mark (its own child span),
-        // a direction sign, then the `formatFiat` output (`$1,234.56`
-        // en-US, `1.100,00 €` de-DE, `13 450,00 kr` sv-SE, whose separators
-        // are NBSP) — so the pattern below recognises the voices `formatFiat`
-        // produces plus the token form the column used to render, not a
-        // hard-coded fixture string. Excluding the title `<p>` is still
+        // currency mode — a direction sign, then the `formatFiat` output
+        // (`$1,234.56` en-US, `1.100,00 €` de-DE, `13 450,00 kr` sv-SE,
+        // whose separators are NBSP) — so the pattern below recognises the
+        // voices `formatFiat` produces plus the token form the column used
+        // to render, not a hard-coded fixture string. Excluding the title
+        // `<p>` is still
         // load-bearing: a fixture title containing "USDC" or "ETH" (an
         // `ETHGlobal`-style merchant) would otherwise resolve to the title
         // and make `amountInTitleCell` trivially true — the structural half
         // would then be unable to fail while still reporting green, the one
         // thing this test exists to prevent.
         //
-        // The `≈` mark is a child `<span>`, so in currency mode the amount
-        // element is NOT a leaf — a `children.length === 0` filter would
-        // never match a row whose valuation is approximate, which is exactly
-        // the fixture shape this suite runs against. Instead of anchoring on
+        // #3950: list rows no longer carry the `≈ ` mark — the owner dropped
+        // it because its following space was the only break opportunity the
+        // figure had, so approx-valued rows wrapped onto two lines. The
+        // optional `(?:≈\s*)?` below stays: it is harmless (the mark never
+        // renders on a list row now) and keeps the probe correct if a `≈`
+        // ever returns through some other surface this sweep grows to cover.
+        // The mark was a child `<span>`, so in the old shape the amount
+        // element was NOT a leaf — a `children.length === 0` filter would
+        // never have matched an approximate row. Instead of anchoring on
         // leafness, take the INNERMOST matches: an element that CONTAINS
-        // another match is a wrapper, not the amount itself. The `≈` span's
-        // own text (`≈ `) matches nothing, so the outer `<Amount>` span is
-        // the single innermost match and `amountMatches` still counts ONE.
+        // another match is a wrapper, not the amount itself.
         // One pattern for every voice the amount column renders as
-        // textContent: `≈` mark + direction sign + `formatFiat` output, or
-        // the token form the column rendered before #3811.
+        // textContent: optional `≈` mark + direction sign + `formatFiat`
+        // output, or the token form the column rendered before #3811.
         const AMOUNT_TEXT =
           /^(?:≈\s*)?[-+]?(?:\$\s*[\d.,\u00a0\u202f ]+|[\d.,\u00a0\u202f ]+\s*(?:USDC|ETH|USD|EUR|SEK|kr|€))\s*$/u
         const matches = Array.from(tr.querySelectorAll('*')).filter(

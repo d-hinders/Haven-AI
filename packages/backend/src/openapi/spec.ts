@@ -372,6 +372,15 @@ const delegationHashList = {
   items: delegationHash,
 } as const
 
+/**
+ * #3933: the edit flow's `replaces` — one hash (the original shape, still sent
+ * by the qa-agent seed and lifecycle scenario) or a list (a re-key's carry and
+ * steady rows share one slot, and an edit replaces both).
+ */
+const replacesDeclaration = {
+  anyOf: [delegationHash, { ...delegationHashList, maxItems: 16 }, { type: 'null' }],
+} as const
+
 const delegationHashParam = {
   name: 'hash',
   in: 'path',
@@ -2913,6 +2922,10 @@ export const openapiSpec = {
                     pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$',
                     description: "A merchant-locked budget (#3331): the server pins the recipient to this live merchant's verified payTo on the agent's chain and records the merchant on the row. recipient_address may be omitted; when sent it must equal that payTo (409 otherwise). 404 for an unknown or non-live merchant; 409 when the merchant has no verified payTo there, not every offer there advertises ERC-7710, or the payTo is one of this agent's own addresses (delegate key, delegate account or treasury).",
                   },
+                  replaces: {
+                    ...replacesDeclaration,
+                    description: "#3933: the edit flow's declaration — one delegation hash, or a list of them. When the (token, recipient) slot already holds live budgets (active, unexpired; a re-key's dormant steady row counts), the build is allowed only when this names EXACTLY those budgets: every one of them, and no other hash. A build without it, naming only some of them (a re-key's carry and steady rows are two), or naming a hash that is not one of them, is refused with 409 BUDGET_SLOT_OCCUPIED, since activating it would leave an old delegation enabled on-chain. Ignored for an empty slot. The edit flow names the budgets it replaces here and in activate, then stops each one.",
+                  },
                 },
               },
             },
@@ -2956,7 +2969,7 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '404': errorResponse,
-          '409': { ...errorResponse, description: 'Revoked agents cannot receive a new budget delegation; other delegation-account conflicts also return 409, as do the merchant-locked refusals (#3331: no verified payTo, not ERC-7710, the payTo is one of the agent\u2019s own addresses, recipient_address differs from the current payTo).' },
+          '409': { ...errorResponse, description: 'Revoked agents cannot receive a new budget delegation; other delegation-account conflicts also return 409, as do the merchant-locked refusals (#3331: no verified payTo, not ERC-7710, the payTo is one of the agent\u2019s own addresses, recipient_address differs from the current payTo), and a plain grant into an occupied slot (#3933: error_code BUDGET_SLOT_OCCUPIED, with existing_delegation_hash — the newest live budget there, the one to edit — and occupying_delegation_hashes, every live budget in the slot, which an edit\u2019s `replaces` must name).' },
           '502': errorResponse,
         },
       },
@@ -2967,7 +2980,7 @@ export const openapiSpec = {
         operationId: 'activateAgentDelegation',
         summary: 'Grant step 2: attach the owner signature and make the budget live.',
         description:
-          "Stores the owner's signature on the pending delegation and flips it active, marking any previously active grant in the same (token, recipient) slot replaced — atomically, so the slot never ends up with zero live grants mid-replacement. Deploys the counterfactual delegator account via the relayer first when needed (#860; permissionless factory call, no owner signature). Activating an agent's FIRST budget also activates a pending_approval agent — on this rail the grant signature IS the approval (#1069). Signature validation is a shape check only (65-byte ECDSA or longer WebAuthn assertion); the real validator is EIP-1271 at redemption.",
+          "Stores the owner's signature on the pending delegation and flips it active, marking any previously active grant in the same (token, recipient) slot replaced — atomically, so the slot never ends up with zero live grants mid-replacement. Since #3933 that replacement is only for the edit flow: if the slot holds live (active, unexpired) budgets, the request must name every one of them as `replaces`, and no other hash, or it is refused with 409 BUDGET_SLOT_OCCUPIED — the database sweep alone would leave the old delegation enabled on-chain, and the edit flow is what stops it. Deploys the counterfactual delegator account via the relayer first when needed (#860; permissionless factory call, no owner signature). Activating an agent's FIRST budget also activates a pending_approval agent — on this rail the grant signature IS the approval (#1069). Signature validation is a shape check only (65-byte ECDSA or longer WebAuthn assertion); the real validator is EIP-1271 at redemption.",
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }, delegationHashParam],
         requestBody: {
@@ -2988,6 +3001,10 @@ export const openapiSpec = {
                   // both still pass; the EIP-1271 redemption check stays the
                   // real validator.
                   signature: { type: 'string', pattern: '^0x(?:[0-9a-fA-F]{2}){65,}$' },
+                  replaces: {
+                    ...replacesDeclaration,
+                    description: "#3933: the live budgets this grant replaces (the edit flow) — one delegation hash, or a list of them. Checked under the agent lock against the slot's live (active, unexpired) budgets: allowed into an occupied slot only when this names exactly those budgets, every one and no other hash, since the activation marks every active budget in the slot replaced and the edit flow stops what it named. Ignored for an empty slot.",
+                  },
                 },
               },
             },
@@ -3015,7 +3032,7 @@ export const openapiSpec = {
           '409': {
             ...errorResponse,
             description:
-              'Revoked agents cannot activate a new budget delegation; non-pending delegation and account conflicts also return 409. A row belonging to a re-key (`rekey_id` set) is refused with `error_code: "REKEY_DELEGATION_NOT_ACTIVATABLE"` — it is activated only by that re-key\'s own completion (#3439).',
+              'Revoked agents cannot activate a new budget delegation; non-pending delegation and account conflicts also return 409. A row belonging to a re-key (`rekey_id` set) is refused with `error_code: "REKEY_DELEGATION_NOT_ACTIVATABLE"` — it is activated only by that re-key\'s own completion (#3439). A plain grant into a (token, recipient) slot that holds a live budget is refused with `error_code: "BUDGET_SLOT_OCCUPIED"`, `existing_delegation_hash` (the newest live budget there) and `occupying_delegation_hashes` (every live budget there) unless `replaces` names exactly those budgets (#3933); nothing is written.',
           },
           '429': { ...errorResponse, description: 'Relayer gas budget exhausted — retry later.' },
           '500': { ...errorResponse, description: 'Stored owner config no longer derives the stored account address.' },
@@ -3044,7 +3061,7 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '404': errorResponse,
-          '409': errorResponse,
+          '409': { ...errorResponse, description: 'Already revoked — the row is revoked, or it was disabled on-chain and the record has been healed to revoked. Both carry `error_code: "DELEGATION_ALREADY_REVOKED"` (#3933), so a client finishing a Stop can treat the goal as met.' },
           '502': errorResponse,
         },
       },

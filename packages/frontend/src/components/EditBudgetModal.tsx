@@ -42,6 +42,7 @@ import {
 } from '@/lib/merchantBudgetRefusal'
 import { truncateAddress, BudgetAmountRow, NoticeRow } from './haven'
 import { budgetPeriodWords } from '@/lib/budget-caption'
+import { findOccupyingBudget, sameSlot } from '@/lib/budget-slot'
 import { Icon } from './ui/Icon'
 import { Button } from './ui/Button'
 import WalletConnectAction from './WalletConnectAction'
@@ -69,11 +70,30 @@ interface Props {
   budget: DelegationBudget
   /** Fires after the edit landed (success or partial), mirroring #1090. */
   onBudgetChange?: () => void
+  /**
+   * #3933: the limits the owner typed into a NEW-budget form whose (token,
+   * recipient) slot turned out to hold this budget. The backend refuses a
+   * plain grant there, so the form routes here instead: the edit opens with
+   * these limits rather than the current ones, and says why it opened.
+   */
+  prefill?: { budgetAtomic: string; periodSeconds: number }
+  /**
+   * #3933: the merchant the replacement budget pays (the marketplace's Fund
+   * flow). Absent, a merchant-locked budget keeps its own merchant (#3331 F3);
+   * present, the replacement names this one — the same slot, since a
+   * merchant-locked budget's slot is its payment address.
+   */
+  merchant?: { slug: string; name: string }
 }
 
 // The day/week/month rhythm the picker offers (#3806: the words come from the
 // caption helper, so a prefilled period outside this trio still reads right).
 const PERIODS = [86_400, 604_800, 2_592_000] as const
+
+/** #3933: a small count in words, for the Stop-signature copy ("two parts"). */
+function countWord(n: number): string {
+  return ['zero', 'one', 'two', 'three', 'four'][n] ?? String(n)
+}
 
 /**
  * Plain copy for the merchant-STALE build refusals a merchant-locked budget's
@@ -115,10 +135,12 @@ export default function EditBudgetModal({
   tokens,
   budget,
   onBudgetChange,
+  prefill,
+  merchant,
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
   useFocusTrap(panelRef, open)
-  const { editBudget, busy, ready, signersError, signersLoading, reloadSigners, passkeyElsewhere } = useDelegationBudget(
+  const { budgets, editBudget, editStopSet, isOwnAttemptedGrant, revoke, busy, ready, signersError, signersLoading, reloadSigners, passkeyElsewhere } = useDelegationBudget(
     agentId,
     chainId,
     { enabled: open },
@@ -135,13 +157,22 @@ export default function EditBudgetModal({
   // of `GET /merchants/{slug}/budgets` the moment it activates. The recipient
   // is read-only here and the build carries `merchant_slug` so the server
   // keeps pinning it to the SAME merchant.
-  const isMerchantLocked = !!budget.merchant_slug
+  //
+  // #3933: a Fund flow routed here names the merchant the replacement pays
+  // (`merchant`); otherwise the budget's own merchant is kept.
+  const replacementMerchantSlug = merchant?.slug ?? budget.merchant_slug ?? null
+  const isMerchantLocked = !!replacementMerchantSlug
+  const oldMerchantName = budget.merchant_slug ? (budget.merchant_name ?? 'this merchant') : null
+  const newMerchantName = merchant?.name ?? oldMerchantName ?? 'this merchant'
 
   const [step, setStep] = useState<Step>('form')
   const [amount, setAmount] = useState('')
   const [period, setPeriod] = useState(budget.period_seconds)
   const [recipient, setRecipient] = useState(budget.recipient_address ?? '')
   const [outcome, setOutcome] = useState<EditBudgetResult | null>(null)
+  // #3933: the finish action on the `revoke_unfinished` screen — the Stop of
+  // the previous budget, through the same per-hash revoke the card's Stop uses.
+  const [finishState, setFinishState] = useState<'idle' | 'stopping' | 'failed' | 'cancelled'>('idle')
 
   // Prefill every time the modal opens (also re-prefills after a close/reopen
   // on a REFRESHED budget row — the card reloads between opens, so a stale
@@ -155,15 +186,18 @@ export default function EditBudgetModal({
     if (!opening) return
     setStep('form')
     setOutcome(null)
-    setPeriod(budget.period_seconds)
+    setFinishState('idle')
+    // #3933: a routed grant opens with the limits the owner typed.
+    setPeriod(prefill?.periodSeconds ?? budget.period_seconds)
     setRecipient(budget.recipient_address ?? '')
     try {
-      setAmount(formatUnits(BigInt(budget.budget_atomic), token?.decimals ?? 18))
+      setAmount(formatUnits(BigInt(prefill?.budgetAtomic ?? budget.budget_atomic), token?.decimals ?? 18))
     } catch {
       // A malformed stored amount leaves the field empty rather than
       // prefilling something the form would refuse — the human types it.
       setAmount('')
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `prefill` is read on the open edge only, like `budget`
   }, [open, budget, token])
 
   const periodOptions = useMemo(() => {
@@ -201,10 +235,10 @@ export default function EditBudgetModal({
       periodSeconds: period,
       // #3331 review finding F3: keep naming the merchant on the replacement
       // grant — omitting this is what silently downgraded a merchant-locked
-      // budget to a plain pinned one.
-      ...(isMerchantLocked && budget.merchant_slug ? { merchantSlug: budget.merchant_slug } : {}),
+      // budget to a plain pinned one. #3933: or the Fund flow's merchant.
+      ...(replacementMerchantSlug ? { merchantSlug: replacementMerchantSlug } : {}),
     }
-  }, [amount, amountValid, budget.merchant_slug, budget.recipient_address, isMerchantLocked, period, recipient, recipientValid, token])
+  }, [amount, amountValid, budget.recipient_address, isMerchantLocked, period, recipient, recipientValid, replacementMerchantSlug, token])
 
   // The change the owner is about to sign, at human precision. Both sides are
   // formatted through viem so a decimal comparison never compares strings.
@@ -228,6 +262,9 @@ export default function EditBudgetModal({
     const recipientChanged =
       (input.recipientAddress ?? null)?.toLowerCase() !==
       (budget.recipient_address ?? null)?.toLowerCase()
+    // #3933: the Fund flow can move a budget to another merchant sharing the
+    // same payment address — a change even when the limits are equal.
+    const merchantChanged = (input.merchantSlug ?? null) !== (budget.merchant_slug ?? null)
     return {
       raised,
       lowered,
@@ -240,9 +277,31 @@ export default function EditBudgetModal({
       recipientChanged,
       oldRecipient: budget.recipient_address,
       newRecipient: input.recipientAddress ?? null,
-      changed: raised || lowered || periodChanged || recipientChanged,
+      changed: raised || lowered || periodChanged || recipientChanged || merchantChanged,
     }
   }, [budget, input, token])
+
+  // #3933 review findings 1 and 2: the slot facts the owner must see before
+  // signing. `oldBudgetHashes` is every live row of the edited budget's slot
+  // (a budget carried through "Replace signing key" is two rows, and each
+  // needs its own Stop signature). `moved` is an edit that changes the
+  // recipient, so the new budget goes into ANOTHER slot; `targetOccupant` is
+  // a live budget already in that slot, which the backend would refuse.
+  const nowSec = Math.floor(Date.now() / 1000)
+  const oldSlot = { tokenAddress: budget.token_address, recipientAddress: budget.recipient_address }
+  // Through the hook, so a retry after an `unconfirmed` edit counts the rows
+  // that attempt will Stop — never its own new grant.
+  const oldBudgetHashes = editStopSet(budget.delegation_hash, oldSlot, nowSec)
+  const stopCount = oldBudgetHashes.length
+  const moved = !!input && !sameSlot(oldSlot, { tokenAddress: input.tokenAddress, recipientAddress: input.recipientAddress })
+  const targetOccupant =
+    moved && input
+      ? findOccupyingBudget(
+          (budgets ?? []).filter((b) => !isOwnAttemptedGrant(b.delegation_hash, budget.delegation_hash)),
+          { tokenAddress: input.tokenAddress, recipientAddress: input.recipientAddress },
+          nowSec,
+        )
+      : null
 
   const handleClose = useCallback(() => {
     if (busy) return
@@ -254,7 +313,9 @@ export default function EditBudgetModal({
   const run = useCallback(async () => {
     if (!input || !changes) return
     setStep('working')
-    const result = await editBudget(budget.delegation_hash, input)
+    const result = await editBudget(budget.delegation_hash, input, {
+      oldSlot: { tokenAddress: budget.token_address, recipientAddress: budget.recipient_address },
+    })
     setOutcome(result)
     if (result.ok) {
       setStep('done')
@@ -266,9 +327,50 @@ export default function EditBudgetModal({
     } else {
       setStep('error')
       // The partial shape means the new budget IS live — refresh the card.
-      if (result.reason === 'revoke_unfinished') onBudgetChange?.()
+      // #3933: so does `slot_occupied` — the budget changed under the modal,
+      // and the card must show the current one — and `target_slot_occupied`,
+      // whose occupant the card's list did not show yet.
+      if (
+        result.reason === 'revoke_unfinished' ||
+        result.reason === 'slot_occupied' ||
+        result.reason === 'target_slot_occupied'
+      ) {
+        onBudgetChange?.()
+      }
     }
-  }, [budget.delegation_hash, changes, editBudget, input, onBudgetChange])
+  }, [budget.delegation_hash, budget.recipient_address, budget.token_address, changes, editBudget, input, onBudgetChange])
+
+  // #3933: finish a replace whose Stop did not land — the same per-hash revoke
+  // the card's Stop uses, once per row still enabled (a re-key pair is two),
+  // one owner signature each. "Already revoked" comes back as `ok` from the
+  // hook (stopped out-of-band, or a revoke-all got there first): finished. A
+  // Stop that does not finish keeps the rows still to stop, so the next try
+  // resumes there instead of asking again for one already signed.
+  const finishStop = useCallback(async () => {
+    if (!outcome || outcome.ok) return
+    const remaining = outcome.unstoppedDelegationHashes ?? [budget.delegation_hash]
+    setFinishState('stopping')
+    let signedAny = false
+    for (let i = 0; i < remaining.length; i++) {
+      const result = await revoke(remaining[i])
+      if (!result.ok) {
+        setOutcome({ ...outcome, unstoppedDelegationHashes: remaining.slice(i) })
+        setFinishState(result.reason === 'cancelled' ? 'cancelled' : 'failed')
+        if (i > 0) onBudgetChange?.()
+        return
+      }
+      if (!result.alreadyStopped) signedAny = true
+    }
+    setFinishState('idle')
+    setOutcome({
+      ok: true,
+      newDelegationHash: outcome.newDelegationHash ?? '',
+      oldDelegationRevoked: signedAny,
+      ...(outcome.earlierLimits ? { earlierLimits: true as const } : {}),
+    })
+    setStep('done')
+    onBudgetChange?.()
+  }, [budget.delegation_hash, onBudgetChange, outcome, revoke])
 
   // Round 2 review findings R2-2 / design 2: a merchant-STALE build refusal
   // gets plain copy naming the way out (Stop, then fund again) instead of the
@@ -288,6 +390,24 @@ export default function EditBudgetModal({
   if (!open) return null
 
   const changed = changes?.changed ?? false
+  const unstoppedCount =
+    outcome && !outcome.ok && outcome.reason === 'revoke_unfinished'
+      ? (outcome.unstoppedDelegationHashes?.length ?? 1)
+      : 0
+  // Was the edit that produced this outcome a move? The hook says so (a
+  // landed earlier attempt may have moved while the current input does not).
+  const outcomeMoved = outcome && !outcome.ok && outcome.moved !== undefined ? outcome.moved : moved
+  const earlierLimits = !!outcome && !outcome.ok && !!outcome.earlierLimits
+  // #3933: the still-enabled budget, named on the `revoke_unfinished` screen.
+  const previousBudgetPhrase = (() => {
+    let amountText: string
+    try {
+      amountText = formatUnits(BigInt(budget.budget_atomic), token?.decimals ?? 18)
+    } catch {
+      amountText = budget.budget_atomic
+    }
+    return `${amountText} ${token?.symbol ?? ''} ${budgetPeriodWords(budget.period_seconds)}`.replace(/\s+/g, ' ')
+  })()
 
   return (
     // `v2-safe-overlay` + a 1rem gutter is `p-4` that also clears the notch and
@@ -335,6 +455,14 @@ export default function EditBudgetModal({
 
           {step === 'form' && (
             <div className="space-y-5">
+              {prefill ? (
+                // #3933: opened from a new-budget form whose slot holds this
+                // budget. Say why the owner is editing rather than adding.
+                <NoticeRow>
+                  This agent already has a budget for this token and recipient, so your new limits
+                  replace it here.
+                </NoticeRow>
+              ) : null}
               <p className="text-sm text-[var(--v2-ink-2)]">
                 Editing the {formatUnits(BigInt(budget.budget_atomic), token?.decimals ?? 18)}{' '}
                 {token?.symbol} {budgetPeriodWords(budget.period_seconds)} budget
@@ -375,7 +503,7 @@ export default function EditBudgetModal({
                     {/* Design review round 2, finding 6: show the truncated
                         address alongside the merchant name, the same "who and
                         where" shape the review step now uses. */}
-                    Pays {budget.merchant_name ?? 'this merchant'} only
+                    Pays {newMerchantName} only
                     {budget.recipient_address ? ` · ${truncateAddress(budget.recipient_address)}` : ''}. The
                     recipient cannot be changed here.
                   </p>
@@ -394,6 +522,13 @@ export default function EditBudgetModal({
                 <p className="text-xs text-[var(--v2-danger)]">
                   Recipient must be a valid wallet address, or blank for any recipient.
                 </p>
+              ) : targetOccupant ? (
+                // #3933 review finding 2: caught before any signature — the
+                // backend refuses a second live budget in that slot.
+                <p className="text-xs text-[var(--v2-danger)]">
+                  This recipient already has a live budget for this token. Edit that budget
+                  instead, or pick another recipient.
+                </p>
               ) : !amountValid ? (
                 <p className="text-xs text-[var(--v2-ink-3)]">
                   Enter an amount above zero to continue.
@@ -405,7 +540,7 @@ export default function EditBudgetModal({
                 </Button>
                 <Button
                   onClick={() => setStep('review')}
-                  disabled={!changed}
+                  disabled={!changed || !!targetOccupant}
                   className="flex-1"
                 >
                   Review changes
@@ -437,8 +572,8 @@ export default function EditBudgetModal({
                         its truncated address) for a merchant-locked budget —
                         the recipient never changes here, so "one recipient" is
                         a strictly vaguer way of saying the same fixed fact. */}
-                    {isMerchantLocked && changes.oldRecipient
-                      ? ` · ${budget.merchant_name ?? 'this merchant'} only · ${truncateAddress(changes.oldRecipient)}`
+                    {oldMerchantName && changes.oldRecipient
+                      ? ` · ${oldMerchantName} only · ${truncateAddress(changes.oldRecipient)}`
                       : changes.oldRecipient
                         ? ' · one recipient'
                         : ' · any recipient'}
@@ -449,7 +584,7 @@ export default function EditBudgetModal({
                   <p className="text-sm font-medium text-[var(--v2-ink)]">
                     {changes.newAmount} {changes.symbol} {budgetPeriodWords(changes.newPeriod)}
                     {isMerchantLocked && changes.newRecipient
-                      ? ` · ${budget.merchant_name ?? 'this merchant'} only · ${truncateAddress(changes.newRecipient)}`
+                      ? ` · ${newMerchantName} only · ${truncateAddress(changes.newRecipient)}`
                       : changes.newRecipient
                         ? ' · one recipient'
                         : ' · any recipient'}
@@ -472,11 +607,39 @@ export default function EditBudgetModal({
                   Signing once sets the new limits. Your current budget keeps working until then —
                   if you stop here, nothing changes.
                 </p>
-                <p>
-                  Right after you sign, both the old and the new budget exist briefly (the
-                  agent could spend up to their combined limit) until you sign once more to stop
-                  the old one. Haven will ask for that second signature.
-                </p>
+                {stopCount > 1 ? (
+                  // #3933 review finding 1: a budget carried through "Replace
+                  // signing key" is held as more than one part, and each part
+                  // takes its own Stop signature. Say so before signing.
+                  <p>
+                    Right after you sign, both the old and the new budget exist briefly (the
+                    agent could spend up to their combined limit) until you stop the old one. It
+                    is held in {countWord(stopCount)} parts since this agent&apos;s signing key
+                    was replaced, so stopping it takes {countWord(stopCount)} more signatures,
+                    one per part. Haven will ask for each.
+                  </p>
+                ) : (
+                  <p>
+                    Right after you sign, both the old and the new budget exist briefly (the
+                    agent could spend up to their combined limit) until you sign once more to stop
+                    the old one. Haven will ask for that second signature.
+                  </p>
+                )}
+                {/* #3933: what the Stop signature does on-chain, and what it
+                    ends with it. A move (finding 2) leaves the old budget
+                    fully working, in Haven too, until it is stopped. */}
+                {moved ? (
+                  <p>
+                    The old budget pays a different recipient, so it keeps working, in Haven and
+                    outside it, until it is stopped. Stopping it also ends any open task budget or
+                    sub-budget taken from it.
+                  </p>
+                ) : (
+                  <p>
+                    Until it is stopped, the old budget can still be spent outside Haven. Stopping it
+                    also ends any open task budget or sub-budget taken from it.
+                  </p>
+                )}
               </div>
               {ready && passkeyElsewhere ? <PasskeyElsewhereHint /> : null}
               {!ready && !signersError && !signersLoading ? (
@@ -525,13 +688,23 @@ export default function EditBudgetModal({
                   <Icon icon={Check} className="h-6 w-6 text-[var(--v2-success)]" />
                 </div>
                 <p className="text-sm font-medium text-[var(--v2-ink)]">Budget updated</p>
-                <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-                  The new limits are live
-                  {outcome?.ok && !outcome.oldDelegationRevoked
-                    ? ' — the previous budget was already stopped'
-                    : ' and the previous budget is stopped'}
-                  .
-                </p>
+                {outcome?.ok && outcome.earlierLimits ? (
+                  // #3933 round 4: an earlier attempt landed first, with the
+                  // limits the owner set then — say so, never "the new limits".
+                  <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
+                    Your earlier change went through first, so the budget has the amount, period and
+                    recipient you chose then, and the previous budget is stopped. Edit it again to
+                    make this change.
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
+                    The new limits are live
+                    {outcome?.ok && !outcome.oldDelegationRevoked
+                      ? ' — the previous budget was already stopped'
+                      : ' and the previous budget is stopped'}
+                    .
+                  </p>
+                )}
               </div>
               <Button variant="ghost" onClick={handleClose} className="w-full">
                 Done
@@ -548,11 +721,72 @@ export default function EditBudgetModal({
                 {outcome.reason === 'revoke_unfinished' ? (
                   <>
                     <p className="text-sm font-medium text-[var(--v2-ink)]">
-                      New budget is live — one step left
+                      {earlierLimits ? 'Your earlier change went through' : 'New budget is live — one step left'}
+                    </p>
+                    {/* #3933: name the still-enabled budget, say what it can
+                        still do, and offer the Stop right here. */}
+                    {earlierLimits ? (
+                      <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
+                        The budget has the amount, period and recipient you chose then, not the ones
+                        you entered now. The previous{' '}
+                        {previousBudgetPhrase} budget{' '}
+                        {outcomeMoved
+                          ? 'pays a different recipient, so it keeps working, in Haven and outside it,'
+                          : 'can still be spent outside Haven'}{' '}
+                        until it is stopped. Stopping it also ends any open task budget or
+                        sub-budget taken from it. Then edit the budget again to make this change.
+                      </p>
+                    ) : outcomeMoved ? (
+                      <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
+                        The new limits took effect. The previous {previousBudgetPhrase} budget pays
+                        a different recipient, so it keeps working, in Haven and outside it, until
+                        it is stopped. Stopping it also ends any open task budget or sub-budget
+                        taken from it.
+                      </p>
+                    ) : (
+                      <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
+                        The new limits took effect. The previous {previousBudgetPhrase} budget can
+                        still be spent outside Haven until it is stopped. Stopping it also ends any
+                        open task budget or sub-budget taken from it.
+                      </p>
+                    )}
+                    {unstoppedCount > 1 ? (
+                      <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
+                        It is held in {countWord(unstoppedCount)} parts, so stopping it takes{' '}
+                        {countWord(unstoppedCount)} signatures.
+                      </p>
+                    ) : null}
+                    {finishState === 'failed' ? (
+                      <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-danger)]">
+                        The previous budget could not be stopped. Try again.
+                      </p>
+                    ) : finishState === 'cancelled' ? (
+                      <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                        No signature yet. The previous budget is not stopped.
+                      </p>
+                    ) : null}
+                  </>
+                ) : outcome.reason === 'slot_occupied' ? (
+                  <>
+                    <p className="text-sm font-medium text-[var(--v2-ink)]">
+                      This budget has changed
                     </p>
                     <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                      The new limits took effect, but the previous budget still needs to be
-                      stopped. Use Stop budget next to it in the budget list when you are ready.
+                      This agent&apos;s budgets changed after you opened this, so nothing was
+                      changed. Close this and edit the current budget.
+                    </p>
+                  </>
+                ) : outcome.reason === 'target_slot_occupied' ? (
+                  // #3933 review finding 2: the edited budget is untouched —
+                  // the recipient chosen for the new one is the problem.
+                  <>
+                    <p className="text-sm font-medium text-[var(--v2-ink)]">
+                      This recipient already has a budget
+                    </p>
+                    <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
+                      The recipient you chose already has a live budget for this token, so nothing
+                      was changed and this budget is still the same. Edit that budget instead, or pick
+                      another recipient.
                     </p>
                   </>
                 ) : outcome.reason === 'unconfirmed' ? (
@@ -561,8 +795,8 @@ export default function EditBudgetModal({
                       The change could not be confirmed
                     </p>
                     <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                      The new budget may already be in place. Check the agent&apos;s budgets before
-                      trying again — a second grant would add a second budget.
+                      The new budget may already be in place. Try again in a moment: Haven checks
+                      first and does not add a second budget.
                     </p>
                   </>
                 ) : outcome.reason === 'refused' ? (
@@ -587,7 +821,29 @@ export default function EditBudgetModal({
                 )}
               </div>
               <div className="flex gap-3">
-                {permanentRefusal ? (
+                {outcome.reason === 'revoke_unfinished' ? (
+                  <>
+                    <Button variant="ghost" onClick={handleClose} className="flex-1" disabled={busy}>
+                      Close
+                    </Button>
+                    <Button
+                      onClick={() => void finishStop()}
+                      className="flex-1"
+                      disabled={busy || finishState === 'stopping' || (!ready && !signersError && !signersLoading)}
+                    >
+                      {finishState === 'stopping' ? 'Stopping…' : 'Stop old budget'}
+                    </Button>
+                  </>
+                ) : outcome.reason === 'target_slot_occupied' ? (
+                  <>
+                    <Button variant="ghost" onClick={handleClose} className="flex-1">
+                      Close
+                    </Button>
+                    <Button onClick={() => setStep('form')} className="flex-1">
+                      Pick another recipient
+                    </Button>
+                  </>
+                ) : permanentRefusal || outcome.reason === 'slot_occupied' ? (
                   <Button onClick={handleClose} className="flex-1">
                     Close
                   </Button>

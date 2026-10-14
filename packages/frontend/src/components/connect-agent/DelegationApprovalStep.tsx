@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useState } from 'react'
 import { type Address } from 'viem'
 import { api } from '@/lib/api'
@@ -180,6 +181,20 @@ export function DelegationApprovalStep({
           // The owner approves by signing, so the sentence never makes
           // Haven the approver (copy-guidelines.md, attribution).
           failureMessage="The budget was not approved. Nothing changed — try again."
+          // #3933: on a resume or a retry the agent may already hold a live
+          // budget for this token, and the backend refuses a second one. Not
+          // a failure, and not retryable: the control disables itself and
+          // this sends the owner to the agent page, where the budget is edited.
+          slotOccupiedNotice={
+            <>
+              {status.agent.name ?? 'This agent'} already has a live budget for{' '}
+              {budget?.token_symbol ?? 'this token'}. To change it, edit that budget on{' '}
+              <Link href={`/agents/${encodeURIComponent(agentId)}`} className="font-medium text-[var(--v2-brand)] hover:underline">
+                the agent&rsquo;s page
+              </Link>
+              .
+            </>
+          }
           // Same footer shape as the legacy step: equal-width ghost-then-
           // primary, with the money-authority action carrying the weight.
           leadingAction={

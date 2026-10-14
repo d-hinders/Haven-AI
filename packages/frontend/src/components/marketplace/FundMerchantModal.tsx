@@ -27,7 +27,8 @@ import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { parseUnits, formatUnits } from 'viem'
 import type { Address } from 'viem'
-import { useDelegationBudget, type BudgetResult, type DelegationBudget, type GrantInput } from '@/hooks/useDelegationBudget'
+import { useDelegationBudget, type DelegationBudget, type GrantInput, type GrantResult } from '@/hooks/useDelegationBudget'
+import { findOccupyingBudget, occupiesSlot } from '@/lib/budget-slot'
 import type { Agent } from '@/hooks/useAgents'
 import type { CatalogEntry, Merchant, MerchantFundingTarget } from '@/hooks/useCatalog'
 import { getChainConfig } from '@/lib/chains'
@@ -42,10 +43,10 @@ import { Icon } from '@/components/ui/Icon'
 import { Button } from '@/components/ui/Button'
 import WalletConnectAction from '@/components/WalletConnectAction'
 import PasskeyElsewhereHint from '@/components/PasskeyElsewhereHint'
+import EditBudgetModal from '@/components/EditBudgetModal'
 import { Select } from '@/components/ui/Select'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
-import { delegationIsLive } from '@/lib/sub-budget'
 
 interface TokenOption {
   address: string
@@ -156,16 +157,18 @@ function refusalCopy(detail: string | undefined, merchantName: string): string {
 }
 
 /**
- * The active budget (#3331 review finding F8) a new grant to `payTo`/`token`
- * would replace — ONE (agent, token, recipient) slot per the lifecycle API,
- * regardless of whose merchant label (if any) currently occupies it. A row
- * locked to a DIFFERENT merchant in the same slot matched neither of the two
- * predicates this used to be split into; it is replaced exactly the same as
- * a plain budget or one already locked to THIS merchant, so it must warn too
- * — the copy just names whichever merchant (or none) it is about to retire.
- * Since #3922 only a LIVE row (active and unexpired, {@link delegationIsLive})
- * warns: an expired `active` row in the slot is still retired when the new
- * grant activates, but it can no longer spend, so nothing current is replaced.
+ * The live budget (#3331 review finding F8) already in the slot a budget to
+ * `payTo`/`token` would go into — ONE (agent, token, recipient) slot per the
+ * lifecycle API, regardless of whose merchant label (if any) currently
+ * occupies it. A row locked to a DIFFERENT merchant in the same slot matched
+ * neither of the two predicates this used to be split into; it occupies the
+ * slot exactly like a plain budget or one already locked to THIS merchant, so
+ * it must be found too — the copy just names whichever merchant (or none).
+ *
+ * #3933: the backend refuses a plain grant into an occupied slot, so a match
+ * here routes the owner to the edit flow instead of signing. "Live" is the
+ * wire's `is_live` (#3922, `delegationIsLive`) through the shared slot
+ * predicate (`lib/budget-slot.ts`): an expired `active` row does not occupy.
  */
 function findReplacedBudget(
   budgets: DelegationBudget[] | null,
@@ -173,14 +176,7 @@ function findReplacedBudget(
   token: TokenOption | null,
 ): DelegationBudget | null {
   if (!payTo || !token) return null
-  return (
-    (budgets ?? []).find(
-      (b) =>
-        delegationIsLive(b) &&
-        (b.recipient_address ?? '').toLowerCase() === payTo.toLowerCase() &&
-        b.token_address.toLowerCase() === token.address.toLowerCase(),
-    ) ?? null
-  )
+  return findOccupyingBudget(budgets, { tokenAddress: token.address, recipientAddress: payTo }, Math.floor(Date.now() / 1000))
 }
 
 interface Props {
@@ -195,7 +191,11 @@ interface Props {
 
 export default function FundMerchantModal({ open, onClose, merchant, funding, offers, agents, onGranted }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
-  useFocusTrap(panelRef, open)
+  // #3933: the live budget being edited instead of granting a second one into
+  // its slot. While set, the edit flow replaces this modal on screen, and
+  // brings its own focus trap and Escape handling.
+  const [editTarget, setEditTarget] = useState<DelegationBudget | null>(null)
+  useFocusTrap(panelRef, open && !editTarget)
 
   const eligibleAgents = useMemo(() => eligibleFundingAgents(agents, funding), [agents, funding])
 
@@ -204,12 +204,13 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
   const [tokenAddress, setTokenAddress] = useState('')
   const [amount, setAmount] = useState('')
   const [period, setPeriod] = useState(2_592_000)
-  const [outcome, setOutcome] = useState<BudgetResult | null>(null)
+  const [outcome, setOutcome] = useState<GrantResult | null>(null)
 
   useEffect(() => {
     if (!open) return
     setStep('select')
     setOutcome(null)
+    setEditTarget(null)
     setAgentId(eligibleAgents[0]?.id ?? '')
     setAmount('')
     setPeriod(2_592_000)
@@ -327,10 +328,16 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
     onClose()
   }, [busy, onClose])
 
-  useEscapeToClose(open, handleClose, { enabled: !busy })
+  useEscapeToClose(open, handleClose, { enabled: !busy && !editTarget })
 
   const run = useCallback(async () => {
     if (!input) return
+    // #3933: the slot already holds a live budget — the backend refuses a
+    // plain grant there. Route to the edit flow instead of signing.
+    if (replacedBudget) {
+      setEditTarget(replacedBudget)
+      return
+    }
     setStep('working')
     const result = await grant(input)
     setOutcome(result)
@@ -342,7 +349,19 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
     } else {
       setStep('error')
     }
-  }, [grant, input, onGranted])
+  }, [grant, input, onGranted, replacedBudget])
+
+  // #3933: the server's 409 when the client-side check missed (a stale list).
+  // `grant` refreshed the list before answering, so the budget it names is
+  // normally in it now; fall back to whatever occupies the slot.
+  const slotTarget =
+    outcome && !outcome.ok && outcome.reason === 'slot_occupied'
+      ? ((outcome.existingDelegationHash
+          ? (budgets ?? []).find(
+              (b) => b.delegation_hash.toLowerCase() === outcome.existingDelegationHash!.toLowerCase() && occupiesSlot(b, Math.floor(Date.now() / 1000)),
+            )
+          : undefined) ?? replacedBudget)
+      : null
 
   // Design review round 2, finding 2: a refusal a same-input retry cannot
   // ever turn into a success must not offer "Try again" as its primary
@@ -354,6 +373,30 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
   const permanentRefusal = refusalKind !== null && isPermanentMerchantBudgetRefusal(refusalKind)
 
   if (!open) return null
+
+  if (editTarget && selectedAgent && chainId != null && token) {
+    return (
+      <EditBudgetModal
+        open
+        onClose={() => {
+          setEditTarget(null)
+          onClose()
+        }}
+        agentId={selectedAgent.id}
+        chainId={chainId}
+        tokens={[token]}
+        budget={editTarget}
+        prefill={input ? { budgetAtomic: input.budgetAtomic, periodSeconds: input.periodSeconds } : undefined}
+        // The replacement pays THIS merchant — the same slot, since the
+        // merchant's payment address is the slot's recipient.
+        merchant={{ slug: merchant.slug, name: merchant.name }}
+        onBudgetChange={() => {
+          void reload()
+          onGranted?.()
+        }}
+      />
+    )
+  }
 
   return (
     <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center v2-safe-overlay [--v2-safe-gutter:1rem] v2-modal-backdrop">
@@ -550,8 +593,15 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                   </p>
                   <p className="v2-tabular">
                     {formatUnits(BigInt(replacedBudget.budget_atomic), token.decimals)} {token.symbol}{' '}
-                    {periodLabel(replacedBudget.period_seconds)} — signing below activates the new budget in its
-                    place.
+                    {periodLabel(replacedBudget.period_seconds)}.
+                  </p>
+                  {/* #3933: what happens on-chain. A plain grant here is
+                      refused, so the change is an edit: two signatures, and
+                      the old budget stays spendable until the second. */}
+                  <p>
+                    To change it, you edit it: sign the new limits, then sign once more to stop the old
+                    budget. Until it is stopped, it can still be spent outside Haven. Stopping it also ends any
+                    open task budget or sub-budget taken from it.
                   </p>
                 </div>
               )}
@@ -561,7 +611,7 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                   Back
                 </Button>
                 <Button onClick={() => void run()} disabled={busy || !ready} className="flex-1">
-                  Sign budget
+                  {replacedBudget ? 'Edit current budget' : 'Sign budget'}
                 </Button>
               </div>
               {ready && passkeyElsewhere ? <PasskeyElsewhereHint /> : null}
@@ -622,9 +672,13 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                     The generic failure closes with "Nothing changed."
                     (#3930: `unconfirmed` does NOT — the grant may already be
                     in place, so it gets its own sentence instead). */}
-                <p className="text-sm font-medium text-[var(--v2-ink)]">The budget could not be set</p>
+                <p className="text-sm font-medium text-[var(--v2-ink)]">
+                  {outcome.reason === 'slot_occupied' ? 'This agent already has a budget here' : 'The budget could not be set'}
+                </p>
                 <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                  {outcome.reason === 'unconfirmed'
+                  {outcome.reason === 'slot_occupied'
+                    ? `${selectedAgent?.name ?? 'This agent'} already has a live budget that pays ${merchant.name}'s address. Nothing was signed. Edit that budget to change its limits.`
+                    : outcome.reason === 'unconfirmed'
                     ? 'The budget could not be confirmed. Check the agent budgets before trying again — it may already be in place, and a second grant would add a second budget.'
                     : `${
                         outcome.reason === 'refused'
@@ -634,7 +688,25 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                 </p>
               </div>
               <div className="flex gap-3">
-                {permanentRefusal ? (
+                {outcome.reason === 'slot_occupied' ? (
+                  // #3933: the server refused a plain grant into an occupied
+                  // slot. Never "Try again" — the same grant would be refused
+                  // again. The way forward is the edit flow.
+                  <>
+                    <Button variant="ghost" onClick={handleClose} className="flex-1">
+                      Close
+                    </Button>
+                    {slotTarget ? (
+                      <Button onClick={() => setEditTarget(slotTarget)} className="flex-1">
+                        Edit current budget
+                      </Button>
+                    ) : (
+                      <Button onClick={() => void reload()} className="flex-1">
+                        Reload budgets
+                      </Button>
+                    )}
+                  </>
+                ) : permanentRefusal ? (
                   // Design review round 3, finding A (code F2): a refusal that
                   // a reload CAN resolve — the payTo moved, it isn't confirmed
                   // yet, or the merchant vanished — offers "Reload page" as its

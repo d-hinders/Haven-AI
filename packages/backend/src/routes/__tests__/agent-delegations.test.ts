@@ -1345,6 +1345,7 @@ describe('delegation lifecycle API (#828)', () => {
       const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke` })
       expect(res.statusCode).toBe(409)
       expect(res.json().error).toMatch(/Already revoked.*reconciled/i)
+      expect(res.json().error_code).toBe('DELEGATION_ALREADY_REVOKED')
       const heal = mockQuery.mock.calls.find((c) => /SET status = 'revoked'/.test(String(c[0])))
       expect(heal).toBeDefined()
       expect(heal![1]).toEqual([AGENT_ID, [HASH]])
@@ -1515,7 +1516,7 @@ describe('delegation lifecycle API (#828)', () => {
         method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke`, payload: {},
       })
       expect(res.statusCode).toBe(409)
-      expect(res.json()).toEqual({ error: 'Already revoked' })
+      expect(res.json()).toEqual({ error: 'Already revoked', error_code: 'DELEGATION_ALREADY_REVOKED' })
     })
 
     it('CHARACTERIZATION: activate still demands an owner signature and writes nothing without one', async () => {

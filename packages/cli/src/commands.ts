@@ -935,13 +935,31 @@ async function cmdBudgetGrant(args: ParsedArgs, d: ResolvedDeps): Promise<number
   const amount = parseTokenAmount(args.flags.amount, token.decimals, token.symbol)
   if (!amount.ok) throw new UsageError(amount.message)
 
-  const built = await api.post<DelegationBuild>(`/agents/${id}/delegations/build`, {
-    token_address: token.address,
-    recipient_address: args.flags.recipient ?? null,
-    budget_atomic: amount.atomic,
-    period_seconds: args.flags.period * 60,
-    ...(args.flags.expires !== undefined ? { expires_at: args.flags.expires } : {}),
-  })
+  let built: DelegationBuild
+  try {
+    built = await api.post<DelegationBuild>(`/agents/${id}/delegations/build`, {
+      token_address: token.address,
+      recipient_address: args.flags.recipient ?? null,
+      budget_atomic: amount.atomic,
+      period_seconds: args.flags.period * 60,
+      ...(args.flags.expires !== undefined ? { expires_at: args.flags.expires } : {}),
+    })
+  } catch (err) {
+    // #3933: a live budget already holds this (token, recipient) slot. A grant
+    // cannot replace it — that would leave the old one enabled on-chain — so
+    // the owner edits it on the agent page, which replaces it and stops the
+    // old one. Branch on the code, never the sentence.
+    const body = err instanceof CliApiError ? (err.body as { error_code?: string; existing_delegation_hash?: string } | undefined) : undefined
+    if (body?.error_code === 'BUDGET_SLOT_OCCUPIED') {
+      throw new HavenCliError(
+        err instanceof Error ? err.message : 'This agent already has a live budget for this token and recipient.',
+        EXIT.refused,
+        "Edit that budget on the agent's page in the Haven dashboard instead: editing replaces it and stops the old one on-chain. Open task and sub-budgets carved from the old budget end when it is stopped.",
+        { error_code: 'BUDGET_SLOT_OCCUPIED', existing_delegation_hash: body.existing_delegation_hash ?? null },
+      )
+    }
+    throw err
+  }
 
   const emitGrant = (status?: DelegationRow['status']) =>
     emit(d, args.flags.json, { ...built, agent_id: id, status: status ?? 'pending' }, () =>

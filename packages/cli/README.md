@@ -166,7 +166,13 @@ never calls `activate` — that is the whole design.
   route). `--amount` is in
   whole tokens, read from your wallet's balances exactly like
   `agents connect`; `--recipient` pins the budget to one address (omit for an
-  open budget); `--expires` takes unix seconds (default: 90 days).
+  open budget); `--expires` takes unix seconds (default: 90 days). A grant
+  adds a budget to an EMPTY (token, recipient) slot only: when the agent
+  already has a live budget there, the build is refused (exit 4,
+  `error_code: BUDGET_SLOT_OCCUPIED` with `existing_delegation_hash` under
+  `--json`, #3933) and the hint says to edit that budget on the agent's page,
+  which replaces it and stops the old one on-chain. A grant cannot replace it
+  — that would leave the old delegation enabled.
 - `budget revoke <agentId> <delegationHash>` prepares the sponsored
   revocation (no gas, one signature). The hash comes from
   `haven budget show <agentId> --hashes` or the dashboard. (`agents show` does

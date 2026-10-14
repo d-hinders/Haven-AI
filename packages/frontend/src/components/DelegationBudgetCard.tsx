@@ -14,7 +14,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isAddress, parseUnits, formatUnits } from 'viem'
 import type { Address } from 'viem'
-import { useDelegationBudget, type DelegationBudget, type GrantInput } from '@/hooks/useDelegationBudget'
+import { useDelegationBudget, type DelegationBudget, type GrantInput, type GrantResult } from '@/hooks/useDelegationBudget'
+import { findOccupyingBudget, occupiesSlot, replacedButEnabledBudgets } from '@/lib/budget-slot'
 import { useTaskBudgets, type TaskBudget } from '@/hooks/useTaskBudgets'
 import { useSubBudgetTrees, type SubBudgetTree } from '@/hooks/useSubBudgets'
 import BudgetGrantAction from './BudgetGrantAction'
@@ -109,9 +110,20 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
   // modal's open flag — one state so closing the modal and clearing the
   // anchor cannot disagree.
   const [editing, setEditing] = useState<DelegationBudget | null>(null)
+  // #3933: the limits typed into the Add budget form when its submit was
+  // routed to the edit flow — the edit opens with them, not the current ones.
+  const [editPrefill, setEditPrefill] = useState<{ budgetAtomic: string; periodSeconds: number } | null>(null)
+  // #3933: a routed submit waiting for its budget to appear in the list (the
+  // server's 409 names a hash the list may not have caught up with yet).
+  const [pendingEdit, setPendingEdit] = useState<{
+    hash: string | null
+    slot: { tokenAddress: string; recipientAddress: string | null }
+    prefill: { budgetAtomic: string; periodSeconds: number }
+  } | null>(null)
 
   const handleEditClosed = useCallback(() => {
     setEditing(null)
+    setEditPrefill(null)
   }, [])
 
   const [token, setToken] = useState(tokens[0]?.address ?? '')
@@ -256,6 +268,57 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
     }
   }, [amount, amountValid, period, recipient, recipientValid, tokenCfg])
 
+  // #3933: a submit whose (token, recipient) slot already holds a live budget
+  // is never signed as a plain grant — the backend refuses it, because the old
+  // budget would stay enabled on-chain. It goes to the edit flow for that
+  // budget instead, with the typed limits. The client-side check answers
+  // before anything is built; when it misses (a stale list), the server's
+  // `slot_occupied` takes the same route through `handleSlotOccupied`.
+  const grantOrEdit = useCallback(
+    async (input: GrantInput): Promise<GrantResult> => {
+      const match = findOccupyingBudget(budgets, input, Math.floor(Date.now() / 1000))
+      if (match) return { ok: false, reason: 'slot_occupied', existingDelegationHash: match.delegation_hash }
+      return grant(input)
+    },
+    [budgets, grant],
+  )
+
+  const handleSlotOccupied = useCallback(
+    (existingDelegationHash: string | null) => {
+      if (!grantInput) return
+      setPendingEdit({
+        hash: existingDelegationHash,
+        slot: { tokenAddress: grantInput.tokenAddress, recipientAddress: grantInput.recipientAddress ?? null },
+        prefill: { budgetAtomic: grantInput.budgetAtomic, periodSeconds: grantInput.periodSeconds },
+      })
+    },
+    [grantInput],
+  )
+
+  // Resolve a routed submit to its row once the list has it: by the hash the
+  // check (or the server) named, else whatever live budget holds the slot.
+  const pendingEditTarget = useMemo(() => {
+    if (!pendingEdit || !budgets) return null
+    const nowSec = Math.floor(Date.now() / 1000)
+    const byHash = pendingEdit.hash
+      ? budgets.find(
+          (b) => b.delegation_hash.toLowerCase() === pendingEdit.hash!.toLowerCase() && occupiesSlot(b, nowSec),
+        )
+      : undefined
+    return byHash ?? findOccupyingBudget(budgets, pendingEdit.slot, nowSec)
+  }, [budgets, pendingEdit])
+
+  useEffect(() => {
+    if (!pendingEdit || !pendingEditTarget) return
+    setEditPrefill(pendingEdit.prefill)
+    setEditing(pendingEditTarget)
+    setPendingEdit(null)
+    // The edit carries the typed limits from here. Collapse the form like
+    // Cancel does (typed values kept), and NOT through `pendingFocus`: the
+    // modal that just opened owns focus (the #3716 note on `openSubBudget`).
+    setFormOpen(false)
+  }, [pendingEdit, pendingEditTarget])
+
   const handleGranted = useCallback(() => {
     setAmount('')
     setRecipient('')
@@ -277,6 +340,25 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
         toast.info('Signature was cancelled.')
       }
       else toast.error('Could not stop the budget. Try again.')
+    },
+    [onBudgetChange, revoke, toast],
+  )
+
+  // #3933: the finish action for an old budget a replace left enabled — the
+  // same per-hash revoke as Stop. "Already revoked" comes back as `ok` with
+  // `alreadyStopped` (stopped out-of-band, or a revoke-all got there first):
+  // finished, not an error.
+  const handleFinishStop = useCallback(
+    async (hash: string) => {
+      const result = await revoke(hash)
+      if (result.ok) {
+        toast.success(result.alreadyStopped ? 'That old budget was already stopped.' : 'Old budget stopped.')
+        onBudgetChange?.()
+      } else if (result.reason === 'cancelled') {
+        toast.info('Signature was cancelled.')
+      } else {
+        toast.error('Could not stop the old budget. Try again.')
+      }
     },
     [onBudgetChange, revoke, toast],
   )
@@ -311,6 +393,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
   // row's status when `expires_at` passes, so gating on status alone would
   // keep the form hidden behind "Add budget" forever for an agent whose only
   // budget expired.
+  const nowSec = Math.floor(Date.now() / 1000)
   const active = (budgets ?? []).filter((b) => b.status === 'active')
   // #3922: the owner predicate is the server's `is_live` (active AND unexpired).
   const hasActive = active.some((b) => delegationIsLive(b))
@@ -319,6 +402,13 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
   // has an active, unexpired one (the card itself renders only on the
   // delegation rail). The modal offers a picker when several qualify.
   const subBudgetParents = retired ? [] : eligibleSubBudgetParents(budgets)
+  // #3933: old budgets a replace retired in Haven but nobody stopped on-chain.
+  // Row-level, from this list (every status) — never `live_delegation_count`.
+  // A retired agent's "Finish revoking" (revoke-all) already covers them.
+  const stillEnabled = retired ? [] : replacedButEnabledBudgets(budgets, nowSec)
+  // #3933: the live budget the form's current input would collide with — the
+  // submit then opens the edit flow, and the hint says what that does.
+  const formSlotMatch = grantInput && !budgetsError ? findOccupyingBudget(budgets, grantInput, nowSec) : null
 
   // #3695: with no active budget the grant form IS the section's content;
   // with one, it waits behind "Add budget" unless opened (or `?grant=` opened
@@ -363,6 +453,39 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
       {ready && passkeyElsewhere && (!retired || (active.length > 0 && !budgetsError)) ? (
         // A retired card asks for a signature only to Stop a live budget.
         <PasskeyElsewhereHint className="mb-4" />
+      ) : null}
+
+      {stillEnabled.length > 0 && !budgetsError ? (
+        <div className="mb-4 space-y-2">
+          {stillEnabled.map((b) => (
+            <ReplacedBudgetNotice
+              key={b.delegation_hash}
+              budget={b}
+              tokens={tokens}
+              onStop={handleFinishStop}
+              busy={busy}
+              ready={ready}
+              needsOwnerWallet={needsOwnerWallet}
+            />
+          ))}
+        </div>
+      ) : null}
+
+      {pendingEdit && !pendingEditTarget && budgets !== null ? (
+        // #3933: the server refused the grant (the slot holds a live budget)
+        // but the list does not show that budget yet. Never the generic
+        // failure: say what happened and offer the refresh that finds it.
+        <NoticeRow
+          className="mb-4"
+          action={
+            <Button size="sm" variant="ghost" onClick={() => void reload()}>
+              Reload budgets
+            </Button>
+          }
+        >
+          This agent already has a live budget for this token and recipient. Nothing was signed. Edit that
+          budget to change its limits.
+        </NoticeRow>
       ) : null}
 
       <div className="divide-y divide-[var(--v2-border)]">
@@ -467,20 +590,24 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
               the action is gated on knowing the current budgets rather than
               on the owner reading a warning. `Try again` is the way out. */}
           <BudgetGrantAction
-            grant={grant}
+            grant={grantOrEdit}
             busy={busy}
             ready={ready}
             input={budgetsError ? null : grantInput}
-            label="Set budget"
+            // #3933: a matching slot opens the edit flow, so the button says so.
+            label={formSlotMatch ? 'Edit existing budget' : 'Set budget'}
             busyLabel="Setting…"
             // #3895: the agent page's verb is "set" — its failure sentence
             // keeps the exact wording the shared control used to hard-code.
             failureMessage="Haven could not set the budget. Nothing changed — try again."
             helper={
               budgetsError
-                ? 'Reload the current budgets before setting one — a new budget replaces the one it matches.'
-                : 'One signature. Refills every period automatically.'
+                ? 'Reload the current budgets before setting one — a budget for a token and recipient that already has one is edited, not added.'
+                : formSlotMatch
+                  ? 'This agent already has a budget for this token and recipient, so you edit it: you sign the new budget, then sign to stop the old one. The review step shows how many signatures that takes. Stopping it ends any open task budget or sub-budget taken from it.'
+                  : 'One signature. Refills every period automatically.'
             }
+            onSlotOccupied={handleSlotOccupied}
             onGranted={handleGranted}
             notReadyHint={needsOwnerWallet ? 'Connect your account owner wallet to set a budget.' : undefined}
             notReadyAction={needsOwnerWallet ? <WalletConnectAction /> : undefined}
@@ -583,7 +710,13 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
           chainId={chainId}
           tokens={tokens}
           budget={editing}
-          onBudgetChange={onBudgetChange}
+          prefill={editPrefill ?? undefined}
+          // #3933: refresh this card's own list too — a partial edit leaves
+          // the old budget `replaced`, and the notice above must show it.
+          onBudgetChange={() => {
+            void reload()
+            onBudgetChange?.()
+          }}
         />
       ) : null}
       </Card>
@@ -632,6 +765,80 @@ function periodNounFromLabel(label: string): string | null {
     default:
       return null
   }
+}
+
+/**
+ * #3933: an old budget a replace retired in Haven (`replaced`, unexpired) that
+ * has not been stopped on-chain — or not that Haven has seen: the status is
+ * Haven's record, not a chain read, so the copy says what the record allows
+ * ("can still be spent outside Haven until it is stopped") and nothing more.
+ * The action is the card's per-hash Stop; a row already disabled on-chain
+ * answers "Already revoked", which the hook reports as finished.
+ */
+function ReplacedBudgetNotice({
+  budget,
+  tokens,
+  onStop,
+  busy,
+  ready,
+  needsOwnerWallet,
+}: {
+  budget: DelegationBudget
+  tokens: TokenOption[]
+  onStop: (hash: string) => void | Promise<void>
+  busy: boolean
+  ready: boolean
+  needsOwnerWallet: boolean
+}) {
+  const t = tokens.find((x) => x.address.toLowerCase() === budget.token_address.toLowerCase())
+  let amount: string
+  try {
+    amount = t ? formatUnits(BigInt(budget.budget_atomic), t.decimals) : budget.budget_atomic
+  } catch {
+    amount = budget.budget_atomic
+  }
+  const phrase = `${amount} ${t?.symbol ?? ''} ${budgetPeriodWords(budget.period_seconds)}`.replace(/\s+/g, ' ')
+  const scope = budget.merchant_name
+    ? `that pays ${budget.merchant_name}`
+    : budget.recipient_address
+      ? `to ${truncateAddress(budget.recipient_address)}`
+      : 'to any recipient'
+  const [stopping, setStopping] = useState(false)
+
+  async function handleStop() {
+    setStopping(true)
+    try {
+      await onStop(budget.delegation_hash)
+    } finally {
+      setStopping(false)
+    }
+  }
+
+  return (
+    <div
+      role="status"
+      className="space-y-2 rounded-lg border border-warning/30 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink)]"
+    >
+      <p className="font-medium">An old budget has not been stopped</p>
+      <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
+        The {phrase} budget {scope} was replaced, but it can still be spent outside Haven until it is stopped.
+        Stopping it also ends any open task budget or sub-budget taken from it.
+      </p>
+      {needsOwnerWallet ? (
+        <WalletConnectAction />
+      ) : (
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => void handleStop()}
+          disabled={busy || !ready || stopping}
+          aria-label={`Stop old budget ${phrase}`}
+        >
+          {stopping ? 'Stopping…' : 'Stop old budget'}
+        </Button>
+      )}
+    </div>
+  )
 }
 
 function BudgetRow({

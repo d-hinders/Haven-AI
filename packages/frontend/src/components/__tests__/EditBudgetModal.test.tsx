@@ -10,7 +10,9 @@ vi.mock('@/components/WalletConnectAction', () => ({
   default: () => <button type="button">Connect wallet</button>,
 }))
 
-const { mockEditBudget, mockSignersError, mockReloadSigners, mockReady, mockSignersLoading, mockPasskeyElsewhere } = vi.hoisted(() => ({
+const { mockEditBudget, mockRevoke, mockSignersError, mockReloadSigners, mockReady, mockSignersLoading, mockPasskeyElsewhere, mockBudgets } = vi.hoisted(() => ({
+  mockBudgets: vi.fn((): unknown[] | null => null),
+  mockRevoke: vi.fn(),
   mockPasskeyElsewhere: vi.fn(() => false),
   mockReady: vi.fn(() => true),
   mockSignersLoading: vi.fn(() => false),
@@ -19,9 +21,18 @@ const { mockEditBudget, mockSignersError, mockReloadSigners, mockReady, mockSign
   mockReloadSigners: vi.fn(),
 }))
 
-vi.mock('@/hooks/useDelegationBudget', () => ({
+vi.mock('@/hooks/useDelegationBudget', async () => {
+  // The hook's own Stop-set read, over the mocked list: the real helper with
+  // no remembered attempt (the hook's tests cover the remembered case).
+  const slot = await vi.importActual<typeof import('@/lib/budget-slot')>('@/lib/budget-slot')
+  return {
   useDelegationBudget: () => ({
+    budgets: mockBudgets(),
     editBudget: mockEditBudget,
+    editStopSet: (hash: string, oldSlot: { tokenAddress: string; recipientAddress?: string | null }, nowSec: number) =>
+      slot.slotOccupantHashesForEdit(mockBudgets() as never, hash, oldSlot, nowSec),
+    isOwnAttemptedGrant: () => false,
+    revoke: mockRevoke,
     busy: false,
     ready: mockReady(),
     signersLoading: mockSignersLoading(),
@@ -29,7 +40,8 @@ vi.mock('@/hooks/useDelegationBudget', () => ({
     reloadSigners: mockReloadSigners,
     passkeyElsewhere: mockPasskeyElsewhere(),
   }),
-}))
+  }
+})
 
 const EditBudgetModal = (await import('../EditBudgetModal')).default
 
@@ -65,6 +77,8 @@ beforeEach(() => {
   mockSignersLoading.mockReturnValue(false)
   mockPasskeyElsewhere.mockReturnValue(false)
   mockReloadSigners.mockReset()
+  mockRevoke.mockReset()
+  mockBudgets.mockReturnValue(null)
 })
 
 function renderModal(overrides: Record<string, unknown> = {}) {
@@ -186,6 +200,31 @@ describe('EditBudgetModal (#3166) — review', () => {
     })
     await waitFor(() => expect(screen.getByText('Budget updated')).toBeInTheDocument())
     expect(onBudgetChange).toHaveBeenCalled()
+  })
+
+  it('#3933 round 5: an earlier attempt that landed first is reported with ITS limits, the Stop offered — and the done screen keeps saying so', async () => {
+    const OLD = '0x' + 'ab'.repeat(32)
+    mockEditBudget.mockResolvedValue({
+      ok: false,
+      reason: 'revoke_unfinished',
+      newDelegationHash: '0x' + 'be'.repeat(32),
+      unstoppedDelegationHashes: [OLD],
+      moved: false,
+      earlierLimits: true,
+    })
+    mockRevoke.mockResolvedValue({ ok: true })
+    renderModal({ budget: budget({ recipient_address: RECIPIENT }) })
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    await waitFor(() => expect(screen.getByText('Your earlier change went through')).toBeInTheDocument())
+    expect(screen.getByText(/The budget has the amount, period and recipient you chose then, not the ones you entered now/)).toBeInTheDocument()
+    expect(screen.queryByText(/The new limits took effect/)).toBeNull()
+    expect(mockRevoke).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Stop old budget' }))
+    await waitFor(() => expect(screen.getByText(/Your earlier change went through first/)).toBeInTheDocument())
+    expect(mockRevoke).toHaveBeenCalledWith(OLD)
+    expect(screen.queryByText(/The new limits are live/)).toBeNull()
   })
 })
 
@@ -343,7 +382,10 @@ describe('EditBudgetModal (#3166) — outcomes', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
     fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
     await waitFor(() => expect(screen.getByText(/New budget is live — one step left/)).toBeInTheDocument())
-    expect(screen.getByText(/Use Stop budget next to it in the budget list/)).toBeInTheDocument()
+    // #3933: the replaced budget no longer has a row with a Stop beside it —
+    // the screen names it, says what it can still do, and offers the Stop.
+    expect(screen.getByText(/The previous 5 USDC per day budget can still be spent outside Haven until it is stopped/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Stop old budget' })).toBeInTheDocument()
     // The new budget IS live — the card must refresh (#1090).
     expect(onBudgetChange).toHaveBeenCalled()
   })
@@ -462,5 +504,228 @@ describe('EditBudgetModal (#3537) — background poll', () => {
 
     expect(screen.getByLabelText('Budget amount')).toHaveValue('7')
     expect(screen.queryByRole('button', { name: 'Sign new budget' })).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * #3933: the edit flow is where every replace now goes. It opens with typed
+ * limits when a new-budget form routed here, carries a Fund flow's merchant,
+ * says what the second signature does on-chain, and finishes an unfinished
+ * Stop in place.
+ */
+describe('EditBudgetModal — replace without a silent leftover (#3933)', () => {
+  const OLD_HASH = '0x' + 'ab'.repeat(32)
+
+  it('opened from a new-budget form: prefilled with the typed limits, and says why', () => {
+    renderModal({ prefill: { budgetAtomic: '12000000', periodSeconds: 604_800 } })
+    expect(screen.getByLabelText('Budget amount')).toHaveValue('12')
+    expect(screen.getByLabelText('Period')).toHaveValue('604800')
+    expect(screen.getByText(/already has a budget for this token and recipient, so your new limits replace it here/)).toBeInTheDocument()
+    // Typed limits differ from the current ones: Review is live at once.
+    expect((screen.getByRole('button', { name: 'Review changes' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('opened directly (no prefill): no routing notice', () => {
+    renderModal()
+    expect(screen.queryByText(/so your new limits replace it here/)).toBeNull()
+  })
+
+  it("a Fund flow's merchant rides the replacement grant, and the recipient stays read-only", async () => {
+    renderModal({
+      budget: budget({ recipient_address: RECIPIENT }),
+      merchant: { slug: 'ampersend-demo-api', name: 'Ampersend Demo API' },
+    })
+    expect(screen.queryByLabelText('Recipient')).toBeNull()
+    expect(screen.getByText(/Pays Ampersend Demo API only/)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    await waitFor(() => expect(mockEditBudget).toHaveBeenCalled())
+    const [oldHash, input] = mockEditBudget.mock.calls[0]!
+    expect(oldHash).toBe(OLD_HASH)
+    expect(input).toMatchObject({ merchantSlug: 'ampersend-demo-api', recipientAddress: RECIPIENT })
+  })
+
+  it('the review states what the second signature does on-chain', () => {
+    toReview('10')
+    expect(screen.getByText(/Until it is stopped, the old budget can still be spent outside Haven/)).toBeInTheDocument()
+    expect(screen.getByText(/Stopping it also ends any open task budget or sub-budget taken from it/)).toBeInTheDocument()
+  })
+
+  async function toRevokeUnfinished() {
+    const view = renderModal()
+    mockEditBudget.mockResolvedValue({ ok: false, reason: 'revoke_unfinished', newDelegationHash: '0x' + 'be'.repeat(32) })
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    await screen.findByRole('button', { name: 'Stop old budget' })
+    return view
+  }
+
+  it('revoke_unfinished: Stop old budget stops THE OLD hash through the per-hash revoke, then reads as done', async () => {
+    const { onBudgetChange } = await toRevokeUnfinished()
+    mockRevoke.mockResolvedValue({ ok: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Stop old budget' }))
+    await waitFor(() => expect(mockRevoke).toHaveBeenCalledWith(OLD_HASH))
+    await waitFor(() => expect(screen.getByText(/the previous budget is stopped/)).toBeInTheDocument())
+    expect(onBudgetChange).toHaveBeenCalled()
+  })
+
+  it('revoke_unfinished: "Already revoked" is finished, not an error', async () => {
+    await toRevokeUnfinished()
+    mockRevoke.mockResolvedValue({ ok: true, alreadyStopped: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Stop old budget' }))
+    await waitFor(() => expect(screen.getByText(/the previous budget was already stopped/)).toBeInTheDocument())
+  })
+
+  it('revoke_unfinished: a failed Stop stays on the screen and says so', async () => {
+    await toRevokeUnfinished()
+    mockRevoke.mockResolvedValue({ ok: false, reason: 'failed' })
+    fireEvent.click(screen.getByRole('button', { name: 'Stop old budget' }))
+    await waitFor(() => expect(screen.getByText('The previous budget could not be stopped. Try again.')).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Stop old budget' })).toBeInTheDocument()
+  })
+
+  it('slot_occupied (a stale `replaces`): names it, refreshes the card, and offers only Close', async () => {
+    const { onBudgetChange } = renderModal()
+    mockEditBudget.mockResolvedValue({ ok: false, reason: 'slot_occupied', existingDelegationHash: '0x' + 'e1'.repeat(32) })
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    await waitFor(() => expect(screen.getByText('This budget has changed')).toBeInTheDocument())
+    expect(screen.getByText(/nothing was changed\. Close this and edit the current budget/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+    expect(onBudgetChange).toHaveBeenCalled()
+  })
+})
+
+describe('EditBudgetModal — a re-key pair and a recipient change (#3933 review findings 1, 2)', () => {
+  const OLD_HASH = '0x' + 'ab'.repeat(32)
+  const PAIR_HASH = '0x' + 'a2'.repeat(32)
+  const TARGET_HASH = '0x' + 'f1'.repeat(32)
+  const OTHER = '0x' + 'dd'.repeat(20)
+
+  /** The edited budget (open slot) carried as a re-key pair. */
+  function withPair() {
+    mockBudgets.mockReturnValue([
+      budget({ created_at: '2026-10-01T00:00:00Z' }),
+      budget({ id: 'b2', delegation_hash: PAIR_HASH, start_date: '4000000000', created_at: '2026-10-02T00:00:00Z' }),
+    ])
+  }
+
+  it('a pair: the review says the old budget takes two Stop signatures, before anything is signed', () => {
+    withPair()
+    toReview('10')
+    expect(
+      screen.getByText(/It is held in two parts since this agent.s signing key was replaced, so stopping it takes two more signatures, one per part\. Haven will ask for each\./),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Haven will ask for that second signature/)).toBeNull()
+    expect(mockEditBudget).not.toHaveBeenCalled()
+  })
+
+  it('a single budget keeps the one-signature copy', () => {
+    mockBudgets.mockReturnValue([budget()])
+    toReview('10')
+    expect(screen.getByText(/Haven will ask for that second signature/)).toBeInTheDocument()
+    expect(screen.queryByText(/two more signatures/)).toBeNull()
+  })
+
+  it('a pair left half-stopped: the finish action Stops each row still enabled, then reads as done', async () => {
+    withPair()
+    const { onBudgetChange } = renderModal()
+    mockEditBudget.mockResolvedValue({
+      ok: false,
+      reason: 'revoke_unfinished',
+      newDelegationHash: '0x' + 'be'.repeat(32),
+      unstoppedDelegationHashes: [OLD_HASH, PAIR_HASH],
+    })
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    await screen.findByRole('button', { name: 'Stop old budget' })
+    expect(screen.getByText('It is held in two parts, so stopping it takes two signatures.')).toBeInTheDocument()
+
+    // First Stop lands, the second is cancelled: the screen stays, naming one part left.
+    mockRevoke.mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({ ok: false, reason: 'cancelled' })
+    fireEvent.click(screen.getByRole('button', { name: 'Stop old budget' }))
+    await waitFor(() => expect(screen.getByText('No signature yet. The previous budget is not stopped.')).toBeInTheDocument())
+    expect(mockRevoke.mock.calls.map((c) => c[0])).toEqual([OLD_HASH, PAIR_HASH])
+    expect(screen.queryByText(/stopping it takes two signatures/)).toBeNull()
+    expect(screen.queryByText(/the previous budget is stopped/)).toBeNull()
+
+    // The retry resumes at the row still enabled — never re-asks for the first.
+    mockRevoke.mockResolvedValueOnce({ ok: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Stop old budget' }))
+    await waitFor(() => expect(screen.getByText(/the previous budget is stopped/)).toBeInTheDocument())
+    expect(mockRevoke.mock.calls.map((c) => c[0])).toEqual([OLD_HASH, PAIR_HASH, PAIR_HASH])
+    expect(onBudgetChange).toHaveBeenCalled()
+  })
+
+  it('the edit hands the composition the edited budget\'s own slot', async () => {
+    renderModal({ budget: budget({ recipient_address: RECIPIENT }) })
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    await waitFor(() => expect(mockEditBudget).toHaveBeenCalled())
+    expect(mockEditBudget.mock.calls[0][2]).toEqual({ oldSlot: { tokenAddress: USDC, recipientAddress: RECIPIENT } })
+  })
+
+  it('a recipient change into an occupied slot is caught on the form, before any signature', () => {
+    // Stored in another case than typed: slots compare case-insensitively.
+    mockBudgets.mockReturnValue([
+      budget(),
+      budget({ id: 'b3', delegation_hash: TARGET_HASH, recipient_address: OTHER.toUpperCase().replace('0X', '0x') }),
+    ])
+    renderModal()
+    fireEvent.change(screen.getByLabelText('Recipient'), { target: { value: OTHER } })
+    expect(
+      screen.getByText('This recipient already has a live budget for this token. Edit that budget instead, or pick another recipient.'),
+    ).toBeInTheDocument()
+    expect((screen.getByRole('button', { name: 'Review changes' }) as HTMLButtonElement).disabled).toBe(true)
+    // Another recipient clears it.
+    fireEvent.change(screen.getByLabelText('Recipient'), { target: { value: '0x' + 'de'.repeat(20) } })
+    expect(screen.queryByText(/This recipient already has a live budget/)).toBeNull()
+    expect((screen.getByRole('button', { name: 'Review changes' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it("target_slot_occupied from the backend: says the RECIPIENT is the problem, never that this budget changed", async () => {
+    const { onBudgetChange } = renderModal()
+    mockEditBudget.mockResolvedValue({ ok: false, reason: 'target_slot_occupied', existingDelegationHash: TARGET_HASH })
+    fireEvent.change(screen.getByLabelText('Recipient'), { target: { value: OTHER } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    await waitFor(() => expect(screen.getByText('This recipient already has a budget')).toBeInTheDocument())
+    expect(
+      screen.getByText(
+        'The recipient you chose already has a live budget for this token, so nothing was changed and this budget is still the same. Edit that budget instead, or pick another recipient.',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('This budget has changed')).toBeNull()
+    expect(onBudgetChange).toHaveBeenCalled()
+    // The way back is the form, with the recipient field to change.
+    fireEvent.click(screen.getByRole('button', { name: 'Pick another recipient' }))
+    expect(screen.getByLabelText('Recipient')).toHaveValue(OTHER)
+  })
+
+  it('a recipient change says the old budget keeps working in Haven until it is stopped — review and unfinished screens', async () => {
+    renderModal()
+    fireEvent.change(screen.getByLabelText('Recipient'), { target: { value: OTHER } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    expect(
+      screen.getByText(/The old budget pays a different recipient, so it keeps working, in Haven and outside it, until it is stopped\./),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/the old budget can still be spent outside Haven/)).toBeNull()
+
+    mockEditBudget.mockResolvedValue({
+      ok: false,
+      reason: 'revoke_unfinished',
+      newDelegationHash: '0x' + 'be'.repeat(32),
+      unstoppedDelegationHashes: [OLD_HASH],
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    await screen.findByRole('button', { name: 'Stop old budget' })
+    expect(
+      screen.getByText(/budget pays a different recipient, so it keeps working, in Haven and outside it, until it is stopped\./),
+    ).toBeInTheDocument()
   })
 })

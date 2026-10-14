@@ -20,6 +20,6 @@
     "ts-status-liveness": 2
   },
   "packages/sdk/src/account-reads.ts": {
-    "ts-status-liveness": 2
+    "ts-status-liveness": 1
   }
 }

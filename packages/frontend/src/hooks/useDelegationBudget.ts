@@ -20,6 +20,7 @@ import { useVisiblePolling } from '@/hooks/useVisiblePolling'
 import { useActiveSigner, hasPasskeyCredentialOnDevice, credentialIdFromKeyId } from '@/lib/signer'
 import { isPasskeyCancellation } from '@/lib/passkeyErrors'
 import type { AccountSigners, DelegationMessage } from '@/lib/delegationPasskeySigner'
+import { findOccupyingBudget, sameSlot, slotOccupantHashesForEdit, type BudgetSlot } from '@/lib/budget-slot'
 
 /**
  * Which signer to use for THIS device, given the account's signer set (the
@@ -184,8 +185,62 @@ export interface GrantInput {
  * agent's budgets before trying again, and never name Haven as the approver.
  */
 export type BudgetResult =
-  | { ok: true }
+  | {
+      ok: true
+      /**
+       * `revoke` only (#3933): the per-hash revoke answered "Already revoked"
+       * (409) — the row was already revoked, or disabled on-chain and healed
+       * by the route. The goal of a Stop is met; nothing was signed.
+       */
+      alreadyStopped?: boolean
+    }
   | { ok: false; reason: 'cancelled' | 'failed' | 'too_many' | 'refused' | 'unconfirmed'; detail?: string }
+
+/**
+ * #3933: the (token, recipient) slot already holds a live budget, so the
+ * backend refused a PLAIN grant into it (409 `BUDGET_SLOT_OCCUPIED`, at build
+ * or at activate; nothing was written). Activating it would have retired the
+ * old budget in Haven's mirror only, leaving it enabled on-chain. The way
+ * forward is the edit flow (`editBudget`), which names the old budget as
+ * `replaces` and then stops it. `existingDelegationHash` is the backend's
+ * `existing_delegation_hash`, the budget to edit, or null when the answer did
+ * not carry one. Mapped from the 409's `error_code`, never from its sentence.
+ *
+ * Only `grant` returns this, so it is its own type rather than another
+ * `BudgetResult` reason: `revoke`/`revokeAll` callers never see it.
+ */
+export type SlotOccupiedResult = {
+  ok: false
+  reason: 'slot_occupied'
+  existingDelegationHash: string | null
+  detail?: string
+}
+
+export type GrantResult = BudgetResult | SlotOccupiedResult
+
+/** The `error_code` the delegation build and activate routes answer for an occupied slot (#3933). */
+export const BUDGET_SLOT_OCCUPIED = 'BUDGET_SLOT_OCCUPIED'
+
+/**
+ * #3933: read the occupied-slot refusal off a thrown API error, by its
+ * `error_code` — never by message text. Duck-typed on purpose (`body` is the
+ * `ApiRequestError` escape hatch, `lib/api.ts`): the test suites mock
+ * `@/lib/api` without the class, and an `instanceof` against an undefined
+ * export would throw instead of answering.
+ */
+function slotOccupiedFrom(err: unknown): SlotOccupiedResult | null {
+  if (!err || typeof err !== 'object') return null
+  const body = (err as { body?: unknown }).body
+  if (!body || typeof body !== 'object') return null
+  const b = body as { error_code?: unknown; existing_delegation_hash?: unknown; error?: unknown }
+  if (b.error_code !== BUDGET_SLOT_OCCUPIED) return null
+  return {
+    ok: false,
+    reason: 'slot_occupied',
+    existingDelegationHash: typeof b.existing_delegation_hash === 'string' ? b.existing_delegation_hash : null,
+    ...(typeof b.error === 'string' && b.error.trim() ? { detail: b.error } : {}),
+  }
+}
 
 /**
  * The edit-in-place result (#3166). Distinct from `BudgetResult` because the
@@ -201,10 +256,58 @@ export type BudgetResult =
  * - `oldDelegationRevoked` is false in the one success-shaped race where the
  *   old grant was already revoked before the flow asked for the stop
  *   signature — the goal is met, so this still reports `ok: true`.
+ * - `slot_occupied` (#3933) — the budget being edited is no longer the slot's
+ *   live budget (another edit or a re-key replaced it since the modal
+ *   opened), so the backend refused the `replaces` it was sent. Nothing was
+ *   written; the owner edits the current budget instead.
+ * - `target_slot_occupied` (#3933 review finding 2) — the edit changes the
+ *   recipient, and the NEW (token, recipient) slot already holds a live
+ *   budget. The budget being edited is untouched; the owner edits that other
+ *   budget instead, or picks another recipient. Decided by comparing slots
+ *   (the edit moved), never by the refusal's sentence; caught before any
+ *   signature when the loaded list shows the occupant.
+ * - `revoke_unfinished` carries `unstoppedDelegationHashes`: the old budget's
+ *   rows whose Stop did not finish, in the order the flow would sign them. A
+ *   budget carried as a re-key pair is two rows, and each needs its own Stop.
  */
 export type EditBudgetResult =
-  | { ok: true; newDelegationHash: string; oldDelegationRevoked: boolean }
-  | { ok: false; reason: 'cancelled' | 'failed' | 'refused' | 'revoke_unfinished' | 'unconfirmed'; detail?: string; newDelegationHash?: string }
+  | {
+      ok: true
+      newDelegationHash: string
+      oldDelegationRevoked: boolean
+      /**
+       * #3933: the replacement finished was an earlier, unconfirmed attempt
+       * that landed with OTHER limits — the live budget carries those, not
+       * the ones last asked for. Set by the modal's finish-Stop, carried
+       * from the `revoke_unfinished` that reported it.
+       */
+      earlierLimits?: true
+    }
+  | {
+      ok: false
+      reason:
+        | 'cancelled'
+        | 'failed'
+        | 'refused'
+        | 'revoke_unfinished'
+        | 'unconfirmed'
+        | 'slot_occupied'
+        | 'target_slot_occupied'
+      detail?: string
+      newDelegationHash?: string
+      /** `slot_occupied` / `target_slot_occupied`: the live budget in the slot the grant was refused for. */
+      existingDelegationHash?: string | null
+      /**
+       * `revoke_unfinished` only: an earlier, unconfirmed attempt of this
+       * edit landed with OTHER limits than the ones now asked for — the live
+       * budget carries the earlier limits (#3933 round 4/5).
+       */
+      earlierLimits?: true
+      /** `revoke_unfinished` only: whether the edit that left it MOVED the recipient (the old rows then still pay, in Haven too). */
+      moved?: boolean
+      /** `revoke_unfinished` only: the old budget's rows still to Stop. */
+      unstoppedDelegationHashes?: string[]
+    }
 
 /**
  * #3930: the slot identity the retry guard keys on — the SAME (token,
@@ -325,6 +428,20 @@ export function useDelegationBudget(
   // minting a new one, or the retry adds a second enabled grant. Cleared when
   // the agent changes (the reset effect below): hashes are agent-scoped.
   const lastAttempted = useRef(new Map<string, string>())
+  // #3933: an `unconfirmed` EDIT remembers its own attempt, keyed by the
+  // budget it edits — never by slot, so a landed attempt is only ever taken
+  // for the edit of THAT budget (round-3 review: a slot-keyed memory let an
+  // edit of an unrelated budget, or of the landed grant itself, adopt the
+  // attempt and Stop the wrong rows). It holds the old rows the attempt was
+  // going to Stop: on the retry that finds the grant landed, the loaded list
+  // has moved on — the new grant is the slot's active row and the old rows
+  // read `replaced` — so recomputing the set from it would Stop the owner's
+  // NEW budget and miss a re-key's steady half. `inputKey` is the limits the
+  // attempt asked for: a retry asking for different ones must not report
+  // them as live. No slot-keyed `lastAttempted` entry is written for an edit:
+  // since #3933 the backend refuses a second grant into a slot whose live
+  // rows it does not name, so a late commit cannot mint a second budget.
+  const editAttempts = useRef(new Map<string, { newHash: string; stopSet: string[]; inputKey: string; moved: boolean }>())
   // The ACCOUNT address scopes the signer lookup (#1079): without it the
   // stored-passkey/hybrid branches are unreachable and `ready` would depend
   // on any globally-connected wallet with no per-account check.
@@ -454,6 +571,29 @@ export function useDelegationBudget(
     [readAttemptedHash],
   )
 
+  /**
+   * #3933: the old rows an edit of `oldDelegationHash` will Stop — the set an
+   * `unconfirmed` edit of this budget remembered (the list may already show
+   * its new grant as the slot's live row), otherwise the slot's live rows.
+   * The review copy's signature count and the Stop loop read the same set.
+   */
+  const editStopSet = useCallback(
+    (oldDelegationHash: string, oldSlot: BudgetSlot, nowSec: number): string[] =>
+      editAttempts.current.get(oldDelegationHash.toLowerCase())?.stopSet ??
+      slotOccupantHashesForEdit(budgets, oldDelegationHash, oldSlot, nowSec),
+    [budgets],
+  )
+
+  /**
+   * #3933: whether `hash` is the grant an `unconfirmed` edit of
+   * `oldDelegationHash` made — that edit's own attempt, not another budget.
+   */
+  const isOwnAttemptedGrant = useCallback(
+    (hash: string, oldDelegationHash: string): boolean =>
+      editAttempts.current.get(oldDelegationHash.toLowerCase())?.newHash.toLowerCase() === hash.toLowerCase(),
+    [],
+  )
+
   useEffect(() => {
     if (!enabled) {
       setBudgets(null)
@@ -494,6 +634,7 @@ export function useDelegationBudget(
     // agent's hash (it would come back absent and the guard would just
     // fall through, but the state is stale regardless).
     lastAttempted.current.clear()
+    editAttempts.current.clear()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately NOT `enabled`/`chainId`: the effect above already resets on enable/disable; chainId is not part of this hook's read scope (see comment above).
   }, [agentId])
 
@@ -512,7 +653,7 @@ export function useDelegationBudget(
   const signingPath = pickSigningPath(signers, signer?.type === 'eoa' ? signer.address : null)
 
   const grant = useCallback(
-    async (input: GrantInput): Promise<BudgetResult> => {
+    async (input: GrantInput): Promise<GrantResult> => {
       setBusy(true)
       try {
         // #3930 retry guard — BEFORE any /build. The previous attempt for this
@@ -534,6 +675,14 @@ export function useDelegationBudget(
             ...(input.merchantSlug ? { merchant_slug: input.merchantSlug } : {}),
           })
         } catch (err) {
+          // #3933: the slot already holds a live budget — a plain grant is
+          // refused before anything is signed. Refresh the list so the caller
+          // can find `existingDelegationHash` in it and route to the edit flow.
+          const occupied = slotOccupiedFrom(err)
+          if (occupied) {
+            await reload()
+            return occupied
+          }
           // Named build refusals (revoked agent, re-key in flight, off-rail
           // account, and — #3331 — the merchant-locked refusals) carry the
           // backend's own sentence; pass it through instead of the generic
@@ -559,6 +708,15 @@ export function useDelegationBudget(
         try {
           await api.post(`/agents/${agentId}/delegations/${built.delegation_hash}/activate`, { signature })
         } catch (err) {
+          // #3933: the slot filled between build and activate. The route
+          // refused under the agent lock and wrote nothing — a DEFINITE
+          // answer, so no re-read and no remembered attempt (remembering this
+          // still-pending hash would turn every retry into `unconfirmed`).
+          const occupied = slotOccupiedFrom(err)
+          if (occupied) {
+            await reload()
+            return occupied
+          }
           // #3930: the response was lost — the activation may still have
           // committed (the counterfactual deploy is the slow path). Re-read
           // the outcome BEFORE reporting anything: a false `failed` invites a
@@ -589,6 +747,50 @@ export function useDelegationBudget(
       }
     },
     [agentId, signingPath, reload, signer, signers, guardRetriedSlot, readAttemptedHash],
+  )
+
+  // #3933: one Stop of the edit flow — the per-hash revoke prepare, ONE owner
+  // signature, submit. `already` is the route's already-done 409 (revoked, or
+  // disabled on-chain and healed): the goal is met, nothing was signed.
+  // Anything else short of a submitted Stop is `unfinished` — never thrown,
+  // because the new grant is already live and only the partial state is true.
+  const stopOldDelegation = useCallback(
+    async (hash: string): Promise<'signed' | 'already' | 'unfinished'> => {
+      let prep: RevokePrepare
+      try {
+        prep = await api.post<RevokePrepare>(`/agents/${agentId}/delegations/${hash}/revoke`, {
+          signature_scheme: signingPath === 'passkey' ? 'webauthn_userop' : 'eip712_userop',
+        })
+      } catch (err) {
+        return isAlreadyRevoked(err) ? 'already' : 'unfinished'
+      }
+      let signature: string
+      try {
+        if (prep.signature_scheme === 'webauthn_userop') {
+          if (!signers) return 'unfinished'
+          // ONE passkey ceremony — the account signs its own UserOperation.
+          const { signUserOpWithPasskey } = await import('@/lib/delegationPasskeySigner')
+          signature = await signUserOpWithPasskey(signers, prep.user_operation as Record<string, unknown>)
+        } else {
+          if (!signer || !prep.signing_payload) return 'unfinished'
+          signature = await signTyped(signer, prep.signing_payload)
+        }
+      } catch {
+        // A cancelled or failed STOP signature is not the generic outcome:
+        // the new grant is already live.
+        return 'unfinished'
+      }
+      try {
+        await api.post(`/agents/${agentId}/delegations/${hash}/revoke/submit`, {
+          signature,
+          user_operation: prep.user_operation,
+        })
+      } catch {
+        return 'unfinished'
+      }
+      return 'signed'
+    },
+    [agentId, signer, signers, signingPath],
   )
 
   // ── Edit budget limits in place (#3166) ──────────────────────────────────
@@ -622,24 +824,118 @@ export function useDelegationBudget(
   // - the old budget was ALREADY revoked by the time the stop signature is
   //   asked for (the same revoke-all race, other side): the goal — old grant
   //   dead — is already met, so the flow reports success.
+  // - #3933: build and activate both carry `replaces`. The backend refuses a
+  //   plain grant into an occupied slot (409 BUDGET_SLOT_OCCUPIED), because
+  //   only this composition stops the old grant on-chain. If `replaces` no
+  //   longer names the slot's live budgets (one was replaced since the modal
+  //   opened), the same 409 travels as `slot_occupied`, and nothing was
+  //   written.
+  // - #3933 review finding 1: `replaces` names EVERY live row in the edited
+  //   budget's slot, not only `oldDelegationHash` — a budget carried through
+  //   "Replace signing key" is a carry/steady pair, activate marks every
+  //   active row in the slot `replaced`, and the backend accepts the edit only
+  //   when `replaces` names exactly those rows. The Stop step then stops each
+  //   of them, one owner signature apiece, so the set stopped is the set
+  //   swept. A Stop that does not finish ends the flow in `revoke_unfinished`
+  //   with the rows still to stop.
+  // - #3933 review finding 2: an edit that changes the recipient MOVES to
+  //   another slot. Activate's sweep is scoped to the new slot, so it retires
+  //   nothing in the old one: the edited budget stays `active` (Haven still
+  //   uses it) until its Stop lands. So a move sends no `replaces` (the new
+  //   slot must be empty, and the backend refuses it otherwise), and then
+  //   Stops the old slot's rows exactly as a same-slot edit does. If the new
+  //   slot already holds a live budget the result is `target_slot_occupied` —
+  //   before any signature when the loaded list shows it, or from the
+  //   backend's 409 when the list was stale.
   const editBudget = useCallback(
     async (
       oldDelegationHash: string,
       input: GrantInput,
-      opts: { expiresAt?: number } = {},
+      opts: {
+        expiresAt?: number
+        /**
+         * The edited budget's (token, recipient) slot. Read from the loaded
+         * list when omitted, and assumed to be the new grant's slot when the
+         * list does not hold the row either.
+         */
+        oldSlot?: BudgetSlot
+      } = {},
     ): Promise<EditBudgetResult> => {
       setBusy(true)
       try {
-        // #3930 retry guard — BEFORE any /build, exactly as in `grant`. When
-        // the remembered attempt has landed, the new grant IS the remembered
-        // hash: skip build/sign/activate entirely and go straight to the Stop
-        // step, as if the lost POST had just returned.
-        const guard = await guardRetriedSlot(input)
-        let newHash: string
-        if (guard.outcome === 'landed') {
-          newHash = guard.hash
-        } else {
-          if (guard.outcome === 'unconfirmed') return { ok: false, reason: 'unconfirmed' }
+        const nowSec = Math.floor(Date.now() / 1000)
+        const newSlot: BudgetSlot = { tokenAddress: input.tokenAddress, recipientAddress: input.recipientAddress }
+        const oldRow = (budgets ?? []).find((b) => b.delegation_hash.toLowerCase() === oldDelegationHash.toLowerCase())
+        const oldSlot: BudgetSlot =
+          opts.oldSlot ??
+          (oldRow ? { tokenAddress: oldRow.token_address, recipientAddress: oldRow.recipient_address } : newSlot)
+        const moved = !sameSlot(oldSlot, newSlot)
+        const editKey = oldDelegationHash.toLowerCase()
+        const inputKey = JSON.stringify([
+          slotKey(input.tokenAddress, input.recipientAddress),
+          input.budgetAtomic,
+          input.periodSeconds,
+          input.merchantSlug ?? null,
+          opts.expiresAt ?? null,
+        ])
+        // A 409 BUDGET_SLOT_OCCUPIED is about the slot the grant goes INTO:
+        // for a move, that is the target slot, not the edited budget.
+        const occupiedResult = (err: unknown): EditBudgetResult | null => {
+          const occupied = slotOccupiedFrom(err)
+          if (!occupied) return null
+          return moved ? { ...occupied, reason: 'target_slot_occupied' } : occupied
+        }
+
+        // #3930 retry, for THIS budget's edit only — BEFORE any /build. When
+        // the remembered attempt has landed, the new grant IS that hash: skip
+        // build/sign/activate and go straight to the Stop step with the set
+        // the attempt computed, as if the lost POST had just returned.
+        let newHash: string | null = null
+        let oldBudgetHashes: string[] | null = null
+        const attempt = editAttempts.current.get(editKey)
+        if (attempt) {
+          const reread = await readAttemptedHash(attempt.newHash)
+          if (rereadLanded(reread)) {
+            editAttempts.current.delete(editKey)
+            // The earlier attempt replaced this budget: nothing new is built,
+            // and its Stops are owed whatever this call asks for (the owner
+            // signed that replacement; its old rows are `replaced` — or, for
+            // a move, still active — and enabled on-chain). They are NOT
+            // signed in this click: the review step described a grant, not
+            // Stops (#3933 round 5). The result is the partial state, so the
+            // modal names what is live and offers the Stop, saying how many
+            // signatures it takes, before any is asked for.
+            await reload()
+            return {
+              ok: false,
+              reason: 'revoke_unfinished',
+              newDelegationHash: attempt.newHash,
+              unstoppedDelegationHashes: attempt.stopSet,
+              moved: attempt.moved,
+              ...(attempt.inputKey !== inputKey ? { earlierLimits: true as const } : {}),
+            }
+          } else if ((reread.kind === 'row' && reread.status === 'pending') || reread.kind === 'read_failed') {
+            return { ok: false, reason: 'unconfirmed' }
+          } else {
+            // Revoked or gone: the attempt is dead, and the old budget is what
+            // it was. Build fresh from the current list.
+            editAttempts.current.delete(editKey)
+          }
+        }
+        if (newHash === null) {
+          // The old budget's rows: what a same-slot edit names as `replaces`
+          // (and activate sweeps), and what every edit then Stops.
+          const stopSet = slotOccupantHashesForEdit(budgets, oldDelegationHash, oldSlot, nowSec)
+          oldBudgetHashes = stopSet
+          const replaces = moved ? {} : { replaces: stopSet }
+          if (moved) {
+            // Finding 2's pre-check: the chosen recipient already has a live
+            // budget for this token. Nothing is built or signed.
+            const occupant = findOccupyingBudget(budgets, newSlot, nowSec)
+            if (occupant) {
+              return { ok: false, reason: 'target_slot_occupied', existingDelegationHash: occupant.delegation_hash }
+            }
+          }
           let built: BuildResponse
           try {
             built = await api.post<BuildResponse>(`/agents/${agentId}/delegations/build`, {
@@ -654,8 +950,16 @@ export function useDelegationBudget(
               // wired an `input.merchantSlug` through.
               ...(input.merchantSlug ? { merchant_slug: input.merchantSlug } : {}),
               ...(opts.expiresAt !== undefined ? { expires_at: opts.expiresAt } : {}),
+              // #3933: the edit flow's declaration. Without it the backend
+              // refuses a grant into this (occupied) slot; with it, the route
+              // checks it names exactly the slot's live budgets.
+              ...replaces,
             })
           } catch (err) {
+            // #3933: `replaces` no longer names the slot's live budgets, or
+            // (a move) the target slot is occupied. Nothing was written.
+            const occupied = occupiedResult(err)
+            if (occupied) return occupied
             // The build refusals are named 409s the owner can act on — pass the
             // backend's own sentence through instead of a generic failure.
             if (err instanceof Error && err.message.trim()) {
@@ -663,7 +967,8 @@ export function useDelegationBudget(
             }
             throw err
           }
-          newHash = built.delegation_hash
+          const builtHash = built.delegation_hash
+          newHash = builtHash
           let grantSignature: string
           if (signingPath === 'passkey' && signers) {
             // ONE passkey ceremony — the kit signs the delegation itself; the
@@ -678,17 +983,25 @@ export function useDelegationBudget(
             grantSignature = await signTyped(signer, built.signing_payload)
           }
           try {
-            await api.post(`/agents/${agentId}/delegations/${newHash}/activate`, {
+            await api.post(`/agents/${agentId}/delegations/${builtHash}/activate`, {
               signature: grantSignature,
+              // #3933: named on activate too — the route re-checks it under
+              // the agent lock, because the slot can change after build.
+              ...replaces,
             })
           } catch (err) {
+            // #3933: refused under the lock, nothing written — a definite
+            // answer, never the #3930 re-read (which would see `pending` and
+            // remember the hash, turning every retry into `unconfirmed`).
+            const occupied = occupiedResult(err)
+            if (occupied) return occupied
             // #3930: the response was lost — re-read before reporting anything,
             // exactly as `grant` does. The new grant may already be live (and
             // the old one already `replaced` in the mirror): telling the owner
             // "nothing was granted" here invites a retry that mints a second
             // enabled grant.
             if (cancelled(err)) return { ok: false, reason: 'cancelled' }
-            const reread = await readAttemptedHash(newHash)
+            const reread = await readAttemptedHash(builtHash)
             if (rereadLanded(reread)) {
               // The new grant is live — fall through to the Stop step as if
               // the POST had returned.
@@ -701,73 +1014,54 @@ export function useDelegationBudget(
               // re-read itself failed: the outcome is UNKNOWN — remember the
               // hash so the retry re-reads it before building. NEVER "nothing
               // was granted".
-              lastAttempted.current.set(slotKey(input.tokenAddress, input.recipientAddress), newHash)
+              editAttempts.current.set(editKey, { newHash: builtHash, stopSet, inputKey, moved })
               return { ok: false, reason: 'unconfirmed' }
             }
           }
         }
-        // The new grant is live and the old one is retired in the mirror.
-        // Kill it on-chain with ONE more owner signature.
-        let prep: RevokePrepare
-        try {
-          prep = await api.post<RevokePrepare>(
-            `/agents/${agentId}/delegations/${oldDelegationHash}/revoke`,
-            { signature_scheme: signingPath === 'passkey' ? 'webauthn_userop' : 'eip712_userop' },
-          )
-        } catch (err) {
-          // "Already revoked" means the goal is met (a concurrent revoke-all
-          // or the reconciliation heal got there first) — not a failure.
-          if (err instanceof Error && /already revoked/i.test(err.message)) {
-            await reload()
-            return { ok: true, newDelegationHash: newHash, oldDelegationRevoked: false }
-          }
-          // The new grant is LIVE; only the on-chain stop of the old one is
-          // unfinished. Report the partial state honestly so the UI can tell
-          // the owner to finish it from the budget card's Stop button.
-          return { ok: false, reason: 'revoke_unfinished', newDelegationHash: newHash }
-        }
-        let revokeSignature: string
-        try {
-          if (prep.signature_scheme === 'webauthn_userop') {
-            if (!signers) {
-              return { ok: false, reason: 'revoke_unfinished', newDelegationHash: newHash }
+        // The new grant is live and (same slot) the old rows are retired in
+        // the mirror. Kill each on-chain with ONE more owner signature apiece,
+        // stopping at the first that does not finish: the owner who cancels
+        // one Stop is not asked for the next one straight away.
+        const toStop = oldBudgetHashes ?? []
+        let signedAny = false
+        for (let i = 0; i < toStop.length; i++) {
+          const stop = await stopOldDelegation(toStop[i])
+          if (stop === 'unfinished') {
+            // The new grant is LIVE; only the on-chain stop of the old rows
+            // is unfinished. Report the partial state honestly so the UI can
+            // tell the owner to finish it, naming the rows still to stop.
+            return {
+              ok: false,
+              reason: 'revoke_unfinished',
+              newDelegationHash: newHash,
+              unstoppedDelegationHashes: toStop.slice(i),
+              moved,
             }
-            // ONE passkey ceremony — the account signs its own UserOperation.
-            const { signUserOpWithPasskey } = await import('@/lib/delegationPasskeySigner')
-            revokeSignature = await signUserOpWithPasskey(
-              signers,
-              prep.user_operation as Record<string, unknown>,
-            )
-          } else {
-            if (!signer || !prep.signing_payload) {
-              return { ok: false, reason: 'revoke_unfinished', newDelegationHash: newHash }
-            }
-            revokeSignature = await signTyped(signer, prep.signing_payload)
           }
-        } catch {
-          // A cancelled or failed STOP signature is NOT the generic outcome:
-          // the new grant is already live, so the partial state — not
-          // "nothing changed" — is what the owner must be told.
-          return { ok: false, reason: 'revoke_unfinished', newDelegationHash: newHash }
-        }
-        try {
-          await api.post(`/agents/${agentId}/delegations/${oldDelegationHash}/revoke/submit`, {
-            signature: revokeSignature,
-            user_operation: prep.user_operation,
-          })
-        } catch {
-          // Same partial-state shape: new grant live, old grant still to stop.
-          return { ok: false, reason: 'revoke_unfinished', newDelegationHash: newHash }
+          if (stop === 'signed') signedAny = true
         }
         await reload()
-        return { ok: true, newDelegationHash: newHash, oldDelegationRevoked: true }
+        // `oldDelegationRevoked: false` only when every row was ALREADY
+        // stopped (a concurrent revoke-all or the reconciliation heal got
+        // there first) — the goal is met, nothing was signed for it.
+        return { ok: true, newDelegationHash: newHash, oldDelegationRevoked: signedAny }
       } catch (err) {
         return { ok: false, reason: cancelled(err) ? 'cancelled' : 'failed' }
       } finally {
         setBusy(false)
       }
     },
-    [agentId, signingPath, reload, signer, signers, guardRetriedSlot, readAttemptedHash],
+    [
+      agentId,
+      budgets,
+      signingPath,
+      reload,
+      signer,
+      signers,
+      readAttemptedHash,
+      stopOldDelegation,
+    ],
   )
 
   const revoke = useCallback(
@@ -777,9 +1071,23 @@ export function useDelegationBudget(
         // Tell the backend which signer this device will use — the prepared
         // op's gas estimation is shaped by the signature kind, and the server
         // cannot know what is available here.
-        const prep = await api.post<RevokePrepare>(`/agents/${agentId}/delegations/${delegationHash}/revoke`, {
-          signature_scheme: signingPath === 'passkey' ? 'webauthn_userop' : 'eip712_userop',
-        })
+        let prep: RevokePrepare
+        try {
+          prep = await api.post<RevokePrepare>(`/agents/${agentId}/delegations/${delegationHash}/revoke`, {
+            signature_scheme: signingPath === 'passkey' ? 'webauthn_userop' : 'eip712_userop',
+          })
+        } catch (err) {
+          // #3933: "Already revoked" is the route's already-done answer — the
+          // row is revoked, or the chain shows it disabled and the route
+          // healed the record. A Stop whose goal is met is finished, not
+          // failed: this is what makes the replaced-budget finish action safe
+          // on a row that was stopped out-of-band.
+          if (isAlreadyRevoked(err)) {
+            await reload()
+            return { ok: true, alreadyStopped: true }
+          }
+          throw err
+        }
         let signature: string
         if (prep.signature_scheme === 'webauthn_userop') {
           if (!signers) return { ok: false, reason: 'failed' }
@@ -865,6 +1173,8 @@ export function useDelegationBudget(
     budgets,
     grant,
     editBudget,
+    editStopSet,
+    isOwnAttemptedGrant,
     revoke,
     revokeAll,
     busy,
@@ -887,6 +1197,22 @@ export function useDelegationBudget(
     signersError,
     reloadSigners,
   }
+}
+
+/** The `error_code` the per-hash revoke prepare answers when the row is already revoked (#3933). */
+export const DELEGATION_ALREADY_REVOKED = 'DELEGATION_ALREADY_REVOKED'
+
+/**
+ * #3933: the per-hash revoke prepare's already-done 409
+ * (`routes/agent-delegations.ts`) — the row is revoked, or the chain shows it
+ * disabled and the route healed the record. Read by its `error_code`, never by
+ * message text; duck-typed for the same reason as `slotOccupiedFrom`.
+ */
+function isAlreadyRevoked(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false
+  const body = (err as { body?: unknown }).body
+  if (!body || typeof body !== 'object') return false
+  return (body as { error_code?: unknown }).error_code === DELEGATION_ALREADY_REVOKED
 }
 
 function cancelled(err: unknown): boolean {

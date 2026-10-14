@@ -62,7 +62,7 @@
 // and a planted `UPDATE agent_delegations SET status = 'active'` must stay
 // green (the self-test pins it).
 //
-// EXCLUSION IS BY EXPORT NAME, NOT BY FILE. The ten named predicate
+// EXCLUSION IS BY EXPORT NAME, NOT BY FILE. The named predicate
 // definitions from slices A/B/C (NAMED_PREDICATE_EXPORTS below) have their
 // declaration bodies blanked before scanning, wherever they live — so a NEW
 // inline copy inside `delegation-budgets.ts` itself is still counted, while
@@ -157,7 +157,7 @@ const BUDGET_TYPE_RE =
 // window (`delegationIsLive(b)`) is budget context for the same reason a
 // field reference is.
 const NAMED_CALL_RE =
-  /\b(delegationIsLive|subBudgetStillRunning|isOpenSubBudget|isLiveTaskBudget)\(\s*/
+  /\b(delegationIsLive|subBudgetStillRunning|isOpenSubBudget|isLiveTaskBudget|isReplacedButEnabled)\(\s*/
 
 export const NAMED_PREDICATE_EXPORTS = [
   // Slice A (#3920) — delegation spendable / still-enabled SQL builders.
@@ -173,6 +173,12 @@ export const NAMED_PREDICATE_EXPORTS = [
   // Slice C (#3922) — the client-side named copies.
   'delegationIsLive',
   'subBudgetStillRunning',
+  // #3933 — the one client copy of "replaced in Haven, still enabled
+  // on-chain": `replaced` and unexpired (`lib/budget-slot.ts`). Not a
+  // liveness restatement — no slice predicate answers it (`is_live` is
+  // false for a replaced row, `stillEnabledDelegationSql` also counts
+  // active and pending) — so it is named once here like the others.
+  'isReplacedButEnabled',
 ]
 
 // ── The tiny JS scanner ──────────────────────────────────────────────────────

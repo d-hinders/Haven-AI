@@ -1464,6 +1464,33 @@ making it unrecoverable.
   time is by construction the `delegate` field already inside `delegation_json`,
   so persisting it would compare a value against itself. Availability hardening
   only — no authority, custody or signature boundary moves.
+- **A plain grant cannot replace a live one (#3933).** The activation sweep
+  above marks the slot's previous grants `replaced` in the database only; each
+  stays enabled on-chain until the owner's Stop lands — redeemable outside
+  Haven by the agent's delegate key, or by a sub-budget grantee whose chain
+  ends in it. Only the edit flow (grant, then Stop) ever submitted that Stop.
+  So since #3933 `build` and `activate` refuse a grant into a (token,
+  recipient) slot that holds a live budget — `active` and unexpired,
+  `spendableDelegationSql` without its started-window clause — with 409
+  `BUDGET_SLOT_OCCUPIED` and the budget to edit (`existing_delegation_hash`,
+  plus every live row in `occupying_delegation_hashes`), unless `replaces`
+  names exactly the slot's live rows — every one, and nothing else. A
+  re-keyed agent's budget is a carry/steady pair, both live in one slot and
+  both swept, so naming one half is refused: the set the edit Stops is the
+  set activate sweeps. Activate decides under the agent lock, so a client
+  cannot get a silent replace by omitting the field, naming part of the slot,
+  or racing a second activation. An edit that changes the recipient is a new
+  grant into the (empty) target slot — no `replaces`, no sweep — followed by
+  the Stop of every row of the old slot; the old budget stays `active`, and
+  shown as such, until that Stop lands. A client that names the right set
+  and never Stops still leaves the old rows enabled; the server cannot
+  enforce the Stop, which is why the finish action exists. The invariant (owner-confirmed, 2026-10-14): once an owner flow
+  that replaces a budget completes, at most one unexpired budget delegation
+  per slot is enabled on-chain, and a Stop that did not land is shown with a
+  way to finish. It is per slot: it does not bound open-plus-pinned or
+  shared-payTo authority. Grants left enabled by replaces before #3933 stay
+  enabled until the owner stops them; the agent page flags any `replaced`,
+  unexpired row with that finish action.
 
 Two honest limits of the mechanism (review-noted): the signer count is
 **DB-sourced** — an owner can change the signer set directly on-chain without

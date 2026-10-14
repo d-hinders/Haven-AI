@@ -192,16 +192,24 @@ for the modal's own shape.
   pinned to the same address share one `(agent, token, recipient)` slot —
   and so does a merchant-locked budget pinned to a DIFFERENT merchant's payTo
   that happens to land in the same slot (a shared address, or an address a
-  merchant later stops using and another later takes up). Activating any
-  grant in that slot replaces whichever ACTIVE row is already there: they
-  carry the same on-chain authority, and two live grants in one slot would
-  make selection ambiguous. Activating a plain pinned budget to a merchant's
-  payTo therefore replaces that merchant's budget, and drops its merchant
-  label. The fund-merchant modal's review step warns about this before the
-  owner signs — a warning fires whichever kind of live (active and unexpired,
-  #3922) row already occupies the slot (plain, locked to this merchant, or
-  locked to another merchant),
-  naming whichever one it is. A budget for THIS merchant in a *different*
+  merchant later stops using and another later takes up). A slot holds ONE
+  live budget (active and unexpired — the wire's `is_live`, #3922): they
+  carry the same on-chain authority, and two live grants
+  in one slot would make selection ambiguous. Since #3933 a new budget
+  cannot be *granted* into a slot that already holds a live one — build and
+  activate refuse it (409 `BUDGET_SLOT_OCCUPIED`), because the activation's
+  database sweep alone would leave the old delegation enabled on-chain. The
+  only way to replace it is the edit flow, which grants the new budget
+  naming every live row of the old one as `replaces` (a re-keyed agent's
+  budget is two rows) and then stops each on-chain (open task and
+  sub-budgets carved from it end with it). So funding a merchant
+  whose payTo already holds a live budget — plain, locked to this merchant,
+  or locked to another merchant — opens that budget's edit instead of a new
+  grant, and the review step names which kind of budget it is and that the
+  old one is stopped. The edit opened from Fund labels the new budget for
+  THIS merchant; the agent page's Edit keeps the row's own label. Only a
+  direct API caller can still replace a merchant's budget with a plain
+  pinned one, which drops its merchant label. A budget for THIS merchant in a *different*
   token, or one still pinned to a payTo the merchant has since rotated away
   from (`stale`, below), is a *different* slot and survives with no warning.
 - **Editing one in place (#3166's REPLACE composition) — only a `current`

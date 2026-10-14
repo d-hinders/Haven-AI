@@ -235,6 +235,36 @@ describe('budget grant/revoke (#2539)', () => {
     expect(api.calls).toEqual([])
   })
 
+  // #3933: a live budget already holds the slot. The build is refused with a
+  // code; the CLI says to edit that budget and carries the code in --json.
+  it('an occupied slot is refused with the edit-it hint, exit 4, and the code in --json', async () => {
+    const OLD = '0x' + 'cd'.repeat(32)
+    const inner = grantApi()
+    const api = {
+      ...inner,
+      post: async <T,>(path: string) => {
+        if (path === '/agents/a1/delegations/build') {
+          throw new CliApiError(
+            'This agent already has a live budget for this token and recipient. Edit that budget instead.',
+            409,
+            { error: 'This agent already has a live budget for this token and recipient. Edit that budget instead.', error_code: 'BUDGET_SLOT_OCCUPIED', existing_delegation_hash: OLD },
+          )
+        }
+        return inner.post<T>(path)
+      },
+    } as unknown as CliApi
+    const human = harness({ makeApi: () => api })
+    const code = await run(['budget', 'grant', 'a1', '--amount', '25', '--token', 'USDC', '--period', '1440'], human.deps)
+    expect(code).toBe(4)
+    expect(human.err.join('\n')).toMatch(/Edit that budget on the agent's page/)
+    expect(human.err.join('\n')).toMatch(/stops the old one on-chain/)
+
+    const json = harness({ makeApi: () => api })
+    await run(['budget', 'grant', 'a1', '--amount', '25', '--token', 'USDC', '--period', '1440', '--json'], json.deps)
+    const out = JSON.parse([...json.out, ...json.err].find((l) => l.trim().startsWith('{')) ?? '{}')
+    expect(out.error).toMatchObject({ error_code: 'BUDGET_SLOT_OCCUPIED', existing_delegation_hash: OLD })
+  })
+
   it('does not advertise a one-time period for a budget grant', async () => {
     const { deps, err } = harness({ makeApi: () => grantApi() })
     await run(['budget', 'grant', 'a1', '--amount', '25', '--token', 'USDC'], deps)

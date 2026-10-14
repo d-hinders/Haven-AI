@@ -72,11 +72,11 @@ describe('BudgetGrantAction (#1073)', () => {
 
   it('the supplied failure sentence is rendered verbatim (#3895)', async () => {
     const grant = vi.fn().mockResolvedValue({ ok: false, reason: 'failed' })
-    renderAction({ grant, failureMessage: 'Haven could not approve the budget. Nothing changed — try again.' })
+    renderAction({ grant, failureMessage: 'The budget was not approved. Nothing changed — try again.' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
 
-    expect(await screen.findByText(/could not approve the budget/i)).toBeTruthy()
+    expect(await screen.findByText('The budget was not approved. Nothing changed — try again.')).toBeTruthy()
     expect(screen.queryByText(/could not set the budget/i)).toBeNull()
   })
 

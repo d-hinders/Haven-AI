@@ -104,8 +104,10 @@ describe('DelegationApprovalStep failed grant (#3895)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
 
-    const message = await screen.findByText(/could not approve the budget/i)
+    const message = await screen.findByText(/budget was not approved/i)
     expect(message.textContent).toMatch(/Nothing changed — try again\./)
     expect(message.textContent).not.toMatch(/set/i)
+    // The owner approves by signing; Haven is never named as the approver.
+    expect(message.textContent).not.toMatch(/haven/i)
   })
 })

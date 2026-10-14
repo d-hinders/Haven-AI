@@ -10,6 +10,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto'
 import Fastify, { type FastifyInstance } from 'fastify'
+import fastifyJwt from '@fastify/jwt'
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import db from '../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../infra/__tests__/helpers/db-harness.js'
@@ -33,6 +34,7 @@ vi.mock('../../modules/sub-budgets/index.js', async (importOriginal) => ({
 }))
 
 const subBudgetRoutes = (await import('../sub-budgets.js')).default
+const agentSubBudgetsOwnerRoutes = (await import('../agent-sub-budgets.js')).default
 
 const USDC_BASE = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
 const CHAIN_ID = 8453
@@ -60,12 +62,15 @@ describeDb('expired closing sub-budget keeps its signature path (#3923 P6)', () 
   let app: FastifyInstance
   let issuerKey = ''
   let issuerId = ''
+  let ownerId = ''
 
   beforeAll(async () => {
     process.env.DELEGATION_RAIL_BUNDLER_URL_8453 = 'http://127.0.0.1:1/bundler-stub'
     await initDbHarness()
     app = Fastify({ logger: false })
+    await app.register(fastifyJwt, { secret: process.env.JWT_SECRET ?? 'test-secret' })
     await app.register(subBudgetRoutes, { prefix: '/sub-budgets' })
+    await app.register(agentSubBudgetsOwnerRoutes, { prefix: '/agents' })
     await app.ready()
   })
   beforeEach(async () => {
@@ -98,6 +103,7 @@ describeDb('expired closing sub-budget keeps its signature path (#3923 P6)', () 
       ],
     )
     issuerId = agent.rows[0].id
+    ownerId = user.rows[0].id
   })
   afterEach(() => vi.clearAllMocks())
   afterAll(async () => {
@@ -171,6 +177,27 @@ describeDb('expired closing sub-budget keeps its signature path (#3923 P6)', () 
       expect(res.json().status).toBe('closed')
       expect(await statusOf(id)).toBe('closed')
     }
+    expect(mockPrepareAccountCall).not.toHaveBeenCalled()
+  })
+
+  const ownerHeaders = () => ({ authorization: `Bearer ${app.jwt.sign({ sub: ownerId, email: 'p6@test.dev' })}` })
+
+  it('owner DELETE, expired closing: NOT closed — agent_signs_close_then_submits, row stays closing, one prepare', async () => {
+    const id = await seedRow('closing', -60)
+    const res = await app.inject({ method: 'DELETE', url: `/agents/${issuerId}/sub-budgets/${id}`, headers: ownerHeaders() })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().status).not.toBe('closed')
+    expect(res.json().next_action).toBe('agent_signs_close_then_submits')
+    expect(mockPrepareAccountCall).toHaveBeenCalledTimes(1)
+    expect(await statusOf(id)).toBe('closing')
+  })
+
+  it('owner DELETE control: an expired open row closes trivially, no prepare', async () => {
+    const id = await seedRow('open', -60)
+    const res = await app.inject({ method: 'DELETE', url: `/agents/${issuerId}/sub-budgets/${id}`, headers: ownerHeaders() })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().status).toBe('closed')
+    expect(await statusOf(id)).toBe('closed')
     expect(mockPrepareAccountCall).not.toHaveBeenCalled()
   })
 })

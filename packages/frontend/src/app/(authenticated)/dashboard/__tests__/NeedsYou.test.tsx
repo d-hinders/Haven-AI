@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
@@ -219,6 +220,31 @@ describe('NeedsYou', () => {
     expect(onDismiss).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'no-backup:acct-1', kind: 'no-backup' }),
     )
+  })
+
+  // The card's list stays mounted at zero items: dismissing the LAST item
+  // must hand focus to the heading, not drop it to <body> with the vanished
+  // X. A caller that really removes the item, as the dashboard does.
+  it('moves focus to the heading when the dismiss empties the card', async () => {
+    const user = userEvent.setup()
+    function Caller() {
+      const [items, setItems] = useState<AttentionRuleItem[]>([
+        item({ id: 'no-backup:acct-1', kind: 'no-backup', title: 'Main has one way to approve payments' }),
+      ])
+      return (
+        <NeedsYou
+          items={items}
+          hasOverviewError={false}
+          onRetry={() => {}}
+          onDismiss={(dismissed) => setItems((prev) => prev.filter((i) => i.id !== dismissed.id))}
+          emptyState={{ kind: 'quiet', body: 'Nothing needs you right now.' }}
+        />
+      )
+    }
+    render(<Caller />)
+    await user.click(screen.getByRole('button', { name: 'Dismiss: Main has one way to approve payments' }))
+    expect(screen.queryByRole('list')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2, name: 'Needs attention' })).toHaveFocus()
   })
 
   // ── #3813: only "No backup signer" and "Needs setup" offer the dismiss ────

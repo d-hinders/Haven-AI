@@ -2338,7 +2338,7 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 >   (#3838). Discovery entries carry `funding_leg_expected` /
 >   `asset_transfer_methods` (#3839). `getAgent()`, `getAgentSummary()` and
 >   `getAllowances()` carry `supersededBy` (#3772). The derived EIP-3009 nonce
->   (#3888) and runbook wording (#3894) are also in range. All additive.
+>   (#3888) and runbook wording (#3892, PR #3894) are also in range. All additive.
 > - **Local MCP.** `haven_get_agent` / `haven_get_allowances` warn a replaced
 >   agent (#3772), discovery shows the funding-leg hint (#3839), and an
 >   out-of-gas `MERCHANT_NOT_READY` refusal names the operator top-up (#3834).

@@ -115,6 +115,14 @@ last-verified: "2026-10-14"
 > since #3855. Description-only, so the stale-client check stays silent by the
 > rule above; nothing else in this document moves.
 
+> **Re-verification (#3924, 2026-10-14, a new CI step beside the ratchets):**
+> `.github/workflows/ci.yml` gains one `backend_checks` step —
+> `npm run lint:budget-liveness` + its self-test, the shrink-only census over
+> inline budget-liveness predicates (#3924, epic #3919 slice E), wired beside
+> `lint:request-schemas`. It is a lint over source text: no tool is added,
+> renamed or re-shaped, no argument, schema, description or consent input
+> changes, and the version-skew and consent-hash contracts do not move.
+
 > **Re-verification (#3940, 2026-10-14, the job-summary how-to line):**
 > `scripts/ci/check-stale-client-compat.mjs`'s reconnect-required summary
 > line now points connected agents at this document's reconnect rule —

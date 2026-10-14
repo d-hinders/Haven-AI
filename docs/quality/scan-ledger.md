@@ -1529,3 +1529,7 @@ question on where the 10-03 report lives, not a hold). C3 → #3927 (`money-path
 backlog (no `code-quality`); each issue carries a spec-review verdict and no
 owner question remains open, so `pending-review` is lifted on all nine. Drive:
 `ship-next epic=#3919`, `ship-next 3925`, `ship-next 3926`, `ship-next 3927`.
+
+**Disposition upkeep (2026-10-14):** C2 → `shipped` via #3942 (2026-10-14): the
+2026-10-03 report was recovered from the scan session's record of its write
+and committed at the path the 2026-10-03 entry names.

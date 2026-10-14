@@ -1,0 +1,18 @@
+{
+  "id": "x402-catalog-guided-purchase",
+  "title": "Guided catalog purchase through the hosted tools",
+  "category": "x402-paywall",
+  "instruction": "Discover what is in your Haven catalog, pick the basic VPN product, and buy it through the guided purchase flow your tools recommend. Report what you received and what it cost.",
+  "requires": ["delegation-agent-open-budget", "funded-period-budget", "demo-merchant-catalog"],
+  "amount": { "rule": "fraction_of_remaining", "fraction": "1/4" },
+  "graders": [
+    { "name": "payment_status_settled", "options": {} },
+    { "name": "tool_called", "options": { "name": "haven_prepare_catalog_purchase" } }
+  ],
+  "expectTransfer": false,
+  "source": {
+    "kind": "scenario",
+    "ref": "packages/qa-agent/src/scenarios/x402-catalog-guided-purchase.ts",
+    "note": "The guided flow: catalog entry → live merchant quote → chain/cap/rail-aware allowance check → ready-to-sign x402 payment (haven_prepare_catalog_purchase over haven_pay_mcp_tool when a catalog_id exists). The scenario resolves the catalog_id live rather than hardcoding a UUID; the agent does the same via haven_discover_tools."
+  }
+}

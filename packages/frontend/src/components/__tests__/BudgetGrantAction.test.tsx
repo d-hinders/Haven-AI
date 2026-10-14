@@ -94,6 +94,30 @@ describe('BudgetGrantAction (#1073)', () => {
     await waitFor(() => expect(screen.queryByText(/No signature yet/)).not.toBeInTheDocument())
   })
 
+  it('UNCONFIRMED (#3930) gets its OWN sentence: never "nothing changed", sends the owner to check the budgets first', async () => {
+    // The activation response was lost — the grant may already be in place.
+    // The caller's generic failure sentence ("… Nothing changed — try again.")
+    // would invite a retry that mints a second enabled grant, so it must not
+    // render here.
+    const grant = vi.fn().mockResolvedValue({ ok: false, reason: 'unconfirmed' })
+    renderAction({
+      grant,
+      failureMessage: 'Haven could not set the budget. Nothing changed — try again.',
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
+
+    const message = await screen.findByText(/could not be confirmed/i)
+    // Danger-styled (the owner must act), but NOT the generic failure text.
+    expect(message.className).toMatch(/danger/)
+    expect(screen.queryByText(/Nothing changed/)).toBeNull()
+    // Directs the owner to check the agent's budgets BEFORE trying again,
+    // and never names Haven as the approver.
+    expect(message.textContent).toMatch(/check the agent's budgets before trying again/i)
+    expect(message.textContent).not.toMatch(/haven/i)
+    expect(screen.queryByText(/could not set the budget/i)).toBeNull()
+  })
+
   it('is disabled while busy, while not ready, and while the input is incomplete', () => {
     const { unmount } = render(
       <BudgetGrantAction

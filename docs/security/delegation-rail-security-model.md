@@ -71,7 +71,7 @@ covers:
   - packages/backend/src/modules/ops/**
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
-last-verified: "2026-10-12"
+last-verified: "2026-10-14"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -215,6 +215,35 @@ and a recording failure is swallowed: metrics can never gate a payment. See
 `docs/operations/sponsored-gas.md`.
 
 ## 3. Delegation custody semantics (#828's contract)
+
+> **Re-verified #3930 (2026-10-14, a lost activate response re-reads before it
+> reports):** this diff touches one file in this document's coverage list,
+> `hooks/useDelegationBudget.ts`, and adds no signing step, no gate, no route
+> and no authority surface. What changed is reporting after a lost activate
+> response: when the activation POST throws, both `grant` and `editBudget`
+> re-read the outcome from the plain, read-only `GET /agents/:id/delegations`
+> (deliberately NOT `?include=remaining` — the path adds no chain RPC on the
+> client) before saying anything: `active`/`replaced` → the grant landed, and
+> `editBudget` runs its Stop step exactly as if the POST had returned;
+> `revoked` (a revoke-all won the race) → the honest `failed`; `pending`, an
+> absent row, or a failed re-read → a new `unconfirmed` outcome that never
+> claims "nothing was granted", because the commit may have landed after a
+> proxy 5xx. A per-`(token, recipient)`-slot remembered hash makes the NEXT
+> attempt for that slot re-read the remembered hash BEFORE any `/build`, so a
+> retry never acts on the stale belief that nothing happened; the remembered
+> state is agent-scoped and cleared when the served agent changes. Every
+> authority claim stands: the only signatures remain the owner's own
+> client-side ones (the delegation and the revoke UserOp); `pickSigningPath`,
+> `useActiveSigner` and every signing step are untouched. The
+> activate-then-revoke ordering of the #3166 note stands, and a revoke-all
+> that raced the activation is now re-read like any other lost response —
+> `failed` when the row shows `revoked`, the Stop step when it shows
+> `active`/`replaced` — instead of being folded into a blanket "nothing was
+> granted". Invariants 1–13 are untouched: the hook gains a read, not a key,
+> a signer or a spend path. Scope of this note: `useDelegationBudget.ts` and
+> the #3166/#3093 claims above that rest on it; nothing else in this document
+> was re-read for it, and `last-verified` is bumped to 2026-10-14 for exactly
+> this coverage.
 
 > **Re-verified #2929 (dark-mode epic #2925, slice 3/3):** the dark-token sweep
 > touched two files in this document's coverage list, `DelegationSendModal.tsx`

@@ -121,7 +121,9 @@ export function merchantTokenOptions(chainId: number, offers: CatalogEntry[]): T
  * account off the delegation rail, a chain the rail is not enabled on, an
  * in-flight re-key) — everything else, including a raw/unrecognised message,
  * falls to one generic sentence rather than surfacing backend prose verbatim.
- * The caller always appends "Nothing changed." once, so this never repeats it.
+ * The generic-failure branch appends "Nothing changed." once, so this never
+ * repeats it (#3930: the `unconfirmed` outcome bypasses this helper entirely —
+ * it may already be in place, so it never says "nothing changed").
  * Classification itself is shared with `EditBudgetModal` (round 2 review
  * finding R2-2) via `@/lib/merchantBudgetRefusal` — only the wording (a NEW
  * budget vs. an in-place edit) differs between the two modals.
@@ -612,15 +614,19 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                 </div>
                 {/* #3331 review finding F9: ONE heading for every failure shape
                     — "the budget could not be set" — followed by named copy
-                    for a recognised refusal or a generic sentence otherwise,
-                    always closing with "Nothing changed." */}
+                    for a recognised refusal or a generic sentence otherwise.
+                    The generic failure closes with "Nothing changed."
+                    (#3930: `unconfirmed` does NOT — the grant may already be
+                    in place, so it gets its own sentence instead). */}
                 <p className="text-sm font-medium text-[var(--v2-ink)]">The budget could not be set</p>
                 <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                  {`${
-                    outcome.reason === 'refused'
-                      ? refusalCopy(outcome.detail, merchant.name)
-                      : 'Haven could not set up this budget.'
-                  } Nothing changed.`}
+                  {outcome.reason === 'unconfirmed'
+                    ? 'The budget could not be confirmed. Check the agent budgets before trying again — it may already be in place, and a second grant would add a second budget.'
+                    : `${
+                        outcome.reason === 'refused'
+                          ? refusalCopy(outcome.detail, merchant.name)
+                          : 'Haven could not set up this budget.'
+                      } Nothing changed.`}
                 </p>
               </div>
               <div className="flex gap-3">

@@ -718,7 +718,7 @@ describe('FundMerchantModal — occupied slot routes to the edit flow (#3933)', 
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '9' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'Edit current budget' })).toBeDefined())
-    expect(screen.getByText(/sign the new limits, then sign two more times to stop the old budget, once for each of its two parts/)).toBeDefined()
+    expect(screen.getByText(/sign the new limits, then stop the old budget with two more signatures, one for each part/)).toBeDefined()
     expect(screen.queryByText(/sign once more/)).toBeNull()
   })
 
@@ -731,7 +731,7 @@ describe('FundMerchantModal — occupied slot routes to the edit flow (#3933)', 
     fireEvent.click(await screen.findByRole('button', { name: 'Sign budget' }))
     await waitFor(() => expect(screen.getByText(/could not be confirmed/)).toBeDefined())
     expect(screen.getByText(/a retry never adds a second budget for the same token and recipient/)).toBeDefined()
-    expect(screen.queryByText(/a second grant would add a second budget/)).toBeNull()
+    expect(screen.queryByText(/would add a second budget/)).toBeNull()
   })
 
   it('Edit current budget opens the edit flow on that budget with the typed limits and this merchant — no grant', async () => {

@@ -613,7 +613,7 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                   <p>
                     To change it, you edit it: sign the new limits, then{' '}
                     {replacedStopCount > 1
-                      ? `sign ${countWord(replacedStopCount)} more times to stop the old budget, once for each of its ${countWord(replacedStopCount)} parts`
+                      ? `stop the old budget with ${countWord(replacedStopCount)} more signatures, one for each part`
                       : 'sign once more to stop the old budget'}
                     . Until it is stopped, it can still be spent outside Haven. Stopping it also ends any open
                     task budget or sub-budget taken from it.

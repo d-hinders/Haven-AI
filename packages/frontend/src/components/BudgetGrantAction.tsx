@@ -142,8 +142,7 @@ export default function BudgetGrantAction({
     // here rather than teaching this shared control a word it cannot yet
     // display. `unconfirmed` (#3930) does NOT fold: the activation may have
     // committed, so the generic "nothing changed — try again" failure sentence
-    // would invite a retry that mints a second enabled grant — it gets its own
-    // branch below.
+    // would be false — it gets its own branch below.
     setOutcome(result.reason === 'too_many' || result.reason === 'refused' ? 'failed' : result.reason)
   }
 

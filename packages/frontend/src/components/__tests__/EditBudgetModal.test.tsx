@@ -201,6 +201,21 @@ describe('EditBudgetModal (#3166) — review', () => {
     await waitFor(() => expect(screen.getByText('Budget updated')).toBeInTheDocument())
     expect(onBudgetChange).toHaveBeenCalled()
   })
+
+  it('#3933 round 4: an earlier attempt that landed first is reported with ITS limits — never "the new limits are live"', async () => {
+    mockEditBudget.mockResolvedValue({
+      ok: true,
+      newDelegationHash: '0x' + 'be'.repeat(32),
+      oldDelegationRevoked: true,
+      earlierLimits: true,
+    })
+    renderModal({ budget: budget({ recipient_address: RECIPIENT }) })
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    await waitFor(() => expect(screen.getByText(/Your earlier change went through first/)).toBeInTheDocument())
+    expect(screen.queryByText(/The new limits are live/)).toBeNull()
+  })
 })
 
 describe('EditBudgetModal (#3331 F3) — merchant-locked budgets', () => {

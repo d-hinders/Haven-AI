@@ -1835,26 +1835,42 @@ describe('#3933 — refuse a silent replace', () => {
     ])
   })
 
-  it('round 3: a retry of the edit asking for OTHER limits than the landed attempt is slot_occupied — nothing built or stopped, attempt cleared', async () => {
+  it('round 4: a retry asking for OTHER limits after the attempt landed finishes the Stops it owed and says the earlier limits are live — no second build', async () => {
     const { result } = await landedEditOfPair()
     mockFlow()
     await act(async () => {
       const res = await result.current.editBudget(OLD_HASH, { ...INPUT, budgetAtomic: '9000' })
-      expect(res).toEqual({ ok: false, reason: 'slot_occupied', existingDelegationHash: NEW_HASH })
+      expect(res).toEqual({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: true, earlierLimits: true })
     })
     expect(builds()).toHaveLength(1)
-    expect(revokeUrls()).toEqual([])
+    // The replacement the owner signed is finished: both swept rows stopped, never the live one.
+    expect(revokeUrls()).toEqual([
+      expect.stringContaining(`/delegations/${OLD_HASH}/revoke`),
+      expect.stringContaining(`/delegations/${OLD_HASH}/revoke/submit`),
+      expect.stringContaining(`/delegations/${PAIR_HASH}/revoke`),
+      expect.stringContaining(`/delegations/${PAIR_HASH}/revoke/submit`),
+    ])
     expect(result.current.isOwnAttemptedGrant(NEW_HASH, OLD_HASH)).toBe(false)
   })
 
-  it('round 3: a retry that MOVES the recipient after the attempt landed does not build a second budget beside it', async () => {
+  it('round 4: a retry that MOVES the recipient after the attempt landed builds no second budget, and still stops the old rows', async () => {
     const { result } = await landedEditOfPair()
     mockFlow()
     await act(async () => {
       const res = await result.current.editBudget(OLD_HASH, { ...INPUT, recipientAddress: RECIPIENT as never })
-      expect(res).toMatchObject({ ok: false, reason: 'slot_occupied', existingDelegationHash: NEW_HASH })
+      expect(res).toEqual({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: true, earlierLimits: true })
     })
     expect(builds()).toHaveLength(1)
+    expect(revokeUrls().filter((u) => u.endsWith('/revoke/submit'))).toHaveLength(2)
+  })
+
+  it('round 4: the SAME limits after the attempt landed is a plain success, with no earlierLimits flag', async () => {
+    const { result } = await landedEditOfPair()
+    mockFlow()
+    await act(async () => {
+      const res = await result.current.editBudget(OLD_HASH, INPUT)
+      expect(res).toEqual({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: true })
+    })
   })
 
   it('round 3: an unconfirmed PLAIN grant that lands is not adopted by an edit of it — the edit builds, replaces it, and stops it', async () => {

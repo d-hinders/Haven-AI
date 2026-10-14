@@ -682,13 +682,22 @@ export default function EditBudgetModal({
                   <Icon icon={Check} className="h-6 w-6 text-[var(--v2-success)]" />
                 </div>
                 <p className="text-sm font-medium text-[var(--v2-ink)]">Budget updated</p>
-                <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-                  The new limits are live
-                  {outcome?.ok && !outcome.oldDelegationRevoked
-                    ? ' — the previous budget was already stopped'
-                    : ' and the previous budget is stopped'}
-                  .
-                </p>
+                {outcome?.ok && outcome.earlierLimits ? (
+                  // #3933 round 4: an earlier attempt landed first, with the
+                  // limits the owner set then — say so, never "the new limits".
+                  <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
+                    Your earlier change went through first, so the budget has the limits you set
+                    then, and the previous budget is stopped. Edit it again to set these limits.
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
+                    The new limits are live
+                    {outcome?.ok && !outcome.oldDelegationRevoked
+                      ? ' — the previous budget was already stopped'
+                      : ' and the previous budget is stopped'}
+                    .
+                  </p>
+                )}
               </div>
               <Button variant="ghost" onClick={handleClose} className="w-full">
                 Done
@@ -768,8 +777,9 @@ export default function EditBudgetModal({
                       The change could not be confirmed
                     </p>
                     <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                      The new budget may already be in place. Check the agent&apos;s budgets before
-                      trying again — a second grant would add a second budget.
+                      The new budget may already be in place. Try again in a moment: Haven checks
+                      first and does not add a second budget. If this keeps showing, close this and
+                      open the budget again.
                     </p>
                   </>
                 ) : outcome.reason === 'refused' ? (

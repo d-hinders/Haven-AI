@@ -271,7 +271,18 @@ function slotOccupiedFrom(err: unknown): SlotOccupiedResult | null {
  *   budget carried as a re-key pair is two rows, and each needs its own Stop.
  */
 export type EditBudgetResult =
-  | { ok: true; newDelegationHash: string; oldDelegationRevoked: boolean }
+  | {
+      ok: true
+      newDelegationHash: string
+      oldDelegationRevoked: boolean
+      /**
+       * #3933: an earlier, unconfirmed attempt of this edit had already
+       * landed with OTHER limits than this call asked for. Its replacement
+       * was finished (the old rows stopped), but the live budget carries the
+       * earlier attempt's limits, not these.
+       */
+      earlierLimits?: true
+    }
   | {
       ok: false
       reason:
@@ -873,19 +884,19 @@ export function useDelegationBudget(
         // the attempt computed, as if the lost POST had just returned.
         let newHash: string | null = null
         let oldBudgetHashes: string[] | null = null
+        let earlierLimits = false
         const attempt = editAttempts.current.get(editKey)
         if (attempt) {
           const reread = await readAttemptedHash(attempt.newHash)
           if (rereadLanded(reread)) {
             editAttempts.current.delete(editKey)
-            if (attempt.inputKey !== inputKey) {
-              // The earlier attempt already replaced this budget, with other
-              // limits than the ones now asked for. Nothing new is built: the
-              // owner edits the budget that is live now (its rows still to
-              // stop stay flagged on the card until they are).
-              await reload()
-              return { ok: false, reason: 'slot_occupied', existingDelegationHash: attempt.newHash }
-            }
+            // The earlier attempt replaced this budget. Its Stops are owed
+            // whatever this call asks for — the owner signed that replacement,
+            // and its old rows are `replaced` (or, for a move, still active)
+            // but enabled on-chain — so they are finished here. Nothing new
+            // is built: when the limits differ, the result says the live
+            // budget carries the earlier attempt's, and the owner edits it.
+            earlierLimits = attempt.inputKey !== inputKey
             newHash = attempt.newHash
             oldBudgetHashes = attempt.stopSet
           } else if ((reread.kind === 'row' && reread.status === 'pending') || reread.kind === 'read_failed') {
@@ -1018,7 +1029,12 @@ export function useDelegationBudget(
         // `oldDelegationRevoked: false` only when every row was ALREADY
         // stopped (a concurrent revoke-all or the reconciliation heal got
         // there first) — the goal is met, nothing was signed for it.
-        return { ok: true, newDelegationHash: newHash, oldDelegationRevoked: signedAny }
+        return {
+          ok: true,
+          newDelegationHash: newHash,
+          oldDelegationRevoked: signedAny,
+          ...(earlierLimits ? { earlierLimits: true as const } : {}),
+        }
       } catch (err) {
         return { ok: false, reason: cancelled(err) ? 'cancelled' : 'failed' }
       } finally {

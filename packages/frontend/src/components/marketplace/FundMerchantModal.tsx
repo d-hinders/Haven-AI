@@ -28,7 +28,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { parseUnits, formatUnits } from 'viem'
 import type { Address } from 'viem'
 import { useDelegationBudget, type DelegationBudget, type GrantInput, type GrantResult } from '@/hooks/useDelegationBudget'
-import { findOccupyingBudget } from '@/lib/budget-slot'
+import { findOccupyingBudget, occupiesSlot } from '@/lib/budget-slot'
 import type { Agent } from '@/hooks/useAgents'
 import type { CatalogEntry, Merchant, MerchantFundingTarget } from '@/hooks/useCatalog'
 import { getChainConfig } from '@/lib/chains'
@@ -358,7 +358,7 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
     outcome && !outcome.ok && outcome.reason === 'slot_occupied'
       ? ((outcome.existingDelegationHash
           ? (budgets ?? []).find(
-              (b) => b.delegation_hash.toLowerCase() === outcome.existingDelegationHash!.toLowerCase() && b.status === 'active',
+              (b) => b.delegation_hash.toLowerCase() === outcome.existingDelegationHash!.toLowerCase() && occupiesSlot(b, Math.floor(Date.now() / 1000)),
             )
           : undefined) ?? replacedBudget)
       : null

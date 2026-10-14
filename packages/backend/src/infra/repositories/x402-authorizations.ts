@@ -469,6 +469,9 @@ export const SETTLEMENT_HASH_TAKEN_SQL = settlementHashTakenSql({ hash: '$1', id
  * the bounding rules: one hash backs at most one eip3009 payment
  * (`settlementHashTakenSql`), a payment takes one hash only
  * (`merchant_settlement_tx_hash IS NULL` makes the UPDATE a compare-and-set).
+ * Since #3927 the writer also locks the INTENT, so two different hashes for
+ * one payment serialize too and the compare-and-set is the backstop, not the
+ * only guard.
  * The residual: a hash can be recorded on ANY payment with the same agent,
  * amount, token, delegate and merchant whose funding confirmed before the
  * transfer was mined (within the skew), including one whose merchant leg
@@ -510,12 +513,34 @@ export type Eip3009SettlementRecordOutcome =
   | 'conflict'
   /** Another payment already holds this hash. */
   | 'hash_taken'
-  /** Not a confirmed eip3009 delegation-rail x402 intent of this agent. */
+  /**
+   * Not a confirmed eip3009 delegation-rail x402 intent of this agent. (Since
+   * #3927 a losing concurrent writer of a different hash answers `conflict`,
+   * never this: the intent lock makes its pre-read see the winner's hash.)
+   */
   | 'not_eligible'
+
+/** Per settlement hash: the same keyspace the erc7710 confirm locks in. */
+export const EIP3009_SETTLEMENT_HASH_LOCK_SQL = 'SELECT pg_advisory_xact_lock(hashtext($1))'
+
+/**
+ * Per payment (#3927). Prefixed so it cannot collide with the bare-hash
+ * keyspace the hash locks share. Always taken AFTER the hash lock: every
+ * writer locks hash → intent, so two writers cannot wait on each other.
+ */
+export const EIP3009_SETTLEMENT_INTENT_LOCK_SQL = "SELECT pg_advisory_xact_lock(hashtext('eip3009-intent:' || $1))"
 
 /**
  * {@link RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL}, serialized per settlement
- * hash with the same advisory lock the erc7710 confirm takes. The uniqueness
+ * hash with the same advisory lock the erc7710 confirm takes, and per payment
+ * with a prefixed intent lock (#3927), in the fixed order hash → intent.
+ *
+ * The hash lock serializes one hash across payments (the pre-read then answers
+ * `hash_taken`). The intent lock serializes different hashes for ONE payment:
+ * without it two writers took different hash locks, both pre-reads saw no
+ * recorded hash, and only the UPDATE's compare-and-set stopped the second —
+ * which then answered `not_eligible`. With it, the second writer's pre-read
+ * sees the first's hash and answers `conflict`. The uniqueness
  * this enforces is one-directional: an eip3009 record refuses a hash an
  * erc7710 row already confirmed with, but the erc7710 confirm checks only
  * `tx_hash`. The reverse collision would need one transaction to be both an
@@ -527,7 +552,8 @@ export async function recordEip3009MerchantSettlement(
   db: Executor = pool,
 ): Promise<Eip3009SettlementRecordOutcome> {
   return withTransaction(db, async (tx) => {
-    await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [input.txHash.toLowerCase()])
+    await tx.query(EIP3009_SETTLEMENT_HASH_LOCK_SQL, [input.txHash.toLowerCase()])
+    await tx.query(EIP3009_SETTLEMENT_INTENT_LOCK_SQL, [input.intentId])
     const existing = await tx.query<{ recorded: string | null }>(FIND_RECORDED_EIP3009_SETTLEMENT_SQL, [
       input.intentId,
       input.agentId,

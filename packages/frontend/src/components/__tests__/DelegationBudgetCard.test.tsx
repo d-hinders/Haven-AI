@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
 
 // #3812: the in-flow connect/switch control reads wagmi and RainbowKit, which
@@ -537,9 +537,10 @@ describe('DelegationBudgetCard load failure (#2473)', () => {
     expect(screen.queryByText(/No budget yet/i)).toBeNull()
   })
 
-  // Money-path review (#2473): a grant REPLACES the active budget in the same
-  // (token, recipient) slot, silently. The rows above the form are what let an
-  // owner see that coming — with the list unknown they cannot, so the action
+  // Money-path review (#2473): a submit into a (token, recipient) slot that
+  // already holds a budget must be edited, not granted (#3933 — the backend
+  // refuses a plain grant there). The rows above the form are what the
+  // card's slot check reads — with the list unknown it cannot, so the action
   // is gated on reloading rather than on the owner reading a warning.
   it('refuses to grant while the current budgets are unknown', async () => {
     mockGet.mockReturnValue(null)
@@ -975,5 +976,145 @@ describe('DelegationBudgetCard sub-budget entry in the Add budget panel (#3716)'
     })
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Add budget' }))
+  })
+})
+
+/**
+ * #3933: a plain grant into an occupied (token, recipient) slot left the old
+ * budget enabled on-chain. The card now routes such a submit to the edit flow
+ * (client-side check first, the server's 409 as the fallback), and flags any
+ * old budget a past replace left `replaced` but unexpired, with a Stop.
+ */
+describe('DelegationBudgetCard — occupied slot and replaced-but-enabled budgets (#3933)', () => {
+  const PINNED = '0x' + 'cc'.repeat(20)
+  const OTHER = '0x' + 'dd'.repeat(20)
+  const OLD_HASH = '0x' + '01'.repeat(32)
+
+  async function openFormAndType(amount: string, recipient: string) {
+    fireEvent.click(await screen.findByRole('button', { name: 'Add budget' }))
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: amount } })
+    fireEvent.change(screen.getByLabelText('Recipient'), { target: { value: recipient } })
+  }
+
+  it('a submit matching a live budget opens the edit flow with the typed limits — no plain grant is signed', async () => {
+    mockGet.mockReturnValue([budget({ recipient_address: PINNED })])
+    render(<DelegationBudgetCard {...PROPS} />)
+    await openFormAndType('10', PINNED)
+    // The hint says what happens on-chain before anything is signed.
+    expect(screen.getByText(/so you edit it\. The old budget can still be spent outside Haven until you stop it/)).toBeTruthy()
+    expect(screen.getByText(/stopping it ends any open task budget or sub-budget taken from it/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Edit existing budget' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit budget' })
+    expect(mockGrant).not.toHaveBeenCalled()
+    // The edit opened on THIS budget, with what the owner typed.
+    expect((within(dialog).getByLabelText('Budget amount') as HTMLInputElement).value).toBe('10')
+    expect(within(dialog).getByText(/already has a budget for this token and recipient/)).toBeTruthy()
+    // Never the generic failure.
+    expect(screen.queryByText(/Haven could not set the budget/)).toBeNull()
+  })
+
+  it('a submit into an EMPTY slot (another recipient) still grants as before', async () => {
+    mockGet.mockReturnValue([budget({ recipient_address: PINNED })])
+    mockGrant.mockResolvedValue({ ok: true })
+    render(<DelegationBudgetCard {...PROPS} />)
+    await openFormAndType('10', OTHER)
+    expect(screen.getByText('One signature. Refills every period automatically.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Set budget' }))
+    await waitFor(() => expect(mockGrant).toHaveBeenCalled())
+    expect(screen.queryByRole('dialog', { name: 'Edit budget' })).toBeNull()
+  })
+
+  it('an EXPIRED budget in the slot does not occupy it — the submit grants', async () => {
+    mockGet.mockReturnValue([budget({ recipient_address: PINNED, expires_at: 1 })])
+    mockGrant.mockResolvedValue({ ok: true })
+    render(<DelegationBudgetCard {...PROPS} />)
+    // An expired-only agent shows the form directly (#3802).
+    fireEvent.change(await screen.findByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.change(screen.getByLabelText('Recipient'), { target: { value: PINNED } })
+    fireEvent.click(screen.getByRole('button', { name: 'Set budget' }))
+    await waitFor(() => expect(mockGrant).toHaveBeenCalled())
+  })
+
+  it("server fallback: the client check missed (stale list), the 409's hash picks the budget once the list has it", async () => {
+    const EXISTING = '0x' + 'e1'.repeat(32)
+    // The list the card rendered with does not show the occupying budget.
+    mockGet.mockReturnValue([budget({ recipient_address: PINNED })])
+    mockGrant.mockImplementation(async () => {
+      // The hook refreshed the list before answering.
+      mockGet.mockReturnValue([
+        budget({ recipient_address: PINNED }),
+        budget({ recipient_address: OTHER, delegation_hash: EXISTING, budget_atomic: '7000000' }),
+      ])
+      return { ok: false, reason: 'slot_occupied', existingDelegationHash: EXISTING }
+    })
+    render(<DelegationBudgetCard {...PROPS} />)
+    await openFormAndType('10', OTHER)
+    fireEvent.click(screen.getByRole('button', { name: 'Set budget' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit budget' })
+    // The budget the server named: 7 USDC, not the other row's 5.
+    expect(within(dialog).getByText(/Editing the 7 USDC per day budget/)).toBeTruthy()
+    expect(screen.queryByText(/Haven could not set the budget/)).toBeNull()
+  })
+
+  it('server fallback with the list not caught up: a named notice and a reload — never the generic failure', async () => {
+    mockGet.mockReturnValue([budget({ recipient_address: PINNED })])
+    mockGrant.mockResolvedValue({ ok: false, reason: 'slot_occupied', existingDelegationHash: '0x' + 'e1'.repeat(32) })
+    render(<DelegationBudgetCard {...PROPS} />)
+    await openFormAndType('10', OTHER)
+    fireEvent.click(screen.getByRole('button', { name: 'Set budget' }))
+    await waitFor(() => expect(screen.getByText(/already has a live budget for this token and recipient\. Nothing was signed/)).toBeTruthy())
+    expect(screen.queryByText(/Haven could not set the budget/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Reload budgets' }))
+    expect(mockReload).toHaveBeenCalled()
+  })
+
+  it('flags a replaced-but-unexpired budget with what it can still do, and Stops it through the per-hash revoke', async () => {
+    mockGet.mockReturnValue([
+      budget(),
+      budget({ status: 'replaced', delegation_hash: OLD_HASH, budget_atomic: '3000000' }),
+    ])
+    mockRevoke.mockResolvedValue({ ok: true })
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(await screen.findByText('An old budget has not been stopped')).toBeTruthy()
+    expect(screen.getByText(/The 3 USDC per day budget to 0xcccc…cccc was replaced, but it can still be spent outside Haven until it is stopped/)).toBeTruthy()
+    expect(screen.getByText(/Stopping it also ends any open task budget or sub-budget taken from it/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Stop old budget 3 USDC per day' }))
+    await waitFor(() => expect(mockRevoke).toHaveBeenCalledWith(OLD_HASH))
+    await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Old budget stopped.'))
+  })
+
+  it('"Already revoked" on the finish action is finished, not an error', async () => {
+    mockGet.mockReturnValue([budget(), budget({ status: 'replaced', delegation_hash: OLD_HASH })])
+    mockRevoke.mockResolvedValue({ ok: true, alreadyStopped: true })
+    render(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(await screen.findByRole('button', { name: /Stop old budget/ }))
+    await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('That old budget was already stopped.'))
+    expect(mockToast.error).not.toHaveBeenCalled()
+  })
+
+  it('a failed finish action says so', async () => {
+    mockGet.mockReturnValue([budget(), budget({ status: 'replaced', delegation_hash: OLD_HASH })])
+    mockRevoke.mockResolvedValue({ ok: false, reason: 'failed' })
+    render(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(await screen.findByRole('button', { name: /Stop old budget/ }))
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith('Could not stop the old budget. Try again.'))
+  })
+
+  it.each([
+    ['an expired replaced row', { status: 'replaced', expires_at: 1 }],
+    ['a revoked row', { status: 'revoked' }],
+    ['a pending row', { status: 'pending' }],
+  ])('no flag for %s', async (_label, overrides) => {
+    mockGet.mockReturnValue([budget(), budget({ delegation_hash: OLD_HASH, ...overrides })])
+    render(<DelegationBudgetCard {...PROPS} />)
+    await screen.findByText('Spending')
+    expect(screen.queryByText('An old budget has not been stopped')).toBeNull()
+  })
+
+  it('a retired agent shows no flag — its Finish revoking (revoke-all) already covers replaced rows', async () => {
+    mockGet.mockReturnValue([budget(), budget({ status: 'replaced', delegation_hash: OLD_HASH })])
+    render(<DelegationBudgetCard {...PROPS} retired="revoked" />)
+    await screen.findByText('Spending')
+    expect(screen.queryByText('An old budget has not been stopped')).toBeNull()
   })
 })

@@ -783,7 +783,10 @@ describe('editBudget — REPLACE composition (#3166)', () => {
       }
       if (url.endsWith('/activate')) return Promise.resolve({ activated: true })
       if (url.endsWith('/revoke')) {
-        return Promise.reject(new Error('Already revoked — the delegation was disabled on-chain and the record has been reconciled.'))
+        const msg = 'Already revoked — the delegation was disabled on-chain and the record has been reconciled.'
+        return Promise.reject(
+          Object.assign(new Error(msg), { status: 409, body: { error: msg, error_code: 'DELEGATION_ALREADY_REVOKED' } }),
+        )
       }
       return Promise.reject(new Error('unexpected ' + url))
     })
@@ -1454,5 +1457,203 @@ describe('#3930 — a lost activate response: re-read before report, no double g
     })
     // The retry DID build — the dead attempt cannot be doubled.
     expect(mockPost.mock.calls.filter((c) => String(c[0]).endsWith('/build'))).toHaveLength(2)
+  })
+})
+
+/**
+ * #3933: the backend refuses a PLAIN grant into a (token, recipient) slot that
+ * already holds a live budget (409 `BUDGET_SLOT_OCCUPIED`), because the old
+ * budget would stay enabled on-chain. The edit flow names the budget it
+ * replaces on build AND activate; a plain grant maps the 409 to a typed
+ * `slot_occupied` by its `error_code`, never by its sentence.
+ */
+describe('#3933 — refuse a silent replace', () => {
+  const OLD_HASH = '0x' + 'ab'.repeat(32)
+  const NEW_HASH = '0x' + 'be'.repeat(32)
+  const EXISTING = '0x' + 'e1'.repeat(32)
+  const SENTENCE =
+    'This agent already has a live budget for this token and recipient. Edit that budget instead: editing replaces it and stops the old one on-chain, so two budgets are never left spendable side by side.'
+  const INPUT = {
+    tokenAddress: ('0x' + 'cc'.repeat(20)) as never,
+    budgetAtomic: '2000',
+    periodSeconds: 86_400,
+  }
+
+  /** The `ApiRequestError` wire shape: `message` is `body.error`, plus `status` and the parsed `body`. */
+  function apiError(message: string, status: number, body?: Record<string, unknown>) {
+    return Object.assign(new Error(message), { name: 'ApiRequestError', status, body: body ?? { error: message } })
+  }
+  const occupied = () =>
+    apiError(SENTENCE, 409, { error: SENTENCE, error_code: 'BUDGET_SLOT_OCCUPIED', existing_delegation_hash: EXISTING })
+
+  function delegationsGetCount(): number {
+    return mockGet.mock.calls.filter((c) => String(c[0]).endsWith('/delegations')).length
+  }
+
+  /** build ok → activate per `activate` → revoke prepare/submit ok. */
+  function mockFlow({
+    build,
+    activate,
+  }: { build?: () => Promise<unknown>; activate?: () => Promise<unknown> } = {}) {
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/build')) {
+        return build
+          ? build()
+          : Promise.resolve({
+              delegation_hash: NEW_HASH,
+              version: 2,
+              signing_payload: { domain: {}, types: {}, primaryType: 'Delegation', message: {} },
+            })
+      }
+      if (url.endsWith('/activate')) return activate ? activate() : Promise.resolve({ activated: true })
+      if (url.endsWith('/revoke')) {
+        return Promise.resolve({ signature_scheme: 'webauthn_userop', user_op_hash: '0xr', user_operation: { nonce: '9n' } })
+      }
+      if (url.endsWith('/revoke/submit')) return Promise.resolve({ revoked: true })
+      return Promise.reject(new Error('unexpected ' + url))
+    })
+    mockSignDelegation.mockResolvedValue('0x' + 'aa'.repeat(100))
+    mockSignUserOp.mockResolvedValue('0x' + 'bb'.repeat(100))
+  }
+
+  it('editBudget names the old budget as `replaces` on BOTH build and activate', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockFlow()
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.editBudget(OLD_HASH, INPUT)
+      expect(res).toEqual({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: true })
+    })
+    const build = mockPost.mock.calls.find((c) => String(c[0]).endsWith('/build'))!
+    const activate = mockPost.mock.calls.find((c) => String(c[0]).endsWith('/activate'))!
+    expect(build[1].replaces).toBe(OLD_HASH)
+    expect(activate[1].replaces).toBe(OLD_HASH)
+    // The activation still carries the owner's signature beside it.
+    expect(activate[1].signature).toBe('0x' + 'aa'.repeat(100))
+  })
+
+  it('a plain grant never sends `replaces` — the backend must be able to refuse it', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockFlow()
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      await result.current.grant(INPUT)
+    })
+    const build = mockPost.mock.calls.find((c) => String(c[0]).endsWith('/build'))!
+    const activate = mockPost.mock.calls.find((c) => String(c[0]).endsWith('/activate'))!
+    expect(Object.keys(build[1])).not.toContain('replaces')
+    expect(Object.keys(activate[1])).not.toContain('replaces')
+  })
+
+  it('grant: a build 409 BUDGET_SLOT_OCCUPIED is the typed slot_occupied with the existing hash — nothing signed, list refreshed', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockFlow({ build: () => Promise.reject(occupied()) })
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    const getsBefore = delegationsGetCount()
+    await act(async () => {
+      const res = await result.current.grant(INPUT)
+      expect(res).toEqual({ ok: false, reason: 'slot_occupied', existingDelegationHash: EXISTING, detail: SENTENCE })
+    })
+    expect(mockSignDelegation).not.toHaveBeenCalled()
+    expect(mockPost.mock.calls.some((c) => String(c[0]).endsWith('/activate'))).toBe(false)
+    // One refresh, so the caller can find the existing budget in the list.
+    expect(delegationsGetCount()).toBe(getsBefore + 1)
+  })
+
+  it('grant: an activate 409 BUDGET_SLOT_OCCUPIED is slot_occupied, not the #3930 unconfirmed — and the retry builds fresh', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockFlow({ activate: () => Promise.reject(occupied()) })
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.grant(INPUT)
+      expect(res).toMatchObject({ ok: false, reason: 'slot_occupied', existingDelegationHash: EXISTING })
+    })
+    // A definite refusal: the hash was not remembered as an unconfirmed
+    // attempt, so the next grant goes straight to /build (it would answer
+    // `unconfirmed` with no build if the pending hash had been remembered).
+    mockFlow()
+    const buildsBefore = mockPost.mock.calls.filter((c) => String(c[0]).endsWith('/build')).length
+    await act(async () => {
+      const res = await result.current.grant(INPUT)
+      expect(res).toEqual({ ok: true })
+    })
+    expect(mockPost.mock.calls.filter((c) => String(c[0]).endsWith('/build')).length).toBe(buildsBefore + 1)
+  })
+
+  it('the mapping reads error_code, never the sentence: same words without the code stay `refused`', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockFlow({ build: () => Promise.reject(apiError(SENTENCE, 409)) })
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.grant(INPUT)
+      expect(res).toEqual({ ok: false, reason: 'refused', detail: SENTENCE })
+    })
+  })
+
+  it('the mapping reads error_code, never the sentence: the code with other words is still slot_occupied', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockFlow({
+      build: () =>
+        Promise.reject(apiError('Conflict', 409, { error: 'Conflict', error_code: 'BUDGET_SLOT_OCCUPIED', existing_delegation_hash: EXISTING })),
+    })
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.grant(INPUT)
+      expect(res).toMatchObject({ ok: false, reason: 'slot_occupied', existingDelegationHash: EXISTING })
+    })
+  })
+
+  it('editBudget: an activate 409 BUDGET_SLOT_OCCUPIED (a stale `replaces`) is slot_occupied — no Stop is attempted', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockFlow({ activate: () => Promise.reject(occupied()) })
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.editBudget(OLD_HASH, INPUT)
+      expect(res).toMatchObject({ ok: false, reason: 'slot_occupied', existingDelegationHash: EXISTING })
+    })
+    expect(mockPost.mock.calls.some((c) => String(c[0]).includes('/revoke'))).toBe(false)
+  })
+
+  it('revoke: the per-hash "Already revoked" 409 is FINISHED (alreadyStopped), with no signature', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockPost.mockImplementation((url: string) =>
+      url.endsWith('/revoke')
+        ? Promise.reject(
+            apiError('Already revoked — the delegation was disabled on-chain and the record has been reconciled.', 409, {
+              error: 'Already revoked',
+              error_code: 'DELEGATION_ALREADY_REVOKED',
+            }),
+          )
+        : Promise.reject(new Error('unexpected ' + url)),
+    )
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.revoke(OLD_HASH)
+      expect(res).toEqual({ ok: true, alreadyStopped: true })
+    })
+    expect(mockSignUserOp).not.toHaveBeenCalled()
+    expect(mockPost.mock.calls.some((c) => String(c[0]).endsWith('/revoke/submit'))).toBe(false)
+  })
+
+  it('revoke: any other prepare refusal is still a failure — not found, or the sentence without its error_code', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    mockPost.mockImplementation(() => Promise.reject(apiError('Delegation not found', 404)))
+    await act(async () => {
+      expect(await result.current.revoke(OLD_HASH)).toEqual({ ok: false, reason: 'failed' })
+    })
+    mockPost.mockImplementation(() => Promise.reject(apiError('Already revoked', 409)))
+    await act(async () => {
+      expect(await result.current.revoke(OLD_HASH)).toEqual({ ok: false, reason: 'failed' })
+    })
   })
 })

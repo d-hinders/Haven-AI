@@ -24,12 +24,12 @@
  */
 
 import { useState, type ReactNode } from 'react'
-import type { BudgetResult, GrantInput } from '@/hooks/useDelegationBudget'
+import type { GrantInput, GrantResult } from '@/hooks/useDelegationBudget'
 import { Button } from './ui/Button'
 
 interface Props {
   /** `grant` from the caller's `useDelegationBudget` instance. */
-  grant: (input: GrantInput) => Promise<BudgetResult>
+  grant: (input: GrantInput) => Promise<GrantResult>
   busy: boolean
   /** False while the account has no way to sign yet (owner wallet not connected). */
   ready: boolean
@@ -73,6 +73,21 @@ interface Props {
    * sets — because one hard-coded sentence cannot match both (#3895).
    */
   failureMessage: string
+  /**
+   * #3933: the (token, recipient) slot already holds a live budget, and the
+   * backend refused a plain grant into it (`slot_occupied`). Never the
+   * generic failure: retrying the same grant cannot succeed. A caller that
+   * can edit the existing budget routes there through this callback (the
+   * agent page's card), and the control shows nothing of its own.
+   */
+  onSlotOccupied?: (existingDelegationHash: string | null) => void
+  /**
+   * #3933: what to show for `slot_occupied` when the caller has no edit flow
+   * of its own (the connect modal): a sentence and a way to the agent page.
+   * Once shown, the grant control is disabled — the same grant would only be
+   * refused again.
+   */
+  slotOccupiedNotice?: ReactNode
   onGranted?: () => void
   className?: string
 }
@@ -91,10 +106,12 @@ export default function BudgetGrantAction({
   notReadyAction,
   readyHint,
   failureMessage,
+  onSlotOccupied,
+  slotOccupiedNotice,
   onGranted,
   className,
 }: Props) {
-  const [outcome, setOutcome] = useState<'cancelled' | 'failed' | 'unconfirmed' | null>(null)
+  const [outcome, setOutcome] = useState<'cancelled' | 'failed' | 'unconfirmed' | 'slot_occupied' | null>(null)
 
   async function handleClick() {
     if (!input) return
@@ -103,6 +120,18 @@ export default function BudgetGrantAction({
     const result = await grant(input)
     if (result.ok) {
       onGranted?.()
+      return
+    }
+    // #3933: an occupied slot is not a failure of this grant — it is the
+    // backend sending the owner to edit the budget already there. A caller
+    // with an edit flow takes it from here; otherwise the control shows the
+    // caller's notice.
+    if (result.reason === 'slot_occupied') {
+      if (onSlotOccupied) {
+        onSlotOccupied(result.existingDelegationHash)
+        return
+      }
+      setOutcome('slot_occupied')
       return
     }
     // `too_many` is a revoke-ALL refusal (#1437) and cannot arise from a
@@ -165,6 +194,15 @@ export default function BudgetGrantAction({
         </p>
       )}
 
+      {/* #3933: the slot already holds a live budget. Not the danger style:
+          nothing failed, and the notice names where to go instead. */}
+      {outcome === 'slot_occupied' && (
+        <div className="mb-3 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+          {slotOccupiedNotice ??
+            'This agent already has a live budget for this token and recipient. Edit that budget on the agent page instead.'}
+        </div>
+      )}
+
       {/* #2733: the page form's row squeezed the "Set budget" pill at 390px
           until its label wrapped onto two lines. BELOW `sm` (and only when
           there is no leadingAction — the modal footer keeps its inline row)
@@ -182,7 +220,7 @@ export default function BudgetGrantAction({
         {leadingAction}
         <Button
           onClick={handleClick}
-          disabled={busy || !ready || !input}
+          disabled={busy || !ready || !input || outcome === 'slot_occupied'}
           className={leadingAction ? 'flex-1' : 'sm:w-auto'}
         >
           {busy ? busyLabel : label}

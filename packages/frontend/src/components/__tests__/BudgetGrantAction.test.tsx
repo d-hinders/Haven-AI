@@ -202,3 +202,39 @@ describe('BudgetGrantAction trailingAction (#3695)', () => {
     expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
   })
 })
+
+/**
+ * #3933: `slot_occupied` is the backend sending the owner to edit the budget
+ * already in the slot — never the caller's failure sentence.
+ */
+describe('BudgetGrantAction — occupied slot (#3933)', () => {
+  const EXISTING = '0x' + 'e1'.repeat(32)
+
+  it('hands the existing hash to the caller that can route, and shows no failure', async () => {
+    const grant = vi.fn().mockResolvedValue({ ok: false, reason: 'slot_occupied', existingDelegationHash: EXISTING })
+    const onSlotOccupied = vi.fn()
+    renderAction({ grant, onSlotOccupied })
+    fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
+    await waitFor(() => expect(onSlotOccupied).toHaveBeenCalledWith(EXISTING))
+    expect(screen.queryByText(/Haven could not set the budget/)).toBeNull()
+  })
+
+  it("without a route, shows the caller's notice and disables the control — the same grant cannot succeed", async () => {
+    const grant = vi.fn().mockResolvedValue({ ok: false, reason: 'slot_occupied', existingDelegationHash: EXISTING })
+    renderAction({ grant, slotOccupiedNotice: 'Already has one — edit it on the agent page.' })
+    fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
+    await screen.findByText('Already has one — edit it on the agent page.')
+    expect(screen.queryByText(/Haven could not set the budget/)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Approve budget' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
+    expect(grant).toHaveBeenCalledTimes(1)
+  })
+
+  it('without a route or a notice, a default sentence — still not the failure', async () => {
+    const grant = vi.fn().mockResolvedValue({ ok: false, reason: 'slot_occupied', existingDelegationHash: null })
+    renderAction({ grant })
+    fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
+    await screen.findByText(/already has a live budget for this token and recipient/)
+    expect(screen.queryByText(/Haven could not set the budget/)).toBeNull()
+  })
+})

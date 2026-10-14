@@ -111,3 +111,21 @@ describe('DelegationApprovalStep failed grant (#3895)', () => {
     expect(message.textContent).not.toMatch(/haven/i)
   })
 })
+
+/**
+ * #3933: on a resume or a retry the agent may already hold a live budget for
+ * this token, and the backend refuses a second one. The step must not show
+ * the generic failure, must not loop, and must point at the agent page.
+ */
+describe('DelegationApprovalStep occupied slot (#3933)', () => {
+  it('says the agent already has a live budget, links to the agent page, and disables the retry', async () => {
+    grant.mockResolvedValue({ ok: false, reason: 'slot_occupied', existingDelegationHash: '0x' + 'e1'.repeat(32) })
+    renderStep(STATUS_WITH_BUDGET)
+    fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
+    await screen.findByText(/Research agent already has a live budget for USDC/)
+    expect(screen.queryByText(/budget was not approved/i)).toBeNull()
+    expect(screen.getByRole('link', { name: 'the agent’s page' }).getAttribute('href')).toBe('/agents/agent-1')
+    expect(screen.getByRole('button', { name: 'Approve budget' })).toBeDisabled()
+    expect(grant).toHaveBeenCalledTimes(1)
+  })
+})

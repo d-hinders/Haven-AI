@@ -44,4 +44,17 @@ describe('x402 settlement verifier check roster (#2680 pin)', () => {
     // The doc's "can never turn a genuine settlement into a refusal" clause:
     expect(src).toMatch(/verdict is checks 1–7/)
   })
+
+  // #3925: check 9 is the eip3009 twin — the token's own `AuthorizationUsed`
+  // log. It is a ## heading (like check 8) rather than a numbered shape item,
+  // because it is not part of the "requires ALL of" shape list: it is an
+  // optional caller-supplied attribution, conditional exactly like check 8.
+  it('check 9 is the WHICH-authorization AuthorizationUsed check, conditional like check 8', () => {
+    expect(src).toMatch(/## Check 9 — WHICH EIP-3009 authorization was burned/)
+    expect(src).toMatch(/expectedAuthorizationUsed\?/)
+    expect(src).toMatch(/authorizationUsedNonces\?/)
+    // The verified outcome carries the nonce-bound flag (the doc's
+    // "nonceBound reports the same for check 9").
+    expect(src).toMatch(/nonceBound\?: boolean/)
+  })
 })

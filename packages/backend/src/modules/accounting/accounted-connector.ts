@@ -1,5 +1,9 @@
 import { getConnection } from '../../infra/repositories/accounting-connections.js'
-import { getSyncState } from '../../infra/repositories/accounting-feed-syncs.js'
+import {
+  getMerchantInvoiceSyncRef,
+  getSyncState,
+  recordMerchantInvoiceSync,
+} from '../../infra/repositories/accounting-feed-syncs.js'
 import { buildAccountingEntryForPayment } from './entry.js'
 import { ledgerAmount } from './feed-transaction.js'
 import {
@@ -14,10 +18,11 @@ import {
 } from './accounted-client.js'
 import type { AccountingConnector, ProviderSecrets, PushResult, VerifyOutcome } from './connector.js'
 import type { FeedTransaction } from './feed-transaction.js'
-import { loadReceiptUnderlag } from './receipt-underlag.js'
+import { loadReceiptUnderlag, merchantReceiptDocument } from './receipt-underlag.js'
 import { ProviderError, type ProviderCompanyInfo } from './provider.js'
 import { readApiKeyConnection } from './api-key-flow.js'
 import { ledgerCurrencyOrDefault } from '../../domain/ledger-currency.js'
+import { markPushed } from './feed-sync.js'
 
 /**
  * Accounted feed adapter (#3017 connect, #3018 the document push; epic
@@ -143,9 +148,18 @@ export class AccountedConnector implements AccountingConnector {
    *
    * Owner decisions pinned by the issue: the suggested-account hint is NOT
    * added (the upload takes exactly the `file` and `upload_source` parts —
-   * `additionalProperties: false`) and the merchant receipt is NOT uploaded
-   * in v1 (one upload is one document and the sync row holds one ref; the
-   * second document is a follow-up once the row can hold a second id).
+   * `additionalProperties: false`).
+   *
+   * #3918 (the follow-up slice #3016 deferred): when the agent captured the
+   * merchant's OWN invoice/ receipt, it is uploaded as a SECOND document on
+   * the same sync — the seller's own verification is what the consultant
+   * files. It gets its own WORM upload (own provider id, own idempotency key
+   * derived from `paymentId:merchant-invoice`) and its own sync row
+   * (`document_kind = 'merchant_invoice'`, recorded by the orchestrator off
+   * `PushResult.merchantInvoiceRef`). Best-effort like the Fortnox
+   * attachment (#956): a failure here is a NOTE on the pushed row, never a
+   * failed row — re-pushing to reach the invoice would re-file the underlag,
+   * and the underlag's delivery stands on its own.
    */
   async pushTransaction(userId: string, tx: FeedTransaction): Promise<PushResult> {
     const connection = await readApiKeyConnection('accounted', userId)
@@ -237,7 +251,57 @@ export class AccountedConnector implements AccountingConnector {
     }
 
     // Proven delivery: the provider echoed the bytes back hash-identical.
-    return { externalRef: this.documentRef(document.id), status: 'pushed' }
+    const externalRef = this.documentRef(document.id)
+
+    // #3918: the merchant's own invoice, second document of the same sync.
+    // Deterministic key (paymentId + ':merchant-invoice') → a retry replays
+    // the provider's cached answer exactly like the underlag does.
+    let merchantInvoiceRef: string | undefined
+    const notes: string[] = []
+    if (tx.merchantReceipt) {
+      try {
+        const doc = await merchantReceiptDocument(tx.paymentId, tx.merchantReceipt, this.fetchImpl)
+        if (!doc) {
+          notes.push("the merchant's own receipt names neither a document nor a url")
+        } else if (doc.bytes.byteLength > ACCOUNTED_DOCUMENTS_MAX_BYTES) {
+          notes.push("the merchant's own invoice is larger than Accounted accepts (over 10 MB) — not attached")
+        } else {
+          let second: AccountedDocument
+          try {
+            ;({ document: second } = await accountedUploadDocument({
+              apiKey: connection.secrets.apiKey,
+              companyId,
+              file: { filename: doc.filename, bytes: doc.bytes, contentType: doc.contentType },
+              idempotencyKey: accountedIdempotencyKey(tx.paymentId, 'merchant-invoice'),
+              fetchImpl: this.fetchImpl,
+            }))
+            merchantInvoiceRef = this.documentRef(second.id)
+          } catch (err) {
+            if (err instanceof AccountedDocumentHashMismatchError) {
+              notes.push(
+                "the merchant's own invoice was not attached: Accounted answered success but stored different bytes than Haven uploaded (sha256 mismatch)",
+              )
+            } else if (err instanceof ProviderError && err.status === 409 && providerErrorCode(err) === 'IDEMPOTENCY_KEY_REUSE') {
+              // Same slot, different bytes: the invoice changed under a
+              // document already filed. Same terminal honesty as the
+              // underlag's 409 — named, never retried, never faked.
+              notes.push("the merchant's own invoice was not attached: IDEMPOTENCY_KEY_REUSE — different bytes under the filed document")
+            } else {
+              throw err
+            }
+          }
+        }
+      } catch (err) {
+        notes.push(`the merchant's own invoice was not attached: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+
+    return {
+      externalRef,
+      status: 'pushed',
+      ...(merchantInvoiceRef ? { merchantInvoiceRef } : {}),
+      ...(notes.length > 0 ? { note: notes.join('; ') } : {}),
+    }
   }
 
   /**
@@ -363,5 +427,56 @@ export class MultiCompanyKeyError extends Error {
       `This Accounted key can see ${count} companies — create a key scoped to one company and connect with that instead.`,
     )
     this.name = 'MultiCompanyKeyError'
+  }
+}
+
+/**
+ * Late attach for Accounted (#3918, the Fortnox #956 precedent): the x402
+ * feed pushes at funding confirmation, but the merchant hands its invoice to
+ * the agent at the settle retry seconds later — so the underlag is usually
+ * ALREADY pushed when the receipt arrives, and pushed rows are never
+ * re-claimed. The capture route calls this fire-and-forget: when the
+ * payment's underlag is already pushed, upload the just-captured invoice as
+ * the second document and record its own sync row. Best-effort by contract —
+ * a failure becomes a note on the pushed row, never an error to the agent.
+ *
+ * Idempotent from three directions at once: the ledger's
+ * `(provider, payment_id, user_id, document_kind)` key makes the second
+ * row-write a no-op, the `paymentId:merchant-invoice` idempotency key makes
+ * a re-upload replay the provider's cached answer, and the row check above
+ * skips the work entirely when the delivery is already recorded.
+ */
+export async function lateAttachAccountedMerchantReceipt(
+  userId: string,
+  paymentId: string,
+  receipt: { url: string | null; inlineJson: unknown | null },
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  const sync = await getSyncState(userId, 'accounted', paymentId)
+  if (!sync || sync.status !== 'pushed') return // not pushed — the in-order push attaches at push time
+  if (await getMerchantInvoiceSyncRef(userId, 'accounted', paymentId)) return // already recorded
+  const connection = await readApiKeyConnection('accounted', userId)
+  const companyId = connection?.row.external_company_id
+  if (!connection || !companyId) return
+  try {
+    const doc = await merchantReceiptDocument(paymentId, receipt, fetchImpl)
+    if (!doc) return
+    if (doc.bytes.byteLength > ACCOUNTED_DOCUMENTS_MAX_BYTES) return // the provider would refuse it; say nothing on a silent best-effort path
+    const { document } = await accountedUploadDocument({
+      apiKey: connection.secrets.apiKey,
+      companyId,
+      file: { filename: doc.filename, bytes: doc.bytes, contentType: doc.contentType },
+      idempotencyKey: accountedIdempotencyKey(paymentId, 'merchant-invoice'),
+      fetchImpl,
+    })
+    await recordMerchantInvoiceSync(userId, 'accounted', paymentId, `accounted:document:${document.id}`)
+  } catch (err) {
+    await markPushed(
+      userId,
+      'accounted',
+      paymentId,
+      sync.external_ref,
+      `the merchant's own invoice was not attached: ${err instanceof Error ? err.message : String(err)}`,
+    )
   }
 }

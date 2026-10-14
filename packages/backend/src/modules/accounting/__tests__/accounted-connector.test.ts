@@ -26,10 +26,18 @@ const { flowMocks, underlagMocks, repoMocks, entryMocks } = vi.hoisted(() => ({
   entryMocks: { buildAccountingEntryForPayment: vi.fn() },
 }))
 vi.mock('../api-key-flow.js', () => ({ readApiKeyConnection: flowMocks.readApiKeyConnection }))
-vi.mock('../receipt-underlag.js', () => ({ loadReceiptUnderlag: underlagMocks.loadReceiptUnderlag }))
+vi.mock('../receipt-underlag.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../receipt-underlag.js')>()),
+  loadReceiptUnderlag: underlagMocks.loadReceiptUnderlag,
+}))
 vi.mock('../entry.js', () => ({ buildAccountingEntryForPayment: entryMocks.buildAccountingEntryForPayment }))
 vi.mock('../../../infra/repositories/accounting-feed-syncs.js', () => ({
   getSyncState: repoMocks.getSyncState,
+  // #3918 names imported by the connector module graph — the push tests
+  // exercise the in-order upload, whose row write happens in the orchestrator.
+  getMerchantInvoiceSyncRef: vi.fn(),
+  recordMerchantInvoiceSync: vi.fn(),
+  markPushed: vi.fn(),
 }))
 vi.mock('../../../infra/repositories/accounting-connections.js', () => ({
   getConnection: repoMocks.getConnection,
@@ -41,6 +49,7 @@ import {
   accountedIdempotencyKey,
   AccountedDocumentHashMismatchError,
 } from '../accounted-client.js'
+import { ACCOUNTED_MERCHANT_DOCUMENT_ID } from './accounted-test-router.js'
 import type { ProviderSecrets } from '../connector.js'
 import { ProviderError } from '../provider.js'
 import { accountedRouter } from './accounted-test-router.js'
@@ -80,7 +89,7 @@ function tx() {
     paymentId: PAYMENT,
     settledAt: '2026-09-10T09:30:00.000Z',
     direction: 'out' as const,
-    counterparty: { address: '0x' + 'ab'.repeat(20), name: 'NordShield VPN' },
+    counterparty: { address: '0x' + 'ab'.repeat(20), name: 'NordShield VPN', country: null },
     resourceUrl: 'https://merchant.example/vpn',
     token: 'USDC',
     amountAtomic: '1000',
@@ -227,6 +236,60 @@ describe('AccountedConnector.pushTransaction (#3018)', () => {
     expect(state.lastUpload?.filename).toBe(`haven-receipt-${PAYMENT}.pdf`)
     expect(state.lastUpload?.uploadSource).toBe('api')
     expect(state.lastUpload?.idempotencyKey).toBe(accountedIdempotencyKey(PAYMENT))
+  })
+
+  /**
+   * #3918: the merchant's own invoice rides the SAME sync as a SECOND
+   * document — own WORM id, own idempotency key (`paymentId:merchant-invoice`),
+   * own ref. Best-effort: a refused second upload is a note, the underlag's
+   * push stands.
+   */
+  it('the captured merchant invoice is uploaded as a second document with its own key and ref', async () => {
+    connectedMock()
+    underlagMock()
+    const { connector, state } = withRouter()
+    const result = await connector.pushTransaction(USER, {
+      ...tx(),
+      merchantReceipt: { url: null, inlineJson: { fakturanummer: 'FAK-2026-1791972466377', saljare: { name: 'Haven Demo AB' } } },
+    })
+    expect(result.status).toBe('pushed')
+    expect(result.externalRef).toBe(DOC_REF)
+    expect(result.merchantInvoiceRef).toBe(`accounted:document:${ACCOUNTED_MERCHANT_DOCUMENT_ID}`)
+    expect(state.uploadCalls).toBe(2)
+    expect(state.uploads.map((u) => u.idempotencyKey)).toEqual([
+      accountedIdempotencyKey(PAYMENT),
+      accountedIdempotencyKey(PAYMENT, 'merchant-invoice'),
+    ])
+    expect(state.uploads[1].filename).toBe(`merchant-receipt-${PAYMENT}.pdf`)
+    expect(state.uploads[1].uploadSource).toBe('api')
+  })
+
+  it('no captured receipt → no second upload, no merchantInvoiceRef (the #3018 shape, byte-identical)', async () => {
+    connectedMock()
+    underlagMock()
+    const { connector, state } = withRouter()
+    const result = await connector.pushTransaction(USER, tx())
+    expect(result.merchantInvoiceRef).toBeUndefined()
+    expect(result.note).toBeUndefined()
+    expect(state.uploadCalls).toBe(1)
+  })
+
+  it('a refused second upload is a NOTE on the pushed row — the underlag ref stands, the failure is named', async () => {
+    connectedMock()
+    underlagMock()
+    const { connector, state } = withRouter()
+    state.failSecondUpload = true
+    const result = await connector.pushTransaction(USER, {
+      ...tx(),
+      merchantReceipt: { url: null, inlineJson: { fakturanummer: 'FAK-9' } },
+    })
+    expect(result.status).toBe('pushed')
+    expect(result.externalRef).toBe(DOC_REF)
+    expect(result.merchantInvoiceRef).toBeUndefined()
+    expect(result.note).toMatch(/merchant's own invoice was not attached/)
+    expect(result.note).toMatch(/DOC_UPLOAD_STORAGE_FAILED/)
+    // The refused attempt created nothing at the provider — only the underlag.
+    expect(state.uploadCalls).toBe(1)
   })
 
   it('delivery proof: a 2xx whose sha256_hash does not match the sent bytes is SKIPPED, no ref stored', async () => {

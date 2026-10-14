@@ -62,7 +62,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-10-01"
+last-verified: "2026-10-14"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -433,10 +433,11 @@ every micro-fee except `invoice/pay`), so a Bitrefill purchase pays one
 request (`invoice/pay`) rather than five. On erc7710 a dropped report does not
 leave the payment unrecorded: the settlement sweep finds it on-chain
 ([Completing a settlement nobody reported](#completing-a-settlement-nobody-reported-2117)).
-On the eip3009 bridge it does not yet. Haven never learns the EIP-3009 nonce,
-so an unreported settlement reads as "merchant likely not paid" after the
-15-minute grace window. Closing that gap is
-[#3888](https://github.com/d-hinders/Haven-AI/issues/3888).
+On the eip3009 bridge the #3888 sweep does the same: it derives the nonce from
+the payment id, finds `AuthorizationUsed(delegate, nonce)` on-chain, and hands
+the transaction through the same verified seam — and since #3925 an agent
+report must prove the burned nonce too (the X-PAYMENT header it posts),
+before anything is recorded.
 **Revisit** if a measured purchase on the current surface still shows agents
 dropping steps after these, or if counsel and a resolution-time egress guard
 are in place.
@@ -1574,8 +1575,9 @@ inside **this intent's own settlement window** (the settlement child's
 cannot be mined outside `authorize .. authorize + 600s`).
 
 Since [#2094](https://github.com/d-hinders/Haven-AI/issues/2094) there is a
-check 8, and it is the only one about WHICH payment rather than what shape it
-had (the eight-check roster is pinned by
+check 8, and since [#3925](https://github.com/d-hinders/Haven-AI/issues/3925)
+a check 9 — both about WHICH payment rather than what shape it had (the
+numbered shape list is pinned by
 [`packages/backend/src/__tests__/settlement-verifier-roster-pin.test.ts`](../../packages/backend/src/__tests__/settlement-verifier-roster-pin.test.ts),
 #2680): when the transaction carries `RedeemedDelegation` logs from the **pinned**
 DelegationManager, the emitted `Delegation` struct is re-hashed with the
@@ -1586,6 +1588,21 @@ turn a genuine settlement into a refusal — no stored child, no manager pinned
 for the chain, or no decodable log from it means check 8 is skipped and the
 verdict is checks 1–7 exactly as before. An absent log is "we learned nothing
 here", not evidence of a forgery.
+
+Since [#3925](https://github.com/d-hinders/Haven-AI/issues/3925) there is a
+check 9, the eip3009 twin: when the caller names the expected
+`AuthorizationUsed(delegate, nonce)` — the sweep derives it from the payment
+id, the agent-reported path reads it from the posted X-PAYMENT header's own
+authorization after checking that header is signed by the delegate — the
+receipt must carry the payment's token's own `AuthorizationUsed` log naming
+that pair, checked BEFORE the transfer scan (the chain's attribution key
+outranks transfer shape, the same reason check 8 runs early). A receipt that
+burned a different nonce for this delegate is refused, one that burned a
+sibling payment's derived nonce is refused by name ("settles another
+payment"), and a receipt with no `AuthorizationUsed` from the token for this
+delegate at all is refused as not an EIP-3009 settlement. A report carrying
+no header is refused rather than attributed by shape; the sweep still
+attributes derived-nonce payments without any report.
 
 **Naming the two hashes (#2998).** `tx_hash` on a receipt (`GET
 /machine-payments/receipts`, `HavenPaymentReceipt.txHash`) means something
@@ -1879,9 +1896,16 @@ sets it too — so a `false` answer only skips the log scan and a `true` answer
 only licenses one. Attribution is ONLY the `AuthorizationUsed` log for this
 payment's delegate and derived nonce, never transfer shape; a payment signed
 by a pre-#3888 signer (random nonce) behaves exactly as before and stays
-outside the sweep's reach — its remedy is still the agent report, which is
-not horizon-bound. A nonce-proven attribution that collides with an earlier
-agent-reported hash on a same-shaped sibling payment is LOGGED and recorded
+outside the sweep's reach — and since #3925 the agent-reported path is held
+to the sweep's standard: a settlement hash is recorded on a payment only if
+the reported transaction burned a nonce provably bound to it, read from the
+X-PAYMENT header the report posts (signer-checked against the delegate) and
+matched against the receipt's `AuthorizationUsed` — a report without a
+header, with a wrong signer, or whose burned nonce is another payment's is
+refused, and a burned nonce that equals a sibling payment's derived nonce is
+refused by name ("settles another payment"). A nonce-proven attribution that
+collides with an earlier agent-reported hash on a same-shaped sibling payment
+is LOGGED and recorded
 nowhere (the owner question is open; the conservative answer is the
 implemented one). Two side effects worth naming: a resumed or
 `retry_original_x402_request` re-sign of a settled payment carries the SAME

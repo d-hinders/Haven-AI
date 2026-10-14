@@ -124,11 +124,59 @@ export function subBudgetRefusalCopy(
 }
 
 /**
- * The budgets a sub-budget can be carved from (#3506 S4): active, unexpired and
- * not merchant-locked. Order is preserved, so the first is the default.
+ * Whether a delegation budget row is live (#3922): the server's `is_live`
+ * (active and unexpired, the budget-view definition). A backend that predates
+ * the field sends none; the row is then derived exactly as before — `active`
+ * and not past its expiry on this clock — never read as "not live".
+ */
+export function delegationIsLive(
+  b: { is_live?: boolean; status: string; expires_at: number },
+  nowSec: number = Date.now() / 1000,
+): boolean {
+  return b.is_live ?? (b.status === 'active' && b.expires_at > nowSec)
+}
+
+/**
+ * The budgets a sub-budget can be carved from (#3506 S4): live
+ * ({@link delegationIsLive}) and not merchant-locked. Order is preserved, so
+ * the first is the default.
  */
 export function eligibleSubBudgetParents<
-  B extends { status: string; expires_at: number; merchant_slug?: string | null },
->(budgets: readonly B[] | null | undefined, nowSec: number): B[] {
-  return (budgets ?? []).filter((b) => b.status === 'active' && b.expires_at > nowSec && !b.merchant_slug)
+  B extends { is_live?: boolean; status: string; expires_at: number; merchant_slug?: string | null },
+>(budgets: readonly B[] | null | undefined): B[] {
+  return (budgets ?? []).filter((b) => delegationIsLive(b) && !b.merchant_slug)
+}
+
+/**
+ * Whether a sub-budget row still has a future "ends" to show (#3922). It is
+ * running while its expiry is still ahead on THIS clock (a page left open
+ * flips to "ended" on its own) and it is either the server's `is_live` (open
+ * and unexpired) or a row whose grant is still enabled on-chain: `pending`
+ * (awaiting its open signature) or `closing` (the disable is prepared but its
+ * signature is still owed — the child keeps working until it lands). It is false
+ * for a `closed` row and for an expired one; which word each then reads is
+ * {@link subBudgetEndLabel}'s ("closed" wins over "ended", #3923).
+ */
+export function subBudgetStillRunning(
+  b: { is_live?: boolean; status: string; expires_at: number },
+  nowSec: number = Date.now() / 1000,
+): boolean {
+  if (b.expires_at <= nowSec) return false
+  // Past the expiry check, live/pending/closing is every status but `closed`
+  // — which also covers a row from a backend that predates `is_live`.
+  return b.is_live === true || b.status !== 'closed'
+}
+
+/**
+ * The word a sub-budget row shows beside its amount (#3923): `closed` when the
+ * row is closed — status wins over expiry, a closed grant with a future expiry
+ * is not "ends in 7 days" — otherwise `ends` while it is still running
+ * ({@link subBudgetStillRunning}) and `ended` once it is not.
+ */
+export function subBudgetEndLabel(
+  b: { is_live?: boolean; status: string; expires_at: number },
+  nowSec: number = Date.now() / 1000,
+): 'ends' | 'ended' | 'closed' {
+  if (b.status === 'closed') return 'closed'
+  return subBudgetStillRunning(b, nowSec) ? 'ends' : 'ended'
 }

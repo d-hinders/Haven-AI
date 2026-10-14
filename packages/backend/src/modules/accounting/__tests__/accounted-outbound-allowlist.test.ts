@@ -22,10 +22,16 @@ const { flowMocks, underlagMocks, repoMocks, entryMocks } = vi.hoisted(() => ({
   entryMocks: { buildAccountingEntryForPayment: vi.fn() },
 }))
 vi.mock('../api-key-flow.js', () => ({ readApiKeyConnection: flowMocks.readApiKeyConnection }))
-vi.mock('../receipt-underlag.js', () => ({ loadReceiptUnderlag: underlagMocks.loadReceiptUnderlag }))
+vi.mock('../receipt-underlag.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../receipt-underlag.js')>()),
+  loadReceiptUnderlag: underlagMocks.loadReceiptUnderlag,
+}))
 vi.mock('../entry.js', () => ({ buildAccountingEntryForPayment: entryMocks.buildAccountingEntryForPayment }))
 vi.mock('../../../infra/repositories/accounting-feed-syncs.js', () => ({
   getSyncState: repoMocks.getSyncState,
+  getMerchantInvoiceSyncRef: vi.fn(),
+  recordMerchantInvoiceSync: vi.fn(),
+  markPushed: vi.fn(),
 }))
 vi.mock('../../../infra/repositories/accounting-connections.js', () => ({
   getConnection: repoMocks.getConnection,
@@ -45,7 +51,7 @@ function tx() {
     paymentId: PAYMENT,
     settledAt: '2026-09-10T09:30:00.000Z',
     direction: 'out' as const,
-    counterparty: { address: '0x' + 'ab'.repeat(20), name: 'NordShield VPN' },
+    counterparty: { address: '0x' + 'ab'.repeat(20), name: 'NordShield VPN', country: null },
     resourceUrl: 'https://merchant.example/vpn',
     token: 'USDC',
     amountAtomic: '1000',

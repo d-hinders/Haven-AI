@@ -35,8 +35,7 @@ export const FORTNOX_REQUEST_TIMEOUT_MS = 15_000
 export const FORTNOX_UPLOAD_TIMEOUT_MS = 60_000
 import {
   loadReceiptUnderlag,
-  merchantReceiptPdf,
-  fetchMerchantReceiptDocument,
+  merchantReceiptDocument,
   type ReceiptUnderlag,
 } from './receipt-underlag.js'
 
@@ -571,18 +570,14 @@ async function attachMerchantReceiptFiles(
   receipt: { url: string | null; inlineJson: unknown | null },
   fetchImpl: typeof fetch,
 ): Promise<void> {
-  let file: ReceiptUnderlag
-  let contentType = 'application/pdf'
-  if (receipt.inlineJson != null) {
-    file = merchantReceiptPdf(paymentId, receipt.inlineJson)
-  } else if (receipt.url) {
-    const doc = await fetchMerchantReceiptDocument(receipt.url, fetchImpl)
-    file = { filename: doc.filename, pdf: doc.bytes }
-    contentType = doc.contentType
-  } else {
-    return
-  }
-  const fileId = await fortnoxUploadPdf(accessToken, file, fetchImpl, contentType)
+  const doc = await merchantReceiptDocument(paymentId, receipt, fetchImpl)
+  if (!doc) return
+  const fileId = await fortnoxUploadPdf(
+    accessToken,
+    { filename: doc.filename, pdf: doc.bytes },
+    fetchImpl,
+    doc.contentType,
+  )
   await fortnoxPost(
     accessToken,
     '/supplierinvoicefileconnections',

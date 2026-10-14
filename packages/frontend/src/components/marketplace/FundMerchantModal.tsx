@@ -167,8 +167,8 @@ function refusalCopy(detail: string | undefined, merchantName: string): string {
  *
  * #3933: the backend refuses a plain grant into an occupied slot, so a match
  * here routes the owner to the edit flow instead of signing. "Live" is the
- * shared slot predicate (`lib/budget-slot.ts`): active AND unexpired, the
- * same rule the backend applies.
+ * wire's `is_live` (#3922, `delegationIsLive`) through the shared slot
+ * predicate (`lib/budget-slot.ts`): an expired `active` row does not occupy.
  */
 function findReplacedBudget(
   budgets: DelegationBudget[] | null,

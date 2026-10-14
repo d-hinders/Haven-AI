@@ -14,13 +14,13 @@ const USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
 const PAY_TO = '0x' + 'f0'.repeat(20)
 
 function row(overrides: Partial<DelegationBudget> = {}): DelegationBudget {
-  return {
+  const r = {
     id: 'b1',
     token_address: USDC,
     recipient_address: null,
     delegation_hash: '0x' + 'ab'.repeat(32),
     version: 1,
-    status: 'active',
+    status: 'active' as const,
     budget_atomic: '5000000',
     period_seconds: 86_400,
     expires_at: NOW + 3600,
@@ -28,6 +28,8 @@ function row(overrides: Partial<DelegationBudget> = {}): DelegationBudget {
     created_at: '2026-09-01T00:00:00Z',
     ...overrides,
   }
+  // The wire's `is_live` (#3922), as the server derives it, unless a test sets it.
+  return { ...r, is_live: overrides.is_live ?? (r.status === 'active' && r.expires_at > NOW) }
 }
 
 /**
@@ -79,6 +81,14 @@ describe('occupiesSlot', () => {
     for (const status of ['replaced', 'revoked', 'pending'] as const) {
       expect(occupiesSlot(row({ status }), NOW)).toBe(false)
     }
+  })
+})
+
+describe('occupiesSlot — the wire flag (#3922)', () => {
+  it('reads `is_live` when the row carries it, whatever status and expiry say', () => {
+    // The server's flag is the backend predicate itself; the client does not restate it.
+    expect(occupiesSlot(row({ is_live: false }), NOW)).toBe(false)
+    expect(occupiesSlot(row({ expires_at: NOW - 1, is_live: true }), NOW)).toBe(true)
   })
 })
 

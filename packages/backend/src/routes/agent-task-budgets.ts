@@ -14,7 +14,7 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
 import { loadOwnedDelegationAgent } from '../infra/repositories/agents.js'
-import { listForOwner, type TaskBudgetRow } from '../infra/repositories/task-budgets.js'
+import { isLiveTaskBudget, listForOwner, type TaskBudgetRow } from '../infra/repositories/task-budgets.js'
 import { readTaskBudgetSpentForReport } from '../modules/task-budgets/index.js'
 import { getChain } from '../domain/chains.js'
 import { formatTokenValue } from '../domain/tokens.js'
@@ -33,6 +33,7 @@ function toWire(row: TaskBudgetRow, nowSec: number) {
     status: row.status,
     expires_at: Number(row.expires_at),
     is_expired: Number(row.expires_at) <= nowSec,
+    is_live: isLiveTaskBudget(row, nowSec),
     created_at: row.created_at,
     opened_at: row.opened_at,
     closed_at: row.closed_at,

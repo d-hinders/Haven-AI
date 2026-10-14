@@ -44,7 +44,7 @@ const TX = {
   paymentId: 'pay-123',
   settledAt: '2026-07-15T09:30:00.000Z',
   direction: 'out' as const,
-  counterparty: { address: '0x' + 'ab'.repeat(20), name: 'NordShield VPN' },
+  counterparty: { address: '0x' + 'ab'.repeat(20), name: 'NordShield VPN', country: null },
   resourceUrl: 'https://merchant.example/vpn',
   token: 'USDC',
   amountAtomic: '1000',
@@ -396,11 +396,11 @@ describe('helpers', () => {
 
   it('supplierNameFor falls back from name to truncated address to unknown', () => {
     expect(supplierNameFor(TX)).toBe('NordShield VPN')
-    const fallback = supplierNameFor({ ...TX, counterparty: { name: null, address: '0x' + 'ab'.repeat(20) } })
+    const fallback = supplierNameFor({ ...TX, counterparty: { name: null, address: '0x' + 'ab'.repeat(20), country: null } })
     expect(fallback).toMatch(/^Merchant 0xabab/)
     // Fortnox-safe: no Unicode ellipsis in the Name field (live gotcha 2000359).
     expect(fallback).not.toMatch(/…/)
-    expect(supplierNameFor({ ...TX, counterparty: { name: null, address: null } })).toBe('Unknown merchant')
+    expect(supplierNameFor({ ...TX, counterparty: { name: null, address: null, country: null } })).toBe('Unknown merchant')
   })
 
   /**
@@ -417,10 +417,10 @@ describe('helpers', () => {
     // CONTROL: the two forms really differ, so this assertion can fail.
     expect(checksummed).not.toBe(lower)
 
-    const fromLower = supplierNameFor({ ...TX, counterparty: { name: null, address: lower } })
+    const fromLower = supplierNameFor({ ...TX, counterparty: { name: null, address: lower, country: null } })
     const fromChecksummed = supplierNameFor({
       ...TX,
-      counterparty: { name: null, address: checksummed },
+      counterparty: { name: null, address: checksummed, country: null },
     })
 
     expect(fromChecksummed).toBe(fromLower)

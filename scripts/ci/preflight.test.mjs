@@ -48,6 +48,8 @@ import {
   GATE_RULES,
   GATE_SHAPED_ANYWHERE,
   literalHead,
+  GATE_OUTPUT_MAX_BUFFER,
+  runGate,
 } from './preflight.mjs'
 import { classifyChangedFiles } from './change-classifier.mjs'
 
@@ -1060,5 +1062,29 @@ describe('the gate map file', () => {
     const raw = JSON.parse(readFileSync(new URL('./preflight-gates.json', import.meta.url), 'utf8'))
     assert.ok(Array.isArray(raw.$comment))
     assert.equal(typeof raw.notGates, 'object')
+  })
+})
+
+describe('the gate output buffer (#3954)', () => {
+  test('a gate whose own output exceeds 1 MiB is not killed and its output is captured', () => {
+    // The backend suite prints ~1.47 MB; under Node's default 1 MiB
+    // `maxBuffer`, `spawnSync` killed it mid-run (~34 s in) and preflight
+    // reported the gate red while the same command run directly passed.
+    // The buffer the battery passes must therefore exceed that measured
+    // chatter — assert against 1.5 MiB, and against the constant itself.
+    const emitted = Math.round(1.5 * 1024 * 1024)
+    const result = runGate({
+      command: `node -e "process.stdout.write('x'.repeat(${emitted}))"`,
+      jobs: ['ci'],
+    })
+    assert.equal(result.status, 0, `gate killed or failed: status=${result.status}`)
+    assert.equal(result.ok, true)
+    assert.equal(result.output.length, emitted, 'captured output was truncated')
+  })
+
+  test('the buffer is sized well above the suite that was killed', () => {
+    // The measured floor is the backend suite's ~1.47 MB of stdout. Anything
+    // at or below that would leave the original defect standing.
+    assert.ok(GATE_OUTPUT_MAX_BUFFER >= 10 * 1024 * 1024)
   })
 })

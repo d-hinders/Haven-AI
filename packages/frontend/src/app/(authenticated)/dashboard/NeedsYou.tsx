@@ -219,34 +219,38 @@ export default function NeedsYou({
 
       {guide ? <div className="px-5 py-4">{guide}</div> : null}
 
-      {count > 0 ? (
-        <div className={hasOverviewError || guide ? 'border-t border-[var(--v2-border)]' : ''}>
-          <AttentionList
-            items={listItems}
-            headingId={headingId}
-            fullBleed
-            onDismiss={(id) => {
-              const item = items.find((candidate) => candidate.id === id)
-              if (item) onDismiss(item)
-            }}
-          />
-          {hiddenCount > 0 && !expanded ? (
-            <div className="border-t border-[var(--v2-border)] px-5 py-3">
-              {/* The accessible name states the count — "Show 3 more" says
-                  what the button reveals without sight of the list. */}
-              <Button
-                variant="tertiary"
-                size="sm"
-                aria-label={`Show ${hiddenCount} more items`}
-                aria-expanded={expanded}
-                onClick={() => setExpanded(true)}
-              >
-                Show {hiddenCount} more
-              </Button>
-            </div>
-          ) : null}
-        </div>
-      ) : showEmpty && emptyState?.kind === 'caught-up' ? (
+      {/* Mounted at zero items too (it renders nothing then): the dismiss
+          that empties the card must still run the list's focus hand-off to
+          the heading — an unmounted list runs no effect, and focus would
+          drop to <body> with the vanished X. */}
+      <div className={count > 0 && (hasOverviewError || guide) ? 'border-t border-[var(--v2-border)]' : ''}>
+        <AttentionList
+          items={listItems}
+          headingId={headingId}
+          fullBleed
+          onDismiss={(id) => {
+            const item = items.find((candidate) => candidate.id === id)
+            if (item) onDismiss(item)
+          }}
+        />
+        {hiddenCount > 0 && !expanded ? (
+          <div className="border-t border-[var(--v2-border)] px-5 py-3">
+            {/* The accessible name states the count — "Show 3 more" says
+                what the button reveals without sight of the list. */}
+            <Button
+              variant="tertiary"
+              size="sm"
+              aria-label={`Show ${hiddenCount} more items`}
+              aria-expanded={expanded}
+              onClick={() => setExpanded(true)}
+            >
+              Show {hiddenCount} more
+            </Button>
+          </div>
+        ) : null}
+      </div>
+
+      {showEmpty && emptyState?.kind === 'caught-up' ? (
         // An unboxed success row on the attention rows' geometry (20px inset,
         // 32px icon centred on the title's first line) — the mockup's clear
         // card. Not a dashed EmptyState tile: that is the "nothing here yet"

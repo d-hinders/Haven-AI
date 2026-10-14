@@ -1163,9 +1163,9 @@ export interface HavenSubBudgetCloseSignData {
 /** #3506: `POST /sub-budgets/:id/close`. */
 export interface CloseSubBudgetResult {
   subBudget: HavenSubBudget
-  /** `closed` on a trivial close (never signed, or already expired); absent when a close signature is pending. */
+  /** `closed` on a trivial close (never signed, or `open` and already expired) or when the chain already shows it disabled; absent when a close signature is pending. */
   status?: 'closed'
-  /** Present only when the close needed a signature (a live child). */
+  /** Present only when the close needed a signature (a live child, or any `closing` row — #3923). */
   signData?: HavenSubBudgetCloseSignData
   nextAction?: string
 }
@@ -1221,6 +1221,12 @@ export interface RawTaskBudget {
   status: HavenTaskBudgetStatus
   expires_at: number
   is_expired: boolean
+  /**
+   * #3922: the backend's single liveness answer (pending/open/closing and not
+   * expired — the `status=live` set). Optional: an older backend omits it, and
+   * a missing value means "derive from `status` + `is_expired`", never false.
+   */
+  is_live?: boolean
   created_at: string
   opened_at: string | null
   closed_at: string | null
@@ -1257,6 +1263,8 @@ export interface HavenTaskBudget {
   status: HavenTaskBudgetStatus
   expiresAt: number
   isExpired: boolean
+  /** #3922: camelCase `is_live`; absent when the backend predates it (presence preserved). */
+  isLive?: boolean
   createdAt: string
   openedAt: string | null
   closedAt: string | null

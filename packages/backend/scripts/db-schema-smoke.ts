@@ -47,7 +47,6 @@ import {
   MARK_TASK_BUDGET_CLOSED_SQL,
   MARK_TASK_BUDGET_CLOSING_SQL,
   MARK_TASK_BUDGET_OPEN_SQL,
-  SELECT_OPEN_TASK_BUDGET_FOR_PAYMENT_SQL,
   SUM_OPEN_RESERVED_ATOMIC_SQL,
 } from '../src/infra/repositories/task-budgets.js'
 import {
@@ -215,6 +214,9 @@ import {
 import {
   CONFIRM_X402_INTENT_SQL,
   COUNT_RECENT_X402_INTENTS_SQL,
+  EIP3009_SETTLEMENT_HASH_LOCK_SQL,
+  EIP3009_SETTLEMENT_INTENT_LOCK_SQL,
+  FIND_RECORDED_EIP3009_SETTLEMENT_SQL,
   FAIL_X402_INTENT_SQL,
   FIND_ACTIVE_X402_INTENT_BY_KEY_SQL,
   FIND_EVIDENCE_ORPHANED_ERC7710_INTENTS_SQL,
@@ -223,6 +225,7 @@ import {
   FIND_X402_INTENT_BY_KEY_SQL,
   GET_MAX_X402_PER_HOUR_SQL,
   MARK_INTENT_SUBMITTED_FOR_SETTLEMENT_SQL,
+  RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL,
   RECORD_X402_SIGNATURE_SQL,
 } from '../src/infra/repositories/x402-authorizations.js'
 import {
@@ -579,6 +582,12 @@ const QUERIES: SmokeQuery[] = [
     name: 'x402: exact-amount idempotency reload',
     sql: FIND_X402_INTENT_BY_KEY_SQL,
   },
+  // #3927: the eip3009 merchant-settlement writer — its two advisory locks
+  // (hash, then the prefixed intent key), the pre-read and the guarded write.
+  { name: 'x402: eip3009 settlement hash lock (#3927, imported)', sql: EIP3009_SETTLEMENT_HASH_LOCK_SQL },
+  { name: 'x402: eip3009 settlement intent lock (#3927, imported)', sql: EIP3009_SETTLEMENT_INTENT_LOCK_SQL },
+  { name: 'x402: eip3009 recorded settlement pre-read (#3927, imported)', sql: FIND_RECORDED_EIP3009_SETTLEMENT_SQL },
+  { name: 'x402: eip3009 merchant-settlement record (#3927, imported)', sql: RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL },
   // Two pasted session-rail entries were DELETED here (#1165): the
   // recordRotatedSession guarded switch (its source died with the #834
   // retirement — no such function exists in src) and a session-shaped
@@ -711,10 +720,10 @@ const QUERIES: SmokeQuery[] = [
     name: 'task budgets: mark closed (open/closing/pending, #3329)',
     sql: MARK_TASK_BUDGET_CLOSED_SQL,
   },
-  {
-    name: 'task budgets: select open for payment (#3329)',
-    sql: SELECT_OPEN_TASK_BUDGET_FOR_PAYMENT_SQL,
-  },
+  // #3919 S-B: the former 'task budgets: select open for payment (#3329)'
+  // PREPARE is gone with the deleted payment-time selector — no production
+  // caller, and the named openTaskBudgetSql predicate is the one spelling of
+  // "open" now (it PREPAREs inside the statements above).
   {
     name: 'agents: lock before opening re-key',
     sql: LOCK_OWNED_AGENT_FOR_REKEY_OPENING_SQL,

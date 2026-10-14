@@ -26,6 +26,7 @@ covers:
   - packages/sdk/src/delegate-sweep.ts
   - packages/signer/src/tools.ts
   - packages/signer/src/core.ts
+  - packages/backend/src/infra/chain/settlement-transfer-verifier.ts
   - packages/backend/src/middleware/auth.ts
   - packages/backend/src/routes/auth.ts
   - packages/backend/src/infra/repositories/device-authorizations.ts
@@ -824,6 +825,77 @@ chain.
 > `account_type = 'delegator_hybrid'` filter (#2413's rule: no legacy rail
 > surface on the dashboard). Scope of this note: those statements and their
 > WHERE/JOIN shapes. Nothing else in this document was re-verified.
+
+> **Re-verified #3921 (2026-10-14 — the budget-liveness predicates, epic
+> #3919 slice B):** this diff touched one file in this document's coverage
+> list, `infra/repositories/dashboard.ts`, and one read in it:
+> `RECEIVED_SUB_BUDGETS_FOR_AGENTS_SQL` now answers its `open` column
+> through the shared `openSubBudgetSql` predicate (defined in
+> `infra/repositories/sub-budgets.ts`) instead of `status = 'open'` alone —
+> an EXPIRED `open` grant now reports `open = false`, the same verdict the
+> payment path (`sub-budget-service.ts`) and the agent's own open list
+> already reached — and the read gained a defaulted `nowSec` parameter for
+> that predicate's app clock. A narrowing: nothing that was refused becomes
+> allowed, the returned row set is unchanged (pending/closing/closed grants
+> still report `open = false` rather than being dropped), and no write,
+> signing path or permission changes. Scope of this note: that one statement
+> and its signature. Nothing else in this document was re-verified.
+>
+> **Re-verified #3922 (2026-10-14: budget liveness, epic #3919 slice C).**
+> The diff touches covered paths:
+> - `routes/agent-delegations.ts`, whose list now selects `is_live` from
+>   `spendableDelegationSql(…, { requireStarted: false })`, the view
+>   definition;
+> - (outside this document's coverage) `infra/repositories/task-budgets.ts`
+>   and `sub-budgets.ts`, which add JS mirrors pinned to their SQL
+>   predicates by a real-DB matrix test;
+> - the `DelegationBudgetCard.tsx` and `useDelegationBudget.ts` readers.
+>
+> `is_live` is a REPORT field, additive, and read by no payment path: the
+> spend-time selectors keep `requireStarted: true`, and every refusal and
+> enforcer is untouched.
+>
+> The still-enabled set gains one exported copy,
+> `STILL_ENABLED_DELEGATION_STATUSES` in `@haven_ai/core`, pinned to
+> `stillEnabledDelegationSql()` by a test. The CLI revoke refusal and the
+> remove dialog stay STATUS-based on purpose: they guard against leaving
+> on-chain authority behind (#3343, #3542) and must hold against an older
+> backend that sends no `is_live`.
+>
+> Two display changes narrow what is shown as live. A `closed` sub-budget
+> with a future expiry reads "ended" instead of "ends"; a `closing` one still
+> reads "ends", because its grant stays enabled until the disable signature
+> lands. The fund-merchant "This replaces…" warning no longer fires for an
+> expired `active` row, which is still retired on activation but can no
+> longer spend. No signing input, permission or custody decision moves.
+>
+> Scope of this note: those reads only. Nothing else in this document was
+> re-verified, and `last-verified` is not bumped.
+>
+> **Re-verified #3923 (2026-10-14: budget liveness, epic #3919 slice D).**
+> The diff touches covered paths:
+> - `routes/agent-delegations.ts`: under `?include=remaining`, the existing
+>   `readRemainingBudget` chain read now runs only for LIVE rows. An expired
+>   `active` row stays in the list with its three remaining fields null and
+>   no read. That narrows a read-only enrichment; nothing is signed, prepared
+>   or redeemed.
+> - `sdk/src/account-reads.ts`: the summary's older-backend filter drops an
+>   expired `closing` task budget.
+> - `DelegationBudgetCard.tsx`: a `closed` sub-budget reads "closed".
+>
+> Outside this document's coverage, `modules/sub-budgets/sub-budget-service.ts`
+> no longer closes an expired `closing` sub-budget trivially. Its disable is
+> re-prepared and signed by the agent's own delegate key (owner decision
+> 2026-10-14), so the child is disabled on-chain rather than left to lapse.
+> That is authority-reducing only, and Haven still signs nothing. One
+> exception (owner decision 2026-10-14): when the delegating agent is revoked
+> or archived, the owner `DELETE` closes an expired `closing` row in Haven
+> with no on-chain disable, since the child can no longer spend and nobody is
+> left to sign. Haven still signs nothing.
+>
+> No payment selector, enforcer, refusal or signer-set decision moves. Scope
+> of this note: those reads and that close path; nothing else in this
+> document was re-verified, and `last-verified` is not bumped.
 
 The unlink guard also refuses while an agent re-key is in flight, so the Safe
 binding cannot disappear between re-key stages. This is a database
@@ -3024,3 +3096,30 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > any agent's authority is edited. Scope of this re-read: this repository
 > change only; nothing else in this document was re-read for it, and
 > `last-verified` is not bumped.
+
+> **Re-verified unchanged in authority, narrowed in evidence (#3925,
+> 2026-10-14, agent-reported EIP-3009 settlement attribution):** a merchant
+> settlement hash is recorded on an x402 EIP-3009 payment only if the reported
+> transaction burned an `AuthorizationUsed(delegate, nonce)` nonce provably
+> bound to THAT payment — derived from the payment's id (the #3888 sweep,
+> which now passes its own proof explicitly) or signed by the payment's
+> delegate in the X-PAYMENT header the settlement report posts
+> (`eip3009SettlementProofFromHeader`: header decode, delegate signer check
+> via the pinned token EIP-712 domain, then the verifier's new check 9
+> matching the receipt's `AuthorizationUsed`). The trusted set is unchanged —
+> the chain and Haven's payment row; the agent's `payment_id`, `txHash` and
+> header stay untrusted inputs that only NAME what to verify. What closes is
+> the shape-only residual where a hash could be recorded on any same-shaped
+> payment whose funding confirmed in the window: a same-shaped sibling report
+> is now refused (a burned nonce equal to a sibling's derived nonce is
+> refused by name, "settles another payment"), and a report with no header,
+> a wrong-signer header, or a receipt with no `AuthorizationUsed` from the
+> payment's token is refused rather than attributed by shape. No signature,
+> key role, enforcer or custody path moves; the residual that remains is the
+> accepted one (a merchant that never settles records nothing; the
+> notBefore/notAfter funding window stays the funding bound; a random-nonce
+> pre-#3888 payment is unattributable on both paths). Scope of this note:
+> `packages/backend/src/infra/chain/settlement-transfer-verifier.ts`,
+> `modules/x402/eip3009-settlement-evidence.ts`, `modules/mpp/evidence.ts`,
+> `infra/repositories/x402-authorizations.ts`; the rest of this document was
+> not re-read for it, and `last-verified` is not bumped.

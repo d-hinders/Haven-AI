@@ -1,4 +1,5 @@
 import type { DelegationBudget } from '@/hooks/useDelegationBudget'
+import { delegationIsLive } from '@/lib/sub-budget'
 
 /**
  * #3933: row-level budget-slot predicates, read from `GET /agents/:id/delegations`
@@ -14,7 +15,7 @@ import type { DelegationBudget } from '@/hooks/useDelegationBudget'
  * claims to have read the chain.
  */
 
-type SlotRow = Pick<DelegationBudget, 'status' | 'expires_at'>
+type SlotRow = Pick<DelegationBudget, 'status' | 'expires_at'> & { is_live?: boolean }
 
 /**
  * An old budget that a replace retired in Haven's mirror but that has not been
@@ -35,13 +36,16 @@ export function replacedButEnabledBudgets<T extends SlotRow>(rows: T[] | null | 
 }
 
 /**
- * Whether a row OCCUPIES its (token, recipient) slot: `active` and unexpired.
- * The same rule the backend applies before it refuses a plain grant with
- * `BUDGET_SLOT_OCCUPIED` (`findOccupyingDelegationsInSlot`, #3933). A dormant
- * re-key "steady" row whose period has not started still occupies.
+ * Whether a row OCCUPIES its (token, recipient) slot: the wire's `is_live`
+ * (#3922, {@link delegationIsLive}) — `spendableDelegationSql` with
+ * `requireStarted: false`, the very predicate the backend applies before it
+ * refuses a plain grant with `BUDGET_SLOT_OCCUPIED`
+ * (`findOccupyingDelegationsInSlot`, #3933). A dormant re-key "steady" row
+ * whose period has not started still occupies. A row without the flag falls
+ * back to `active` and unexpired.
  */
 export function occupiesSlot(row: SlotRow, nowSec: number): boolean {
-  return row.status === 'active' && row.expires_at > nowSec
+  return delegationIsLive(row, nowSec)
 }
 
 /**

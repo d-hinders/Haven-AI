@@ -17,6 +17,9 @@ import {
   isHalfRevoked,
 } from '@/lib/half-revoked'
 import { formatAgentLastActivity, formatAgentLastActivityTitle } from '@/lib/agent-last-seen'
+import { agentStatusPresentation } from '@/lib/payment-status'
+import type { StatusTone } from '@/components/ui/StatusBadge'
+import { DELEGATION_BUDGET_CARD_ID } from '@/components/DelegationBudgetCard'
 import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
 import { STRANDED_FUNDS_TITLE, strandedFundsCause } from '@/lib/stranded-funds-copy'
 import MoveAgentModal from '../MoveAgentModal'
@@ -36,6 +39,21 @@ const DANGER_ACTION_BUTTON_CLASS =
  * re-review S9); visible from `lg` up, where the row never wraps.
  */
 const SEPARATOR_CLASS = 'hidden text-[var(--v2-border-strong)] lg:inline'
+
+/**
+ * #3945: chip paint per the shared `StatusTone`. The warning/danger/neutral
+ * strings are the pre-#3945 ternary, kept byte-identical so paused and
+ * revoked chips render exactly as every committed baseline captured them;
+ * `success`/`brand` exist because the shared map's tone union is wider than
+ * this chip has ever needed, and an unmapped tone falls through to neutral.
+ */
+const STATUS_CHIP_TONE_CLASS: Record<StatusTone, string> = {
+  warning: 'bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]',
+  danger: 'bg-[var(--v2-danger-soft)] text-[var(--v2-danger)]',
+  neutral: 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]',
+  success: 'bg-[var(--v2-success-soft)] text-[var(--v2-success)]',
+  brand: 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]',
+}
 
 export function AgentCard({
   agent,
@@ -164,16 +182,24 @@ export function AgentCard({
                 </Link>
               </h3>
               {!isActive ? (
+                /* #3945: the label is the SHARED presentation
+                   (`agentStatusPresentation`), not the raw enum and not a
+                   third hand-written copy — the dashboard row and the agent
+                   page already render these words for the same statuses. The
+                   tone classes are the pre-#3945 paint, kept byte-identical
+                   for paused (warning) and revoked (danger) so no committed
+                   baseline drifts; pending_approval arrives as the shared
+                   map's `warning`. An unrecognised status falls back to the
+                   map's neutral word-cased label — the fail-closed direction
+                   the payment-status module documents — never the raw enum. */
                 <span
+                  data-testid="agent-status-chip"
                   className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
-                    isPaused
-                      ? 'bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]'
-                      : agent.status === 'revoked'
-                        ? 'bg-[var(--v2-danger-soft)] text-[var(--v2-danger)]'
-                        : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
+                    STATUS_CHIP_TONE_CLASS[agentStatusPresentation(agent.status).tone] ??
+                    STATUS_CHIP_TONE_CLASS.neutral
                   }`}
                 >
-                  {agent.status}
+                  {agentStatusPresentation(agent.status).label}
                 </span>
               ) : null}
             </div>
@@ -443,6 +469,15 @@ export function AgentCard({
               </span>
             )}
             <span className="flex items-center gap-2">
+              {/* #3945: pause belongs to `active`, resume to `paused` — the
+                  backend's RESUME_AGENT_SQL only flips `paused` agents, so
+                  offering Resume to any other status was a dead end. A
+                  pending_approval agent's one action is setting its first
+                  budget, which lives on the agent page's budget card, so the
+                  card links straight there (the same destination the
+                  dashboard row and the agent page both call "Needs setup").
+                  Revoked and archived agents are gated out by `isOperational`
+                  above and get their own rows below. */}
               {isActive ? (
                 <button
                   onClick={() => onPause(agent)}
@@ -452,7 +487,7 @@ export function AgentCard({
                 >
                   {busyAction === 'pause' ? 'Pausing…' : 'Pause payments'}
                 </button>
-              ) : (
+              ) : isPaused ? (
                 <button
                   onClick={() => onResume(agent)}
                   disabled={isBusy}
@@ -461,7 +496,14 @@ export function AgentCard({
                 >
                   {busyAction === 'resume' ? 'Resuming...' : 'Resume from pause'}
                 </button>
-              )}
+              ) : agent.status === 'pending_approval' ? (
+                <Link
+                  href={`/agents/${agent.id}#${DELEGATION_BUDGET_CARD_ID}`}
+                  className={ACTION_BUTTON_CLASS}
+                >
+                  Finish setup
+                </Link>
+              ) : null}
             </span>
             {/* #1402: Remove stops the live delegation and archives its
                 credential. #2413 dropped the legacy "Unlink" variant with the

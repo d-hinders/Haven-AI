@@ -30,7 +30,7 @@ covers:
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
   - packages/demo-merchant-mcp/src/x402.ts
   - packages/demo-merchant-mcp/src/http.ts
-last-verified: "2026-10-05"
+last-verified: "2026-10-14"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -1964,6 +1964,7 @@ check that the backend agrees with itself.
 ## Related documentation
 
 - [`packages/qa-agent/README.md`](../../packages/qa-agent/README.md) — package and scenario details
+- [`agent-evals.md`](./agent-evals.md) — the model-in-the-loop agent eval suite (#3958, epic #3957): task format, graders, starter tasks, the Hermes runner and its credential inventory
 - [`e2e-qa-runbook.md`](./e2e-qa-runbook.md) — manual agent/merchant coverage
 - [`dev-environment.md`](./dev-environment.md) — shared dev topology
 - [`promoting-dev-to-main.md`](./promoting-dev-to-main.md) — promotion checks

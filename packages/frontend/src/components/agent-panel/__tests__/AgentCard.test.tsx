@@ -9,6 +9,8 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import type { Agent } from '@/hooks/useAgents'
 import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
 import { STRANDED_FUNDS_TITLE, strandedFundsCause } from '@/lib/stranded-funds-copy'
+import { agentStatusPresentation } from '@/lib/payment-status'
+import { DELEGATION_BUDGET_CARD_ID } from '@/components/DelegationBudgetCard'
 
 /** Escape a copy string for use inside a text-matching RegExp. */
 function escapeRe(value: string): string {
@@ -502,5 +504,91 @@ describe('AgentCard organization actions (#3222 re-review)', () => {
     }
     expect(row.className).toMatch(/gap-x-4/)
     expect(row.className).toMatch(/lg:gap-2/)
+  })
+})
+
+/**
+ * #3945: the action row used to be `isActive ? Pause : Resume`, so every
+ * non-active status — `pending_approval` included — was offered "Resume from
+ * pause", a dead end: the backend's RESUME_AGENT_SQL only flips rows
+ * `WHERE status = 'paused'`. And the status pill printed the raw enum
+ * (`pending_approval`) where the dashboard row says "Needs setup". This block
+ * pins the status-keyed affordance matrix and the shared label source.
+ */
+describe('AgentCard status-keyed actions and chip (#3945)', () => {
+  const FINISH_SETUP_HREF = `/agents/agent-1#${DELEGATION_BUDGET_CARD_ID}`
+
+  it('pending_approval: no Pause, no Resume — a Finish setup link to the budget card', () => {
+    renderCard(agentFixture({ status: 'pending_approval' }))
+    expect(screen.queryByRole('button', { name: 'Resume Research agent' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Pause Research agent' })).toBeNull()
+    expect(screen.getByRole('link', { name: 'Finish setup' })).toHaveAttribute(
+      'href',
+      FINISH_SETUP_HREF,
+    )
+  })
+
+  it('pending_approval: the chip reads "Needs setup", never the raw enum', () => {
+    renderCard(agentFixture({ status: 'pending_approval' }))
+    expect(screen.getByTestId('agent-status-chip')).toHaveTextContent('Needs setup')
+    expect(document.body.textContent).not.toContain('pending_approval')
+  })
+
+  it('active: Pause, not Resume', () => {
+    renderCard(agentFixture({ status: 'active' }))
+    expect(screen.getByRole('button', { name: 'Pause Research agent' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Resume Research agent' })).toBeNull()
+  })
+
+  it('paused: Resume, not Pause', () => {
+    renderCard(agentFixture({ status: 'paused' }))
+    expect(screen.getByRole('button', { name: 'Resume Research agent' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Pause Research agent' })).toBeNull()
+  })
+
+  it('revoked: neither Pause nor Resume nor Finish setup', () => {
+    renderCard(agentFixture({ status: 'revoked' }))
+    expect(screen.queryByRole('button', { name: 'Pause Research agent' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Resume Research agent' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Finish setup' })).toBeNull()
+  })
+
+  /**
+   * The raw-enum half of #3945, checked for EVERY status the schema allows
+   * (`packages/core/src/api-types.ts` `Agent.status`: active | paused |
+   * pending_approval | revoked). Scoped to the CHIP on purpose: the English
+   * copy on a revoked card legitimately uses the words ("Network access
+   * already revoked"), and "active on-chain" appears in the half-revoked
+   * marker — the claim under test is that no STATUS VALUE renders, i.e. the
+   * chip never prints the enum, not that the words can never appear. The one
+   * multi-word enum, `pending_approval`, is also asserted absent from the
+   * whole card, since no legitimate copy contains it.
+   */
+  it('no raw status value on the chip for every schema status', () => {
+    for (const status of ['active', 'paused', 'pending_approval', 'revoked'] as const) {
+      const { unmount } = render(
+        <AgentCard
+          agent={agentFixture({ status })}
+          onPause={vi.fn()}
+          onResume={vi.fn()}
+          onRevokeCredential={vi.fn()}
+          onArchive={vi.fn()}
+          onRestore={vi.fn()}
+          onMoveToOrganization={vi.fn()}
+          busyAction={null}
+        />,
+      )
+      const chip = screen.queryByTestId('agent-status-chip')
+      if (status === 'active') {
+        // Active agents render no chip at all — and therefore no raw value.
+        expect(chip).toBeNull()
+      } else {
+        expect(chip).not.toBeNull()
+        expect(chip?.textContent).toBe(agentStatusPresentation(status).label)
+        expect(chip?.textContent).not.toBe(status)
+      }
+      expect(document.body.textContent).not.toContain('pending_approval')
+      unmount()
+    }
   })
 })

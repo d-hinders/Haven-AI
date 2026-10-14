@@ -18,6 +18,8 @@ export {
   reopenMissingPushed,
   getSyncState,
   listSyncs,
+  recordMerchantInvoiceSync,
+  getMerchantInvoiceSyncRef,
   type SyncStatus,
   type FeedSyncRow,
   type ClaimResult,

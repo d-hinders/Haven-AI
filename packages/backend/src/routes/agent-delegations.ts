@@ -66,6 +66,7 @@ import {
   revokeDelegationsByHashes,
   selectDelegationRowForAgentByHash,
   listDelegationJsonByIds,
+  spendableDelegationSql,
 } from '../infra/repositories/delegation-budgets.js'
 import {
   readRemainingBudget,
@@ -116,6 +117,8 @@ interface AgentDelegationListRow {
   merchant_id: string | null
   merchant_slug: string | null
   merchant_name: string | null
+  /** #3922: `spendableDelegationSql(…, { requireStarted: false })`, selected from SQL. */
+  is_live: boolean
 }
 
 // Serialize a prepared UserOperation to wire JSON: bigint → "123n" string,
@@ -297,9 +300,9 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
   // SELECT produced, byte-identical to the pre-#3693 shape: no enrichment
   // keys (not even the three nulls on non-active rows), the server-side
   // delegation_json fetch does NOT run, and the chain reader is never called.
-  // With `?include=remaining`, each ACTIVE row additionally carries
-  // remaining_atomic / remaining_from_chain / period_end (non-active rows
-  // carry the three as null), following the GET /merchants/:slug/budgets
+  // With `?include=remaining`, each LIVE row additionally carries
+  // remaining_atomic / remaining_from_chain / period_end (every non-live
+  // row, an expired active one included, carries the three as null), following the GET /merchants/:slug/budgets
   // precedent. Unknown `include` values are refused by the enforced request
   // schema — this module is in `enforcedModules` — before the handler runs.
   //
@@ -327,7 +330,8 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       `SELECT d.id, d.chain_id, d.token_address, d.recipient_address, d.delegation_hash,
               d.version, d.status, d.budget_atomic, d.period_seconds, d.start_date,
               d.expires_at, d.created_at,
-              d.merchant_id, m.slug AS merchant_slug, m.name AS merchant_name
+              d.merchant_id, m.slug AS merchant_slug, m.name AS merchant_name,
+              (${spendableDelegationSql('d', { requireStarted: false })}) AS is_live
        FROM agent_delegations d
        LEFT JOIN merchants m ON m.id = d.merchant_id
        WHERE d.agent_id = $1
@@ -336,7 +340,11 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     )
 
     // #3693 (corrected body): the plain pollers' default. The rows go back
-    // exactly as the SELECT produced them — the enrichment keys are absent
+    // exactly as the SELECT produced them — the one derived field is #3922's
+    // `is_live`, selected as the budget-VIEW predicate itself
+    // (`spendableDelegationSql`, `requireStarted: false`, so a dormant
+    // future-start re-key row is live as the budget views show it) so the
+    // wire flag cannot drift from the SQL; the enrichment keys are absent
     // (not null), the delegation_json fetch below never runs, and the chain
     // reader is never called.
     if (request.query.include !== 'remaining') {
@@ -345,16 +353,20 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
 
     // delegation_json intentionally NOT in the list — fetch is explicit (#3693:
     // the remaining-this-period read needs it, so it is read SERVER-SIDE only,
-    // for the ACTIVE rows, and never reaches the response).
-    const activeIds = result.rows.filter((r) => r.status === 'active').map((r) => r.id)
-    const jsonById = await listDelegationJsonByIds(activeIds)
+    // for the LIVE rows, and never reaches the response).
+    // #3923 P1: only a SPENDABLE row (`is_live`, the budget-view predicate) is
+    // read. An expired `active` row stays in the list as history but costs no
+    // chain read and reports null remaining, like a non-active row.
+    const isReadable = (r: AgentDelegationListRow): boolean => r.status === 'active' && r.is_live
+    const liveIds = result.rows.filter(isReadable).map((r) => r.id)
+    const jsonById = await listDelegationJsonByIds(liveIds)
     const nowSec = Math.floor(Date.now() / 1000)
-    // #3693: each ACTIVE row reports what the chain will still allow this
+    // #3693: each LIVE row reports what the chain will still allow this
     // period. Reads share analytics' worker pool (`BUDGET_READ_CONCURRENCY` in
     // flight) and the reader's own per-read timeouts, so a slow RPC can slow
     // the page by at most one read — never hang it, never fire N RPCs at once.
     const delegations = await mapWithConcurrency(result.rows, BUDGET_READ_CONCURRENCY, async (row) => {
-      if (row.status !== 'active') {
+      if (!isReadable(row)) {
         return { ...row, remaining_atomic: null, remaining_from_chain: null, period_end: null }
       }
       // `readRemainingBudget` already degrades to the full budget on failure;

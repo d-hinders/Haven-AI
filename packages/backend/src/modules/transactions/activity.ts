@@ -342,3 +342,40 @@ export async function buildActivityGroups(
     }),
   )
 }
+
+/**
+ * The overview's whole activity payload (#3944): the grouped rows BESIDE the
+ * two empty-state facts the card needs but cannot derive from the rows.
+ *
+ * `hasOlderActivity` is true when the feed carries any transaction OUTSIDE
+ * the `ACTIVITY_WINDOW_DAYS` window — activity exists, just not in the
+ * window, so the empty state may not say "No activity yet". The flag reads
+ * from the SAME feed the groups bucket (an explorer-read failure degrades it
+ * to false, the same posture as the rows). The window set here is the same
+ * pure walk `buildActivityGroups` runs (`activityWindowDays(now, tz)` —
+ * identical inputs, identical set, so the flag can never disagree with the
+ * rows); it is computed twice rather than threaded through, because the walk
+ * is a few hundred clock comparisons against a cache-hot formatter.
+ *
+ * `windowDays` rides the wire so the client can NAME the window ("No
+ * activity in the last N days") without hard-coding a 7 that would drift
+ * from `ACTIVITY_WINDOW_DAYS` — the dashboard has no window constant of its
+ * own, and #3944's rule is that the copy may not invent one.
+ */
+export interface ActivityFeed {
+  groups: DashboardActivityGroup[]
+  hasOlderActivity: boolean
+  windowDays: number
+}
+
+export async function buildActivityFeed(
+  params: BuildActivityGroupsParams,
+): Promise<ActivityFeed> {
+  const now = params.now ?? Date.now()
+  const groups = await buildActivityGroups({ ...params, now })
+  const windowDays = activityWindowDays(now, params.tz)
+  const hasOlderActivity = params.transactions.some(
+    (tx) => !windowDays.has(localDayKey(tx.timestamp, params.tz)),
+  )
+  return { groups, hasOlderActivity, windowDays: ACTIVITY_WINDOW_DAYS }
+}

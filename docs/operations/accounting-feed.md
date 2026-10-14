@@ -381,7 +381,12 @@ float tail or exponent notation reaches a supplier invoice.
 figure on the record it backs: `Book value` in the invoiced currency, with the
 SEK capture kept below it as `Haven SEK ref` when they differ. One document,
 two clearly-labelled figures — never a DKK invoice backed by a receipt quoting
-kronor.
+kronor. When the merchant's own invoice is captured (#956), the underlag also
+carries the SELLER BLOCK (#3918): the seller's legal name (`Merchant` line),
+the catalog's supplier `Country`, and the invoice's `VAT reg no` / `Org no` —
+the fields a Swedish consultant needs to code omvänd (reverse) VAT. Every
+seller line renders only when its value is actually known; the document never
+states an empty-looking fact.
 
 **A USD ledger records the quoted rate, not an assumed 1:1.** A USDC payment into
 a USD-booking company carries the rate the source actually quoted, with its
@@ -390,7 +395,7 @@ named after; the rate is factual provenance on an unattested document.
 
 ## Sync statuses
 
-`accounting_feed_syncs`, one row per (user, provider, payment):
+`accounting_feed_syncs`, one row per (user, provider, payment, document_kind):
 `pending → pushed | failed | skipped`. `failed` and `skipped` are re-claimable
 (#1365); `pushed` is FINAL with one sanctioned exception, the verification-gated
 reopen. `error` carries the failure, the skip reason, the non-fatal note on a
@@ -843,10 +848,10 @@ Haven's own record per the epic Notes; Accounted keys are revoked in their
 dashboard, so `revoke` clears local secrets only).
 
 **The document push (#3018, slice 2).** `pushTransaction` renders the verifiable
-receipt underlag (`receipt-underlag.ts`, deterministic bytes; the merchant
-receipt and the suggested-account hint are excluded by owner decision — the
-upload takes exactly `file` + `upload_source=api`, and the sync row holds one
-ref) and uploads it with `POST /api/v1/companies/{companyId}/documents`,
+receipt underlag (`receipt-underlag.ts`, deterministic bytes; the
+suggested-account hint is excluded by owner decision — the upload takes exactly
+`file` + `upload_source=api`) and uploads it with
+`POST /api/v1/companies/{companyId}/documents`,
 `Idempotency-Key = uuid5(paymentId)`. Delivery proof: a **2xx** (the spec
 declares `200`, not `201`) whose `data.sha256_hash` equals the local SHA-256
 of the sent bytes — anything else is `skipped` and no ref is stored. Error
@@ -859,6 +864,26 @@ terminal `skipped` (same key, different bytes — never retried); 400
 `ProviderError` with `retryAfterMs` from `Retry-After` (seconds → ms; the
 sweep reads the field, `retry-sweep.ts`). Oversize underlag (> 10 MB) is
 gated locally BEFORE any request.
+
+**The merchant's own invoice, as a second document (#3918).** #3016 scoped
+"one upload is one file, one ref per sync row"; #3918 revisits the ROW, not
+the upload: when the agent captured the merchant's own receipt/invoice, the
+push uploads it as a SECOND document on the same sync — its own WORM id, its
+own idempotency key (`uuid5(paymentId:merchant-invoice)`, so the two uploads
+can never collide on a key) — and records its delivery as a second ledger row
+under `document_kind = 'merchant_invoice'` (migration 113 widened the unique
+key to `(provider, payment_id, user_id, document_kind)`; every generic
+claim/mark/sweep/backfill statement is scoped to `'underlag'`, so a
+merchant-invoice row is never claimed, rewritten or counted — it is written
+once, only after the sha256 proof, by `recordMerchantInvoiceSync`). The
+second upload is best-effort like the Fortnox attachment (#956): a failure is
+a NOTE on the pushed underlag row, never a failed row — re-pushing to reach
+the invoice would re-file the underlag. Because the x402 merchant receipt
+arrives at the settle retry — seconds AFTER the funding-confirmation push —
+the capture route also late-attaches (`lateAttachAccountedMerchantReceipt`,
+the #956 Fortnox shape): pushed underlag + no recorded row yet → upload +
+record; anything else → no-op. Idempotent from three directions: the ledger
+key, the idempotency key, and the row check.
 
 **Verify from Haven's own record.** `capabilities.verify: false`: there is no
 `GET /documents/{id}` on the 2026-05-12 spec and `/download` writes a

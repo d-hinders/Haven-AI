@@ -15,6 +15,20 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Changed
+
+- Against an older backend that sends no `is_live`, the agent summary's
+  task-budget list now drops an expired `closing` task budget too (#3923), as
+  the backend has since #3773. A current backend already omits it, so nothing
+  visible changes there. No update needed.
+
+- The agent summary's client-side task-budget filter follows the backend's new
+  `is_live` flag (#3922) instead of restating the rule. Against a current
+  backend nothing visible changes: `status=live` already returns only live
+  rows. `HavenTaskBudget` (and `haven_get_task_budget`'s result) gains an
+  optional `isLive`. Against an older backend that sends no `is_live`, the
+  list is derived exactly as before. No update needed.
+
 ## 0.10.0-alpha.0 — 2026-10-14
 
 ### Changed

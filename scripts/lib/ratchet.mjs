@@ -5,10 +5,11 @@
 // (file → key → count) that may only SHRINK — new occurrences, or growth of
 // an existing count, fail. This module is the single implementation; a further
 // ratcheting gate should import it rather than clone either script. There are
-// NINE as of #3131 — design-lint, copy-lint, the wire-type ratchet, the
+// TEN as of #3924 — design-lint, copy-lint, the wire-type ratchet, the
 // db-mock ratchet, the retired-rail prose ratchet, ui-gate-wording, the
-// request-schema ratchet (#3029), the typed next-step ratchet (#3104) and the
-// MCP↔CLI vocabulary guard (#3131) — and the two
+// request-schema ratchet (#3029), the typed next-step ratchet (#3104), the
+// MCP↔CLI vocabulary guard (#3131) and the budget-liveness census (#3924) —
+// and the two
 // that had cloned instead of imported were the two missing a `--update`
 // refusal. That count is ASSERTED against the real importer list by
 // `ratchet.test.mjs` rather than maintained by hand: it said FIVE here and in

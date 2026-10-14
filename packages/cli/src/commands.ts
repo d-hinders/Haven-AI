@@ -840,7 +840,28 @@ interface DelegationRow {
   delegation_hash: string
   version: number
   status: 'pending' | 'active' | 'replaced' | 'revoked'
+  /**
+   * #3922: the backend's budget-view liveness (`active` and unexpired). Absent
+   * on an older backend — a missing value means "derive from `status`", never
+   * false.
+   */
+  is_live?: boolean
 }
+
+/**
+ * The "still enabled" delegation statuses (#3922): a row is enabled on-chain
+ * until the chain confirms it dead, so only `revoked` is not. This is the CLI's
+ * ONE copy of `STILL_ENABLED_DELEGATION_STATUSES` from `@haven_ai/core` — the
+ * published CLI cannot depend on that private package — and
+ * `commands.test.ts` pins the two together. The revoke gate reads STATUS, not
+ * `is_live`: it guards against leaving on-chain authority behind and must work
+ * against an older backend that sends no `is_live`.
+ */
+const STILL_ENABLED_STATUSES: ReadonlySet<string> = new Set([
+  'pending',
+  'active',
+  'replaced',
+])
 
 /** The POST /agents/:id/delegations/:hash/revoke prepare response (#2539). */
 interface RevocationPrepare {
@@ -962,7 +983,9 @@ async function cmdBudgetGrant(args: ParsedArgs, d: ResolvedDeps): Promise<number
     await d.sleep(BUDGET_WAIT_INTERVAL_MS)
     const { delegations } = await api.get<{ delegations: DelegationRow[] }>(`/agents/${id}/delegations`)
     const mine = delegations.find((row) => row.delegation_hash === built.delegation_hash)
-    if (mine?.status === 'active') {
+    // #3922: the backend's `is_live` when sent; an older backend omits it, so
+    // fall back to the status it always sent (missing is never "not live").
+    if (mine && (mine.is_live ?? mine.status === 'active')) {
       emitGrant('active')
       return EXIT.ok
     }
@@ -1103,7 +1126,7 @@ async function cmdAgentRevoke(args: ParsedArgs, d: ResolvedDeps): Promise<number
     const agent = await api.get<Agent>(`/agents/${id}`)
     if ((agent.live_delegation_count ?? 0) > 0) {
       const { delegations } = await api.get<{ delegations: DelegationRow[] }>(`/agents/${id}/delegations`)
-      live = delegations.filter((r) => r.status === 'pending' || r.status === 'active' || r.status === 'replaced')
+      live = delegations.filter((r) => STILL_ENABLED_STATUSES.has(r.status))
     }
   } catch (err) {
     // Fail closed: without the live set, no revoke. The read's own exit

@@ -193,7 +193,8 @@ for the modal's own shape.
   and so does a merchant-locked budget pinned to a DIFFERENT merchant's payTo
   that happens to land in the same slot (a shared address, or an address a
   merchant later stops using and another later takes up). A slot holds ONE
-  live budget: they carry the same on-chain authority, and two live grants
+  live budget (active and unexpired — the wire's `is_live`, #3922): they
+  carry the same on-chain authority, and two live grants
   in one slot would make selection ambiguous. Since #3933 a new budget
   cannot be *granted* into a slot that already holds a live one — build and
   activate refuse it (409 `BUDGET_SLOT_OCCUPIED`), because the activation's
@@ -451,7 +452,7 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   — the same build → sign → activate composition the agent page's budget form
   uses, extended with `merchant_slug` rather than forked. The review step
   states which payments this budget pays and which still use the open budget
-  (see "Which budget pays" above) and, if an ACTIVE row already occupies the same
+  (see "Which budget pays" above) and, if a LIVE (active and unexpired, #3922) row already occupies the same
   `(agent, token, recipient)` slot — plain, locked to this merchant, or locked
   to a DIFFERENT merchant — warns that signing replaces it, naming whichever
   one it is; a budget for this merchant in another token, or one pinned to a

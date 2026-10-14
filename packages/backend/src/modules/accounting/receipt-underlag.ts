@@ -47,6 +47,16 @@ export interface ReceiptUnderlagData {
   fxRateLedger: string | null
   merchantName: string | null
   merchantAddress: string | null
+  /**
+   * #3918: the seller identity the merchant's own invoice carries (via the
+   * captured merchant receipt), plus the catalog's supplier country — the
+   * fields a Swedish consultant needs for omvand (reverse) VAT coding.
+   * Every field stays null when unknown: a filing artifact never invents a
+   * seller.
+   */
+  merchantCountry: string | null
+  merchantVatNo: string | null
+  merchantOrgNo: string | null
   resourceUrl: string | null
   chainId: number | null
   /**
@@ -141,6 +151,13 @@ export function underlagFromData(data: ReceiptUnderlagData): ReceiptUnderlag {
       : []),
     `Merchant       ${data.merchantName ?? data.merchantAddress ?? 'unknown'}`,
     ...(data.merchantName && data.merchantAddress ? [`Merchant addr  ${data.merchantAddress}`] : []),
+    // #3918: the seller block, from the merchant's own invoice and the
+    // catalog country — the reverse-VAT fields (Emil, our Accounted contact:
+    // country + VAT reg no decide the omvand coding). Lines appear only when
+    // the value is known; the document never states an empty-looking fact.
+    ...(data.merchantCountry ? [`Country        ${data.merchantCountry}`] : []),
+    ...(data.merchantVatNo ? [`VAT reg no     ${data.merchantVatNo}`] : []),
+    ...(data.merchantOrgNo ? [`Org no         ${data.merchantOrgNo}`] : []),
     `Resource       ${data.resourceUrl ?? 'n/a'}`,
     '',
     'ON-CHAIN SETTLEMENT',
@@ -256,6 +273,50 @@ export async function fetchMerchantReceiptDocument(
 }
 
 /**
+ * The merchant's own receipt/invoice as an uploadable document (#956, shared
+ * by the Fortnox attachment and the Accounted second upload #3918): an
+ * inline JSON is rendered as the provenance PDF (`merchantReceiptPdf`), a
+ * URL is fetched under the SSRF guards (`fetchMerchantReceiptDocument`).
+ * Null when the receipt names neither.
+ */
+export async function merchantReceiptDocument(
+  paymentId: string,
+  receipt: { url: string | null; inlineJson: unknown | null },
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ filename: string; bytes: Buffer; contentType: string } | null> {
+  if (receipt.inlineJson != null) {
+    const file = merchantReceiptPdf(paymentId, receipt.inlineJson)
+    return { filename: file.filename, bytes: file.pdf, contentType: 'application/pdf' }
+  }
+  if (receipt.url) {
+    const doc = await fetchMerchantReceiptDocument(receipt.url, fetchImpl)
+    return { filename: doc.filename, bytes: doc.bytes, contentType: doc.contentType }
+  }
+  return null
+}
+
+/**
+ * The seller block the merchant's own invoice carries, read defensively off
+ * the captured receipt JSON (#3918). The demo merchant's invoice (and any
+ * merchant following the same Swedish bookkeeping shape) names it under
+ * `saljare` — name, `org_nr`, `moms_nr` (the VAT reg no). Anything absent,
+ * non-object or non-string reads as null: Haven asserts nothing about the
+ * merchant-provided fields, it only carries them onto the underlag.
+ */
+export function sellerFromMerchantReceipt(inlineJson: unknown): {
+  name: string | null
+  orgNo: string | null
+  vatNo: string | null
+} {
+  if (inlineJson == null || typeof inlineJson !== 'object') return { name: null, orgNo: null, vatNo: null }
+  const saljare = (inlineJson as { saljare?: unknown }).saljare
+  if (saljare == null || typeof saljare !== 'object') return { name: null, orgNo: null, vatNo: null }
+  const str = (v: unknown): string | null => (typeof v === 'string' && v.trim().length > 0 ? v : null)
+  const s = saljare as { name?: unknown; org_nr?: unknown; moms_nr?: unknown }
+  return { name: str(s.name), orgNo: str(s.org_nr), vatNo: str(s.moms_nr) }
+}
+
+/**
  * Load + render the underlag for a feed transaction. `receiptRef` is the
  * `machine_payment_evidence` row id (see `AccountingEntry.receiptRef`);
  * authorization details join in from the payment intent when there is one.
@@ -271,6 +332,11 @@ export async function loadReceiptUnderlag(
   // SQL lives in infra/repositories/machine-payments.ts (#999).
   const row = await loadReceiptUnderlagSource(tx.receiptRef, userId)
   if (!row) return null
+  // #3918: the seller identity comes from the merchant's OWN invoice when the
+  // agent captured one (the demo merchant names Haven Demo AB + org/VAT nos);
+  // the catalog country is the counterparty's — the feed's VAT-treatment
+  // source, unchanged.
+  const seller = sellerFromMerchantReceipt(tx.merchantReceipt?.inlineJson ?? null)
   return underlagFromData({
     paymentId: tx.paymentId,
     settledAt: tx.settledAt,
@@ -284,8 +350,11 @@ export async function loadReceiptUnderlag(
     amountLedger: tx.amountLedger,
     ledgerCurrency: tx.ledgerCurrency,
     fxRateLedger: tx.fxRateLedger,
-    merchantName: tx.counterparty.name,
+    merchantName: seller.name ?? tx.counterparty.name,
     merchantAddress: tx.counterparty.address ?? row.merchant_address,
+    merchantCountry: tx.counterparty.country,
+    merchantVatNo: seller.vatNo,
+    merchantOrgNo: seller.orgNo,
     resourceUrl: tx.resourceUrl,
     chainId: row.chain_id,
     // #3767: the BOOKED hash — the settlement when available/pinned, the

@@ -80,7 +80,7 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-10-10"
+last-verified: "2026-10-14"
 ---
 
 
@@ -114,6 +114,47 @@ last-verified: "2026-10-10"
 > `snapshot:regen`; the one changed line is that description, already served
 > since #3855. Description-only, so the stale-client check stays silent by the
 > rule above; nothing else in this document moves.
+
+> **Re-verification (#3924, 2026-10-14, a new CI step beside the ratchets):**
+> `.github/workflows/ci.yml` gains one `backend_checks` step —
+> `npm run lint:budget-liveness` + its self-test, the shrink-only census over
+> inline budget-liveness predicates (#3924, epic #3919 slice E), wired beside
+> `lint:request-schemas`. It is a lint over source text: no tool is added,
+> renamed or re-shaped, no argument, schema, description or consent input
+> changes, and the version-skew and consent-hash contracts do not move.
+
+> **Re-verification (#3940, 2026-10-14, the job-summary how-to line):**
+> `scripts/ci/check-stale-client-compat.mjs`'s reconnect-required summary
+> line now points connected agents at this document's reconnect rule —
+> restart or reconnect the session; a reconnect keeps credentials, agent id
+> and budget, and a prepared or funded payment resumes on its `payment_id`
+> — via the absolute GitHub URL a job summary needs, instead of naming the
+> destructive `haven-reset` skill as the how-to. The sentence is exported
+> (`RECONNECT_HOWTO`) and pinned by its test. The measuring instrument's
+> logic — corpus and snapshot validation, the silence rules above — is
+> unchanged, so no skew rule in this document moves.
+
+> **Re-verification (#3922, 2026-10-14, additive `is_live`).** The SDK
+> (`account-reads.ts`, `types.ts`) and the CLI (`commands.ts`) read a new
+> additive wire field, `is_live`, on budget rows. Each falls back to its
+> previous derivation when an older backend omits it:
+> - the SDK task-budget summary and the CLI grant wait both fall back this
+>   way;
+> - the CLI revoke refusal stays status-based and never reads the field.
+>
+> So every client/backend skew pair keeps working. No tool, description,
+> input schema or signer surface changes, so the contract fingerprint does
+> not move. One output field is added: every `task_budget` result
+> (`haven_open_task_budget`, `haven_close_task_budget`, `haven_submit` for a
+> task budget, and `haven_get_task_budget`; hosted and local) carries an
+> additive `isLive`, absent against an older backend. Nothing else in this document moves.
+
+> **Re-verification (#3923, 2026-10-14).** Against an older backend that
+> sends no `is_live`, the SDK summary's task-budget filter now drops an
+> expired `closing` row as well, matching the backend's `status=live` since
+> #3773. A current backend already omits that row, so nothing visible
+> changes there. No tool, description, input schema or wire field changes,
+> so the contract fingerprint does not move.
 
 > **Re-verification (#3839 follow-up via #3864, 2026-10-10, hosted
 > `haven_discover_tools` description golden regen):** #3839 (22f49edd)

@@ -536,6 +536,21 @@ jobs:
           npm run lint:request-schemas:test
           npm run check:route-modules
 
+      - name: Budget-liveness ratchet (#3924, epic #3919 slice E)
+        # Blocking, shrink-only census over inline budget-liveness predicates.
+        # Slices A-C of the epic named every liveness predicate once
+        # (spendableDelegationSql / the per-table Sql builders /
+        # delegationIsLive); this gate counts the inline restatements of the
+        # same comparisons — SELECT … WHERE reads on the three budget tables
+        # in the backend, budget-shaped TypeScript sites in the client
+        # packages, and the accepted delegation-budgets.ts payment-window
+        # mirror — so the pattern cannot grow back one query at a time (it
+        # did, #3542 → #3802). Status TRANSITIONS (UPDATE … SET status, the
+        # slot sweeps) are not counted. Self-test spawns the real CLI (#2720).
+        run: |
+          npm run lint:budget-liveness
+          npm run lint:budget-liveness:test
+
       - name: Typed next-step ratchet (#3104, epic #3105)
         # Blocking, shrink-only, baseline at zero: every next-step emission in
         # the hosted server, the signer and the local runtime names its tool

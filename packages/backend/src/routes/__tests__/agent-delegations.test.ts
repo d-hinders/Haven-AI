@@ -12,6 +12,7 @@ import { DelegationManager, DeleGatorCore } from '@metamask/delegation-abis'
 // #3693: the shared helpers stay REAL through the reader mock above — the pins
 // below assert the route computes with exactly what analytics computes with.
 import { BUDGET_READ_CONCURRENCY, currentPeriodBounds } from '../../infra/chain/delegation-budget-reader.js'
+import { spendableDelegationSql } from '../../infra/repositories/delegation-budgets.js'
 
 const { mockQuery, mockCompute, mockTreasury, mockEnsureDeployed, mockReadDisabled, mockMerchantBySlug, mockFundingTargets } = vi.hoisted(() => ({
   mockMerchantBySlug: vi.fn(),
@@ -106,6 +107,10 @@ const DELEGATION_ROW = {
   merchant_id: null,
   merchant_slug: null,
   merchant_name: null,
+  // #3922: the list SELECT derives it (`spendableDelegationSql`, requireStarted
+  // false); the mocked pool stands in for that column — its SQL value is
+  // proven on real Postgres in budget-is-live-wire.test.ts.
+  is_live: true,
 }
 const OWNER = '0x' + 'ee'.repeat(20)
 const HASH = `0x${'ab'.repeat(32)}`
@@ -1671,6 +1676,10 @@ describe('delegation lifecycle API (#828)', () => {
       expect(res.json().delegations[0]).toMatchObject({ merchant_slug: 'demo-store', merchant_name: 'Demo store' })
       const listQuery = mockQuery.mock.calls.find((c) => /FROM agent_delegations/.test(String(c[0])))!
       expect(String(listQuery[0])).toMatch(/LEFT JOIN merchants m ON m\.id = d\.merchant_id/)
+      // #3922: the wire flag is the view predicate itself, selected — not a JS recomputation.
+      expect(String(listQuery[0])).toContain(
+        `(${spendableDelegationSql('d', { requireStarted: false })}) AS is_live`,
+      )
     })
 
     it('an open budget documents its null recipient', async () => {

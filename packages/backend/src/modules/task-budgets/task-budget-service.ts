@@ -118,7 +118,9 @@ export interface TaskBudgetPaymentResolution {
  * exact parent it was carved from, never a different active grant that
  * happens to cover the same token. An EXPIRED open row answers
  * `task_budget_not_open` (not `not_found` — the row exists, it is simply no
- * longer usable), same as `selectOpenForPayment`'s storage-scoped filter.
+ * longer usable), the same verdict the named `openTaskBudgetSql` predicate
+ * reaches for the same row and clock — pinned row-for-row by a real-DB
+ * matrix test (`infra/repositories/__tests__/task-budgets.test.ts`).
  */
 export function checkTaskBudgetForPayment(
   row: TaskBudgetRow | null,

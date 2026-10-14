@@ -111,6 +111,7 @@ import * as machinePaymentDeliveryReports from './109_machine_payment_delivery_r
 import * as sponsoredUseropGasEvents from './110_sponsored_userop_gas_events.js'
 import * as attentionDismissals from './111_attention_dismissals.js'
 import * as agentSupersededBy from './112_agent_superseded_by.js'
+import * as syncDocumentKind from './113_sync_document_kind.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -281,4 +282,5 @@ export const migrations: Migration[] = [
   sponsoredUseropGasEvents,
   attentionDismissals,
   agentSupersededBy,
+  syncDocumentKind,
 ]

@@ -572,6 +572,8 @@ export default function DashboardClient() {
       />
       <ActivitySection
         activity={overview?.activity ?? []}
+        hasOlderActivity={overview?.hasOlderActivity}
+        activityWindowDays={overview?.activityWindowDays}
         accountCount={accounts.length}
         hasAccounts={accounts.length > 0}
         loading={overviewInitialLoading}

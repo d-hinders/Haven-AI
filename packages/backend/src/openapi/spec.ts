@@ -13498,6 +13498,25 @@ export const openapiSpec = {
             items: { $ref: '#/components/schemas/DashboardActivityGroup' },
             description: 'Grouped activity rows, newest first. Every count is a FLOOR (`countIsFloor`) when the explorer window was truncated.',
           },
+          // #3944: the two empty-state facts. `hasOlderActivity` is true when
+          // the feed the `activity` groups bucket over carries ANY
+          // transaction outside `activityWindowDays` — activity exists, just
+          // not in the window, so the card may not say "No activity yet".
+          // Optional so a pre-#3944 response reads unchanged (the client
+          // keeps today's copy when the signal is absent). `activityWindowDays`
+          // is the `ACTIVITY_WINDOW_DAYS` the backend bucketed over, carried
+          // on the wire because the frontend has no window constant and the
+          // empty-state copy may not hard-code a 7 that can drift. Both live
+          // at the ENVELOPE level — a per-row `DashboardActivityGroup` field
+          // would say nothing about the rows that are absent.
+          hasOlderActivity: {
+            type: 'boolean',
+            description: 'True when the merged transaction feed carries any transaction outside the `activityWindowDays` window — activity exists, just not in it. False (not absent) when an account read failed, the same degradation as the rows.',
+          },
+          activityWindowDays: {
+            type: 'integer',
+            description: 'The window (in days) `activity` is bucketed over — the backend\u2019s `ACTIVITY_WINDOW_DAYS`, carried on the wire so the client names the window without hard-coding it.',
+          },
           // #3858: the former 5-row `transactions` preview is removed from the
           // wire — no dashboard surface has read it since #3810.
           agentCount: {

@@ -28,6 +28,7 @@ vi.mock('../../../infra/prices.js', () => ({
 import {
   ACTIVITY_WINDOW_DAYS,
   activityWindowDays,
+  buildActivityFeed,
   buildActivityGroups,
   localDayKey,
 } from '../activity.js'
@@ -212,5 +213,50 @@ describe('buildActivityGroups — pinned spring-forward clock', () => {
     // payment is still present behind it (not dropped from the window).
     expect(groups[0].latestAt).toBe(new Date(now).toISOString())
     expect(new Date(groups[1].latestAt).toISOString()).toBe('2026-03-29T12:00:00.000Z')
+  })
+})
+
+// #3944: the feed builder returns the grouped rows BESIDE the two
+// empty-state facts. The flag must agree with the window the groups were
+// bucketed over — same `activityWindowDays(now, tz)` walk, same clock — so
+// these run against the REAL module, not a mock of it.
+describe('buildActivityFeed — hasOlderActivity and the carried window', () => {
+  const now = Date.parse('2026-04-05T10:00:00Z')
+
+  it('is false when every transaction is inside the window, true when any is outside', async () => {
+    const inside = Math.floor(Date.parse('2026-04-03T09:00:00Z') / 1000)
+    const outside = Math.floor(Date.parse('2026-03-20T09:00:00Z') / 1000) // 14+ days back
+
+    const fresh = await buildActivityFeed({
+      transactions: [row({ timestamp: inside })],
+      truncated: false,
+      tz: 'UTC',
+      now,
+    })
+    expect(fresh.hasOlderActivity).toBe(false)
+    expect(fresh.groups).toHaveLength(1)
+
+    const older = await buildActivityFeed({
+      transactions: [row({ timestamp: inside }), row({ timestamp: outside })],
+      truncated: false,
+      tz: 'UTC',
+      now,
+    })
+    // The out-of-window row is dropped from the GROUPS but still sets the
+    // flag — the empty 7-day list and "activity exists" are independent.
+    expect(older.groups).toHaveLength(1)
+    expect(older.hasOlderActivity).toBe(true)
+  })
+
+  it('an empty feed is both flag-false and rowless, and the window rides the wire', async () => {
+    const feed = await buildActivityFeed({
+      transactions: [],
+      truncated: false,
+      tz: 'Europe/Stockholm',
+      now,
+    })
+    expect(feed.hasOlderActivity).toBe(false)
+    expect(feed.groups).toEqual([])
+    expect(feed.windowDays).toBe(ACTIVITY_WINDOW_DAYS)
   })
 })

@@ -553,6 +553,17 @@ truncated address); the subtitle is the agent's name; a group of N renders
 "×N" ("×N+" when the count is a floor). The 5-row `transactions` preview is
 removed from the wire (#3858) — no dashboard surface reads it.
 
+**Empty state distinguishes no activity from an empty window (#3944).** The
+card covers only the last seven user-local days (`ACTIVITY_WINDOW_DAYS`),
+so an empty list means one of two things and the copy says which: a feed
+with no activity at all renders "No activity yet" (first-run copy); a feed
+whose newest transaction is older than the window renders "No activity in
+the last N days" with the transactions page as its action — never a claim
+that nothing has happened. The signal (`hasOlderActivity`) and the window
+(`activityWindowDays`) ride the `/dashboard/overview` response; the client
+names the window from the wire and never hard-codes the 7, because the
+constant it would copy lives behind the backend's window and can drift.
+
 ## Policy Violation
 
 Use when an agent request is declined because it exceeds rules. There is no

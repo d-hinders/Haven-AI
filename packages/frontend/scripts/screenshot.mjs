@@ -1262,6 +1262,12 @@ export const FIXTURE_OVERVIEW = {
       approxCurrency: 'SEK',
     },
   ],
+  // #3944: the two empty-state facts (shape parity with the e2e fixture —
+  // fixture-shape-parity.test.ts compares the top-level key SETS). Rows
+  // render, so `hasOlderActivity` is false; `activityWindowDays` mirrors
+  // the backend's ACTIVITY_WINDOW_DAYS.
+  hasOlderActivity: false,
+  activityWindowDays: 7,
 }
 
 // #3804: the cached budget-remaining read. One KNOWN row (chain-backed,

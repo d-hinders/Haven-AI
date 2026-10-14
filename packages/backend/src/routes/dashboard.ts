@@ -30,7 +30,7 @@ import {
   needsBackupSignerRecommendation,
 } from '../modules/accounts/index.js'
 import {
-  buildActivityGroups,
+  buildActivityFeed,
   compareTransactions,
   isValidActivityTimeZone,
   type EnrichedTransaction,
@@ -558,13 +558,18 @@ export default async function dashboardRoutes(
     const resolveMerchantName = (address: string): string | null =>
       contactNames.get(address.toLowerCase()) ?? activityReceiptNames.get(address.toLowerCase()) ?? null
 
-    const activity = await buildActivityGroups({
-      transactions: enrichedTransactions,
-      truncated: explorerTruncated,
-      tz,
-      currency,
-      resolveMerchantName,
-    })
+    // #3944: the feed builder returns the grouped rows BESIDE the two
+    // empty-state facts — `hasOlderActivity` (any feed transaction outside
+    // the window) and `windowDays` (ACTIVITY_WINDOW_DAYS, carried so the
+    // client can name the window without hard-coding a 7 that drifts).
+    const { groups: activity, hasOlderActivity, windowDays: activityWindowDays } =
+      await buildActivityFeed({
+        transactions: enrichedTransactions,
+        truncated: explorerTruncated,
+        tz,
+        currency,
+        resolveMerchantName,
+      })
 
     return {
       totals: {
@@ -721,6 +726,15 @@ export default async function dashboardRoutes(
       // #3858: the former 5-row `transactions` preview is gone — nothing has
       // read it since #3810 (the dashboard renders `activity`).
       activity,
+      // #3944: the Activity card's empty state must distinguish "no activity
+      // ever" from "nothing in the window" — the rows above cannot carry
+      // that (an empty list is both). True when the SAME feed the groups
+      // bucket carries any transaction outside `activityWindowDays`; an
+      // explorer-read failure degrades it to false, the same posture as the
+      // rows. The window rides the wire so the copy names the window the
+      // backend actually buckets over, never a client-side constant.
+      hasOlderActivity,
+      activityWindowDays,
     }
   })
 }

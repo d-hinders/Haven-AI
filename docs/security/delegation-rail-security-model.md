@@ -845,8 +845,9 @@ chain.
 > - `routes/agent-delegations.ts`, whose list now selects `is_live` from
 >   `spendableDelegationSql(…, { requireStarted: false })`, the view
 >   definition;
-> - `infra/repositories/task-budgets.ts` and `sub-budgets.ts`, which add JS
->   mirrors pinned to their SQL predicates by a real-DB matrix test;
+> - (outside this document's coverage) `infra/repositories/task-budgets.ts`
+>   and `sub-budgets.ts`, which add JS mirrors pinned to their SQL
+>   predicates by a real-DB matrix test;
 > - the `DelegationBudgetCard.tsx` and `useDelegationBudget.ts` readers.
 >
 > `is_live` is a REPORT field, additive, and read by no payment path: the
@@ -860,9 +861,12 @@ chain.
 > on-chain authority behind (#3343, #3542) and must hold against an older
 > backend that sends no `is_live`.
 >
-> The one display change narrows what is shown as live: a closed or closing
-> sub-budget with a future expiry reads "ended" instead of "ends". No
-> signing input, permission or custody decision moves.
+> Two display changes narrow what is shown as live. A `closed` sub-budget
+> with a future expiry reads "ended" instead of "ends"; a `closing` one still
+> reads "ends", because its grant stays enabled until the disable signature
+> lands. The fund-merchant "This replaces…" warning no longer fires for an
+> expired `active` row, which is still retired on activation but can no
+> longer spend. No signing input, permission or custody decision moves.
 >
 > Scope of this note: those reads only. Nothing else in this document was
 > re-verified, and `last-verified` is not bumped.

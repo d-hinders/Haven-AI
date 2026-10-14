@@ -206,7 +206,8 @@ export default function AccountDetailClient() {
   //
   // Two words in it are load-bearing, both from the design review:
   //  - "a budget", not "an active budget" — `HAS_LIVE_DELEGATIONS_FOR_ACCOUNT_SQL`
-  //    matches `LIVE_DELEGATION_STATUSES_SQL` (pending/active/replaced), so a
+  //    matches `stillEnabledDelegationSql()` (pending/active/replaced; TS
+  //    mirror `STILL_ENABLED_DELEGATION_STATUSES`), so a
   //    grant that was never activated, or one replaced but not yet disabled,
   //    blocks the unlink too.
   //  - "recovering funds", not "a recovery" — this page already renders a

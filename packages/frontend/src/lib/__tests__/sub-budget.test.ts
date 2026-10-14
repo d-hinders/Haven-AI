@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   subBudgetStillRunning,
+  delegationIsLive,
   expiryDateToUnixSeconds,
   parseSubBudgetAmount,
   subBudgetRefusalCopy,
@@ -114,12 +115,33 @@ describe('end-date clamp disclosure (#3506 design review)', () => {
 
 // #3922: "ends" shows only for a running slice.
 describe('subBudgetStillRunning (#3922)', () => {
-  it('live rows run; pending unexpired rows run; closed/closing/expired rows do not', () => {
-    expect(subBudgetStillRunning({ is_live: true, status: 'open', is_expired: false })).toBe(true)
-    expect(subBudgetStillRunning({ is_live: false, status: 'pending', is_expired: false })).toBe(true)
-    expect(subBudgetStillRunning({ is_live: false, status: 'pending', is_expired: true })).toBe(false)
-    expect(subBudgetStillRunning({ is_live: false, status: 'closed', is_expired: false })).toBe(false)
-    expect(subBudgetStillRunning({ is_live: false, status: 'closing', is_expired: false })).toBe(false)
-    expect(subBudgetStillRunning({ is_live: false, status: 'open', is_expired: true })).toBe(false)
+  const NOW = 1_800_000_000
+  const ahead = NOW + 3600
+  const past = NOW - 1
+  it('runs while its expiry is ahead and the grant is live, pending or closing', () => {
+    expect(subBudgetStillRunning({ is_live: true, status: 'open', expires_at: ahead }, NOW)).toBe(true)
+    expect(subBudgetStillRunning({ is_live: false, status: 'pending', expires_at: ahead }, NOW)).toBe(true)
+    // A closing grant is still enabled on-chain until its disable signature lands.
+    expect(subBudgetStillRunning({ is_live: false, status: 'closing', expires_at: ahead }, NOW)).toBe(true)
+  })
+  it('a closed row, or any row past its expiry on this clock, has ended', () => {
+    expect(subBudgetStillRunning({ is_live: false, status: 'closed', expires_at: ahead }, NOW)).toBe(false)
+    expect(subBudgetStillRunning({ is_live: false, status: 'pending', expires_at: past }, NOW)).toBe(false)
+    expect(subBudgetStillRunning({ is_live: false, status: 'closing', expires_at: past }, NOW)).toBe(false)
+    // is_live is a fetch-time snapshot: a page left open past expiry still flips.
+    expect(subBudgetStillRunning({ is_live: true, status: 'open', expires_at: past }, NOW)).toBe(false)
+  })
+})
+
+describe('delegationIsLive (#3922)', () => {
+  const NOW = 1_800_000_000
+  it('reads the server flag when present', () => {
+    expect(delegationIsLive({ is_live: true, status: 'active', expires_at: NOW - 10 }, NOW)).toBe(true)
+    expect(delegationIsLive({ is_live: false, status: 'active', expires_at: NOW + 10 }, NOW)).toBe(false)
+  })
+  it('derives as before when an older backend sends no is_live — never "not live"', () => {
+    expect(delegationIsLive({ status: 'active', expires_at: NOW + 10 }, NOW)).toBe(true)
+    expect(delegationIsLive({ status: 'active', expires_at: NOW - 10 }, NOW)).toBe(false)
+    expect(delegationIsLive({ status: 'replaced', expires_at: NOW + 10 }, NOW)).toBe(false)
   })
 })

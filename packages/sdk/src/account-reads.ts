@@ -324,7 +324,7 @@ export class AccountReads {
    * an agent can still act on, and read-by-id (`haven_get_task_budget`) is
    * the any-status surface for everything else:
    *
-   * - `closing` ALWAYS stays visible, expired or not — the close submit is
+   * - `closing` stays visible until its expiry (#3773) — the close submit is
    *   in flight and the signer's close refusal tells the caller to re-check
    *   exactly this row's status;
    * - `closed` rows drop (terminal — `closed_at` names what happened, and
@@ -333,10 +333,13 @@ export class AccountReads {
    *   budget reserves nothing and pays nothing);
    * - unexpired `pending` and `open` rows stay.
    *
-   * The same filter also runs here, client-side: it is what keeps the list
-   * bounded against a backend that predates `status=live`, which refuses the
-   * value with a 400 — that refusal (and only that) falls back to
-   * `status=all`. A row whose wire carries
+   * A filter also runs here, client-side. A row carrying the backend's
+   * `is_live` (#3922) is kept exactly when it is true — the server's own
+   * `status=live` verdict. A row without it (an older backend) is derived by
+   * the earlier rule, which keeps a `closing` row whatever its expiry. That is
+   * what keeps the list bounded against a backend that predates `status=live`,
+   * which refuses the value with a 400 — that refusal (and only that) falls
+   * back to `status=all`. A row whose wire carries
    * no `is_expired` is treated as unexpired — the degraded read errs toward
    * KEEPING rows, never toward hiding one the agent could still act on.
    */

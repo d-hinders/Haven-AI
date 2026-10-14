@@ -23,7 +23,7 @@ import PasskeyElsewhereHint from './PasskeyElsewhereHint'
 import EditBudgetModal from './EditBudgetModal'
 import IssueSubBudgetModal from './IssueSubBudgetModal'
 import ConfirmDialog from './ConfirmDialog'
-import { eligibleSubBudgetParents, subBudgetStillRunning } from '@/lib/sub-budget'
+import { delegationIsLive, eligibleSubBudgetParents, subBudgetStillRunning } from '@/lib/sub-budget'
 import { Card } from './ui/Card'
 import { Skeleton } from './ui/Skeleton'
 import { Button } from './ui/Button'
@@ -313,7 +313,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
   // budget expired.
   const active = (budgets ?? []).filter((b) => b.status === 'active')
   // #3922: the owner predicate is the server's `is_live` (active AND unexpired).
-  const hasActive = active.some((b) => b.is_live)
+  const hasActive = active.some((b) => delegationIsLive(b))
   // #3506: a sub-budget is carved from a LIVE budget — the entry point, now
   // inside the Add budget panel below (#3716), exists only when this agent
   // has an active, unexpired one (the card itself renders only on the

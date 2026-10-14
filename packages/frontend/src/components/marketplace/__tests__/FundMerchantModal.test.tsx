@@ -319,6 +319,31 @@ describe('FundMerchantModal (#3331)', () => {
     expect(screen.queryByText(/replaces/)).toBeNull()
   })
 
+  // #3922: an EXPIRED active row in the same slot is retired on activation
+  // but can no longer spend, so nothing current is replaced — no warning.
+  it('review step: no warning for an expired active budget in the same slot', async () => {
+    mockBudgets.mockReturnValue([
+      budget({ recipient_address: PAY_TO, token_address: USDC_SEPOLIA, status: 'active', expires_at: 1_000, is_live: false }),
+    ])
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
+    expect(screen.queryByText(/replaces/)).toBeNull()
+  })
+
+  // #3922 older-backend fallback: a row with no is_live is derived as before
+  // (active and unexpired), so the replace warning still fires.
+  it('review step: still warns for a live budget from a backend that sends no is_live', async () => {
+    const legacy = budget({ recipient_address: PAY_TO, token_address: USDC_SEPOLIA }) as Partial<DelegationBudget>
+    delete legacy.is_live
+    mockBudgets.mockReturnValue([legacy as DelegationBudget])
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => expect(screen.getByText(/replaces/)).toBeDefined())
+  })
+
   // #3331 review finding F8: the replace-predicate gap — an active row in the
   // SAME (token, recipient) slot but locked to a DIFFERENT merchant used to
   // match neither the "plain" nor the "this merchant" predicate. It IS in the

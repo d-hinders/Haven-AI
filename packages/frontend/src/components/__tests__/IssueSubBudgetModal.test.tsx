@@ -147,7 +147,7 @@ describe('IssueSubBudgetModal (#3506)', () => {
 describe('eligibleSubBudgetParents (#3506 S4)', () => {
   // #3922: liveness is the server's `is_live` (active and unexpired), never
   // recomputed from status/expires_at here.
-  const b = (o: Record<string, unknown>) => ({ is_live: true, merchant_slug: null, ...o })
+  const b = (o: Record<string, unknown>) => ({ is_live: true, status: 'active', expires_at: 9_999_999_999, merchant_slug: null, ...o })
   it('keeps only live, non-merchant-locked budgets', () => {
     const rows = [
       b({ id: 'ok' }),

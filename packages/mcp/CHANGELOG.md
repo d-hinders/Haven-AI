@@ -15,6 +15,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Changed
+
+- `haven_get_task_budget`'s `task_budget` carries an additive `isLive` from the backend's new `is_live` flag (#3922); absent against an older backend. Same field as the hosted runtime.
+
 ## 0.10.0-alpha.0 — 2026-10-14
 
 ### Added

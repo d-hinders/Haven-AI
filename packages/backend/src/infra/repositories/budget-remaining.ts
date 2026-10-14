@@ -29,7 +29,7 @@
 
 import { getChainData } from '@haven_ai/core'
 import pool from '../../db.js'
-import { delegationLiveWindowSql } from './delegation-budgets.js'
+import { spendableDelegationSql } from './delegation-budgets.js'
 import type { Executor } from '../transaction.js'
 
 export type { Executor }
@@ -65,8 +65,7 @@ export const LIST_DASHBOARD_BUDGET_DELEGATIONS_SQL = `SELECT ad.id, ad.agent_id,
        JOIN agents a ON a.id = ad.agent_id
        JOIN smart_accounts sa ON sa.id = a.account_id AND sa.account_type = 'delegator_hybrid'
        WHERE a.user_id = $1
-         AND ad.status = 'active'
-         AND (${delegationLiveWindowSql('ad')})
+         AND (${spendableDelegationSql('ad', { requireStarted: false })})
        ORDER BY ad.created_at ASC`
 
 /**

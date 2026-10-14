@@ -432,8 +432,10 @@ Two limits are deliberate:
 promise about spending, so the database enforces the delegation path:
 `ARCHIVE_AGENT_SQL` requires `status='revoked'` **and** `NOT EXISTS` any
 live row in `agent_delegations`, in one statement. Since #3542 "live" is
-`pending`, `active` **and** `replaced` — one shared set
-(`LIVE_DELEGATION_STATUSES_SQL`) with the `revoke-all` target list, the
+`pending`, `active` **and** `replaced` — one shared predicate
+(`stillEnabledDelegationSql`, defined beside the payment-path
+`spendableDelegationSql` in `infra/repositories/delegation-budgets.ts`)
+behind the `revoke-all` target list, the
 account-delete guard and the `live_delegation_count` on agent reads — because a
 `replaced` row stays redeemable until its own disable lands. Revoking flips
 only the agent's status — it never touches delegations — so revoke+archive

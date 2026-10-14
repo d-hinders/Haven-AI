@@ -114,11 +114,12 @@ function budgetRow(overrides: Record<string, unknown> = {}) {
 
 // A's budget delegation, selected BY HASH (the #3329 review finding E rule,
 // applied to the sub-budget's grandparent). The sub-budget path runs
-// `selectActiveDelegationByHash` — status = 'active' plus live start/expiry
-// bounds — which is a DIFFERENT statement from the task-budget file's
-// by-hash select; this regex matches the sub-budget one.
+// `selectActiveDelegationByHash` — the `spendableDelegationSql` predicate
+// (#3919 S-A: an `active` row inside its live start/expiry bounds,
+// `requireStarted: true`) — which is a DIFFERENT statement from the
+// task-budget file's by-hash select; this regex matches the sub-budget one.
 const A_BUDGET_DELEGATION: DbRoute = [
-  /SELECT delegation_hash, delegation_json, recipient_address, budget_atomic\s+FROM agent_delegations\s+WHERE agent_id = \$1 AND delegation_hash = \$2 AND status = 'active'/,
+  /SELECT delegation_hash, delegation_json, recipient_address, budget_atomic\s+FROM agent_delegations\s+WHERE agent_id = \$1 AND delegation_hash = \$2\s+AND \(status = 'active'/,
   () => ({ rows: [budgetRow()] }),
 ]
 

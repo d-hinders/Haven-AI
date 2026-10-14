@@ -15,7 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isAddress, parseUnits, formatUnits } from 'viem'
 import type { Address } from 'viem'
 import { useDelegationBudget, type DelegationBudget, type GrantInput, type GrantResult } from '@/hooks/useDelegationBudget'
-import { findOccupyingBudget, replacedButEnabledBudgets } from '@/lib/budget-slot'
+import { findOccupyingBudget, occupiesSlot, replacedButEnabledBudgets } from '@/lib/budget-slot'
 import { useTaskBudgets, type TaskBudget } from '@/hooks/useTaskBudgets'
 import { useSubBudgetTrees, type SubBudgetTree } from '@/hooks/useSubBudgets'
 import BudgetGrantAction from './BudgetGrantAction'
@@ -302,7 +302,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
     const nowSec = Math.floor(Date.now() / 1000)
     const byHash = pendingEdit.hash
       ? budgets.find(
-          (b) => b.delegation_hash.toLowerCase() === pendingEdit.hash!.toLowerCase() && b.status === 'active' && b.expires_at > nowSec,
+          (b) => b.delegation_hash.toLowerCase() === pendingEdit.hash!.toLowerCase() && occupiesSlot(b, nowSec),
         )
       : undefined
     return byHash ?? findOccupyingBudget(budgets, pendingEdit.slot, nowSec)

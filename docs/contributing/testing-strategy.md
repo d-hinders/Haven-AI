@@ -766,7 +766,10 @@ budget-shaped TypeScript sites in the client packages doing the same.
 Status transitions (`INSERT`, `UPDATE … SET status`, the slot sweeps) are
 not counted, and the named predicate definitions are excluded **by export
 name, not by file** — so a new inline copy inside `delegation-budgets.ts`
-itself still counts. The accepted delegation-budgets.ts payment-window
+itself still counts. A predicate no slice answers gets ONE named copy added
+to that list, never an inline restatement: #3933's `isReplacedButEnabled`
+(`replaced` and unexpired — still enabled on-chain, `lib/budget-slot.ts`)
+is the first. The accepted delegation-budgets.ts payment-window
 mirror is ratcheted at its measured count; the reason lives in the script
 header. The debt this guards against is real: the same inline-copy pattern
 regrew between #3542 (2026-10-01) and #3802 (2026-10-09). After a

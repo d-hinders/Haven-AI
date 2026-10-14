@@ -527,6 +527,20 @@ export const NOT_GATE_RULES = Object.freeze([
 export const DB_SKIP_MARKER = /real-DB suites SKIPPED/i
 
 /**
+ * Cap on the output a gate may emit before the harness stops reading it.
+ *
+ * Node's default `maxBuffer` for `spawnSync`/`execFile*` is 1 MiB, and the
+ * battery PIPES every gate's stdout/stderr (it has to — the run matches gates'
+ * output for the real-DB skip marker and prints tails on failure), so a gate
+ * whose own output exceeds 1 MiB was killed mid-suite: the backend suite
+ * prints ~1.47 MB and preflight reported it red while the same command run
+ * directly passed (#3954). 64 MiB — the value the `git diff`/`status` reads in
+ * `changedSurfaces` already use — is far above any real suite's chatter but
+ * still bounded, so a runaway gate cannot balloon memory without limit.
+ */
+export const GATE_OUTPUT_MAX_BUFFER = 64 * 1024 * 1024
+
+/**
  * Shapes that LOOK like a gate, anywhere in a line — the shield.
  *
  * Deliberately COARSER than GATE_RULES, and deliberately a separate list. The
@@ -645,7 +659,7 @@ export function changedSurfaces(base) {
   const files = execFileSync('git', ['diff', '--name-only', `${base}...HEAD`], {
     cwd: ROOT,
     encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
+    maxBuffer: GATE_OUTPUT_MAX_BUFFER,
   })
     .split('\n')
     .filter((f) => f.trim() !== '')
@@ -662,7 +676,7 @@ export function changedSurfaces(base) {
   const dirty = execFileSync('git', ['status', '--porcelain', '-z'], {
     cwd: ROOT,
     encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
+    maxBuffer: GATE_OUTPUT_MAX_BUFFER,
   })
     .split('\0')
     .map((entry) => (/^[ MADRCU?!]{2} /.test(entry) ? entry.slice(3) : entry))
@@ -709,14 +723,20 @@ export function selectGates(plan, surfaces) {
  * in the corpus carries one today (every live use sits on an excluded
  * command), and a gate that did would be run from the root. Written down
  * rather than guarded.
+ *
+ * Output is captured (not inherited) because the battery matches gate output
+ * for the real-DB skip marker and prints a tail per red gate — so the child
+ * must be given a generous `maxBuffer` (GATE_OUTPUT_MAX_BUFFER), not the
+ * 1 MiB default that killed a verbose backend suite mid-run (#3954).
  */
-function runGate(gate) {
+export function runGate(gate) {
   const started = Date.now()
   const result = spawnSync(gate.command, {
     cwd: ROOT,
     shell: true,
     stdio: ['ignore', 'pipe', 'pipe'],
     encoding: 'utf8',
+    maxBuffer: GATE_OUTPUT_MAX_BUFFER,
   })
   return {
     ...gate,

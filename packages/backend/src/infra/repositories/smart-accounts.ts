@@ -27,7 +27,7 @@
 
 import pool from '../../db.js'
 import { withTransaction, type Executor } from '../transaction.js'
-import { LIVE_DELEGATION_STATUSES_SQL } from './delegation-budgets.js'
+import { stillEnabledDelegationSql } from './delegation-budgets.js'
 
 export type { Executor }
 
@@ -307,7 +307,7 @@ export const HAS_LIVE_DELEGATIONS_FOR_ACCOUNT_SQL = `SELECT EXISTS (
          FROM agent_delegations ad
          JOIN agents a ON a.id = ad.agent_id
          WHERE a.account_id = $1 AND a.user_id = $2
-           AND ad.status IN ${LIVE_DELEGATION_STATUSES_SQL}
+           AND ${stillEnabledDelegationSql('ad')}
        ) AS live`
 
 export const HAS_OPEN_SWEEPS_FOR_ACCOUNT_SQL = `SELECT EXISTS (

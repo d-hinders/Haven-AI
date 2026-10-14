@@ -612,8 +612,10 @@ test.describe('design-system visual regression', () => {
       const sample = page.getByTestId('ds-attention-list')
       await expect(sample).toHaveCount(1)
       // All four tone items rendered — a dismiss here is interaction state,
-      // and this gate photographs the resting page only.
-      await expect(sample.getByTestId(/^attention-dismiss-/)).toHaveCount(4)
+      // and this gate photographs the resting page only. Three dismiss
+      // controls: the failure row has none, only the reserved slot.
+      await expect(sample.locator('li')).toHaveCount(4)
+      await expect(sample.getByTestId(/^attention-dismiss-/)).toHaveCount(3)
       await expectShowcaseClip(sample, vp.height, 'the AttentionList sample', `design-system-attention-list-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
     })
 

@@ -14,7 +14,8 @@ import { Info, TriangleAlert } from 'lucide-react'
  * would nest the action inside another control. The rules under test here are
  * the ones a screenshot cannot see: the tone given in TEXT (Row's leading icon
  * is aria-hidden), the labelled dismiss, and where focus lands after a
- * dismiss — the next item, or the caller's list heading when the list emptied.
+ * dismiss — the next dismissible item, or the caller's list heading when no
+ * dismiss button remains.
  */
 
 const ITEMS: AttentionListItem[] = [
@@ -170,5 +171,141 @@ describe('AttentionList (#3805)', () => {
     expect(
       screen.getByRole('button', { name: 'Dismiss: Re-approval needed' }),
     ).toBeTruthy()
+  })
+
+  // One trailing column: a mixed list (the dashboard's "Needs setup" with its
+  // X above "Low balance" without one) staggered its actions by the X's
+  // width. The non-dismissible row now keeps an empty, aria-hidden slot in
+  // the X's place — and a list with no dismissible row reserves nothing.
+  it('reserves the dismiss slot on a non-dismissible row when another row has the X', () => {
+    const { container } = render(
+      <AttentionList
+        items={[
+          { ...ITEMS[0], dismissible: false },
+          { ...ITEMS[1] },
+        ]}
+        onDismiss={() => {}}
+      />,
+    )
+    const rows = container.querySelectorAll('li')
+    const slot = rows[0].querySelector('[data-attention-dismiss-slot]')
+    expect(slot).not.toBeNull()
+    expect(slot?.getAttribute('aria-hidden')).toBe('true')
+    // The dismissible row has the real control, not a slot.
+    expect(rows[1].querySelector('[data-attention-dismiss-slot]')).toBeNull()
+    expect(rows[1].querySelector('[data-attention-dismiss]')).not.toBeNull()
+  })
+
+  it('reserves no dismiss slot when no row is dismissible', () => {
+    const { container } = render(
+      <AttentionList
+        items={ITEMS.map((item) => ({ ...item, dismissible: false }))}
+        onDismiss={() => {}}
+      />,
+    )
+    expect(container.querySelector('[data-attention-dismiss-slot]')).toBeNull()
+  })
+
+  it('gives every action the shared minimum width', () => {
+    render(
+      <AttentionList
+        items={[{ ...ITEMS[0], action: <button type="button">Review</button> }]}
+        onDismiss={() => {}}
+      />,
+    )
+    const wrapper = screen.getByRole('button', { name: 'Review' }).parentElement
+    expect(wrapper?.className).toContain('min-w-[7rem]')
+  })
+
+  // A row with nothing visible on the right (no badge, no action) has
+  // nothing to align — and below sm its slot would wrap into an empty 32px
+  // line under the body — so it reserves nothing even in a mixed list.
+  it('reserves no slot on a row with no badge and no action', () => {
+    const { container } = render(
+      <AttentionList
+        items={[
+          { ...ITEMS[0], id: 'bare', badge: undefined, action: undefined, dismissible: false },
+          { ...ITEMS[1] },
+        ]}
+        onDismiss={() => {}}
+      />,
+    )
+    expect(container.querySelector('[data-attention-dismiss-slot]')).toBeNull()
+  })
+
+  // Focus after a dismiss is counted among the dismiss BUTTONS, not among the
+  // rows: with non-dismissible rows above, an index into `items` overshoots
+  // and skips the next dismissible row.
+  it('moves focus to the next DISMISSIBLE row when non-dismissible rows precede it', async () => {
+    const user = userEvent.setup()
+    const fixed = (id: string): AttentionListItem => ({
+      id,
+      title: `Fixed ${id}`,
+      tone: 'neutral',
+      dismissible: false,
+    })
+    const open = (id: string): AttentionListItem => ({
+      id,
+      title: `Open ${id}`,
+      tone: 'brand',
+    })
+    renderList([fixed('n1'), fixed('n2'), fixed('n3'), open('a'), open('b'), open('c')])
+    await user.click(screen.getByRole('button', { name: 'Dismiss: Open a' }))
+    expect(screen.queryByRole('button', { name: 'Dismiss: Open a' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Dismiss: Open b' })).toHaveFocus()
+  })
+
+  it('counts interleaved non-dismissible rows out: [N, A, N, B] dismiss A → B', async () => {
+    const user = userEvent.setup()
+    renderList([
+      { ...ITEMS[0], dismissible: false },
+      ITEMS[1],
+      { ...ITEMS[2], dismissible: false },
+      { id: 'b', title: 'Open b', tone: 'brand' },
+    ])
+    await user.click(screen.getByRole('button', { name: 'Dismiss: Re-approval needed' }))
+    expect(screen.getByRole('button', { name: 'Dismiss: Open b' })).toHaveFocus()
+  })
+
+  it('clamps to the last remaining dismissible row: [A, N, B, N] dismiss B → A', async () => {
+    const user = userEvent.setup()
+    renderList([
+      ITEMS[0],
+      { ...ITEMS[1], dismissible: false },
+      ITEMS[2],
+      { id: 'n', title: 'Fixed n', tone: 'neutral', dismissible: false },
+    ])
+    await user.click(screen.getByRole('button', { name: 'Dismiss: Payment failed' }))
+    expect(screen.getByRole('button', { name: 'Dismiss: Travel budget reached' })).toHaveFocus()
+  })
+
+  it('drops the focus move when the caller keeps the item, so a later render does not replay it', async () => {
+    const user = userEvent.setup()
+    function KeepingCaller() {
+      const [tick, setTick] = useState(0)
+      return (
+        <div>
+          <button type="button" onClick={() => setTick((t) => t + 1)}>
+            Rerender {tick}
+          </button>
+          {/* A fresh array each render, as the dashboard builds it. */}
+          <AttentionList items={ITEMS.map((item) => ({ ...item }))} onDismiss={() => {}} />
+        </div>
+      )
+    }
+    render(<KeepingCaller />)
+    await user.click(screen.getByRole('button', { name: 'Dismiss: Re-approval needed' }))
+    const rerender = screen.getByRole('button', { name: /Rerender/ })
+    await user.click(rerender)
+    expect(rerender).toHaveFocus()
+  })
+
+  it('moves focus to the heading when the last dismissible row goes, even with rows left', async () => {
+    const user = userEvent.setup()
+    renderList([{ ...ITEMS[0], dismissible: false }, ITEMS[1]], 'list-heading')
+    await user.click(screen.getByRole('button', { name: 'Dismiss: Re-approval needed' }))
+    // The non-dismissible row stays; there is no dismiss button left to land on.
+    expect(screen.getByRole('list')).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Needs attention' })).toHaveFocus()
   })
 })

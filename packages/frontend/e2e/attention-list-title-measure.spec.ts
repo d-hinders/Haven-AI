@@ -56,7 +56,7 @@ interface Metrics {
 
 async function lengthen(page: Page, part: keyof typeof PARTS): Promise<Metrics> {
   const sample = page.getByTestId('ds-attention-list')
-  await expect(sample.getByTestId(/^attention-dismiss-/)).toHaveCount(4)
+  await expect(sample.getByTestId(/^attention-dismiss-/)).toHaveCount(3)
   return sample
     .locator(PARTS[part])
     .first()
@@ -125,7 +125,7 @@ test.describe('AttentionList first-line alignment (#3880)', () => {
       await page.setViewportSize({ width: vp.width, height: vp.height })
       await page.goto('/design-system')
       const sample = page.getByTestId('ds-attention-list')
-      await expect(sample.getByTestId(/^attention-dismiss-/)).toHaveCount(4)
+      await expect(sample.getByTestId(/^attention-dismiss-/)).toHaveCount(3)
       const m = await sample
         .locator('li')
         .first()
@@ -171,7 +171,7 @@ test.describe('AttentionList first-line alignment (#3880)', () => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/design-system')
     const sample = page.getByTestId('ds-attention-list')
-    await expect(sample.getByTestId(/^attention-dismiss-/)).toHaveCount(4)
+    await expect(sample.getByTestId(/^attention-dismiss-/)).toHaveCount(3)
     const m = await sample.evaluate((el) => {
       const li = el.querySelector('li') as HTMLElement
       const subtitle = li.querySelector('p.text-xs') as HTMLElement
@@ -189,5 +189,58 @@ test.describe('AttentionList first-line alignment (#3880)', () => {
     })
     expect(m.wrapped, 'the narrowed row wraps its controls under the body').toBe(true)
     expect(Math.abs(m.gap - m.rowGap)).toBeLessThanOrEqual(1)
+  })
+})
+
+/**
+ * One trailing column. The dashboard mixed a dismissible "Needs setup" row
+ * with a non-dismissible "Low balance" row, and the second row's badge and
+ * action slid right by the dismiss's 40px, so neither lined up. The sample's
+ * failure row has no dismiss, so this measures the real mixed shape: the
+ * dismiss (or the reserved slot) ends every row on one edge, and the rows
+ * with an action end their actions — and, at the shared minimum width, their
+ * badges — on one edge too.
+ */
+const COLUMN_TOLERANCE_PX = 1
+
+test.describe('AttentionList one trailing column', () => {
+  test.beforeEach(async ({ page }) => {
+    await mockHavenApi(page)
+    await seedAuthenticatedSession(page)
+  })
+
+  test('desktop: mixed dismissible rows share the trailing edges', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.goto('/design-system')
+    const sample = page.getByTestId('ds-attention-list')
+    await expect(sample.getByTestId(/^attention-dismiss-/)).toHaveCount(3)
+    const rows = await sample.locator('li').evaluateAll((lis) =>
+      lis.map((li) => {
+        const end = li.querySelector('[data-attention-dismiss], [data-attention-dismiss-slot]') as HTMLElement | null
+        const action = li.querySelector('button:not([data-attention-dismiss]), a') as HTMLElement | null
+        const badge = action?.parentElement?.previousElementSibling as HTMLElement | null
+        return {
+          isSlot: end?.hasAttribute('data-attention-dismiss-slot') ?? false,
+          endRight: end ? end.getBoundingClientRect().right : null,
+          endWidth: end ? end.getBoundingClientRect().width : null,
+          actionRight: action ? action.getBoundingClientRect().right : null,
+          badgeRight: action && badge ? badge.getBoundingClientRect().right : null,
+        }
+      }),
+    )
+    // Precondition: the list really is mixed — one reserved slot among Xs.
+    expect(rows.filter((r) => r.isSlot)).toHaveLength(1)
+    const ends = rows.map((r) => r.endRight)
+    expect(ends.every((x) => x !== null)).toBe(true)
+    for (const r of rows) {
+      expect(r.endWidth).toBe(32)
+      expect(Math.abs((r.endRight as number) - (ends[0] as number))).toBeLessThanOrEqual(COLUMN_TOLERANCE_PX)
+    }
+    const withAction = rows.filter((r) => r.actionRight !== null)
+    expect(withAction.length).toBeGreaterThanOrEqual(2)
+    for (const r of withAction) {
+      expect(Math.abs((r.actionRight as number) - (withAction[0].actionRight as number))).toBeLessThanOrEqual(COLUMN_TOLERANCE_PX)
+      expect(Math.abs((r.badgeRight as number) - (withAction[0].badgeRight as number))).toBeLessThanOrEqual(COLUMN_TOLERANCE_PX)
+    }
   })
 })

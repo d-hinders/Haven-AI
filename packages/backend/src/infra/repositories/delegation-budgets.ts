@@ -3,6 +3,14 @@
  * `agent_delegations` rows a delegation-rail agent's displayed budget is
  * derived from. Storage access only — the shaping lives in
  * `rails/delegation-budget-view.ts`.
+ *
+ * The module owns the TWO named liveness predicates every reader of
+ * `agent_delegations` uses (#3919 S-A): {@link spendableDelegationSql} — an
+ * `active` row inside its spend window, the payment selectors and the
+ * budget-viewing reads — and {@link stillEnabledDelegationSql} — every
+ * status the chain has not confirmed dead, the revoke-all target set and the
+ * guards. No reader spells the window or the set inline; see the predicates'
+ * doc comments for why both exist.
  */
 
 import pool from '../../db.js'
@@ -56,32 +64,64 @@ export async function listDelegationJsonByIds(ids: string[]): Promise<Map<string
 }
 
 /**
- * The #3802 owner predicate — `expires_at > EXTRACT(EPOCH FROM NOW())`,
- * evaluated against the DATABASE clock, beside `status = 'active'`.
- * `start_date` is deliberately NOT filtered (owner decision 2026-10-09,
- * superseding the round-1 "same window as the payment path" framing): a
- * credential rotation writes a dormant "steady" row whose `start_date` is
- * in the FUTURE beside the live "carry" row in the same slot
- * (`rekey-carry.ts`) — filtering future starts would hide the whole budget
- * for the carry window. ONE shared fragment instead of five copies, because
- * every budget-VIEWING read below must agree about which grants are still
- * budgets — a `status = 'active'` row alone is not: nothing flips the
- * status when `expires_at` passes (the status CHECK has no expired value),
- * and the on-chain TimestampEnforcer refuses an expired grant, so showing
- * it as "5.00 USDC/daily" (or letting it activate an agent) states an
- * authority the chain will not honour.
+ * The two liveness predicates for `agent_delegations`, in ONE module so the
+ * readers cannot drift (#3919 S-A). They answer two different questions and
+ * BOTH are load-bearing:
+ *
+ * - {@link spendableDelegationSql} — "can this row authorize a payment
+ *   NOW?" An `active` row plus the expiry window
+ *   (`expires_at` past the DATABASE clock's now — two app instances
+ *   disagreeing about "now" must not disagree about which grant authorizes
+ *   a payment), with the `start_date <= now` bound added under
+ *   `requireStarted: true`. The payment selectors pass `true` (#1698: a
+ *   grant whose first period has not opened is "active" only in Haven's
+ *   bookkeeping — the on-chain TimestampEnforcer reverts before its first
+ *   period opens, and the dormant "steady" half of a carried budget sits in
+ *   the same slot and must not win a payment). Every budget-VIEWING read
+ *   passes `false` (#3802 owner decision 2026-10-09, superseding the
+ *   round-1 "same window as the payment path" framing: a credential
+ *   rotation writes a dormant "steady" row whose `start_date` is in the
+ *   FUTURE beside the live "carry" row in the same slot —
+ *   `rekey-carry.ts` — and filtering future starts would hide the whole
+ *   budget for the carry window).
+ *
+ * - {@link stillEnabledDelegationSql} — "is the chain still holding this
+ *   grant?" THE definition of a live delegation: every status the chain has
+ *   not confirmed dead (#3542). One predicate, shared by the revoke-all
+ *   target list, the `live_delegation_count` read on GET /agents, the
+ *   archive guard and the account-delete guard, so the four cannot drift
+ *   apart: a guard that ignored `replaced` would let an agent be archived,
+ *   or its account deleted, while an old key's delegation was still enabled
+ *   on-chain (#3343 — the edit flow leaves the row `replaced` in the DB
+ *   until the owner's Stop userop lands). The per-hash path and the payment
+ *   paths do NOT read this set.
+ *
+ * Why BOTH exist: an EXPIRED `active` row is not spendable and still
+ * enabled AT ONCE — the status CHECK has no expired value, so nothing flips
+ * the status when `expires_at` passes; the on-chain TimestampEnforcer
+ * refuses an expired grant, yet the row is still an enabled grant the Stop
+ * path must target (#3542, #3343). Spendability is a window question;
+ * still-enabled is a status question — one predicate cannot be the other,
+ * which is exactly what the former inline copies invited.
  *
  * Unqualified on purpose — every interpolating query joins only tables with
- * no `start_date`/`expires_at` of their own, and the aliased join queries
- * call {@link delegationLiveWindowSql} with their table alias. The payment
- * selection queries above keep their inline copy — INCLUDING their
- * `start_date <= now` bound: their text is pinned (#1698's tests assert it
- * untouched), and an expired grant must never be SELECTED for payment even
- * though the views still show its dormant steady sibling.
+ * no `start_date`/`expires_at` of their own; queries that join tables that
+ * DO, pass their table alias.
  */
-export function delegationLiveWindowSql(tableAlias?: string): string {
+export function spendableDelegationSql(
+  tableAlias: string | undefined,
+  opts: { requireStarted: boolean },
+): string {
   const prefix = tableAlias ? `${tableAlias}.` : ''
-  return `${prefix}expires_at > EXTRACT(EPOCH FROM NOW())`
+  const started = opts.requireStarted
+    ? ` AND ${prefix}start_date <= EXTRACT(EPOCH FROM NOW())`
+    : ''
+  return `${prefix}status = 'active' AND ${prefix}expires_at > EXTRACT(EPOCH FROM NOW())${started}`
+}
+
+export function stillEnabledDelegationSql(tableAlias?: string): string {
+  const prefix = tableAlias ? `${tableAlias}.` : ''
+  return `${prefix}status IN ('pending', 'active', 'replaced')`
 }
 
 export async function listActiveDelegations(
@@ -95,7 +135,7 @@ export async function listActiveDelegations(
   // projection (`deriveDelegationAllowances`) still strips to its frozen
   // six fields, so nothing leaks onto that wire.
   //
-  // #3802: the owner predicate joins the filter — `status = 'active'` alone
+  // #3802: the owner predicate joins the filter — an `active` row alone
   // kept presenting EXPIRED grants as budgets on the dashboard, the agents
   // routes and the agent-facing allowances read. `start_date` is not
   // filtered: the future-dated steady row a rekey writes must stay visible
@@ -104,8 +144,8 @@ export async function listActiveDelegations(
     `SELECT id, agent_id, chain_id, token_address, budget_atomic, period_seconds,
             delegation_hash, recipient_address, merchant_id, start_date, expires_at, created_at
      FROM agent_delegations
-     WHERE agent_id = ANY($1) AND status = 'active'
-       AND (${delegationLiveWindowSql()})
+     WHERE agent_id = ANY($1)
+       AND (${spendableDelegationSql(undefined, { requireStarted: false })})
      ORDER BY created_at ASC`,
     [agentIds],
   )
@@ -302,10 +342,8 @@ export const SELECT_DELEGATION_FOR_PAYMENT_SQL = `SELECT delegation_hash, delega
      FROM agent_delegations
      WHERE agent_id = $1
        AND token_address = LOWER($2)
-       AND status = 'active'
        AND (recipient_address = LOWER($3) OR recipient_address IS NULL)
-       AND start_date <= EXTRACT(EPOCH FROM NOW())
-       AND expires_at > EXTRACT(EPOCH FROM NOW())
+       AND (${spendableDelegationSql(undefined, { requireStarted: true })})
      ORDER BY (recipient_address IS NULL), expires_at ASC, created_at DESC`
 
 export interface DelegationForPaymentRow {
@@ -456,9 +494,8 @@ export function liveRecipientPins<T extends { recipient_address: string | null }
 // anyone does about it.
 export const SELECT_ACTIVE_DELEGATION_BY_HASH_SQL = `SELECT delegation_hash, delegation_json, recipient_address, budget_atomic
      FROM agent_delegations
-     WHERE agent_id = $1 AND delegation_hash = $2 AND status = 'active'
-       AND start_date <= EXTRACT(EPOCH FROM NOW())
-       AND expires_at > EXTRACT(EPOCH FROM NOW())`
+     WHERE agent_id = $1 AND delegation_hash = $2
+       AND (${spendableDelegationSql(undefined, { requireStarted: true })})`
 
 export async function selectActiveDelegationByHash(
   agentId: string,
@@ -472,16 +509,6 @@ export async function selectActiveDelegationByHash(
 }
 
 /**
- * THE definition of a "live" delegation: every status the chain has not
- * confirmed dead (#3542). One SQL tuple, shared by the revoke-all target list
- * below, the `live_delegation_count` read on GET /agents, the archive guard and
- * the account-delete guard — so the four cannot drift apart. A guard that
- * ignored `replaced` would let an agent be archived, or its account deleted,
- * while an old key's delegation was still enabled on-chain.
- */
-export const LIVE_DELEGATION_STATUSES_SQL = `('pending', 'active', 'replaced')`
-
-/**
  * #1400: everything the batch revocation must kill — pending AND active
  * (a pending grant is still a signed delegation that could activate).
  *
@@ -490,12 +517,13 @@ export const LIVE_DELEGATION_STATUSES_SQL = `('pending', 'active', 'replaced')`
  * (the slot sweep marks the old grant replaced, and it is disabled only when
  * the owner's Stop userop lands). A re-key or revoke-all that skipped those
  * rows would complete while the OLD key's delegation stayed live — so
- * "still enabled" here means every status the chain has not confirmed dead.
- * The per-hash path and the payment paths do NOT read this list.
+ * "still enabled" here means {@link stillEnabledDelegationSql}: every
+ * status the chain has not confirmed dead. The per-hash path and the
+ * payment paths do NOT read this list.
  */
 export const LIST_NON_REVOKED_DELEGATIONS_FOR_AGENT_SQL = `SELECT delegation_hash, delegation_json, status
        FROM agent_delegations
-       WHERE agent_id = $1 AND status IN ${LIVE_DELEGATION_STATUSES_SQL}
+       WHERE agent_id = $1 AND ${stillEnabledDelegationSql()}
        ORDER BY created_at ASC`
 
 export async function listNonRevokedDelegationsForAgent(
@@ -681,8 +709,7 @@ export const LIST_ACTIVE_MERCHANT_BUDGETS_FOR_USER_SQL = `SELECT d.id, d.agent_i
      WHERE a.user_id = $1
        AND a.status <> 'revoked'
        AND d.merchant_id = $2
-       AND d.status = 'active'
-       AND d.expires_at > EXTRACT(EPOCH FROM now())
+       AND (${spendableDelegationSql('d', { requireStarted: false })})
      ORDER BY a.name ASC, d.created_at ASC`
 
 export interface MerchantBudgetRow {

@@ -94,7 +94,7 @@ export default function BudgetGrantAction({
   onGranted,
   className,
 }: Props) {
-  const [outcome, setOutcome] = useState<'cancelled' | 'failed' | null>(null)
+  const [outcome, setOutcome] = useState<'cancelled' | 'failed' | 'unconfirmed' | null>(null)
 
   async function handleClick() {
     if (!input) return
@@ -111,7 +111,10 @@ export default function BudgetGrantAction({
     // (the fund-merchant modal) reads `grant()`'s result itself rather than
     // going through this generic control. Both fold into the generic failure
     // here rather than teaching this shared control a word it cannot yet
-    // display.
+    // display. `unconfirmed` (#3930) does NOT fold: the activation may have
+    // committed, so the generic "nothing changed — try again" failure sentence
+    // would invite a retry that mints a second enabled grant — it gets its own
+    // branch below.
     setOutcome(result.reason === 'too_many' || result.reason === 'refused' ? 'failed' : result.reason)
   }
 
@@ -145,6 +148,20 @@ export default function BudgetGrantAction({
       {outcome === 'failed' && (
         <p className="mb-3 rounded-[10px] border border-danger/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-xs text-[var(--v2-danger)]">
           {failureMessage}
+        </p>
+      )}
+
+      {/*
+        #3930: the activation response was lost and the re-read could not prove
+        what happened. The grant may already be in place, so this is NOT the
+        generic failure: the sentence never says "nothing changed", never names
+        Haven as the approver, and sends the owner to check the agent's budgets
+        BEFORE trying again — a second grant would add a second budget.
+      */}
+      {outcome === 'unconfirmed' && (
+        <p className="mb-3 rounded-[10px] border border-danger/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-xs text-[var(--v2-danger)]">
+          The budget could not be confirmed. Check the agent&apos;s budgets before trying again — it
+          may already be in place, and a second grant would add a second budget.
         </p>
       )}
 

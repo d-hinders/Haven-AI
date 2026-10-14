@@ -754,9 +754,11 @@ reached — the banner ladder above says the same), `brand`, `warning`, and
 `danger` for real failures only. The dismiss is a button labelled
 `Dismiss: {title}` calling `onDismiss(id)`; the list holds no dismissal
 state (persistence is #3813's), and after a dismiss focus moves to the next
-dismissible item's dismiss button — counted among dismissible rows only, so
+dismissible item's dismiss button (the last remaining one when the dismissed
+row was the last dismissible row) — counted among dismissible rows only, so
 non-dismissible rows above it never push focus past it — or to the caller's
-list heading (`headingId`) when no dismiss button remains.
+list heading (`headingId`) when no dismiss button remains. That fallback
+needs the caller to keep the list mounted through the emptying dismiss.
 The title and the subtitle each line-clamp to two lines at every width
 (`Row` truncates both to one), so an item is never cut to a line that
 cannot be judged — the narrow desktop "Needs attention" card included (#3876).

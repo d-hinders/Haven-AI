@@ -28,10 +28,15 @@
  * setup" offer the control). The list holds NO dismissal state — #3813 owns
  * persistence; this component renders what it is given.
  * What it does own is where focus lands: after a dismiss it moves to the
- * next item's dismiss button (the caller re-renders without the dismissed
- * item, and this effect runs after that render), or — when no dismiss button
- * remains — to the caller's list heading via `headingId`. A control that
- * vanishes under the pointer must not strand focus on `body`. "Next" is
+ * next dismissible item's dismiss button, or the last remaining one when the
+ * dismissed row was the last dismissible row (the caller re-renders without
+ * the dismissed item, and this effect runs after that render), or — when no
+ * dismiss button remains — to the caller's list heading via `headingId`. A
+ * control that vanishes under the pointer must not strand focus on `body`.
+ * The heading fallback needs the caller to keep this list mounted through
+ * the dismiss that empties it; a list unmounted at zero items runs no
+ * effect. If the caller's next render still holds the dismissed item, the
+ * pending move is dropped rather than replayed on some later render. "Next" is
  * counted among the DISMISSIBLE rows only: the focus targets are the dismiss
  * buttons, and since #3813 a non-dismissible row has none, so an index into
  * `items` would skip ahead by the number of non-dismissible rows above it.
@@ -187,7 +192,8 @@ export function AttentionList({
   /**
    * DOM id of the caller's list heading. When a dismiss leaves no dismiss
    * button — the list emptied, or only non-dismissible rows remain — focus
-   * moves there; the caller owns the heading and the empty state.
+   * moves there; the caller owns the heading and the empty state. The list
+   * must stay mounted through that dismiss for the move to run.
    */
   headingId?: string
   /** Edge-to-edge rows with dividers, for a list that is the card's body (#3902). */
@@ -199,12 +205,14 @@ export function AttentionList({
   // item — focusing a still-mounted row would strand focus on a departing node.
   // It is the dismissed control's position among the DISMISS BUTTONS, not
   // among `items` — the two orders differ once a row is non-dismissible.
-  const pendingFocusIndex = useRef<number | null>(null)
+  const pendingFocus = useRef<{ id: string; index: number } | null>(null)
 
   useEffect(() => {
-    if (pendingFocusIndex.current === null) return
-    const index = pendingFocusIndex.current
-    pendingFocusIndex.current = null
+    if (pendingFocus.current === null) return
+    const { id, index } = pendingFocus.current
+    pendingFocus.current = null
+    // The caller kept the item: nothing vanished, so focus stays where it is.
+    if (items.some((item) => item.id === id)) return
     const buttons = listRef.current?.querySelectorAll<HTMLButtonElement>('[data-attention-dismiss]')
     if (buttons && buttons.length > 0) {
       buttons[Math.min(index, buttons.length - 1)]?.focus()
@@ -220,9 +228,10 @@ export function AttentionList({
   const reserveDismissSlot = items.some((item) => item.dismissible !== false)
 
   const handleDismiss = (item: AttentionListItem) => {
-    pendingFocusIndex.current = items
+    const index = items
       .filter((candidate) => candidate.dismissible !== false)
       .findIndex((candidate) => candidate.id === item.id)
+    pendingFocus.current = { id: item.id, index }
     onDismiss(item.id)
   }
 

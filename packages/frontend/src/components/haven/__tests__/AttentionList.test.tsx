@@ -14,7 +14,8 @@ import { Info, TriangleAlert } from 'lucide-react'
  * would nest the action inside another control. The rules under test here are
  * the ones a screenshot cannot see: the tone given in TEXT (Row's leading icon
  * is aria-hidden), the labelled dismiss, and where focus lands after a
- * dismiss — the next item, or the caller's list heading when the list emptied.
+ * dismiss — the next dismissible item, or the caller's list heading when no
+ * dismiss button remains.
  */
 
 const ITEMS: AttentionListItem[] = [
@@ -252,6 +253,51 @@ describe('AttentionList (#3805)', () => {
     await user.click(screen.getByRole('button', { name: 'Dismiss: Open a' }))
     expect(screen.queryByRole('button', { name: 'Dismiss: Open a' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Dismiss: Open b' })).toHaveFocus()
+  })
+
+  it('counts interleaved non-dismissible rows out: [N, A, N, B] dismiss A → B', async () => {
+    const user = userEvent.setup()
+    renderList([
+      { ...ITEMS[0], dismissible: false },
+      ITEMS[1],
+      { ...ITEMS[2], dismissible: false },
+      { id: 'b', title: 'Open b', tone: 'brand' },
+    ])
+    await user.click(screen.getByRole('button', { name: 'Dismiss: Re-approval needed' }))
+    expect(screen.getByRole('button', { name: 'Dismiss: Open b' })).toHaveFocus()
+  })
+
+  it('clamps to the last remaining dismissible row: [A, N, B, N] dismiss B → A', async () => {
+    const user = userEvent.setup()
+    renderList([
+      ITEMS[0],
+      { ...ITEMS[1], dismissible: false },
+      ITEMS[2],
+      { id: 'n', title: 'Fixed n', tone: 'neutral', dismissible: false },
+    ])
+    await user.click(screen.getByRole('button', { name: 'Dismiss: Payment failed' }))
+    expect(screen.getByRole('button', { name: 'Dismiss: Travel budget reached' })).toHaveFocus()
+  })
+
+  it('drops the focus move when the caller keeps the item, so a later render does not replay it', async () => {
+    const user = userEvent.setup()
+    function KeepingCaller() {
+      const [tick, setTick] = useState(0)
+      return (
+        <div>
+          <button type="button" onClick={() => setTick((t) => t + 1)}>
+            Rerender {tick}
+          </button>
+          {/* A fresh array each render, as the dashboard builds it. */}
+          <AttentionList items={ITEMS.map((item) => ({ ...item }))} onDismiss={() => {}} />
+        </div>
+      )
+    }
+    render(<KeepingCaller />)
+    await user.click(screen.getByRole('button', { name: 'Dismiss: Re-approval needed' }))
+    const rerender = screen.getByRole('button', { name: /Rerender/ })
+    await user.click(rerender)
+    expect(rerender).toHaveFocus()
   })
 
   it('moves focus to the heading when the last dismissible row goes, even with rows left', async () => {

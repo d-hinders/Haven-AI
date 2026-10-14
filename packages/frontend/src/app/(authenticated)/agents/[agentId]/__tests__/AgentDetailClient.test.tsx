@@ -144,13 +144,13 @@ vi.mock('@/components/transactions/TransactionsTable', () => ({
         <div key={tx.hash}>
           <span>{tx.accountName}</span>
           {tx.movementOverride}
-          {/* #3811: the stub mirrors the adapter's fiat contract — the
-              activity rows carry #3824's serve-time amount, `≈`-marked, or
-              an em dash when unpriced. The real rendering is covered by the
-              TransactionsTable tests. */}
+          {/* #3811, amended by #3950: the stub mirrors the adapter's fiat
+              contract — the activity rows carry #3824's serve-time amount,
+              rendered PLAIN (the `≈` mark moved off list rows with the
+              #3950 owner decision), or an em dash when unpriced. The real
+              rendering is covered by the TransactionsTable tests. */}
           {tx.approxAmount != null ? (
             <span>
-              {'≈ '}
               {tx.approxAmount} {tx.approxCurrency}
             </span>
           ) : (
@@ -745,11 +745,12 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.queryByText('Haven wallet 0x4444…4444')).not.toBeInTheDocument()
   })
 
-  // #3811: the activity rows adopt the shared rules — the movement's
-  // counterparty is `counterpartyLabel`'s no-address mode (never a truncated
-  // address), and the row's fiat is #3824's serve-time `approx_amount` with
-  // "≈" — or an em dash when unpriced, never 0.
-  it('renders the activity rows without addresses and with the serve-time "≈"', () => {
+  // #3811, amended by #3950: the activity rows adopt the shared rules — the
+  // movement's counterparty is `counterpartyLabel`'s no-address mode (never a
+  // truncated address), and the row's fiat is #3824's serve-time
+  // `approx_amount` rendered PLAIN (the `≈` mark lives only on the detail
+  // panel now) — or an em dash when unpriced, never 0.
+  it('renders the activity rows without addresses and the serve-time figure without the "≈" mark', () => {
     mockUseAgentActivity.mockReturnValue({
       activity: [
         {
@@ -785,11 +786,12 @@ describe('AgentDetailClient last-activity metadata', () => {
     // No truncated address anywhere in the rows…
     expect(screen.queryByText('0x2222…2222')).not.toBeInTheDocument()
     // …the unresolvable counterparty reads as calm copy, and the serve-time
-    // figure carries the "≈".
+    // figure renders plain — no `≈` on list rows (#3950). The `startsWith`
+    // match is the negative half too: a `≈ `-prefixed figure fails it.
     expect(screen.getAllByText('New recipient').length).toBeGreaterThan(0)
     expect(
       screen.getAllByText((_, element) =>
-        (element?.textContent ?? '').replace(/\u00a0/g, ' ').trim().startsWith('≈ 0.11 SEK'),
+        (element?.textContent ?? '').replace(/\u00a0/g, ' ').trim().startsWith('0.11 SEK'),
       ).length,
     ).toBeGreaterThan(0)
   })

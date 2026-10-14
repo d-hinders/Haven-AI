@@ -733,7 +733,14 @@ summary use it; the summary goes further and reads a week under a cent as a
 payment count rather than any figure. The sign comes only
 from `direction` (a negative magnitude cannot double-sign it); `symbol` is
 not allowed in this mode. `≈` (with `title="Converted at today's rate"`) goes
-before the sign: `≈ -9,09 kr`. Unknown — `null` or a non-finite value —
+before the sign: `≈ -9,09 kr`. Since #3950 the transactions list rows
+(`TransactionsTable` — `/transactions`, the agent page and the account page)
+call this mode WITHOUT the mark and render the figure inside a
+`whitespace-nowrap` cell, so a money figure never wraps or truncates — the
+auto-layout column widens to the figure's min-content instead. The mark
+stays where it explains something: the detail panel (why the two figures
+differ) and the dashboard's activity row. Unknown — `null` or a non-finite
+value —
 renders `—` in `--v2-ink-3`, never `0,00 kr`: existing callers turned unknown
 into zero, and this mode must not.
 

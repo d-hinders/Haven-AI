@@ -41,6 +41,7 @@ import { observeErc7710Settlement } from '../x402/settlement-observed.js'
 import {
   isFundedEip3009Payment,
   observeEip3009MerchantSettlement,
+  eip3009SettlementProofFromHeader,
 } from '../x402/eip3009-settlement-evidence.js'
 import { withParties } from '../../openapi/party-model.js'
 import { toCanonicalAddress } from '../transactions/index.js'
@@ -561,7 +562,19 @@ export async function attachMachinePaymentEvidence(
     const base = await recordMachinePaymentEvidenceBase(payment, { suppressFeed: true })
     if (base.status === 'failed' && base.reason === 'missing_resource_url') throw new Error('resource_missing')
     if (base.status !== 'recorded') throw new Error(`evidence_base_${base.reason}`)
-    const settled = await observeEip3009MerchantSettlement(payment, input.txHash)
+    // #3925: the header the SDK posts WITH the evidence is the nonce proof.
+    // The eip3009 branch returns before `attachEvidenceProof` below would
+    // store it, so it is read HERE, before the observe call: its own
+    // `authorization.nonce` — signature-checked against the delegate — is the
+    // attribution the record is bound to. A report without a header (an older
+    // client, or one after the retry path) is refused rather than attributed
+    // by transfer shape; the passive sweep still attributes derived-nonce
+    // payments without any report.
+    const proof = eip3009SettlementProofFromHeader(payment, input.paymentProofHeader ?? null)
+    if (!proof.ok) {
+      throw new SettlementReportRefusal('settlement_unverified', 'eip3009', proof.reason)
+    }
+    const settled = await observeEip3009MerchantSettlement(payment, input.txHash, undefined, proof.proof)
     if (settled.outcome === 'unverified') {
       // Nothing was fed: the evidence row exists, but the settlement report
       // was refused — the feed fires on the next evidence call, Sync now,

@@ -156,20 +156,62 @@ export interface ClientUpdateHint {
 
 type ActionableVerdict = Extract<ClientCompatVerdict, { kind: 'behind' | 'below_min' }>
 
-export function clientUpdateHint(verdict: ActionableVerdict): ClientUpdateHint {
+// #3412: the connector packages are installed BY the connector, so their
+// update command is the connector doctor. `sdk`/`cli` keep their own forms.
+const CONNECTOR_PACKAGES: readonly string[] = ['@haven_ai/signer', '@haven_ai/mcp', '@haven_ai/connect']
+
+// Mirrors `assertValidServerSlug` in @haven_ai/connect (1-32 lowercase letters,
+// digits, single hyphens; 'signer' and 'signer-*' reserved because they would
+// collide with another pair's haven-signer-* entry; #1696 — 'haven' and
+// 'haven-signer' refused outright as the bare pair's own names). The backend
+// cannot import the connector, so the shape is pinned here — a suffix is only
+// appended when the slug is one the connector's own `--name` parser would
+// accept.
+const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+
+/**
+ * #3799: the per-agent suffix for a connector `upgrade_command`. The calling
+ * agent's recorded MCP pair (migration 067 — a display aid, never identity)
+ * is normalised from the hosted name: `haven-<slug>` → `--name <slug>`, the
+ * bare `haven` pair → no flag, and ANYTHING that is not a slug the connector
+ * would accept → no flag. Fail-closed: a malformed record must never produce
+ * a command the connector refuses to parse. Backend-only — the bare command
+ * in core, the parity test and `/discovery` stay untouched.
+ */
+export function agentPairSuffix(
+  pkg: PublishedClientPackage,
+  mcpServerName: string | null | undefined,
+): string {
+  if (!(CONNECTOR_PACKAGES as readonly string[]).includes(pkg)) return ''
+  if (!mcpServerName || mcpServerName === 'haven') return ''
+  if (!mcpServerName.startsWith('haven-')) return ''
+  const slug = mcpServerName.slice('haven-'.length)
+  if (slug.length === 0 || slug.length > 32 || !SLUG_RE.test(slug)) return ''
+  if (slug === 'signer' || slug.startsWith('signer-')) return ''
+  if (slug === 'haven' || slug === 'haven-signer') return ''
+  return ` --name ${slug}`
+}
+
+export function clientUpdateHint(
+  verdict: ActionableVerdict,
+  agent?: Pick<AgentContext, 'mcp_server_name'>,
+): ClientUpdateHint {
   return {
     package: verdict.package,
     current: verdict.version,
     recommended: verdict.recommended_version,
     min_version: verdict.min_version,
     required: verdict.kind === 'below_min',
-    upgrade_command: upgradeCommandFor(verdict.package),
+    upgrade_command: upgradeCommandFor(verdict.package) + agentPairSuffix(verdict.package, agent?.mcp_server_name),
     notes_url: releaseNotesUrl(),
   }
 }
 
-export function clientOutdatedBody(verdict: ActionableVerdict): Record<string, unknown> {
-  const hint = clientUpdateHint(verdict)
+export function clientOutdatedBody(
+  verdict: ActionableVerdict,
+  agent?: Pick<AgentContext, 'mcp_server_name'>,
+): Record<string, unknown> {
+  const hint = clientUpdateHint(verdict, agent)
   return {
     error:
       `${hint.package} ${hint.current} is below the minimum version this Haven deployment accepts ` +
@@ -267,7 +309,7 @@ export async function clientRefusalPreHandler(
       return undefined
     }
   }
-  return reply.code(CLIENT_OUTDATED_STATUS).send(clientOutdatedBody(verdict))
+  return reply.code(CLIENT_OUTDATED_STATUS).send(clientOutdatedBody(verdict, agent))
 }
 
 /**
@@ -311,6 +353,9 @@ export function registerClientCompatHooks(app: FastifyInstance, deps: ClientComp
   app.addHook('onSend', async (request, reply, payload) => {
     const verdict = verdictFor(request, deps.table)
     if (verdict.kind !== 'behind' && verdict.kind !== 'below_min') return payload
-    return injectClientUpdate(payload, reply.getHeader('content-type'), clientUpdateHint(verdict))
+    // #3799: the hint personalises the connector command with the calling
+    // agent's recorded pair (--name <slug>); the name arrives on the SAME
+    // auth SELECT that authenticated the request — no second read in onSend.
+    return injectClientUpdate(payload, reply.getHeader('content-type'), clientUpdateHint(verdict, request.agent))
   })
 }

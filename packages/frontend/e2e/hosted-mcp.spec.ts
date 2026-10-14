@@ -98,7 +98,7 @@ test.describe('Hosted MCP — in-budget path', () => {
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
   })
 
-  test('dashboard shows active agent with its monthly spend', async ({ page }) => {
+  test('dashboard shows active agent with its 30-day spend', async ({ page }) => {
     const browserErrors = collectBrowserErrors(page)
 
     await page.goto('/dashboard')
@@ -109,9 +109,14 @@ test.describe('Hosted MCP — in-budget path', () => {
     // so pin to the first occurrence.
     await expect(page.getByRole('link', { name: /Research agent/i }).first()).toBeVisible()
 
-    // Spend metrics are shown (mocked at $12.50).
-    // Multiple elements may show "12.50" (stat + activity row) — pin to first.
-    await expect(page.getByText(/12\.50/).first()).toBeVisible()
+    // The money panel (#3807) names the agent's 30-day NET spend (#3803
+    // definition, mocked at $32.50 — the fixture marks the d30 window
+    // approx, so the row renders "≈ $32.50"). Only the money panel's
+    // per-agent row renders this figure, but several other "Research agent"
+    // texts exist on the page (agent card + activity row), so scope to the
+    // spending block's rows and pin to the first match.
+    const spendingRows = page.locator('dl').filter({ hasText: /Research agent/ })
+    await expect(spendingRows.getByText(/32\.50/).first()).toBeVisible()
 
     expect(await expectNoHorizontalOverflow(page)).toMatchObject({
       hasOverflow: false,

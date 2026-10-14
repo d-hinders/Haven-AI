@@ -7,10 +7,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../config.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../config.js')>()
-  return { config: { ...actual.config, blockscoutApiKey: '' } }
+  return { config: { ...actual.config, blockscoutApiKey: '', alchemyHistoryApiKey: '' } }
 })
 
-import { fetchNormalTransactions } from '../explorer-api.js'
+import { alchemyHistoryEndpoint, fetchNormalTransactions } from '../explorer-api.js'
 
 const ACCOUNT = '0x135a9215604711AC70d970e12Caa812c53537EF4'
 
@@ -20,6 +20,11 @@ afterEach(() => {
 })
 
 describe('anonymous Blockscout v2 reads (no BLOCKSCOUT_API_KEY)', () => {
+  it('stays on Blockscout when ALCHEMY_HISTORY_API_KEY is unset', () => {
+    expect(alchemyHistoryEndpoint(8453)).toBeNull()
+    expect(alchemyHistoryEndpoint(84532)).toBeNull()
+  })
+
   it('sends no apikey param', async () => {
     const fetchMock = vi.fn((_input: string | URL, _init?: RequestInit) =>
       Promise.resolve({

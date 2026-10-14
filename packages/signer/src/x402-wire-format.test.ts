@@ -4,7 +4,8 @@
  * The SDK's signing path is covered by `packages/sdk/src/x402-signing.test.ts`;
  * this file exercises the *same invariants* against the edge signer's
  * `buildX402PaymentHeader` so the two signing paths cannot silently diverge.
- * Both ultimately call `exact.evm.createPaymentHeader` from the x402 library,
+ * Both build the header from the x402 library's own prepare → sign → encode
+ * trio (since #3888 overwriting the derived nonce on the unsigned payload),
  * but they wrap it independently — a divergence in either wrapper (option
  * selection, header re-encoding, asset normalization) would break exactly one
  * path and these tests localize which.
@@ -20,6 +21,7 @@ import { hashTypedData, recoverTypedDataAddress } from 'viem'
 import {
   addressFromKey,
   buildX402ExpectedMessage,
+  deriveX402PaymentNonce,
   normalizePaymentRequired,
   X402_MAX_AUTHORIZATION_WINDOW_SECONDS,
   X402_SETTLEMENT_FORWARD_MARGIN_SECONDS,
@@ -102,9 +104,9 @@ const FUNDING = buildFundingLegUserOp({
 const FUNDING_TYPED_DATA = FUNDING.typedData
 const FUNDING_DIGEST = FUNDING.digest
 
-async function expectedX402() {
+async function expectedX402(paymentId = 'pay_x402_wire') {
   const context = {
-    paymentId: 'pay_x402_wire',
+    paymentId,
     payloadHash: FUNDING.payloadHash as string,
     resourceUrl: PAYMENT_REQUIRED.resource.url,
     merchantTo: ACCEPTED.payTo,
@@ -126,9 +128,12 @@ async function expectedX402() {
   }
 }
 
-async function buildHeader(paymentRequired = PAYMENT_REQUIRED): Promise<{ header: DecodedHeader; delegateAddress: string }> {
+async function buildHeader(
+  paymentRequired = PAYMENT_REQUIRED,
+  paymentId = 'pay_x402_wire',
+): Promise<{ header: DecodedHeader; delegateAddress: string }> {
   const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
-  const funding = await signer.signX402FundingTypedData(FUNDING_TYPED_DATA as never, await expectedX402())
+  const funding = await signer.signX402FundingTypedData(FUNDING_TYPED_DATA as never, await expectedX402(paymentId))
   const result = await signer.buildX402PaymentHeader(paymentRequired, funding.x402Binding)
   return { header: decodeHeader(result.paymentHeader), delegateAddress: signer.delegateAddress }
 }
@@ -206,14 +211,26 @@ describe('edge signer EIP-3009 authorization fields', () => {
     )
   })
 
-  it('uses a fresh 32-byte hex nonce per signing', async () => {
-    const first = await buildHeader()
-    const second = await buildHeader()
+  // #3888: the nonce is no longer random — it is derived from the binding's
+  // payment id, so the backend can attribute the settlement by the payment
+  // itself and a resume re-signs the SAME nonce (refused as already used).
+  it('carries the nonce derived from the binding payment id (#3888)', async () => {
+    const { header } = await buildHeader()
+    expect(header.payload.authorization.nonce).toBe(deriveX402PaymentNonce('pay_x402_wire'))
+  })
 
-    expect(first.header.payload.authorization.nonce).toMatch(/^0x[0-9a-f]{64}$/i)
+  it('keeps the x402 nonce shape (0x + 64 hex)', async () => {
+    const { header } = await buildHeader()
+    expect(header.payload.authorization.nonce).toMatch(/^0x[0-9a-f]{64}$/i)
+  })
+
+  it('derives a DIFFERENT nonce for a different payment id', async () => {
+    const first = await buildHeader()
+    const second = await buildHeader(undefined, 'pay_other')
     expect(first.header.payload.authorization.nonce).not.toBe(
       second.header.payload.authorization.nonce,
     )
+    expect(second.header.payload.authorization.nonce).toBe(deriveX402PaymentNonce('pay_other'))
   })
 })
 

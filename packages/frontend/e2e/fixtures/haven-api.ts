@@ -132,8 +132,8 @@ export const dashboardTransaction = {
   // #3763: the two EIP-3009 legs, named. `hash` stays the FUNDING hash; the
   // recorded settlement — the transaction the MERCHANT names — headlines the
   // drawer's On-chain section and the table link. Visible text: the drawer
-  // renders "Merchant settlement (reported by the agent, verified
-  // on-chain)" + "Funding from your account" on this row.
+  // renders "Merchant settlement (reported by the agent or detected
+  // on-chain, verified)" + "Funding from your account" on this row.
   fundingTxHash: `0x${'ab'.repeat(32)}`,
   settlementTxHash: `0x${'22'.repeat(32)}`,
   settlementScheme: 'eip3009' as const,
@@ -142,6 +142,12 @@ export const dashboardTransaction = {
   to: testRecipientAddress,
   value: '12500000',
   valueFormatted: '12.50',
+  // #3824: the serve-time amount for a row without book-time fiat — today's
+  // rate (~10.76 SEK/USD, the same story `totals.sek` tells) in the served
+  // default currency. `convertedAmount` stays absent on this row: the two
+  // provenances never ride together.
+  approxAmount: '134.5000',
+  approxCurrency: 'SEK' as const,
   asset: 'USDC',
   decimals: 6,
   direction: 'out' as const,
@@ -192,6 +198,9 @@ export const x402UnrecordedSettlementTransaction = {
   to: testRecipientAddress,
   value: '1000000',
   valueFormatted: '1.00',
+  // #3824: serve-time amount, same rule and rate story as `dashboardTransaction`.
+  approxAmount: '10.7600',
+  approxCurrency: 'SEK' as const,
   asset: 'USDC',
   decimals: 6,
   direction: 'out' as const,
@@ -253,16 +262,10 @@ export const dashboardOverview = {
     sekAmount: 30,
     sekPercent: 0.2,
   },
-  metrics: {
-    connectedAgents: 1,
-    monthlyAgentSpendUsd: 12.5,
-    monthlyAgentSpendEur: 11.38,
-    // #3127 (finding 8): the "Monthly agent spend" tile reads
-    // `monthlyAgentSpendSek ?? 0` under the served default.
-    monthlyAgentSpendSek: 133,
-    successfulTransactions: 3,
-    activeAccounts: 1,
-  },
+  // #3807: the metrics block is gone with the four KPI tiles — the SEK
+  // spend figure the old "Monthly agent spend" tile read now lives in
+  // `spend.d30.net.sek` (the same #3803 net definition the analytics page
+  // uses), and the visual spec pins it there.
   // #2120: 0, matching `routes/dashboard.ts:84`, which hardcodes both to 0 —
   // the approval queue died with the AllowanceModule rail and its table is
   // dropped (#2055). A seeded 1 fabricated a count no backend can emit. The
@@ -273,6 +276,84 @@ export const dashboardOverview = {
   pendingApprovals: 0,
   onboardingProgress: {
     hasFirstAgentPayment: true,
+  },
+  // #3803: the agentCount tiles read this — every preview agent is counted,
+  // by status, including the pending ones the old LIMIT 6 preview dropped.
+  // #3809: the three listed agents are 1 active, 1 paused, 1 pending — the
+  // total must agree with `agents` or the section's "View all N agents"
+  // footer would promise an agent the list does not carry.
+  agentCount: {
+    active: 1,
+    paused: 1,
+    pending_approval: 1,
+  },
+  // #3803: TWO accounts (mainnet + testnet) so the account rows render both
+  // the mainnet USDC balance story and a testnet pace story.
+  accounts: [
+    {
+      accountId: testSafe.id,
+      chainId: 8453,
+      isTestnet: false,
+      usdcBalanceAtomic: '1250000000',
+      usdcDecimals: 6,
+      usdcBalanceFreshness: { status: 'stale' as const, asOf: '2026-10-09T10:00:00.000Z' },
+      funded: true,
+      needs_backup_recommendation: false,
+      usdcPace7dAtomic: '6250000',
+    },
+    {
+      accountId: 'safe-sepolia',
+      chainId: 84532,
+      isTestnet: true,
+      usdcBalanceAtomic: '50000000',
+      usdcDecimals: 6,
+      funded: true,
+      needs_backup_recommendation: false,
+      usdcPace7dAtomic: '1000000',
+    },
+  ],
+  // #3803: today's rate per BUDGET token, in the viewer's preferred currency
+  // (testUser is USD). Null means "the price read failed" — the client shows
+  // the caption without a rate, never a fake 0.
+  spotRates: { USDC: 1 },
+  // #3803: the 7/30-day block. scope 'mainnet' because the user HAS a
+  // mainnet account; d30 carries the larger triple so the two tiles differ.
+  spend: {
+    scope: 'mainnet' as const,
+    d7: {
+      gross: { usd: 18.5, eur: 16.84, sek: 199.1 },
+      net: { usd: 11.1, eur: 10.1, sek: 119.46 },
+      approx: false,
+      payments: 6,
+      distinctMerchants: 3,
+      budgetStops: 1,
+    },
+    d30: {
+      gross: { usd: 74.0, eur: 67.34, sek: 796.4 },
+      net: { usd: 48.1, eur: 43.77, sek: 517.66 },
+      approx: true,
+      payments: 21,
+      distinctMerchants: 5,
+      budgetStops: 3,
+    },
+    topMerchant7d: {
+      key: 'research.example',
+      x402ResourceUrl: 'https://research.example/report',
+      to: testRecipientAddress,
+      merchantName: null,
+    },
+    failedIntents7d: 1,
+    // 30 days, most recent last — days WITHOUT a snapshot are ABSENT from the
+    // real wire; the harness generates a dense series so a gap never renders.
+    balance_by_day: Array.from({ length: 30 }, (_, i) => {
+      const day = new Date(Date.UTC(2026, 8, 10 + i))
+      return {
+        snapshotDate: day.toISOString().slice(0, 10),
+        totalUsd: 1225 + i * 1.25,
+        totalEur: 1113.8 + i * 1.14,
+        totalSek: i % 7 === 0 ? null : 13170 + i * 13.45,
+      }
+    }),
   },
   agents: [
     {
@@ -291,9 +372,232 @@ export const dashboardOverview = {
           resetPeriodMin: 43_200,
         },
       ],
+      // #3803: the full budget view beside the frozen mirror above —
+      // identity, raw budget, and the LIVE window the client renders as
+      // "resets in …". Two agents carry budgets with MIXED periods.
+      // #3809: the windows are pinned to the VISUAL HARNESS's frozen clock
+      // (FROZEN_NOW 2026-09-01T12:00Z in product-routes.visual.spec.ts) — a
+      // live budget renders its meter "in each budget's own period", so the
+      // dates must be around THAT instant, not the day the fixture was
+      // written, or the baseline photographs not-started rows.
+      budgets: [
+        {
+          id: '9d1f4c0a-0000-4000-8000-000000000001',
+          delegationHash: `0x${'11'.repeat(32)}`,
+          chainId: 8453,
+          tokenAddress: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
+          tokenSymbol: 'USDC',
+          decimals: 6,
+          budgetAtomic: '250000000',
+          periodSeconds: 86_400,
+          startDate: '2026-08-20T10:00:00.000Z',
+          expiresAt: '2027-08-20T10:00:00.000Z',
+          periodEnd: '2026-09-02T10:00:00.000Z',
+        },
+      ],
+      receivedSubBudgets: [],
+      stats: {
+        d7: {
+          gross: { usd: 12.5, eur: 11.38, sek: 134.5 },
+          net: { usd: 7.5, eur: 6.83, sek: 80.7 },
+          approx: false,
+          payments: 4,
+          refusals: { budget: 1, scope: 0, failed: 0, haven: 0 },
+        },
+        d30: {
+          gross: { usd: 50.0, eur: 45.5, sek: 538.0 },
+          net: { usd: 32.5, eur: 29.58, sek: 349.7 },
+          approx: true,
+          payments: 14,
+          refusals: { budget: 2, scope: 1, failed: 1, haven: 0 },
+        },
+        lastPaymentAt: '2026-10-09T09:41:00.000Z',
+        lastCounterparty: {
+          source: 'x402',
+          x402ResourceUrl: 'https://research.example/report',
+          to: testRecipientAddress,
+          merchantName: null,
+        },
+      },
+    },
+    {
+      id: 'agent-e2e-watcher',
+      name: 'Watcher agent',
+      status: 'paused' as const,
+      accountId: testSafe.id,
+      accountName: testSafe.name,
+      accountChainId: testSafe.chain_id,
+      allowances: [],
+      budgets: [
+        {
+          id: '9d1f4c0a-0000-4000-8000-000000000002',
+          delegationHash: `0x${'22'.repeat(32)}`,
+          chainId: 8453,
+          tokenAddress: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
+          tokenSymbol: 'USDC',
+          decimals: 6,
+          budgetAtomic: '50000000',
+          // Mixed periods: a WEEKLY budget beside the daily one above.
+          // #3809: window dates pinned around the frozen clock (see above).
+          periodSeconds: 604_800,
+          startDate: '2026-08-27T10:00:00.000Z',
+          expiresAt: '2027-08-27T10:00:00.000Z',
+          periodEnd: '2026-09-03T10:00:00.000Z',
+        },
+      ],
+      receivedSubBudgets: [
+        { parentAgentId: testAgent.id, parentAgentName: testAgent.name, open: true },
+      ],
+      stats: {
+        d7: {
+          gross: { usd: 6.0, eur: 5.46, sek: 64.6 },
+          net: { usd: 3.6, eur: 3.28, sek: 38.76 },
+          approx: false,
+          payments: 2,
+          refusals: { budget: 0, scope: 0, failed: 1, haven: 1 },
+        },
+        d30: {
+          gross: { usd: 24.0, eur: 21.84, sek: 258.4 },
+          net: { usd: 15.6, eur: 14.2, sek: 167.96 },
+          approx: false,
+          payments: 7,
+          refusals: { budget: 1, scope: 0, failed: 1, haven: 2 },
+        },
+        lastPaymentAt: '2026-10-07T18:02:00.000Z',
+        lastCounterparty: {
+          source: 'api',
+          x402ResourceUrl: null,
+          to: testRecipientAddress,
+          merchantName: 'Example Shop AB',
+        },
+      },
+    },
+    {
+      // #3803: a pending agent — carries NO budgets (nothing delegated yet)
+      // but DOES carry its connection setup status, so the client can offer
+      // "Finish setup" instead of a bare spinner.
+      id: 'agent-e2e-pending',
+      name: 'Connecting agent',
+      status: 'pending_approval' as const,
+      accountId: 'safe-sepolia',
+      accountName: 'Showcase account',
+      accountChainId: 84532,
+      setupStatus: 'awaiting_connection',
+      allowances: [],
+      budgets: [],
+      receivedSubBudgets: [],
+      stats: {
+        d7: {
+          gross: { usd: 0, eur: 0, sek: 0 },
+          net: { usd: 0, eur: 0, sek: 0 },
+          approx: false,
+          payments: 0,
+          refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+        },
+        d30: {
+          gross: { usd: 0, eur: 0, sek: 0 },
+          net: { usd: 0, eur: 0, sek: 0 },
+          approx: false,
+          payments: 0,
+          refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+        },
+        lastPaymentAt: null,
+        lastCounterparty: null,
+      },
     },
   ],
-  transactions: [dashboardTransaction],
+  // #3858: the former 5-row `transactions` preview is gone from the wire —
+  // the dashboard reads the grouped-activity rows below.
+  // #3824: the grouped-activity rows the redesigned dashboard renders. One
+  // group: the fixture's one confirmed x402 payment, keyed agent + token +
+  // merchant + local day + outcome. approx (serve-time) rather than
+  // converted (book-time) — the row has no book-time fiat. `latestAt` is the
+  // row's timestamp (1_779_000_000) as ISO 8601.
+  activity: [
+    {
+      count: 1,
+      sumAtomic: '12500000',
+      tokenSymbol: 'USDC',
+      decimals: 6,
+      latestAt: new Date(1_779_000_000 * 1000).toISOString(),
+      agentId: testAgent.id,
+      agentName: testAgent.name,
+      source: 'x402',
+      x402ResourceUrl: 'https://research.example/report',
+      to: testRecipientAddress,
+      merchantName: null,
+      activityType: null,
+      direction: 'out' as const,
+      status: 'confirmed' as const,
+      approxAmount: '134.5000',
+      approxCurrency: 'SEK' as const,
+    },
+  ],
+}
+
+/**
+ * `GET /dashboard/budget-remaining` (#3804) — the cached, display-only
+ * budget-remaining read. THREE rows: two KNOWN (fromChain, amounts
+ * populated, a sub-budget attribution line) wired to the overview fixture's
+ * OWN delegation hashes (#3809 — the agents section meters the overview's
+ * budgets through these reads, so the harness photographs a real meter on
+ * both budgeted agents: the daily one at 92%, the weekly paused one at 40%)
+ * and one UNKNOWN (`remaining_from_chain: false`, `remaining_atomic`/
+ * `used_atomic`/`read_at` null — never "0 left", never the full budget).
+ * Read/period instants sit around the visual harness's frozen clock
+ * (2026-09-01T12:00Z). The screenshot harness and any spec seeding the
+ * dashboard spread this same shape.
+ */
+export const dashboardBudgetRemaining = {
+  budgets: [
+    {
+      agent_id: testAgent.id,
+      chain_id: 8453,
+      delegation_hash: `0x${'11'.repeat(32)}`,
+      token_address: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
+      token_symbol: 'USDC',
+      token_decimals: 6,
+      budget_atomic: '250000000',
+      read_at: '2026-09-01T11:00:00.000Z',
+      period_end: '2026-09-02T10:00:00.000Z',
+      remaining_atomic: '20000000',
+      remaining_from_chain: true,
+      used_atomic: '230000000',
+      sub_budget_spend: [
+        { agent_id: '33333333-3333-4333-8333-333333333333', spent_atomic: '250000' },
+      ],
+    },
+    {
+      agent_id: 'agent-e2e-watcher',
+      chain_id: 8453,
+      delegation_hash: `0x${'22'.repeat(32)}`,
+      token_address: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
+      token_symbol: 'USDC',
+      token_decimals: 6,
+      budget_atomic: '50000000',
+      read_at: '2026-09-01T11:00:00.000Z',
+      period_end: '2026-09-03T10:00:00.000Z',
+      remaining_atomic: '30000000',
+      remaining_from_chain: true,
+      used_atomic: '20000000',
+      sub_budget_spend: [],
+    },
+    {
+      agent_id: '44444444-4444-4444-8444-444444444444',
+      chain_id: 84532,
+      delegation_hash: `0x${'d'.repeat(64)}`,
+      token_address: '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
+      token_symbol: 'USDC',
+      token_decimals: 6,
+      budget_atomic: '2000000',
+      read_at: null,
+      period_end: '2026-10-10T00:00:00.000Z',
+      remaining_atomic: null,
+      remaining_from_chain: false,
+      used_atomic: null,
+      sub_budget_spend: [],
+    },
+  ],
 }
 
 /**
@@ -518,6 +822,43 @@ export async function mockHavenApi(page: Page) {
 
     if (method === 'GET' && path === '/dashboard/overview') {
       await fulfillJson(route, dashboardOverview)
+      return
+    }
+
+    // #3808: `DashboardClient` mounts `useBudgetRemaining`, which reads
+    // `GET /dashboard/budget-remaining` on every dashboard render. The
+    // #3804 fixture default is the same two-row shape the API serves (one
+    // KNOWN row, one UNKNOWN row) — without a handler here the read falls
+    // through to `fulfillUnmockedRoute` → 599 and `unexpectedBrowserErrors`
+    // fails every dashboard-rendering spec.
+    if (method === 'GET' && path === '/dashboard/budget-remaining') {
+      await fulfillJson(route, dashboardBudgetRemaining)
+      return
+    }
+
+    // #3813: `DashboardClient` mounts `useAttentionDismissals`, which reads
+    // `GET /user/attention-dismissals` on every dashboard render. The e2e
+    // default session holds no dismissals, so every "Needs attention" item renders
+    // exactly as the baselines captured it; specs that need a dismissed
+    // item seed this route explicitly. The write is accepted and echoed in
+    // the stored shape (never re-read in the same fixture run).
+    if (method === 'GET' && path === '/user/attention-dismissals') {
+      await fulfillJson(route, { dismissals: [] })
+      return
+    }
+    if (method === 'POST' && path === '/user/attention-dismissals') {
+      const body = route.request().postDataJSON() as {
+        item_kind: string
+        account_id?: string
+        agent_id?: string
+      }
+      await fulfillJson(route, {
+        id: '00000000-0000-4000-8000-000000000000',
+        item_kind: body.item_kind,
+        account_id: body.account_id ?? null,
+        agent_id: body.agent_id ?? null,
+        created_at: '2026-10-09T00:00:00.000Z',
+      })
       return
     }
 
@@ -791,7 +1132,9 @@ export async function mockHavenApi(page: Page) {
               status: 'active',
               budget_atomic: '250000000',
               period_seconds: 43_200 * 60,
-              start_date: '2026-05-02T10:00:00.000Z',
+              // #3806: the wire carries `start_date` as a Unix-seconds digit
+              // string (the driver decodes the BIGINT), never ISO.
+              start_date: '1777716000',
               expires_at: Math.floor(Date.UTC(2027, 4, 2) / 1000),
               created_at: '2026-05-02T10:00:00.000Z',
             },
@@ -804,7 +1147,7 @@ export async function mockHavenApi(page: Page) {
               // The fixture's single row is active: a mid-period read with the
               // budget mostly intact, refilling one period after start_date.
               ...(r.status === 'active'
-                ? { remaining_atomic: '187500000', remaining_from_chain: true, period_end: new Date(Date.parse(r.start_date) + r.period_seconds * 1000).toISOString() }
+                ? { remaining_atomic: '187500000', remaining_from_chain: true, period_end: new Date(Number(r.start_date) * 1000 + r.period_seconds * 1000).toISOString() }
                 : { remaining_atomic: null, remaining_from_chain: null, period_end: null }),
             }))
           : rows,
@@ -896,6 +1239,32 @@ export async function mockHavenApi(page: Page) {
     // itself, same convention as every other fixture override in this file.
     if (method === 'GET' && path === '/user/company-details') {
       await fulfillJson(route, { error: 'Not found' }, 404)
+      return
+    }
+
+    // #3825: Settings → Signers lists the user's signers once each. Same
+    // account and same single passkey as `/accounts/hybrid/:address/signers`
+    // and the agent-scoped twin above, so every read of "who can approve" tells
+    // one story; no browser wallet, because the fixture account has no EOA
+    // owner. Without this answer `/settings` hits the 599 unmocked-route gate.
+    if (method === 'GET' && path === '/user/signers') {
+      await fulfillJson(route, {
+        signers: [
+          {
+            kind: 'passkey',
+            key_id: `0x${'11'.repeat(32)}`,
+            created_at: '2026-05-01T10:00:00.000Z',
+            accounts: [
+              {
+                account_id: testSafe.id,
+                account_address: testSafeAddress,
+                account_name: testSafe.name,
+                chain_id: testSafe.chain_id,
+              },
+            ],
+          },
+        ],
+      })
       return
     }
 
@@ -1022,10 +1391,11 @@ export async function serveAccountingFeedStatus(page: Page, status: unknown) {
  * hydrates from and the agent-scoped twin (#888) — for the reason the shared
  * handlers give: same account, same answer. Register AFTER `mockHavenApi`
  * (later-registered routes win); everything else falls back to the shared
- * fixture. Two specs use it: `wallet-button-collapsed-states.visual.spec.ts`
- * (the collapsed connected-EOA captures) and `wallet-signer-offering.spec.ts`
- * (the owner-match / "Wrong wallet" pills, #2073) — one encoding of the shape,
- * so the two cannot drift the way #2264 found two fixtures drifting.
+ * fixture. `wallet-signer-offering.spec.ts` uses it for the owner-match /
+ * "Switch wallet" states on the account page (#2073, #3825). The collapsed
+ * WalletButton pixel spec that once shared it was removed with the top-bar
+ * pill (#3825); the single encoding stays so any future consumer cannot drift
+ * the way #2264 found two fixtures drifting.
  */
 export async function serveOwnerOnlyHybridSigners(page: Page, ownerAddress: string) {
   await page.route('**/api/**', async (route) => {
@@ -1181,7 +1551,8 @@ export async function serveAgentDetailResponses(
             status: 'active',
             budget_atomic: '250000000',
             period_seconds: 604_800,
-            start_date: '2026-06-02T10:00:00.000Z',
+            // #3806: Unix-seconds digit string on the wire, never ISO.
+            start_date: '1780394400',
             expires_at: Math.floor(Date.UTC(2027, 5, 2) / 1000),
             created_at: '2026-06-02T10:00:00.000Z',
           },
@@ -1202,6 +1573,11 @@ export async function serveAgentDetailResponses(
             token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
             amount_raw: '25000000',
             amount: '25.00',
+            // #3824: the serve-time amount at today's rate in the user's
+            // preference — 25 USDC ≈ 269.00 SEK at the fixture's ~10.76
+            // SEK/USD story.
+            approx_amount: '269.0000',
+            approx_currency: 'SEK',
             to: testRecipientAddress,
             reason: null,
             status: 'confirmed',
@@ -1461,16 +1837,15 @@ export async function waitForDrawerOpen(page: Page) {
 export async function openReceiveFundsModal(page: Page) {
   await page.goto('/dashboard')
   await dismissMobileSidebar(page)
-  // The hero CTA renders as "Receive" for funded accounts and "Receive funds"
-  // only after the dashboard knows the account is unfunded. The onboarding
-  // checklist can also expose "Receive funds", so pin to the first exact match
-  // in DOM order.
+  // #3807: the hero CTA reads "Deposit address" everywhere (funded and
+  // unfunded alike), as do the onboarding checklist and the account-detail
+  // button. Pin to the first exact match in DOM order.
   await page
-    .getByRole('button', { name: /^Receive( funds)?$/ })
+    .getByRole('button', { name: /^Deposit address$/ })
     .first()
     .click()
 
-  const modal = page.getByRole('dialog', { name: 'Receive funds' })
+  const modal = page.getByRole('dialog', { name: 'Deposit address' })
   await modal.waitFor({ state: 'visible' })
   return modal
 }

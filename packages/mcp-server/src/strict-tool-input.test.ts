@@ -24,6 +24,8 @@ import { toJsonSchemaCompat } from '@modelcontextprotocol/sdk/server/zod-json-sc
 // restated, so the premise pin at the bottom of this file reads the real
 // string rather than a copy that can drift from it.
 import { HavenClient, HAVEN_SKILL_MD } from '@haven_ai/sdk'
+import { HOSTED_CONTRACT_FINGERPRINT } from './contract-fingerprint.js'
+import { HOSTED_SERVER_VERSION } from './server.js'
 // #2348: the LOCAL surface, imported rather than restated — the crossover keys
 // this file smuggles have to be the ones @haven_ai/mcp really declares, or the
 // tests prove nothing about the divergence they exist for.
@@ -281,6 +283,15 @@ describe('#2312 strict hosted tool input — over the real MCP transport', () =>
       // validation: it reached the handler and made a Haven request — or, for
       // a tool that is offline by design, answered in its own vocabulary.
       expect(text.toLowerCase()).not.toContain('unrecognized')
+      // #3816: every hosted handler result carries the contract fingerprint
+      // and the server version at the top level of its JSON payload — the
+      // pre-deploy client's stale-list comparison fields.
+      const payload = JSON.parse(text) as {
+        contract_fingerprint?: string
+        server_version?: string
+      }
+      expect(payload.contract_fingerprint).toBe(HOSTED_CONTRACT_FINGERPRINT)
+      expect(payload.server_version).toBe(HOSTED_SERVER_VERSION)
       const offlineMarker = OFFLINE_TOOLS[name]
       if (offlineMarker) {
         expect(fetches).toEqual([])

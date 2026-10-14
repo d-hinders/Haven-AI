@@ -98,7 +98,7 @@ export default function ReceiveFundsModal({ open, account, onClose }: Props) {
       >
         <div className="flex items-start justify-between gap-4 border-b border-[var(--v2-border)] px-6 py-4">
           <div>
-            <h2 id="receive-funds-title" className="text-base font-semibold text-[var(--v2-ink)]">Receive funds</h2>
+            <h2 id="receive-funds-title" className="text-base font-semibold text-[var(--v2-ink)]">Deposit address</h2>
             {/*
               With no chain resolved this subtitle renders nothing rather than a
               hedged version of itself. The sentence's entire job is to name the

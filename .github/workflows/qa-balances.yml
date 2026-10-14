@@ -8,7 +8,8 @@ name: QA wallet balances
 # standing issue — "QA wallet balances low", label `qa-funding` — open while
 # any wallet is within 7 days of running dry (scripts/ci/qa-balance-issue.mjs).
 #
-# Read-only except for testnet faucet requests for the dev relayer: it never
+# Read-only except for testnet faucet requests for the demo merchant's
+# settlement wallet and the dev relayer (#3836): it never
 # signs or moves Haven or customer funds, and receives no delegate private key
 # or CDP wallet secret. Owner decisions (2026-10-05): a GitHub issue is the
 # only channel, once a day, 7 days ahead; Pimlico credit is out of scope.

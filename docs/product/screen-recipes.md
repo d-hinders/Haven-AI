@@ -18,7 +18,7 @@ covers:
   - packages/frontend/src/components/ui/PageHeader.tsx
   - packages/frontend/src/components/ui/SegmentedControl.tsx
   - packages/frontend/src/components/ui/Skeleton.tsx
-  - packages/frontend/src/components/ui/StatTile.tsx
+  - packages/ui/src/StatTile.tsx
   - packages/frontend/src/components/analytics/AgentsTable.tsx
   - packages/frontend/src/components/analytics/EmptyStates.tsx
   - packages/frontend/src/components/analytics/RangeControl.tsx
@@ -38,7 +38,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-10-06"
+last-verified: "2026-10-12"
 ---
 
 # Haven Screen Recipes
@@ -72,20 +72,41 @@ Use these recipes when designing or refactoring Haven product screens. They tran
 
 Use after the user has created a Haven account but has not finished the first useful setup path.
 
-Structure:
-1. Normal dashboard header and balance hero.
-2. True attention/error state only if it needs action now.
-3. One compact setup sequence may show the first three steps, but only the
-   current step has a primary action: `Receive funds` or `Connect agent`.
-   Later steps remain subordinate or locked.
-4. Full dashboard metrics and activity only after setup is dismissed or the
-   user has enough product activity for those sections to be meaningful.
+Structure (#3818):
+1. Normal dashboard header and money card, with the "Needs attention" card below it at
+   full width (#3897) — never a side column beside the balance.
+2. The setup steps ARE the "Needs attention" card while setup is in progress — titled
+   `Get started`, three numbered steps, then the rule items that still apply
+   (another agent waiting for setup, a recommended backup signer once funded)
+   below them in the same card. Never a second card beside it.
+3. Only the next step is highlighted and carries the primary action. Connecting
+   an agent stays available before funding, at secondary weight and without the
+   highlight; step 3 stays locked until an agent can pay.
+4. The steps own the card only until the first agent payment. After it, one
+   `You're set up` line takes their place until dismissed (the dismissal persists
+   per user), and the steps never return: USDC spent to zero, an expired budget
+   or an unreadable balance belongs to the Needs attention rules from then on. "Hide
+   for now" persists across reloads, until another step completes.
+5. Before the first agent payment, the money panel's spending block says what it
+   will show instead of three zero tiles.
+
+What completes a step — never a weaker signal:
+- Step 1: USDC on an account (any amount above zero), testnet accounts included.
+  ETH or another token's dust does not count: agents spend USDC.
+- Step 2: an agent that can pay — active or paused, with a usable budget. A
+  connected agent still waiting for budget approval does not count; the step
+  names the newest such agent with `Finish setup`.
+- Step 3: the first agent payment.
 
 Money and risk clarity:
-- For the funding step, say that Receive shows the exact Haven wallet address and network. Do not show the raw address, token list, QR code, or network detail inline on the dashboard.
-- For the first-agent step, say the user will set a budget and connect the agent.
-  Do not show budget/risk explainers or wallet summaries on the dashboard.
-- Keep the next step honest, but move explanatory detail into the Receive or Connect Agent flow.
+- The funding step's action opens `Add funds` (after the account picker when the
+  user has several accounts), which shows the exact address and network and
+  carries the test-network faucet. Do not show the raw address, token
+  list, QR code, or network detail in the guide; suggest an amount ("We suggest
+  N USDC") rather than require one.
+- For the first-agent step, say the user will connect an agent and approve a
+  budget. Do not show budget/risk explainers or wallet summaries on the dashboard.
+- Keep the next step honest, but move explanatory detail into the Add funds or Connect Agent flow.
 - Avoid `import account` copy in the first-run path unless an existing-account flow is actually supported in the UI.
 
 Avoid:
@@ -95,9 +116,12 @@ Avoid:
 - Repeating wallet, network, or activity facts that are not needed for the next action.
 
 States:
-- Loading balances: do not show a false zero or premature `Connect agent` step.
-- No funds: primary action is `Receive funds`.
+- Loading the overview: do not show the guide yet — no false zero, no premature step.
+- USDC read unavailable: the guide stays; step 1 says the balance could not be read
+  and offers no funding action until it can. Never read an unknown balance as zero.
+- No funds: primary action is `Add funds`.
 - Funded with no agents: primary action is `Connect agent`.
+- An agent waiting for setup: step 2 names it with `Finish setup`.
 - Dismissed: keep the dashboard usable; other empty states should still offer the same next action.
 
 ## Agent Budget Setup
@@ -159,12 +183,22 @@ one setup prompt for every environment. Legacy Safe accounts are not rendered at
 all since #2413, so this flow is unreachable for one rather than being refused by
 a notice.
 
-Structure:
-1. Create and copy a single setup prompt — identical for every environment.
+Structure (step 3 of the modal is one numbered list — copy → paste → approve —
+that is both the instructions and the progress, #3832; see design-system.md §
+Numbered step list):
+1. Create and copy a single setup prompt — identical for every environment. The
+   copy action is the screen's one full-width primary (until the
+   server-credential path issues credentials, when "Continue to wallet
+   approval" takes that role); the prompt text sits in
+   a closed "View the prompt" disclosure. Next to the steps, one line says the
+   agent creates its own key and Haven only receives its public address — shown
+   on the connector path only, since the manual path makes the key in the
+   browser.
 2. Wait for the local connector to generate the signing key and API key, then
    register the public signing address and proof with Haven. If it cannot
-   connect after the bounded wait, the warning-gated manual credential fallback
-   may create the one-time credential in the browser; the user saves it in the
+   connect after the bounded wait — or runs on a server or hosted backend, where
+   the connector cannot run at all — the server-credential disclosure (#2482;
+   no warning gate, one click) may create the one-time credential in the browser; the user saves it in the
    trusted agent workspace, and the browser registers the same public address
    and proof. It must be labeled as manual, never as an automatically
    configured runtime.
@@ -448,10 +482,18 @@ done, and how to stop it (#3691, epic). Sections, in order:
    one-line description (budgets are enforced on-chain) ABOVE the card (see
    the detail-page section rule in design-system.md). The card holds one row
    per active budget — amount, period, recipient or merchant, Edit and Stop —
-   each measured by `BudgetMeter` from the read's remaining-this-period:
-   "{used} of {budget} {token} used this period · refills in …" (or
-   "· expires in …" when the budget ends first). When the chain read failed
-   the row shows no meter and says usage couldn't be read — never "0 used".
+   each measured by `BudgetMeter`, captioned by the shared budget-caption
+   helper (#3806): "{used} of {budget} {token} used this period" at two
+   decimals, then the earlier of the refill and the expiry ("refills in 45m"
+   / "refills Thu 14:02" / "refills 14 Nov"; "expires …" when the budget ends
+   first). The refill is anchored on the row's `start_date`, never on the
+   wall clock. When the chain read failed or the read's period has already
+   ended, the row shows no meter and says usage couldn't be read — never
+   "0 used", and the old amount is never paired with the next refill; a
+   future `start_date` (a re-key's dormant steady grant) shows when it
+   starts. Quiet note lines under the caption come from the helper too:
+   "incl. … by {agent}" for sub-agents that spent and "… reserved for task
+   budgets".
    **Add budget is collapsed once a budget exists**: with no budget the grant
    form is the section's content, headed "Set its first budget"; once one
    exists, adding another is an "Add budget" control that opens the form in
@@ -489,13 +531,27 @@ Structure:
 4. Empty state with the next useful action.
 
 Money and risk clarity:
-- Each row should show amount, token, direction/status, and whether it ran automatically or was declined by the agent rules.
+- Each row shows the user's currency (through `<Amount>`'s currency mode —
+  `≈` for serve-time figures, an em dash when unpriced), direction/status,
+  and whether it ran automatically or was declined by the agent rules. List
+  rows show no addresses: the counterparty renders through
+  `counterpartyLabel`'s no-address mode, the same helper the transactions
+  page feeds (#3810, #3811).
 - Technical hashes stay in detail surfaces.
 - Use a card/compact `TransactionsTable` when the agent history needs semantic
   columns, sorting, or pagination. Use `TransactionActivityRow` for a short,
   non-sortable preview. Lead with `Agent payment`, `Machine payment`, `Payment
   rejected`, or similar human event copy, not a raw recipient address.
 - Put recipient, source, and links in row metadata or detail actions.
+
+**The dashboard's activity list is grouped and merchant-first (#3810).** The
+preview renders `GET /dashboard/overview`'s `activity` groups — one row per
+group under user-local day headings, at most eight rows over the last seven
+days. The title is the counterparty through `counterpartyLabel`'s no-address
+mode (merchant site, receipt name, "Deposit", "New recipient" — never a
+truncated address); the subtitle is the agent's name; a group of N renders
+"×N" ("×N+" when the count is a floor). The 5-row `transactions` preview is
+removed from the wire (#3858) — no dashboard surface reads it.
 
 ## Policy Violation
 
@@ -526,7 +582,18 @@ Structure:
 4. Empty state inside the table that preserves the current filters.
 
 Money and risk clarity:
-- Show amount, token, status, counterparty, account, and date.
+- **List rows show the user's currency, never the token (#3805, #3811).** The
+  amount renders through `<Amount>`'s currency mode via the shared
+  `transactionFiat` helper: book-time `convertedAmount` plain, serve-time
+  `approxAmount` with `≈`, and an unknown valuation as an em dash — never 0.
+  The token amount appears only where a budget is set and in the detail
+  drawer (owner decision, #3811).
+- **List rows show no addresses (#3810, #3811).** The counterparty half of
+  every row — `From -> To` line included — renders through
+  `counterpartyLabel`'s no-address mode: the merchant's hostname, the source
+  title, a resolved name, "Deposit", or "New recipient". A raw address never
+  ellipsises into a list row; the detail drawer is where the full address
+  lives.
 - Use external links for details, but do not make hashes the primary labels.
 - Use `TransactionActivityRow` for short non-sortable previews such as
   Dashboard. Use card/compact `TransactionsTable` for scoped sortable histories.
@@ -557,6 +624,12 @@ Money and risk clarity:
   carries the resource hostname, so an x402 row and an ordinary agent payment
   read the same at the title and are told apart by those two surfaces.
 - Show the money path as a compact `From [wallet/counterparty] -> To [wallet/counterparty]` line instead of repeating wallet, initiator, and counterparty in a separate metadata row.
+- **The detail drawer is where users verify (#3811).** Addresses and hashes
+  render IN FULL there — never ellipsised — and every address carries the
+  one copy affordance (`CopyButton`, "Copy address"); the explorer link
+  stays beside it. The headline is the user's currency figure with the
+  token amount beside it, signless (owner decision 2026-10-09, #3811): the
+  currency figure carries the sign.
 - Keep amount in its own cell **at `md` and up**; date and the external-details
   link are separate columns or controls. Below `md` the amount column collapses
   and the amount rides under the title inside the activity cell (#2734) — its
@@ -603,9 +676,15 @@ Structure:
    Haven charges no fees says "No fees yet — Haven is not charging fees" in
    words rather than rendering `$0.00`, because "nothing charged in this
    window" is a different fact from "the product is not charging fees".
+   (`StatTile` lives in `packages/ui/src/StatTile.tsx`; these are the card
+   variant. The redesigned dashboard's hero figures use the `inline` variant
+   — no card chrome, `text-base` value, no delta chip — #3805.)
 4. The agents table: spend, share, payments, refusals, budget used, top
    merchant, last payment, each row a link into the agent. Budget figures ride
-   in the delegation's own token units with a progress bar and the reset date.
+   in the delegation's own token units, captioned by the shared budget-caption
+   helper (#3806) — the period length derived from the response's own bounds,
+   and the next refill as its next event ("refills Thu 14:02"). There is no
+   `expires_at` on this endpoint, so no "expires" branch.
 5. Below the table: the spend-over-time chart (one bar per day with activity,
    stacked by agent, refusal caps, partial edge days striped; #3051), then the
    top-merchants table, then the balance-over-time chart (#2949). The table
@@ -620,9 +699,10 @@ Money and risk clarity:
   payment is money that was not spent, not money that was kept. The count's
   limit is said out — price-cap refusals in the agent's runtime are not
   recorded.
-- A budget reading says where the measurement came from: from the chain, or
-  from Haven's last snapshot when the chain could not be read. The two are not
-  the same claim and the cell does not let the reader assume the stronger.
+- A budget reading that cannot be made is not a measurement: a failed chain
+  read, or a read whose period has already ended, renders "Usage this period
+  couldn't be read" instead of a bar — never a 0 % bar and never a "read from
+  Haven's last snapshot" claim (#3806).
 - The states are mutually exclusive, because what they report about the
   request is: empty says the endpoint answered and the window holds nothing;
   error says it did not answer. A page of confident zeros is what an outage
@@ -801,7 +881,8 @@ Structure:
 Money and risk clarity:
 - Use `sign-in method` and `approve actions`, not `signer` or `owner`.
 - Explain recovery limitations plainly without making the user feel at fault.
-- Keep personal profile details on `/profile`; Settings should focus on preferences, access, approvals, recovery, notifications, and data controls.
+- Keep personal profile details on `/profile`; Settings should focus on preferences, access, signers, approvals, recovery, notifications, and data controls.
 - Accounting connections are a Settings section (owner decision 2026-09-11, #2868): one `SettingsRow` per provider (the page's own row, not `ui/Row` — `Row` truncates its title to one line and never wraps its trailing slot, which squeezed "Fortnox" to "Fortn…" beside two buttons at 390px) with a status chip and the one action that resolves the state; the feed settings open inline under the row (`Card.Section`-style block, never a nested filled card); Disconnect confirms and says history in Haven stays; the section header carries the responsibility line (data tooling, not accounting or tax advice — the accountant remains responsible for coding, correctness and filing); copy follows the accounting guardrail — a payment *appears in the ledger with payment evidence attached; the accountant books it*.
 - Company details (`CompanyDetailsCard`, #3332) is the same shape of Settings section as Accounting above it: no frontend-side flag of its own (it reads the API's status alone — 404 hides it, 200 renders it, empty or filled), the purpose/retention text shown above the form always (not behind a tooltip), and "Remove company details" a confirm dialog before `DELETE`, the same danger-button pattern Accounting's Disconnect uses. See [`docs/product/owner-company-details.md`](owner-company-details.md).
+- Signers is a Settings section (owner decision 2026-10-09, #3825): a signer is its own object, not part of an account, so every passkey and wallet is listed once with the accounts it approves. "Signers" is the section's own name — its title and its loading, empty and error states, the one sanctioned exception to the no-"signer" rule (`copy-guidelines.md`); the rows, the account card's link to it ("All your passkeys and wallets in Settings") and every other surface still speak in outcomes ("Approves …", "Browser wallet", "Passkey · added {date}"). No address by default — a wallet row reveals it behind "Show address" — and the browser-wallet connect/disconnect control lives here, as a quiet footer line rather than a row (a row in a list titled Signers reads as one more signer), now that the top bar carries no wallet pill.
 - Avoid duplicating account summary facts already shown on Dashboard, Profile, or Account details.

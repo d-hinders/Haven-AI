@@ -12,6 +12,11 @@
  */
 
 import { getChainConfig } from '@/lib/chains'
+// #3844: the reset-period words are the budget caption helper's (#3806), via
+// `budgetPeriodLabel` — the same mapping every budget meter reads, so the
+// handoff can no longer disagree with the app about a period length (it used
+// to read a monthly budget "per 30 days" while the meters said "per month").
+import { budgetPeriodLabel } from '@/lib/budget-period'
 
 // ── Input types ───────────────────────────────────────────────────
 
@@ -66,18 +71,6 @@ function slugify(name: string): string {
       .replace(/^-+|-+$/g, '')
       .slice(0, 40) || 'agent'
   )
-}
-
-function resetLabel(mins: number): string {
-  if (mins === 0) return 'one-time'
-  if (mins === 60) return 'per hour'
-  if (mins === 1440) return 'per day'
-  if (mins === 10080) return 'per week'
-  if (mins === 43200) return 'per 30 days'
-  if (mins < 60) return `per ${mins}m`
-  if (mins % 1440 === 0) return `per ${mins / 1440}d`
-  if (mins % 60 === 0) return `per ${mins / 60}h`
-  return `per ${mins}m`
 }
 
 // ── Env block ──────────────────────────────────────────────────────
@@ -204,7 +197,7 @@ export function buildHandoff(input: HandoffInput): HandoffArtifacts {
   } else {
     policyLines.push(`- **Allowances:**`)
     for (const a of policy.allowances) {
-      policyLines.push(`  - ${a.amount} ${a.tokenSymbol} ${resetLabel(a.resetPeriodMin)}`)
+      policyLines.push(`  - ${a.amount} ${a.tokenSymbol} ${budgetPeriodLabel(a.resetPeriodMin)}`)
     }
   }
   policyLines.push(

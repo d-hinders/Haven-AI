@@ -1,6 +1,7 @@
 export {
   buildHostedMcpServer,
   createHostedHavenClient,
+  HOSTED_CONTRACT_FINGERPRINT,
   HOSTED_SERVER_NAME,
   HOSTED_SERVER_VERSION,
   type HostedClientOptions,

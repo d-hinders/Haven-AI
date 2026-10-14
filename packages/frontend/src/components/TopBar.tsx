@@ -2,7 +2,6 @@
 
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
-import WalletButton from './WalletButton'
 import EnvBadge from './EnvBadge'
 import { ChevronLeft } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
@@ -147,7 +146,12 @@ export default function TopBar({ actionSlot }: TopBarProps) {
           </div>
         ) : null}
 
-        {/* Right region: theme toggle (desktop) + wallet. The approval-
+        {/* Right region: the theme toggle (desktop). No wallet pill (#3825):
+            most users sign with a passkey, and a signer with a raw address
+            on every screen is the wrong level of detail. Signers have their
+            own home in Settings → Signers, and every signing flow offers its
+            own in-flow connect (#3812). Below `lg` the cluster is empty —
+            the toggle lives in the More sheet there (see below). The approval-
             notification bell was deleted with the legacy Safe rail (#1989, epic
             #1440) — the delegation rail enforces budgets on-chain and produces
             no approvals to notify about.
@@ -164,7 +168,6 @@ export default function TopBar({ actionSlot }: TopBarProps) {
           <span className="hidden lg:inline-flex">
             <ThemeToggle />
           </span>
-          <WalletButton />
         </div>
       </div>
     </header>

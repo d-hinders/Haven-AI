@@ -262,6 +262,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/ops/sponsored-gas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sponsored UserOp gas cost per merchant per day.
+         * @description What the delegation-rail gas sponsorship costs (#3837): every UserOp submitted through the payment path, tagged direct vs x402 funding leg, bucketed per UTC day — x402 funding legs by the merchant host from the joined payment intent (null when the intent has no resource URL), direct payments as their own null-host bucket. Gas is the EntryPoint receipt actualGasCost (includes preVerificationGas; the l1Fee is not added) and is priced at VIEW time — eth_priced_at says so. Value moved is the confirmed intents' usd_value. Reads through the read-only ops database role and writes one audit row before answering.
+         */
+        get: operations["getOpsSponsoredGas"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ops/feedback": {
         parameters: {
             query?: never;
@@ -1482,6 +1502,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/user/signers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the caller's signers across all of their accounts, each once.
+         * @description Every signer of the caller's live Hybrid DeleGator accounts on every chain, deduplicated: a passkey by `key_id` (one passkey sits on every chain's account), an owner wallet by address (always lowercase). Each lists the accounts it approves. Passkeys come first, ordered by `created_at` ascending (unknown last, then `key_id`); wallets follow, ordered by address. Each `accounts` list is ordered by chain then address. `created_at` is the earliest enrollment date known for the key, null when none is recorded. Public-key material only; an account whose signer configuration cannot be resolved is skipped.
+         */
+        get: operations["listUserSigners"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/user/preferences": {
         parameters: {
             query?: never;
@@ -1500,6 +1540,30 @@ export type paths = {
          */
         put: operations["updateUserPreferences"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/user/attention-dismissals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The caller’s saved "Needs you" dismissals.
+         * @description Server-saved dismissals for the recurring "Needs you" items (#3813), stored per account (backup) and per agent (needs setup) — permanent, and visible from every device of the same user. Presentation-only: nothing here is on the payment path, and there is no undismiss — the backup recommendation stays visible on the account page and a budget-less agent on the agent page.
+         */
+        get: operations["listAttentionDismissals"];
+        put?: never;
+        /**
+         * Dismiss one recurring "Needs you" item.
+         * @description Idempotent: re-dismissing answers the same 201 as the first write. `item_kind` decides which id the body must carry — `no-backup` requires `account_id` (the backup item is per account), `needs-setup` requires `agent_id` (per agent within its account). A foreign or unknown id is a 404, never a 403 — the route does not confirm that an id exists.
+         */
+        post: operations["createAttentionDismissal"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2448,6 +2512,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/agent-connection-setups/{setupId}/retired-agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report agents this connector retired on replacement (#3772).
+         * @description Called by `@haven_ai/connect --replace` after it retires old agent directories on a machine: the NEW agent, authenticated with its own API key, names the retired agent ids. Each id that belongs to the same user is stamped superseded-by-this-agent, and that agent's later identity and allowances reads carry `superseded_by`. WARNING ONLY: nothing is granted, revoked or paused, and no payment path consults it. Agent API key only — a setup token is not accepted — and accepted only within 30 minutes of the setup's registration (409 after). Ids owned by another user, the caller itself, or unknown are silently omitted from `recorded_agent_ids`; a later replace overwrites an earlier stamp.
+         */
+        post: operations["recordRetiredAgents"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent-connection-setups/{setupId}/connector-status": {
         parameters: {
             query?: never;
@@ -2953,7 +3037,7 @@ export type paths = {
         };
         /**
          * Fetch live spend-authority state for the authenticated agent.
-         * @description Rail-aware (#1135): on the delegation rail the response carries the ACTIVE budget delegations (remaining = the period budget; AllowanceModule-only fields are zeroed placeholders). BOTH retired rails answer 410 — the session rail (#993) and, since #2020 reversed #1986’s left-readable decision, the Safe/AllowanceModule rail too. Reporting only — enforcement stays on-chain.
+         * @description Rail-aware (#1135): on the delegation rail the response carries the agent's active, unexpired budget delegations (remaining = the period budget; AllowanceModule-only fields are zeroed placeholders). BOTH retired rails answer 410 — the session rail (#993) and, since #2020 reversed #1986’s left-readable decision, the Safe/AllowanceModule rail too. Reporting only — enforcement stays on-chain.
          */
         get: operations["getMachinePaymentAllowances"];
         put?: never;
@@ -3379,8 +3463,28 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** Aggregated dashboard overview: totals, day change, metrics, previews. */
+        /** Aggregated dashboard overview: totals, day change, spend windows, previews. */
         get: operations["getDashboardOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/dashboard/budget-remaining": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Cached on-chain budget-remaining for every budget the user can see, with sub-budget spend attribution.
+         * @description Display-only. The enforcer read is cached for up to 60 s (and never past the period end in force at the read); a failed or timed-out read returns remaining_from_chain false with remaining_atomic/used_atomic null — never "0", never the full budget. `read_at` carries the staleness bound. Sub-budget spend counts confirmed payment_intents through the parent budget's sub-budget tree for the parent's current period; it is a floor, not a ledger.
+         */
+        get: operations["getDashboardBudgetRemaining"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3632,7 +3736,7 @@ export type paths = {
 export type webhooks = Record<string, never>;
 export type components = {
     schemas: {
-        /** @description #3303: the backend's update hint for an outdated published client. `required: true` means the client is below a minimum this deployment set and will be refused at its refusal points; `upgrade_command` is the command that starts the update, on this deployment's channel. For the connector-installed packages (signer, mcp, connect) it is the connector doctor (#3412): it works as pasted on an existing install and prints the exact `--doctor --repair` line to run next — a bare connector re-run is a setup command that stops at "Missing --setup" on an already set-up machine. */
+        /** @description #3303: the backend's update hint for an outdated published client. `required: true` means the client is below a minimum this deployment set and will be refused at its refusal points; `upgrade_command` is the command that starts the update, on this deployment's channel. For the connector-installed packages (signer, mcp, connect) it is the connector doctor (#3412): it works as pasted on an existing install and prints the exact `--doctor --repair` line to run next — a bare connector re-run is a setup command that stops at "Missing --setup" on an already set-up machine. #3799: on those packages the backend may append ` --name <slug>` (normalised from the calling agent's recorded MCP pair — a display aid, never identity), so an agent on a multi-agent machine can run one command. `/discovery`, `/.well-known/haven.json` and `/releases` keep the bare form. */
         ClientUpdate: {
             /** @example @haven_ai/mcp */
             package: string;
@@ -3810,6 +3914,40 @@ export type components = {
              * @description Retention is 7 days from `created_at` (#3597).
              */
             expires_at: string;
+        };
+        /** @description One server-saved "Needs you" dismissal (#3813). `no-backup` rows carry `account_id` (the backup item is per account); `needs-setup` rows carry `agent_id` (per agent within its account). Permanent — there is no undismiss. */
+        AttentionDismissal: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            item_kind: "no-backup" | "needs-setup";
+            /**
+             * Format: uuid
+             * @description Set on `no-backup` rows; null otherwise.
+             */
+            account_id: string | null;
+            /**
+             * Format: uuid
+             * @description Set on `needs-setup` rows; null otherwise.
+             */
+            agent_id: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        AttentionDismissalsResponse: {
+            dismissals: components["schemas"]["AttentionDismissal"][];
+        };
+        /** @description The kind decides which id the body carries; any other pairing is refused before the handler. */
+        AttentionDismissalInput: {
+            /** @enum {string} */
+            item_kind: "no-backup";
+            /** Format: uuid */
+            account_id: string;
+        } | {
+            /** @enum {string} */
+            item_kind: "needs-setup";
+            /** Format: uuid */
+            agent_id: string;
         };
         CatalogEntryMerchant: {
             /** Format: uuid */
@@ -4362,6 +4500,38 @@ export type components = {
             /** Format: date-time */
             generated_at: string;
         };
+        OpsSponsoredGas: {
+            days: number;
+            /** @description The view-time ETH/USD quote; null when the price feed returned nothing usable. */
+            eth_price_usd: number | null;
+            /** @enum {string} */
+            eth_priced_at: "view_time";
+            /** @description Which on-chain figure the gas numbers are and how ETH is priced. */
+            gas_basis: string;
+            rows: {
+                /**
+                 * Format: date
+                 * @description UTC day bucket.
+                 */
+                day: string;
+                /** @description The merchant host from the intent resource URL; null for direct payments. */
+                merchant_host: string | null;
+                /** @enum {string} */
+                leg: "direct" | "x402_funding";
+                funding_legs: number;
+                /** @description Sum of actualGasCost in wei; null while no leg in the bucket has a known cost. */
+                gas_cost_wei: string | null;
+                gas_eth: number | null;
+                /** @description gas_eth priced at view time; null when no usable ETH quote. */
+                gas_usd: number | null;
+                /** @description The confirmed intents' usd_value; reverted legs moved nothing. */
+                value_moved_usd: number;
+                /** @description gas_usd / value_moved_usd; null when gas was not priced or nothing moved. */
+                gas_value_ratio: number | null;
+            }[];
+            /** Format: date-time */
+            generated_at: string;
+        };
         OpsFeedbackList: {
             feedback: components["schemas"]["OpsFeedback"][];
             /** Format: date-time */
@@ -4806,6 +4976,26 @@ export type components = {
             /** @description Other agent directories the connector found on this machine (#2561, #3032: sent by `@haven_ai/connect`, `api.ts` `updateInstallStatus`). A tri-state: a list (found these), `[]` (scanned, found none), `null` (the scan could not run). Not trusted beyond its shape: entries are trimmed, path- or secret-shaped strings dropped, and the list capped server-side rather than refused. */
             superseded_agent_ids?: string[] | null;
         };
+        RecordRetiredAgentsRequest: {
+            /** @description Ids of the agents `--replace` retired on this machine. */
+            retired_agent_ids: string[];
+        };
+        RecordRetiredAgentsResponse: {
+            /** Format: uuid */
+            setup_id: string;
+            /** @description The subset of the reported ids that was stamped (same user, not the caller itself). */
+            recorded_agent_ids: string[];
+        };
+        /** @description #3772: set when `@haven_ai/connect --replace` retired this agent in favour of a newer one — a stale-duplicate WARNING. Reporting metadata only: this agent's budget, status and credentials are unchanged. Null when never superseded, when the replacement has since been revoked or archived, or when the read failed. */
+        AgentSupersession: {
+            /**
+             * Format: uuid
+             * @description The agent that replaced this one (#3772).
+             */
+            agent_id: string;
+            /** Format: date-time */
+            superseded_at: string;
+        } | null;
         UpdateConnectorInstallStatusResponse: {
             /** Format: uuid */
             setup_id: string;
@@ -4822,7 +5012,7 @@ export type components = {
                 reset_period_min: number;
             } | null;
         };
-        /** @description One element of an agent's derived budget view (GET /agents, GET /agents/{id}, PUT /agents/{id}; POST /agents carries it as a literal empty array). Projected from the agent's ACTIVE delegations, never from stored allowance rows (#1090/#2020). Its `allowance_amount` is HUMAN-DECIMAL — the opposite shape to the identically named field on AgentConnectionAllowance, which is atomic (#2295). */
+        /** @description One element of an agent's derived budget view (GET /agents, GET /agents/{id}, PUT /agents/{id}; POST /agents carries it as a literal empty array). Projected from the agent's active, unexpired delegations, never from stored allowance rows (#1090/#2020). Its `allowance_amount` is HUMAN-DECIMAL — the opposite shape to the identically named field on AgentConnectionAllowance, which is atomic (#2295). */
         AgentAllowance: {
             /** Format: uuid */
             id: string;
@@ -5402,6 +5592,7 @@ export type components = {
             /** @example 0x1111111111111111111111111111111111111111 */
             delegate_address: string;
             delegate_account_address: string | null;
+            superseded_by: components["schemas"]["AgentSupersession"];
             chain_id: number;
             /**
              * @description Which rail this agent's account is on (#1306). `delegation` means spend is gated by the agent's active budget delegations, enforced on-chain by the caveat enforcers. `legacy` is the RETIRED Safe / AllowanceModule rail (#1986) and gates nothing any more — every payment entry point answers 410 for such an account, so read it as "this account cannot pay until it re-onboards via POST /accounts/hybrid", not as a second live policy primitive. Reporting only; the enum keeps both values because a retired-rail account can still read its own identity here.
@@ -5433,6 +5624,7 @@ export type components = {
             /** @example 0x1111111111111111111111111111111111111111 */
             delegate_address: string;
             chain_id: number;
+            superseded_by: components["schemas"]["AgentSupersession"];
             allowances: {
                 /** Format: uuid */
                 id: string;
@@ -5769,6 +5961,13 @@ export type components = {
              */
             convertedCurrency?: "SEK" | "USD" | "EUR";
             convertedFxRate?: string | null;
+            /** @description #3824: the token amount at today’s rate in `approxCurrency`, for rows without book-time fiat. Null when no usable price exists — never "0". */
+            approxAmount?: string | null;
+            /**
+             * @description #3824: the currency `approxAmount` is denominated in — the user’s `currency_preference`, or SEK when none is set.
+             * @enum {string}
+             */
+            approxCurrency?: "SEK" | "USD" | "EUR";
             /** @description Book-time token→currency rates frozen at settlement (`machine_payment_evidence.fx_rates`, migration 082), one per supported ledger currency with a usable quote. Null on rows settled before migration 082 and on rows with no evidence row. */
             fxRates?: {
                 [key: string]: number;
@@ -5789,7 +5988,7 @@ export type components = {
             /** @description Failure or skip reason; on a pushed row, a non-fatal note (#498). Null when clean. */
             error: string | null;
         };
-        /** @description Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe/account scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields (since #3132 it does carry the base-shape `timestampSource` / `confirmedAt`). Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why. */
+        /** @description Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe/account scope. Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why. */
         Transaction: {
             hash: string;
             /** @enum {string} */
@@ -5861,6 +6060,13 @@ export type components = {
              */
             convertedCurrency?: "SEK" | "USD" | "EUR";
             convertedFxRate?: string | null;
+            /** @description #3824: the token amount at today’s rate in `approxCurrency`, for rows without book-time fiat. Null when no usable price exists — never "0". */
+            approxAmount?: string | null;
+            /**
+             * @description #3824: the currency `approxAmount` is denominated in — the user’s `currency_preference`, or SEK when none is set.
+             * @enum {string}
+             */
+            approxCurrency?: "SEK" | "USD" | "EUR";
             /** @description Book-time token→currency rates frozen at settlement (`machine_payment_evidence.fx_rates`, migration 082), one per supported ledger currency with a usable quote. Null on rows settled before migration 082 and on rows with no evidence row. */
             fxRates?: {
                 [key: string]: number;
@@ -6009,22 +6215,147 @@ export type components = {
             tokenSymbol: string;
             /** @description HUMAN-DECIMAL token amount — whole token units, NOT the atomic integer (25 USDC is "25.00", a zero budget is "0"). Projected from the agent's active delegation by rails/delegation-budget-view.ts via formatTokenValue(budget_atomic, decimals), whose output is always "0" or <integer>.<2–6 fraction digits> — so this pattern REJECTS an atomic value such as "500" (#2408). "0" is the one value both shapes share. Do not BigInt() this value: it is the shape that made #2283 a production bug. To compare it against an atomic price, scale it by the token's decimals first (#2295). */
             allowanceAmount: string;
-            resetPeriodMin: number;
         };
         DashboardAgentPreview: {
             /** Format: uuid */
             id: string;
             name: string;
             /**
-             * @description Revoked agents are excluded from the preview query.
+             * @description Revoked agents are excluded from the overview query. #3803: pending_approval joins — the redesigned overview must surface an agent still waiting for its connection.
              * @enum {string}
              */
-            status: "active" | "paused";
+            status: "active" | "paused" | "pending_approval";
             /** Format: uuid */
             accountId: string | null;
             accountName: string | null;
             accountChainId: number | null;
+            /** @deprecated */
             allowances: components["schemas"]["DashboardAgentAllowance"][];
+            /** @description Present only when status is 'pending_approval': the agent's newest connection setup status (e.g. 'awaiting_connection', 'expired', 'failed'). */
+            setupStatus?: string;
+            /** @description #3803: every live budget from the active delegation set — expired rows follow the #3802 predicate and are absent. */
+            budgets: components["schemas"]["DashboardAgentBudget"][];
+            /** @description #3803: sub-budget grants this agent RECEIVED, so an agent whose only authority is a received sub-budget does not read "No budget". */
+            receivedSubBudgets: components["schemas"]["DashboardReceivedSubBudget"][];
+            stats: components["schemas"]["DashboardAgentStats"];
+        };
+        /** @description #3803 — one delegation-rail budget with its identity and live window, for the caption the client renders in the user currency (see spotRates). budgetAtomic is the atomic integer; never parse the human `allowances[].allowanceAmount` for arithmetic. */
+        DashboardAgentBudget: {
+            /** Format: uuid */
+            id: string;
+            /** @description The delegation's stable identity (#827) — keccak of the unsigned delegation. */
+            delegationHash: string;
+            chainId: number;
+            /** @example 0x1111111111111111111111111111111111111111 */
+            tokenAddress: string;
+            tokenSymbol: string;
+            decimals: number;
+            /** @description Base-10 atomic integer (VARCHAR(78) on the wire source). */
+            budgetAtomic: string;
+            periodSeconds: number;
+            /** Format: date-time */
+            startDate: string;
+            /** Format: date-time */
+            expiresAt: string;
+            /**
+             * Format: date-time
+             * @description End of the CURRENT budget period, computed from startDate + periodSeconds at read time.
+             */
+            periodEnd: string;
+        };
+        /** @description #3803 — a sub-budget grant the agent received from a parent agent. */
+        DashboardReceivedSubBudget: {
+            /** Format: uuid */
+            parentAgentId: string;
+            parentAgentName: string;
+            /** @description true iff the grant's stored status is 'open'. */
+            open: boolean;
+        };
+        /** @description #3803 — one window of the 7/30-day block. gross is the booked (or re-priced) fiat; net is gross with the #3755 delegate_sweeps ratio netting applied. Both are USD/EUR/SEK triples. */
+        DashboardSpendWindow: {
+            gross: {
+                usd: number;
+                eur: number;
+                sek: number;
+            };
+            net: {
+                usd: number;
+                eur: number;
+                sek: number;
+            };
+            /** @description Owner decision 1: true when any row's booked fiat was NULL and was priced at today's rate — the client marks the figure ≈ so a re-priced total is never shown as booked. */
+            approx: boolean;
+            /** @description Confirmed payment rows in the window — activity, never netted. */
+            payments: number;
+            /** @description DISTINCT merchants over the window — merchant = the x402 resource host, else the recipient address. A user-level figure, never a sum of per-agent counts. */
+            distinctMerchants: number;
+            /** @description Refusal rows whose reason was delegation_budget_exceeded or delegation_expired — a budget stopped a payment. */
+            budgetStops: number;
+        };
+        /** @description #3803 — one window of a PER-AGENT stats block. Same gross/net/approx/payments definitions as the user-level DashboardSpendWindow; per-agent refusals instead of the user-level distinctMerchants/budgetStops rollups. */
+        DashboardAgentSpendWindow: {
+            gross: {
+                usd: number;
+                eur: number;
+                sek: number;
+            };
+            net: {
+                usd: number;
+                eur: number;
+                sek: number;
+            };
+            /** @description Owner decision 1: true when any row's booked fiat was NULL and was priced at today's rate. */
+            approx: boolean;
+            /** @description Confirmed payment rows in the window — activity, never netted. */
+            payments: number;
+            refusals: components["schemas"]["DashboardRefusalBuckets"];
+        };
+        /** @description #3803 — refusal ROW counts per bucket (not distinct reasons — #3815). relayer_budget is Haven’s own cap and is never shown as the user’s budget. */
+        DashboardRefusalBuckets: {
+            /** @description delegation_budget_exceeded + delegation_expired. */
+            budget: number;
+            /** @description no_delegation_for_target. */
+            scope: number;
+            /** @description onchain_revert. */
+            failed: number;
+            /** @description relayer_budget. */
+            haven: number;
+        };
+        /** @description #3803 — per-agent 7/30-day figures. The spend windows carry the same definition as the user-level block; refusals are row counts per bucket over the same window. */
+        DashboardAgentStats: {
+            d7: components["schemas"]["DashboardAgentSpendWindow"];
+            d30: components["schemas"]["DashboardAgentSpendWindow"];
+            /**
+             * Format: date-time
+             * @description ALL-TIME latest confirmed payment (not windowed); null when the agent never paid.
+             */
+            lastPaymentAt: string | null;
+            lastCounterparty: {
+                source: string | null;
+                x402ResourceUrl: string | null;
+                to: string | null;
+                merchantName: string | null;
+            } | null;
+        };
+        /** @description #3803 — per-account USDC, funding and pace. No new chain reads: the balance comes from the portfolio the overview already fetches. */
+        DashboardAccountOverview: {
+            /** Format: uuid */
+            accountId: string;
+            chainId: number;
+            /** @description The chain registry’s own testnet marker (faucet presence). */
+            isTestnet: boolean;
+            /** @description The chain-registry USDC balance in base units. NULL when the balance read is unavailable — unknown, never 0. */
+            usdcBalanceAtomic: string | null;
+            /** @description The registry USDC decimals; null when the chain has no registry USDC. */
+            usdcDecimals: number | null;
+            /** @description Present only when the USDC balance read was stale or unavailable (#3295 marker). */
+            usdcBalanceFreshness?: components["schemas"]["BalanceFreshness"];
+            /** @description The account's own USDC > 0. Null when the balance is unknown — never derived from a 0. */
+            funded: boolean | null;
+            /** @description Per account (the session payload answered only accounts[0] before #3803). */
+            needs_backup_recommendation: boolean;
+            /** @description Σ confirmed − min(swept, confirmed) per (agent, token, chain) over the last 7 days, for this account’s agents on this chain in the registry USDC. Swept = delegate_sweeps status submitted with a tx_hash. */
+            usdcPace7dAtomic: string;
         };
         DashboardOverviewResponse: {
             totals: {
@@ -6049,16 +6380,6 @@ export type components = {
                 /** @description Present only when at least one of the totals' balance reads failed (#3295): stale with the oldest served as-of time, or unavailable when some token has no known value. Absent on a clean read. */
                 balancesFreshness?: components["schemas"]["BalanceFreshness"];
             };
-            metrics: {
-                /** @description Agents with status 'active' only. */
-                connectedAgents: number;
-                monthlyAgentSpendUsd: number;
-                monthlyAgentSpendEur: number;
-                monthlyAgentSpendSek?: number;
-                successfulTransactions: number;
-                /** @description All linked Safes, regardless of activity. */
-                activeAccounts: number;
-            };
             /** @description Always 0 since #2055 — the approval queue died with the Safe rail and its table is dropped; the field survives for wire compatibility. */
             actionableApprovals: number;
             /** @description Duplicate of actionableApprovals; always 0 since #2055, kept for compatibility. */
@@ -6066,10 +6387,135 @@ export type components = {
             onboardingProgress: {
                 hasFirstAgentPayment: boolean;
             };
-            /** @description At most 6. */
+            /** @description #3803: EVERY delegation-rail agent in active/paused/pending_approval — the former at-most-6 cap moved to the client (#3809). */
             agents: components["schemas"]["DashboardAgentPreview"][];
-            /** @description At most 5. Payment-enrichment fields (paymentId, paymentFlowStatus, amountSek, …) are never populated in this projection. */
-            transactions: components["schemas"]["Transaction"][];
+            /** @description Grouped activity rows, newest first. Every count is a FLOOR (`countIsFloor`) when the explorer window was truncated. */
+            activity?: components["schemas"]["DashboardActivityGroup"][];
+            /** @description #3803 — the overview’s agents[] by status, so tiles do not derive counts from a client-side slice. */
+            agentCount: {
+                active: number;
+                paused: number;
+                pending_approval: number;
+            };
+            /** @description #3803 — one entry per delegation-rail account, in the accounts list order. */
+            accounts: components["schemas"]["DashboardAccountOverview"][];
+            /** @description #3803 — today’s rate per BUDGET token symbol in the user’s preferred currency (see the transaction feed’s resolution); null when the price read failed or quoted zero. The client has no rate of its own, so the budget captions are struck here. */
+            spotRates: {
+                [key: string]: number | null;
+            };
+            /** @description #3803 — the 7/30-day block. Windows are [now − N×24h, now) on confirmed_at — the same definition as /analytics/overview. Rows are confirmed, delegation-rail agents only; revoked agents’ in-window spend is included. Not counted: fees, deposits, other tokens. */
+            spend: {
+                /**
+                 * @description Owner decision 3: mainnet accounts only whenever the user has one; a testnet-only user sees test totals labelled 'Test network'.
+                 * @enum {string}
+                 */
+                scope: "mainnet" | "testnet";
+                d7: components["schemas"]["DashboardSpendWindow"];
+                d30: components["schemas"]["DashboardSpendWindow"];
+                /** @description The 7-day top merchant by USD booked sum, with RAW identity fields; null on a no-spend window. */
+                topMerchant7d: {
+                    /** @description The merchant identity: the x402 resource host, else the recipient address. */
+                    key: string;
+                    /** @description One representative x402 resource URL of this merchant’s rows. */
+                    x402ResourceUrl: string | null;
+                    /** @description One representative recipient address. */
+                    to: string | null;
+                    /** @description Contact name, else receipt name, for the merchant address; null when neither exists. */
+                    merchantName: string | null;
+                } | null;
+                /** @description Payment intents with status failed in the 7-day window. */
+                failedIntents7d: number;
+                /** @description 30 days of portfolio totals, shared with analytics’ BALANCE_BY_DAY_SQL. Days with no snapshot are ABSENT, not zero; totalSek is null on pre-migration-090 days. */
+                balance_by_day: {
+                    /** @description YYYY-MM-DD (UTC). */
+                    snapshotDate: string;
+                    totalUsd: number;
+                    totalEur: number;
+                    totalSek: number | null;
+                }[];
+            };
+        };
+        DashboardActivityGroup: {
+            /** @description Rows in the group. A FLOOR, not a total, when `countIsFloor` is true — the client renders "×40+". */
+            count: number;
+            /** @description Present ONLY when the explorer window that produced the feed was truncated: the count is a floor over an unknown total. A count is never presented as exact when it is not. */
+            countIsFloor?: boolean;
+            /** @description Sum of the member rows' atomic `value` strings. One token per group, so the units agree. */
+            sumAtomic: string;
+            /** @description Ticker of the group’s token. */
+            tokenSymbol: string;
+            /** @description Decimals of the group’s token. */
+            decimals: number;
+            /**
+             * Format: date-time
+             * @description ISO 8601 instant of the newest member row.
+             */
+            latestAt: string;
+            /** @description Agent attribution of the newest member; null when the row has no agent (deposits, unattributed transfers). */
+            agentId: string | null;
+            /** @description Agent name of the newest member. */
+            agentName: string | null;
+            /** @description The newest member's source, e.g. `x402`. */
+            source: string | null;
+            /** @description The newest member’s x402 resource URL, when it is an x402 payment. */
+            x402ResourceUrl: string | null;
+            /** @description The newest member’s raw `to` field — the merchant address on outbound payments, the account’s own address on deposits. */
+            to: string;
+            /** @description Contact or receipt-merchant name resolved for the counterparty, when one exists; null otherwise (always null on deposits). */
+            merchantName: string | null;
+            /** @description The activity class, e.g. `delegate_sweep`; null for plain transfers and x402 payments. */
+            activityType: string | null;
+            /** @enum {string} */
+            direction: "in" | "out";
+            /**
+             * @description The DERIVED outcome: isError → failed; a paymentFlowStatus of confirming_merchant/needs_attention or a non-terminal paymentProofStatus → pending; else confirmed.
+             * @enum {string}
+             */
+            status: "confirmed" | "pending" | "failed";
+            /** @description The book-time fiat sum — present ONLY when every member row carries a stored `convertedAmount` capture. */
+            convertedAmount?: string;
+            /**
+             * @description The currency `convertedAmount` is denominated in (the user’s preference).
+             * @enum {string}
+             */
+            convertedCurrency?: "SEK" | "USD" | "EUR";
+            /** @description The serve-time fiat sum at today’s rate — present INSTEAD of convertedAmount when any member lacked book-time fiat. Null when no usable price exists; never 0. */
+            approxAmount?: string | null;
+            /**
+             * @description The currency `approxAmount` is denominated in (the user’s preference).
+             * @enum {string}
+             */
+            approxCurrency?: "SEK" | "USD" | "EUR";
+        };
+        DashboardBudgetRemainingEntry: {
+            /** Format: uuid */
+            agent_id: string;
+            chain_id: number;
+            delegation_hash: string;
+            token_address: string;
+            token_symbol: string;
+            token_decimals: number;
+            budget_atomic: string;
+            /**
+             * Format: date-time
+             * @description Null when the read is unknown.
+             */
+            read_at: string | null;
+            /** Format: date-time */
+            period_end: string;
+            /** @description Null when the read is unknown — never "0", never the full budget. */
+            remaining_atomic: string | null;
+            remaining_from_chain: boolean;
+            /** @description Null when the read is unknown. */
+            used_atomic: string | null;
+            sub_budget_spend: {
+                /** Format: uuid */
+                agent_id: string;
+                spent_atomic: string;
+            }[];
+        };
+        DashboardBudgetRemainingResponse: {
+            budgets: components["schemas"]["DashboardBudgetRemainingEntry"][];
         };
         /** @description Reported whether or not it is recoverable — nothing about a stranded residual fails quietly. */
         AgentRekeyResidual: {
@@ -6850,6 +7296,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OpsOverview"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The ops console (or its read-only database) is not configured. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The read could not be audited, so nothing was returned. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getOpsSponsoredGas: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The per-merchant-per-day buckets for the trailing window. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsSponsoredGas"];
                 };
             };
             /** @description Error response */
@@ -12828,6 +13339,68 @@ export interface operations {
             };
         };
     };
+    listUserSigners: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The deduplicated signer list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        signers: ({
+                            /** @enum {string} */
+                            kind: "passkey";
+                            key_id: string;
+                            /** Format: date-time */
+                            created_at: string | null;
+                            accounts: {
+                                account_id: string;
+                                /** @example 0x1111111111111111111111111111111111111111 */
+                                account_address: string;
+                                account_name: string | null;
+                                chain_id: number;
+                            }[];
+                        } | {
+                            /** @enum {string} */
+                            kind: "wallet";
+                            /** @example 0x1111111111111111111111111111111111111111 */
+                            address: string;
+                            accounts: {
+                                account_id: string;
+                                /** @example 0x1111111111111111111111111111111111111111 */
+                                account_address: string;
+                                account_name: string | null;
+                                chain_id: number;
+                            }[];
+                        })[];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
     getUserPreferences: {
         parameters: {
             query?: never;
@@ -12923,6 +13496,110 @@ export interface operations {
                 };
             };
             /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listAttentionDismissals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every dismissal the caller has made, oldest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttentionDismissalsResponse"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    createAttentionDismissal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttentionDismissalInput"];
+            };
+        };
+        responses: {
+            /** @description Dismissed. Returns the stored dismissal. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttentionDismissal"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The account or agent does not exist or belongs to another user. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -15642,13 +16319,20 @@ export interface operations {
                             token: string | null;
                             amount_raw?: string | null;
                             amount: string | null;
+                            /** @description #3824: the token amount at today’s rate in `approx_currency`; null when no usable price exists — never "0". */
+                            approx_amount?: string | null;
+                            /**
+                             * @description #3824: the currency `approx_amount` is denominated in (the user’s `currency_preference`).
+                             * @enum {string}
+                             */
+                            approx_currency?: "SEK" | "USD" | "EUR";
                             to: string | null;
                             status: string | null;
                             /** @description The FUNDING transaction on the eip3009 bridge — Haven’s sponsored UserOp (account → delegate). */
                             tx_hash?: string | null;
                             /** @description #3763: the EIP-3009 funding leg, named — same value as `tx_hash`. */
                             funding_tx_hash?: string | null;
-                            /** @description #3763: the merchant’s settlement transaction (delegate → merchant) when an agent reported one and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`). Null is "not recorded", never "failed" — the SDK’s default evidence post reports the funding hash, which the writer refuses, so many eip3009 payments legitimately never get one. */
+                            /** @description #3763: the merchant’s settlement transaction (delegate → merchant) when an agent reported one or the backend’s settlement sweep detected it on-chain (#3888), and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`). Null is "not recorded", never "failed" — the SDK’s default evidence post reports the funding hash, which the writer refuses, so many eip3009 payments legitimately never get one. */
                             settlement_tx_hash?: string | null;
                             /** @description #3763: which settlement branch moved the money — `eip3009` or `erc7710` — read from the intent’s `machine_metadata`; null when none was recorded. */
                             settlement_scheme?: string | null;
@@ -15831,13 +16515,20 @@ export interface operations {
                             token: string | null;
                             amount_raw?: string | null;
                             amount: string | null;
+                            /** @description #3824: the token amount at today’s rate in `approx_currency`; null when no usable price exists — never "0". */
+                            approx_amount?: string | null;
+                            /**
+                             * @description #3824: the currency `approx_amount` is denominated in (the user’s `currency_preference`).
+                             * @enum {string}
+                             */
+                            approx_currency?: "SEK" | "USD" | "EUR";
                             to: string | null;
                             status: string | null;
                             /** @description The FUNDING transaction on the eip3009 bridge — Haven’s sponsored UserOp (account → delegate). */
                             tx_hash?: string | null;
                             /** @description #3763: the EIP-3009 funding leg, named — same value as `tx_hash`. */
                             funding_tx_hash?: string | null;
-                            /** @description #3763: the merchant’s settlement transaction (delegate → merchant) when an agent reported one and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`). Null is "not recorded", never "failed" — the SDK’s default evidence post reports the funding hash, which the writer refuses, so many eip3009 payments legitimately never get one. */
+                            /** @description #3763: the merchant’s settlement transaction (delegate → merchant) when an agent reported one or the backend’s settlement sweep detected it on-chain (#3888), and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`). Null is "not recorded", never "failed" — the SDK’s default evidence post reports the funding hash, which the writer refuses, so many eip3009 payments legitimately never get one. */
                             settlement_tx_hash?: string | null;
                             /** @description #3763: which settlement branch moved the money — `eip3009` or `erc7710` — read from the intent’s `machine_metadata`; null when none was recorded. */
                             settlement_scheme?: string | null;
@@ -17048,6 +17739,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UpdateConnectorInstallStatusResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    recordRetiredAgents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                setupId: components["parameters"]["SetupId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordRetiredAgentsRequest"];
+            };
+        };
+        responses: {
+            /** @description Retired agents recorded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordRetiredAgentsResponse"];
                 };
             };
             /** @description Error response */
@@ -21728,7 +22490,10 @@ export interface operations {
     };
     getDashboardOverview: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description IANA time-zone name (e.g. `Europe/Stockholm`) the activity groups bucket local days by. Defaults to UTC; an invalid zone is refused with 400. */
+                tz?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -21742,6 +22507,56 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DashboardOverviewResponse"];
+                };
+            };
+            /** @description Invalid `tz` — not an IANA zone name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getDashboardBudgetRemaining: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Per-budget remaining amounts with sub-budget spend attribution. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardBudgetRemainingResponse"];
                 };
             };
             /** @description Error response */

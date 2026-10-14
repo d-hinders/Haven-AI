@@ -53,7 +53,7 @@ import { tombstonesDirForCredentialRoot } from './tombstone.js'
 import { assertSupportedNodeVersion } from './local-mcp-runtime.js'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 
-export const CONNECTOR_VERSION = '0.9.0-alpha.0'
+export const CONNECTOR_VERSION = '0.10.0-alpha.0'
 
 /**
  * #3737 owner decision 4: the derived slug marks NON-production backends
@@ -64,6 +64,8 @@ export const CONNECTOR_VERSION = '0.9.0-alpha.0'
  * exotic chain is merely cosmetic.
  */
 const PRODUCTION_CHAIN_ID = 8453
+/** #3772: agent ids are uuids; an identity that fell back to a directory name is not one. */
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /** #3303: the `X-Haven-Client` value every Haven API request from this connector carries. */
 export const CONNECTOR_CLIENT_IDENTITY = `@haven_ai/connect/${CONNECTOR_VERSION}`
@@ -968,17 +970,23 @@ async function executeConnect(
           'when a stale host next probes the old path.',
       )
     } else if (supersededAgentIds.length > 0) {
+      // #3830: this list is every OTHER agent directory on the machine, not a
+      // replace set — since #3737 a run without `--name` adds a named agent
+      // alongside the ones already here. So the text claims only what is true
+      // of ANY id in it (a normal run, a `--replace` run whose local
+      // retirement was skipped, a key-less or tombstoned directory): the
+      // directory exists, and this run revoked nothing. Never "previous", and
+      // a host acting as its own agent is not described as a fault.
       log('')
       log(
-        `Heads-up: this setup created a NEW agent. Your previous agent(s) — ${supersededAgentIds.join(', ')} — ` +
-          'still exist with their own keys, and any host that was already running keeps acting as them.',
+        `Heads-up: other agent directories on this machine — ${supersededAgentIds.join(', ')}. ` +
+          'This setup created a NEW agent and revoked none of them; any not revoked in Haven keep their own keys and any budgets.',
       )
       log(
-        'If you meant to replace them: use Remove agent\u2026 on the Haven agent page for each (it ends their live budgets), then restart EVERY ' +
-          'long-lived host (gateways, TUI workers, editors) — each holds the MCP wiring snapshot from ' +
-          'its own start time, so after repeated setups each can be stuck on a DIFFERENT old agent. ' +
-          `Then remove their directories under ~/.haven/agents (or ${RERUN_HINT} --tombstone <dir> to ` +
-          `leave a diagnostic in their place). Run ${RERUN_HINT} --doctor to check whether their keys are still live.`,
+        'To retire one you no longer use: use Remove agent\u2026 on its Haven agent page (it ends its live budget), restart any ' +
+          'long-lived host (gateways, TUI workers, editors) still wired to it — each holds the MCP wiring snapshot from its own start time — ' +
+          `and remove its directory under ~/.haven/agents (or ${RERUN_HINT} --tombstone <dir> to leave a diagnostic in its place). ` +
+          `To rewire the bare haven / haven-signer pair instead of adding an agent, re-run with --replace. Run ${RERUN_HINT} --doctor to check which keys are still live.`,
       )
     }
   } catch {
@@ -1023,6 +1031,25 @@ async function executeConnect(
     })
   } catch (err) {
     log(`Could not report install status to Haven: ${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  // #3772: tell Haven which agents THIS run retired, so a session still running
+  // as one of them is warned on its own reads. Only `retiredAgentIds` (the
+  // directories whose tombstone and teardown succeeded) — never the
+  // `supersededScan`, which names every other agent on the machine. Identity can
+  // fall back to a directory name, so non-uuid ids are dropped. Best-effort: a
+  // failure (or an older backend's 404) is a note, never a change of outcome.
+  const reportableRetiredIds = [...new Set(retiredAgentIds.filter((id) => UUID_SHAPE.test(id)))]
+  if (reportableRetiredIds.length > 0 && api.reportRetiredAgents) {
+    try {
+      await api.reportRetiredAgents({
+        setupId: registration.setup_id,
+        apiKey: localApiKey,
+        retiredAgentIds: reportableRetiredIds,
+      })
+    } catch (err) {
+      log(`Could not tell Haven which agents were retired: ${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 
   // #1377 D: stay alive through the approval instead of going dead exactly

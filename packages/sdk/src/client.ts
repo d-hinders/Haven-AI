@@ -211,6 +211,9 @@ function mapCatalogEntry(entry: RawCatalogEntry): HavenCatalogEntry {
     priceAtomic: entry.price_atomic,
     asset: entry.asset,
     network: entry.network,
+    // #3839: conditional like `merchant` — absent (not null) when the backend
+    // does not send the field, so an older backend's exact shape is unchanged.
+    ...(entry.asset_transfer_methods !== undefined ? { assetTransferMethods: entry.asset_transfer_methods } : {}),
     status: entry.status,
     verifiedAt: entry.verified_at,
     source: entry.source,
@@ -1597,7 +1600,10 @@ export class HavenClient {
       )
     }
 
-    const paymentHeader = await this.fundingLeg.createPaymentHeader(input.paymentRequired, option)
+    // #3888: the resume re-signs the SAME derived nonce the original header
+    // carried, so a settled payment's re-signed authorization is refused by
+    // the merchant as already used instead of paying twice (#3475).
+    const paymentHeader = await this.fundingLeg.createPaymentHeader(input.paymentRequired, option, status.paymentId)
     const receipt = this.fundingLeg.receiptFromStatus(input.paymentRequired, option, paymentHeader, status)
     this.fundingLeg.cacheReceipt(idempotencyKey, paymentHeader, receipt, input.taskBudgetId)
     return receipt

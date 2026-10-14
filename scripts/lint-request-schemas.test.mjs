@@ -231,6 +231,9 @@ describe('index.ts readers', () => {
     // #3164 adds the born-enforced organization module the same way.
     assert.deepEqual(enforcedModulesFromIndex(real), [
       'routes/contacts.ts',
+      // #3804: the display-only dashboard budget-remaining read, born
+      // ENFORCED (GET-only, no parameters, no existing callers to shadow for).
+      'routes/dashboard-budget-remaining.ts',
       'routes/merchants.ts',
       'routes/labels.ts',
       'routes/agent-labels.ts',

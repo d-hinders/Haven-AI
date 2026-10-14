@@ -323,6 +323,13 @@ import {
   LIST_DASHBOARD_AGENTS_SQL,
   LIST_DASHBOARD_ACCOUNTS_SQL,
   SUM_MONTHLY_PAYMENT_SPEND_SQL,
+  AGENT_LAST_PAYMENT_SQL,
+  DASHBOARD_MERCHANTS_SQL,
+  DASHBOARD_SPEND_GROUPS_SQL,
+  FAILED_INTENTS_7D_SQL,
+  PENDING_AGENT_SETUP_STATUSES_SQL,
+  RECEIVED_SUB_BUDGETS_FOR_AGENTS_SQL,
+  REFUSAL_BUCKETS_BY_AGENT_SQL,
 } from '../src/infra/repositories/dashboard.js'
 import {
   LIST_AGENT_PAYMENTS_SQL,
@@ -335,7 +342,11 @@ import {
   LIST_TOOL_INVOCATIONS_FOR_AGENT_SQL,
   LIST_TOOL_INVOCATIONS_FOR_AGENTS_SQL,
 } from '../src/infra/repositories/agent-tool-invocations.js'
-import { LIST_AGENT_NAMES_FOR_USER_SQL } from '../src/infra/repositories/agents.js'
+import {
+  LIST_AGENT_NAMES_FOR_USER_SQL,
+  MARK_AGENTS_SUPERSEDED_SQL,
+  FIND_AGENT_SUPERSESSION_SQL,
+} from '../src/infra/repositories/agents.js'
 import {
   COUNT_ACCOUNTS_FOR_USER_SQL,
   FIND_HYBRID_ACCOUNT_BY_ADDRESS_FOR_USER_SQL,
@@ -432,6 +443,8 @@ const QUERIES: SmokeQuery[] = [
   { name: 'agents: rotate API key', sql: ROTATE_AGENT_API_KEY_SQL },
   { name: 'agents: pause', sql: PAUSE_AGENT_SQL },
   { name: 'agents: resume', sql: RESUME_AGENT_SQL },
+  { name: 'agents: mark superseded (tenant-scoped, #3772)', sql: MARK_AGENTS_SUPERSEDED_SQL },
+  { name: 'agents: read supersession stamp (#3772)', sql: FIND_AGENT_SUPERSESSION_SQL },
   // #3426: the per-agent x402 tax-declaration opt-in. IMPORTED, like the rest
   // of the agents aggregate — the toggle's gate lives in the WHERE clause, so
   // a column or owner_company_details drift would only surface here.
@@ -497,6 +510,16 @@ const QUERIES: SmokeQuery[] = [
   { name: 'dashboard: portfolio snapshots for today+yesterday', sql: FIND_PORTFOLIO_SNAPSHOTS_SQL },
   { name: 'dashboard: portfolio snapshot upsert', sql: INSERT_PORTFOLIO_SNAPSHOT_SQL },
   { name: 'dashboard: month-to-date payment spend', sql: SUM_MONTHLY_PAYMENT_SPEND_SQL },
+  // #3803: the redesigned overview's grouped statements. Each is PREPAREd
+  // against the real schema — the ANY($n) array parameters and the
+  // `WITH legs AS` CTEs are part of the checked surface, same as the rest.
+  { name: 'dashboard: pending-agent setup statuses', sql: PENDING_AGENT_SETUP_STATUSES_SQL },
+  { name: 'dashboard: received sub-budgets', sql: RECEIVED_SUB_BUDGETS_FOR_AGENTS_SQL },
+  { name: 'dashboard: 7/30-day spend groups (netting + pace)', sql: DASHBOARD_SPEND_GROUPS_SQL },
+  { name: 'dashboard: distinct merchants + top merchant', sql: DASHBOARD_MERCHANTS_SQL },
+  { name: 'dashboard: per-agent last payment', sql: AGENT_LAST_PAYMENT_SQL },
+  { name: 'dashboard: refusal buckets by agent', sql: REFUSAL_BUCKETS_BY_AGENT_SQL },
+  { name: 'dashboard: failed intents 7d', sql: FAILED_INTENTS_7D_SQL },
   // Agent-activity read model (#1167). IMPORTED — verbatim from
   // routes/agent-activity.ts. The four-table payment/approval joins are the
   // highest-value additions in this block: they reach machine_payment_evidence

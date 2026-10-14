@@ -15,6 +15,72 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.10.0-alpha.0 — 2026-10-14
+
+### Changed
+
+- EIP-3009 merchant headers minted by the SDK now carry an EIP-3009 nonce
+  derived from the Haven payment id — `keccak256(utf8("haven-x402-payment-nonce:") || utf8(payment_id))`,
+  the shared `deriveX402PaymentNonce` on the edge surface — instead of the x402
+  library's random draw (#3888). That makes the merchant's settlement
+  attributable by the payment itself: Haven's backend finds the token's
+  `AuthorizationUsed(delegate, derived nonce)` log and records the verified
+  settlement even when the agent never reports it. The signed typed data is
+  still the library's own (the nonce is overwritten on the unsigned payload
+  `preparePaymentHeader` built). A header minted without a payment id keeps
+  the random nonce and today's behaviour, so no update is needed — but a
+  signer without this change leaves its settlements as undetectable as
+  before. A fixed nonce also closes the #3475 re-pay hazard: a resumed
+  payment re-signs the SAME nonce, so a settled payment is refused as
+  already used instead of paying twice.
+
+### Added
+
+- `getAgent()`, `getAgentSummary()` and `getAllowances()` carry `supersededBy`
+  (#3772): `null`, or — when a Connect `--replace` on the agent's machine retired
+  this agent and reported it — `{ replacementAgentId, supersededAt, warning,
+  nextAction: "stop_and_tell_user", nextToolOmittedReason }`. The warning tells
+  the agent that its session is still running as the replaced agent, to restart,
+  and to have the user remove the old agent, which keeps any budget it still
+  holds until then. Warning only: nothing is paused or revoked. An older backend
+  that sends no `superseded_by` reads as `null`. The field is required on the
+  two types, so code that builds `HavenAgent` / `HavenAllowanceSummary` objects
+  by hand (test mocks) adds `supersededBy: null`.
+
+- `HavenCatalogEntry.assetTransferMethods` (optional, additive): the x402 transfer methods a catalog merchant last advertised, as the catalog stores them (`"eip3009"`, `"eip3009,erc7710"`; `null` until probed; absent against a backend that does not send it). New `catalogFundingLegExpected(methods)` turns it into the discovery hint `true | false | "unknown"` (#3839). The `discoverTools` description gains one sentence on how to use that hint.
+
+### Changed
+
+- The haven-pay skill now prefers a merchant sign-in session over paying call
+  by call (#3838): before a multi-call flow to a merchant that documents or
+  offers a SIWX sign-in session, the agent signs in first (unsigned sign-in
+  request → `haven_sign_siwx` on the 402's `sign-in-with-x` extension), makes
+  the waived calls itself with the `SIGN-IN-WITH-X` header — never passing the
+  merchant session token to `haven_quote_x402` / `haven_pay_x402_quote`, whose
+  unpaid probe refuses a 200 — and pays only where the merchant still charges
+  (Bitrefill: `invoice/pay`). The safety rules are unchanged (sign at the final
+  URL after redirects; never forward the header or a session token across a
+  redirect), and the fallback is pinned: a signer without `haven_sign_siwx`
+  (older than 0.9.0-alpha.0) or a refused sign-in pays each call normally. The
+  `haven_pay_x402_quote` tool description is rewritten in lockstep, byte-neutral
+  against its ratchet. Text-only. No update needed.
+- `MERCHANT_NOT_READY`'s code description (published as `x-enumDescriptions`) and the `haven-pay` skill say an out-of-gas refusal (`reason_code: settlement_wallet_out_of_gas`) needs the merchant's operator to top up its settlement wallet before any retry succeeds, rather than "often transient" alone (#3834). The code, its wire shape and `retry_with_new_quote` are unchanged.
+- The published `haven-pay` skill carries the stale-tool-list reconnect rule
+  (#3816): every hosted result now carries `contract_fingerprint` and
+  `server_version` at the top level of its JSON, and when a result's
+  fingerprint differs from the one in the server instructions the client
+  loaded — or a `next_arguments` doesn't fit the loaded schema of the hosted
+  tool it names — the tool list is stale: reconnect or restart the session,
+  never hand-build or reshape a payload to fit. An in-flight payment keeps its
+  `payment_id` and resumes through `haven_get_payment_status` /
+  `haven_resume_x402_payment`; never pay again. Installed skill copies refresh
+  only on reinstall. No update needed.
+
+- `AGENT_CLIENT_UPDATE_SENTENCE` says a connector `upgrade_command` may name
+  the agent's pair with `--name <slug>` (#3799, backend-sourced suffix): an
+  agent on a multi-agent machine runs the update as one command. The runbook
+  copies were regenerated in lockstep (cli + frontend step files).
+
 ## 0.9.0-alpha.0 — 2026-10-09
 
 ### Added

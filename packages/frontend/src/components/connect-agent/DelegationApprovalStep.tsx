@@ -8,6 +8,7 @@ import { useDelegationBudget, type GrantInput } from '@/hooks/useDelegationBudge
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { budgetPeriodLabel } from '@/lib/budget-period'
 import BudgetGrantAction from '../BudgetGrantAction'
+import PasskeyElsewhereHint from '../PasskeyElsewhereHint'
 import WalletButton from '../WalletButton'
 import { Button } from '../ui/Button'
 import { AgentRulesSummary } from '../haven'
@@ -56,7 +57,7 @@ export function DelegationApprovalStep({
   onSwitchChain: () => void
   isSwitchingChain: boolean
 }) {
-  const { grant, busy, ready } = useDelegationBudget(agentId, chainId)
+  const { grant, busy, ready, passkeyElsewhere } = useDelegationBudget(agentId, chainId)
   const [confirming, setConfirming] = useState(false)
   const [confirmFailed, setConfirmFailed] = useState(false)
   // Once the budget is signed the agent is live and spending — there is
@@ -103,7 +104,8 @@ export function DelegationApprovalStep({
     <>
       <AgentRulesSummary
         // #1684: no card heading — the modal subtitle already reads "Approve
-        // the agent budget" about 40px above this card. One sentence, once.
+        // the agent budget" above this card, and since #3832 the step-list
+        // row around it says "Review and sign". One sentence, once.
         title={null}
         // #1684: one line, not three sentences. What the table below cannot
         // say is kept: the refill, and the guarantee that nothing executes
@@ -139,7 +141,9 @@ export function DelegationApprovalStep({
 
       {confirmFailed && (
         <WarningCallout
-          title="Budget set — finishing up"
+          // #3895: the body already says "approved"; the title says it too
+          // instead of "Budget set", which is the agent page's verb.
+          title="Budget approved — finishing up"
           body={
             <>
               Your budget is approved and the agent can spend within it. Haven just could not finish
@@ -171,6 +175,11 @@ export function DelegationApprovalStep({
           input={grantInput}
           label="Approve budget"
           busyLabel={confirming ? 'Finishing…' : 'Waiting for signature…'}
+          // #3895: this screen approves; the agent page sets. Each caller
+          // supplies the failure sentence its own button's verb carries.
+          // The owner approves by signing, so the sentence never makes
+          // Haven the approver (copy-guidelines.md, attribution).
+          failureMessage="The budget was not approved. Nothing changed — try again."
           // Same footer shape as the legacy step: equal-width ghost-then-
           // primary, with the money-authority action carrying the weight.
           leadingAction={
@@ -193,10 +202,11 @@ export function DelegationApprovalStep({
               </Button>
             )
           }
+          readyHint={passkeyElsewhere ? <PasskeyElsewhereHint /> : undefined}
           notReadyHint={
             isWrongChain
               ? `This Haven wallet is on ${approvalChainName}. Switch networks to approve the budget.`
-              : 'Connect the wallet that owns this Haven wallet to approve the budget.'
+              : 'Connect your account owner wallet to approve the budget.'
           }
           // A passkey account is always ready. An EOA-owned one is blocked for
           // one of two different reasons, and the legacy step distinguishes

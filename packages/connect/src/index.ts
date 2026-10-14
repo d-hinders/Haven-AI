@@ -58,9 +58,12 @@ export {
 } from './installed-clients.js'
 export {
   defaultAgentDirectory,
+  resolveAgentDirectoryBySlug,
+  assertDirectoryRecordsSlug,
   writeCredentialFiles,
   writeConnectOutcomeRecord,
   CONNECT_OUTCOME_FILENAME,
+  type ResolveAgentDirectoryOptions,
   type StoredCredentialPaths,
   type WriteCredentialInput,
 } from './storage.js'

@@ -4,6 +4,9 @@ status: current
 contract: true
 covers:
   - packages/backend/src/middleware/owner-cli.ts
+  - packages/backend/src/domain/user-signers.ts
+  - packages/backend/src/routes/user.ts
+  - packages/frontend/src/components/PasskeyElsewhereHint.tsx
   - packages/backend/src/infra/repositories/merchants.ts
   - packages/backend/src/modules/catalog/merchant-catalog.ts
   - packages/backend/src/db/migrations/101_merchant_pay_to.ts
@@ -58,6 +61,7 @@ covers:
   - packages/frontend/src/lib/signer.ts
   - packages/frontend/src/hooks/useAccountOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
+  - packages/frontend/src/components/DelegationBudgetCard.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
   - packages/backend/src/modules/passport/attestation.ts
   - packages/backend/src/modules/passport/revocation.ts
@@ -67,7 +71,7 @@ covers:
   - packages/backend/src/modules/ops/**
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
-last-verified: "2026-10-08"
+last-verified: "2026-10-12"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -200,6 +204,16 @@ availability while funds stay caveat-gated on-chain regardless — failing
 closed would let a DB hiccup take down the very operations it exists to keep
 up.
 
+The sponsored-UserOp gas of the PAYMENT path is a separate ledger, not rows in
+that table (#3837, migration `sponsored_userop_gas_events`): every UserOp
+submitted through `submitDelegationPayment` (both direct payments and the x402
+EIP-3009 funding leg) records its EntryPoint `actualGasCost` there, including a
+landed-but-reverted op and a cost-NULL `receipt_unconfirmed` one. It is
+monitoring only — no budget counts it, no reader of `relayer_gas_events`
+(`gas_sponsored_ops`, `relayerSpendSummary`, `assertRelayerBudget`) sees it —
+and a recording failure is swallowed: metrics can never gate a payment. See
+`docs/operations/sponsored-gas.md`.
+
 ## 3. Delegation custody semantics (#828's contract)
 
 > **Re-verified #2929 (dark-mode epic #2925, slice 3/3):** the dark-token sweep
@@ -214,6 +228,26 @@ up.
 > read, caveat value, or user-visible claim about who signs, what may be spent,
 > or when revocation bites changed. A CSS token rename in a delegation-surface
 > file is not a semantics change: this paragraph is that re-verification record.
+
+> **Re-verified #3812 (in-flow wallet connect):** this change touched three
+> files in this document's coverage list. `AccountSignersCard.tsx` and
+> `DelegationSendModal.tsx` are presentation-only: each now renders a "Connect
+> wallet" / "Switch wallet" control beside the owner-wallet blocker it already
+> showed. `useAgentRekey.ts` gains a read-only `signersState`
+> (`loading`/`loaded`/`error`), so a connect offer can tell a pending signer
+> read from a failed one; `signingBlockedReason` and every signing step are
+> unchanged. Elsewhere the change only adds restrictions: "Sign new budget" and
+> the off-ramp "Sign transfer" are disabled while no one on this device can
+> sign. (`WalletButton.tsx`, whose
+> disconnect-then-reopen-the-picker logic moved unchanged into a shared
+> `useSwitchWallet` hook, is not in the coverage list.) Nothing that decides
+> who may sign changed: `useActiveSigner`, `pickSigningPath`,
+> `useAccountOperationGate` and every `ready` predicate are untouched. The
+> control renders only where the caller is already not ready, and connecting
+> a wallet that is not the set's named owner still leaves the account blocked
+> (#2068). The statements in §6 about the header pill and the `wrong_wallet`
+> caption stand. `last-verified` is not re-stamped: this note is the scope,
+> and nothing else in this document was re-verified.
 
 **Where the signed delegation lives:** the agent receives it through the
 existing credential channel (same trust envelope as the agent API key).
@@ -577,6 +611,21 @@ chain.
 > four files, the two SQL statements' SELECT lists, and the signup INSERT's
 > column list. Nothing else in this
 > document was re-verified.
+
+> **Re-verified unchanged (#3824, 2026-10-09 — serve-time approx amounts +
+> grouped activity):** this diff touched one file in this document's coverage
+> list, `routes/transactions.ts`, and none of its authority, custody or
+> signing surfaces. The change is additive READ-only projection: the JSON feed
+> stamps rows that lack book-time fiat with an OPTIONAL `approxAmount` /
+> `approxCurrency` pair priced at serve time (`getServeTimeFiatValues` — one
+> cached CoinGecko read per token, null never 0), after the shared enrichment
+> helper and only on the JSON route; the CSV export path is byte-identical
+> (pinned by test). No filter, scope, tenant bound, query WHERE or route
+> ordering moved; the route still writes nothing. The new dashboard activity
+> grouping (`modules/transactions/activity.ts`) is a pure in-memory projection
+> of the same user-scoped feed and touches no enforcement surface. Scope of
+> this note: `routes/transactions.ts`'s response mapping and the new
+> transactions-module files. Nothing else in this document was re-verified.
 >
 > **Re-verified unchanged (#3195, 2026-09-30, the monthly-spend SEK fallback
 > predicate):** `infra/repositories/dashboard.ts`'s `fallback_amount_sek`
@@ -717,6 +766,33 @@ chain.
 > delegation, open sweep, in-flight re-key. No permission, signer set or
 > chain state changes. Scope of this note: the unlink and re-default writes.
 > Nothing else in this document was re-verified.
+
+> **Re-verified #3803 (2026-10-09 — the redesigned dashboard overview):** this
+> diff touched one file in this document's coverage list,
+> `infra/repositories/dashboard.ts`, and every change is a read. The two
+> existing list statements widen: `LIST_DASHBOARD_AGENTS_SQL` adds
+> `pending_approval` to its status set — a connect-flow agent the overview
+> must show; a status with no spend authority, per §3's #3544 note on what
+> `pending_approval` can and cannot become — and `LIST_DASHBOARD_ACCOUNTS_SQL`
+> adds `owner_address` plus a `hybrid_account_passkeys` COUNT, the raw
+> signer-set inputs so `needsBackupSignerRecommendation` (§7) can be answered
+> PER ACCOUNT by the route; the predicate itself is unchanged and still lives
+> in `modules/accounts/mainnet-gate.ts`, and the recommendation remains
+> advice, not a gate. The rest is additive: seven new SELECT-only grouped
+> statements (connection-setup statuses, received sub-budgets, the 7/30-day
+> spend groups with the USDC pace, distinct-merchant counts, per-agent last
+> payment, refusal row buckets, failed-intent count) over rows the caller's
+> own `user_id` already scopes (`$1` in every statement) and, on the
+> payment/refusal/intent reads, rail-scoped through the shared
+> `DELEGATION_RAIL_JOIN` fragment. The netting reuses analytics'
+> `spendNetFactorSql` rather than a fourth verbatim copy of the ratio, and
+> every figure — gross, net, pace, buckets — is a display re-projection of
+> already-confirmed rows at read time: no confirm path, no booking write, no
+> signing path and no spend decision reads them; budget, recipient and expiry
+> remain enforced on-chain by the caveat enforcers. The account list keeps its
+> `account_type = 'delegator_hybrid'` filter (#2413's rule: no legacy rail
+> surface on the dashboard). Scope of this note: those statements and their
+> WHERE/JOIN shapes. Nothing else in this document was re-verified.
 
 The unlink guard also refuses while an agent re-key is in flight, so the Safe
 binding cannot disappear between re-key stages. This is a database
@@ -883,7 +959,13 @@ plus per-credential enrollment time** (`key_id`, P256 x/y, owner address, and
 "Passkey · added {date}"; nothing secret, nothing spend-enabling). It powers
 login-time signer resolution and the account-level recovery card. It is a
 read: no route lets Haven — or this endpoint's caller — change a signer set
-without an existing signer's signature (invariant 13 unchanged).
+without an existing signer's signature (invariant 13 unchanged). Since #3825
+`GET /user/signers` lists the same material across all of the caller's live
+delegation-rail accounts — each passkey (by `key_id`) and owner wallet once,
+with the accounts it approves — for Settings → Signers. Its signer material is
+`key_id`, owner address and enrollment time only (no P256 coordinates), next to
+each approved account's id, address, name and chain; it is scoped to the
+authenticated user, and is equally a read.
 
 **Management surface (#1081).** Signer changes are reachable the same two ways:
 agent-scoped (`/agents/:id/account-signers/{prepare,submit}`, #888) and
@@ -952,8 +1034,13 @@ simultaneously blocked gated actions for the same state. The decision:
 EOA when the connected wallet **is** the set's named owner (#2068) → any
 passkey — so a mixed account keeps
 signing with its connected owner wallet and only the pure-passkey marker-less
-case changed; the fallback credential is **disclosed** in the wallet menu
-(#1952's rendering, reachable since this decision) before any ceremony. This
+case changed; the fallback credential is **disclosed** before any ceremony.
+That disclosure was the wallet menu's (#1952's rendering) until #3825 took the
+wallet pill out of the top bar; since then each owner-signing flow renders the
+shared `PasskeyElsewhereHint` line itself — "This account's passkey may be on
+another device" — whenever the passkey path is the one that will sign and no
+enrolled passkey is marked on this device (owner decision 2026-10-09). With the
+owner wallet connected the EOA signs and no hint shows. This
 offers no signer that cannot sign: the set is the account's on-chain-enrolled
 signers, selection draws only from that account+chain-scoped set, and device
 availability — the one unknown — is answered by the ceremony itself.
@@ -980,8 +1067,9 @@ since #2068 — for an owner-only set exactly when the connected wallet is
 the named owner (the same address check; an unrelated wallet stays blocked,
 and since #2073 that block has its own name: the gate answers
 `wrong_wallet`, carrying both addresses, rather than folding the mismatch
-into `no_signer`. The distinct kind changes what the UI *says* — the header
-wallet pill and the action-area caption name the mismatch instead of asking
+into `no_signer`. The distinct kind changes what the UI *says* — the wallet
+pill (in the connect flow's approval step; #3825 removed it from the header)
+and the action-area caption name the mismatch instead of asking
 the user to connect the wallet they already connected — and never what may
 *sign*: every consumer treats it as blocked, `wrong_wallet` is produced
 only by the hybrid branch's address compare, and the owner on the wrong
@@ -1422,6 +1510,28 @@ key, and sponsorship can pay gas but never move value. The scheme is recorded
 per intent (`machine_metadata.settlement_scheme`) so 3009-mode usage is
 auditable and its retirement measurable.
 
+**Since #3888 the 3009 header's nonce is derived, not random** — and neither
+half of that adds authority. The delegate's signed header carries
+`nonce = keccak256(utf8("haven-x402-payment-nonce:") || utf8(payment_id))`
+(`deriveX402PaymentNonce`, SDK edge surface; the signer overwrites the nonce
+on the unsigned payload the x402 library prepared, so the typed data it signs
+stays the library's own). `payment_id` is already inside the Haven-signed
+binding the signer verifies, so the signer gains no new input from Haven, and
+the derivation grants no spend capability — it only makes the settlement
+ATTRIBUTABLE. The backend's settlement sweep reads the pinned token's
+`AuthorizationUsed(delegate, derived nonce)` log (read-only chain
+observation, bounded block ranges, fail-closed on any RPC failure) and hands
+the transaction it finds to the same on-chain verifier and guarded writer the
+the agent-reported path uses; it moves no money and grants nothing. Accepted
+residuals (stated on #3888): a party controlling `payment_id` can
+force a nonce collision with an earlier authorization from the same delegate
+EOA, which makes EIP-3009 refuse the later settlement on-chain — denial of
+that ONE payment, not a double spend; and the derived nonce makes payments
+publicly linkable to Haven, which the delegate EOA's funding legs already
+are. A fixed nonce also closes the #3475 re-pay hazard for new signers: a
+resumed payment re-signs the same nonce, so a settled payment is refused as
+already used instead of paying twice.
+
 Hardening shipped with #961: the per-agent hourly x402 cap now guards the
 delegation branch too (every authorize costs a sponsored bundler estimation,
 so the cap is sponsorship-cost protection on the #717 surface — placed after
@@ -1481,13 +1591,15 @@ document was not re-read for it, and `last-verified` is not bumped. The
 app's Vercel ignore-build step (#3591; since #3594 a script shared with
 the dashboard's Vercel project, each with its own watch file) decides
 only *when* the console or the dashboard redeploys, from what changed since
-its last deployment. That includes a PR's first preview fetching `dev` from
+its last deployment. That includes a `preview/*` branch's first preview fetching `dev` from
 the repository's public URL, which is read-only and needs no credential. It
 moves no authority either, and the same scope note holds. Since #3681 the
 console deploys from `dev` only (`git.deploymentEnabled`), so no per-PR
-console preview exists, and the dashboard's watch file excludes tests and
-Playwright baselines; they decide only whether the console deploys and
-whether the dashboard builds, move
+console preview exists, and since #3821 the dashboard's
+`git.deploymentEnabled` map also limits which branches deploy. The dashboard's
+watch file excludes tests and Playwright baselines. The maps and watch files
+decide only whether each project deploys and
+builds, move
 no authority, and the same scope note holds. The console's CI render
 smoke (#3583) only proves, in a browser, that the console renders under that
 CSP and that the CSP refuses an un-nonced inline script; it moves no
@@ -2308,6 +2420,20 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > text, copy-only) and #3524 (compact `haven_send`/`haven_pay` results), were
 > re-verified where they merged. Nothing else in this document was re-verified.
 
+> **Re-verified (0.10.0-alpha.0 release, 2026-10-14):** the release bump's only
+> covered-file edit is the `SIGNER_VERSION` literal in `packages/signer/src/tools.ts`
+> (`0.10.0-alpha.0`). No signing check, refusal or allowlist moves in that edit.
+> One commit in the range changes signer source (`git log origin/main..origin/dev
+> -- packages/signer/src` at `641f527d`): #3888 (#3893), in `core.ts`. It is
+> recorded above where it merged ("Since #3888 the 3009 header's nonce is
+> derived, not random"), and it was read again for this release:
+> - the nonce is overwritten on the unsigned payload that `preparePaymentHeader`
+>   built;
+> - the typed data is signed by the library's own `signPaymentHeader`;
+> - the binding and expiry checks before it are unchanged.
+>
+> Nothing else in this document was re-verified.
+
 > **Re-verified (0.9.0-alpha.0 release, 2026-10-09):** the release bump's only
 > covered-file edit is the `SIGNER_VERSION` literal in `packages/signer/src/tools.ts`
 > (`0.9.0-alpha.0`). No signing check, refusal or allowlist moves in that edit.
@@ -2455,6 +2581,22 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > - **Nothing else moves.** No delegation shape, caveat, signer, allowlist or redemption guard in this document moves.
 >
 > The rest of this document was not re-read for it, and `last-verified` is not bumped.
+
+> **Re-verified unchanged (#3839, 2026-10-09, discovery funding-leg hint):**
+> this doc is coupled through `packages/sdk/src/client.ts`, whose catalog
+> mapping now carries `asset_transfer_methods` through to discovery as an
+> additive field. Discovery also gains a `funding_leg_expected` hint read from
+> that same column — the one the merchant-locked budget rule above reads per offer.
+> The hint is advisory output only: no delegation shape, caveat, pin rule,
+> redemption guard or settlement selection moves, and the per-offer ERC-7710
+> reading above is unchanged. The rest of this document was not re-read for
+> it, and `last-verified` is not bumped.
+
+> **#3830 (2026-10-09).** The connect modal's other-agents card no longer
+> revokes: it lists the owner's not-revoked agents from the connector's report
+> with a link to each agent page (owner decision), so the "replaced-agents
+> card" path in the #3542 note below is gone. The Remove dialog and Finish
+> revoking flows it describes are unchanged. Nothing else here was re-read.
 
 > **#3542 (2026-10-01).** Re-verified unchanged except the archive guard
 > above. The archive guard and the account-delete guard
@@ -2643,3 +2785,184 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > so no consumer can be tricked into treating a displayed link as an
 > authority change. The rest of this document was not re-read for it, and
 > `last-verified` is bumped to 2026-10-08 for exactly this coverage.
+
+> **Re-verified unchanged (#3799, 2026-10-09, auth-row display field):** this
+> diff touches `infra/repositories/agents.ts` (a covered path) by adding
+> `a.mcp_server_name` to `AGENT_BY_API_KEY_SQL` and `AgentAuthRow` (plus the
+> `mcp_server_name` pass-through on `AgentContext` in
+> `middleware/agentAuth.ts`). The field is migration 067's "a display aid,
+> never identity": it only personalises a `client_update.upgrade_command`
+> hint string in the client-compat middleware and is read nowhere else on the
+> auth path. Authentication still keys on the API-key hash; no delegation,
+> enforcer, budget, signer-set or custody decision reads it, and no signing
+> input changes. Scope of this re-read: this field only. The rest of this
+> document was not re-read for it, and `last-verified` is not bumped.
+> **Re-verified #3802 (2026-10-09, expired budgets stop counting as active —
+> round 2, owner predicate):**
+> this diff touches `infra/repositories/delegation-budgets.ts` (a covered
+> path) to stop presenting EXPIRED grants as budgets. Every budget-VIEWING
+> read now filters `expires_at > EXTRACT(EPOCH FROM NOW())` (the DATABASE
+> clock, exclusive bound) beside `status = 'active'`: ONE shared fragment
+> (`delegationLiveWindowSql`) joins `listActiveDelegations` (which feeds the
+> dashboard, the agents routes and the agent-facing allowances read), the
+> analytics budget-remaining slice, the three ops reads and the connect
+> activation check. `start_date` is deliberately NOT filtered (owner
+> decision 2026-10-09): a credential rotation writes a dormant "steady" row
+> with a future `start_date` beside the live "carry" row, and filtering
+> future starts would hide the whole budget for the carry window. The
+> payment selection queries keep their own inline `start_date <= now <
+> expires_at` copy — pinned by #1698's tests — so a grant is never SELECTED
+> for payment before its window opens even though the views show its
+> dormant steady sibling; `GET /agents/:id/delegations` keeps listing every
+> status on purpose (the round-1 JS windowing there was reverted), and the
+> agent-detail `DelegationBudgetCard` excludes expired rows from
+> `hasActive` so the grant form shows. Nothing this document pins moves: no
+> new grant, signature, signer, key or custody path; the rows' status
+> values and every revoke/calldata-binding claim are untouched (the
+> still-enabled sets those span `pending`/`active`/`replaced` by status in
+> their own queries, not through these views); and the activation check
+> plus the allowances read only ever get NARROWER than `status = 'active'`
+> — an agent whose only budget expired now reports no budget (readiness
+> `needs_approval`) and can no longer activate through connect, matching
+> what the on-chain `TimestampEnforcer` already refuses (Red Line #4: the
+> chain remains the only spend authority; the views now agree with it).
+> Scope of this re-read: the sections whose claims rest on which rows the
+> budget views return and on the connect activation check; the invariant,
+> custody, redemption and settlement sections were NOT
+> re-read (the diff touches no file that implements them). `last-verified`
+> is bumped for exactly this coverage.
+>
+> **Re-verified unchanged (#3799, 2026-10-09, auth-row display field):** this
+> diff touches `infra/repositories/agents.ts` (a covered path) by adding
+> `a.mcp_server_name` to `AGENT_BY_API_KEY_SQL` and `AgentAuthRow` (plus the
+> `mcp_server_name` pass-through on `AgentContext` in
+> `middleware/agentAuth.ts`). The field is migration 067's "a display aid,
+> never identity": it only personalises a `client_update.upgrade_command`
+> hint string in the client-compat middleware and is read nowhere else on the
+> auth path. Authentication still keys on the API-key hash; no delegation,
+> enforcer, budget, signer-set or custody decision reads it, and no signing
+> input changes. Scope of this re-read: this field only. The rest of this
+> document was not re-read for it, and `last-verified` is not bumped.
+>
+> **Re-verified unchanged (#3806, 2026-10-09, budget caption helper):** this
+> diff touches two covered files, both display-layer.
+> `hooks/useDelegationBudget.ts` adds two fields to the `DelegationBudget`
+> interface (`start_date`, `created_at` — Unix-second digit strings the wire
+> already carries) so the dashboard can anchor refill captions on the same
+> boundary arithmetic the reads use; the hook's `pickSigningPath`, its
+> signer-set fetch-on-mount and its visible-only poll are untouched.
+> `components/DelegationBudgetCard.tsx` moves caption wording (period words,
+> usage/expired/unread captions, the reserved-for-task-budgets note) into the
+> shared `lib/budget-caption.ts` helper and renders its states — no signing,
+> edit, revoke or confirm path moves, and the card's #3717/#3166 refusal
+> explanations stand. The period arithmetic itself moved verbatim to
+> `@haven_ai/core` (backend re-export, arithmetic unchanged) and is certified
+> by the casp shard for the `satisfied-by` contract doc:
+> `docs/regulatory/casp-changelog/2026-10-09-3806.md`. No new spender, no new
+> authority grant, no custody change (Red Line #4: the chain remains the only
+> spend authority). Scope of this re-read: the two files above and the
+> sections whose claims rest on the hook's signing-path selection and the
+> card's display of budget state; nothing else in this document was re-read
+> for it, and `last-verified` is not bumped.
+>
+> **Re-verified unchanged (#3845, 2026-10-09, owner-wallet surfaces polish):**
+> this diff touches four covered files, all display-layer.
+> `hooks/useDelegationBudget.ts` returns one more read-only value,
+> `hasPasskeys` (`signers.passkeys.length > 0`, null until the signer read
+> lands) — no new fetch, and `pickSigningPath`, `ready` and every signing step
+> are untouched. `components/AccountSignersCard.tsx` words the wallet row by
+> whether the set has a passkey; the Remove button's `wayCount < 2` gate and
+> both consequence confirmations are unchanged. `components/DelegationSendModal.tsx`
+> rewords its not-ready line to "Connect your account owner wallet to send."
+> `components/DelegationBudgetCard.tsx` renders its failed-signer-load retry
+> and its #3812 owner-wallet notice through one shared notice-row component;
+> the `signersError` / `needsOwnerWallet` conditions and every Stop and Edit
+> gate are unchanged.
+> Elsewhere the change only rewords or de-duplicates: the remove dialog and the
+> merchant-budget modal stop offering a passkey to an account that has none,
+> and the edit-budget modal's retry row uses the same shared component.
+> `useAgentRekey.ts` and `lib/signer.ts` are not touched. No new spender, no
+> authority grant, no custody change. Scope of this re-read: the four files
+> above and the sections whose claims rest on the hook's signing-path
+> selection and the signers card's removal gate (§3's #3812 note, §6);
+> nothing else in this document was re-read for it, and `last-verified` is not
+> bumped.
+>
+> **Re-verified (#3825, 2026-10-09, Settings → Signers; wallet pill leaves the
+> top bar):** the covered files this diff touches are
+> `domain/user-signers.ts` (new: the signer aggregation behind
+> `GET /user/signers`), `routes/user.ts` (that route — owner-scoped, read-only),
+> `components/PasskeyElsewhereHint.tsx` (new: the shared #1097 line),
+> `hooks/useDelegationBudget.ts` (one more read-only return field,
+> `passkeyElsewhere`, true only when the passkey path will sign;
+> `pickSigningPath` untouched), `hooks/useAccountSigners.ts` and
+> `hooks/useDelegationSend.ts` (only their `passkeyElsewhere` return, now gated
+> on the passkey path the same way; `pickSigningPath` untouched),
+> `components/DelegationSendModal.tsx` and `components/DelegationBudgetCard.tsx`
+> (both render the shared hint), and `components/AccountSignersCard.tsx`. The
+> card hides the owner address behind "Show address" and the passkey key ids
+> entirely, and links to Settings → Signers; its Remove gates
+> (`wayCount < 2`), both consequence confirmations, the enrolment action and
+> its in-flow wallet connect are unchanged. Outside the coverage list, the
+> top bar no longer renders the wallet pill (it stays in the connect flow's
+> approval step), and the backend adds the read-only `GET /user/signers`
+> described in §6's read surface. §6's wording about the "header wallet pill"
+> was updated in place; `useAccountOperationGate`, `pickSigningPath` and every
+> signing step are untouched. No new spender, no authority grant, no custody
+> change. The #1969 paragraph's "disclosed in the wallet menu" was rewritten
+> in place: with the pill gone the menu no longer opens for a ready user, so
+> each owner-signing flow now shows the #1097 cross-device line itself — a
+> hint beside a working action, never a gate. Scope of this re-read: §6 (read
+> surface, the #1969 paragraph and the `wrong_wallet` paragraph) and the
+> #3812 note in §3; nothing else in this document was re-read for it, and
+> `last-verified` is not bumped.
+
+> **Re-verified (#3813, 2026-10-10, server-saved "Needs you" dismissals):** this
+> diff touches one file in this document's coverage list,
+> `packages/backend/src/routes/user.ts` — it adds `GET`/`POST
+> /user/attention-dismissals` (migration 111's `attention_dismissals` table
+> behind them). Both endpoints are presentation-only: a dismissal hides a
+> nagging dashboard row and nothing else — it grants no spending ability, does
+> not touch `pickSigningPath`, budgets, allowances, signers or any §3/§6
+> surface, and no payment-path code reads the table. The POST is scoped to the
+> JWT subject with an ownership `EXISTS` against `smart_accounts`/`agents`, so
+> a dismissal can never be planted for another user's account or agent, and
+> the spec's `oneOf` body plus the table's CHECK refuse every kind except the
+> two owner-approved ones. No new spender, no authority grant, no custody
+> change. Scope of this re-read: the `routes/user.ts` coverage and the
+> endpoints above; nothing else in this document was re-read for it.
+> `last-verified` is bumped to 2026-10-10 for exactly this coverage.
+
+> **Re-verified unchanged (#3895, 2026-10-12, connect-step failure copy):**
+> this diff touches one covered file, display-layer only:
+> `components/DelegationBudgetCard.tsx` passes the budget grant's failure
+> sentence to the shared grant control as a prop instead of that control
+> hard-coding it — so each surface renders the verb of its own button. This
+> card's sentence is byte-identical to the one that was hard-coded ("Haven
+> could not set the budget. Nothing changed — try again."); the connect
+> modal's approval step now passes its own approve-verb sentence through the
+> same prop. No signing step, gate, input or authority surface moves; the
+> grant call and its inputs are untouched, as are the Stop and Edit paths.
+> No new spender, no new authority grant, no custody change (Red Line #4:
+> the chain remains the only spend authority). Scope of this re-read:
+> `DelegationBudgetCard.tsx` and the sections whose claims rest on the
+> card's grant rendering; nothing else in this document was re-read for it,
+> and `last-verified` is bumped to 2026-10-12 for exactly this coverage.
+>
+> **Re-verified unchanged (#3772 part 1, 2026-10-13, supersession record):**
+> this diff touches `infra/repositories/agents.ts` (a covered path) by adding
+> `markAgentsSuperseded` / `findAgentSupersession` over two new nullable
+> `agents` columns (migration 112, `superseded_by_agent_id`, `superseded_at`).
+> A connector `--replace` reports the ids it retired with the NEW agent's API
+> key, within 30 minutes of that setup's registration; the UPDATE is scoped to
+> the setup's own user and excludes the reporter, so an agent credential can
+> only put a warning on a sibling of its own owner, and only while freshly
+> connected.
+> The record is read nowhere on the auth path (`AGENT_BY_API_KEY_SQL` is
+> untouched) and by no delegation, enforcer, budget, signer-set or custody
+> decision: the superseded agent keeps its key, status and on-chain budget,
+> and removal stays the owner-authenticated control. This is not the
+> "agent editing its own authority" the re-key routes refuse — nothing about
+> any agent's authority is edited. Scope of this re-read: this repository
+> change only; nothing else in this document was re-read for it, and
+> `last-verified` is not bumped.

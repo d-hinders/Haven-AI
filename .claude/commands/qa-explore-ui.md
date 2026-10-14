@@ -8,7 +8,7 @@ Run an exploratory **UI** QA pass as the agent, using **this session's own model
 
 ## Phase 1 — Point at a target & attach the browser driver
 
-1. **Target URL** — a **non-production** Vercel deployment (a PR preview or the dev project). It must build with `NEXT_PUBLIC_HAVEN_ENV=dev`, or the `?apiBaseUrl` override is a no-op (production ignores it — the #582/#583 security gate). There is **no permanent dev frontend URL**; take it as input. If you don't have one, stop and ask.
+1. **Target URL** — a **non-production** Vercel deployment: the stable `dev` host (`docs/operations/agent-qa.md` → "Stable dev targets"), or an opt-in `preview/*` deployment when you are testing one branch's build (PR previews are opt-in since #3821, `docs/operations/dev-environment.md` § PR previews are opt-in). It must build with `NEXT_PUBLIC_HAVEN_ENV=dev`, or the `?apiBaseUrl` override is a no-op (production ignores it — the #582/#583 security gate). Use the target you were given; with none, use the `dev` host.
 2. **Re-point at the shared dev backend** by appending `?apiBaseUrl=https://havenbackend-dev-8b95.up.railway.app` to the URL (persists to `localStorage['haven_api_base_url']`). See `docs/operations/agent-qa.md` → "Stable dev targets".
 3. **Attach Playwright MCP** — reuses the Playwright/Chromium setup when the sandbox already has it; otherwise Playwright MCP manages its own browser:
    `claude mcp add playwright -- npx @playwright/mcp@latest`

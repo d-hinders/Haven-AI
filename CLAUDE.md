@@ -83,11 +83,13 @@ The rail seam (`rails/execution-rail.ts`), the sweep machinery and the
 delegate-balance monitor stay — sweep returns stranded funds and is shared with
 the live EIP-3009 bridge.
 
-**Accounts.** Signup provisions a passkey-owned Hybrid DeleGator on every
-supported chain, counterfactually and with zero transactions — one Face ID
-prompt, the only onboarding path. The **signer set** is user-managed
-(`/agents/:id/account-signers/*`): every change is signed by an existing signer,
-never by Haven; recovery is a backup signer replacing a lost one.
+**Accounts.** Signup provisions **one** passkey-owned Hybrid DeleGator, on the
+network chosen at signup (`POST /accounts/hybrid` takes one `chain_id`),
+counterfactually and with zero transactions — one passkey prompt, the only
+onboarding path. There is no in-app path to a second account yet. The
+**signer set** is user-managed (`/agents/:id/account-signers/*`): every change
+is signed by an existing signer, never by Haven; recovery is a backup signer
+replacing a lost one.
 **Single-signer accounts are permitted and have no recovery** — recommended
 against after funding, never gated. Both removal actions refuse exactly one
 thing: the removal leaving **no** signer, mirroring `CannotRemoveLastSigner`
@@ -306,6 +308,11 @@ from branches; `@haven_ai/core` is workspace-private.
   production release, including a promotion that moves no version and publishes
   nothing, and its closeout covers production and not only npm;
   [`scripts/README.md`](scripts/README.md) has the full rationale.
+- The one-page release checklist — ask an agent session to release, approve,
+  hold `dev`, click Merge, verify tags, migrations and the real-payment
+  canary — is
+  [`docs/operations/release-checklist.md`](docs/operations/release-checklist.md);
+  every step on it can be done by any of the three maintainers (#3798).
 
 ## UI Surface Hierarchy
 

@@ -62,6 +62,17 @@ interface Props {
    * issue exists to remove, so surface one wherever `ready` can be false.
    */
   notReadyAction?: ReactNode
+  /**
+   * Information shown above the control while it IS ready — the #1097
+   * cross-device heads-up (#3825). Never a gate: the button stays live.
+   */
+  readyHint?: ReactNode
+  /**
+   * The failure sentence shown when the signature fails. Each surface supplies
+   * the verb of its own button — the connect modal approves, the agent page
+   * sets — because one hard-coded sentence cannot match both (#3895).
+   */
+  failureMessage: string
   onGranted?: () => void
   className?: string
 }
@@ -78,6 +89,8 @@ export default function BudgetGrantAction({
   trailingAction,
   notReadyHint,
   notReadyAction,
+  readyHint,
+  failureMessage,
   onGranted,
   className,
 }: Props) {
@@ -115,6 +128,8 @@ export default function BudgetGrantAction({
         </div>
       )}
 
+      {ready && readyHint ? <div className="mb-3">{readyHint}</div> : null}
+
       {/*
         Cancelled is NOT an error state. Muted ink, no border, no danger token —
         the control stays live and the user simply tries again.
@@ -125,9 +140,11 @@ export default function BudgetGrantAction({
         </p>
       )}
 
+      {/* #3895: the verb belongs to the caller's button — the connect modal
+          approves, the agent page sets. The sentence arrives via prop. */}
       {outcome === 'failed' && (
         <p className="mb-3 rounded-[10px] border border-danger/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-xs text-[var(--v2-danger)]">
-          Haven could not set the budget. Nothing changed — try again.
+          {failureMessage}
         </p>
       )}
 

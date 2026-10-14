@@ -9,12 +9,45 @@ interface BaseRowProps {
   leading?: ReactNode
   /** Optional tone for the leading icon background — renders the icon inside a 32px soft circle. */
   leadingTone?: Tone
+  /**
+   * Extra classes for the leading wrapper (the 32px circle, or the 16px icon
+   * span without a tone). The row centres it on the whole body by default; a
+   * caller whose body runs to several lines can pin it to the first line
+   * instead (AttentionList, #3880).
+   */
+  leadingClassName?: string
   /** Primary label. Rendered as 14px medium ink. */
   title: ReactNode
+  /**
+   * Extra classes for the title paragraph. The title is a single-line
+   * `truncate` by default; a caller that needs it to wrap (e.g. AttentionList's
+   * two-line clamp) passes the override here rather than to the row root, where
+   * the classes would land on the flex container and do nothing. `truncate`
+   * stays appended: `whitespace-normal` still wins over its `nowrap` because
+   * Tailwind emits whitespace utilities after `truncate`.
+   */
+  titleClassName?: string
   /** Secondary line below the title (12px ink-3). */
   subtitle?: ReactNode
+  /** Extra classes for the subtitle paragraph — same contract as `titleClassName` (#3876). */
+  subtitleClassName?: string
+  /**
+   * Extra classes for the body column — the `min-w-0 flex-1` div that holds
+   * the title and subtitle. Same contract as `titleClassName` (#3876). A
+   * caller whose trailing slot can be wider than the space left beside the
+   * body passes a readable minimum here: with `flex-wrap` on the row, the
+   * trailing then wraps onto its own line instead of squeezing the body to a
+   * one-glyph column (AttentionList's non-dismissible rows, #3813).
+   */
+  bodyClassName?: string
   /** Right-hand slot — value, badge, chevron, action button. */
   trailing?: ReactNode
+  /**
+   * Extra classes for the trailing wrapper. The wrapper is a `flex-shrink-0`
+   * flex item; a caller that needs it to take the full row width below a
+   * breakpoint (AttentionList's mobile wrap) sizes it here.
+   */
+  trailingClassName?: string
   /**
    * Visual density. `comfortable` (default) is for top-level lists; `compact`
    * for dense panels; `flush` for a row that sits inside a caller-padded box
@@ -67,9 +100,14 @@ export function Row(props: RowProps) {
   const {
     leading,
     leadingTone,
+    leadingClassName = '',
     title,
+    titleClassName = '',
     subtitle,
+    subtitleClassName = '',
+    bodyClassName = '',
     trailing,
+    trailingClassName = '',
     density = 'comfortable',
     accent = false,
     className = '',
@@ -94,7 +132,7 @@ export function Row(props: RowProps) {
       ? (
           <span
             aria-hidden="true"
-            className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full ${TONE_BG[leadingTone]}`}
+            className={[`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full ${TONE_BG[leadingTone]}`, leadingClassName].filter(Boolean).join(' ')}
           >
             <span className="inline-flex h-4 w-4 items-center justify-center">{leading}</span>
           </span>
@@ -102,7 +140,7 @@ export function Row(props: RowProps) {
       : (
           <span
             aria-hidden="true"
-            className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--v2-ink-3)]"
+            className={['inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--v2-ink-3)]', leadingClassName].filter(Boolean).join(' ')}
           >
             {leading}
           </span>
@@ -118,13 +156,13 @@ export function Row(props: RowProps) {
         />
       )}
       {leadingNode}
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{title}</p>
+      <div className={['min-w-0 flex-1', bodyClassName].filter(Boolean).join(' ')}>
+        <p className={[titleClassName, 'truncate text-sm font-medium text-[var(--v2-ink)]'].filter(Boolean).join(' ')}>{title}</p>
         {subtitle ? (
-          <p className="mt-0.5 truncate text-xs text-[var(--v2-ink-3)]">{subtitle}</p>
+          <p className={[subtitleClassName, 'mt-0.5 truncate text-xs text-[var(--v2-ink-3)]'].filter(Boolean).join(' ')}>{subtitle}</p>
         ) : null}
       </div>
-      {trailing ? <div className="flex-shrink-0">{trailing}</div> : null}
+      {trailing ? <div className={['flex-shrink-0', trailingClassName].filter(Boolean).join(' ')}>{trailing}</div> : null}
     </>
   )
 

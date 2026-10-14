@@ -19,6 +19,7 @@ const AGENT: HavenAgent = {
   delegateAddress: '0xdelegate',
   chainId: 8453,
   executionRail: 'legacy',
+  supersededBy: null,
 }
 
 function service(overrides: Partial<ConstructorParameters<typeof DelegateSweepApi>[0]> = {}) {

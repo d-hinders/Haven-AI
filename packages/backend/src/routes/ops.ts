@@ -40,6 +40,7 @@ import { createOpsAuth, opsOperatorOf } from '../middleware/ops-auth.js'
 import {
   buildOpsOnchainView,
   buildOpsOverview,
+  buildOpsSponsoredGas,
   buildOpsFeedbackList,
   buildOpsUserDetail,
   buildOpsHealth,
@@ -347,6 +348,25 @@ export default async function opsRoutes(app: FastifyInstance, opts: OpsRoutesOpt
       return reply.headers(NO_STORE).send(done.result)
     },
   )
+
+  // GET /ops/sponsored-gas — what the gas sponsorship costs (#3837), per
+  // merchant per day, next to the value the sponsored funding legs moved.
+  // Monitoring only: no threshold, no alert (owner decision 2026-10-09).
+  // The builder reaches only the sponsored-gas ledger, payment_intents and
+  // the CoinGecko price feed — no rail, chain client or signer (invariant 1).
+  app.get('/sponsored-gas', { onRequest: opsAuth }, async (request, reply) => {
+    const done = await dataRead(
+      request,
+      reply,
+      (db) => buildOpsSponsoredGas(db),
+      () => ({
+        action: 'view',
+        targetType: 'sponsored_gas',
+      }),
+    )
+    if (!done) return reply
+    return reply.headers(NO_STORE).send(done.result)
+  })
 
   // GET /ops/health — the system-health read (#3514): sweepable ERC-7710
   // intents, stuck revocations, stuck outbound lanes, the delegate balance

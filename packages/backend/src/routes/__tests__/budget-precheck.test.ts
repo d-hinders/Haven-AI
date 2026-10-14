@@ -158,20 +158,28 @@ async function seedX402Intent(
 async function seedActiveDelegation(
   agentId: string,
   budgetAtomic: string,
-  overrides: { delegationJson?: string } = {},
+  overrides: {
+    delegationJson?: string
+    /** #3802 characterization: an expiry in the past makes the grant expired-only. */
+    expiresAt?: number
+    /** #3802 characterization: a recipient address pins the budget to one payee. */
+    recipientAddress?: string
+  } = {},
 ): Promise<string> {
   const { rows } = await db.query<{ id: string }>(
     `INSERT INTO agent_delegations
-       (agent_id, chain_id, token_address, delegation_hash, delegation_json, version, status,
+       (agent_id, chain_id, token_address, recipient_address, delegation_hash, delegation_json, version, status,
         budget_atomic, period_seconds, start_date, expires_at)
-     VALUES ($1, $2, $3, $4, $5, 1, 'active', $6, 604800, 0, 99999999999) RETURNING id`,
+     VALUES ($1, $2, $3, $4, $5, $6, 1, 'active', $7, 604800, 0, $8) RETURNING id`,
     [
       agentId,
       CHAIN,
       USDC,
+      overrides.recipientAddress ?? null,
       `0x${String(++seq).padStart(64, '3')}`,
       overrides.delegationJson ?? JSON.stringify({ kind: 'test-fixture' }),
       budgetAtomic,
+      overrides.expiresAt ?? 99999999999,
     ],
   )
   return rows[0].id
@@ -345,6 +353,50 @@ describeDb('POST /machine-payments/budget-precheck (#3054)', () => {
     await vi.waitFor(async () => {
       expect(await refusalRows(agentId)).toHaveLength(1)
     })
+  })
+
+  // ── #3802 characterization: expiry already gates the payment path ─────────
+  // The budget-VIEWING predicate changes in #3802; the payment selection does
+  // NOT — it has carried `start_date <= now AND expires_at > now` since #1698.
+  // These two pin that an EXPIRED grant is already refused before #3802
+  // touches any view, and stay green after (the first commits on today's
+  // code; the spec's "characterization first").
+
+  it('#3802 characterization: an EXPIRED-ONLY budget is refused 403 delegation_budget_exceeded with remaining_atomic "0"', async () => {
+    const { agentId } = await seedDelegationAgent()
+    // 5.00 USDC remaining on the LEDGER — but the grant expired a minute ago.
+    await seedActiveDelegation(agentId, '5000000', { expiresAt: Math.floor(Date.now() / 1000) - 60 })
+
+    const res = await app.inject({ method: 'POST', url: '/machine-payments/budget-precheck', headers, payload: precheckBody() })
+    expect(res.statusCode).toBe(403)
+    expect(res.json().error_code).toBe('delegation_budget_exceeded')
+    expect(res.json().remaining_atomic).toBe('0')
+
+    await vi.waitFor(async () => {
+      expect(await refusalRows(agentId)).toHaveLength(1)
+    })
+  })
+
+  it('#3802 characterization: an expired PINNED budget with no merchantTo answers 403, not 409 — an expired pin is not a live pin', async () => {
+    const { agentId } = await seedDelegationAgent()
+    // A merchant-locked budget that EXPIRED: naming no payee must NOT read as
+    // "the agent holds a funded pin" (the 409 retry_with_explicit_context
+    // answer) — the pin is dead, so the honest answer is the exhausted-budget
+    // 403, exactly as the live-pin gate (`liveRecipientPins`) decides.
+    await seedActiveDelegation(agentId, '5000000', {
+      expiresAt: Math.floor(Date.now() / 1000) - 60,
+      recipientAddress: '0x' + '5a'.repeat(20),
+    })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/budget-precheck',
+      headers,
+      payload: precheckBody({ merchantTo: undefined }),
+    })
+    expect(res.statusCode).toBe(403)
+    expect(res.json().error_code).toBe('delegation_budget_exceeded')
+    expect(res.json().remaining_atomic).toBe('0')
   })
 
   // ── The dedupe fold key is UNCHANGED (epic decision 4) ───────────────────

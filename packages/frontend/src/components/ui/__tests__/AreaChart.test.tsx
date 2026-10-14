@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { AreaChart, deltaLabel } from '../AreaChart'
-import type { AreaPoint } from '../AreaChart'
+import type { AreaPoint, FullChartProps } from '../AreaChart'
 
 /**
  * `ui/AreaChart` (#2948, analytics slice D).
@@ -38,7 +38,7 @@ const FOUR_POINTS: AreaPoint[] = [
 const SUMMARY = 'Balance over 4 days: ends at 1,120.00 USD, 120.00 USD spent across the range'
 
 function renderChart(
-  overrides: Partial<Parameters<typeof AreaChart>[0]> = {},
+  overrides: Partial<FullChartProps> = {},
   points: AreaPoint[] = FOUR_POINTS,
 ) {
   return render(

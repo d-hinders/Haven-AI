@@ -1,6 +1,13 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+// #3812: the in-flow connect/switch control reads wagmi and RainbowKit, which
+// these tests do not provide. Stub it so the test can assert WHEN a flow
+// offers it; `WalletConnectAction.test.tsx` covers what it does.
+vi.mock('@/components/WalletConnectAction', () => ({
+  default: () => <button type="button">Connect wallet</button>,
+}))
+
 const { mockUseSend, mockToast } = vi.hoisted(() => ({
   mockUseSend: vi.fn(),
   mockToast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
@@ -85,21 +92,30 @@ describe('DelegationSendModal (#1083)', () => {
   it('names the owner wallet as the blocker when loaded but not ready', () => {
     mockUseSend.mockReturnValue(base({ ready: false }))
     render(<DelegationSendModal {...PROPS} />)
-    expect(screen.getByText(/Connect the account.s owner wallet/)).toBeTruthy()
+    expect(screen.getByText(/Connect your account owner wallet/)).toBeTruthy()
     expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true)
+    // #3812: the way out is in the modal, not only in the header.
+    expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeTruthy()
+  })
+
+  it('a ready (passkey) send offers no wallet connect (#3812)', () => {
+    mockUseSend.mockReturnValue(base())
+    render(<DelegationSendModal {...PROPS} />)
+    expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
   })
 
   it('claims no blocker while the signer set is still loading', () => {
     mockUseSend.mockReturnValue(base({ loaded: false, ready: false }))
     render(<DelegationSendModal {...PROPS} />)
-    expect(screen.queryByText(/Connect the account.s owner wallet/)).toBeNull()
+    expect(screen.queryByText(/Connect your account owner wallet/)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
   })
 
   it('a failed signer fetch is a retryable error, not owner-wallet advice', () => {
     const reload = vi.fn()
     mockUseSend.mockReturnValue(base({ loaded: false, loadError: true, ready: false, reload }))
     render(<DelegationSendModal {...PROPS} />)
-    expect(screen.queryByText(/Connect the account.s owner wallet/)).toBeNull()
+    expect(screen.queryByText(/Connect your account owner wallet/)).toBeNull()
     expect(screen.getByText(/could not load/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(reload).toHaveBeenCalled()
@@ -110,7 +126,7 @@ describe('DelegationSendModal (#1083)', () => {
     render(<DelegationSendModal {...PROPS} />)
     expect(screen.getByText(/may be on another device/)).toBeTruthy()
     // The blocker copy must NOT show — this is a hint on a working send.
-    expect(screen.queryByText(/Connect the account.s owner wallet/)).toBeNull()
+    expect(screen.queryByText(/Connect your account owner wallet/)).toBeNull()
   })
 
   it('copy is outcome language — no delegation/userop/treasury jargon', () => {

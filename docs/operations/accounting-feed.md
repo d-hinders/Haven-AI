@@ -508,7 +508,10 @@ transaction, the SIE `#VER` text, the legacy Fortnox voucher description and
 the receipt underlag PDF:
 
 - the **verified merchant settlement** (`machine_metadata.merchant_settlement_tx_hash`,
-  recorded and chain-verified by the #3475 evidence path) when one is recorded;
+  recorded and chain-verified by the #3475 evidence path or the #3888
+  settlement sweep — an agent report or a chain-detected
+  `AuthorizationUsed(delegate, derived nonce)`, both through the same verifier)
+  when one is recorded;
 - else the **funding hash, labelled as funding**.
 
 That is the same hash #3763 headlines in the Haven UI, so the books, the UI

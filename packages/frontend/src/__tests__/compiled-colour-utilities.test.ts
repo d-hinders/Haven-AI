@@ -259,7 +259,14 @@ describe('every opacity-modified colour utility compiles to a colour (#1818)', (
     // Without this, a tokenizer bug that silently swallowed a region would turn
     // every assertion below into a vacuous pass over an empty array — which is
     // the same class of invisible failure the file exists to catch.
-    expect(bases.length).toBeGreaterThan(50)
+    //
+    // The floor is a VACUITY guard, not a ratchet: it exists to catch the
+    // count collapsing toward zero (scanner breakage), not to pin the exact
+    // census. #3808 deleted RecoveryNudge — the last `border-brand/25` — and
+    // moved the distinct-base count 51 → 50, which is a legitimate deletion,
+    // not scanner blindness. 45 keeps several deletions of headroom while
+    // still failing loudly on a swallowed region.
+    expect(bases.length).toBeGreaterThan(45)
     expect(new Set(all.map((u) => u.file)).size).toBeGreaterThan(30)
   })
 
@@ -268,7 +275,10 @@ describe('every opacity-modified colour utility compiles to a colour (#1818)', (
     // If those were scanned as call-sites, the guard would fail on its own
     // documentation and the fix would be to delete the explanation.
     expect(bases).not.toContain('ring-current/30') // Toast.tsx:141
-    expect(bases).not.toContain('bg-[var(--v2-brand)]/40') // ConnectStepShell.tsx:49
+    // #3832 deleted the ConnectStepShell ticker and the `bg-[var(--v2-brand)]/40`
+    // comment this line used to target; TopBar's comment quotes another dead
+    // class, so the guard keeps a second real comment to be wrong about.
+    expect(bases).not.toContain('bg-[var(--v2-bg)]/85') // TopBar.tsx:44
   })
 
   it('no dead class outside the triaged inventory', async () => {

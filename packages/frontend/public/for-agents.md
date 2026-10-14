@@ -28,7 +28,7 @@ haven budget grant <agentId> --amount <n> --token USDC --period <minutes> [--rec
 haven budget revoke <agentId> <delegationHash> [--wait]
 ```
 
-The CLI never signs: it prints a dashboard link, your user opens it and signs with their passkey or wallet. `--wait` polls until the human's signature lands. The hash for `revoke` is in `haven agents show <agentId>`.
+The CLI never signs: it prints a dashboard link, your user opens it and signs with their passkey or wallet. `--wait` polls until the human's signature lands. The hash for `revoke` is in `haven budget show <agentId> --hashes`.
 
 ## Hand-off scripts
 
@@ -90,7 +90,7 @@ Nothing here needs you to. Steps 1-3 — account, funding, budget — are links:
 
 ## If something breaks
 
-If a Haven result carries `client_update`, that client is out of date: run its `upgrade_command` as given, then any repair line it prints, then retry. `required: true` means payments are refused until you do. What changed: [/releases](/releases).
+If a Haven result carries `client_update`, that client is out of date: run its `upgrade_command` exactly as given — a connector command may name your pair with `--name <slug>` — then any repair line it prints, then retry. `required: true` means payments are refused until you do. What changed: [/releases](/releases).
 
 Something else wrong? `haven feedback submit "<text>"` sends it to Haven — it needs `haven login` first. Never put a credential in that text: no API key, no delegate key, no session token, no recovery phrase.
 

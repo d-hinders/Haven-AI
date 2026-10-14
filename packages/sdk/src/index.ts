@@ -7,6 +7,7 @@ export { verifyPaymentReceipt, RECEIPT_VERSION } from './receipt.js'
 export type { PaymentReceipt, ReceiptVerification } from './receipt.js'
 
 export { toolDescriptions, composeDescription } from './tool-descriptions.js'
+export { catalogFundingLegExpected, type CatalogFundingLegHint } from './catalog-funding-leg.js'
 export type { ToolDescription, SharedToolKey } from './tool-descriptions.js'
 
 export { HAVEN_SKILL_MD, HAVEN_SKILL_BODY_MD, SKILL_FOLDER_NAME } from './skill-content.js'
@@ -134,6 +135,7 @@ export type {
   ResumeX402PaymentInput,
   MachinePaymentRail,
   HavenAgent,
+  HavenAgentSupersession,
   HavenAgentSummary,
   HavenAgentAllowanceSummary,
   HavenAgentReadiness,
@@ -234,6 +236,8 @@ export { isZeroSettlementTxHash } from './merchant-completion.js'
 // #3727: the PAYMENT-RESPONSE decoder the hosted outcome report reuses —
 // it takes `transaction` (or its aliases) only and never surfaces `payer`.
 export { parseMerchantSettlement } from './merchant-completion.js'
+// #3888: the shared EIP-3009 nonce derivation (also on the edge surface).
+export { deriveX402PaymentNonce, X402_PAYMENT_NONCE_TAG } from './x402-nonce.js'
 export {
   resolveX402RetryTarget,
   isSecureX402RetryTarget,

@@ -7,10 +7,13 @@ import { describe, expect, it } from 'vitest'
 import { ethers } from 'ethers'
 import {
   appendHistory,
+  buildBalancesReport,
   burnPerDay,
   classify,
   collectBalances,
+  MERCHANT_TOPUP_TARGET_WEI,
   MIN_READINGS,
+  readMerchant,
   readingsFor,
   RELAYER_FALLBACK_FLOOR_WEI,
   runwayDays,
@@ -227,6 +230,20 @@ describe('collectBalances', () => {
     }
   })
 
+  it('readMerchant carries /healthz chain_id when present; its absence keeps the reading (#3836)', async () => {
+    const settlement = {
+      address: SETTLEMENT, native_balance_wei: ETH(0.01).toString(), cost_per_settlement_wei: COST.toString(), warn_floor: 25, fail_floor: 12,
+    }
+    const src = (body: unknown): BalanceSources =>
+      ({ api: null, demoMerchantUrl: 'https://m.test', provider: provider(0n, {}), fetchImpl: healthz(body) })
+    expect(await readMerchant(src({ chain_id: 84532, settlement }))).toMatchObject({ ok: true, chainId: 84532 })
+    const absent = await readMerchant(src({ settlement }))
+    expect(absent.ok).toBe(true)
+    expect(absent).not.toHaveProperty('chainId')
+    // A non-numeric chain_id is not trusted as one.
+    expect(await readMerchant(src({ chain_id: '84532', settlement }))).not.toHaveProperty('chainId')
+  })
+
   it('a reader that hangs becomes unknown at the deadline, never a job timeout', async () => {
     const hanging = {
       call: () => new Promise(() => {}),
@@ -286,5 +303,60 @@ describe('relayer floor parity', () => {
     const m = text.match(/RELAYER_LOW_BALANCE_WEI\s*=\s*(?:ethers\.)?parseEther\(\s*['"]([0-9.]+)['"]\s*\)/)
     expect(m, 'RELAYER_LOW_BALANCE_WEI = parseEther(...) not found in backend relayer.ts').not.toBeNull()
     expect(ethers.parseEther(m![1]!)).toBe(RELAYER_FALLBACK_FLOOR_WEI)
+  })
+})
+
+/**
+ * #3896: the merchant's target. Once the job refills it daily, its history is
+ * post-top-up readings and the observed burn is rounding noise, so the band is
+ * a top-up-FAILURE alarm. These pin what the target decides.
+ */
+describe('merchant top-up target (#3896)', () => {
+  const COST = 2_500_000_000_000n // SETTLEMENT_COST_WEI
+  const criticalFloor = COST * 12n
+  const fallbackFloor = COST * 25n
+  const BURN = ETH(0.00038) // the burn the 2026-10-11 run implied
+  const CLAIM = ETH(0.0001)
+
+  it('right after the switch, with the old drops still in the window, a wallet refilled to the target reads ok (0.002 would read warn)', () => {
+    const report = (todayWei: bigint) => {
+      const days = 8
+      const history: HistoryEntry[] = falling(ETH(0.004), BURN, days).map((wei, i) => ({
+        date: `2026-10-0${i + 1}`,
+        balances: { merchant: wei.toString() },
+      }))
+      const merchant = { ok: true as const, address: '0x' + 'cd'.repeat(20), atomic: todayWei, criticalFloor, fallbackFloor, chainId: 84532 }
+      const off = { ok: false as const, reason: 'unused' }
+      return buildBalancesReport({ treasury: off, merchant, relayer: off }, history, new Date('2026-10-12T12:00:00Z'))
+        .rows.find((r) => r.key === 'merchant')!
+    }
+    expect(MERCHANT_TOPUP_TARGET_WEI).toBe(ETH(0.004))
+    expect(report(MERCHANT_TOPUP_TARGET_WEI)).toMatchObject({ band: 'ok', basis: 'observed' })
+    expect(report(ETH(0.002))).toMatchObject({ band: 'warn', basis: 'observed' })
+  })
+
+  /** Days of notice: from the first non-ok band to the balance falling below the critical floor, top-ups failing. */
+  const noticeDays = (target: bigint) => {
+    // 14 refilled readings in [target, target + one claim).
+    const history = Array.from({ length: 14 }, (_, i) => target + (CLAIM * BigInt((i * 37) % 100)) / 100n)
+    let balance = history.at(-1)!
+    let firstAlarm = -1
+    for (let day = 1; day <= 30; day++) {
+      balance = balance > BURN ? balance - BURN : 0n
+      history.push(balance)
+      history.splice(0, history.length - 14)
+      const { band } = classify({ balance, readings: history, criticalFloor, fallbackFloor })
+      if (firstAlarm < 0 && band !== 'ok') firstAlarm = day
+      if (balance < criticalFloor) return day - firstAlarm
+    }
+    throw new Error('never fell below the critical floor')
+  }
+
+  it('when top-ups stop, the target gives at least 5 days of warn before the critical floor (0.002 gives fewer)', () => {
+    expect(noticeDays(MERCHANT_TOPUP_TARGET_WEI)).toBeGreaterThanOrEqual(5)
+    expect(noticeDays(ETH(0.002))).toBeLessThan(5)
+    // The figures agent-qa.md and the MERCHANT_TOPUP_TARGET_WEI comment state, at this burn.
+    expect(noticeDays(MERCHANT_TOPUP_TARGET_WEI)).toBe(7)
+    expect(noticeDays(ETH(0.002))).toBe(3)
   })
 })

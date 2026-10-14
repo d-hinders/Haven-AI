@@ -72,15 +72,19 @@ sign-only signer, whose entire network surface is an authenticated, read-only
 sign-context fetch from Haven (#1263 for x402, #3271 for direct payments) that
 never carries the key.
 
-The same boundary decides **who retires a superseded agent** (#2561). A
-connector run on a machine that already holds agents leaves those agents alive
-with their own keys, and it reports their ids so the DASHBOARD can offer the
-owner a revoke that also ends the agent's budget with one owner signature
-(#3542). The connector never revokes: `POST /agents/:id/revoke`
-is owner-authenticated and the connector holds only agent API keys, so an agent
-credential retiring a sibling agent would be the "agent editing its own
-authority" that the re-key routes (#1694) already refuse. Nothing is automatic
-— the offer is rendered, the owner clicks, one agent at a time.
+The same boundary decides **who retires an agent** (#2561). A connector run on
+a machine that already holds agents leaves those agents alive with their own
+keys, and it reports their ids so the DASHBOARD can list them for the owner.
+Since named pairs became the default (#3737) most of those agents coexist with
+the new one rather than being replaced by it, and the report cannot tell the
+two apart, so the dashboard lists the owner's agents among them that Haven has not revoked — active,
+paused or still in setup — with a link to each
+agent page and offers no revoke there (#3830, owner decision 2026-10-09);
+revoking — which also ends the agent's budget with one owner signature (#3542)
+— stays on the agent page. The connector never revokes: `POST
+/agents/:id/revoke` is owner-authenticated and the connector holds only agent
+API keys, so an agent credential retiring a sibling agent would be the "agent
+editing its own authority" that the re-key routes (#1694) already refuse.
 
 The report distinguishes three states rather than two, and the third is why:
 a list of ids, `[]` when the credential scan ran and found none, and `null`

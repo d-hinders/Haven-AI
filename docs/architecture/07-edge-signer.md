@@ -503,7 +503,12 @@ account is permanently out of scope.
   a permissive-file warning.
 - First-launch consent must match the current signer identity and tool set.
   Acknowledgement uses `HAVEN_SIGNER_ACK` or a local
-  `<credentials>.signer-ack.json` sidecar.
+  `<credentials>.signer-ack.json` sidecar. Re-acknowledgement after a tool-set
+  change needs no setup token (#3799): run the recorded wrapper with `--ack`
+  and stdin closed (`<dir>/bin/haven-signer.mjs --ack < /dev/null`), or
+  `npx @haven_ai/connect --doctor --repair --ack-local-tools` — the ack is
+  written by the installed signer, so an override cannot mint a mismatching
+  hash.
 - MCP operations append JSONL audit entries next to the credential file or at
   `~/.haven/signer-audit.jsonl`. Entries omit keys, signatures, and headers.
   Since #3172 the sidecar is created owner-only (`0600`), a permissive one is

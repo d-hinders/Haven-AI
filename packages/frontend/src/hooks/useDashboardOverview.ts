@@ -1,8 +1,9 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 import { useVisiblePolling } from '@/hooks/useVisiblePolling'
+import { browserTimeZone } from '@/lib/analytics-range'
 import type { DashboardOverviewResponse } from '@/types/dashboard'
 
 export function useDashboardOverview() {
@@ -11,9 +12,20 @@ export function useDashboardOverview() {
   const [error, setError] = useState<string | null>(null)
   const requestIdRef = useRef(0)
 
-  // #2732: the `silent` variant (used by visible-only polling) must change no
-  // visible state on a failed tick — the demo screen keeps its last good
-  // values instead of flipping to an error branch mid-presentation.
+  // #3810: the overview's activity groups bucket by the user's LOCAL day, so
+  // the request names the zone — the browser's IANA name, exactly as
+  // `/analytics/overview` receives its `tz` (same validation server-side, and
+  // the same `browserTimeZone` rule: an unresolvable zone is omitted and the
+  // documented UTC default takes over, never a guess). The path is memoized
+  // so a re-render that changes nothing cannot re-issue the request.
+  const path = useMemo(() => {
+    const params = new URLSearchParams()
+    const zone = browserTimeZone()
+    if (zone !== undefined) params.set('tz', zone)
+    const query = params.toString()
+    return query ? `/dashboard/overview?${query}` : '/dashboard/overview'
+  }, [])
+
   const fetchOverview = useCallback(async (silent = false) => {
     const requestId = ++requestIdRef.current
     try {
@@ -21,7 +33,7 @@ export function useDashboardOverview() {
         setLoading(true)
         setError(null)
       }
-      const response = await api.get<DashboardOverviewResponse>('/dashboard/overview')
+      const response = await api.get<DashboardOverviewResponse>(path)
       if (requestIdRef.current !== requestId) return
 
       setData(response)
@@ -40,7 +52,7 @@ export function useDashboardOverview() {
         setLoading(false)
       }
     }
-  }, [])
+  }, [path])
 
   useEffect(() => {
     fetchOverview()

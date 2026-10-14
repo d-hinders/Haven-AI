@@ -38,6 +38,41 @@ export async function getFiatValuesForTokenAmount(
   }
 }
 
+/**
+ * #3824: the SERVE-TIME fiat triple — what a token amount is worth at today's
+ * rate, priced now rather than read from a stored book-time capture.
+ *
+ * Deliberately NOT `getFiatValuesForTokenAmount`'s semantics. That helper
+ * books a value and returns an arithmetic product of the amount and whatever
+ * quote came back — and `getTokenPrice` answers a ZERO price for a symbol
+ * CoinGecko does not list (`infra/prices.ts`), so an unknown token would
+ * silently read "0". On a display surface that is a lie of the worst kind:
+ * inbound spam tokens would render "≈ 0" instead of "unknown". Here a price
+ * ≤ 0, an unparseable amount, or a failed read is `null` in every currency —
+ * "not priced", never "worth nothing".
+ */
+export async function getServeTimeFiatValues(
+  tokenSymbol: string,
+  amountHuman: string,
+): Promise<FiatValues> {
+  const amount = Number(amountHuman)
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { usd: null, eur: null, sek: null }
+  }
+
+  try {
+    const price = await getTokenPrice(tokenSymbol)
+    const convert = (rate: number) => (rate > 0 ? amount * rate : null)
+    return {
+      usd: convert(price.usd),
+      eur: convert(price.eur),
+      sek: convert(price.sek),
+    }
+  } catch {
+    return { usd: null, eur: null, sek: null }
+  }
+}
+
 /** Where a captured FX rate came from. Spot at settlement for now (open Q #1). */
 export const FX_SOURCE_SPOT = 'coingecko_spot'
 

@@ -25,7 +25,6 @@ import { expect, test } from '@playwright/test'
 import {
   collectBrowserErrors,
   dashboardOverview,
-  dashboardTransaction,
   expectNoHorizontalOverflow,
   mockHavenApi,
   seedAuthenticatedSession,
@@ -65,6 +64,35 @@ const ROUTES = ['/dashboard', '/agents', '/transactions'] as const
  * listed here is still gated against escaping the shell entirely.
  */
 const KNOWN_CONTENT_OVERFLOW: Partial<Record<(typeof ROUTES)[number], string>> = {}
+
+/**
+ * One #3824 activity group whose newest member is a confirmed x402 payment
+ * toward `merchant` — the shape the redesigned dashboard's ActivitySection
+ * renders (#3810). `latestAt` and `to` are parameters so two seeded groups
+ * differ in the fields the rendered React key is built from. The raw `to`
+ * never renders: the row's title is the x402 resource's hostname (the
+ * no-address mode of `counterpartyLabel`).
+ */
+function dashboardActivityGroup(merchant: 'alpha.example' | 'beta.example', latestAt: string, to: string) {
+  return {
+    count: 1,
+    sumAtomic: '2500000',
+    tokenSymbol: 'USDC',
+    decimals: 6,
+    latestAt,
+    agentId: null,
+    agentName: 'Scout',
+    source: 'x402',
+    x402ResourceUrl: `https://${merchant}/api`,
+    to,
+    merchantName: null,
+    activityType: null,
+    direction: 'out' as const,
+    status: 'confirmed' as const,
+    approxAmount: '25.0000',
+    approxCurrency: 'SEK' as const,
+  }
+}
 
 /**
  * The local `measureContentOverflow` that used to live here was folded into the
@@ -212,7 +240,7 @@ test.describe('mobile viewport', () => {
   }
 
   /**
-   * The dashboard's compact transaction row must not spill out of its own box
+   * The dashboard's compact activity row must not spill out of its own box
    * (#1833).
    *
    * `TransactionActivityRow`'s `compact` density pinned the row to `h-[72px]`
@@ -224,15 +252,12 @@ test.describe('mobile viewport', () => {
    * into its neighbour.
    *
    * BOTH HALVES ARE ASSERTED — the cause AND the reported symptom — and
-   * getting a second row is what makes the second half mean anything. The
-   * shared `dashboardTransaction` fixture serves exactly ONE transaction, so an
-   * adjacency loop over it would iterate zero pairs and pass no matter what the
-   * layout did: the "guard that cannot fail" shape this suite keeps paying for.
-   * Editing the shared fixture would fix that and blast-radius every other spec
-   * (it also feeds `/transactions`), so this test instead registers its OWN
-   * `**\/api/transactions/*` handler AFTER `mockHavenApi`. Playwright tries the
-   * most-recently-registered matching route first, so the override is scoped to
-   * this test and nothing else moves.
+   * getting a second row is what makes the second half mean anything: an
+   * adjacency loop over a single row would iterate zero pairs and pass no
+   * matter what the layout did — the "guard that cannot fail" shape this
+   * suite keeps paying for. So the seed serves TWO rows, scoped to this test
+   * (see below), rather than relying on `mockHavenApi`'s single-group
+   * overview.
    *
    * The overflow half would be sufficient alone — rows are stacked block
    * siblings, so "no row's content escapes its own box" implies "no row
@@ -247,14 +272,20 @@ test.describe('mobile viewport', () => {
    * is the same reason the fix sizes to content instead of picking a bigger
    * number.
    *
-   * The row is located by CONTENT — a `/transactions` link carrying a movement
-   * — not by class. The fix IS a class change, so a probe written against
-   * `.h-\[72px\]` would measure the shape it was written for and then silently
-   * find nothing. The `From `/`To ` filter also excludes the metrics card,
-   * which is a `/transactions` link too and measured 122px at every width,
-   * quietly padding the row count while testing nothing.
+   * The rows are located by CONTENT — a `/transactions` link carrying one of
+   * the SEEDED merchant titles — not by class. The fix IS a class change, so
+   * a probe written against `.h-\[72px\]` would measure the shape it was
+   * written for and then silently find nothing. #3810 moved the underlying
+   * wire: the dashboard renders #3824's grouped activity
+   * (`overview.activity`); the 5-row `transactions` preview is gone from the
+   * wire (#3858) —
+   * seeding `overview.transactions` feeds a shape the page never reads and
+   * the row count quietly drops to zero. The title filter also excludes the
+   * section's "View all" link and the metrics card, which are
+   * `/transactions` links too but carry no seeded title, quietly padding the
+   * row count while testing nothing.
    */
-  test('/dashboard compact transaction row stays inside its box at mobile widths', async ({
+  test('/dashboard compact activity row stays inside its box at mobile widths', async ({
     page,
   }) => {
     test.slow()
@@ -264,26 +295,31 @@ test.describe('mobile viewport', () => {
     // The endpoint is `/dashboard/overview`, NOT `/transactions/{accountId}`.
     // Worth naming because the plausible guess is wrong and fails silently:
     // an override on `**\/api/transactions/*` never matches, the page keeps
-    // `mockHavenApi`'s single-row overview, and the only symptom is a row
+    // `mockHavenApi`'s single-group overview, and the only symptom is a row
     // count of 1. The request log settled it.
     //
-    // The two rows differ in `hash` (React's key) and direction, so a
-    // measurement cannot silently read the same element twice.
-    await page.route('**/api/dashboard/overview', async (route) => {
+    // #3810: the rows come from `overview.activity` (#3824 groups) — the old
+    // seed fed the `transactions` preview, which the page no longer reads.
+    // The two groups differ in `latestAt`/`to` (the rendered React key) and
+    // in merchant hostname (the row's title), so a measurement cannot
+    // silently read the same element twice.
+    await page.route('**/api/dashboard/overview**', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
           ...dashboardOverview,
-          transactions: [
-            dashboardTransaction,
-            {
-              ...dashboardTransaction,
-              hash: `0x${'cd'.repeat(32)}`,
-              direction: 'in',
-              valueFormatted: '320.00',
-              timestamp: dashboardTransaction.timestamp - 3600,
-            },
+          activity: [
+            dashboardActivityGroup(
+              'alpha.example',
+              new Date(Date.now() - 60_000).toISOString(),
+              '0x1111111111111111111111111111111111111111',
+            ),
+            dashboardActivityGroup(
+              'beta.example',
+              new Date(Date.now() - 3_660_000).toISOString(),
+              '0x2222222222222222222222222222222222222222',
+            ),
           ],
         }),
       })
@@ -315,11 +351,12 @@ test.describe('mobile viewport', () => {
 
         const links = Array.from(document.querySelectorAll('a[href="/transactions"]'))
           .filter(visible)
-          // A transaction row carries a <TransactionMovement>; the metrics
-          // card and the section's "Open transactions" button do not.
+          // A dashboard activity row carries its seeded merchant title (the
+          // x402 hostname the no-address mode renders); the "View all" link
+          // and the metrics card do not.
           .filter((el) => {
             const text = el.textContent ?? ''
-            return text.includes('From ') && text.includes('To ')
+            return text.includes('alpha.example') || text.includes('beta.example')
           })
 
         return links.map((link) => {
@@ -357,7 +394,7 @@ test.describe('mobile viewport', () => {
       // that keeps the adjacency check honest.
       expect(
         rows.length,
-        `@${width}px: expected two dashboard transaction rows to measure, got ${rows.length}`,
+        `@${width}px: expected two dashboard activity rows to measure, got ${rows.length}`,
       ).toBe(2)
 
       // 1. THE CAUSE — content stays inside its own row.

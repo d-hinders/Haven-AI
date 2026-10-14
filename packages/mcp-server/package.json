@@ -1,6 +1,6 @@
 {
   "name": "@haven_ai/mcp-server",
-  "version": "0.9.0-alpha.0",
+  "version": "0.10.0-alpha.0",
   "private": true,
   "description": "Hosted, keyless Haven MCP server — constructs and relays payments over Streamable HTTP. Never holds the delegate key; the edge signs.",
   "type": "module",
@@ -30,7 +30,8 @@
     "build": "npm --prefix ../sdk run build && tsup",
     "start": "node dist/cli.js",
     "test": "npm --prefix ../core run build && npm --prefix ../sdk run build && npm --prefix ../mcp run build && npm --prefix ../signer run build && vitest run",
-    "typecheck": "npm --prefix ../core run build && npm --prefix ../sdk run build && npm --prefix ../mcp run build && npm --prefix ../signer run build && tsc --noEmit"
+    "typecheck": "npm --prefix ../core run build && npm --prefix ../sdk run build && npm --prefix ../mcp run build && npm --prefix ../signer run build && tsc --noEmit",
+    "snapshot:regen": "npm --prefix ../core run build && npm --prefix ../sdk run build && npm --prefix ../mcp run build && npm --prefix ../signer run build && UPDATE_TOOL_CONTRACT_SNAPSHOT=1 vitest run src/tool-contract-snapshot.test.ts"
   },
   "keywords": [
     "haven",

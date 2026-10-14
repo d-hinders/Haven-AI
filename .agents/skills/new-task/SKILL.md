@@ -427,7 +427,9 @@ non-epic issues carried `code-quality`. #3307 went from claim to merge in about
 `code-quality` is the selector for a no-argument
 [ship-next](../ship-next/SKILL.md) run. That loop is rarely driven by hand. Two
 scheduled workflows (`guard-freshness.yml`, `db-concurrency-proof.yml`) also add
-the label automatically, to queue the CI-health issues they file.
+the label automatically, to queue the CI-health issues they file, and so does
+the push-driven `dev-push-health.yml` (#3890) when a CI job on `dev` itself is
+red.
 
 - Do not add `code-quality` by default, and do not offer it as a closing step.
 - When the requester passes `--ship` or clearly asks to ship now, run § *Issue

@@ -24,3 +24,9 @@ export * from './submission-reconciler.js'
 // (prepare_reverted / prepare_failed). Exports are disjoint from the six
 // re-exports above (checked when this was added).
 export * from './prepare-failure.js'
+// #3837: the sponsored-gas recorder (awaited-and-swallowed) and its leg
+// mapper. Exports are disjoint from the re-exports above: this module's
+// names (recordSponsoredUserOpGas, sponsoredLegOf, SponsoredLeg,
+// SponsoredUserOpOutcome, SponsoredUserOpGasRecord) exist nowhere else in
+// the barrel.
+export * from './sponsored-gas.js'

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { StatusBadge } from '@/components/ui/StatusBadge'
-import { Amount } from './Amount'
+import { Amount, type AmountCurrency } from './Amount'
 import { DirectionMark } from './DirectionMark'
 import { ExternalLink } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
@@ -27,11 +27,28 @@ export function TransactionActivityRow({
   details = [],
   action,
   density = 'comfortable',
+  countLabel,
+  fiat,
 }: {
   title: string
   description?: ReactNode
-  /** Formatted, unsigned amount — sign and tone come from `direction`/`failed` via <Amount>. */
+  /**
+   * Token mode: a formatted, unsigned amount — sign and tone come from
+   * `direction`/`failed` via <Amount>. `fiat` (below) takes precedence when
+   * present; the two modes are mutually exclusive by construction.
+   */
   value: string
+  /** Optional group-count marker (#3810): a muted "×N" beside the title. */
+  countLabel?: string
+  /**
+   * Currency mode (#3805, #3810): the row's figure is ALREADY a fiat
+   * valuation server-side (book-time `convertedAmount`, or #3824's
+   * `approxAmount`), so the amount renders through <Amount>'s currency mode —
+   * `≈` for serve-time, an em dash for an unknown valuation. Omitted for
+   * token-denominated rows (the transactions table) — the default keeps every
+   * existing caller byte-identical.
+   */
+  fiat?: { amount: number | null; currency: AmountCurrency; approx?: boolean }
   asset?: string
   failed?: boolean
   status?: string
@@ -101,6 +118,9 @@ export function TransactionActivityRow({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <p className="min-w-0 truncate text-sm font-medium text-[var(--v2-ink)]">{title}</p>
+            {countLabel ? (
+              <span className="text-xs font-medium text-[var(--v2-ink-3)]">{countLabel}</span>
+            ) : null}
             {status ? <StatusBadge tone={statusTone}>{status}</StatusBadge> : null}
           </div>
           {description ? (
@@ -123,12 +143,22 @@ export function TransactionActivityRow({
       <div className="flex items-center justify-between gap-3 pl-11 sm:block sm:pl-0 sm:text-right">
         <div>
           <p>
-            <Amount
-              value={value}
-              symbol={asset}
-              direction={direction === 'neutral' ? undefined : direction}
-              failed={failed}
-            />
+            {fiat ? (
+              <Amount
+                amount={fiat.amount}
+                currency={fiat.currency}
+                approx={fiat.approx}
+                direction={direction === 'neutral' ? undefined : direction}
+                failed={failed}
+              />
+            ) : (
+              <Amount
+                value={value}
+                symbol={asset}
+                direction={direction === 'neutral' ? undefined : direction}
+                failed={failed}
+              />
+            )}
           </p>
           {(timestamp || action) && !isCompact ? (
             <div className="mt-1 flex items-center justify-end gap-2 text-xs text-[var(--v2-ink-3)]">

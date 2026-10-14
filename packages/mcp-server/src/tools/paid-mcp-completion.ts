@@ -79,6 +79,7 @@ import {
   parseMcpTransport,
   serializeMcpTransport,
   submitSignatureWithExpiryMapping,
+  MERCHANT_OUT_OF_GAS_REASON,
 } from './support/mcp-context.js'
 import { isPendingApproval } from './support/quote-response.js'
 
@@ -473,14 +474,16 @@ function redactCredentialString(key: string, value: string): string {
  */
 function merchantNotReadyBodyFor(
   body: unknown,
-): { reasonCode?: string; retryAfterS?: number } | null {
+): { reasonCode?: string; retryAfterS?: number; settlementsRemaining?: number; failFloor?: number } | null {
   if (!body || typeof body !== 'object' || (body as Record<string, unknown>).error !== 'merchant_not_ready') {
     return null
   }
-  const { reason_code, retry_after_s } = body as Record<string, unknown>
+  const { reason_code, retry_after_s, settlements_remaining, fail_floor } = body as Record<string, unknown>
   return {
     reasonCode: typeof reason_code === 'string' ? reason_code : undefined,
     retryAfterS: typeof retry_after_s === 'number' ? retry_after_s : undefined,
+    settlementsRemaining: typeof settlements_remaining === 'number' ? settlements_remaining : undefined,
+    failFloor: typeof fail_floor === 'number' ? fail_floor : undefined,
   }
 }
 
@@ -778,8 +781,18 @@ export async function deliverMerchantPayment(
           (notReady.reasonCode ? ` (reason_code: ${notReady.reasonCode})` : '') +
           `. erc7710 has no funding leg and the merchant did not attempt settlement, so no ` +
           `funds moved — the agent's budget is intact. Ignore this code's sweep guidance: there ` +
-          `is no delegate balance to sweep. Re-quote` +
-          (notReady.retryAfterS ? ` after approximately ${notReady.retryAfterS}s` : ' later') +
+          `is no delegate balance to sweep. ` +
+          // #3834: out of gas does not recover by waiting — name the
+          // operator top-up and the floor instead of a retry interval.
+          (notReady.reasonCode === MERCHANT_OUT_OF_GAS_REASON
+            ? `Its settlement wallet is out of gas` +
+              (notReady.settlementsRemaining !== undefined && notReady.failFloor !== undefined
+                ? ` (settlements_remaining: ${notReady.settlementsRemaining}, fail_floor: ${notReady.failFloor})`
+                : '') +
+              `: the merchant's operator must top it up, and until then every retry is refused again. ` +
+              `Re-quote once the merchant has been topped up`
+            : `Re-quote` +
+              (notReady.retryAfterS ? ` after approximately ${notReady.retryAfterS}s` : ' later')) +
           `. Merchant response: ${JSON.stringify(redactMerchantCredentials(result.body)).slice(0, 500)}`
         : `Merchant refused to deliver the resource (${merchantHttp}). erc7710 has no ` +
           `funding leg, so there is no delegate balance to sweep — ignore this code's sweep ` +

@@ -410,6 +410,46 @@ describe('haven_settle_mcp_tool', () => {
     expect(payload.retry_with_new_quote).toBe(true)
   })
 
+  // #3834: an out-of-gas refusal on the paid retry names the operator top-up
+  // and the floor, never a retry interval.
+  it('an erc7710 settle refused for out of gas names the operator top-up, not a retry interval (#3834)', async () => {
+    const SIG7710 = '0x' + '33'.repeat(65)
+    stubFetch({
+      'POST /x402/pay_7710_oog/settle': { status: 200, body: { payment_header: 'HEADER_FROM_HAVEN' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 503,
+      ok: false,
+      body: {
+        error: 'merchant_not_ready',
+        reason_code: 'settlement_wallet_out_of_gas',
+        settlements_remaining: 11,
+        fail_floor: 12,
+        retry_after_s: 60,
+        recovery: 'operator_top_up',
+      },
+    })
+    const payload = await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_7710_oog',
+      signature: SIG7710,
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: { prompt: 'Hello' },
+    })
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe(AgentPaymentFailureCode.MerchantRejectedAfterFunding)
+    expect(payload.message).toMatch(/settlements_remaining: 11, fail_floor: 12/)
+    expect(payload.message).toMatch(/the merchant's operator must top it up, and until then every retry is refused again/)
+    expect(payload.message).toMatch(/Re-quote once the merchant has been topped up\./)
+    // Haven's own wording carries no retry interval; the "after approximately
+    // Ns" clause is for the other reason codes only. (The merchant's raw body
+    // is still relayed after "Merchant response:", as before.)
+    const havenPart = payload.message.split('Merchant response:')[0]
+    expect(havenPart).not.toMatch(/after approximately|often transient/)
+    expect(payload.retry_with_new_quote).toBe(true)
+  })
+
   // #2987 review: a GENERIC non-2xx on erc7710 is not proof that nothing was
   // settled — the merchant held a live settlement authorization and may have
   // redeemed it before answering (an upstream 502/504 lands here as a

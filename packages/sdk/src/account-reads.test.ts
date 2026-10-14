@@ -443,6 +443,57 @@ describe('AccountReads', () => {
     expect(legacy.allowances[0].reservedHavenAtomic).toBeUndefined()
   })
 
+  // #3772: `superseded_by` on the agent and allowance reads becomes ONE
+  // warning shape; absent/null/malformed never invents one.
+  describe('#3772 supersededBy', () => {
+    const MARK = { agent_id: 'b3f1c2d4-0000-4000-8000-000000000002', superseded_at: '2026-10-13T10:00:00.000Z' }
+
+    function serve(extra: unknown) {
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+        const path = new URL(String(input)).pathname
+        if (path === '/machine-payments/agent') return json({ ...agent('delegation'), ...(extra === undefined ? {} : { superseded_by: extra }) })
+        if (path === '/machine-payments/allowances') return json({ ...allowance(), ...(extra === undefined ? {} : { superseded_by: extra }) })
+        if (path === '/task-budgets') return json({ task_budgets: [] })
+        throw new Error(`Unexpected ${path}`)
+      }))
+      return reads(async () => ({}) as PaymentStatusResult)
+    }
+
+    it('maps a marked agent and allowance read, and the summary carries it', async () => {
+      const service = serve(MARK)
+      const expected = {
+        replacementAgentId: MARK.agent_id,
+        supersededAt: MARK.superseded_at,
+        nextAction: 'stop_and_tell_user',
+        warning: `This agent was replaced on its machine by agent ${MARK.agent_id} at ${MARK.superseded_at}. ` +
+          'This session is still running as the old agent: restart the agent runtime so it loads the new agent, ' +
+          'and ask the user to remove this agent on its Haven agent page if it is no longer used — ' +
+          'it keeps any budget it still holds until then.',
+        nextToolOmittedReason:
+          "The next step is the user's: restart this session, and remove the superseded agent in the Haven dashboard. No Haven tool does either.",
+      }
+      expect((await service.getAgent()).supersededBy).toEqual(expected)
+      expect((await service.getAllowances()).supersededBy).toEqual(expected)
+      expect((await service.getAgentSummary()).supersededBy).toEqual(expected)
+    })
+
+    it.each([
+      ['null', null],
+      ['absent (older backend)', undefined],
+      ['a non-object', 'yes'],
+      ['a non-string agent id', { agent_id: 7, superseded_at: MARK.superseded_at }],
+      ['an empty agent id', { agent_id: '', superseded_at: MARK.superseded_at }],
+      ['a missing timestamp', { agent_id: MARK.agent_id }],
+      ['an empty timestamp', { agent_id: MARK.agent_id, superseded_at: '' }],
+      ['a non-string timestamp', { agent_id: MARK.agent_id, superseded_at: 123 }],
+    ])('maps %s to null', async (_label, wire) => {
+      const service = serve(wire)
+      expect((await service.getAgent()).supersededBy).toBeNull()
+      expect((await service.getAllowances()).supersededBy).toBeNull()
+      expect((await service.getAgentSummary()).supersededBy).toBeNull()
+    })
+  })
+
   it('maps receipt history without exposing proof headers', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ receipts: [{
       id: 'receipt_1', payment_id: 'pay_1', rail: 'x402', proof_status: 'settled', tx_hash: '0xtx', chain_id: 8453,

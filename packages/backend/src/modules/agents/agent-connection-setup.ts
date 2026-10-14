@@ -219,3 +219,46 @@ function looksLikeRawPathOrSecret(value: string): boolean {
   if (value.includes('/') || value.includes('\\')) return true
   return false
 }
+
+/**
+ * #3772: a retired-agents report is accepted only this long after the
+ * connector REGISTERED the setup (`setup_token_consumed_at`). The connector
+ * sends it seconds-to-minutes later, right after the install-status report;
+ * closing the window afterwards means a long-lived agent key cannot stamp its
+ * owner's other agents as superseded months later (code review, round 1).
+ */
+export const RETIRED_AGENTS_REPORT_WINDOW_MINUTES = SETUP_TOKEN_TTL_MINUTES
+
+/** Whether a setup registered at `registeredAt` may still report retired agents at `now`. */
+export function retiredAgentsReportWindowOpen(
+  registeredAt: Date | string | null | undefined,
+  now: Date = new Date(),
+): boolean {
+  if (!registeredAt) return false
+  const registered = registeredAt instanceof Date ? registeredAt : new Date(registeredAt)
+  const ms = registered.getTime()
+  if (!Number.isFinite(ms)) return false
+  return now.getTime() - ms <= RETIRED_AGENTS_REPORT_WINDOW_MINUTES * 60_000
+}
+
+/** #3772: the most retired agent ids one `--replace` report may carry. */
+export const MAX_RETIRED_AGENT_IDS = 32
+
+const RETIRED_AGENT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * #3772: the semantic half of `POST /:setupId/retired-agents` body validation,
+ * kept here (pure, no I/O) so it still holds when request validation is in
+ * shadow/off: exactly `{ retired_agent_ids: string[] }`, 1-32 unique uuids.
+ * Returns the ids, or null when the body is malformed.
+ */
+export function parseRetiredAgentIds(body: unknown): string[] | null {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null
+  const record = body as Record<string, unknown>
+  if (Object.keys(record).some((key) => key !== 'retired_agent_ids')) return null
+  const ids = record.retired_agent_ids
+  if (!Array.isArray(ids) || ids.length < 1 || ids.length > MAX_RETIRED_AGENT_IDS) return null
+  if (!ids.every((id): id is string => typeof id === 'string' && RETIRED_AGENT_UUID.test(id))) return null
+  if (new Set(ids).size !== ids.length) return null
+  return ids
+}

@@ -126,6 +126,12 @@ Avoid:
 
 ### Use “sign in” and “approve actions” instead of “signer” or “owner”
 
+One sanctioned exception (owner decision 2026-10-09, #3825): **Settings →
+Signers** is that section's name — its title and its own loading, empty and
+error states. A signer is its own object there, not part of an account. Its
+rows, and every other surface, still speak in outcomes (“Approves …”,
+“Passkey · added {date}”, “Browser wallet”).
+
 Prefer:
 - “Choose how you sign in”
 - “Choose how you want to approve actions”
@@ -176,8 +182,13 @@ Credential rows (signer lists, “ways to approve”):
   enrolled, e.g. “Passkey · added March 3, 2026”. When a credential has no
   stored date (it predates timestamp exposure), fall back to **“Passkey 1”**,
   “Passkey 2”, … in enrollment order — never to a platform name.
-- An EOA row is **“Wallet”** with the address underneath — not “External
-  owner”, “signer”, or “owner” (the sign-in rule above already bans those).
+- An EOA row is **“Browser wallet”** — not “External owner”, “signer”, or
+  “owner” (the sign-in rule above already bans those). Its address is hidden
+  by default and revealed behind a **“Show address”** disclosure (#3825): most
+  users approve with a passkey, and a raw address on every list is the wrong
+  level of detail, but a user asked to connect a wallet must be able to tell
+  which one. When the wallet is the one connected on this device, the row may
+  name the connector: “Browser wallet · MetaMask”.
 
 Action copy keeps the anchor pattern — passkey first, familiar examples second,
 ideally as subtext:
@@ -461,7 +472,7 @@ Use this mapping when replacing technical language with product-facing language.
 | Safe deployed | Your Haven account is ready |
 | Smart account | Haven account |
 | Smart wallet | Haven wallet |
-| Signer | Sign-in method / approval method |
+| Signer | Sign-in method / approval method (exception: the Settings → Signers section name, above) |
 | Owner | Control / approve actions |
 | Owner type | Sign-in method |
 | Passkey signer | Secure passkey |
@@ -530,9 +541,9 @@ fifth, and it has none for the reason given above):
 
 - **`connect command` / `setup command` are blocked** by the frontend copy lint
   (`scripts/frontend-copy-lint.mjs`, `BANNED`), which is a required check. It
-  reads `src/app`, `src/components` and the named prose files in `SCAN_FILES`
-  — so the connect modal and both copies of the downloadable skill are covered,
-  and `src/hooks`, `packages/connect/src`, `packages/backend/src` and every
+  reads `src/app`, `src/components`, `src/hooks` (since #3884) and the named
+  prose files in `SCAN_FILES` — so the connect modal and both copies of the
+  downloadable skill are covered, and `packages/connect/src`, `packages/backend/src` and every
   `*.test.ts` are **not**: `walk()` skips test files by name and the scan trees
   are frontend-only.
 - **`setup prompt`, `agent credential` and `delegate key` have no checker.** A
@@ -601,9 +612,9 @@ never a README copy — the shared-prose rule this epic follows throughout.
 
 ## Enforcement
 
-These guidelines are enforced on frontend copy, not just documented. `npm run lint:copy` (`scripts/frontend-copy-lint.mjs`) scans user-facing source (`packages/frontend/src/app/**` + `components/**`) for the unambiguous **multi-word** banned phrases drawn from this guide and **fails the PR on any new occurrence** (#902). It is deliberately conservative — only multi-word phrases, never bare words like "safe"/"owner"/"deploy" — so false positives stay near zero. Its `BANNED` list is a superset of the mapping table (it also covers e.g. "policy engine", "smart contract wallet", "webauthn credential"), and it does **not** reach `packages/backend/**` — rules about strings that live there are documentation-only. The i18n message catalog (`src/lib/i18n/messages/en.ts`, the app's copy) **is** scanned (#3347): it is in the script's `SCAN_FILES` allowlist, and any other `.ts` file in that directory counts as convention copy, so a new locale fails the run until it is listed.
+These guidelines are enforced on frontend copy, not just documented. `npm run lint:copy` (`scripts/frontend-copy-lint.mjs`) scans user-facing source (`packages/frontend/src/app/**` + `components/**` + `hooks/**` since #3884, and `packages/ui/src`) for the unambiguous **multi-word** banned phrases drawn from this guide and **fails the PR on any new occurrence** (#902). It is deliberately conservative — only multi-word phrases, never bare words like "safe"/"owner"/"deploy" — so false positives stay near zero. Its `BANNED` list is a superset of the mapping table (it also covers e.g. "policy engine", "smart contract wallet", "webauthn credential"), and it does **not** reach `packages/backend/**` — rules about strings that live there are documentation-only. The i18n message catalog (`src/lib/i18n/messages/en.ts`, the app's copy) **is** scanned (#3347): it is in the script's `SCAN_FILES` allowlist, and any other `.ts` file in that directory counts as convention copy, so a new locale fails the run until it is listed.
 
-- **Prose outside those two directories is scanned only if it is named (#2317).** `src/lib` and `src/hooks` are excluded by directory on purpose — there the banned phrases are legitimate code identifiers, and widening the rule would bury a blocking check in false positives. But a handful of `lib/` files hold nothing but user-facing prose, and for those the gate was green while reading none of them: `agent-skill-bundle.ts` is downloaded verbatim as `SKILL.md` from the connect-agent success screen, and `agent-pause-copy.ts` / `stranded-funds-copy.ts` are single sentences extracted out of `components/` so two surfaces agree (#2195, #2230). Those files, plus `agent-handoff.ts`, `passkeyLabels.ts`, `transaction-labels.ts` / `transaction-presentation.tsx` (#2333) and the SDK's canonical `packages/sdk/src/skill-content.ts`, are listed individually in the script's `SCAN_FILES` allowlist. **The script is the list, not this sentence** — the enumeration above had drifted three entries behind it by #2926 (`agent-onboarding-prompt.ts`, the SDK's `agent-guidance.ts`, `public/for-agents.md`), which is what an enumeration in prose does; `npm run lint:copy` prints the live count in its own summary line. **If you add a prose file under `lib/`, the gate will not see it until you add it there** — a green check on a PR that touched only such a file carries no information about it. Entries must resolve to real files; an emptied allowlist or a path matching nothing fails the run rather than passing quietly.
+- **Prose outside those directories is scanned only if it is named (#2317).** `src/lib` is excluded by directory on purpose (`src/hooks` was too, until #3884) — there the banned phrases are legitimate code identifiers, and widening the rule would bury a blocking check in false positives. But a handful of `lib/` files hold nothing but user-facing prose, and for those the gate was green while reading none of them: `agent-skill-bundle.ts` is downloaded verbatim as `SKILL.md` from the connect-agent success screen, and `agent-pause-copy.ts` / `stranded-funds-copy.ts` are single sentences extracted out of `components/` so two surfaces agree (#2195, #2230). Those files, plus `agent-handoff.ts`, `passkeyLabels.ts`, `transaction-labels.ts` / `transaction-presentation.tsx` (#2333) and the SDK's canonical `packages/sdk/src/skill-content.ts`, are listed individually in the script's `SCAN_FILES` allowlist. **The script is the list, not this sentence** — the enumeration above had drifted three entries behind it by #2926 (`agent-onboarding-prompt.ts`, the SDK's `agent-guidance.ts`, `public/for-agents.md`), which is what an enumeration in prose does; `npm run lint:copy` prints the live count in its own summary line. **If you add a prose file under `lib/`, the gate will not see it until you add it there** — a green check on a PR that touched only such a file carries no information about it. Entries must resolve to real files; an emptied allowlist or a path matching nothing fails the run rather than passing quietly.
 
 - **Name extracted copy so the gate can ask for it (#2333).** A hand-maintained list nobody is prompted to extend is a slower version of the hole it closes: the #2195/#2230 extraction pattern — pull a shared sentence out of `components/` into `lib/` so two surfaces say one fact identically — takes copy out of scope **every time it is applied**, and #2333 found three more unscanned modules a fortnight after #2317 added four. So the naming is now normative and enforced: **extracted UI copy under `src/lib` is named `*-copy.ts`, `*-labels.ts` or `*Labels.ts`, and any `.tsx` there renders by definition.** Since #3347 the rule also covers **any `.ts` file in `src/lib/i18n/messages/`** — a directory rule, not a name rule — because the message catalog is the app's copy. A file matching those shapes or that directory that is not in `SCAN_FILES` fails the run, naming the file, at the moment it lands — or is exempted in `CONVENTION_EXEMPT` with a written reason. **Its ceiling, stated as a fact:** it matches names, not content, so calling the next extraction `transactionText.ts` still evades it. What it changes is that following the convention is enforced and evading it is deliberate; it is not a content classifier for `src/lib`, and #2332 (`passkey.ts`, a genuine utility carrying a banned phrase in a developer-facing `throw`) is the standing counter-example for why one would be wrong. It is also not a substitute for reading the copy: the first human pass over the newly-scanned files found a real defect the matcher cannot see — bare "delegate" rendered on the primary transaction row (#2356), invisible because the matcher is multi-word-literal by design and "delegate" is a legitimate identifier everywhere else in the frontend.
 
@@ -629,6 +640,29 @@ or `casp-risk-guardrails.md` § Product Copy Rules is affected: all three are
 cross-reference fixes (a dangling "(below)"; a "Steps 1-3 … as above" that
 leaned on two other sections once split; a "the setup above"), not changes to
 what the runbook claims. Nothing else in this document was re-verified.
+
+Re-verified 2026-10-10 (#3882): the 2026-10-02 call above is reversed for
+the agent-skills index. Its slugs and builder code are not copy, but each
+step's `description`, the index's own first entry and its `mcp.note` are
+agent-read prose served in `/.well-known/agent-skills/index.json` that
+appears nowhere else (no description is in the runbook), which is the bar
+`agent-guidance.ts` and `for-agents.md` already meet. `agent-skill-steps.ts`
+and `agent-skill-index.ts` are now in `SCAN_FILES`, with four more `lib/`
+prose files the naming convention could not catch: `dashboard-attention.ts`
+(the "Needs attention" titles, subtitles and empty-state lines), `agent-list-filters.ts` (agent-list filter
+and sort labels), `agent-credential.ts` (the `notes` prose in the downloaded
+credential file) and `sub-budget.ts` (form validation and error copy). A pin
+test keeps all six listed. `src/hooks` prose (step headings, `setError`
+strings) stays unscanned — a separate follow-up. The script's `SCAN_FILES`
+is the list; the named files in the bullets above are examples.
+
+Re-verified 2026-10-10 (#3884): that follow-up landed. `src/hooks` is now a
+scanned directory. Measured first: 49 files, two hits, both code rather than
+copy (a regex in `useAgentRekey.ts`, a JSDoc comment in
+`useAccountSigners.ts`), held as permanent reviewed entries in
+`packages/frontend/copy-lint-baseline.json` — the reason is on `SCAN_DIRS` in
+the script, since the baseline file cannot carry one. Nothing else in this
+document was re-verified.
 
 Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): the
 enforcement claims above match the code at this head: `npm run lint:copy` /

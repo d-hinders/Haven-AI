@@ -157,6 +157,12 @@ export function freshness(verifiedAt: string | null): string {
  * the paying agent needs an open (unpinned) budget for the EIP-3009 bridge
  * (`CLAUDE.md` "x402" section). Null/empty is treated as "no erc7710 seen",
  * the same reading `catalog.ts` gives an unprobed row.
+ *
+ * #3839: agents get the same fact as `funding_leg_expected` on discovery, from
+ * the SDK's `catalogFundingLegExpected`. The frontend keeps no `@haven_ai/sdk`
+ * runtime dependency, so the two are reconciled by a parity test
+ * (`marketplace.test.ts`): this is `catalogFundingLegExpected(x) !== false`
+ * — "unknown" counts as needing an unpinned budget, the conservative reading.
  */
 export function needsUnpinnedBudget(assetTransferMethods: string | null): boolean {
   if (!assetTransferMethods) return true

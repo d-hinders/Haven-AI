@@ -1,0 +1,189 @@
+{
+  "comment": "Every next_arguments the hosted server emits for a HOSTED next_tool — the corpus scripts/ci/check-stale-client-compat.mjs validates against origin/main's snapshot. Regenerate after an intended contract change: npm run snapshot:regen -w packages/mcp-server. The quote→pay entry's idempotency_key is the placeholder <x402q-uuid>; the live emission is a fresh uuid.",
+  "entries": [
+    {
+      "site": "catalog-entry.ts http row",
+      "tool": "haven_quote_x402",
+      "arguments": {
+        "url": "https://merchant.example/paid"
+      }
+    },
+    {
+      "site": "errors.ts normalizeError: submission outcome unknown (typed 502, payment_id known)",
+      "tool": "haven_get_payment_status",
+      "arguments": {
+        "payment_id": "pay_1"
+      }
+    },
+    {
+      "site": "guidance.ts eip3009 confirmed replay: funded-awaiting-merchant (poll status)",
+      "tool": "haven_get_payment_status",
+      "arguments": {
+        "payment_id": "pay_1"
+      }
+    },
+    {
+      "site": "paid-mcp-completion.ts complete eip3009: settlement evidence retryable (hash prefilled)",
+      "tool": "haven_report_settlement_evidence",
+      "arguments": {
+        "payment_id": "pay_1",
+        "settlement_tx_hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "site": "paid-mcp-completion.ts insecure target eip3009",
+      "tool": "haven_sweep_delegate",
+      "arguments": {}
+    },
+    {
+      "site": "paid-mcp-completion.ts pending",
+      "tool": "haven_get_payment_status",
+      "arguments": {
+        "payment_id": "pay_1"
+      }
+    },
+    {
+      "site": "paid-mcp-completion.ts rejected after funding: eip3009",
+      "tool": "haven_sweep_delegate",
+      "arguments": {}
+    },
+    {
+      "site": "paid-mcp-completion.ts rejected after funding: eip3009, live state is not a sweep",
+      "tool": "haven_get_payment_status",
+      "arguments": {
+        "payment_id": "pay_1"
+      }
+    },
+    {
+      "site": "paid-mcp-completion.ts rejected after funding: erc7710",
+      "tool": "haven_get_payment_status",
+      "arguments": {
+        "payment_id": "pay_1"
+      }
+    },
+    {
+      "site": "paid-mcp-completion.ts report settlement evidence: reason-bearing refusal",
+      "tool": "haven_get_payment_status",
+      "arguments": {
+        "payment_id": "pay_1"
+      }
+    },
+    {
+      "site": "paid-mcp-completion.ts settle funding pending",
+      "tool": "haven_get_payment_status",
+      "arguments": {
+        "payment_id": "pay_1"
+      }
+    },
+    {
+      "site": "paid-mcp-completion.ts settle held-hash, can report",
+      "tool": "haven_report_settlement_evidence",
+      "arguments": {
+        "payment_id": "pay_1",
+        "settlement_tx_hash": "0xabababababababababababababababababababababababababababababababab"
+      }
+    },
+    {
+      "site": "paid-mcp-completion.ts settle held-hash, cannot report",
+      "tool": "haven_get_payment_status",
+      "arguments": {
+        "payment_id": "pay_1"
+      }
+    },
+    {
+      "site": "paid-mcp-completion.ts timeout eip3009",
+      "tool": "haven_get_payment_status",
+      "arguments": {
+        "payment_id": "pay_1"
+      }
+    },
+    {
+      "site": "paid-mcp-completion.ts timeout erc7710",
+      "tool": "haven_get_payment_status",
+      "arguments": {
+        "payment_id": "pay_1"
+      }
+    },
+    {
+      "site": "plain-http-x402.ts haven_quote_x402 → haven_pay_x402_quote (request mode, every optional input)",
+      "tool": "haven_pay_x402_quote",
+      "arguments": {
+        "idempotency_key": "<x402q-uuid>",
+        "url": "https://merchant.test/paid",
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\"invoice_id\":\"inv_123\"}",
+        "max_amount_human": "1.5"
+      }
+    },
+    {
+      "site": "plain-http-x402.ts pay request-mode replay: past the signing step",
+      "tool": "haven_get_payment_status",
+      "arguments": {
+        "payment_id": "pay_1"
+      }
+    },
+    {
+      "site": "plain-http-x402.ts report outcome accepted, eip3009 unsettled (offer settlement evidence)",
+      "tool": "haven_report_settlement_evidence",
+      "arguments": {
+        "payment_id": "pay_1"
+      }
+    },
+    {
+      "site": "plain-http-x402.ts report outcome rejected",
+      "tool": "haven_sweep_delegate",
+      "arguments": {}
+    },
+    {
+      "site": "plain-http-x402.ts report outcome: erc7710 accepted (report settlement evidence)",
+      "tool": "haven_report_settlement_evidence",
+      "arguments": {
+        "payment_id": "pay_1",
+        "settlement_tx_hash": "0xabababababababababababababababababababababababababababababababab"
+      }
+    },
+    {
+      "site": "plain-http-x402.ts report outcome: erc7710 rejected (verify settlement before re-quoting)",
+      "tool": "haven_get_payment_status",
+      "arguments": {
+        "payment_id": "pay_1"
+      }
+    },
+    {
+      "site": "state-direct-recovery.ts check_funds: symbol resolves to no or several allowances (#3213)",
+      "tool": "haven_get_allowances",
+      "arguments": {}
+    },
+    {
+      "site": "state-direct-recovery.ts erc7710 submit: retry, then report settlement evidence",
+      "tool": "haven_report_settlement_evidence",
+      "arguments": {
+        "payment_id": "pay_1"
+      }
+    },
+    {
+      "site": "state-direct-recovery.ts no-sign-data replay: still resolving",
+      "tool": "haven_get_payment_status",
+      "arguments": {
+        "payment_id": "pay_1"
+      }
+    },
+    {
+      "site": "state-direct-recovery.ts submit follow-up: not confirmed or status unreadable (read status)",
+      "tool": "haven_get_payment_status",
+      "arguments": {
+        "payment_id": "pay_1"
+      }
+    },
+    {
+      "site": "state-direct-recovery.ts submit follow-up: x402 funding confirmed, MCP-tool purchase (complete the call)",
+      "tool": "haven_complete_mcp_tool",
+      "arguments": {
+        "payment_id": "pay_1"
+      }
+    }
+  ]
+}

@@ -19,6 +19,7 @@ export type OpsRevealRequest = ApiSchema<'OpsRevealRequest'>
 export type OpsRevealResponse = ApiSchema<'OpsRevealResponse'>
 export type HealthOpsResponse = ApiSchema<'HealthOpsResponse'>
 export type OpsHealth = ApiSchema<'OpsSystemHealth'>
+export type OpsSponsoredGas = ApiSchema<'OpsSponsoredGas'>
 
 /** The build-time doc-health JSON (#3511's `scripts/docs/doc-health.mjs`). */
 export interface DocHealthReport {

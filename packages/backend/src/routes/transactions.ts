@@ -21,6 +21,7 @@ import {
   paginateByOffset,
   resolveTransactionCurrency,
   resolveTransactionFilters,
+  serveTimeAmount,
   transactionsToCsv,
   type ParsedTokenFilter,
 } from '../modules/transactions/index.js'
@@ -172,6 +173,25 @@ export default async function transactionRoutes(
     // #2870: the accounting badge rides the PAGE, not the whole feed — one
     // ledger query per response, and none for an unentitled account.
     const enrichedPage = await enrichTransactionsWithAccounting(sub, paginated, request.log)
+    // #3824: rows WITHOUT book-time fiat gain a serve-time amount at today's
+    // rate, in the user's preferred currency — priced AFTER the shared
+    // enrichment helper, on the JSON route only (the CSV export above stays
+    // deliberately fixed-currency book-time and runs over `filtered`, which
+    // never passes through here). `convertedAmount` stays exactly as the
+    // book-time capture struck it; an unknown price is `approxAmount: null`,
+    // never 0. Only the PAGE is priced: the rows that leave are the rows
+    // that carry the fields, and the response is a bounded window.
+    const approxPage = await Promise.all(
+      enrichedPage.map(async (tx) => {
+        if (tx.convertedAmount != null) return tx
+        const approxAmount = await serveTimeAmount(
+          tx.tokenSymbol ?? tx.asset,
+          tx.valueFormatted,
+          currency,
+        )
+        return { ...tx, approxAmount, approxCurrency: currency }
+      }),
+    )
     // #3132 (owner decision 3): every row states its population and its
     // narrowing as two values. The feed is WALLET-scoped by construction —
     // `agentId` / `accountId` narrow it, they do not turn it into the
@@ -188,7 +208,7 @@ export default async function transactionRoutes(
       // One account name. The `safeName` twin outlived #2914 by exactly one
       // release so `@haven_ai/cli` on `latest` would not print every ACCOUNT
       // cell blank; `latest` is 0.3.0-alpha.0 now and reads `accountName`.
-      transactions: enrichedPage.map((tx) => ({ ...tx, scope })),
+      transactions: approxPage.map((tx) => ({ ...tx, scope })),
       total: filtered.length,
       offset,
       limit,

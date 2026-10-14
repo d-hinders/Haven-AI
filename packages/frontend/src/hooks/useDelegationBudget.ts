@@ -83,6 +83,16 @@ export interface DelegationBudget {
   period_seconds: number
   expires_at: number
   /**
+   * #3806: the period ANCHOR — a Unix-second digit string on the wire (the
+   * driver decodes the BIGINT as a string). A period runs from
+   * `start_date + k × period_seconds`, not from creation time: budgets are
+   * signed with `startDate: nowSec - 60` and a re-key's carry/steady pair
+   * keeps the old boundary. The caption helper anchors refills here.
+   */
+  start_date: string
+  /** #3806: ordering anchor for the multi-budget primary selection. */
+  created_at: string
+  /**
    * The merchant a merchant-locked budget (#3331) was issued for, or null for
    * every other row (and after that merchant is deleted). All three travel
    * together — a row either names all three or none.
@@ -675,8 +685,17 @@ export function useDelegationBudget(
     ready: signingPath !== null,
     // #3542 review: `ready` reads false while the signer set is still loading,
     // which is not the same as "this device cannot sign". Callers that act on
-    // `!ready` (the replaced-agents card) wait on this first.
+    // `!ready` wait on this first.
     signersLoading: signers === null && !signersError,
+    // #3845: whether the signer set has ANY enrolled passkey, on any device
+    // (the ceremony can hand off to another one). Null until the set is read,
+    // so a caller never drops a passkey clause on a guess.
+    hasPasskeys: signers ? signers.passkeys.length > 0 : null,
+    // #3825: the #1097 cross-device heads-up, for the flows that sign
+    // through this hook (the global wallet menu that disclosed it is gone).
+    // #3825 design review: only when the PASSKEY will sign — with the owner
+    // wallet connected the EOA path signs and nothing hands off.
+    passkeyElsewhere: signingPath === 'passkey' && passkeyLikelyElsewhere(signers),
     reload,
     budgetsError,
     signersError,

@@ -35,6 +35,18 @@ export {
   SETTLEMENT_SWEEP_INTERVAL_MS,
 } from './settlement-sweeper.js'
 
+/**
+ * The passive eip3009 settlement sweep (#3888). Public for the same reason:
+ * the composition root registers it inside the SAME leader-gated tick and
+ * owns its cadence.
+ */
+export {
+  runEip3009SettlementSweepTick,
+  resetEip3009SettlementSweepState,
+  EIP3009_SWEEP_MIN_AGE_SECONDS,
+  EIP3009_SWEEP_RECOVERY_HORIZON_SECONDS,
+} from './eip3009-settlement-sweeper.js'
+
 export type { X402AuthorizeBody, X402HandlerResult, X402McpCallContextInput } from './types.js'
 
 export {

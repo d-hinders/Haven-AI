@@ -47,7 +47,40 @@ Do not point it at a project repository, shared folder, or cloud-synced folder.
 
 Use `--ack-local-tools` with Haven-generated setup prompts. It prepares the
 local Haven tools acknowledgement during setup so Codex and Claude Code can load
-Haven after a normal restart.
+Haven after a normal restart. It also works with `--repair`: when an upgrade
+changes the signer's tool set, the stored acknowledgement no longer matches and
+the new signer refuses to start — `--repair --ack-local-tools` re-acknowledges
+consent for the signer the repair installs (printing the consent block), with
+no setup token. With a bare `--doctor` the flag is refused: the doctor is
+read-only. The token-free path, without a repair, is the recorded wrapper:
+`<agent dir>/bin/haven-signer.mjs --ack < /dev/null`.
+
+## Updating an agent's own connector (#3799)
+
+On a machine with several agents, an agent can update its own pair in one
+command. `--doctor` and `--repair` accept `--name <slug>` and select the agent
+directory by its recorded MCP pair (`haven-<slug>` / `haven-signer-<slug>`) —
+the same rule `--rekey --name` and `--unwire --name` use. An unknown slug is
+refused listing the slugs that exist; two live directories claiming one pair
+are refused listing both; tombstoned directories never match. When several
+agents exist and no `--name` or `--credentials-dir` is given, the multi-agent
+refusal names, per directory, the agent id AND the pair it owns, and offers the
+`--name <slug>` command for named pairs.
+
+Two honesty rules worth knowing:
+
+- On Claude Code, `--repair` writes no MCP config (the connector does not own
+  that runtime's registry). It re-points `<dir>/bin/haven-signer.mjs` at the
+  pinned signer runtime, and says exactly that — the entry that launches the
+  wrapper uses the new signer after a restart. `--doctor --runtime claude-code`
+  names the recorded pair and how to confirm it (`claude mcp get
+  haven-signer-<slug>`).
+- When the stored consent does not match the pinned signer's tool set, a bare
+  `--repair` stops before writing anything and names the token-free
+  re-consent command; `--repair --ack-local-tools` performs the
+  re-acknowledgement with the installed signer during the repair. The stored
+  ack holds only a hash, so a mismatch is never reported as "the tools grew" —
+  a rekey or a chain change produces the same mismatch.
 
 ## Supported runtimes
 
@@ -78,7 +111,9 @@ spending authority.
 ### `--doctor` reports every agent, not just one (#1697)
 
 With several agents wired into one runtime (`--name`), the doctor enumerates
-every credential directory on the machine and classifies each one:
+every credential directory on the machine and classifies each one. An agent can
+also select its OWN directory with `--doctor --name <slug>` or
+`--repair --name <slug>` — see [Updating an agent's own connector](#updating-an-agents-own-connector-3799):
 
 | Classification | Meaning |
 | --- | --- |
@@ -109,7 +144,7 @@ report stays `version: 1`; `level` is additive.
 | Level | Meaning | Example |
 | --- | --- | --- |
 | `ok` | Nothing to say. | The installed signer matches the connector's pin. |
-| `advisory` | Worth reading; nothing is broken. Exit 0. | `signer_runtime`: the install is intact but behind the pinned version ("intact, but outdated" — both versions named, `--repair` offered); `signer_runtime_unused` (#3123): runtime directories nothing references; `mcp_server_name_rebound` (#3122): two local binding records claim one server name. `superseded_agents` on a recognised runtime with no config file the connector can read (Claude Code, `other`): a second live key is reported, and the check says why "wired" cannot be verified from this machine. |
+| `advisory` | Worth reading; nothing is broken. Exit 0. | `signer_runtime`: the install is intact but behind the pinned version ("intact, but outdated" — both versions named, `--repair` offered); `signer_runtime_unused` (#3123): runtime directories nothing references; `mcp_server_name_rebound` (#3122): two local binding records claim one server name. `superseded_agents` on a recognised runtime with no config file the connector can read (Claude Code, `other`): a second live key is reported, and the check — labelled "Other agent credentials (wiring not verifiable)" — says why "wired" cannot be verified from this machine. On Claude Code a pair named in `~/.claude.json` counts as wired (#3830), so only directories that file does not name reach this advisory, and the inventory row reads "not verified as wired" rather than "superseded"; a directory it upgrades runs the full per-agent checks and can fail the run. |
 | `failed` | A real failure with one repair action. Exit 1. | A stale or empty runtime directory; a live key in a directory the runtime's config demonstrably does not use. |
 
 What stays blocking is live spend authority: a directory whose stored key
@@ -285,10 +320,10 @@ long-lived host afterwards, as with any retirement.
 
 Setup guards the **name slot** (a taken `--name`, the bare pair already wired
 — #2551 refuses or asks) but never the **wallet**: a machine can carry several
-agents with live keys, and until #3122 the "your previous agent(s) still exist
-with their own keys" heads-up was printed only after the credentials were
-written (that completion heads-up, #1688, is unchanged — this slice ADDS an
-earlier notice). Two things changed, both from local files only (no network call is
+agents with live keys, and until #3122 the heads-up naming the other agent
+directories was printed only after the credentials were written (that
+completion heads-up, #1688, still prints — reworded by #3830, see below — and
+this slice ADDS an earlier notice). Two things changed, both from local files only (no network call is
 added; the backend is not asked whether any key still authenticates):
 
 - **Before the key is minted or anything is written**, setup names every
@@ -383,21 +418,29 @@ deployment, so the two differing is intended topology, not an environment
 mismatch. It is non-secret: the same string goes into your own MCP config file,
 and the API key travels beside it in a header.
 
-`superseded_agent_ids` lists the other agent directories on this machine. A
-re-run mints a NEW agent, and without `--replace` retires nothing, so those
-older agents still hold live API and signing keys — use **Remove agent…** on the
-Haven agent page for each if you meant to replace them. Empty on a clean first run; an empty
-list here is not a guarantee, since a scan that cannot read the credential root
-also yields one rather than failing a completed setup.
+`superseded_agent_ids` lists the other agent directories on this machine —
+every one, key-less and tombstoned included, on any backend. Despite the field
+name it is **not** a replace set (#3830): since named pairs became the default
+(#3737), a run without `--replace` adds its agent alongside the ones already
+here and retires nothing, so most listed agents are simply other agents, many
+of them wired and in use. Agents a `--replace` run actually retired are
+`retired_agent_ids`. The completion heads-up names the list as "other agent
+directories on this machine" and says this setup revoked none of them; if you
+no longer use one, use **Remove agent…** on its Haven agent page. Empty on a
+clean first run; an empty list here is not a guarantee, since a scan that
+cannot read the credential root also yields one rather than failing a
+completed setup.
 
-**The dashboard offers the revoke, never the connector (#2561).** The same ids
-now ride the install-status report, so the Haven dashboard can put a
-revoke next to the setup that displaced them; it also ends the agent's budget
-with one owner signature (#3542). The connector does not
-and must not do it: `POST /agents/:id/revoke` is owner-authenticated, and an
-agent credential retiring a sibling agent is the "agent editing its own
-authority" the re-key routes refuse. Nothing is revoked automatically — the
-owner clicks, one agent at a time.
+**The dashboard lists them; revoking stays on each agent's page (#2561,
+#3830).** The same ids ride the install-status report, and the connect modal's
+completed state lists those that are the owner's agents and not revoked
+(active, paused or still in setup), each linking to its agent page. It
+does not call them replaced and offers no revoke there (owner decision,
+2026-10-09): the report cannot tell a coexisting agent
+from a retired one. The connector never revokes either: `POST
+/agents/:id/revoke` is owner-authenticated, and an agent credential retiring a
+sibling agent is the "agent editing its own authority" the re-key routes
+refuse.
 
 On the REPORT the field is a tri-state, unlike the `--json` outcome above: a
 list, `[]` when the scan ran and found none, and `null` when it could not run.
@@ -411,7 +454,12 @@ untouched — and `superseded_agents_retired_locally` is `true` when that
 retirement covered every collision entry (`false`: the install ended with an
 error code and the retirement was skipped, or one entry failed). Both fields
 are absent on any other run and say nothing about the backend, where nothing is
-revoked.
+revoked. Separately, since #3772 a run that retired at least one directory tells
+Haven which ones (`POST /agent-connection-setups/{setupId}/retired-agents`, with
+the new agent's key, `retired_agent_ids` only), so a session still running as a
+retired agent sees a `supersededBy` warning on its own `haven_get_agent` /
+`haven_get_allowances`. That report is best-effort — an older backend's 404 is
+ignored silently and any other failure is one log line — and it still pauses and revokes nothing.
 
 A `wiring_collision` refusal (a non-interactive bare setup over a live
 previous agent, #2551) carries `error.superseded_agent_ids` and
@@ -718,7 +766,8 @@ repair spelled out: use **Remove agent…** on the Haven agent page, then remove
 the directory. An already-revoked one reports as informational; an unreachable
 probe is a note, never a verdict. Connect never revokes or deletes
 credentials itself — it reports, you decide. The setup completion output
-names superseded agents the moment they are created, for the same reason.
+names the other agent directories the moment the new agent is created, for
+the same reason.
 One honest limit: "newest" is decided by file mtime, so a restored backup or
 a sync tool that rewrites timestamps can make doctor examine the wrong
 directory as current — before revoking anything, confirm the agent id

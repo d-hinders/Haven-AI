@@ -76,6 +76,38 @@ describe('useDelegationBudget passkey dispatch (#887)', () => {
     expect(result.current.ready).toBe(false) // no wallet connected
   })
 
+  // #3845: whether the set has ANY enrolled passkey (any device) — null until
+  // the signer read lands, so a caller never drops a passkey clause on a guess.
+  it('hasPasskeys is null before the signer read, then true for a set with a passkey', async () => {
+    let resolveSigners: (v: unknown) => void = () => {}
+    mockGet.mockImplementation((url: string) => {
+      if (url.endsWith('/delegations')) return Promise.resolve({ delegations: [] })
+      if (url.endsWith('/account-signers')) return new Promise((r) => { resolveSigners = r })
+      return Promise.reject(new Error('unexpected ' + url))
+    })
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    expect(result.current.hasPasskeys).toBeNull()
+    // Not on this device — still counts: the ceremony can hand off.
+    await act(async () => { resolveSigners(PASSKEY_SIGNERS) })
+    await waitFor(() => expect(result.current.hasPasskeys).toBe(true))
+  })
+
+  it('hasPasskeys is false for a wallet-only set', async () => {
+    mockApi(EOA_SIGNERS)
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.hasPasskeys).toBe(false))
+  })
+
+  it('hasPasskeys stays null when the signer read fails', async () => {
+    mockGet.mockImplementation((url: string) => {
+      if (url.endsWith('/delegations')) return Promise.resolve({ delegations: [] })
+      return Promise.reject(new Error('boom'))
+    })
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.signersError).toBe(true))
+    expect(result.current.hasPasskeys).toBeNull()
+  })
+
   it('grant on a passkey account signs the DELEGATION via WebAuthn — one ceremony', async () => {
     mockApi(PASSKEY_SIGNERS)
     const message = { delegate: '0xd', delegator: '0xa', authority: '0x0', caveats: [], salt: '1' }
@@ -327,6 +359,23 @@ describe('multi-signer accounts (the Daniel regression)', () => {
     owner_address: '0x' + 'ee'.repeat(20),
     passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
   }
+
+  // #3825 design review: the cross-device hint describes the PASSKEY path
+  // only. With the owner wallet connected the EOA signs, and nothing hands off.
+  it('passkeyElsewhere: true on the passkey path with no device marker', async () => {
+    mockApi(MIXED_SIGNERS)
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    expect(result.current.passkeyElsewhere).toBe(true)
+  })
+
+  it('passkeyElsewhere: false when the connected owner wallet will sign', async () => {
+    mockApi(MIXED_SIGNERS)
+    mockSigner.mockReturnValue({ type: 'eoa', address: MIXED_SIGNERS.owner_address, walletClient: {} })
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    expect(result.current.passkeyElsewhere).toBe(false)
+  })
 
   it('stays ready and signs with the passkey after an EOA owner is enrolled', async () => {
     mockApi(MIXED_SIGNERS)

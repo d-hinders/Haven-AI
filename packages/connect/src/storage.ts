@@ -1,8 +1,11 @@
 import { access, chmod, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import crypto from 'node:crypto'
+import { basename } from 'node:path'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { assertValidServerSlug } from './server-names.js'
+import { readRuntimeSidecar } from './signer-runtime.js'
+import { TOMBSTONE_FILENAME } from './tombstone.js'
 
 export interface StoredCredentialPaths {
   directory: string
@@ -201,8 +204,14 @@ export async function readStoredCredentials(
   agentIdOrSlug: string | undefined,
   baseDir?: string,
 ): Promise<StoredCredentialSnapshot> {
-  const key = serverName ?? agentIdOrSlug
-  const directory = key ? defaultAgentDirectory(key, baseDir) : await discoverSoleAgentDirectory(baseDir)
+  // #3799: --name resolves by the pair the directory RECORDS, not by assuming
+  // the folder is named after the slug — the same rule --doctor/--repair and
+  // --unwire now use. Legacy agent-id keyed directories keep their path.
+  const directory = serverName
+    ? await resolveAgentDirectoryBySlug(serverName, { root: baseDir })
+    : agentIdOrSlug
+      ? defaultAgentDirectory(agentIdOrSlug, baseDir)
+      : await discoverSoleAgentDirectory(baseDir)
 
   const identity = await readJsonFile(join(directory, 'identity.json'))
   if (!identity) {
@@ -215,7 +224,7 @@ export async function readStoredCredentials(
   // the repair line names it exactly — the sole-agent discovery that selected
   // it must not have to hold until phase two.
   let discoveredSlug: string | undefined
-  if (!key) {
+  if (!serverName && !agentIdOrSlug) {
     const binding = await readJsonFile(join(directory, 'mcp-server-binding.json'))
     const hostedName = binding && typeof binding === 'object' ? asString((binding as Record<string, unknown>).server_name) : undefined
     if (hostedName && hostedName.startsWith('haven-')) {
@@ -331,6 +340,111 @@ async function discoverSoleAgentDirectory(baseDir?: string): Promise<string> {
     `Several agents are wired on this machine, so --rekey cannot tell which one you mean:\n` +
       candidates.map((d) => `  ${d}`).join('\n') +
       '\nRe-run with --name <slug> to pick one.',
+  )
+}
+
+// ── One --name resolver, shared by --doctor/--repair/--rekey/--unwire (#3799) ──
+//
+// Every stored-state subcommand that takes `--name <slug>` resolves the agent
+// directory through THIS rule, not by assuming the folder is named after the
+// slug. A directory claims a slug when one of its OWN records says so: the
+// signer-runtime sidecar (`server_name`, what repair reads back) or the local
+// MCP server-name binding record. Which record decides: the sidecar wins; the
+// binding corroborates — a directory with neither record can still be reached
+// by its legacy folder name (pre-#1696 shape) so nothing already wired breaks.
+
+export interface ResolveAgentDirectoryOptions {
+  /** The credential ROOT to scan. Default: ~/.haven/agents. */
+  root?: string
+  /**
+   * Retired (tombstoned) directories may claim a slug. Only --unwire wants
+   * this: it must reach a retired agent to release its name. Selection for
+   * --doctor/--repair/--rekey never matches a tombstoned directory.
+   */
+  allowRetired?: boolean
+}
+
+/** Does THIS directory record the pair for `slug`? Shared agree-check for `--name` + `--credentials-dir`. */
+export async function assertDirectoryRecordsSlug(directory: string, slug: string): Promise<void> {
+  assertValidServerSlug(slug)
+  const sidecar = await readRuntimeSidecar(directory)
+  const bindingRecord = await readJsonFile(join(directory, 'mcp-server-binding.json'))
+  const bindingSlug = bindingRecord ? asString(bindingRecord.server_name) : undefined
+  const claimed = sidecar?.server_name ?? bindingSlug
+  if (claimed === slug) return
+  // Pre-#1696: no record at all, folder named after the slug — the assumption
+  // every --name consumer made before this resolver existed.
+  if (!claimed && basename(directory) === slug) return
+  throw new Error(
+    `--name ${slug} and --credentials-dir ${directory} disagree: that directory records ` +
+      (claimed ? `the pair 'haven-${claimed}'` : 'no named pair') +
+      `. Pass one of them, not both — or point --credentials-dir at the directory that records 'haven-${slug}'.`,
+  )
+}
+
+export async function resolveAgentDirectoryBySlug(
+  slug: string,
+  opts: ResolveAgentDirectoryOptions = {},
+): Promise<string> {
+  assertValidServerSlug(slug)
+  const root = defaultCredentialRoot(opts.root)
+  let entries: string[] = []
+  try {
+    entries = await readdir(root)
+  } catch {
+    throw new Error(
+      `No agent directories under ${root} — nothing records the pair 'haven-${slug}'. ` +
+        'Connect this agent first, or pass --credentials-dir <path> for the exact directory.',
+    )
+  }
+  interface Claim {
+    directory: string
+    agentId: string | null
+    retired: boolean
+  }
+  const claims: Claim[] = []
+  const recordedSlugs: string[] = []
+  let barePairCount = 0
+  let legacyFolder: string | undefined
+  for (const entry of entries.sort()) {
+    const directory = join(root, entry)
+    const retired = (await readJsonFile(join(directory, TOMBSTONE_FILENAME))) !== null
+    const sidecar = await readRuntimeSidecar(directory)
+    const bindingRecord = await readJsonFile(join(directory, 'mcp-server-binding.json'))
+    const bindingSlug = bindingRecord ? asString(bindingRecord.server_name) : undefined
+    const claimedSlug = sidecar?.server_name ?? bindingSlug
+    if (claimedSlug && !recordedSlugs.includes(claimedSlug)) recordedSlugs.push(claimedSlug)
+    // A sidecar without a server_name is the bare `haven` / `haven-signer` pair.
+    if (sidecar && !sidecar.server_name) barePairCount++
+    if (retired && !opts.allowRetired) continue
+    if (claimedSlug === slug) {
+      const identity = await readJsonFile(join(directory, 'identity.json'))
+      claims.push({ directory, agentId: identity ? (asString(identity.agent_id) ?? null) : null, retired })
+    }
+    // Legacy fallback: no record claims anything, and the folder carries the
+    // slug as its name — exactly where the old `join(root, slug)` look landed.
+    if (!claimedSlug && !retired && entry === slug) legacyFolder = directory
+  }
+  if (claims.length > 1) {
+    throw new Error(
+      `${claims.length} agent directories on this machine record the pair 'haven-${slug}' — the MCP server name ` +
+        `changed hands (mcp_server_name_rebound):\n` +
+        claims
+          .map((c) => `  • ${c.agentId ? `agent ${c.agentId}` : 'agent (no agent_id recorded)'} — ${c.directory}${c.retired ? ' (retired)' : ''}`)
+          .join('\n') +
+        '\nRetire the earlier one with --unwire, or name the directory exactly with --credentials-dir <path>. Nothing was changed.',
+    )
+  }
+  if (claims.length === 1) return claims[0].directory
+  if (legacyFolder) return legacyFolder
+  const known = [
+    ...recordedSlugs.map((s) => `'haven-${s}'`),
+    ...(barePairCount > 0 ? [`${barePairCount} unnamed 'haven' / 'haven-signer' pair${barePairCount === 1 ? '' : 's'} (no --name)`] : []),
+  ]
+  throw new Error(
+    `No agent directory on this machine records the pair 'haven-${slug}'.` +
+      (known.length > 0 ? ` Directories under ${root} record: ${known.join(', ')}.` : ` Nothing under ${root} records a named pair.`) +
+      ' Check the agent id against the Haven agent page, or name the directory exactly with --credentials-dir <path>.',
   )
 }
 

@@ -40,9 +40,12 @@ import {
   classifyMerchantBudgetRefusal,
   isPermanentMerchantBudgetRefusal,
 } from '@/lib/merchantBudgetRefusal'
-import { truncateAddress, BudgetAmountRow } from './haven'
+import { truncateAddress, BudgetAmountRow, NoticeRow } from './haven'
+import { budgetPeriodWords } from '@/lib/budget-caption'
 import { Icon } from './ui/Icon'
 import { Button } from './ui/Button'
+import WalletConnectAction from './WalletConnectAction'
+import PasskeyElsewhereHint from './PasskeyElsewhereHint'
 import { Input } from './ui/Input'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
@@ -68,15 +71,9 @@ interface Props {
   onBudgetChange?: () => void
 }
 
-const PERIODS: Array<{ label: string; seconds: number }> = [
-  { label: 'per day', seconds: 86_400 },
-  { label: 'per week', seconds: 604_800 },
-  { label: 'per month', seconds: 2_592_000 },
-]
-
-function periodLabel(seconds: number): string {
-  return PERIODS.find((p) => p.seconds === seconds)?.label ?? `every ${seconds}s`
-}
+// The day/week/month rhythm the picker offers (#3806: the words come from the
+// caption helper, so a prefilled period outside this trio still reads right).
+const PERIODS = [86_400, 604_800, 2_592_000] as const
 
 /**
  * Plain copy for the merchant-STALE build refusals a merchant-locked budget's
@@ -121,7 +118,7 @@ export default function EditBudgetModal({
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
   useFocusTrap(panelRef, open)
-  const { editBudget, busy, ready, signersError, reloadSigners } = useDelegationBudget(
+  const { editBudget, busy, ready, signersError, signersLoading, reloadSigners, passkeyElsewhere } = useDelegationBudget(
     agentId,
     chainId,
     { enabled: open },
@@ -170,11 +167,13 @@ export default function EditBudgetModal({
   }, [open, budget, token])
 
   const periodOptions = useMemo(() => {
-    const list = [...PERIODS]
-    if (!list.some((p) => p.seconds === period)) {
-      list.push({ label: `every ${period}s`, seconds: period })
+    const list: number[] = [...PERIODS]
+    if (!list.some((p) => p === period)) {
+      list.push(period)
     }
-    return list
+    // Labels are the caption helper's period words (#3806) — the picker, the
+    // row and the confirmation all phrase one period the same way.
+    return list.map((seconds) => ({ label: budgetPeriodWords(seconds), seconds }))
   }, [period])
 
   // A merchant-locked budget's recipient is never user-editable (F3) — it is
@@ -322,21 +321,23 @@ export default function EditBudgetModal({
 
         <div className="p-6">
           {signersError ? (
-            <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3">
-              <p className="text-sm text-[var(--v2-ink-2)]">
-                Haven could not load how this account is approved.
-              </p>
-              <Button size="sm" variant="ghost" onClick={() => void reloadSigners()}>
-                Try again
-              </Button>
-            </div>
+            <NoticeRow
+              className="mb-5"
+              action={
+                <Button size="sm" variant="ghost" onClick={() => void reloadSigners()}>
+                  Try again
+                </Button>
+              }
+            >
+              Haven could not load how this account is approved.
+            </NoticeRow>
           ) : null}
 
           {step === 'form' && (
             <div className="space-y-5">
               <p className="text-sm text-[var(--v2-ink-2)]">
                 Editing the {formatUnits(BigInt(budget.budget_atomic), token?.decimals ?? 18)}{' '}
-                {token?.symbol} {periodLabel(budget.period_seconds)} budget
+                {token?.symbol} {budgetPeriodWords(budget.period_seconds)} budget
                 {/* Design review round 2, finding 1: a merchant-locked budget
                     already names its merchant in the read-only row just below
                     — "budget for its recipient" here would be a second, vaguer
@@ -431,7 +432,7 @@ export default function EditBudgetModal({
                 <div>
                   <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">Now</p>
                   <p className="text-sm text-[var(--v2-ink-2)]">
-                    {changes.oldAmount} {changes.symbol} {periodLabel(changes.oldPeriod)}
+                    {changes.oldAmount} {changes.symbol} {budgetPeriodWords(changes.oldPeriod)}
                     {/* Design review round 2, finding 1: name the merchant (and
                         its truncated address) for a merchant-locked budget —
                         the recipient never changes here, so "one recipient" is
@@ -446,7 +447,7 @@ export default function EditBudgetModal({
                 <div>
                   <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">After you sign</p>
                   <p className="text-sm font-medium text-[var(--v2-ink)]">
-                    {changes.newAmount} {changes.symbol} {periodLabel(changes.newPeriod)}
+                    {changes.newAmount} {changes.symbol} {budgetPeriodWords(changes.newPeriod)}
                     {isMerchantLocked && changes.newRecipient
                       ? ` · ${budget.merchant_name ?? 'this merchant'} only · ${truncateAddress(changes.newRecipient)}`
                       : changes.newRecipient
@@ -477,11 +478,29 @@ export default function EditBudgetModal({
                   the old one. Haven will ask for that second signature.
                 </p>
               </div>
+              {ready && passkeyElsewhere ? <PasskeyElsewhereHint /> : null}
+              {!ready && !signersError && !signersLoading ? (
+                // #3812: the wallet can go away after Edit opened (Edit itself
+                // is disabled without a signer). Say so before the signature
+                // fails, and offer the way back in place.
+                <div className="space-y-2">
+                  <p className="text-xs text-[var(--v2-ink-3)]">
+                    Connect your account owner wallet to sign the new budget.
+                  </p>
+                  <WalletConnectAction />
+                </div>
+              ) : null}
               <div className="flex gap-3">
                 <Button variant="ghost" onClick={() => setStep('form')} className="flex-1" disabled={busy}>
                   Back
                 </Button>
-                <Button onClick={() => void run()} disabled={busy} className="flex-1">
+                <Button
+                  onClick={() => void run()}
+                  // #3812 design review: dead while the hint above says no one
+                  // here can sign, the same gate BudgetGrantAction applies.
+                  disabled={busy || (!ready && !signersError && !signersLoading)}
+                  className="flex-1"
+                >
                   Sign new budget
                 </Button>
               </div>

@@ -15,6 +15,18 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.10.0-alpha.0 — 2026-10-14
+
+### Added
+
+- **`haven_get_agent` and `haven_get_allowances` warn a replaced agent (#3772).** When a Connect `--replace` retired this agent on its machine, both outputs carry `supersededBy` with a warning to restart the session and have the user remove the old agent; otherwise `supersededBy` is `null`. Same field as the hosted runtime. Warning only.
+
+- **`haven_discover_tools` says which merchants avoid the funding leg (#3839).** Each entry now carries `asset_transfer_methods` and `funding_leg_expected: true | false | "unknown"` — `false` when the merchant advertises erc7710 — and the description tells the agent to prefer `false` among equivalent entries. It is a catalog hint; the quote's `expected_funding_leg` stays authoritative. Same fields as the hosted runtime; listing order is unchanged.
+
+### Changed
+
+- **An out-of-gas `MERCHANT_NOT_READY` refusal names the operator top-up (#3834).** When the merchant refuses with `reason_code: settlement_wallet_out_of_gas`, the local runtime's message now gives `fail_floor` beside `settlements_remaining` and says the merchant's operator must top up its settlement wallet, so retrying before then is refused again. It no longer says "Retry after approximately 60s". Its `next_tool_omitted_reason` names the top-up too. Every other reason code keeps its wording; `retry_with_new_quote` stays `true`. Same sentence as the hosted runtime.
+
 ## 0.9.0-alpha.0 — 2026-10-09
 
 ### Changed

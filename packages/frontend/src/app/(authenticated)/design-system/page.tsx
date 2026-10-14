@@ -1,6 +1,6 @@
 'use client'
 
-import { ArrowDown, ArrowUp, Bot, Check, Circle, EllipsisVertical, Info, TriangleAlert, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Bot, Check, Circle, EllipsisVertical, Info, OctagonAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
 import { MobileTabBar } from '@/components/sidebar/MobileTabBar'
 import { baseNavItems } from '@/components/sidebar/Sidebar'
 import { Icon } from '@/components/ui/Icon'
@@ -33,7 +33,10 @@ import { StepProgress } from '@/components/ui/StepProgress'
 import { SeriesSwatch, StackedBarChart } from '@/components/ui/StackedBarChart'
 import type { StackedBarDay } from '@/components/ui/StackedBarChart'
 import { AreaChart } from '@/components/ui/AreaChart'
-import type { AreaPoint } from '@/components/ui/AreaChart'
+import type { AreaPoint, SparklinePoint } from '@/components/ui/AreaChart'
+import { AttentionList } from '@/components/haven/AttentionList'
+import { NoticeRow } from '@/components/haven/NoticeRow'
+import type { AttentionListItem } from '@/components/haven/AttentionList'
 import { CodeBlock } from '@/components/ui/CodeBlock'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import ComingSoonModal from '@/components/ComingSoonModal'
@@ -48,7 +51,8 @@ import { Tooltip } from '@/components/ui/Tooltip'
 import { useToast } from '@/components/ui/Toast'
 import { THEME_TOKENS, contrastTable } from '@/lib/theme-tokens'
 import { formatAnalyticsTick } from '@/lib/analytics-format'
-import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
+import { budgetCaption, type BudgetCaptionRow } from '@/lib/budget-caption'
+import DashboardOnboardingGuide, { SetupCompleteLine } from '@/components/DashboardOnboardingGuide'
 
 import { WalletPopover } from '@/components/WalletButton'
 import {
@@ -269,6 +273,129 @@ const DS_BALANCE_POINTS: AreaPoint[] = [
 const DS_BALANCE_END = DS_BALANCE_POINTS[DS_BALANCE_POINTS.length - 1].value
 const DS_BALANCE_SPENT = DS_BALANCE_POINTS[0].value - DS_BALANCE_END
 const DS_BALANCE_SUMMARY = `Balance over 7 days: ends at ${dsMoney(DS_BALANCE_END)} USD, ${dsMoney(DS_BALANCE_SPENT)} USD spent across the range`
+
+/**
+ * Sparkline sample data (#3805). Two of the fourteen days carry no snapshot —
+ * `null`, a missing day the sparkline skips and connects across (#3897)
+ * rather than drawing a zero, because a zero would state a balance nobody
+ * measured.
+ */
+const DS_SPARKLINE_POINTS: SparklinePoint[] = [
+  { label: 'Sep 24', value: 1180 },
+  { label: 'Sep 25', value: 1220 },
+  { label: 'Sep 26', value: null },
+  { label: 'Sep 27', value: 1105 },
+  { label: 'Sep 28', value: 1060 },
+  { label: 'Sep 29', value: null },
+  { label: 'Sep 30', value: 1140 },
+  { label: 'Oct 1', value: 1190 },
+  { label: 'Oct 2', value: 1150 },
+  { label: 'Oct 3', value: 1210 },
+  { label: 'Oct 4', value: 1255 },
+  { label: 'Oct 5', value: 1230 },
+  { label: 'Oct 6', value: 1275 },
+  { label: 'Oct 7', value: 1240 },
+]
+const DS_SPARKLINE_SUMMARY =
+  'Balance over the last 14 days: ends at 1,240 USDC, up 60 USDC across the range, with 2 days without a snapshot.'
+
+/** The AttentionList sample's items — one per tone, one of them without a badge label. */
+const DS_ATTENTION_ITEMS: AttentionListItem[] = [
+  {
+    id: 'budget-reached',
+    title: 'Travel budget reached',
+    subtitle:
+      'Travel planner has spent its 75 USDC total budget. It approves nothing further until you raise or clear it.',
+    tone: 'neutral',
+    badge: 'Budget reached',
+    icon: Info,
+  },
+  {
+    id: 'reapproval',
+    title: 'Re-approval needed',
+    subtitle: 'Spending paused while Travel planner awaits your approval of the new agent rules.',
+    tone: 'warning',
+    badge: 'Review needed',
+    icon: TriangleAlert,
+    action: (
+      <Button size="sm" variant="ghost">
+        Review
+      </Button>
+    ),
+  },
+  {
+    id: 'summary',
+    title: 'Weekly summary ready',
+    subtitle: 'The spending summary for the week ending Sunday is ready to read.',
+    tone: 'brand',
+    icon: Sparkles,
+  },
+  {
+    id: 'payment-failed',
+    title: 'Payment failed',
+    subtitle: 'The payment to acme.dev failed at signing. Nothing was spent.',
+    tone: 'danger',
+    badge: 'Failed',
+    icon: OctagonAlert,
+  },
+]
+
+/**
+ * The AttentionList showcase owns the dismissal state the list itself refuses
+ * to hold (#3813 owns persistence) — the sample is a caller like any other.
+ */
+function AttentionListShowcase() {
+  const [dismissed, setDismissed] = useState<string[]>([])
+  const items = DS_ATTENTION_ITEMS.filter((item) => !dismissed.includes(item.id))
+  return (
+    <AttentionList
+      items={items}
+      fullBleed
+      onDismiss={(id) => setDismissed((prev) => [...prev, id])}
+      headingId="ds-attention-list-heading"
+    />
+  )
+}
+
+// #3806: the budget examples' captions are the caption helper's OUTPUT,
+// computed at one frozen instant (UTC) so the page renders the same words on
+// every machine and in every capture — the helper never reads the clock.
+const DS_BUDGET_NOW = Date.parse('2026-07-12T09:00:00Z')
+const dsMeterCaption = (row: BudgetCaptionRow): string => {
+  const caption = budgetCaption(row, { nowMs: DS_BUDGET_NOW, timeZone: 'UTC' })
+  return caption.kind === 'meter' ? caption.caption : ''
+}
+// 250 USDC per week, 62.50 used — the refill lands 2026-07-18T00:00Z.
+const DS_SPENDING_ROW: BudgetCaptionRow = {
+  token: 'USDC',
+  recipient: null,
+  startSec: 1_783_728_000,
+  periodSeconds: 604_800,
+  expiresSec: null,
+  budgetAtomic: '250000000',
+  usedAtomic: '62500000',
+  readFromChain: true,
+  periodEndMs: null,
+  symbol: 'USDC',
+  chainId: null,
+}
+// 1.20 of 3.00 USDC over a 14-day period anchored 2026-06-26T09:00Z — the
+// next boundary (2026-07-24T09:00Z) is 12 days out, the day-and-month branch.
+const DS_METER_ROW: BudgetCaptionRow = {
+  token: 'USDC',
+  recipient: null,
+  startSec: 1_782_464_400,
+  periodSeconds: 1_209_600,
+  expiresSec: null,
+  budgetAtomic: '3000000',
+  usedAtomic: '1200000',
+  readFromChain: true,
+  periodEndMs: null,
+  symbol: 'USDC',
+  chainId: null,
+}
+// Untouched: zero used on the same period — the caption still names the refill.
+const DS_METER_UNTOUCHED_ROW: BudgetCaptionRow = { ...DS_METER_ROW, usedAtomic: '0' }
 
 function Section({
   title,
@@ -1075,7 +1202,7 @@ export default function DesignSystemPage() {
             <p className="text-xs font-semibold uppercase tracking-wider text-[var(--v2-brand)]">Anchor</p>
             <p className="mt-2 text-sm font-semibold text-[var(--v2-ink)]">Secondary focal point</p>
             <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-              Use for the second-most-important surface on a page (recoverable funds, agent status). Cooler off-white background, brand-tinted hairline.
+              Use for the second-most-important surface on a page (the sweep page&rsquo;s How to recover card). Cooler off-white background, brand-tinted hairline.
             </p>
           </Card>
 
@@ -1652,8 +1779,8 @@ export default function DesignSystemPage() {
           <EmptyState
             icon={<DotIcon />}
             tone="success"
-            title="You're all caught up"
-            body="Nothing needs your attention. Agents keep working within their budgets."
+            title="Setup complete"
+            body="Your account is funded and your first agent has a budget it can spend from."
           />
         </div>
         <div className="mt-5 grid gap-5 lg:grid-cols-2">
@@ -1675,35 +1802,47 @@ export default function DesignSystemPage() {
 
       <Section
         title="First-run setup"
-        description="A three-step checklist anchors a new user. Each step's status is computed independently from real state — agents and funds can be completed in any order. The active step gets the primary CTA; later steps lock until their prerequisite lands. When all three are done, the guide collapses to a Setup complete banner."
+        description="While setup is in progress the guide IS the Needs attention card (titled Get started), with the rule items that still apply listed below it. Step 1 completes on any USDC on an account — other tokens never count — and reads as unknown, with no funding action, when the USDC read is unavailable; its action opens Add funds, which carries the test-network faucet. Step 2 completes only on an agent that can pay (active or paused, with a usable budget) and names the newest agent still waiting for setup; it can be done before funding, at secondary weight. Step 3 unlocks on the same rule. Hide for now survives a reload until another step completes. The guide never shows an address. The steps own the card only until the first agent payment; from then on they never return — one You're set up line takes their place until dismissed, and the Needs attention rules speak for anything that changes later."
       >
         <div className="max-w-3xl space-y-4">
-          {/* Active: fund step open, agent + payment steps still pending. */}
-          <DashboardOnboardingGuide
-            hasFunds={false}
-            hasAgents={false}
-            hasFirstAgentPayment={false}
-            onReceiveFunds={() => undefined}
-            onAddAgent={() => undefined}
-            onShowAgentUsage={() => undefined}
-            onDismiss={() => undefined}
-            onDismissComplete={() => undefined}
-            inProgressDismissed={false}
-            completeDismissed={false}
-          />
-          {/* All three done — the celebration banner. */}
-          <DashboardOnboardingGuide
-            hasFunds
-            hasAgents
-            hasFirstAgentPayment
-            onReceiveFunds={() => undefined}
-            onAddAgent={() => undefined}
-            onShowAgentUsage={() => undefined}
-            onDismiss={() => undefined}
-            onDismissComplete={() => undefined}
-            inProgressDismissed={false}
-            completeDismissed={false}
-          />
+          {/* A new account: no USDC yet, nothing connected. */}
+          <div className="rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-5">
+            <DashboardOnboardingGuide
+              usdcFunded={false}
+              hasSetUpAgent={false}
+              hasFirstAgentPayment={false}
+              onAddFunds={() => undefined}
+              onAddAgent={() => undefined}
+              onShowAgentUsage={() => undefined}
+            />
+          </div>
+          {/* Funded, an agent connected but waiting for its budget approval. */}
+          <div className="rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-5">
+            <DashboardOnboardingGuide
+              usdcFunded
+              hasSetUpAgent={false}
+              pendingAgent={{ id: 'agent-research', name: 'Research agent', moreCount: 1, awaiting: 'approval' }}
+              hasFirstAgentPayment={false}
+              onAddFunds={() => undefined}
+              onAddAgent={() => undefined}
+              onShowAgentUsage={() => undefined}
+            />
+          </div>
+          {/* The USDC read is unavailable: step 1 says so, no funding action. */}
+          <div className="rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-5">
+            <DashboardOnboardingGuide
+              usdcFunded={null}
+              hasSetUpAgent={false}
+              hasFirstAgentPayment={false}
+              onAddFunds={() => undefined}
+              onAddAgent={() => undefined}
+              onShowAgentUsage={() => undefined}
+            />
+          </div>
+          {/* All three done. */}
+          <div className="rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-5">
+            <SetupCompleteLine onDismiss={() => undefined} />
+          </div>
         </div>
       </Section>
 
@@ -2061,8 +2200,15 @@ export default function DesignSystemPage() {
             balance="$4,280.35 available"
           />
 
-          <Card hover={false} className="overflow-hidden">
-            <Card.Header title="Recent agent activity" />
+          {/* #3810: the grouped dashboard row — `countLabel` renders the muted
+                ×N beside the title, and `fiat` switches the amount to Amount's
+                currency mode (≈ marks a serve-time valuation). The dashboard's
+                merchant-first activity list is this shape. The testid anchors
+                the design-system clip (#3064 pattern); `Card` does not spread
+                extra props, so the div carries it. */}
+          <div data-testid="ds-activity-row">
+            <Card hover={false} className="overflow-hidden">
+              <Card.Header title="Recent agent activity" />
             <TransactionActivityRow
               direction="out"
               title="Agent payment"
@@ -2071,6 +2217,20 @@ export default function DesignSystemPage() {
               asset="USDC"
               status="Sent"
               statusTone="neutral"
+            />
+            {/* #3810: the grouped dashboard row — `countLabel` renders the
+                muted ×N beside the title, and `fiat` switches the amount to
+                Amount's currency mode (≈ marks a serve-time valuation). The
+                dashboard's merchant-first activity list is this shape, and a
+                confirmed row there carries no badge (#3897) — only pending
+                and failed name their state. */}
+            <TransactionActivityRow
+              direction="out"
+              title="api.vendor.com"
+              description="Research assistant"
+              value="36.00"
+              countLabel="×3"
+              fiat={{ amount: 134.5, currency: 'SEK', approx: true }}
             />
             <TransactionActivityRow
               direction="out"
@@ -2091,7 +2251,8 @@ export default function DesignSystemPage() {
               status="Failed"
               statusTone="danger"
             />
-          </Card>
+            </Card>
+          </div>
         </div>
       </Section>
 
@@ -2380,7 +2541,7 @@ export default function DesignSystemPage() {
                   <BudgetMeter
                     usedPercent={25}
                     label="USDC budget used"
-                    caption="62.5 of 250 USDC used this period · refills in 3 days"
+                    caption={dsMeterCaption(DS_SPENDING_ROW)}
                   />
                 </div>
               </div>
@@ -2408,7 +2569,7 @@ export default function DesignSystemPage() {
                 className="mb-2 flex items-start gap-2 text-xs text-[var(--v2-ink-3)]"
               >
                 <Icon icon={Info} className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
-                <span>Connect the account&apos;s owner wallet to update this agent budget.</span>
+                <span>Connect your account owner wallet to update this agent budget.</span>
               </p>
               <div className="flex gap-3">
                 <Button variant="ghost" className="flex-1">Back</Button>
@@ -2439,8 +2600,8 @@ export default function DesignSystemPage() {
               that is connected but is not the account&apos;s owner gets the second caption
               (`wrong_wallet` in `useAccountOperationGate`, #2073): it names both addresses, because
               &quot;connect a wallet&quot; would send the user back to the wallet they already
-              connected. The header wallet pill renders the matching &quot;Wrong wallet&quot;
-              state in the same case.
+              connected. In-flow, the connect control reads &quot;Switch wallet&quot; in the
+              same case (the header wallet pill left the top bar in #3825).
             </p>
           </div>
         </Card>
@@ -2661,7 +2822,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="AreaChart"
-        description="Balance over time (#2948): one line on the first series token with a faint area beneath it, and the range's spend annotated as the endpoint delta. The y-scale runs from the data with headroom rather than from zero, so a quiet range still reads as a range. Below three points it renders nothing. Same keyboard treatment and narrow-screen panel as StackedBarChart, and the same pointer treatment too: the callout takes no pointer, a tap pins a day, and a second tap on the pinned day or Escape releases it (#3070)."
+        description="Balance over time (#2948): one line on the first series token with a faint area beneath it, and the range's spend annotated as the endpoint delta. The y-scale runs from the data with headroom rather than from zero, so a quiet range still reads as a range. The point dots are HTML spans positioned like the labels — a `<circle>` in the stretched svg would render as an oval wherever the box's aspect differs from the viewBox's (#3903). Below three points it renders nothing. Same keyboard treatment and narrow-screen panel as StackedBarChart, and the same pointer treatment too: the callout takes no pointer, a tap pins a day, and a second tap on the pinned day or Escape releases it (#3070)."
       >
         <Card hover={false} className="p-5">
           <AreaChart
@@ -2674,17 +2835,128 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
+        title="Amount: currency mode"
+        description="The other half of the Amount contract (#3805): for a figure that is already a fiat valuation server-side, pass the unsigned magnitude (amount) and the currency it is in — never a symbol string, never a conversion done here. It formats through formatFiatDisplay — formatFiat's output, plus <$0.01 for a non-zero figure under a cent (zero stays $0.00, #3897) — the one formatter, so a SEK figure reads the same on every screen; the sign comes only from direction, and a negative magnitude can never double-sign it. ≈ marks a figure converted at today's rate rather than booked, and it goes before the sign. Unknown — null, or a non-finite value — renders an em dash in secondary ink, never 0,00 kr: an unknown valuation is not a zero. A currency figure is a valuation of a token amount, not a fiat balance Haven holds."
+      >
+        {/* The testid rides a plain wrapper: `Card` forwards no extra props,
+            and the visual spec clips this sample by it. */}
+        <div data-testid="ds-amount-currency">
+          <Card hover={false} className="p-5">
+            <div className="space-y-2 text-sm">
+              <p><Amount amount={9.09} currency="SEK" direction="out" /> <span className="text-xs text-[var(--v2-ink-3)]">— SEK valuation, signed by direction</span></p>
+              <p><Amount amount={0.96} currency="USD" direction="in" /> <span className="text-xs text-[var(--v2-ink-3)]">— incoming: the quiet success green</span></p>
+              <p><Amount amount={0.88} currency="EUR" /> <span className="text-xs text-[var(--v2-ink-3)]">— signless figure (budgets, balances)</span></p>
+              <p><Amount amount={9.09} currency="SEK" direction="out" approx /> <span className="text-xs text-[var(--v2-ink-3)]">— approx: converted at today&apos;s rate, ≈ before the sign</span></p>
+              <p><Amount amount={null} currency="SEK" direction="out" /> <span className="text-xs text-[var(--v2-ink-3)]">— unknown renders an em dash, never 0,00 kr</span></p>
+              <p><Amount amount={0} currency="SEK" /> <span className="text-xs text-[var(--v2-ink-3)]">— zero is a real valuation and renders as one</span></p>
+            </div>
+          </Card>
+        </div>
+      </Section>
+
+      <Section
+        title="AttentionList"
+        description="The list of things that need your eye (#3805), built from Row, StatusBadge and Icon. The rows are static — the action and the dismiss live in trailing, never on the row itself, so an action is never nested inside another control. The tone always rides text as well as colour (Row's leading icon is aria-hidden): a StatusBadge label, or an sr-only tone word when the item has no badge. Budget reached is neutral — the budget did its job; danger is for real failures only. Dismiss is labelled Dismiss: {title} and calls onDismiss(id); the list holds no dismissal state, and after a dismiss focus moves to the next item, or to the list heading when the list empties. The title and subtitle each line-clamp to two lines at every width; the icon (and, from sm up, the trailing controls) centre on the title's first line; below sm the trailing slot wraps under the body. fullBleed is for a list that is the card's body, as on the dashboard: rows run edge to edge with hairline dividers and the card's 20px side inset, and this sample renders it so the first-line and clamp measurements cover the dashboard's shape. Zero items renders nothing — the caller shows the empty state."
+      >
+        <div data-testid="ds-attention-list">
+          <Card hover={false} className="overflow-hidden">
+            <h3
+              id="ds-attention-list-heading"
+              tabIndex={-1}
+              className="border-b border-[var(--v2-border)] px-5 py-3 text-sm font-medium text-[var(--v2-ink)]"
+            >
+              Needs attention
+            </h3>
+            <AttentionListShowcase />
+          </Card>
+        </div>
+      </Section>
+
+      <Section
+        title="AreaChart — sparkline"
+        description="The sparkline variant of AreaChart (#3805): the balance line over a faint area of the same colour (#3902), in a box the caller sizes (height, default 40px) or, with fill, grows to its container with height as the minimum (#3908). No gridlines, ticks, x labels, delta annotation, tooltip or caret — one dot on the last point, drawn in HTML rather than as an SVG circle so it stays round at every box width; the box keeps an inset on every side in CSS px, at least the dot's radius plus stroke, and the line draws edge to edge inside it, so the dot's centre stays on the line's endpoint without the dot ever leaving the box (#3903). It is role=img with the required ariaLabel summary sentence and is not a tab stop: there is no hidden data table, the sentence is the data access. A day with no snapshot is skipped, never zero: the line connects across it at the measured days' true positions (#3897), and the area's top edge is the line itself, so it never dips to the baseline there either. Below three points it renders a flat placeholder line of the same height instead of nothing, so the layout does not jump, and there is no draw animation on data refresh."
+      >
+        <div data-testid="ds-area-chart-sparkline">
+          <Card hover={false} className="p-5">
+            <div className="space-y-5">
+              <div>
+                <p className="text-xs text-[var(--v2-ink-3)]">Balance, last 14 days (2 days without a snapshot)</p>
+                <div className="mt-2">
+                  <AreaChart variant="sparkline" points={DS_SPARKLINE_POINTS} ariaLabel={DS_SPARKLINE_SUMMARY} />
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-[var(--v2-ink-3)]">Below three points: a flat placeholder line of the same height</p>
+                <div className="mt-2 max-w-[320px]">
+                  <AreaChart
+                    variant="sparkline"
+                    height={28}
+                    points={[
+                      { label: 'Mon', value: null },
+                      { label: 'Tue', value: 5 },
+                    ]}
+                    ariaLabel="Balance: not enough days with a snapshot yet."
+                  />
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-[var(--v2-ink-3)]">height=64, for a row that has the room</p>
+                <div className="mt-2">
+                  <AreaChart
+                    variant="sparkline"
+                    height={64}
+                    points={DS_SPARKLINE_POINTS}
+                    ariaLabel={DS_SPARKLINE_SUMMARY}
+                  />
+                </div>
+              </div>
+            </div>
+          </Card>
+        </div>
+      </Section>
+
+      <Section
+        title="StatTile — inline"
+        description="The inline variant of StatTile (#3805): no card border, ground or shadow, and the figure at text-base — the tile a larger card sets beside peers. Tiles carrying money-length values (13 000,50 kr) row up from sm and stack below it; tiles carrying only short counts, like the dashboard money card's payments / merchants / stopped by budget (#3897), stay three across at every width. It shows no delta chip: passing polarity or delta with inline throws, because a judgement colour smuggled into a plain-reading tile is the defect the polarity rule exists to prevent. The figure still carries no colour in any state — the value is ink, the label secondary, exactly the card tile's contract at a smaller scale."
+      >
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3" data-testid="ds-stat-tile-inline">
+          <StatTile variant="inline" label="Spent today" value="13 000,50 kr" />
+          <StatTile variant="inline" label="Refused" value="3" />
+          <StatTile variant="inline" label="Fees paid to Haven" value="No fees yet" />
+        </div>
+      </Section>
+
+      <Section
+        title="NoticeRow"
+        description="One tinted notice line inside a card or modal (#3845): a sentence and, optionally, the one action that resolves it — a retry, or the owner-wallet connect. The tint is a callout, one of the reserved uses of --v2-surface, not a grouping wrapper. Below sm the action sits on its own line under the text; from sm up they share one line, the action at the end. The caller sets the outer margin. Not AttentionList: that is a dismissable list of things that need your eye; a NoticeRow is a single line that stays until its cause is gone."
+      >
+        <div data-testid="ds-notice-row">
+          <Card hover={false} className="p-5">
+            <NoticeRow
+              className="mb-4"
+              action={<Button size="sm" variant="ghost">Try again</Button>}
+            >
+              Haven could not load how this account is approved.
+            </NoticeRow>
+            <NoticeRow action={<Button size="sm" variant="ghost">Connect wallet</Button>}>
+              Connect your account owner wallet to change or stop a budget.
+            </NoticeRow>
+          </Card>
+        </div>
+      </Section>
+
+      <Section
         title="Signing credential (wallet menu)"
         description="Which passkey is about to sign, as the wallet menu states it. Two states, because they are two different facts: a credential this device's marker matched, and the passkeys[0] fallback used when no enrolled passkey carries this device's marker. The fallback is deliberate and load-bearing — see delegation-rail-security-model.md §6 — and until #1952 the menu rendered NOTHING in that case, going silent in exactly the case where the credential was chosen by array position."
       >
         {/*
-          Rendered with props forced, as every gallery state is — and since
-          #1969 (owner decision 2026-08-26) the fallback state is ALSO a
-          reachable production render: `useActiveSigner` resolves a
-          `delegator_passkey` for any non-empty hydrated signer set, so a
-          marker-less user reaches it through ordinary hydration. The
-          app-state proof lives in `e2e/wallet-signer-offering.spec.ts`; this
-          showcase keeps both states side by side under the blocking pixel
+          Rendered with props forced, as every gallery state is. Since #3825
+          the wallet pill renders only in the connect flow's approval step,
+          and only while not ready, so neither state is reachable from an app
+          route any more — this page is where they live (proof:
+          `e2e/wallet-signing-credential-states.spec.ts`). The marker-less
+          user sees the `PasskeyElsewhereHint` line on each signing flow
+          instead. Both states stay side by side under the blocking pixel
           gate so their designed difference stays photographed.
         */}
         {/*
@@ -2874,9 +3146,9 @@ export default function DesignSystemPage() {
               </span>
               <span className="v2-tabular text-xs text-[var(--v2-ink-3)]">40%</span>
             </div>
-            <BudgetMeter usedPercent={40} label="USDC budget used" caption="Refills in 12 days" />
+            <BudgetMeter usedPercent={40} label="USDC budget used" caption={dsMeterCaption(DS_METER_ROW)} />
             <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
-              The analytics agents table renders exactly this shape — its “resets …” line is the
+              The analytics agents table renders exactly this shape — the helper's next-refill line is the
               caption slot.
             </p>
           </div>
@@ -2888,7 +3160,7 @@ export default function DesignSystemPage() {
             </p>
           </div>
           <div>
-            <BudgetMeter usedPercent={0} label="USDC budget used" caption="Nothing spent yet" />
+            <BudgetMeter usedPercent={0} label="USDC budget used" caption={dsMeterCaption(DS_METER_UNTOUCHED_ROW)} />
             <p className="mt-2 text-xs text-[var(--v2-ink-3)]">Untouched — clamped at 0.</p>
           </div>
         </div>

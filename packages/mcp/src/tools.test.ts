@@ -966,6 +966,45 @@ describe('Haven MCP tool handlers', () => {
     })
   })
 
+  it('#3772: haven_get_agent and haven_get_allowances carry supersededBy with the warning, null otherwise', async () => {
+    const mark = { agent_id: '11111111-2222-4333-8444-555555555555', superseded_at: '2026-10-13T10:00:00.000Z' }
+    const serve = (superseded: typeof mark | undefined) =>
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+        const u = String(url)
+        const extra = superseded ? { superseded_by: superseded } : {}
+        if (u.endsWith('/machine-payments/agent')) {
+          return jsonResponse({
+            id: 'agt_1', name: 'Test', status: 'active', account_address: safeAddress,
+            delegate_address: delegateAddress, chain_id: 8453, execution_rail: 'delegation', ...extra,
+          })
+        }
+        if (u.includes('/allowances')) {
+          return jsonResponse({
+            agent_id: 'agt_1', account_address: safeAddress, delegate_address: delegateAddress,
+            chain_id: 8453, allowances: [], ...extra,
+          })
+        }
+        return jsonResponse({ task_budgets: [] })
+      })
+    type Marked = { supersededBy: { replacementAgentId: string; warning: string; nextAction: string } | null }
+    const run = async (): Promise<[Marked, Marked]> => {
+      const handlers = createToolHandlers(new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl }))
+      const agent = await handlers.haven_get_agent({})
+      const allowances = await handlers.haven_get_allowances({})
+      if (!agent.success || !allowances.success) throw new Error('expected success')
+      return [agent.data as Marked, allowances.data as Marked]
+    }
+
+    serve(mark)
+    for (const data of await run()) {
+      expect(data.supersededBy).toMatchObject({ replacementAgentId: mark.agent_id, nextAction: 'stop_and_tell_user' })
+      expect(data.supersededBy?.warning).toContain('still running as the old agent')
+    }
+    vi.restoreAllMocks()
+    serve(undefined)
+    for (const data of await run()) expect(data.supersededBy).toBeNull()
+  })
+
   it('negative control: assertNoDelegateKeyLeak fails when the key is present', () => {
     // Without these the non-custody assertion could be silently weakened
     // (e.g. comparing against a stripped version of the key) and still pass.
@@ -1542,10 +1581,48 @@ describe('haven_pay_mcp_tool: merchant_not_ready parity (#2983)', () => {
     expect(result.retry_with_new_quote).toBe(true)
     expect(result.message).toMatch(/reason_code: fail_floor_reached/)
     expect(result.message).toMatch(/Retry after approximately 30s/)
+    // #3834: every other reason keeps the generic next-step reason.
+    expect(result.next_tool_omitted_reason).toBe(
+      'the merchant needs to recover first; re-quote after the retry_after_s in the message',
+    )
     expect(result.message).not.toMatch(/discovery document/)
     // Never spent the discovery retry — the merchant's own reason is
     // conclusive, no need to probe .well-known or same-origin `/`.
     expect(calls.some((c) => c.url.includes('.well-known'))).toBe(false)
+  })
+
+  // #3834: out of gas recovers only when the operator tops the merchant's
+  // settlement wallet up. The literal below is the SAME one the hosted test
+  // pins (packages/mcp-server/src/tools/catalog-purchase.test.ts) — that pair
+  // is the hosted/local parity check.
+  it('out of gas: the exact operator-top-up sentence, with the floor (#3834)', async () => {
+    installFetch({
+      'POST http://merchant.test/mcp': {
+        status: 503,
+        body: {
+          error: 'merchant_not_ready',
+          reason_code: 'settlement_wallet_out_of_gas',
+          settlements_remaining: 11,
+          fail_floor: 12,
+          retry_after_s: 60,
+          recovery: 'operator_top_up',
+        },
+      },
+    })
+    const result = await notReadyHandlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'buy_vpn',
+    })
+    if (result.success) throw new Error('expected failure')
+    expect(result.code).toBe('MERCHANT_NOT_READY')
+    expect(result.retry_with_new_quote).toBe(true)
+    // Same literal the hosted test pins for next_tool_omitted_reason.
+    expect(result.next_tool_omitted_reason).toBe(
+      "the merchant's operator must top up its settlement wallet first; re-quote after that",
+    )
+    expect(result.message).toBe(
+      "The merchant refused this call: its settlement wallet is out of gas (reason_code: settlement_wallet_out_of_gas). It has gas for 11 more settlements and refuses new payments below 12 (settlements_remaining: 11, fail_floor: 12). No payment was created. The merchant's operator must top up its settlement wallet; until then every retry is refused again. Tell the user, and re-quote once the merchant has been topped up.",
+    )
   })
 
   // #2987 review: the mapping also runs on the retry against a DISCOVERED
@@ -1826,6 +1903,27 @@ describe('haven_discover_tools (#349)', () => {
     // read-only: exactly one request, a GET to /catalog, nothing else
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(String(fetchMock.mock.calls[0][0])).toBe(`${baseUrl}/catalog`)
+  })
+
+  it('carries asset_transfer_methods and the funding_leg_expected hint like the hosted surface (#3839)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({
+        entries: [
+          { ...catalogEntries[0], id: 'a', asset_transfer_methods: 'eip3009,erc7710' },
+          { ...catalogEntries[0], id: 'b', asset_transfer_methods: 'eip3009' },
+          { ...catalogEntries[0], id: 'c', asset_transfer_methods: null },
+          { ...catalogEntries[0], id: 'd' },
+        ],
+      }),
+    )
+    const result = await handlers().haven_discover_tools({})
+    const data = (result as { data: Array<Record<string, unknown>> }).data
+    expect(data.map((e) => [e.id, e.asset_transfer_methods, e.funding_leg_expected])).toEqual([
+      ['a', 'eip3009,erc7710', false],
+      ['b', 'eip3009', true],
+      ['c', null, 'unknown'],
+      ['d', null, 'unknown'],
+    ])
   })
 
   it('forwards category and rail filters as query parameters', async () => {

@@ -73,8 +73,9 @@ export interface Transaction {
   fundingTxHash?: string | null
   /**
    * #3763: the merchant's settlement transaction — the delegate collecting
-   * from the agent's signed EIP-3009 authorization — recorded ONLY when an
-   * agent reported it and it verified on-chain (#3475,
+   * from the agent's signed EIP-3009 authorization — recorded when an agent
+   * reported it or the backend's settlement sweep detected it on-chain
+   * (#3888), and it verified on-chain (#3475,
    * `machine_metadata.merchant_settlement_tx_hash`). The merchant shows this
    * transaction; before #3763 the history views linked the funding leg as
    * "the" payment instead. `null` is "not recorded", never "failed": the

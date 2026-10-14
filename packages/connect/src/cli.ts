@@ -175,12 +175,19 @@ export async function runCli(
     // when the bare pair is provably another agent's.
     const { unwireAgent } = await import('./unwire.js')
     const { tombstonesDirForAgentDirectory } = await import('./tombstone.js')
+    // #3799: --name resolves through the shared pair-record rule — the folder
+    // need not be named after the slug, and a retired directory stays
+    // reachable (unwire must reach a retired agent to release its name).
+    const { resolveAgentDirectoryBySlug } = await import('./storage.js')
     const { homedir } = await import('node:os')
     const { join } = await import('node:path')
     const homeDir = homedir()
     const root = parsed.options.credentialsDir ?? join(homeDir, '.haven', 'agents')
     const directory =
-      parsed.unwireDir ?? (parsed.options.serverName ? join(root, parsed.options.serverName) : root)
+      parsed.unwireDir ??
+      (parsed.options.serverName
+        ? await resolveAgentDirectoryBySlug(parsed.options.serverName, { root, allowRetired: true })
+        : root)
     const ledgerDir = tombstonesDirForAgentDirectory(directory, homeDir)
     try {
       const result = await unwireAgent({
@@ -396,13 +403,18 @@ export async function runCli(
     // --doctor since #3210; --repair never gets here without a flag (args.ts).
     const runtime = parsed.options.runtime ?? ''
     const credentialsDir = parsed.options.credentialsDir
+    // #3799: --name selects the agent directory by its recorded pair;
+    // --ack-local-tools on a repair re-consents the installed signer
+    // (explicit flag only — never automatic).
+    const serverName = parsed.options.serverName
+    const ackLocalTools = parsed.options.ackLocalTools === true
     try {
       if (parsed.repair) {
-        const repair = await runRepair({ runtime, credentialsDir })
+        const repair = await runRepair({ runtime, credentialsDir, serverName, ackLocalTools })
         for (const message of repair.messages) io.stderr(`${redactSecrets(message)}\n`)
         if (!repair.ok) return 1
       }
-      const report = await runDoctor({ runtime, credentialsDir })
+      const report = await runDoctor({ runtime, credentialsDir, serverName })
       // Defensively redacted like every other output path — the report is
       // secret-free by construction, but signerCapabilities is untrusted
       // process output and belts are cheap (#1589 review).
@@ -419,6 +431,12 @@ export async function runCli(
         // describes ONE agent; multi-agent means the rest still have to be
         // accounted for, by name and by verdict, never silently dropped.
         const otherAgents = report.agents.filter((agent) => agent.directory !== report.credentialDirectory)
+        // #3830: when the superseded check is an advisory, the connector could
+        // not tell wired from superseded, so the row must not assert it either.
+        // The `--json` classification is unchanged (#3121 decision 5).
+        const wiringUnverifiable = report.checks.some(
+          (check) => check.id === 'superseded_agents' && check.level === 'advisory',
+        )
         if (otherAgents.length > 0) {
           io.stdout('\nOther agents on this machine:\n')
           for (const agent of otherAgents) {
@@ -438,7 +456,9 @@ export async function runCli(
               // re-key check above.
               : agent.classification === 'parked'
                 ? 'parked re-key only — no identity.json in this directory, but key material is still there'
-                : agent.classification
+                : agent.classification === 'superseded' && wiringUnverifiable
+                  ? 'not verified as wired — no config the connector can read names it'
+                  : agent.classification
             io.stdout(redactSecrets(`  ${failed.length > 0 ? '✗' : advised.length > 0 ? '!' : '•'} ${name}: ${verdict}\n`))
             for (const check of [...failed, ...advised]) {
               io.stdout(redactSecrets(`      ${levelMarker(check.level)} ${check.label}: ${check.detail}\n`))

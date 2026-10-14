@@ -23,7 +23,7 @@ import { checkTextForSecrets, MAX_FEEDBACK_TEXT_LENGTH } from './secret-check.js
 export const DEFAULT_API = 'https://havenbackend-production-8a00.up.railway.app'
 // Self-reported CLI version. Owned by scripts/release-bump.mjs, which rewrites
 // the string literal below on every release — keep it a bare quoted literal.
-export const CLI_VERSION = '0.9.0-alpha.0'
+export const CLI_VERSION = '0.10.0-alpha.0'
 
 /** #3303: the `X-Haven-Client` value every Haven API request from this CLI carries. */
 export const CLI_CLIENT_IDENTITY = `@haven_ai/cli/${CLI_VERSION}`
@@ -1319,13 +1319,14 @@ async function resolveWalletAndToken(
     : (accounts.find((s) => s.is_default) ?? accounts[0])
   if (!safe) throw new UsageError(`No wallet matches --safe ${args.flags.safe}`)
 
-  // `chain_id` is REQUIRED here, not decorative. The same account address is
-  // provisioned on every supported chain, so a wallet address usually owns more
-  // than one ownership row — and `GET /balances/:address` answers
-  // `400 chain_id required` rather than guessing when it finds more than one
-  // (`routes/balances.ts`). `wallets balances` has always passed it; this call
-  // omitted it and would have failed for exactly the ordinary multi-chain
-  // account (haven-reviewer, #2527).
+  // `chain_id` is REQUIRED here, not decorative. A passkey set derives the same
+  // account address on every chain, so one address can own more than one
+  // ownership row (an account on each of two chains) — and
+  // `GET /balances/:address` answers `400 chain_id required` rather than
+  // guessing when it finds more than one (`routes/balances.ts`). `wallets
+  // balances` has always passed it; this call omitted it and would have failed
+  // for any address with accounts on more than one chain (haven-reviewer,
+  // #2527).
   const { balances } = await api.get<{ balances: BalanceToken[] }>(
     `/balances/${accountAddressOf(safe)}?chain_id=${safe.chain_id}`,
   )

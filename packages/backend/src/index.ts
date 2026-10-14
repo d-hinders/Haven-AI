@@ -33,6 +33,10 @@ import transactionRoutes from './routes/transactions.js'
 import receiveRoutes from './routes/receive.js'
 import portfolioRoutes from './routes/portfolio.js'
 import dashboardRoutes from './routes/dashboard.js'
+// #3804: rides the /dashboard prefix as its own route FILE — #3803 is
+// concurrently reworking the overview route/repository, and the
+// request-validation rollout keys enforcedModules on the file.
+import dashboardBudgetRemainingRoutes from './routes/dashboard-budget-remaining.js'
 import agentRoutes from './routes/agents.js'
 import agentTaxDeclarationRoutes from './routes/agent-tax-declaration.js'
 import labelRoutes from './routes/labels.js'
@@ -156,6 +160,9 @@ installRequestValidation(app, {
   enforcedModules: [
     // Slice 1 (#3029) proof module, and the modules born enforced since.
     'routes/contacts.ts',
+    // #3804: display-only dashboard budget-remaining read — born ENFORCED
+    // like every module after the rollout began (GET-only, no parameters).
+    'routes/dashboard-budget-remaining.ts',
     'routes/merchants.ts',
     'routes/labels.ts',
     'routes/agent-labels.ts',
@@ -517,6 +524,9 @@ await app.register(transactionRoutes, { prefix: '/transactions' })
 await app.register(receiveRoutes, { prefix: '/receive', trustProxyHops: config.trustProxyHops })
 await app.register(portfolioRoutes, { prefix: '/portfolio' })
 await app.register(dashboardRoutes, { prefix: '/dashboard' })
+// #3804: the cached budget-remaining read — its own file on the same prefix
+// (see the import comment above).
+await app.register(dashboardBudgetRemainingRoutes, { prefix: '/dashboard' })
 // #2847 (epic #1440): `GET /safe/:addr/details` and `POST /safe/exec` are
 // deleted. `/safe` no longer mounts anything here but the safe-deploy
 // tombstone below — the prefix survives only because that 410 does.
@@ -834,25 +844,47 @@ const start = async () => {
     void runOutboundBump()
     setInterval(runOutboundBump, OUTBOUND_BUMP_INTERVAL_MS).unref()
 
-    // Passive erc7710 settlement observation (#2117, #2092 residual). On
-    // erc7710 direct settlement the merchant redeems the chain and Haven
-    // submits nothing, so an intent stays `submitted` until an AGENT reports
-    // the settlement hash. When that report never comes — no
-    // `PAYMENT-RESPONSE` transaction, or the generic plain-HTTP flow (#2041)
-    // where Haven never sees the header — the payment has no evidence row and
-    // is therefore permanently absent from the Fortnox feed. This tick finds
-    // such a settlement by looking its intent-unique settlement child (#2094)
-    // up in the pinned DelegationManager's `RedeemedDelegation` logs and
-    // completes it through the same seam the agent-reported path uses.
+    // Passive settlement observation for BOTH x402 schemes. On erc7710 direct
+    // settlement the merchant redeems the chain and Haven submits nothing, so
+    // an intent stays `submitted` until an AGENT reports the settlement hash.
+    // When that report never comes — no `PAYMENT-RESPONSE` transaction, or
+    // the generic plain-HTTP flow (#2041) where Haven never sees the header —
+    // the payment has no evidence row and is therefore permanently absent
+    // from the Fortnox feed. This tick finds such a settlement by looking its
+    // intent-unique settlement child (#2094) up in the pinned
+    // DelegationManager's `RedeemedDelegation` logs and completes it through
+    // the same seam the agent-reported path uses.
     //
-    // It never guesses: attribution is only ever the manager naming this
-    // intent's own child, never transfer shape. Bounded RPC, and an outage
-    // confirms nothing and waits for the next tick.
+    // On the eip3009 bridge (#3888) the merchant's settlement is a second
+    // transaction Haven never submits, and since #3888 its EIP-3009 nonce is
+    // derived from the payment id — so a settlement the agent never reported
+    // is found the same way: `AuthorizationUsed(delegate, derived nonce)` on
+    // the pinned token, handed to the same verifier and the same recording
+    // order (base row, verified hash, ONE feed fire) as an agent report.
+    //
+    // Neither pass ever guesses: attribution is only ever a chain event that
+    // names this intent's own key — the manager's child redemption, the
+    // token's burned authorization nonce — never transfer shape. Bounded RPC,
+    // and an outage confirms nothing and waits for the next tick.
     const runSettlementSweep = async () => {
       try {
         await runIfLeader(LEADER_LOCK_KEYS.settlementSweep, async () => {
-          const { runSettlementSweepTick } = await import('./modules/x402/index.js')
-          await runSettlementSweepTick(app.log)
+          const { runSettlementSweepTick, runEip3009SettlementSweepTick } = await import(
+            './modules/x402/index.js'
+          )
+          // Two passes under one leader gate — the builder decision #3888
+          // left open. Each with its own boundary, so a failure in one
+          // cannot silence the other.
+          try {
+            await runSettlementSweepTick(app.log)
+          } catch (err) {
+            app.log.warn({ err }, 'erc7710 settlement sweep pass failed')
+          }
+          try {
+            await runEip3009SettlementSweepTick(app.log)
+          } catch (err) {
+            app.log.warn({ err }, 'eip3009 settlement sweep pass failed')
+          }
         })
       } catch (err) {
         app.log.warn({ err }, 'Settlement sweep tick failed')

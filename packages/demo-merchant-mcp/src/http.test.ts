@@ -607,7 +607,9 @@ describe('demo merchant MCP x402 flow', () => {
         reason_code: 'settlement_wallet_out_of_gas',
         settlements_remaining: 0,
         fail_floor: 12,
+        recovery: 'operator_top_up',
       })
+      expect(body.retry_after_s).toBe(60)
       expect(typeof body.retry_after_s).toBe('number')
       expect(res.headers.get('Retry-After')).toBe(String(body.retry_after_s))
       // No 402 was ever issued, so nothing was ever signed or submitted.

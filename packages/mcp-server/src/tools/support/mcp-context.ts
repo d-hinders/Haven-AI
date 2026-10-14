@@ -145,7 +145,25 @@ export function merchantNotReadyErrorFor(err: unknown): HostedToolError | null {
   if (!body || typeof body !== 'object' || (body as Record<string, unknown>).error !== 'merchant_not_ready') {
     return null
   }
-  const { reason_code, settlements_remaining, retry_after_s } = body as Record<string, unknown>
+  const { reason_code, settlements_remaining, fail_floor, retry_after_s } = body as Record<string, unknown>
+  // #3834: an out-of-gas refusal does not recover by waiting. The demo
+  // merchant refuses below its fail floor and its settlement wallet does not
+  // refill itself, so "retry after 60s" sent agents into a loop of refusals
+  // while an operator had to top the wallet up. The sentence is Haven's own,
+  // keyed on the reason code — merchant prose is never repeated
+  // (docs/security/hosted-egress.md). Every other reason keeps the wording
+  // below, byte for byte.
+  if (reason_code === MERCHANT_OUT_OF_GAS_REASON) {
+    return new HostedToolError({
+      code: AgentPaymentFailureCode.MerchantNotReady,
+      message: merchantOutOfGasMessage(settlements_remaining, fail_floor),
+      statusCode: 503,
+      nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.StopAndTellUser, nextTool: null, nextToolOmittedReason: "the merchant's operator must top up its settlement wallet first; re-quote after that" }),
+      // Still a re-quote once the wallet is topped up — the documented wire
+      // field stays true.
+      retryWithNewQuote: true,
+    })
+  }
   return new HostedToolError({
     code: AgentPaymentFailureCode.MerchantNotReady,
     message:
@@ -164,6 +182,32 @@ export function merchantNotReadyErrorFor(err: unknown): HostedToolError | null {
     // wrong; the merchant's own wallet needs to recover first.
     retryWithNewQuote: true,
   })
+}
+
+/** The demo merchant's reason code for a settlement wallet below its fail floor (#2979). */
+export const MERCHANT_OUT_OF_GAS_REASON = 'settlement_wallet_out_of_gas'
+
+/**
+ * #3834: Haven's message for an out-of-gas `merchant_not_ready` refusal. The
+ * local runtime (`packages/mcp/src/tools.ts`) writes the same sentence; the
+ * hosted and local tests pin the same literal, which is the parity check.
+ */
+function merchantOutOfGasMessage(settlementsRemaining: unknown, failFloor: unknown): string {
+  const remaining = typeof settlementsRemaining === 'number' ? settlementsRemaining : null
+  const floor = typeof failFloor === 'number' ? failFloor : null
+  const figures =
+    remaining !== null && floor !== null
+      ? ` It has gas for ${remaining} more settlement${remaining === 1 ? '' : 's'} and refuses new payments below ${floor} (settlements_remaining: ${remaining}, fail_floor: ${floor}).`
+      : remaining !== null
+        ? ` settlements_remaining: ${remaining}.`
+        : ''
+  return (
+    `The merchant refused this call: its settlement wallet is out of gas (reason_code: ${MERCHANT_OUT_OF_GAS_REASON}).` +
+    figures +
+    ' No payment was created.' +
+    " The merchant's operator must top up its settlement wallet; until then every retry is refused again." +
+    ' Tell the user, and re-quote once the merchant has been topped up.'
+  )
 }
 
 /**

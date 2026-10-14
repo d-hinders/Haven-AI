@@ -52,6 +52,10 @@ export {
   type SweepExpectedAuth,
 } from './sweep.js'
 export { addressFromKey, signHash, verifySignature } from './edge-signing.js'
+// #3888: the shared EIP-3009 nonce derivation — the signer, the SDK header
+// builder and the backend must derive the SAME nonce from the SAME payment
+// id, so it travels on the edge surface every published signer resolves.
+export { deriveX402PaymentNonce, X402_PAYMENT_NONCE_TAG } from './x402-nonce.js'
 export {
   TAX_DECLARATION_DOMAIN,
   TAX_DECLARATION_TYPES,

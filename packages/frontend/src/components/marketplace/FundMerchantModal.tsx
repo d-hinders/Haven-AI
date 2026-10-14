@@ -31,6 +31,7 @@ import { useDelegationBudget, type BudgetResult, type DelegationBudget, type Gra
 import type { Agent } from '@/hooks/useAgents'
 import type { CatalogEntry, Merchant, MerchantFundingTarget } from '@/hooks/useCatalog'
 import { getChainConfig } from '@/lib/chains'
+import { budgetPeriodWords } from '@/lib/budget-caption'
 import { needsUnpinnedBudget, networkToChainId } from '@/lib/marketplace'
 import {
   classifyMerchantBudgetRefusal,
@@ -39,6 +40,8 @@ import {
 import { truncateAddress, BudgetAmountRow } from '@/components/haven'
 import { Icon } from '@/components/ui/Icon'
 import { Button } from '@/components/ui/Button'
+import WalletConnectAction from '@/components/WalletConnectAction'
+import PasskeyElsewhereHint from '@/components/PasskeyElsewhereHint'
 import { Select } from '@/components/ui/Select'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
@@ -51,14 +54,14 @@ interface TokenOption {
 
 type Step = 'select' | 'review' | 'working' | 'done' | 'error'
 
-const PERIODS: Array<{ label: string; seconds: number }> = [
-  { label: 'per day', seconds: 86_400 },
-  { label: 'per week', seconds: 604_800 },
-  { label: 'per month', seconds: 2_592_000 },
-]
+const PERIODS: Array<{ label: string; seconds: number }> = [86_400, 604_800, 2_592_000].map((seconds) => ({
+  // #3806: the period words are the caption helper's.
+  label: budgetPeriodWords(seconds),
+  seconds,
+}))
 
 function periodLabel(seconds: number): string {
-  return PERIODS.find((p) => p.seconds === seconds)?.label ?? `every ${seconds}s`
+  return budgetPeriodWords(seconds)
 }
 
 /** A plain, no-exponent, non-negative decimal — `1e3` or `-5` are refused with a message, never silently. */
@@ -251,7 +254,7 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
   // `chainId` change (agent picker inside one mounted instance), so `budgets`
   // and `ready` below are never the PREVIOUS agent's while the new read is in
   // flight — they read `null`/`false` instead.
-  const { budgets, budgetsError, reload, grant, busy, ready } = useDelegationBudget(
+  const { budgets, budgetsError, reload, grant, busy, ready, signersError, signersLoading, hasPasskeys, passkeyElsewhere } = useDelegationBudget(
     selectedAgent?.id ?? '',
     chainId ?? 0,
     { enabled: open && !!selectedAgent },
@@ -555,10 +558,19 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                   Sign budget
                 </Button>
               </div>
+              {ready && passkeyElsewhere ? <PasskeyElsewhereHint /> : null}
               {!ready && (
-                <p className="text-xs text-[var(--v2-ink-3)]">
-                  Connect the wallet or passkey that approves actions for this agent's Haven wallet.
-                </p>
+                <div className="space-y-2">
+                  <p className="text-xs text-[var(--v2-ink-3)]">
+                    {/* #3845: offer a passkey only to an account that has one
+                        (any device); unknown keeps the offer. */}
+                    {hasPasskeys === false
+                      ? 'Connect your account owner wallet to sign this budget.'
+                      : 'Connect your account owner wallet, or use one of the account’s passkeys, to sign this budget.'}
+                  </p>
+                  {/* #3812: connect or switch in place (the header pill is gone since #3825). */}
+                  {!signersError && !signersLoading ? <WalletConnectAction /> : null}
+                </div>
               )}
             </div>
           )}

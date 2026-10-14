@@ -1,1 +1,8 @@
-{}
+{
+  "packages/frontend/src/hooks/useAccountSigners.ts": {
+    "webauthn credential": 1
+  },
+  "packages/frontend/src/hooks/useAgentRekey.ts": {
+    "allowance module": 1
+  }
+}

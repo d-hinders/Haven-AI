@@ -114,8 +114,9 @@ const transactionBaseProperties = {
   // CSV/CLI export key and the React keys — so the legs travel beside it.
   // `fundingTxHash` restates the funding hash explicitly (Haven's sponsored
   // UserOp, account → delegate); `settlementTxHash` is the merchant's own
-  // delegate → merchant transaction, present ONLY when an agent reported it
-  // and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`).
+  // delegate → merchant transaction, present when an agent reported it OR the
+  // backend's settlement sweep detected it on-chain (#3888), and it verified
+  // on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`).
   // Null is "not recorded", never "failed": the SDK's default evidence post
   // reports the funding hash, which the writer refuses, so many eip3009
   // payments legitimately never get one. Populated only on x402-synthesized
@@ -198,6 +199,22 @@ const transactionBaseProperties = {
     description: 'The currency `convertedAmount` is denominated in — the user’s `currency_preference`, or SEK when none is set. SEK mirrors `amountSek`; USD/EUR are struck from the row’s book-time rate map (`machine_payment_evidence.fx_rates`, migration 082) and are null when no rate was captured there.',
   },
   convertedFxRate: { type: ['string', 'null'] },
+  // #3824: the serve-time ("at today's rate") amount for rows WITHOUT
+  // book-time fiat, struck NOW in the user's preferred currency — priced via
+  // the CoinGecko read, never persisted. Additive and optional: a row that
+  // already carries `convertedAmount` (the stored book-time capture) does
+  // NOT carry these, so the two provenances never blur. Null — not 0 — when
+  // the token has no usable quote (an inbound spam token must not read
+  // "≈ 0"). Absent from the CSV export, which stays fixed-currency book-time.
+  approxAmount: {
+    type: ['string', 'null'],
+    description: '#3824: the token amount at today’s rate in `approxCurrency`, for rows without book-time fiat. Null when no usable price exists — never "0".',
+  },
+  approxCurrency: {
+    type: 'string',
+    enum: ['SEK', 'USD', 'EUR'],
+    description: '#3824: the currency `approxAmount` is denominated in — the user’s `currency_preference`, or SEK when none is set.',
+  },
   // #3127: the row's own stored book-time rate map (migration 082), carried
   // for auditability — the same capture `convertedFxRate` names the one used
   // rate out of. Keys are the settlement-time supported ledger currencies;
@@ -583,6 +600,18 @@ const accountProperties = {
   created_at: { type: 'string', format: 'date-time' },
 } as const
 
+/** One account a signer approves — `GET /user/signers` (#3825). */
+const userSignerAccount = {
+  type: 'object',
+  required: ['account_id', 'account_address', 'account_name', 'chain_id'],
+  properties: {
+    account_id: { type: 'string' },
+    account_address: address,
+    account_name: { type: 'string', nullable: true },
+    chain_id: { type: 'integer' },
+  },
+}
+
 /** A linked account as every `/user/accounts…` write and the list route return it. The deprecated alias schema went with #2914. */
 const account = {
   type: 'object',
@@ -866,6 +895,14 @@ const activityPayment = {
     token: { type: ['string', 'null'] },
     amount_raw: { type: ['string', 'null'] },
     amount: { type: ['string', 'null'] },
+    // #3824: the serve-time amount at today's rate, in the user's preferred
+    // currency (the preference this feed reads since #3824 — the
+    // /transactions route and the dashboard have read it since #3127).
+    // Optional and additive: absent until a row is priced, and `null` — not
+    // 0 — when the token has no usable quote. The mcp_tool_call branch does
+    // not carry these: it is not a transaction-shaped row.
+    approx_amount: { type: ['string', 'null'], description: '#3824: the token amount at today’s rate in `approx_currency`; null when no usable price exists — never "0".' },
+    approx_currency: { type: 'string', enum: ['SEK', 'USD', 'EUR'], description: '#3824: the currency `approx_amount` is denominated in (the user’s `currency_preference`).' },
     to: { type: ['string', 'null'] },
     status: { type: ['string', 'null'] },
     // #3763: `tx_hash` keeps its FUNDING meaning (Haven's sponsored UserOp,
@@ -875,7 +912,7 @@ const activityPayment = {
     funding_tx_hash: { type: ['string', 'null'], description: '#3763: the EIP-3009 funding leg, named — same value as `tx_hash`.' },
     settlement_tx_hash: {
       type: ['string', 'null'],
-      description: '#3763: the merchant’s settlement transaction (delegate → merchant) when an agent reported one and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`). Null is "not recorded", never "failed" — the SDK’s default evidence post reports the funding hash, which the writer refuses, so many eip3009 payments legitimately never get one.',
+      description: '#3763: the merchant’s settlement transaction (delegate → merchant) when an agent reported one or the backend’s settlement sweep detected it on-chain (#3888), and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`). Null is "not recorded", never "failed" — the SDK’s default evidence post reports the funding hash, which the writer refuses, so many eip3009 payments legitimately never get one.',
     },
     settlement_scheme: {
       type: ['string', 'null'],
@@ -1932,6 +1969,30 @@ export const openapiSpec = {
           '200': {
             description: 'The counts.',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/OpsOverview' } } },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'The ops console (or its read-only database) is not configured.' },
+          '503': { ...errorResponse, description: 'The read could not be audited, so nothing was returned.' },
+        },
+      },
+    },
+    '/ops/sponsored-gas': {
+      get: {
+        tags: ['Ops'],
+        operationId: 'getOpsSponsoredGas',
+        summary: 'Sponsored UserOp gas cost per merchant per day.',
+        description:
+          'What the delegation-rail gas sponsorship costs (#3837): every UserOp submitted through the payment path, ' +
+          'tagged direct vs x402 funding leg, bucketed per UTC day — x402 funding legs by the merchant host from the ' +
+          'joined payment intent (null when the intent has no resource URL), direct payments as their own null-host bucket. ' +
+          'Gas is the EntryPoint receipt actualGasCost (includes preVerificationGas; the l1Fee is not added) and is priced ' +
+          'at VIEW time — eth_priced_at says so. Value moved is the confirmed intents\' usd_value. Reads through the ' +
+          'read-only ops database role and writes one audit row before answering.',
+        security: [{ OpsJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The per-merchant-per-day buckets for the trailing window.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/OpsSponsoredGas' } } },
           },
           '401': errorResponse,
           '404': { ...errorResponse, description: 'The ops console (or its read-only database) is not configured.' },
@@ -4432,6 +4493,58 @@ export const openapiSpec = {
         },
       },
     },
+    '/user/signers': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'listUserSigners',
+        summary: "List the caller's signers across all of their accounts, each once.",
+        description:
+          "Every signer of the caller's live Hybrid DeleGator accounts on every chain, deduplicated: a passkey by `key_id` (one passkey sits on every chain's account), an owner wallet by address (always lowercase). Each lists the accounts it approves. Passkeys come first, ordered by `created_at` ascending (unknown last, then `key_id`); wallets follow, ordered by address. Each `accounts` list is ordered by chain then address. `created_at` is the earliest enrollment date known for the key, null when none is recorded. Public-key material only; an account whose signer configuration cannot be resolved is skipped.",
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The deduplicated signer list.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['signers'],
+                  properties: {
+                    signers: {
+                      type: 'array',
+                      items: {
+                        oneOf: [
+                          {
+                            type: 'object',
+                            required: ['kind', 'key_id', 'created_at', 'accounts'],
+                            properties: {
+                              kind: { type: 'string', enum: ['passkey'] },
+                              key_id: { type: 'string' },
+                              created_at: { type: 'string', format: 'date-time', nullable: true },
+                              accounts: { type: 'array', items: userSignerAccount },
+                            },
+                          },
+                          {
+                            type: 'object',
+                            required: ['kind', 'address', 'accounts'],
+                            properties: {
+                              kind: { type: 'string', enum: ['wallet'] },
+                              address: address,
+                              accounts: { type: 'array', items: userSignerAccount },
+                            },
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
     '/user/preferences': {
       get: {
         tags: ['Dashboard'],
@@ -4494,6 +4607,52 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '404': errorResponse,
+        },
+      },
+    },
+    '/user/attention-dismissals': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'listAttentionDismissals',
+        summary: 'The caller\u2019s saved "Needs you" dismissals.',
+        description:
+          'Server-saved dismissals for the recurring "Needs you" items (#3813), stored per account (backup) and per agent (needs setup) — permanent, and visible from every device of the same user. Presentation-only: nothing here is on the payment path, and there is no undismiss — the backup recommendation stays visible on the account page and a budget-less agent on the agent page.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Every dismissal the caller has made, oldest first.',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/AttentionDismissalsResponse' } },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'createAttentionDismissal',
+        summary: 'Dismiss one recurring "Needs you" item.',
+        description:
+          'Idempotent: re-dismissing answers the same 201 as the first write. `item_kind` decides which id the body must carry — `no-backup` requires `account_id` (the backup item is per account), `needs-setup` requires `agent_id` (per agent within its account). A foreign or unknown id is a 404, never a 403 — the route does not confirm that an id exists.',
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/AttentionDismissalInput' },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Dismissed. Returns the stored dismissal.',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/AttentionDismissal' } },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'The account or agent does not exist or belongs to another user.' },
         },
       },
     },
@@ -6526,6 +6685,38 @@ export const openapiSpec = {
         },
       },
     },
+    '/agent-connection-setups/{setupId}/retired-agents': {
+      post: {
+        tags: ['Connect Agent 2'],
+        operationId: 'recordRetiredAgents',
+        summary: 'Report agents this connector retired on replacement (#3772).',
+        description:
+          'Called by `@haven_ai/connect --replace` after it retires old agent directories on a machine: the NEW agent, authenticated with its own API key, names the retired agent ids. Each id that belongs to the same user is stamped superseded-by-this-agent, and that agent\'s later identity and allowances reads carry `superseded_by`. WARNING ONLY: nothing is granted, revoked or paused, and no payment path consults it. Agent API key only — a setup token is not accepted — and accepted only within 30 minutes of the setup\'s registration (409 after). Ids owned by another user, the caller itself, or unknown are silently omitted from `recorded_agent_ids`; a later replace overwrites an earlier stamp.',
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ $ref: '#/components/parameters/SetupId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/RecordRetiredAgentsRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Retired agents recorded.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/RecordRetiredAgentsResponse' },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '409': errorResponse,
+        },
+      },
+    },
     '/agent-connection-setups/{setupId}/connector-status': {
       get: {
         tags: ['Connect Agent 2'],
@@ -7665,7 +7856,7 @@ export const openapiSpec = {
         operationId: 'getMachinePaymentAllowances',
         summary: 'Fetch live spend-authority state for the authenticated agent.',
         description:
-          'Rail-aware (#1135): on the delegation rail the response carries the ACTIVE budget delegations (remaining = the period budget; AllowanceModule-only fields are zeroed placeholders). BOTH retired rails answer 410 — the session rail (#993) and, since #2020 reversed #1986’s left-readable decision, the Safe/AllowanceModule rail too. Reporting only — enforcement stays on-chain.',
+          'Rail-aware (#1135): on the delegation rail the response carries the agent\'s active, unexpired budget delegations (remaining = the period budget; AllowanceModule-only fields are zeroed placeholders). BOTH retired rails answer 410 — the session rail (#993) and, since #2020 reversed #1986’s left-readable decision, the Safe/AllowanceModule rail too. Reporting only — enforcement stays on-chain.',
         security: [{ AgentApiKey: [] }],
         responses: {
           '200': {
@@ -8609,12 +8800,44 @@ export const openapiSpec = {
       get: {
         tags: ['Dashboard'],
         operationId: 'getDashboardOverview',
-        summary: 'Aggregated dashboard overview: totals, day change, metrics, previews.',
+        summary: 'Aggregated dashboard overview: totals, day change, spend windows, previews.',
         security: [{ DashboardJwt: [] }],
+        // #3824: the grouped activity rows bucket by the USER's local day, so
+        // the caller names the zone. Shape is a plain string; "a zone Intl
+        // knows" is not a shape the spec can state — the handler validates it
+        // against the IANA tzdata list exactly as `/analytics/overview` does
+        // and 400s an invalid one.
+        parameters: [
+          {
+            name: 'tz',
+            in: 'query',
+            schema: { type: 'string' },
+            description: 'IANA time-zone name (e.g. `Europe/Stockholm`) the activity groups bucket local days by. Defaults to UTC; an invalid zone is refused with 400.',
+          },
+        ],
         responses: {
           '200': {
             description: 'Dashboard overview.',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/DashboardOverviewResponse' } } },
+          },
+          '400': { ...errorResponse, description: 'Invalid `tz` — not an IANA zone name.' },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/dashboard/budget-remaining': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getDashboardBudgetRemaining',
+        summary:
+          'Cached on-chain budget-remaining for every budget the user can see, with sub-budget spend attribution.',
+        description:
+          'Display-only. The enforcer read is cached for up to 60 s (and never past the period end in force at the read); a failed or timed-out read returns remaining_from_chain false with remaining_atomic/used_atomic null — never "0", never the full budget. `read_at` carries the staleness bound. Sub-budget spend counts confirmed payment_intents through the parent budget\'s sub-budget tree for the parent\'s current period; it is a floor, not a ledger.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Per-budget remaining amounts with sub-budget spend attribution.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/DashboardBudgetRemainingResponse' } } },
           },
           '401': errorResponse,
         },
@@ -9161,7 +9384,10 @@ export const openapiSpec = {
           'deployment\'s channel. For the connector-installed packages (signer, mcp, connect) it is ' +
           'the connector doctor (#3412): it works as pasted on an existing install and prints the ' +
           'exact `--doctor --repair` line to run next — a bare connector re-run is a setup command ' +
-          'that stops at "Missing --setup" on an already set-up machine.',
+          'that stops at "Missing --setup" on an already set-up machine. #3799: on those packages ' +
+          'the backend may append ` --name <slug>` (normalised from the calling agent\'s recorded ' +
+          'MCP pair — a display aid, never identity), so an agent on a multi-agent machine can run ' +
+          'one command. `/discovery`, `/.well-known/haven.json` and `/releases` keep the bare form.',
         required: ['package', 'current', 'recommended', 'min_version', 'required', 'upgrade_command', 'notes_url'],
         properties: {
           package: { type: 'string', examples: ['@haven_ai/mcp'] },
@@ -9425,6 +9651,52 @@ export const openapiSpec = {
           expires_at: { ...isoDateTime, description: 'Retention is 7 days from `created_at` (#3597).' },
         },
         additionalProperties: false,
+      },
+      AttentionDismissal: {
+        type: 'object',
+        description:
+          'One server-saved "Needs you" dismissal (#3813). `no-backup` rows carry `account_id` (the backup item is per account); `needs-setup` rows carry `agent_id` (per agent within its account). Permanent — there is no undismiss.',
+        required: ['id', 'item_kind', 'account_id', 'agent_id', 'created_at'],
+        properties: {
+          id: uuid,
+          item_kind: { type: 'string', enum: ['no-backup', 'needs-setup'] },
+          account_id: { ...uuid, nullable: true, description: 'Set on `no-backup` rows; null otherwise.' },
+          agent_id: { ...uuid, nullable: true, description: 'Set on `needs-setup` rows; null otherwise.' },
+          created_at: isoDateTime,
+        },
+        additionalProperties: false,
+      },
+      AttentionDismissalsResponse: {
+        type: 'object',
+        required: ['dismissals'],
+        properties: {
+          dismissals: { type: 'array', items: { $ref: '#/components/schemas/AttentionDismissal' } },
+        },
+        additionalProperties: false,
+      },
+      AttentionDismissalInput: {
+        description:
+          'The kind decides which id the body carries; any other pairing is refused before the handler.',
+        oneOf: [
+          {
+            type: 'object',
+            required: ['item_kind', 'account_id'],
+            properties: {
+              item_kind: { type: 'string', enum: ['no-backup'] },
+              account_id: uuid,
+            },
+            additionalProperties: false,
+          },
+          {
+            type: 'object',
+            required: ['item_kind', 'agent_id'],
+            properties: {
+              item_kind: { type: 'string', enum: ['needs-setup'] },
+              agent_id: uuid,
+            },
+            additionalProperties: false,
+          },
+        ],
       },
       CatalogEntryMerchant: {
         type: 'object',
@@ -10369,6 +10641,37 @@ export const openapiSpec = {
         },
         additionalProperties: false,
       },
+      OpsSponsoredGas: {
+        type: 'object',
+        required: ['days', 'eth_price_usd', 'eth_priced_at', 'gas_basis', 'rows', 'generated_at'],
+        properties: {
+          days: { type: 'integer' },
+          eth_price_usd: { type: ['number', 'null'], description: 'The view-time ETH/USD quote; null when the price feed returned nothing usable.' },
+          eth_priced_at: { type: 'string', enum: ['view_time'] },
+          gas_basis: { type: 'string', description: 'Which on-chain figure the gas numbers are and how ETH is priced.' },
+          rows: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['day', 'merchant_host', 'leg', 'funding_legs', 'gas_cost_wei', 'gas_eth', 'gas_usd', 'value_moved_usd', 'gas_value_ratio'],
+              properties: {
+                day: { type: 'string', format: 'date', description: 'UTC day bucket.' },
+                merchant_host: { type: ['string', 'null'], description: 'The merchant host from the intent resource URL; null for direct payments.' },
+                leg: { type: 'string', enum: ['direct', 'x402_funding'] },
+                funding_legs: { type: 'integer' },
+                gas_cost_wei: { type: ['string', 'null'], description: 'Sum of actualGasCost in wei; null while no leg in the bucket has a known cost.' },
+                gas_eth: { type: ['number', 'null'] },
+                gas_usd: { type: ['number', 'null'], description: 'gas_eth priced at view time; null when no usable ETH quote.' },
+                value_moved_usd: { type: 'number', description: 'The confirmed intents\' usd_value; reverted legs moved nothing.' },
+                gas_value_ratio: { type: ['number', 'null'], description: 'gas_usd / value_moved_usd; null when gas was not priced or nothing moved.' },
+              },
+              additionalProperties: false,
+            },
+          },
+          generated_at: { type: 'string', format: 'date-time' },
+        },
+        additionalProperties: false,
+      },
       OpsFeedbackList: {
         type: 'object',
         required: ['feedback', 'generated_at'],
@@ -11263,6 +11566,45 @@ export const openapiSpec = {
         },
         additionalProperties: false,
       },
+      RecordRetiredAgentsRequest: {
+        type: 'object',
+        required: ['retired_agent_ids'],
+        properties: {
+          retired_agent_ids: {
+            type: 'array',
+            items: uuid,
+            minItems: 1,
+            maxItems: 32,
+            uniqueItems: true,
+            description: 'Ids of the agents `--replace` retired on this machine.',
+          },
+        },
+        additionalProperties: false,
+      },
+      RecordRetiredAgentsResponse: {
+        type: 'object',
+        required: ['setup_id', 'recorded_agent_ids'],
+        properties: {
+          setup_id: uuid,
+          recorded_agent_ids: {
+            type: 'array',
+            items: uuid,
+            description: 'The subset of the reported ids that was stamped (same user, not the caller itself).',
+          },
+        },
+        additionalProperties: false,
+      },
+      AgentSupersession: {
+        type: ['object', 'null'],
+        required: ['agent_id', 'superseded_at'],
+        properties: {
+          agent_id: { ...uuid, description: 'The agent that replaced this one (#3772).' },
+          superseded_at: isoDateTime,
+        },
+        additionalProperties: false,
+        description:
+          '#3772: set when `@haven_ai/connect --replace` retired this agent in favour of a newer one — a stale-duplicate WARNING. Reporting metadata only: this agent\'s budget, status and credentials are unchanged. Null when never superseded, when the replacement has since been revoked or archived, or when the read failed.',
+      },
       UpdateConnectorInstallStatusResponse: {
         type: 'object',
         required: ['setup_id', 'status', 'install_status'],
@@ -11303,7 +11645,7 @@ export const openapiSpec = {
         type: 'object',
         description:
           'One element of an agent\'s derived budget view (GET /agents, GET /agents/{id}, PUT /agents/{id}; POST /agents carries it as a literal empty array). ' +
-          'Projected from the agent\'s ACTIVE delegations, never from stored allowance rows (#1090/#2020). ' +
+          'Projected from the agent\'s active, unexpired delegations, never from stored allowance rows (#1090/#2020). ' +
           'Its `allowance_amount` is HUMAN-DECIMAL — the opposite shape to the identically named field on ' +
           'AgentConnectionAllowance, which is atomic (#2295).',
         required: ['id', 'agent_id', 'token_address', 'token_symbol', 'allowance_amount', 'reset_period_min'],
@@ -12117,7 +12459,7 @@ export const openapiSpec = {
       },
       MachinePaymentAgent: {
         type: 'object',
-        required: ['id', 'name', 'status', 'account_address', 'delegate_address', 'delegate_account_address', 'chain_id', 'execution_rail'],
+        required: ['id', 'name', 'status', 'account_address', 'delegate_address', 'delegate_account_address', 'chain_id', 'execution_rail', 'superseded_by'],
         properties: {
           id: uuid,
           name: { type: 'string' },
@@ -12132,6 +12474,7 @@ export const openapiSpec = {
            * never authority).
            */
           delegate_account_address: { anyOf: [address, { type: 'null' }] },
+          superseded_by: { $ref: '#/components/schemas/AgentSupersession' },
           chain_id: { type: 'integer' },
           execution_rail: {
             type: 'string',
@@ -12181,12 +12524,13 @@ export const openapiSpec = {
       },
       AllowanceSummary: {
         type: 'object',
-        required: ['agent_id', 'account_address', 'delegate_address', 'chain_id', 'allowances'],
+        required: ['agent_id', 'account_address', 'delegate_address', 'chain_id', 'allowances', 'superseded_by'],
         properties: {
           agent_id: uuid,
           account_address: address,
           delegate_address: address,
           chain_id: { type: 'integer' },
+          superseded_by: { $ref: '#/components/schemas/AgentSupersession' },
           allowances: {
             type: 'array',
             items: {
@@ -12702,7 +13046,7 @@ export const openapiSpec = {
         additionalProperties: false,
       },
       Transaction: {
-        description: 'Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe/account scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields (since #3132 it does carry the base-shape `timestampSource` / `confirmedAt`). Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why.',
+        description: 'Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe/account scope. Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why.',
         type: 'object',
         required: [...transactionBaseRequired, 'chainId', 'accountId', 'accountAddress', 'accountName'],
         properties: {
@@ -12908,7 +13252,7 @@ export const openapiSpec = {
       },
       DashboardAgentAllowance: {
         type: 'object',
-        required: ['tokenSymbol', 'allowanceAmount', 'resetPeriodMin'],
+        required: ['tokenSymbol', 'allowanceAmount'],
         properties: {
           tokenSymbol: { type: 'string' },
           // #2400: was a bare `{ type: 'string' }`, while the identical value
@@ -12927,27 +13271,164 @@ export const openapiSpec = {
           // round trip. The literal STAYS, now as belt-and-braces rather than
           // as the sole guard.
           allowanceAmount: allowanceHumanAmount,
-          resetPeriodMin: { type: 'integer' },
         },
         additionalProperties: false,
       },
       DashboardAgentPreview: {
         type: 'object',
-        required: ['id', 'name', 'status', 'accountId', 'accountName', 'accountChainId', 'allowances'],
+        required: ['id', 'name', 'status', 'accountId', 'accountName', 'accountChainId', 'allowances', 'budgets', 'receivedSubBudgets', 'stats'],
         properties: {
           id: uuid,
           name: { type: 'string' },
-          status: { type: 'string', enum: ['active', 'paused'], description: 'Revoked agents are excluded from the preview query.' },
+          status: { type: 'string', enum: ['active', 'paused', 'pending_approval'], description: 'Revoked agents are excluded from the overview query. #3803: pending_approval joins — the redesigned overview must surface an agent still waiting for its connection.' },
           accountId: { type: ['string', 'null'], format: 'uuid' },
           accountName: { type: ['string', 'null'] },
           accountChainId: { type: ['integer', 'null'] },
-          allowances: { type: 'array', items: { $ref: '#/components/schemas/DashboardAgentAllowance' } },
+          // #3807 removed the allowances tile; this field stays because the
+          // frontend still reads it (and `resetPeriodMin` is deprecated with
+          // it).
+          allowances: { type: 'array', items: { $ref: '#/components/schemas/DashboardAgentAllowance' }, deprecated: true },
+          // #3803: the connection setup's own status, carried ONLY for a
+          // `pending_approval` agent — the client shows "Remove" instead of
+          // "Finish setup" when the setup expired or failed (owner decision 2).
+          setupStatus: { type: 'string', description: "Present only when status is 'pending_approval': the agent's newest connection setup status (e.g. 'awaiting_connection', 'expired', 'failed')." },
+          budgets: { type: 'array', items: { $ref: '#/components/schemas/DashboardAgentBudget' }, description: '#3803: every live budget from the active delegation set — expired rows follow the #3802 predicate and are absent.' },
+          receivedSubBudgets: { type: 'array', items: { $ref: '#/components/schemas/DashboardReceivedSubBudget' }, description: '#3803: sub-budget grants this agent RECEIVED, so an agent whose only authority is a received sub-budget does not read "No budget".' },
+          stats: { $ref: '#/components/schemas/DashboardAgentStats' },
+        },
+        additionalProperties: false,
+      },
+      DashboardAgentBudget: {
+        type: 'object',
+        description: '#3803 — one delegation-rail budget with its identity and live window, for the caption the client renders in the user currency (see spotRates). budgetAtomic is the atomic integer; never parse the human `allowances[].allowanceAmount` for arithmetic.',
+        required: ['id', 'delegationHash', 'chainId', 'tokenAddress', 'tokenSymbol', 'decimals', 'budgetAtomic', 'periodSeconds', 'startDate', 'expiresAt', 'periodEnd'],
+        properties: {
+          id: uuid,
+          delegationHash: delegationHash,
+          chainId: { type: 'integer' },
+          tokenAddress: address,
+          tokenSymbol: { type: 'string' },
+          decimals: { type: 'integer' },
+          budgetAtomic: { type: 'string', description: 'Base-10 atomic integer (VARCHAR(78) on the wire source).' },
+          periodSeconds: { type: 'integer' },
+          startDate: { type: 'string', format: 'date-time' },
+          expiresAt: { type: 'string', format: 'date-time' },
+          periodEnd: { type: 'string', format: 'date-time', description: 'End of the CURRENT budget period, computed from startDate + periodSeconds at read time.' },
+        },
+        additionalProperties: false,
+      },
+      DashboardReceivedSubBudget: {
+        type: 'object',
+        description: '#3803 — a sub-budget grant the agent received from a parent agent.',
+        required: ['parentAgentId', 'parentAgentName', 'open'],
+        properties: {
+          parentAgentId: uuid,
+          parentAgentName: { type: 'string' },
+          open: { type: 'boolean', description: "true iff the grant's stored status is 'open'." },
+        },
+        additionalProperties: false,
+      },
+      DashboardSpendWindow: {
+        type: 'object',
+        description: '#3803 — one window of the 7/30-day block. gross is the booked (or re-priced) fiat; net is gross with the #3755 delegate_sweeps ratio netting applied. Both are USD/EUR/SEK triples.',
+        required: ['gross', 'net', 'approx', 'payments', 'distinctMerchants', 'budgetStops'],
+        properties: {
+          gross: {
+            type: 'object',
+            required: ['usd', 'eur', 'sek'],
+            properties: { usd: { type: 'number' }, eur: { type: 'number' }, sek: { type: 'number' } },
+            additionalProperties: false,
+          },
+          net: {
+            type: 'object',
+            required: ['usd', 'eur', 'sek'],
+            properties: { usd: { type: 'number' }, eur: { type: 'number' }, sek: { type: 'number' } },
+            additionalProperties: false,
+          },
+          approx: { type: 'boolean', description: "Owner decision 1: true when any row's booked fiat was NULL and was priced at today's rate — the client marks the figure ≈ so a re-priced total is never shown as booked." },
+          payments: { type: 'integer', description: 'Confirmed payment rows in the window — activity, never netted.' },
+          distinctMerchants: { type: 'integer', description: 'DISTINCT merchants over the window — merchant = the x402 resource host, else the recipient address. A user-level figure, never a sum of per-agent counts.' },
+          budgetStops: { type: 'integer', description: 'Refusal rows whose reason was delegation_budget_exceeded or delegation_expired — a budget stopped a payment.' },
+        },
+        additionalProperties: false,
+      },
+      DashboardAgentSpendWindow: {
+        type: 'object',
+        description: '#3803 — one window of a PER-AGENT stats block. Same gross/net/approx/payments definitions as the user-level DashboardSpendWindow; per-agent refusals instead of the user-level distinctMerchants/budgetStops rollups.',
+        required: ['gross', 'net', 'approx', 'payments', 'refusals'],
+        properties: {
+          gross: {
+            type: 'object',
+            required: ['usd', 'eur', 'sek'],
+            properties: { usd: { type: 'number' }, eur: { type: 'number' }, sek: { type: 'number' } },
+            additionalProperties: false,
+          },
+          net: {
+            type: 'object',
+            required: ['usd', 'eur', 'sek'],
+            properties: { usd: { type: 'number' }, eur: { type: 'number' }, sek: { type: 'number' } },
+            additionalProperties: false,
+          },
+          approx: { type: 'boolean', description: "Owner decision 1: true when any row's booked fiat was NULL and was priced at today's rate." },
+          payments: { type: 'integer', description: 'Confirmed payment rows in the window — activity, never netted.' },
+          refusals: { $ref: '#/components/schemas/DashboardRefusalBuckets' },
+        },
+        additionalProperties: false,
+      },
+      DashboardRefusalBuckets: {
+        type: 'object',
+        description: '#3803 — refusal ROW counts per bucket (not distinct reasons — #3815). relayer_budget is Haven\u2019s own cap and is never shown as the user\u2019s budget.',
+        required: ['budget', 'scope', 'failed', 'haven'],
+        properties: {
+          budget: { type: 'integer', description: 'delegation_budget_exceeded + delegation_expired.' },
+          scope: { type: 'integer', description: 'no_delegation_for_target.' },
+          failed: { type: 'integer', description: 'onchain_revert.' },
+          haven: { type: 'integer', description: 'relayer_budget.' },
+        },
+        additionalProperties: false,
+      },
+      DashboardAgentStats: {
+        type: 'object',
+        description: '#3803 — per-agent 7/30-day figures. The spend windows carry the same definition as the user-level block; refusals are row counts per bucket over the same window.',
+        required: ['d7', 'd30', 'lastPaymentAt', 'lastCounterparty'],
+        properties: {
+          d7: { $ref: '#/components/schemas/DashboardAgentSpendWindow' },
+          d30: { $ref: '#/components/schemas/DashboardAgentSpendWindow' },
+          lastPaymentAt: { type: ['string', 'null'], format: 'date-time', description: 'ALL-TIME latest confirmed payment (not windowed); null when the agent never paid.' },
+          lastCounterparty: {
+            type: ['object', 'null'],
+            required: ['source', 'x402ResourceUrl', 'to', 'merchantName'],
+            properties: {
+              source: { type: ['string', 'null'] },
+              x402ResourceUrl: { type: ['string', 'null'] },
+              to: { type: ['string', 'null'] },
+              merchantName: { type: ['string', 'null'] },
+            },
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: false,
+      },
+      DashboardAccountOverview: {
+        type: 'object',
+        description: '#3803 — per-account USDC, funding and pace. No new chain reads: the balance comes from the portfolio the overview already fetches.',
+        required: ['accountId', 'chainId', 'isTestnet', 'usdcBalanceAtomic', 'usdcDecimals', 'funded', 'needs_backup_recommendation', 'usdcPace7dAtomic'],
+        properties: {
+          accountId: uuid,
+          chainId: { type: 'integer' },
+          isTestnet: { type: 'boolean', description: 'The chain registry\u2019s own testnet marker (faucet presence).' },
+          usdcBalanceAtomic: { type: ['string', 'null'], description: 'The chain-registry USDC balance in base units. NULL when the balance read is unavailable — unknown, never 0.' },
+          usdcDecimals: { type: ['integer', 'null'], description: 'The registry USDC decimals; null when the chain has no registry USDC.' },
+          usdcBalanceFreshness: { $ref: '#/components/schemas/BalanceFreshness', description: 'Present only when the USDC balance read was stale or unavailable (#3295 marker).' },
+          funded: { type: ['boolean', 'null'], description: "The account's own USDC > 0. Null when the balance is unknown — never derived from a 0." },
+          needs_backup_recommendation: { type: 'boolean', description: 'Per account (the session payload answered only accounts[0] before #3803).' },
+          usdcPace7dAtomic: { type: 'string', description: 'Σ confirmed − min(swept, confirmed) per (agent, token, chain) over the last 7 days, for this account\u2019s agents on this chain in the registry USDC. Swept = delegate_sweeps status submitted with a tx_hash.' },
         },
         additionalProperties: false,
       },
       DashboardOverviewResponse: {
         type: 'object',
-        required: ['totals', 'change', 'metrics', 'actionableApprovals', 'pendingApprovals', 'onboardingProgress', 'agents', 'transactions'],
+        required: ['totals', 'change', 'actionableApprovals', 'pendingApprovals', 'onboardingProgress', 'agents', 'agentCount', 'accounts', 'spotRates', 'spend'],
         properties: {
           totals: {
             type: 'object',
@@ -12980,19 +13461,11 @@ export const openapiSpec = {
             },
             additionalProperties: false,
           },
-          metrics: {
-            type: 'object',
-            required: ['connectedAgents', 'monthlyAgentSpendUsd', 'monthlyAgentSpendEur', 'successfulTransactions', 'activeAccounts'],
-            properties: {
-              connectedAgents: { type: 'integer', description: "Agents with status 'active' only." },
-              monthlyAgentSpendUsd: { type: 'number' },
-              monthlyAgentSpendEur: { type: 'number' },
-              monthlyAgentSpendSek: { type: 'number' },
-              successfulTransactions: { type: 'integer' },
-              activeAccounts: { type: 'integer', description: 'All linked Safes, regardless of activity.' },
-            },
-            additionalProperties: false,
-          },
+          // #3807: the metrics block is gone with the four KPI tiles —
+          // agentCount.active supersedes connectedAgents, spend.d30 supersedes
+          // the monthly agent spend triple, and the "Successful transactions"
+          // all-time count counted receives too (the issue's Method note) to
+          // survive as a figure. activeAccounts was every linked Safe.
           actionableApprovals: { type: 'integer', description: 'Always 0 since #2055 — the approval queue died with the Safe rail and its table is dropped; the field survives for wire compatibility.' },
           pendingApprovals: { type: 'integer', description: 'Duplicate of actionableApprovals; always 0 since #2055, kept for compatibility.' },
           onboardingProgress: {
@@ -13001,8 +13474,197 @@ export const openapiSpec = {
             properties: { hasFirstAgentPayment: { type: 'boolean' } },
             additionalProperties: false,
           },
-          agents: { type: 'array', items: { $ref: '#/components/schemas/DashboardAgentPreview' }, description: 'At most 6.' },
-          transactions: { type: 'array', items: { $ref: '#/components/schemas/Transaction' }, description: 'At most 5. Payment-enrichment fields (paymentId, paymentFlowStatus, amountSek, …) are never populated in this projection.' },
+          agents: { type: 'array', items: { $ref: '#/components/schemas/DashboardAgentPreview' }, description: '#3803: EVERY delegation-rail agent in active/paused/pending_approval — the former at-most-6 cap moved to the client (#3809).' },
+          // #3824: grouped dashboard activity — up to 8 groups over the last 7
+          // user-local days (bucketed by the `tz` query parameter, default
+          // UTC), newest first, grouped server-side in memory over the
+          // transaction feed. Optional so pre-#3824
+          // consumers read the same response unchanged.
+          activity: {
+            type: 'array',
+            maxItems: 8,
+            items: { $ref: '#/components/schemas/DashboardActivityGroup' },
+            description: 'Grouped activity rows, newest first. Every count is a FLOOR (`countIsFloor`) when the explorer window was truncated.',
+          },
+          // #3858: the former 5-row `transactions` preview is removed from the
+          // wire — no dashboard surface has read it since #3810.
+          agentCount: {
+            type: 'object',
+            description: '#3803 — the overview\u2019s agents[] by status, so tiles do not derive counts from a client-side slice.',
+            required: ['active', 'paused', 'pending_approval'],
+            properties: {
+              active: { type: 'integer' },
+              paused: { type: 'integer' },
+              pending_approval: { type: 'integer' },
+            },
+            additionalProperties: false,
+          },
+          accounts: { type: 'array', items: { $ref: '#/components/schemas/DashboardAccountOverview' }, description: '#3803 — one entry per delegation-rail account, in the accounts list order.' },
+          spotRates: {
+            type: 'object',
+            description: '#3803 — today\u2019s rate per BUDGET token symbol in the user\u2019s preferred currency (see the transaction feed\u2019s resolution); null when the price read failed or quoted zero. The client has no rate of its own, so the budget captions are struck here.',
+            additionalProperties: { type: ['number', 'null'] },
+          },
+          spend: {
+            type: 'object',
+            description: '#3803 — the 7/30-day block. Windows are [now − N×24h, now) on confirmed_at — the same definition as /analytics/overview. Rows are confirmed, delegation-rail agents only; revoked agents\u2019 in-window spend is included. Not counted: fees, deposits, other tokens.',
+            required: ['scope', 'd7', 'd30', 'topMerchant7d', 'failedIntents7d', 'balance_by_day'],
+            properties: {
+              scope: { type: 'string', enum: ['mainnet', 'testnet'], description: "Owner decision 3: mainnet accounts only whenever the user has one; a testnet-only user sees test totals labelled 'Test network'." },
+              d7: { $ref: '#/components/schemas/DashboardSpendWindow' },
+              d30: { $ref: '#/components/schemas/DashboardSpendWindow' },
+              topMerchant7d: {
+                type: ['object', 'null'],
+                description: 'The 7-day top merchant by USD booked sum, with RAW identity fields; null on a no-spend window.',
+                required: ['key', 'x402ResourceUrl', 'to', 'merchantName'],
+                properties: {
+                  key: { type: 'string', description: 'The merchant identity: the x402 resource host, else the recipient address.' },
+                  x402ResourceUrl: { type: ['string', 'null'], description: 'One representative x402 resource URL of this merchant\u2019s rows.' },
+                  to: { type: ['string', 'null'], description: 'One representative recipient address.' },
+                  merchantName: { type: ['string', 'null'], description: 'Contact name, else receipt name, for the merchant address; null when neither exists.' },
+                },
+                additionalProperties: false,
+              },
+              failedIntents7d: { type: 'integer', description: 'Payment intents with status failed in the 7-day window.' },
+              balance_by_day: {
+                type: 'array',
+                description: '30 days of portfolio totals, shared with analytics\u2019 BALANCE_BY_DAY_SQL. Days with no snapshot are ABSENT, not zero; totalSek is null on pre-migration-090 days.',
+                items: {
+                  type: 'object',
+                  required: ['snapshotDate', 'totalUsd', 'totalEur', 'totalSek'],
+                  properties: {
+                    snapshotDate: { type: 'string', description: 'YYYY-MM-DD (UTC).' },
+                    totalUsd: { type: 'number' },
+                    totalEur: { type: 'number' },
+                    totalSek: { type: ['number', 'null'] },
+                  },
+                  additionalProperties: false,
+                },
+              },
+            },
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: false,
+      },
+      // ── Grouped dashboard activity (#3824) ─────────────────────────────
+      //
+      // One row per agent + token + counterparty + user-local day + outcome
+      // + activityType, computed in memory over the dashboard's merged feed
+      // (explorer window + synthesized x402 rows) — not a database table.
+      // `status` is the DERIVED outcome (confirmed | pending | failed, from
+      // `isError` / `paymentFlowStatus` / `paymentProofStatus`); the
+      // accounting push `Transaction.status` is a different field and never
+      // appears here. The fiat pair is EITHER book-time (`convertedAmount`,
+      // when every member row carried a stored capture) OR serve-time
+      // (`approxAmount`, today's rate via the CoinGecko read) — never both.
+      // Null means "no usable price", never 0.
+      DashboardActivityGroup: {
+        type: 'object',
+        required: [
+          'count',
+          'sumAtomic',
+          'tokenSymbol',
+          'decimals',
+          'latestAt',
+          'agentId',
+          'agentName',
+          'source',
+          'x402ResourceUrl',
+          'to',
+          'merchantName',
+          'activityType',
+          'direction',
+          'status',
+        ],
+        properties: {
+          count: { type: 'integer', description: 'Rows in the group. A FLOOR, not a total, when `countIsFloor` is true — the client renders "×40+".' },
+          countIsFloor: {
+            type: 'boolean',
+            description: 'Present ONLY when the explorer window that produced the feed was truncated: the count is a floor over an unknown total. A count is never presented as exact when it is not.',
+          },
+          sumAtomic: { type: 'string', description: 'Sum of the member rows\' atomic `value` strings. One token per group, so the units agree.' },
+          tokenSymbol: { type: 'string', description: 'Ticker of the group’s token.' },
+          decimals: { type: 'integer', description: 'Decimals of the group’s token.' },
+          latestAt: { type: 'string', format: 'date-time', description: 'ISO 8601 instant of the newest member row.' },
+          agentId: { type: ['string', 'null'], description: 'Agent attribution of the newest member; null when the row has no agent (deposits, unattributed transfers).' },
+          agentName: { type: ['string', 'null'], description: 'Agent name of the newest member.' },
+          source: { type: ['string', 'null'], description: "The newest member's source, e.g. `x402`." },
+          x402ResourceUrl: { type: ['string', 'null'], description: 'The newest member’s x402 resource URL, when it is an x402 payment.' },
+          to: { type: 'string', description: 'The newest member’s raw `to` field — the merchant address on outbound payments, the account’s own address on deposits.' },
+          merchantName: { type: ['string', 'null'], description: 'Contact or receipt-merchant name resolved for the counterparty, when one exists; null otherwise (always null on deposits).' },
+          activityType: { type: ['string', 'null'], description: "The activity class, e.g. `delegate_sweep`; null for plain transfers and x402 payments." },
+          direction: { type: 'string', enum: ['in', 'out'] },
+          status: { type: 'string', enum: ['confirmed', 'pending', 'failed'], description: 'The DERIVED outcome: isError → failed; a paymentFlowStatus of confirming_merchant/needs_attention or a non-terminal paymentProofStatus → pending; else confirmed.' },
+          convertedAmount: { type: 'string', description: 'The book-time fiat sum — present ONLY when every member row carries a stored `convertedAmount` capture.' },
+          convertedCurrency: { type: 'string', enum: ['SEK', 'USD', 'EUR'], description: 'The currency `convertedAmount` is denominated in (the user’s preference).' },
+          approxAmount: { type: ['string', 'null'], description: 'The serve-time fiat sum at today’s rate — present INSTEAD of convertedAmount when any member lacked book-time fiat. Null when no usable price exists; never 0.' },
+          approxCurrency: { type: 'string', enum: ['SEK', 'USD', 'EUR'], description: 'The currency `approxAmount` is denominated in (the user’s preference).' },
+        },
+        additionalProperties: false,
+      },
+      // ── Dashboard budget-remaining (#3804) ─────────────────────────────
+      //
+      // Display-only, cached enforcer reads. A failed or timed-out read is
+      // `remaining_from_chain: false` with `remaining_atomic`/`used_atomic`
+      // NULL — deliberately NOT the `?include=remaining` fallback (full
+      // budget) and NOT `/analytics/overview`'s `used_atomic: "0"`: shipping
+      // either would state a fact the chain did not give us. `read_at` is
+      // the instant the cached read was made; the dashboard may be up to 60 s
+      // behind a just-accepted payment (owner decision 1, #3804).
+      DashboardBudgetRemainingEntry: {
+        type: 'object',
+        required: [
+          'agent_id',
+          'chain_id',
+          'delegation_hash',
+          'token_address',
+          'token_symbol',
+          'token_decimals',
+          'budget_atomic',
+          'read_at',
+          'period_end',
+          'remaining_atomic',
+          'remaining_from_chain',
+          'used_atomic',
+          'sub_budget_spend',
+        ],
+        properties: {
+          agent_id: { type: 'string', format: 'uuid' },
+          chain_id: { type: 'integer' },
+          delegation_hash: { type: 'string' },
+          token_address: { type: 'string' },
+          token_symbol: { type: 'string' },
+          token_decimals: { type: 'integer' },
+          budget_atomic: { type: 'string' },
+          read_at: { type: ['string', 'null'], format: 'date-time', description: 'Null when the read is unknown.' },
+          period_end: { type: 'string', format: 'date-time' },
+          remaining_atomic: { type: ['string', 'null'], description: 'Null when the read is unknown — never "0", never the full budget.' },
+          remaining_from_chain: { type: 'boolean' },
+          used_atomic: { type: ['string', 'null'], description: 'Null when the read is unknown.' },
+          sub_budget_spend: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['agent_id', 'spent_atomic'],
+              properties: {
+                agent_id: { type: 'string', format: 'uuid' },
+                spent_atomic: { type: 'string' },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+        additionalProperties: false,
+      },
+      DashboardBudgetRemainingResponse: {
+        type: 'object',
+        required: ['budgets'],
+        properties: {
+          budgets: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/DashboardBudgetRemainingEntry' },
+          },
         },
         additionalProperties: false,
       },

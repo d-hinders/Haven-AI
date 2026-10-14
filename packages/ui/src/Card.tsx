@@ -10,11 +10,14 @@ interface CardProps {
   /**
    * Surface elevation tier.
    * - `flat` (default): standard card. One elevation per page is plenty.
-   * - `raised`: the single most prominent surface on a page (e.g. balance hero,
-   *   the dashboard total). Hover lift is suppressed — it's already prominent.
+   * - `raised`: the single most prominent surface on a page (e.g. the dashboard
+   *   money card, the account balance card). Hover lift is suppressed — it's
+   *   already prominent.
    * - `anchor`: secondary focal point. Cooler off-white background + brand-tinted
    *   hairline border. Use for the second-most-important surface on a page
-   *   (pending approvals callout, agent status banner). Don't sprinkle.
+   *   (the sweep page's "How to recover" card, the demo's "What you just
+   *   saw" card). Don't
+   *   sprinkle — the dashboard has none since #3910.
    */
   elevation?: Elevation
 }

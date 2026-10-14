@@ -198,6 +198,9 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // wrapper below inside quoteMcpToolCall — same transitive-call shape as
   // isMerchantEndpointMiss/withDiscoveryGuidance (see SINGLE_SLICE_RETAINED).
   merchantNotReadyErrorFor: { module: 'mcp-context', slices: ['s2810'] },
+  // #3834: the out-of-gas reason code, read by the quote-path mapper (s2810,
+  // via merchantNotReadyErrorFor) and the paid retry (s2812).
+  MERCHANT_OUT_OF_GAS_REASON: { module: 'mcp-context', slices: ['s2810', 's2812'] },
   quoteMcpToolCall: { module: 'mcp-context', slices: ['s2810'] },
   submitSignatureWithExpiryMapping: { module: 'mcp-context', slices: ['s2809', 's2812'] },
   submitErc7710WithExpiryMapping: { module: 'mcp-context', slices: ['s2809'] },
@@ -474,6 +477,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'isMerchantEndpointMiss',
     'withDiscoveryGuidance',
     'merchantNotReadyErrorFor',
+    'MERCHANT_OUT_OF_GAS_REASON',
     'quoteMcpToolCall',
     'serializeMcpTransport',
     'parseMcpTransport',

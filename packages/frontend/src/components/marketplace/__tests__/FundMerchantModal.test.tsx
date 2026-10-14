@@ -5,7 +5,17 @@ import type { Agent } from '@/hooks/useAgents'
 import type { CatalogEntry, Merchant, MerchantFundingTarget } from '@/hooks/useCatalog'
 import type { DelegationBudget } from '@/hooks/useDelegationBudget'
 
-const { mockGrant, mockReady, mockBudgets, mockBudgetsError, mockReload } = vi.hoisted(() => ({
+// #3812: the in-flow connect/switch control reads wagmi and RainbowKit, which
+// these tests do not provide. Stub it so the test can assert WHEN a flow
+// offers it; `WalletConnectAction.test.tsx` covers what it does.
+vi.mock('@/components/WalletConnectAction', () => ({
+  default: () => <button type="button">Connect wallet</button>,
+}))
+
+const { mockGrant, mockReady, mockBudgets, mockBudgetsError, mockReload, mockSignersLoading, mockHasPasskeys, mockPasskeyElsewhere } = vi.hoisted(() => ({
+  mockSignersLoading: vi.fn(() => false),
+  mockHasPasskeys: vi.fn((): boolean | null => null),
+  mockPasskeyElsewhere: vi.fn(() => false),
   mockGrant: vi.fn(),
   mockReady: vi.fn(() => true),
   mockBudgets: vi.fn((): unknown[] | null => []),
@@ -21,6 +31,10 @@ vi.mock('@/hooks/useDelegationBudget', () => ({
     grant: mockGrant,
     busy: false,
     ready: mockReady(),
+    signersLoading: mockSignersLoading(),
+    hasPasskeys: mockHasPasskeys(),
+    passkeyElsewhere: mockPasskeyElsewhere(),
+    signersError: null,
   }),
 }))
 
@@ -112,6 +126,9 @@ function budget(overrides: Partial<DelegationBudget> = {}): DelegationBudget {
     budget_atomic: '5000000',
     period_seconds: 86_400,
     expires_at: 9_999_999_999,
+    // #3806: the wire's anchor and ordering fields.
+    start_date: '1788228000',
+    created_at: '2026-09-01T00:00:00Z',
     merchant_id: null,
     merchant_slug: null,
     merchant_name: null,
@@ -133,6 +150,9 @@ beforeEach(() => {
   mockGrant.mockResolvedValue({ ok: true })
   mockReady.mockReset()
   mockReady.mockReturnValue(true)
+  mockSignersLoading.mockReturnValue(false)
+  mockHasPasskeys.mockReturnValue(null)
+  mockPasskeyElsewhere.mockReturnValue(false)
   mockBudgets.mockReset()
   mockBudgets.mockReturnValue([])
   mockBudgetsError.mockReset()
@@ -328,6 +348,67 @@ describe('FundMerchantModal (#3331)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
     expect(screen.queryByText(/replaces/)).toBeNull()
+  })
+
+  // #3812: a review step that cannot be signed offers the owner wallet connect
+  // in place; a signable one offers nothing extra.
+  it('review step: offers the owner wallet connect when nobody here can sign', async () => {
+    mockBudgets.mockReturnValue([])
+    mockReady.mockReturnValue(false)
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
+    expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeDefined()
+    mockReady.mockReturnValue(true)
+  })
+
+  // #3845: the not-ready line offers a passkey only to an account that has
+  // one enrolled; unknown keeps the offer.
+  it.each([
+    [false, 'Connect your account owner wallet to sign this budget.'],
+    [true, 'Connect your account owner wallet, or use one of the account’s passkeys, to sign this budget.'],
+    [null, 'Connect your account owner wallet, or use one of the account’s passkeys, to sign this budget.'],
+  ])('review step: hasPasskeys=%s words the not-ready line for the signer set', async (has, text) => {
+    mockBudgets.mockReturnValue([])
+    mockReady.mockReturnValue(false)
+    mockHasPasskeys.mockReturnValue(has)
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
+    expect(screen.getByText(text)).toBeDefined()
+    if (has === false) expect(screen.queryByText(/passkey/i)).toBeNull()
+  })
+
+  it('review step: a signable budget whose passkey is elsewhere carries the cross-device hint (#3825)', async () => {
+    mockBudgets.mockReturnValue([])
+    mockPasskeyElsewhere.mockReturnValue(true)
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
+    expect(screen.getByText(/passkey may be on another device/)).toBeDefined()
+  })
+
+  it('review step: no wallet connect while the signer set loads', async () => {
+    mockBudgets.mockReturnValue([])
+    mockReady.mockReturnValue(false)
+    mockSignersLoading.mockReturnValue(true)
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
+    expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
+  })
+
+  it('review step: a signable budget offers no wallet connect', async () => {
+    mockBudgets.mockReturnValue([])
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
+    expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
   })
 
   it('review step: states the no-fallback rule and BOTH exceptions while this budget is active (#3331 F2, corrected round 3 captain copy)', async () => {

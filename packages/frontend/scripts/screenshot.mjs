@@ -773,21 +773,22 @@ const ADDR = {
 }
 const T0 = Date.parse('2026-07-10T09:00:00.000Z') / 1000 // fixed anchor, in seconds
 
-const tx = (i, over = {}) => ({
-  hash: `0x${String(i).repeat(4).padStart(8, '0')}${'ab'.repeat(28)}`.slice(0, 66),
-  // #3763: the two EIP-3009 legs ride every row on the wire (nullable), so
-  // the dataset carries the keys everywhere and fills them on the eip3009
-  // rows below — the parity suite requires screenshot rows to carry every
-  // key the e2e fixture's `dashboardTransaction` has.
-  fundingTxHash: null,
-  settlementTxHash: null,
-  settlementScheme: null,
-  type: 'erc20',
-  from: FIXTURE_ACCOUNT.account_address,
-  to: ADDR.recipient,
-  value: '25000000',
-  valueFormatted: '25.00',
-  asset: 'USDC',
+const tx = (i, over = {}) => {
+  const row = {
+    hash: `0x${String(i).repeat(4).padStart(8, '0')}${'ab'.repeat(28)}`.slice(0, 66),
+    // #3763: the two EIP-3009 legs ride every row on the wire (nullable), so
+    // the dataset carries the keys everywhere and fills them on the eip3009
+    // rows below — the parity suite requires screenshot rows to carry every
+    // key the e2e fixture's `dashboardTransaction` has.
+    fundingTxHash: null,
+    settlementTxHash: null,
+    settlementScheme: null,
+    type: 'erc20',
+    from: FIXTURE_ACCOUNT.account_address,
+    to: ADDR.recipient,
+    value: '25000000',
+    valueFormatted: '25.00',
+    asset: 'USDC',
   decimals: 6,
   direction: 'out',
   timestamp: T0 - i * 8_600,
@@ -800,7 +801,19 @@ const tx = (i, over = {}) => ({
   accountAddress: FIXTURE_ACCOUNT.account_address,
   accountName: FIXTURE_ACCOUNT.name,
   ...over,
-})
+  }
+  // #3824: the serve-time amount rides every row (the parity suite requires
+  // screenshot rows to carry every key the e2e `dashboardTransaction` has),
+  // computed from the row's FINAL `valueFormatted` so the overridden rows
+  // (1.00, 150.00, 0.012 …) price consistently at the dataset's ~10.76
+  // SEK/USD story. No row in this dataset carries book-time fiat, so
+  // `approx*` is the fiat half on all of them — matching the e2e fixture.
+  return {
+    ...row,
+    approxAmount: (Number(row.valueFormatted) * 10.76).toFixed(4),
+    approxCurrency: 'SEK',
+  }
+}
 // #2870: the accounting badge's three states on three agent rows — pushed
 // ("In Fortnox"), pending ("Feeding…"), failed ("Not fed", reason on hover).
 // The inbound rows and the plain ETH transfer carry none, which is the
@@ -808,8 +821,8 @@ const tx = (i, over = {}) => ({
 const accounting = (status, extra = {}) => ({ provider: 'fortnox', status, externalRef: null, error: null, ...extra })
 export const FIXTURE_TXS = [
   // #3763: eip3009 WITH a recorded settlement — the drawer headlines it
-  // ("Merchant settlement (reported by the agent, verified on-chain)") and
-  // names the funding leg ("Funding from your account"). The
+  // ("Merchant settlement (reported by the agent or detected on-chain,
+  // verified)") and names the funding leg ("Funding from your account"). The
   // `transactions-detail-network` capture photographs THIS row's drawer, so
   // the regenerated evidence carries the recorded state's visible text.
   tx(1, {
@@ -1078,7 +1091,8 @@ export const FIXTURE_OVERVIEW = {
   // hero's change line renders in every capture this harness takes.
   totals: { usd: 12_640.55, eur: 11_690.21, sek: 136_050.75 },
   change: { available: true, usdAmount: 214.3, eurAmount: 198.2, usdPercent: 1.7, eurPercent: 1.7, sekAmount: 2_285.4, sekPercent: 1.7 },
-  metrics: { connectedAgents: 2, monthlyAgentSpendUsd: 482.5, monthlyAgentSpendEur: 446.3, monthlyAgentSpendSek: 5_192.5, successfulTransactions: 37, activeAccounts: 1 },
+  // #3807: the metrics block is gone with the KPI tiles — the SEK spend
+  // figure the old "Monthly agent spend" tile read lives in `spend.d30`.
   // #2120: 0, not 1. `routes/dashboard.ts:84` hardcodes `actionableApprovals
   // = 0` (and mirrors it into `pendingApprovals`) — the queue died with the
   // AllowanceModule rail and `approval_requests` is dropped. Both fields
@@ -1086,14 +1100,191 @@ export const FIXTURE_OVERVIEW = {
   // photographs a number the product cannot produce.
   actionableApprovals: 0, pendingApprovals: 0,
   onboardingProgress: { hasFirstAgentPayment: true },
+  // #3803: the same section keys the typed e2e fixture carries (the parity
+  // test `fixture-shape-parity.test.ts` holds the two together). Values are
+  // this harness's showcase dataset; shapes are identical.
+  agentCount: { active: 2, paused: 1, pending_approval: 1 },
+  accounts: [
+    {
+      accountId: FIXTURE_ACCOUNT.id,
+      chainId: FIXTURE_ACCOUNT.chain_id,
+      isTestnet: false,
+      usdcBalanceAtomic: '12640550000',
+      usdcDecimals: 6,
+      usdcBalanceFreshness: { status: 'stale', asOf: '2026-10-09T10:00:00.000Z' },
+      funded: true,
+      needs_backup_recommendation: false,
+      usdcPace7dAtomic: '62500000',
+    },
+    {
+      accountId: 'safe-showcase-sepolia',
+      chainId: 84532,
+      isTestnet: true,
+      usdcBalanceAtomic: '500000000',
+      usdcDecimals: 6,
+      funded: true,
+      needs_backup_recommendation: false,
+      usdcPace7dAtomic: '10000000',
+    },
+  ],
+  spotRates: { USDC: 1 },
+  spend: {
+    scope: 'mainnet',
+    d7: {
+      gross: { usd: 185.0, eur: 168.4, sek: 1991.0 },
+      net: { usd: 111.0, eur: 101.0, sek: 1194.6 },
+      approx: false,
+      payments: 6,
+      distinctMerchants: 3,
+      budgetStops: 1,
+    },
+    d30: {
+      gross: { usd: 740.0, eur: 673.4, sek: 7964.0 },
+      net: { usd: 481.0, eur: 437.7, sek: 5176.6 },
+      approx: true,
+      payments: 21,
+      distinctMerchants: 5,
+      budgetStops: 3,
+    },
+    topMerchant7d: {
+      key: 'api.example.dev',
+      x402ResourceUrl: 'https://api.example.dev/reports',
+      to: ADDR.merchant,
+      merchantName: null,
+    },
+    failedIntents7d: 1,
+    balance_by_day: Array.from({ length: 30 }, (_, i) => {
+      const day = new Date(Date.UTC(2026, 8, 10 + i))
+      return {
+        snapshotDate: day.toISOString().slice(0, 10),
+        totalUsd: 12_615 + i * 0.85,
+        totalEur: 11_668 + i * 0.79,
+        totalSek: i % 7 === 0 ? null : 135_800 + i * 9.2,
+      }
+    }),
+  },
   agents: FIXTURE_AGENTS.map((a) => ({
     id: a.id, name: a.name, status: a.status, accountId: a.account_id,
     accountName: a.account_name, accountChainId: a.account_chain_id,
+    ...(a.status === 'pending_approval' ? { setupStatus: 'awaiting_connection' } : {}),
     allowances: a.allowances.map((x) => ({
       tokenSymbol: x.token_symbol, allowanceAmount: x.allowance_amount, resetPeriodMin: x.reset_period_min,
     })),
+    budgets: a.status === 'pending_approval' ? [] : [
+      {
+        id: a.id === 'agent-research'
+          ? '9d1f4c0a-0000-4000-8000-0000000000a1'
+          : '9d1f4c0a-0000-4000-8000-0000000000a2',
+        delegationHash: a.id === 'agent-research' ? `0x${'31'.repeat(32)}` : `0x${'32'.repeat(32)}`,
+        chainId: a.account_chain_id,
+        tokenAddress: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+        tokenSymbol: 'USDC',
+        decimals: 6,
+        budgetAtomic: a.id === 'agent-research' ? '250000000' : '50000000',
+        // Mixed periods: a daily budget on the research agent, a weekly one
+        // on the second active agent — the captions must render both.
+        periodSeconds: a.id === 'agent-research' ? 86_400 : 604_800,
+        startDate: '2026-10-08T10:00:00.000Z',
+        expiresAt: '2027-10-08T10:00:00.000Z',
+        periodEnd: '2026-10-10T10:00:00.000Z',
+      },
+    ],
+    receivedSubBudgets: a.id === 'agent-research' ? [] : [
+      { parentAgentId: 'agent-research', parentAgentName: 'Research agent', open: true },
+    ],
+    stats: {
+      d7: {
+        gross: { usd: 62.5, eur: 57.38, sek: 672.5 },
+        net: { usd: 37.5, eur: 34.43, sek: 403.5 },
+        approx: false,
+        payments: 4,
+        refusals: { budget: 1, scope: 0, failed: 0, haven: 0 },
+      },
+      d30: {
+        gross: { usd: 250.0, eur: 229.5, sek: 2690.0 },
+        net: { usd: 162.5, eur: 149.18, sek: 1748.5 },
+        approx: true,
+        payments: 14,
+        refusals: { budget: 2, scope: 1, failed: 1, haven: 0 },
+      },
+      lastPaymentAt: '2026-10-09T09:41:00.000Z',
+      lastCounterparty: a.status === 'pending_approval' ? null : {
+        source: 'x402',
+        x402ResourceUrl: 'https://api.example.dev/reports',
+        to: ADDR.merchant,
+        merchantName: null,
+      },
+    },
   })),
-  transactions: FIXTURE_TXS.slice(0, 4),
+  // #3858: the former 5-row `transactions` preview is gone from the wire —
+  // SAME top-level key set as the e2e `dashboardOverview` (the parity suite
+  // compares them exactly). Two groups
+  // over the dataset's rows: the Research agent's USDC stream at the merchant
+  // (a floor count — the screenshot story includes a truncated-window render
+  // beside it) and one deposit day. approx (serve-time) fiat throughout: no
+  // row in this dataset carries book-time fiat.
+  activity: [
+    {
+      count: 3,
+      countIsFloor: true,
+      sumAtomic: '75000000',
+      tokenSymbol: 'USDC',
+      decimals: 6,
+      latestAt: new Date((T0 - 8_600) * 1000).toISOString(),
+      agentId: 'agent-research',
+      agentName: 'Research agent',
+      source: 'x402',
+      x402ResourceUrl: 'https://api.example.dev/reports',
+      to: ADDR.merchant,
+      merchantName: 'Example Merchant API',
+      activityType: null,
+      direction: 'out',
+      status: 'confirmed',
+      approxAmount: '807.0000',
+      approxCurrency: 'SEK',
+    },
+    {
+      count: 2,
+      sumAtomic: '225500000',
+      tokenSymbol: 'USDC',
+      decimals: 6,
+      latestAt: new Date((T0 - 17_200) * 1000).toISOString(),
+      agentId: null,
+      agentName: null,
+      source: null,
+      x402ResourceUrl: null,
+      to: FIXTURE_ACCOUNT.account_address,
+      merchantName: null,
+      activityType: null,
+      direction: 'in',
+      status: 'confirmed',
+      approxAmount: '2425.8200',
+      approxCurrency: 'SEK',
+    },
+  ],
+}
+
+// #3804: the cached budget-remaining read. One KNOWN row (chain-backed,
+// sub-budget attribution) and one UNKNOWN row (`remaining_*` null) — the
+// unknown row photographs as "unavailable", never "0 left" and never the
+// full budget, which is the wire-shape rule the issue pins.
+export const FIXTURE_BUDGET_REMAINING = {
+  budgets: [
+    {
+      agent_id: 'agent-research', chain_id: 84532, delegation_hash: `0x${'c'.repeat(64)}`,
+      token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', token_symbol: 'USDC', token_decimals: 6,
+      budget_atomic: '3000000', read_at: '2026-10-09T13:00:00.000Z', period_end: '2026-10-10T00:00:00.000Z',
+      remaining_atomic: '1500000', remaining_from_chain: true, used_atomic: '1500000',
+      sub_budget_spend: [{ agent_id: 'agent-claw', spent_atomic: '250000' }],
+    },
+    {
+      agent_id: 'agent-ops', chain_id: 84532, delegation_hash: `0x${'d'.repeat(64)}`,
+      token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', token_symbol: 'USDC', token_decimals: 6,
+      budget_atomic: '2000000', read_at: null, period_end: '2026-10-10T00:00:00.000Z',
+      remaining_atomic: null, remaining_from_chain: false, used_atomic: null,
+      sub_budget_spend: [],
+    },
+  ],
 }
 // Agent detail (#1075): the activity feed + spend stats behind
 // `/agent-activity/:id/*`. Without these the route fell through to the empty
@@ -1105,6 +1296,9 @@ export const FIXTURE_AGENT_ACTIVITY = [
     type: 'payment', id: 'pay-1', agent_id: 'agent-research', agent_name: 'Research agent',
     token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
     amount_raw: '25000000', amount: '25.00', to: ADDR.merchant,
+    // #3824: the serve-time amount at today's rate in the user's preference —
+    // 25 USDC ≈ 269.00 SEK at the dataset's ~10.76 SEK/USD story.
+    approx_amount: '269.0000', approx_currency: 'SEK',
     // #2120: 'confirmed', not 'executed'. `payment_intents.status` is only
     // ever written pending_signature | submitted | confirmed | failed |
     // expired; 'executed' was an `approval_requests` status, and it only
@@ -1156,6 +1350,8 @@ export const FIXTURE_AGENT_ACTIVITY = [
     type: 'payment', id: 'pay-3', agent_id: 'agent-research', agent_name: 'Research agent',
     token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
     amount_raw: '12000000', amount: '12.00', to: ADDR.recipient,
+    // #3824: serve-time amount, same rate story as pay-1 (12 USDC ≈ 129.12 SEK).
+    approx_amount: '129.1200', approx_currency: 'SEK',
     reason: null, status: 'failed', tx_hash: null, source: 'api',
     x402_resource_url: null, x402_merchant_address: null, chain_id: FIXTURE_ACCOUNT.chain_id,
     account_id: FIXTURE_ACCOUNT.id, account_address: FIXTURE_ACCOUNT.account_address, account_name: FIXTURE_ACCOUNT.name,
@@ -1167,6 +1363,8 @@ export const FIXTURE_AGENT_ACTIVITY = [
     type: 'payment', id: 'pay-2', agent_id: 'agent-research', agent_name: 'Research agent',
     token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
     amount_raw: '4500000', amount: '4.50', to: ADDR.recipient,
+    // #3824: serve-time amount, same rate story as pay-1 (4.50 USDC ≈ 48.42 SEK).
+    approx_amount: '48.4200', approx_currency: 'SEK',
     reason: null, status: 'confirmed', tx_hash: `0x${'b2'.repeat(32)}`,  // #2120: see pay-1
     source: 'api', x402_resource_url: null, x402_merchant_address: null,
     chain_id: FIXTURE_ACCOUNT.chain_id,
@@ -1831,6 +2029,11 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   }
   if (pathname === '/chains') return { deployable: [FIXTURE_ACCOUNT.chain_id] }
   if (pathname === '/dashboard/overview') return FIXTURE_OVERVIEW
+  if (pathname === '/dashboard/budget-remaining') return FIXTURE_BUDGET_REMAINING
+  // #3813's server-saved "Needs attention" dismissals — read on every dashboard
+  // render. Without this key the generic fallback answered an object with no
+  // `dismissals` array and the dashboard hit its error boundary (#3897).
+  if (pathname === '/user/attention-dismissals') return { dismissals: [] }
   if (pathname.startsWith('/portfolio/')) return FIXTURE_PORTFOLIO
   if (pathname.startsWith('/balances/')) return FIXTURE_BALANCES
   if (pathname === '/agents') {
@@ -1891,6 +2094,39 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (pathname.startsWith('/accounts/hybrid/') && pathname.endsWith('/signers')) {
     // The account-scoped signer set (#1081/#1089) — one passkey, so the
     // Backup & recovery card renders its "only one way to approve" state.
+    return {
+      account_address: FIXTURE_ACCOUNT.account_address,
+      chain_id: FIXTURE_ACCOUNT.chain_id,
+      owner_address: null,
+      passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
+    }
+  }
+  if (pathname === '/user/signers') {
+    // #3825: Settings → Signers — every signer once, with the accounts it
+    // approves. The same one passkey the account-scoped reads above serve,
+    // approving the fixture account.
+    return {
+      signers: [
+        {
+          kind: 'passkey',
+          key_id: '0x' + '11'.repeat(32),
+          created_at: '2026-03-03T12:00:00.000Z',
+          accounts: [{
+            account_id: FIXTURE_ACCOUNT.id,
+            account_address: FIXTURE_ACCOUNT.account_address,
+            account_name: FIXTURE_ACCOUNT.name,
+            chain_id: FIXTURE_ACCOUNT.chain_id,
+          }],
+        },
+      ],
+    }
+  }
+  if (pathname.startsWith('/agents/') && pathname.endsWith('/account-signers')) {
+    // #3812: the agent-scoped signer read behind the budget card, the remove
+    // dialog and the re-key modal. Unkeyed, it fell through to the empty
+    // fallback (no signer at all), so every default agent capture rendered
+    // the "connect your owner wallet" state. One passkey, as the account-
+    // scoped read above and the e2e fixture (`haven-api.ts`) both serve.
     return {
       account_address: FIXTURE_ACCOUNT.account_address,
       chain_id: FIXTURE_ACCOUNT.chain_id,
@@ -3246,10 +3482,6 @@ async function runAnalyticsScenario({ page, vp, shoot }, waitForContent) {
   await shoot(page.locator('main').first(), 'page')
 }
 
-// Staged by the `half-revoked-agents` run: how the superseded card's signer set
-// answers (`ready` | `not-ready` | `loading`). Reset at the top of each run.
-let halfRevokedSignerStage = 'ready'
-
 // The auth pages' API stages (#3578): the redesigned sign-in and sign-up
 // captures need the error band and the in-flight submit, which no URL can
 // reach — both exist only while a login/register round-trip has just failed
@@ -3908,78 +4140,9 @@ export const SCENARIOS = {
           passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
         }
       }
-      // ── The superseded-agent revoke confirm (#3542 B), reached through the
-      // connect modal's completed setup exactly as `connect-agent-superseded-*`
-      // do. Its signer set is staged by the run: loading (delayed answer),
-      // cannot-sign (no signer at all) and ready (one enrolled passkey).
-      if (apiPath === '/agents/agent-research/account-signers') {
-        if (halfRevokedSignerStage === 'loading') {
-          return delayedHttp(30_000, {
-            account_address: FIXTURE_ACCOUNT.account_address, chain_id: FIXTURE_ACCOUNT.chain_id,
-            owner_address: null, passkeys: [],
-          })
-        }
-        return {
-          account_address: FIXTURE_ACCOUNT.account_address,
-          chain_id: FIXTURE_ACCOUNT.chain_id,
-          owner_address: null,
-          passkeys: halfRevokedSignerStage === 'not-ready'
-            ? []
-            : [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
-        }
-      }
-      if (apiPath === '/agents/agent-research/revoke' && method === 'POST') return {}
-      if (apiPath === '/agents/agent-research/delegations/revoke-all' && method === 'POST') {
-        // A prepare the headless browser cannot sign: no WebAuthn here, so the
-        // ceremony fails and the card shows its "key revoked, budget still
-        // active" result — the same screen a cancelled signature produces.
-        return {
-          signature_scheme: 'webauthn_userop',
-          user_operation: {},
-          user_op_hash: '0x' + '9c'.repeat(32),
-          delegation_hashes: ['0x' + '4d'.repeat(32)],
-        }
-      }
-      if (apiPath === '/agent-connection-setups' && method === 'POST') {
-        return {
-          setup_id: CONNECT_SETUP_ID,
-          status: 'active',
-          setup_token: CONNECT_SETUP_TOKEN,
-          expires_at: '2099-01-01T00:00:00.000Z',
-          connector_command: CONNECT_COMMAND,
-          setup_prompt: 'Please connect this workspace to Haven.',
-        }
-      }
-      if (apiPath === `/agent-connection-setups/${CONNECT_SETUP_ID}`) {
-        return {
-          setup_id: CONNECT_SETUP_ID,
-          agent_id: 'agent-fixture-new',
-          status: 'active',
-          expires_at: '2099-01-01T00:00:00.000Z',
-          agent: { name: 'New agent', description: null },
-          haven_wallet: {
-            id: FIXTURE_ACCOUNT.id, name: FIXTURE_ACCOUNT.name,
-            address: FIXTURE_ACCOUNT.account_address, chain_id: FIXTURE_ACCOUNT.chain_id,
-            network: 'Base Sepolia',
-          },
-          agent_budget: [{
-            id: 'budget-1', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-            token_symbol: 'USDC', allowance_amount: '25000000', reset_period_min: 1440,
-          }],
-          delegate_address: '0x3333333333333333333333333333333333333333',
-          install_status: {
-            runtime_mcp_mode: 'local_stdio', local_mcp_configured: true,
-            local_mcp_acknowledged: true, credential_files_written: true,
-            skill_installed: false, restart_required: true,
-            superseded_agent_ids: ['agent-research'],
-          },
-          approval: { status: 'confirmed', safe_tx_hash: null, tx_hash: null },
-        }
-      }
       return undefined
     },
     async run({ page, vp, shoot }) {
-      halfRevokedSignerStage = 'ready'
       // ── /agents: list card, collapsed toggle, expanded Removed group ──────
       await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
@@ -4028,52 +4191,6 @@ export const SCENARIOS = {
       await dismissMobileSidebar(page, vp)
       await page.getByText(/Budget still active/).first().waitFor({ timeout: 20_000 })
       await shoot(page.locator('main').first(), 'account-summary')
-
-      // ── Superseded-agent revoke confirm: loading, cannot sign, ready, result ──
-      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
-      await dismissMobileSidebar(page, vp)
-      await page.getByRole('button', { name: 'Connect agent', exact: true }).first().click()
-      const connect = page.getByRole('dialog').first()
-      await connect.getByLabel('Agent name').fill('New agent')
-      await connect.getByRole('button', { name: 'Set agent budget' }).click()
-      await connect.getByPlaceholder('Amount').fill('25')
-      await connect.getByRole('button', { name: 'Create setup prompt' }).click()
-      await connect.getByText(/This setup replaced /).waitFor({ timeout: 30_000 })
-
-      const confirm = page.getByRole('dialog', { name: 'Revoke Research agent?' })
-      const openConfirm = async (stage) => {
-        halfRevokedSignerStage = stage
-        await connect.getByRole('button', { name: 'Revoke Research agent' }).click()
-        await confirm.waitFor({ timeout: 20_000 })
-      }
-      const closeConfirm = async () => {
-        await confirm.getByRole('button', { name: 'Keep it' }).click()
-        await confirm.waitFor({ state: 'detached', timeout: 20_000 })
-      }
-
-      // Signer set still loading: only the confirm waits (cancel stays usable),
-      // and it says nothing about signing.
-      await openConfirm('loading')
-      await confirm.locator('button:disabled', { hasText: 'Revoke agent' }).waitFor({ timeout: 20_000 })
-      await shoot(confirm, 'superseded-confirm-loading')
-      await closeConfirm()
-
-      // No signer reachable from this device: confirm still available, hint shown.
-      await openConfirm('not-ready')
-      await confirm.getByText(/cannot sign for the account/).waitFor({ timeout: 20_000 })
-      await shoot(confirm, 'superseded-confirm-cannot-sign')
-      await closeConfirm()
-
-      // Normal state: one enrolled passkey.
-      await openConfirm('ready')
-      await confirm.getByRole('button', { name: 'Revoke agent' }).waitFor({ timeout: 20_000 })
-      await shoot(confirm, 'superseded-confirm')
-
-      // Confirm: the credential is revoked, the signature cannot complete, and
-      // the card says which half happened.
-      await confirm.getByRole('button', { name: 'Revoke agent' }).click()
-      await connect.getByText(/Its key is revoked, but its budget is still active/).waitFor({ timeout: 30_000 })
-      await shoot(connect, 'superseded-result-budget-active')
     },
   },
 
@@ -4292,6 +4409,60 @@ export const SCENARIOS = {
     },
   },
 
+  'owner-wallet-only': {
+    description:
+      'An account owned only by a browser wallet, with no wallet connected (#3812) — the signing surfaces that offer their own Connect wallet: the account signers card, the agent budget card, and the remove-agent dialog',
+    // #3812: the header WalletButton used to be the only connect entry, so
+    // these surfaces said "connect your owner wallet" with nothing to click.
+    // The state only exists for an owner-only signer set (no passkeys): any
+    // enrolled passkey keeps every surface `ready` (#1969). The account page
+    // reads `/accounts/hybrid/<addr>/signers` (the shared fixture serves one
+    // passkey there); the agent page and its dialogs read the agent-scoped
+    // `/agents/<id>/account-signers`. Both are served the same owner-only set
+    // here, so every capture shows the state it is named for.
+    api(apiPath) {
+      const ownerOnly = {
+        account_address: FIXTURE_ACCOUNT.account_address,
+        chain_id: FIXTURE_ACCOUNT.chain_id,
+        owner_address: '0x' + 'ee'.repeat(20),
+        passkeys: [],
+      }
+      if (apiPath.startsWith('/accounts/hybrid/') && apiPath.endsWith('/signers')) return ownerOnly
+      if (apiPath === '/agents/agent-research/account-signers') return ownerOnly
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      const settle = async (url) => {
+        await page.goto(url, { waitUntil: 'networkidle', timeout: 30_000 })
+        await page.evaluate(() => document.fonts.ready)
+        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await dismissMobileSidebar(page, vp)
+      }
+
+      // ── account page: Backup & recovery ──────────────────────────────────
+      await settle(`${BASE_URL}/accounts/${FIXTURE_ACCOUNT.id}`)
+      const signersHeading = page.getByRole('heading', { name: 'Backup & recovery' })
+      await signersHeading.waitFor({ timeout: 15_000 })
+      const signersCard = page.locator('div.rounded-\\[10px\\]', { has: signersHeading })
+      await signersCard.getByRole('button', { name: 'Connect wallet' }).waitFor({ timeout: 15_000 })
+      await shoot(signersCard, 'account-signers')
+
+      // ── agent page: the budget card's rows ───────────────────────────────
+      await settle(`${BASE_URL}/agents/agent-research`)
+      const budgetNotice = page.getByText(/Connect your account owner wallet to change or stop a budget/)
+      await budgetNotice.waitFor({ timeout: 15_000 })
+      const budgetSection = page.locator('section', { has: budgetNotice })
+      await budgetSection.getByRole('button', { name: 'Connect wallet' }).waitFor({ timeout: 15_000 })
+      await shoot(budgetSection, 'agent-budget')
+
+      // ── remove-agent dialog: the revoke path ─────────────────────────────
+      await page.getByRole('button', { name: 'Agent options' }).click()
+      await page.getByRole('menuitem', { name: /Remove agent/ }).click()
+      const dialog = page.getByRole('dialog')
+      await dialog.getByRole('button', { name: 'Connect wallet' }).waitFor({ timeout: 15_000 })
+      await shoot(dialog, 'remove-agent')
+    },
+  },
   'account-backup-recovery': {
     description:
       'Backup & recovery card at both viewports, in all three of its rendered states — the healthy multi-signer layout, the one-way-to-approve warning, and the load failure',
@@ -4969,7 +5140,11 @@ export const SCENARIOS = {
 
 
       await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
-      await dialog.getByText('Connect your agent').waitFor({ timeout: 30_000 })
+      // #3832: the connect step is a numbered list whose row 1 is the copy
+      // action. Captured BEFORE the copy (the ready frame), then with the
+      // prompt disclosure open, then copied, at each stage.
+      const copyPrompt = dialog.getByRole('button', { name: 'Copy setup prompt' })
+      await copyPrompt.waitFor({ timeout: 30_000 })
 
       // The stage timers are armed by the effect that runs once a POLLED GET
       // reports `awaiting_connection` — a different round-trip from the POST
@@ -4985,7 +5160,14 @@ export const SCENARIOS = {
       // Each stage is CONFIRMED by its own copy before it is captured, so a
       // stage that never arrives fails the run instead of producing a
       // convincing, wrongly-labelled PNG.
-      await dialog.getByText('Waiting for the agent to run').waitFor({ timeout: 15_000 })
+      await shoot(dialog, 'waiting-ready')
+      await dialog.getByText('View the prompt').click()
+      await dialog.getByText(CONNECT_SETUP_TOKEN).first().waitFor({ timeout: 10_000 })
+      await shoot(dialog, 'waiting-prompt-open')
+      await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+      await copyPrompt.click()
+      await dialog.getByText('Prompt copied').waitFor({ timeout: 10_000 })
+      await dialog.getByText('Waiting for your agent to run').waitFor({ timeout: 15_000 })
       await shoot(dialog, 'waiting-starting')
 
       await page.clock.fastForward(65_000)
@@ -4997,7 +5179,7 @@ export const SCENARIOS = {
       await shoot(dialog, 'waiting-recovery')
 
       // #2482: the server-side credential path now lives in its own top-level
-      // disclosure directly under the setup prompt — one click from the
+      // disclosure (since #3832, in the footer below the setup steps) — one click from the
       // connect step, no reveal button, no warning panel, no checkbox. It is
       // the most safety-relevant surface in the flow (it hands out the
       // one-time private signing key), so it is captured twice: BEFORE
@@ -5256,7 +5438,8 @@ export const SCENARIOS = {
   },
 
   /**
-   * The superseded-agent revoke offer (#2561), which had no rendered evidence
+   * The other-agents list in the completed setup (#2561; a revoke offer until
+   * #3830 made it a list with links), which had no rendered evidence
    * at all until two design-review passes each rebuilt a throwaway scenario to
    * see it. Committed so the third does not have to, and so the state is
    * captured the same way twice rather than off spec each time.
@@ -5266,24 +5449,24 @@ export const SCENARIOS = {
    * agents this owner has, so `null` (the scan could not run), `[]` and a
    * report naming agents the owner does not hold all produce the same correct
    * silence — and a capture of silence proves little. What is worth pinning is
-   * the offer itself, the long list, and the one branch where the card speaks
-   * without offering: the agent list failed to load, so it says so rather than
-   * implying there was nothing to replace.
+   * the list itself, the long list, and the one branch where the card speaks
+   * without listing: the agent list failed to load, so it says so rather than
+   * implying there were no other agents.
    */
   ...Object.fromEntries(
     [
-      ['one', ['agent-research'], 'a single superseded agent'],
+      ['one', ['agent-research'], 'a single other agent'],
       // Both fixture agents, and they are the only two — an id this fixture
       // does not have would have rendered ONE agent under a name promising
       // several, which is a scenario measuring something other than its title.
-      // `agent-retired` is `paused`, not `revoked`, so it is still offerable:
+      // `agent-retired` is `paused`, not `revoked`, so it is still listed:
       // the card drops revoked agents, not paused ones.
-      ['many', ['agent-research', 'agent-retired'], 'several, each revocable on its own'],
+      ['many', ['agent-research', 'agent-retired'], 'several, a paused one showing its status'],
       ['failed', ['agent-research'], 'the agent list could not be read'],
     ].map(([name, supersededIds, why]) => [
       `connect-agent-superseded-${name}`,
       {
-        description: `Connect agent, the completed setup's superseded-agent offer: ${why} (#2561)`,
+        description: `Connect agent, the completed setup's list of other agents on this machine: ${why} (#2561, #3830)`,
         api(apiPath, method) {
           // `failed` breaks the read the card intersects against, which is the
           // whole point of that variant.
@@ -5358,8 +5541,8 @@ export const SCENARIOS = {
           await dialog
             .getByText(
               name === 'failed'
-                ? /may have replaced an earlier agent/
-                : /This setup replaced /,
+                ? /Other agents may be set up on this machine/
+                : /other agents? (is|are) set up on this machine/i,
             )
             .waitFor({ timeout: 30_000 })
           await shoot(dialog, name)
@@ -5370,7 +5553,7 @@ export const SCENARIOS = {
 
   'wrong-wallet': {
     description:
-      'The wrong-wallet gate state (#2073): a hydrated hybrid signer set naming an EOA owner, a connected wallet that is NOT it — the header Wrong wallet pill and its popover',
+      'The wrong-wallet gate state (#2073): a hydrated hybrid signer set naming an EOA owner, a connected wallet that is NOT it — the account page Backup & recovery card offering Switch wallet in place (the header pill left the top bar in #3825)',
     // ── Why this scenario exists ─────────────────────────────────────────────
     //
     // #2068 made the signer gate fail closed for an unrelated wallet, and
@@ -5400,32 +5583,55 @@ export const SCENARIOS = {
       return undefined
     },
     async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/dashboard`, {
+      // #3825: the header pill is gone; the mismatch is now named where it
+      // blocks — the account's Backup & recovery card, whose in-flow
+      // `WalletConnectAction` (#3812) reads "Switch wallet" for a connected
+      // wallet that is not the owner. Waiting on that name pins the state
+      // through the real path — reconnect, hydration, gate — and a run where
+      // the healthy state renders instead FAILS here.
+      await page.goto(`${BASE_URL}/accounts/${FIXTURE_ACCOUNT.id}`, {
         waitUntil: 'domcontentloaded',
         timeout: 60_000,
       })
       await dismissMobileSidebar(page, vp)
-
-      // The header names the mismatch. Waiting on the accessible name pins
-      // the state through the real path — reconnect, hydration, gate — and a
-      // run where the normal address pill renders instead FAILS here rather
-      // than photographing the silent-disagreement defect as evidence.
-      const pill = page.getByRole('button', { name: 'Wrong wallet' })
-      await pill.waitFor({ timeout: 30_000 })
-      const header = page.locator('header').first()
-      await shoot(header, 'header-pill')
-
-      // The fix is one click away: the wallet menu with Switch wallet.
-      await pill.click()
-      const popover = page.getByRole('dialog', { name: 'Wallet menu' })
-      await popover.waitFor({ timeout: 15_000 })
-      await popover.getByRole('button', { name: 'Switch wallet' }).waitFor({ timeout: 15_000 })
-      // The mismatch note (design-review finding on #2073): the popover must
-      // not photograph identical to the healthy connected state.
-      await popover
-        .getByText('This is not the wallet that controls this account', { exact: false })
-        .waitFor({ timeout: 15_000 })
-      await shoot(popover, 'popover')
+      const heading = page.getByRole('heading', { name: 'Backup & recovery' })
+      await heading.waitFor({ timeout: 30_000 })
+      const card = page.locator('div.rounded-\\[10px\\]', { has: heading })
+      await card.getByRole('button', { name: 'Switch wallet' }).waitFor({ timeout: 30_000 })
+      await shoot(card, 'account-signers')
+    },
+  },
+  'settings-signers': {
+    description:
+      'Settings → Signers (#3825): every passkey and wallet once, with the accounts each approves — a passkey on two networks, a dateless passkey (ordinal label), and an owner wallet with its address behind Show address',
+    api(apiPath) {
+      if (apiPath === '/user/signers') {
+        const main = {
+          account_id: FIXTURE_ACCOUNT.id,
+          account_address: FIXTURE_ACCOUNT.account_address,
+          account_name: FIXTURE_ACCOUNT.name,
+          chain_id: FIXTURE_ACCOUNT.chain_id,
+        }
+        const mainnet = { ...main, account_id: 'acc-mainnet', account_address: '0x' + 'a2'.repeat(20), chain_id: 8453 }
+        return {
+          signers: [
+            { kind: 'passkey', key_id: '0x' + '11'.repeat(32), created_at: '2026-03-03T12:00:00.000Z', accounts: [mainnet, main] },
+            { kind: 'passkey', key_id: '0x' + '22'.repeat(32), created_at: null, accounts: [main] },
+            { kind: 'wallet', address: '0x' + 'ee'.repeat(20), accounts: [main] },
+          ],
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/settings#signers`, { waitUntil: 'networkidle', timeout: 30_000 })
+      await page.evaluate(() => document.fonts.ready)
+      await dismissMobileSidebar(page, vp)
+      const heading = page.getByRole('heading', { name: 'Signers' })
+      await heading.waitFor({ timeout: 15_000 })
+      const section = page.locator('#signers')
+      await section.getByText('Passkey 2').waitFor({ timeout: 15_000 })
+      await shoot(section, 'section')
     },
   },
   'modal-migrations': {
@@ -5559,10 +5765,10 @@ export const SCENARIOS = {
       await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
 
-      // The hero labels this button "Receive" when funded and "Receive funds"
-      // when not — both branches exist and which one renders depends on the
-      // fixture's balances, which this scenario deliberately does not pin.
-      await page.getByRole('button', { name: /^Receive( funds)?$/ }).first().click()
+      // The hero's deposit action is named "Deposit address" everywhere since
+      // #3807 (the funded/unfunded distinction moved to the meta-line under
+      // the sparkline, not the button label).
+      await page.getByRole('button', { name: /^Deposit address$/ }).first().click()
       const dialog = page.getByRole('dialog')
       // Confirmed by the RESOLVED sentence rather than by a bare timeout, so a
       // run that lands on the refusal fails here instead of being shot under
@@ -5606,7 +5812,7 @@ export const SCENARIOS = {
       await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
 
-      await page.getByRole('button', { name: /^Receive( funds)?$/ }).first().click()
+      await page.getByRole('button', { name: /^Deposit address$/ }).first().click()
       const dialog = page.getByRole('dialog')
       await dialog
         .getByText(/can't confirm which network this account uses/)
@@ -6006,6 +6212,141 @@ export const SCENARIOS = {
   // own session above is now the SEK user, so this scenario photographs the
   // three fiat surfaces the finding names, in the currency the served
   // default puts on them, for the design-reviewer pass.
+  // ── #3897: the dashboard as whole pages, one per mockup state ──────────
+  // The committed baselines photograph one data state (the busy shared
+  // fixture) as a page; the first-run baselines crop the card. These three
+  // give the design review the mockup's other states as full pages.
+  'dashboard-new-user': {
+    description:
+      '#3897: a brand-new account — no USDC, no agents — as a whole page: the money card with its spending half explaining what it will show, and the setup guide as the "Needs attention" card (mockup "New user")',
+    api(apiPath) {
+      if (apiPath === '/dashboard/overview') {
+        return {
+          ...FIXTURE_OVERVIEW,
+          totals: { usd: 0, eur: 0, sek: 0 },
+          change: { available: false, usdAmount: 0, eurAmount: 0, usdPercent: 0, eurPercent: 0, sekAmount: 0, sekPercent: 0 },
+          onboardingProgress: { hasFirstAgentPayment: false },
+          agentCount: { active: 0, paused: 0, pending_approval: 0 },
+          accounts: FIXTURE_OVERVIEW.accounts.slice(0, 1).map((account) => ({
+            ...account,
+            usdcBalanceAtomic: '0',
+            usdcBalanceFreshness: undefined,
+            funded: false,
+            usdcPace7dAtomic: '0',
+          })),
+          spend: {
+            ...FIXTURE_OVERVIEW.spend,
+            d7: { ...FIXTURE_OVERVIEW.spend.d7, gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, payments: 0, distinctMerchants: 0, budgetStops: 0 },
+            d30: { ...FIXTURE_OVERVIEW.spend.d30, gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, distinctMerchants: 0, budgetStops: 0 },
+            topMerchant7d: null,
+            failedIntents7d: 0,
+            balance_by_day: [],
+          },
+          agents: [],
+          activity: [],
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByRole('heading', { name: 'Get started' }).waitFor({ timeout: 30_000 })
+      await shoot(page.locator('main').first(), 'page')
+    },
+  },
+  'dashboard-all-clear': {
+    description:
+      '#3897, #3902: one healthy agent, nothing to flag, the "You\'re set up" line already dismissed — the "You\'re all caught up" achievement under the money card, backed by a funded account with well over a month of runway and a known budget read below 90% (mockup "All clear")',
+    api(apiPath) {
+      if (apiPath === '/dashboard/overview') {
+        const research = FIXTURE_OVERVIEW.agents.find((agent) => agent.id === 'agent-research')
+        const calm = (window) => ({ ...window, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } })
+        return {
+          ...FIXTURE_OVERVIEW,
+          agentCount: { active: 1, paused: 0, pending_approval: 0 },
+          accounts: FIXTURE_OVERVIEW.accounts.slice(0, 1).map((account) => ({ ...account, usdcBalanceFreshness: undefined })),
+          spend: {
+            ...FIXTURE_OVERVIEW.spend,
+            d7: { ...FIXTURE_OVERVIEW.spend.d7, budgetStops: 0 },
+            d30: { ...FIXTURE_OVERVIEW.spend.d30, budgetStops: 0 },
+            failedIntents7d: 0,
+          },
+          agents: [{ ...research, stats: { ...research.stats, d7: calm(research.stats.d7), d30: calm(research.stats.d30) } }],
+        }
+      }
+      // #3902: a KNOWN read below 90% for the one budgeted agent — the
+      // achievement only shows on measured facts, so an empty read would
+      // (correctly) render the neutral line instead.
+      if (apiPath === '/dashboard/budget-remaining') {
+        return { budgets: FIXTURE_BUDGET_REMAINING.budgets.filter((row) => row.agent_id === 'agent-research') }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      // The set-up line holds the guide slot until dismissed; seed the
+      // dismissal so the slot is empty and the achievement renders.
+      await page.addInitScript((userId) => {
+        window.localStorage.setItem(`haven-onboarding-complete-dismissed:${userId}`, '1')
+      }, FIXTURE_USER.id)
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByRole('heading', { name: "You're all caught up" }).waitFor({ timeout: 30_000 })
+      await shoot(page.locator('main').first(), 'page')
+    },
+  },
+  'dashboard-quiet': {
+    description:
+      '#3902: the all-clear data with NO budget read — nothing to flag, but the budget room is unmeasured, so the card shows only the neutral line ("No items to review right now."), never the achievement',
+    api(apiPath) {
+      if (apiPath === '/dashboard/overview') return SCENARIOS['dashboard-all-clear'].api(apiPath)
+      if (apiPath === '/dashboard/budget-remaining') return { budgets: [] }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.addInitScript((userId) => {
+        window.localStorage.setItem(`haven-onboarding-complete-dismissed:${userId}`, '1')
+      }, FIXTURE_USER.id)
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByText('No items to review right now.').waitFor({ timeout: 30_000 })
+      await shoot(page.locator('main').first(), 'page')
+    },
+  },
+  'dashboard-sub-cent': {
+    description:
+      '#3897: a week of sub-cent agent payments — the count-form summary and "<$0.01" in the spending half and the activity row, never "$0.00" (the agent caption\'s sub-cent form is unit-tested, not shown here: the shared budget read is not sub-cent)',
+    api(apiPath) {
+      if (apiPath === '/dashboard/overview') {
+        // Under a cent in EVERY display currency (the fixture user's default is SEK).
+        const tiny = { usd: 0.004, eur: 0.004, sek: 0.004 }
+        const window = (stats) => ({ ...stats, gross: tiny, net: tiny, approx: false })
+        return {
+          ...FIXTURE_OVERVIEW,
+          spend: {
+            ...FIXTURE_OVERVIEW.spend,
+            d7: { ...FIXTURE_OVERVIEW.spend.d7, gross: tiny, net: tiny, payments: 3, distinctMerchants: 1, budgetStops: 0 },
+            d30: { ...FIXTURE_OVERVIEW.spend.d30, gross: tiny, net: tiny, approx: false, payments: 3, distinctMerchants: 1, budgetStops: 0 },
+          },
+          agents: FIXTURE_OVERVIEW.agents.map((agent) =>
+            agent.id === 'agent-research'
+              ? { ...agent, stats: { ...agent.stats, d7: window(agent.stats.d7), d30: window(agent.stats.d30) } }
+              : { ...agent, stats: { ...agent.stats, d7: { ...agent.stats.d7, net: { usd: 0, eur: 0, sek: 0 } }, d30: { ...agent.stats.d30, net: { usd: 0, eur: 0, sek: 0 } } } },
+          ),
+          activity: FIXTURE_OVERVIEW.activity.map((group) =>
+            group.direction === 'out' ? { ...group, sumAtomic: '4000', approxAmount: '0.0040' } : group,
+          ),
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByText(/made 3 payments/).waitFor({ timeout: 30_000 })
+      await shoot(page.locator('main').first(), 'page')
+    },
+  },
   'currency-preference-sek': {
     description:
       '#3127 finding 8: the SEK no-preference default (migration 091) rendering on the fiat surfaces — the /dashboard hero with its SEK total and change line, the Settings → Preferences card with the kr SEK radio active, the accounts overview and the account detail page priced in SEK (#3195 adds the overview)',
@@ -6017,7 +6358,7 @@ export const SCENARIOS = {
       // suite owns the byte-level voice.
       await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
-      await page.getByText('Total balance').waitFor({ timeout: 20_000 })
+      await page.getByRole('region', { name: 'Balance' }).waitFor({ timeout: 20_000 })
       await page.getByText('136 050,75 kr').first().waitFor({ timeout: 20_000 })
       // The change line renders the SEK swing, not the quiet caption. The
       // percent renders in sv-SE through Intl (#3195 round-2 finding b):

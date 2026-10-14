@@ -437,6 +437,13 @@ latency rising while request latency stays flat, or a measured backlog on one
 chain. That data now exists, which is why this is an evidence question rather
 than a guess.
 
+The payment path's sponsored UserOps are a separate ledger
+(`sponsored_userop_gas_events`, migration 110, #3837) — not new rows in
+`relayer_gas_events` — so the ops rollup on this page and the
+`gas_sponsored_ops` figure keep their #717 meaning exactly; the sponsored-gas
+view lives in the ops console (`GET /ops/sponsored-gas`, per merchant per
+day). See `docs/operations/sponsored-gas.md`.
+
 **Do not build it as a reliability fix for stuck transactions.** A pool reduces
 the blast radius of a stall from 100% to 1/N; it does not prevent one. Fee
 bumping and replacement handling address the cause, a pool only dilutes the

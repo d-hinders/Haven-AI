@@ -3,7 +3,6 @@
 import { ArrowRight } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { type ReactNode } from 'react'
-import { useAuth } from '@/context/AuthContext'
 import { usePreferences } from '@/hooks/usePreferences'
 import { useT } from '@/context/LocaleContext'
 import { useTheme, type ThemePreference } from '@/context/ThemeContext'
@@ -13,6 +12,7 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { SettingsSection as Section, SettingsRow as SettingRow } from './SettingsSection'
 import { ConnectionsCard } from '@/components/accounting/ConnectionsCard'
 import { CompanyDetailsCard } from '@/components/settings/CompanyDetailsCard'
+import { SignersSection } from '@/components/settings/SignersSection'
 
 function StatusPill({
   children,
@@ -52,12 +52,9 @@ function ComingSoonToggle({ label, comingSoonText }: { label: string; comingSoon
 }
 
 export default function SettingsClient() {
-  const { passkeys = [] } = useAuth()
   const { currency, setCurrency, saving } = usePreferences()
   const { preference, setPreference } = useTheme()
   const t = useT()
-
-  const hasPasskey = passkeys.length > 0
 
   return (
     <div className="max-w-4xl">
@@ -135,16 +132,19 @@ export default function SettingsClient() {
           description={t.settings.access.description}
         >
           <SettingRow
-            label={t.settings.passkey.label}
-            value={hasPasskey ? <StatusPill tone="success">{t.settings.passkey.enrolled}</StatusPill> : <StatusPill>{t.settings.passkey.none}</StatusPill>}
-            detail={hasPasskey ? t.settings.passkey.detailEnrolled(passkeys.length) : t.settings.passkey.detailNone}
-          />
-          <SettingRow
             label={t.settings.password.label}
             detail={t.settings.password.detail}
             action={<StatusPill>{t.common.comingSoon}</StatusPill>}
           />
         </Section>
+
+        {/*
+          Signers (#3825): every passkey and wallet that approves the user's
+          accounts, once each. It replaced the Access → Passkey status row
+          (a count with no detail) and Recovery's "Backup and recovery"
+          placeholder, which pointed at the per-account card.
+        */}
+        <SignersSection />
 
         {/*
           Accounting connections live HERE (owner decision 2026-09-11, #2868):
@@ -180,11 +180,6 @@ export default function SettingsClient() {
           <SettingRow
             label={t.settings.recovery.limitationsLabel}
             detail={t.settings.recovery.limitationsDetail}
-          />
-          <SettingRow
-            label={t.settings.recovery.backupLabel}
-            detail={t.settings.recovery.backupDetail}
-            action={<StatusPill>{t.common.comingSoon}</StatusPill>}
           />
           <SettingRow
             label={t.settings.recovery.sessionsLabel}

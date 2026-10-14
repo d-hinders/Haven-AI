@@ -268,6 +268,17 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
           'explicitly rather than inherited from the setup record. --doctor alone resolves it from the record.',
       )
     }
+    // #3799: --ack-local-tools is HONOURED by --repair (it re-consents the
+    // signer the repair installs — owner decision 2026-10-09: explicit flag,
+    // never automatic) and REFUSED with a bare --doctor, which is read-only
+    // and has nothing to acknowledge. The old behaviour silently dropped the
+    // flag, which is exactly the failure mode this refusal replaces.
+    if (options.ackLocalTools && !repair) {
+      throw new Error(
+        '--ack-local-tools does nothing with --doctor alone: the doctor is read-only. Re-consent during a ' +
+          'repair (--repair --ack-local-tools), or token-free with the recorded wrapper: <agent dir>/bin/haven-signer.mjs --ack',
+      )
+    }
     return { options: options as ConnectOptions, help, json, doctor, repair, tombstone, rekey }
   }
 
@@ -328,7 +339,9 @@ export function helpText(): string {
     '                             agents can run side by side in one runtime. 1-32 lowercase letters, digits,',
     '                             single hyphens; immutable once wired. Without it the pair is named from the',
     '                             agent\'s display name; --bare wires the bare haven / haven-signer pair.',
-    '  --ack-local-tools          Write the one-time local Haven tools acknowledgement during setup.',
+    '  --ack-local-tools          Write the local Haven tools acknowledgement: during setup, or (with --repair)',
+    '                             re-acknowledge consent for the signer the repair installs — no setup token.',
+    '                             With a bare --doctor it is refused: --doctor is read-only.',
     '  --ack-signer               Backward-compatible alias for --ack-local-tools.',
     '  --local                    Advanced: install the fully-local Haven MCP (no hosted dependency).',
     '                             Only available for Claude Code and Codex. Default is hosted MCP + local signer.',
@@ -337,10 +350,13 @@ export function helpText(): string {
     '                             signer runtime, hosted MCP, and a live signer handshake. Exits non-zero only on a failed check; an advisory (!) exits 0.',
     '                             --runtime is optional: without it the doctor checks the runtime the setup recorded,',
     '                             and reports a failure (not a pass) when no record names one.',
+    '                             --name <slug> selects the agent directory by its recorded MCP pair.',
     '  --repair                   Repair, then re-diagnose (implies --doctor): reinstall the pinned signer',
     '                             runtime, rewrite the wrapper and runtime config from stored credentials.',
     '                             Hosted topology only (refuses to touch a --local config). No keys, no token.',
     '                             Requires --runtime <runtime>: it rewrites that config, so the runtime is never inherited.',
+    '                             --name <slug> selects the agent to repair by its recorded pair; --ack-local-tools',
+    '                             re-consents the installed signer (the old token-free path: <agent dir>/bin/haven-signer.mjs --ack).',
     '  --rekey                    Replace this agent\'s signing key (no token). Generates a fresh keypair HERE and',
     '                             prints its public address to paste into the Haven agent page. Nothing changes',
     '                             until you finish; the agent keeps working on its old key throughout.',

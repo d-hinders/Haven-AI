@@ -199,15 +199,32 @@ export const en = {
 
     access: {
       title: 'Access',
-      description: 'How you sign in to Haven and approve actions on your accounts.',
+      description: 'How you sign in to Haven.',
     },
-    passkey: {
-      label: 'Passkey status',
-      enrolled: 'Enrolled',
-      none: 'No passkey',
-      detailEnrolled: (n: number) =>
-        `${n} passkey${n !== 1 ? 's' : ''} registered for approving actions in Haven.`,
-      detailNone: 'Set up a passkey during onboarding for faster approvals.',
+    /**
+     * Settings → Signers (#3825). A signer is its own object, not part of an
+     * account (owner decision 2026-10-09): one passkey can approve accounts
+     * on several networks. No address by default; "passkey", never a
+     * platform brand (#1679).
+     */
+    signers: {
+      title: 'Signers',
+      description:
+        'The passkeys and wallets that can approve actions on your accounts. One passkey or wallet can approve several accounts.',
+      walletLabel: 'Browser wallet',
+      walletLabelConnected: (connector: string) => `Browser wallet · ${connector}`,
+      approves: 'Approves',
+      noAccounts: 'Approves no account yet.',
+      accountFallbackName: 'Account',
+      showAddress: 'Show address',
+      loading: 'Loading your signers…',
+      loadError: 'Haven could not load your signers.',
+      retry: 'Try again',
+      empty: 'No signers yet. Your first passkey is added when you create an account.',
+      connectionConnected: (connector: string) => `${connector} is connected on this device.`,
+      connectionNone: 'Approve with a browser wallet? Connect it on this device.',
+      connect: 'Connect wallet',
+      disconnect: 'Disconnect',
     },
     password: {
       label: 'Password',
@@ -220,8 +237,6 @@ export const en = {
       limitationsLabel: 'Recovery limitations',
       limitationsDetail:
         'Haven can help you find account details, but it cannot bypass your wallets or passkeys or recover funds sent on the wrong network.',
-      backupLabel: 'Backup and recovery',
-      backupDetail: 'Backups are managed per account, under Backup and recovery on any of its agents.',
       sessionsLabel: 'Active sessions',
       sessionsDetail: 'Review signed-in devices and revoke sessions.',
       exitPathLabel: 'Your exit path',

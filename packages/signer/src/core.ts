@@ -21,6 +21,7 @@ import {
   x402V2PaymentEnvelope,
   decodeBase64Json,
   encodeBase64Json,
+  deriveX402PaymentNonce,
   AgentPaymentFailureCode,
   HavenError,
   HavenSigningError,
@@ -437,11 +438,21 @@ export function createEdgeSigner(
       // was asserted open against before building the header — retiring the
       // binding on expiry exactly as the first check does.
       assertWindowOpenOrRetire()
-      const header = await exact.evm.createPaymentHeader(
-        account,
+      // #3888: the nonce is no longer the library's random draw. It is
+      // derived from the Haven payment id the binding already commits to, so
+      // the backend can attribute the merchant's `AuthorizationUsed(delegate,
+      // nonce)` log to this payment even when the agent never reports the
+      // settlement. The signed typed data stays the library's own: the
+      // derived nonce only OVERWRITES the field on the unsigned payload
+      // `preparePaymentHeader` built — nothing is hand-signed here.
+      const unsigned = exact.evm.preparePaymentHeader(
+        account.address,
         paymentRequired.x402Version,
         requirements,
       )
+      unsigned.payload.authorization.nonce = deriveX402PaymentNonce(expected.paymentId)
+      const signed = await exact.evm.signPaymentHeader(account, requirements, unsigned)
+      const header = exact.evm.encodePayment(signed)
 
       if (paymentRequired.x402Version < 2) {
         x402Bindings.delete(x402Binding)

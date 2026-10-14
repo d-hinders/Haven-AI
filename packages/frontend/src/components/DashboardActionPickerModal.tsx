@@ -31,9 +31,11 @@ export default function DashboardActionPickerModal({
 
   // 'send' was removed with the legacy Safe send flow (#1989, epic #1440) —
   // the dashboard no longer offers an owner-send affordance on any rail.
+  // #3807: the receive action's button reads "Deposit address", so the
+  // picker names what the CTA names.
   const title =
     action === 'receive'
-      ? 'Choose account to receive into'
+      ? 'Choose account for a deposit address'
       : 'Choose account to add funds to'
 
   return (

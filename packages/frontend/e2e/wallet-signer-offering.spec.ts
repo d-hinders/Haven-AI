@@ -1,25 +1,35 @@
 /**
- * The signer the wallet menu OFFERS, by app state — not by forced props (#1969).
+ * The signer an account OFFERS, by app state — not by forced props (#1969,
+ * #2073), re-pointed at the surface that still shows it (#3825).
  *
- * ── What this proves that the showcase spec cannot ───────────────────────────
+ * ── Why this file moved off the top bar ──────────────────────────────────────
  *
- * `wallet-signing-credential-states.spec.ts` proves the /design-system SHOWCASE
- * discriminates the marker-matched and fallback renders — with props forced,
- * as every gallery state is. This spec proves the APP reaches those renders
- * through the real resolution path: `AuthContext` hydrates the hybrid signer
- * set from the (mocked) owner-scoped API read, `useActiveSigner` resolves it,
- * and the header renders what a real user sees. Until #1969 (owner decision
- * 2026-08-26) the marker-less half of this spec was impossible to write: the
- * hook refused the state, and the product rendered "Connect wallet" instead.
+ * It used to read the resolved signer off the header's wallet pill ("Passkey",
+ * "Wrong wallet", the truncated address) and its menu. #3825 removed that pill
+ * from `TopBar` — signers live in Settings → Signers and every signing flow
+ * carries its own in-flow connect (#3812) — so there is no global surface that
+ * names the resolved signer any more.
  *
- * Two states, same run, so the discrimination is proven rather than assumed:
+ * The STATES still matter, and they are still reachable through the product's
+ * own resolution path: `AuthContext` hydrates the hybrid signer set from the
+ * (mocked) owner-scoped read, `useAccountSigners` / `pickSigningPath` resolve
+ * it, and the account page's "Backup & recovery" card (`AccountSignersCard`)
+ * renders the outcome for a user who is about to sign:
  *
- * - MARKER-LESS (the #1969 state: new device, cleared site data + re-login, or
- *   a passkey enrolled elsewhere — the blob re-hydrates from the server, the
- *   device markers never do): the Passkey pill renders, and the menu carries
- *   the #1952 disclosure naming the fallback credential.
- * - MARKER MATCHED (positive control): the same pill, and NO disclosure —
- *   exactly what shipped before #1969, unchanged.
+ * - READY with a passkey (no wallet prompt at all);
+ * - "Connect your account owner wallet…" plus `WalletConnectAction`'s
+ *   "Connect wallet" when no signer is reachable;
+ * - the same card's "Switch wallet" when a connected wallet is NOT the owner
+ *   (#2073) — the in-flow successor to the pill's "Wrong wallet".
+ *
+ * What is NOT carried over, on purpose: the #1952 "No passkey enrolled on this
+ * device" disclosure and the passkey-menu copy were `WalletPopover` content,
+ * which no app route renders now (it survives in the connect modal's approval
+ * step for wallet-only owners and on `/design-system`, where
+ * `wallet-signing-credential-states.spec.ts` still asserts the two states, and
+ * `WalletButton.test.tsx` covers the hybrid dropdown copy). The card's own
+ * marker-less cue is the cross-device hint (#1097), asserted below as the
+ * discriminator between the marker-less and marker-matched states.
  *
  * The precedence mirror (mixed EOA+passkey accounts keep signing with the
  * connected EOA) is pinned in `signer.test.ts` — wagmi connection state is a
@@ -36,6 +46,7 @@ import {
   testSafeAddress,
   testUser,
 } from './fixtures/haven-api'
+import { SUPPORTED_CHAIN_ID_HEX, installInjectedWallet } from './fixtures/injected-wallet'
 
 const HYBRID_KEY_ID = '0x0102030405060708'
 // credentialIdFromKeyId('0x0102030405060708') → base64url("\x01…\x08")
@@ -44,9 +55,7 @@ const DEVICE_MARKER_KEY = `haven_passkey_device_${CREDENTIAL_ID}`
 
 const hybridSafe = { ...testSafe, account_type: 'delegator_hybrid' }
 // `accounts`, not `safes`: AuthContext has only ever read `accounts`, and the
-// `safes` twin is gone entirely (#2914 follow-up). Spreading the dead key left
-// `accounts` pointing at the NON-hybrid `testSafe`, so this spec rendered
-// wallet UI against the wrong account type while claiming otherwise.
+// `safes` twin is gone entirely (#2914 follow-up).
 const hybridUser = { ...testUser, accounts: [hybridSafe] }
 const OWNER_ADDRESS = '0x2222222222222222222222222222222222222222'
 const UNRELATED_ADDRESS = '0x9999999999999999999999999999999999999999'
@@ -64,6 +73,8 @@ const hybridSigners = {
   ],
 }
 
+const ACCOUNT_PAGE = `/accounts/${testSafe.id}`
+
 async function mockHybridAccount(page: Page) {
   await mockHavenApi(page)
   // Later-registered routes win: make the fixture user's one safe a Hybrid
@@ -77,44 +88,10 @@ async function mockHybridAccount(page: Page) {
 }
 
 /**
- * A CONNECTED wallet, through the real wagmi path (#2073). The stub is a
- * minimal EIP-1193 provider; the two seeded wagmi keys are what lets the
- * targetless `injected()` connector reconnect on mount (`isAuthorized`
- * requires `injected.connected`, and `recentConnectorId` puts it first).
- * Everything above the provider — reconnect, `useAccount`,
- * `useAccountOperationGate`, `useActiveSigner`, the header render — is the
- * product's own code; nothing is forced by props.
- */
-async function installConnectedWallet(page: Page, address: string) {
-  await page.addInitScript(
-    ({ addr, chainIdHex }) => {
-      window.localStorage.setItem('wagmi.injected.connected', 'true')
-      window.localStorage.setItem('wagmi.recentConnectorId', '"injected"')
-      const provider = {
-        isMetaMask: true,
-        request: async ({ method }: { method: string }) => {
-          if (method === 'eth_accounts' || method === 'eth_requestAccounts') return [addr]
-          if (method === 'eth_chainId') return chainIdHex
-          if (method === 'net_version') return String(parseInt(chainIdHex, 16))
-          // Anything else is a test gap — fail loudly rather than hang.
-          throw new Error(`e2e wallet stub: unanswered method ${method}`)
-        },
-        on: () => {},
-        removeListener: () => {},
-      }
-      Object.defineProperty(window, 'ethereum', { value: provider, configurable: true })
-    },
-    { addr: address, chainIdHex: '0x2105' }, // 8453 — the hybrid fixture's chain
-  )
-}
-
-/**
  * Owner-only signer set: an EOA owner, zero enrolled passkeys (#2068's shape).
- * Served by the shared `serveOwnerOnlyHybridSigners` since #2284 — the
- * collapsed-WalletButton pixel gate renders the same account, and one
- * encoding of "same account, same signer-set answer" is the point. No
- * `/auth/me` override: the shared `testSafe` has been `delegator_hybrid` by
- * default since #2264, so `hybridUser` is what the fixture already serves.
+ * Served by the shared `serveOwnerOnlyHybridSigners` — one encoding of "same
+ * account, same signer-set answer". No `/auth/me` override: the shared
+ * `testSafe` is `delegator_hybrid` by default since #2264.
  */
 async function mockOwnerOnlyHybridAccount(page: Page) {
   await mockHavenApi(page)
@@ -126,7 +103,14 @@ async function shoot(page: Page, name: string) {
   await page.screenshot({ path: `${process.env.PROBE_SHOTS_DIR}/${name}.png` })
 }
 
-test('a marker-less hybrid user is OFFERED the passkey signer, with the #1952 disclosure (#1969)', async ({
+/** The Backup & recovery card, once the account page has rendered it. */
+async function openRecoveryCard(page: Page) {
+  await page.goto(ACCOUNT_PAGE)
+  await page.evaluate(() => document.fonts.ready)
+  await expect(page.getByRole('heading', { name: 'Backup & recovery' })).toBeVisible({ timeout: 20_000 })
+}
+
+test('a marker-less hybrid user is OFFERED the passkey signer — ready, no wallet prompt — with the cross-device hint (#1969)', async ({
   page,
 }) => {
   const pageErrors: string[] = []
@@ -134,8 +118,7 @@ test('a marker-less hybrid user is OFFERED the passkey signer, with the #1952 di
 
   await mockHybridAccount(page)
   await seedAuthenticatedSession(page)
-  await page.goto('/dashboard')
-  await page.evaluate(() => document.fonts.ready)
+  await openRecoveryCard(page)
 
   // The #1969 state, reached through the real path: hydration wrote the blob…
   await expect
@@ -149,24 +132,23 @@ test('a marker-less hybrid user is OFFERED the passkey signer, with the #1952 di
   // …and no device marker exists.
   expect(await page.evaluate((k) => window.localStorage.getItem(k), DEVICE_MARKER_KEY)).toBeNull()
 
-  // The header offers the account's own signer — not a wallet connection CTA.
-  const pill = page.getByRole('button', { name: 'Passkey', exact: true })
-  await expect(pill).toBeVisible()
+  // The account's own signer is offered: signing is ready, so the card asks
+  // for no wallet and offers no connect control. (Before #1969 this state
+  // rendered "Connect wallet".)
+  await expect(page.getByRole('button', { name: 'Add a backup passkey' })).toBeEnabled()
+  await expect(page.getByText('Connect your account owner wallet')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Connect wallet' })).toHaveCount(0)
-  await shoot(page, '1969-after-markerless-pill')
+  await expect(page.getByRole('button', { name: 'Switch wallet' })).toHaveCount(0)
 
-  // The menu DISCLOSES that the credential is the fallback (#1952) — offering
-  // without disclosure was option 2, declined by the owner decision.
-  await pill.click()
-  await expect(page.getByText('Signing with')).toBeVisible()
-  await expect(page.getByText('No passkey enrolled on this device')).toBeVisible()
-  await expect(page.getByText('Your browser may ask you to choose a different one.')).toBeVisible()
-  await shoot(page, '1969-after-markerless-popover')
+  // Offering WITH disclosure, in the card's own words: the passkey may live on
+  // another device, so the browser may hand the ceremony off (#1097/#1952).
+  await expect(page.getByText(/passkey may be on another device/)).toBeVisible()
+  await shoot(page, '1969-after-markerless-card')
 
   expect(pageErrors).toEqual([])
 })
 
-test('positive control: a marker-matched user gets the same pill with NO disclosure — unchanged by #1969', async ({
+test('positive control: a marker-matched user is offered the same signer with NO cross-device hint — unchanged by #1969', async ({
   page,
 }) => {
   const pageErrors: string[] = []
@@ -175,69 +157,76 @@ test('positive control: a marker-matched user gets the same pill with NO disclos
   await mockHybridAccount(page)
   await seedAuthenticatedSession(page)
   await page.addInitScript((k) => window.localStorage.setItem(k, '1'), DEVICE_MARKER_KEY)
-  await page.goto('/dashboard')
-  await page.evaluate(() => document.fonts.ready)
+  await openRecoveryCard(page)
 
-  const pill = page.getByRole('button', { name: 'Passkey', exact: true })
-  await expect(pill).toBeVisible()
-  await pill.click()
-  await expect(page.getByText('Signing with')).toBeVisible()
-  // The discrimination: marker matched → the fallback disclosure must NOT render.
-  await expect(page.getByText('No passkey enrolled on this device')).toHaveCount(0)
-  await shoot(page, '1969-control-marker-popover')
+  await expect(page.getByRole('button', { name: 'Add a backup passkey' })).toBeEnabled()
+  // The discrimination: marker matched → the hint must NOT render.
+  await expect(page.getByText(/passkey may be on another device/)).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Connect wallet' })).toHaveCount(0)
+  await shoot(page, '1969-control-marker-card')
 
   expect(pageErrors).toEqual([])
 })
 
 // ── Owner-match / mismatch, through the real wagmi connection (#2073) ────────
 
-test('an UNRELATED connected wallet on an owner-only hybrid account renders the Wrong wallet pill — not a normal connected pill (#2073)', async ({
+test('an UNRELATED connected wallet on an owner-only hybrid account is blocked and offered Switch wallet — not treated as the owner (#2073)', async ({
   page,
 }) => {
   const pageErrors: string[] = []
   page.on('pageerror', (e) => pageErrors.push(String(e)))
 
   await mockOwnerOnlyHybridAccount(page)
-  await installConnectedWallet(page, UNRELATED_ADDRESS)
+  await installInjectedWallet(page, { chainIdHex: SUPPORTED_CHAIN_ID_HEX, address: UNRELATED_ADDRESS })
   await seedAuthenticatedSession(page)
-  await page.goto('/dashboard')
-  await page.evaluate(() => document.fonts.ready)
+  await openRecoveryCard(page)
 
-  // The header names the mismatch instead of rendering the silent
-  // "everything is fine" address pill beside a blocked action area.
-  const pill = page.getByRole('button', { name: 'Wrong wallet' })
-  await expect(pill).toBeVisible({ timeout: 15_000 })
-  await expect(page.getByRole('button', { name: '0x9999…9999' })).toHaveCount(0)
-  await shoot(page, '2073-wrong-wallet-pill')
-
-  // The fix is one click away: the wallet menu with Switch wallet.
-  await pill.click()
-  await expect(page.getByRole('dialog', { name: 'Wallet menu' })).toBeVisible()
+  // The card names the block instead of enabling actions beside a wallet that
+  // cannot sign for this account…
+  await expect(page.getByText('Connect your account owner wallet')).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('button', { name: 'Add a backup passkey' })).toBeDisabled()
+  // …and the fix is one click away, in the flow: the wallet IS connected, so
+  // the action is "Switch wallet", never "Connect wallet".
   await expect(page.getByRole('button', { name: 'Switch wallet' })).toBeVisible()
-  // The popover NAMES the mismatch (design-review finding on #2073) — it must
-  // not render pixel-identical to the healthy connected state.
-  await expect(page.getByText(/This is not the wallet that controls this account/)).toBeVisible()
-  await expect(page.getByText('0x2222…2222')).toBeVisible()
-  await shoot(page, '2073-wrong-wallet-popover')
+  await expect(page.getByRole('button', { name: 'Connect wallet' })).toHaveCount(0)
+  await shoot(page, '2073-wrong-wallet-card')
 
   expect(pageErrors).toEqual([])
 })
 
-test('positive control: the OWNER connected on the same owner-only set keeps the normal address pill (#2068 ready path)', async ({
+test('positive control: the OWNER connected on the same owner-only set can approve — no connect or switch control (#2068 ready path)', async ({
   page,
 }) => {
   const pageErrors: string[] = []
   page.on('pageerror', (e) => pageErrors.push(String(e)))
 
   await mockOwnerOnlyHybridAccount(page)
-  await installConnectedWallet(page, OWNER_ADDRESS)
+  await installInjectedWallet(page, { chainIdHex: SUPPORTED_CHAIN_ID_HEX, address: OWNER_ADDRESS })
   await seedAuthenticatedSession(page)
-  await page.goto('/dashboard')
-  await page.evaluate(() => document.fonts.ready)
+  await openRecoveryCard(page)
 
-  await expect(page.getByRole('button', { name: '0x2222…2222' })).toBeVisible({ timeout: 15_000 })
-  await expect(page.getByRole('button', { name: 'Wrong wallet' })).toHaveCount(0)
-  await shoot(page, '2073-owner-match-pill')
+  await expect(page.getByRole('button', { name: 'Add a backup passkey' })).toBeEnabled({ timeout: 15_000 })
+  await expect(page.getByText('Connect your account owner wallet')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Switch wallet' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Connect wallet' })).toHaveCount(0)
+  await shoot(page, '2073-owner-match-card')
+
+  expect(pageErrors).toEqual([])
+})
+
+test('an owner-only account with NO wallet connected is offered Connect wallet in the flow (#3812)', async ({
+  page,
+}) => {
+  const pageErrors: string[] = []
+  page.on('pageerror', (e) => pageErrors.push(String(e)))
+
+  await mockOwnerOnlyHybridAccount(page)
+  await seedAuthenticatedSession(page)
+  await openRecoveryCard(page)
+
+  await expect(page.getByText('Connect your account owner wallet')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Connect wallet' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Switch wallet' })).toHaveCount(0)
 
   expect(pageErrors).toEqual([])
 })

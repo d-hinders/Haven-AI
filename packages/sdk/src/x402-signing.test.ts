@@ -17,16 +17,19 @@
  * 1. **Authorization fields** — `from`/`to`/`value` must match the payment
  *    option exactly; `validAfter`/`validBefore` must form a sane window
  *    (facilitators reject expired or not-yet-valid authorizations); `nonce`
- *    must be 32 random bytes (USDC rejects reused nonces on-chain).
+ *    must be 32 bytes (USDC rejects reused nonces on-chain) — random when no
+ *    Haven payment id is named, the shared `deriveX402PaymentNonce`
+ *    derivation when one is (#3888).
  * 2. **Signature recovery** — the signature must recover to the delegate
  *    address under the exact EIP-712 domain USDC uses on Base
  *    (`name: 'USD Coin'`, `version: '2'`, `chainId: 8453`,
  *    `verifyingContract: <Base USDC>`). A signature produced under any other
  *    domain (wrong chainId, wrong contract) recovers to a different address
  *    and the facilitator rejects it.
- * 3. **Nonce lifecycle** — separate payments must use fresh nonces (replay
+ * 3. **Nonce lifecycle** — separate payments must use distinct nonces (replay
  *    safety), while a retry of the *same* payment must reuse the cached
  *    header — and therefore the same nonce — so the merchant can de-dupe.
+ *    Since #3888 a re-sign of the same payment id derives the SAME nonce too.
  * 4. **Asset address byte-sensitivity** — EIP-712 hashes are computed over
  *    the checksummed `verifyingContract`; the SDK must not lowercase or
  *    otherwise rewrite the asset address it echoes into `accepted`.
@@ -39,6 +42,7 @@ import { ethers } from 'ethers'
 import { x402ResourceServer } from '@x402/core/server'
 import type { PaymentPayload, PaymentRequirements } from '@x402/core/types'
 import { HavenClient } from './client.js'
+import { deriveX402PaymentNonce } from './x402-nonce.js'
 import {
   normalizePaymentRequired,
   X402_MAX_AUTHORIZATION_WINDOW_SECONDS,
@@ -161,13 +165,14 @@ async function buildHeader(
   haven: HavenClient = makeHaven(),
   pr: X402PaymentRequired = paymentRequired,
   option: X402PaymentOption = accepted,
+  paymentId?: string,
 ): Promise<string> {
   const target = haven as unknown as {
     fundingLeg: {
-      createPaymentHeader(pr: X402PaymentRequired, option: X402PaymentOption): Promise<string>
+      createPaymentHeader(pr: X402PaymentRequired, option: X402PaymentOption, paymentId?: string): Promise<string>
     }
   }
-  return target.fundingLeg.createPaymentHeader(pr, option)
+  return target.fundingLeg.createPaymentHeader(pr, option, paymentId)
 }
 
 describe('merchant timeout versus signed lifetime (#3117)', () => {
@@ -250,6 +255,24 @@ describe('EIP-3009 authorization fields', () => {
     const haven = makeHaven()
     const first = decodeHeader(await buildHeader(haven))
     const second = decodeHeader(await buildHeader(haven))
+    expect(first.payload.authorization.nonce).not.toBe(second.payload.authorization.nonce)
+  })
+
+  // #3888: a header minted for a NAMED payment carries the shared derivation
+  // `keccak256(utf8(tag) || utf8(payment_id))` — that is what makes the
+  // merchant's settlement attributable by the payment itself — while the
+  // unnamed fallback above stays random.
+  it('carries the nonce derived from the payment id when one is named (#3888)', async () => {
+    const { payload } = decodeHeader(await buildHeader(makeHaven(), paymentRequired, accepted, 'pay_3888'))
+    expect(payload.authorization.nonce).toBe(deriveX402PaymentNonce('pay_3888'))
+    expect(payload.authorization.nonce).toMatch(/^0x[0-9a-f]{64}$/i)
+  })
+
+  it('derives a different nonce for a different payment id', async () => {
+    const haven = makeHaven()
+    const first = decodeHeader(await buildHeader(haven, paymentRequired, accepted, 'pay_3888'))
+    const second = decodeHeader(await buildHeader(haven, paymentRequired, accepted, 'pay_other'))
+    expect(second.payload.authorization.nonce).toBe(deriveX402PaymentNonce('pay_other'))
     expect(first.payload.authorization.nonce).not.toBe(second.payload.authorization.nonce)
   })
 })

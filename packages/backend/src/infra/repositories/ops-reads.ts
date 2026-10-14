@@ -21,6 +21,7 @@
  * leaves through `POST /ops/reveal`.
  */
 import type { Executor } from '../transaction.js'
+import { delegationLiveWindowSql } from './delegation-budgets.js'
 
 /** Hits per key-type lookup in `/ops/search` (#3512). */
 export const OPS_SEARCH_LIMIT = 20
@@ -73,7 +74,8 @@ export const OPS_OVERVIEW_AGENTS_SQL = `SELECT status, count(*)::int AS count
   FROM agents GROUP BY status ORDER BY status`
 
 export const OPS_OVERVIEW_ACTIVE_DELEGATIONS_SQL = `SELECT count(*)::int AS count
-  FROM agent_delegations WHERE status = 'active'`
+  FROM agent_delegations WHERE status = 'active'
+    AND (${delegationLiveWindowSql()})`
 
 export const OPS_OVERVIEW_INTENTS_24H_SQL = `SELECT status, count(*)::int AS count
   FROM payment_intents WHERE created_at > NOW() - INTERVAL '24 hours'
@@ -216,7 +218,8 @@ export const OPS_USER_AGENTS_SQL = `SELECT id, account_id, name, status, delegat
 export const OPS_USER_DELEGATIONS_SQL = `SELECT d.id, d.agent_id, d.chain_id, d.token_address, d.recipient_address,
     d.merchant_id, d.budget_atomic, d.period_seconds, d.start_date, d.expires_at
   FROM agent_delegations d JOIN agents a ON a.id = d.agent_id
-  WHERE a.user_id = $1 AND d.status = 'active' ORDER BY d.expires_at`
+  WHERE a.user_id = $1 AND d.status = 'active'
+    AND (${delegationLiveWindowSql('d')}) ORDER BY d.expires_at`
 
 export const OPS_USER_INTENTS_SQL = `SELECT id, agent_id, status, chain_id, token_symbol, amount_human, to_address,
     error_message, created_at
@@ -328,6 +331,7 @@ export const OPS_ONCHAIN_DELEGATIONS_SQL = `SELECT sa.id AS account_id, d.chain_
   JOIN agents ag ON ag.id = d.agent_id
   JOIN smart_accounts sa ON sa.id = ag.account_id
   WHERE sa.user_id = $1 AND d.status = 'active'
+    AND (${delegationLiveWindowSql('d')})
   ORDER BY d.delegation_hash`
 
 export interface OpsOnchainAccountRow {

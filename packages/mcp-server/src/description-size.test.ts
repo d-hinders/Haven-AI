@@ -443,11 +443,22 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * derived arithmetically — the same union discipline as rounds
  * 5/16/19/20/21). 30,947 / 29 = 1067.1379…, pinned at the two-decimal
  * ceiling (1067.14). Shrink-only from here.
+ *
+ * **Re-derived — round 26, #3839 (2026-10-09).** `haven_discover_tools` gains
+ * one sentence (`FUNDING_LEG_DISCOVERY_GUIDANCE`): how to read the new
+ * per-entry `funding_leg_expected` hint — prefer `false` among equivalent
+ * entries, no preference on "unknown", never hide `true` entries, a
+ * recipient-pinned budget pays erc7710 merchants only, the quote is
+ * authoritative. #3839's acceptance criteria require the description to say
+ * exactly this and a test to pin it; it was trimmed once (345 → 267 bytes)
+ * before this re-derivation. No tool was added — 29 holds. Measured: 31,214
+ * UTF-8 bytes (+267); the mean pin: 31,214 / 29 = 1076.3448…, pinned at the
+ * two-decimal ceiling (1076.35). Shrink-only from here.
  */
-const MAX_TOTAL_BYTES = 30_947
-// Mean pin: round 25 (union block above): 30,947 / 29 = 1067.1379…, pinned
-// at the two-decimal ceiling (1067.14). Shrink-only from here.
-const MAX_MEAN_BYTES = 1067.14
+const MAX_TOTAL_BYTES = 31_214
+// Mean pin: round 26 (#3839 block above): 31,214 / 29 = 1076.3448…, pinned
+// at the two-decimal ceiling (1076.35). Shrink-only from here.
+const MAX_MEAN_BYTES = 1076.35
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

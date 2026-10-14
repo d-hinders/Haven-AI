@@ -297,7 +297,25 @@ the FINAL URL after redirects — and retry the merchant with the
 \`SIGN-IN-WITH-X\` header it returns: the delegate
 wallet signs in as the wallet that paid, moving no funds. NEVER follow a
 redirect with \`SIGN-IN-WITH-X\` (or a resulting session token) attached; if
-the final origin differs, re-sign there. On THIS path Haven never sends the
+the final origin differs, re-sign there.
+
+Sign in BEFORE a multi-call flow: if a merchant documents or offers a
+sign-in session (its docs, or a 402 whose \`sign-in-with-x\` extension names
+a free sign-in route), do not pay call by call. Send the unsigned sign-in
+request yourself, take the \`sign-in-with-x\` extension from its 402, and
+call \`mcp__haven-signer__haven_sign_siwx\` with it. The session token (often
+about 2 h) waives the merchant's micro-fees, so make every now-free call
+YOURSELF with the \`SIGN-IN-WITH-X\` header set — never pass a merchant
+session token to \`mcp__haven__haven_quote_x402\` or
+\`mcp__haven__haven_pay_x402_quote\` (their unpaid probe refuses a 200 with
+X402_PROBE_NOT_PAYMENT_REQUIRED) — and pay only where the merchant still
+charges (on Bitrefill, \`invoice/pay\`; keep sending the session token
+there). Sign at the FINAL URL after redirects, and never forward
+\`SIGN-IN-WITH-X\` or a session token across a redirect. If the signer's
+tools/list has no \`haven_sign_siwx\` (a signer older than 0.9.0-alpha.0),
+or the sign-in is refused, pay each call normally instead.
+
+On THIS path Haven never sends the
 paid request (it sends only unpaid probes):
 on the **EIP-3009** scheme (the pay result names
 \`mcp__haven-signer__haven_sign_x402\`), that tool returns both
@@ -416,6 +434,20 @@ check on in-flight payments. Do not poll in a tight loop.
   reports a missing or invalid credential, tell the user to re-run the Haven
   connector command.
 
+## Stale tool list
+
+Every hosted Haven result carries \`contract_fingerprint\` and
+\`server_version\` at the top level of its JSON. If a result's
+\`contract_fingerprint\` differs from the one in the server instructions you
+loaded at connect, or a \`next_arguments\` doesn't fit the schema you loaded
+for the hosted tool it names, your tool list is stale — reconnect or restart
+the session before continuing, and never hand-build or reshape a payload to
+make it fit; defer to the live schema and the \`next_arguments\` Haven returns.
+(A misfit on a signer tool is signer skew, not a stale list.) If a payment is
+already prepared or funded, keep its \`payment_id\`: after reconnecting,
+resume through \`haven_get_payment_status\` or \`haven_resume_x402_payment\`
+(\`haven_sweep_delegate\` for a stranded bridge balance). Never pay again.
+
 ## Failure handling
 
 Haven tool failures are shaped like \`{ success: false, code, message, ... }\`
@@ -440,7 +472,9 @@ fields a success does; follow them first, then branch on \`code\` and surface
   "cannot settle right now" signal (a 503 \`merchant_not_ready\` with a
   \`reason_code\`) instead of a 402. No payment was created. Tell the user;
   retry later (the message carries \`retry_after_s\` when the merchant gave
-  one) — this is not a wrong or broken endpoint.
+  one) — this is not a wrong or broken endpoint. An out-of-gas refusal
+  (\`settlement_wallet_out_of_gas\`) needs the merchant's operator to top up
+  its settlement wallet first; retrying before then is refused again.
 - \`MERCHANT_REJECTED_AFTER_FUNDING\`: the merchant refused the paid retry.
   On eip3009 (\`rail\` not \`erc7710\`): Stop-and-sweep — stop retrying the
   merchant and use \`mcp__haven__haven_sweep_delegate\` to recover stranded

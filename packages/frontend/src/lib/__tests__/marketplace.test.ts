@@ -10,6 +10,10 @@ import {
   networkToChainId,
   withinBudget,
 } from '@/lib/marketplace'
+// #3839: the SDK's discovery hint, by relative path — the frontend keeps no
+// @haven_ai/* runtime dependency (standalone Vercel deploys), the same pattern
+// agent-onboarding-prompt.test.ts uses for cross-package parity.
+import { catalogFundingLegExpected } from '../../../../sdk/src/catalog-funding-leg'
 import type { CatalogEntry } from '@/hooks/useCatalog'
 
 function entry(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
@@ -189,4 +193,27 @@ describe('freshness', () => {
   it('reports a recent verification in hours', () => {
     expect(freshness(new Date().toISOString())).toBe('verified just now')
   })
+})
+
+describe('needsUnpinnedBudget agrees with the agents\' funding_leg_expected hint (#3839)', () => {
+  // One stored column, two readers: the marketplace badge and the discovery
+  // hint an agent sees. They must never disagree about a merchant.
+  const cases: Array<string | null> = [
+    null,
+    '',
+    ' , ',
+    'eip3009',
+    'erc7710',
+    'eip3009,erc7710',
+    'eip3009, erc7710',
+    // Exact match on both sides, like the settlement selector: not erc7710.
+    'eip3009,ERC7710',
+    'eip3009,permit2',
+    'erc77100',
+  ]
+  for (const value of cases) {
+    it(`agrees on ${JSON.stringify(value)}`, () => {
+      expect(needsUnpinnedBudget(value)).toBe(catalogFundingLegExpected(value) !== false)
+    })
+  }
 })

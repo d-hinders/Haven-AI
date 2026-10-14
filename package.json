@@ -41,6 +41,8 @@
     "lint:copy": "node scripts/frontend-copy-lint.mjs",
     "visual:baselines": "node scripts/ci/visual-baseline-inventory.mjs",
     "visual:baselines:test": "node --test scripts/ci/visual-baseline-inventory.test.mjs",
+    "ci:stale-client-compat": "node scripts/ci/check-stale-client-compat.mjs --base origin/main | tee -a \"$GITHUB_STEP_SUMMARY\"",
+    "ci:stale-client-compat:test": "node --test scripts/ci/check-stale-client-compat.test.mjs",
     "lint:copy:update": "node scripts/frontend-copy-lint.mjs --update",
     "lint:copy:test": "node --test scripts/frontend-copy-lint.test.mjs",
     "branch-hygiene": "node scripts/branch-hygiene.mjs",

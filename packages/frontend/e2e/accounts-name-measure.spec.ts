@@ -567,7 +567,7 @@ test('/accounts: a lone NON-default account offers no set-default control', asyn
 
       This card deliberately renders no action of its own; the controls that
       prove the scan works are the app chrome's own buttons (the sidebar's
-      user menu, the wallet pill), which are on every authenticated page.
+      user menu and nav links), which are on every authenticated page.
       Naming what it found in the message keeps a future failure diagnosable
       rather than just "expected > 0".
     */

@@ -21,6 +21,13 @@
  * Baselines are Linux-rendered by the dispatch workflow — none are committed
  * from a developer machine. No dark baseline: this file is deliberately not in
  * `chromium-desktop-dark`'s `testMatch`.
+ *
+ * The panel is content-height, so the element clip's outermost rows land
+ * OUTSIDE the panel's paint — they photograph the translucent backdrop over
+ * the page behind the dialog. `capture` therefore hides the page behind the
+ * modal first (`hidePageBehindModal`, #3872): without it, any change to the
+ * agent page's table — e.g. #3811's counterparty cells moving a status badge
+ * two pixels — re-renders this baseline with the modal byte-identical.
  */
 import { expect, test, type Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
@@ -113,12 +120,79 @@ async function fillForm(page: Page, amount = '25') {
 }
 
 async function capture(page: Page, panel: ReturnType<Page['getByTestId']>, name: string) {
+  await hidePageBehindModal(page)
   await page.evaluate(() => document.fonts.ready)
+  // Settle every running animation and transition before the pixels are read.
+  // Measured flake without this: the agent `<Select>` flips disabled→enabled
+  // when the budget list lands, and its `transition-colors` was caught
+  // MID-FLIGHT by roughly half of the captures — the placeholder text rendered
+  // ~4% lighter (26,31,54 vs 37,44,67 on the glyph stems, ~160px), a coin
+  // flip `animations: 'disabled'` did not settle. `finish()` commits each
+  // animation's end state; infinite ones (animate-pulse) have no end state
+  // and are already cancelled by `animations: 'disabled'` below.
+  await page.evaluate(() => {
+    for (const animation of document.getAnimations()) {
+      try {
+        animation.finish()
+      } catch {
+        // An infinite animation has no end state to commit; `animations:
+        // 'disabled'` below cancels those for the capture instead.
+      }
+    }
+  })
   await expect(panel).toHaveScreenshot(name, {
     animations: 'disabled',
     caret: 'hide',
     maxDiffPixels: 50,
     threshold: PIXEL_THRESHOLD,
+  })
+}
+
+/**
+ * #3872: the panel is CONTENT-height — measured 714.75px at the desktop
+ * evidence viewport — so Playwright's element clip rounds out to whole pixel
+ * rows and the clip's first and last rows are NOT panel paint. They are the
+ * translucent `v2-modal-backdrop` over WHATEVER PAGE HAPPENS TO BE BEHIND
+ * THE MODAL. Measured on the `empty-desktop` clip: the leaked bottom row
+ * carried the agent page's "Confirming" status badge (x 324–343 of the clip)
+ * and the bottom-right corner blend a counterparty cell fragment, so a change
+ * to the agent page's table (exactly what #3811's counterparty rules did)
+ * re-rendered this MODAL baseline with the modal itself byte-identical —
+ * 23–78 antialiased pixels at y 703–715 of the 448x716 clip, none inside the
+ * modal.
+ *
+ * So the page behind the modal is hidden before the capture: the backdrop
+ * then blends over the ancestors' uniform backgrounds, the clip's edge rows
+ * carry nothing but the modal's own overlay stack, and this baseline can only
+ * move when the modal itself moves. The modal renders IN PLACE (no portal —
+ * its ancestor chain runs through `main`), so "hide the page" cannot be a
+ * single `visibility` on an ancestor: every ancestor of the wrapper carries
+ * the rest of the page as its other children. Those siblings are what gets
+ * hidden — at every level from the wrapper's parent up to `<body>`, the
+ * children that are NOT on the wrapper's own path. `visibility` (not
+ * `display`) so nothing reflows under the fixed dialog, and the modal's own
+ * path is never touched, so the panel, backdrop and scroll cue keep
+ * rendering.
+ */
+async function hidePageBehindModal(page: Page) {
+  await page.evaluate(() => {
+    const panel = document.querySelector('[data-testid="issue-sub-budget-modal"]')
+    if (!panel) throw new Error('issue-sub-budget-modal: panel not mounted at capture time')
+    const wrapper = panel.closest('[role="dialog"]')
+    if (!wrapper) {
+      throw new Error('issue-sub-budget-modal: no role="dialog" wrapper above the panel')
+    }
+    let ancestor: HTMLElement | null = wrapper.parentElement as HTMLElement | null
+    let onPath: Element = wrapper
+    while (ancestor && ancestor !== document.body) {
+      for (const sibling of Array.from(ancestor.children)) {
+        if (sibling !== onPath && sibling instanceof HTMLElement) {
+          sibling.style.visibility = 'hidden'
+        }
+      }
+      onPath = ancestor
+      ancestor = ancestor.parentElement as HTMLElement | null
+    }
   })
 }
 

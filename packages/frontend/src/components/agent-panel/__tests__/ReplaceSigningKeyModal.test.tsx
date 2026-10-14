@@ -78,7 +78,57 @@ function gateBox(): HTMLElement | null {
   while (node && !node.contains(checkbox)) node = node.parentElement
   return node
 }
+
+// #3825: the cross-device heads-up, read beside the money-path re-key hook.
+describe('ReplaceSigningKeyModal cross-device hint (#3825)', () => {
+  it('shows the hint when the account has passkeys but none on this device', async () => {
+    mockUseActiveSigner.mockReturnValue(null)
+    mockApiGet.mockResolvedValue({
+      account_address: '0x9999999999999999999999999999999999999999',
+      chain_id: 8453,
+      owner_address: null,
+      passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+    })
+    mockOnDevice.mockReturnValue(false)
+    renderModal()
+    expect(await screen.findByText(/passkey may be on another device/)).toBeTruthy()
+  })
+
+  it('makes no signer read while the modal is closed (it stays mounted on the agent page)', async () => {
+    renderModal({ open: false })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(mockApiGet).not.toHaveBeenCalledWith(expect.stringContaining('/account-signers'))
+  })
+
+  it('shows no hint when the connected owner wallet will sign a mixed account', async () => {
+    mockUseActiveSigner.mockReturnValue(eoaSigner())
+    mockApiGet.mockResolvedValue({
+      account_address: '0x9999999999999999999999999999999999999999',
+      chain_id: 8453,
+      owner_address: '0x5555555555555555555555555555555555555555',
+      passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+    })
+    mockOnDevice.mockReturnValue(false)
+    renderModal()
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalled())
+    await new Promise((r) => setTimeout(r, 0))
+    expect(screen.queryByText(/passkey may be on another device/)).toBeNull()
+  })
+
+  it('shows no hint for a wallet-owned account with no passkeys', async () => {
+    renderModal()
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalled())
+    expect(screen.queryByText(/passkey may be on another device/)).toBeNull()
+  })
+})
 import { ApiRequestError } from '@/lib/api'
+
+// #3812: the in-flow connect/switch control reads wagmi and RainbowKit, which
+// these tests do not provide. Stub it so the test can assert WHEN a flow
+// offers it; `WalletConnectAction.test.tsx` covers what it does.
+vi.mock('@/components/WalletConnectAction', () => ({
+  default: () => <button type="button">Connect wallet</button>,
+}))
 
 const CURRENT = '0x2222222222222222222222222222222222222222'
 const NEXT = '0x3333333333333333333333333333333333333333'
@@ -639,6 +689,39 @@ describe('signing-path refusal — the one reason left (#1890)', () => {
     expect(screen.getByRole('button', { name: /switch off the old key/i })).toBeEnabled()
   })
 
+  // #3812: the refusal comes with its way out — connect or switch the owner
+  // wallet right here, since the header no longer carries a wallet pill (#3825).
+  it('offers the owner wallet connect inside the refusal', async () => {
+    mockUseActiveSigner.mockReturnValue(null)
+    renderModal()
+    await waitFor(() =>
+      expect(screen.getByText(/cannot replace this key from this device/i)).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeInTheDocument()
+  })
+
+  // #3812 review S1: `signers === null` is both "loading" and "failed", and
+  // either reads as `no_signer`. Connecting fixes neither, so a failed read —
+  // which a passkey-only owner can hit too — must not offer the connect.
+  it('offers no wallet connect when the signer set could not be read', async () => {
+    mockUseActiveSigner.mockReturnValue(null)
+    const signersBody = await mockApiGet()
+    mockApiGet.mockImplementation((url: string) =>
+      String(url).includes('/account-signers') ? Promise.reject(new Error('boom')) : Promise.resolve(signersBody),
+    )
+    renderModal()
+    await waitFor(() =>
+      expect(screen.getByText(/cannot replace this key from this device/i)).toBeInTheDocument(),
+    )
+    expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
+  })
+
+  it('offers no wallet connect when the owner can already sign (#3812)', async () => {
+    renderModal()
+    await advanceToConsequences()
+    expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
+  })
+
   it('still lets a blocked owner read what the flow will cost', async () => {
     mockUseActiveSigner.mockReturnValue(null)
     renderModal()
@@ -662,7 +745,7 @@ describe('signing-path refusal — the one reason left (#1890)', () => {
       expect(screen.getByText(/cannot replace this key from this device/i)).toBeInTheDocument(),
     )
     expect(screen.queryByText(/passkey is not supported/i)).toBeNull()
-    expect(screen.getByText(/or use a device with one of its passkeys/i)).toBeInTheDocument()
+    expect(screen.getByText(/or use a device with one of the account’s passkeys/i)).toBeInTheDocument()
   })
 })
 

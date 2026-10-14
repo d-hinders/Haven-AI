@@ -1,6 +1,10 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
 import { getExplorerUrl } from '../domain/chains.js'
+import {
+  DEFAULT_TRANSACTION_CURRENCY,
+  type TransactionCurrency,
+} from '../domain/transaction-currency.js'
 import { machinePaymentLifecycle } from '../domain/machine-payment-lifecycle.js'
 import { agentExistsForUser, listAgentNamesForUser } from '../infra/repositories/agents.js'
 import {
@@ -14,9 +18,24 @@ import {
   sumAgentSpendThisWeek,
   sumAgentSpendToday,
 } from '../infra/repositories/agent-activity.js'
-import { toCanonicalAddress } from '../modules/transactions/index.js'
+import { toCanonicalAddress, resolveTransactionCurrency, serveTimeAmount } from '../modules/transactions/index.js'
 
 // ── Routes ────────────────────────────────────────────────────────
+
+/**
+ * #3824: the currency the approx amounts are struck in — the user's
+ * preference, read FAIL-SOFT: an unreadable preference row serves the
+ * documented default (`transactionCurrencyOrDefault`'s spirit) rather than
+ * 500-ing a feed whose primary data is the payment rows themselves. The
+ * pricing read downstream already fails soft per row (`serve-time.ts`).
+ */
+async function approxCurrencyFor(userId: string): Promise<TransactionCurrency> {
+  try {
+    return await resolveTransactionCurrency(userId)
+  } catch {
+    return DEFAULT_TRANSACTION_CURRENCY
+  }
+}
 
 export default async function agentActivityRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
@@ -37,6 +56,11 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
       return reply.code(404).send({ error: 'Agent not found' })
     }
 
+    // #3824: the approx amounts are struck in the user's preferred currency —
+    // the preference the feed never read before (the /transactions route and
+    // the dashboard have read it since #3127). One read per request.
+    const currency = await approxCurrencyFor(sub)
+
     // Fetch payments
     const payments = await listAgentPayments(id, limit, offset)
 
@@ -46,9 +70,16 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
     // Fetch MCP tool invocations (audit log)
     const invocations = await listToolInvocationsForAgent(id, limit, offset)
 
+    // #3824: a serve-time amount at today's rate for every payment row —
+    // null, never 0, when the token has no usable quote (`serve-time.ts`).
+    // The activity rows carry token amounts only; this is their only fiat.
+    const approxAmounts = await Promise.all(
+      payments.map((p) => serveTimeAmount(p.token_symbol, p.amount_human, currency)),
+    )
+
     // Merge and sort by created_at desc
     const activity = [
-      ...payments.map((p) => {
+      ...payments.map((p, i) => {
         const lifecycle = machinePaymentLifecycle({
           rail: p.source,
           paymentStatus: p.status,
@@ -62,6 +93,10 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           token: p.token_symbol,
           amount_raw: p.amount_raw,
           amount: p.amount_human,
+          // #3824: the serve-time amount in `approx_currency` (the user's
+          // preference), null when the token has no usable quote — never 0.
+          approx_amount: approxAmounts[i],
+          approx_currency: currency,
           to: toCanonicalAddress(p.to_address),
           status: p.status,
           // #3763: `tx_hash` keeps its FUNDING meaning (Haven's sponsored
@@ -196,9 +231,19 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
     // Recent MCP tool invocations (audit log)
     const invocations = await listToolInvocationsForAgents(agentIds, limit, offset)
 
+    // #3824: the approx amounts are struck in the user's preferred currency —
+    // the preference the feed never read before (the /transactions route and
+    // the dashboard have read it since #3127). One read per request.
+    const currency = await approxCurrencyFor(sub)
+    // Serve-time amounts for the payment rows — null, never 0, when the
+    // token has no usable quote (`serve-time.ts`).
+    const approxAmounts = await Promise.all(
+      payments.map((p) => serveTimeAmount(p.token_symbol, p.amount_human, currency)),
+    )
+
     // Merge and sort
     const activity = [
-      ...payments.map((p) => {
+      ...payments.map((p, i) => {
         const lifecycle = machinePaymentLifecycle({
           rail: p.source,
           paymentStatus: p.status,
@@ -214,6 +259,10 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           token: p.token_symbol,
           amount_raw: p.amount_raw,
           amount: p.amount_human,
+          // #3824: the serve-time amount in `approx_currency` (the user's
+          // preference), null when the token has no usable quote — never 0.
+          approx_amount: approxAmounts[i],
+          approx_currency: currency,
           to: toCanonicalAddress(p.to_address),
           status: p.status,
           // #3763: `tx_hash` keeps its FUNDING meaning (Haven's sponsored

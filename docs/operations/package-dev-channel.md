@@ -13,6 +13,7 @@ covers:
   - packages/mcp-server/src/connector-channel.ts
   - packages/backend/src/config.ts
   - packages/backend/src/routes/agent-connection-setups.ts
+  - packages/backend/src/middleware/client-compat.ts
   - packages/connect/src/runtime-spec-override.ts
   - packages/connect/src/doctor.ts
   - packages/connect/src/cli.ts
@@ -26,8 +27,28 @@ covers:
   - packages/mcp/src/credentials.ts
   - packages/backend/src/middleware/retired-safe-names.ts
   - packages/core/src/client-compat.ts
-last-verified: "2026-09-25"
+last-verified: "2026-10-09"
 ---
+
+> **Re-verification (#3819, 2026-10-09):** coupled through
+> `.github/workflows/publish.yml`: the dependency-presence gate's ledger
+> (`dep_state`) is now a space-delimited `pkg=state` string with an
+> exact-word `case` lookup instead of a bash-4 associative array, making the
+> loop bash 3.2 compatible (#3819). The gate runs on BOTH channels and its
+> behaviour is unchanged on every bash; the dev-channel checklist, snapshot
+> version shape and dist-tag rules in this document are untouched. Verified
+> by `release-bump.test.mjs` (102/102), which runs the real loop shell on
+> host bash 5 and in a real GNU bash 3.2.57 container — on the dev channel
+> too.
+
+> **Re-verification (#3797, 2026-10-09):** coupled through
+> `.github/workflows/publish.yml`, which gains a dependency-presence gate that
+> runs on BOTH channels: a package whose exact-pinned internal `@haven_ai/*`
+> dependency did not publish in the same run is held back and marked FAILED,
+> never nominated for `latest`. The dev-channel checklist above was updated in
+> the same pass; the snapshot version shape, dist-tag rules, channel guard and
+> every credential path are untouched. Verified by `release-bump.test.mjs`
+> (102/102), which runs the real loop shell on the dev channel too.
 
 > **Re-verification (#3496, tombstone-before-identity doctor selection,
 > 2026-09-30):** this doc is coupled through `packages/connect/src/doctor.ts`.
@@ -97,6 +118,12 @@ and the `release` skill.
 >
 > The rest of this document was not re-read for it, and `last-verified` is not bumped.
 
+> **Re-verified unchanged (2026-10-09, `ALCHEMY_HISTORY_API_KEY` added):**
+> - **What changed.** `config.ts` gains `alchemyHistoryApiKey`, read by the Base / Base Sepolia transaction-history reads only. No connector, dist-tag or channel variable is touched.
+> - **What did not.** No dist-tag, channel or `HAVEN_CONNECTOR_CHANNEL` behaviour moves.
+>
+> The rest of this document was not re-read for it, and `last-verified` is not bumped.
+
 > **Re-verified unchanged (2026-10-07, `BLOCKSCOUT_API_KEY` added):**
 > - **What changed.** `config.ts` gains `blockscoutApiKey`, read by the Base / Base Sepolia explorer history reads only. No connector, dist-tag or channel variable is touched.
 > - **What did not.** No dist-tag, channel or `HAVEN_CONNECTOR_CHANNEL` behaviour moves.
@@ -108,6 +135,22 @@ and the `release` skill.
 > - **What did not.** No dist-tag, channel or `HAVEN_CONNECTOR_CHANNEL` behaviour moves.
 >
 > The rest of this document was not re-read for it, and `last-verified` is not bumped.
+
+> **Re-verified unchanged (#3830, 2026-10-09, coexisting-agent wording and
+> Claude Code wiring evidence):** this doc is coupled through connect's
+> `doctor.ts` and `runtime.ts`. The changes: the completion heads-up names the
+> other agent directories as "other agent directories on this machine" and
+> says this setup revoked none of them (no longer "previous agent(s)" or "If
+> you meant to replace them"); on Claude Code `--doctor` reads `~/.claude.json`
+> server entries as additive wiring evidence, and the `superseded_agents`
+> advisory's label (and the human inventory row) no longer assert
+> "superseded". A directory the evidence upgrades to `wired` now runs the full
+> per-agent checks, so on Claude Code a broken second agent can fail
+> `--doctor` where it used to be an advisory — the behaviour Codex already
+> had. The check id, the inventory classifications and every `--json` field
+> are unchanged, and no channel, dist-tag, version-order or publish behaviour
+> this document describes moves. The rest of this document
+> was not re-read for it, and `last-verified` is not bumped.
 
 > **Re-verified unchanged (#3756, 2026-10-07, superseded-agent wording):**
 > this doc is coupled through connect's `doctor.ts`, `runtime.ts`, `args.ts`
@@ -162,6 +205,16 @@ and the `release` skill.
 > document describes for the dev channel is unchanged, and no channel,
 > dist-tag, version-order or publish behaviour moves. Scope of this note: that
 > file — nothing else in this document was re-verified.
+>
+> **Re-verification (#3772 part 1, retired-agents report, 2026-10-13):** this
+> doc is coupled through `routes/agent-connection-setups.ts` and
+> `packages/connect/src/runtime.ts`. The change adds
+> `POST /agent-connection-setups/{setupId}/retired-agents` and, after a
+> completed `--replace`, one best-effort connector call to it (an older
+> backend's 404 is ignored silently; any other failure is one log line). The setup, register and install-status flow
+> this document describes for the dev channel is unchanged, and no channel,
+> dist-tag, version-order or publish behaviour moves. Scope of this note: those
+> two files — nothing else in this document was re-verified.
 >
 > **Re-verification (#3259, failed tombstone mirror, 2026-09-23):** this doc is
 > coupled through `packages/connect/src/{cli,runtime}.ts`. The change: a failed
@@ -287,6 +340,26 @@ and the `release` skill.
 >
 > `last-verified` is not bumped.
 
+> **Re-verification (0.10.0-alpha.0 release, 2026-10-14):** coupled because the
+> bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), now
+> `0.9.0-alpha.0` → `0.10.0-alpha.0`, a MINOR step. `HAVEN_CONNECTOR_CHANNEL`
+> stays `alpha`.
+> - **Publish path.** Re-measured at `origin/dev` `641f527d`: `git log
+>   origin/main..origin/dev` over `publish.yml`, `release-channel.mjs`,
+>   `release-snapshot-version.mjs` and `release-version-order.mjs` returns **2**
+>   commits, both in `publish.yml`'s publish loop:
+>   - #3797 (#3800) holds back a package whose internal dependency did not
+>     publish in the same run;
+>   - #3819 (#3828) makes that ledger work on bash 3.2.
+>
+>   Neither touches channel selection, the `dev` snapshot version or version
+>   ordering. The bump's own diff touches none of these files.
+> - **Live dist-tags read during this release** (registry over HTTP). `dev` =
+>   `0.0.0-dev.202610130724.e847be6`, below `alpha`/`latest` = `0.9.0-alpha.0`
+>   for all five packages.
+>
+> `last-verified` is not bumped.
+
 > **Re-verification (0.9.0-alpha.0 release, 2026-10-09):** coupled because the
 > bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), now
 > `0.8.1-alpha.0` → `0.9.0-alpha.0`, a MINOR step. `HAVEN_CONNECTOR_CHANNEL`
@@ -389,6 +462,24 @@ and the `release` skill.
 > `parseOpsDatabaseUrl` in `config/ops.ts`) and its comment, plus its import.
 > `connectorChannel` / `parseConnectorChannel` and `requestValidationMode` have
 > no diff. `last-verified` is not bumped; nothing else here was re-verified.
+>
+> **Re-verification (#3799, 2026-10-09, the upgrade hint's per-agent suffix).**
+> This diff touches covered connect files (`doctor.ts`, `cli.ts`, `args.ts`,
+> `storage.ts`) and `packages/backend/src/middleware/client-compat.ts`. For
+> the connector packages only, `client_update.upgrade_command` may append
+> ` --name <slug>` — normalised from `agents.mcp_server_name` (migration 067)
+> with a fail-closed slug check, `haven` → no flag, anything the connector's
+> parser would refuse → no flag. The suffix is added in the backend hint
+> (from the SAME auth SELECT that authenticated the request — no second read
+> in `onSend`), not in core or the SDK: `@haven_ai/core`'s
+> `upgradeCommandFor` keeps the bare `/ --doctor$/` form,
+> `connector-upgrade-command-parity.test.ts` is unchanged and green, and
+> `/discovery`, `/.well-known/haven.json` and `/releases` keep the bare
+> command. The connect-side changes are directory selection and refusal
+> wording (`--doctor`/`--repair --name <slug>` now resolve through the shared
+> pair-record rule); channel selection, dist-tag resolution, version
+> ordering and the snapshot path do not move. `last-verified` is not bumped:
+> this note is the scope. Nothing else in this document was re-verified.
 >
 > **Re-verification (#3304):** coupled because `packages/core/src/client-compat.ts`
 > is in this doc's `covers:`. The only edit there is a comment: the sentence
@@ -667,7 +758,11 @@ throughout.
    step prints `Snapshot version: 0.0.0-dev.…`, and the run summary carries a
    per-package table with `published under `dev`` on each row. Read the table:
    one package can fail while the others publish (#1159), so a green summary
-   glance is not enough.
+   glance is not enough. A package whose internal `@haven_ai/*` dependency did
+   not publish in the same run is **held back**, not published: its row reads
+   `**FAILED** — not published: dependency <dep>@<ver> did not publish in this
+   run` (#3797 — the gate runs on both channels). Re-run the failed job to
+   heal it; the re-run skips versions already on npm.
 
 3. **Confirm on the registry, and poll before concluding.**
 

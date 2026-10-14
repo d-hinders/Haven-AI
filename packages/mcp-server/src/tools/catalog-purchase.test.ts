@@ -3567,7 +3567,16 @@ describe('a merchant_not_ready 503 is reported as itself, not a wrong-endpoint m
       expect((res as { next_action?: string }).next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
       const message = (res as { message?: string }).message ?? ''
       expect(message).toContain('settlement_wallet_out_of_gas')
-      expect(message).toContain('60')
+      // #3834: out of gas recovers only when the operator tops the wallet up,
+      // so the message names that and the floor, never a retry interval.
+      // (Was `toContain('60')`, which an incidental digit could satisfy.)
+      expect(message).toContain('fail_floor: 12')
+      expect(message).toContain('settlements_remaining: 0')
+      expect(message).toContain("The merchant's operator must top up its settlement wallet")
+      expect(message).not.toMatch(/often transient|Retry after approximately/)
+      expect((res as { next_tool_omitted_reason?: string }).next_tool_omitted_reason).toBe(
+        "the merchant's operator must top up its settlement wallet first; re-quote after that",
+      )
       // The old, misleading text this replaces must be gone.
       expect(message).not.toContain('discovery document')
       expect((res as { retry_with_new_quote?: boolean }).retry_with_new_quote).toBe(true)
@@ -3588,6 +3597,52 @@ describe('a merchant_not_ready 503 is reported as itself, not a wrong-endpoint m
       expect(res.success).toBe(false)
       expect((res as { code?: string }).code).not.toBe(AgentPaymentFailureCode.MerchantNotReady)
       expect((res as { message?: string }).message ?? '').not.toContain('cannot settle a payment right now')
+    })
+
+    // #3834: the exact out-of-gas sentence. The local runtime's test
+    // (packages/mcp/src/tools.test.ts) pins the SAME literal — that pair is
+    // the hosted/local parity check.
+    it('out of gas: the exact operator-top-up sentence, with the floor beside the remaining count (#3834)', async () => {
+      stubFetch({
+        'POST /mcp': {
+          status: 503,
+          body: { ...MERCHANT_NOT_READY_BODY, settlements_remaining: 11, recovery: 'operator_top_up' },
+          responseHeaders: { 'Retry-After': '60' },
+        },
+      })
+      const res = await handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'buy_vpn',
+        arguments: { plan: 'basic' },
+      })
+      expect((res as { message?: string }).message).toBe(
+        "The merchant refused this call: its settlement wallet is out of gas (reason_code: settlement_wallet_out_of_gas). It has gas for 11 more settlements and refuses new payments below 12 (settlements_remaining: 11, fail_floor: 12). No payment was created. The merchant's operator must top up its settlement wallet; until then every retry is refused again. Tell the user, and re-quote once the merchant has been topped up.",
+      )
+    })
+
+    // #3834: no hosted test pinned the wording for any OTHER reason code
+    // (hosted-egress.test.ts only checks 'capacity' appears). This pins it,
+    // byte for byte, so the out-of-gas branch cannot leak into it.
+    it('any other reason_code keeps the generic retry wording, unchanged (#3834)', async () => {
+      stubFetch({
+        'POST /mcp': {
+          status: 503,
+          body: { error: 'merchant_not_ready', reason_code: 'capacity', settlements_remaining: 2, retry_after_s: 30 },
+        },
+      })
+      const res = await handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'buy_vpn',
+        arguments: { plan: 'basic' },
+      })
+      expect((res as { code?: string }).code).toBe(AgentPaymentFailureCode.MerchantNotReady)
+      expect((res as { message?: string }).message).toBe(
+        'The merchant refused this call: it cannot settle a payment right now (reason_code: capacity), settlements_remaining: 2. No payment was created. Retry after approximately 30s.',
+      )
+      expect((res as { next_tool_omitted_reason?: string }).next_tool_omitted_reason).toBe(
+        'the merchant needs to recover first; re-quote after retry_after_s',
+      )
+      expect((res as { retry_with_new_quote?: boolean }).retry_with_new_quote).toBe(true)
     })
 
     it('never spends the bounded #1271 discovery retry on an honest 503', async () => {
@@ -3895,3 +3950,73 @@ describe('#2991 — expected_settlement_scheme / expected_funding_leg', () => {
   })
 })
 
+
+// ── #3839 — the discovery entry's catalog-based funding-leg hint. Information
+// at CHOICE time: which merchants avoid the EIP-3009 funding leg (#3777).
+describe('#3839 — funding_leg_expected on discovery entries', () => {
+  const FACILITATORS = ['0x4444444444444444444444444444444444444444']
+  const DELEGATION_AGENT = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
+  const base = {
+    description: 'd', category: 'api', rail: 'x402', protocol: 'mcp', tool_name: 'create_text',
+    tool_arguments: { prompt: 'Hello' }, price_display: '$0.01 USDC', price_atomic: '10000',
+    asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', network: 'eip155:84532', status: 'active',
+    verified_at: '2026-06-16T08:50:39.772Z',
+  }
+  const ROWS = [
+    { ...base, id: 'cat_7710', name: 'Takes erc7710', resource_url: 'http://merchant.test/m7710/mcp', asset_transfer_methods: 'eip3009,erc7710' },
+    { ...base, id: 'cat_3009', name: 'eip3009 only', resource_url: 'http://merchant.test/m3009/mcp', asset_transfer_methods: 'eip3009' },
+    { ...base, id: 'cat_none', name: 'Never probed', resource_url: 'http://merchant.test/none/mcp', asset_transfer_methods: null },
+    // A backend that does not send the field at all.
+    { ...base, id: 'cat_old', name: 'Older backend', resource_url: 'http://merchant.test/old/mcp' },
+  ]
+
+  type Row = { id: string; asset_transfer_methods: string | null; funding_leg_expected: boolean | 'unknown' }
+
+  it('emits asset_transfer_methods and the hint per row — "unknown", never null, when nothing is recorded', async () => {
+    stubFetch({ 'GET /catalog': { status: 200, body: { entries: ROWS } } })
+    const result = ok<Row[]>(await handlers().haven_discover_tools({}))
+    expect(result.data.map((e) => [e.id, e.asset_transfer_methods, e.funding_leg_expected])).toEqual([
+      ['cat_7710', 'eip3009,erc7710', false],
+      ['cat_3009', 'eip3009', true],
+      ['cat_none', null, 'unknown'],
+      ['cat_old', null, 'unknown'],
+    ])
+    // Listing order is the backend's (it also serves the marketplace): the
+    // hint never re-sorts or hides an entry.
+    expect(result.data.map((e) => e.id)).toEqual(ROWS.map((r) => r.id))
+  })
+
+  it('agrees with the live quote\'s expected_funding_leg for a delegation-rail agent — each side computed on its own', async () => {
+    // Discovery reads the stored set; the quote reads the merchant's live
+    // `accepts[]` through predictSettlementScheme. This test imports neither
+    // rule, so the two can only agree by being right.
+    const erc7710Merchant = {
+      ...PAYMENT_REQUIRED,
+      accepts: [
+        { ...PAYMENT_REQUIRED.accepts[0] },
+        { ...PAYMENT_REQUIRED.accepts[0], extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: FACILITATORS } },
+      ],
+    }
+    stubFetch({
+      'GET /catalog': { status: 200, body: { entries: ROWS.slice(0, 2) } },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+      'POST /m7710/mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(erc7710Merchant)) } },
+      'POST /m3009/mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(PAYMENT_REQUIRED)) } },
+    })
+    const discovered = ok<Array<Row & { resource_url: string }>>(await handlers().haven_discover_tools({}))
+    expect(discovered.data).toHaveLength(2)
+    for (const entry of discovered.data) {
+      const quote = ok<{ expected_funding_leg: boolean | null }>(
+        await handlers().haven_quote_mcp_tool({
+          merchant_url: entry.resource_url,
+          tool_name: 'create_text',
+          arguments: { prompt: 'Hello' },
+        }),
+      )
+      expect(quote.data.expected_funding_leg, entry.id).not.toBeNull()
+      expect(entry.funding_leg_expected, entry.id).toBe(quote.data.expected_funding_leg)
+    }
+    // Both outcomes are exercised, so agreement is not vacuous.
+    expect(discovered.data.map((e) => e.funding_leg_expected).sort()).toEqual([false, true])
+  })
+})

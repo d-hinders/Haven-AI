@@ -19,7 +19,7 @@ covers:
   - packages/frontend/src/components/DelegationBudgetCard.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
   - packages/frontend/src/hooks/useEscapeToClose.ts
-last-verified: "2026-09-21"
+last-verified: "2026-10-12"
 ---
 
 # Haven Product & UX Guide
@@ -67,9 +67,11 @@ Use technical infrastructure terms only when they add transparency for a technic
 Brand-new users should not see the full operational dashboard until it helps
 them. A first-run state should lead with one balance or account status, one
 active setup action, and only the context needed to take that action. A compact
-setup sequence is acceptable when exactly one step has a CTA. Other steps may
-show their independently computed status but remain non-actionable until their
-prerequisites make them current.
+setup sequence is acceptable when exactly one step is highlighted and carries
+the primary action. A step that can already be done may offer a secondary-weight
+action (#3818: connecting an agent before funding stays allowed). Other steps
+show their independently computed status and stay subordinate or locked until
+their prerequisites make them current.
 
 Avoid showing competing analytics cards, empty management panels, transaction
 previews, multiple simultaneous CTAs, account/network summaries, or risk
@@ -124,7 +126,7 @@ Core rules:
 - No gradient buttons. The brand gradient is reserved for the app wordmark and one restrained hero accent phrase.
 - Flat cards use the `--v2-surface` token (white in light, its dark counterpart
   in dark) with `border-[var(--v2-border)]`, v2 radius, and the v2 card shadow.
-- Raised cards are prominent page anchors such as the account detail total balance card; the dashboard balance hero uses the tinted anchor surface with the raised shadow rather than a white raised card.
+- Raised cards are prominent page anchors such as the account detail total balance card; the dashboard money panel is ONE raised card (#3897): balance, sparkline and actions on the left, the 30-day spending on the right as a divided section, stacked below `lg`.
 - Other elevations already present in the shared `Card` primitive, including
   the restrained tinted `anchor` tier, must match the live `/design-system`
   reference and remain secondary to the page's primary anchor. The static

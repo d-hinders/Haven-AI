@@ -4,6 +4,7 @@ import {
   testUser,
   testAgent,
   dashboardOverview,
+  dashboardBudgetRemaining,
   accountingProviders,
   accountingConnection,
   accountingFeedStatus,
@@ -107,7 +108,9 @@ import {
 
 type Agent = ApiSchema<'Agent'>
 type DashboardOverview = ApiSchema<'DashboardOverviewResponse'>
-type DashboardTransaction = DashboardOverview['transactions'][number]
+type DashboardBudgetRemaining = ApiSchema<'DashboardBudgetRemainingResponse'>
+// #3858: DashboardOverview no longer carries the 5-row transactions preview,
+// so there is no DashboardTransaction projection to derive.
 type DashboardAgentPreview = DashboardOverview['agents'][number]
 
 type ListProvidersResponse =
@@ -134,15 +137,18 @@ const DASHBOARD_AGENT_DEFAULT = {
   ...dashboardOverview.agents[0]!,
 } satisfies DashboardAgentPreview
 
-const DASHBOARD_TRANSACTION_DEFAULT = {
-  ...dashboardOverview.transactions[0]!,
-} satisfies DashboardTransaction
+// #3858: the former DASHBOARD_TRANSACTION_DEFAULT (derived from
+// dashboardOverview.transactions[0]) is gone with the removed preview — the
+// overview mock no longer carries the field.
 
 const DASHBOARD_OVERVIEW_DEFAULT = {
   ...dashboardOverview,
   agents: [DASHBOARD_AGENT_DEFAULT],
-  transactions: [DASHBOARD_TRANSACTION_DEFAULT],
 } satisfies DashboardOverview
+
+const DASHBOARD_BUDGET_REMAINING_DEFAULT = {
+  ...dashboardBudgetRemaining,
+} satisfies DashboardBudgetRemaining
 
 const ACCOUNTING_PROVIDERS_DEFAULT = {
   providers: accountingProviders.map(
@@ -194,6 +200,7 @@ const ACCOUNTING_FEED_STATUS_DEFAULT = {
 export type ApiRoutes = {
   '/agents': { agents: Agent[] }
   '/dashboard/overview': DashboardOverview
+  '/dashboard/budget-remaining': DashboardBudgetRemaining
   '/accounting/providers': ListProvidersResponse
   '/accounting/connections': ListConnectionsResponse
   '/accounting/feed/status': FeedStatusResponse
@@ -203,6 +210,7 @@ export type ApiRoutes = {
 export const API_MOCK_DEFAULTS: ApiRoutes = {
   '/agents': AGENTS_DEFAULT,
   '/dashboard/overview': DASHBOARD_OVERVIEW_DEFAULT,
+  '/dashboard/budget-remaining': DASHBOARD_BUDGET_REMAINING_DEFAULT,
   '/accounting/providers': ACCOUNTING_PROVIDERS_DEFAULT,
   '/accounting/connections': ACCOUNTING_CONNECTIONS_DEFAULT,
   '/accounting/feed/status': ACCOUNTING_FEED_STATUS_DEFAULT,

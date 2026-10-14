@@ -15,6 +15,7 @@ export const OPS_NAV_ITEMS: OpsNavItem[] = [
   { href: '/feedback', label: 'Feedback', match: (p) => p === '/feedback' },
   { href: '/search', label: 'Search', match: (p) => p === '/search' },
   { href: '/health', label: 'Health', match: (p) => p === '/health' },
+  { href: '/sponsored-gas', label: 'Sponsored gas', match: (p) => p === '/sponsored-gas' },
   { href: '/doc-health', label: 'Doc health', match: (p) => p === '/doc-health' },
   // The customer page is reached from search and from the health lists; it
   // never appears in the nav itself, but its active state maps to nothing.

@@ -1,4 +1,5 @@
 export { BudgetMeter } from './BudgetMeter'
+export { BudgetRemainingList } from './BudgetRemainingList'
 export { AgentBudgetCard } from './AgentBudgetCard'
 export { Amount, type AmountDirection } from './Amount'
 export {
@@ -17,6 +18,7 @@ export { TransactionMovement } from './TransactionMovement'
 export { AgentRulesSummary, type AgentRuleSummaryItem } from './AgentRulesSummary'
 export { ApprovalRequiredBanner } from './ApprovalRequiredBanner'
 export { WalletIdentityBlock } from './WalletIdentityBlock'
+export { NoticeRow } from './NoticeRow'
 export { RiskExplainer } from './RiskExplainer'
 export { CredentialHandoffCard } from './CredentialHandoffCard'
 export { LabelChip, LabelChipRow, LabelOptionRow, type AgentLabel } from './LabelChip'

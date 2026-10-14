@@ -8,6 +8,10 @@ import { expectMatchesSpec } from '../../openapi/response-shape.js'
 // the route also reads the pure freshness combiner from it (#3295), which
 // stays real so the marker math this file pins is the production math.
 import { combineBalanceFreshness } from '../../modules/accounts/balance-freshness.js'
+// #3803: the route answers needs_backup_recommendation per account through
+// the session payload's predicate — kept REAL so the signer-floor math this
+// file exercises is the production math, like the freshness combiner above.
+import { needsBackupSignerRecommendation } from '../../modules/accounts/mainnet-gate.js'
 
 const { mockQuery, portfolioMocks, transactionMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
@@ -20,6 +24,10 @@ const { mockQuery, portfolioMocks, transactionMocks } = vi.hoisted(() => ({
   },
   transactionMocks: {
     compareTransactions: vi.fn(() => 0),
+    // #3824: the route derives the tz validity check and the grouped rows
+    // from this module; the characterization below feeds it directly.
+    isValidActivityTimeZone: vi.fn(() => true),
+    buildActivityGroups: vi.fn(async () => []),
     enrichedTransactionIdentityKey: vi.fn((tx: {
       chainId: number
       safeId: string
@@ -57,9 +65,16 @@ vi.mock('../../db.js', () => ({
 vi.mock('../../modules/accounts/index.js', () => ({
   ...portfolioMocks,
   combineBalanceFreshness,
+  needsBackupSignerRecommendation,
 }))
 vi.mock('../../infra/fiat-values.js', () => ({
   getFiatValuesForTokenAmount: vi.fn(),
+}))
+// #3803: the route reads today's spot rates for the budget captions. A mock
+// keeps the suite off CoinGecko — the price read itself is infra/prices.ts'
+// own concern.
+vi.mock('../../infra/prices.js', () => ({
+  getTokenPrice: vi.fn(async () => ({ usd: 1, eur: 0.9, sek: 10 })),
 }))
 // #992: aggregation/enrichment/caching moved to src/modules/transactions/.
 vi.mock('../../modules/transactions/index.js', () => transactionMocks)
@@ -90,6 +105,39 @@ const AGENT = {
   account_id: SAFE.id,
   account_name: SAFE.name,
   account_chain_id: SAFE.chain_id,
+}
+
+/**
+ * #3803: default answers for the NEW overview sections — an empty dataset
+ * (zero spend, zero merchants, zero refusals, no last payments, no budgets,
+ * no setups, no sub-budgets, no contacts). Every dispatcher in this file ends
+ * with `overview3803(sql) ?? throw`. The sections' own real-DB proofs live in
+ * infra/repositories/__tests__/dashboard-overview.db.test.ts.
+ */
+function overview3803(sql: string): { rows: unknown[] } | null {
+  if (sql.includes('WITH legs AS') && sql.includes('FROM payment_intents pi')) return { rows: [] }
+  if (sql.includes('distinct_merchants_30')) {
+    return {
+      rows: [
+        {
+          distinct_merchants_30: '0',
+          distinct_merchants_7: '0',
+          top_merchant_key: null,
+          top_merchant_url: null,
+          top_merchant_to: null,
+          top_merchant_address: null,
+        },
+      ],
+    }
+  }
+  if (sql.includes('FROM payment_refusals')) return { rows: [] }
+  if (sql.includes('AS failed_intents')) return { rows: [{ failed_intents: '0' }] }
+  if (sql.includes('DISTINCT ON (pi.agent_id)')) return { rows: [] }
+  if (sql.includes('FROM contacts WHERE')) return { rows: [] }
+  if (sql.includes('FROM agent_connection_setups')) return { rows: [] }
+  if (sql.includes('agent_sub_budgets')) return { rows: [] }
+  if (sql.includes('FROM agent_delegations')) return { rows: [] }
+  return null
 }
 
 describe('dashboard routes', () => {
@@ -131,7 +179,7 @@ describe('dashboard routes', () => {
       if (sql.includes('AS has_first_agent_payment')) {
         return Promise.resolve({ rows: [{ has_first_agent_payment: true }] })
       }
-      if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) {
+      if (sql.includes('FROM smart_accounts us') && sql.includes('GROUP BY us.id')) {
         return Promise.resolve({ rows: [SAFE] })
       }
       if (sql.includes('FROM agents a')) {
@@ -149,6 +197,8 @@ describe('dashboard routes', () => {
       if (sql.includes('GROUP BY token_symbol')) {
         return Promise.resolve({ rows: [] })
       }
+      const overviewDefaults = overview3803(sql)
+      if (overviewDefaults) return Promise.resolve(overviewDefaults)
 
       throw new Error(`Unexpected query: ${sql}`)
     })
@@ -180,7 +230,7 @@ describe('dashboard routes', () => {
     const agentQuery = mockQuery.mock.calls.find(([sql]) =>
       String(sql).includes('FROM agents a'),
     )?.[0] as string
-    expect(agentQuery).toContain("a.status IN ('active', 'paused')")
+    expect(agentQuery).toContain("a.status IN ('active', 'paused', 'pending_approval')")
   })
 
   // #3195: the overview must honour the caller's preference when it names
@@ -207,10 +257,11 @@ describe('dashboard routes', () => {
   })
 
   // #2914 (naming epic #2906 phase 5, the contraction): the twin `#2907`
-  // dual-emitted is gone. DashboardAgentPreview and the preview transaction
-  // carry the account_* names ONLY, ON THE WIRE — a request-level check, not
-  // just the mapper's own unit test (the mapper itself is deleted).
-  it('#2914: agents[] and transactions[] carry the account_* names only, not the retired safe*', async () => {
+  // dual-emitted is gone. DashboardAgentPreview carries the account_* names
+  // ONLY, ON THE WIRE — a request-level check, not just the mapper's own unit
+  // test (the mapper itself is deleted). #3858: the former transactions[]
+  // half of this check rode the removed 5-row preview; agents[] keeps it.
+  it('#2914: agents[] carry the account_* names only, not the retired safe*', async () => {
     const tx = {
       hash: '0x72d03a8ff551e443c118c93c54d32260941deb613e51fcd2733cd3455e8fa1a1',
       type: 'native',
@@ -247,14 +298,6 @@ describe('dashboard routes', () => {
       expect(agent.accountName).toBeDefined()
       expect(agent.accountChainId).toBeDefined()
     }
-    expect(body.transactions.length).toBeGreaterThan(0)
-    for (const item of body.transactions) {
-      expect(item.safeId).toBeUndefined()
-      expect(item.safeAddress).toBeUndefined()
-      expect(item.safeName).toBeUndefined()
-      expect(item.accountId).toBeDefined()
-      expect(item.accountAddress).toBeDefined()
-    }
   })
 
   // #2055 (epic #1440, #2021 readability waiver): the approval queue is gone,
@@ -264,42 +307,9 @@ describe('dashboard routes', () => {
   // "scopes the approval count to the requesting user" tests, which pinned a
   // query (`status IN ('pending', 'approved')` against `approval_requests`)
   // that no longer runs.
-  // #3132: the preview carries the same synthesized x402 rows as the feed, so
-  // the MARKED fallback must reach it — a whitelist that drops the mark would
-  // put the silent substitution back on the surface a user looks at first.
-  it('#3132: the preview carries timestampSource and confirmedAt through its whitelist (no scope — not a list query)', async () => {
-    const synthesized = {
-      hash: '0x72d03a8ff551e443c118c93c54d32260941deb613e51fcd2733cd3455e8fa1a2',
-      type: 'erc20',
-      from: SAFE.account_address,
-      to: '0x15179876c595922999C2d5DC7c23Cc7711fE799a',
-      value: '20000',
-      valueFormatted: '0.02',
-      asset: 'USDC',
-      decimals: 6,
-      direction: 'out',
-      timestamp: 1778240999,
-      timestampSource: 'created_at',
-      confirmedAt: null,
-      blockNumber: null,
-      isError: false,
-      source: 'x402',
-    }
-    transactionMocks.fetchAccountTransactions.mockResolvedValue({ transactions: [] })
-    transactionMocks.mergeX402Transactions.mockImplementation(async () => [synthesized])
-
-    const response = await app.inject({
-      method: 'GET',
-      url: '/dashboard/overview',
-      headers: { authorization: `Bearer ${token}` },
-    })
-
-    expect(response.statusCode).toBe(200)
-    const [row] = response.json().transactions as Array<Record<string, unknown>>
-    expect(row.timestampSource).toBe('created_at')
-    expect(row.confirmedAt).toBeNull()
-    expect(row).not.toHaveProperty('scope')
-  })
+  // #3132 guarded the marked x402 fallback reaching the 5-row preview's
+  // whitelist; #3858 removed that preview (and its whitelist) from the wire,
+  // so the check retired with the surface it covered.
 
   it('reports actionableApprovals/pendingApprovals as hardcoded 0 — no approval query runs', async () => {
     const response = await app.inject({
@@ -326,7 +336,7 @@ describe('dashboard routes', () => {
       if (sql.includes('AS has_first_agent_payment')) {
         return Promise.resolve({ rows: [{ has_first_agent_payment: true }] })
       }
-      if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) {
+      if (sql.includes('FROM smart_accounts us') && sql.includes('GROUP BY us.id')) {
         return Promise.resolve({ rows: [gnosisSafe, baseSafe] })
       }
       if (sql.includes('FROM agents a')) {
@@ -341,6 +351,8 @@ describe('dashboard routes', () => {
       if (sql.includes('GROUP BY token_symbol')) {
         return Promise.resolve({ rows: [] })
       }
+      const overviewDefaults = overview3803(sql)
+      if (overviewDefaults) return Promise.resolve(overviewDefaults)
 
       throw new Error(`Unexpected query: ${sql}`)
     })
@@ -372,12 +384,62 @@ describe('dashboard routes', () => {
 
     expect(response.statusCode).toBe(200)
     const body = response.json()
-    expect(body.metrics.successfulTransactions).toBe(2)
-    expect(body.transactions).toHaveLength(2)
-    expect(body.transactions.map((item: { chainId: number }) => item.chainId).sort()).toEqual([
-      100,
-      8453,
-    ])
+    // #3807 + #3858: neither the retired metrics block nor the 5-row preview
+    // carries the count any more — the grouped `activity` feed does. The
+    // same-address rows must reach it UNSQUASHED: the route dedupes the
+    // merged feed before grouping, and the identity key keeps the chain, so
+    // the two chains' rows arrive as two rows — never collapsed into one.
+    expect(body.metrics).toBeUndefined()
+    expect(body.transactions).toBeUndefined()
+    const groupCalls = transactionMocks.buildActivityGroups.mock
+      .calls as unknown as Array<[{ transactions: { chainId: number }[] }]>
+    const feed = groupCalls.at(-1)?.[0].transactions
+    expect(feed?.map((item) => item.chainId).sort()).toEqual([100, 8453])
+  })
+
+  // #3803: an unavailable USDC leg answers null (unknown), NEVER 0 —
+  // "funded" is a three-state answer, and collapsing unknown into 0 would
+  // render "not funded" for a balance the backend simply could not read.
+  it('answers an unavailable USDC leg with null balance and null funded', async () => {
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('AS has_first_agent_payment')) return Promise.resolve({ rows: [{ has_first_agent_payment: true }] })
+      if (sql.includes('FROM smart_accounts us') && sql.includes('GROUP BY us.id')) return Promise.resolve({ rows: [SAFE] })
+      if (sql.includes('FROM agents a')) return Promise.resolve({ rows: [] })
+      if (sql.includes('FROM user_daily_portfolio_snapshots')) return Promise.resolve({ rows: [] })
+      if (sql.includes('INSERT INTO user_daily_portfolio_snapshots')) return Promise.resolve({ rows: [] })
+      if (sql.includes('GROUP BY token_symbol')) return Promise.resolve({ rows: [] })
+      const overviewDefaults = overview3803(sql)
+      if (overviewDefaults) return Promise.resolve(overviewDefaults)
+      throw new Error(`Unexpected query: ${sql}`)
+    })
+    portfolioMocks.fetchPortfolioForAccount.mockResolvedValue({
+      totalUsd: 0,
+      totalEur: 0,
+      totalSek: 0,
+      breakdown: [
+        {
+          symbol: 'USDC',
+          balance: '0',
+          balanceFormatted: '0',
+          balanceFreshness: { status: 'unavailable' },
+        },
+      ],
+    })
+    transactionMocks.fetchAccountTransactions.mockResolvedValue({ transactions: [] })
+    transactionMocks.mergeX402Transactions.mockResolvedValue([])
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/dashboard/overview',
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = response.json()
+    const account = body.accounts.find((a: { accountId: string }) => a.accountId === SAFE.id)
+    expect(account.usdcBalanceAtomic).toBeNull()
+    expect(account.funded).toBeNull()
+    expect(account.usdcPace7dAtomic).toBe('0')
   })
 })
 
@@ -400,7 +462,7 @@ describe('dashboard derives delegation-rail budgets from active delegations (#10
     transactionMocks.mergeX402Transactions.mockResolvedValue([])
     mockQuery.mockImplementation((sql: string) => {
       if (sql.includes('AS has_first_agent_payment')) return Promise.resolve({ rows: [{ has_first_agent_payment: true }] })
-      if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) return Promise.resolve({ rows: [SAFE] })
+      if (sql.includes('FROM smart_accounts us') && sql.includes('GROUP BY us.id')) return Promise.resolve({ rows: [{ ...SAFE, id: SAFE_UUID }] })
       if (sql.includes('FROM agents a')) {
         return Promise.resolve({
           rows: [{ ...AGENT, id: AGENT_UUID, account_id: SAFE_UUID, account_type: 'delegator_hybrid' }],
@@ -411,11 +473,32 @@ describe('dashboard derives delegation-rail budgets from active delegations (#10
         return Promise.resolve({ rows: [{ agent_id: AGENT.id, token_symbol: 'USDC', allowance_amount: '10.00', reset_period_min: 1440 }] })
       }
       if (sql.includes('FROM agent_delegations')) {
-        return Promise.resolve({ rows: [{ id: DELEGATION_UUID, agent_id: AGENT_UUID, chain_id: 84532, token_address: SEPOLIA_USDC, budget_atomic: '1000000', period_seconds: 86_400 }] })
+        // #3803: the full ActiveDelegationRow shape — the budget wire now
+        // carries the identity + live window, so the row must too.
+        return Promise.resolve({
+          rows: [
+            {
+              id: DELEGATION_UUID,
+              agent_id: AGENT_UUID,
+              chain_id: 84532,
+              token_address: SEPOLIA_USDC,
+              budget_atomic: '1000000',
+              period_seconds: 86_400,
+              delegation_hash: '0x' + 'a'.repeat(64),
+              recipient_address: null,
+              merchant_id: null,
+              start_date: String(Math.floor(Date.now() / 1000) - 3_600),
+              expires_at: String(Math.floor(Date.now() / 1000) + 86_400),
+              created_at: new Date(),
+            },
+          ],
+        })
       }
       if (sql.includes('FROM user_daily_portfolio_snapshots')) return Promise.resolve({ rows: [] })
       if (sql.includes('INSERT INTO user_daily_portfolio_snapshots')) return Promise.resolve({ rows: [] })
       if (sql.includes('GROUP BY token_symbol')) return Promise.resolve({ rows: [] })
+      const overviewDefaults = overview3803(sql)
+      if (overviewDefaults) return Promise.resolve(overviewDefaults)
       throw new Error(`Unexpected query: ${sql}`)
     })
 
@@ -445,9 +528,8 @@ describe('dashboard derives delegation-rail budgets from active delegations (#10
     // the enum and the uuid formats of the whole overview envelope, against
     // the same schema the dashboard's generated wire types are built from.
     expectMatchesSpec('GET', '/dashboard/overview', body)
-    expect(agent.allowances).toEqual([
-      { tokenSymbol: 'USDC', allowanceAmount: '1.00', resetPeriodMin: 1440 },
-    ])
+    // #3807: `resetPeriodMin` left the wire with the KPI tiles.
+    expect(agent.allowances).toEqual([{ tokenSymbol: 'USDC', allowanceAmount: '1.00' }])
   })
 })
 
@@ -483,7 +565,7 @@ describe('dashboard overview under degraded balance reads (#3295)', () => {
       if (sql.includes('AS has_first_agent_payment')) {
         return Promise.resolve({ rows: [{ has_first_agent_payment: false }] })
       }
-      if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) {
+      if (sql.includes('FROM smart_accounts us') && sql.includes('GROUP BY us.id')) {
         return Promise.resolve({ rows: [SAFE] })
       }
       if (sql.includes('FROM agents a')) {
@@ -498,6 +580,8 @@ describe('dashboard overview under degraded balance reads (#3295)', () => {
       if (sql.includes('GROUP BY token_symbol')) {
         return Promise.resolve({ rows: [] })
       }
+      const overviewDefaults = overview3803(sql)
+      if (overviewDefaults) return Promise.resolve(overviewDefaults)
       throw new Error(`Unexpected query: ${sql}`)
     })
   })
@@ -576,7 +660,7 @@ describe('dashboard overview under degraded balance reads (#3295)', () => {
       if (sql.includes('AS has_first_agent_payment')) {
         return Promise.resolve({ rows: [{ has_first_agent_payment: false }] })
       }
-      if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) {
+      if (sql.includes('FROM smart_accounts us') && sql.includes('GROUP BY us.id')) {
         return Promise.resolve({ rows: [SAFE] })
       }
       if (sql.includes('FROM agents a')) {
@@ -588,6 +672,8 @@ describe('dashboard overview under degraded balance reads (#3295)', () => {
       if (sql.includes('GROUP BY token_symbol')) {
         return Promise.resolve({ rows: [] })
       }
+      const overviewDefaults = overview3803(sql)
+      if (overviewDefaults) return Promise.resolve(overviewDefaults)
       throw new Error(`Unexpected query: ${sql}`)
     })
 
@@ -633,7 +719,7 @@ describe('dashboard overview under degraded balance reads (#3295)', () => {
       if (sql.includes('AS has_first_agent_payment')) {
         return Promise.resolve({ rows: [{ has_first_agent_payment: false }] })
       }
-      if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) {
+      if (sql.includes('FROM smart_accounts us') && sql.includes('GROUP BY us.id')) {
         return Promise.resolve({ rows: [SAFE] })
       }
       if (sql.includes('FROM agents a')) {
@@ -645,6 +731,8 @@ describe('dashboard overview under degraded balance reads (#3295)', () => {
       if (sql.includes('GROUP BY token_symbol')) {
         return Promise.resolve({ rows: [] })
       }
+      const overviewDefaults = overview3803(sql)
+      if (overviewDefaults) return Promise.resolve(overviewDefaults)
       throw new Error(`Unexpected query: ${sql}`)
     })
 
@@ -710,7 +798,7 @@ describe('dashboard writes the daily snapshot only from a clean read (#3296)', (
       if (sql.includes('AS has_first_agent_payment')) {
         return Promise.resolve({ rows: [{ has_first_agent_payment: false }] })
       }
-      if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) {
+      if (sql.includes('FROM smart_accounts us') && sql.includes('GROUP BY us.id')) {
         return Promise.resolve({ rows: accountRows })
       }
       if (sql.includes('FROM agents a')) {
@@ -725,6 +813,8 @@ describe('dashboard writes the daily snapshot only from a clean read (#3296)', (
       if (sql.includes('GROUP BY token_symbol')) {
         return Promise.resolve({ rows: [] })
       }
+      const overviewDefaults = overview3803(sql)
+      if (overviewDefaults) return Promise.resolve(overviewDefaults)
       throw new Error(`Unexpected query: ${sql}`)
     })
   }

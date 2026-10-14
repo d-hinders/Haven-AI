@@ -35,6 +35,7 @@ named where they belong below.
 
 | Date | Decision | Refs |
 |---|---|---|
+| 2026-10-09 | Any of the three maintainers merges a promotion; test a partner merge before changing any rule | #3798, PR #3794 |
 | 2026-10-01 | Sub-agent budgets: the delegating agent submits its own sub-budget signatures; the owner relay is optional, not required | #3506, epic #3328 |
 | 2026-09-27 | Sub-agent budgets: sub-budget issuance is owner-governed; the delegating agent's delegate key only signs within the owner-approved envelope | #3330, epic #3328 |
 | 2026-09-26 | Promotions merge behind by the owner; the post-promotion sync-back is dropped | PR #3325 |
@@ -53,6 +54,28 @@ named where they belong below.
 | 2026-07-12 | Session rail retired outright; AllowanceModule import-only | #834 (AllowanceModule half superseded) |
 | — | Approval-queue history readability waived | #2021, #2055 |
 | — | Historical: POC scope and phased roadmap | — |
+
+---
+
+## 2026-10-09 — any of the three maintainers merges a promotion (#3798)
+
+Owner decision, 2026-10-09: all three maintainers — @d-hinders,
+@AntonioSaaranen, @PhilipEriksson — can merge a `dev → main` promotion, not
+only the owner. **No ruleset change up front.** The owner merged #3794
+(behind `main`) under the current rules with an ordinary **Merge pull
+request** button and a merge-commit form, so the first step is to test
+whether partners can already do the same: on the next promotion PR, a partner
+clicks merge and the result (who, which PR, allowed or the exact refusal) is
+recorded on #3798. A rule changes only if that test shows partners are
+blocked, and then only by a new owner decision. Both partners hold the access
+every post-merge step needs (Railway prod DB snapshot, deploy and migration
+logs; Vercel; the funded prod wallet for the real-payment canary). The
+2026-09-26 decision above stays as written. An authenticated ruleset read the
+same day shows `Dev gate` (18134280) with **no bypass actors** and the
+admin-role `always` bypass only on *Haven automerge rules* (18021461), so how
+GitHub admits the behind merge at all is unconfirmed until the partner test
+lands. `branch-and-release-flow.md` § *Promotion to production* holds the
+rule.
 
 ---
 

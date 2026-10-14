@@ -179,7 +179,13 @@ export async function submitDelegationPayment(
   agent: { chain_id: number; delegate_address: string },
   preparedUserOp: unknown,
   signature: Hex,
-): Promise<{ txHash: string }> {
+): Promise<{
+  txHash: string
+  /** #3837: the sponsored UserOp's cost (EntryPoint `actualGasCost`), for the sponsored-gas ledger. */
+  userOpHash: string
+  actualGasUsed: bigint
+  actualGasCost: bigint
+}> {
   const rail = await createDelegationRail({
     delegateOwnerAddress: agent.delegate_address as Address,
     chainId: agent.chain_id,
@@ -195,5 +201,10 @@ export async function submitDelegationPayment(
     },
     signature,
   )
-  return { txHash: result.txHash }
+  return {
+    txHash: result.txHash,
+    userOpHash: result.userOpHash,
+    actualGasUsed: result.actualGasUsed,
+    actualGasCost: result.actualGasCost,
+  }
 }

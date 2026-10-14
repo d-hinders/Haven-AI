@@ -2112,7 +2112,7 @@ describe('--name wiring slug through runConnect (#1696)', () => {
     })
 
     const output = logs.join('\n')
-    expect(output).not.toContain('Heads-up: this setup created a NEW agent')
+    expect(output).not.toContain('Heads-up: other agent directories on this machine')
     expect(output).not.toContain('agent-named')
   })
 
@@ -2296,10 +2296,11 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
     expect(output).toContain('use Remove agent\u2026 on the Haven agent page for each (it ends their live budgets)')
     expect(output).not.toMatch(/revoke them on the Haven agent page/)
     // #2551: replaced means retired LOCALLY — the restart guidance survives,
-    // the "keeps acting as them" warning is now false and must not print.
+    // and the other-directories heads-up (the not-retired branch) must not
+    // print. Keyed on its current lead (#3830) so the guard can still fail.
     expect(output).toMatch(/NOT revoked/)
     expect(output).toMatch(/restart EVERY long-lived host/)
-    expect(output).not.toMatch(/keeps acting as them/)
+    expect(output).not.toContain('Heads-up: other agent directories on this machine')
     // Never the secret, never an auto-action claim.
     expect(output).not.toContain('sk_agent_oldsecret')
     expect(output).not.toMatch(/revoked (it|them) for you/)
@@ -2383,7 +2384,7 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
   it('says nothing extra on a first-ever setup — no prior dirs, no heads-up', async () => {
     const { output } = await runWithPriorDir(false)
     expect(output).not.toContain('agent-old')
-    expect(output).not.toMatch(/previous agent/)
+    expect(output).not.toContain('Heads-up: other agent directories on this machine')
   })
 })
 
@@ -2517,7 +2518,13 @@ describe('runConnect terminal outcome record (#2173)', () => {
     // still name the same agents — the field is additive to that prose, not a
     // replacement for it.
     const headsUp = logs.join('\n')
-    expect(headsUp).toContain('this setup created a NEW agent')
+    expect(headsUp).toContain('Heads-up: other agent directories on this machine')
+    // #3830: these agents coexist — the run neither replaced nor retired them,
+    // so none of the old "replaced" framing may print.
+    expect(headsUp).toContain('revoked none of them')
+    expect(headsUp).not.toContain('previous agent(s)')
+    expect(headsUp).not.toContain('If you meant to replace them')
+    expect(headsUp).not.toMatch(/keeps acting as them/)
     // Each id separately: readdir order is not guaranteed, so asserting the
     // joined string would be an ordering flake rather than a guard.
     expect(headsUp).toContain('agent-0')
@@ -3167,6 +3174,9 @@ describe('existing-agent wiring collision at setup (#2551)', () => {
       updateInstallStatus: vi.fn(async () => {}),
       getConnectorStatus: vi.fn(),
       getAgentIdentity: vi.fn(),
+      reportRetiredAgents: vi.fn(async (_input: { setupId: string; apiKey: string; retiredAgentIds: readonly string[] }) => ({
+        recordedAgentIds: [] as string[],
+      })),
     }
   }
 
@@ -3301,7 +3311,7 @@ describe('existing-agent wiring collision at setup (#2551)', () => {
     const output = h.logs.join('\n')
     expect(output).toMatch(/Retired previous agent agent-old locally/)
     expect(output).toMatch(/NOT revoked/)
-    expect(output).not.toMatch(/keeps acting as them/)
+    expect(output).not.toContain('Heads-up: other agent directories on this machine')
     // #3772 review S2: a bare directory with NO binding record (pre-0.4.0
     // wiring) still gets the stale-session sentence in --json — the replace
     // itself names the displaced agent.
@@ -3357,6 +3367,108 @@ describe('existing-agent wiring collision at setup (#2551)', () => {
     expect(result.outcome.superseded_agents_retired_locally).toBe(true)
     await expect(stat(join(opsDir, 'TOMBSTONE.json'))).rejects.toThrow()
     expect(JSON.parse(await readFile(join(opsDir, 'identity.json'), 'utf8')).api_key).toBe('sk_agent_agent-ops')
+  })
+
+  describe('#3772 retired agents are reported to Haven', () => {
+    const OLD_A = '11111111-2222-4333-8444-555555555555'
+    const OLD_B = '66666666-7777-4888-8999-aaaaaaaaaaaa'
+    const NAMED = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff'
+
+    it('reports exactly the retired ids, once, authenticated with the NEW agent key', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3772-report-'))
+      await seedDir(root, 'old-a', liveBare(OLD_A))
+      await seedDir(root, 'old-b', liveBare(OLD_B))
+      const h = harness(root)
+
+      const result = await runConnect({ ...baseOptions(root), replaceExistingWiring: true }, h.deps)
+
+      expect(h.api.reportRetiredAgents).toHaveBeenCalledTimes(1)
+      const input = h.api.reportRetiredAgents.mock.calls[0][0]
+      expect(input.setupId).toBe('setup-2551')
+      expect(input.apiKey).toBe('sk_agent_newsecret')
+      expect([...input.retiredAgentIds].sort()).toEqual([OLD_A, OLD_B].sort())
+      // After the complete install-status report, never before.
+      expect(h.api.reportRetiredAgents.mock.invocationCallOrder[0]).toBeGreaterThan(
+        h.api.updateInstallStatus.mock.invocationCallOrder.at(-1)!,
+      )
+      expect([...(result.outcome.retired_agent_ids ?? [])].sort()).toEqual([OLD_A, OLD_B].sort())
+    })
+
+    it('MUTATION PROOF: a coexisting NAMED agent (superseded-only) is never reported', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3772-superseded-only-'))
+      await seedDir(root, 'old-a', liveBare(OLD_A))
+      await seedDir(root, 'ops', { ...liveBare(NAMED), 'signer-runtime.json': { server_name: 'ops', wrapper_path: '/w' } })
+      const h = harness(root)
+
+      const result = await runConnect({ ...baseOptions(root), replaceExistingWiring: true }, h.deps)
+
+      expect(result.outcome.superseded_agent_ids).toContain(NAMED)
+      expect(h.api.reportRetiredAgents).toHaveBeenCalledTimes(1)
+      expect(h.api.reportRetiredAgents.mock.calls[0][0].retiredAgentIds).toEqual([OLD_A])
+    })
+
+    it('is not called without --replace, even when other agent directories exist', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3772-no-replace-'))
+      await seedDir(root, 'ops', { ...liveBare(NAMED), 'signer-runtime.json': { server_name: 'ops', wrapper_path: '/w' } })
+      const h = harness(root)
+
+      const result = await runConnect({ ...baseOptions(root), serverName: 'payment-agent' }, h.deps)
+
+      expect(result.outcome.superseded_agent_ids).toContain(NAMED)
+      expect(h.api.reportRetiredAgents).not.toHaveBeenCalled()
+    })
+
+    it('is not called when nothing was retired (clean machine, or install error skipped retirement)', async () => {
+      const clean = await mkdtemp(join(tmpdir(), 'haven-3772-clean-'))
+      const hClean = harness(clean)
+      await runConnect({ ...baseOptions(clean), replaceExistingWiring: true }, hClean.deps)
+      expect(hClean.api.reportRetiredAgents).not.toHaveBeenCalled()
+
+      const failed = await mkdtemp(join(tmpdir(), 'haven-3772-install-err-'))
+      await seedDir(failed, 'old-a', liveBare(OLD_A))
+      const hFailed = harness(failed, { installErrorCode: 'runtime_config_write_failed' })
+      await runConnect({ ...baseOptions(failed), replaceExistingWiring: true }, hFailed.deps)
+      expect(hFailed.api.reportRetiredAgents).not.toHaveBeenCalled()
+    })
+
+    it('drops ids that are not uuids (a directory-name identity fallback)', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3772-non-uuid-'))
+      await seedDir(root, 'old-a', liveBare(OLD_A))
+      await seedDir(root, 'old-b', liveBare('agent-old-not-a-uuid'))
+      const h = harness(root)
+
+      const result = await runConnect({ ...baseOptions(root), replaceExistingWiring: true }, h.deps)
+
+      expect(result.outcome.retired_agent_ids).toHaveLength(2)
+      expect(h.api.reportRetiredAgents.mock.calls[0][0].retiredAgentIds).toEqual([OLD_A])
+    })
+
+    it('an older backend (null answer) is tolerated silently', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3772-null-'))
+      await seedDir(root, 'old-a', liveBare(OLD_A))
+      const h = harness(root)
+      h.api.reportRetiredAgents.mockResolvedValue(null as never)
+
+      await runConnect({ ...baseOptions(root), replaceExistingWiring: true }, h.deps)
+
+      expect(h.api.reportRetiredAgents).toHaveBeenCalledTimes(1)
+      expect(h.logs.join('\n')).not.toContain('Could not tell Haven')
+    })
+
+    it('a thrown report is logged in one line and the run outcome is unaffected', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3772-throw-'))
+      await seedDir(root, 'old-a', liveBare(OLD_A))
+      const h = harness(root)
+      h.api.reportRetiredAgents.mockRejectedValue(new Error('boom 500'))
+
+      const result = await runConnect({ ...baseOptions(root), replaceExistingWiring: true }, h.deps)
+
+      expect(h.logs.filter((line) => line.includes('Could not tell Haven which agents were retired: boom 500'))).toHaveLength(1)
+      expect(result.outcome.retired_agent_ids).toEqual([OLD_A])
+      expect(result.outcome.superseded_agents_retired_locally).toBe(true)
+      expect(result.outcome.outcome).not.toBe('failed')
+      expect(result.outcome).not.toHaveProperty('retired_agents_reported')
+    })
   })
 
   it('--replace on a clean machine is a harmless no-op — no prompt, no retirement, no outcome flag', async () => {

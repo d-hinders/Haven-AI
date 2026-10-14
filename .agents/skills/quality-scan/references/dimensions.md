@@ -320,7 +320,7 @@ exiting 1 on the marker.
 ```bash
 # Copy lint: files that can carry product copy but are outside SCAN_DIRS and
 # SCAN_FILES, run through the lint's own matcher.
-git ls-files 'packages/frontend/src/**/*.ts' 'packages/frontend/src/**/*.tsx' 'packages/sdk/src/**/*.ts' | grep -vE '\.test\.|__tests__|/app/|/components/' > "$SCRATCH/cl.txt"
+git ls-files 'packages/frontend/src/**/*.ts' 'packages/frontend/src/**/*.tsx' 'packages/sdk/src/**/*.ts' | grep -vE '\.test\.|__tests__|/app/|/components/|/hooks/' > "$SCRATCH/cl.txt"
 node -e 'import("./scripts/frontend-copy-lint.mjs").then(async (m) => { const fs = await import("node:fs"); const files = fs.readFileSync(process.argv[1], "utf8").trim().split("\n").filter((f) => !m.SCAN_FILES.includes(f)); let hit = 0; for (const f of files) { const n = m.findCopyIssues(fs.readFileSync(f, "utf8")).length; if (n) { hit++; console.log(n, f) } } console.log("unscanned:", files.length, "with hits:", hit) })' "$SCRATCH/cl.txt"
 # Money-path perimeter: files that call a money verb but match no glob.
 rg -l -e 'sendTransaction|redeemDelegation|signTypedData|sendUserOperation|executeTransaction|broadcastTransaction' packages --type ts -g '!*test*' -g '!**/dist/**' > "$SCRATCH/mv.txt"

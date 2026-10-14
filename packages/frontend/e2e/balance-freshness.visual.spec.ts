@@ -207,7 +207,7 @@ test.describe('degraded balance renders the last-known value with its stale mark
     await expect(main.getByText('as of 45m ago')).toHaveCount(1)
     // Every token has a known value, so the change stays a real line computed
     // from the substituted totals — not the unavailable caption.
-    await expect(main.getByText('+$12.34 (+0.98%) today')).toHaveCount(1)
+    await expect(main.getByText('+$12.34 (+0.98%) since yesterday')).toHaveCount(1)
 
     await expectNoSkeletons(main, '/dashboard (degraded)')
     await settleFonts(page)

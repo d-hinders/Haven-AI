@@ -16,6 +16,8 @@ import { useDelegationSend } from '@/hooks/useDelegationSend'
 import { getChainTokens } from '@/lib/chains'
 import { Modal } from './ui/Modal'
 import { Button } from './ui/Button'
+import WalletConnectAction from './WalletConnectAction'
+import PasskeyElsewhereHint from './PasskeyElsewhereHint'
 import { Input } from './ui/Input'
 import { useToast } from './ui/Toast'
 
@@ -120,17 +122,18 @@ export default function DelegationSendModal({ open, onClose, accountAddress, cha
           // #1097: with the signer set loaded, this is only reachable for
           // owner-only accounts (the optimistic passkey fallback keeps
           // `ready` true otherwise) — the wallet really is the blocker.
-          <p className="text-xs text-[var(--v2-ink-muted)]">
-            Connect the account&apos;s owner wallet to send.
-          </p>
+          <div className="space-y-2">
+            <p className="text-xs text-[var(--v2-ink-muted)]">
+              Connect your account owner wallet to send.
+            </p>
+            {/* #3812: connect or switch in place (the header pill is gone since #3825). */}
+            <WalletConnectAction />
+          </div>
         ) : null}
         {ready && passkeyElsewhere ? (
           // #1097: hint on a WORKING send — the ceremony may hand off to the
           // device that holds the passkey.
-          <p className="text-xs text-[var(--v2-ink-muted)]">
-            This account&apos;s passkey may be on another device — your browser will
-            guide you there when you approve.
-          </p>
+          <PasskeyElsewhereHint />
         ) : null}
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="ghost" onClick={onClose}>

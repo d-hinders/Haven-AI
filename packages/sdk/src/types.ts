@@ -722,6 +722,24 @@ export interface HavenAgent {
    * mechanism a caller should read/derive from.
    */
   executionRail: 'legacy' | 'delegation'
+  /**
+   * #3772: non-null when a later `connect --replace` on this machine retired
+   * this agent's directory and installed a replacement — the session reading
+   * this is still running as the OLD agent. Warning only: nothing is paused or
+   * revoked, and the old agent keeps any budget it still holds until the user
+   * removes it. Null when not superseded, and on an older backend that sends nothing.
+   */
+  supersededBy: HavenAgentSupersession | null
+}
+
+/** #3772: the "this agent was replaced" notice carried by agent reads. */
+export interface HavenAgentSupersession {
+  replacementAgentId: string
+  supersededAt: string
+  warning: string
+  nextAction: typeof AgentPaymentNextAction.StopAndTellUser
+  /** Why no Haven tool follows: the next step is the user's. */
+  nextToolOmittedReason: string
 }
 
 export interface HavenAllowance {
@@ -798,6 +816,8 @@ export interface HavenAllowanceSummary {
   delegateAddress: string
   chainId: number
   allowances: HavenAllowance[]
+  /** #3772: see {@link HavenAgent.supersededBy}. */
+  supersededBy: HavenAgentSupersession | null
 }
 
 /**
@@ -1840,7 +1860,9 @@ export const AgentPaymentFailureCode = {
    * challenge — e.g. its settlement wallet is out of gas. No 402 was ever
    * issued and no payment was created; this is honest and (per
    * `retry_after_s`, when present) usually transient, unlike a permanent
-   * endpoint miss.
+   * endpoint miss — except out of gas (`reason_code:
+   * settlement_wallet_out_of_gas`), which needs the merchant's operator to
+   * top up its settlement wallet first (#3834).
    */
   MerchantNotReady: 'MERCHANT_NOT_READY',
 } as const
@@ -1954,7 +1976,7 @@ export const AgentPaymentFailureCodeDescriptions: Record<AgentPaymentFailureCode
   [AgentPaymentFailureCode.MaxAmountUnconvertible]:
     "max_amount_human could not be converted to atomic units against this quote's asset — either its decimals are unknown to Haven or the cap has more decimal places than the asset supports. Nothing was spent. Round the cap, or re-send it as an exact atomic max_amount.",
   [AgentPaymentFailureCode.MerchantNotReady]:
-    'The merchant refused the probe with its own "cannot settle right now" signal instead of a 402 challenge. No payment was created. Often transient — retry later (see retry_after_s in the message, if given) rather than treating this as a broken or wrong endpoint.',
+    'The merchant refused the probe with its own "cannot settle right now" signal instead of a 402 challenge. No payment was created. Often transient — retry later (see retry_after_s in the message, if given) rather than treating this as a broken or wrong endpoint — except an out-of-gas refusal (reason_code settlement_wallet_out_of_gas), which needs the merchant\'s operator to top up its settlement wallet before any retry can succeed.',
 }
 
 /**
@@ -2519,6 +2541,8 @@ export interface RawHavenAgent {
   delegate_address: string
   chain_id: number
   execution_rail: string
+  /** #3772: absent on an older backend. */
+  superseded_by?: { agent_id: string; superseded_at: string } | null
 }
 
 /** @internal */
@@ -2565,6 +2589,8 @@ export interface RawHavenAllowanceSummary {
   delegate_address: string
   chain_id: number
   allowances: RawHavenAllowance[]
+  /** #3772: absent on an older backend. */
+  superseded_by?: { agent_id: string; superseded_at: string } | null
 }
 
 /** @internal */
@@ -2635,6 +2661,14 @@ export interface HavenCatalogEntry {
   priceAtomic: string | null
   asset: string | null
   network: string | null
+  /**
+   * #3839: the x402 `assetTransferMethods` the merchant advertised on its last
+   * probe, comma-separated as the catalog stores them (`"eip3009"`,
+   * `"eip3009,erc7710"`); null until the first successful x402 probe and for
+   * ingestion/MPP rows. OPTIONAL on purpose: absent against a backend that does
+   * not send it. Feed it to `catalogFundingLegExpected` for the funding-leg hint.
+   */
+  assetTransferMethods?: string | null
   status: 'active' | 'degraded' | 'delisted'
   verifiedAt: string | null
   /**
@@ -2704,6 +2738,8 @@ export interface RawCatalogEntry {
   price_atomic: string | null
   asset: string | null
   network: string | null
+  /** #3839: comma-separated x402 assetTransferMethods; null until probed. Absent from an older backend. */
+  asset_transfer_methods?: string | null
   status: 'active' | 'degraded' | 'delisted'
   verified_at: string | null
   source: 'operator' | 'ingestion'

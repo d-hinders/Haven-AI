@@ -20,6 +20,7 @@ function renderAction(overrides: Partial<React.ComponentProps<typeof BudgetGrant
       input={INPUT}
       label="Approve budget"
       busyLabel="Waiting for signature…"
+      failureMessage="Haven could not set the budget. Nothing changed — try again."
       {...overrides}
     />,
   )
@@ -52,15 +53,31 @@ describe('BudgetGrantAction (#1073)', () => {
     expect(onGranted).not.toHaveBeenCalled()
   })
 
-  it('a FAILED signature reads as an error and says nothing changed', async () => {
+  it('a FAILED signature reads as an error and renders the CALLER’S failure sentence (#3895)', async () => {
     const grant = vi.fn().mockResolvedValue({ ok: false, reason: 'failed' })
-    renderAction({ grant })
+    // #3895: the sentence is supplied per surface — the verb of the button
+    // the user clicked, not a hard-coded one. The agent page's "set" wording
+    // rides through unchanged; the modal passes its own approve sentence.
+    renderAction({
+      grant,
+      failureMessage: 'Haven could not set the budget. Nothing changed — try again.',
+    })
 
     fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
 
     const message = await screen.findByText(/could not set the budget/i)
     expect(message.className).toMatch(/danger/)
     expect(screen.getByRole('button', { name: 'Approve budget' })).toBeEnabled()
+  })
+
+  it('the supplied failure sentence is rendered verbatim (#3895)', async () => {
+    const grant = vi.fn().mockResolvedValue({ ok: false, reason: 'failed' })
+    renderAction({ grant, failureMessage: 'The budget was not approved. Nothing changed — try again.' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
+
+    expect(await screen.findByText('The budget was not approved. Nothing changed — try again.')).toBeTruthy()
+    expect(screen.queryByText(/could not set the budget/i)).toBeNull()
   })
 
   it('a retry clears the previous attempt’s outcome', async () => {
@@ -86,6 +103,7 @@ describe('BudgetGrantAction (#1073)', () => {
         input={INPUT}
         label="Approve budget"
         busyLabel="Waiting for signature…"
+        failureMessage="Haven could not set the budget. Nothing changed — try again."
       />,
     )
     expect(screen.getByRole('button', { name: 'Waiting for signature…' })).toBeDisabled()
@@ -125,6 +143,21 @@ describe('BudgetGrantAction (#1073)', () => {
 
 // #3695: a page form that opened in place carries its Cancel in the submit
 // row, after the grant button, without taking the modal-footer shape.
+// #3825: the cross-device heads-up rides above a WORKING control and never
+// gates it; it is withheld while the control is not ready.
+describe('BudgetGrantAction readyHint (#3825)', () => {
+  it('shows the hint above a ready control, which stays enabled', () => {
+    renderAction({ readyHint: <p>passkey may be on another device</p> })
+    expect(screen.getByText(/passkey may be on another device/)).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Approve budget' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('withholds the hint while the control is not ready', () => {
+    renderAction({ ready: false, readyHint: <p>passkey may be on another device</p> })
+    expect(screen.queryByText(/passkey may be on another device/)).toBeNull()
+  })
+})
+
 describe('BudgetGrantAction trailingAction (#3695)', () => {
   it('renders after the grant button in the same row and keeps the helper', () => {
     renderAction({ helper: 'One signature.', trailingAction: <button type="button">Cancel</button> })

@@ -21,6 +21,7 @@ import { ALLOWLIST } from '../../../scripts/serve-docs.mjs'
 import {
   BUILD,
   SKIP,
+  globToRegExp,
   isWatched as isWatchedBy,
   makeRepo,
   parseIgnoreCommand,
@@ -167,29 +168,29 @@ describe('frontend Vercel ignore step — the rule (#3594)', () => {
     expect(r.run({ VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'dev' })).toBe(BUILD)
   })
 
-  it('a frontend PR gets a preview even when its newest push is docs-only (case i)', () => {
-    r.git('checkout', '-q', '-b', 'feat/x')
+  it('a preview/* branch with a frontend change builds even when its newest push is docs-only (case i)', () => {
+    r.git('checkout', '-q', '-b', 'preview/x')
     r.commit('packages/frontend/src/app/page.tsx')
     r.commit('docs/operations/runbook.md')
-    expect(r.run({ VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'feat/x' })).toBe(BUILD)
+    expect(r.run({ VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'preview/x' })).toBe(BUILD)
   })
 
   it('production, or a preview with no dev history it can find, builds (case k)', () => {
-    r.git('checkout', '-q', '-b', 'feat/z')
+    r.git('checkout', '-q', '-b', 'preview/z')
     r.commit('packages/backend/src/routes/payments.ts')
     expect(r.run({ VERCEL_ENV: 'production' })).toBe(BUILD)
     const shallow = r.shallowClone()
     try {
-      expect(r.run({ VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'feat/z' }, shallow)).toBe(BUILD)
+      expect(r.run({ VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'preview/z' }, shallow)).toBe(BUILD)
     } finally {
       rmSync(shallow, { recursive: true, force: true })
     }
   })
 
-  it('a backend-only PR spends no build on its first preview (case j; the skipped deployment still counts toward the cap, #3681)', () => {
-    r.git('checkout', '-q', '-b', 'feat/y')
+  it('a backend-only preview/* branch spends no build on its first preview (case j; the skipped deployment still counts toward the cap, #3681)', () => {
+    r.git('checkout', '-q', '-b', 'preview/y')
     r.commit('packages/backend/src/routes/payments.ts')
-    expect(r.run({ VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'feat/y' })).toBe(SKIP)
+    expect(r.run({ VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'preview/y' })).toBe(SKIP)
   })
 
   it('skips when only Playwright screenshots or specs changed (#3681)', () => {
@@ -245,5 +246,39 @@ describe('frontend Vercel ignore step — the rule (#3594)', () => {
     expect(r.run({ VERCEL_GIT_PREVIOUS_SHA: deployed })).toBe(SKIP)
     expect(r.run({ VERCEL_GIT_PREVIOUS_SHA: deployed, FRONTEND_FORCE_BUILD: '1' })).toBe(BUILD)
     expect(r.run({ VERCEL_GIT_PREVIOUS_SHA: deployed, OPS_FORCE_BUILD: '1' })).toBe(SKIP)
+  })
+})
+
+/**
+ * #3821: every push to any branch created a frontend deployment, a skipped one
+ * included, and those count toward Vercel Hobby's daily cap of 100. Only `dev`
+ * (the dev host), `main` (production) and opt-in `preview/*` branches deploy.
+ * Vercel deploys a branch when ANY `true` rule matches it, and deploys a branch
+ * that matches no rule.
+ */
+describe('frontend Vercel project deploys dev, main and preview/* only (#3821)', () => {
+  const config = JSON.parse(readFileSync(join(FRONTEND, 'vercel.json'), 'utf8'))
+  const rules = Object.entries(config.git?.deploymentEnabled ?? {}) as Array<[string, boolean]>
+  const deploys = (branch: string) => {
+    const matched = rules.filter(([glob]) => globToRegExp(glob).test(branch))
+    return matched.length === 0 || matched.some(([, on]) => on === true)
+  }
+
+  it('turns every branch off and dev, main and preview/** on', () => {
+    expect(config.git.deploymentEnabled).toEqual({ '**': false, dev: true, main: true, 'preview/**': true })
+  })
+
+  it.each([
+    ['dev', true],
+    ['main', true],
+    ['preview/foo', true],
+    ['preview/a/b', true],
+    ['feat/1234-x', false],
+    ['release/0.10.0', false],
+    ['hotfix/x', false],
+    ['previews', false],
+    ['development', false],
+  ])('branch %s deploys: %s', (branch, expected) => {
+    expect(deploys(branch)).toBe(expected)
   })
 })

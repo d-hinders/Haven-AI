@@ -26,11 +26,12 @@
  */
 
 import { pruneSignerRuntimes } from './prune-runtimes.js'
+import { spawn } from 'node:child_process'
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { connectorRerunCommand } from '@haven_ai/sdk'
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
-import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
+import { MCP_RUNTIME_MANIFEST, signerPackageSpec } from './runtime-manifest.js'
 import {
   probeHostedAgentIdentity,
   probeHostedMcpTools,
@@ -54,7 +55,7 @@ import { normalizeRuntimeName, restartRequiredForRuntime, RUNTIME_FLAG_VALUE_LIS
 import { getLocalSignerConsentStatus } from './signer-consent.js'
 import { TOMBSTONE_FILENAME, readAgentTombstone, readTombstoneRecords, tombstonesDirForAgentDirectory } from './tombstone.js'
 import { serverNamesFor, type ServerNames } from './server-names.js'
-import { CONNECT_OUTCOME_FILENAME, readConnectOutcomeRuntime, readMcpServerBinding, REKEY_PENDING_FILENAME, inspectRekeyPending, type RekeyPendingStatus } from './storage.js'
+import { CONNECT_OUTCOME_FILENAME, readConnectOutcomeRuntime, readMcpServerBinding, REKEY_PENDING_FILENAME, inspectRekeyPending, resolveAgentDirectoryBySlug, assertDirectoryRecordsSlug, type RekeyPendingStatus } from './storage.js'
 import { shortAddress, withoutUserinfo } from './redact.js'
 
 /**
@@ -130,8 +131,64 @@ export interface DoctorDeps {
   probeHostedIdentity?: typeof probeHostedAgentIdentity
   runCommand?: (command: string, args: string[]) => Promise<void>
   env?: NodeJS.ProcessEnv
+  /**
+   * #3799 test seam: re-acknowledge consent by running the recorded wrapper's
+   * `--ack` (the INSTALLED signer writes the ack, so a HAVEN_SIGNER_SPEC
+   * override cannot produce a mismatching hash). Default: execFile below.
+   */
+  runSignerAck?: (wrapperPath: string) => Promise<{ stdout: string }>
   /** Injected clock — the pending-re-key TTL is the only time-dependent check (#1911). */
   now?: () => number
+}
+
+/**
+ * #3799: token-free re-consent. Run the recorded wrapper with `--ack` and
+ * stdin closed — the signer prints its consent block and writes the ack next
+ * to the credential file. Going through the wrapper (not this process's
+ * bundled signer) is the point: the ack must describe the signer that will
+ * actually run.
+ */
+function runWrapperAck(wrapperPath: string, timeoutMs = 30_000): Promise<{ stdout: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(wrapperPath, ['--ack'], { stdio: ['ignore', 'pipe', 'pipe'] })
+    let stdout = ''
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      child.kill()
+      reject(new Error(`signer --ack timed out after ${Math.round(timeoutMs / 1000)}s`))
+    }, timeoutMs)
+    child.stdout?.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString('utf8')
+    })
+    child.on('error', (err) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      reject(err)
+    })
+    child.on('close', (code) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (code === 0) resolve({ stdout })
+      else reject(new Error(`signer --ack exited ${code ?? 'abnormally'}`))
+    })
+  })
+}
+
+/**
+ * #3799: the `--name <slug>` repair line for a named pair — no
+ * `--credentials-dir` needed, the pair record selects the directory.
+ */
+function repairCommandNamedFor(runtime: string, slug: string): string {
+  const nameFlag = ` --name ${slug}`
+  if (normalizeRuntimeName(runtime)) return `Run: ${RERUN} --doctor --repair --runtime ${runtime}${nameFlag}`
+  return (
+    `Run: ${RERUN} --doctor --repair --runtime <runtime>${nameFlag} — --repair needs the runtime named; ` +
+    `one of: ${RUNTIME_FLAG_VALUE_LIST.join(', ')}.`
+  )
 }
 
 interface IdentityFile {
@@ -420,6 +477,53 @@ export interface AgentInventoryEntry {
    * `runDoctor` for why that check exists rather than a cascade rule change.
    */
   rekeyPending?: RekeyPendingStatus
+}
+
+/**
+ * #3830: Claude Code keeps its MCP servers in `~/.claude.json` — user scope
+ * `mcpServers`, and per-project `projects[<path>].mcpServers` — a file the
+ * connector does not write, so `runtimeConfigPathFor` names no config for it
+ * and `agentIsWired` used to fall back to "the selected directory is wired,
+ * the rest are not". Under named pairs by default (#3737) that labelled a
+ * second, deliberately connected agent `superseded` and still spend-capable.
+ *
+ * This reduces the file to what `agentIsWired` matches on — each server's
+ * NAME, launch command and args, and URL — one line per server. `env` and
+ * `headers` are never kept: they can hold secrets, and wiring evidence does
+ * not need them. The text is only matched against, never printed. Returns
+ * null when the file is missing, unparseable, or names no servers; the
+ * caller then keeps the fallback exactly as before. Project-scope `.mcp.json`
+ * files are not discoverable from here, so this is positive evidence only:
+ * it can show a directory IS wired, never that it is not.
+ */
+async function readClaudeCodeWiringEvidence(homeDir: string): Promise<string | null> {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(await readFile(join(homeDir, '.claude.json'), 'utf8'))
+  } catch {
+    return null
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null
+  const blocks: unknown[] = [(parsed as { mcpServers?: unknown }).mcpServers]
+  const projects = (parsed as { projects?: unknown }).projects
+  if (typeof projects === 'object' && projects !== null) {
+    for (const project of Object.values(projects as Record<string, unknown>)) {
+      if (typeof project === 'object' && project !== null) blocks.push((project as { mcpServers?: unknown }).mcpServers)
+    }
+  }
+  const lines: string[] = []
+  for (const block of blocks) {
+    if (typeof block !== 'object' || block === null) continue
+    for (const [name, server] of Object.entries(block as Record<string, unknown>)) {
+      const entry = typeof server === 'object' && server !== null ? (server as Record<string, unknown>) : {}
+      const parts = [JSON.stringify(name) + ':']
+      if (typeof entry.command === 'string') parts.push(entry.command)
+      if (Array.isArray(entry.args)) parts.push(...entry.args.filter((arg): arg is string => typeof arg === 'string'))
+      if (typeof entry.url === 'string') parts.push(entry.url)
+      lines.push(parts.join(' '))
+    }
+  }
+  return lines.length > 0 ? lines.join('\n') : null
 }
 
 /**
@@ -925,8 +1029,16 @@ async function verdictsForAgent(
         id: 'signer_process',
         label: 'Signer stdio handshake',
         level: 'failed',
-        detail: 'The local-tools consent is not acknowledged, so the signer refuses to start (by design).',
-        repair: `Run: ${RERUN} --ack-local-tools --setup <token>  (or re-run your original connector command with --ack-local-tools).`,
+        // #3799: honest about what the mismatch does and does not prove. The
+        // stored ack covers a tool SET; a doctor bundled with a newer signer
+        // reports exactly this against an older, still-working install.
+        detail:
+          'The stored local-tools consent does not match the tool set this connector bundles — by design a signer ' +
+          'with a different tool set refuses to start. This does not prove the currently running signer is broken: ' +
+          'a doctor newer than the installed signer reports exactly this mismatch.',
+        repair:
+          `Run: ${sidecar.wrapper_path} --ack < /dev/null — re-acknowledge consent with the installed signer, no setup token needed. ` +
+          `Or re-run repair with --ack-local-tools: ${repairCommandFor(input.runtime, ' --ack-local-tools', input.repairDir)}.`,
       })
     } else {
       const probe: LocalMcpProbeResult = await (deps.probeSignerTools ?? probeLocalMcpTools)(
@@ -965,20 +1077,39 @@ async function verdictsForAgent(
   return { checks, ...(signerCapabilities ? { signerCapabilities } : {}) }
 }
 
+/**
+ * #3799: resolve `--name <slug>` to the directory that records the pair,
+ * BEFORE discovery. `--name` with `--credentials-dir` must agree — refuse
+ * otherwise, never silently prefer one. Returns the explicit directory for
+ * discovery, or undefined when no name was given.
+ */
+async function resolveNamedDirectory(
+  input: { credentialsDir?: string; serverName?: string },
+  homeDir: string,
+): Promise<string | undefined> {
+  if (!input.serverName) return input.credentialsDir
+  if (input.credentialsDir) {
+    await assertDirectoryRecordsSlug(input.credentialsDir, input.serverName)
+    return input.credentialsDir
+  }
+  return resolveAgentDirectoryBySlug(input.serverName, { root: join(homeDir, '.haven', 'agents') })
+}
+
 export async function runDoctor(
-  input: { runtime: string; credentialsDir?: string },
+  input: { runtime: string; credentialsDir?: string; serverName?: string },
   deps: DoctorDeps = {},
 ): Promise<DoctorReport> {
   const homeDir = deps.homeDir ?? homedir()
   const checks: CheckVerdict[] = []
   let signerCapabilities: Record<string, unknown> | undefined
 
-  const { directory, others, parkedOnly, identityDirectories } = await discoverCredentialDirectory(homeDir, input.credentialsDir)
+  const namedDir = await resolveNamedDirectory(input, homeDir)
+  const { directory, others, parkedOnly, identityDirectories } = await discoverCredentialDirectory(homeDir, namedDir)
   // #3412: with several agents on the machine — or when the caller already
   // named the directory with --credentials-dir — every repair line names the
   // directory it is about, so the pasted repair cannot fall back to a scan of
   // ~/.haven/agents and land on a different agent. See `credentialsDirFlagFor`.
-  const nameRepairDir = identityDirectories.length > 1 || Boolean(input.credentialsDir)
+  const nameRepairDir = identityDirectories.length > 1 || Boolean(namedDir)
 
   // ── #3120: resolve the runtime BEFORE anything judges it ──────────────────
   // An absent flag used to flow through as '' and earn a fabricated green
@@ -1004,6 +1135,13 @@ export async function runDoctor(
       configText = null
     }
   }
+  // #3830: wiring evidence for the runtime that owns no config file the
+  // connector writes. It feeds only the `wired` decision — the runtime-config
+  // checks keep reading `configText` and stay on the CLI-managed skip. A
+  // directory it upgrades is then a wired agent like any on Codex: it runs the
+  // full per-agent check set, and a failure there now fails the run.
+  const claudeCodeWiring =
+    configText === null && normalizedRuntime === 'claude-code' ? await readClaudeCodeWiringEvidence(homeDir) : null
 
   // ── Inventory ─────────────────────────────────────────────────────────────
   const allDirectories = directory ? [directory, ...others] : others
@@ -1051,7 +1189,12 @@ export async function runDoctor(
       })
       continue
     }
-    const wired = agentIsWired(configText, names, slug, identity, sidecar, dir === directory, bareOwnerExists)
+    const wired =
+      agentIsWired(configText, names, slug, identity, sidecar, dir === directory, bareOwnerExists) ||
+      // Additive only: a name or wrapper path in ~/.claude.json proves this
+      // directory is wired; its absence proves nothing (#3830), so the
+      // fallback verdict above is never downgraded.
+      (claudeCodeWiring !== null && agentIsWired(claudeCodeWiring, names, slug, identity, sidecar, false, false))
     const entry: AgentInventoryEntry = {
       ...(slug ? { slug } : {}),
       ...(identity.agent_id ? { agentId: identity.agent_id } : {}),
@@ -1164,7 +1307,7 @@ export async function runDoctor(
       level: 'failed',
       detail:
         `Runtime is unknown — no runtime flag was given and the connector's record in ` +
-        `${primaryDirectory ?? input.credentialsDir ?? '~/.haven/agents'} carries no resolvable ` +
+        `${primaryDirectory ?? namedDir ?? '~/.haven/agents'} carries no resolvable ` +
         `${CONNECT_OUTCOME_FILENAME} runtime. The runtime config was NOT checked. Re-run the doctor ` +
         `naming the runtime — one of: ${RUNTIME_FLAG_VALUE_LIST.join(', ')}.`,
       repair: `Re-run the doctor naming the runtime — one of: ${RUNTIME_FLAG_VALUE_LIST.join(', ')}.`,
@@ -1173,12 +1316,24 @@ export async function runDoctor(
     // claude-code / other: genuinely CLI-managed or manual — the honest skip
     // the scope boundary preserves. The detail names the RESOLVED runtime
     // (#3120), so "CLI-managed" is only ever claimed about a runtime that
-    // earned it.
+    // earned it. #3799: for Claude Code the doctor also names the pair the
+    // folder RECORDS and how to confirm it — the config lives in the Claude
+    // Code registry, which this connector neither reads nor writes, so
+    // "skipping the file check" without naming the pair left the agent with
+    // nothing to verify against.
+    const claudePairSuffix =
+      input2.runtime === 'claude-code' && primaryDirectory
+        ? await (async () => {
+            const sidecar = await readRuntimeSidecar(primaryDirectory)
+            const names = serverNamesFor(sidecar?.server_name)
+            return ` The MCP pair recorded for this folder is ${names.hosted} / ${names.signer} — confirm with \`claude mcp get ${names.signer}\`.`
+          })()
+        : ''
     checks.push({
       id: 'runtime_config',
       label: 'Runtime MCP config',
       level: 'ok',
-      detail: `Runtime '${input2.runtime}' is configured through its own CLI or by hand (${input2.runtime === 'other' ? 'manual runtime' : 'CLI-managed'}) and has no file-based config the connector owns — skipping the file check.`,
+      detail: `Runtime '${input2.runtime}' is configured through its own CLI or by hand (${input2.runtime === 'other' ? 'manual runtime' : 'CLI-managed'}) and has no file-based config the connector owns — skipping the file check.${claudePairSuffix}`,
     })
   } else if (configText === null) {
     checks.push({
@@ -1322,7 +1477,11 @@ export async function runDoctor(
       supersededLive.length === 0 ? 'ok' : classificationUnreliable ? 'advisory' : 'failed'
     checks.push({
       id: 'superseded_agents',
-      label: 'Superseded agent credentials',
+      // #3830: an advisory means the connector could not tell wired from
+      // superseded, so its label must not assert "superseded" either. The
+      // inventory `classification` stays as is (#3121 decision 5); the label
+      // is what a person reads.
+      label: supersededLevel === 'advisory' ? 'Other agent credentials (wiring not verifiable)' : 'Superseded agent credentials',
       level: supersededLevel,
       detail:
         supersededLevel === 'failed'
@@ -1330,7 +1489,7 @@ export async function runDoctor(
             'your latest setup keeps authenticating (and spending) as the old agent.'
           : supersededLevel === 'advisory'
             ? `${otherEntries.length} other credential dir(s) found — ${parts.join('; ')}. Runtime ` +
-              `'${input2.runtime}' has no config file the connector can read, so which of these agents ` +
+              `'${input2.runtime}' has no config file the connector writes, and none it can read names these agents, so which of them ` +
               'are wired cannot be verified from this machine: a live key here may be an agent you use ' +
               'deliberately, or one a host started before your latest setup is still spending as.'
             : `${otherEntries.length} other credential dir(s) found — ${parts.join('; ')}.`,
@@ -1397,7 +1556,7 @@ export async function runDoctor(
         `${rebound.length} MCP server name${rebound.length === 1 ? '' : 's'} changed hands on this machine (locally recorded ` +
         `bindings; the backend's own record is the authority for the same backend): ${parts.join('; ')}. A saved session, ` +
         'script or document naming the server may still mean the earlier agent.',
-      repair: `Retire the earlier director(y/ies) with ${RERUN} --unwire <dir> to release the name, or keep both and address them by --name.`,
+      repair: `Retire the earlier director(y/ies) with ${RERUN} --unwire <dir> to release the name, or keep both and address them by --name — --doctor --repair --name <slug> now selects the pair directly.`,
     })
   }
 
@@ -1548,19 +1707,24 @@ export interface RepairResult {
 
 /** Re-run the pieces setup owns; never touches credentials or tokens. */
 export async function runRepair(
-  input: { runtime: string; credentialsDir?: string },
+  input: { runtime: string; credentialsDir?: string; serverName?: string; ackLocalTools?: boolean },
   deps: DoctorDeps = {},
 ): Promise<RepairResult> {
   const homeDir = deps.homeDir ?? homedir()
   const messages: string[] = []
-  const { directory, others, identityDirectories } = await discoverCredentialDirectory(homeDir, input.credentialsDir)
+  // #3799: --name resolves the directory by its RECORDED pair before discovery
+  // (refusing on unknown slug, a rebound name, or disagreement with
+  // --credentials-dir), so naming the agent replaces the mtime guess.
+  const namedDir = await resolveNamedDirectory(input, homeDir)
+  const { directory, others, identityDirectories } = await discoverCredentialDirectory(homeDir, namedDir)
   // #3412: repair REWRITES the runtime config from ONE agent's stored
   // credentials. With several agents on the machine and no --credentials-dir,
   // "the newest directory by mtime" is a guess — and the doctor's primary is
   // chosen differently (first wired agent), so the two could disagree. On
   // 2026-09-28 exactly that re-wired a prod agent when a dev one was meant.
   // Refuse the guess and hand back one exact command per agent instead.
-  if (!input.credentialsDir && identityDirectories.length > 1) {
+  // #3799: a --name that resolved cleanly IS the naming — no refusal.
+  if (!namedDir && identityDirectories.length > 1) {
     const lines = await Promise.all(
       identityDirectories.map(async (dir) => {
         const identity = await readIdentity(dir)
@@ -1571,16 +1735,27 @@ export async function runRepair(
         // never offered as a target: repairing it would re-wire a retired
         // agent's credentials over its tombstone.
         const retired = !identity?.api_key || (await pathExists(join(dir, TOMBSTONE_FILENAME)))
+        // #3799: name the PAIR each directory owns — the sidecar records it,
+        // and the pair is what the calling agent knows itself by. Named pairs
+        // are offered a --name command; the bare pair still needs the
+        // directory spelled out.
+        const sidecar = await readRuntimeSidecar(dir)
+        const slug = sidecar?.server_name
+        const pair = slug
+          ? `${serverNamesFor(slug).hosted} / ${serverNamesFor(slug).signer}`
+          : 'the bare haven / haven-signer pair'
         return retired
-          ? `  • ${who} (${dir}): retired — not a repair target`
-          : `  • ${who}: ${repairCommandFor(input.runtime, '', dir).replace(/^Run: /, '')}`
+          ? `  • ${who} — ${pair} (${dir}): retired — not a repair target`
+          : slug
+            ? `  • ${who} — owns ${pair}: ${repairCommandNamedFor(input.runtime, slug).replace(/^Run: /, '')}`
+            : `  • ${who} — owns ${pair}: ${repairCommandFor(input.runtime, '', dir).replace(/^Run: /, '')}`
       }),
     )
     return {
       ok: false,
       messages: [
         `${identityDirectories.length} agent credential directories exist on this machine, and a repair rewrites the ` +
-          'runtime config from ONE of them. Name the agent to repair with --credentials-dir — nothing was changed:',
+          'runtime config from ONE of them. Name the agent to repair with --name <slug> (its recorded pair) or --credentials-dir — nothing was changed:',
         ...lines,
         'Not sure which agent is which? Compare the agent ids against the Haven agent page, or run --doctor first.',
       ],
@@ -1674,6 +1849,34 @@ export async function runRepair(
   const serverName = existingSidecar?.server_name
 
   const signerPath = join(directory, 'signer.json')
+
+  // ── Consent gate (#3799; owner decision 2026-10-09: explicit flag, never automatic) ──
+  // The stored ack covers the signer's tool SET: a repair that installs a
+  // signer with a newer tool set would otherwise finish and leave the agent
+  // unable to start the signer (HAVEN_SIGNER_NO_CONSENT) until re-consent.
+  // Without --ack-local-tools, stop BEFORE writing anything and name the
+  // token-free re-consent — produced by the installed signer via the recorded
+  // wrapper's `--ack`, so a HAVEN_SIGNER_SPEC override cannot mint a
+  // mismatching hash. Never claim the tools "grew": a rekey, a chain change
+  // or the address-shape case produce the same mismatch, and the ack file
+  // holds only the hash.
+  const consent = await getLocalSignerConsentStatus(signerPath)
+  const consentMismatch =
+    !consent.acknowledged && (consent.reason === 'ack_file_missing' || consent.reason === 'ack_file_mismatch')
+  if (consentMismatch && !input.ackLocalTools) {
+    const wrapperPath = existingSidecar?.wrapper_path ?? join(directory, 'bin', 'haven-signer.mjs')
+    return {
+      ok: false,
+      messages: [
+        'Repair stopped before writing anything: the signer it installs would refuse to start until local-tools ' +
+          'consent is re-acknowledged — the stored acknowledgement does not match the tool set of the signer this connector pins.',
+        'The mismatch does not prove the currently running signer is broken; a newer tool set is enough to explain it.',
+        `Re-consent without a setup token, produced by the installed signer: ${wrapperPath} --ack < /dev/null`,
+        `Or re-run repair with --ack-local-tools to re-consent during the repair: ${repairCommandFor(input2.runtime, ' --ack-local-tools', directory)}`,
+      ],
+    }
+  }
+
   const prepared = await prepareSignerRuntime(
     { credentialDirectory: directory, signerPath, homeDir, serverName },
     { runCommand: deps.runCommand, env: deps.env },
@@ -1681,7 +1884,53 @@ export async function runRepair(
   messages.push(...prepared.messages)
 
   const names = serverNamesFor(serverName)
-  messages.push(`Rewriting MCP entries ${names.hosted} / ${names.signer}${serverName ? ` (agent "${serverName}")` : ' (unnamed pair)'} — no other pair is touched.`)
+
+  // #3799: say what the repair ACTUALLY writes. writeRuntimeConfig has no
+  // case for runtimes configured through their own CLI (claude-code) — there
+  // the write is a no-op and the old unconditional "Rewriting MCP entries"
+  // line was a falsehood. What really changed is the wrapper re-point (above)
+  // plus the sidecar; whichever MCP entry launches the wrapper picks up the
+  // new signer after a restart.
+  const rewritesConfig = runtimeConfigPathFor(normalizeRuntimeName(input2.runtime) ?? input2.runtime, homeDir) !== null
+  if (rewritesConfig) {
+    messages.push(`Rewriting MCP entries ${names.hosted} / ${names.signer}${serverName ? ` (agent "${serverName}")` : ' (unnamed pair)'} — no other pair is touched.`)
+  } else {
+    messages.push(
+      `Re-pointed ${prepared.wrapperPath} at signer ${signerPackageSpec()}. ` +
+        (input2.runtime === 'claude-code'
+          ? `Claude Code's MCP entries were not touched — the entry that launches this wrapper uses the new signer after a restart. Confirm with \`claude mcp get ${names.signer}\`.`
+          : `No MCP config was written — '${input2.runtime}' is configured through its own CLI or by hand; the entry that launches this wrapper uses the new signer after a restart.`),
+    )
+  }
+
+  if (consentMismatch && input.ackLocalTools) {
+    messages.push(`Re-acknowledging local-tools consent with the installed signer (${signerPackageSpec()}):`)
+    try {
+      const ack = await (deps.runSignerAck ?? runWrapperAck)(prepared.wrapperPath)
+      for (const line of ack.stdout.split('\n')) {
+        if (line.trim()) messages.push(`  ${line}`)
+      }
+    } catch (err) {
+      return {
+        ok: false,
+        messages: [
+          ...messages,
+          `The re-acknowledgement failed: ${err instanceof Error ? err.message : String(err)} — consent was NOT written; the runtime config was not rewritten.`,
+        ],
+      }
+    }
+    const after = await getLocalSignerConsentStatus(signerPath)
+    if (!after.acknowledged) {
+      return {
+        ok: false,
+        messages: [
+          ...messages,
+          `Consent still does not match after the re-acknowledgement (${after.reason ?? after.error}). The runtime config was not rewritten.`,
+        ],
+      }
+    }
+    messages.push('Local-tools consent acknowledged for the installed signer.')
+  }
 
   const configResult = await writeRuntimeConfig({
     // Normalized for the WRITE too (#3145 review round 3): `writeRuntimeConfig`

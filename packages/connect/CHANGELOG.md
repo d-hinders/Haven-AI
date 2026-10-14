@@ -15,6 +15,47 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.10.0-alpha.0 — 2026-10-14
+
+### Added
+
+- After a `--replace` whose install completed, the connector tells Haven which
+  agents the run retired on this machine (#3772), using the NEW agent's key.
+  Only the retired directories are reported — never the coexisting agents
+  `superseded_agent_ids` lists. Haven then warns the retired agent's own reads
+  (`haven_get_agent` / `haven_get_allowances`), so a session still running as
+  it learns to restart. Best-effort: an older backend's 404 is ignored silently, any other
+  failure is one log line, and the outcome is unchanged. Nothing is paused or revoked.
+
+- `--doctor` and `--repair` accept `--name <slug>` and select the agent
+  directory by its RECORDED MCP pair — one rule shared with `--rekey --name`
+  and `--unwire --name` (#3799). An unknown slug is refused listing the slugs
+  that exist; two live directories claiming one pair are refused listing both;
+  tombstoned directories never match; `--name` with `--credentials-dir` must
+  agree or is refused.
+
+### Changed
+
+- The multi-agent `--repair` refusal names, per directory, the agent id AND the
+  MCP pair it owns (`haven-<slug>` / `haven-signer-<slug>`, or the bare
+  `haven` / `haven-signer` pair), and offers the `--name <slug>` command for
+  named pairs (#3799).
+- `--repair` on a runtime whose config the connector does not write (Claude
+  Code) now says what it actually changed — the wrapper re-point at the pinned
+  signer runtime — instead of claiming to rewrite MCP entries it does not own;
+  `--doctor --runtime claude-code` names the recorded pair and how to confirm
+  it (`claude mcp get haven-signer-<slug>`) (#3799).
+- `--repair --ack-local-tools` re-acknowledges local-tools consent for the
+  signer the repair installs — produced by the installed signer (the recorded
+  wrapper's `--ack`), no setup token, consent block printed. Without the flag,
+  a repair whose installed signer would refuse to start stops before writing
+  anything and names the token-free re-consent command. Owner decision
+  2026-10-09: explicit flag, never automatic re-consent. The doctor's
+  consent-missing check offers the same token-free path instead of
+  `--ack-local-tools --setup <token>` (#3799).
+- `--ack-local-tools` with a bare `--doctor` is refused at parse time instead
+  of silently dropped (#3799); `--name` with `--doctor`/`--repair` is honoured.
+
 ## 0.9.0-alpha.0 — 2026-10-09
 
 ### Changed

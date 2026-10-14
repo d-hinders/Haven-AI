@@ -16,8 +16,9 @@ import {
 } from '@/hooks/useAgentActivity'
 import { useDelegateBalance } from '@/hooks/useDelegateBalance'
 import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains'
-import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
-import { truncate, timeAgo } from '@/lib/format'
+import { paymentSourceTitle } from '@/lib/transaction-labels'
+import { activityCounterparty, counterpartyLabel } from '@/lib/transaction-presentation'
+import { timeAgo } from '@/lib/format'
 import { formatAgentLastActivity, formatAgentLastActivityTitle } from '@/lib/agent-last-seen'
 import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
 import {
@@ -61,7 +62,6 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { Tooltip } from '@/components/ui/Tooltip'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
 import {
   ApprovalRequiredBanner,
@@ -81,24 +81,23 @@ function activityTitle(item: PaymentActivityItem, agentName?: string): string {
   return 'Agent payment'
 }
 
+// #3811: the counterparty half of the movement is the SHARED helper's
+// no-address mode — the same label the transactions table and the dashboard
+// read (the merchant's hostname for x402, the source title, "New recipient")
+// — so a raw address never surfaces in an agent's activity rows.
 function activityMovement(item: PaymentActivityItem, walletName: string) {
-  const isX402 = isMachinePaymentSource(item.source)
-  const hostname = isX402 ? parseX402Hostname(item.x402_resource_url) : null
-
-  const recipient = hostname ? (
-    hostname
-  ) : (
-    <Tooltip label={item.to} mono>
-      <span>{truncate(item.to)}</span>
-    </Tooltip>
-  )
+  const recipient = counterpartyLabel(activityCounterparty(item), undefined, undefined, {
+    noAddress: true,
+  })
 
   return <TransactionMovement from={walletName} to={recipient} />
 }
 
 function activityWalletName(item: PaymentActivityItem, fallbackName: string): string {
   if (item.account_name) return item.account_name
-  if (item.account_address) return `Haven wallet ${truncate(item.account_address)}`
+  // #3811: list rows carry no addresses — an unnamed wallet falls back to
+  // the kind, not to `Haven wallet 0x1234…abcd`.
+  if (item.account_address) return 'Haven wallet'
   return fallbackName
 }
 
@@ -127,6 +126,11 @@ function activityToTransaction(
     value: item.amount_raw ?? '0',
     valueFormatted: item.amount,
     asset: item.token,
+    // #3824/#3811: the activity rows' only fiat, struck in the user's
+    // `currency_preference` — the shared table's currency mode reads it
+    // through `transactionFiat`.
+    approxAmount: item.approx_amount ?? null,
+    approxCurrency: item.approx_currency ?? undefined,
     decimals: 0,
     direction: 'out',
     timestamp: Number.isFinite(createdMs) ? Math.floor(createdMs / 1000) : 0,

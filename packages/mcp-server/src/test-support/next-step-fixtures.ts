@@ -203,8 +203,9 @@ type Site = {
 }
 
 /**
- * Refusal fixtures: 33 site-thrown `HostedToolError` rows (the eip3009
- * rejection carrying a live-state branch) + the 7 generic `normalizeError`
+ * Refusal fixtures: 34 site-thrown `HostedToolError` rows (the eip3009
+ * rejection carrying a live-state branch; #3834 adds the out-of-gas
+ * `merchant_not_ready` row) + the 7 generic `normalizeError`
  * branches (the HavenApiError 4xx/5xx pair, `HavenError` and UNKNOWN_ERROR
  * from #3214, #3416's typed rail-unavailable branch, #3500's typed
  * task-budget-exceeded branch and #3504's typed delegation-budget-exceeded
@@ -213,14 +214,16 @@ type Site = {
  * #3475 follow-up review round 1 (S3): the missing-settlement-hash case is a
  * SUCCESS no-op, not a refusal — its fixture moved to `EMISSION_SITES`.
  */
-export const REFUSAL_SITE_COUNT = 62
+export const REFUSAL_SITE_COUNT = 63
 /** `refusalNextStep(` calls in the hosted source: 30 inline site steps + rejectedAfterFundingStep's 3 + stateErrorNextStep's 5 (round 3 of #3126 migrated the three check_funds cap refusals onto the builder; #3213 added the symbol-resolution refusal) + #3214's 4 in normalizeError (the HavenApiError 4xx/5xx pair, HavenError, UNKNOWN_ERROR) + #3329's 3 (task-budgets.ts's unresolvable-token and over-precise-amount refusals, and state-direct-recovery.ts's haven_submit payment_id/task_budget_id/sub_budget_id exactly-one refusal (#3506 widened it to three ids; still one refusalNextStep site)) + #3423's 1 (catalog-entry.ts's http-row refusal, split out of the combined mcp-row check) + #3416's 1 in normalizeError (the typed rail_unavailable_for_chain 503) + #3500's 1 in normalizeError (the typed task_budget_exceeded 403) + #3504's 1 in normalizeError (the typed delegation_budget_exceeded 403). + #3506 review S2's 2 (state-direct-recovery.ts haven_submit sub_budget_id: the close_needs_reprepare and close_outcome_unconfirmed recovery refusals). + #3494's 2 in normalizeError (the typed signature_rejected and onchain_execution_failed 502s on `POST /payments/:id/sign`) + #3494 review round 1's 1 more in normalizeError (the typed account_validation_failed 502 on the same route). + #3564's 2 in normalizeError (the typed submission_outcome_unknown 502, replacing #3494 round 2's one stop-only arm: the payment_id arm names the status read, the no-id arm stops — no id to poll, so check_status_later's default tool is uncallable). + #3609's 1 in normalizeError (the typed prepare_reverted 502 on `POST /payments` and the x402 funding leg). + #3731's 1 more in the same branch (the insufficient-balance arm of the typed prepare_reverted 502 — the funding step beside the caveat stop). + #3747's 7 (the merchant-egress refusal sites: mcp-context's pre-intent quote/probe refusal, plain-http-x402's pre-funding refusal, and paid-mcp-completion's delivery-time refusal branches). + #3739's 2 in plain-http-x402.ts (request mode's url-required refusal, and `probeRefusal`, the one builder behind the probe's redirect, timeout, size and not-payable refusals). + #3774's 2 in plain-http-x402.ts (`erc7710OutcomeRefusal`'s settlement-evidence and rejected arms). + 1 in identity-gate.ts (the hosted dispatch gate's rejected-key refusal). */
 // #3769: 72 = 70 + 2 — the catalog argument-resolution support
 // (`tools/support/catalog-arguments.ts`) adds two refusalNextStep sites: the
 // fixed-SKU caller-arguments refusal and the shared argumentRefusal builder
 // (used for both the uncompilable-row-schema and the schema-violation
 // refusals).
-export const REFUSAL_STEP_CALLS = 72
+// #3834: 73 = 72 + 1 — mcp-context.ts's out-of-gas `merchant_not_ready`
+// refusal, its own site beside the generic one.
+export const REFUSAL_STEP_CALLS = 73
 
 export const REFUSAL_SITES: Site[] = [
   { site: 'catalog-purchase.ts prepare: allowance short', base: { code: 'INSUFFICIENT_ALLOWANCE', message: 'm', statusCode: 402, suggestedTool: 'haven_get_allowances' }, step: { nextAction: A.FundAccountOrRaiseAllowance, nextTool: null, nextToolOmittedReason: 'the account needs funds or a higher allowance first; haven_get_allowances shows the numbers' }, expect: { next_action: 'fund_account_or_raise_allowance', suggested_tool: 'haven_get_allowances', ...OMIT('the account needs funds or a higher allowance first; haven_get_allowances shows the numbers') } },
@@ -271,6 +274,8 @@ export const REFUSAL_SITES: Site[] = [
   { site: 'catalog-entry.ts unusable', base: { code: 'CATALOG_ENTRY_UNUSABLE', message: 'm', statusCode: 409, suggestedTool: 'haven_pay_mcp_tool' }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: STOP_SUG }, expect: { next_action: 'stop_and_tell_user', suggested_tool: 'haven_pay_mcp_tool', ...OMIT(STOP_SUG) } },
   // #3423 item 1: an http catalog row hands off to haven_quote_x402, not the mcp-only haven_pay_mcp_tool fallback above.
   { site: 'catalog-entry.ts http row', base: { code: 'CATALOG_ENTRY_UNUSABLE', message: 'm', statusCode: 409, suggestedTool: 'haven_quote_x402' }, step: { nextAction: A.RetryWithExplicitContext, nextTool: 'haven_quote_x402', nextArguments: { url: 'https://merchant.example/paid' } }, expect: { next_action: 'retry_with_explicit_context', suggested_tool: 'haven_quote_x402', next_tool: 'mcp__haven__haven_quote_x402', next_tool_server: 'haven', next_tool_name: 'haven_quote_x402', next_tool_server_role: 'hosted', next_arguments: { url: 'https://merchant.example/paid' } } },
+  // #3834: an out-of-gas refusal names the operator top-up, not a retry interval; the generic row below keeps every other reason_code.
+  { site: 'mcp-context.ts merchant not ready: settlement wallet out of gas', base: { code: 'MERCHANT_NOT_READY', message: 'm', statusCode: 503, retryWithNewQuote: true }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: "the merchant's operator must top up its settlement wallet first; re-quote after that" }, expect: { next_action: 'stop_and_tell_user', ...OMIT("the merchant's operator must top up its settlement wallet first; re-quote after that") } },
   { site: 'mcp-context.ts merchant not ready', base: { code: 'MERCHANT_NOT_READY', message: 'm', statusCode: 503, retryWithNewQuote: true }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: 'the merchant needs to recover first; re-quote after retry_after_s' }, expect: { next_action: 'stop_and_tell_user', ...OMIT('the merchant needs to recover first; re-quote after retry_after_s') } },
   { site: 'mcp-context.ts insecure merchant url', base: { code: 'INSECURE_RETRY_TARGET', message: 'm', statusCode: 400 }, step: { nextAction: A.RetryWithExplicitContext, nextTool: null, nextToolOmittedReason: "re-call with the merchant's https URL as merchant_url; nothing was funded or signed" }, expect: { next_action: 'retry_with_explicit_context', ...OMIT("re-call with the merchant's https URL as merchant_url; nothing was funded or signed") } },
   { site: 'mcp-context.ts mcp_transport unrecognised', base: { code: 'INVALID_INPUT', message: 'm', statusCode: 400, status: 'invalid_input', phase: 'not_started', rail: 'x402' }, step: { nextAction: A.RetryWithExplicitContext, nextTool: null, nextToolOmittedReason: RETRY }, expect: { next_action: 'retry_with_explicit_context', ...OMIT(RETRY) } },

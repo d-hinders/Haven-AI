@@ -17,6 +17,15 @@ import { workerSchemaName } from './src/infra/__tests__/helpers/worker-schema.js
 // them is the divergence this file's own comment above warns about.
 applyTestEnvDefaults()
 
+// Explorer history routing is env-driven: with ALCHEMY_HISTORY_API_KEY set
+// (a production value copied into a local `.env`), every Base history read
+// goes to Alchemy and the Blockscout-shaped stubs in the explorer and
+// transactions suites stop matching. Blank it before `config.ts` loads —
+// dotenv never overrides a variable that is already set — so the suites run
+// the same everywhere. Suites that test the Alchemy path set it through their
+// own `config` mock.
+process.env.ALCHEMY_HISTORY_API_KEY = ''
+
 // Real-DB isolation (#1220): bind this worker's connections to its own
 // schema BEFORE config.ts reads DATABASE_URL. `options` rides the postgres
 // startup packet, so every connection the pool hands out — including the

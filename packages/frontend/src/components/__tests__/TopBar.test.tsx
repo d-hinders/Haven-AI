@@ -5,16 +5,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ThemeProvider } from '@/context/ThemeContext'
 import { LocaleProvider } from '@/context/LocaleContext'
 
-// The bar is the layout; these two are the other residents of its rows, and
-// each reaches past its own wallet-connector/provider stack. They are stubbed
-// to nothing because this suite's claim is about the theme toggle's place in
-// the right cluster — and a live WalletButton would make the whole file depend
-// on wagmi and RainbowKit contexts it is not testing. Their absence is
-// asserted nowhere; the components keep their own suites (WalletButton.test.tsx
-// covers the wallet, EnvBadge.test.tsx the badge).
-vi.mock('../WalletButton', () => ({
-  default: () => <span data-testid="stub-wallet-button" />,
-}))
+// The env badge is the other resident of the bar's rows; it is stubbed
+// because this suite's claim is about the right cluster, and the badge keeps
+// its own suite (EnvBadge.test.tsx). There is deliberately NO WalletButton
+// mock any more (#3825): the bar no longer renders one, and a live
+// WalletButton here would throw for want of wagmi's provider — so an
+// accidental re-add fails this whole file, not just one assertion.
 vi.mock('../EnvBadge', () => ({
   default: () => <span data-testid="stub-env-badge" />,
 }))
@@ -62,29 +58,16 @@ describe('TopBar', () => {
     delete document.documentElement.dataset.theme
   })
 
-  it('places the theme toggle in the right cluster, before the wallet button', () => {
-    const { container } = renderBar()
+  it('places the theme toggle in the right cluster', () => {
+    renderBar()
 
     const toggle = screen.getByRole('button', { name: /^Theme:/ })
-    const wallet = screen.getByTestId('stub-wallet-button')
 
-    // Document order, not a class read: a class is a string, the tree order
-    // is a fact. `compareDocumentPosition` carries the XML-DOM quirk — "a
-    // before b" answers with the FOLLOWING bit, and "a after b" with
-    // PRECEDING|FOLLOWING — so the bit test alone proves only that the two
-    // share a tree (which is what `Sidebar.test.tsx` leans on for its label
-    // order). Asserting the NUMBER is what actually pins the direction:
-    // equality with FOLLOWING is true only when the toggle is first.
-    expect(toggle.compareDocumentPosition(wallet)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
-
-    // The right cluster is the `ml-auto` flex row the toggle and the wallet
-    // share. The button sits one span deeper than the cluster in the icon
-    // variant — this call site's gating span; #2953 removed the Tooltip's
-    // trigger wrapper — so the shared ancestor is the button's grandparent,
-    // and the wallet button is a direct child of it. Identity, not a class
-    // substring: the two elements must be the same node.
+    // The right cluster is the `ml-auto` flex row. The button sits one span
+    // deeper than the cluster in the icon variant — this call site's gating
+    // span; #2953 removed the Tooltip's trigger wrapper — so the cluster is
+    // the button's grandparent.
     const cluster = toggle.parentElement?.parentElement
-    expect(cluster).toBe(wallet.parentElement)
     // The `ml-auto` is what makes this THE right cluster rather than the left
     // one: it is the only thing pushing the row off the left edge of the bar,
     // and in the left cluster the toggle would sit against the account chip on
@@ -133,10 +116,23 @@ describe('TopBar', () => {
     expect(document.querySelectorAll('[data-mobile-tab-bar]')).toHaveLength(0)
   })
 
+  // #3825: no wallet pill in the bar — signers live in Settings → Signers
+  // and every signing flow connects in place (#3812).
+  it('renders no wallet button', () => {
+    const { container } = renderBar()
+    // Positive control: the bar and its right cluster rendered.
+    const toggle = screen.getByRole('button', { name: /^Theme:/ })
+    const cluster = toggle.parentElement?.parentElement as HTMLElement
+    // The cluster holds exactly the toggle's gating span — nothing beside it.
+    expect(cluster.children).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: /wallet/i })).toBeNull()
+    expect(container.textContent ?? '').not.toMatch(/connect wallet|0x[0-9a-f]{4}/i)
+  })
+
   it('renders no global account picker (#3719)', () => {
     renderBar()
     // Non-vacuity: the bar rendered its right cluster.
-    expect(screen.getByTestId('stub-wallet-button')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Theme:/ })).toBeTruthy()
     // Haven has no "active" account: the bar carries no account dropdown, and
     // an account-specific action picks its account locally.
     expect(screen.queryByRole('button', { name: /active account/i })).toBeNull()

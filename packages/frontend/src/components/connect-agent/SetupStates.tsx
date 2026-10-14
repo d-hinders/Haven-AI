@@ -10,29 +10,6 @@ import { describeBudgetGrant } from '@/lib/budget-period'
 import { ActionCallout } from './SetupNotices'
 import { restartCopyForRuntime } from './setup-copy'
 
-/** Loading state while the connector finishes local setup. */
-export function FinalizingLocalSetup({ loading: _loading }: { loading: boolean }) {
-  // #1377 C: the label is static — polling must never swap it (content shift).
-  // #1393: no local `space-y-*` wrapper — ConnectStepShell's body is a
-  // `flex flex-col gap-5`, and that gap is the flow's only vertical rhythm,
-  // so this renders as top-level siblings of the shell rather than a single
-  // wrapped block with its own spacing. `text-center` moves onto the one
-  // element that needs it now that the wrapper no longer supplies it.
-  return (
-    <>
-      <div className="flex justify-center">
-        <StatusBadge tone="neutral">
-          <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-current motion-safe:animate-pulse" aria-hidden />
-          Finishing setup
-        </StatusBadge>
-      </div>
-      <p className="mx-auto max-w-sm text-center text-sm leading-relaxed text-[var(--v2-ink-2)]">
-        The connector is finishing local setup. This usually takes a few seconds.
-      </p>
-    </>
-  )
-}
-
 /** Terminal state (expired/cancelled/failed) with a restart + close action. */
 export function TerminalSetupState({
   title,
@@ -53,8 +30,8 @@ export function TerminalSetupState({
   onPrimary: () => void
   onSecondary: () => void
 }) {
-  // #1393: no local `space-y-*` — shell `gap-5` is the only rhythm (see
-  // FinalizingLocalSetup above); `text-center` moves onto the title/body
+  // #1393: no local `space-y-*` — ConnectStepShell's body is a `flex
+  // flex-col gap-5`, and that gap is the flow's only rhythm; `text-center` moves onto the title/body
   // group specifically. The title stays the section tier (text-sm
   // font-semibold): the modal has exactly one title, the Modal primitive's
   // own `text-sm font-semibold` (ui/Modal.tsx) — every heading inside the
@@ -165,9 +142,10 @@ export function SetupDoneState({
     <>
       {/* #1394: this screen leads with a heading like every other sub-state.
           It used to go badge → body → list, which read as a fragment rather
-          than the flow's conclusion. No StatusBadge here: the shell ticker
-          says "Approved" and the header subtitle says what just happened —
-          a third copy made none of them authoritative.
+          than the flow's conclusion. No StatusBadge here: the step list
+          above says "Budget approved" (#3832; the shell ticker's "Approved"
+          before it) and the header subtitle says what just happened — a
+          third copy made none of them authoritative.
 
           #1684: ONE line, not a heading plus a sentence repeating its subject
           and verb ("X is ready to spend" / "X can now spend up to …"). The
@@ -178,16 +156,12 @@ export function SetupDoneState({
           button overhanging everything above it by ~150px.
 
           #3690: left-aligned, like the checklist below it — a centred line
-          over a left-aligned list split the screen into two columns. The
-          success mark is icon only, so the "no third status copy" rule above
-          holds: it says the flow ended well without restating "Approved". */}
+          over a left-aligned list split the screen into two columns.
+
+          #3832: no success disc above the line any more. The step list's
+          three ticked rows directly above already say the flow ended well;
+          a fourth, larger check would be a second success mark. */}
       <div>
-        <div
-          aria-hidden="true"
-          className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-[var(--v2-success-soft)]"
-        >
-          <Icon icon={Check} className="h-5 w-5 text-[var(--v2-success)]" />
-        </div>
         {/* text-balance: this line is the money-clarity payoff, and its length
             depends on the agent name, the amount and the WALLET name — a
             rendered review caught "…from Operating wallet." stranding

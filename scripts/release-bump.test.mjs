@@ -1147,22 +1147,63 @@ test('the guard is called before every publish, and outside the failure isolatio
  *
  * A guard that is skipped, backgrounded, or deleted shows up here as
  * PUBLISHES THAT SHOULD NOT EXIST, whatever the source text looks like.
+ * Optional knobs (added for #3797, defaulting to the behaviour above):
+ *   deps        — per-package `dependencies` objects to write into the
+ *                 throwaway package.json files, so the dependency-presence
+ *                 gate has something to read (`cli: null` = no dependencies
+ *                 key, the real cli's shape).
+ *   failPublish — package directories whose `npm publish` exits non-zero,
+ *                 the #3797 incident shape (sdk fails, dependents follow).
+ *   viewExit    — the stub `npm view` exit code. The default 1 means nothing
+ *                 is on the registry, INCLUDING versions just published —
+ *                 the registry-lag shape #2660 measured, which is why
+ *                 presence is decided from run outcomes, not post-publish
+ *                 registry reads.
+ *
+ * Also returns the step's summary table (`summary`), read from the real
+ * GITHUB_STEP_SUMMARY file the loop writes.
  */
-function runPublishLoop(workflow, { channel, version, tag }) {
+function runPublishLoop(workflow, { channel, version, tag, deps = {}, failPublish = [], viewExit = 1 }) {
   const dir = join(tmpdir(), `haven-2421-loop-${randomUUID()}`)
   mkdirSync(join(dir, 'bin'), { recursive: true })
   for (const p of ['sdk', 'signer', 'mcp', 'connect', 'cli']) {
     mkdirSync(join(dir, 'packages', p), { recursive: true })
+    const manifest = { name: `@haven_ai/${p}`, version }
+    // `null` (the real cli's "no dependencies at all") and undefined both omit
+    // the key entirely; only a real object lands in the manifest.
+    if (deps[p]) manifest.dependencies = deps[p]
     writeFileSync(
       join(dir, 'packages', p, 'package.json'),
-      JSON.stringify({ name: `@haven_ai/${p}`, version }),
+      JSON.stringify(manifest),
     )
   }
   const log = join(dir, 'npm.log')
   writeFileSync(log, '')
+  // The stub's `view` always 404s by default — including for a version the
+  // stub just "published" — so the harness itself demonstrates why presence
+  // must come from run outcomes: a gate built on post-publish registry reads
+  // would skip every dependent under exactly this stub (#2660's shape).
+  // failPublish names package DIRECTORIES whose `npm publish` exits 1; the
+  // ` $* ` word-match keeps `packages/sdk` from also matching `packages/sdkx`.
+  // A publish that exits 1 is recorded as `publish-failed …`, so `published`
+  // below counts only publishes that SUCCEEDED — the #3797 incident is
+  // "sdk's publish failed", and recording the failed call as published would
+  // make that indistinguishable from it going out.
   writeFileSync(
     join(dir, 'bin', 'npm'),
-    `#!/bin/sh\necho "$@" >> "${log}"\ncase "$1" in\n  view) exit 1 ;;\n  *) exit 0 ;;\nesac\n`,
+    `#!/bin/sh
+case "$1" in
+  view) exit ${viewExit} ;;
+  publish)
+    for f in ${failPublish.join(' ')}; do
+      case " $* " in *" packages/$f "*) echo "publish-failed $*" >> "${log}"; exit 1 ;; esac
+    done
+    echo "$@" >> "${log}"
+    exit 0 ;;
+  *) echo "$@" >> "${log}"
+     exit 0 ;;
+esac
+`,
   )
   spawnSync('chmod', ['+x', join(dir, 'bin', 'npm')])
   const summary = join(dir, 'summary.md')
@@ -1191,7 +1232,12 @@ function runPublishLoop(workflow, { channel, version, tag }) {
 
   const r = spawnSync('bash', [file], { cwd: dir, encoding: 'utf8', env })
   const calls = readFileSync(log, 'utf8').split('\n')
-  const published = calls.filter((l) => l.startsWith('publish'))
+  // `publish ` (trailing space) matches only SUCCEEDED publishes — the
+  // `publish-failed …` lines also start with "publish" but must not count.
+  const published = calls.filter((l) => l.startsWith('publish '))
+  // Publish invocations that the stub made EXIT NON-ZERO — the incident half
+  // of #3797, recorded separately so "not published" is observable.
+  const failedPublishes = calls.filter((l) => l.startsWith('publish-failed'))
   // #2647: the step no longer moves a tag — it NOMINATES. Any `dist-tag` call
   // recorded here would be the credential regression this split exists to
   // prevent, so it is still read from the same recorder and asserted empty.
@@ -1202,8 +1248,12 @@ function runPublishLoop(workflow, { channel, version, tag }) {
   const written = readFileSync(ghOutput, 'utf8')
   const promoteLine = written.split('\n').filter((l) => l.startsWith('promote=')).pop()
   const promote = promoteLine === undefined ? null : promoteLine.slice('promote='.length)
+  // The per-package results table, read from the real GITHUB_STEP_SUMMARY
+  // file — where the loop's reason rows ("skipped — already on npm" /
+  // "did not publish in this run") land.
+  const summaryText = readFileSync(summary, 'utf8')
   rmSync(dir, { recursive: true, force: true })
-  return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}`, published, distTags, promote }
+  return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}`, published, failedPublishes, distTags, promote, summary: summaryText }
 }
 
 /**
@@ -2556,4 +2606,211 @@ test('client release data — the bump never writes client-compat.ts: a release 
     Object.fromEntries(CHANGELOG_PACKAGES.map((n) => [n, fixtureChangelog(n, [])])),
   ))
   assert.equal(/min_version|recommended_version/.test(rendered.split('*/')[1]), false)
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dependency presence in the publish loop (#3797).
+//
+// On the 0.9.0-alpha.0 promotion `sdk` failed to publish while its dependents
+// went out and had `latest` moved onto them — for five minutes,
+// `npx @haven_ai/mcp` resolved to a package depending on a version that did
+// not exist. The fix: a package whose exact-pinned internal dependency did not
+// reach npm in THIS run is not published and not nominated. These tests run
+// the REAL loop shell with the stub extended (failPublish / viewExit / deps).
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The REAL internal dependency graph of the five published packages, at the
+// version under test (the bump rewrites every pin to the release version, so
+// a fixture at one version is faithful). `cli` has no `dependencies` key at
+// all — the gate must pass over it silently under `set -u`.
+const INTERNAL_DEP_GRAPH = {
+  sdk: undefined,
+  signer: { '@haven_ai/sdk': REAL_V },
+  mcp: { '@haven_ai/sdk': REAL_V },
+  connect: { '@haven_ai/sdk': REAL_V, '@haven_ai/signer': REAL_V, '@haven_ai/mcp': REAL_V },
+  cli: null,
+}
+
+test('#3797: a package whose internal dependency failed to publish is NOT published and NOT nominated', async () => {
+  // The incident shape: sdk's publish exits non-zero; signer, mcp and connect
+  // must not go out (their dependency did not publish in this run) and must
+  // not be handed to promote-tags. cli depends on nothing and still publishes
+  // — one package's failure must not punish the others (#1159), but a
+  // dependant of the failure is punished BY THE FAILURE ITSELF, not by us.
+  const workflow = await publishWorkflow()
+  const { code, out, published, failedPublishes, promote, summary } = runPublishLoop(workflow, {
+    channel: 'prod',
+    version: REAL_V,
+    tag: null,
+    failPublish: ['sdk'],
+    deps: INTERNAL_DEP_GRAPH,
+  })
+
+  assert.notEqual(code, 0, 'a dependency-failed package must fail the job')
+  // Prove sdk was ATTEMPTED and failed — not skipped by a guard — otherwise
+  // the dependents' restraint would be unexplained.
+  assert.equal(failedPublishes.length, 1, `exactly one publish may fail; got: ${failedPublishes.join(' | ')}`)
+  assert.match(failedPublishes[0], /packages\/sdk/)
+  assert.deepEqual(
+    published.map((l) => l.match(/packages\/(\w+)/)?.[1]),
+    ['cli'],
+    `only the dependency-free package may publish; got: ${published.join(' | ')}`,
+  )
+  for (const dependent of ['signer', 'mcp', 'connect']) {
+    assert.ok(
+      !promote.includes(`@haven_ai/${dependent}@`),
+      `${dependent} was nominated for latest although its dependency did not publish in this run — promote-tags would move a tag onto a broken package`,
+    )
+  }
+  // The results table carries the reason, and the word *skipped* stays
+  // reserved for "already on npm".
+  assert.match(
+    summary,
+    /\*\*FAILED\*\* — not published: dependency @haven_ai\/sdk@0\.1\.29-alpha\.0 did not publish in this run/,
+    'the summary row must name the missing dependency as the reason',
+  )
+  assert.ok(!summary.includes('skipped — already on npm'), 'nothing was already on npm in this scenario')
+  // The stdout line names the remedy: re-running the failed job heals it.
+  assert.match(out, /dependency @haven_ai\/sdk@\S+ did not publish in this run/)
+})
+
+test('#3797: presence comes from THIS RUN — a just-published dep that still 404s on view does NOT block its dependents', async () => {
+  // The default stub's `view` exits 1 for EVERYTHING, including a version the
+  // same run just published — the registry-lag shape #2660 measured (up to
+  // ~4 minutes). A gate that confirmed a dependency with a post-publish
+  // `npm view` would skip every dependent under exactly this stub; the
+  // outcome-based gate publishes all five.
+  const workflow = await publishWorkflow()
+  const { code, published, promote, summary } = runPublishLoop(workflow, {
+    channel: 'prod',
+    version: REAL_V,
+    tag: null,
+    deps: INTERNAL_DEP_GRAPH,
+  })
+
+  assert.equal(code, 0)
+  assert.equal(published.length, 5, `all five should publish; got: ${published.join(' | ')}`)
+  for (const p of ['sdk', 'signer', 'mcp', 'connect', 'cli']) {
+    assert.match(promote, new RegExp(`@haven_ai/${p}@`), `${p} must be nominated`)
+  }
+  assert.ok(!summary.includes('did not publish in this run'))
+})
+
+test('#3797: a re-run reports already-live packages as skipped, never dependency-failed', async () => {
+  // Pins the ordering requirement: the dependency gate runs AFTER the
+  // already-on-npm check, so "re-run failed jobs" heals a partial publish
+  // instead of reporting every healed package as dependency-failed. viewExit
+  // 0 = everything is on npm (the state a re-run walks into).
+  const workflow = await publishWorkflow()
+  const { code, published, summary } = runPublishLoop(workflow, {
+    channel: 'prod',
+    version: REAL_V,
+    tag: null,
+    viewExit: 0,
+    deps: INTERNAL_DEP_GRAPH,
+  })
+
+  assert.equal(code, 0, 'a re-run with everything on npm is a no-op, not a failure')
+  assert.deepEqual(published, [], 'a re-run must publish nothing')
+  assert.equal((summary.match(/skipped — already on npm/g) ?? []).length, 5)
+  assert.ok(!summary.includes('did not publish in this run'), 'an already-live package is skipped, not dependency-failed')
+})
+
+test('#3797: a non-exact internal pin fails the run loudly', async () => {
+  // lint:workspace-pins enforces exact pins at the release PR; if a range or a
+  // drifted pin reaches this workflow anyway, it is a defect in the tree. The
+  // package carrying it is held back with a row naming the drift and the job
+  // exits non-zero — but NOT via a mid-loop `exit 1`, which would strand
+  // `latest` for the packages that already published (the #1159 rule the
+  // promote-write-before-any-exit structural test enforces). Packages the
+  // defect does not touch still publish: mcp's dependency is sdk (fine), so
+  // only signer and its dependent connect are held back.
+  const workflow = await publishWorkflow()
+  const { code, out, published, promote, summary } = runPublishLoop(workflow, {
+    channel: 'prod',
+    version: REAL_V,
+    tag: null,
+    deps: { ...INTERNAL_DEP_GRAPH, signer: { '@haven_ai/sdk': `^${REAL_V}` } },
+  })
+
+  assert.notEqual(code, 0, 'a non-exact internal pin must fail the job')
+  assert.match(out, /pins @haven_ai\/sdk@\^0\.1\.29-alpha\.0 but the workspace has @haven_ai\/sdk@0\.1\.29-alpha\.0/)
+  assert.match(out, /exactly \(lint:workspace-pins\)/)
+  assert.match(
+    summary,
+    /\*\*FAILED\*\* — not published: pins @haven_ai\/sdk@\^0\.1\.29-alpha\.0 but the workspace has @haven_ai\/sdk@0\.1\.29-alpha\.0/,
+  )
+  assert.deepEqual(
+    published.map((l) => l.match(/packages\/(\w+)/)?.[1]).sort(),
+    ['cli', 'mcp', 'sdk'],
+    `the defect-free packages must still publish; got: ${published.join(' | ')}`,
+  )
+  for (const held of ['signer', 'connect']) {
+    assert.ok(!promote.includes(`@haven_ai/${held}@`), `${held} must not be nominated`)
+  }
+})
+
+test('#3797: the gate holds on the dev channel — the snapshot tree pins snapshot versions', async () => {
+  // The dev channel publishes from a throwaway tree whose internal pins the
+  // bump rewrote to the snapshot version; the exactness check compares pin to
+  // workspace, which agree here, so dependents publish and nothing is
+  // dependency-failed. This is the channel the 0.9.0-alpha.0 incident did NOT
+  // happen on — kept green so the gate never becomes prod-only.
+  const workflow = await publishWorkflow()
+  const snapshotDeps = Object.fromEntries(
+    Object.entries(INTERNAL_DEP_GRAPH).map(([p, d]) => [
+      p,
+      d ? Object.fromEntries(Object.keys(d).map((n) => [n, SNAPSHOT_V])) : d,
+    ]),
+  )
+  const { code, published, summary } = runPublishLoop(workflow, {
+    channel: 'dev',
+    version: SNAPSHOT_V,
+    tag: 'dev',
+    deps: snapshotDeps,
+  })
+  assert.equal(code, 0)
+  assert.equal(published.length, 5, `all five snapshots should publish; got: ${published.join(' | ')}`)
+  assert.ok(!summary.includes('did not publish in this run'))
+})
+
+test('#3797: every internal dependency precedes its dependent in the publish loop order', async () => {
+  // The gate reads each dependent's outcome ledger, which only works if the
+  // dependency's own outcome was decided EARLIER in the same loop. This pins
+  // the real workspace graph (read from the repo's package.json files, not a
+  // fixture) against the real loop line, so adding a package or an edge in
+  // the wrong order fails here instead of stranding the gate in CI.
+  const workflow = await publishWorkflow()
+  const loop = workflow.match(/for pkg in ([a-z ]+); do/)
+  assert.notEqual(loop, null, 'could not find the publish loop line')
+  const order = loop[1].trim().split(/\s+/)
+
+  for (const dir of order) {
+    const manifest = JSON.parse(await readFile(join(ROOT, 'packages', dir, 'package.json'), 'utf8'))
+    for (const [name] of Object.entries(manifest.dependencies ?? {}).filter(([n]) => n.startsWith('@haven_ai/'))) {
+      const depDir = name.split('/')[1]
+      assert.ok(
+        order.includes(depDir),
+        `${dir} depends on ${name}, which is not in the publish loop at all — the gate would have no outcome to read`,
+      )
+      assert.ok(
+        order.indexOf(depDir) < order.indexOf(dir),
+        `publish loop order is wrong: ${dir} depends on ${name}, but ${depDir} comes AFTER it ` +
+          `(${order.join(' ')}) — the dependency-presence gate would read an undecided outcome`,
+      )
+    }
+  }
+})
+
+test('#3797: the dependency gate sits between the already-on-npm check and npm publish', async () => {
+  // Structural complement to the behavioural tests above: the gate must run
+  // after the skip (a re-run reports skipped, not dep-failed) and before the
+  // publish (a dep-blocked package never reaches the registry).
+  const step = stepRunScript(await publishWorkflow(), 'Publish packages whose version is not yet on npm')
+  const skip = step.indexOf('npm view "$name@$version"')
+  const gate = step.indexOf('did not publish in this run')
+  const publish = step.indexOf('npm publish -w')
+  assert.notEqual(gate, -1, 'the dependency-presence gate is gone from the publish step')
+  assert.ok(skip < gate, 'the dependency gate must run AFTER the already-on-npm check')
+  assert.ok(gate < publish, 'the dependency gate must run BEFORE npm publish')
 })

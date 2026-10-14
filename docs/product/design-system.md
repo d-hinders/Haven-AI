@@ -3,6 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/frontend/src/app/globals.css
+  - packages/frontend/src/components/connect-agent/ConnectSteps.tsx
   - packages/frontend/src/context/ThemeContext.tsx
   - packages/frontend/src/lib/theme-bootstrap.ts
   - packages/frontend/src/lib/theme-tokens.ts
@@ -31,6 +32,9 @@ covers:
   - packages/frontend/src/components/haven/BudgetMeter.tsx
   - packages/frontend/src/components/haven/ApprovalRequiredBanner.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
+  - packages/frontend/src/components/haven/Amount.tsx
+  - packages/frontend/src/components/haven/AttentionList.tsx
+  - packages/frontend/src/components/haven/NoticeRow.tsx
   - packages/frontend/src/components/transactions/**
   - packages/frontend/src/components/haven/LabelChip.tsx
   - packages/frontend/src/__tests__/capture-viewports.test.ts
@@ -94,7 +98,7 @@ covers:
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
-last-verified: "2026-10-06"
+last-verified: "2026-10-13"
 ---
 
 # Haven Design System
@@ -325,7 +329,7 @@ nothing" verdict is a measurement rather than a broken reader.
 Cards on hover get a brand‑tinted lift only when interactive:
 `hover:shadow-[0_8px_24px_-12px_rgba(16,24,40,0.12)]` (neutral) or `hover:shadow-[0_12px_32px_-16px_rgba(79,70,229,0.30)]` (protocol cards, navigational). These are literal values rather than tokens, so they were never affected — an arbitrary value that carries its own shadow list is unambiguous and compiles fine. It is only a bare `var()` that Tailwind cannot type.
 
-Raised card elevation is reserved for the few surfaces that anchor a page, such as the dashboard hero and account balance card. Popover shadow is for floating menus, tooltips, and toasts.
+Raised card elevation is reserved for the few surfaces that anchor a page, such as the dashboard money card and account balance card. Popover shadow is for floating menus, tooltips, and toasts.
 
 **No glow shadows on text**, no colored shadows on buttons.
 
@@ -637,8 +641,10 @@ which this rule does not touch).
 - State banners (`ApprovalRequiredBanner`) do not scatter through the page.
   They stack in ONE slot directly under the `PageHeader`, ordered by severity:
   `danger` first (the next action cannot be undone), then `warning` (something
-  needs attention — a half-revoked credential, stranded funds, an exhausted
-  budget), then `neutral` (informational — paused, snapshot reads). Within a
+  needs attention — a half-revoked credential, stranded funds), then `neutral`
+  (informational — paused, snapshot reads, a budget reached: the budget did
+  its job, and a state the product designed for is not a warning — owner
+  decision 2026-10-09, #3805). Within a
   tone, the banner that asks the user for a decision comes first. The slot
   opens the page on the thing that needs doing, before any content card.
 - The `PageHeader`'s own `meta` line (above) carries the entity's quiet
@@ -654,13 +660,223 @@ full ARIA contract (`aria-valuemin`, `aria-valuemax`, `aria-valuenow`,
 `aria-label`). It takes `usedPercent` — **clamped to 0–100**, so an overdrawn
 or malformed read can never push the fill past its track or the ARIA value
 outside its own declared range — and a `label`; an optional `caption` slot
-renders the "1.20 of 3.00 USDC used · refills …" line. The label row above the
-bar (token value, percentage) belongs to the caller: it is the caller's tabular
-typography, not part of the measurement. The fill is a token surface colour,
-never a series colour — a budget bar measures one delegation against its own
-period, it is not a category to be keyed against a legend. Recorded on
+carries the meter's line. That caption is the shared budget-caption helper's
+output (`lib/budget-caption.ts`, #3806): token amounts at two decimals
+("1.25 of 5.00 USDC used this period") — or ONE leading "≈" in fiat when the
+caller supplies a rate — followed by the earlier of the refill and the
+expiry, phrased under 24 h relative ("refills in 45m"), under 7 days as
+weekday and 24-hour time ("refills Thu 14:02"), otherwise day and month
+("refills 14 Nov"). The states that replace the bar: a failed or stale read
+shows "Usage this period couldn't be read" (never a 0 % bar, never a
+"snapshot" claim), an expired budget its own line, and a future `start_date`
+shows when the budget starts. The dashboard's agent rows ask for the compact
+`style: 'row'` wording (#3908), as the mockup draws a row: the period word in
+place of "used this period" ("≈$0.40 of $1.00 · per day · refills in 5h"),
+with an extra-budget count riding in the same line ("· +1 budget"); every
+other surface keeps the full wording. In token mode the row joins the cap and
+its symbol with a no-break space (#3910), so "3.00 USDC" never splits. Beside
+the caption the row has a right-hand column: the last payment's time, and the
+merchant under it from `sm`, in one fixed 10rem column in every row so every
+budget bar has the same length (#3912; the merchant truncates with its full
+name as a tooltip); below `sm` the time sits
+on the name line and the merchant is hidden, so the bar and caption span the
+row (#3910). The label row above the bar (token value,
+percentage) belongs to the caller: it is the caller's tabular typography, not
+part of the measurement. The fill is a token surface colour, never a series
+colour — a budget bar measures one delegation against its own period, it is
+not a category to be keyed against a legend. Recorded on
 `/design-system` → *BudgetMeter*; the analytics agents table renders through
 it.
+
+### Statistics tile (#2947)
+
+`StatTile` (`packages/ui/src/StatTile.tsx`) is the one number and the sentence
+under it. The **value arrives pre-formatted** — the tile formats nothing,
+itself: the caller owns the formatter (`lib/format.ts`'s `formatFiat` and its
+`currencyLocale` rule are the one voice for money figures, and the compact
+SEK tier renders in the UI's voice — en-US `SEK 5.19K`, not sv-SE's scale
+words), so a figure on one tile cannot disagree with the same figure on the
+next. A string value is also what keeps the money path's numeric-string types
+intact. The tile's own rule is the polarity one (see the component header):
+the figure renders in `--v2-ink` in every state and the delta chip's tone is
+derived from what a *rising* value of the figure means — the tile never picks
+a colour and the caller never hands it one.
+
+The card variant is the bordered tile the analytics page mounts (§ Cards
+chrome: `rounded-[10px]`, border, `--v2-bg` ground, `shadow-card`). The
+inline variant (#3805) is below.
+
+### Amount: currency mode (#3805)
+
+`Amount` has two modes. The token mode is the original contract: a
+pre-formatted, unsigned string (`value`) with an optional `symbol`, the sign
+coming only from `direction` — callers own formatting, so a `+`/`-` can never
+disagree with the tone.
+
+The **currency mode** (#3805) is for a figure that is already a fiat
+valuation server-side (book-time `convertedAmount`, or `approxAmount`): pass
+the unsigned magnitude (`amount`), the currency it is IN (`currency: 'SEK' |
+'USD' | 'EUR'` — e.g. `convertedCurrency`, never read from preferences inside
+the component), and optionally `approx`. It formats through
+`formatFiatDisplay` (`lib/format.ts`) — `formatFiat`'s output, no second
+`Intl.NumberFormat` — so `9,09 kr`, `$0.96` and `0,88 €` are byte-for-byte
+the formatter's output, NBSPs included.
+
+**Under a cent (#3897, owner decision 2026-10-12):** a non-zero figure with
+`|value| < 0.005`, which would round to `0.00`, renders `<$0.01` (`<0,01 kr`,
+`<0,01 €`); the sign still comes from the caller (`-<$0.01` in activity,
+`≈<$0.01 of $1.00` in a budget caption). Zero stays `$0.00`. The rule lives
+in `formatFiatDisplay`, not `formatFiat`, which also drives the balance
+count-up, the "since yesterday" line and /accounts and keeps plain rounding.
+`Amount`'s currency mode, the budget caption's fiat mode and the dashboard
+summary use it; the summary goes further and reads a week under a cent as a
+payment count rather than any figure. The sign comes only
+from `direction` (a negative magnitude cannot double-sign it); `symbol` is
+not allowed in this mode. `≈` (with `title="Converted at today's rate"`) goes
+before the sign: `≈ -9,09 kr`. Unknown — `null` or a non-finite value —
+renders `—` in `--v2-ink-3`, never `0,00 kr`: existing callers turned unknown
+into zero, and this mode must not.
+
+A currency figure is a **valuation of a token amount**, not a fiat balance
+Haven holds — the budget's own token where a budget is set, the user's
+currency everywhere else (owner decision 2026-10-09).
+
+### AttentionList (#3805)
+
+`components/haven/AttentionList` is the one list of "things that need your
+eye", built from `Row`, `StatusBadge` and `Icon`. The rows are **static** —
+`href`/`onClick` never go on the row (that would nest the action inside
+another control); the caller's action and the dismiss live in the row's
+`trailing` slot. The **tone is also given in text** — a `StatusBadge` label
+or `sr-only` tone word — because `Row`'s leading icon is `aria-hidden`:
+colour alone is not a channel. Tones: `neutral` (which includes a budget
+reached — the banner ladder above says the same), `brand`, `warning`, and
+`danger` for real failures only. The dismiss is a button labelled
+`Dismiss: {title}` calling `onDismiss(id)`; the list holds no dismissal
+state (persistence is #3813's), and after a dismiss focus moves to the next
+item, or to the caller's list heading (`headingId`) when the list emptied.
+The title and the subtitle each line-clamp to two lines at every width
+(`Row` truncates both to one), so an item is never cut to a line that
+cannot be judged — the narrow desktop "Needs attention" card included (#3876).
+The leading icon, and from `sm` up the trailing badge, action and dismiss,
+centre on the title's first line rather than on the whole body, so a
+four-line item still reads as one line with detail beneath (#3880).
+Below `sm` the trailing slot also wraps under the body. `fullBleed` is for
+a list that **is** the card's body, as on the dashboard (#3902): rows run
+edge to edge with hairline dividers and take the card's 20px side inset
+instead of `Row`'s 16px; only the horizontal padding changes, so the
+first-line alignment holds. The `/design-system` sample renders it, so the
+geometry guards in `e2e/attention-list-title-measure.spec.ts` measure the
+dashboard's shape. Zero items renders nothing — the caller owns the empty
+state.
+
+### NoticeRow (#3845)
+
+`components/haven/NoticeRow` is one tinted notice line inside a card or
+modal: a sentence and, optionally, the one action that resolves it (a
+retry, or the owner-wallet connect). It replaced three hand-copied rows on
+the owner-signing surfaces: the agent budget card's failed signer load and
+its #3812 owner-wallet notice, and the edit-budget modal's failed signer
+load. The
+tint is a callout, one of the reserved `--v2-surface` uses, not a grouping
+wrapper. Below `sm` the action sits on its own line under the text; from
+`sm` up they share one line, the action at the end. The caller sets the
+outer margin. It is not `AttentionList`: that is a dismissable list of
+things that need your eye, while a `NoticeRow` is a single line that stays
+until its cause is gone.
+
+### AreaChart sparkline (#3805)
+
+`variant="sparkline"` inside `ui/AreaChart.tsx` (no new file, so the chart
+home's design-lint `raw-svg` exemption already covers it): the balance line
+over a faint area of the same series colour (`AREA_OPACITY`), in a box the
+caller sizes (`height`, default 40px). No gridlines,
+ticks, x labels, delta annotation, tooltip or caret — a dot on the last
+point only (see below for how it stays round and inside the box). It is `role="img"` with a **required** `ariaLabel` summary
+sentence and is not a tab stop: there is no hidden data table, the sentence
+is the data access. A day with no snapshot (`value: null`) is **skipped,
+never zero; the line connects across it**, and each measured day keeps its
+true x position in the window (#3897 — #3805 broke the line at every gap,
+which drew sparse snapshots as scattered dashes). The area's top edge is the
+line itself, so it never dips to the baseline at a missing day either. Below `MIN_CHARTABLE_DAYS` it renders a flat
+placeholder line of the same height instead of nothing, so a layout that
+reserved the box does not jump. No draw animation on data refresh.
+
+The end dot is an **HTML span, not an SVG `<circle>`** (#3903): the drawing
+stretches with `preserveAspectRatio="none"`, and a circle stretches with it
+into an oval wherever the box is not 640 px wide. The dot is positioned in
+CSS px on both axes — the sparkline's vertical scale is exactly 1 (in
+`fill` mode, #3908, the box grows to its container with the height as a
+minimum, the drawing stretches, and the dot's vertical position becomes the
+endpoint's fraction of the inset box instead, so it stays on the line), and its
+horizontal position is the endpoint's fraction of the viewBox, padded by a
+CSS-px box inset on every side (`SPARKLINE_DOT_INSET`, 4px, at least the
+dot's radius plus stroke) with the line drawn edge to edge inside it — so
+the dot stays round
+at every width, its centre stays on the line's endpoint, and it never
+leaves the box (#3902's containment guarantee, restated in CSS px). The
+line itself takes `vector-effect: non-scaling-stroke`, so its 2px weight no
+longer depends on the segment's slope. The same treatment applies to the
+full chart's point dots, positioned as a percentage of the viewBox like the
+tick labels; the sparkline's flat placeholder still draws no dot.
+
+### StatTile inline (#3805)
+
+`variant="inline"`: no card border, ground or shadow; the value at
+`text-base v2-tabular`; the label above in the usual secondary ink. It shows
+**no delta chip** — passing `polarity` or `delta` with `inline` throws, the
+same render-time refusal the missing-polarity case uses, because a judgement
+colour smuggled into a plain-reading tile is the defect the polarity rule
+exists to prevent. Tiles carrying money-length values row up from `sm`;
+below `sm` the longest supported value (`13 000,50 kr`) fits without
+truncation, and the tiles stack. Tiles carrying only short counts — the
+dashboard money card's payments / merchants / stopped by budget (#3897) —
+stay three across at every width. The figure still carries no colour in any state — the card
+tile's contract, at a smaller scale.
+
+### Money panel (#3807)
+
+The dashboard's top section is `dashboard/MoneyPanel.tsx`, built from four
+registered pieces: `PageHeader` (the heading carries the templated 7-day
+summary sentence from `lib/dashboard-summary.ts` — fixed templates over the
+overview's own figures, never model-written, naming at most two agents and
+one merchant and describing budget stops neutrally), then ONE money card
+(#3897): `Card elevation="raised"` — the page's single most prominent
+surface — with the balance on the left (the figure, the "since yesterday"
+line, the § AreaChart sparkline fed from `spend.balance_by_day` — a missing
+day is skipped, never zero; under 3 measured days the flat placeholder
+draws — and the two actions, "Add funds" primary and "Deposit address"
+secondary; "Add funds" steps down to ghost through `addFundsSecondary` while
+the first-run guide's step 1 is the active step, so exactly one primary
+"Add funds" shows, #3902) and the 30-day spending on the right as a
+`Card.Section divided`, stacked below `lg`. The spending half (#3902) is a
+muted "Agent spending, last 30 days" label — still the section's heading —
+with the 30-day total large and left-aligned beneath it, the per-agent split
+bar and legend, then three § StatTile inline tiles (payments, distinct
+merchants, stopped by budget) below a hairline divider, pinned to the bottom
+of the half at `lg`. Beside it at `lg` the balance half's sparkline grows
+into the spare height (`fill`), so the actions sit level with that row and
+never above an empty band (#3908); before the first payment the same muted label reads
+"Agent spending" over its explanation. The "Needs attention" card
+(a normal flat card with the shared header band, like Agents and Activity, #3910) follows at full width — never a side column beside the balance —
+then Agents and Activity. Its count badge is neutral, never a warning tint
+(the card holds neutral items too), sits beside the heading, and hides at
+zero and while the card is "Get started". With nothing listed it shows
+"You're all caught up" — the title alone, no reason line (#3908) — only when
+the runway and budget-room facts were measured and hold
+(`attentionEmptyState`, #3902); otherwise a neutral line
+that claims nothing, and nothing at all while the budget reads load. That total — and the per-agent split below it —
+renders through § Amount: currency mode with `approx` from the
+wire's `spend` windows, so a total that includes rows priced at today's
+rate carries the `≈` and a booked total does not. The four KPI tiles and
+their `metrics.*` wire fields are gone with this panel: agent counts live
+in the agents section (#3809), the spend total is the analytics page's own
+#3803 net figure, and "Successful transactions" counted receives, so it
+has no honest successor. When every linked account is a test account
+(`spend.scope === 'testnet'`, #3803 owner decision 3) the balance carries
+a quiet "Test network" label rather than a silently mislabelled total,
+and the balance's change line reads "since yesterday" — the diff is against
+the yesterday snapshot.
 
 ### Buttons
 
@@ -741,9 +957,11 @@ distribution note below):
 Tertiary — **variant**, `variant="tertiary"`
 ([#1830](https://github.com/d-hinders/Haven-AI/issues/1830)). The *quiet* action: dismiss,
 cancel, "not now" — the escape hatch beside a committing action, never the committing action
-itself. Live at five product call sites plus the `/design-system` showcase — among them
-`ConfirmDialog`'s cancel, `ProfileClient`'s cancel edit and `DashboardOnboardingGuide`'s
-dismiss. (It was eight until [#1989](https://github.com/d-hinders/Haven-AI/issues/1989)
+itself. Live at many product call sites plus the `/design-system` showcase — among them
+`ConfirmDialog`'s cancel, `ProfileClient`'s cancel edit and the dashboard's "Hide for
+now" (in the "Needs attention" card's header since #3897; the guide
+renders inside that card, and its finished state is a one-line `SetupCompleteLine` with
+its own tertiary Dismiss). (It was eight until [#1989](https://github.com/d-hinders/Haven-AI/issues/1989)
 deleted `settings/ManageApprovers`, which held three of them.):
 - `bg-transparent text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface)] hover:text-[var(--v2-ink)]`
 - focus ring `focus-visible:ring-brand/80`
@@ -761,7 +979,7 @@ its *text* colour on hover (`ink-2` → `ink`), pinned by
 That difference has a shipped consequence, and it is the rule to take from it: **tertiary
 needs surrounding structure to be legible as pressable.** It works inside a dialog's action
 row or at the end of a card, where position tells you it is a control. It fails in running
-content — `connect-agent/SetupStates.tsx:234` records the case where a tertiary button
+content — `connect-agent/SetupStates.tsx:208` records the case where a tertiary button
 "rendered as stray bold text in the middle of a checklist rather than a control", and was
 changed to ghost for the border alone while keeping secondary weight. Reach for ghost when
 the control has to announce itself; tertiary when its context already has.
@@ -791,7 +1009,7 @@ command is not reproducible. It misses two things by construction. **`variant` i
 so every unadorned `<Button>` is an uncounted `primary` — which is why primary shows 0 and is
 nonetheless the most common button in the product. And it cannot see the four dynamic call
 sites (`DashboardClient.tsx:361`, `ConfirmDialog.tsx:60`, `agent-panel/ReplaceSigningKeyModal.tsx:904`,
-`connect-agent/CopyBlock.tsx:54`). The shape of the distribution is the point, not the integer.
+`connect-agent/CopyBlock.tsx:62`). The shape of the distribution is the point, not the integer.
 Re-derived 2026-09-30 for #3195 by running the published command: the previous figure
 (112/11/5/1 — 129, derived by #2203 at `ba4e045b`) had drifted through merged work to
 155/31/7/0 — 193, the same shape (ghost dominates, primary lives in the unadorned call
@@ -1001,13 +1219,22 @@ short, and an icon-only square grows in both axes. Two rules generalise from it:
   announces as "button". Every collapsing state carries an explicit `aria-label` (plus a
   matching `title`, which is the pointer-hover mitigation for the lost label). jsdom
   applies no CSS, so a unit test that queries by role and name keeps passing on text the
-  real browser never renders — `e2e/mobile-nav-tap-target.mobile.spec.ts` measures the
-  rendered label width and the name together, and `WalletButton.test.tsx` asserts the
-  attribute rather than the name.
+  real browser never renders — `WalletButton.test.tsx` asserts the attribute rather than
+  the name. (`e2e/mobile-nav-tap-target.mobile.spec.ts` measured the rendered label width
+  and the name together until #3825 took the pill out of the top bar; the spec now
+  asserts the bar's right cluster holds no control at all.)
 
 A collapsed control also takes its neighbour's radius (`rounded-xl` here, the
 notification bell's), because two adjacent 40px squares in one 56px band read as a row
 only if they are the same shape.
+
+**Since [#3825](https://github.com/d-hinders/Haven-AI/issues/3825) the top bar carries
+no wallet pill.** Most users sign with a passkey, and a signer with a raw address on every
+screen is the wrong level of detail; signers have their own home in Settings → Signers,
+and every signing flow offers its own in-flow connect (#3812). `WalletButton` still
+renders in the connect flow's approval step, so the collapse rules above still describe
+it; the over-subscribed-bar argument is history. Below `lg` the bar's right cluster is
+now empty — the theme toggle lives in the More sheet there.
 
 **The former investor-briefing borrower was retired with the page in #2468.** The
 remaining borrowers and their guards are the live tap-target examples; do not infer a
@@ -1156,7 +1383,7 @@ The link stays available while an adjacent action is busy, and normal link behav
 intact. Prove body and control hit targets with a real browser at desktop and 390px;
 jsdom cannot evaluate the pseudo-element's stacking or hit testing.
 
-`Card` supports `elevation="flat" | "raised"` and `hover={false}`. Use `raised` only for prominent page anchors, and keep nested or data-dense cards flat.
+`Card` supports `elevation="flat" | "raised" | "anchor"` and `hover={false}`. Use `raised` only for the page's single most prominent surface (the dashboard money card, #3897), `anchor` for a second focal point where a page has one (the sweep page's "How to recover" card; the dashboard has none since #3910, when "Needs attention" became a normal card), and keep nested or data-dense cards flat.
 
 **A card in a grid has to fit its track, and by default it cannot ([#2251](https://github.com/d-hinders/Haven-AI/issues/2251)).** This is the card sibling of the `truncate`d-table-cell rule under *Transaction tables* below, and it has the same shape: a `truncate` descendant is `white-space: nowrap`, so its min-content is the whole string, and a container that is never allowed to go below its min-content grows instead of ellipsising.
 
@@ -1313,6 +1540,56 @@ button placed there is no longer a descendant of a `<form>` in the body.
 resolves rather than that the attribute string matches — a stale id compares
 equal and still submits nothing.
 
+### Wizard progress (`StepProgress`)
+
+`ui/StepProgress` is the numbered disc band a multi-step modal carries in its
+header (`Modal`'s `headerAccessory`): one disc per step, the current one
+brand-soft with a brand ring, finished ones success-soft with a tick, the rest
+a `--v2-border` ring, joined by 1px lines. It says **where the user is in a
+wizard**, and nothing else: a step's own instructions live in its body. Call
+sites: the Connect agent modal (steps 1-2) and `ReplaceSigningKeyModal`; its `/design-system` specimen is the "StepProgress"
+section, after SidePanel.
+
+### Numbered step list (`ConnectSteps`, #3832)
+
+A vertical list in which **each row is both an instruction and its status**:
+a disc, a section-tier heading, and the row's own body (a control, a line of
+copy, or a whole sub-flow) beneath it. Use it when one screen walks the user
+through a short sequence they act on in order and the screen itself observes
+the progress — today, step 3 of the Connect agent modal (copy → paste →
+approve), where the old Waiting → Connected → Approved ticker said where the
+user was without saying what to do. Use `StepProgress` instead when the steps
+are separate screens of a wizard.
+
+Done, active and pending reuse `StepProgress`'s disc treatments, so the wizard
+band and the list read as one progress language rather than two; working adds
+the brand spinner:
+
+| State | Disc | Heading |
+|---|---|---|
+| done | `--v2-success-soft` fill, `border-success/30`, lucide `Check` | `--v2-ink-3` |
+| active | `--v2-brand-soft` fill, `--v2-brand` ring and numeral | `--v2-ink` |
+| working | lucide `Loader2` in `--v2-brand`, `motion-safe:animate-spin` | `--v2-ink` |
+| pending | `--v2-border` ring, `--v2-ink-3` numeral | `--v2-ink-2` |
+
+Rules:
+- **One progress signal per surface** (#1418). A screen that renders this list
+  renders no ticker, badge or wizard band saying the same thing — the Connect
+  agent modal hides its `StepProgress` on step 3 for exactly this reason.
+- **Name a gate once per viewport** (#1684). When the modal subtitle names the
+  action, the row heading says it in other words ("Review and sign" under
+  "Approve the agent budget").
+- A row's done state comes from state that only moves forward (the
+  connect flow's `promptCopied`, latched per setup and keyed by `setup_id`, so
+  "Create a new setup" starts uncopied), never from a value a later action can
+  overwrite.
+- Live status inside a row goes in an `aria-live="polite"` region with a
+  reserved height, so a status change swaps words without moving the rows below.
+
+It is local to `components/connect-agent/` because it has one call site; a
+second call site is the trigger to promote it to `components/ui/` with a
+`/design-system` specimen next to `StepProgress`.
+
 ### Local hint marker (#1952)
 
 A **known but not-preferred** fact, stated beside the thing it qualifies:
@@ -1320,7 +1597,8 @@ A **known but not-preferred** fact, stated beside the thing it qualifies:
 icon-led label row (lucide `Info` at `h-3.5 w-3.5 flex-shrink-0`, `text-xs
 font-medium text-[var(--v2-ink-2)]`). One call site so far —
 `WalletButton.tsx`'s "No passkey enrolled on this device", shown in both states
-on `/design-system` → *Signing credential (wallet menu)*.
+on `/design-system` → *Signing credential (wallet menu)*; since #3825 that is the
+only place it renders (the pill no longer opens for a ready user).
 
 **Reach for it instead of a semantic tone when nothing has failed.** There is no
 `--v2-info` family, and `--v2-warning` is scoped to 402/pending-review, to
@@ -1332,7 +1610,7 @@ enumeration and is why the two read as contradicting each other until you check
 (#2764). So
 the honest options for "legible but not alarming" are this or plain muted text.
 Muted text is the right weight for mild friction — the #1097 "passkey may be on
-another device" hints in `AccountSignersCard` and `DelegationSendModal` are
+another device" hint (shown on every owner-signing flow since #3825) is
 deliberately unmarked. This marker is for the step above that: a fact the user
 would want to act on, on an authority-bearing surface.
 
@@ -1341,7 +1619,7 @@ usual bar** (§ 5's Arrows subsection declines a precedent on one instance). It
 is written down anyway because the alternative was worse in a specific way:
 `--v2-border-strong` already had three unrelated uses, plain `border-l` +
 `--v2-border` grouping exists at three more call sites
-(`ConnectionVerificationFooter.tsx`, `WaitingForConnector.tsx` ×2) at a lighter
+(`ConnectionVerificationFooter.tsx`, `WaitingForConnector.tsx` ×2 at the time of #1952) at a lighter
 weight, and none of them is documented — so the next author wanting a local hint
 had four undocumented shapes to copy and would plausibly have hand-rolled a
 fifth. Two reviewers split on whether this belongs here; it is recorded rather
@@ -1476,6 +1754,28 @@ Use `components/transactions/TransactionsTable.tsx` for full transaction history
 - Empty state renders inside the table with the correct column span.
 
 Use `TransactionActivityRow` for compact dashboard, account detail, or agent detail previews.
+
+**Merchant-first titles (#3810).** The dashboard's activity list reads
+`counterpartyLabel` in `lib/transaction-presentation.tsx` with the opt-in
+`noAddress` mode, so a raw address never titles a row there: the merchant's
+site for x402, the receipt/contact name the backend resolved, "Deposit" for
+inbound, "New recipient" when nothing resolves, "Agent payment" when an x402
+row carries no resource URL, and "Returned from <agent>" for sweeps. The
+subtitle is the agent's name; "From My account" appears only when the user
+has more than one account. A confirmed row carries no status badge — its
+direction is already the amount's sign and tone; only "Pending" and "Failed"
+name a state (#3897). The shared screens (`TransactionsTable`,
+`TransactionDetailPanel`) pass no mode and keep the truncated address until
+#3811 — the two supports on the same helper must not drift apart silently,
+which is what the characterization tests in
+`lib/__tests__/transaction-presentation.test.tsx` pin. Two row props exist for
+the grouped dashboard shape: `countLabel` renders the muted ×N beside the
+title (×N+ when the count is a floor over a truncated window — a count is
+never presented as exact when it is not), and `fiat` switches the amount to
+`Amount`'s currency mode (book-time plain, serve-time `≈`, unknown valuation
+an em dash). Rows group under user-local day headings ("Today" /
+"Yesterday" / a short date); the server buckets the groups per day (#3824),
+the client only names the bucket.
 
 A collapsing table like this one has to **fit** at mobile widths, not scroll: the `overflow-x-auto` wrapper the `Table` primitive recommends for dense admin tables is mutually exclusive with `Table.Head sticky`, because `overflow-x: auto` forces the computed `overflow-y` to `auto` and the wrapper then becomes the sticky scroll ancestor. When such a table overflows, the cause is usually a `truncate`d cell — `truncate` is `white-space: nowrap`, and an auto-layout column can never be narrower than its min-content, so the untruncated text widens the table instead of ellipsising. Put `max-w-0` on the one flexible cell. Both findings, with their measured numbers, live in `components/ui/Table.tsx`'s docstring ([#1772](https://github.com/d-hinders/Haven-AI/issues/1772)).
 

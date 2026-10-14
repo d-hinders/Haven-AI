@@ -197,6 +197,21 @@ test('the three rendered-copy modules #2333 found are on the allowlist', () => {
   }
 })
 
+test('the six prose-bearing lib/ files #3882 found are on the allowlist', () => {
+  // None matches the naming convention, so nothing else would notice an entry
+  // being dropped: the gate would go green while reading none of them again.
+  for (const f of [
+    'packages/frontend/src/lib/dashboard-attention.ts',
+    'packages/frontend/src/lib/agent-skill-steps.ts',
+    'packages/frontend/src/lib/agent-skill-index.ts',
+    'packages/frontend/src/lib/agent-list-filters.ts',
+    'packages/frontend/src/lib/agent-credential.ts',
+    'packages/frontend/src/lib/sub-budget.ts',
+  ]) {
+    assert.ok(SCAN_FILES.includes(f), `${f} must be scanned`)
+  }
+})
+
 test('matchesCopyConvention: the extracted-copy names match', () => {
   assert.ok(matchesCopyConvention('packages/frontend/src/lib/agent-pause-copy.ts'))
   assert.ok(matchesCopyConvention('packages/frontend/src/lib/transaction-labels.ts'))
@@ -311,6 +326,7 @@ const copy = (text) => `export default function P() {\n  return <p>${text}</p>\n
 // refusal and would have looked like the copy rule firing.
 const OTHER = 'packages/frontend/src/components/Thing.tsx'
 const UI_FILE = 'packages/ui/src/Thing.tsx'
+const HOOK = 'packages/frontend/src/hooks/useThing.ts'
 
 // The guard carries THREE self-checks that fire before any copy rule, and each
 // one caught a draft of this fixture: a SCAN_DIRS entry matching no files, a
@@ -326,7 +342,23 @@ const scaffold = (files) => ({
   ...allowlisted,
   [OTHER]: copy('Nothing to see.'),
   [UI_FILE]: 'export const x = 1\n',
+  [HOOK]: 'export const x = 1\n',
   ...files,
+})
+
+test('CLI: src/hooks is scanned — a banned term in a hook fails and is named (#3884)', () => {
+  // A directory scan, not a membership pin: this fails if src/hooks leaves
+  // SCAN_DIRS AND if walk() ever stops reading the directory.
+  const { status, out } = runGuard('frontend-copy-lint.mjs', {
+    also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'],
+    files: scaffold({
+      [PAGE]: copy('Nothing to see.'),
+      [HOOK]: "export const msg = 'Edit your spending policy.'\n",
+      [BASE]: '{}',
+    }),
+  })
+  assert.notEqual(status, 0, out)
+  assert.match(out, /src\/hooks\/useThing\.ts/)
 })
 
 test('CLI: a new banned term beyond the baseline exits non-zero and names it', () => {

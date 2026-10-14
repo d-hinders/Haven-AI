@@ -50,7 +50,7 @@ Procedures: ../operations/e2e-qa-runbook.md and ../operations/agent-qa.md.
 - **Exact command:**
 - **Process exit code:**
 - **Git branch / SHA:** `<branch from dev>` / `<sha>`
-- **Frontend URL / build SHA:** `<per-PR preview or localhost>` / `<sha>`
+- **Frontend URL / build SHA:** `<dev host, preview/* deployment, or localhost>` / `<sha>`
 - **Backend URL / deploy SHA:**
 - **Merchant URL / version:** `<sanitized hostname>` / `<version>`
 - **Chain:** `<name>` (`<chain id>`)

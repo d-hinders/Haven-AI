@@ -42,8 +42,8 @@ export type CompanyDetailsStatus = 'loading' | 'off' | 'empty' | 'ready' | 'erro
 /**
  * `save`/`remove`/`recheckVies` return a CODE, not a rendered sentence — the
  * component owns copy (`t.settings.companyDetails.*`) so every user-facing
- * string lives in the message catalog the copy lint scans, not in this
- * (unscanned, `src/hooks`) file. `message` is the backend's own 400 body
+ * string lives in the message catalog, not in this hook (the copy lint scans
+ * both since #3884, but copy belongs with the component). `message` is the backend's own 400 body
  * text (`VALIDATION_MESSAGES` in `routes/owner-company-details.ts`) for the
  * one case (`'validation'`) where the backend's own words are the right
  * words to show, verbatim, per the issue's "surface the backend's 400

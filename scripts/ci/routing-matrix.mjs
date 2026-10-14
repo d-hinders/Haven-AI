@@ -400,6 +400,27 @@ export const ROUTING_MATRIX = [
       'hand because both declare no SDK-dependency fan-out can reach.',
   },
   {
+    files: ['packages/sdk/src/catalog-funding-leg.ts'],
+    expect: [
+      'code',
+      'sdk',
+      'frontend',
+      'backend',
+      'connect',
+      'mcp',
+      'mcp_server',
+      'signer',
+      'qa_agent',
+    ],
+    kind: CONTRACT,
+    why:
+      'The discovery funding-leg hint (#3839). The dashboard\'s needsUnpinnedBudget reads the same ' +
+      'catalog column without an SDK runtime dependency, and marketplace.test.ts imports THIS file ' +
+      'by relative path to assert the two agree — a test that runs only in frontend_checks. Same ' +
+      'shape as skill-content.ts below: only `sdk` and `frontend` are decided by the manifest entry; ' +
+      'the rest arrive by `dependentsOf(sdk)`.',
+  },
+  {
     files: ['packages/sdk/src/skill-content.ts'],
     expect: [
       'code',
@@ -525,6 +546,26 @@ export const ROUTING_MATRIX = [
     expect: ['code', 'backend', 'mcp_server', 'signer', 'mcp', 'connect', 'qa_agent'],
     kind: CONTRACT,
     why: 'The ratchet’s self-test, same reason as dep-lint’s.',
+  },
+  {
+    files: ['scripts/ci/check-stale-client-compat.mjs'],
+    expect: ['code', 'mcp_server'],
+    kind: CONTRACT,
+    why:
+      'The hosted tool-contract compat guard (#3817). It reads packages/mcp-server\'s committed ' +
+      'tools-list snapshot and next-arguments corpus and compares them against origin/main, and ' +
+      'only mcp_server_checks runs it — as an ADVISORY job-summary report that exits 0 either ' +
+      'way. Before its manifest entry a PR touching only the guard routed nowhere, so a change ' +
+      'that weakened the check never re-ran it: the gated-guard shape #1626 closes.',
+  },
+  {
+    files: ['scripts/ci/check-stale-client-compat.test.mjs'],
+    expect: ['code', 'mcp_server'],
+    kind: CONTRACT,
+    why:
+      'The guard\'s self-test, registered beside it (#1626): mcp_server_checks runs it as a real ' +
+      'gate next to the advisory step, so the logic that decides what counts as ' +
+      'reconnect-required cannot be weakened in the same PR that keeps the report silent.',
   },
   {
     files: ['scripts/generate-api-types.mjs'],

@@ -527,6 +527,7 @@ describe('HavenClient structural boundary', () => {
       'X402_MAX_AUTHORIZATION_WINDOW_SECONDS',
       'X402_PAYMENT_HEADER_NAME',
       'X402_PAYMENT_HEADER_NAMES_SENT',
+      'X402_PAYMENT_NONCE_TAG', // #3888: the derivation's fixed domain tag
       'X402_PAYMENT_REQUIRED_HEADER_NAME',
       'X402_PAYMENT_RESPONSE_HEADER_NAME',
       'X402_SETTLEMENT_FORWARD_MARGIN_SECONDS',
@@ -540,6 +541,7 @@ describe('HavenClient structural boundary', () => {
       'buildSweepAuthorizationMessage',
       'buildSweepTypedData',
       'buildX402ExpectedMessage',
+      'catalogFundingLegExpected', // #3839
       'compareNodeVersions',
       'composeDescription',
       'connectorRerunCommand',
@@ -550,6 +552,7 @@ describe('HavenClient structural boundary', () => {
       'decodeBase64Utf8',
       'defaultNextToolFor', // #3101
       'deriveDelegateAccountAddress', // #3283
+      'deriveX402PaymentNonce', // #3888: the settlement-attribution derivation
       'discoverMerchantMcpUrl',
       'encodeBase64Json',
       'encodeBase64Utf8',
@@ -643,6 +646,7 @@ describe('HavenClient structural boundary', () => {
       'AgentPaymentWarning',
       'AgentPurchaseSummary',
       'BudgetPrecheckResult',
+      'CatalogFundingLegHint', // #3839
       'CatalogSubmissionAccepted',
       'ClaudeTool',
       'EvidenceReportOutcome', // #2970
@@ -650,6 +654,7 @@ describe('HavenClient structural boundary', () => {
       'HavenAgentAllowanceSummary',
       'HavenAgentReadiness',
       'HavenAgentSummary',
+      'HavenAgentSupersession', // #3772
       'HavenAllowance',
       'HavenAllowanceSummary',
       'HavenBalanceCoverage', // #3126

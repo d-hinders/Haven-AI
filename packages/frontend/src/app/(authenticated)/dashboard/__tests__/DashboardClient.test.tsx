@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockUseAuth = vi.fn()
@@ -47,14 +48,50 @@ vi.mock('@/hooks/useAccountOperationGate', () => ({
   useAccountOperationGate: () => mockUseAccountOperationGate(),
 }))
 
+// #3808: the rules read the budget-remaining poll for the ≥90% arm; the
+// dashboard tests here exercise the wiring, not the poll (its contract has
+// its own suite).
+// #3902: per-test state — the "still loading" hand-off to the empty state is
+// tested through the real component. Reset in beforeEach.
+const mockBudgetRemainingState: { data: unknown; loading: boolean } = { data: null, loading: false }
+vi.mock('@/hooks/useBudgetRemaining', () => ({
+  useBudgetRemaining: () => ({ ...mockBudgetRemainingState, error: null, refetch: vi.fn() }),
+}))
+
+// #3813: server-saved dismissals are a hook with its own suite — here the
+// dashboard tests pin the WIRING (a dismissed id hides its item; a dismiss
+// on a dismissible kind writes through to the hook).
+const mockUseAttentionDismissals = vi.fn()
+const mockDismissOnServer = vi.fn()
+vi.mock('@/hooks/useAttentionDismissals', () => ({
+  useAttentionDismissals: () => mockUseAttentionDismissals(),
+}))
+
 
 vi.mock('@/components/DashboardOnboardingGuide', () => ({
-  default: ({ hasFirstAgentPayment }: { hasFirstAgentPayment: boolean }) => (
+  // #3818: the mock prints the inputs the dashboard derives, so the wiring
+  // (USDC state, set-up agent, the named pending agent, hide) is assertable
+  // here; the component's own rendering is tested in its suite.
+  default: ({
+    hasFirstAgentPayment,
+    usdcFunded,
+    hasSetUpAgent,
+    pendingAgent,
+  }: {
+    hasFirstAgentPayment: boolean
+    usdcFunded: boolean | null
+    hasSetUpAgent: boolean
+    pendingAgent?: { name: string; moreCount: number } | null
+  }) => (
     <div>
       <span>Onboarding guide</span>
       <span>{hasFirstAgentPayment ? 'first-payment-complete' : 'first-payment-pending'}</span>
+      <span>{`usdc-${String(usdcFunded)}`}</span>
+      <span>{hasSetUpAgent ? 'agent-set-up' : 'agent-not-set-up'}</span>
+      {pendingAgent ? <span>{`pending-${pendingAgent.name}-${pendingAgent.moreCount}`}</span> : null}
     </div>
   ),
+  SetupCompleteLine: () => <span>Setup complete line</span>,
 }))
 
 vi.mock('@/components/ConnectAgentModal', () => ({
@@ -99,6 +136,7 @@ vi.mock('@/components/ui/Toast', async () => {
 })
 
 import DashboardClient from '../DashboardClient'
+import type { DashboardAgentPreview } from '@/types/dashboard'
 
 const SAFE = {
   id: 'safe-1',
@@ -110,7 +148,12 @@ const SAFE = {
   account_type: 'delegator_hybrid' as const,
 }
 
-function mockBaseState() {
+function mockBaseState(
+  overviewAgents: DashboardAgentPreview[] = [],
+  // #3808: the rules read the #3803 wire fields (accounts, spend) that the
+  // base shape predates; tests that exercise them pass them here.
+  overviewExtras: Record<string, unknown> = {},
+) {
   mockUseAuth.mockReturnValue({
     user: {
       id: 'user-1',
@@ -149,21 +192,15 @@ function mockBaseState() {
         eurPercent: 1,
         sekPercent: 0,
       },
-      metrics: {
-        connectedAgents: 1,
-        monthlyAgentSpendUsd: 42,
-        monthlyAgentSpendEur: 38,
-        monthlyAgentSpendSek: 440,
-        successfulTransactions: 4,
-        activeAccounts: 1,
-      },
+      // #3807: the metrics block is gone with the KPI tiles.
       actionableApprovals: 2,
       pendingApprovals: 2,
       onboardingProgress: {
         hasFirstAgentPayment: false,
       },
-      agents: [],
+      agents: overviewAgents,
       transactions: [],
+      ...overviewExtras,
     },
     loading: false,
     error: null,
@@ -185,48 +222,148 @@ function mockBaseState() {
 
 describe('DashboardClient', () => {
   beforeEach(() => {
+    mockBudgetRemainingState.data = null
+    mockBudgetRemainingState.loading = false
     vi.clearAllMocks()
     window.localStorage.clear()
     window.sessionStorage.clear()
+    mockUseAttentionDismissals.mockReturnValue({
+      dismissedIds: new Set<string>(),
+      dismiss: mockDismissOnServer,
+    })
     mockBaseState()
   })
 
-  it('leads with total balance, primary actions, attention, and metric cards', () => {
+  describe('agents section wiring (#3809)', () => {
+    /** `useAgents` knows an agent exists; the overview supplies the preview rows. */
+    const previewAgent = (budgets: DashboardAgentPreview['budgets'] = []): DashboardAgentPreview => ({
+      id: 'agent-1',
+      name: 'Research agent',
+      status: 'active',
+      accountId: null,
+      accountName: null,
+      accountChainId: 8453,
+      allowances: [],
+      budgets,
+      receivedSubBudgets: [],
+      stats: {
+        d7: {
+          gross: { usd: 0, eur: 0, sek: 0 },
+          net: { usd: 0, eur: 0, sek: 0 },
+          approx: false,
+          payments: 0,
+          refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+        },
+        d30: {
+          gross: { usd: 0, eur: 0, sek: 0 },
+          net: { usd: 0, eur: 0, sek: 0 },
+          approx: false,
+          payments: 0,
+          refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+        },
+        lastPaymentAt: null,
+        lastCounterparty: null,
+      },
+    })
+
+    it('reads "No budget" for an agent with zero live budgets — not "No spend limits"', () => {
+      // #3802: the overview's budgets array carries only live (unexpired,
+      // started) budgets, so an empty array means the agent cannot spend at
+      // all. "No spend limits" said the opposite of the truth.
+      mockBaseState([previewAgent([])])
+
+      render(<DashboardClient />)
+
+      expect(screen.getByText('No budget')).toBeInTheDocument()
+      expect(screen.queryByText('No spend limits')).not.toBeInTheDocument()
+    })
+
+    it('renders the overview agents through the shared section (badge from the rules, never "Connected")', () => {
+      // The budget-remaining poll is mocked to null at the top of this file,
+      // so the row's budget read is UNKNOWN — an em dash, never a 0% bar.
+      // The old per-status "Connected" badge is gone with #3809.
+      mockBaseState([
+        previewAgent([
+          {
+            id: 'budget-1',
+            delegationHash: `0x${'11'.repeat(32)}`,
+            chainId: 8453,
+            tokenAddress: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            tokenSymbol: 'USDC',
+            decimals: 6,
+            budgetAtomic: '250000000',
+            periodSeconds: 86_400,
+            startDate: '2026-10-01T00:00:00.000Z',
+            expiresAt: '2027-01-01T00:00:00.000Z',
+            periodEnd: '2026-10-11T00:00:00.000Z',
+          },
+        ]),
+      ])
+
+      render(<DashboardClient />)
+
+      expect(screen.getByRole('heading', { level: 2, name: 'Agents' })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: /Research agent/ })).toBeInTheDocument()
+      // The page's money-panel tiles also render em dashes for zero windows —
+      // scope to the agent row's own caption.
+      expect(within(screen.getByRole('link', { name: /Research agent/ })).getByText('—')).toBeInTheDocument()
+      expect(screen.queryByText('Connected')).not.toBeInTheDocument()
+    })
+  })
+
+  it('leads with the balance, the money panel, and its two actions', () => {
+    // A user whose agents have paid: the spending block shows its figures
+    // (before the first payment it explains itself instead, #3818).
+    mockBaseState([], { onboardingProgress: { hasFirstAgentPayment: true } })
     render(<DashboardClient />)
 
     expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument()
     expect(screen.getByText('$1,234.56')).toBeInTheDocument()
-    // Send and the approvals attention row are DELETED (#1989) — asserted as
-    // absences in their own dedicated test below, where the fixture is set up
-    // to make a regression visible rather than merely unasserted.
-    expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
+    // #3807: the four KPI tiles are gone; the money panel renders the
+    // templated 7-day summary and the 30-day spending block in their place.
+    expect(screen.getByRole('button', { name: 'Deposit address' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add funds' })).toBeInTheDocument()
-    expect(screen.getByText('Agents connected')).toBeInTheDocument()
-    expect(screen.getByText('Monthly agent spend')).toBeInTheDocument()
-    expect(screen.getByText('$42.00')).toBeInTheDocument()
-    expect(screen.getByText('Successful transactions')).toBeInTheDocument()
-    expect(screen.getByText('Active accounts')).toBeInTheDocument()
+    // #3902 (changed on purpose): the mockup's muted label, still the heading.
+    expect(screen.getByRole('heading', { level: 2, name: 'Agent spending, last 30 days' })).toBeInTheDocument()
+    expect(screen.getByText('Payments')).toBeInTheDocument()
+    expect(screen.getByText('Merchants')).toBeInTheDocument()
+    expect(screen.getByText('Stopped by budget')).toBeInTheDocument()
   })
 
-  /**
-   * #3127 review round 2, finding 7: the "Monthly agent spend" mark must not
-   * be a currency glyph. It was lucide's `DollarSign`, which under the SEK
-   * no-preference default painted `$` over `482,50 kr` on every new signup.
-   * The tile describes spend, not a currency, so the mark is
-   * currency-neutral (`Coins`) — pinned by the generated class the Icon
-   * primitive stamps per lucide glyph, exactly the headless equivalent the
-   * AGENTS.md closeout asks for when browser verification is skipped.
-   */
-  it('renders a currency-neutral mark on the Monthly agent spend tile (no $ glyph)', () => {
+  it('makes "Add funds" the primary action, ahead of "Deposit address" (#3897)', () => {
+    mockBaseState([], { onboardingProgress: { hasFirstAgentPayment: true } })
     render(<DashboardClient />)
 
-    const label = screen.getByText('Monthly agent spend')
-    const card = label.closest('div.group') ?? label.closest('[class*="group"]')!
-    const icon = card.querySelector('span[aria-hidden="true"] svg')
-    expect(icon).not.toBeNull()
-    // The coins glyph, not the dollar one.
-    expect(icon!.getAttribute('class')).toContain('lucide-coins')
-    expect(icon!.getAttribute('class')).not.toContain('lucide-dollar-sign')
+    const balance = screen.getByRole('region', { name: 'Balance' })
+    const actions = within(balance)
+      .getAllByRole('button')
+      .map((button) => button.textContent)
+    expect(actions).toEqual(['Add funds', 'Deposit address'])
+    // Primary is the brand fill; the secondary is the ghost outline.
+    expect(within(balance).getByRole('button', { name: 'Add funds' }).className).toContain('bg-[var(--v2-brand)]')
+    expect(within(balance).getByRole('button', { name: 'Deposit address' }).className).not.toContain(
+      'bg-[var(--v2-brand)]',
+    )
+  })
+
+  it('renders "Needs attention" below the money card at full width, never in a side column (#3897, #3902)', () => {
+    mockBaseState([], { onboardingProgress: { hasFirstAgentPayment: true } })
+    const { container } = render(<DashboardClient />)
+
+    const balance = screen.getByRole('region', { name: 'Balance' })
+    const needsYou = screen.getByRole('article')
+    // DOM order: the money card, then "Needs attention", then the agents/activity grid.
+    expect(balance.compareDocumentPosition(needsYou) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // The old hero-plus-aside row is gone, and "Needs attention" sits in the page's
+    // single column — its parent lays children out vertically, not in a grid.
+    expect(container.innerHTML).not.toContain('minmax(320px,0.42fr)')
+    expect(needsYou.parentElement?.className).toContain('space-y-6')
+    expect(needsYou.parentElement?.className).not.toMatch(/grid-cols/)
+    // Balance and spending share ONE raised card (#3897), spending a divided section.
+    const card = balance.closest('.shadow-card-raised')
+    expect(card).not.toBeNull()
+    expect(within(card as HTMLElement).getByRole('region', { name: 'Spending' })).toBeInTheDocument()
+    expect(screen.queryByText('Total balance')).toBeNull()
   })
 
   /**
@@ -254,14 +391,7 @@ describe('DashboardClient', () => {
             sekPercent: 0,
             ...overrides,
           },
-          metrics: {
-            connectedAgents: 1,
-            monthlyAgentSpendUsd: 42,
-            monthlyAgentSpendEur: 38,
-            monthlyAgentSpendSek: 440,
-            successfulTransactions: 4,
-            activeAccounts: 1,
-          },
+      // #3807: the metrics block is gone with the KPI tiles.
           actionableApprovals: 0,
           pendingApprovals: 0,
           onboardingProgress: {
@@ -276,7 +406,7 @@ describe('DashboardClient', () => {
       })
     }
 
-    it('renders the SEK total, its change line, and the monthly spend from the SEK keys', () => {
+    it('renders the SEK total and its change line from the SEK keys', () => {
       mockSekOverview({ sekAmount: 130, sekPercent: 1 })
       render(<DashboardClient />)
 
@@ -290,8 +420,11 @@ describe('DashboardClient', () => {
       // locale — sv-SE under SEK: decimal comma, NBSP before `%` (normalized
       // to a plain space by getByText). The kr half was already sv-SE; the
       // line no longer mixes a hand-rolled English percent scaffold into it.
-      expect(screen.getByText('+130,00 kr (+1,00 %) today')).toBeInTheDocument()
-      expect(screen.getByText('440,00 kr')).toBeInTheDocument()
+      expect(screen.getByText('+130,00 kr (+1,00 %) since yesterday')).toBeInTheDocument()
+      // #3807: the monthly-spend SEK figure lives in the spending block now,
+      // read from `spend.d30` — this fixture carries no spend block, so the
+      // block renders its quiet placeholder instead of a number.
+      expect(screen.getAllByText('—').length).toBeGreaterThan(0)
       // The USD total must not leak onto a SEK hero under any label.
       expect(screen.queryByText('$1,234.56')).toBeNull()
     })
@@ -306,8 +439,9 @@ describe('DashboardClient', () => {
       render(<DashboardClient />)
 
       expect(screen.getByText('13 000,50 kr')).toBeInTheDocument()
-      expect(screen.queryByText(/today/)).toBeNull()
-      expect(screen.getByText('Across all linked Haven accounts.')).toBeInTheDocument()
+      expect(screen.queryByText(/since yesterday/)).toBeNull()
+      // #3897: no filler caption takes the change line's place.
+      expect(within(screen.getByRole('region', { name: 'Balance' })).getByText('13 000,50 kr')).toBeInTheDocument()
     })
 
     it('keeps the USD hero for a USD preference', () => {
@@ -365,14 +499,7 @@ describe('DashboardClient', () => {
           eurPercent: 1,
           sekPercent: 0,
         },
-        metrics: {
-          connectedAgents: 1,
-          monthlyAgentSpendUsd: 42,
-          monthlyAgentSpendEur: 38,
-          monthlyAgentSpendSek: 440,
-          successfulTransactions: 4,
-          activeAccounts: 1,
-        },
+      // #3807: the metrics block is gone with the KPI tiles.
         actionableApprovals: 1,
         pendingApprovals: 1,
         onboardingProgress: {
@@ -392,7 +519,7 @@ describe('DashboardClient', () => {
     // Without this the four absences below would all be satisfied by a blank
     // screen — the failure mode #1987 paid for.
     expect(screen.getByText('$1,234.56')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Deposit address' })).toBeInTheDocument()
 
     expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
     expect(screen.queryByText('1 agent payment needs your action')).toBeNull()
@@ -438,63 +565,139 @@ describe('DashboardClient', () => {
     expect(screen.getByText('first-payment-pending')).toBeInTheDocument()
   })
 
-  it('does not flash the guide for completed setup after the completion banner was dismissed', () => {
-    window.localStorage.setItem('haven-onboarding-complete-dismissed:user-1', '1')
-    mockUseDashboardOverview.mockReturnValue({
-      data: {
-        totals: { usd: 1234.56, eur: 1100, sek: 13000.5 },
-        change: {
-          available: true,
-          usdAmount: 12.34,
-          eurAmount: 11,
-          sekAmount: null,
-          usdPercent: 1.23,
-          eurPercent: 1,
-          sekPercent: 0,
-        },
-        metrics: {
-          connectedAgents: 1,
-          monthlyAgentSpendUsd: 42,
-          monthlyAgentSpendEur: 38,
-          monthlyAgentSpendSek: 440,
-          successfulTransactions: 4,
-          activeAccounts: 1,
-        },
-        actionableApprovals: 0,
-        pendingApprovals: 0,
-        onboardingProgress: {
-          hasFirstAgentPayment: true,
-        },
-        agents: [],
-        transactions: [],
+  // #3818: a finished setup — USDC on the account, an agent with a budget,
+  // the first payment made.
+  const FUNDED_ACCOUNT = {
+    accountId: 'safe-1',
+    chainId: 8453,
+    isTestnet: false,
+    usdcBalanceAtomic: '5000000',
+    usdcDecimals: 6,
+    funded: true,
+    needs_backup_recommendation: false,
+    usdcPace7dAtomic: '0',
+  }
+  function setUpAgentPreview(): DashboardAgentPreview {
+    return {
+      id: 'agent-1',
+      name: 'Research agent',
+      status: 'active',
+      accountId: null,
+      accountName: null,
+      accountChainId: 8453,
+      allowances: [],
+      budgets: [{ id: 'budget-1' }] as never,
+      receivedSubBudgets: [],
+      stats: {
+        d7: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+        d30: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+        lastPaymentAt: null,
+        lastCounterparty: null,
       },
+    }
+  }
+  function mockCompletedSetup() {
+    mockBaseState([setUpAgentPreview()], {
+      accounts: [FUNDED_ACCOUNT],
+      onboardingProgress: { hasFirstAgentPayment: true },
+    })
+  }
+
+  it('holds the empty card back while budget reads load, then shows the achievement once they are known (#3902)', () => {
+    // Every fact holds except that the budget read has not settled yet.
+    window.localStorage.setItem('haven-onboarding-complete-dismissed:user-1', '1')
+    mockCompletedSetup()
+    mockBudgetRemainingState.loading = true
+    const first = render(<DashboardClient />)
+    expect(screen.getByRole('heading', { level: 2, name: 'Needs attention' })).toBeInTheDocument()
+    expect(screen.queryByText("You're all caught up")).not.toBeInTheDocument()
+    expect(screen.queryByText('No items to review right now.')).not.toBeInTheDocument()
+    first.unmount()
+
+    // Positive control: the same data once the read settles at 10% used.
+    mockBudgetRemainingState.loading = false
+    mockBudgetRemainingState.data = {
+      budgets: [{
+        agent_id: 'agent-1', chain_id: 8453, delegation_hash: '0xhash', token_address: '0xtoken',
+        token_symbol: 'USDC', token_decimals: 6, budget_atomic: '10000000', used_atomic: '1000000',
+        read_at: '2026-10-09T00:00:00Z', period_end: '2026-10-16T00:00:00Z',
+        remaining_atomic: '9000000', remaining_from_chain: true, sub_budget_spend: [],
+      }],
+    }
+    render(<DashboardClient />)
+    expect(screen.getByRole('heading', { level: 3, name: "You're all caught up" })).toBeInTheDocument()
+  })
+
+  it('shows one "You\'re set up" line, not the steps, once all three are done', () => {
+    mockCompletedSetup()
+    render(<DashboardClient />)
+    expect(screen.getByText('Setup complete line')).toBeInTheDocument()
+    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+  })
+
+  it('does not flash the guide for completed setup after the completion banner was dismissed', () => {
+    // The pre-#3818 banner's key is read as is: an owner who dismissed the
+    // old banner does not see the new line either.
+    window.localStorage.setItem('haven-onboarding-complete-dismissed:user-1', '1')
+    mockCompletedSetup()
+    render(<DashboardClient />)
+    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+    expect(screen.queryByText('Setup complete line')).not.toBeInTheDocument()
+  })
+
+  it('does not show the guide before first-payment progress is known', () => {
+    // The overview arrived but without onboarding progress (an old cached
+    // shape): the gate, not a missing card, keeps the guide out.
+    mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, funded: false, usdcBalanceAtomic: '0' }], onboardingProgress: undefined })
+    render(<DashboardClient />)
+    expect(screen.getByRole('heading', { name: 'Needs attention' })).toBeInTheDocument()
+    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+  })
+
+  it('after the first agent payment the steps never return — a regression is the rules\' job (#3818 review)', () => {
+    // A veteran whose USDC read is unavailable, whose budget expired, who
+    // has paid before: before this rule they got "Get started" again.
+    mockBaseState([], {
+      accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: null, funded: null }],
+      onboardingProgress: { hasFirstAgentPayment: true },
+    })
+    render(<DashboardClient />)
+    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+    expect(screen.getByText('Setup complete line')).toBeInTheDocument()
+  })
+
+  it('a balance-read error mid-setup does not collapse the page into the focused view (#3818 review)', () => {
+    mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: null, funded: null }] })
+    mockUseAggregatedBalances.mockReturnValue({ balances: [], loading: false, error: 'boom', refetch: vi.fn() })
+    render(<DashboardClient />)
+    expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
+    // The full layout keeps the activity section.
+    expect(screen.getByRole('heading', { name: 'Activity' })).toBeInTheDocument()
+  })
+
+  it('before the first agent payment the spending block says what will appear there, not three zeros (#3818)', () => {
+    mockBaseState([], { accounts: [FUNDED_ACCOUNT] })
+    render(<DashboardClient />)
+    expect(screen.getByText(/After your agents’ first payment, this shows what they spent/)).toBeInTheDocument()
+    expect(screen.queryByText('Stopped by budget')).not.toBeInTheDocument()
+  })
+
+  it('a revoked agent with a budget does not complete step 2 — GET /agents lists it, the overview does not', () => {
+    // The original bug: step 2 completed on `agents.length > 0`, and GET
+    // /agents returns every status.
+    mockBaseState([], { accounts: [FUNDED_ACCOUNT] })
+    mockUseAgents.mockReturnValue({
+      agents: [{ id: 'agent-r', name: 'Gone', status: 'revoked', allowances: [{ id: 'x' }], created_at: '2026-10-01T00:00:00Z' }],
       loading: false,
-      error: null,
       refetch: vi.fn(),
     })
-
     render(<DashboardClient />)
-
-    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
-    expect(screen.queryByText('first-payment-complete')).not.toBeInTheDocument()
+    expect(screen.getByText('agent-not-set-up')).toBeInTheDocument()
   })
 
-  it('does not show the unfunded receive CTA before balances finish loading', () => {
-    mockUseAggregatedBalances.mockReturnValue({
-      balances: [],
-      loading: true,
-      error: null,
-      refetch: vi.fn(),
-    })
-
-    render(<DashboardClient />)
-
-    expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Receive funds' })).not.toBeInTheDocument()
-    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
-  })
-
-  it('does not mark the account unfunded when aggregate balances fail to load', () => {
+  it('keeps the guide visible when the USDC read is unavailable — step 1 unknown, never "unfunded" (#3818)', () => {
+    // Before #3818 a balance-read error hid the guide entirely.
+    mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: null, funded: null }] })
     mockUseAggregatedBalances.mockReturnValue({
       balances: [],
       loading: false,
@@ -504,13 +707,53 @@ describe('DashboardClient', () => {
 
     render(<DashboardClient />)
 
-    expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
+    expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
+    expect(screen.getByText('usdc-null')).toBeInTheDocument()
+    // The hero's own actions are unaffected.
+    expect(screen.getByRole('button', { name: 'Deposit address' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add funds' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Receive funds' })).not.toBeInTheDocument()
-    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+  })
+
+  it('ETH or other-token dust does not complete step 1 — only USDC on the account does (#3818)', () => {
+    // The aggregate read shows a balance (ETH); the account's own USDC is zero.
+    mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: '0', funded: false }] })
+    render(<DashboardClient />)
+    expect(screen.getByText('usdc-false')).toBeInTheDocument()
+  })
+
+  it('a pending_approval agent leaves step 2 open and is named, not listed twice (#3818)', () => {
+    const pending = (id: string, name: string): DashboardAgentPreview => ({
+      ...setUpAgentPreview(),
+      id,
+      name,
+      status: 'pending_approval',
+      budgets: [],
+    })
+    mockBaseState([pending('agent-a', 'Alpha'), pending('agent-b', 'Beta')], {
+      accounts: [FUNDED_ACCOUNT],
+    })
+    mockUseAgents.mockReturnValue({
+      agents: [
+        { id: 'agent-a', name: 'Alpha', created_at: '2026-10-01T00:00:00Z' },
+        { id: 'agent-b', name: 'Beta', created_at: '2026-10-08T00:00:00Z' },
+      ],
+      loading: false,
+      refetch: vi.fn(),
+    })
+
+    render(<DashboardClient />)
+
+    expect(screen.getByText('agent-not-set-up')).toBeInTheDocument()
+    // The newest waiting agent is the one step 2 names…
+    expect(screen.getByText('pending-Beta-1')).toBeInTheDocument()
+    // …so its "Needs setup" row is not repeated; the other agent keeps its row.
+    expect(screen.queryByText('Beta is waiting to be set up')).not.toBeInTheDocument()
+    expect(screen.getByText('Alpha is waiting to be set up')).toBeInTheDocument()
   })
 
   it('shows a focused first-run guide instead of the full dashboard when the account needs funds', () => {
+    // #3818: focused only when the account is KNOWN to hold no USDC.
+    mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: '0', funded: false }] })
     mockUseAggregatedBalances.mockReturnValue({
       balances: [],
       loading: false,
@@ -521,26 +764,93 @@ describe('DashboardClient', () => {
     render(<DashboardClient />)
 
     expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
-    expect(screen.queryByText('Agents connected')).not.toBeInTheDocument()
-    expect(screen.queryByText('Recent transactions')).not.toBeInTheDocument()
-    expect(screen.queryByText('Monthly agent spend')).not.toBeInTheDocument()
+    // The agents and activity sections wait until the account is funded.
+    expect(screen.queryByRole('heading', { name: 'Agents' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Activity' })).not.toBeInTheDocument()
+    // #3897 (changed on purpose, the mockup's new-user card): the spending
+    // half stays, explaining what it will show — never zero tiles.
+    const spending = screen.getByRole('region', { name: 'Spending' })
+    expect(within(spending).getByText(/After your agents’ first payment/)).toBeInTheDocument()
+    expect(within(spending).queryByText('Payments')).not.toBeInTheDocument()
   })
 
-  it('does not persist first-run guide dismissal across browser sessions', () => {
-    window.localStorage.setItem('haven_dashboard_onboarding_dismissed:user-1:fund', '1')
-    mockUseAggregatedBalances.mockReturnValue({
-      balances: [],
-      loading: false,
-      error: null,
-      refetch: vi.fn(),
-    })
-
+  it('shows exactly one primary "Add funds" while step 1 is the active step: the money card\'s steps back (#3902)', () => {
+    mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: '0', funded: false }] })
     render(<DashboardClient />)
-
     expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
+    // Step 1's own "Add funds" is the guide's primary (DashboardOnboardingGuide.test);
+    // the money card's renders ghost beside it.
+    const balance = screen.getByRole('region', { name: 'Balance' })
+    const addFunds = within(balance).getByRole('button', { name: 'Add funds' })
+    expect(addFunds.className).not.toContain('bg-[var(--v2-brand)]')
+    expect(addFunds.className).toContain('border-[var(--v2-border-strong)]')
   })
 
-  it('does not show the connect-agent guide before agents finish loading', () => {
+  it('makes the money card\'s "Add funds" primary again once step 1 is done or the guide is hidden (#3902)', () => {
+    // Funded: step 1 is done, so the guide (still showing) no longer asks for funds.
+    mockBaseState([], { accounts: [FUNDED_ACCOUNT] })
+    const funded = render(<DashboardClient />)
+    expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
+    expect(
+      within(screen.getByRole('region', { name: 'Balance' })).getByRole('button', { name: 'Add funds' }).className,
+    ).toContain('bg-[var(--v2-brand)]')
+    funded.unmount()
+
+    // Unfunded but the guide hidden: the money card's button is the only one.
+    window.localStorage.setItem('haven-setup-guide-hidden:user-1', '0')
+    mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: '0', funded: false }] })
+    render(<DashboardClient />)
+    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+    expect(
+      within(screen.getByRole('region', { name: 'Balance' })).getByRole('button', { name: 'Add funds' }).className,
+    ).toContain('bg-[var(--v2-brand)]')
+  })
+
+  it('puts "Hide for now" and the progress in the card header, beside "Get started" (#3897)', () => {
+    mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: '0', funded: false }] })
+    render(<DashboardClient />)
+    const heading = screen.getByRole('heading', { name: 'Get started' })
+    // The progress sits beside the title; the header row holds both.
+    expect(within(heading.parentElement as HTMLElement).getByText('0 of 3 done')).toBeInTheDocument()
+    const header = (heading.parentElement as HTMLElement).parentElement as HTMLElement
+    expect(within(header).getByRole('button', { name: 'Hide for now' })).toBeInTheDocument()
+    expect(within(header).getByText('0 of 3 done')).toBeInTheDocument()
+  })
+
+  it('moves focus to the card heading after "Hide for now" — the button unmounts itself (#3910)', async () => {
+    const user = userEvent.setup()
+    mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: '0', funded: false }] })
+    render(<DashboardClient />)
+    await user.click(screen.getByRole('button', { name: 'Hide for now' }))
+    // The hand-off runs in a requestAnimationFrame; flush it.
+    await new Promise((resolve) => window.requestAnimationFrame(() => resolve(null)))
+    const heading = document.getElementById('needs-attention-heading')
+    expect(heading).not.toBeNull()
+    expect(heading).toHaveAttribute('tabindex', '-1')
+    expect(document.activeElement).toBe(heading)
+  })
+
+  it('"Hide for now" survives a reload and comes back when a step completes (#3818)', async () => {
+    const user = userEvent.setup()
+    mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: '0', funded: false }] })
+    const first = render(<DashboardClient />)
+    await user.click(screen.getByRole('button', { name: 'Hide for now' }))
+    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+    first.unmount()
+
+    // A reload: still hidden — it was session-only before #3818.
+    const second = render(<DashboardClient />)
+    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+    second.unmount()
+
+    // USDC arrives: step 1 completes, so the guide comes back.
+    mockBaseState([], { accounts: [FUNDED_ACCOUNT] })
+    render(<DashboardClient />)
+    expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
+    expect(screen.getByText('usdc-true')).toBeInTheDocument()
+  })
+
+  it('does not wait on GET /agents — the overview carries the agents, so a refetch never flips the card (#3818)', () => {
     mockUseAgents.mockReturnValue({
       agents: [],
       loading: true,
@@ -549,7 +859,7 @@ describe('DashboardClient', () => {
 
     render(<DashboardClient />)
 
-    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+    expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
   })
 
   it('does not show a zero balance when dashboard totals fail to load', () => {
@@ -572,193 +882,218 @@ describe('DashboardClient', () => {
     expect(screen.queryByText('No transactions yet')).not.toBeInTheDocument()
   })
 
-  describe('backup-signer recovery nudge (#1153 funded-state trigger)', () => {
-    const DELEGATOR_ACCOUNT = { ...SAFE, account_type: 'delegator_hybrid' }
-
-    /** The signer set AuthContext resolves on login, as the dashboard reads it. */
-    const storeSigners = (passkeys: number, owner: string | null) => {
-      window.localStorage.setItem(
-        `haven_hybrid_signers_${DELEGATOR_ACCOUNT.account_address.toLowerCase()}_${DELEGATOR_ACCOUNT.chain_id}`,
-        JSON.stringify({
-          account_address: DELEGATOR_ACCOUNT.account_address,
-          chain_id: DELEGATOR_ACCOUNT.chain_id,
-          owner_address: owner,
-          passkeys: Array.from({ length: passkeys }, (_, i) => ({ key_id: `0x0${i}`, x: '0x1', y: '0x2' })),
-        }),
-      )
+  // ── The backup item lives in the NeedsYou card now (#3808) ────────────────
+  // The RecoveryNudge component is deleted; its per-account rule reads the
+  // overview's `needs_backup_recommendation` (#1205) through the shared rules
+  // in `lib/dashboard-attention.ts`. Rule-level truth (per-account items,
+  // testnet silence, unknown reads) is pinned there; these tests pin the
+  // DASHBOARD WIRING — the legacy global dismissal key and the render path.
+  describe('backup item wiring (#3808)', () => {
+    const RECOMMENDED_ACCOUNT = {
+      accountId: 'safe-1',
+      chainId: 8453,
+      isTestnet: false,
+      usdcBalanceAtomic: '1250000000',
+      usdcDecimals: 6,
+      funded: true,
+      needs_backup_recommendation: true,
+      usdcPace7dAtomic: '6250000',
     }
 
-    const asDelegationUser = () =>
-      mockUseAuth.mockReturnValue({
-        user: {
-          id: 'user-1',
-          name: 'Ada',
-          email: 'ada@example.com',
-          wallet_address: '0x5555555555555555555555555555555555555555',
-          accounts: [DELEGATOR_ACCOUNT],
-        },
+    it('shows the backup item for a funded account the server recommends a backup for', () => {
+      mockBaseState([], { accounts: [RECOMMENDED_ACCOUNT], spend: { failedIntents7d: 0 } })
+
+      render(<DashboardClient />)
+
+      expect(screen.getByText('Main account has one way to approve payments')).toBeInTheDocument()
+    })
+
+    it('never shows the backup item for a test-network account', () => {
+      mockBaseState([], {
+        accounts: [{ ...RECOMMENDED_ACCOUNT, accountId: 'acct-testnet', isTestnet: true }],
+        spend: { failedIntents7d: 0 },
       })
 
-    it('shows the nudge for a funded, single-signer delegation-rail account', () => {
-      asDelegationUser()
-      storeSigners(1, null) // one passkey, no owner → no recovery
-      // mockBaseState() already sets a non-zero aggregated balance.
+      render(<DashboardClient />)
+
+      expect(screen.queryByText(/has one way to approve payments/)).not.toBeInTheDocument()
+    })
+
+    it('hides the backup item when its id is in the server-saved dismissals (#3813)', () => {
+      mockUseAttentionDismissals.mockReturnValue({
+        dismissedIds: new Set([`no-backup:${RECOMMENDED_ACCOUNT.accountId}`]),
+        dismiss: mockDismissOnServer,
+      })
+      mockBaseState([], { accounts: [RECOMMENDED_ACCOUNT], spend: { failedIntents7d: 0 } })
 
       render(<DashboardClient />)
 
-      expect(screen.getByText('Add a backup soon')).toBeInTheDocument()
+      expect(screen.queryByText(/has one way to approve payments/)).not.toBeInTheDocument()
     })
 
-    it('stays silent when the account ALREADY has a backup', () => {
-      // Recommending a backup to someone who enrolled one teaches them to
-      // ignore the banner — and it is the state the nudge is asking for.
-      asDelegationUser()
-      storeSigners(2, null)
+    it('writes a server-saved dismissal through the hook when the backup item is dismissed', async () => {
+      const user = userEvent.setup()
+      mockBaseState([], { accounts: [RECOMMENDED_ACCOUNT], spend: { failedIntents7d: 0 } })
 
       render(<DashboardClient />)
+      await user.click(screen.getByTestId(`attention-dismiss-no-backup:${RECOMMENDED_ACCOUNT.accountId}`))
 
-      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
+      expect(mockDismissOnServer).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'no-backup', accountId: RECOMMENDED_ACCOUNT.accountId }),
+      )
+      // The legacy key is no longer written — the server owns persistence now.
+      expect(window.localStorage.getItem('haven.recovery-nudge.dismissed')).toBeNull()
     })
 
-    it('counts an EOA owner as the second signer', () => {
-      asDelegationUser()
-      storeSigners(1, '0x5555555555555555555555555555555555555555')
-
-      render(<DashboardClient />)
-
-      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
-    })
-
-    /**
-     * #1989 (epic #1440) removed the LEGACY-rail arm of this nudge, and this
-     * test is the inversion of the four #1229/#1205 tests that used to live
-     * here.
-     *
-     * Those four are deleted rather than kept, and the distinction matters:
-     * three of them ('stays silent once the passkey Safe has a second
-     * approver', 'keeps the safe-rail nudge off testnet chains', 'leaves an
-     * imported wallet-owned Safe alone') all asserted that NO nudge renders
-     * for some legacy configuration. Every one of them is now true by
-     * CONSTRUCTION — no legacy configuration can produce a nudge at all — so
-     * keeping them would have left three green tests guarding the empty set,
-     * which is exactly the #1987 defect. They were removed and replaced by the
-     * single assertion that actually still has content: the arm is gone for
-     * the configuration it used to FIRE on.
-     *
-     * The positive control is in the same test on purpose. Without it, "no
-     * nudge for a legacy Safe" is satisfied by breaking the nudge outright.
-     */
-    it('shows no backup nudge for a funded single-owner passkey Safe, while the delegation nudge still fires', () => {
-      const asPasskeySafeUser = () => {
-        mockUseAuth.mockReturnValue({
-          user: {
-            id: 'user-1',
-            name: 'Ada',
-            email: 'ada@example.com',
-            wallet_address: null,
-            accounts: [{ ...SAFE, account_type: 'legacy_safe' as const }],
+    it('writes a needs-setup dismissal through the hook when a setup item is dismissed', async () => {
+      const user = userEvent.setup()
+      // #3818: with the first-run steps showing, the agent step 2 names has
+      // no row of its own; this test is about the card's dismissal wiring, so
+      // the steps are hidden ("Hide for now" at 0 completed steps).
+      window.localStorage.setItem('haven-setup-guide-hidden:user-1', '0')
+      // An active agent with no usable budget raises "Needs setup"
+      // (dashboard-attention rule 1) — the agent a user keeps without a
+      // budget on purpose.
+      const budgetlessAgent: DashboardAgentPreview = {
+        id: 'agent-9',
+        name: 'Kept agent',
+        status: 'active',
+        accountId: null,
+        accountName: null,
+        accountChainId: 8453,
+        allowances: [],
+        budgets: [],
+        receivedSubBudgets: [],
+        stats: {
+          d7: {
+            gross: { usd: 0, eur: 0, sek: 0 },
+            net: { usd: 0, eur: 0, sek: 0 },
+            approx: false,
+            payments: 0,
+            refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
           },
-          passkeys: [
-            {
-              id: 'passkey-1',
-              credential_id: 'cred-primary',
-              signer_address: '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2',
-              chain_id: SAFE.chain_id,
-              account_address: SAFE.account_address,
-              created_at: '2026-05-12T00:00:00Z',
-            },
-          ],
-        })
-      }
-
-      // The exact fixture that used to render the nudge: funded, legacy
-      // passkey-owned Safe, sole owner.
-      asPasskeySafeUser()
-      const { unmount } = render(<DashboardClient />)
-      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
-      // And it no longer points anywhere: 'Approvers' was the destination.
-      expect(screen.queryByText('Approvers')).not.toBeInTheDocument()
-      unmount()
-
-      // POSITIVE CONTROL — the nudge itself is alive on the delegation rail.
-      asDelegationUser()
-      storeSigners(1, null)
-      render(<DashboardClient />)
-      expect(screen.getByText('Add a backup soon')).toBeInTheDocument()
-      expect(screen.getByText('Backup & recovery')).toBeInTheDocument()
-    })
-
-    it('stays silent when the signer set is unknown — a failed read must not nag', () => {
-      asDelegationUser()
-      // Nothing stored: AuthContext skips per-safe failures silently, so an
-      // absent set means "we do not know", not "no backup".
-
-      render(<DashboardClient />)
-
-      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
-    })
-
-    it('does not show the nudge for an unfunded delegation-rail account', () => {
-      mockUseAuth.mockReturnValue({
-        user: {
-          id: 'user-1',
-          name: 'Ada',
-          email: 'ada@example.com',
-          wallet_address: '0x5555555555555555555555555555555555555555',
-          accounts: [DELEGATOR_ACCOUNT],
+          d30: {
+            gross: { usd: 0, eur: 0, sek: 0 },
+            net: { usd: 0, eur: 0, sek: 0 },
+            approx: false,
+            payments: 0,
+            refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+          },
+          lastPaymentAt: null,
+          lastCounterparty: null,
         },
-      })
-      // The signer set must be KNOWN (here: one passkey, no owner — the
-      // nudge-worthy configuration) or the component stays silent on the
-      // unknown-signer state and this test passes whatever the funding gate
-      // does. With signers known, only the unfunded state suppresses the
-      // nudge, which is what this test's name claims.
-      storeSigners(1, null)
-      mockUseAggregatedBalances.mockReturnValue({
-        balances: [],
+      }
+      mockBaseState([budgetlessAgent])
+
+      render(<DashboardClient />)
+      await user.click(screen.getByTestId('attention-dismiss-needs-setup:agent-9'))
+
+      expect(mockDismissOnServer).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'needs-setup', agentId: 'agent-9' }),
+      )
+    })
+  })
+
+  describe('money panel (#3807)', () => {
+    /** The full wire shape the panel's spending block and summary read. */
+    const baseSpend = {
+      scope: 'mainnet' as 'mainnet' | 'testnet',
+      d7: {
+        gross: { usd: 18.5, eur: 16.84, sek: 199.1 },
+        net: { usd: 11.1, eur: 10.1, sek: 119.46 },
+        approx: false,
+        payments: 6,
+        distinctMerchants: 3,
+        budgetStops: 1,
+      },
+      d30: {
+        gross: { usd: 74, eur: 67.34, sek: 796.4 },
+        net: { usd: 48.1, eur: 43.77, sek: 517.66 },
+        approx: true,
+        payments: 21,
+        distinctMerchants: 5,
+        budgetStops: 3,
+      },
+      topMerchant7d: {
+        key: 'research.example',
+        x402ResourceUrl: 'https://research.example/report',
+        to: '0x3333333333333333333333333333333333333333',
+        merchantName: null,
+      },
+      failedIntents7d: 1,
+      balance_by_day: Array.from({ length: 30 }, (_, i) => {
+        // Real calendar days (Sep 10 + i, rolling into October) — a naive
+        // string pad produces '2026-09-39' and the sparkline's Date.parse
+        // goes NaN.
+        const day = new Date(Date.UTC(2026, 8, 10 + i))
+        return {
+          snapshotDate: day.toISOString().slice(0, 10),
+          totalUsd: 1200 + i,
+          totalEur: 1100 + i,
+          totalSek: null as number | null,
+        }
+      }),
+    }
+
+    function mockOverviewWithSpend(spend: typeof baseSpend) {
+      mockUseDashboardOverview.mockReturnValue({
+        data: {
+          totals: { usd: 1234.56, eur: 1100, sek: 13000.5 },
+          change: {
+            available: true,
+            usdAmount: 12.34,
+            eurAmount: 11,
+            sekAmount: null,
+            usdPercent: 1.23,
+            eurPercent: 1,
+            sekPercent: 0,
+          },
+          actionableApprovals: 0,
+          pendingApprovals: 0,
+          onboardingProgress: { hasFirstAgentPayment: true },
+          agents: [],
+          transactions: [],
+          spend,
+        },
         loading: false,
         error: null,
         refetch: vi.fn(),
       })
+    }
 
+    it('renders the templated 7-day summary under the heading', () => {
+      mockOverviewWithSpend(baseSpend)
       render(<DashboardClient />)
 
-      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
+      // d7: the fixture has no agents, so the spread-out count form renders
+      // off the totals — and the fixture's 1 budget stop rides along as its
+      // own neutral sentence.
+      expect(
+        screen.getByText(
+          'Agents spent $11.10 in the last 7 days. 1 payment attempt was stopped by a budget limit.',
+        ),
+      ).toBeInTheDocument()
     })
 
-    it('does not show the nudge when a transient balance-fetch failure makes funded state unknown', () => {
-      mockUseAuth.mockReturnValue({
-        user: {
-          id: 'user-1',
-          name: 'Ada',
-          email: 'ada@example.com',
-          wallet_address: '0x5555555555555555555555555555555555555555',
-          accounts: [DELEGATOR_ACCOUNT],
-        },
-      })
-      // Known single-signer set, same as above: without it the test passes
-      // via unknown-signer silence and the error branch is load-bearing for
-      // nothing. With it, the balance-fetch error is the only reason the
-      // nudge stays off.
-      storeSigners(1, null)
-      mockUseAggregatedBalances.mockReturnValue({
-        balances: [],
-        loading: false,
-        error: 'Failed to load balances',
-        refetch: vi.fn(),
-      })
-
+    it('labels a test-network-only overview "Test network"', () => {
+      mockOverviewWithSpend({ ...baseSpend, scope: 'testnet' as const })
       render(<DashboardClient />)
 
-      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
+      expect(screen.getByText('Test network')).toBeInTheDocument()
     })
 
-    it('does not show the nudge for a funded account that is not on the delegation rail', () => {
-      // mockBaseState() defaults to the live delegation rail; legacy cases
-      // supply an explicit `account_type: 'legacy_safe'` fixture.
+    it('marks a re-priced 30-day total with ≈ and never presents it as booked', () => {
+      mockOverviewWithSpend(baseSpend)
       render(<DashboardClient />)
 
-      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
+      // d30.approx is true in the fixture, and the Amount primitive's
+      // title carries the reason (owner decision 1). The title sits on the
+      // inner ≈ mark; the figure is its sibling inside the Amount root, so
+      // read the enclosing span's text.
+      const marks = screen.getAllByTitle("Converted at today's rate")
+      expect(marks.length).toBeGreaterThan(0)
+      const amounts = marks.map((mark) => mark.parentElement?.textContent ?? '')
+      expect(amounts.join(' ')).toContain('48.10')
     })
   })
 

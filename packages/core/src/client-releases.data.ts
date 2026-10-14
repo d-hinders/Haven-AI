@@ -15,8 +15,36 @@
 
 export const CLIENT_RELEASE_DATA = {
   "@haven_ai/sdk": {
-    "released_version": "0.9.0-alpha.0",
+    "released_version": "0.10.0-alpha.0",
     "notes": [
+      {
+        "version": "0.10.0-alpha.0",
+        "date": "2026-10-14",
+        "summary": "EIP-3009 merchant headers minted by the SDK now carry an EIP-3009 nonce derived from the Haven payment id — keccak256(utf8(\"haven-x402-payment-nonce:\") || utf8(payment_id)), the shared deriveX402PaymentNonce on the edge surface — instead of the x402 library's random draw. (+6 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "EIP-3009 merchant headers minted by the SDK now carry an EIP-3009 nonce derived from the Haven payment id — ",
+            "code": false
+          },
+          {
+            "text": "keccak256(utf8(\"haven-x402-payment-nonce:\") || utf8(payment_id))",
+            "code": true
+          },
+          {
+            "text": ", the shared ",
+            "code": false
+          },
+          {
+            "text": "deriveX402PaymentNonce",
+            "code": true
+          },
+          {
+            "text": " on the edge surface — instead of the x402 library's random draw. (+6 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.9.0-alpha.0",
         "date": "2026-10-09",
@@ -28,32 +56,48 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.8.1-alpha.0",
-        "date": "2026-10-07",
-        "summary": "The setup prompt's command-modification rule permits a third change: the re-run a wiring_collision refusal asks for. (+1 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "The setup prompt's command-modification rule permits a third change: the re-run a ",
-            "code": false
-          },
-          {
-            "text": "wiring_collision",
-            "code": true
-          },
-          {
-            "text": " refusal asks for. (+1 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/signer": {
-    "released_version": "0.9.0-alpha.0",
+    "released_version": "0.10.0-alpha.0",
     "notes": [
+      {
+        "version": "0.10.0-alpha.0",
+        "date": "2026-10-14",
+        "summary": "The EIP-3009 merchant header the signer builds now carries an EIP-3009 nonce derived from the Haven payment id inside the verified binding — keccak256(utf8(\"haven-x402-payment-nonce:\") || utf8(payment_id)), the shared deriveX402PaymentNonce from @haven_ai/sdk/edge — instead of the x402 library's random draw.",
+        "summary_segments": [
+          {
+            "text": "The EIP-3009 merchant header the signer builds now carries an EIP-3009 nonce derived from the Haven payment id inside the verified binding — ",
+            "code": false
+          },
+          {
+            "text": "keccak256(utf8(\"haven-x402-payment-nonce:\") || utf8(payment_id))",
+            "code": true
+          },
+          {
+            "text": ", the shared ",
+            "code": false
+          },
+          {
+            "text": "deriveX402PaymentNonce",
+            "code": true
+          },
+          {
+            "text": " from ",
+            "code": false
+          },
+          {
+            "text": "@haven_ai/sdk/edge",
+            "code": true
+          },
+          {
+            "text": " — instead of the x402 library's random draw.",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.9.0-alpha.0",
         "date": "2026-10-09",
@@ -73,24 +117,68 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.8.1-alpha.0",
-        "date": "2026-10-07",
-        "summary": "README: the network-calls section names every sign-context read.",
-        "summary_segments": [
-          {
-            "text": "README: the network-calls section names every sign-context read.",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/mcp": {
-    "released_version": "0.9.0-alpha.0",
+    "released_version": "0.10.0-alpha.0",
     "notes": [
+      {
+        "version": "0.10.0-alpha.0",
+        "date": "2026-10-14",
+        "summary": "haven_get_agent and haven_get_allowances warn a replaced agent. When a Connect --replace retired this agent on its machine, both outputs carry supersededBy with a warning to restart the session and have the user remove the old agent; otherwise supersededBy is null. (+2 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "haven_get_agent",
+            "code": true
+          },
+          {
+            "text": " and ",
+            "code": false
+          },
+          {
+            "text": "haven_get_allowances",
+            "code": true
+          },
+          {
+            "text": " warn a replaced agent. When a Connect ",
+            "code": false
+          },
+          {
+            "text": "--replace",
+            "code": true
+          },
+          {
+            "text": " retired this agent on its machine, both outputs carry ",
+            "code": false
+          },
+          {
+            "text": "supersededBy",
+            "code": true
+          },
+          {
+            "text": " with a warning to restart the session and have the user remove the old agent; otherwise ",
+            "code": false
+          },
+          {
+            "text": "supersededBy",
+            "code": true
+          },
+          {
+            "text": " is ",
+            "code": false
+          },
+          {
+            "text": "null",
+            "code": true
+          },
+          {
+            "text": ". (+2 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.9.0-alpha.0",
         "date": "2026-10-09",
@@ -102,24 +190,40 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.8.1-alpha.0",
-        "date": "2026-10-07",
-        "summary": "No changes to this package in this release.",
-        "summary_segments": [
-          {
-            "text": "No changes to this package in this release.",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/connect": {
-    "released_version": "0.9.0-alpha.0",
+    "released_version": "0.10.0-alpha.0",
     "notes": [
+      {
+        "version": "0.10.0-alpha.0",
+        "date": "2026-10-14",
+        "summary": "After a --replace whose install completed, the connector tells Haven which agents the run retired on this machine, using the NEW agent's key. Only the retired directories are reported — never the coexisting agents superseded_agent_ids lists. (+5 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "After a ",
+            "code": false
+          },
+          {
+            "text": "--replace",
+            "code": true
+          },
+          {
+            "text": " whose install completed, the connector tells Haven which agents the run retired on this machine, using the NEW agent's key. Only the retired directories are reported — never the coexisting agents ",
+            "code": false
+          },
+          {
+            "text": "superseded_agent_ids",
+            "code": true
+          },
+          {
+            "text": " lists. (+5 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.9.0-alpha.0",
         "date": "2026-10-09",
@@ -139,48 +243,48 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.8.1-alpha.0",
-        "date": "2026-10-07",
-        "summary": "README: the wiring_collision relay names the re-run the setup prompt now permits. After the user answers the relay, the dashboard's setup prompt lets an agent re-run once with the flag the user chose (--name or --replace).",
-        "summary_segments": [
-          {
-            "text": "README: the ",
-            "code": false
-          },
-          {
-            "text": "wiring_collision",
-            "code": true
-          },
-          {
-            "text": " relay names the re-run the setup prompt now permits. After the user answers the relay, the dashboard's setup prompt lets an agent re-run once with the flag the user chose (",
-            "code": false
-          },
-          {
-            "text": "--name",
-            "code": true
-          },
-          {
-            "text": " or ",
-            "code": false
-          },
-          {
-            "text": "--replace",
-            "code": true
-          },
-          {
-            "text": ").",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/cli": {
-    "released_version": "0.9.0-alpha.0",
+    "released_version": "0.10.0-alpha.0",
     "notes": [
+      {
+        "version": "0.10.0-alpha.0",
+        "date": "2026-10-14",
+        "summary": "Agent runbook text: the revoke hash is read from haven budget show <agentId> --hashes, and a connector upgrade_command may name the pair with --name <slug>. Text only; no update needed.",
+        "summary_segments": [
+          {
+            "text": "Agent runbook text: the revoke hash is read from ",
+            "code": false
+          },
+          {
+            "text": "haven budget show <agentId> --hashes",
+            "code": true
+          },
+          {
+            "text": ", and a connector ",
+            "code": false
+          },
+          {
+            "text": "upgrade_command",
+            "code": true
+          },
+          {
+            "text": " may name the pair with ",
+            "code": false
+          },
+          {
+            "text": "--name <slug>",
+            "code": true
+          },
+          {
+            "text": ". Text only; no update needed.",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.9.0-alpha.0",
         "date": "2026-10-09",
@@ -208,38 +312,6 @@ export const CLIENT_RELEASE_DATA = {
           },
           {
             "text": " say what they do not do. The help said pause would \"Stop the agent spending\" and revoke would \"Permanently revoke an agent\"; all three are backend-only status changes, and the budget stays live on-chain. (+2 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
-      },
-      {
-        "version": "0.8.1-alpha.0",
-        "date": "2026-10-07",
-        "summary": "haven feedback submit \"<text>\". A one-way feedback/bug-report channel to Haven for a signed-in user and the agent working in their terminal — needs haven login, 4000 characters (code points) or fewer, several unquoted words are joined into one text like contacts add's own free-text argument.",
-        "summary_segments": [
-          {
-            "text": "haven feedback submit \"<text>\"",
-            "code": true
-          },
-          {
-            "text": ". A one-way feedback/bug-report channel to Haven for a signed-in user and the agent working in their terminal — needs ",
-            "code": false
-          },
-          {
-            "text": "haven login",
-            "code": true
-          },
-          {
-            "text": ", 4000 characters (code points) or fewer, several unquoted words are joined into one text like ",
-            "code": false
-          },
-          {
-            "text": "contacts add",
-            "code": true
-          },
-          {
-            "text": "'s own free-text argument.",
             "code": false
           }
         ],

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { currentPeriodBounds } from '@haven_ai/core'
 import {
   budgetBandsCaption,
   budgetUsedPercent,
@@ -145,17 +146,37 @@ describe('budgetUsedPercent', () => {
 })
 
 describe('formatBudgetResetDate', () => {
-  it('renders the period end as day and short month, with no year', () => {
-    // A delegation period runs hours to weeks, so a year would read as a
-    // period years away; the element carries the full timestamp on its title
-    // for the reader who needs the date precisely.
-    expect(formatBudgetResetDate('2026-07-11T00:00:00.000Z')).toBe('11 Jul')
-    // Midday UTC, not the day's last second: this formatter renders in the
-    // HOST zone (no timeZone option), so `23:59:59Z` is already the following
-    // day here in +01:00 — '2 Dec', correctly. An instant that is the same
-    // calendar day across the zones a CI box can sit in is the only honest
-    // input for a day-number pin.
-    expect(formatBudgetResetDate('2026-12-01T12:00:00.000Z')).toBe('1 Dec')
+  // #3844: the period-end voice is the caption helper's `formatNextEvent` —
+  // the same three-distance phrasing a budget meter's "refills …" line uses.
+  // `nowMs` is a parameter (nothing here reads the clock), the zone is
+  // explicit, and the end instant is a boundary of `start_date` via
+  // `currentPeriodBounds` in `@haven_ai/core`, not an invented timestamp.
+  const TZ = 'Europe/Stockholm'
+  // start_date 2026-10-08T12:02:00Z, period 86 400 s, now 2026-10-09T09:00Z
+  // → the same anchor fixture #3806 pins for `currentPeriodBounds`.
+  const startSec = Math.floor(Date.parse('2026-10-08T12:02:00Z') / 1000)
+  const nowMs = Date.parse('2026-10-09T09:00:00Z')
+
+  it('says "in 3h" when the end is under 24 h away', () => {
+    const end = currentPeriodBounds(startSec, 86_400, Math.floor(nowMs / 1000)).end * 1000
+    expect(end).toBe(Date.parse('2026-10-09T12:02:00Z'))
+    // 3 h 2 m away rounds to whole hours in the helper's near band.
+    expect(formatBudgetResetDate(new Date(end).toISOString(), nowMs, TZ)).toBe('in 3h')
+  })
+
+  it('says "Thu 14:02" when the end is under 7 days away', () => {
+    const end = currentPeriodBounds(startSec, 4 * 86_400, Math.floor(nowMs / 1000)).end * 1000
+    // 2026-10-12T12:02:00Z is a Monday; 14:02 in Stockholm (UTC+2).
+    expect(formatBudgetResetDate(new Date(end).toISOString(), nowMs, TZ)).toBe('Mon 14:02')
+  })
+
+  it('renders the far band as day and short month, with no year', () => {
+    // A delegation period is short by nature, so a year would read as a
+    // period years away. A 30-day budget's boundary: 2026-11-07T12:02:00Z —
+    // the helper's ≥ 7-day band, the voice this formatter used to roll
+    // itself, now byte-identical from the helper.
+    const end = currentPeriodBounds(startSec, 30 * 86_400, Math.floor(nowMs / 1000)).end * 1000
+    expect(formatBudgetResetDate(new Date(end).toISOString(), nowMs, TZ)).toBe('7 Nov')
   })
 })
 

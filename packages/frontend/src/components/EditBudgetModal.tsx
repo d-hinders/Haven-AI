@@ -362,7 +362,12 @@ export default function EditBudgetModal({
       if (!result.alreadyStopped) signedAny = true
     }
     setFinishState('idle')
-    setOutcome({ ok: true, newDelegationHash: outcome.newDelegationHash ?? '', oldDelegationRevoked: signedAny })
+    setOutcome({
+      ok: true,
+      newDelegationHash: outcome.newDelegationHash ?? '',
+      oldDelegationRevoked: signedAny,
+      ...(outcome.earlierLimits ? { earlierLimits: true as const } : {}),
+    })
     setStep('done')
     onBudgetChange?.()
   }, [budget.delegation_hash, onBudgetChange, outcome, revoke])
@@ -389,9 +394,10 @@ export default function EditBudgetModal({
     outcome && !outcome.ok && outcome.reason === 'revoke_unfinished'
       ? (outcome.unstoppedDelegationHashes?.length ?? 1)
       : 0
-  // Was the edit that produced this outcome a move? The form can change after
-  // an error only through Back, so the current input still describes it.
-  const outcomeMoved = moved
+  // Was the edit that produced this outcome a move? The hook says so (a
+  // landed earlier attempt may have moved while the current input does not).
+  const outcomeMoved = outcome && !outcome.ok && outcome.moved !== undefined ? outcome.moved : moved
+  const earlierLimits = !!outcome && !outcome.ok && !!outcome.earlierLimits
   // #3933: the still-enabled budget, named on the `revoke_unfinished` screen.
   const previousBudgetPhrase = (() => {
     let amountText: string
@@ -714,11 +720,21 @@ export default function EditBudgetModal({
                 {outcome.reason === 'revoke_unfinished' ? (
                   <>
                     <p className="text-sm font-medium text-[var(--v2-ink)]">
-                      New budget is live — one step left
+                      {earlierLimits ? 'Your earlier change went through' : 'New budget is live — one step left'}
                     </p>
                     {/* #3933: name the still-enabled budget, say what it can
                         still do, and offer the Stop right here. */}
-                    {outcomeMoved ? (
+                    {earlierLimits ? (
+                      <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
+                        The budget has the limits you set then, not these. The previous{' '}
+                        {previousBudgetPhrase} budget{' '}
+                        {outcomeMoved
+                          ? 'pays a different recipient, so it keeps working, in Haven and outside it,'
+                          : 'can still be spent outside Haven'}{' '}
+                        until it is stopped. Stopping it also ends any open task budget or
+                        sub-budget taken from it. Then edit the budget again to set these limits.
+                      </p>
+                    ) : outcomeMoved ? (
                       <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
                         The new limits took effect. The previous {previousBudgetPhrase} budget pays
                         a different recipient, so it keeps working, in Haven and outside it, until
@@ -778,8 +794,7 @@ export default function EditBudgetModal({
                     </p>
                     <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
                       The new budget may already be in place. Try again in a moment: Haven checks
-                      first and does not add a second budget. If this keeps showing, close this and
-                      open the budget again.
+                      first and does not add a second budget.
                     </p>
                   </>
                 ) : outcome.reason === 'refused' ? (

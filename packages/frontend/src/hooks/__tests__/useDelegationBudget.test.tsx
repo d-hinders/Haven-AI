@@ -834,6 +834,7 @@ describe('editBudget — REPLACE composition (#3166)', () => {
         reason: 'revoke_unfinished',
         newDelegationHash: NEW_HASH,
         unstoppedDelegationHashes: [OLD_HASH],
+        moved: false,
       })
     })
     // The stop was prepared but never submitted — the owner finishes it later.
@@ -873,6 +874,7 @@ describe('editBudget — REPLACE composition (#3166)', () => {
         reason: 'revoke_unfinished',
         newDelegationHash: NEW_HASH,
         unstoppedDelegationHashes: [OLD_HASH],
+        moved: false,
       })
     })
   })
@@ -1385,6 +1387,7 @@ describe('#3930 — a lost activate response: re-read before report, no double g
         reason: 'revoke_unfinished',
         newDelegationHash: HASH,
         unstoppedDelegationHashes: [OLD_HASH],
+        moved: false,
       })
     })
   })
@@ -1716,6 +1719,7 @@ describe('#3933 — refuse a silent replace', () => {
         reason: 'revoke_unfinished',
         newDelegationHash: NEW_HASH,
         unstoppedDelegationHashes: [PAIR_HASH],
+        moved: false,
       })
     })
     // The first row's Stop was submitted; the second was never submitted.
@@ -1741,7 +1745,7 @@ describe('#3933 — refuse a silent replace', () => {
     expect(mockSignUserOp).toHaveBeenCalledTimes(1)
   })
 
-  it('#3930 retry that finds the edit LANDED stops the rows the lost attempt swept — never the new budget (round-2 blocker)', async () => {
+  it('#3930 retry that finds the edit LANDED reports the rows the lost attempt swept as still to stop — never the new budget, nothing signed in that click (rounds 2 and 5)', async () => {
     // The first attempt's activate response is lost and the re-read cannot
     // find the new row yet: unconfirmed, the pair remembered as the Stop set.
     mockApiWith(PAIR)
@@ -1772,15 +1776,17 @@ describe('#3933 — refuse a silent replace', () => {
     mockFlow()
     await act(async () => {
       const res = await result.current.editBudget(OLD_HASH, INPUT)
-      expect(res).toEqual({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: true })
+      expect(res).toEqual({
+        ok: false,
+        reason: 'revoke_unfinished',
+        newDelegationHash: NEW_HASH,
+        unstoppedDelegationHashes: [OLD_HASH, PAIR_HASH],
+        moved: false,
+      })
     })
-    expect(revokeUrls()).toEqual([
-      expect.stringContaining(`/delegations/${OLD_HASH}/revoke`),
-      expect.stringContaining(`/delegations/${OLD_HASH}/revoke/submit`),
-      expect.stringContaining(`/delegations/${PAIR_HASH}/revoke`),
-      expect.stringContaining(`/delegations/${PAIR_HASH}/revoke/submit`),
-    ])
-    expect(revokeUrls().some((u) => u.includes(NEW_HASH))).toBe(false)
+    // The review step described a grant: no Stop is signed in this click.
+    expect(revokeUrls()).toEqual([])
+    expect(mockSignUserOp).not.toHaveBeenCalled()
     // No second grant: the landed retry made no /build of its own.
     expect(mockPost.mock.calls.filter((c) => String(c[0]).endsWith('/build'))).toHaveLength(1)
     // Used up: the attempt is no longer remembered.
@@ -1835,42 +1841,77 @@ describe('#3933 — refuse a silent replace', () => {
     ])
   })
 
-  it('round 4: a retry asking for OTHER limits after the attempt landed finishes the Stops it owed and says the earlier limits are live — no second build', async () => {
+  it('round 4/5: a retry asking for OTHER limits after the attempt landed reports earlierLimits and the rows it still owes — no build, nothing signed', async () => {
     const { result } = await landedEditOfPair()
     mockFlow()
     await act(async () => {
       const res = await result.current.editBudget(OLD_HASH, { ...INPUT, budgetAtomic: '9000' })
-      expect(res).toEqual({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: true, earlierLimits: true })
+      expect(res).toEqual({
+        ok: false,
+        reason: 'revoke_unfinished',
+        newDelegationHash: NEW_HASH,
+        unstoppedDelegationHashes: [OLD_HASH, PAIR_HASH],
+        moved: false,
+        earlierLimits: true,
+      })
     })
     expect(builds()).toHaveLength(1)
-    // The replacement the owner signed is finished: both swept rows stopped, never the live one.
-    expect(revokeUrls()).toEqual([
-      expect.stringContaining(`/delegations/${OLD_HASH}/revoke`),
-      expect.stringContaining(`/delegations/${OLD_HASH}/revoke/submit`),
-      expect.stringContaining(`/delegations/${PAIR_HASH}/revoke`),
-      expect.stringContaining(`/delegations/${PAIR_HASH}/revoke/submit`),
-    ])
+    expect(revokeUrls()).toEqual([])
     expect(result.current.isOwnAttemptedGrant(NEW_HASH, OLD_HASH)).toBe(false)
   })
 
-  it('round 4: a retry that MOVES the recipient after the attempt landed builds no second budget, and still stops the old rows', async () => {
+  it('round 4/5: a retry that MOVES the recipient after the attempt landed builds no second budget, and still reports the old rows to stop', async () => {
     const { result } = await landedEditOfPair()
     mockFlow()
     await act(async () => {
       const res = await result.current.editBudget(OLD_HASH, { ...INPUT, recipientAddress: RECIPIENT as never })
-      expect(res).toEqual({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: true, earlierLimits: true })
+      // `moved` describes the ATTEMPT that landed (same slot), not this input.
+      expect(res).toMatchObject({ reason: 'revoke_unfinished', unstoppedDelegationHashes: [OLD_HASH, PAIR_HASH], moved: false, earlierLimits: true })
     })
     expect(builds()).toHaveLength(1)
-    expect(revokeUrls().filter((u) => u.endsWith('/revoke/submit'))).toHaveLength(2)
   })
 
-  it('round 4: the SAME limits after the attempt landed is a plain success, with no earlierLimits flag', async () => {
+  it('round 4/5: the SAME limits after the attempt landed carries no earlierLimits flag', async () => {
     const { result } = await landedEditOfPair()
     mockFlow()
     await act(async () => {
       const res = await result.current.editBudget(OLD_HASH, INPUT)
-      expect(res).toEqual({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: true })
+      expect(res).toMatchObject({ reason: 'revoke_unfinished', newDelegationHash: NEW_HASH })
+      expect(res).not.toHaveProperty('earlierLimits')
     })
+  })
+
+  it('round 5: a landed attempt that MOVED the recipient reports moved: true — the old rows still pay, even when the retry input does not move', async () => {
+    mockApiWith(PAIR)
+    mockFlow({ activate: () => Promise.reject(new TypeError('Failed to fetch')) })
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.budgets).toHaveLength(2))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.editBudget(OLD_HASH, { ...INPUT, recipientAddress: RECIPIENT as never })
+      expect(res).toEqual({ ok: false, reason: 'unconfirmed' })
+    })
+    // The move landed in the recipient's slot; the old rows are untouched (still active).
+    mockApiWith([...PAIR, row(NEW_HASH, { recipient_address: RECIPIENT, created_at: '2026-10-03T00:00:00Z' })])
+    await act(async () => {
+      await result.current.reload()
+    })
+    await waitFor(() => expect(result.current.budgets).toHaveLength(3))
+    mockFlow()
+    await act(async () => {
+      // Back on the form, the owner puts the old recipient back.
+      const res = await result.current.editBudget(OLD_HASH, INPUT)
+      expect(res).toEqual({
+        ok: false,
+        reason: 'revoke_unfinished',
+        newDelegationHash: NEW_HASH,
+        unstoppedDelegationHashes: [OLD_HASH, PAIR_HASH],
+        moved: true,
+        earlierLimits: true,
+      })
+    })
+    expect(builds()).toHaveLength(1)
+    expect(revokeUrls()).toEqual([])
   })
 
   it('round 3: an unconfirmed PLAIN grant that lands is not adopted by an edit of it — the edit builds, replaces it, and stops it', async () => {

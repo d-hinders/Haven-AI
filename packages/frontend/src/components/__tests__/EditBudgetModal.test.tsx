@@ -202,18 +202,28 @@ describe('EditBudgetModal (#3166) — review', () => {
     expect(onBudgetChange).toHaveBeenCalled()
   })
 
-  it('#3933 round 4: an earlier attempt that landed first is reported with ITS limits — never "the new limits are live"', async () => {
+  it('#3933 round 5: an earlier attempt that landed first is reported with ITS limits, the Stop offered — and the done screen keeps saying so', async () => {
+    const OLD = '0x' + 'ab'.repeat(32)
     mockEditBudget.mockResolvedValue({
-      ok: true,
+      ok: false,
+      reason: 'revoke_unfinished',
       newDelegationHash: '0x' + 'be'.repeat(32),
-      oldDelegationRevoked: true,
+      unstoppedDelegationHashes: [OLD],
+      moved: false,
       earlierLimits: true,
     })
+    mockRevoke.mockResolvedValue({ ok: true })
     renderModal({ budget: budget({ recipient_address: RECIPIENT }) })
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
     fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    await waitFor(() => expect(screen.getByText('Your earlier change went through')).toBeInTheDocument())
+    expect(screen.getByText(/The budget has the limits you set then, not these/)).toBeInTheDocument()
+    expect(screen.queryByText(/The new limits took effect/)).toBeNull()
+    expect(mockRevoke).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Stop old budget' }))
     await waitFor(() => expect(screen.getByText(/Your earlier change went through first/)).toBeInTheDocument())
+    expect(mockRevoke).toHaveBeenCalledWith(OLD)
     expect(screen.queryByText(/The new limits are live/)).toBeNull()
   })
 })

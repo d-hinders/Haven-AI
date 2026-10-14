@@ -276,10 +276,10 @@ export type EditBudgetResult =
       newDelegationHash: string
       oldDelegationRevoked: boolean
       /**
-       * #3933: an earlier, unconfirmed attempt of this edit had already
-       * landed with OTHER limits than this call asked for. Its replacement
-       * was finished (the old rows stopped), but the live budget carries the
-       * earlier attempt's limits, not these.
+       * #3933: the replacement finished was an earlier, unconfirmed attempt
+       * that landed with OTHER limits — the live budget carries those, not
+       * the ones last asked for. Set by the modal's finish-Stop, carried
+       * from the `revoke_unfinished` that reported it.
        */
       earlierLimits?: true
     }
@@ -297,6 +297,14 @@ export type EditBudgetResult =
       newDelegationHash?: string
       /** `slot_occupied` / `target_slot_occupied`: the live budget in the slot the grant was refused for. */
       existingDelegationHash?: string | null
+      /**
+       * `revoke_unfinished` only: an earlier, unconfirmed attempt of this
+       * edit landed with OTHER limits than the ones now asked for — the live
+       * budget carries the earlier limits (#3933 round 4/5).
+       */
+      earlierLimits?: true
+      /** `revoke_unfinished` only: whether the edit that left it MOVED the recipient (the old rows then still pay, in Haven too). */
+      moved?: boolean
       /** `revoke_unfinished` only: the old budget's rows still to Stop. */
       unstoppedDelegationHashes?: string[]
     }
@@ -433,7 +441,7 @@ export function useDelegationBudget(
   // them as live. No slot-keyed `lastAttempted` entry is written for an edit:
   // since #3933 the backend refuses a second grant into a slot whose live
   // rows it does not name, so a late commit cannot mint a second budget.
-  const editAttempts = useRef(new Map<string, { newHash: string; stopSet: string[]; inputKey: string }>())
+  const editAttempts = useRef(new Map<string, { newHash: string; stopSet: string[]; inputKey: string; moved: boolean }>())
   // The ACCOUNT address scopes the signer lookup (#1079): without it the
   // stored-passkey/hybrid branches are unreachable and `ready` would depend
   // on any globally-connected wallet with no per-account check.
@@ -884,21 +892,28 @@ export function useDelegationBudget(
         // the attempt computed, as if the lost POST had just returned.
         let newHash: string | null = null
         let oldBudgetHashes: string[] | null = null
-        let earlierLimits = false
         const attempt = editAttempts.current.get(editKey)
         if (attempt) {
           const reread = await readAttemptedHash(attempt.newHash)
           if (rereadLanded(reread)) {
             editAttempts.current.delete(editKey)
-            // The earlier attempt replaced this budget. Its Stops are owed
-            // whatever this call asks for — the owner signed that replacement,
-            // and its old rows are `replaced` (or, for a move, still active)
-            // but enabled on-chain — so they are finished here. Nothing new
-            // is built: when the limits differ, the result says the live
-            // budget carries the earlier attempt's, and the owner edits it.
-            earlierLimits = attempt.inputKey !== inputKey
-            newHash = attempt.newHash
-            oldBudgetHashes = attempt.stopSet
+            // The earlier attempt replaced this budget: nothing new is built,
+            // and its Stops are owed whatever this call asks for (the owner
+            // signed that replacement; its old rows are `replaced` — or, for
+            // a move, still active — and enabled on-chain). They are NOT
+            // signed in this click: the review step described a grant, not
+            // Stops (#3933 round 5). The result is the partial state, so the
+            // modal names what is live and offers the Stop, saying how many
+            // signatures it takes, before any is asked for.
+            await reload()
+            return {
+              ok: false,
+              reason: 'revoke_unfinished',
+              newDelegationHash: attempt.newHash,
+              unstoppedDelegationHashes: attempt.stopSet,
+              moved: attempt.moved,
+              ...(attempt.inputKey !== inputKey ? { earlierLimits: true as const } : {}),
+            }
           } else if ((reread.kind === 'row' && reread.status === 'pending') || reread.kind === 'read_failed') {
             return { ok: false, reason: 'unconfirmed' }
           } else {
@@ -999,7 +1014,7 @@ export function useDelegationBudget(
               // re-read itself failed: the outcome is UNKNOWN — remember the
               // hash so the retry re-reads it before building. NEVER "nothing
               // was granted".
-              editAttempts.current.set(editKey, { newHash: builtHash, stopSet, inputKey })
+              editAttempts.current.set(editKey, { newHash: builtHash, stopSet, inputKey, moved })
               return { ok: false, reason: 'unconfirmed' }
             }
           }
@@ -1021,6 +1036,7 @@ export function useDelegationBudget(
               reason: 'revoke_unfinished',
               newDelegationHash: newHash,
               unstoppedDelegationHashes: toStop.slice(i),
+              moved,
             }
           }
           if (stop === 'signed') signedAny = true
@@ -1029,12 +1045,7 @@ export function useDelegationBudget(
         // `oldDelegationRevoked: false` only when every row was ALREADY
         // stopped (a concurrent revoke-all or the reconciliation heal got
         // there first) — the goal is met, nothing was signed for it.
-        return {
-          ok: true,
-          newDelegationHash: newHash,
-          oldDelegationRevoked: signedAny,
-          ...(earlierLimits ? { earlierLimits: true as const } : {}),
-        }
+        return { ok: true, newDelegationHash: newHash, oldDelegationRevoked: signedAny }
       } catch (err) {
         return { ok: false, reason: cancelled(err) ? 'cancelled' : 'failed' }
       } finally {

@@ -213,7 +213,7 @@ export function feedTransaction(paymentId: string, over: Partial<FeedTransaction
     paymentId,
     settledAt: '2026-09-10T09:30:00.000Z',
     direction: 'out',
-    counterparty: { address: '0x' + 'ab'.repeat(20), name: 'NordShield VPN' },
+    counterparty: { address: '0x' + 'ab'.repeat(20), name: 'NordShield VPN', country: null },
     resourceUrl: 'https://merchant.example/vpn',
     token: 'USDC',
     amountAtomic: '1000',

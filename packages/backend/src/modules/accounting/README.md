@@ -59,6 +59,15 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
      `connectionStatus: 'scope_missing'` on the result — the orchestrator
      flips the connection's status so the dashboard asks for a re-consent, and
      the sync row stays `pushed` (never re-pushable).
+   - **A second document (#3918)** — when the provider's model carries the
+     merchant's own invoice as its own object (Accounted's WORM documents do),
+     upload it in the same `pushTransaction` with a payment-derived but
+     DISTINCT idempotency key (Accounted: `paymentId:merchant-invoice`) and
+     return its ref as `merchantInvoiceRef`; the orchestrator records it as a
+     second ledger row (`document_kind = 'merchant_invoice'`) that no claim,
+     mark or sweep statement ever touches. The second upload is best-effort:
+     a failure is a note on the pushed row, never a failed push (re-pushing
+     to reach the second document would re-file the first).
    - **pre-push vs post-push scope refusal (#2865).** If the CREATE call
      itself (or anything before it) is refused for scope — nothing exists at
      the provider — return `status: 'skipped'` with the reason and

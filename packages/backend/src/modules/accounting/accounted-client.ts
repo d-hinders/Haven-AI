@@ -127,15 +127,23 @@ export interface AccountedDocumentResponse {
 const ACCOUNTED_IDEMPOTENCY_NAMESPACE = '9f1c2a6e-0b4d-4c7a-9e2f-5d3b8a1c7e40'
 
 /**
- * The `Idempotency-Key` for one payment's document upload: `uuid5(paymentId)`
- * under the namespace above. Bytes are deterministic and the merchant receipt
- * is excluded, so a retry of the same payment replays the provider's cached
- * response; a DIFFERENT payment derives a different key.
+ * The `Idempotency-Key` for one payment's document upload: `uuid5(name)`
+ * under the namespace above. Bytes are deterministic, so a retry of the same
+ * payment replays the provider's cached response; a DIFFERENT payment (or a
+ * different document of the same payment) derives a different key.
+ *
+ * The underlag's name stays the bare `paymentId` — the value every pre-#3918
+ * upload derived its key from, kept verbatim so a pre-deploy failed row
+ * replaying post-deploy still hits the provider's cache. The merchant
+ * invoice (#3918) is a SECOND document for the SAME payment: its name is the
+ * payment id suffixed, so the two uploads can never collide on a key (a
+ * collision would be the provider's terminal `IDEMPOTENCY_KEY_REUSE`).
  */
-export function accountedIdempotencyKey(paymentId: string): string {
+export function accountedIdempotencyKey(paymentId: string, document: 'underlag' | 'merchant-invoice' = 'underlag'): string {
+  const name = document === 'underlag' ? paymentId : `${paymentId}:merchant-invoice`
   const ns = ACCOUNTED_IDEMPOTENCY_NAMESPACE.replace(/-/g, '')
   const nsBytes = Buffer.from(ns, 'hex')
-  const hash = createHash('sha1').update(nsBytes).update(paymentId).digest()
+  const hash = createHash('sha1').update(nsBytes).update(name).digest()
   hash[6] = ((hash[6] & 0x0f) | 0x50) as number // version 5
   hash[8] = ((hash[8] & 0x3f) | 0x80) as number // RFC 4122 variant
   const hex = hash.toString('hex')

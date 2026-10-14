@@ -9,7 +9,7 @@
  */
 import Fastify, { type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
-import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import db from '../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../infra/__tests__/helpers/db-harness.js'
 
@@ -121,17 +121,109 @@ describeDb('a plain grant into an occupied budget slot (#3933)', () => {
     })
   }
 
-  it('CHARACTERISATION (before #3933): a plain grant into an occupied slot activates and sweeps the old row to replaced', async () => {
+  it('was: a plain grant into an occupied slot activated and swept the old row to replaced in SQL only — now refused by name, nothing written', async () => {
+    // The characterisation this file opened with (activate → 200, old →
+    // `replaced`) flipped: the old grant would stay enabled on-chain with
+    // nothing asking the owner to stop it.
     const { userId, agentId } = await seedAgent()
     const old = await seedDelegation(agentId, 'active')
     const fresh = await seedDelegation(agentId, 'pending')
 
     const res = await activate(agentId, userId, fresh)
 
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toMatchObject({ error_code: 'BUDGET_SLOT_OCCUPIED', existing_delegation_hash: old })
+    expect(String(res.json().error)).toMatch(/Edit that budget/)
+    expect(await statusOf(old)).toBe('active')
+    expect(await statusOf(fresh)).toBe('pending')
+  })
+
+  it('a grant into an empty slot activates as before', async () => {
+    const { userId, agentId } = await seedAgent()
+    const fresh = await seedDelegation(agentId, 'pending')
+    const res = await activate(agentId, userId, fresh)
     expect(res.statusCode).toBe(200)
     expect(await statusOf(fresh)).toBe('active')
-    // SQL only: the old grant is still enabled on-chain, and nothing asked
-    // the owner to stop it.
+  })
+
+  it('the edit flow, naming the live grant it replaces, activates and sweeps it', async () => {
+    const { userId, agentId } = await seedAgent()
+    const old = await seedDelegation(agentId, 'active')
+    const fresh = await seedDelegation(agentId, 'pending')
+
+    const res = await activate(agentId, userId, fresh, { replaces: old.toUpperCase().replace('0X', '0x') })
+
+    expect(res.statusCode).toBe(200)
+    expect(await statusOf(fresh)).toBe('active')
     expect(await statusOf(old)).toBe('replaced')
+  })
+
+  it('a wrong or stale `replaces` is refused like a plain grant', async () => {
+    const { userId, agentId } = await seedAgent()
+    const old = await seedDelegation(agentId, 'active')
+    const fresh = await seedDelegation(agentId, 'pending')
+    // Stale: a grant this slot replaced earlier. Wrong: a hash nobody holds.
+    const stale = await seedDelegation(agentId, 'active')
+    await db.query(`UPDATE agent_delegations SET status = 'replaced' WHERE delegation_hash = $1`, [stale])
+
+    for (const replaces of [stale, `0x${'9'.repeat(64)}`]) {
+      const res = await activate(agentId, userId, fresh, { replaces })
+      expect(res.statusCode, replaces).toBe(409)
+      expect(res.json().error_code).toBe('BUDGET_SLOT_OCCUPIED')
+    }
+    expect(await statusOf(old)).toBe('active')
+    expect(await statusOf(fresh)).toBe('pending')
+  })
+
+  it('an expired active row does not occupy the slot: a plain grant activates', async () => {
+    const { userId, agentId } = await seedAgent()
+    const expired = await seedDelegation(agentId, 'active', { expiresAt: Math.floor(Date.now() / 1000) - 60 })
+    const fresh = await seedDelegation(agentId, 'pending')
+
+    const res = await activate(agentId, userId, fresh)
+
+    expect(res.statusCode).toBe(200)
+    expect(await statusOf(fresh)).toBe('active')
+    // Swept as before: an expired grant is dead on-chain, so this is bookkeeping.
+    expect(await statusOf(expired)).toBe('replaced')
+  })
+
+  describe('build refuses first, so the owner is not asked to sign what activate would refuse', () => {
+    async function build(agentId: string, userId: string, extra: Record<string, unknown> = {}) {
+      return app.inject({
+        method: 'POST',
+        url: `/agents/${agentId}/delegations/build`,
+        headers: userHeaders(userId),
+        payload: { token_address: USDC, recipient_address: null, budget_atomic: '2000000', period_seconds: 86_400, ...extra },
+      })
+    }
+
+    async function pendingCount(agentId: string): Promise<number> {
+      const r = await db.query<{ n: string }>(
+        `SELECT COUNT(*)::text AS n FROM agent_delegations WHERE agent_id = $1 AND status = 'pending'`,
+        [agentId],
+      )
+      return Number(r.rows[0].n)
+    }
+
+    it('a plain build into an occupied slot is refused, and nothing is built', async () => {
+      const { userId, agentId } = await seedAgent()
+      const old = await seedDelegation(agentId, 'active')
+
+      const res = await build(agentId, userId)
+
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toMatchObject({ error_code: 'BUDGET_SLOT_OCCUPIED', existing_delegation_hash: old })
+      expect(await pendingCount(agentId)).toBe(0)
+    })
+
+    it('an edit build naming the live grant builds; a plain build into an empty slot builds', async () => {
+      const { userId, agentId } = await seedAgent()
+      const old = await seedDelegation(agentId, 'active')
+      expect((await build(agentId, userId, { replaces: old })).statusCode).toBe(201)
+
+      const other = await seedAgent()
+      expect((await build(other.agentId, other.userId)).statusCode).toBe(201)
+    })
   })
 })

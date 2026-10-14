@@ -59,6 +59,7 @@ import {
 } from '../rails/delegation-rail.js'
 import {
   activatePendingDelegationInSlot,
+  findOccupyingDelegationsInSlot,
   findReusablePendingDelegation,
   withDelegationBuildSlotLock,
   listNonRevokedDelegationsForAgent,
@@ -160,6 +161,34 @@ export const UNAVAILABLE_AGENT_REFUSAL =
   'Agent cannot receive a budget while its account or re-key is unavailable'
 /** #2331's rotated-delegate-key refusal; #2415 kept the wording byte-identical. */
 export const ROTATED_DELEGATE_KEY_REFUSAL = 'Delegation was built for a previous delegate key'
+/**
+ * #3933: a plain grant into a (token, recipient) slot that already holds a
+ * live budget. Activation would mark the old grant `replaced` in the database
+ * only — it stays enabled on-chain until the owner's Stop lands, and only the
+ * edit flow (grant + Stop) submits that. So a plain grant is refused and the
+ * owner is sent to edit; the edit flow names the budget it `replaces`.
+ */
+export const BUDGET_SLOT_OCCUPIED_REFUSAL =
+  'This agent already has a live budget for this token and recipient. Edit that budget instead: editing replaces it and stops the old one on-chain, so two budgets are never left spendable side by side.'
+export const BUDGET_SLOT_OCCUPIED_ERROR_CODE = 'BUDGET_SLOT_OCCUPIED'
+
+/**
+ * The slot rule (#3933), one definition for build and activate: allowed into
+ * an empty slot, or as an edit whose `replaces` is one of the slot's live
+ * grants; otherwise the named refusal with the grant to edit.
+ */
+function slotOccupiedRefusal(
+  occupying: string[],
+  replaces: string | null | undefined,
+): { error: string; error_code: string; existing_delegation_hash: string } | null {
+  if (occupying.length === 0) return null
+  if (replaces && occupying.some((hash) => hash.toLowerCase() === replaces.toLowerCase())) return null
+  return {
+    error: BUDGET_SLOT_OCCUPIED_REFUSAL,
+    error_code: BUDGET_SLOT_OCCUPIED_ERROR_CODE,
+    existing_delegation_hash: occupying[0],
+  }
+}
 // #3439: a re-key's own replacement row is activated only by that re-key's
 // own completion (`ACTIVATE_REKEY_DELEGATION_SQL` inside `completeRekey`) —
 // never by the ordinary owner-signature activate route, however the row got
@@ -429,6 +458,8 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       period_seconds: number
       expires_at?: number
       merchant_slug?: string
+      /** #3933: the edit flow names the live budget this grant replaces. */
+      replaces?: string | null
     }
   }>('/:id/delegations/build', async (request, reply) => {
     const { sub } = request.user as { sub: string }
@@ -537,6 +568,20 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     // is `nowSec - 60` and a pair straddling a second boundary hashes
     // differently — so the unique index never collided and one slot ended up
     // with two pending version-1 rows.
+    // #3933: refuse a plain grant into an occupied slot here, before the owner
+    // is asked to sign something activate would refuse. Activate checks again
+    // under the agent lock — the slot can change between the two calls.
+    const buildSlotRefusal = slotOccupiedRefusal(
+      await findOccupyingDelegationsInSlot(
+        request.params.id,
+        token_address,
+        recipient_address ? recipient_address.toLowerCase() : null,
+        null,
+      ),
+      request.body?.replaces,
+    )
+    if (buildSlotRefusal) return reply.code(409).send(buildSlotRefusal)
+
     const outcome = await withDelegationBuildSlotLock(
       request.params.id,
       token_address,
@@ -660,7 +705,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
   })
 
   // ── POST /:id/delegations/:hash/activate — grant step 2 ───────────────────
-  app.post<{ Params: { id: string; hash: string }; Body: { signature?: string } }>(
+  app.post<{ Params: { id: string; hash: string }; Body: { signature?: string; replaces?: string | null } }>(
     '/:id/delegations/:hash/activate',
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
@@ -825,12 +870,29 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         // alone. Kept as one `if` so the transaction gains no second
         // ROLLBACK call site (`lint:deps` counts inline SQL per file,
         // shrink-only).
-        if (
+        const rotated =
           lockedAgent.delegate_address.toLowerCase() !== preLockDelegateKey.toLowerCase() ||
           signed.delegate.toLowerCase() !== expectedDelegateAccountAddress.toLowerCase()
-        ) {
+        // #3933: under the agent lock (activations for one agent serialize),
+        // so the slot read is authoritative: a plain grant into a slot that
+        // holds a live grant is refused, and only an edit naming that grant
+        // as `replaces` goes on to the sweep below. Folded into the rotated-key
+        // refusal's one `if` — same transaction, still one ROLLBACK site.
+        const slotRefusal = rotated
+          ? null
+          : slotOccupiedRefusal(
+              await findOccupyingDelegationsInSlot(
+                request.params.id,
+                pending.token_address,
+                pending.recipient_address,
+                request.params.hash,
+                client,
+              ),
+              request.body?.replaces,
+            )
+        if (rotated || slotRefusal) {
           await client.query('ROLLBACK')
-          return reply.code(409).send({ error: ROTATED_DELEGATE_KEY_REFUSAL })
+          return reply.code(409).send(rotated ? { error: ROTATED_DELEGATE_KEY_REFUSAL } : slotRefusal)
         }
         // Sweep the slot's OTHER active grants, then flip the pending row —
         // one repository call that owns the order and excludes the new row by

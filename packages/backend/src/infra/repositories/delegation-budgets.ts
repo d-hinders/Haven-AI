@@ -611,6 +611,41 @@ export async function activatePendingDelegation(
  * directly, or a failure after it leaves the slot with no active grant (the
  * #1053 finding 4 outage) with nothing to roll back (haven-reviewer, #2411).
  */
+/**
+ * #3933: the grants that OCCUPY a (token, recipient) slot — `active` and not
+ * yet expired (`spendableDelegationSql` without the started-window clause, so
+ * a re-key's dormant steady row counts). A plain grant into such a slot would
+ * be swept to `replaced` by the activation below in SQL only, leaving the old
+ * delegation enabled on-chain with nothing asking the owner to stop it; the
+ * build and activate routes refuse that unless the request names one of
+ * these hashes as the budget it `replaces` (the edit flow, which Stops it).
+ * `$4` excludes the delegation being activated (NULL at build time).
+ */
+export const SELECT_OCCUPYING_DELEGATIONS_IN_SLOT_SQL = `SELECT delegation_hash
+       FROM agent_delegations
+       WHERE agent_id = $1
+         AND token_address = LOWER($2)
+         AND recipient_address IS NOT DISTINCT FROM LOWER($3)
+         AND (${spendableDelegationSql(undefined, { requireStarted: false })})
+         AND delegation_hash IS DISTINCT FROM $4
+       ORDER BY created_at DESC`
+
+export async function findOccupyingDelegationsInSlot(
+  agentId: string,
+  tokenAddress: string,
+  recipientAddress: string | null,
+  exceptDelegationHash: string | null,
+  executor: Executor = pool,
+): Promise<string[]> {
+  const result = await executor.query<{ delegation_hash: string }>(SELECT_OCCUPYING_DELEGATIONS_IN_SLOT_SQL, [
+    agentId,
+    tokenAddress,
+    recipientAddress,
+    exceptDelegationHash,
+  ])
+  return result.rows.map((row) => row.delegation_hash)
+}
+
 export const REPLACE_OTHER_ACTIVE_DELEGATIONS_IN_SLOT_SQL = `UPDATE agent_delegations
        SET status = 'replaced', updated_at = NOW()
        WHERE agent_id = $1

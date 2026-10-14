@@ -764,7 +764,7 @@ export type paths = {
         put?: never;
         /**
          * Grant step 2: attach the owner signature and make the budget live.
-         * @description Stores the owner's signature on the pending delegation and flips it active, marking any previously active grant in the same (token, recipient) slot replaced — atomically, so the slot never ends up with zero live grants mid-replacement. Deploys the counterfactual delegator account via the relayer first when needed (#860; permissionless factory call, no owner signature). Activating an agent's FIRST budget also activates a pending_approval agent — on this rail the grant signature IS the approval (#1069). Signature validation is a shape check only (65-byte ECDSA or longer WebAuthn assertion); the real validator is EIP-1271 at redemption.
+         * @description Stores the owner's signature on the pending delegation and flips it active, marking any previously active grant in the same (token, recipient) slot replaced — atomically, so the slot never ends up with zero live grants mid-replacement. Since #3933 that replacement is only for the edit flow: if the slot holds a live (active, unexpired) budget, the request must name it as `replaces`, or it is refused with 409 BUDGET_SLOT_OCCUPIED — the database sweep alone would leave the old delegation enabled on-chain, and the edit flow is what stops it. Deploys the counterfactual delegator account via the relayer first when needed (#860; permissionless factory call, no owner signature). Activating an agent's FIRST budget also activates a pending_approval agent — on this rail the grant signature IS the approval (#1069). Signature validation is a shape check only (65-byte ECDSA or longer WebAuthn assertion); the real validator is EIP-1271 at redemption.
          */
         post: operations["activateAgentDelegation"];
         delete?: never;
@@ -9613,6 +9613,8 @@ export interface operations {
                     expires_at?: number;
                     /** @description A merchant-locked budget (#3331): the server pins the recipient to this live merchant's verified payTo on the agent's chain and records the merchant on the row. recipient_address may be omitted; when sent it must equal that payTo (409 otherwise). 404 for an unknown or non-live merchant; 409 when the merchant has no verified payTo there, not every offer there advertises ERC-7710, or the payTo is one of this agent's own addresses (delegate key, delegate account or treasury). */
                     merchant_slug?: string | null;
+                    /** @description #3933: the edit flow's declaration. When the (token, recipient) slot already holds a live budget (active, unexpired), a build without this field — or naming a hash that is not one of the slot's live budgets — is refused with 409 BUDGET_SLOT_OCCUPIED, since activating it would leave the old delegation enabled on-chain. The edit flow names the budget it replaces here and in activate, then stops it. */
+                    replaces?: string | null;
                 };
             };
         };
@@ -9691,7 +9693,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Revoked agents cannot receive a new budget delegation; other delegation-account conflicts also return 409, as do the merchant-locked refusals (#3331: no verified payTo, not ERC-7710, the payTo is one of the agent’s own addresses, recipient_address differs from the current payTo). */
+            /** @description Revoked agents cannot receive a new budget delegation; other delegation-account conflicts also return 409, as do the merchant-locked refusals (#3331: no verified payTo, not ERC-7710, the payTo is one of the agent’s own addresses, recipient_address differs from the current payTo), and a plain grant into an occupied slot (#3933: error_code BUDGET_SLOT_OCCUPIED, with existing_delegation_hash — edit that budget instead). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9738,6 +9740,8 @@ export interface operations {
             content: {
                 "application/json": {
                     signature: string;
+                    /** @description #3933: the live budget this grant replaces (the edit flow). Checked under the agent lock: a plain grant into a (token, recipient) slot holding a live budget is refused with 409 BUDGET_SLOT_OCCUPIED, as is a hash that is not one of that slot's live budgets. */
+                    replaces?: string | null;
                 };
             };
         };
@@ -9800,7 +9804,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Revoked agents cannot activate a new budget delegation; non-pending delegation and account conflicts also return 409. A row belonging to a re-key (`rekey_id` set) is refused with `error_code: "REKEY_DELEGATION_NOT_ACTIVATABLE"` — it is activated only by that re-key's own completion (#3439). */
+            /** @description Revoked agents cannot activate a new budget delegation; non-pending delegation and account conflicts also return 409. A row belonging to a re-key (`rekey_id` set) is refused with `error_code: "REKEY_DELEGATION_NOT_ACTIVATABLE"` — it is activated only by that re-key's own completion (#3439). A plain grant into a (token, recipient) slot that holds a live budget is refused with `error_code: "BUDGET_SLOT_OCCUPIED"` and `existing_delegation_hash` unless `replaces` names that budget (#3933); nothing is written. */
             409: {
                 headers: {
                     [name: string]: unknown;

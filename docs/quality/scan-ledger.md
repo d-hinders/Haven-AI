@@ -1514,3 +1514,7 @@ gate's `--changed=` is shell-expanded, so glob-string misses must be dropped
 before confirmation.
 
 **Disposition: pending owner decision** (S1, C1, C2, C3).
+
+**Disposition upkeep (2026-10-14):** C2 → `shipped` via #3942 (2026-10-14): the
+2026-10-03 report was recovered from the scan session's record of its write
+and committed at the path the 2026-10-03 entry names.

@@ -168,10 +168,18 @@ export interface GrantInput {
  * (`refusalCopy` in `components/marketplace/FundMerchantModal.tsx`).
  * Additive: every existing caller that does not name it keeps folding it into
  * its generic failure copy, exactly as it already does for `too_many`.
+ *
+ * `unconfirmed` (#3930) is the lost-activate-response outcome: the activation
+ * POST threw and the re-read could not prove what happened (the row is still
+ * `pending`, is absent, or the re-read itself failed). The activation may
+ * HAVE committed — a proxy 5xx can arrive while the backend is still
+ * deploying — so this is never "nothing changed": a retry that trusts it
+ * mints a second enabled grant. Renderers must send the owner to check the
+ * agent's budgets before trying again, and never name Haven as the approver.
  */
 export type BudgetResult =
   | { ok: true }
-  | { ok: false; reason: 'cancelled' | 'failed' | 'too_many' | 'refused'; detail?: string }
+  | { ok: false; reason: 'cancelled' | 'failed' | 'too_many' | 'refused' | 'unconfirmed'; detail?: string }
 
 /**
  * The edit-in-place result (#3166). Distinct from `BudgetResult` because the
@@ -190,7 +198,44 @@ export type BudgetResult =
  */
 export type EditBudgetResult =
   | { ok: true; newDelegationHash: string; oldDelegationRevoked: boolean }
-  | { ok: false; reason: 'cancelled' | 'failed' | 'refused' | 'revoke_unfinished'; detail?: string; newDelegationHash?: string }
+  | { ok: false; reason: 'cancelled' | 'failed' | 'refused' | 'revoke_unfinished' | 'unconfirmed'; detail?: string; newDelegationHash?: string }
+
+/**
+ * #3930: the slot identity the retry guard keys on — the SAME (token,
+ * recipient) slot the backend's pending-row reuse and its activate-time sweep
+ * use. Both are lower-cased: hashes and addresses are compared
+ * case-insensitively everywhere on this path.
+ */
+function slotKey(tokenAddress: string, recipientAddress?: string | null): string {
+  return `${tokenAddress.toLowerCase()}:${(recipientAddress ?? '').toLowerCase()}`
+}
+
+/**
+ * #3930: the outcome of re-reading ONE attempted delegation hash from the
+ * plain `GET /agents/:id/delegations` list. `absent` (no row for the hash) is
+ * distinct from `read_failed` (the GET itself threw) — both mean the outcome
+ * is unproven, but tests pin them separately.
+ */
+type AttemptedHashReread =
+  | { kind: 'row'; status: DelegationBudget['status'] }
+  | { kind: 'absent' }
+  | { kind: 'read_failed' }
+
+/** The activation committed (or was swept there): the grant is live. */
+function rereadLanded(r: AttemptedHashReread): boolean {
+  return r.kind === 'row' && (r.status === 'active' || r.status === 'replaced')
+}
+
+/**
+ * #3930: what the pre-build retry guard decided for this slot. `proceed`
+ * covers both "nothing remembered" and "the remembered attempt is
+ * definitively dead" — a fresh `/build` is safe in both. `landed` carries the
+ * hash that committed; `unconfirmed` means still unknown.
+ */
+type RetryGuardOutcome =
+  | { outcome: 'proceed' }
+  | { outcome: 'landed'; hash: string }
+  | { outcome: 'unconfirmed' }
 
 async function signTyped(
   signer: NonNullable<ReturnType<typeof useActiveSigner>>,
@@ -267,6 +312,13 @@ export function useDelegationBudget(
   // still in flight; the counter only reaches zero once every overlapping
   // manual call has finished, so polls stay suppressed for the whole window.
   const manualBudgetsReloadInFlight = useRef(0)
+  // #3930: the last hash whose activation was ATTEMPTED but left `unconfirmed`,
+  // per (token, recipient) slot. The re-read after a lost activate POST can see
+  // `pending` while the backend is still deploying, and the commit can land
+  // later — so the NEXT /build for the same slot re-reads this hash BEFORE
+  // minting a new one, or the retry adds a second enabled grant. Cleared when
+  // the agent changes (the reset effect below): hashes are agent-scoped.
+  const lastAttempted = useRef(new Map<string, string>())
   // The ACCOUNT address scopes the signer lookup (#1079): without it the
   // stored-passkey/hybrid branches are unreachable and `ready` would depend
   // on any globally-connected wallet with no per-account check.
@@ -344,6 +396,58 @@ export function useDelegationBudget(
     }
   }, [agentId, enabled])
 
+  // ── #3930: re-reading a lost activate response ───────────────────────────
+  // The activate route commits in ONE transaction and answers `{ activated:
+  // true }`; if the browser never receives that response, the grant may still
+  // have LANDED. Before reporting anything, the hook re-reads the outcome from
+  // the plain delegations list — deliberately a DIRECT `api.get` and not
+  // `reload()`: `reload` swallows its errors and returns nothing, so a failed
+  // re-read would be indistinguishable from "no row". Deliberately the PLAIN
+  // read, never `?include=remaining`: this path needs only each row's status,
+  // and the remaining variant costs a chain RPC per active row server-side.
+  const readAttemptedHash = useCallback(
+    async (hash: string): Promise<AttemptedHashReread> => {
+      try {
+        const res = await api.get<{ delegations?: Array<Pick<DelegationBudget, 'delegation_hash' | 'status'>> }>(
+          `/agents/${agentId}/delegations`,
+        )
+        const row = (res.delegations ?? []).find(
+          (d) => d.delegation_hash.toLowerCase() === hash.toLowerCase(),
+        )
+        return row ? { kind: 'row', status: row.status } : { kind: 'absent' }
+      } catch {
+        return { kind: 'read_failed' }
+      }
+    },
+    [agentId],
+  )
+
+  /**
+   * #3930 retry guard: the last attempt for this slot ended `unconfirmed` —
+   * re-read that hash BEFORE a new `/build`, or the retry mints a second
+   * grant. `proceed` covers both "nothing remembered" and "the remembered
+   * attempt is definitively dead" (`revoked`, or the row is gone) — a fresh
+   * build is safe in both. `unconfirmed` keeps the entry: still unknown, and
+   * a build would risk the second grant.
+   */
+  const guardRetriedSlot = useCallback(
+    async (input: GrantInput): Promise<RetryGuardOutcome> => {
+      const key = slotKey(input.tokenAddress, input.recipientAddress)
+      const remembered = lastAttempted.current.get(key)
+      if (remembered === undefined) return { outcome: 'proceed' }
+      const reread = await readAttemptedHash(remembered)
+      if (rereadLanded(reread)) {
+        lastAttempted.current.delete(key)
+        return { outcome: 'landed', hash: remembered }
+      }
+      if (reread.kind === 'row' && reread.status === 'pending') return { outcome: 'unconfirmed' }
+      if (reread.kind === 'read_failed') return { outcome: 'unconfirmed' }
+      lastAttempted.current.delete(key)
+      return { outcome: 'proceed' }
+    },
+    [readAttemptedHash],
+  )
+
   useEffect(() => {
     if (!enabled) {
       setBudgets(null)
@@ -379,6 +483,11 @@ export function useDelegationBudget(
     setBudgetsError(false)
     setSigners(null)
     setSignersError(false)
+    // #3930: remembered attempted hashes are agent-scoped — a caller that
+    // switches WHICH agent this instance serves must not re-read the previous
+    // agent's hash (it would come back absent and the guard would just
+    // fall through, but the state is stale regardless).
+    lastAttempted.current.clear()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately NOT `enabled`/`chainId`: the effect above already resets on enable/disable; chainId is not part of this hook's read scope (see comment above).
   }, [agentId])
 
@@ -400,6 +509,15 @@ export function useDelegationBudget(
     async (input: GrantInput): Promise<BudgetResult> => {
       setBusy(true)
       try {
+        // #3930 retry guard — BEFORE any /build. The previous attempt for this
+        // slot may have ended `unconfirmed`; a retry that trusted that and
+        // built anew would mint a SECOND enabled grant.
+        const guard = await guardRetriedSlot(input)
+        if (guard.outcome === 'landed') {
+          await reload()
+          return { ok: true }
+        }
+        if (guard.outcome === 'unconfirmed') return { ok: false, reason: 'unconfirmed' }
         let built: BuildResponse
         try {
           built = await api.post<BuildResponse>(`/agents/${agentId}/delegations/build`, {
@@ -432,7 +550,30 @@ export function useDelegationBudget(
           if (!signer) return { ok: false, reason: 'failed' }
           signature = await signTyped(signer, built.signing_payload)
         }
-        await api.post(`/agents/${agentId}/delegations/${built.delegation_hash}/activate`, { signature })
+        try {
+          await api.post(`/agents/${agentId}/delegations/${built.delegation_hash}/activate`, { signature })
+        } catch (err) {
+          // #3930: the response was lost — the activation may still have
+          // committed (the counterfactual deploy is the slow path). Re-read
+          // the outcome BEFORE reporting anything: a false `failed` invites a
+          // retry that mints a second enabled grant.
+          if (cancelled(err)) return { ok: false, reason: 'cancelled' }
+          const reread = await readAttemptedHash(built.delegation_hash)
+          if (rereadLanded(reread)) {
+            await reload()
+            return { ok: true }
+          }
+          if (reread.kind === 'row' && reread.status === 'revoked') {
+            // Revoke-all raced the activation: nothing is live, nothing will be.
+            return { ok: false, reason: 'failed' }
+          }
+          // `pending` (the commit can still land), the row absent, or the
+          // re-read itself failed: the outcome is UNKNOWN — remember the hash
+          // so the retry re-reads it before building, and never report
+          // "nothing was granted".
+          lastAttempted.current.set(slotKey(input.tokenAddress, input.recipientAddress), built.delegation_hash)
+          return { ok: false, reason: 'unconfirmed' }
+        }
         await reload()
         return { ok: true }
       } catch (err) {
@@ -441,7 +582,7 @@ export function useDelegationBudget(
         setBusy(false)
       }
     },
-    [agentId, signingPath, reload, signer, signers],
+    [agentId, signingPath, reload, signer, signers, guardRetriedSlot, readAttemptedHash],
   )
 
   // ── Edit budget limits in place (#3166) ──────────────────────────────────
@@ -463,8 +604,15 @@ export function useDelegationBudget(
   //   backend's named 409 travels as `refused`.
   // - new-grant signature cancelled or failed: nothing was granted, nothing
   //   was revoked (`cancelled` / `failed`).
-  // - activation raced a revoke-all: the 409 "no longer pending" surfaces as
-  //   `failed` with the old state untouched (the grant did not land).
+  // - the activate response was LOST (#3930): the hook re-reads the outcome
+  //   before reporting. The new grant landed → the Stop step runs as if the
+  //   POST had returned; a revoke-all raced it → `failed`; still `pending`,
+  //   absent, or the re-read itself failed → `unconfirmed` (NEVER "nothing
+  //   was granted" — the old budget may already be `replaced`, and a retry
+  //   that builds again mints a second enabled grant).
+  // - activation raced a revoke-all: the 409 "no longer pending" is re-read
+  //   like any other activate failure (#3930) — `failed` when the row shows
+  //   `revoked`, the Stop step when it shows `active`/`replaced`.
   // - the old budget was ALREADY revoked by the time the stop signature is
   //   asked for (the same revoke-all race, other side): the goal — old grant
   //   dead — is already met, so the flow reports success.
@@ -476,49 +624,81 @@ export function useDelegationBudget(
     ): Promise<EditBudgetResult> => {
       setBusy(true)
       try {
-        let built: BuildResponse
-        try {
-          built = await api.post<BuildResponse>(`/agents/${agentId}/delegations/build`, {
-            token_address: input.tokenAddress,
-            recipient_address: input.recipientAddress ?? null,
-            budget_atomic: input.budgetAtomic,
-            period_seconds: input.periodSeconds,
-            // #3331 review finding F3: a merchant-locked budget's edit-in-place
-            // must keep naming the merchant — omitting this silently turned the
-            // replacement into a plain pinned budget (the label lost, the row
-            // dropped out of the merchant page) the moment `EditBudgetModal`
-            // wired an `input.merchantSlug` through.
-            ...(input.merchantSlug ? { merchant_slug: input.merchantSlug } : {}),
-            ...(opts.expiresAt !== undefined ? { expires_at: opts.expiresAt } : {}),
-          })
-        } catch (err) {
-          // The build refusals are named 409s the owner can act on — pass the
-          // backend's own sentence through instead of a generic failure.
-          if (err instanceof Error && err.message.trim()) {
-            return { ok: false, reason: 'refused', detail: err.message }
-          }
-          throw err
-        }
-        let grantSignature: string
-        if (signingPath === 'passkey' && signers) {
-          // ONE passkey ceremony — the kit signs the delegation itself; the
-          // typed-data message IS the delegation (#828's payload).
-          const { signDelegationWithPasskey } = await import('@/lib/delegationPasskeySigner')
-          grantSignature = await signDelegationWithPasskey(
-            signers,
-            built.signing_payload.message as unknown as DelegationMessage,
-          )
+        // #3930 retry guard — BEFORE any /build, exactly as in `grant`. When
+        // the remembered attempt has landed, the new grant IS the remembered
+        // hash: skip build/sign/activate entirely and go straight to the Stop
+        // step, as if the lost POST had just returned.
+        const guard = await guardRetriedSlot(input)
+        let newHash: string
+        if (guard.outcome === 'landed') {
+          newHash = guard.hash
         } else {
-          if (!signer) return { ok: false, reason: 'failed' }
-          grantSignature = await signTyped(signer, built.signing_payload)
-        }
-        try {
-          await api.post(`/agents/${agentId}/delegations/${built.delegation_hash}/activate`, {
-            signature: grantSignature,
-          })
-        } catch (err) {
-          // Nothing was granted — the old budget is exactly what it was.
-          return { ok: false, reason: cancelled(err) ? 'cancelled' : 'failed' }
+          if (guard.outcome === 'unconfirmed') return { ok: false, reason: 'unconfirmed' }
+          let built: BuildResponse
+          try {
+            built = await api.post<BuildResponse>(`/agents/${agentId}/delegations/build`, {
+              token_address: input.tokenAddress,
+              recipient_address: input.recipientAddress ?? null,
+              budget_atomic: input.budgetAtomic,
+              period_seconds: input.periodSeconds,
+              // #3331 review finding F3: a merchant-locked budget's edit-in-place
+              // must keep naming the merchant — omitting this silently turned the
+              // replacement into a plain pinned budget (the label lost, the row
+              // dropped out of the merchant page) the moment `EditBudgetModal`
+              // wired an `input.merchantSlug` through.
+              ...(input.merchantSlug ? { merchant_slug: input.merchantSlug } : {}),
+              ...(opts.expiresAt !== undefined ? { expires_at: opts.expiresAt } : {}),
+            })
+          } catch (err) {
+            // The build refusals are named 409s the owner can act on — pass the
+            // backend's own sentence through instead of a generic failure.
+            if (err instanceof Error && err.message.trim()) {
+              return { ok: false, reason: 'refused', detail: err.message }
+            }
+            throw err
+          }
+          newHash = built.delegation_hash
+          let grantSignature: string
+          if (signingPath === 'passkey' && signers) {
+            // ONE passkey ceremony — the kit signs the delegation itself; the
+            // typed-data message IS the delegation (#828's payload).
+            const { signDelegationWithPasskey } = await import('@/lib/delegationPasskeySigner')
+            grantSignature = await signDelegationWithPasskey(
+              signers,
+              built.signing_payload.message as unknown as DelegationMessage,
+            )
+          } else {
+            if (!signer) return { ok: false, reason: 'failed' }
+            grantSignature = await signTyped(signer, built.signing_payload)
+          }
+          try {
+            await api.post(`/agents/${agentId}/delegations/${newHash}/activate`, {
+              signature: grantSignature,
+            })
+          } catch (err) {
+            // #3930: the response was lost — re-read before reporting anything,
+            // exactly as `grant` does. The new grant may already be live (and
+            // the old one already `replaced` in the mirror): telling the owner
+            // "nothing was granted" here invites a retry that mints a second
+            // enabled grant.
+            if (cancelled(err)) return { ok: false, reason: 'cancelled' }
+            const reread = await readAttemptedHash(newHash)
+            if (rereadLanded(reread)) {
+              // The new grant is live — fall through to the Stop step as if
+              // the POST had returned.
+            } else if (reread.kind === 'row' && reread.status === 'revoked') {
+              // Revoke-all raced the activation: nothing was granted, and the
+              // old budget is exactly what it was.
+              return { ok: false, reason: 'failed' }
+            } else {
+              // `pending` (the commit can still land), the row absent, or the
+              // re-read itself failed: the outcome is UNKNOWN — remember the
+              // hash so the retry re-reads it before building. NEVER "nothing
+              // was granted".
+              lastAttempted.current.set(slotKey(input.tokenAddress, input.recipientAddress), newHash)
+              return { ok: false, reason: 'unconfirmed' }
+            }
+          }
         }
         // The new grant is live and the old one is retired in the mirror.
         // Kill it on-chain with ONE more owner signature.
@@ -533,18 +713,18 @@ export function useDelegationBudget(
           // or the reconciliation heal got there first) — not a failure.
           if (err instanceof Error && /already revoked/i.test(err.message)) {
             await reload()
-            return { ok: true, newDelegationHash: built.delegation_hash, oldDelegationRevoked: false }
+            return { ok: true, newDelegationHash: newHash, oldDelegationRevoked: false }
           }
           // The new grant is LIVE; only the on-chain stop of the old one is
           // unfinished. Report the partial state honestly so the UI can tell
           // the owner to finish it from the budget card's Stop button.
-          return { ok: false, reason: 'revoke_unfinished', newDelegationHash: built.delegation_hash }
+          return { ok: false, reason: 'revoke_unfinished', newDelegationHash: newHash }
         }
         let revokeSignature: string
         try {
           if (prep.signature_scheme === 'webauthn_userop') {
             if (!signers) {
-              return { ok: false, reason: 'revoke_unfinished', newDelegationHash: built.delegation_hash }
+              return { ok: false, reason: 'revoke_unfinished', newDelegationHash: newHash }
             }
             // ONE passkey ceremony — the account signs its own UserOperation.
             const { signUserOpWithPasskey } = await import('@/lib/delegationPasskeySigner')
@@ -554,7 +734,7 @@ export function useDelegationBudget(
             )
           } else {
             if (!signer || !prep.signing_payload) {
-              return { ok: false, reason: 'revoke_unfinished', newDelegationHash: built.delegation_hash }
+              return { ok: false, reason: 'revoke_unfinished', newDelegationHash: newHash }
             }
             revokeSignature = await signTyped(signer, prep.signing_payload)
           }
@@ -562,7 +742,7 @@ export function useDelegationBudget(
           // A cancelled or failed STOP signature is NOT the generic outcome:
           // the new grant is already live, so the partial state — not
           // "nothing changed" — is what the owner must be told.
-          return { ok: false, reason: 'revoke_unfinished', newDelegationHash: built.delegation_hash }
+          return { ok: false, reason: 'revoke_unfinished', newDelegationHash: newHash }
         }
         try {
           await api.post(`/agents/${agentId}/delegations/${oldDelegationHash}/revoke/submit`, {
@@ -571,17 +751,17 @@ export function useDelegationBudget(
           })
         } catch {
           // Same partial-state shape: new grant live, old grant still to stop.
-          return { ok: false, reason: 'revoke_unfinished', newDelegationHash: built.delegation_hash }
+          return { ok: false, reason: 'revoke_unfinished', newDelegationHash: newHash }
         }
         await reload()
-        return { ok: true, newDelegationHash: built.delegation_hash, oldDelegationRevoked: true }
+        return { ok: true, newDelegationHash: newHash, oldDelegationRevoked: true }
       } catch (err) {
         return { ok: false, reason: cancelled(err) ? 'cancelled' : 'failed' }
       } finally {
         setBusy(false)
       }
     },
-    [agentId, signingPath, reload, signer, signers],
+    [agentId, signingPath, reload, signer, signers, guardRetriedSlot, readAttemptedHash],
   )
 
   const revoke = useCallback(

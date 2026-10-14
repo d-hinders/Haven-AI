@@ -28,10 +28,18 @@
  * setup" offer the control). The list holds NO dismissal state — #3813 owns
  * persistence; this component renders what it is given.
  * What it does own is where focus lands: after a dismiss it moves to the
- * next item's dismiss button (the caller re-renders without the dismissed
- * item, and this effect runs after that render), or — when the list emptied —
- * to the caller's list heading via `headingId`. A control that vanishes
- * under the pointer must not strand focus on `body`.
+ * next dismissible item's dismiss button, or the last remaining one when the
+ * dismissed row was the last dismissible row (the caller re-renders without
+ * the dismissed item, and this effect runs after that render), or — when no
+ * dismiss button remains — to the caller's list heading via `headingId`. A
+ * control that vanishes under the pointer must not strand focus on `body`.
+ * The heading fallback needs the caller to keep this list mounted through
+ * the dismiss that empties it; a list unmounted at zero items runs no
+ * effect. If the caller's next render still holds the dismissed item, the
+ * pending move is dropped rather than replayed on some later render. "Next" is
+ * counted among the DISMISSIBLE rows only: the focus targets are the dismiss
+ * buttons, and since #3813 a non-dismissible row has none, so an index into
+ * `items` would skip ahead by the number of non-dismissible rows above it.
  *
  * ── Two-line clamp, at every width ──────────────────────────────────────────
  *
@@ -66,6 +74,23 @@
  * one-glyph column with the title and subtitle ellipsized to nothing. With
  * the minimum in place the row's `flex-wrap` drops the trailing below the
  * body instead — the same place it already sits below `sm`.
+ *
+ * ── One trailing column ────────────────────────────────────────────────────
+ *
+ * Mixed rows must not stagger. When ANY row in the list offers the dismiss,
+ * every row without one keeps an empty, `aria-hidden` 32px slot in its
+ * place, so the actions end on one right edge instead of the non-dismissible
+ * rows' controls sliding 40px right of the rest. A list with no dismissible
+ * row reserves nothing, and neither does a row with nothing visible to align
+ * (no badge, no action) — below `sm` its slot would be an empty 32px line
+ * under the body. The decision reads the items as given, so dismissing the
+ * last dismissible row (or "Show N more" revealing the first) shifts the
+ * column 40px — accepted: the list is consistent with itself at every render. The action also gets a shared minimum width
+ * (`ACTION_MIN`, 112px — room for "Finish setup" and "View activity"), so
+ * "Add funds" and "Review" match them and the badges end on one edge too. A
+ * longer label ("View transactions") grows past it: its action still ends on
+ * the shared edge, but its badge sits further left. Raising the minimum to
+ * fit it would bloat every short action, so that one case is accepted.
  *
  * ── Full-bleed (#3902) ────────────────────────────────────────────────────
  *
@@ -136,6 +161,14 @@ const TITLE_TOP = 'mt-1.5'
 /** Two lines, then an ellipsis — see the clamp rule above. */
 const CLAMP = 'whitespace-normal line-clamp-2'
 
+/**
+ * The action's shared minimum width — see "One trailing column" above. The
+ * wrapper is a flex box with this minimum and the caller's control grows to
+ * fill it (Button centres its label), so short actions match the widest
+ * common one without the caller sizing anything.
+ */
+const ACTION_MIN = 'flex min-w-[7rem] [&>*]:grow'
+
 /** Full-bleed rows take the card's 20px side inset instead of `Row`'s 16px. */
 const FULL_BLEED_ROW = 'px-5'
 
@@ -157,8 +190,10 @@ export function AttentionList({
   items: AttentionListItem[]
   onDismiss: (id: string) => void
   /**
-   * DOM id of the caller's list heading. When a dismiss empties the list,
-   * focus moves there — the caller owns the heading and the empty state.
+   * DOM id of the caller's list heading. When a dismiss leaves no dismiss
+   * button — the list emptied, or only non-dismissible rows remain — focus
+   * moves there; the caller owns the heading and the empty state. The list
+   * must stay mounted through that dismiss for the move to run.
    */
   headingId?: string
   /** Edge-to-edge rows with dividers, for a list that is the card's body (#3902). */
@@ -168,12 +203,16 @@ export function AttentionList({
   const listRef = useRef<HTMLUListElement | null>(null)
   // Set at click time, consumed after the caller's re-render has removed the
   // item — focusing a still-mounted row would strand focus on a departing node.
-  const pendingFocusIndex = useRef<number | null>(null)
+  // It is the dismissed control's position among the DISMISS BUTTONS, not
+  // among `items` — the two orders differ once a row is non-dismissible.
+  const pendingFocus = useRef<{ id: string; index: number } | null>(null)
 
   useEffect(() => {
-    if (pendingFocusIndex.current === null) return
-    const index = pendingFocusIndex.current
-    pendingFocusIndex.current = null
+    if (pendingFocus.current === null) return
+    const { id, index } = pendingFocus.current
+    pendingFocus.current = null
+    // The caller kept the item: nothing vanished, so focus stays where it is.
+    if (items.some((item) => item.id === id)) return
     const buttons = listRef.current?.querySelectorAll<HTMLButtonElement>('[data-attention-dismiss]')
     if (buttons && buttons.length > 0) {
       buttons[Math.min(index, buttons.length - 1)]?.focus()
@@ -184,9 +223,16 @@ export function AttentionList({
 
   if (items.length === 0) return null
 
-  const handleDismiss = (index: number) => {
-    pendingFocusIndex.current = index
-    onDismiss(items[index].id)
+  // One trailing column: reserve the dismiss slot on every row once any row
+  // has the control (see the header comment).
+  const reserveDismissSlot = items.some((item) => item.dismissible !== false)
+
+  const handleDismiss = (item: AttentionListItem) => {
+    const index = items
+      .filter((candidate) => candidate.dismissible !== false)
+      .findIndex((candidate) => candidate.id === item.id)
+    pendingFocus.current = { id: item.id, index }
+    onDismiss(item.id)
   }
 
   return (
@@ -195,7 +241,7 @@ export function AttentionList({
       data-full-bleed={fullBleed ? '' : undefined}
       className={`${fullBleed ? 'divide-y divide-[var(--v2-border)]' : 'space-y-1'} ${className}`.trim()}
     >
-      {items.map((item, index) => (
+      {items.map((item) => (
         <li key={item.id}>
           <Row
             leading={item.icon ? <Icon icon={item.icon} className="h-4 w-4" /> : undefined}
@@ -215,19 +261,25 @@ export function AttentionList({
                 ) : (
                   <span className="sr-only">{TONE_TEXT[item.tone]}</span>
                 )}
-                {item.action}
-                {item.dismissible !== false && (
+                {item.action ? <div className={ACTION_MIN}>{item.action}</div> : null}
+                {item.dismissible !== false ? (
                   <button
                     type="button"
                     data-attention-dismiss
                     data-testid={`attention-dismiss-${item.id}`}
                     aria-label={`Dismiss: ${item.title}`}
-                    onClick={() => handleDismiss(index)}
+                    onClick={() => handleDismiss(item)}
                     className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
                   >
                     <Icon icon={X} className="h-4 w-4" />
                   </button>
-                )}
+                ) : reserveDismissSlot && (item.badge !== undefined || item.action) ? (
+                  <span
+                    aria-hidden="true"
+                    data-attention-dismiss-slot
+                    className="h-8 w-8 flex-shrink-0"
+                  />
+                ) : null}
               </div>
             }
           />

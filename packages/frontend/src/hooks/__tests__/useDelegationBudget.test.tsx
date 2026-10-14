@@ -736,8 +736,19 @@ describe('editBudget — REPLACE composition (#3166)', () => {
     expect(mockPost.mock.calls.some((c) => String(c[0]).includes('/activate'))).toBe(false)
   })
 
-  it('activation raced a revoke-all (409 no longer pending): failed, old state untouched, no revoke attempted', async () => {
+  it('activation raced a revoke-all (409 no longer pending): the re-read (#3930) shows the row revoked → failed, no revoke attempted', async () => {
     mockApi(PASSKEY_SIGNERS)
+    // #3930: the 409 now triggers the re-read before anything is reported.
+    // The revoke-all that won the race left the row `revoked` — which is what
+    // makes this `failed` (an `active` re-read would continue to the Stop
+    // step; an unknown one would be `unconfirmed`).
+    mockGet.mockImplementation((url: string) => {
+      if (url.endsWith('/delegations')) {
+        return Promise.resolve({ delegations: [{ delegation_hash: NEW_HASH, status: 'revoked' }] })
+      }
+      if (url.endsWith('/account-signers')) return Promise.resolve(PASSKEY_SIGNERS)
+      return Promise.reject(new Error('unexpected ' + url))
+    })
     mockPost.mockImplementation((url: string) => {
       if (url.endsWith('/build')) {
         return Promise.resolve({
@@ -1182,5 +1193,266 @@ describe('useDelegationBudget visible-only polling (#2732)', () => {
     })
     expect(result.current.budgets).toHaveLength(1)
     expect(result.current.budgetsError).toBe(false)
+  })
+})
+
+describe('#3930 — a lost activate response: re-read before report, no double grant', () => {
+  const HASH = '0x' + 'd3'.repeat(32)
+  const OLD_HASH = '0x' + 'ab'.repeat(32)
+  const INPUT = {
+    tokenAddress: ('0x' + 'cc'.repeat(20)) as never,
+    budgetAtomic: '1000',
+    periodSeconds: 86_400,
+  }
+
+  function delegationsGetCount(): number {
+    return mockGet.mock.calls.filter((c) => String(c[0]).endsWith('/delegations')).length
+  }
+
+  /**
+   * build → signature → activate POST REJECTS (the response is lost); the
+   * delegations GET answers with `rows` — pass `null` to make the read itself
+   * throw. `rowHash` deliberately differs in CASE from HASH: the re-read must
+   * compare hashes case-insensitively.
+   */
+  function mockLostActivate(rows: Array<{ delegation_hash: string; status: string }> | null) {
+    mockGet.mockImplementation((url: string) => {
+      if (url.endsWith('/delegations')) {
+        if (rows === null) return Promise.reject(new TypeError('read failed'))
+        return Promise.resolve({ delegations: rows })
+      }
+      if (url.endsWith('/account-signers')) return Promise.resolve(PASSKEY_SIGNERS)
+      return Promise.reject(new Error('unexpected ' + url))
+    })
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/build')) {
+        return Promise.resolve({
+          delegation_hash: HASH,
+          version: 1,
+          signing_payload: { domain: {}, types: {}, primaryType: 'Delegation', message: {} },
+        })
+      }
+      if (url.endsWith('/activate')) return Promise.reject(new TypeError('Failed to fetch'))
+      if (url.endsWith('/revoke')) {
+        return Promise.resolve({
+          signature_scheme: 'webauthn_userop',
+          user_op_hash: '0xr',
+          user_operation: { nonce: '9n' },
+        })
+      }
+      if (url.endsWith('/revoke/submit')) return Promise.resolve({ revoked: true })
+      return Promise.reject(new Error('unexpected ' + url))
+    })
+    mockSignDelegation.mockResolvedValue('0x' + 'aa'.repeat(100))
+    mockSignUserOp.mockResolvedValue('0x' + 'bb'.repeat(100))
+  }
+
+  it('grant: activate POST lost, re-read shows the hash ACTIVE (case-insensitive) → ok: true, one GET then a refresh', async () => {
+    mockLostActivate([{ delegation_hash: HASH.toUpperCase(), status: 'active' }])
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    const getsBefore = delegationsGetCount()
+    await act(async () => {
+      const res = await result.current.grant(INPUT)
+      expect(res).toEqual({ ok: true })
+    })
+    // The error path adds EXACTLY ONE delegations read (the re-read) plus the
+    // refresh the landed result promises — never more.
+    expect(delegationsGetCount()).toBe(getsBefore + 2)
+  })
+
+  it('grant: re-read shows REPLACED (the retry already swept it) → ok: true', async () => {
+    mockLostActivate([{ delegation_hash: HASH, status: 'replaced' }])
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      expect(await result.current.grant(INPUT)).toEqual({ ok: true })
+    })
+  })
+
+  it('grant: re-read shows REVOKED (revoke-all raced it) → failed, no refresh', async () => {
+    mockLostActivate([{ delegation_hash: HASH, status: 'revoked' }])
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    const getsBefore = delegationsGetCount()
+    await act(async () => {
+      expect(await result.current.grant(INPUT)).toEqual({ ok: false, reason: 'failed' })
+    })
+    // Exactly one re-read GET, and NO reload (nothing landed).
+    expect(delegationsGetCount()).toBe(getsBefore + 1)
+  })
+
+  it('grant: re-read shows PENDING (commit may still land) → the new unconfirmed result', async () => {
+    mockLostActivate([{ delegation_hash: HASH, status: 'pending' }])
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      expect(await result.current.grant(INPUT)).toEqual({ ok: false, reason: 'unconfirmed' })
+    })
+  })
+
+  it('grant: re-read finds NO row for the hash → unconfirmed', async () => {
+    mockLostActivate([])
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      expect(await result.current.grant(INPUT)).toEqual({ ok: false, reason: 'unconfirmed' })
+    })
+  })
+
+  it('grant: the re-read ITSELF fails → unconfirmed, and the failure is not mistaken for absent', async () => {
+    mockLostActivate(null)
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      expect(await result.current.grant(INPUT)).toEqual({ ok: false, reason: 'unconfirmed' })
+    })
+  })
+
+  it('grant: a CANCELLED signature returns cancelled with NO re-read', async () => {
+    mockLostActivate([{ delegation_hash: HASH, status: 'active' }])
+    mockSignDelegation.mockReset()
+    mockSignDelegation.mockRejectedValue(new Error('User rejected the request'))
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    const getsBefore = delegationsGetCount()
+    await act(async () => {
+      expect(await result.current.grant(INPUT)).toEqual({ ok: false, reason: 'cancelled' })
+    })
+    expect(delegationsGetCount()).toBe(getsBefore)
+  })
+
+  it('grant: a named build refusal still returns refused with its detail — no re-read (nothing was attempted)', async () => {
+    mockLostActivate([{ delegation_hash: HASH, status: 'active' }])
+    mockPost.mockImplementation((url: string) =>
+      Promise.reject(new Error('Agent was revoked — budgets cannot be granted')),
+    )
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    const getsBefore = delegationsGetCount()
+    await act(async () => {
+      const res = await result.current.grant(INPUT)
+      expect(res).toEqual({ ok: false, reason: 'refused', detail: 'Agent was revoked — budgets cannot be granted' })
+    })
+    expect(delegationsGetCount()).toBe(getsBefore)
+  })
+
+  it('editBudget: activate POST lost, re-read ACTIVE → the Stop step runs as if the POST had returned', async () => {
+    mockLostActivate([{ delegation_hash: HASH, status: 'active' }])
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.editBudget(OLD_HASH, INPUT)
+      expect(res).toEqual({ ok: true, newDelegationHash: HASH, oldDelegationRevoked: true })
+    })
+    // The Stop step really ran: old hash to the revoke routes only.
+    const urls = mockPost.mock.calls.map((c) => String(c[0]))
+    expect(urls.some((u) => u.endsWith(`/delegations/${OLD_HASH}/revoke`))).toBe(true)
+    expect(urls.some((u) => u.endsWith(`/delegations/${OLD_HASH}/revoke/submit`))).toBe(true)
+  })
+
+  it('editBudget: lost response, re-read ACTIVE, then the stop FAILS → revoke_unfinished naming the live (attempted) hash', async () => {
+    mockLostActivate([{ delegation_hash: HASH, status: 'active' }])
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/build')) {
+        return Promise.resolve({
+          delegation_hash: HASH,
+          version: 1,
+          signing_payload: { domain: {}, types: {}, primaryType: 'Delegation', message: {} },
+        })
+      }
+      if (url.endsWith('/activate')) return Promise.reject(new TypeError('Failed to fetch'))
+      return Promise.reject(new Error('revoke prepare exploded'))
+    })
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      expect(await result.current.editBudget(OLD_HASH, INPUT)).toEqual({
+        ok: false,
+        reason: 'revoke_unfinished',
+        newDelegationHash: HASH,
+      })
+    })
+  })
+
+  it('editBudget: lost response, re-read REVOKED → failed, old budget untouched, no stop attempted', async () => {
+    mockLostActivate([{ delegation_hash: HASH, status: 'revoked' }])
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      expect(await result.current.editBudget(OLD_HASH, INPUT)).toEqual({ ok: false, reason: 'failed' })
+    })
+    expect(mockPost.mock.calls.some((c) => String(c[0]).includes('/revoke'))).toBe(false)
+  })
+
+  it('editBudget: lost response, re-read PENDING → unconfirmed, never "nothing was granted", no stop attempted', async () => {
+    mockLostActivate([{ delegation_hash: HASH, status: 'pending' }])
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      expect(await result.current.editBudget(OLD_HASH, INPUT)).toEqual({
+        ok: false,
+        reason: 'unconfirmed',
+      })
+    })
+    expect(mockPost.mock.calls.some((c) => String(c[0]).includes('/revoke'))).toBe(false)
+  })
+
+  it('retry after unconfirmed: the remembered hash is now ACTIVE — the second grant makes NO /build and returns ok: true', async () => {
+    mockLostActivate([{ delegation_hash: HASH, status: 'pending' }])
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      expect(await result.current.grant(INPUT)).toEqual({ ok: false, reason: 'unconfirmed' })
+    })
+    // The commit lands late (the residual race): the re-read now shows active.
+    mockGet.mockImplementation((url: string) => {
+      if (url.endsWith('/delegations')) {
+        return Promise.resolve({ delegations: [{ delegation_hash: HASH, status: 'active' }] })
+      }
+      if (url.endsWith('/account-signers')) return Promise.resolve(PASSKEY_SIGNERS)
+      return Promise.reject(new Error('unexpected ' + url))
+    })
+    await act(async () => {
+      expect(await result.current.grant(INPUT)).toEqual({ ok: true })
+    })
+    // The no-build assertion, meaningful here: ONE build total, from the FIRST attempt.
+    expect(mockPost.mock.calls.filter((c) => String(c[0]).endsWith('/build'))).toHaveLength(1)
+  })
+
+  it('retry after unconfirmed: the remembered hash is STILL pending — unconfirmed again, no /build', async () => {
+    mockLostActivate([{ delegation_hash: HASH, status: 'pending' }])
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      await result.current.grant(INPUT)
+    })
+    await act(async () => {
+      expect(await result.current.grant(INPUT)).toEqual({ ok: false, reason: 'unconfirmed' })
+    })
+    expect(mockPost.mock.calls.filter((c) => String(c[0]).endsWith('/build'))).toHaveLength(1)
+    // No new signature either — the retry built nothing and signed nothing.
+    expect(mockSignDelegation).toHaveBeenCalledTimes(1)
+  })
+
+  it('retry after unconfirmed: the remembered hash is REVOKED — the attempt is dead, so the retry builds fresh', async () => {
+    mockLostActivate([{ delegation_hash: HASH, status: 'pending' }])
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      await result.current.grant(INPUT)
+    })
+    mockGet.mockImplementation((url: string) => {
+      if (url.endsWith('/delegations')) {
+        return Promise.resolve({ delegations: [{ delegation_hash: HASH, status: 'revoked' }] })
+      }
+      if (url.endsWith('/account-signers')) return Promise.resolve(PASSKEY_SIGNERS)
+      return Promise.reject(new Error('unexpected ' + url))
+    })
+    await act(async () => {
+      expect(await result.current.grant(INPUT)).toEqual({ ok: false, reason: 'failed' })
+    })
+    // The retry DID build — the dead attempt cannot be doubled.
+    expect(mockPost.mock.calls.filter((c) => String(c[0]).endsWith('/build'))).toHaveLength(2)
   })
 })

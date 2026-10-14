@@ -451,6 +451,21 @@ export const toolSchemas = {
      * argument is now spelled once across both.
      */
     body: z.string().optional(),
+    /**
+     * #3967: the price the agent EXPECTS, in whole tokens ("0.10" = 0.1 USDC),
+     * compared against the amount of the option pay will actually select. A
+     * mismatch stops the agent (`safe_to_continue: false`,
+     * `next_action: stop_and_tell_user`, no prefilled cap) — the plain-HTTP
+     * analogue of the MCP quote tools' `catalog_price_differs`. Absent:
+     * nothing changes. Same shape and name as the local surface's.
+     */
+    expected_amount: z
+      .string()
+      .regex(
+        /^[0-9]+(\.[0-9]+)?$/,
+        'expected_amount must be a plain decimal amount in whole tokens, e.g. "0.10"',
+      )
+      .optional(),
   },
   haven_pay_x402_quote: {
     // #3097: the URL the agent QUOTED — where the paid retry goes. The
@@ -932,8 +947,9 @@ export const STRICT_INPUT_TOOLS = {
     'silently replaced by a different one rather than merely lost. @haven_ai/mcp now refuses ' +
     'idempotencyKey itself; it takes idempotency_key.',
   haven_quote_x402:
-    'This is the HOSTED surface. It takes url, method, headers and body (body was added so ' +
-    'a body-bearing POST paywall is quoted with the body the caller means to pay for). The ' +
+    'This is the HOSTED surface. It takes url, method, headers, body and expected_amount (body was ' +
+    'added so a body-bearing POST paywall is quoted with the body the caller means to pay for; ' +
+    'expected_amount is the price the agent expects, and a mismatch stops the agent). The ' +
     'local MCP (@haven_ai/mcp) additionally takes idempotency_key, which the hosted quote ' +
     'has no use for — carrying it here used to be dropped in silence. haven_discover_tools ' +
     'hands you resource_url; this tool spells that argument url.',

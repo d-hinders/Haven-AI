@@ -117,6 +117,15 @@ export interface BudgetPrecheckBody {
    * compare, unchanged.
    */
   idempotencyKey?: string
+  /**
+   * #3967: false answers the same decided 403 WITHOUT writing a
+   * `payment_refusals` row. The quote surfaces ask with this — a quote is not
+   * a payment attempt, and the later prepare records its own refusal if the
+   * agent goes ahead. Default true: every existing caller (catalog prepare,
+   * and any caller that omits the field) records exactly as before. No new
+   * `source` value, no migration.
+   */
+  recordRefusal?: boolean
 }
 
 /** A generic handler result shape, mirroring `X402HandlerResult`. */

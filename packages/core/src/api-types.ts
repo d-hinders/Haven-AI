@@ -5689,6 +5689,8 @@ export type components = {
             resourceUrl?: string;
             /** @description #3492/#3527: the x402 idempotency key of the quote this pre-check describes. When it resolves to an already-SETTLED erc7710 OR eip3009 payment matching this same quote (confirmed, a tx_hash, settlement_scheme erc7710 or eip3009, and the SAME token/amountAtomic/merchantTo/resourceUrl this request names — both of the latter two are REQUIRED for a replay match, no task- or sub-budget pin), the pre-check answers sufficient — with `replay: true` — WITHOUT comparing against the now-lower remaining budget and WITHOUT recording a payment_refusals row: the money already moved (on eip3009, its funding leg did — the same fact the x402 replay guard already treats as replayable for every scheme), so re-refusing it as over-budget would be a false ledger row. Any other shape (no row, a pending child, a key collision on a different quote, or a task/sub-budget-scoped row) leaves today's compare unchanged. Omitted: unchanged behavior. */
             idempotencyKey?: string;
+            /** @description #3967: false answers the same decided 403 WITHOUT writing a payment_refusals row. The quote surfaces ask with this — a quote is not a payment attempt, and a later prepare records its own refusal if the agent goes ahead. Default true (omitted = record): every existing caller is unchanged. */
+            recordRefusal?: boolean;
         };
         /** @description The sufficient branch of the server-side budget pre-check (#3054). The insufficient answer is not this schema — it is the 403 delegation_budget_exceeded refusal, which also lands a payment_refusals row with source "hosted_prepare". */
         BudgetPrecheckResponse: {

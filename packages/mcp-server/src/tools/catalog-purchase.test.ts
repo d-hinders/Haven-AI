@@ -3784,6 +3784,55 @@ describe('#2991 — expected_settlement_scheme / expected_funding_leg', () => {
     expect(res.data.expected_funding_leg).toBe(false)
   })
 
+  // #3967: the MCP quote tools stay INFORMATIONAL (no next step is added),
+  // but an over-budget quote now carries the decided refusal as
+  // `safe_to_continue: false` + the budget_check block + the warning.
+  it('haven_quote_mcp_tool over budget: safe_to_continue false, the block, the warning — still no next step', async () => {
+    stubFetch({
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(bothEntriesMerchant())) },
+      },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+      'POST /machine-payments/budget-precheck': {
+        status: 403,
+        body: {
+          error: 'delegation_budget_exceeded',
+          error_code: 'delegation_budget_exceeded',
+          remaining_atomic: '500000',
+        },
+      },
+    })
+    const res = ok<{
+      safe_to_continue: boolean
+      budget_check?: { sufficient: boolean | null; remaining_atomic?: string; requested_atomic: string }
+      warnings?: Array<{ code: string }>
+      next_action?: unknown
+      quote_is_informational: boolean
+    }>(
+      await handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      }),
+    )
+    expect(res.data.safe_to_continue).toBe(false)
+    expect(res.data.budget_check).toEqual({
+      sufficient: false,
+      remaining_atomic: '500000',
+      requested_atomic: '1500000',
+    })
+    expect(res.data.warnings).toEqual([
+      expect.objectContaining({ code: 'QUOTE_EXCEEDS_REMAINING_BUDGET' }),
+    ])
+    // Still informational: no next step appears on either branch.
+    expect(res.data.quote_is_informational).toBe(true)
+    expect(res.data.next_action).toBeUndefined()
+    // The quote never writes to the refusals ledger: recordRefusal: false.
+    const precheckCall = recordedCalls().find((c) => c.url.includes('/machine-payments/budget-precheck'))
+    expect((precheckCall?.body as Record<string, unknown>).recordRefusal).toBe(false)
+  })
+
   it('same merchant + agent on the legacy/3009 rail: predicts eip3009 WITH a funding leg — and NOT settleable (Haven refuses retired rails with 410)', async () => {
     stubFetch({
       'POST /mcp': {
@@ -3826,6 +3875,12 @@ describe('#2991 — expected_settlement_scheme / expected_funding_leg', () => {
         responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(bothEntriesMerchant())) },
       },
       'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+      // #3967: the quote runs the quote-time budget pre-check; explicit
+      // sufficient stub (the refusal/degrade branches are tested separately).
+      'POST /machine-payments/budget-precheck': {
+        status: 200,
+        body: { sufficient: true, remaining_atomic: '5000000' },
+      },
     })
     const res = ok<{
       accepted_scheme: string
@@ -3833,12 +3888,21 @@ describe('#2991 — expected_settlement_scheme / expected_funding_leg', () => {
       expected_funding_leg: boolean | null
       expected_settleable?: boolean
       warnings?: unknown[]
+      safe_to_continue: boolean
+      budget_check?: { sufficient: boolean | null; remaining_atomic?: string; requested_atomic: string }
     }>(await handlers().haven_quote_catalog_purchase({ catalog_id: 'cat_1' }))
     expect(res.data.accepted_scheme).toBe('standard')
     expect(res.data.expected_settlement_scheme).toBe('erc7710')
     expect(res.data.expected_funding_leg).toBe(false)
     expect(res.data.expected_settleable).toBe(true)
     expect(res.data.warnings).toBeUndefined()
+    // #3967: always present on the MCP quote tools, plus the block.
+    expect(res.data.safe_to_continue).toBe(true)
+    expect(res.data.budget_check).toEqual({
+      sufficient: true,
+      remaining_atomic: '5000000',
+      requested_atomic: '1500000',
+    })
   })
 
   it('an erc7710-only merchant predicts erc7710 regardless of the account rail — and says whether THIS agent can settle it', async () => {

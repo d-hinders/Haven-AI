@@ -353,7 +353,9 @@ for example, an invoice carrying an \`x402_payment_url\` to POST with its
 \`invoice_id\`, beside a raw deposit address and a web payment link.
 - **Quote the exact request:** \`mcp__haven__haven_quote_x402\` with \`url\`,
   \`method\`, \`headers\` and \`body\`, exactly as the merchant described it.
-  \`body\` is a JSON **string**, not an object. On a JSON POST always pass
+  \`body\` is a JSON **string**, not an object. When the price is stated up
+  front (an invoice total, say), also pass \`expected_amount\` — the price you
+  expect, in whole tokens (\`"0.10"\`). On a JSON POST always pass
   \`headers: {"Content-Type": "application/json"}\` — the tool does not infer
   it, and a merchant may answer a request without it with a generic challenge
   Haven cannot pay (for example, only the \`upto\` scheme).
@@ -382,6 +384,16 @@ for example, an invoice carrying an \`x402_payment_url\` to POST with its
   report it, the merchant's settlement evidence. (A deposit transfer is bound
   to its payee and amount on-chain too; the difference is the record, not
   the binding.)
+- **If the quote says stop, stop.** The quote checks the agent's remaining
+  budget at quote time, and it can check a price you state (\`expected_amount\`).
+  When it returns \`safe_to_continue: false\` — the amount exceeds the budget, or
+  the price does not match what you expected — it prefills no cap and names no
+  next tool: stop and tell the user. If the x402 challenge itself is wrong (a
+  price wildly off the invoice) and NOTHING has been paid via x402, the
+  invoice's own deposit address MAY be an alternative, but only with the
+  user's explicit go-ahead — never automatically. Once an x402 payment has
+  been attempted or refused, never pay the deposit address: it can pay the
+  invoice twice.
 - **Pay exactly one route, and never fall back silently.** If the x402 route
   is refused or fails, do not then pay the deposit address — that pays the
   invoice twice. Follow the result's guidance fields instead: on EIP-3009, a

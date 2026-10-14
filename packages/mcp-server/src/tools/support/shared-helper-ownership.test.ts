@@ -240,6 +240,12 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // buildMcpToolQuoteResponse's own two callers (s2810) and haven_quote_x402's
   // direct call (s2811) — the third hosted quote surface to carry it.
   settlementPredictionFields: { module: 'quote-response', slices: ['s2810', 's2811'] },
+  // #3967: the quote-time budget gate + denial hints, shared by all three
+  // quote surfaces (s2810's two MCP quote tools and s2811's haven_quote_x402).
+  selectedSettlement: { module: 'quote-response', slices: ['s2810', 's2811'] },
+  quoteBudgetCheckFields: { module: 'quote-response', slices: ['s2810', 's2811'] },
+  runQuoteBudgetPrecheck: { module: 'quote-response', slices: ['s2810', 's2811'] },
+  merchantDenialWarnings: { module: 'quote-response', slices: ['s2810', 's2811'] },
   // tools/support/catalog-entry.ts — catalog refusal contract, shared by the
   // #2810 quote/preflight paths whose error shape the #2811 resume tests pin.
   getUsableCatalogMcpEntry: { module: 'catalog-entry', slices: ['s2810'] },
@@ -504,6 +510,11 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'wrongTool',
     'resolveResumeState',
     'settlementPredictionFields',
+    // #3967: the quote-time budget gate + denial hints.
+    'selectedSettlement',
+    'quoteBudgetCheckFields',
+    'runQuoteBudgetPrecheck',
+    'merchantDenialWarnings',
   ],
   // #3419: the task-budget twin rides s3329's two handoff sites; the min-version
   // constant is reported on those results and pinned cross-package.

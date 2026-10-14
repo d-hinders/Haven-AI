@@ -2041,6 +2041,22 @@ export const AgentPaymentWarningCode = {
    * settlement can no longer land at all.
    */
   SettlementUnconfirmed: 'SETTLEMENT_UNCONFIRMED',
+  /**
+   * #3967: the quote-time budget pre-check decided the quoted amount does NOT
+   * fit the agent's remaining delegation budget — the same server-side compare
+   * the payment path runs before funding. Travels beside
+   * `budget_check.sufficient: false` and, on `haven_quote_x402`,
+   * `safe_to_continue: false` with no prefilled cap. The on-chain policy
+   * remains the actual gate either way.
+   */
+  QuoteExceedsRemainingBudget: 'QUOTE_EXCEEDS_REMAINING_BUDGET',
+  /**
+   * #3967: the MERCHANT reported a denial on one of its x402 payment options —
+   * a known denial key (starting with `issuanceDenied`) in `accepts[].extra`.
+   * Strictly informational: it flips neither `safe_to_continue` nor
+   * `expected_settleable`; the agent should surface it to the user.
+   */
+  MerchantReportedDenial: 'MERCHANT_REPORTED_DENIAL',
 } as const
 
 export type AgentPaymentWarningCode =

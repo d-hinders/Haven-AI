@@ -12,6 +12,8 @@ covers:
   - packages/backend/src/db/migrations/101_merchant_pay_to.ts
   - packages/backend/src/routes/merchants.ts
   - packages/backend/src/infra/repositories/delegation-budgets.ts
+  - packages/backend/src/modules/mpp/budget-precheck.ts
+  - packages/mcp-server/src/tools/support/quote-response.ts
   - packages/sdk/src/delegate-account.ts
   - packages/sdk/src/redemption-guard.ts
   - packages/sdk/src/direct-payment-guard.ts
@@ -3123,3 +3125,22 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > `modules/x402/eip3009-settlement-evidence.ts`, `modules/mpp/evidence.ts`,
 > `infra/repositories/x402-authorizations.ts`; the rest of this document was
 > not re-read for it, and `last-verified` is not bumped.
+
+> **Re-verified #3967 (2026-10-14, the quote-time budget gate):** the diff
+> touches `packages/sdk/src/client.ts` (covered): `precheckBudget` gains an
+> optional `recordRefusal` input, and the quote surfaces call it with
+> `recordRefusal: false` so a QUOTE never writes a `payment_refusals` row —
+> a quote is a read, and the later prepare records its own refusal if the
+> agent goes ahead. The quote-time check is advisory and fail-closed on
+> authority: its only STOP outcome (a decided 403) is a refusal the
+> delegation-rail enforcer (`evaluatePeriodPrecheck`, delegation-authorize)
+> would reach at redemption anyway; an unavailable check fails OPEN with an
+> `AllowanceCheckUnavailable` warning; and the skip guards (chain mismatch,
+> no agent, retired rail) exist so the quote cannot refuse on a question it
+> did not ask. No signing, key-role, enforcer or custody path moves. Scope
+> of this note: `packages/sdk/src/client.ts`,
+> `packages/mcp-server/src/tools/support/quote-response.ts` (the shared
+> `runQuoteBudgetPrecheck` / `quoteBudgetCheckFields` helpers the three
+> quote surfaces call), `packages/backend/src/modules/mpp/budget-precheck.ts`;
+> the rest of this document was not re-read for it, and `last-verified` is
+> not bumped.

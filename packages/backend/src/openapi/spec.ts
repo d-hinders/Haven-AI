@@ -12706,6 +12706,14 @@ export const openapiSpec = {
               'quote, or a task/sub-budget-scoped row) leaves today\'s compare unchanged. Omitted: ' +
               'unchanged behavior.',
           },
+          recordRefusal: {
+            type: 'boolean',
+            description:
+              '#3967: false answers the same decided 403 WITHOUT writing a payment_refusals row. ' +
+              'The quote surfaces ask with this — a quote is not a payment attempt, and a later ' +
+              'prepare records its own refusal if the agent goes ahead. Default true (omitted = ' +
+              'record): every existing caller is unchanged.',
+          },
         },
         additionalProperties: false,
       },

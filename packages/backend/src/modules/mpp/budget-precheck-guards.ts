@@ -47,5 +47,9 @@ export function budgetPrecheckBodyError(
   if (body.idempotencyKey !== undefined && typeof body.idempotencyKey !== 'string') {
     return { error: 'idempotencyKey must be a string' }
   }
+  // #3967: optional; absent means true (unchanged for every existing caller).
+  if (body.recordRefusal !== undefined && typeof body.recordRefusal !== 'boolean') {
+    return { error: 'recordRefusal must be a boolean' }
+  }
   return null
 }

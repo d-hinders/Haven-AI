@@ -225,6 +225,17 @@ approval request, signature, funding operation, paid merchant retry, or
 on-chain transaction. Every quote is informational rather than a price
 reservation or payment authority.
 
+Since #3967 every quote ALSO carries what Haven can already know about the
+price before any payment exists: a quote-time budget pre-check against the
+agent's remaining delegation budget (asked about the option pay will actually
+select, with `record_refusal: false` so a quote writes no refusal row), an
+optional agent-stated `expected_amount`, and the merchant's own denial hints
+from `accepts[].extra`. An over-budget or mismatched quote stops the agent —
+`safe_to_continue: false`, no prefilled cap, no next tool — but the quote data
+itself is still returned, an unavailable pre-check fails OPEN with a warning
+(the on-chain policy remains the actual gate), and nothing about the payment
+path's own checks changes.
+
 Every merchant-facing SDK fetch (probes, MCP handshakes, paid retries,
 resume retries) is bounded since #1300: `config.merchantTimeout` (default
 **300 s**, calibrated to the protocol contract — the merchant's own

@@ -74,7 +74,11 @@ import {
   quoteMcpToolCall,
   serializeMcpTransport,
 } from './support/mcp-context.js'
-import { buildMcpToolQuoteResponse, isPendingApproval } from './support/quote-response.js'
+import {
+  buildMcpToolQuoteResponse,
+  isPendingApproval,
+  runQuoteBudgetPrecheck,
+} from './support/quote-response.js'
 
 /**
  * The tools this capability owns, as a tuple so the set is data rather than a
@@ -582,6 +586,12 @@ export function createCatalogPurchaseHandlers(
           toolArguments,
         })
         const agent = await agentPrefetch
+        // #3967: the quote-time budget pre-check (record_refusal: false — a
+        // quote never writes to the refusals ledger), on the option pay will
+        // actually select. Degrades to sufficient: null + a warning, never a
+        // refusal; the shared builder turns the outcome into the
+        // budget_check block, the warning, and safe_to_continue.
+        const budgetPrecheck = await runQuoteBudgetPrecheck(haven, quote, agent)
         return buildMcpToolQuoteResponse({
           quote,
           merchantUrl,
@@ -589,6 +599,7 @@ export function createCatalogPurchaseHandlers(
           toolArguments,
           requestedMerchantUrl: args.merchant_url as string,
           agent,
+          budgetPrecheck,
         })
       }),
 
@@ -1144,6 +1155,9 @@ export function createCatalogPurchaseHandlers(
           egressTarget: 'catalog',
         })
         const agent = await agentPrefetch
+        // #3967: same quote-time budget pre-check as haven_quote_mcp_tool —
+        // record_refusal: false, selected option, degrade-never-refuse.
+        const budgetPrecheck = await runQuoteBudgetPrecheck(haven, quote, agent)
         return buildMcpToolQuoteResponse({
           quote,
           merchantUrl,
@@ -1152,6 +1166,7 @@ export function createCatalogPurchaseHandlers(
           requestedMerchantUrl: entry.resourceUrl,
           catalog: entry,
           agent,
+          budgetPrecheck,
         })
       }),
 

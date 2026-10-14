@@ -1490,7 +1490,12 @@ making it unrecoverable.
   way to finish. It is per slot: it does not bound open-plus-pinned or
   shared-payTo authority. Grants left enabled by replaces before #3933 stay
   enabled until the owner stops them; the agent page flags any `replaced`,
-  unexpired row with that finish action.
+  unexpired row with that finish action. The owner-facing copy follows the
+  rule (#3971): an `unconfirmed` grant no longer warns that a retry adds a
+  second budget — the retry re-reads the attempt, and build/activate refuse
+  a second live budget in the slot — and the fund-merchant warning counts
+  the Stop signatures the edit will ask for (a re-keyed pair is two). Copy
+  only; no request, signature or authority path changes.
 
 Two honest limits of the mechanism (review-noted): the signer count is
 **DB-sourced** — an owner can change the signer set directly on-chain without

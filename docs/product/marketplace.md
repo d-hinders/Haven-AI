@@ -206,7 +206,8 @@ for the modal's own shape.
   whose payTo already holds a live budget — plain, locked to this merchant,
   or locked to another merchant — opens that budget's edit instead of a new
   grant, and the review step names which kind of budget it is and that the
-  old one is stopped. The edit opened from Fund labels the new budget for
+  old one is stopped — with how many Stop signatures that takes (one per
+  row the edit replaces: two for a re-keyed budget, #3971). The edit opened from Fund labels the new budget for
   THIS merchant; the agent page's Edit keeps the row's own label. Only a
   direct API caller can still replace a merchant's budget with a plain
   pinned one, which drops its merchant label. A budget for THIS merchant in a *different*

@@ -297,8 +297,11 @@ interface TypedDataPayload {
 interface DelegationRow {
   chain_id: number
   token_address: string | null
+  recipient_address?: string | null
   status: string
   budget_atomic: string | null
+  delegation_hash?: string
+  expires_at?: string | number | null
 }
 
 async function ensureBudget(
@@ -324,6 +327,21 @@ async function ensureBudget(
     console.log('  ✓ active USDC budget delegation already granted — skipping')
     return
   }
+  // #3933: a live budget in the same (USDC, open) slot with a different
+  // amount is REPLACED through the edit composition — the new grant names it
+  // as `replaces`, then the old one is stopped on-chain. A plain grant into
+  // an occupied slot is refused by build and activate.
+  const nowSec = Math.floor(Date.now() / 1000)
+  const occupying = delegations.find(
+    (d) =>
+      d.status === 'active' &&
+      d.chain_id === CHAIN_ID &&
+      d.token_address?.toLowerCase() === ADDR.usdc.toLowerCase() &&
+      (d.recipient_address ?? null) === null &&
+      Number(d.expires_at ?? 0) > nowSec &&
+      typeof d.delegation_hash === 'string',
+  )
+  const replaces = occupying?.delegation_hash
 
   const built = await api<{
     delegation_hash?: string
@@ -338,6 +356,7 @@ async function ensureBudget(
       recipient_address: null,
       budget_atomic: budgetAtomic,
       period_seconds: cfg.periodMin * 60,
+      ...(replaces ? { replaces } : {}),
     },
   })
   if (!built.delegation_hash || !built.signing_payload) {
@@ -357,11 +376,51 @@ async function ensureBudget(
 
   await api(cfg, 'POST', `/agents/${agentId}/delegations/${built.delegation_hash}/activate`, {
     token,
-    body: { signature },
+    body: { signature, ...(replaces ? { replaces } : {}) },
   })
   console.log(
     `  ✓ budget granted: ${cfg.budgetUsdc} USDC per ${cfg.periodMin} min (delegation ${built.delegation_hash})`,
   )
+  if (replaces) await stopReplacedBudget(cfg, token, agentId, owner, replaces)
+}
+
+/**
+ * The edit composition's second half (#3933): an owner-signed Stop of the
+ * budget the new grant replaced, so it is not left enabled on-chain. A failed
+ * Stop is logged, not fatal — the seed's own grant is already live — and the
+ * old grant then still shows on the agent page with its finish action.
+ */
+async function stopReplacedBudget(
+  cfg: SeedConfig,
+  token: string,
+  agentId: string,
+  owner: ethers.Wallet,
+  hash: string,
+): Promise<void> {
+  try {
+    const prep = await api<{ signature_scheme?: string; signing_payload?: TypedDataPayload; user_operation?: unknown }>(
+      cfg,
+      'POST',
+      `/agents/${agentId}/delegations/${hash}/revoke`,
+      { token, body: { signature_scheme: 'eip712_userop' } },
+    )
+    if (prep.signature_scheme !== 'eip712_userop' || !prep.signing_payload) {
+      throw new Error('revoke prepare returned no eip712_userop payload')
+    }
+    const { domain, types, message } = prep.signing_payload
+    const signable = Object.fromEntries(Object.entries(types).filter(([name]) => name !== 'EIP712Domain'))
+    const signature = await owner.signTypedData(domain as never, signable as never, message as never)
+    await api(cfg, 'POST', `/agents/${agentId}/delegations/${hash}/revoke/submit`, {
+      token,
+      body: { signature, user_operation: prep.user_operation },
+    })
+    console.log(`  ✓ replaced budget stopped on-chain (delegation ${hash})`)
+  } catch (err) {
+    console.warn(
+      `  ⚠ the replaced budget ${hash} is still enabled on-chain — stop it from the agent page: ` +
+        (err instanceof Error ? err.message : String(err)),
+    )
+  }
 }
 
 // ── Orchestration ────────────────────────────────────────────────────────────

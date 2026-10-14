@@ -50,6 +50,10 @@ interface FakeOpts {
   activeAfterReplace?: number
   /** Omit the tx hash from a confirmed pre-revoke payment. */
   noTxHash?: boolean
+  /** #3933 regression: the backend accepts a plain grant into the occupied slot. */
+  slotRuleMissing?: boolean
+  /** #3933: the plain grant is refused, but with another error_code. */
+  plainRefusalCode?: string
 }
 
 /**
@@ -76,6 +80,15 @@ function installFakeApi(opts: FakeOpts) {
       return json(201, { id: 'agent-t', api_key: 'sk_agent_throwaway' })
     }
     if (path.endsWith('/delegations/build')) {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { replaces?: string }
+      // #3933: once grant 1 is live, a build that does not name it is refused.
+      if (grants >= 1 && !body.replaces && !opts.slotRuleMissing) {
+        return json(409, {
+          error: 'This agent already has a live budget for this token and recipient. Edit that budget instead.',
+          error_code: opts.plainRefusalCode ?? 'BUDGET_SLOT_OCCUPIED',
+          existing_delegation_hash: '0xhash1',
+        })
+      }
       grants += 1
       return json(201, { delegation_hash: `0xhash${grants}`, signing_payload: TD })
     }
@@ -119,14 +132,15 @@ const STANDING_TREASURY = '0x' + 'cd'.repeat(20)
 const OK_403 = { status: 403, body: { error: 'Agent has no active budget delegation for USDC to this recipient' } }
 
 describe('the on-chain reads (#3344)', () => {
-  it('passes only after asking the observer: the pay-1 Transfer and grant 2 disabled; grant 1 is reported', async () => {
+  it('passes only after asking the observer: the pay-1 Transfer, and BOTH grants disabled (#3933: the replaced one is stopped)', async () => {
     installFakeApi({ postRevokeAuthorize: OK_403 })
     const result = await delegationLifecycle.run(ctx)
     expect(result.pass).toBe(true)
     expect(mockProve).toHaveBeenCalledWith('0xfeed', { from: THROWAWAY_TREASURY, to: STANDING_TREASURY, amount: 2_000n }, expect.anything())
+    expect(mockWaitDisabled).toHaveBeenCalledWith('0xhash1', expect.anything())
     expect(mockWaitDisabled).toHaveBeenCalledWith('0xhash2', expect.anything())
-    expect(mockReadDisabled).toHaveBeenCalledWith('0xhash1')
-    expect(result.detail).toMatch(/replaced grant is still enabled on-chain/)
+    expect(result.detail).toMatch(/refused BUDGET_SLOT_OCCUPIED/)
+    expect(result.detail).toMatch(/replaced grant was stopped on-chain/)
   })
 
   it('FAILS when the revoke is reported but disabledDelegations stays false', async () => {
@@ -150,12 +164,14 @@ describe('the on-chain reads (#3344)', () => {
     expect(noTx.detail).toMatch(/no tx hash/)
   })
 
-  it('a failed read of the replaced grant is reported, not fatal', async () => {
+  it('FAILS when the replaced grant\'s stop is reported but the chain does not show it (#3933)', async () => {
     installFakeApi({ postRevokeAuthorize: OK_403 })
-    mockReadDisabled.mockRejectedValue(new Error('rpc down'))
+    mockWaitDisabled.mockImplementation(async (hash: string) =>
+      hash === '0xhash1' ? { ok: false, error: 'delegation 0xhash1 is not disabled on-chain after 60s' } : { ok: true },
+    )
     const result = await delegationLifecycle.run(ctx)
-    expect(result.pass).toBe(true)
-    expect(result.detail).toMatch(/replaced grant is unread/)
+    expect(result.pass).toBe(false)
+    expect(result.detail).toMatch(/replaced grant revoke reported, but the chain does not show it/)
   })
 })
 
@@ -188,6 +204,22 @@ describe('the revoke discriminators', () => {
     const result = await delegationLifecycle.run(ctx)
     expect(result.pass).toBe(false)
     expect(result.detail).toMatch(/offered to the chain/)
+  })
+})
+
+describe('the slot rule (#3933)', () => {
+  it('FAILS when a plain replacement grant into the occupied slot is accepted', async () => {
+    installFakeApi({ postRevokeAuthorize: OK_403, slotRuleMissing: true })
+    const result = await delegationLifecycle.run(ctx)
+    expect(result.pass).toBe(false)
+    expect(result.detail).toMatch(/plain replacement grant into the occupied slot was ACCEPTED/)
+  })
+
+  it('FAILS when the plain grant is refused for another reason', async () => {
+    installFakeApi({ postRevokeAuthorize: OK_403, plainRefusalCode: 'SOMETHING_ELSE' })
+    const result = await delegationLifecycle.run(ctx)
+    expect(result.pass).toBe(false)
+    expect(result.detail).toMatch(/refused for the wrong reason/)
   })
 })
 

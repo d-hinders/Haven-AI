@@ -3507,6 +3507,16 @@ of them on the delegation rail as a version-skew report, not a credential
 problem — and note the last is also what a *legacy-rail* intent looks like if
 a caller passes `typed_data` that the context never committed to.
 
+> **Re-verified (#3933, 2026-10-14, `haven budget grant` into an occupied
+> slot):** this doc is coupled through `packages/cli/src/**`. The change: when
+> the agent already has a live budget for the (token, recipient), the build is
+> refused and `haven budget grant` exits `4` (refused) with a hint to edit
+> that budget on the agent's page; under `--json` the error carries
+> `error_code: "BUDGET_SLOT_OCCUPIED"` and `existing_delegation_hash`. No
+> command, flag or other exit code moves, and no runtime, tool or connector
+> behaviour this document describes changes. The rest of this document was
+> not re-read for it.
+
 ### Hosted tool lists — the contract fingerprint and the reconnect rule (#3816)
 
 The hosted transport is stateless, so a deploy cannot tell connected clients

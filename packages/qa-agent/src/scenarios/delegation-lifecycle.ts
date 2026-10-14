@@ -27,7 +27,7 @@ import {
   type ThrowawayIdentity,
   type TypedData,
 } from '../lib/throwaway-identity.js'
-import { proveUsdcTransfer, readDisabled, waitForDisabled } from '../lib/chain.js'
+import { proveUsdcTransfer, waitForDisabled } from '../lib/chain.js'
 
 const CHAIN_ID = 84532
 
@@ -43,8 +43,10 @@ export const TIMING = { receiptWaitMs: 60_000, pollIntervalMs: 3_000 }
 export const delegationLifecycle: Scenario = {
   name: 'delegation-lifecycle',
   invariant:
-    'A budget grant can be activated, replaced (exactly one active row), and revoked — ' +
-    'after revoke the same payment shape is refused with 403, never offered to the chain.',
+    'A budget grant can be activated, replaced only through the edit flow (a plain grant into ' +
+    'the occupied slot is refused, #3933; the edit leaves exactly one active row and the old ' +
+    'grant is stopped on-chain), and revoked — after revoke the same payment shape is refused ' +
+    'with 403, never offered to the chain.',
   async run(ctx: ScenarioContext) {
     const { delegationAgentApiKey, delegationDelegateKey } = ctx.cfg
     if (!delegationAgentApiKey || !delegationDelegateKey) {
@@ -121,9 +123,52 @@ async function lifecycle(
   )
   if (!paid.ok) return fail(`post-activate payment is not on-chain: ${paid.error}`)
 
-  // ── 2. replace: same slot → EXACTLY ONE active row (#1053 finding 4) ─────
-  const grant2 = await grantAndActivate()
-  if ('error' in grant2) return fail(`replacement grant failed: ${grant2.error}`)
+  /**
+   * Owner-signed Stop of one grant, then the DelegationManager's own flag read
+   * on the observer (#3344: `revoked: true` is the backend's word; polled,
+   * because the observer can lag the node the backend wrote to).
+   */
+  async function stopOnChain(hash: string, label: string): Promise<string | null> {
+    const prep = await userCall<{
+      signature_scheme?: string
+      signing_payload?: TypedData
+      user_operation?: unknown
+      error?: string
+    }>('POST', `/agents/${agentId}/delegations/${hash}/revoke`, token, {
+      signature_scheme: 'eip712_userop',
+    })
+    if (prep.json.signature_scheme !== 'eip712_userop' || !prep.json.signing_payload) {
+      return `${label} revoke prepare failed (${prep.status}): ${prep.json.error ?? ''}`
+    }
+    const revokeSig = await signTyped(owner, prep.json.signing_payload)
+    const submit = await userCall<{ revoked?: boolean; error?: string }>(
+      'POST', `/agents/${agentId}/delegations/${hash}/revoke/submit`, token,
+      { signature: revokeSig, user_operation: prep.json.user_operation },
+    )
+    if (!submit.json.revoked) return `${label} revoke submit failed (${submit.status}): ${submit.json.error ?? ''}`
+    const disabled = await waitForDisabled(hash, { timeoutMs: TIMING.receiptWaitMs, intervalMs: TIMING.pollIntervalMs })
+    if (!disabled.ok) return `${label} revoke reported, but the chain does not show it: ${disabled.error}`
+    return null
+  }
+
+  // ── 2a. a PLAIN grant into the occupied slot is refused (#3933) ──────────
+  // Activation used to sweep grant 1 to `replaced` in SQL only, leaving it
+  // enabled on-chain with nothing asking the owner to stop it.
+  const plain = await grantAndActivate()
+  if (!('error' in plain)) {
+    return fail(
+      'a plain replacement grant into the occupied slot was ACCEPTED — the #3933 slot rule is ' +
+        'missing, and the old grant would be left enabled on-chain unseen',
+    )
+  }
+  if (plain.errorCode !== 'BUDGET_SLOT_OCCUPIED') {
+    return fail(`the plain replacement grant was refused for the wrong reason: ${plain.error}`)
+  }
+
+  // ── 2b. the EDIT flow: grant naming grant 1 → exactly one active row ─────
+  // (#1053 finding 4: the activation and the slot sweep are one transaction.)
+  const grant2 = await grantAndActivate({ replaces: identity.grantHash })
+  if ('error' in grant2) return fail(`edit-flow replacement grant failed: ${grant2.error}`)
   const list = await userCall<{ delegations?: Array<{ status: string; delegation_hash: string }> }>(
     'GET', `/agents/${agentId}/delegations`, token,
   )
@@ -137,36 +182,14 @@ async function lifecycle(
   if (active[0].delegation_hash !== grant2.hash) {
     return fail('the surviving active grant is not the replacement')
   }
+  // The edit flow's second half: the replaced grant is STOPPED on-chain, not
+  // left enabled (what #3933 is about).
+  const stop1 = await stopOnChain(identity.grantHash, 'replaced grant')
+  if (stop1) return fail(stop1)
 
-  // ── 3. revoke (owner signs the treasury op) ──────────────────────────────
-  const prep = await userCall<{
-    signature_scheme?: string
-    signing_payload?: TypedData
-    user_operation?: unknown
-    error?: string
-  }>('POST', `/agents/${agentId}/delegations/${grant2.hash}/revoke`, token, {
-    signature_scheme: 'eip712_userop',
-  })
-  if (prep.json.signature_scheme !== 'eip712_userop' || !prep.json.signing_payload) {
-    return fail(`revoke prepare failed (${prep.status}): ${prep.json.error ?? ''}`)
-  }
-  const revokeSig = await signTyped(owner, prep.json.signing_payload)
-  const submit = await userCall<{ revoked?: boolean; error?: string }>(
-    'POST', `/agents/${agentId}/delegations/${grant2.hash}/revoke/submit`, token,
-    { signature: revokeSig, user_operation: prep.json.user_operation },
-  )
-  if (!submit.json.revoked) return fail(`revoke submit failed (${submit.status}): ${submit.json.error ?? ''}`)
-  // #3344: `revoked: true` is the backend's word. The DelegationManager's own
-  // flag, read on the observer (polled: it can lag the node the backend wrote to).
-  const disabled = await waitForDisabled(grant2.hash, { timeoutMs: TIMING.receiptWaitMs, intervalMs: TIMING.pollIntervalMs })
-  if (!disabled.ok) return fail(`revoke reported, but the chain does not show it: ${disabled.error}`)
-  // The REPLACED grant is only marked replaced in the DB: "the on-chain kill of
-  // the old one is the revoke flow" (backend routes/agent-delegations.ts). Read
-  // and REPORT its on-chain state rather than claim it was taken away.
-  const grant1State = await readDisabled(identity.grantHash).then(
-    (d) => (d ? 'disabled' : 'still enabled'),
-    () => 'unread (observer read failed)',
-  )
+  // ── 3. revoke the replacement (owner signs the treasury op) ─────────────
+  const stop2 = await stopOnChain(grant2.hash, 'replacement')
+  if (stop2) return fail(stop2)
 
   // ── 4. the SAME payment shape is now REFUSED — 403, never 502 ────────────
   const pay2 = await payAs(agentKey, delegate.privateKey, standingTreasury, PAY_HUMAN)
@@ -185,9 +208,10 @@ async function lifecycle(
 
   return pass(
     `lifecycle proven on a throwaway identity: grant activated (deploy + pay ${PAY_HUMAN} USDC — the ` +
-      `USDC Transfer is on the observer node, tx ${pay1.tx}), replacement left exactly 1 active row, ` +
-      `revoke disabled the replacement on-chain (DelegationManager.disabledDelegations = true) and flipped ` +
-      `the same payment shape to 403 "no active budget delegation" — never a chain-side rejection. ` +
-      `The replaced grant is ${grant1State} on-chain (replacement is DB-only; its on-chain kill is the revoke flow).`,
+      `USDC Transfer is on the observer node, tx ${pay1.tx}); a plain replacement grant into the occupied ` +
+      `slot was refused BUDGET_SLOT_OCCUPIED (#3933); the edit-flow replacement left exactly 1 active row ` +
+      `and the replaced grant was stopped on-chain; revoke disabled the replacement on-chain ` +
+      `(DelegationManager.disabledDelegations = true for both) and flipped the same payment shape to 403 ` +
+      `"no active budget delegation" — never a chain-side rejection.`,
   )
 }

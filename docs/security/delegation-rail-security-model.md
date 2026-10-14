@@ -1499,6 +1499,24 @@ hard backstop.
 
 The rail settles x402 two ways, selected per payment (`routes/x402.ts`):
 
+- **A plain grant cannot replace a live one (#3933).** The sweep above marks
+  the slot's previous grant `replaced` in the database only; that delegation
+  stays enabled on-chain until the owner's Stop lands — redeemable outside
+  Haven by the agent's delegate key, or by a sub-budget grantee whose chain
+  ends in it. Only the edit flow (grant, then Stop) ever submitted that Stop.
+  So since #3933 `build` and `activate` refuse a grant into a (token,
+  recipient) slot that holds a live budget — `active` and unexpired,
+  `spendableDelegationSql` without its started-window clause — with 409
+  `BUDGET_SLOT_OCCUPIED` and the budget to edit, unless the request names that
+  budget as `replaces`. Activate decides under the agent lock, so a client
+  cannot get a silent replace by omitting the field or racing a second
+  activation. The invariant (owner-confirmed, 2026-10-14): once an owner flow
+  that replaces a budget completes, at most one unexpired budget delegation
+  per slot is enabled on-chain, and a Stop that did not land is shown with a
+  way to finish. It is per slot: it does not bound open-plus-pinned or
+  shared-payTo authority. Grants left enabled by replaces before #3933 stay
+  enabled until the owner stops them; the agent page flags any `replaced`,
+  unexpired row with that finish action.
 - **erc7710 direct settlement (default & destination, #830):** the settlement
   redeems the budget delegation itself — enforcers run at every payment,
   against every merchant; no funding leg, no hot balance, no sweep.

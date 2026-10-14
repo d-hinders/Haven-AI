@@ -1,6 +1,6 @@
 ---
 name: haven-reset
-description: Safely reset a local Haven MCP and credential setup, verify a clean slate, guide reconnection, and optionally perform an explicitly authorized payment smoke check. Use when a user asks to reset, remove, clean, reconnect, or retest Haven in a supported agent client.
+description: Safely reset a local Haven MCP and credential setup, verify a clean slate, guide reconnection, and optionally perform an explicitly authorized payment smoke check. Use when a user asks to reset, remove, clean, or retest Haven, or reconnect it after a reset, in a supported agent client.
 ---
 
 # Haven Reset

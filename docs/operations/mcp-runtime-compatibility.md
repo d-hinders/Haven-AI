@@ -80,7 +80,7 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-10-10"
+last-verified: "2026-10-14"
 ---
 
 
@@ -114,6 +114,17 @@ last-verified: "2026-10-10"
 > `snapshot:regen`; the one changed line is that description, already served
 > since #3855. Description-only, so the stale-client check stays silent by the
 > rule above; nothing else in this document moves.
+
+> **Re-verification (#3940, 2026-10-14, the job-summary how-to line):**
+> `scripts/ci/check-stale-client-compat.mjs`'s reconnect-required summary
+> line now points connected agents at this document's reconnect rule —
+> restart or reconnect the session; a reconnect keeps credentials, agent id
+> and budget, and a prepared or funded payment resumes on its `payment_id`
+> — via the absolute GitHub URL a job summary needs, instead of naming the
+> destructive `haven-reset` skill as the how-to. The sentence is exported
+> (`RECONNECT_HOWTO`) and pinned by its test. The measuring instrument's
+> logic — corpus and snapshot validation, the silence rules above — is
+> unchanged, so no skew rule in this document moves.
 
 > **Re-verification (#3839 follow-up via #3864, 2026-10-10, hosted
 > `haven_discover_tools` description golden regen):** #3839 (22f49edd)

@@ -586,39 +586,14 @@ export async function activatePendingDelegation(
 }
 
 /**
- * Retire every OTHER active grant in the (agent, token, recipient) slot the
- * new grant is about to occupy (#2411). The on-chain kill of the old grant is
- * the revoke flow; this only stops Haven selecting it for payments.
- *
- * `AND id <> $4` is the load-bearing clause. #2331 reordered the activation
- * transaction so this sweep ran AFTER `activatePendingDelegation`, and the
- * sweep — then inlined in the route without an exclusion — flipped the row it
- * had just activated: every activation committed with ZERO active rows in
- * the slot and the first payment 403ed (qa-failure #2411, reproduced on real
- * Postgres). Excluding the row being activated by id makes the sweep correct
- * in EITHER order, so a future reorder cannot reintroduce the defect; the
- * order is restored as well, in `activatePendingDelegationInSlot`, because
- * both halves are cheap and the real-DB test proves each one separately.
- *
- * `recipient_address IS NOT DISTINCT FROM $3`: an open grant (NULL recipient)
- * and a recipient-pinned grant are different slots — a pinned grant never
- * retires the open one and vice versa (#829's selection order relies on both
- * coexisting). Returns the retired ids so a caller can report honestly.
- *
- * The executor defaults to the pool per this directory's convention, but a
- * sweep is only ever meaningful paired with an activation — call it through
- * `activatePendingDelegationInSlot` on the caller's transaction client, not
- * directly, or a failure after it leaves the slot with no active grant (the
- * #1053 finding 4 outage) with nothing to roll back (haven-reviewer, #2411).
- */
-/**
  * #3933: the grants that OCCUPY a (token, recipient) slot — `active` and not
  * yet expired (`spendableDelegationSql` without the started-window clause, so
  * a re-key's dormant steady row counts). A plain grant into such a slot would
  * be swept to `replaced` by the activation below in SQL only, leaving the old
  * delegation enabled on-chain with nothing asking the owner to stop it; the
- * build and activate routes refuse that unless the request names one of
- * these hashes as the budget it `replaces` (the edit flow, which Stops it).
+ * build and activate routes refuse that unless the request's `replaces`
+ * names exactly these hashes — a re-key's carry/steady pair is swept as a
+ * whole, so the edit flow must name, and then Stop, both.
  * `$4` excludes the delegation being activated (NULL at build time).
  */
 export const SELECT_OCCUPYING_DELEGATIONS_IN_SLOT_SQL = `SELECT delegation_hash
@@ -646,6 +621,32 @@ export async function findOccupyingDelegationsInSlot(
   return result.rows.map((row) => row.delegation_hash)
 }
 
+/**
+ * Retire every OTHER active grant in the (agent, token, recipient) slot the
+ * new grant is about to occupy (#2411). The on-chain kill of the old grant is
+ * the revoke flow; this only stops Haven selecting it for payments.
+ *
+ * `AND id <> $4` is the load-bearing clause. #2331 reordered the activation
+ * transaction so this sweep ran AFTER `activatePendingDelegation`, and the
+ * sweep — then inlined in the route without an exclusion — flipped the row it
+ * had just activated: every activation committed with ZERO active rows in
+ * the slot and the first payment 403ed (qa-failure #2411, reproduced on real
+ * Postgres). Excluding the row being activated by id makes the sweep correct
+ * in EITHER order, so a future reorder cannot reintroduce the defect; the
+ * order is restored as well, in `activatePendingDelegationInSlot`, because
+ * both halves are cheap and the real-DB test proves each one separately.
+ *
+ * `recipient_address IS NOT DISTINCT FROM $3`: an open grant (NULL recipient)
+ * and a recipient-pinned grant are different slots — a pinned grant never
+ * retires the open one and vice versa (#829's selection order relies on both
+ * coexisting). Returns the retired ids so a caller can report honestly.
+ *
+ * The executor defaults to the pool per this directory's convention, but a
+ * sweep is only ever meaningful paired with an activation — call it through
+ * `activatePendingDelegationInSlot` on the caller's transaction client, not
+ * directly, or a failure after it leaves the slot with no active grant (the
+ * #1053 finding 4 outage) with nothing to roll back (haven-reviewer, #2411).
+ */
 export const REPLACE_OTHER_ACTIVE_DELEGATIONS_IN_SLOT_SQL = `UPDATE agent_delegations
        SET status = 'replaced', updated_at = NOW()
        WHERE agent_id = $1

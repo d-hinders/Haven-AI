@@ -1001,8 +1001,8 @@ describe('DelegationBudgetCard — occupied slot and replaced-but-enabled budget
     render(<DelegationBudgetCard {...PROPS} />)
     await openFormAndType('10', PINNED)
     // The hint says what happens on-chain before anything is signed.
-    expect(screen.getByText(/so you edit it\. The old budget can still be spent outside Haven until you stop it/)).toBeTruthy()
-    expect(screen.getByText(/stopping it ends any open task budget or sub-budget taken from it/)).toBeTruthy()
+    expect(screen.getByText(/so you edit it: you sign the new budget, then sign again to stop the old one\./)).toBeTruthy()
+    expect(screen.getByText(/Stopping it ends any open task budget or sub-budget taken from it/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Edit existing budget' }))
     const dialog = await screen.findByRole('dialog', { name: 'Edit budget' })
     expect(mockGrant).not.toHaveBeenCalled()

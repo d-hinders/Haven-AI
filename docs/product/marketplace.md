@@ -199,13 +199,16 @@ for the modal's own shape.
   activate refuse it (409 `BUDGET_SLOT_OCCUPIED`), because the activation's
   database sweep alone would leave the old delegation enabled on-chain. The
   only way to replace it is the edit flow, which grants the new budget
-  naming the old one as `replaces` and then stops the old one on-chain (open
-  task and sub-budgets carved from it end with it). So funding a merchant
+  naming every live row of the old one as `replaces` (a re-keyed agent's
+  budget is two rows) and then stops each on-chain (open task and
+  sub-budgets carved from it end with it). So funding a merchant
   whose payTo already holds a live budget — plain, locked to this merchant,
   or locked to another merchant — opens that budget's edit instead of a new
   grant, and the review step names which kind of budget it is and that the
-  old one is stopped. Replacing a merchant's budget with a plain pinned one
-  drops its merchant label. A budget for THIS merchant in a *different*
+  old one is stopped. The edit opened from Fund labels the new budget for
+  THIS merchant; the agent page's Edit keeps the row's own label. Only a
+  direct API caller can still replace a merchant's budget with a plain
+  pinned one, which drops its merchant label. A budget for THIS merchant in a *different*
   token, or one still pinned to a payTo the merchant has since rotated away
   from (`stale`, below), is a *different* slot and survives with no warning.
 - **Editing one in place (#3166's REPLACE composition) — only a `current`

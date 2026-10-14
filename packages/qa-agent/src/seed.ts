@@ -328,11 +328,13 @@ async function ensureBudget(
     return
   }
   // #3933: a live budget in the same (USDC, open) slot with a different
-  // amount is REPLACED through the edit composition — the new grant names it
-  // as `replaces`, then the old one is stopped on-chain. A plain grant into
-  // an occupied slot is refused by build and activate.
+  // amount is REPLACED through the edit composition — the new grant names
+  // EVERY live row of the slot as `replaces` (a re-keyed agent's budget is a
+  // carry/steady pair), then each is stopped on-chain. A plain grant into an
+  // occupied slot, or one naming only part of it, is refused by build and
+  // activate.
   const nowSec = Math.floor(Date.now() / 1000)
-  const occupying = delegations.find(
+  const occupying = delegations.filter(
     (d) =>
       d.status === 'active' &&
       d.chain_id === CHAIN_ID &&
@@ -341,7 +343,7 @@ async function ensureBudget(
       Number(d.expires_at ?? 0) > nowSec &&
       typeof d.delegation_hash === 'string',
   )
-  const replaces = occupying?.delegation_hash
+  const replaces = occupying.length > 0 ? occupying.map((d) => d.delegation_hash as string) : undefined
 
   const built = await api<{
     delegation_hash?: string
@@ -381,7 +383,7 @@ async function ensureBudget(
   console.log(
     `  ✓ budget granted: ${cfg.budgetUsdc} USDC per ${cfg.periodMin} min (delegation ${built.delegation_hash})`,
   )
-  if (replaces) await stopReplacedBudget(cfg, token, agentId, owner, replaces)
+  for (const hash of replaces ?? []) await stopReplacedBudget(cfg, token, agentId, owner, hash)
 }
 
 /**

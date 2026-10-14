@@ -73,10 +73,16 @@
  * every row without one keeps an empty, `aria-hidden` 32px slot in its
  * place, so the actions end on one right edge instead of the non-dismissible
  * rows' controls sliding 40px right of the rest. A list with no dismissible
- * row reserves nothing. The action also gets a shared minimum width
+ * row reserves nothing, and neither does a row with nothing visible to align
+ * (no badge, no action) — below `sm` its slot would be an empty 32px line
+ * under the body. The decision reads the items as given, so dismissing the
+ * last dismissible row (or "Show N more" revealing the first) shifts the
+ * column 40px — accepted: the list is consistent with itself at every render. The action also gets a shared minimum width
  * (`ACTION_MIN`, 112px — room for "Finish setup" and "View activity"), so
- * "Add funds" and "Review" match them and the badges end on one edge too; a
- * longer label ("View transactions") simply grows past it.
+ * "Add funds" and "Review" match them and the badges end on one edge too. A
+ * longer label ("View transactions") grows past it: its action still ends on
+ * the shared edge, but its badge sits further left. Raising the minimum to
+ * fit it would bloat every short action, so that one case is accepted.
  *
  * ── Full-bleed (#3902) ────────────────────────────────────────────────────
  *
@@ -250,7 +256,7 @@ export function AttentionList({
                   >
                     <Icon icon={X} className="h-4 w-4" />
                   </button>
-                ) : reserveDismissSlot ? (
+                ) : reserveDismissSlot && (item.badge !== undefined || item.action) ? (
                   <span
                     aria-hidden="true"
                     data-attention-dismiss-slot

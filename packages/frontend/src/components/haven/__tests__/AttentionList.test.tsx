@@ -215,4 +215,20 @@ describe('AttentionList (#3805)', () => {
     const wrapper = screen.getByRole('button', { name: 'Review' }).parentElement
     expect(wrapper?.className).toContain('min-w-[7rem]')
   })
+
+  // A row with nothing visible on the right (no badge, no action) has
+  // nothing to align — and below sm its slot would wrap into an empty 32px
+  // line under the body — so it reserves nothing even in a mixed list.
+  it('reserves no slot on a row with no badge and no action', () => {
+    const { container } = render(
+      <AttentionList
+        items={[
+          { ...ITEMS[0], id: 'bare', badge: undefined, action: undefined, dismissible: false },
+          { ...ITEMS[1] },
+        ]}
+        onDismiss={() => {}}
+      />,
+    )
+    expect(container.querySelector('[data-attention-dismiss-slot]')).toBeNull()
+  })
 })

@@ -762,11 +762,12 @@ The leading icon, and from `sm` up the trailing badge, action and dismiss,
 centre on the title's first line rather than on the whole body, so a
 four-line item still reads as one line with detail beneath (#3880).
 The trailing controls form **one column**: once any row in the list offers
-the dismiss, a row without one keeps an empty, `aria-hidden` slot in its
-place, and every action shares a minimum width (room for "Finish setup" and
-"View activity"), so
-mixed rows end their badges and actions on the same edges instead of
-staggering by the dismiss's width.
+the dismiss, a row with a badge or action but no dismiss keeps an empty,
+`aria-hidden` slot in its place, so every row's actions end on the same edge
+instead of staggering by the dismiss's width. Actions also share a 7rem
+minimum width (room for "Finish setup" and "View activity"), so badges beside
+actions up to that width end on one edge too; a wider label ("View
+transactions") grows past it and its badge sits further left.
 Below `sm` the trailing slot also wraps under the body. `fullBleed` is for
 a list that **is** the card's body, as on the dashboard (#3902): rows run
 edge to edge with hairline dividers and take the card's 20px side inset

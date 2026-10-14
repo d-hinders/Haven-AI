@@ -745,8 +745,8 @@ export default function EditBudgetModal({
                       This budget has changed
                     </p>
                     <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                      It was replaced after you opened this, so nothing was signed. Close this and
-                      edit the current budget.
+                      This agent&apos;s budgets changed after you opened this, so nothing was
+                      signed. Close this and edit the current budget.
                     </p>
                   </>
                 ) : outcome.reason === 'target_slot_occupied' ? (

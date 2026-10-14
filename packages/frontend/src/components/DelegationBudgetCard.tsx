@@ -601,7 +601,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
               budgetsError
                 ? 'Reload the current budgets before setting one — a budget for a token and recipient that already has one is edited, not added.'
                 : formSlotMatch
-                  ? 'This agent already has a budget for this token and recipient, so you edit it: you sign the new budget, then sign again to stop the old one. Stopping it ends any open task budget or sub-budget taken from it.'
+                  ? 'This agent already has a budget for this token and recipient, so you edit it: you sign the new budget, then sign to stop the old one. The review step shows how many signatures that takes. Stopping it ends any open task budget or sub-budget taken from it.'
                   : 'One signature. Refills every period automatically.'
             }
             onSlotOccupied={handleSlotOccupied}

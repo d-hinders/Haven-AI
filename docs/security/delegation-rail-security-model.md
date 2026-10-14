@@ -825,6 +825,21 @@ chain.
 > surface on the dashboard). Scope of this note: those statements and their
 > WHERE/JOIN shapes. Nothing else in this document was re-verified.
 
+> **Re-verified #3921 (2026-10-14 — the budget-liveness predicates, epic
+> #3919 slice B):** this diff touched one file in this document's coverage
+> list, `infra/repositories/dashboard.ts`, and one read in it:
+> `RECEIVED_SUB_BUDGETS_FOR_AGENTS_SQL` now answers its `open` column
+> through the shared `openSubBudgetSql` predicate (defined in
+> `infra/repositories/sub-budgets.ts`) instead of `status = 'open'` alone —
+> an EXPIRED `open` grant now reports `open = false`, the same verdict the
+> payment path (`sub-budget-service.ts`) and the agent's own open list
+> already reached — and the read gained a defaulted `nowSec` parameter for
+> that predicate's app clock. A narrowing: nothing that was refused becomes
+> allowed, the returned row set is unchanged (pending/closing/closed grants
+> still report `open = false` rather than being dropped), and no write,
+> signing path or permission changes. Scope of this note: that one statement
+> and its signature. Nothing else in this document was re-verified.
+
 The unlink guard also refuses while an agent re-key is in flight, so the Safe
 binding cannot disappear between re-key stages. This is a database
 serialization guard only: it grants nothing, signs nothing, and touches no

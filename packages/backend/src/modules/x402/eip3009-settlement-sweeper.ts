@@ -45,9 +45,10 @@
  *   direction and costs a topics-indexed filter, not a Transfer walk.
  * - **Hand what it finds to the existing verifier.** The recorded write is
  *   `observeEip3009MerchantSettlement` — the same seam the agent-reported
- *   path (`modules/mpp/evidence.ts`) uses, with its replay guard, its
- *   compare-and-set (`merchant_settlement_tx_hash IS NULL`) and its
- *   `settlementHashTakenSql` refusal.
+ *   path (`modules/mpp/evidence.ts`) uses, with its replay guard, its two
+ *   advisory locks (the hash, then the payment, #3927), its compare-and-set
+ *   (`merchant_settlement_tx_hash IS NULL`) and its `settlementHashTakenSql`
+ *   refusal.
  *
  * ## Recording order — the reported path's order, verbatim
  *
@@ -56,8 +57,8 @@
  * (`feedSettledPaymentBestEffort`). The feed must never fire before the
  * hash write, or it books the funding hash exactly as today's bug does
  * (#3767's B1 rule, which the reported path already obeys). A hash already
- * pinned is left alone — the candidate query excludes it and the writer's
- * CAS would refuse it anyway.
+ * pinned is left alone — the candidate query excludes it, and the writer
+ * answers `conflict` under its intent lock (#3927; its CAS is the backstop).
  *
  * ## The agent-reported-vs-chain-detected precedence (owner question 2)
  *

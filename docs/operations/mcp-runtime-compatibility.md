@@ -125,9 +125,10 @@ last-verified: "2026-10-10"
 >
 > So every client/backend skew pair keeps working. No tool, description,
 > input schema or signer surface changes, so the contract fingerprint does
-> not move. One output gains a field: `haven_get_task_budget`'s
-> `task_budget` (hosted and local) carries an additive `isLive`, absent
-> against an older backend. Nothing else in this document moves.
+> not move. One output field is added: every `task_budget` result
+> (`haven_open_task_budget`, `haven_close_task_budget`, `haven_submit` for a
+> task budget, and `haven_get_task_budget`; hosted and local) carries an
+> additive `isLive`, absent against an older backend. Nothing else in this document moves.
 
 > **Re-verification (#3839 follow-up via #3864, 2026-10-10, hosted
 > `haven_discover_tools` description golden regen):** #3839 (22f49edd)

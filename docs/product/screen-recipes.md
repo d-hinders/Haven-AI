@@ -652,9 +652,9 @@ with their money in a chosen window ([#2947](https://github.com/d-hinders/Haven-
 epic [#2944](https://github.com/d-hinders/Haven-AI/issues/2944)). The page is
 read-only: it moves no money and changes no authority, so the review-moment
 rule above does not bind it, and it must not acquire controls that suggest it
-does. The sidebar entry sits after *Transactions*; the mobile tab bar stays
-five cells and the entry rides in the *More* sheet with the other secondary
-routes.
+does. The sidebar entry sits after *Dashboard* in the Overview group; the
+mobile tab bar stays five cells and the entry rides in the *More* sheet with
+the other secondary routes.
 
 Structure:
 1. PageHeader with title *Analytics* and the subtitle "What your agents did

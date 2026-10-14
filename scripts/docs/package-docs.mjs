@@ -349,7 +349,13 @@ export const GOVERNED_PACKAGE_DOCS = [
     // need all four. That is the shape #2590/#2591 exist to prevent, and it is
     // recorded here rather than claimed solved. Prior: '2026-09-06' — see the
     // #2590 note above.
-    'last-verified': '2026-09-06',
+    //
+    // 2026-10-10 pass (#3645): the WHOLE README was re-measured at dev
+    // `22f49edd`, the exit-code table included, so the "NOT re-verified" list
+    // above no longer applies. Follow-up in the same PR: exit-code row 4's
+    // lead was false for a device login the human denied (exit 4, no session
+    // yet), and its list of CLI-side refusals read as complete; both fixed.
+    'last-verified': '2026-10-10',
   },
   {
     doc: 'packages/mcp-server/README.md',

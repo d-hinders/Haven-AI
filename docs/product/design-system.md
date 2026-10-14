@@ -350,8 +350,8 @@ scroll-continuation cue.
 Dark UIs elevate by **surface**, not by shadow: each step sits lighter than the
 one below it (`--v2-bg` < `--v2-surface` < `--v2-surface-2`), and a light
 theme's grey shadow on `#12151c` reads as a smear rather than as height. So the
-five tiers above are **redeclared** in both dark blocks of `globals.css`, and a
-call site never needs to know which theme it is in — write `shadow-card`, never
+five tiers above are **redeclared** in both dark blocks of
+`packages/ui/src/tokens.css`, and a call site never needs to know which theme it is in — write `shadow-card`, never
 a theme-conditional shadow.
 
 The dark form of every tier leads with a translucent **white hairline**

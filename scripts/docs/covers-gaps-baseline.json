@@ -1,8 +1,4 @@
 {
-  "AGENTS.md": [
-    "packages/frontend/src/app/globals.css",
-    "packages/frontend/tailwind.config.js"
-  ],
   "CLAUDE.md": [
     "scripts/docs/package-docs.mjs"
   ],
@@ -109,7 +105,6 @@
     "packages/frontend/src/components/agent-panel/ReplaceSigningKeyModal.tsx",
     "packages/frontend/src/components/connect-agent/CopyBlock.tsx",
     "packages/frontend/src/components/sidebar/Sidebar.tsx",
-    "packages/frontend/src/components/ui/EmptyState.tsx",
     "packages/frontend/src/components/ui/Modal.tsx",
     "packages/frontend/src/components/ui/SidePanel.tsx",
     "packages/frontend/wire-type-baseline.json",
@@ -139,7 +134,6 @@
   ],
   "docs/operations/agent-discovery-listings.md": [
     "packages/frontend/src/components/AccountSignersCard.tsx",
-    "packages/frontend/src/components/onboarding/RecoveryNudge.tsx",
     "packages/frontend/src/lib/__tests__/discovery-surfaces.test.ts"
   ],
   "docs/operations/agent-qa.md": [
@@ -147,10 +141,7 @@
     "packages/frontend/e2e/fixtures/haven-api.ts",
     "packages/mcp-server/src/server.ts",
     "packages/signer/package.json",
-    "packages/signer/src/server.ts",
-    "scripts/ci/guard-freshness.mjs",
     "scripts/ci/guard-freshness.test.mjs",
-    "scripts/ci/qa-freshness.mjs",
     "scripts/release-bump.mjs"
   ],
   "docs/operations/backend-scaling.md": [
@@ -202,7 +193,6 @@
   ],
   "docs/regulatory/casp-risk-guardrails.md": [
     ".github/money-path-globs.json",
-    "packages/backend/src/middleware/owner-cli.ts",
     "packages/backend/src/routes/__tests__/non-custody-onchain-enforcer.contract.test.ts",
     "packages/backend/src/routes/__tests__/non-custody-onchain-gate.contract.test.ts",
     "scripts/ci/money-path.test.mjs",

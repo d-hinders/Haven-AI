@@ -67,6 +67,23 @@
  * the minimum in place the row's `flex-wrap` drops the trailing below the
  * body instead — the same place it already sits below `sm`.
  *
+ * ── One trailing column ────────────────────────────────────────────────────
+ *
+ * Mixed rows must not stagger. When ANY row in the list offers the dismiss,
+ * every row without one keeps an empty, `aria-hidden` 32px slot in its
+ * place, so the actions end on one right edge instead of the non-dismissible
+ * rows' controls sliding 40px right of the rest. A list with no dismissible
+ * row reserves nothing, and neither does a row with nothing visible to align
+ * (no badge, no action) — below `sm` its slot would be an empty 32px line
+ * under the body. The decision reads the items as given, so dismissing the
+ * last dismissible row (or "Show N more" revealing the first) shifts the
+ * column 40px — accepted: the list is consistent with itself at every render. The action also gets a shared minimum width
+ * (`ACTION_MIN`, 112px — room for "Finish setup" and "View activity"), so
+ * "Add funds" and "Review" match them and the badges end on one edge too. A
+ * longer label ("View transactions") grows past it: its action still ends on
+ * the shared edge, but its badge sits further left. Raising the minimum to
+ * fit it would bloat every short action, so that one case is accepted.
+ *
  * ── Full-bleed (#3902) ────────────────────────────────────────────────────
  *
  * `fullBleed` is for a list that IS the card body: rows run edge to edge
@@ -136,6 +153,14 @@ const TITLE_TOP = 'mt-1.5'
 /** Two lines, then an ellipsis — see the clamp rule above. */
 const CLAMP = 'whitespace-normal line-clamp-2'
 
+/**
+ * The action's shared minimum width — see "One trailing column" above. The
+ * wrapper is a flex box with this minimum and the caller's control grows to
+ * fill it (Button centres its label), so short actions match the widest
+ * common one without the caller sizing anything.
+ */
+const ACTION_MIN = 'flex min-w-[7rem] [&>*]:grow'
+
 /** Full-bleed rows take the card's 20px side inset instead of `Row`'s 16px. */
 const FULL_BLEED_ROW = 'px-5'
 
@@ -184,6 +209,10 @@ export function AttentionList({
 
   if (items.length === 0) return null
 
+  // One trailing column: reserve the dismiss slot on every row once any row
+  // has the control (see the header comment).
+  const reserveDismissSlot = items.some((item) => item.dismissible !== false)
+
   const handleDismiss = (index: number) => {
     pendingFocusIndex.current = index
     onDismiss(items[index].id)
@@ -215,8 +244,8 @@ export function AttentionList({
                 ) : (
                   <span className="sr-only">{TONE_TEXT[item.tone]}</span>
                 )}
-                {item.action}
-                {item.dismissible !== false && (
+                {item.action ? <div className={ACTION_MIN}>{item.action}</div> : null}
+                {item.dismissible !== false ? (
                   <button
                     type="button"
                     data-attention-dismiss
@@ -227,7 +256,13 @@ export function AttentionList({
                   >
                     <Icon icon={X} className="h-4 w-4" />
                   </button>
-                )}
+                ) : reserveDismissSlot && (item.badge !== undefined || item.action) ? (
+                  <span
+                    aria-hidden="true"
+                    data-attention-dismiss-slot
+                    className="h-8 w-8 flex-shrink-0"
+                  />
+                ) : null}
               </div>
             }
           />

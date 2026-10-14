@@ -299,7 +299,11 @@ const DS_SPARKLINE_POINTS: SparklinePoint[] = [
 const DS_SPARKLINE_SUMMARY =
   'Balance over the last 14 days: ends at 1,240 USDC, up 60 USDC across the range, with 2 days without a snapshot.'
 
-/** The AttentionList sample's items — one per tone, one of them without a badge label. */
+/**
+ * The AttentionList sample's items — one per tone, one of them without a badge
+ * label, and one (the failure) without the dismiss, so the reserved slot and
+ * the one trailing column are on show.
+ */
 const DS_ATTENTION_ITEMS: AttentionListItem[] = [
   {
     id: 'budget-reached',
@@ -337,6 +341,14 @@ const DS_ATTENTION_ITEMS: AttentionListItem[] = [
     tone: 'danger',
     badge: 'Failed',
     icon: OctagonAlert,
+    // As on the dashboard: a failure is resolved, not dismissed — so this row
+    // shows the reserved dismiss slot that keeps the trailing column aligned.
+    dismissible: false,
+    action: (
+      <Button size="sm" variant="ghost">
+        View activity
+      </Button>
+    ),
   },
 ]
 
@@ -2856,7 +2868,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="AttentionList"
-        description="The list of things that need your eye (#3805), built from Row, StatusBadge and Icon. The rows are static — the action and the dismiss live in trailing, never on the row itself, so an action is never nested inside another control. The tone always rides text as well as colour (Row's leading icon is aria-hidden): a StatusBadge label, or an sr-only tone word when the item has no badge. Budget reached is neutral — the budget did its job; danger is for real failures only. Dismiss is labelled Dismiss: {title} and calls onDismiss(id); the list holds no dismissal state, and after a dismiss focus moves to the next item, or to the list heading when the list empties. The title and subtitle each line-clamp to two lines at every width; the icon (and, from sm up, the trailing controls) centre on the title's first line; below sm the trailing slot wraps under the body. fullBleed is for a list that is the card's body, as on the dashboard: rows run edge to edge with hairline dividers and the card's 20px side inset, and this sample renders it so the first-line and clamp measurements cover the dashboard's shape. Zero items renders nothing — the caller shows the empty state."
+        description="The list of things that need your eye (#3805), built from Row, StatusBadge and Icon. The rows are static — the action and the dismiss live in trailing, never on the row itself, so an action is never nested inside another control. The tone always rides text as well as colour (Row's leading icon is aria-hidden): a StatusBadge label, or an sr-only tone word when the item has no badge. Budget reached is neutral — the budget did its job; danger is for real failures only. Dismiss is labelled Dismiss: {title} and calls onDismiss(id); the list holds no dismissal state, and after a dismiss focus moves to the next item, or to the list heading when the list empties. The title and subtitle each line-clamp to two lines at every width; the icon (and, from sm up, the trailing controls) centre on the title's first line; the trailing controls form one column — a row with a badge or action but no dismiss keeps an empty slot in its place whenever another row has one, and actions share a 7rem minimum width (a wider label grows past it); below sm the trailing slot wraps under the body. fullBleed is for a list that is the card's body, as on the dashboard: rows run edge to edge with hairline dividers and the card's 20px side inset, and this sample renders it so the first-line and clamp measurements cover the dashboard's shape. Zero items renders nothing — the caller shows the empty state."
       >
         <div data-testid="ds-attention-list">
           <Card hover={false} className="overflow-hidden">

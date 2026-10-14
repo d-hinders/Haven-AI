@@ -171,4 +171,64 @@ describe('AttentionList (#3805)', () => {
       screen.getByRole('button', { name: 'Dismiss: Re-approval needed' }),
     ).toBeTruthy()
   })
+
+  // One trailing column: a mixed list (the dashboard's "Needs setup" with its
+  // X above "Low balance" without one) staggered its actions by the X's
+  // width. The non-dismissible row now keeps an empty, aria-hidden slot in
+  // the X's place — and a list with no dismissible row reserves nothing.
+  it('reserves the dismiss slot on a non-dismissible row when another row has the X', () => {
+    const { container } = render(
+      <AttentionList
+        items={[
+          { ...ITEMS[0], dismissible: false },
+          { ...ITEMS[1] },
+        ]}
+        onDismiss={() => {}}
+      />,
+    )
+    const rows = container.querySelectorAll('li')
+    const slot = rows[0].querySelector('[data-attention-dismiss-slot]')
+    expect(slot).not.toBeNull()
+    expect(slot?.getAttribute('aria-hidden')).toBe('true')
+    // The dismissible row has the real control, not a slot.
+    expect(rows[1].querySelector('[data-attention-dismiss-slot]')).toBeNull()
+    expect(rows[1].querySelector('[data-attention-dismiss]')).not.toBeNull()
+  })
+
+  it('reserves no dismiss slot when no row is dismissible', () => {
+    const { container } = render(
+      <AttentionList
+        items={ITEMS.map((item) => ({ ...item, dismissible: false }))}
+        onDismiss={() => {}}
+      />,
+    )
+    expect(container.querySelector('[data-attention-dismiss-slot]')).toBeNull()
+  })
+
+  it('gives every action the shared minimum width', () => {
+    render(
+      <AttentionList
+        items={[{ ...ITEMS[0], action: <button type="button">Review</button> }]}
+        onDismiss={() => {}}
+      />,
+    )
+    const wrapper = screen.getByRole('button', { name: 'Review' }).parentElement
+    expect(wrapper?.className).toContain('min-w-[7rem]')
+  })
+
+  // A row with nothing visible on the right (no badge, no action) has
+  // nothing to align — and below sm its slot would wrap into an empty 32px
+  // line under the body — so it reserves nothing even in a mixed list.
+  it('reserves no slot on a row with no badge and no action', () => {
+    const { container } = render(
+      <AttentionList
+        items={[
+          { ...ITEMS[0], id: 'bare', badge: undefined, action: undefined, dismissible: false },
+          { ...ITEMS[1] },
+        ]}
+        onDismiss={() => {}}
+      />,
+    )
+    expect(container.querySelector('[data-attention-dismiss-slot]')).toBeNull()
+  })
 })

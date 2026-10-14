@@ -1429,7 +1429,8 @@ none worsened materially.
   file:line evidence and that run's one still-undecided candidate (its C1)
   are recoverable only outside the repository. One docs PR.
 - C3 — block-1 survivor: removing the `merchant_settlement_tx_hash IS NULL`
-  compare-and-set left 76 / 76 green across the five suites that reach it. Diagnosis: *not load-bearing at the
+  compare-and-set left 76 / 76 green across five suites, only two of which
+  (43 tests) reach the writer (corrected in the new-task spec review). Diagnosis: *not load-bearing at the
   tested condition* — the writer pre-reads under an advisory lock keyed by
   the hash, so only a two-different-hashes-one-payment race reaches the
   clause, and the one concurrency test drives the opposite race. One PR (a

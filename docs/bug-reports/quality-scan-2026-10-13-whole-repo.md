@@ -265,10 +265,14 @@ can start now; 5 lands last.
 - **Observed by execution.** Removing
   `AND target.machine_metadata->>'merchant_settlement_tx_hash' IS NULL` from
   `RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL`
-  (`x402-authorizations.ts:493`) left every suite that reaches it green:
-  **56 / 56** across the sweeper, evidence and repository suites, and
-  **20 / 20** across the two outcome-handler suites the independent review
-  added (76 / 76 in all). Diagnosis: *not load-bearing at
+  (`x402-authorizations.ts:493`) left every suite run green: **76 / 76**
+  across five suites (the EIP-3009 sweeper, the settlement-evidence suite,
+  the x402-authorizations repository suite, delivery-reference and the
+  agent-reported-outcome suite) — of which only the first two (**43 tests**)
+  reach the writer; the repository suite never names it, and the two outcome
+  suites seed `tx_hash` equal to the reported hash, so `isFundedEip3009Payment`
+  is false and the seam is never entered. *Corrected in the new-task spec
+  review:* first written as "the five suites that reach it". Diagnosis: *not load-bearing at
   the tested condition*. The writer pre-reads the recorded hash inside a
   transaction that holds an advisory lock keyed by the **hash**
   (`x402-authorizations.ts:529-536`), so a same-hash race serialises and the
@@ -368,8 +372,8 @@ can start now; 5 lands last.
   - M3 `attention-dismissals.ts` user scoping on the backup-signer insert
     dropped: **caught**, 1 red of 15 (real DB).
   - M4 `x402-authorizations.ts:493` CAS clause → `AND TRUE`: **survived**,
-    56 / 56 green (76 / 76 with the two suites the review added) — diagnosed
-    in C3.
+    76 / 76 green across five suites, 43 of them in the two that reach the
+    writer — diagnosed in C3.
   - M5 `sdk/account-reads.ts:103` supersession mapping → always null:
     **caught**, 1 red of 58.
   - Every restore byte-identical (`cmp`); 26 census files not mutated (budget

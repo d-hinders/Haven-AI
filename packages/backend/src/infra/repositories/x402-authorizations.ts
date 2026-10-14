@@ -524,11 +524,16 @@ export type Eip3009SettlementRecordOutcome =
 export const EIP3009_SETTLEMENT_HASH_LOCK_SQL = 'SELECT pg_advisory_xact_lock(hashtext($1))'
 
 /**
- * Per payment (#3927). Prefixed so it cannot collide with the bare-hash
- * keyspace the hash locks share. Always taken AFTER the hash lock: every
- * writer locks hash → intent, so two writers cannot wait on each other.
+ * Per payment (#3927). The prefix keeps its inputs disjoint from the bare
+ * hashes the hash locks use; `hashtext` is 32-bit, so two keys can still
+ * collide in the shared advisory space, which is astronomically unlikely and
+ * costs only extra serialization (a crossed double collision would at worst
+ * be a deadlock Postgres aborts, never a hang). The id is lowercased so a
+ * caller's spelling cannot split one payment across two keys. Always taken
+ * AFTER the hash lock: every writer locks hash → intent.
  */
-export const EIP3009_SETTLEMENT_INTENT_LOCK_SQL = "SELECT pg_advisory_xact_lock(hashtext('eip3009-intent:' || $1))"
+export const EIP3009_SETTLEMENT_INTENT_LOCK_SQL =
+  "SELECT pg_advisory_xact_lock(hashtext('eip3009-intent:' || LOWER($1)))"
 
 /**
  * {@link RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL}, serialized per settlement

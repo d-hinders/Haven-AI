@@ -25,6 +25,7 @@ import {
   recordX402Signature,
 } from '../x402-authorizations.js'
 import { expirePendingIntent } from '../payment-intents.js'
+import type { Executor } from '../../transaction.js'
 
 let seq = 0
 
@@ -435,9 +436,13 @@ describeDb('eip3009 merchant-settlement writer: one hash per payment (#3927)', (
     return r.rows[0]?.h ?? null
   }
 
-  /** Resolves once every pid is waiting on a heavyweight lock (row or advisory). */
+  /**
+   * Resolves once every pid is waiting on a heavyweight lock (row or
+   * advisory). The deadline sits under vitest's 5 s test timeout, so a pid
+   * that never blocks fails with this message, not an anonymous timeout.
+   */
   async function waitUntilBlocked(pids: number[]): Promise<void> {
-    const deadline = Date.now() + 10_000
+    const deadline = Date.now() + 4_000
     for (;;) {
       const r = await db.query<{ n: string }>(
         `SELECT COUNT(*)::text AS n FROM pg_stat_activity WHERE pid = ANY($1::int[]) AND wait_event_type = 'Lock'`,
@@ -452,6 +457,22 @@ describeDb('eip3009 merchant-settlement writer: one hash per payment (#3927)', (
   async function pidOf(client: { query: typeof db.query }): Promise<number> {
     const r = await client.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
     return r.rows[0].pid
+  }
+
+  type Checkout = Awaited<ReturnType<typeof db.connect>>
+
+  /**
+   * Hand a client back clean even when the test failed mid-transaction: an
+   * open transaction would keep its row or advisory lock and poison the
+   * next test's `resetDb` (or the next checkout of the same client).
+   */
+  async function releaseClean(client: Checkout): Promise<void> {
+    try {
+      await client.query('ROLLBACK')
+      client.release()
+    } catch {
+      client.release(true)
+    }
   }
 
   it('the compare-and-set alone stops a second hash: the blocked UPDATE writes 0 rows (direct SQL)', async () => {
@@ -475,8 +496,8 @@ describeDb('eip3009 merchant-settlement writer: one hash per payment (#3927)', (
       await b.query('COMMIT')
       expect(await recordedHash(id)).toBe(HASH_A)
     } finally {
-      a.release()
-      b.release()
+      await releaseClean(a)
+      await releaseClean(b)
     }
   })
 
@@ -488,9 +509,12 @@ describeDb('eip3009 merchant-settlement writer: one hash per payment (#3927)', (
     const c = await db.connect()
     const wa = await db.connect()
     const wb = await db.connect()
-    // An executor whose transaction runs on a known backend: `withTransaction`
-    // checks a client out through `connect()`.
-    const on = (client: typeof wa) => ({ query: client.query.bind(client), connect: async () => client }) as never
+    // An executor whose transaction runs on a known backend. Passing the
+    // client itself would make `withTransaction` skip BEGIN (a checked-out
+    // client is treated as an outer transaction), and the xact locks would
+    // then release per statement; through `connect()` it opens and releases
+    // the transaction on this client.
+    const on = (client: Checkout): Executor => ({ query: client.query.bind(client), connect: async () => client }) as unknown as Executor
     try {
       const [pidA, pidB] = [await pidOf(wa), await pidOf(wb)]
       await c.query('BEGIN')
@@ -508,7 +532,9 @@ describeDb('eip3009 merchant-settlement writer: one hash per payment (#3927)', (
       const winner = outcomes[0] === 'recorded' ? HASH_A : HASH_B
       expect(await recordedHash(id)).toBe(winner)
     } finally {
-      c.release()
+      // On a failure before the writers settle, ending C's transaction lets
+      // them finish (and release their clients through `withTransaction`).
+      await releaseClean(c)
     }
   })
 })

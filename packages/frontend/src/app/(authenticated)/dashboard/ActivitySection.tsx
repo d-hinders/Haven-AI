@@ -19,12 +19,21 @@ type ActivityGroup = ApiSchema<'DashboardActivityGroup'>
 /**
  * The dashboard's merchant-first activity list (#3810, epic #3801).
  *
- * Replaces the old 5-row `transactions` preview (still on the wire until the
- * follow-up removes it — the dashboard no longer reads it). The rows are
- * #3824's server-side groups (agent + counterparty + token + user-local day
- * + outcome + activityType, capped at 8 over the last 7 local days), so the
- * list is: day headings, one row per group, "×N" when a group bundles more
- * than one payment.
+ * The rows are #3824's server-side groups (agent + counterparty + token +
+ * user-local day + outcome + activityType, capped at 8 over the last 7 local
+ * days), so the list is: day headings, one row per group, "×N" when a group
+ * bundles more than one payment. The old 5-row `transactions` preview left
+ * the wire in #3858 — nothing has read it since #3810.
+ *
+ * Two empty states (#3944). `activity.length === 0` is ambiguous — an empty
+ * 7-day window is also a feed with no activity at all — so the overview
+ * carries `hasOlderActivity` (any feed transaction outside the window) and
+ * `activityWindowDays` (the backend's window, on the wire because this
+ * component has no window constant and the copy may not hard-code a 7 that
+ * can drift from `ACTIVITY_WINDOW_DAYS`). With the signal absent or false,
+ * today's copy stands unchanged — an older backend renders exactly what it
+ * always has. The window state implies accounts exist (the flag is derived
+ * from account transactions), so its action is always the transactions page.
  *
  * Merchant first means the TITLE is the counterparty — read through
  * `counterpartyLabel`'s no-address mode, so a raw address can never surface
@@ -45,6 +54,8 @@ export function ActivitySection({
   loading,
   unavailable,
   onRetry,
+  hasOlderActivity,
+  activityWindowDays,
 }: {
   activity: ActivityGroup[]
   accountCount: number
@@ -52,7 +63,17 @@ export function ActivitySection({
   loading: boolean
   unavailable: boolean
   onRetry: () => void
+  /** #3944 — present only on a current backend; absent keeps the "No activity yet" copy. */
+  hasOlderActivity?: boolean
+  /** #3944 — the backend's window (`ACTIVITY_WINDOW_DAYS`); the empty-state copy names it. */
+  activityWindowDays?: number
 }) {
+  // The window-naming empty state needs BOTH fields: a `hasOlderActivity`
+  // without its window cannot state the window it means. Both arrive
+  // together from the route, so the pairing is the well-formed signal.
+  const hasWindowOnlyActivity =
+    hasOlderActivity === true && typeof activityWindowDays === 'number'
+  const windowEmptyTitle = `No activity in the last ${activityWindowDays} days`
   return (
     <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card overflow-hidden">
       <Card.Header
@@ -90,6 +111,20 @@ export function ActivitySection({
             title="Activity preview unavailable"
             body="Haven could not refresh recent payments right now."
             action={<Button variant="ghost" size="sm" onClick={onRetry}>Try again</Button>}
+          />
+        </div>
+      ) : activity.length === 0 && hasWindowOnlyActivity ? (
+        <div className="p-6">
+          <EmptyState
+            tone="brand"
+            icon={<EmptyActivityIcon />}
+            title={windowEmptyTitle}
+            body="Payments and deposits from before this window are still on your transactions page."
+            action={
+              <Button href="/transactions" variant="ghost" size="sm">
+                Open transactions
+              </Button>
+            }
           />
         </div>
       ) : activity.length === 0 ? (

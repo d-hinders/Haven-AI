@@ -27,7 +27,13 @@ const { mockQuery, portfolioMocks, transactionMocks } = vi.hoisted(() => ({
     // #3824: the route derives the tz validity check and the grouped rows
     // from this module; the characterization below feeds it directly.
     isValidActivityTimeZone: vi.fn(() => true),
-    buildActivityGroups: vi.fn(async () => []),
+    // #3944: the route reads the feed BUILDER — rows plus the two
+    // empty-state facts — not the bare group list any more.
+    buildActivityFeed: vi.fn(async () => ({
+      groups: [] as never[],
+      hasOlderActivity: false,
+      windowDays: 7,
+    })),
     enrichedTransactionIdentityKey: vi.fn((tx: {
       chainId: number
       safeId: string
@@ -391,10 +397,68 @@ describe('dashboard routes', () => {
     // the two chains' rows arrive as two rows — never collapsed into one.
     expect(body.metrics).toBeUndefined()
     expect(body.transactions).toBeUndefined()
-    const groupCalls = transactionMocks.buildActivityGroups.mock
+    const feedCalls = transactionMocks.buildActivityFeed.mock
       .calls as unknown as Array<[{ transactions: { chainId: number }[] }]>
-    const feed = groupCalls.at(-1)?.[0].transactions
+    const feed = feedCalls.at(-1)?.[0].transactions
     expect(feed?.map((item) => item.chainId).sort()).toEqual([100, 8453])
+  })
+
+  // #3944: the overview carries the two empty-state facts the Activity
+  // card's empty state branches on. Passthrough in BOTH directions — the
+  // handler owns no window math of its own, `buildActivityFeed` does — and
+  // the shape gate runs with the fields present (they are OPTIONAL in the
+  // schema so a pre-#3944 response still validates; the route always emits
+  // them). The computation itself is pinned against the REAL module in
+  // modules/transactions/__tests__/activity-window.test.ts.
+  it('carries hasOlderActivity and activityWindowDays from the feed builder', async () => {
+    // expectMatchesSpec needs a payload whose uuid-format fields ARE uuids —
+    // the beforeEach defaults keep the older tests' short ids on purpose.
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('AS has_first_agent_payment')) return Promise.resolve({ rows: [{ has_first_agent_payment: true }] })
+      if (sql.includes('FROM smart_accounts us') && sql.includes('GROUP BY us.id')) {
+        return Promise.resolve({ rows: [{ ...SAFE, id: SAFE_UUID }] })
+      }
+      if (sql.includes('FROM agents a')) return Promise.resolve({ rows: [] })
+      if (sql.includes('FROM user_daily_portfolio_snapshots')) return Promise.resolve({ rows: [] })
+      if (sql.includes('INSERT INTO user_daily_portfolio_snapshots')) return Promise.resolve({ rows: [] })
+      if (sql.includes('GROUP BY token_symbol')) return Promise.resolve({ rows: [] })
+      const overviewDefaults = overview3803(sql)
+      if (overviewDefaults) return Promise.resolve(overviewDefaults)
+      throw new Error(`Unexpected query: ${sql}`)
+    })
+    transactionMocks.buildActivityFeed.mockResolvedValue({
+      groups: [],
+      hasOlderActivity: true,
+      windowDays: 7,
+    })
+
+    const older = await app.inject({
+      method: 'GET',
+      url: '/dashboard/overview',
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(older.statusCode).toBe(200)
+    const olderBody = older.json()
+    expect(olderBody.hasOlderActivity).toBe(true)
+    expect(olderBody.activityWindowDays).toBe(7)
+    expectMatchesSpec('GET', '/dashboard/overview', olderBody)
+
+    transactionMocks.buildActivityFeed.mockResolvedValue({
+      groups: [],
+      hasOlderActivity: false,
+      windowDays: 7,
+    })
+
+    const fresh = await app.inject({
+      method: 'GET',
+      url: '/dashboard/overview',
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(fresh.statusCode).toBe(200)
+    expect(fresh.json().hasOlderActivity).toBe(false)
+    expect(fresh.json().activityWindowDays).toBe(7)
   })
 
   // #3803: an unavailable USDC leg answers null (unknown), NEVER 0 —

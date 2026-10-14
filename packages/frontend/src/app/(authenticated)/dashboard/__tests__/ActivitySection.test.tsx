@@ -204,6 +204,41 @@ describe('ActivitySection (#3810)', () => {
     renderSection()
 
     expect(screen.getByText('No activity yet')).toBeInTheDocument()
+    // #3944: the BODY copy is pinned too — the window variant replaces it,
+    // so this is exactly what a signal-ABSENT response (an older backend, a
+    // fixture without the field) must keep rendering.
+    expect(
+      screen.getByText('Receive funds or make your first payment to start building activity here.'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open transactions' })).toHaveAttribute(
+      'href',
+      '/transactions',
+    )
+  })
+
+  it('names the window when the feed only carries older activity (#3944)', () => {
+    // QA user A: a deposit 13 days back, nothing since — an empty 7-day
+    // list that "No activity yet" would misdescribe as a first-run account.
+    renderSection({ hasOlderActivity: true, activityWindowDays: 7 })
+
+    expect(screen.queryByText('No activity yet')).not.toBeInTheDocument()
+    expect(screen.getByText('No activity in the last 7 days')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'Payments and deposits from before this window are still on your transactions page.',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open transactions' })).toHaveAttribute(
+      'href',
+      '/transactions',
+    )
+  })
+
+  it('keeps the "No activity yet" copy when the signal is present but false', () => {
+    renderSection({ hasOlderActivity: false, activityWindowDays: 7 })
+
+    expect(screen.getByText('No activity yet')).toBeInTheDocument()
+    expect(screen.queryByText('No activity in the last 7 days')).not.toBeInTheDocument()
   })
 
   it('labels pending and failed groups without faking a direction', () => {

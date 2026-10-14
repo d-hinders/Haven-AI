@@ -533,6 +533,11 @@ export const dashboardOverview = {
       approxCurrency: 'SEK' as const,
     },
   ],
+  // #3944: the two empty-state facts. The fixture renders activity rows, so
+  // `hasOlderActivity` is false; `activityWindowDays` mirrors the backend's
+  // ACTIVITY_WINDOW_DAYS.
+  hasOlderActivity: false,
+  activityWindowDays: 7,
 }
 
 /**

@@ -43,7 +43,11 @@ const { mockQuery, portfolioMocks, transactionMocks, fiatMocks } = vi.hoisted(()
     // #3824: the route derives the tz check and the grouped rows from this
     // module; this file characterizes the aggregates, not the grouping.
     isValidActivityTimeZone: vi.fn(() => true),
-    buildActivityGroups: vi.fn(async () => []),
+    buildActivityFeed: vi.fn(async () => ({
+      groups: [] as never[],
+      hasOlderActivity: false,
+      windowDays: 7,
+    })),
     enrichedTransactionIdentityKey: vi.fn((tx: { hash: string }) => tx.hash),
     enrichTransactionsWithAgents: vi.fn(
       async (_userId: string, transactions: unknown[]) => transactions,

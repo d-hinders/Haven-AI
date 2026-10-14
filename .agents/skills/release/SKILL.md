@@ -701,9 +701,16 @@ not change the contract. A non-empty diff is a RECONNECT EVENT. The closeout
 says **"hosted tool contract changed — connected agents must reconnect"**
 and lists the changed tools (the tool names whose entries the diff touches),
 both to the owner in the closeout report AND in the promotion PR body, with
-a link to the `haven-reset` skill
-([`../haven-reset/SKILL.md`](../haven-reset/SKILL.md)) as the
-how-to-reconnect step. The `mcp_server_checks` job summary on the promoted
+the reconnect rule from
+[`../../../docs/operations/mcp-runtime-compatibility.md`](../../../docs/operations/mcp-runtime-compatibility.md#hosted-tool-lists--the-contract-fingerprint-and-the-reconnect-rule-3816)
+as the how-to-reconnect step: connected agents reconnect or restart the
+session. The hosted transport is stateless and a restart rewrites no local
+files, so a reconnect keeps credentials, agent id and budget unchanged, and
+a prepared or funded payment keeps its `payment_id` and resumes — it is
+never paid again. Do not point anyone at the `haven-reset` skill as the way
+to reconnect: it is destructive (it tombstones credential directories and
+deletes key material), and a reconnect request alone does not authorize
+credential deletion. The `mcp_server_checks` job summary on the promoted
 PR already reported which emissions a client holding the old schema would
 refuse — carry those findings, not a re-derivation.
 

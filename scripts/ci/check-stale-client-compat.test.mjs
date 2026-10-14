@@ -8,7 +8,7 @@ import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { checkStaleClientCompat, flatSchemaViolations } from './check-stale-client-compat.mjs'
+import { checkStaleClientCompat, flatSchemaViolations, RECONNECT_HOWTO } from './check-stale-client-compat.mjs'
 
 /** The pre-#3739 haven_pay_x402_quote schema a stale client holds. */
 const STALE_PAY_SCHEMA = {
@@ -157,6 +157,21 @@ describe('checkStaleClientCompat', () => {
     const { reports, notice } = checkStaleClientCompat({ baseSnapshot: null, branchSnapshot: BASE, corpus: { entries: [] } })
     assert.deepEqual(reports, [])
     assert.match(notice, /no tools\/list snapshot yet/)
+  })
+})
+
+describe('the job-summary reconnect how-to line (#3940)', () => {
+  test('says restart or reconnect, keeps credentials/budget/payment_id, links the rule, and never names haven-reset', () => {
+    assert.match(RECONNECT_HOWTO, /reconnect or restart the session/)
+    assert.match(RECONNECT_HOWTO, /keeps credentials, agent id and budget/)
+    assert.match(RECONNECT_HOWTO, /keeps its payment_id and resumes/)
+    // A relative link does not resolve in a job summary; check the fragment by
+    // eye against the heading — docs:check strips URL fragments when linting.
+    assert.match(
+      RECONNECT_HOWTO,
+      /https:\/\/github\.com\/d-hinders\/Haven-AI\/blob\/dev\/docs\/operations\/mcp-runtime-compatibility\.md#hosted-tool-lists--the-contract-fingerprint-and-the-reconnect-rule-3816/,
+    )
+    assert.doesNotMatch(RECONNECT_HOWTO, /haven-reset/)
   })
 })
 

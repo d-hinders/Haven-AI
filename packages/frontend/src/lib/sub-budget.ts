@@ -153,8 +153,9 @@ export function eligibleSubBudgetParents<
  * flips to "ended" on its own) and it is either the server's `is_live` (open
  * and unexpired) or a row whose grant is still enabled on-chain: `pending`
  * (awaiting its open signature) or `closing` (the disable is prepared but its
- * signature is still owed — the child keeps working until it lands). Only a
- * `closed` row, or an expired one, reads "ended".
+ * signature is still owed — the child keeps working until it lands). It is false
+ * for a `closed` row and for an expired one; which word each then reads is
+ * {@link subBudgetEndLabel}'s ("closed" wins over "ended", #3923).
  */
 export function subBudgetStillRunning(
   b: { is_live?: boolean; status: string; expires_at: number },

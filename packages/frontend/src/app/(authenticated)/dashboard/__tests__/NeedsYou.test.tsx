@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
@@ -219,6 +220,61 @@ describe('NeedsYou', () => {
     expect(onDismiss).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'no-backup:acct-1', kind: 'no-backup' }),
     )
+  })
+
+  // The card's list stays mounted at zero items: dismissing the LAST item
+  // must hand focus to the heading, not drop it to <body> with the vanished
+  // X. A caller that really removes the item, as the dashboard does.
+  it('moves focus to the heading when the dismiss empties the card', async () => {
+    const user = userEvent.setup()
+    function Caller() {
+      const [items, setItems] = useState<AttentionRuleItem[]>([
+        item({ id: 'no-backup:acct-1', kind: 'no-backup', title: 'Main has one way to approve payments' }),
+      ])
+      return (
+        <NeedsYou
+          items={items}
+          hasOverviewError={false}
+          onRetry={() => {}}
+          onDismiss={(dismissed) => setItems((prev) => prev.filter((i) => i.id !== dismissed.id))}
+          emptyState={{ kind: 'quiet', body: 'Nothing needs you right now.' }}
+        />
+      )
+    }
+    render(<Caller />)
+    await user.click(screen.getByRole('button', { name: 'Dismiss: Main has one way to approve payments' }))
+    expect(screen.queryByRole('list')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2, name: 'Needs attention' })).toHaveFocus()
+    // The empty state still follows the always-mounted list.
+    expect(screen.getByText('Nothing needs you right now.')).toBeInTheDocument()
+  })
+
+  it('draws no divider for the always-mounted list once the guide is the card and no items remain', async () => {
+    const user = userEvent.setup()
+    function Caller() {
+      const [items, setItems] = useState<AttentionRuleItem[]>([
+        item({ id: 'needs-setup:a1', kind: 'needs-setup', tone: 'brand', title: 'Scout has no budget' }),
+      ])
+      return (
+        <NeedsYou
+          items={items}
+          hasOverviewError={false}
+          onRetry={() => {}}
+          onDismiss={(dismissed) => setItems((prev) => prev.filter((i) => i.id !== dismissed.id))}
+          title="Get started"
+          showCount={false}
+          guide={<p>Onboarding guide</p>}
+        />
+      )
+    }
+    render(<Caller />)
+    const card = screen.getByRole('article')
+    // With an item under the guide, the list's divider separates them...
+    expect(card.querySelector('.border-t')).not.toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Dismiss: Scout has no budget' }))
+    // ...and with none, the empty wrapper draws no stray hairline.
+    expect(card.querySelector('.border-t')).toBeNull()
+    expect(screen.getByRole('heading', { level: 2, name: 'Get started' })).toHaveFocus()
   })
 
   // ── #3813: only "No backup signer" and "Needs setup" offer the dismiss ────

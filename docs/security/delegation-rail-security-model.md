@@ -887,7 +887,11 @@ chain.
 > no longer closes an expired `closing` sub-budget trivially. Its disable is
 > re-prepared and signed by the agent's own delegate key (owner decision
 > 2026-10-14), so the child is disabled on-chain rather than left to lapse.
-> That is authority-reducing only, and Haven still signs nothing.
+> That is authority-reducing only, and Haven still signs nothing. One
+> exception (owner decision 2026-10-14): when the delegating agent is revoked
+> or archived, the owner `DELETE` closes an expired `closing` row in Haven
+> with no on-chain disable, since the child can no longer spend and nobody is
+> left to sign. Haven still signs nothing.
 >
 > No payment selector, enforcer, refusal or signer-set decision moves. Scope
 > of this note: those reads and that close path; nothing else in this

@@ -230,8 +230,8 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
   // keys (not even the three nulls on non-active rows), the server-side
   // delegation_json fetch does NOT run, and the chain reader is never called.
   // With `?include=remaining`, each LIVE row additionally carries
-  // remaining_atomic / remaining_from_chain / period_end (non-active rows
-  // carry the three as null), following the GET /merchants/:slug/budgets
+  // remaining_atomic / remaining_from_chain / period_end (every non-live
+  // row, an expired active one included, carries the three as null), following the GET /merchants/:slug/budgets
   // precedent. Unknown `include` values are refused by the enforced request
   // schema — this module is in `enforcedModules` — before the handler runs.
   //

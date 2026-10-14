@@ -2687,7 +2687,7 @@ export type paths = {
         put?: never;
         /**
          * Close a task budget — trivially if never signed or already expired, otherwise prepares the revocation.
-         * @description status=pending, or status=open past its expiry: closes immediately, nothing signed, nothing on-chain (200, status='closed'). status=open and live: prepares disableDelegation(child) from the agent's own delegate account and returns sign_data for the agent to sign, then submit via POST /task-budgets/{id}/submit. status=closing (expired or not — its disable signature is still owed, #3923): first checks the chain; if the child is already disabled, answers 200 status='closed' with nothing to sign; otherwise re-prepares a fresh close operation and replaces the stored one, so calling close again is always safe. status=closed: 409.
+         * @description status=pending, or status=open/closing past its expiry: closes immediately, nothing signed, nothing on-chain (200, status='closed'). status=open and live: prepares disableDelegation(child) from the agent's own delegate account and returns sign_data for the agent to sign, then submit via POST /task-budgets/{id}/submit. status=closing: first checks the chain; if the child is already disabled, answers 200 status='closed' with nothing to sign; otherwise re-prepares a fresh close operation and replaces the stored one, so calling close again is always safe. status=closed: 409.
          */
         post: operations["closeTaskBudget"];
         delete?: never;
@@ -2784,7 +2784,7 @@ export type paths = {
         put?: never;
         /**
          * Close a sub-budget row — trivially if never signed or open and already expired, otherwise prepares the revocation.
-         * @description DELEGATOR-scoped (the delegating agent closes either row of its tree). status=pending, or status=open/closing past its expiry: closes immediately, nothing signed, nothing on-chain (200, status='closed'). status=open and live: prepares disableDelegation(child) from the delegating agent's own delegate account and returns sign_data to sign, then submit via POST /sub-budgets/{id}/submit. status=closing: first checks the chain; if the child is already disabled, answers 200 status='closed'; otherwise re-prepares a fresh close operation (idempotent in EFFECT, never in bytes). Closing the parent-child row strands every grant under it; closing a grant row leaves the delegating agent intact. status=closed: 409.
+         * @description DELEGATOR-scoped (the delegating agent closes either row of its tree). status=pending, or status=open past its expiry: closes immediately, nothing signed, nothing on-chain (200, status='closed'). status=open and live: prepares disableDelegation(child) from the delegating agent's own delegate account and returns sign_data to sign, then submit via POST /sub-budgets/{id}/submit. status=closing (expired or not — its disable signature is still owed, #3923): first checks the chain; if the child is already disabled, answers 200 status='closed'; otherwise re-prepares a fresh close operation (idempotent in EFFECT, never in bytes). Closing the parent-child row strands every grant under it; closing a grant row leaves the delegating agent intact. status=closed: 409.
          */
         post: operations["closeSubBudget"];
         delete?: never;

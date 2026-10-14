@@ -104,6 +104,34 @@ semantics match. They are not byte-for-byte identical:
 - Hosted MCP provides gasless sweep orchestration; the signer supplies
   `haven_sign_sweep_delegate`.
 
+**A hosted tool list carries a contract fingerprint; a local one does not
+(#3816).** The hosted server's tool list changes on every deploy, while an
+agent keeps the list it loaded when its session started, so the hosted server
+says which list it serves:
+
+- **What is hashed.** For each hosted tool, sorted by name: its name,
+  description and converted input schema, serialised as sorted-key JSON,
+  sha256, first 16 hex characters. The instructions are excluded, so dev and
+  prod agree. It is computed once at import
+  (`packages/mcp-server/src/contract-fingerprint.ts:101-127`).
+- **Where it appears.** The hosted instructions state the fingerprint and the
+  reconnect rule (`packages/mcp-server/src/server.ts:156-170`), and every
+  hosted handler result carries `contract_fingerprint` and `server_version` at
+  the top level of its JSON (`toMcpResult`, `server.ts:374-392`). An
+  SDK-generated refusal that is not already a hosted payload (an unknown tool,
+  a strict-input refusal) gets the same fingerprint and the stale-list hint
+  appended to its text (`annotateStaleToolList`, `server.ts:349-372`).
+- **The rule.** A result whose fingerprint differs from the one in the
+  instructions means the agent's list is stale: reconnect or restart before
+  continuing. During a rolling deploy it may alternate once. A payment already
+  prepared or funded keeps its `payment_id` and resumes after reconnecting; it
+  is never paid again.
+- **Hosted only.** The local stdio server and the signer carry neither field;
+  their tool list changes only on reinstall.
+
+The full contract and the skew table live in
+[`mcp-runtime-compatibility.md` § Hosted tool lists](../operations/mcp-runtime-compatibility.md#hosted-tool-lists--the-contract-fingerprint-and-the-reconnect-rule-3816).
+
 **A receipt read is not a transaction-history read, and since #3132 every row
 says which it is.** `haven_list_receipts` (both runtimes, via the SDK's
 `listReceiptsPage`) returns this agent's evidence rows only — agent-scoped by
@@ -447,6 +475,7 @@ since #1984 — are unaffected, hosted and local alike.
 
 - [Hosted connect flow](06-hosted-mcp-connect-flow.md)
 - [Edge signer](07-edge-signer.md)
+- [MCP runtime compatibility](../operations/mcp-runtime-compatibility.md) — the contract fingerprint and reconnect rule (#3816)
 - [Hosted merchant egress](../security/hosted-egress.md) (#3747)
 - [CASP / MiCA guardrails](../regulatory/casp-risk-guardrails.md)
 
@@ -602,3 +631,12 @@ The week's tool-surface drift (#3423 slices, #3444, #3465 catalog handoff,
 #3467 compact receipts, #3476 allowance block, #3485 allowance spelling)
 extended schemas and refusal text inside the documented decision structure;
 none of it moved the local/hosted split this document is about.
+
+> **Re-verification (#3935, the hosted contract fingerprint, 2026-10-14):** the
+> fingerprint paragraph under "Tool model" was added against `origin/dev`
+> `686ac03c` (`packages/mcp-server/src/{server,contract-fingerprint}.ts`); a
+> grep over `packages/mcp/src` and `packages/signer/src` for
+> `contract_fingerprint` / `server_version` returns nothing, which is the
+> "hosted only" claim. Scope of this note: that paragraph and the related-docs
+> link. The rest of this document was not re-read for it, and `last-verified`
+> is not bumped.

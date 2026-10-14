@@ -9,6 +9,7 @@ covers:
   - packages/sdk/src/delegate-account.ts
   - packages/sdk/src/settlement-child.ts
   - packages/backend/src/modules/payments/direct-sign-context.ts
+  - packages/backend/src/modules/x402/eip3009-settlement-sweeper.ts
   - packages/mcp-server/src/boot.ts
   - packages/mcp-server/src/auth.ts
   - packages/mcp-server/src/server.ts
@@ -92,7 +93,19 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
      merchant payment header for the merchant leg of an x402 payment, after
      consuming the recorded binding and checking the merchant challenge against
      it. Reuses the SDK's `selectStandardPaymentOption` +
-     `toStandardPaymentRequirements` + the `x402` library.
+     `toStandardPaymentRequirements` + the `x402` library. Since #3888 the
+     authorization's nonce is not the library's random draw: the signer
+     overwrites it with `deriveX402PaymentNonce(expected.paymentId)` on the
+     unsigned payload `preparePaymentHeader` built, then lets the library's
+     `signPaymentHeader` sign it (`packages/signer/src/core.ts:448-454`). That
+     ties the merchant's on-chain `AuthorizationUsed(delegate, nonce)` to the
+     Haven payment, so the backend's settlement sweeper can attribute a
+     settlement the agent never reported
+     (`packages/backend/src/modules/x402/eip3009-settlement-sweeper.ts:386-387`).
+     Signers older than #3888 still send a random nonce. Why this is safe is in
+     the [delegation-rail security model](../security/delegation-rail-security-model.md)
+     ("Since #3888 the 3009 header's nonce is derived, not random"); the
+     payment sequence is in [04](04-x402-payment-sequence.md).
    - `signSweepAuthorization(authorization, expectedAuth)` → verifies Haven's
      authenticated recovery context, confirms the delegate and — when the
      local credential carries the agent's account (Haven wallet) address —
@@ -561,3 +574,9 @@ account is permanently out of scope.
   allowances and agent-wallet balances small, retry the original merchant
   session after funding confirms, and reconcile or sweep stranded delegate
   balances when a merchant retry fails or the authorization expires unsettled.
+
+> **Re-verification (#3935, the derived EIP-3009 nonce, 2026-10-14):** the
+> `buildX402PaymentHeader` sentences were added against `origin/dev`
+> `686ac03c` (`packages/signer/src/core.ts`, the backend's
+> `eip3009-settlement-sweeper.ts`). Scope of this note: that bullet. The rest
+> of this document was not re-read for it, and `last-verified` is not bumped.

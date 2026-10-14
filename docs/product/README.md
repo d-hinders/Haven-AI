@@ -28,7 +28,7 @@ covers:
   - packages/frontend/src/components/DashboardOnboardingGuide.tsx
   - packages/frontend/src/components/TopBar.tsx
   - packages/frontend/src/components/sidebar/Sidebar.tsx
-last-verified: "2026-10-12"
+last-verified: "2026-10-14"
 ---
 
 # Haven Product & UX Guide
@@ -89,14 +89,16 @@ explainers all at once just because those components exist. Add detail
 progressively inside the relevant action flow, detail page, modal, or after the
 user dismisses setup.
 
-On the dashboard today, a user with no funds in any account gets a focused view while the
-setup guide ("Your first 3 steps") is showing: the money panel without its
-spending block, the "Needs you" card, and the guide. The agents and activity
-sections stay hidden until funds arrive or the guide stops showing. The
-guide's only CTA sits on the first incomplete step, and the "Needs you" card
-holds back its low-balance and zero-USDC items while the funding step is open.
-The money panel's Deposit address and Add funds buttons still render above
-the guide.
+On the dashboard today, the setup steps are the "Needs attention" card, titled
+"Get started" with an "N of 3 done" count, until the first agent payment. "Hide
+for now" hides them in that browser until another step completes; after the
+first payment one dismissible "You're set up" line takes their place. Only the
+active step carries a primary button; connecting an agent early is offered at
+secondary weight. While the steps show and the USDC step is not done, the card
+holds back its low-balance and zero-USDC items. When every account is also
+known to hold no USDC, the page is a focused view: the money card and this card
+only, with Agents and Activity hidden, and the money card's Add funds steps
+down beside Deposit address so step 1's is the one primary Add funds.
 
 ---
 
@@ -148,9 +150,9 @@ Core rules:
 - Raised cards are prominent page anchors such as the account detail total balance card; the dashboard money panel is ONE raised card (#3897): balance, sparkline and actions on the left, the 30-day spending on the right as a divided section, stacked below `lg`.
 - Other elevations already present in the shared `Card` primitive, including
   the restrained tinted `anchor` tier, must match the live `/design-system`
-  reference and remain secondary to the page's primary anchor. The static
-  `design-system.md` card table does not yet document `anchor`; treat that as
-  documentation debt, not permission to invent another tier.
+  reference and remain secondary to the page's primary anchor.
+  `design-system.md` § Cards says when to use `anchor`; do not invent another
+  tier.
 - Modals use the themed `--v2-bg` token and a solid darkened backdrop with no
   blur (the backdrop darkens whichever theme is active).
 - Avoid old dark app classes for new work: `bg-gray-*`, `text-gray-*`, dark-only `zinc` surfaces, glow shadows, and white alpha borders.

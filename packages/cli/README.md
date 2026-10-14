@@ -329,7 +329,7 @@ sentence, now emit an object as well.
 | `1` | Failed | Something broke that none of the below describes (a 5xx, an unexpected error). Retrying may help. |
 | `2` | Usage | The command line was wrong — unknown command, missing argument, bad flag, or a `--safe` that matches nothing. Fix the argv; retrying it unchanged will not help. |
 | `3` | Not authenticated | No stored session, or the backend rejected the one we have. Run `haven login`. |
-| `4` | Refused | The session is fine and the answer is no anyway: a 403, 410 or other 4xx from the backend (its own `error` text is echoed when it sends one), or a refusal the CLI makes itself — a live budget on `agents revoke`, credential-shaped `feedback submit` text, the connector's refusal under `agents connect --run`. |
+| `4` | Refused | The answer is no: a 403, 410 or other 4xx from the backend (its own `error` text is echoed when it sends one), or a refusal the CLI makes itself — for example a live budget on `agents revoke`, credential-shaped `feedback submit` text, the connector's refusal under `agents connect --run`, or a device login the human denied. |
 | `5` | Network | The backend could not be reached at all. Check connectivity and `--api`. |
 
 **Why a 401 is `3` and not `4`.** The two overlap by definition — a 401 *is* the

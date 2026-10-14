@@ -351,7 +351,7 @@ test('/agents: a paused agent name the row has room for is not cut by the status
   expect(
     stemReading.pills,
     `@1280px: the title row renders ${JSON.stringify(stemReading.pills)} (widths ${JSON.stringify(stemReading.pillWidths)})`,
-  ).toEqual(['paused'])
+  ).toEqual(['Paused'])
   const pillRoom = stemReading.pillWidths[0] + 8
 
   const bandName = await bandNameFor(page, BAND_STEM, stemReading.rowInner)
@@ -361,7 +361,7 @@ test('/agents: a paused agent name the row has room for is not cut by the status
   await atWidth(page, 1280)
   const reading = await readSettled(page, bandName)
 
-  expect(reading.pills, `@1280px: the title row renders ${JSON.stringify(reading.pills)}`).toEqual(['paused'])
+  expect(reading.pills, `@1280px: the title row renders ${JSON.stringify(reading.pills)}`).toEqual(['Paused'])
 
   // Non-vacuity #2, re-checked against the RENDERED measure rather than the
   // canvas estimate: the name must genuinely be in this row's band, or the
@@ -398,7 +398,7 @@ test('/agents: an unbounded paused name truncates against the card, not against 
     const reading = await readSettled(page, UNBOUNDED_NAME)
 
     expect(reading.pills, `@${width}px: the title row renders ${JSON.stringify(reading.pills)} (widths ${JSON.stringify(reading.pillWidths)})`)
-      .toEqual(['paused'])
+      .toEqual(['Paused'])
 
     // Agent names are user-supplied and unbounded, so a name this long MUST
     // still truncate — a card that grew to fit one would be a different defect,

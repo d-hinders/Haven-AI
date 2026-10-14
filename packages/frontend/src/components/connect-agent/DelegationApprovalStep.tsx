@@ -177,7 +177,9 @@ export function DelegationApprovalStep({
           busyLabel={confirming ? 'Finishing…' : 'Waiting for signature…'}
           // #3895: this screen approves; the agent page sets. Each caller
           // supplies the failure sentence its own button's verb carries.
-          failureMessage="Haven could not approve the budget. Nothing changed — try again."
+          // The owner approves by signing, so the sentence never makes
+          // Haven the approver (copy-guidelines.md, attribution).
+          failureMessage="The budget was not approved. Nothing changed — try again."
           // Same footer shape as the legacy step: equal-width ghost-then-
           // primary, with the money-authority action carrying the weight.
           leadingAction={

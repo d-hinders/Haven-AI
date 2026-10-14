@@ -33,15 +33,15 @@ import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import { SECRETS_KEY_ENV } from '../../../infra/secrets.js'
 import { getConnection } from '../../../infra/repositories/accounting-connections.js'
-import { getSyncState } from '../../../infra/repositories/accounting-feed-syncs.js'
-import { AccountedConnector } from '../accounted-connector.js'
+import { getSyncState, getMerchantInvoiceSyncRef, markFailed } from '../../../infra/repositories/accounting-feed-syncs.js'
+import { AccountedConnector, lateAttachAccountedMerchantReceipt } from '../accounted-connector.js'
 import { accountedIdempotencyKey } from '../accounted-client.js'
 import { connectWithApiKey } from '../api-key-flow.js'
 import { clearConnectors, registerConnector } from '../connector.js'
 import { feedSettledPayment } from '../feed-orchestrator.js'
 import { ACCOUNTED } from '../registry.js'
 import { accountingEntry } from './connector-conformance.js'
-import { accountedRouter, ACCOUNTED_DOCUMENT_ID } from './accounted-test-router.js'
+import { accountedRouter, ACCOUNTED_DOCUMENT_ID, ACCOUNTED_MERCHANT_DOCUMENT_ID } from './accounted-test-router.js'
 
 const KEY = randomBytes(32).toString('base64')
 const DOC_REF = `accounted:document:${ACCOUNTED_DOCUMENT_ID}`
@@ -132,7 +132,7 @@ describeDb('Accounted document feed on the real database (#3018)', () => {
       paymentId: pid,
       settledAt: '2026-09-10T09:30:00.000Z',
       direction: 'out',
-      counterparty: { address: '0x' + 'ab'.repeat(20), name: 'NordShield VPN' },
+      counterparty: { address: '0x' + 'ab'.repeat(20), name: 'NordShield VPN', country: null },
       resourceUrl: 'https://merchant.example/vpn',
       token: 'USDC',
       amountAtomic: '1000',
@@ -183,7 +183,7 @@ describeDb('Accounted document feed on the real database (#3018)', () => {
       paymentId: pid,
       settledAt: '2026-09-10T09:30:00.000Z',
       direction: 'out',
-      counterparty: { address: '0x' + 'ab'.repeat(20), name: 'NordShield VPN' },
+      counterparty: { address: '0x' + 'ab'.repeat(20), name: 'NordShield VPN', country: null },
       resourceUrl: 'https://merchant.example/vpn',
       token: 'USDC',
       amountAtomic: '1000',
@@ -216,5 +216,86 @@ describeDb('Accounted document feed on the real database (#3018)', () => {
     await feedSettledPayment(userId, pid)
     expect(state.uploads).toHaveLength(1)
     expect((await getSyncState(userId, 'accounted', pid))?.external_ref).toBe(DOC_REF)
+  })
+
+  /**
+   * #3918: the merchant's own invoice is the SECOND document of the same
+   * sync — its own WORM id, its own ledger row (`document_kind =
+   * 'merchant_invoice'`), invisible to `getSyncState` (the underlag read).
+   * A re-feed of the pushed payment creates nothing new.
+   */
+  it('a captured merchant invoice is delivered as a second document with its own pushed row, once', async () => {
+    const userId = await connectedUser()
+    const { impl, state } = accountedRouter()
+    registerConnector(new AccountedConnector(impl))
+    const pid = `pay-feed-db-${seq}-4`
+    mocks.buildAccountingEntryForPayment.mockImplementationOnce(async (_u: string, id: string) => ({
+      ...accountingEntry(id),
+      merchantReceipt: {
+        url: null,
+        inlineJson: {
+          fakturanummer: 'FAK-2026-1791972466377',
+          saljare: { name: 'Haven Demo AB', org_nr: '559412-3456', moms_nr: 'SE559412345601' },
+        },
+      },
+    }))
+
+    expect(await feedSettledPayment(userId, pid)).toEqual({ outcome: 'pushed' })
+    // Two proven uploads, two distinct keys, two distinct ids.
+    expect(state.uploadCalls).toBe(2)
+    expect(state.uploads.map((u) => u.idempotencyKey)).toEqual([
+      accountedIdempotencyKey(pid),
+      accountedIdempotencyKey(pid, 'merchant-invoice'),
+    ])
+    const underlagRow = await getSyncState(userId, 'accounted', pid)
+    expect(underlagRow?.external_ref).toBe(DOC_REF)
+    const invoiceRef = await getMerchantInvoiceSyncRef(userId, 'accounted', pid)
+    expect(invoiceRef).toBe(`accounted:document:${ACCOUNTED_MERCHANT_DOCUMENT_ID}`)
+
+    // The dedup ledger: a re-feed creates nothing new on either row.
+    await feedSettledPayment(userId, pid)
+    expect(state.uploadCalls).toBe(2)
+    expect(await getMerchantInvoiceSyncRef(userId, 'accounted', pid)).toBe(invoiceRef)
+  })
+
+  /**
+   * #3918 late attach (the Fortnox #956 shape): the x402 merchant receipt
+   * arrives at the settle retry — seconds AFTER the feed pushed the
+   * underlag. The capture route calls the accounted late-attach, which
+   * uploads the second document and records the row; a second call (or a
+   * race with the push) is a no-op. And the merchant-invoice row is never
+   * touched by the underlag's failure machinery.
+   */
+  it('a receipt captured after the push is late-attached once, and a failed underlag re-push never touches its row', async () => {
+    const userId = await connectedUser()
+    const { impl, state } = accountedRouter()
+    registerConnector(new AccountedConnector(impl))
+    const pid = `pay-feed-db-${seq}-5`
+
+    // Push WITHOUT the receipt (the normal x402 order).
+    await feedSettledPayment(userId, pid)
+    expect(state.uploadCalls).toBe(1)
+    expect(await getMerchantInvoiceSyncRef(userId, 'accounted', pid)).toBeNull()
+
+    // The capture arrives → the late attach uploads + records. (The router's
+    // fetch is passed explicitly: the default is the real network, and this
+    // test has no live key.)
+    await lateAttachAccountedMerchantReceipt(userId, pid, {
+      url: null,
+      inlineJson: { fakturanummer: 'FAK-2026-1791972466377', saljare: { name: 'Haven Demo AB' } },
+    }, impl)
+    expect(state.uploadCalls).toBe(2)
+    const invoiceRef = await getMerchantInvoiceSyncRef(userId, 'accounted', pid)
+    expect(invoiceRef).toBe(`accounted:document:${ACCOUNTED_MERCHANT_DOCUMENT_ID}`)
+
+    // A second late attach (a duplicate report) creates nothing.
+    await lateAttachAccountedMerchantReceipt(userId, pid, { url: null, inlineJson: { fakturanummer: 'FAK-9' } }, impl)
+    expect(state.uploadCalls).toBe(2)
+
+    // The underlag row failing again never rewrites the merchant-invoice row.
+    await markFailed(userId, 'accounted', pid, 'provider outage')
+    const underlagRow = await getSyncState(userId, 'accounted', pid)
+    expect(underlagRow?.status).toBe('failed')
+    expect(await getMerchantInvoiceSyncRef(userId, 'accounted', pid)).toBe(invoiceRef)
   })
 })

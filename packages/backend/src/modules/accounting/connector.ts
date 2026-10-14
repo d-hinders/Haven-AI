@@ -61,6 +61,14 @@ export interface PushResult {
    * so the dashboard can say which scope a re-consent must add.
    */
   missingScopes?: string[]
+  /**
+   * #3918: the provider ref of the merchant's OWN invoice, when a second
+   * document was uploaded AND proven (sha256) in the same push. The
+   * orchestrator records it as a second sync row (`document_kind =
+   * 'merchant_invoice'`); a failed or absent second document is a `note` on
+   * the pushed row instead — the underlag's delivery stands on its own.
+   */
+  merchantInvoiceRef?: string
 }
 
 /**

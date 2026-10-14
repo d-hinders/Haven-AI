@@ -45,6 +45,9 @@ const { mockQuery, fiatMocks, reportingMocks } = vi.hoisted(() => ({
     // modules/accounting/ barrel post-#998, so it needs a mock here too (an
     // unmocked call threw and 500'd the settle/evidence routes).
     feedSettledPaymentBestEffort: vi.fn(),
+    // #3918: the Accounted late-attach, fired fire-and-forget next to the
+    // Fortnox one by the same capture route — same barrel, same 500-if-unmocked.
+    lateAttachAccountedMerchantReceipt: vi.fn().mockResolvedValue(undefined),
   },
 }))
 
@@ -305,6 +308,7 @@ describe('machine payment routes', () => {
     // `.catch()` in the fire-and-forget call site — it must keep resolving
     // to a promise across tests, just with a clean call history.
     reportingMocks.lateAttachMerchantReceipt.mockClear()
+    reportingMocks.lateAttachAccountedMerchantReceipt.mockClear()
   })
 
   function pendingIntent(overrides: Record<string, unknown> = {}) {

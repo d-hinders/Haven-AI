@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from 'vitest'
 const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }))
 vi.mock('../../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery(...a) } }))
 
-const { receiptPdf, underlagFromData, loadReceiptUnderlag, merchantReceiptPdf, fetchMerchantReceiptDocument } = await import('../receipt-underlag.js')
+const { receiptPdf, underlagFromData, loadReceiptUnderlag, merchantReceiptPdf, fetchMerchantReceiptDocument, sellerFromMerchantReceipt, merchantReceiptDocument } = await import('../receipt-underlag.js')
 
 const DATA = {
   paymentId: 'pay-123',
@@ -25,6 +25,11 @@ const DATA = {
   fxRateLedger: '10.42',
   merchantName: 'NordShield VPN',
   merchantAddress: '0x' + 'ab'.repeat(20),
+  // #3918: the seller block. Nulls are the "unknown" case — the document
+  // renders only what it actually knows.
+  merchantCountry: 'SE',
+  merchantVatNo: 'SE559412345601',
+  merchantOrgNo: '559412-3456',
   resourceUrl: 'https://merchant.example/vpn',
   chainId: 84532,
   txHash: '0x' + 'cd'.repeat(32),
@@ -39,7 +44,7 @@ const TX = {
   paymentId: 'pay-123',
   settledAt: '2026-07-15T09:30:00.000Z',
   direction: 'out' as const,
-  counterparty: { address: DATA.merchantAddress, name: 'NordShield VPN' },
+  counterparty: { address: DATA.merchantAddress, name: 'NordShield VPN', country: 'SE' },
   resourceUrl: 'https://merchant.example/vpn',
   token: 'USDC',
   amountAtomic: '1000',
@@ -52,6 +57,20 @@ const TX = {
   fxSource: 'riksbank',
   fxAt: '2026-07-15T09:30:00.000Z',
   receiptRef: 'evidence-1',
+  // #3918: the captured merchant receipt — the demo merchant's seller block
+  // (empirical anchor: settle of b1e26fc2 returned exactly these values).
+  merchantReceipt: {
+    url: null,
+    inlineJson: {
+      fakturanummer: 'FAK-2026-1791972466377',
+      saljare: {
+        name: 'Haven Demo AB',
+        address: 'Birger Jarlsgatan 57, 113 56 Stockholm',
+        org_nr: '559412-3456',
+        moms_nr: 'SE559412345601',
+      },
+    },
+  },
   txHash: '0x' + 'cd'.repeat(32),
   txHashIsFunding: false,
   fundingTxHash: null,
@@ -94,6 +113,22 @@ describe('underlagFromData', () => {
     }
   })
 
+  it('renders the seller block when the merchant invoice provides it (#3918)', () => {
+    const s = underlagFromData(DATA).pdf.toString('latin1')
+    // The reverse-VAT fields, in the underlag's 15-column label style.
+    expect(s).toContain('Country        SE')
+    expect(s).toContain('VAT reg no     SE559412345601')
+    expect(s).toContain('Org no         559412-3456')
+  })
+
+  it('omits every seller line that is not known — the document never invents a seller', () => {
+    const s = underlagFromData({ ...DATA, merchantCountry: null, merchantVatNo: null, merchantOrgNo: null }).pdf
+      .toString('latin1')
+    expect(s).not.toContain('Country')
+    expect(s).not.toContain('VAT reg no')
+    expect(s).not.toContain('Org no')
+  })
+
   it('sanitizes exotic payment ids in the filename', () => {
     const { filename } = underlagFromData({ ...DATA, paymentId: 'a/b:c d' })
     expect(filename).toBe('haven-receipt-a_b_c_d.pdf')
@@ -114,7 +149,14 @@ describe('loadReceiptUnderlag', () => {
     })
     const underlag = await loadReceiptUnderlag('u1', TX)
     expect(underlag?.filename).toBe('haven-receipt-pay-123.pdf')
-    expect(underlag?.pdf.toString('latin1')).toContain(DATA.txHash)
+    const text = underlag?.pdf.toString('latin1') ?? ''
+    expect(text).toContain(DATA.txHash)
+    // #3918: the invoice's seller block lands on the document — the name from
+    // `saljare` (not the catalog fallback), the VAT + org numbers beside it.
+    expect(text).toContain('Haven Demo AB')
+    expect(text).toContain('VAT reg no     SE559412345601')
+    expect(text).toContain('Org no         559412-3456')
+    expect(text).toContain('Country        SE')
     const [sql, params] = mockQuery.mock.calls[0] as [string, unknown[]]
     expect(sql).toContain('mpe.user_id = $2')
     expect(params).toEqual(['evidence-1', 'u1'])
@@ -266,5 +308,55 @@ describe('underlag amount scaling (#3917)', () => {
   it('labels the atomic figure explicitly when no human amount was captured, never implying a scale', () => {
     const pdf = underlagFromData({ ...DATA, amount: null }).pdf.toString('latin1')
     expect(pdf).toContain('Amount         1000 USDC \\(atomic units\\)')
+  })
+})
+
+/**
+ * #3918: the seller identity is carried from the merchant's OWN invoice
+ * (captured receipt JSON) onto the underlag — read defensively, because
+ * Haven asserts nothing about merchant-provided fields.
+ */
+describe('sellerFromMerchantReceipt (#3918)', () => {
+  it('reads the demo merchant invoice shape (saljare: name, org_nr, moms_nr)', () => {
+    expect(
+      sellerFromMerchantReceipt({
+        fakturanummer: 'FAK-2026-1791972466377',
+        saljare: { name: 'Haven Demo AB', org_nr: '559412-3456', moms_nr: 'SE559412345601' },
+      }),
+    ).toEqual({ name: 'Haven Demo AB', orgNo: '559412-3456', vatNo: 'SE559412345601' })
+  })
+
+  it('reads nulls for anything absent, non-object, or non-string — never throws, never invents', () => {
+    expect(sellerFromMerchantReceipt(null)).toEqual({ name: null, orgNo: null, vatNo: null })
+    expect(sellerFromMerchantReceipt('not an object')).toEqual({ name: null, orgNo: null, vatNo: null })
+    expect(sellerFromMerchantReceipt({ faktura: 1 })).toEqual({ name: null, orgNo: null, vatNo: null })
+    expect(sellerFromMerchantReceipt({ saljare: 'not an object' })).toEqual({ name: null, orgNo: null, vatNo: null })
+    expect(sellerFromMerchantReceipt({ saljare: { name: 42, org_nr: '', moms_nr: null } })).toEqual({
+      name: null,
+      orgNo: null,
+      vatNo: null,
+    })
+  })
+})
+
+/** #3918: the shared second-document builder (Fortnox attach + Accounted upload). */
+describe('merchantReceiptDocument (#3918)', () => {
+  it('renders an inline JSON as the provenance PDF', async () => {
+    const doc = await merchantReceiptDocument('pay-123', { url: null, inlineJson: { fakturanummer: 'FAK-1' } })
+    expect(doc?.filename).toBe('merchant-receipt-pay-123.pdf')
+    expect(doc?.contentType).toBe('application/pdf')
+    expect(doc?.bytes.toString('latin1')).toContain('FAK-1')
+  })
+
+  it('fetches a URL document under the SSRF guards', async () => {
+    const impl = (async () =>
+      new Response(new Uint8Array(8), { status: 200, headers: { 'content-type': 'application/pdf' } })) as unknown as typeof fetch
+    const doc = await merchantReceiptDocument('pay-123', { url: 'https://merchant.example/receipt.pdf', inlineJson: null }, impl)
+    expect(doc?.filename).toBe('merchant-receipt.pdf')
+    expect(doc?.contentType).toBe('application/pdf')
+  })
+
+  it('returns null when the receipt names neither', async () => {
+    expect(await merchantReceiptDocument('pay-123', { url: null, inlineJson: null })).toBeNull()
   })
 })

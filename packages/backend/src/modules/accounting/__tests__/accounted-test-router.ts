@@ -45,10 +45,19 @@ export interface AccountedRouterState {
   replayIdempotent: boolean
   /** Echo a WRONG sha256 back on a 2xx — the hash-mismatch case. */
   corruptHash: boolean
+  /** #3918: refuse only the SECOND create (the merchant-invoice upload) with a retryable 500. */
+  failSecondUpload: boolean
 }
 
 const DOCUMENT_ID = '3f1c7a52-9b04-4e6a-8f21-7c5d2e8b9a10'
 export const ACCOUNTED_DOCUMENT_ID = DOCUMENT_ID
+/**
+ * #3918: the id the router hands the SECOND document of a payment (a
+ * distinct idempotency key) — the merchant-invoice upload must carry a ref
+ * of its own, never the underlag's.
+ */
+export const ACCOUNTED_MERCHANT_DOCUMENT_ID = '4d0cc49e-8f21-4e6a-9b04-7c5d2e8b9a11'
+const DOCUMENT_IDS_BY_INDEX = [DOCUMENT_ID, ACCOUNTED_MERCHANT_DOCUMENT_ID]
 
 export function accountedRouter() {
   const state: AccountedRouterState = {
@@ -64,6 +73,16 @@ export function accountedRouter() {
     rateLimited: false,
     replayIdempotent: false,
     corruptHash: false,
+    failSecondUpload: false,
+  }
+  // Per-idempotency-key record + document id: a payment's SECOND document
+  // (the merchant invoice, key `paymentId:merchant-invoice`) gets its own
+  // cached answer and its own id — a replay of either key must return the
+  // SAME id that key created (#3918).
+  const byKey = new Map<string, { record: UploadRecord; id: string }>()
+  const idForKey = (key: string): string => {
+    const idx = byKey.size
+    return DOCUMENT_IDS_BY_INDEX[idx] ?? `4d0cc49e-0000-4000-8000-${String(idx).padStart(12, '0')}`
   }
   const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
     new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } })
@@ -77,6 +96,7 @@ export function accountedRouter() {
       if (state.refuseScope) return json(accountedFixture('error-403-scope.json'), 403)
       if (state.forbidden) return json(accountedFixture('error-403-forbidden.json'), 403)
       if (state.tooLarge) return json(accountedFixture('error-400-too-large.json'), 400)
+      if (state.failSecondUpload && state.uploadCalls === 1) return json({ error: { code: 'DOC_UPLOAD_STORAGE_FAILED', message: 'second document refused' } }, 500)
       if (state.storageFailed) {
         return json(
           {
@@ -104,20 +124,17 @@ export function accountedRouter() {
         sha256,
         byteLength: bytes.byteLength,
       }
+      const key = record.idempotencyKey ?? ''
+      const cached = byKey.get(key)
       // A replay of the SAME key with the SAME bytes returns the provider's
       // cached answer (the Idempotent-Replayed behaviour) — no second
       // document, so `uploadCalls` (the create counter) does not move.
-      if (
-        state.lastUpload &&
-        state.lastUpload.sha256 === record.sha256 &&
-        state.lastUpload.idempotencyKey === record.idempotencyKey &&
-        !state.corruptHash
-      ) {
+      if (cached && cached.record.sha256 === record.sha256 && !state.corruptHash) {
         state.replayIdempotent = true
         return json(
           {
             data: {
-              id: DOCUMENT_ID,
+              id: cached.id,
               sha256_hash: sha256,
               filename: record.filename,
               size: bytes.byteLength,
@@ -132,7 +149,7 @@ export function accountedRouter() {
       }
       // SAME key, DIFFERENT bytes: the provider's 409 — the cached document
       // exists and this body is not it.
-      if (state.lastUpload && state.lastUpload.idempotencyKey === record.idempotencyKey && state.lastUpload.sha256 !== record.sha256) {
+      if (cached && cached.record.sha256 !== record.sha256) {
         state.uploadCalls += 1
         return json(accountedFixture('error-409-idempotency.json'), 409)
       }
@@ -145,7 +162,10 @@ export function accountedRouter() {
         idempotency_key: record.idempotencyKey,
         sha256: record.sha256,
       }
+      const documentId = idForKey(key)
+      byKey.set(key, { record, id: documentId })
       const body = accountedFixture('document-created.json')
+      body.data.id = documentId
       body.data.sha256_hash = state.corruptHash ? 'deadbeef'.repeat(8) : sha256
       body.data.filename = record.filename
       body.data.size = bytes.byteLength

@@ -56,7 +56,7 @@ describe('toFeedTransaction', () => {
       fxSource: 'coingecko_spot',
       receiptRef: 'ev1',
     })
-    expect(tx.counterparty).toEqual({ address: '0xmerchant', name: 'Soundside' })
+    expect(tx.counterparty).toEqual({ address: '0xmerchant', name: 'Soundside', country: 'US' })
   })
 
   it('asserts nothing — no vatTreatment or posted account fields', () => {

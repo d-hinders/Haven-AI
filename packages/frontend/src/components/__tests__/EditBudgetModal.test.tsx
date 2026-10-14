@@ -21,10 +21,17 @@ const { mockEditBudget, mockRevoke, mockSignersError, mockReloadSigners, mockRea
   mockReloadSigners: vi.fn(),
 }))
 
-vi.mock('@/hooks/useDelegationBudget', () => ({
+vi.mock('@/hooks/useDelegationBudget', async () => {
+  // The hook's own Stop-set read, over the mocked list: the real helper with
+  // no remembered attempt (the hook's tests cover the remembered case).
+  const slot = await vi.importActual<typeof import('@/lib/budget-slot')>('@/lib/budget-slot')
+  return {
   useDelegationBudget: () => ({
     budgets: mockBudgets(),
     editBudget: mockEditBudget,
+    editStopSet: (hash: string, oldSlot: { tokenAddress: string; recipientAddress?: string | null }, nowSec: number) =>
+      slot.slotOccupantHashesForEdit(mockBudgets() as never, hash, oldSlot, nowSec),
+    isOwnAttemptedGrant: () => false,
     revoke: mockRevoke,
     busy: false,
     ready: mockReady(),
@@ -33,7 +40,8 @@ vi.mock('@/hooks/useDelegationBudget', () => ({
     reloadSigners: mockReloadSigners,
     passkeyElsewhere: mockPasskeyElsewhere(),
   }),
-}))
+  }
+})
 
 const EditBudgetModal = (await import('../EditBudgetModal')).default
 

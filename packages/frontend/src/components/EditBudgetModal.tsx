@@ -42,7 +42,7 @@ import {
 } from '@/lib/merchantBudgetRefusal'
 import { truncateAddress, BudgetAmountRow, NoticeRow } from './haven'
 import { budgetPeriodWords } from '@/lib/budget-caption'
-import { findOccupyingBudget, sameSlot, slotOccupantHashesForEdit } from '@/lib/budget-slot'
+import { findOccupyingBudget, sameSlot } from '@/lib/budget-slot'
 import { Icon } from './ui/Icon'
 import { Button } from './ui/Button'
 import WalletConnectAction from './WalletConnectAction'
@@ -140,7 +140,7 @@ export default function EditBudgetModal({
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
   useFocusTrap(panelRef, open)
-  const { budgets, editBudget, revoke, busy, ready, signersError, signersLoading, reloadSigners, passkeyElsewhere } = useDelegationBudget(
+  const { budgets, editBudget, editStopSet, isOwnAttemptedGrant, revoke, busy, ready, signersError, signersLoading, reloadSigners, passkeyElsewhere } = useDelegationBudget(
     agentId,
     chainId,
     { enabled: open },
@@ -289,12 +289,18 @@ export default function EditBudgetModal({
   // a live budget already in that slot, which the backend would refuse.
   const nowSec = Math.floor(Date.now() / 1000)
   const oldSlot = { tokenAddress: budget.token_address, recipientAddress: budget.recipient_address }
-  const oldBudgetHashes = slotOccupantHashesForEdit(budgets, budget.delegation_hash, oldSlot, nowSec)
+  // Through the hook, so a retry after an `unconfirmed` edit counts the rows
+  // that attempt will Stop — never its own new grant.
+  const oldBudgetHashes = editStopSet(budget.delegation_hash, oldSlot, nowSec)
   const stopCount = oldBudgetHashes.length
   const moved = !!input && !sameSlot(oldSlot, { tokenAddress: input.tokenAddress, recipientAddress: input.recipientAddress })
   const targetOccupant =
     moved && input
-      ? findOccupyingBudget(budgets, { tokenAddress: input.tokenAddress, recipientAddress: input.recipientAddress }, nowSec)
+      ? findOccupyingBudget(
+          (budgets ?? []).filter((b) => !isOwnAttemptedGrant(b.delegation_hash)),
+          { tokenAddress: input.tokenAddress, recipientAddress: input.recipientAddress },
+          nowSec,
+        )
       : null
 
   const handleClose = useCallback(() => {

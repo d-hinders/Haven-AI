@@ -403,6 +403,12 @@ export function useDelegationBudget(
   // minting a new one, or the retry adds a second enabled grant. Cleared when
   // the agent changes (the reset effect below): hashes are agent-scoped.
   const lastAttempted = useRef(new Map<string, string>())
+  // #3933: an `unconfirmed` EDIT also remembers the old rows it was going to
+  // Stop, keyed by the attempted (new) hash. On the retry that finds the grant
+  // landed, the loaded list has moved on — the new grant is now the slot's
+  // active row and the old rows read `replaced` — so recomputing the Stop set
+  // from it would Stop the owner's NEW budget and miss a re-key's steady half.
+  const attemptedStopSets = useRef(new Map<string, string[]>())
   // The ACCOUNT address scopes the signer lookup (#1079): without it the
   // stored-passkey/hybrid branches are unreachable and `ready` would depend
   // on any globally-connected wallet with no per-account check.
@@ -527,9 +533,36 @@ export function useDelegationBudget(
       if (reread.kind === 'row' && reread.status === 'pending') return { outcome: 'unconfirmed' }
       if (reread.kind === 'read_failed') return { outcome: 'unconfirmed' }
       lastAttempted.current.delete(key)
+      attemptedStopSets.current.delete(remembered.toLowerCase())
       return { outcome: 'proceed' }
     },
     [readAttemptedHash],
+  )
+
+  /**
+   * #3933: the old rows an edit of `oldDelegationHash` will Stop. While an
+   * edit is `unconfirmed`, the set it computed is remembered, and the list
+   * may already show its new grant as the slot's live row; that grant is
+   * never part of the set, so the review copy's signature count and the
+   * Stop loop agree with what the lost attempt swept.
+   */
+  const editStopSet = useCallback(
+    (oldDelegationHash: string, oldSlot: BudgetSlot, nowSec: number): string[] => {
+      const old = oldDelegationHash.toLowerCase()
+      for (const set of attemptedStopSets.current.values()) {
+        if (set.some((hash) => hash.toLowerCase() === old)) return set
+      }
+      return slotOccupantHashesForEdit(budgets, oldDelegationHash, oldSlot, nowSec).filter(
+        (hash) => !attemptedStopSets.current.has(hash.toLowerCase()),
+      )
+    },
+    [budgets],
+  )
+
+  /** #3933: whether `hash` is a grant this hook's own `unconfirmed` edit made (not someone else's live budget). */
+  const isOwnAttemptedGrant = useCallback(
+    (hash: string): boolean => attemptedStopSets.current.has(hash.toLowerCase()),
+    [],
   )
 
   useEffect(() => {
@@ -572,6 +605,7 @@ export function useDelegationBudget(
     // agent's hash (it would come back absent and the guard would just
     // fall through, but the state is stale regardless).
     lastAttempted.current.clear()
+    attemptedStopSets.current.clear()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately NOT `enabled`/`chainId`: the effect above already resets on enable/disable; chainId is not part of this hook's read scope (see comment above).
   }, [agentId])
 
@@ -809,7 +843,7 @@ export function useDelegationBudget(
         const moved = !sameSlot(oldSlot, newSlot)
         // The old budget's rows: what a same-slot edit names as `replaces`
         // (and activate sweeps), and what every edit then Stops.
-        const oldBudgetHashes = slotOccupantHashesForEdit(budgets, oldDelegationHash, oldSlot, nowSec)
+        const oldBudgetHashes = editStopSet(oldDelegationHash, oldSlot, nowSec)
         const replaces = moved ? {} : { replaces: oldBudgetHashes }
         // A 409 BUDGET_SLOT_OCCUPIED is about the slot the grant goes INTO:
         // for a move, that is the target slot, not the edited budget.
@@ -827,12 +861,20 @@ export function useDelegationBudget(
         let newHash: string
         if (guard.outcome === 'landed') {
           newHash = guard.hash
+          // `oldBudgetHashes` above is already the Stop set the lost attempt
+          // computed (`editStopSet`), not one recomputed from a list that now
+          // shows the new grant as the slot's live row. Used up here.
+          attemptedStopSets.current.delete(newHash.toLowerCase())
         } else {
           if (guard.outcome === 'unconfirmed') return { ok: false, reason: 'unconfirmed' }
           if (moved) {
             // Finding 2's pre-check: the chosen recipient already has a live
             // budget for this token. Nothing is built or signed.
-            const occupant = findOccupyingBudget(budgets, newSlot, nowSec)
+            const occupant = findOccupyingBudget(
+              (budgets ?? []).filter((b) => !isOwnAttemptedGrant(b.delegation_hash)),
+              newSlot,
+              nowSec,
+            )
             if (occupant) {
               return { ok: false, reason: 'target_slot_occupied', existingDelegationHash: occupant.delegation_hash }
             }
@@ -915,6 +957,7 @@ export function useDelegationBudget(
               // hash so the retry re-reads it before building. NEVER "nothing
               // was granted".
               lastAttempted.current.set(slotKey(input.tokenAddress, input.recipientAddress), newHash)
+              attemptedStopSets.current.set(newHash.toLowerCase(), oldBudgetHashes)
               return { ok: false, reason: 'unconfirmed' }
             }
           }
@@ -950,7 +993,19 @@ export function useDelegationBudget(
         setBusy(false)
       }
     },
-    [agentId, budgets, signingPath, reload, signer, signers, guardRetriedSlot, readAttemptedHash, stopOldDelegation],
+    [
+      agentId,
+      budgets,
+      signingPath,
+      reload,
+      signer,
+      signers,
+      guardRetriedSlot,
+      readAttemptedHash,
+      stopOldDelegation,
+      editStopSet,
+      isOwnAttemptedGrant,
+    ],
   )
 
   const revoke = useCallback(
@@ -1062,6 +1117,8 @@ export function useDelegationBudget(
     budgets,
     grant,
     editBudget,
+    editStopSet,
+    isOwnAttemptedGrant,
     revoke,
     revokeAll,
     busy,

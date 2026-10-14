@@ -23,10 +23,16 @@ const { mockGrant, mockReady, mockBudgets, mockBudgetsError, mockReload, mockSig
   mockReload: vi.fn(),
 }))
 
+// The modal's Stop-set read (#3933), over the mocked list: the real helper
+// with no remembered attempt (the hook's own tests cover that case).
+const budgetSlot = await vi.importActual<typeof import('@/lib/budget-slot')>('@/lib/budget-slot')
 vi.mock('@/hooks/useDelegationBudget', () => ({
   useDelegationBudget: () => ({
     budgets: mockBudgets(),
     budgetsError: mockBudgetsError(),
+    editStopSet: (hash: string, slot: { tokenAddress: string; recipientAddress?: string | null }, nowSec: number) =>
+      budgetSlot.slotOccupantHashesForEdit(mockBudgets() as never, hash, slot, nowSec),
+    isOwnAttemptedGrant: () => false,
     reload: mockReload,
     grant: mockGrant,
     busy: false,

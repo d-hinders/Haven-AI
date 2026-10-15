@@ -1119,10 +1119,11 @@ compatibility contract — the manifest table, version skew, `--doctor`'s checks
 > move.
 
 > **Re-verified #3996 (2026-10-15 — an additive env reader in
-> `packages/mcp/src/credentials.ts`).** The diff touches one covered path,
-> `packages/mcp/src/credentials.ts` (plus `packages/mcp/src/server.ts`, which
-> this document does not cover): a new exported `chainRpcsFromEnv(env)` helper
-> that scans for `HAVEN_RPC_URL_<chainId>` scalars, consumed by
+> `packages/mcp/src/credentials.ts`).** The diff touches two covered paths:
+> `packages/mcp/src/credentials.ts`, which gains the exported
+> `chainRpcsFromEnv(env)` helper, and `packages/mcp/src/server.ts`, newly
+> declared in `covers:` so this doc is implicated the next time that file
+> changes. The helper scans for `HAVEN_RPC_URL_<chainId>` scalars, consumed by
 > `resolveHavenClient`. It does not touch `HAVEN_CONNECTOR_CHANNEL`, the
 > credential-file shape, the consent inputs, any version constant, or any
 > field this document names; nothing about channel selection, dist-tag

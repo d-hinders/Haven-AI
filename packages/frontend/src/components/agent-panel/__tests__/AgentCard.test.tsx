@@ -592,3 +592,50 @@ describe('AgentCard status-keyed actions and chip (#3945)', () => {
     }
   })
 })
+
+// #3988: the budget block never reads "No budget" for a grant holder, and a
+// ZERO-capped budget is no authority (#3897) — all three through the shared
+// `lib/agent-budget.ts` helper, which the assertions compare against on
+// purpose (the claim under test is "this surface renders the SHARED line").
+describe('AgentCard budget block (#3988)', () => {
+  it('reads the shared received-budget line for a grant holder with no own budget', () => {
+    renderCard(
+      agentFixture({
+        allowances: [],
+        receivedSubBudgets: [
+          { parent_agent_id: 'p1', parent_agent_name: 'Agent naming', open: true },
+        ],
+      } as Partial<Agent>),
+    )
+    expect(screen.getByText('Spends from Agent naming\'s budget')).toBeTruthy()
+    expect(document.body.textContent).not.toContain('No budget')
+  })
+
+  it('joins several parents with "and", budgets plural', () => {
+    renderCard(
+      agentFixture({
+        allowances: [],
+        receivedSubBudgets: [
+          { parent_agent_id: 'p1', parent_agent_name: 'Agent naming', open: true },
+          { parent_agent_id: 'p2', parent_agent_name: 'Ops agent', open: true },
+        ],
+      } as Partial<Agent>),
+    )
+    expect(screen.getByText("Spends from Agent naming and Ops agent's budgets")).toBeTruthy()
+  })
+
+  it('reads "No budget" when there is neither a positive cap nor an open grant', () => {
+    renderCard(agentFixture({ allowances: [], receivedSubBudgets: [] }))
+    expect(screen.getByText('No budget')).toBeTruthy()
+  })
+
+  it('a zero-cap budget reads "No budget" even with an absent grant list', () => {
+    renderCard(
+      agentFixture({
+        allowances: [{ id: 'z', agent_id: 'agent-1', token_address: '0x0', token_symbol: 'USDC', allowance_amount: '0', reset_period_min: 1440 }],
+        receivedSubBudgets: undefined,
+      } as unknown as Partial<Agent>),
+    )
+    expect(screen.getByText('No budget')).toBeTruthy()
+  })
+})

@@ -929,6 +929,10 @@ export const FIXTURE_AGENTS = [
       token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
       token_symbol: 'USDC', allowance_amount: '250.000000', reset_period_min: 10080,
     }],
+    // #3988: the received grants ride on every Agent read. The default
+    // dataset carries none — the dedicated `received-sub-budgets` scenario
+    // is the one place the grant-holder states photograph.
+    receivedSubBudgets: [],
     // #3167: labels ride on every agent read — the showcase agent carries two,
     // so the /agents screenshot photographs chips and the "+N" overflow rule.
     labels: [
@@ -970,6 +974,7 @@ export const FIXTURE_AGENTS = [
       token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
       token_symbol: 'USDC', allowance_amount: '500.000000', reset_period_min: 1440,
     }],
+    receivedSubBudgets: [],
     // #3167: the paused agent is unlabelled — the empty state photographs too.
     labels: [],
     // #3164: the paused agent is filed under DevOps (a sub-organization), so
@@ -1053,6 +1058,7 @@ export const FIXTURE_HALF_REVOKED_AGENTS = [
       token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
       token_symbol: 'USDC', allowance_amount: '150.000000', reset_period_min: 10080,
     }],
+    receivedSubBudgets: [],
     archived_at: null,
   },
   {
@@ -1066,6 +1072,7 @@ export const FIXTURE_HALF_REVOKED_AGENTS = [
       token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
       token_symbol: 'USDC', allowance_amount: '75.000000', reset_period_min: 1440,
     }],
+    receivedSubBudgets: [],
     archived_at: '2026-08-02T10:00:00.000Z',
   },
 ]
@@ -4200,6 +4207,89 @@ export const SCENARIOS = {
       await dismissMobileSidebar(page, vp)
       await page.getByText(/Budget still active/).first().waitFor({ timeout: 20_000 })
       await shoot(page.locator('main').first(), 'account-summary')
+    },
+  },
+
+  /**
+   * #3988: the received sub-budget states. A grant HOLDER with no budget of
+   * its own used to read "No budget" on /agents and got no trace of the
+   * grant on its own page; both are the fix's visible halves.
+   *
+   * Reachability: `agent-research` is remapped to the holder — its own
+   * allowances EMPTY (so the helper's received line takes over) and an OPEN
+   * received grant from the paused agent, exactly the chain the server's
+   * qualifying-chain read would answer `open: true` for (real grant, live
+   * parent-child, spendable parent budget). The detail read for the same
+   * agent serves the received list (`useReceivedSubBudgets`' endpoint);
+   * every other read keeps the default dataset, so the page is otherwise the
+   * ordinary agent page.
+   */
+  'received-sub-budgets': {
+    description:
+      'Received sub-budgets (#3988) — the /agents card Spends-from line for a grant holder with no own budget, and the holder Spending card Received budgets block',
+    api(apiPath, method) {
+      if (apiPath === '/agents' && method === 'GET') {
+        return {
+          agents: FIXTURE_AGENTS.map((a) =>
+            a.id === 'agent-research'
+              ? {
+                  ...a,
+                  allowances: [],
+                  receivedSubBudgets: [
+                    { parent_agent_id: 'agent-retired', parent_agent_name: 'Data-feed agent', open: true },
+                  ],
+                }
+              : a,
+          ),
+          organizations: FIXTURE_ORGANIZATIONS,
+        }
+      }
+      if (apiPath === '/agents/agent-research/sub-budgets/received') {
+        return {
+          agent_id: 'agent-research',
+          received: [
+            {
+              id: 'recv-e2e-1',
+              agent_id: 'agent-research',
+              parent_agent_id: 'agent-retired',
+              parent_agent_name: 'Data-feed agent',
+              parent_sub_budget_id: 'pc-e2e-1',
+              chain_id: 8453,
+              token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+              recipient_address: null,
+              parent_delegation_hash: '0x' + 'ab'.repeat(32),
+              delegation_hash: '0x' + 'cd'.repeat(32),
+              label: null,
+              period_amount_atomic: '25000000',
+              status: 'open',
+              expires_at: 9_999_999_999,
+              is_expired: false,
+              is_live: true,
+              created_at: '2026-09-01T10:00:00.000Z',
+              opened_at: '2026-09-01T10:00:00.000Z',
+              closed_at: null,
+              close_tx_hash: null,
+            },
+          ],
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      // ── /agents: the grant-holder card's budget block ──────────────────────
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      const card = page.getByTestId('agent-card').filter({ hasText: 'Research agent' })
+      await card.getByText("Spends from Data-feed agent's budget").waitFor({ timeout: 20_000 })
+      await card.scrollIntoViewIfNeeded()
+      await shoot(card, 'agents-card-grant-holder')
+
+      // ── Holder detail: the Received budgets block inside the Spending card ─
+      await page.goto(`${BASE_URL}/agents/agent-research`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByText('Received budgets').waitFor({ timeout: 20_000 })
+      await page.getByText('From Data-feed agent').waitFor({ timeout: 20_000 })
+      await shoot(page.locator('main').first(), 'detail-received-budgets')
     },
   },
 

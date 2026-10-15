@@ -877,6 +877,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/agents/{id}/sub-budgets/received": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The sub-budget grants this agent RECEIVES and has not closed.
+         * @description #3988 — the holder's side of the sub-budget table: every non-closed grant the agent holds, with the parent agent's name, for the read-only Received budgets block on the holder's own page. Read-only by design — closing a grant stays the delegator's action (DELETE /agents/{id}/sub-budgets/{sub}). Whether a grant can actually pay is the server's chain verdict on the Agent payload (`receivedSubBudgets[].open`), not this list.
+         */
+        get: operations["listReceivedAgentSubBudgets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agents/{id}/sub-budgets/{sub}/sign": {
         parameters: {
             query?: never;
@@ -5051,6 +5071,7 @@ export type components = {
             created_at: string;
             archived_at?: string | null;
             allowances: components["schemas"]["AgentAllowance"][];
+            receivedSubBudgets?: components["schemas"]["AgentReceivedSubBudget"][];
             labels: components["schemas"]["Label"][];
             organization_id: string | null;
             tax_declaration_enabled: boolean;
@@ -6277,12 +6298,23 @@ export type components = {
              */
             periodEnd: string;
         };
+        /** @description #3988 — a sub-budget grant the agent received from a parent agent, with the server-side qualifying-chain verdict. `open` follows the payment path: a grant whose chain the payment path would refuse (stopped parent budget, closed or expired parent-child row, expired grant, or the delegator's own self row) is `open: false`, so no surface presents it as spendable. */
+        AgentReceivedSubBudget: {
+            /** Format: uuid */
+            parent_agent_id: string;
+            parent_agent_name: string;
+            open: boolean;
+        };
+        /** @description #3988 — one row of GET /agents/{id}/sub-budgets/received: the same wire shape as SubBudget (is_live is the server’s liveness answer) plus the parent agent’s display name. Deliberately WIDER than the chain verdict: a pending or closing grant is listed (the owner can still act on it) but only the Agent payload’s `receivedSubBudgets[].open` says whether it can pay. */
+        ReceivedSubBudgetGrant: components["schemas"]["SubBudget"] & {
+            parent_agent_name: string;
+        };
         /** @description #3803 — a sub-budget grant the agent received from a parent agent. */
         DashboardReceivedSubBudget: {
             /** Format: uuid */
             parentAgentId: string;
             parentAgentName: string;
-            /** @description true iff the grant's stored status is 'open'. */
+            /** @description #3988: true iff the WHOLE redemption chain is live by Haven's rows — the grant is open and unexpired, hangs from an open, unexpired parent-child row, and that row was carved from the parent agent's currently spendable budget delegation (the payment path would accept the chain). Not the grant's stored status alone, and never true for a self row. */
             open: boolean;
         };
         /** @description #3803 — one window of the 7/30-day block. gross is the booked (or re-priced) fiat; net is gross with the #3755 delegate_sweeps ratio netting applied. Both are USD/EUR/SEK triples. */
@@ -10412,6 +10444,62 @@ export interface operations {
                             grants: components["schemas"]["SubBudget"][];
                         }[];
                         unattached: components["schemas"]["SubBudget"][];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listReceivedAgentSubBudgets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The received grants, newest first. Closed grants are never listed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        agent_id: string;
+                        received: components["schemas"]["ReceivedSubBudgetGrant"][];
                     };
                 };
             };

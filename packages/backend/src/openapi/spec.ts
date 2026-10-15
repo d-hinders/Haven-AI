@@ -3287,6 +3287,40 @@ export const openapiSpec = {
         },
       },
     },
+    '/agents/{id}/sub-budgets/received': {
+      get: {
+        tags: ['SubBudgets'],
+        operationId: 'listReceivedAgentSubBudgets',
+        summary: 'The sub-budget grants this agent RECEIVES and has not closed.',
+        description:
+          "#3988 — the holder's side of the sub-budget table: every non-closed grant the agent holds, with the parent agent's name, for the read-only Received budgets block on the holder's own page. Read-only by design — closing a grant stays the delegator's action (DELETE /agents/{id}/sub-budgets/{sub}). Whether a grant can actually pay is the server's chain verdict on the Agent payload (`receivedSubBudgets[].open`), not this list.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '200': {
+            description: 'The received grants, newest first. Closed grants are never listed.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['agent_id', 'received'],
+                  properties: {
+                    agent_id: uuid,
+                    received: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/ReceivedSubBudgetGrant' },
+                    },
+                  },
+                  additionalProperties: false,
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
     '/agents/{id}/sub-budgets/{sub}/sign': {
       post: {
         tags: ['SubBudgets'],
@@ -11732,6 +11766,21 @@ export const openapiSpec = {
           archived_at: { anyOf: [isoDateTime, { type: 'null' }] },
           allowances: { type: 'array', items: { $ref: '#/components/schemas/AgentAllowance' } },
           /**
+           * #3988: the sub-budget grants this agent RECEIVED, each carrying
+           * the server's verdict on the WHOLE redemption chain — `open` is
+           * true iff the grant is a real grant (never the delegator's own
+           * parent-child row) that is open and unexpired, hangs from a live
+           * parent-child row, and that row was carved from the parent
+           * agent's currently spendable budget delegation: the same chain
+           * the payment path accepts. Clients render it; they never
+           * recompute it. Optional (absent on pre-#3988 cached reads); the
+           * list, detail, PATCH and create responses all emit it.
+           */
+          receivedSubBudgets: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/AgentReceivedSubBudget' },
+          },
+          /**
            * #3167: the labels this agent carries, name-sorted. Derived per
            * read (joined from agent_label_assignments), so it is never stale
            * and needs no second round trip. DISPLAY ONLY — categorization
@@ -13371,6 +13420,34 @@ export const openapiSpec = {
         },
         additionalProperties: false,
       },
+      AgentReceivedSubBudget: {
+        type: 'object',
+        description:
+          '#3988 — a sub-budget grant the agent received from a parent agent, with the server-side qualifying-chain verdict. `open` follows the payment path: a grant whose chain the payment path would refuse (stopped parent budget, closed or expired parent-child row, expired grant, or the delegator\'s own self row) is `open: false`, so no surface presents it as spendable.',
+        required: ['parent_agent_id', 'parent_agent_name', 'open'],
+        properties: {
+          parent_agent_id: uuid,
+          parent_agent_name: { type: 'string' },
+          open: { type: 'boolean' },
+        },
+        additionalProperties: false,
+      },
+      ReceivedSubBudgetGrant: {
+        type: 'object',
+        description:
+          '#3988 — one row of GET /agents/{id}/sub-budgets/received: the same wire shape as SubBudget (is_live is the server’s liveness answer) plus the parent agent’s display name. Deliberately WIDER than the chain verdict: a pending or closing grant is listed (the owner can still act on it) but only the Agent payload’s `receivedSubBudgets[].open` says whether it can pay.',
+        allOf: [
+          { $ref: '#/components/schemas/SubBudget' },
+          {
+            type: 'object',
+            required: ['parent_agent_name'],
+            properties: {
+              parent_agent_name: { type: 'string' },
+            },
+            additionalProperties: false,
+          },
+        ],
+      },
       DashboardReceivedSubBudget: {
         type: 'object',
         description: '#3803 — a sub-budget grant the agent received from a parent agent.',
@@ -13378,7 +13455,11 @@ export const openapiSpec = {
         properties: {
           parentAgentId: uuid,
           parentAgentName: { type: 'string' },
-          open: { type: 'boolean', description: "true iff the grant's stored status is 'open'." },
+          open: {
+            type: 'boolean',
+            description:
+              "#3988: true iff the WHOLE redemption chain is live by Haven's rows — the grant is open and unexpired, hangs from an open, unexpired parent-child row, and that row was carved from the parent agent's currently spendable budget delegation (the payment path would accept the chain). Not the grant's stored status alone, and never true for a self row.",
+          },
         },
         additionalProperties: false,
       },

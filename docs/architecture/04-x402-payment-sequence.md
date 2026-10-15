@@ -62,7 +62,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-10-14"
+last-verified: "2026-10-15"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -2754,3 +2754,17 @@ effective (narrower) limits, and the dashboard shows the parent→child tree.
 > EIP-3009-only; it is now true of both schemes. Scope of this note: those
 > three passages. Nothing else in this document was re-verified.
 > `last-verified` is not re-stamped.
+
+> **Re-verified #3988 (2026-10-15 — a read-only holder-side sub-budget
+> listing).** The diff touches one covered path:
+> `routes/agent-sub-budgets.ts` gains
+> `GET /agents/{id}/sub-budgets/received` — a SELECT-only read of the
+> non-closed grants an agent RECEIVES, with the parent agent's name joined,
+> for the holder's own page. It prepares, signs and redeems nothing and
+> offers no mutation (closing stays the delegator's DELETE); the
+> payment-time chain check (`checkSubBudgetForPayment`) is untouched, and
+> the display verdict the Agent payload ships is the same chain that check
+> already enforced, so no display can now present a chain the payment path
+> would refuse. Scope of this note: that one route. Nothing else in this
+> document was re-verified; `last-verified` is bumped to 2026-10-15 for
+> exactly this coverage.

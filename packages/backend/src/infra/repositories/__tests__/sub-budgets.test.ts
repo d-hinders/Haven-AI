@@ -5,7 +5,7 @@
  * exactly like `task-budgets.test.ts` (#3329).
  */
 import { randomUUID } from 'node:crypto'
-import { beforeAll, beforeEach, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import {
@@ -26,7 +26,7 @@ import {
   type InsertPendingSubBudgetInput,
 } from '../sub-budgets.js'
 import { checkSubBudgetForPayment } from '../../../modules/sub-budgets/sub-budget-service.js'
-import { listReceivedSubBudgetsForAgents } from '../dashboard.js'
+import { listReceivedGrantsForAgents } from '../sub-budgets.js'
 
 const USDC = '0x036cbd53842c5426634e7929541ec2318f3dcf7e'
 const BUDGET_HASH = `0x${'a'.repeat(64)}`
@@ -100,6 +100,34 @@ async function openGrantLive(grantId: string, now: number): Promise<boolean> {
     [now, grantId],
   )
   return result.rows[0].live
+}
+
+/**
+ * The parent agent's BUDGET delegation — the root of the redemption chain
+ * the qualifying-chain read now checks (#3988). `expiresAt` in the past
+ * seeds a STOPPED budget; a not-yet-started row would be the other
+ * non-spendable shape the payment selector refuses.
+ */
+async function seedBudgetDelegation(
+  agentId: string,
+  delegationHash: string,
+  over: { expiresAt?: number; startDate?: number } = {},
+): Promise<void> {
+  const n = ++seq
+  await db.query(
+    `INSERT INTO agent_delegations
+       (agent_id, chain_id, token_address, delegation_hash, delegation_json, version, status,
+        budget_atomic, period_seconds, start_date, expires_at)
+     VALUES ($1, 84532, $2, $3, $4, 1, 'active', '250000000', 604800, $5, $6)`,
+    [
+      agentId,
+      USDC,
+      delegationHash,
+      JSON.stringify({ kind: 'test-fixture', n }),
+      over.startDate ?? 0,
+      over.expiresAt ?? 99999999999,
+    ],
+  )
 }
 
 describeDb('agent_sub_budgets repository (#3330)', () => {
@@ -374,21 +402,137 @@ describeDb('agent_sub_budgets repository (#3330)', () => {
     await markOpen(parentChild.id, a.agentId, signed)
     await markOpen(grant.id, a.agentId, signed)
 
-    const received = await listReceivedSubBudgetsForAgents(b.userId, [b.agentId], now)
+    const received = await listReceivedGrantsForAgents(b.userId, [b.agentId], now)
     expect(received).toHaveLength(1)
     expect(received[0]).toMatchObject({ agent_id: b.agentId, parent_agent_id: a.agentId, open: false })
     expect(await listForAgent(b.agentId, { status: 'open', nowSec: now })).toEqual([])
 
     // Control: the same tree UNEXPIRED answers open = true on both readers.
+    // #3988: the healthy chain ALSO needs the parent's budget delegation to
+    // be spendable — the root link of the three-link redemption chain.
     const c = await seedAgent('parent-c')
     const d = await seedAgent('sub-d')
     const liveTree = await seedTree(c, d)
+    await seedBudgetDelegation(c.agentId, liveTree.parentChild.parent_delegation_hash)
     await markOpen(liveTree.parentChild.id, c.agentId, signed)
     await markOpen(liveTree.grant.id, c.agentId, signed)
-    const liveReceived = await listReceivedSubBudgetsForAgents(d.userId, [d.agentId], now)
+    const liveReceived = await listReceivedGrantsForAgents(d.userId, [d.agentId], now)
     expect(liveReceived).toHaveLength(1)
     expect(liveReceived[0]).toMatchObject({ agent_id: d.agentId, parent_agent_id: c.agentId, open: true })
     expect(await listForAgent(d.agentId, { status: 'open', nowSec: now })).toHaveLength(1)
+  })
+
+  /**
+   * #3988, each case the issue names for the qualifying-chain read. The
+   * expired-grant case is pinned by the #3919 P3 test above (same reader,
+   * same verdict). The read answers one row per REAL grant — `open: false`
+   * when the chain is broken, because a broken-chain grant is still
+   * authority the owner can act on — and never answers a self row at all.
+   */
+  describe('#3988: the qualifying-chain read', () => {
+    const now = Math.floor(Date.now() / 1000)
+    const signed = JSON.stringify({ signed: true })
+
+    async function seedLiveTree(a: Seeded, b: Seeded) {
+      const tree = await seedTree(a, b)
+      await seedBudgetDelegation(a.agentId, tree.parentChild.parent_delegation_hash)
+      await markOpen(tree.parentChild.id, a.agentId, signed)
+      await markOpen(tree.grant.id, a.agentId, signed)
+      return tree
+    }
+
+    it('a healthy chain counts: real grant, live parent-child, spendable parent budget', async () => {
+      const a = await seedAgent('healthy-a')
+      const b = await seedAgent('healthy-b')
+      await seedLiveTree(a, b)
+
+      const received = await listReceivedGrantsForAgents(b.userId, [b.agentId], now)
+      expect(received).toHaveLength(1)
+      expect(received[0]).toMatchObject({
+        agent_id: b.agentId,
+        parent_agent_id: a.agentId,
+        open: true,
+      })
+      // The name JOIN resolves to the parent agent's real name.
+      expect(received[0].parent_agent_name).toContain('healthy-a')
+      expect(received[0].parent_agent_name.length).toBeGreaterThan(0)
+    })
+
+    it('a delegator with a stopped budget and an open parent-child row is never counted (self row)', async () => {
+      // A's own narrowing row (agent_id = parent_agent_id, no grant behind
+      // it) — with A's budget delegation STILL SPENDABLE, so the only rule
+      // that can exclude it is the real-grant rule itself.
+      const a = await seedAgent('self-row-a')
+      await seedBudgetDelegation(a.agentId, BUDGET_HASH)
+      const selfRow = await insertPendingSubBudget(subInput(a.agentId))
+      await markOpen(selfRow.id, a.agentId, signed)
+
+      const received = await listReceivedGrantsForAgents(a.userId, [a.agentId], now)
+      expect(received).toEqual([])
+    })
+
+    it('B whose parent budget was stopped is not counted (open: false)', async () => {
+      const a = await seedAgent('stopped-budget-a')
+      const b = await seedAgent('stopped-budget-b')
+      const tree = await seedTree(a, b)
+      await seedBudgetDelegation(a.agentId, tree.parentChild.parent_delegation_hash, {
+        // The owner stopped A's budget delegation: past its spend window.
+        expiresAt: now - 120,
+      })
+      await markOpen(tree.parentChild.id, a.agentId, signed)
+      await markOpen(tree.grant.id, a.agentId, signed)
+
+      const received = await listReceivedGrantsForAgents(b.userId, [b.agentId], now)
+      expect(received).toHaveLength(1)
+      expect(received[0]).toMatchObject({ agent_id: b.agentId, open: false })
+    })
+
+    it('B whose parent-child row is closed is not counted (open: false)', async () => {
+      const a = await seedAgent('closed-middle-a')
+      const b = await seedAgent('closed-middle-b')
+      const tree = await seedLiveTree(a, b)
+      await markClosed(tree.parentChild.id, a.agentId, null)
+
+      const received = await listReceivedGrantsForAgents(b.userId, [b.agentId], now)
+      expect(received).toHaveLength(1)
+      expect(received[0]).toMatchObject({ agent_id: b.agentId, open: false })
+    })
+
+    it('a grant that does not hang from its named parent-child row is not counted', async () => {
+      // Edge-1 of checkSubBudgetForPayment: the grant's parent_delegation_hash
+      // must name the parent-child row's OWN delegation hash. Two trees from
+      // the same parent: B's grant re-pointed at the WRONG parent-child hash.
+      const a = await seedAgent('hangs-a')
+      const b = await seedAgent('hangs-b')
+      const wrong = await seedTree(a, await seedAgent('hangs-other'))
+      const tree = await seedTree(a, b)
+      await seedBudgetDelegation(a.agentId, tree.parentChild.parent_delegation_hash)
+      // Re-point B's grant at the WRONG parent-child's hash (both rows open).
+      await db.query(`UPDATE agent_sub_budgets SET parent_delegation_hash = $1 WHERE id = $2`, [
+        wrong.parentChild.delegation_hash,
+        tree.grant.id,
+      ])
+      await markOpen(tree.parentChild.id, a.agentId, signed)
+      await markOpen(tree.grant.id, a.agentId, signed)
+      await markOpen(wrong.parentChild.id, a.agentId, signed)
+
+      const received = await listReceivedGrantsForAgents(b.userId, [b.agentId], now)
+      expect(received).toHaveLength(1)
+      expect(received[0]).toMatchObject({ agent_id: b.agentId, open: false })
+    })
+
+    it('a PENDING grant row is listed with open: false, not dropped', async () => {
+      const a = await seedAgent('pending-a')
+      const b = await seedAgent('pending-b')
+      const tree = await seedTree(a, b)
+      await seedBudgetDelegation(a.agentId, tree.parentChild.parent_delegation_hash)
+      await markOpen(tree.parentChild.id, a.agentId, signed)
+      // B's grant stays pending — A has not signed it yet.
+
+      const received = await listReceivedGrantsForAgents(b.userId, [b.agentId], now)
+      expect(received).toHaveLength(1)
+      expect(received[0]).toMatchObject({ agent_id: b.agentId, open: false })
+    })
   })
 
   it('#3506 listAwaitingSignatureForDelegatingAgent: pending/closing rows for the DELEGATING agent only, parent-child first, never the sub-agent', async () => {

@@ -64,7 +64,7 @@ describe('search', () => {
   })
 })
 
-describe('budget state, derived from allowances alone', () => {
+describe('budget state, derived from the shared agent-budget helper (#3988)', () => {
   it('none / one_time / recurring', () => {
     expect(budgetStateOf(charlie)).toBe('none')
     expect(budgetStateOf(bravo)).toBe('one_time')
@@ -73,10 +73,38 @@ describe('budget state, derived from allowances alone', () => {
   it('a mixed set is recurring if any allowance resets', () => {
     expect(budgetStateOf(agent({ allowances: [allowance('1', 0), allowance('2', 10080)] }))).toBe('recurring')
   })
-  it('does not offer states the row cannot prove (exhausted, near limit, pending signature)', () => {
-    // A facet option that could never match would read as "no agent is near
-    // its limit" — a false zero. The options are exactly the three derivable ones.
-    expect(BUDGET_FACET.options.map((o) => o.value)).toEqual(['recurring', 'one_time', 'none'])
+  it('a ZERO-capped own budget is no authority: it reads none unless a grant is open', () => {
+    // #3897's rule, now through the helper: `allowances.length` alone would
+    // have classified the zero cap one_time.
+    expect(budgetStateOf(agent({ allowances: [allowance('0')] }))).toBe('none')
+  })
+  it('a grant holder is classified received, never none (#3988)', () => {
+    const holder = agent({
+      allowances: [],
+      receivedSubBudgets: [{ parent_agent_id: 'p', parent_agent_name: 'Agent naming', open: true }],
+    } as Partial<Agent>)
+    expect(budgetStateOf(holder)).toBe('received')
+  })
+  it('a NON-qualifying received grant (open: false) is not a budget', () => {
+    const stale = agent({
+      allowances: [],
+      receivedSubBudgets: [{ parent_agent_id: 'p', parent_agent_name: 'Agent naming', open: false }],
+    } as Partial<Agent>)
+    expect(budgetStateOf(stale)).toBe('none')
+  })
+  it('own positive budgets win over the received classification', () => {
+    const both = agent({
+      allowances: [allowance('25')],
+      receivedSubBudgets: [{ parent_agent_id: 'p', parent_agent_name: 'Agent naming', open: true }],
+    } as Partial<Agent>)
+    expect(budgetStateOf(both)).toBe('recurring')
+  })
+  it('the facet offers the four derivable states; none keeps its name', () => {
+    expect(BUDGET_FACET.options.map((o) => o.value)).toEqual(['recurring', 'one_time', 'received', 'none'])
+    // #3988: saved `?budget=none` links keep parsing — the value is unchanged.
+    expect(
+      readFilterState(new URLSearchParams('budget=none'), BUILT_IN_FACETS).facets.budget,
+    ).toEqual(['none'])
   })
 })
 
@@ -98,6 +126,14 @@ describe('sort', () => {
     expect(largestAllowance(bravo)).toBe(100)
     expect(largestAllowance(charlie)).toBe(0)
     expect([...ALL].sort(compareAgents('budget')).map((a) => a.name)).toEqual(['Bravo', 'Alpha', 'charlie'])
+  })
+  it('budget: a received-grant holder ranks above a zero-capped agent, not tied at 0 (#3988)', () => {
+    const holder = agent({ id: 'h', name: 'Holder', allowances: [], receivedSubBudgets: [{ parent_agent_id: 'p', parent_agent_name: 'A', open: true }] } as Partial<Agent>)
+    const zeroCap = agent({ id: 'z', name: 'Zerocap', allowances: [allowance('0')] })
+    // Both "amount 0"; the holder has authority the zero cap does not.
+    expect([...[zeroCap, holder]].sort(compareAgents('budget')).map((a) => a.name)).toEqual(['Holder', 'Zerocap'])
+    // A known positive amount still outranks the unknown grant.
+    expect([...[holder, alpha]].sort(compareAgents('budget')).map((a) => a.name)).toEqual(['Alpha', 'Holder'])
   })
   it('a non-numeric allowance amount does not poison the sort', () => {
     expect(largestAllowance(agent({ allowances: [allowance('abc'), allowance('3')] }))).toBe(3)
@@ -163,7 +199,7 @@ describe('counts', () => {
     // status counts ignore the status selection…
     expect(counts.status).toEqual({ active: 1, paused: 1, pending_approval: 0, revoked: 1 })
     // …budget counts honour it (only charlie is revoked, and charlie has no budget)
-    expect(counts.budget).toEqual({ recurring: 0, one_time: 0, none: 1 })
+    expect(counts.budget).toEqual({ recurring: 0, one_time: 0, received: 0, none: 1 })
   })
 })
 

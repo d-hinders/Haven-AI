@@ -30,6 +30,7 @@
 
 import pool from '../../db.js'
 import { type Executor } from '../transaction.js'
+import { spendableDelegationSql } from './delegation-budgets.js'
 
 export interface SubBudgetRow {
   id: string
@@ -561,4 +562,115 @@ export async function sumOpenReservedForBudgetDelegation(
     nowSec,
   ])
   return BigInt(result.rows[0]?.total ?? '0')
+}
+
+// ── #3988: the received-grant read the display surfaces share ───────────────
+
+/**
+ * The chain verdict a received sub-budget grant must pass before ANY display
+ * may present it as spendable (#3988, the spec's settled decision): "'Spends
+ * from' means the payment path would accept the chain, by Haven's own rows."
+ * This is {@link checkSubBudgetForPayment} as a WHERE expression, by Haven's
+ * rows alone:
+ *
+ *  1. the grant is a REAL grant — `parent_sub_budget_id IS NOT NULL`, which
+ *     also excludes the delegator's own parent-child row (a self row has
+ *     `agent_id = parent_agent_id` AND `parent_sub_budget_id NULL`,
+ *     migration 100);
+ *  2. the grant row is open and unexpired ({@link openSubBudgetSql});
+ *  3. its parent-child row exists, is a parent-child row
+ *     (`parent_sub_budget_id IS NULL`, `agent_id = parent_agent_id`), is open
+ *     and unexpired, and is the row the grant HANGS FROM
+ *     (`parent_delegation_hash = pc.delegation_hash`);
+ *  4. that parent-child row was carved from the parent agent's SPENDABLE
+ *     budget delegation — an `agent_delegations` row by that exact hash that
+ *     passes `spendableDelegationSql` with `requireStarted: true`, the same
+ *     validity window `SELECT_ACTIVE_DELEGATION_BY_HASH_SQL` (the per-hash
+ *     payment selector) enforces: a stopped, expired or not-yet-started
+ *     parent budget is a chain the payment path refuses
+ *     (`sub_budget_parent_mismatch`), so it is not "Spends from".
+ *
+ * Real grants that FAIL the chain still return, with `open = false` — a
+ * pending grant is still authority the owner can act on (close it, sign it),
+ * the same reason the pre-#3988 read kept them. Only SELF rows are dropped
+ * outright: a delegator's own narrowing is not something it "received"
+ * (the #3988 Wrong-1 bug: A read "Spends from A's budget").
+ */
+export const RECEIVED_GRANTS_FOR_AGENTS_SQL = `SELECT asb.agent_id,
+         asb.parent_agent_id,
+         pa.name AS parent_agent_name,
+         (${openSubBudgetSql('asb', '$3')}
+           AND pc.parent_sub_budget_id IS NULL
+           AND pc.agent_id = asb.parent_agent_id
+           AND (${openSubBudgetSql('pc', '$3')})
+           AND asb.parent_delegation_hash = pc.delegation_hash
+           AND EXISTS (
+             SELECT 1 FROM agent_delegations ad
+             WHERE ad.agent_id = asb.parent_agent_id
+               AND ad.delegation_hash = pc.parent_delegation_hash
+               AND ${spendableDelegationSql('ad', { requireStarted: true })}
+           )) AS open
+  FROM agent_sub_budgets asb
+  JOIN agents pa ON pa.id = asb.parent_agent_id
+  JOIN agents holder ON holder.id = asb.agent_id
+  LEFT JOIN agent_sub_budgets pc ON pc.id = asb.parent_sub_budget_id
+  WHERE holder.user_id = $1
+    AND asb.agent_id = ANY($2)
+    AND asb.parent_sub_budget_id IS NOT NULL
+  ORDER BY asb.agent_id, pa.name`
+
+export interface ReceivedGrantRow {
+  agent_id: string
+  parent_agent_id: string
+  parent_agent_name: string
+  open: boolean
+}
+
+/** `userId` is REQUIRED; `agentIds` must have been read under the same tenant. */
+export async function listReceivedGrantsForAgents(
+  userId: string,
+  agentIds: string[],
+  nowSec: number = Math.floor(Date.now() / 1000),
+  executor: Executor = pool,
+): Promise<ReceivedGrantRow[]> {
+  if (agentIds.length === 0) return []
+  const result = await executor.query<ReceivedGrantRow>(
+    RECEIVED_GRANTS_FOR_AGENTS_SQL,
+    [userId, agentIds, nowSec],
+  )
+  return result.rows
+}
+
+/**
+ * The grants ONE agent received that are not `closed`, with the parent
+ * agent's name joined — the holder's detail page's "Received budgets" block
+ * (#3988). This is the DISPLAY list, deliberately wider than the chain
+ * verdict above: a pending or closing grant is not spendable yet, but it is
+ * still a received budget the owner should see (and only the delegator can
+ * close). `open`-ness rides on the wire's `is_live`; the caller renders the
+ * status through `subBudgetEndLabel`.
+ */
+export interface ReceivedGrantForOwnerRow extends SubBudgetRow {
+  parent_agent_name: string
+}
+
+/** `userId` is REQUIRED (the holder's owner — the route scopes by both). */
+export async function listReceivedGrantsForOwner(
+  agentId: string,
+  userId: string,
+  executor: Executor = pool,
+): Promise<ReceivedGrantForOwnerRow[]> {
+  const result = await executor.query<ReceivedGrantForOwnerRow>(
+    `SELECT g.*, pa.name AS parent_agent_name
+       FROM agent_sub_budgets g
+       JOIN agents pa ON pa.id = g.parent_agent_id
+       JOIN agents holder ON holder.id = g.agent_id
+      WHERE g.agent_id = $1
+        AND holder.user_id = $2
+        AND g.parent_sub_budget_id IS NOT NULL
+        AND g.status <> 'closed'
+      ORDER BY g.created_at DESC`,
+    [agentId, userId],
+  )
+  return result.rows
 }

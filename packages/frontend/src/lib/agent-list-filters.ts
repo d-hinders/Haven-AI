@@ -1,6 +1,7 @@
 import type { Agent } from '@/hooks/useAgents'
 import type { SmartAccount } from '@/context/AuthContext'
 import { accountWithChainLabel } from '@/lib/account-label'
+import { hasConfiguredAllowances, receivedBudgetLine } from '@/lib/agent-budget'
 
 /**
  * Search, facets and sort for the `/agents` list (#3165).
@@ -11,13 +12,21 @@ import { accountWithChainLabel } from '@/lib/account-label'
  * the toolbar. The built-in facets are the two the row already carries at
  * this head: status and budget state.
  *
- * Budget state is derived from `allowances` alone, which is all `GET /agents`
- * returns. "Exhausted", "near limit" and "pending signature" (the issue names
- * them) need a per-agent remaining figure or a setup state the row does not
- * carry, so they are NOT offered as options: a facet that silently matched
- * nothing would read as "no agent is near its limit", which is the false
- * zero this codebase keeps meeting. They arrive with a server field; see the
- * PR body for the note the issue asks for.
+ * Budget state (#3988) comes from the shared `lib/agent-budget.ts` helper —
+ * the agent's own `allowances` (zero-capped = none) PLUS its
+ * `receivedSubBudgets` (the server's qualifying-chain verdict). "Exhausted",
+ * "near limit" and "pending signature" (the issue names them) need a
+ * per-agent remaining figure or a setup state the row does not carry, so
+ * they are NOT offered as options: a facet that silently matched nothing
+ * would read as "no agent is near its limit", which is the false zero this
+ * codebase keeps meeting. They arrive with a server field; see the PR body
+ * for the note the issue asks for.
+ *
+ * The #3988 builder decision for a grant holder: its OWN facet value
+ * `received` ("Received budget") — `recurring`/`one_time` describe the
+ * agent's own cap, which a holder may not have, and the row carries no
+ * grant amount to classify it by. The existing `none` value keeps its name,
+ * so saved `?budget=none` links still parse.
  */
 
 export type AgentFacetMatch = 'any' | 'all'
@@ -77,13 +86,23 @@ export const STATUS_FACET: AgentFacet = {
   predicate: (agent, value) => agent.status === value,
 }
 
-export type BudgetState = 'recurring' | 'one_time' | 'none'
+export type BudgetState = 'recurring' | 'one_time' | 'received' | 'none'
 
-/** What the row can say about its budget from `allowances` alone. */
-export function budgetStateOf(agent: Pick<Agent, 'allowances'>): BudgetState {
-  const allowances = agent.allowances ?? []
-  if (allowances.length === 0) return 'none'
-  return allowances.some((a) => Number(a.reset_period_min) > 0) ? 'recurring' : 'one_time'
+/**
+ * What the row can say about its budget (#3988): the agent's own allowance
+ * caps through the shared helper's zero-cap rule, then the server's
+ * qualifying-chain verdict on its received grants. A grant holder is never
+ * classified `'none'` — "No budget" was the bug this file fed.
+ */
+export function budgetStateOf(
+  agent: Pick<Agent, 'allowances' | 'receivedSubBudgets'>,
+): BudgetState {
+  if (hasConfiguredAllowances(agent)) {
+    return (agent.allowances ?? []).some((a) => Number(a.reset_period_min) > 0)
+      ? 'recurring'
+      : 'one_time'
+  }
+  return receivedBudgetLine(agent.receivedSubBudgets) !== null ? 'received' : 'none'
 }
 
 export const BUDGET_FACET: AgentFacet = {
@@ -93,6 +112,7 @@ export const BUDGET_FACET: AgentFacet = {
   options: [
     { value: 'recurring', label: 'Recurring budget' },
     { value: 'one_time', label: 'One-time budget' },
+    { value: 'received', label: 'Received budget' },
     { value: 'none', label: 'No budget' },
   ],
   predicate: (agent, value) => budgetStateOf(agent) === value,
@@ -139,6 +159,10 @@ function time(value: string | null | undefined): number {
  * tokens are not comparable in fiat here (the row carries no price), so the
  * sort is by the largest number the user typed — good enough to bring the
  * big budgets to the top, and honest about being unit-blind.
+ *
+ * #3988: a received-grant holder ranks by `hasBudgetTieBreak` in the sort
+ * below, not here — the row carries no grant amount, so its number stays 0
+ * rather than an invented positive.
  */
 export function largestAllowance(agent: Pick<Agent, 'allowances'>): number {
   return (agent.allowances ?? []).reduce((max, a) => {
@@ -154,7 +178,15 @@ export function compareAgents(sort: AgentSortKey): (a: Agent, b: Agent) => numbe
     case 'created':
       return (a, b) => time(b.created_at) - time(a.created_at) || a.name.localeCompare(b.name)
     case 'budget':
-      return (a, b) => largestAllowance(b) - largestAllowance(a) || a.name.localeCompare(b.name)
+      // #3988: equal amounts fall to the shared helper's "has a budget"
+      // answer — a received-grant holder (whose amount the row does not
+      // carry) ranks above a zero-capped or budgetless agent instead of
+      // tying at 0.
+      return (a, b) =>
+        largestAllowance(b) - largestAllowance(a) ||
+        Number(hasConfiguredAllowances(b) || receivedBudgetLine(b.receivedSubBudgets) !== null) -
+          Number(hasConfiguredAllowances(a) || receivedBudgetLine(a.receivedSubBudgets) !== null) ||
+        a.name.localeCompare(b.name)
     case 'name':
     default:
       return (a, b) => a.name.localeCompare(b.name)

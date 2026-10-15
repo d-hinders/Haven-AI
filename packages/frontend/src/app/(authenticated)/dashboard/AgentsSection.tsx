@@ -46,6 +46,7 @@ import { StatusBadge, type StatusTone } from '@/components/ui/StatusBadge'
 import { BudgetMeter } from '@/components/haven'
 import type { AttentionRuleItem, DashboardBudgetRemaining, DashboardOverview } from '@/lib/dashboard-attention'
 import { agentUsedPercent, hasPositiveCap } from '@/lib/dashboard-attention'
+import { receivedBudgetLine } from '@/lib/agent-budget'
 import {
   budgetCaption,
   selectPrimaryBudgets,
@@ -188,15 +189,11 @@ function toCaptionRow(
   }
 }
 
-function receivedSubBudgetLine(agent: DashboardAgent): string | null {
-  const open = (agent.receivedSubBudgets ?? []).filter((sub) => sub.open)
-  if (open.length === 0) return null
-  // Distinct parents; one reads "<parent>'s budget", several "<a> and <b>'s
-  // budgets". The parent's own name carries the possessive's voice.
-  const parents = [...new Set(open.map((sub) => sub.parentAgentName))]
-  const subject = parents.join(' and ')
-  return `Spends from ${subject}${parents.length > 1 ? "'s budgets" : "'s budget"}`
-}
+/**
+ * #3988: the received-budget line is OWNED by `lib/agent-budget.ts` — the
+ * one copy every budget-authority display reads, alongside the zero-cap
+ * rule. (The dashboard wire is camelCase; `receivedBudgetLine` accepts it.)
+ */
 
 /**
  * The row's budget block: the meter captioned through #3806, or the em dash
@@ -232,7 +229,7 @@ function AgentBudget({
     // sub-budget is real authority and must never read "No budget" (#3803).
     // The row's "Last paid" node rides on the same line, right-aligned
     // (#3989): rows without a bar keep the time on the line they have.
-    const subBudgetLine = receivedSubBudgetLine(agent)
+    const subBudgetLine = receivedBudgetLine(agent.receivedSubBudgets)
     return (
       <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-3">
         <p className="text-xs text-[var(--v2-ink-3)]">{subBudgetLine ?? 'No budget'}</p>

@@ -1388,3 +1388,12 @@ project owner — collaborators have Viewer access, not env-var write access.
 > mode, enforced-module list, environment variable or dev setup step this
 > document describes moved. The rest of this document was not re-read for it,
 > and `last-verified` is not bumped.
+
+> **Re-verified #3988 (2026-10-15 — a generated table, regenerated).**
+> `packages/backend/src/openapi/route-modules.generated.ts` is the one
+> covered file in this diff: it is REGENERATED (`npm run
+> generate:route-modules`) for the new `GET /agents/{id}/sub-budgets/received`
+> operation, exactly as the file's own header instructs — one mapped row, no
+> mode, enforced-module list, environment variable or dev setup step this
+> document describes moved. The rest of this document was not re-read for
+> it; `last-verified` already reads 2026-10-15.

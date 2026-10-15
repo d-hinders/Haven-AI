@@ -97,5 +97,5 @@ last-verified: "2026-10-15"
 ## Notes For The Coding Agent
 
 - The two minor findings and the two price/verified nits are filed together as #4008. They share the marketplace surface, so they are batched per new-task § Epics.
-- The merchant-page buying journey that this run makes visible (no "how to buy", a cap-only budget hint, generic copy) is already filed as epic #4002 (#4003, #4004, #4005).
+- The merchant-page buying journey that this run makes visible (no "how to buy", a budget hint that showed this user nothing, generic copy) is already filed as epic #4002 (#4003, #4004, #4005).
 - To see the per-offer budget answer (#4004, shipped) on dev, the QA identity needs an agent with a live USDC budget on Base Sepolia. Seed one before epic #4002's promotion-checklist run, which calls for "a signed-in user with one connected agent and a budget".

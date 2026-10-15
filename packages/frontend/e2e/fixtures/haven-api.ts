@@ -1629,7 +1629,6 @@ export async function serveAgentDetailResponses(
       await fulfillJson(route, {
         all_time: [{ token: 'USDC', total_spent: '25.00', tx_count: 1 }],
         today: [{ token: 'USDC', total_spent: '0.00', tx_count: 0 }],
-        this_week: [{ token: 'USDC', total_spent: '25.00', tx_count: 1 }],
         pending_approvals: 0,
       })
       return

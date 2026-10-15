@@ -142,6 +142,76 @@ export function localDayKey(unixSeconds: number, tz: string): string {
   return dayKeyFormatter(tz).format(new Date(unixSeconds * 1000))
 }
 
+/**
+ * The UTC offset `tz` observes at `instantMs`, in milliseconds (positive east
+ * of UTC). `formatToParts` reads the zone's own wall clock; the difference to
+ * the instant IS the offset.
+ */
+function zoneOffsetMs(instantMs: number, tz: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(new Date(instantMs))
+  const get = (type: string): number =>
+    Number(parts.find((part) => part.type === type)?.value ?? '0')
+  const asUtc = Date.UTC(
+    get('year'),
+    get('month') - 1,
+    get('day'),
+    get('hour'),
+    get('minute'),
+    get('second'),
+  )
+  return asUtc - instantMs
+}
+
+/**
+ * The UTC instant of local midnight for `day` (`YYYY-MM-DD`) in `tz`. Found by
+ * iterating the zone's offset at the candidate instant: start from the naive
+ * UTC parse, subtract the observed offset, repeat. Two rounds converge for
+ * every real zone — an offset only changes inside a DST transition, and a
+ * transition shifts the guess by at most one hour, which the second round
+ * absorbs. (A `Intl`-less library or a `SET TIME ZONE` round-trip is not
+ * available here, and this must work for any IANA zone the frontend sends.)
+ */
+function zonedMidnightMs(day: string, tz: string): number {
+  let guess = Date.parse(`${day}T00:00:00Z`)
+  for (let i = 0; i < 2; i++) {
+    guess = Date.parse(`${day}T00:00:00Z`) - zoneOffsetMs(guess, tz)
+  }
+  return guess
+}
+
+export interface LocalDayBounds {
+  /** Inclusive ISO start of the local day. */
+  startIso: string
+  /** Exclusive ISO end of the local day (the next day's local midnight). */
+  endIso: string
+}
+
+/**
+ * The user-local calendar day containing `nowMs` in `tz`, as a half-open
+ * `[startIso, endIso)` instant pair — the bounds the agent stats route passes
+ * as SQL parameters (#3977). The end is derived from the START day, not from
+ * `nowMs`, so a clock landing exactly on local midnight still yields the full
+ * 24h (23h/25h on DST days) rather than a zero-width window.
+ */
+export function localDayBounds(nowMs: number, tz: string): LocalDayBounds {
+  const day = localDayKey(Math.floor(nowMs / 1000), tz)
+  const [year, month, dayOfMonth] = day.split('-').map(Number)
+  const nextDay = new Date(Date.UTC(year, month - 1, dayOfMonth + 1)).toISOString().slice(0, 10)
+  return {
+    startIso: new Date(zonedMidnightMs(day, tz)).toISOString(),
+    endIso: new Date(zonedMidnightMs(nextDay, tz)).toISOString(),
+  }
+}
+
 export function activityOutcome(tx: {
   isError: boolean
   paymentFlowStatus?: string | null

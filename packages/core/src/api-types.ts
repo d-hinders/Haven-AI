@@ -2187,7 +2187,7 @@ export type paths = {
         };
         /**
          * One agent's spend totals per token, plus its pending-approval count.
-         * @description Totals count CONFIRMED spend only, so an in-flight payment does not inflate them. Each window (all time, today, this week) is a separate per-token list rather than one list with three numbers, because a token can appear in one window and not another.
+         * @description Totals count CONFIRMED spend only, so an in-flight payment does not inflate them. Each window (all time, today) is a separate per-token list rather than one list with both numbers, because a token can appear in one window and not another. "Today" is the CALLER's local day: the `tz` query parameter names the IANA zone the day is cut in, and the window counts on `confirmed_at` — a payment created before local midnight and confirmed after belongs to the day it was confirmed in (#3977).
          */
         get: operations["getAgentStats"];
         put?: never;
@@ -16444,7 +16444,10 @@ export interface operations {
     };
     getAgentStats: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description IANA time-zone name (e.g. `Europe/Stockholm`) the "today" window cuts the caller's local day by. Defaults to UTC; an invalid zone is refused with 400. */
+                tz?: string;
+            };
             header?: never;
             path: {
                 /** @description Agent id. */
@@ -16471,13 +16474,23 @@ export interface operations {
                             total_spent: string | null;
                             tx_count: number;
                         }[];
-                        this_week: {
-                            token: string | null;
-                            total_spent: string | null;
-                            tx_count: number;
-                        }[];
                         /** @description Always 0 since #2055 — the approval queue died with the Safe rail; kept for wire compatibility. */
                         pending_approvals: number;
+                    };
+                };
+            };
+            /** @description Invalid `tz` — not an IANA zone name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
                     };
                 };
             };

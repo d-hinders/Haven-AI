@@ -15,10 +15,26 @@ import {
   listAgentPayments,
   listFeedPayments,
   sumAgentSpendAllTime,
-  sumAgentSpendThisWeek,
   sumAgentSpendToday,
 } from '../infra/repositories/agent-activity.js'
-import { toCanonicalAddress, resolveTransactionCurrency, serveTimeAmount } from '../modules/transactions/index.js'
+import {
+  isValidActivityTimeZone,
+  localDayBounds,
+  toCanonicalAddress,
+  resolveTransactionCurrency,
+  serveTimeAmount,
+} from '../modules/transactions/index.js'
+
+/**
+ * Route options — the production register passes none.
+ *
+ * `now` is the injectable clock the "today" window derives from (#3977):
+ * tests register the plugin with a fixed instant and assert the exact
+ * local-day bounds the query received, without freezing anything global.
+ */
+export interface AgentActivityRouteOptions {
+  now?: () => Date
+}
 
 // ── Routes ────────────────────────────────────────────────────────
 
@@ -37,8 +53,14 @@ async function approxCurrencyFor(userId: string): Promise<TransactionCurrency> {
   }
 }
 
-export default async function agentActivityRoutes(app: FastifyInstance): Promise<void> {
+export default async function agentActivityRoutes(
+  app: FastifyInstance,
+  options: AgentActivityRouteOptions = {},
+): Promise<void> {
   app.addHook('onRequest', authMiddleware)
+  // The injectable clock (#3977): every "today" bound derives from this one
+  // instant, so a test can pin the whole window without freezing global time.
+  const now = options.now ?? (() => new Date())
 
   // GET /agent-activity/:id/activity — paginated payment + MCP tool-call
   // history (#2055: the approval half is gone with the table).
@@ -159,11 +181,24 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
   })
 
   // GET /agents/:id/stats — spending stats for an agent
-  app.get<{ Params: { id: string } }>(
+  app.get<{ Params: { id: string }; Querystring: { tz?: string } }>(
     '/:id/stats',
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       const { id } = request.params
+
+      // #3977: "today" is the USER's local day, so the caller names the zone —
+      // validated exactly as the dashboard validates its `tz`: an invalid zone
+      // is a 400, before any read. Default UTC, same as the dashboard (the
+      // spec declares the parameter, so an off-spec `tz` shape never reaches
+      // the handler under the request-validation plugin).
+      const tz = request.query.tz ?? 'UTC'
+      if (!isValidActivityTimeZone(tz)) {
+        // Never echo the raw query value (same reasoning as the dashboard's
+        // 400 body): an offset/abbreviation reflected verbatim is exactly the
+        // instrument analytics refuses to be.
+        return reply.code(400).send({ error: 'unsupported tz' })
+      }
 
       // Verify agent belongs to user
       if (!(await agentExistsForUser(id, sub))) {
@@ -173,11 +208,14 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
       // Total spent per token (confirmed only)
       const totals = await sumAgentSpendAllTime(id)
 
-      // Spent today per token
-      const todayTotals = await sumAgentSpendToday(id)
-
-      // Spent this week
-      const weekTotals = await sumAgentSpendThisWeek(id)
+      // Spent today per token — "today" is the CALLER's local day: the bounds
+      // are derived from the route's clock in the validated zone and passed
+      // as SQL parameters, so nothing here leans on the database session's
+      // time zone (`CURRENT_DATE` before #3977 read the server default). The
+      // window counts on `confirmed_at`, the same column the dashboard's
+      // spend windows count (#3803 §4).
+      const { startIso, endIso } = localDayBounds(now().getTime(), tz)
+      const todayTotals = await sumAgentSpendToday(id, startIso, endIso)
 
       // #2055: pending approvals are structurally zero — the queue died with
       // the AllowanceModule rail; the wire field survives for compatibility.
@@ -190,11 +228,6 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           tx_count: Number(r.tx_count),
         })),
         today: todayTotals.map((r) => ({
-          token: r.token_symbol,
-          total_spent: r.total_spent,
-          tx_count: Number(r.tx_count),
-        })),
-        this_week: weekTotals.map((r) => ({
           token: r.token_symbol,
           total_spent: r.total_spent,
           tx_count: Number(r.tx_count),

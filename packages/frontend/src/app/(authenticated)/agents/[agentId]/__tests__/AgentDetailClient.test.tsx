@@ -271,7 +271,7 @@ describe('AgentDetailClient last-activity metadata', () => {
   it('renders no Pending-approvals tile — the queue it implies does not exist (#2106)', () => {
     mockUseAgentActivity.mockReturnValue({
       activity: [],
-      stats: { all_time: [], today: [], this_week: [], pending_approvals: 0 },
+      stats: { all_time: [], today: [], pending_approvals: 0 },
       loading: false,
     })
     render(<AgentDetailClient agentId="agent-1" />)
@@ -293,7 +293,6 @@ describe('AgentDetailClient last-activity metadata', () => {
       stats: {
         all_time: [{ token: 'USDC', total_spent: '482.50', tx_count: 37 }],
         today: [{ token: 'USDC', total_spent: '25.00', tx_count: 1 }],
-        this_week: [],
         pending_approvals: 0,
       },
       loading: false,

@@ -339,7 +339,6 @@ import {
   LIST_FEED_PAYMENTS_SQL,
   SUM_AGENT_SPEND_ALL_TIME_SQL,
   SUM_AGENT_SPEND_TODAY_SQL,
-  SUM_AGENT_SPEND_WEEK_SQL,
 } from '../src/infra/repositories/agent-activity.js'
 import {
   LIST_TOOL_INVOCATIONS_FOR_AGENT_SQL,
@@ -531,8 +530,9 @@ const QUERIES: SmokeQuery[] = [
   { name: 'agent-activity: single-agent payments (evidence joins)', sql: LIST_AGENT_PAYMENTS_SQL },
   { name: 'agent-activity: feed payments (evidence joins)', sql: LIST_FEED_PAYMENTS_SQL },
   { name: 'agent-activity: spend all time', sql: SUM_AGENT_SPEND_ALL_TIME_SQL },
-  { name: 'agent-activity: spend today', sql: SUM_AGENT_SPEND_TODAY_SQL },
-  { name: 'agent-activity: spend this week', sql: SUM_AGENT_SPEND_WEEK_SQL },
+  // #3977: the today window is parameterised — the route derives the caller's
+  // local-day bounds and passes them as $2/$3, which PREPARE type-checks.
+  { name: 'agent-activity: spend today (parameterised local day)', sql: SUM_AGENT_SPEND_TODAY_SQL },
   // One statement, two surfaces (#1179) — the dashboard and the activity feed.
   { name: 'agent-tool-invocations: read for agent', sql: LIST_TOOL_INVOCATIONS_FOR_AGENT_SQL },
   { name: 'agent-tool-invocations: read for agent set', sql: LIST_TOOL_INVOCATIONS_FOR_AGENTS_SQL },

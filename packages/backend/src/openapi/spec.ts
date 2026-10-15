@@ -5980,9 +5980,17 @@ export const openapiSpec = {
         operationId: 'getAgentStats',
         summary: "One agent's spend totals per token, plus its pending-approval count.",
         description:
-          'Totals count CONFIRMED spend only, so an in-flight payment does not inflate them. Each window (all time, today, this week) is a separate per-token list rather than one list with three numbers, because a token can appear in one window and not another.',
+          'Totals count CONFIRMED spend only, so an in-flight payment does not inflate them. Each window (all time, today) is a separate per-token list rather than one list with both numbers, because a token can appear in one window and not another. "Today" is the CALLER\'s local day: the `tz` query parameter names the IANA zone the day is cut in, and the window counts on `confirmed_at` — a payment created before local midnight and confirmed after belongs to the day it was confirmed in (#3977).',
         security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Agent id.' }],
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Agent id.' },
+          {
+            name: 'tz',
+            in: 'query',
+            schema: { type: 'string' },
+            description: 'IANA time-zone name (e.g. `Europe/Stockholm`) the "today" window cuts the caller\'s local day by. Defaults to UTC; an invalid zone is refused with 400.',
+          },
+        ],
         responses: {
           '200': {
             description: 'Spend totals and the pending count.',
@@ -5990,17 +5998,17 @@ export const openapiSpec = {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['all_time', 'today', 'this_week', 'pending_approvals'],
+                  required: ['all_time', 'today', 'pending_approvals'],
                   properties: {
                     all_time: spendTotals,
                     today: spendTotals,
-                    this_week: spendTotals,
                     pending_approvals: { type: 'integer', description: 'Always 0 since #2055 — the approval queue died with the Safe rail; kept for wire compatibility.' },
                   },
                 },
               },
             },
           },
+          '400': { ...errorResponse, description: 'Invalid `tz` — not an IANA zone name.' },
           '401': errorResponse,
           '404': { ...errorResponse, description: 'No such agent for this caller.' },
         },

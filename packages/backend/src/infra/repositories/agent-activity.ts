@@ -1,7 +1,7 @@
 /**
  * Data access for the agent-activity read model — the payment/approval history
- * behind `GET /agents/:id/activity` and `GET /activity/feed`, plus the four
- * spend aggregates behind `GET /agents/:id/stats`.
+ * behind `GET /agents/:id/activity` and `GET /activity/feed`, plus the spend
+ * aggregates behind `GET /agents/:id/stats`.
  *
  * Extracted verbatim from `routes/agent-activity.ts` (#1167) so
  * `scripts/db-schema-smoke.ts` can PREPARE every statement against the real
@@ -222,12 +222,12 @@ export async function listFeedPayments(
 // ── Spend stats ──────────────────────────────────────────────────────────────
 
 /**
- * The three spend buckets are separate verbatim statements, not one statement
- * with a parameterised window: they differ in their `created_at` predicate,
- * and the all-time bucket has none at all. A runtime-assembled WHERE is a
- * statement `db-schema-smoke` cannot PREPARE.
+ * The two spend buckets are separate verbatim statements, not one statement
+ * with a parameterised window: they differ in their time predicate, and the
+ * all-time bucket has none at all. A runtime-assembled WHERE is a statement
+ * `db-schema-smoke` cannot PREPARE.
  *
- * All three count CONFIRMED intents only — a pending or failed intent is not
+ * Both count CONFIRMED intents only — a pending or failed intent is not
  * spend.
  */
 export const SUM_AGENT_SPEND_ALL_TIME_SQL = `SELECT token_symbol,
@@ -237,20 +237,22 @@ export const SUM_AGENT_SPEND_ALL_TIME_SQL = `SELECT token_symbol,
          WHERE agent_id = $1 AND status = 'confirmed'
          GROUP BY token_symbol`
 
+/**
+ * #3977: "today" is the CALLER's local day. The route derives the day's
+ * bounds in the validated `tz` from its own (injectable) clock and passes
+ * them as parameters, so nothing here leans on the database session's time
+ * zone — `CURRENT_DATE` before #3977 read the server default (UTC on our
+ * images), which put local midnight at 01:00/02:00 for a Stockholm user.
+ * Counts on `confirmed_at`, the same column the dashboard's spend windows
+ * count (#3803 §4): a payment created before local midnight and confirmed
+ * after belongs to the day it was CONFIRMED in.
+ */
 export const SUM_AGENT_SPEND_TODAY_SQL = `SELECT token_symbol,
                 SUM(CAST(amount_human AS NUMERIC)) as total_spent,
                 COUNT(*) as tx_count
          FROM payment_intents
          WHERE agent_id = $1 AND status = 'confirmed'
-           AND created_at >= CURRENT_DATE
-         GROUP BY token_symbol`
-
-export const SUM_AGENT_SPEND_WEEK_SQL = `SELECT token_symbol,
-                SUM(CAST(amount_human AS NUMERIC)) as total_spent,
-                COUNT(*) as tx_count
-         FROM payment_intents
-         WHERE agent_id = $1 AND status = 'confirmed'
-           AND created_at >= CURRENT_DATE - interval '7 days'
+           AND confirmed_at >= $2 AND confirmed_at < $3
          GROUP BY token_symbol`
 
 /** Same gating contract as `listAgentPayments`. */
@@ -265,18 +267,17 @@ export async function sumAgentSpendAllTime(
 /** Same gating contract as `listAgentPayments`. */
 export async function sumAgentSpendToday(
   agentId: string,
+  /** Inclusive ISO start of the caller's local day (from `localDayBounds`). */
+  windowStartIso: string,
+  /** Exclusive ISO end of the caller's local day. */
+  windowEndIso: string,
   db: Executor = pool,
 ): Promise<AgentSpendStatsRow[]> {
-  const result = await db.query<AgentSpendStatsRow>(SUM_AGENT_SPEND_TODAY_SQL, [agentId])
-  return result.rows
-}
-
-/** Same gating contract as `listAgentPayments`. */
-export async function sumAgentSpendThisWeek(
-  agentId: string,
-  db: Executor = pool,
-): Promise<AgentSpendStatsRow[]> {
-  const result = await db.query<AgentSpendStatsRow>(SUM_AGENT_SPEND_WEEK_SQL, [agentId])
+  const result = await db.query<AgentSpendStatsRow>(SUM_AGENT_SPEND_TODAY_SQL, [
+    agentId,
+    windowStartIso,
+    windowEndIso,
+  ])
   return result.rows
 }
 

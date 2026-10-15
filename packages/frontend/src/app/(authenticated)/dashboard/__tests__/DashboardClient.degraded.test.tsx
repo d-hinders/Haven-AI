@@ -207,7 +207,7 @@ describe('DashboardClient — degraded balance reads (#3295)', () => {
 
     render(<DashboardClient />)
 
-    expect(screen.getByText('+$12.34 (+1.23%) since yesterday')).toBeInTheDocument()
+    expect(screen.getByText('+$12.34 (+1.23%) since yesterday (UTC)')).toBeInTheDocument()
   })
 
   it('reports the change as unavailable when some token has no known value — never a swing from a zero', () => {
@@ -223,7 +223,7 @@ describe('DashboardClient — degraded balance reads (#3295)', () => {
     // The figure still renders (never an understated zero), but no swing is
     // claimed from a total understated by an unknown amount.
     expect(screen.getByText('$1,234.56')).toBeInTheDocument()
-    expect(screen.queryByText('+$12.34 (+1.23%) since yesterday')).not.toBeInTheDocument()
+    expect(screen.queryByText('+$12.34 (+1.23%) since yesterday (UTC)')).not.toBeInTheDocument()
     // #3897: no filler caption takes the change line's place — the balance
     // card holds the figure and nothing claims a day's movement.
     expect(within(screen.getByRole('region', { name: 'Balance' })).getByText('$1,234.56')).toBeInTheDocument()
@@ -283,6 +283,6 @@ describe('DashboardClient — degraded balance reads (#3295)', () => {
     expect(screen.getByText('$1,234.56')).toBeInTheDocument()
     expect(screen.queryByText(/as of /)).not.toBeInTheDocument()
     expect(screen.queryByText('Unavailable')).not.toBeInTheDocument()
-    expect(screen.getByText('+$12.34 (+1.23%) since yesterday')).toBeInTheDocument()
+    expect(screen.getByText('+$12.34 (+1.23%) since yesterday (UTC)')).toBeInTheDocument()
   })
 })

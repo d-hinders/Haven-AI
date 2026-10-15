@@ -8,6 +8,8 @@ covers:
   - docs/regulatory/casp-risk-guardrails.md
   - packages/frontend/src/components/ReceiveFundsModal.tsx
   - packages/frontend/src/components/AddFundsModal.tsx
+  - packages/frontend/src/lib/agent-budget.ts
+  - packages/frontend/src/lib/agent-list-filters.ts
   - packages/frontend/src/components/ConnectAgentModal.tsx
   - packages/frontend/src/components/EditAgentModal.tsx
   - packages/frontend/src/components/DashboardOnboardingGuide.tsx
@@ -454,8 +456,8 @@ Structure:
 Rules:
 - Filter state lives in the URL (`?q=…&status=active,paused&budget=none&sort=seen`; the comma is percent-encoded on the wire), so a view is shareable and survives reload; `?setup=` and other parameters on the page are preserved in both directions (closing the setup modal drops only `setup`). Writes use `history.replaceState` with a `null` state (Next treats its own `__NA`-marked state as an internal write and would not re-sync `useSearchParams`), so the URL never lags a keystroke. Unknown values in a pasted link are dropped, never applied silently.
 - A facet is registered as data (`AgentFacet` in `lib/agent-list-filters.ts`: id, options, predicate, match mode), so the labels facet (#3167), the organization facet (#3164) and the account facet (#3719) plug in without a toolbar change. The account facet is registered only when the user has more than one account; its options use the same `name · chain` shape as the card. Facet counts answer "how many if I pick this" — a facet's own selection is excluded from its counts.
-- The budget facet offers only what `GET /agents` can prove from `allowances`: recurring, one-time, none. Exhausted, near-limit and pending-signature need a server field and are not offered, because an option that can never match reads as "no agent is near its limit".
-- Sort keys: name, recently seen (`mcp_last_seen_at`, never-seen last), newest, largest budget (largest single allowance in its own token units — the row carries no price, so this is deliberately unit-blind).
+- The budget facet offers what `GET /agents` can prove about authority (#3988): recurring, one-time, received, none. The first two are the agent's OWN budget cap (a zero cap is no authority, #3897); `received` marks a grant holder — an agent spending through an open sub-budget another agent granted it, which the server verifies against the whole redemption chain (`receivedSubBudgets[].open`) and which never classifies as `none`. Exhausted, near-limit and pending-signature still need a server field and are not offered, because an option that can never match reads as "no agent is near its limit".
+- Sort keys: name, recently seen (`mcp_last_seen_at`, never-seen last), newest, largest budget (largest single allowance in its own token units — the row carries no price, so this is deliberately unit-blind; a grant holder, whose amount the row does not carry, ranks above zero-capped agents but below any known positive amount).
 - Filtering is client-side over the loaded list; the API is unpaginated, so this holds until an account has enough agents for `GET /agents` itself to need paging.
 
 ## Agent Detail
@@ -514,7 +516,16 @@ done, and how to stop it (#3691, epic). Sections, in order:
    form, shown only while the panel is open (#3716) — never as a permanent
    card row; the Sub-agent budgets list of issued slices stays on the card,
    outside the panel. A revoked or removed agent's section is read-only plus
-   Stop (#3549). There is no second, read-only budget summary on the page.
+   Stop (#3549). The one read-only budget summary on the page is the
+   **Received budgets** block (#3988): when the agent RECEIVES sub-budget
+   grants (not closed), the card lists each — the granting agent's name, the
+   amount per period and its end ("ends …", "ended"; a pending grant reads
+   "waiting for the sharing agent to sign it", a closing one "closing") —
+   inside the same card, with no actions: closing a grant is the granting
+   agent's owner's move. When the agent holds received grants and no budget
+   of its own, the grant form's heading still reads "Set its first budget"
+   but its line says the agent spends through the received budgets below —
+   it must never imply the agent cannot pay.
 5. Activity — heading and description above the card, payments-only rows
    (`TransactionsTable` in card variant), empty state "No activity yet". The
    header's right side carries the counts summary — "{n} today · {m} all

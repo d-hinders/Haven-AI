@@ -8,7 +8,7 @@ vi.mock('@/components/WalletConnectAction', () => ({
   default: () => <button type="button">Connect wallet</button>,
 }))
 
-const { mockGet, mockGrant, mockRevoke, mockReload, mockBudgetsError, mockTaskBudgets, mockTrees, mockHookArgs, mockToast, mockSigner } =
+const { mockGet, mockGrant, mockRevoke, mockReload, mockBudgetsError, mockTaskBudgets, mockTrees, mockReceivedGrants, mockHookArgs, mockToast, mockSigner } =
   vi.hoisted(() => ({
   // #3812: whether this device can sign, and whether the signer set is known.
   mockSigner: { ready: true, signersLoading: false, signersError: null as string | null, passkeyElsewhere: false },
@@ -21,6 +21,8 @@ const { mockGet, mockGrant, mockRevoke, mockReload, mockBudgetsError, mockTaskBu
   mockTaskBudgets: vi.fn(() => [] as unknown[]),
   // #3922: the sub-budget trees the card renders; null = nothing read (default).
   mockTrees: vi.fn(() => null as unknown[] | null),
+  // #3988: the grants the agent RECEIVES; null = nothing read (default).
+  mockReceivedGrants: vi.fn(() => null as unknown[] | null),
   // Shared so the revoke-toast tests can assert on it; the component only
   // ever calls the namespaced methods (success/info/error).
   mockToast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn() }),
@@ -57,6 +59,7 @@ vi.mock('@/hooks/useTaskBudgets', () => ({
 vi.mock('@/hooks/useSubBudgets', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/hooks/useSubBudgets')>()),
   useSubBudgetTrees: () => ({ trees: mockTrees(), error: false, reload: vi.fn() }),
+  useReceivedSubBudgets: () => ({ grants: mockReceivedGrants(), error: false, reload: vi.fn() }),
 }))
 vi.mock('@/components/ui/Toast', () => ({
   useToast: () => ({ toast: mockToast }),
@@ -105,6 +108,8 @@ beforeEach(() => {
   mockGet.mockReset()
   mockTrees.mockReset()
   mockTrees.mockReturnValue(null)
+  mockReceivedGrants.mockReset()
+  mockReceivedGrants.mockReturnValue(null)
   mockGrant.mockReset()
   mockRevoke.mockReset()
   mockReload.mockReset()
@@ -1186,5 +1191,69 @@ describe('DelegationBudgetCard sub-budget "ends" follows is_live (#3922)', () =>
     mockTrees.mockReturnValue(tree(sub({ status: 'pending', is_live: false })))
     render(<DelegationBudgetCard {...PROPS} />)
     expect(document.body.textContent).toMatch(/up to 2 USDC · ends .*waiting for signature/)
+  })
+})
+
+// #3988: the holder's side — the read-only "Received budgets" block and an
+// empty state that never implies a grant holder cannot pay.
+describe('DelegationBudgetCard received budgets (#3988)', () => {
+  const receivedGrant = {
+    id: 'g1',
+    agent_id: 'agent-1',
+    parent_agent_id: 'p1',
+    parent_agent_name: 'Agent naming',
+    parent_sub_budget_id: 'pc1',
+    chain_id: 84532,
+    token_address: USDC,
+    recipient_address: null,
+    parent_delegation_hash: '0x' + 'ab'.repeat(32),
+    delegation_hash: '0x' + 'ef'.repeat(32),
+    label: null,
+    period_amount_atomic: '25000000',
+    status: 'open',
+    expires_at: 9_999_999_999,
+    is_expired: false,
+    is_live: true,
+    created_at: '2026-09-01T00:00:00Z',
+    opened_at: '2026-09-01T00:00:00Z',
+    closed_at: null,
+    close_tx_hash: null,
+  }
+
+  it('lists each received grant with the parent agent, amount per period and its end', () => {
+    mockReceivedGrants.mockReturnValue([receivedGrant])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.getByText('Received budgets')).toBeTruthy()
+    expect(screen.getByText('From Agent naming')).toBeTruthy()
+    const row = screen.getByText('From Agent naming').closest('div')?.parentElement ?? null
+    expect(row?.textContent).toContain('25 USDC')
+    expect(row?.textContent).toMatch(/ends /)
+  })
+
+  it('words a pending grant as not-yet-signed, not as live authority', () => {
+    mockReceivedGrants.mockReturnValue([{ ...receivedGrant, status: 'pending', is_live: false }])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.getByText('From Agent naming')).toBeTruthy()
+    expect(screen.getByText(/waiting for the sharing agent to sign it/)).toBeTruthy()
+  })
+
+  it('renders nothing when the agent has received nothing (never an empty section)', () => {
+    mockReceivedGrants.mockReturnValue([])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.queryByText('Received budgets')).toBeNull()
+  })
+
+  it('the no-own-budget empty state does not imply a grant holder cannot pay', () => {
+    mockReceivedGrants.mockReturnValue([receivedGrant])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.getByText('Set its first budget')).toBeTruthy()
+    expect(screen.getByText(/spends through the received budgets below/)).toBeTruthy()
+    expect(document.body.textContent).not.toContain('The agent can start paying within it.')
+  })
+
+  it('keeps the original empty-state line when nothing has been received', () => {
+    mockReceivedGrants.mockReturnValue([])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.getByText('The agent can start paying within it.')).toBeTruthy()
   })
 })

@@ -35,6 +35,7 @@
  */
 
 import type { ApiSchema } from '@haven_ai/core'
+import { hasPositiveCap, receivedBudgetLine } from './agent-budget'
 
 export type DashboardOverview = ApiSchema<'DashboardOverviewResponse'>
 export type DashboardBudgetRemaining = ApiSchema<'DashboardBudgetRemainingResponse'>
@@ -117,23 +118,19 @@ export const DISMISSIBLE_ATTENTION_KINDS: ReadonlySet<AttentionItemKind> = new S
 ])
 
 /**
- * A budget cap above zero (#3897). A zero cap is no authority — the agents
- * section reads it "No budget" (#3802's rule) and it never completes setup.
- * An unparseable cap is kept: the caption shows it as unknown.
+ * A budget cap above zero (#3897) — OWNED by `lib/agent-budget.ts` (#3988):
+ * the one definition every budget-authority display reads. A zero cap is no
+ * authority — the agents section reads it "No budget" (#3802's rule) and it
+ * never completes setup. An unparseable cap is kept: the caption shows it as
+ * unknown.
  */
-export function hasPositiveCap(budgetAtomic: string): boolean {
-  try {
-    return BigInt(budgetAtomic) > 0n
-  } catch {
-    return true
-  }
-}
+export { hasPositiveCap }
 
 /** A usable budget: a live delegation budget with a cap above zero, or an open received sub-budget. */
 function hasUsableBudget(agent: DashboardAgent): boolean {
   return (
     (agent.budgets ?? []).some((budget) => hasPositiveCap(budget.budgetAtomic)) ||
-    (agent.receivedSubBudgets ?? []).some((sub) => sub.open)
+    receivedBudgetLine(agent.receivedSubBudgets) !== null
   )
 }
 

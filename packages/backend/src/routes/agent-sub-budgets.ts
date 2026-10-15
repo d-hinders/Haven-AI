@@ -46,6 +46,7 @@ import {
   insertPendingSubBudget,
   isOpenSubBudget,
   listForOwner,
+  listReceivedGrantsForOwner,
   listTreeForOwner,
   markClosed,
   markClosing,
@@ -416,6 +417,26 @@ export default async function agentSubBudgetsOwnerRoutes(app: FastifyInstance): 
       unattached: grants
         .filter((g) => !parentChildRows.some((p) => p.id === g.parent_sub_budget_id))
         .map((g) => toWire(g, nowSec)),
+    })
+  })
+
+  // ── GET /agents/:id/sub-budgets/received — the grants this agent RECEIVES ─
+  // The holder's side of the table (#3988): every non-closed grant the agent
+  // holds, with the parent agent's name joined, for the read-only "Received
+  // budgets" block on the holder's own page. `listTreeForOwner` answers the
+  // DELEGATING side; this is the mirror — a holder with no budget of its own
+  // must not read as if it cannot pay. Read-only: closing a grant stays the
+  // delegator's action (DELETE /agents/:issuer/sub-budgets/:sub above), and
+  // this endpoint offers no mutation.
+  app.get<{ Params: { id: string } }>('/:id/sub-budgets/received', async (request, reply) => {
+    const { sub } = request.user as { sub: string }
+    const agent = await loadOwnedDelegationAgent(request.params.id, sub)
+    if (!agent) return reply.code(404).send({ error: 'Agent not found' })
+    const rows = await listReceivedGrantsForOwner(request.params.id, sub)
+    const nowSec = Math.floor(Date.now() / 1000)
+    return reply.send({
+      agent_id: agent.agent_id,
+      received: rows.map((r) => ({ ...toWire(r, nowSec), parent_agent_name: r.parent_agent_name })),
     })
   })
 

@@ -80,7 +80,7 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-10-14"
+last-verified: "2026-10-15"
 ---
 
 
@@ -5889,3 +5889,13 @@ to call next in structured fields, and those fields are typed end to end
 > and the real-Postgres `record_refusal` route tests in
 > `routes/__tests__/budget-precheck.test.ts`. Nothing else in this document
 > was re-verified; `last-verified` already reads today.
+
+> **Re-verified #3988 (2026-10-15 — an additive field on the Agent payload).**
+> The diff touches one covered path, `routes/agents.ts`: the list, detail,
+> PATCH and create responses gain an OPTIONAL `receivedSubBudgets` array
+> (the server's qualifying-chain verdict on grants the agent RECEIVES).
+> Additive only — no request schema, no removed field, no enum or format
+> moves — and every published client (SDK, CLI, hosted MCP tool surfaces)
+> ignores unknown response fields, so no expected-context version,
+> consent-hash input or version floor moves. `last-verified` is bumped to
+> 2026-10-15 for exactly this coverage.

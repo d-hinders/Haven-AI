@@ -564,6 +564,12 @@ describe('dashboard derives delegation-rail budgets from active delegations (#10
         // The frozen onboarding mirror — must NOT be what the dashboard shows.
         return Promise.resolve({ rows: [{ agent_id: AGENT.id, token_symbol: 'USDC', allowance_amount: '10.00', reset_period_min: 1440 }] })
       }
+      // #3988: the received-grant read is answered EMPTY — this pin is about
+      // the agent's own delegation, and the read must not inherit the
+      // delegation row below (its SQL names agent_delegations in the EXISTS).
+      if (sql.includes('FROM agent_sub_budgets')) {
+        return Promise.resolve({ rows: [] })
+      }
       if (sql.includes('FROM agent_delegations')) {
         // #3803: the full ActiveDelegationRow shape — the budget wire now
         // carries the identity + live window, so the row must too.

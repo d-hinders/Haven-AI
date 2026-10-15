@@ -16,7 +16,10 @@ const mockRead = vi.fn()
 vi.mock('../../../rails/delegation-budget-view.js', () => ({
   deriveDelegationBudgets: (...a: unknown[]) => mockDerive(...a),
 }))
-vi.mock('../../../infra/repositories/delegation-budgets.js', () => ({
+vi.mock('../../../infra/repositories/delegation-budgets.js', async (importOriginal) => ({
+  // #3988: sub-budgets.ts interpolates spendableDelegationSql into its own
+  // SQL template at module load, so the REAL builders must stay loadable.
+  ...(await importOriginal<typeof import('../../../infra/repositories/delegation-budgets.js')>()),
   listDelegationJsonByIds: (...a: unknown[]) => mockJson(...a),
 }))
 vi.mock('../../../infra/chain/delegation-budget-reader.js', () => ({

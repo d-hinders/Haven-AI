@@ -21,6 +21,7 @@ import { agentStatusPresentation } from '@/lib/payment-status'
 import type { StatusTone } from '@/components/ui/StatusBadge'
 import { DELEGATION_BUDGET_CARD_ID } from '@/components/DelegationBudgetCard'
 import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
+import { agentReceivedBudgetLine, hasConfiguredAllowances as hasPositiveAllowanceCaps } from '@/lib/agent-budget'
 import { STRANDED_FUNDS_TITLE, strandedFundsCause } from '@/lib/stranded-funds-copy'
 import MoveAgentModal from '../MoveAgentModal'
 import { RemoveAgentDialog } from './RemoveAgentDialog'
@@ -108,7 +109,10 @@ export function AgentCard({
   const halfRevoked = isHalfRevoked(agent)
   const canFinish = canFinishRevoking(agent)
 
-  const hasConfiguredAllowances = agent.allowances.length > 0
+  const hasConfiguredAllowances = hasPositiveAllowanceCaps(agent)
+  // #3988: a grant holder with no (or only zero-capped) own budgets still has
+  // authority — the shared helper's line, never "No budget".
+  const receivedLine = agentReceivedBudgetLine(agent)
 
   return (
     <>
@@ -388,6 +392,8 @@ export function AgentCard({
                   chainId={chainId}
                 />
               ))
+            ) : receivedLine ? (
+              <p className="text-xs text-[var(--v2-ink-3)]">{receivedLine}</p>
             ) : (
               <p className="text-xs text-[var(--v2-ink-3)]">No budget</p>
             )}

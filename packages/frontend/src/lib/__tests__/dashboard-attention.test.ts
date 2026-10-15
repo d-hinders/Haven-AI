@@ -26,7 +26,7 @@ type AgentSlice = {
   accountName?: string | null
   setupStatus?: string
   budgets?: Array<Record<string, unknown>>
-  receivedSubBudgets?: Array<{ open: boolean }>
+  receivedSubBudgets?: Array<{ open: boolean; parentAgentName?: string }>
   refusalBuckets?: { budget: number; scope: number; failed: number; haven: number }
 }
 
@@ -139,7 +139,7 @@ describe('computeAttentionItems — needs setup (rule 1)', () => {
             name: 'Scout',
             status: 'active',
             budgets: [],
-            receivedSubBudgets: [{ open: true }],
+            receivedSubBudgets: [{ parentAgentName: 'Agent naming', open: true }],
           },
         ],
         [],
@@ -160,7 +160,7 @@ describe('computeAttentionItems — needs setup (rule 1)', () => {
             name: 'Scout',
             status: 'active',
             budgets: [],
-            receivedSubBudgets: [{ open: false }],
+            receivedSubBudgets: [{ parentAgentName: 'Agent naming', open: false }],
           },
         ],
         [],
@@ -613,7 +613,7 @@ describe('firstRunSetupState (#3818)', () => {
 
     it('an open received sub-budget counts as a usable budget', () => {
       const overview = makeOverview(
-        [{ id: 's', name: 'S', status: 'active', receivedSubBudgets: [{ open: true }] }],
+        [{ id: 's', name: 'S', status: 'active', receivedSubBudgets: [{ parentAgentName: 'Agent naming', open: true }] }],
         [],
       )
       expect(firstRunSetupState(overview).hasSetUpAgent).toBe(true)

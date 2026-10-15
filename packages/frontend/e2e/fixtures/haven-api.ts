@@ -125,7 +125,120 @@ export const testAgent = {
       reset_period_min: 43_200,
     },
   ],
+  // #3988: the received-grant data rides on every Agent read now. The
+  // Research agent holds an open grant from the Watcher agent (the same
+  // direction the dashboard fixture states), but its OWN budget is positive,
+  // so the card still renders its allowance rows — the received line only
+  // takes over for a holder with no (or zero-capped) own budgets.
+  receivedSubBudgets: [
+    { parent_agent_id: 'agent-e2e-watcher', parent_agent_name: 'Watcher agent', open: true },
+  ],
 }
+
+/**
+ * #3988: a grant HOLDER — no budget of its own, an open received sub-budget
+ * from the Research agent. The state the /agents card used to read "No
+ * budget" for. Specs opt in by seeding it (`seedAgents`) or routing its id;
+ * the shared `GET /agents` answer keeps returning only `testAgent`, so the
+ * resting agent-panel captures stay untouched.
+ */
+export const grantHolderAgent = {
+  ...testAgent,
+  id: 'agent-e2e-grantholder',
+  name: 'Grant holder agent',
+  description: 'Spends through a budget another agent granted it.',
+  allowances: [],
+  receivedSubBudgets: [
+    { parent_agent_id: testAgent.id, parent_agent_name: testAgent.name, open: true },
+  ],
+}
+
+/**
+ * #3988: the tree the fixture DELEGATOR issues to the grant holder — the
+ * issuer-side "Sub-agent budgets" section of the same card, so both sides of
+ * the table photograph. Returned ONLY for `subBudgetTreeAgent.id`; every
+ * other agent keeps the empty `trees: []` the card renders nothing for.
+ */
+export const subBudgetTreeAgent = {
+  ...testAgent,
+  id: 'agent-e2e-delegator',
+  name: 'Delegating agent',
+}
+
+export const subBudgetTreeFixture = [
+  {
+    parent_child_sub_budget: {
+      id: 'tree-e2e-parent-child',
+      agent_id: subBudgetTreeAgent.id,
+      parent_agent_id: subBudgetTreeAgent.id,
+      parent_sub_budget_id: null,
+      chain_id: 84532,
+      token_address: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
+      recipient_address: null,
+      parent_delegation_hash: `0x${'4d'.repeat(32)}`,
+      delegation_hash: `0x${'51'.repeat(32)}`,
+      label: null,
+      period_amount_atomic: '100000000',
+      status: 'open',
+      expires_at: Math.floor(Date.UTC(2027, 4, 2) / 1000),
+      is_expired: false,
+      is_live: true,
+      created_at: '2026-09-01T10:00:00.000Z',
+      opened_at: '2026-09-01T10:00:00.000Z',
+      closed_at: null,
+      close_tx_hash: null,
+    },
+    grants: [
+      {
+        id: 'tree-e2e-grant',
+        agent_id: grantHolderAgent.id,
+        parent_agent_id: subBudgetTreeAgent.id,
+        parent_sub_budget_id: 'tree-e2e-parent-child',
+        chain_id: 84532,
+        token_address: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
+        recipient_address: null,
+        parent_delegation_hash: `0x${'51'.repeat(32)}`,
+        delegation_hash: `0x${'52'.repeat(32)}`,
+        label: null,
+        period_amount_atomic: '25000000',
+        status: 'open',
+        expires_at: Math.floor(Date.UTC(2027, 4, 2) / 1000),
+        is_expired: false,
+        is_live: true,
+        created_at: '2026-09-01T10:00:00.000Z',
+        opened_at: '2026-09-01T10:00:00.000Z',
+        closed_at: null,
+        close_tx_hash: null,
+      },
+    ],
+  },
+]
+
+/** #3988: the grants the fixture grant holder RECEIVES (`parent_agent_name` joined). */
+export const receivedGrantsFixture = [
+  {
+    id: 'received-e2e-grant',
+    agent_id: grantHolderAgent.id,
+    parent_agent_id: testAgent.id,
+    parent_agent_name: testAgent.name,
+    parent_sub_budget_id: 'tree-e2e-parent-child',
+    chain_id: 84532,
+    token_address: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
+    recipient_address: null,
+    parent_delegation_hash: `0x${'51'.repeat(32)}`,
+    delegation_hash: `0x${'53'.repeat(32)}`,
+    label: null,
+    period_amount_atomic: '25000000',
+    status: 'open',
+    expires_at: Math.floor(Date.UTC(2027, 4, 2) / 1000),
+    is_expired: false,
+    is_live: true,
+    created_at: '2026-09-01T10:00:00.000Z',
+    opened_at: '2026-09-01T10:00:00.000Z',
+    closed_at: null,
+    close_tx_hash: null,
+  },
+]
 
 export const dashboardTransaction = {
   hash: `0x${'ab'.repeat(32)}`,
@@ -1112,14 +1225,26 @@ export async function mockHavenApi(page: Page) {
       await fulfillJson(route, { task_budgets: [] })
       return
     }
-    // #3330: the budget card also reads the sub-budget trees the agent ISSUES
-    // (`useSubBudgetTrees`). No fixture agent has issued one, so every agent
-    // gets the empty list the API returns in that state (`useSubBudgetTrees`
-    // tolerates the absent `unattached` key) — the card renders unchanged, and
-    // the read is no longer an "Unmocked API route" that
-    // `unexpectedBrowserErrors` fails the mobile agent-detail spec on.
+    // #3330/#3988: the budget card reads the sub-budget trees the agent ISSUES
+    // (`useSubBudgetTrees`) AND the grants the agent RECEIVES
+    // (`useReceivedSubBudgets`). The DELEGATING fixture agent gets its real
+    // tree so the issuer side of the card photographs; the grant holder gets
+    // its received list; every other agent gets the empty answers the card
+    // renders nothing for — the reads are no longer an "Unmocked API route"
+    // that `unexpectedBrowserErrors` fails the mobile agent-detail spec on.
     if (method === 'GET' && path.startsWith('/agents/') && path.endsWith('/sub-budgets/tree')) {
-      await fulfillJson(route, { trees: [] })
+      const issuerId = path.split('/')[2]
+      await fulfillJson(route, {
+        trees: issuerId === subBudgetTreeAgent.id ? subBudgetTreeFixture : [],
+      })
+      return
+    }
+    if (method === 'GET' && path.startsWith('/agents/') && path.endsWith('/sub-budgets/received')) {
+      const holderId = path.split('/')[2]
+      await fulfillJson(route, {
+        agent_id: holderId,
+        received: holderId === grantHolderAgent.id ? receivedGrantsFixture : [],
+      })
       return
     }
     if (method === 'GET' && path.startsWith('/agents/') && path.endsWith('/delegations')) {
@@ -1466,6 +1591,10 @@ export async function serveAgentDetailResponses(
     // a credential is revoked before its budget (`POST /revoke` flips status
     // only). No archived override: archiving needs no live budget.
     agentOverrides?: { status?: 'revoked' }
+    // #3988: pass an array to research a grant HOLDER — the agent's own
+    // allowances empty out and its received grants ride on the list read
+    // (the shared sub-budgets/received handler answers the detail fetch).
+    receivedSubBudgets?: Array<{ parent_agent_id: string; parent_agent_name: string; open: boolean }>
   } = {},
 ) {
   await page.route('**/api/**', async (route) => {
@@ -1488,16 +1617,25 @@ export async function serveAgentDetailResponses(
             id: agentId,
             created_at: '2026-05-02T10:00:00.000Z',
             ...options.agentOverrides,
+            // #3988: a spec can research a grant HOLDER — no own budget, an
+            // open received grant (default: the ordinary budgeted agent).
+            // The spread keeps the literal under the `allowances: [` key the
+            // fixture-shape-parity test classifies it by.
             allowances: [
-              {
-                id: 'dlg-e2e-1',
-                agent_id: agentId,
-                token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-                token_symbol: 'USDC',
-                allowance_amount: '250.000000',
-                reset_period_min: 10_080,
-              },
+              ...(options.receivedSubBudgets !== undefined
+                ? []
+                : [
+                    {
+                      id: 'dlg-e2e-1',
+                      agent_id: agentId,
+                      token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+                      token_symbol: 'USDC',
+                      allowance_amount: '250.000000',
+                      reset_period_min: 10_080,
+                    },
+                  ]),
             ],
+            receivedSubBudgets: options.receivedSubBudgets ?? [],
           },
         ],
       })

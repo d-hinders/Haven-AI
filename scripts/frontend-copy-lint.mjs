@@ -137,6 +137,12 @@ export const SCAN_FILES = [
   // note, the delete confirm's promotion promise. Extracted from the modals
   // the same way #2195/#3167 extracted theirs, so the same gate must read it.
   'packages/frontend/src/lib/organization-copy.ts',
+  // #3988: the budget-authority helper — owns the "Spends from <parent>'s
+  // budget(s)" line and the "No budget" decision shared by the dashboard row,
+  // the /agents card, the Budget facet, the Largest-budget sort and the
+  // account detail page. User-facing prose living outside SCAN_DIRS, exactly
+  // like the copy modules above.
+  'packages/frontend/src/lib/agent-budget.ts',
   // Credential-row labels ("Passkey · added {date}", "Passkey N") rendered by
   // WalletButton.tsx and AccountSignersCard.tsx. copy-guidelines.md § "Name
   // credentials 'passkey'" (#1679) specifies this string by name (#2333).

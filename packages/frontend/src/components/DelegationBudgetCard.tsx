@@ -17,7 +17,7 @@ import type { Address } from 'viem'
 import { useDelegationBudget, type DelegationBudget, type GrantInput, type GrantResult } from '@/hooks/useDelegationBudget'
 import { findOccupyingBudget, occupiesSlot, replacedButEnabledBudgets } from '@/lib/budget-slot'
 import { useTaskBudgets, type TaskBudget } from '@/hooks/useTaskBudgets'
-import { useSubBudgetTrees, type SubBudgetTree } from '@/hooks/useSubBudgets'
+import { useReceivedSubBudgets, useSubBudgetTrees, type ReceivedSubBudgetGrant, type SubBudgetTree } from '@/hooks/useSubBudgets'
 import BudgetGrantAction from './BudgetGrantAction'
 import WalletConnectAction from './WalletConnectAction'
 import PasskeyElsewhereHint from './PasskeyElsewhereHint'
@@ -25,6 +25,7 @@ import EditBudgetModal from './EditBudgetModal'
 import IssueSubBudgetModal from './IssueSubBudgetModal'
 import ConfirmDialog from './ConfirmDialog'
 import { delegationIsLive, eligibleSubBudgetParents, subBudgetEndLabel } from '@/lib/sub-budget'
+import { receivedGrantStatusNote } from '@/lib/agent-budget'
 import { Card } from './ui/Card'
 import { Skeleton } from './ui/Skeleton'
 import { Button } from './ui/Button'
@@ -97,6 +98,10 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
   // #3330: the parent→child sub-budget trees this agent ISSUES, read the
   // same defensive way — `trees` stays `null` (nothing rendered) on failure.
   const { trees: subBudgetTrees, reload: reloadSubBudgets } = useSubBudgetTrees(agentId)
+  // #3988: the grants this agent RECEIVES — the holder's side of the same
+  // table, the same defensive read. A holder with no budget of its own must
+  // not read as if it cannot pay.
+  const { grants: receivedGrants } = useReceivedSubBudgets(agentId)
   // #3506: the issue-sub-budget modal's open flag.
   const [issuingSubBudget, setIssuingSubBudget] = useState(false)
   // #3922: `is_live` is the server's answer (pending/open/closing and not
@@ -547,7 +552,12 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
                 {budgetsError ? 'Set a budget' : 'Set its first budget'}
               </p>
               <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
-                The agent can start paying within it.
+                {/* #3988: a grant holder CAN pay — through the received
+                    budgets listed below. The line must never imply it
+                    cannot. */}
+                {receivedGrants && receivedGrants.length > 0
+                  ? 'It spends through the received budgets below; a budget of its own adds to that.'
+                  : 'The agent can start paying within it.'}
               </p>
             </div>
           )}
@@ -673,6 +683,25 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
           section so the two carve-outs read narrowest-first. The chain is
           the enforcement: stopping the budget above strands every row here
           (stated in the copy, not implied). */}
+      {/* #3988: the grants this agent RECEIVES — the holder's side, read-only.
+          Listed only when at least one exists, never as an empty section
+          (the trees section's own rule). Closing a grant stays the
+          delegator's action; nothing here mutates. */}
+      {receivedGrants && receivedGrants.length > 0 ? (
+        <Card.Section divided className="mt-4">
+          <div className="py-2">
+            <p className="text-sm font-medium text-[var(--v2-ink)]">Received budgets</p>
+            <p className="mt-0.5 text-xs text-[var(--v2-ink-muted)]">
+              Slices of another agent&rsquo;s budget that this agent spends through. Each stays inside its
+              slice and inside the budget it comes from; stopping the budget above stops them too.
+            </p>
+          </div>
+          {receivedGrants.map((grant) => (
+            <ReceivedBudgetGrantRow key={grant.id} grant={grant} tokens={tokens} />
+          ))}
+        </Card.Section>
+      ) : null}
+
       {subBudgetTrees && subBudgetTrees.length > 0 ? (
         <Card.Section divided className="mt-4">
           <div className="py-2">
@@ -1095,6 +1124,33 @@ function SubBudgetGrantRow({ grant, tokens }: { grant: SubBudgetTree['grants'][n
   return (
     <div className="py-2">
       <Row density="flush" title={grant.label || 'Sub-agent slice'} subtitle={parts.join(' · ')} />
+    </div>
+  )
+}
+
+/**
+ * One RECEIVED grant on the holder's page (#3988): the parent agent's name
+ * as the title, the slice's amount per period and its end as the subtitle.
+ * Pending and closing wording (#3988 builder copy, design-reviewed): a
+ * pending grant pays nothing yet (the sharing agent has not signed it); a
+ * closing one keeps working until its disable lands — both still listed,
+ * because the owner can act on them, but they are not presented as live
+ * authority. Closed grants never arrive (the read excludes them).
+ */
+function ReceivedBudgetGrantRow({ grant, tokens }: { grant: ReceivedSubBudgetGrant; tokens: TokenOption[] }) {
+  const t = tokens.find((x) => x.address.toLowerCase() === grant.token_address.toLowerCase())
+  const amount = t ? formatUnits(BigInt(grant.period_amount_atomic), t.decimals) : grant.period_amount_atomic
+  const statusNote = receivedGrantStatusNote(grant)
+  const parts = [`${amount} ${t?.symbol ?? ''}`.trim(), subBudgetEndText(grant)]
+  if (statusNote) parts.push(statusNote)
+  if (grant.recipient_address) parts.push(`to ${truncateAddress(grant.recipient_address)}`)
+  return (
+    <div className="py-2">
+      <Row
+        density="flush"
+        title={`From ${grant.parent_agent_name}`}
+        subtitle={parts.join(' · ')}
+      />
     </div>
   )
 }

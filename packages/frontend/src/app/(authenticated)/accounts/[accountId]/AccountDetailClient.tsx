@@ -48,6 +48,7 @@ import { formatAllowanceForToken } from '@/lib/allowance-format'
 // mapping every budget meter reads, so no surface can disagree about a period
 // length. The local roller this used to carry is gone.
 import { budgetPeriodLabel } from '@/lib/budget-period'
+import { agentReceivedBudgetLine, hasConfiguredAllowances } from '@/lib/agent-budget'
 import { agentStatusPresentation } from '@/lib/payment-status'
 import { isHalfRevoked } from '@/lib/half-revoked'
 import { formatAgentLastActivity } from '@/lib/agent-last-seen'
@@ -62,11 +63,15 @@ function agentBudgetSummary(agent: Agent, chainId: number | null): string {
   // which is where the budget is ended; nothing here acts.
   if (isHalfRevoked(agent)) return 'Budget still active on-chain'
   if (agent.status === 'revoked') return 'Access revoked'
-  const allowances = agent.allowances ?? []
-  if (allowances.length === 0) return 'No budget'
-  if (allowances.length > 1) return `${allowances.length} agent budgets`
+  // #3988: the budget question is the shared helper's, not an
+  // `allowances.length` copy — a zero cap is no authority, and an open
+  // RECEIVED sub-budget is (so a grant holder never reads "No budget" here).
+  if (!hasConfiguredAllowances(agent)) {
+    return agentReceivedBudgetLine(agent) ?? 'No budget'
+  }
+  if ((agent.allowances ?? []).length > 1) return `${agent.allowances.length} agent budgets`
 
-  const allowance = allowances[0]
+  const allowance = agent.allowances[0]
   const amount = formatAllowanceForToken(
     allowance.allowance_amount,
     chainId,

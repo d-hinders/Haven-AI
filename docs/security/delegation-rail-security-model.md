@@ -3153,3 +3153,21 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > quote surfaces call), `packages/backend/src/modules/mpp/budget-precheck.ts`;
 > the rest of this document was not re-read for it, and `last-verified` is
 > not bumped.
+
+> **Re-verified #3988 (2026-10-15 — the received sub-budget display read).**
+> The diff touches covered paths: `infra/repositories/sub-budgets.ts` gains
+> `RECEIVED_GRANTS_FOR_AGENTS_SQL` / `listReceivedGrantsForAgents` — the
+> qualifying-chain verdict the display surfaces share (a real grant — never
+> a self row — open and unexpired, hanging from a live parent-child row
+> (`openSubBudgetSql` twice), carved from the parent agent's currently
+> SPENDABLE budget delegation via `spendableDelegationSql` with
+> `requireStarted: true`, the payment selectors' own window) — and
+> `infra/repositories/dashboard.ts` now delegates to it;
+> `routes/agents.ts` and `routes/agent-sub-budgets.ts` add read-only
+> endpoints/fields that serve it. Every change is a read, and the verdict
+> NARROWS what a display presents as spendable toward what
+> `checkSubBudgetForPayment` already refuses — nothing refused becomes
+> allowed, and no signing path, permission or custody surface moves. Scope
+> of this note: those reads and the additive `Agent.receivedSubBudgets`
+> wire field. Nothing else in this document was re-verified;
+> `last-verified` already reads 2026-10-15.

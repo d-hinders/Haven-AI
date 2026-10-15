@@ -466,13 +466,6 @@ export interface HowToBuyInput {
   merchantBudgets: ReadonlyArray<MerchantBudget>
   /** The merchant's funding targets (`useMerchant`). */
   funding: ReadonlyArray<MerchantFundingTarget>
-  /**
-   * Whether the page may offer "Set a budget for this merchant" — the
-   * header's `showFundAction` AND at least one of `eligibleFundingAgents`
-   * that is ACTIVE (the modal's own predicate admits paused and pending
-   * agents; the panel must not point a paused agent at an action).
-   */
-  fundActionAvailable: boolean
   /** Required for tests; defaults to now. */
   nowMs?: number
 }
@@ -490,8 +483,8 @@ export interface HowToBuyInput {
  *    agent's budget here is real but SHORT for every offer ("nothing left
  *    this period"); null means no budget in the offers' token can pay —
  *    including one locked to another recipient, which is unusable here just
- *    the same. The panel offers the fund action when `fundActionAvailable`,
- *    else links to the agent's budget.
+ *    the same. The panel offers the fund action when it may (its own
+ *    `fundActionAvailable` prop), else links to the agent's budget.
  *  - `wrong-network` — no agent can pay and every known no is a chain no:
  *    the agent's account is on another network and there is no in-app fix.
  *  - `uncertain` — nothing can be claimed (unknowns everywhere, or no active
@@ -538,7 +531,16 @@ export function howToBuy(input: HowToBuyInput): HowToBuyAnswer {
     return { kind: 'done', agentName: agent.name, selected, partial }
   }
 
-  // 2. No one can pay — the first budget-shaped no names the fix.
+  // 2. Unknown anywhere → the panel claims nothing. This runs BEFORE the
+  //    budget-fix reduction, so an unknown answer beside a budget-shaped no
+  //    is 'uncertain', not a named fix — any unknown beats both (the panel
+  //    never claims what the data cannot support). An agent that cannot be
+  //    measured on one offer cannot be said to be fixable on another.
+  if (perOffer.some((answers) => answers.some((a) => a.answer === 'unknown'))) {
+    return { kind: 'uncertain' }
+  }
+
+  // 3. No one can pay — the first budget-shaped no names the fix.
   for (const agent of activeAgents) {
     for (let i = 0; i < offers.length; i++) {
       const answer = answerFor(i, agent.id)
@@ -553,11 +555,6 @@ export function howToBuy(input: HowToBuyInput): HowToBuyAnswer {
         }
       }
     }
-  }
-
-  // 3. Unknown anywhere → the panel claims nothing.
-  if (perOffer.some((answers) => answers.some((a) => a.answer === 'unknown'))) {
-    return { kind: 'uncertain' }
   }
 
   // 4. Every answer is a known no and none is about a budget: the agents'

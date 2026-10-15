@@ -411,7 +411,6 @@ describe('howToBuy (#4005)', () => {
     agents?: BudgetAgent[]
     budgets?: DashboardBudgetRemainingEntry[]
     merchantBudgets?: MerchantBudget[]
-    fundActionAvailable?: boolean
   }) {
     return howToBuy({
       merchantName: 'Merchant Example',
@@ -420,7 +419,6 @@ describe('howToBuy (#4005)', () => {
       budgets: overrides.budgets ?? [budgetRow()],
       merchantBudgets: overrides.merchantBudgets ?? [],
       funding: [verifiedFunding],
-      fundActionAvailable: overrides.fundActionAvailable ?? false,
       nowMs: NOW_MS,
     })
   }
@@ -496,6 +494,22 @@ describe('howToBuy (#4005)', () => {
       budgets: [],
     })
     expect(withUnknown.kind).toBe('uncertain')
+  })
+
+  it('claims nothing when an unknown answer sits beside a budget-shaped no on ONE agent', () => {
+    // The agent cannot afford the USDC offer (a real but short budget) and
+    // cannot be MEASURED on the second offer — its asset symbol is not
+    // registered, so no budget answer exists for it. Naming a budget fix
+    // would claim a step the data cannot support: any unknown beats both,
+    // including the budget fix.
+    const result = runHowToBuy({
+      offers: [
+        entry({ price_atomic: '10000' }),
+        entry({ id: 'cat-2', asset: 'NOPE', price_atomic: '10000' }),
+      ],
+      budgets: [budgetRow({ remaining_atomic: '1000' })],
+    })
+    expect(result.kind).toBe('uncertain')
   })
 })
 

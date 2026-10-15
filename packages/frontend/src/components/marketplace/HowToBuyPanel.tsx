@@ -187,7 +187,7 @@ export function HowToBuyPanel({
   // loading (or the read failed) the step claims nothing.
   const answerReady = !agentsLoading && agentsError == null && activeCount > 0 && !budgetsPending && budgetsError == null
   const answer = answerReady
-    ? howToBuy({ merchantName, offers, agents, budgets, merchantBudgets, funding, fundActionAvailable })
+    ? howToBuy({ merchantName, offers, agents, budgets, merchantBudgets, funding })
     : null
   const pasteTargetName =
     answer?.kind === 'done' ? answer.agentName : activeCount === 1 ? firstActive!.name : null

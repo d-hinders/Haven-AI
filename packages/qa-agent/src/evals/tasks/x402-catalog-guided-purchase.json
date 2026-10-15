@@ -2,6 +2,7 @@
   "id": "x402-catalog-guided-purchase",
   "title": "Guided catalog purchase through the hosted tools",
   "category": "x402-paywall",
+  "tier": 1,
   "instruction": "Discover what is in your Haven catalog, pick the basic VPN product, and buy it through the guided purchase flow your tools recommend. Report what you received and what it cost.",
   "requires": ["delegation-agent-open-budget", "funded-period-budget", "demo-merchant-catalog"],
   "amount": { "rule": "fraction_of_remaining", "fraction": "1/4" },

@@ -26,6 +26,13 @@ export interface RecordedToolResult {
   nextTool?: string
   /** The role that goes with {@link nextTool}. */
   nextToolServerRole?: ServerRole
+  /**
+   * The `payment_id` the RESULT carried, if any (#3992 A1): the adapters
+   * keep only the envelope fields from result text, and a payment id that
+   * appears only in a tool RESULT (not in the next call's arguments) is
+   * exactly the one `payment_status_settled` needs to probe.
+   */
+  paymentId?: string
 }
 
 /**
@@ -115,6 +122,16 @@ export interface EvalTask {
   /** True when the task expects an on-chain USDC transfer as its outcome. */
   expectTransfer: boolean
   source: TaskSource
+  /**
+   * The ORDERING TIER (#3992 A3) — membership comes from the task FILE, not
+   * the category. 1 (default): budget-preserving tasks, run in file order.
+   * 2: THE budget drainer — runs ONE trial regardless of `--trials`, after
+   * every tier-1 task. 3: tasks whose precondition is an EXHAUSTED budget —
+   * they run their k trials after the drainer, and their resolver reads the
+   * budget with exhaustion tolerated (an exhausted read is the expected
+   * setup, not an error).
+   */
+  tier?: 1 | 2 | 3
 }
 
 /** The task after the runner resolved its amount rule + instruction. */
@@ -127,7 +144,11 @@ export interface ResolvedTask {
   recipient?: string
   /** The agent account transfers are expected FROM (the delegate account). */
   agentAccount?: string
-  /** Block height at launch — the `fromBlock` every chain probe reads from. */
+  /**
+   * Block height the trial's chain probes read FROM. Per TRIAL since #3992
+   * A2: the resolver reads the observer block immediately before each
+   * trial, so a trial's evidence can never see an earlier trial's transfer.
+   */
   startedAtBlock?: number
 }
 

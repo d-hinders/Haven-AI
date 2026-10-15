@@ -2,6 +2,7 @@
   "id": "direct-send-then-report-remaining",
   "title": "Direct send, then report the budget impact",
   "category": "direct-payment",
+  "tier": 1,
   "instruction": "Pay {amount} USDC to {recipient} on Base Sepolia. Afterwards, check your allowances and tell me exactly how much of your period budget remains.",
   "requires": ["delegation-agent-open-budget", "funded-period-budget", "payment-recipient"],
   "amount": { "rule": "fraction_of_remaining", "fraction": "1/4" },

@@ -2,12 +2,27 @@
  * Task-file + loader tests (#3958 AC 2: at least 10 task files, each citing
  * its source). These read the REAL task directory — a broken starter task
  * fails the suite here, not on the partner's machine.
+ *
+ * The suite's production sequencing (per-trial resolution over a simulated
+ * budget) is driven in `cli.test.ts` — these tests own the task FILES: the
+ * loader, the coherence rules (incl. the #3992 tier field), and the
+ * selection pipeline (tiered order, limit-before-shuffle).
  */
 
 import { describe, expect, it } from 'vitest'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { anyTaskUsesTarget, loadTasks, orderTasksForSequence, renderInstruction, resolveTask, validateTask } from './tasks.js'
+import {
+  anyTaskUsesTarget,
+  loadTasks,
+  orderTasksForSequence,
+  renderInstruction,
+  resolveTask,
+  seededShuffle,
+  selectTaskSequence,
+  shuffleWithinTiers,
+  validateTask,
+} from './tasks.js'
 import { HOSTED_TOOLS, SIGNER_TOOLS } from './tools.js'
 import type { EvalTask } from './types.js'
 
@@ -43,6 +58,13 @@ describe('the starter task set (read from disk)', () => {
     for (const t of tasks) {
       for (const g of t.graders) expect(g.name).toMatch(/^(transfer_settled|payment_status_settled|no_payment_retry_after_refusal|agent_status_before_payment|x402_request_mode_replay|tool_called)$/)
     }
+  })
+
+  it('the tier field is present on the real set: exactly one drainer (tier 2) and one exhausted-budget task (tier 3)', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    expect(tasks.filter((t) => t.tier === 2).map((t) => t.id)).toEqual(['direct-send-full-remaining'])
+    expect(tasks.filter((t) => t.tier === 3).map((t) => t.id)).toEqual(['over-budget-x402-refused'])
+    expect(tasks.filter((t) => (t.tier ?? 1) === 1)).toHaveLength(tasks.length - 2)
   })
 })
 
@@ -97,6 +119,68 @@ describe('validateTask — the coherence rules', () => {
       expectTransfer: false,
     }
     expect(validateTask(t, 'x.json')).toBeNull()
+  })
+})
+
+describe('validateTask — the ordering tier (#3992 A3: membership comes from the task file)', () => {
+  const base = {
+    id: 'test-task',
+    title: 'T',
+    category: 'direct-payment',
+    instruction: 'Pay {amount} to {recipient}.',
+    requires: [],
+    amount: { rule: 'remaining_period_budget', delta_atomic: '0' },
+    graders: [{ name: 'transfer_settled' }],
+    expectTransfer: true,
+    source: { kind: 'scenario', ref: 'x.ts', note: 'n' },
+  }
+
+  it('accepts an explicit tier 1', () => {
+    expect(validateTask({ ...structuredClone(base), tier: 1 }, 'x.json')).toBeNull()
+  })
+
+  it('rejects an out-of-range tier', () => {
+    expect(validateTask({ ...structuredClone(base), tier: 4 }, 'x.json')).toContain('tier must be 1')
+    expect(validateTask({ ...structuredClone(base), tier: 'two' }, 'x.json')).toContain('tier must be 1')
+  })
+
+  it('tier 2 must BE the drainer shape: a direct payment of the entire remaining budget', () => {
+    expect(validateTask({ ...structuredClone(base), tier: 2 }, 'x.json')).toBeNull()
+    const slice = { ...structuredClone(base), tier: 2, amount: { rule: 'fraction_of_remaining', fraction: '1/4' } }
+    expect(validateTask(slice, 'x.json')).toContain('tier 2 is the budget drainer')
+    const overBudget = {
+      ...structuredClone(base),
+      tier: 2,
+      category: 'over-budget',
+      graders: [{ name: 'no_payment_retry_after_refusal' }],
+      expectTransfer: false,
+      amount: { rule: 'remaining_period_budget', delta_atomic: '1000000' },
+    }
+    expect(validateTask(overBudget, 'x.json')).toContain('tier 2 is the budget drainer')
+  })
+
+  it('tier 3 must declare an EXHAUSTED-budget precondition in requires', () => {
+    const exhausted = {
+      ...structuredClone(base),
+      tier: 3,
+      category: 'over-budget',
+      instruction: 'Buy the product. If refused, tell me why.',
+      requires: ['EXHAUSTED-period-budget-below-0.001-USDC'],
+      graders: [{ name: 'no_payment_retry_after_refusal' }],
+      expectTransfer: false,
+    }
+    expect(validateTask(exhausted, 'x.json')).toBeNull()
+    const noPrecondition = { ...exhausted, requires: ['demo-merchant-catalog'] }
+    expect(validateTask(noPrecondition, 'x.json')).toContain('EXHAUSTED')
+  })
+
+  it('tier 3 cannot also expect a transfer', () => {
+    const t = {
+      ...structuredClone(base),
+      tier: 3,
+      requires: ['EXHAUSTED-period-budget'],
+    }
+    expect(validateTask(t, 'x.json')).toContain('cannot also expect a transfer')
   })
 })
 
@@ -215,16 +299,15 @@ describe('resolveTask — fraction_of_remaining slices the live remaining budget
     }
   })
 
-  it('the § 4 sequence property: every success task still resolves a PAYABLE amount after the earlier transfers', async () => {
-    // 30 nightly sessions share ONE period budget — resolve the suite the way
-    // the CLI does (one live read per task, each transfer deducted from the
-    // next read) and assert no later success task collapses to a refusal.
-    const slice1 = { ...task } as typeof task
-    const slice2 = { ...task, id: 'slice-2' }
-    const slice3 = { ...task, id: 'slice-3' }
+  it('the § 4 resolver property: successive slices of a SHRINKING budget stay payable and never take the whole', async () => {
+    // The resolver-level property the production sequencing exercises (the
+    // full production path is driven in cli.test.ts): resolve the same task
+    // the way the per-trial resolver does — one live read per trial, each
+    // settled transfer deducted from the next read — and no trial collapses
+    // to a refusal.
     let remaining = 10_000_000n // 10 USDC of period budget for the whole night
-    for (const t of [slice1, slice2, slice3]) {
-      const r = await resolveTask(t, { budget: async () => ({ remaining }) })
+    for (let trial = 1; trial <= 3; trial++) {
+      const r = await resolveTask(task, { budget: async () => ({ remaining }) })
       expect('resolved' in r).toBe(true)
       if (!('resolved' in r)) continue
       expect(r.resolved.amountAtomic).toBeGreaterThan(0n) // payable, not a guaranteed refusal
@@ -234,36 +317,78 @@ describe('resolveTask — fraction_of_remaining slices the live remaining budget
     // And the budget did NOT hit zero after the success legs.
     expect(remaining).toBeGreaterThan(0n)
   })
+})
 
-  it('orderTasksForSequence runs the full-remaining drainer LAST — the real 10-task set is payable in one invocation', async () => {
+describe('the tiered run order (#3992 A3)', () => {
+  const mk = (id: string, tier: number | undefined, amount: EvalTask['amount'], category: EvalTask['category'] = 'direct-payment') =>
+    ({ id, title: id, category, instruction: 'x', requires: [], tier, amount, graders: [], expectTransfer: true, source: { kind: 'issue', ref: '1', note: 'n' } }) as EvalTask
+
+  it('tier 1 in file order, the drainer in tier 2, exhausted-budget tasks in tier 3', async () => {
     const { tasks } = await loadTasks(TASKS_DIR)
     const ordered = orderTasksForSequence(tasks)
-    expect(ordered[ordered.length - 1]!.id).toBe('direct-send-full-remaining')
-    // Simulate the CLI: one live read per task, every transfer deducted.
-    let remaining = 10_000_000n
-    for (const t of ordered) {
-      if (t.category === 'over-budget') continue // over-budget legs refuse by design; skip the deduction
-      const r = await resolveTask(t, { budget: async () => ({ remaining }) })
-      expect('resolved' in r).toBe(true)
-      if (!('resolved' in r)) continue
-      if (t.id === 'direct-send-full-remaining') {
-        expect(r.resolved.amountAtomic).toBe(remaining) // the drainer, on purpose
-      } else {
-        expect(r.resolved.amountAtomic).toBeGreaterThan(0n) // every earlier task still payable
-      }
-      remaining -= r.resolved.amountAtomic
-    }
+    expect(ordered.map((t) => t.id)).toEqual([
+      'direct-send-get-agent-first',
+      'direct-send-partial-budget',
+      'direct-send-then-report-remaining',
+      'over-budget-check-status-no-retry',
+      'over-budget-direct-refused',
+      'x402-catalog-guided-purchase',
+      'x402-plain-http-request-mode',
+      'x402-price-cap-below-price',
+      'direct-send-full-remaining',
+      'over-budget-x402-refused',
+    ])
   })
 
-  it('orderTasksForSequence is stable for tasks that do not drain', () => {
-    const mk = (id: string, amount: EvalTask['amount']) =>
-      ({ id, title: id, category: 'direct-payment', instruction: 'x', requires: [], amount, graders: [], expectTransfer: true, source: { kind: 'issue', ref: '1', note: 'n' } }) as EvalTask
+  it('is stable for same-tier tasks and defaults missing tiers to 1', () => {
     const ordered = orderTasksForSequence([
-      mk('a-fraction', { rule: 'fraction_of_remaining', fraction: '1/4' }),
-      mk('b-drainer', { rule: 'remaining_period_budget', delta_atomic: '0' }),
-      mk('c-over', { rule: 'remaining_period_budget', delta_atomic: '1000000' }),
+      mk('b', 1, { rule: 'remaining_period_budget', delta_atomic: '0' }),
+      mk('c', undefined, { rule: 'fraction_of_remaining', fraction: '1/4' }),
+      mk('a', 1, { rule: 'remaining_period_budget', delta_atomic: '1000000' }),
+      mk('d', 3, { rule: 'remaining_period_budget', delta_atomic: '0' }, 'over-budget'),
     ])
-    expect(ordered.map((t) => t.id)).toEqual(['a-fraction', 'c-over', 'b-drainer'])
+    expect(ordered.map((t) => t.id)).toEqual(['b', 'c', 'a', 'd'])
+  })
+})
+
+describe('selectTaskSequence — tier order, limit BEFORE shuffle, shuffle within tiers (#3992 B)', () => {
+  const mk = (id: string, tier: number): EvalTask =>
+    ({ id, title: id, category: 'direct-payment', instruction: 'x', requires: [], tier, amount: { rule: 'remaining_period_budget', delta_atomic: '0' }, graders: [], expectTransfer: true, source: { kind: 'issue', ref: '1', note: 'n' } }) as EvalTask
+
+  const tasks = [mk('t1-a', 1), mk('t1-b', 1), mk('t1-c', 1), mk('t1-d', 1), mk('t1-e', 1), mk('t1-f', 1), mk('drainer', 2), mk('exhausted', 3)]
+
+  it('no shuffle: the canonical tiered order', () => {
+    expect(selectTaskSequence(tasks).map((t) => t.id)).toEqual(['t1-a', 't1-b', 't1-c', 't1-d', 't1-e', 't1-f', 'drainer', 'exhausted'])
+  })
+
+  it('the same seed gives the same order, and the tiers are preserved', () => {
+    const once = selectTaskSequence(tasks, { shuffleSeed: 1234 })
+    const twice = selectTaskSequence(tasks, { shuffleSeed: 1234 })
+    expect(once.map((t) => t.id)).toEqual(twice.map((t) => t.id))
+    expect(once.map((t) => t.tier)).toEqual([...once.map((t) => t.tier ?? 1)].sort((a, b) => a - b))
+    expect([...once].sort((a, b) => a.id.localeCompare(b.id)).map((t) => t.id)).toEqual([...tasks].sort((a, b) => a.id.localeCompare(b.id)).map((t) => t.id))
+  })
+
+  it('the --limit subset is chosen from the canonical order BEFORE any shuffle — the 5-task slice is shuffle-stable', () => {
+    const plain = selectTaskSequence(tasks, { limit: 5 })
+    const shuffled = selectTaskSequence(tasks, { limit: 5, shuffleSeed: 99 })
+    expect(plain.map((t) => t.id)).toEqual(['t1-a', 't1-b', 't1-c', 't1-d', 't1-e'])
+    expect([...shuffled].sort((a, b) => a.id.localeCompare(b.id)).map((t) => t.id)).toEqual(['t1-a', 't1-b', 't1-c', 't1-d', 't1-e'])
+  })
+
+  it('seededShuffle is a permutation and is deterministic', () => {
+    const items = [1, 2, 3, 4, 5, 6, 7, 8]
+    expect([...seededShuffle(items, 7)].sort((a, b) => a - b)).toEqual(items)
+    expect(seededShuffle(items, 7)).toEqual(seededShuffle(items, 7))
+    expect(seededShuffle(items, 8)).not.toEqual(seededShuffle(items, 9))
+  })
+
+  it('shuffleWithinTiers never moves a task across its tier boundary', () => {
+    const shuffled = shuffleWithinTiers(tasks, 31337)
+    expect(shuffled.filter((t) => t.tier === 1).map((t) => t.id)).toEqual(shuffled.filter((t) => t.tier === 1).map((t) => t.id))
+    const tiers = shuffled.map((t) => t.tier ?? 1)
+    expect(tiers).toEqual([...tiers].sort((a, b) => a - b))
+    expect(shuffled[shuffled.length - 1].id).toBe('exhausted')
   })
 })
 

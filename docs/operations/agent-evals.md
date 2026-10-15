@@ -24,7 +24,7 @@ covers:
   - packages/connect/src/server-names.ts
   - packages/signer/src/consent.ts
   - packages/signer/src/cli-args.ts
-last-verified: "2026-10-14"
+last-verified: "2026-10-15"
 ---
 
 # Agent Evals — the model-in-the-loop eval suite (epic #3957)
@@ -49,24 +49,52 @@ backend**. No payment code is changed by this suite; the graders only READ.
 | Tool lists | `packages/qa-agent/src/evals/tools.ts` | The 29 hosted tools, the 5 signer tools, and the explicit 9-tool payment list. Graders match BARE tool names + `next_tool_server_role`, never the server-prefixed name. |
 | Starter tasks | `packages/qa-agent/src/evals/tasks/*.json` | 10 tasks across direct-payment / x402-paywall / over-budget, each citing its source. |
 | Hermes adapter | `packages/qa-agent/src/evals/hermes.ts` | Runs one task through Hermes, collects the tool-call log, parses it into the grader model. |
-| Runner | `packages/qa-agent/src/evals/runner.ts` + `cli.ts` | k trials per task, applies graders, writes JSON report + readable summary with per-task pass rate, pass^k and wall time per session. |
+| Runner | `packages/qa-agent/src/evals/runner.ts` + `cli.ts` | k trials per task, applies graders, writes JSON report + readable summary with per-task pass rate, pass^k and wall time per session. Resolution is PER TRIAL (#3992 A2): the CLI injects a resolver that reads the budget + observer block immediately before each trial. |
+| Compare | `packages/qa-agent/src/evals/compare.ts` | The regression-only compare (#3992 D): the new report vs earlier comparable reports, alerting only after two consecutive pass^k failures on a 5-of-7 baseline. |
 
-Amounts are **budget-aware** (#3958 § 4): success tasks take a **slice** of
-the live remaining period budget (`fraction_of_remaining`, floored) so a
-sequence of success tasks never spends the whole budget on the first one —
-30 nightly sessions share ONE period budget unless the owner resets it, and
-a later success task that resolves to ~0 becomes a guaranteed refusal.
-Full-remaining sends (`direct-send-full-remaining`,
-`remaining_period_budget` with `delta_atomic: 0`) and over-budget tasks
-(remaining + 1 USDC, the `over-budget-refused` scenario's own derivation)
-are the exceptions, on purpose. `direct-send-full-remaining` consumes the
-ENTIRE period budget by definition, so the run order puts it LAST
-(`orderTasksForSequence` in `tasks.ts`) — the task files sort alphabetically,
-which would otherwise zero the budget before the slice tasks resolve. The
-budget read is refused, not guessed,
-when the chain/backend does not supply the number — the #2016 discipline.
-Size the eval agent's period budget for a full night: 10 tasks x 3 trials
-plus margin.
+Amounts are **budget-aware and per-trial** (#3958 § 4, re-scoped by #3992
+A2): the amount is resolved from a LIVE read of the remaining period budget
+**immediately before each trial** — not once at launch — by the resolver the
+CLI injects into the runner. Each trial's record carries its own resolved
+amount and its own observer start block, and every grader's evidence is
+scoped to that trial: chain probes read from the trial's start block and
+payment ids come from the trial's own log, so no trial can pass on an
+earlier trial's (or an earlier task's) transfer.
+
+Success tasks take a **slice** of the remaining budget
+(`fraction_of_remaining`, floored), so the k trials of a slice task shrink
+geometrically instead of summing to k×R/4 — the old launch-once resolution
+made 3 trials of a `1/4` task cost 225% of the budget and turned every
+later slice into a refusal. Full-remaining sends
+(`remaining_period_budget` with `delta_atomic: 0`) and over-budget tasks
+(remaining + 1 USDC) are the exceptions, on purpose. The read is refused,
+not guessed, when the chain/backend does not supply the number — the #2016
+discipline; a mid-run resolve failure is a RED TRIAL with the named cause,
+not an exit, and the run finishes and reports.
+
+**Ordering tiers** (#3992 A3) come from the task files' `tier` field, not
+the category: tier 1 = budget-preserving tasks in file order; tier 2 = THE
+budget drainer (`direct-send-full-remaining`), which runs **exactly one
+trial** regardless of `--trials` (after it there is nothing left to drain)
+and is marked `k=1 (drains budget)` in the report so its pass^k is never
+compared with the k-trial tasks; tier 3 = tasks whose precondition is an
+EXHAUSTED budget (`over-budget-x402-refused`), which run AFTER the drainer
+and read the budget with exhaustion tolerated (`exhausted-ok` — an exhausted
+read is their expected setup, not an error). `--shuffle=<seed>` shuffles
+WITHIN tiers only (deterministic per seed, recorded in the report);
+`--limit` slices the canonical order BEFORE any shuffle, so the workflow's
+5-task subset is stable.
+
+**Consistency guard:** before resolving each trial, the resolver waits
+(bounded, 120s default) until the backend budget read reflects the previous
+trial's settled spend — `/allowances` can lag the observer node. A budget
+INCREASE observed between trials is recorded in the report as a refill
+boundary event (`budgetEvents`), which is how a run that crosses the Daily
+period's refill anchor reports itself. On guard timeout the trial is red
+with the named cause.
+
+Size the eval agent's budget as a **Daily** period (see "Funding and the
+nightly budget" below) so the tiered run fits inside one refill.
 
 ## Provisioning: connect, not seed.ts
 
@@ -128,6 +156,29 @@ or `HAVEN_CREDENTIALS`, or `HAVEN_DELEGATE_KEY`
 (`packages/signer/src/cli-args.ts`). One of these must be set for an
 unattended start.
 
+## Funding and the nightly budget
+
+- **Initial funding of the eval account:** Circle faucet test USDC on Base
+  Sepolia; the dev relayer sponsors gas, the same funding model
+  `packages/qa-agent/src/seed.ts` documents. The eval agent is provisioned
+  through connect (above), not seed.ts.
+- **Period:** give the eval agent a **Daily** period (the dashboard supports
+  it — `PERIODS` in `packages/frontend/src/components/haven/DelegationBudgetCard.tsx`),
+  sized so the tiered run fits inside one refill: the tier-1 slices shrink
+  geometrically, the drainer takes the rest once, and the tier-3 refusal
+  tasks spend nothing — the full 10-task run moves a bounded fraction over
+  the initial remaining budget.
+- **There is no "reset period budget" action.** Editing a budget builds a
+  NEW delegation and needs the owner's passkey signatures, so it cannot run
+  unattended — the operator step is the initial funding plus the Daily
+  period, not per-run resets.
+- **Refill anchor:** verify where the Daily refill anchors before relying on
+  it (grant start vs local/UTC midnight). A run that can cross the boundary
+  is not a problem it hides: the runner detects a budget INCREASE between
+  trials and records it in the report (`budgetEvents`, surfaced in both
+  summary halves), so a refill mid-run is visible instead of silently
+  inflating a slice.
+
 ## Running the suite
 
 ```
@@ -152,11 +203,14 @@ Env the run needs (all dev/testnet):
   covers all 10 tasks — no per-task config or task filter needed.
 - `QA_EVAL_AGENT_ACCOUNT` — the eval agent's account/delegate address (the
   payer the chain probe accepts).
-- `QA_EVAL_HERMES_COMMAND` — how ONE task runs through Hermes, non-interactively:
-  a command template containing `{instruction}` and optionally `{log}`
-  (e.g. `hermes -p {instruction} --session-log {log}`). **There is no
-  default**: the adapter refuses to guess how Hermes runs one task
-  unattended and where it writes the session log (partner open question 2).
+- `QA_EVAL_HERMES_COMMAND` — how ONE task runs through Hermes,
+  non-interactively: a command template containing `{instruction}` (and
+  `{log}` when the wrapper writes the log itself). The VERIFIED shape is a
+  wrapper around `hermes -z {instruction} --yolo` (verified live
+  2026-10-15: one task, exit 0) — see "The Hermes lane as actually run"
+  below for the wrapper. **There is no default**: the adapter refuses to
+  guess how Hermes runs one task unattended and where it writes the session
+  log.
 - `QA_EVAL_HERMES_SESSION_LOG` — the log path, when the template does not
   carry `{log}`.
 - `QA_RPC_URL_BASE_SEPOLIA` — optional; the OBSERVER node the chain graders
@@ -164,9 +218,37 @@ Env the run needs (all dev/testnet):
   `packages/qa-agent/src/lib/chain.ts`): point it at a node the backend does
   not write through.
 
+**Model identity in every report (#3992 C).** The Hermes lane supplies the
+identity through env (or its wrapper); the Claude Code lane reports the
+model its stream carried. Any value not supplied prints `not reported` in
+both summary halves — an unpinned model change must never read as a
+regression in the trend lines:
+
+- `QA_EVAL_MODEL` — the model id (e.g. `GLM-5.3-Flash-EXL3`); overrides the
+  Claude Code lane's stream-reported model when set.
+- `QA_EVAL_INFERENCE_SERVER_BUILD` — the inference server build string (e.g.
+  `vLLM 0.11.x (EXL3), DGX Spark :8888`).
+- `QA_EVAL_HARNESS_VERSION` — the harness version the wrapper or workflow
+  pins (e.g. the qa-agent commit or package version).
+
+Other flags:
+
+- `--shuffle=<seed>` — deterministic shuffle WITHIN tiers; the seed and the
+  executed order are recorded in the report. `--limit` is applied to the
+  canonical order BEFORE the shuffle, so the 5-task PR subset is the same
+  with or without a shuffle.
+- `--compare-with=<path1>,<path2>,… --new-report=<path>` — the regression-only
+  compare (#3992 D): reads the new report plus the earlier ones, compares
+  only reports of the same lane/adapter/model/trials-per-task, and exits
+  non-zero naming the tasks that failed pass^k on the last two comparable
+  nights after passing on at least 5 of the 7 before them. Fewer than 3
+  comparable reports prints `baseline building` and exits zero; malformed
+  reports are skipped and named; the drainer (k=1) is never compared.
+
 The output is a JSON report plus a `<out>.summary.txt` readable summary:
-per-task pass rate, pass^k (all k trials), and wall time per session. The
-CLI exits non-zero if any task failed any trial.
+per-task pass rate, pass^k (all k trials — except the drainer, marked
+`k=1 (drains budget)`), the executed order, the model identity triple, and
+wall time per session. The CLI exits non-zero if any task failed any trial.
 
 ## Grader semantics (pinned, do not soften)
 
@@ -185,7 +267,9 @@ CLI exits non-zero if any task failed any trial.
   message without money movement looks like).
 - The x402 counterpart is `payment_status_settled`: an erc7710 redemption
   is submitted by the merchant's facilitator, so the backend payment object
-  is the outcome there, not a transfer from the agent's account.
+  is the outcome there, not a transfer from the agent's account. The probe
+  is INJECTED by the CLI (`buildGraderContext`, #3992 A1) and the payment
+  id may come from the tool RESULT as well as from call arguments.
 
 ## Lane 2: Claude Code headless (#3959)
 
@@ -279,25 +363,70 @@ session) plus total cost, model and hosted MCP provenance to the GitHub job
 summary (`evals-report.json.summary.md` → `$GITHUB_STEP_SUMMARY`); the full
 JSON report and the per-session cost evidence are uploaded as artifacts.
 
-## Open questions (partner) — the adapter's recorded seams
+## The Hermes lane as actually run (verified live 2026-10-15)
 
-1. Which model and inference server (Ollama, vLLM, llama.cpp, MLX...), and
-   what context window? The agent sees 29 hosted + 5 signer tools plus
-   Hermes built-ins — if tools must be filtered, the report records it.
-2. Can Hermes run one task non-interactively, exit when done, and save the
-   tool-call log? Nothing in this repo documents it. Until answered,
-   `QA_EVAL_HERMES_COMMAND` + `QA_EVAL_HERMES_SESSION_LOG` are REQUIRED and
-   the parser accepts the Anthropic-style session JSONL (assistant
-   `tool_use` / user `tool_result`) or our normalized JSON. If the real
-   session format differs, extend `parseHermesSessionLog` — do not fork the
-   graders.
-3. When is the machine free: every night, or some nights? (Budget sizing
-   follows this.)
-4. How do results come back — a narrowly scoped GitHub token pushing to a
-   results branch, or something simpler? Decide at setup; the token is
-   credential item 4 above.
-5. The real 10 x 3 partner-machine run is an issue-level acceptance
-   criterion reported on #3958, not a build gate for this slice.
+The partner verified the lane on the machine and answered the seams on
+#3957; this section is what is actually true, replacing the fictional
+`hermes -p {instruction} --session-log {log}` example the runbook carried
+before #3992:
+
+- **The command is `hermes -z {instruction} --yolo`** — one task,
+  non-interactive, exits when done (verified, exit 0). `hermes.ts:89-95`
+  already shell-quotes `{instruction}`.
+- **The tool-call trace lives in the profile's `state.db`**, not a
+  `--session-log` flag: a session row with source `oneshot`, assistant
+  messages carrying the `tool_calls` JSON (name and arguments), and joined
+  `role=tool` result rows. The wrapper that `QA_EVAL_HERMES_COMMAND` names
+  therefore: reads the newest `oneshot` session started after the trial,
+  walks those rows, and emits the normalized `AgentRunLog` JSON the adapter
+  already parses (or the Anthropic-style session JSONL — the parser accepts
+  both). No parser fork is needed. The wrapper lives on the partner machine
+  for now; committing it into the repo is a one-line decision for the
+  partner (say the word on #3957 and it lands under
+  `packages/qa-agent/scripts/`).
+- **The model is GLM-5.3-Flash-EXL3 on the DGX Spark (vLLM :8888, 850k
+  ctx)**, shared with the build workers — a saturated night skips the run,
+  which is acceptable. Set `QA_EVAL_MODEL`,
+  `QA_EVAL_INFERENCE_SERVER_BUILD` and `QA_EVAL_HARNESS_VERSION` in the
+  wrapper so every report carries the identity (#3992 C).
+- **Nightly, in the cheap-electricity window.** The runner is a scheduled
+  job: it checks the pipeline pause sentinel before each task and exits if
+  present (the electricity gate pauses testing with the same grace
+  semantics as in-flight cards). It never claims issues — findings go to
+  the report and the regression ping; follow-ups go through the normal
+  claim protocol.
+- **Tool restriction for the eval profile — RESIDUAL, recorded.** `--yolo`
+  auto-approves every tool call, including Hermes built-ins such as shell
+  and file access. Two tasks fetch merchant URLs, which is a
+  prompt-injection path, and the machine is shared with build workers.
+  Nothing in this repo or in connect's Hermes writer configures toolsets
+  (open question 1 below), so no restriction exists today. Residual risk
+  accepted for the testnet-only lane until a `--allowed-tools`-style flag
+  exists; the eval profile should enable only the Haven MCP pair the moment
+  Hermes supports scoping. The graders' evidence scoping (#3992 A2) bounds
+  the blast radius of a confused trial but does not remove the path.
+
+## Open questions (partner) — status after the 2026-10-15 answers on #3957
+
+1. ~~Which model and inference server?~~ ANSWERED: GLM-5.3-Flash-EXL3 on
+   the DGX Spark (vLLM :8888, 850k ctx); 29 hosted + 5 signer tools plus
+   built-ins fit trivially at that window.
+2. ~~Can Hermes run one task non-interactively?~~ ANSWERED: `hermes -z
+   {instruction} --yolo`; the trace is in the profile's `state.db` and the
+   wrapper emits the normalized log (see the section above).
+3. ~~When is the machine free?~~ ANSWERED: nightly, cheap-electricity
+   window; the pipeline pause sentinel defers the run.
+4. ~~How do results come back?~~ ANSWERED: a results branch with a narrowly
+   scoped token plus a regression-only ping (#3992 D's compare is the repo
+   side of that). The token remains credential item 4 above.
+5. Can a Hermes profile restrict which toolsets the model sees (only the
+   Haven MCP pair, no shell/file built-ins)? STILL OPEN — nothing in this
+   repo or connect's writer configures toolsets; the residual is recorded
+   above. (Whether the `state.db` wrapper is committed into the repo is
+   also the partner's call; it is documented, not yet committed.)
+
+The real 10 x 3 partner-machine run remains an issue-level acceptance
+criterion reported on #3958, not a build gate for this slice.
 
 ## Where this fits
 

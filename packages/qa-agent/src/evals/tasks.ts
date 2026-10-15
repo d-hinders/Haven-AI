@@ -9,12 +9,15 @@
  * otherwise pass silently and fail only on the partner's machine, three
  * hours into a nightly run.
  *
- * Resolution is the budget-aware half (#3958 § 4): the amount comes from a
- * LIVE read of the remaining period budget. Success tasks take a SLICE of
- * the remaining budget (`fraction_of_remaining`) — 30 nightly sessions
- * share ONE period budget, so a success task that spends the whole
- * remaining budget turns every later success task into a refusal. Full-
- * remaining (`delta_atomic: 0`) and over-budget (`remaining + delta`)
+ * Resolution is the budget-aware half (#3958 § 4, re-scoped per-trial by
+ * #3992 A2): the amount comes from a LIVE read of the remaining period
+ * budget — now taken immediately BEFORE EACH TRIAL by the CLI's injected
+ * resolver, not once at launch, so every trial resolves and is graded
+ * against the budget state of its own moment. Success tasks take a SLICE of
+ * the remaining budget (`fraction_of_remaining`, floored) — 30 nightly
+ * sessions share ONE period budget, so a success task that spends the whole
+ * remaining budget turns every later success task into a refusal.
+ * Full-remaining (`delta_atomic: 0`) and over-budget (`remaining + delta`)
  * tasks use `remaining_period_budget`. The read is injected; a caller that
  * cannot read the budget gets an ERROR, not a guessed amount — same refusal
  * as `lib/delegation-budget.ts`'s fallback discipline.
@@ -96,6 +99,27 @@ export function validateTask(raw: unknown, file: string): string | null {
   if (typeof source?.ref !== 'string' || source.ref.length === 0) return `${file}: source.ref is required`
   if (typeof source?.note !== 'string' || source.note.length === 0) return `${file}: source.note is required`
   if (typeof t.expectTransfer !== 'boolean') return `${file}: expectTransfer must be boolean`
+  // The ordering tier (#3992 A3): membership comes from the task FILE, not
+  // the category. 1 = budget-preserving (default), 2 = THE budget drainer,
+  // 3 = the precondition is an exhausted budget.
+  if (t.tier !== undefined && (![1, 2, 3].includes(t.tier as number) || typeof t.tier !== 'number')) {
+    return `${file}: tier must be 1 (budget-preserving), 2 (the budget drainer) or 3 (requires an exhausted budget)`
+  }
+  if (t.tier === 2) {
+    const drains = t.category === 'direct-payment' && amount?.rule === 'remaining_period_budget' && (amount as { delta_atomic?: unknown }).delta_atomic === '0'
+    if (!drains) {
+      return `${file}: tier 2 is the budget drainer — a direct-payment task sending the ENTIRE remaining budget (remaining_period_budget, delta_atomic "0"); everything else is tier 1 or 3`
+    }
+  }
+  if (t.tier === 3) {
+    const requires = t.requires
+    if (!Array.isArray(requires) || !requires.some((r) => typeof r === 'string' && r.startsWith('EXHAUSTED'))) {
+      return `${file}: tier 3 must declare its exhausted-budget precondition in "requires" (an EXHAUSTED-… entry) — the tier exists for tasks whose setup IS a spent budget`
+    }
+    if (t.expectTransfer) {
+      return `${file}: tier 3 expects an exhausted budget — it cannot also expect a transfer_settled outcome`
+    }
+  }
   // Coherence: a transfer-expecting task must carry a transfer grader, and a
   // task that never expects a transfer must not carry one.
   const hasTransferGrader = (graders as Array<{ name: string }>).some((g) => g.name === 'transfer_settled')
@@ -164,19 +188,77 @@ export const anyTaskUsesTarget = (tasks: EvalTask[]): boolean =>
   tasks.some((t) => t.instruction.includes('{target}'))
 
 /**
- * Full-remaining senders (`remaining_period_budget` with `delta_atomic: 0`)
- * consume the ENTIRE period budget by definition — every task resolved after
- * one reads ~0 and is doomed to refuse (#3958 § 4). The task files sort
- * alphabetically, which puts `direct-send-full-remaining` FIRST; the run
- * order must not. Stable sort: drainers last, everything else in file order.
- * (The x402 tasks also ship `delta_atomic: 0`, but their resolved amount
- * feeds graders, not a spend against the period budget — they are not
- * drainers.)
+ * The tiered run order (#3992 A3). Tier membership comes from the task file
+ * (`tier`, default 1) — NOT the category: `over-budget-x402-refused` is
+ * category `over-budget` but tier 3, because its precondition is an
+ * EXHAUSTED budget, while `over-budget-direct-refused` is tier 1 (it needs
+ * the budget funded, refuses once, spends nothing, and is repeatable).
+ *
+ *   tier 1 — budget-preserving tasks, in file order;
+ *   tier 2 — THE budget drainer (`direct-send-full-remaining`), once;
+ *   tier 3 — tasks whose precondition is an exhausted budget.
+ *
+ * The task files sort alphabetically, which would otherwise put the drainer
+ * FIRST; the run order must not. Stable sort on the tier keeps file order
+ * within a tier.
  */
-export const orderTasksForSequence = (tasks: EvalTask[]): EvalTask[] => {
-  const drainsBudget = (t: EvalTask): boolean =>
-    t.category === 'direct-payment' && t.amount.rule === 'remaining_period_budget' && t.amount.delta_atomic === '0'
-  return [...tasks].sort((a, b) => Number(drainsBudget(a)) - Number(drainsBudget(b)))
+export const taskTier = (t: EvalTask): number => t.tier ?? 1
+
+export const orderTasksForSequence = (tasks: EvalTask[]): EvalTask[] =>
+  [...tasks].sort((a, b) => taskTier(a) - taskTier(b))
+
+/**
+ * mulberry32 — a tiny deterministic PRNG. Enough for task ordering; the seed
+ * and the produced order are both recorded in the report so two runs with
+ * the same `--shuffle=<seed>` give the same order.
+ */
+export function seededShuffle<T>(items: T[], seed: number): T[] {
+  let a = seed >>> 0
+  const rand = (): number => {
+    a |= 0
+    a = (a + 0x6d2b79f5) | 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+  const out = [...items]
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1))
+    ;[out[i], out[j]] = [out[j]!, out[i]!]
+  }
+  return out
+}
+
+/**
+ * Shuffle WITHIN tiers only (#3992 B): the drainer still runs after every
+ * tier-1 task and before every tier-3 task, whatever the seed. Deterministic
+ * for a given seed + task set.
+ */
+export function shuffleWithinTiers(tasks: EvalTask[], seed: number): EvalTask[] {
+  const tiers = new Map<number, EvalTask[]>()
+  for (const t of tasks) {
+    const k = taskTier(t)
+    const bucket = tiers.get(k) ?? []
+    bucket.push(t)
+    tiers.set(k, bucket)
+  }
+  return [...tiers.keys()].sort((x, y) => x - y).flatMap((k) => seededShuffle(tiers.get(k)!, seed))
+}
+
+/**
+ * The full selection pipeline the CLI runs (#3992 B): canonical order
+ * (tiered, file order within a tier) → the `--limit` slice chosen from the
+ * CANONICAL order (so the workflow's 5-task subset is the same with or
+ * without a shuffle) → an optional `--shuffle=<seed>` applied WITHIN tiers
+ * only. Returns the executed order; the caller records it in the report.
+ */
+export function selectTaskSequence(
+  tasks: EvalTask[],
+  opts: { limit?: number; shuffleSeed?: number } = {},
+): EvalTask[] {
+  const canonical = orderTasksForSequence(tasks)
+  const limited = opts.limit !== undefined ? canonical.slice(0, opts.limit) : canonical
+  return opts.shuffleSeed !== undefined ? shuffleWithinTiers(limited, opts.shuffleSeed) : limited
 }
 
 /** Resolve the task against a live budget read. */

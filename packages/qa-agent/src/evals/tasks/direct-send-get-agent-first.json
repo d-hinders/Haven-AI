@@ -2,6 +2,7 @@
   "id": "direct-send-get-agent-first",
   "title": "The agent grounds on haven_get_agent before any payment tool",
   "category": "direct-payment",
+  "tier": 1,
   "instruction": "Before you move anything, check which Haven deployment, account and budget you are actually operating with. Then pay {amount} USDC to {recipient} on Base Sepolia and confirm the outcome to me.",
   "requires": ["delegation-agent-open-budget", "funded-period-budget", "payment-recipient"],
   "amount": { "rule": "fraction_of_remaining", "fraction": "1/4" },

@@ -186,7 +186,12 @@ function paymentIdFrom(call: RecordedToolCall): string | undefined {
 export async function paymentStatusSettled(log: AgentRunLog, ctx: GraderContext): Promise<GraderResult> {
   const probe = ctx.probePaymentStatus
   if (!probe) return fail('no backend probe injected — a status grader without a backend proves nothing')
-  const ids = log.calls.map(paymentIdFrom).filter((id): id is string => Boolean(id))
+  // Ids come from call arguments AND from tool RESULTS (#3992 A1): the
+  // adapters keep `payment_id` out of result envelopes as a field, so the
+  // result-borne id arrives through `result.paymentId`.
+  const ids = log.calls
+    .map((call) => call.result?.paymentId ?? paymentIdFrom(call))
+    .filter((id): id is string => Boolean(id))
   if (ids.length === 0) {
     return fail('no payment_id anywhere in the log — the run cannot be tied to a backend payment object')
   }

@@ -26,6 +26,7 @@ export const ampersendDemoApi: Merchant = {
   offer_count: 3,
   networks: ['eip155:84532', 'eip155:8453'],
   verified_payable: true,
+  lowest_price_atomic: '1000',
 }
 
 export const ampersendOffers: CatalogEntry[] = [
@@ -141,6 +142,7 @@ export const havenDemoStore: Merchant = {
   offer_count: 1,
   networks: ['eip155:84532'],
   verified_payable: true,
+  lowest_price_atomic: '50000',
 }
 
 export const havenDemoStoreOffers: CatalogEntry[] = [
@@ -192,6 +194,7 @@ export const bergetAi: Merchant = {
   offer_count: 0,
   networks: [],
   verified_payable: false,
+  lowest_price_atomic: null,
 }
 
 export const marketplaceMerchants: Merchant[] = [ampersendDemoApi, havenDemoStore, bergetAi]

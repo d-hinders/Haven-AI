@@ -57,6 +57,7 @@ export function serializeMerchant(row: MerchantListingRow) {
     offer_count: row.offer_count,
     networks: row.networks,
     verified_payable: row.verified_payable,
+    lowest_price_atomic: row.lowest_price_atomic,
   }
 }
 

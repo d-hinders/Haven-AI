@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { MerchantGrid } from '../MerchantGrid'
+import { VERIFIED_MEANING } from '@/lib/marketplace'
 import type { Merchant } from '@/hooks/useCatalog'
 
 function merchant(overrides: Partial<Merchant> = {}): Merchant {
@@ -18,8 +19,16 @@ function merchant(overrides: Partial<Merchant> = {}): Merchant {
     offer_count: 2,
     networks: ['eip155:8453'],
     verified_payable: false,
+    lowest_price_atomic: '1000',
     ...overrides,
   }
+}
+
+/** The rendered merchant cards, in DOM order. */
+function cardSlugs(container: HTMLElement): string[] {
+  return [...container.querySelectorAll('[data-testid^="merchant-card-"]')].map((el) =>
+    (el.getAttribute('data-testid') ?? '').replace('merchant-card-', ''),
+  )
 }
 
 describe('MerchantGrid', () => {
@@ -42,7 +51,7 @@ describe('MerchantGrid', () => {
     expect(card.querySelector('.mt-auto')).not.toBeNull()
   })
 
-  it('renders a merchant card with category, description, offer count and networks', () => {
+  it('renders a merchant card with category, description, footer and networks (#3980: From <price> USDC first, the count after it)', () => {
     render(
       <MerchantGrid
         merchants={[merchant()]}
@@ -53,10 +62,57 @@ describe('MerchantGrid', () => {
     )
     expect(screen.getByTestId('merchant-card-merchant-one')).toBeDefined()
     expect(screen.getByText('Merchant One')).toBeDefined()
-    expect(screen.getByText('2 offers')).toBeDefined()
+    // Two offers: the lowest USDC price leads ("From 0.001 USDC" — 1000
+    // atomic, 6 decimals), the offer count follows it.
+    expect(screen.getByText('From 0.001 USDC · 2 offers')).toBeDefined()
   })
 
-  it('shows the Verified badge only when verified_payable is true', () => {
+  it('shows the offer count alone when no counted offer prices in USDC', () => {
+    render(
+      <MerchantGrid
+        merchants={[merchant({ lowest_price_atomic: null })]}
+        loading={false}
+        error={null}
+        onSubmit={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('2 offers')).toBeDefined()
+    expect(screen.queryByText(/From /)).toBeNull()
+  })
+
+  it('renders a coming-soon card muted: "Coming soon" in the badge slot and no offer or price footer', () => {
+    render(
+      <MerchantGrid
+        merchants={[merchant({ id: 's', slug: 'soon', name: 'Soon Co', listing_status: 'coming_soon' })]}
+        loading={false}
+        error={null}
+        onSubmit={vi.fn()}
+      />,
+    )
+    const card = screen.getByTestId('merchant-card-soon')
+    expect(within(card).getByText('Coming soon')).toBeDefined()
+    expect(within(card).queryByText(/offer/)).toBeNull()
+    expect(within(card).queryByText(/From /)).toBeNull()
+  })
+
+  it('sorts payable merchants before coming-soon ones, keeping the served order inside each group', () => {
+    // Exactly `GET /merchants`' order (coming_soon sorts before `live`
+    // alphabetically, so Berget and Redpine head the raw list) — the grid
+    // must not present a card you cannot pay before one you can, while the
+    // endpoint's own order stays untouched for its other clients.
+    const served = [
+      merchant({ id: 'b', slug: 'berget-ai', name: 'Berget AI', listing_status: 'coming_soon' }),
+      merchant({ id: 'r', slug: 'redpine', name: 'Redpine', listing_status: 'coming_soon' }),
+      // A testnet network so the "Show test merchants" default is ON and the
+      // test merchant's card is on the page at all.
+      merchant({ id: 't', slug: 'test-one', name: 'Aaa test', is_test_merchant: true, networks: ['eip155:84532'] }),
+      merchant({ id: 'z', slug: 'zzz', name: 'Zzz live' }),
+    ]
+    const { container } = render(<MerchantGrid merchants={served} loading={false} error={null} onSubmit={vi.fn()} />)
+    expect(cardSlugs(container)).toEqual(['zzz', 'test-one', 'berget-ai', 'redpine'])
+  })
+
+  it('marks a verified merchant with the quiet check — title carries the meaning, sr-only the word, and no uppercase badge', () => {
     render(
       <MerchantGrid
         merchants={[merchant({ id: 'v', slug: 'verified', verified_payable: true })]}
@@ -65,7 +121,16 @@ describe('MerchantGrid', () => {
         onSubmit={vi.fn()}
       />,
     )
-    expect(within(screen.getByTestId('merchant-card-verified')).getByText('Verified')).toBeDefined()
+    const card = screen.getByTestId('merchant-card-verified')
+    // The quiet marker: `title` spells the meaning out on hover/AT, sr-only
+    // "Verified" names it, and the uppercase badge is gone.
+    expect(within(card).getByTitle(VERIFIED_MEANING)).toBeDefined()
+    expect(within(card).getByText('Verified').className).toContain('sr-only')
+    expect(within(card).queryByText('VERIFIED')).toBeNull()
+    // The unverified card carries no marker at all.
+    const { unmount } = render(<MerchantGrid merchants={[merchant()]} loading={false} error={null} onSubmit={vi.fn()} />)
+    expect(screen.getByTestId('merchant-card-merchant-one').querySelector('[title]')).toBeNull()
+    unmount()
   })
 
   it('shows the test-merchant footer label and hides it behind the toggle by default when no listed network is a testnet', () => {

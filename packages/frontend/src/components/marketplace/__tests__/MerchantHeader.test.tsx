@@ -18,6 +18,7 @@ function merchant(overrides: Partial<Merchant> = {}): Merchant {
     offer_count: 3,
     networks: ['eip155:8453', 'eip155:84532'],
     verified_payable: true,
+    lowest_price_atomic: '1000',
     ...overrides,
   }
 }

@@ -3993,6 +3993,8 @@ export type components = {
             networks: string[];
             /** @description Any offer verified payable — the same observation `CatalogEntry.verified_payable` records, at merchant level. */
             verified_payable: boolean;
+            /** @description The lowest price among the merchant's counted offers, in USDC atomic units (6 decimals), null when no counted offer prices in USDC. Counted offers are the same set `offer_count` aggregates (non-delisted, on the listed chains); an offer counts when its `price_atomic` is a digit string and its `asset` is USDC — the symbol or Circle's canonical contract address (the seed data carries both). A client renders "From <price> USDC" (price scaled by 10^-6) with the offer count after it when there is more than one. */
+            lowest_price_atomic: string | null;
         };
         CatalogEntry: {
             /** Format: uuid */

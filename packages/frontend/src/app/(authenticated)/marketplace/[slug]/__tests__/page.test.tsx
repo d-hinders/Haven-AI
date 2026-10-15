@@ -69,6 +69,7 @@ const merchant: Merchant = {
   offer_count: 1,
   networks: ['eip155:84532'],
   verified_payable: true,
+  lowest_price_atomic: '1000',
 }
 
 function offer(overrides: Partial<CatalogEntry> = {}): CatalogEntry {

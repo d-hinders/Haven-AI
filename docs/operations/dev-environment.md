@@ -31,7 +31,7 @@ covers:
   - packages/frontend/vercel.json
   - packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts
   - scripts/vercel/**
-last-verified: "2026-10-10"
+last-verified: "2026-10-15"
 ---
 
 > **Re-verified #3913 (2026-10-13, Vercel skip-setting doc corrections):** the
@@ -636,6 +636,18 @@ Isolation rules that are non-negotiable for a payments product:
  101 deploys (see `docs/product/marketplace.md`); until then every offer
  reads `unstated`.
 
+ > **Re-verified #3980 (2026-10-15):** #3980 touches
+ > `infra/repositories/merchants.ts` (a USDC lowest-price aggregate beside the
+ > offer count) and `routes/merchants.ts` (the field on the wire, plus a
+ > renumbered bind placeholder), without moving the scoping this bullet
+ > describes: `$1` is still the network list, `coming_soon` rows are still
+ > listed only through the same `includeProspects` gate, and the SQL's
+ > `ORDER BY` is deliberately unchanged — #3980 re-sorts client-side in the
+ > grid's `visible` memo, so the endpoint's order for its other clients stays
+ > put.
+ > Scope of this re-read: this bullet's marketplace paragraphs and the
+ > merchants repo/route coverage it names; the rest of the document was not
+ > re-read for it.
  > **Re-verified #3769 (2026-10-08):** the catalog verifier
  > (`modules/catalog/merchant-catalog.ts`) now probes a plain-HTTP row with
  > the row's DECLARED method and body example (`http_method`/`body_type`/

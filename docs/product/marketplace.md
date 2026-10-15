@@ -389,15 +389,31 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   idiom (`entityCardClassName`: hover lift, product focus ring): a monogram
   (`components/ui/Monogram.tsx`, promoted on its third copy — `/contacts`,
   the card, the merchant header) or a logo when `logo_url` is set, name,
-  category chip (acronyms kept: API, AI), description clamped to two lines,
-  network chips, and a bottom-pinned footer with the offer count or "Coming
-  soon", plus the Haven test-merchant label on a test merchant. Filters, in
+  the category as plain `ink-3` text (acronyms kept: API, AI — deliberately
+  not a chip, so it stops dressing up like the network chips beside it),
+  description clamped to two lines, network chips, and a bottom-pinned footer
+  that answers "can I pay this, and what does it cost?" (#3980): live
+  merchants show "From <price> USDC" — the lowest USDC price over the counted
+  offers, served as the nullable `lowest_price_atomic` on `GET /merchants`
+  (atomic units; the card scales by 10^-6), with the offer count after it
+  when there is more than one offer, and the offer count alone when no
+  counted offer prices in USDC — while a coming-soon merchant shows no footer
+  at all (nothing there is comparable), renders muted, and carries "Coming
+  soon" in the badge slot. The grid sorts payable merchants before
+  coming-soon ones, CLIENT-side in `MerchantGrid`'s `visible` memo — the
+  endpoint's own order (test merchants last, then by name) is preserved
+  within each group and must not change for its other clients. Verified is a
+  quiet check after the name (`title` = the meaning, sr-only "Verified" so
+  the card link's accessible name stays the merchant's) — the merchant page
+  still spells the meaning out in visible text; the Haven test-merchant label
+  renders on a test merchant. Filters, in
   two rows (#3979): first a search over name and description (leading icon,
   filling the row, as on Contacts) with the network dropdown beside it, shown
   only when the listed chains are more than one; then category pills
   (`components/ui/FilterPill.tsx`, moved out of `CatalogPanel.tsx`) on the
   left and the "Verified only" and "Show test merchants" checkboxes on the
-  right. The network dropdown starts on the chain of the user's default
+  right (the row's bottom margin trimmed below `sm`, where the 44px tap
+  boxes add their height). The network dropdown starts on the chain of the user's default
   account (`resolveDefaultAccount`) when the listed merchants serve it, else
   "All networks"; it is derived at read time, so it holds once the user and
   the merchants load, and any choice overrides it. A merchant that lists no

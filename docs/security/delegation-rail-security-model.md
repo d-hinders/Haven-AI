@@ -74,7 +74,7 @@ covers:
   - packages/backend/src/modules/ops/**
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
-last-verified: "2026-10-14"
+last-verified: "2026-10-15"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -451,6 +451,15 @@ caveat, so the authority is still the signed caveat stack and nothing else.
 > (Merchant-locked budgets) and the `merchant-catalog.ts`/`merchants.ts`
 > coverage it names; the rest of the document was not re-read for it, and
 > `last-verified` stays 2026-10-08.
+
+> **Re-verified #3980 (2026-10-15):** #3980 touches `merchants.ts` (a USDC
+> lowest-price aggregate over the counted offers) without touching the payTo
+> path: `pay_to` is still written as seen from the challenge and never
+> COALESCEd, and the new price column feeds no budget pin, no caveat, and no
+> authority path — it is a display field on the listing reads only. Scope of
+> this re-read: the Merchant-locked budgets section above and the
+> `merchant-catalog.ts`/`merchants.ts` coverage it names; the rest of the
+> document was not re-read for it.
 
 Two limits are deliberate:
 - **Slot sharing.** A merchant-locked budget and a plain budget pinned to the

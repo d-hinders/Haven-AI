@@ -642,8 +642,9 @@ Isolation rules that are non-negotiable for a payments product:
  > renumbered bind placeholder), without moving the scoping this bullet
  > describes: `$1` is still the network list, `coming_soon` rows are still
  > listed only through the same `includeProspects` gate, and the SQL's
- > `ORDER BY` is deliberately unchanged — #3980 re-sorts client-side in
- > `MerchantGrid` so the endpoint's order for its other clients stays put.
+ > `ORDER BY` is deliberately unchanged — #3980 re-sorts client-side in the
+ > grid's `visible` memo, so the endpoint's order for its other clients stays
+ > put.
  > Scope of this re-read: this bullet's marketplace paragraphs and the
  > merchants repo/route coverage it names; the rest of the document was not
  > re-read for it.

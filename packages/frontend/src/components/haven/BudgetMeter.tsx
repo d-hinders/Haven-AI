@@ -15,6 +15,17 @@ export type BudgetMeterProps = {
   label: string
   /** Optional caption line under the bar (the "1.20 of 3.00 USDC used · refills …" line). */
   caption?: ReactNode
+  /**
+   * Optional trailing node on the caption line — the dashboard's "Last paid …"
+   * (#3989). It renders as a SIBLING of the caption `<p>`, never inside it
+   * (the caption tests read that `<p>` with `$`-anchored regexes and a
+   * span-count check), on a `flex flex-wrap items-baseline justify-between`
+   * line: when the caption and the trailing node do not fit on one row, the
+   * trailing node wraps to its own right-aligned line below the caption. It
+   * is the caller's node — the `ml-auto` that right-aligns it rides on it.
+   * Callers that omit it render exactly as before.
+   */
+  trailing?: ReactNode
 }
 
 /**
@@ -24,12 +35,13 @@ export type BudgetMeterProps = {
  * own period renders the same track height, the same fill and the same ARIA
  * contract, instead of restating the markup per screen.
  *
- * It takes `usedPercent` (clamped 0–100), an `aria-label`, and an optional
- * `caption` slot for the line under the bar. The label row that sits above it
- * (token value, percentage) belongs to the caller — it is tabular, caller-
- * specific typography, not part of the measurement.
+ * It takes `usedPercent` (clamped 0–100), an `aria-label`, an optional
+ * `caption` slot for the line under the bar, and an optional `trailing` node
+ * that rides on that same line, right-aligned (#3989). The label row that sits
+ * above it (token value, percentage) belongs to the caller — it is tabular,
+ * caller-specific typography, not part of the measurement.
  */
-export function BudgetMeter({ usedPercent, label, caption }: BudgetMeterProps) {
+export function BudgetMeter({ usedPercent, label, caption, trailing }: BudgetMeterProps) {
   const used = Math.min(100, Math.max(0, usedPercent))
   return (
     <div>
@@ -49,7 +61,20 @@ export function BudgetMeter({ usedPercent, label, caption }: BudgetMeterProps) {
           style={{ width: `${used}%` }}
         />
       </div>
-      {caption && <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{caption}</p>}
+      {caption && !trailing && <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{caption}</p>}
+      {trailing ? (
+        // #3989: the caption and the trailing node share ONE wrapping line —
+        // the trailing node is a sibling of the caption <p>, never inside it,
+        // so a caption's `$`-anchored guard cannot pick the time up. When the
+        // two do not fit (a phone, a long SEK caption), the trailing node
+        // wraps to its own right-aligned line (its caller-supplied `ml-auto`
+        // absorbs the wrapped line's free space) instead of squeezing the
+        // caption or breaking between a label and its time.
+        <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-3">
+          {caption && <p className="text-xs text-[var(--v2-ink-3)]">{caption}</p>}
+          {trailing}
+        </div>
+      ) : null}
     </div>
   )
 }

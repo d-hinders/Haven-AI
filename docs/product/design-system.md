@@ -674,13 +674,19 @@ shows when the budget starts. The dashboard's agent rows ask for the compact
 place of "used this period" ("≈$0.40 of $1.00 · per day · refills in 5h"),
 with an extra-budget count riding in the same line ("· +1 budget"); every
 other surface keeps the full wording. In token mode the row joins the cap and
-its symbol with a no-break space (#3910), so "3.00 USDC" never splits. Beside
-the caption the row has a right-hand column: the last payment's time, and the
-merchant under it from `sm`, in one fixed 10rem column in every row so every
-budget bar has the same length (#3912; the merchant truncates with its full
-name as a tooltip); below `sm` the time sits
-on the name line and the merchant is hidden, so the bar and caption span the
-row (#3910). The label row above the bar (token value,
+its symbol with a no-break space (#3910), so "3.00 USDC" never splits. The
+caption line can also carry an optional `trailing` node (#3989) — the
+dashboard agent row's labelled "Last paid" time: a SIBLING of the caption
+`<p>`, never inside it, on one `flex flex-wrap items-baseline
+justify-between gap-x-3` line. When the caption and the trailing node do not
+fit (a phone, a long SEK caption), the trailing node — `whitespace-nowrap`,
+so a label never splits from its time — wraps to its OWN right-aligned line
+below the caption; the caption is never squeezed. The row itself is one
+three-track grid (icon, body, chevron) at every width: the bar and its
+caption line span the row between the icon and the chevron, with no time
+column and no `time` area, and the row renders no counterparty or merchant —
+the last payment shows as the time only (the wire's `lastCounterparty` is
+unchanged). The label row above the bar (token value,
 percentage) belongs to the caller: it is the caller's tabular typography, not
 part of the measurement. The fill is a token surface colour, never a series
 colour — a budget bar measures one delegation against its own period, it is

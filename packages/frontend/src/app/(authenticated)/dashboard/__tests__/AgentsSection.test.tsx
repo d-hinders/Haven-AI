@@ -343,39 +343,67 @@ describe('AgentsSection (#3809)', () => {
     expect(screen.getByRole('button', { name: 'Connect agent' })).toBeInTheDocument()
   })
 
-  it("names the last payment's counterparty, never a raw address", () => {
+  it('renders no counterparty or merchant in the row — not even a populated one (#3989)', () => {
     const agent = makeAgent({
       stats: {
         ...makeStats(),
         lastPaymentAt: '2026-10-09T09:41:00.000Z',
+        // Populated on the wire (the field is required) — and still invisible:
+        // the row shows the time only, never the counterparty (#3989).
         lastCounterparty: {
           source: 'x402',
           x402ResourceUrl: 'https://research.example/report',
           to: '0x9999999999999999999999999999999999999999',
-          merchantName: null,
+          merchantName: 'Research Merchant AB',
         },
       },
     })
 
+    const { container } = render(<AgentsSection {...baseProps({ overview: makeOverview({ agents: [agent] }) })} />)
+
+    // No hostname, no resolved merchant name, never a raw address.
+    expect(screen.queryByText('research.example')).not.toBeInTheDocument()
+    expect(screen.queryByText('Research Merchant AB')).not.toBeInTheDocument()
+    expect(container.textContent).not.toMatch(/0x9999/)
+    // The visible "Last paid" label replaced the sr-only "Last payment"
+    // prefix (#3989): the label is not read twice.
+    expect(screen.queryByText('Last payment')).not.toBeInTheDocument()
+    expect(screen.getByTestId('agent-row-last-payment')).toHaveTextContent(/^Last paid /)
+  })
+
+  it('says "No payments yet" on the caption line for an agent that never paid (#3989)', () => {
+    const agent = makeAgent({ budgets: [makeBudget()] })
+    const budgetRemaining = { budgets: [makeRead()] }
+    render(
+      <AgentsSection
+        {...baseProps({ overview: makeOverview({ agents: [agent] }), budgetRemaining })}
+      />,
+    )
+    const time = screen.getByTestId('agent-row-last-payment')
+    expect(time).toHaveTextContent('No payments yet')
+    // In the NEW position: a sibling of the caption <p> under the bar — in the
+    // caption line's wrapper, never inside the caption itself.
+    const meter = screen.getByRole('progressbar')
+    expect(meter.parentElement).toContainElement(time)
+    expect(time.parentElement!.querySelector('p')).not.toBe(time)
+  })
+
+  it('keeps "Last paid" and its time one unbreakable node (#3989)', () => {
+    const agent = makeAgent({
+      stats: { ...makeStats(), lastPaymentAt: '2026-10-09T09:41:00.000Z' },
+    })
+
     render(<AgentsSection {...baseProps({ overview: makeOverview({ agents: [agent] }) })} />)
 
-    // #3908: the right-hand column — the time on top, the merchant under it.
-    const column = screen.getByTestId('agent-row-last-payment')
-    expect(within(column).getByText(/ago$/)).toBeInTheDocument()
-    expect(within(column).getByText('research.example')).toBeInTheDocument()
-    // The old under-the-bar sentence is gone; the column keeps "Last payment"
-    // for screen readers only.
-    expect(screen.queryByText(/Last payment .* to /)).toBeNull()
-    expect(within(column).getByText('Last payment')).toHaveClass('sr-only')
-    expect(screen.queryByText(/0x9999/)).not.toBeInTheDocument()
+    const time = screen.getByTestId('agent-row-last-payment')
+    // One whitespace-nowrap element holding label and time as plain text —
+    // when the caption line wraps, the whole node moves as one unit.
+    expect(time).toHaveClass('whitespace-nowrap')
+    expect(time.children).toHaveLength(0)
+    expect(time.textContent).toMatch(/^Last paid /)
   })
 
-  it('says "No payments yet" in the right column for an agent that never paid (#3908)', () => {
-    render(<AgentsSection {...baseProps({ overview: makeOverview({ agents: [makeAgent()] }) })} />)
-    expect(within(screen.getByTestId('agent-row-last-payment')).getByText('No payments yet')).toBeInTheDocument()
-  })
-
-  it('keeps the right column on a paused row and leaves it off a setup row (#3908)', () => {
+  it('keeps the time on a paused row (under the bar) and off a setup row (#3989)', () => {
     const paused = makeAgent({ id: AGENT_IDS.watcher, name: 'Watcher agent', status: 'paused' })
     const pending = makeAgent({ id: AGENT_IDS.pending, name: 'Connecting agent', status: 'pending_approval' })
     render(<AgentsSection {...baseProps({ overview: makeOverview({ agents: [paused, pending] }) })} />)

@@ -2,6 +2,7 @@
   "id": "x402-plain-http-request-mode",
   "title": "x402 paywall on a plain-HTTP endpoint, request mode end to end",
   "category": "x402-paywall",
+  "tier": 1,
   "instruction": "Fetch the paid resource at {target} (a plain-HTTP x402 endpoint). It will answer 402 Payment Required: get a quote, replay the request the way the quote tells you, and bring me the actual response body. Do not pay twice for the same request.",
   "requires": ["delegation-agent-open-budget", "funded-period-budget", "plain-http-x402-target"],
   "amount": { "rule": "fraction_of_remaining", "fraction": "1/4" },

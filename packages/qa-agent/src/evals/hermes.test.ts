@@ -96,9 +96,10 @@ describe('resultFieldsFromText', () => {
   })
 })
 
-describe('the config contract refuses to guess (partner open question #2)', () => {
-  it('throws naming the open question when no command template is set', () => {
-    expect(() => hermesAdapterConfigFromEnv({})).toThrow(/open question/)
+describe('the config contract refuses to guess (the runbook names the verified wrapper)', () => {
+  it('throws naming the verified `hermes -z` wrapper when no command template is set', () => {
+    expect(() => hermesAdapterConfigFromEnv({})).toThrow(/hermes -z \{instruction\} --yolo/)
+    expect(() => hermesAdapterConfigFromEnv({})).toThrow(/docs\/operations\/agent-evals\.md/)
   })
 
   it('throws when the template cannot carry the instruction', () => {

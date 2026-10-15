@@ -1,7 +1,8 @@
 /**
- * Runner tests: k trials, pass rate, pass^k, wall time, and the rule that an
- * adapter failure is a RED TRIAL, not a crash — a nightly run must finish
- * and report.
+ * Runner tests: k trials, pass rate, pass^k, wall time, and the two rules
+ * that keep a nightly run finishable: an adapter failure is a RED TRIAL,
+ * not a crash, and (since #3992 A2) so is a resolve failure — with the
+ * per-trial resolver carrying its own amount and start block per trial.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -20,24 +21,34 @@ const TASK: EvalTask = {
   source: { kind: 'issue', ref: '3958', note: 'test' },
 }
 
-function resolved(): ResolvedTask {
-  return { task: TASK, amountAtomic: 1n, instruction: 'x' }
+function resolved(block: number = 10): ResolvedTask {
+  return { task: TASK, amountAtomic: 1n, instruction: 'x', startedAtBlock: block }
 }
 
 function logWith(calls: AgentRunLog['calls']): AgentRunLog {
   return { taskId: TASK.id, trial: 1, calls }
 }
 
-const fakeAdapter = (name: string, behavior: (trial: number) => Promise<AgentRunLog>): EvalAdapter => ({
+const fakeAdapter = (name: string, behavior: (resolved: ResolvedTask, trial: number) => Promise<AgentRunLog>): EvalAdapter => ({
   name,
-  runTask: (_t, trial) => behavior(trial),
+  runTask: (resolved, trial) => behavior(resolved, trial),
 })
+
+/** A resolver the tests control: one resolved task per (task, trial) call. */
+function fakeResolver(byCall: ResolvedTask[]): NonNullable<Parameters<typeof runSuite>[0]['resolveForTrial']> {
+  let i = 0
+  return async () => {
+    if (i >= byCall.length) throw new Error('the test resolver ran out of per-trial resolutions')
+    return byCall[i++]!
+  }
+}
 
 describe('runSuite', () => {
   it('collects pass rate, pass^k and per-trial wall time', async () => {
     let n = 0
     const report = await runSuite({
-      resolved: [resolved()],
+      tasks: [TASK],
+      resolveForTrial: async () => resolved(),
       adapter: fakeAdapter('fake', async () => {
         n += 1
         return logWith(n === 1 ? [{ name: 'haven_get_agent' }, { name: 'haven_pay' }] : [{ name: 'haven_pay' }])
@@ -52,11 +63,13 @@ describe('runSuite', () => {
     expect(task.trials[1].pass).toBe(false)
     expect(task.trials[1].detail).toContain('no haven_get_agent')
     expect(task.slowestSessionMs).toBeGreaterThanOrEqual(0)
+    expect(task.drainsBudget).toBe(false)
   })
 
   it('pass^k holds only when EVERY trial passed', async () => {
     const report = await runSuite({
-      resolved: [resolved()],
+      tasks: [TASK],
+      resolveForTrial: async () => resolved(),
       adapter: fakeAdapter('fake', async () => logWith([{ name: 'haven_get_agent' }, { name: 'haven_pay' }])),
       trials: 3,
     })
@@ -66,7 +79,8 @@ describe('runSuite', () => {
 
   it('an adapter failure is a red trial with the cause, not an exception', async () => {
     const report = await runSuite({
-      resolved: [resolved()],
+      tasks: [TASK],
+      resolveForTrial: async () => resolved(),
       adapter: fakeAdapter('fake', async () => {
         throw new Error('hermes exited 137')
       }),
@@ -78,12 +92,81 @@ describe('runSuite', () => {
     expect(t.trials[0].detail).toContain('adapter failure')
     expect(t.trials[0].detail).toContain('hermes exited 137')
   })
+
+  it('a resolve failure is a red trial too — later trials still run (#3992 A2)', async () => {
+    const report = await runSuite({
+      tasks: [TASK],
+      resolveForTrial: async (_task, trial) => {
+        if (trial === 2) throw new Error('budget read failed: HTTP 503')
+        return resolved()
+      },
+      adapter: fakeAdapter('fake', async () => logWith([{ name: 'haven_get_agent' }, { name: 'haven_pay' }])),
+      trials: 3,
+    })
+    const t = report.tasks[0]
+    expect(t.trials).toHaveLength(3)
+    expect(t.trials[0].pass).toBe(true)
+    expect(t.trials[1].pass).toBe(false)
+    expect(t.trials[1].detail).toContain('resolve failure')
+    expect(t.trials[1].detail).toContain('HTTP 503')
+    expect(t.trials[2].pass).toBe(true)
+    expect(t.passAll).toBe(false)
+  })
+
+  it('records the executed order and the shuffle seed (#3992 B)', async () => {
+    const a = { ...TASK, id: 'a' }
+    const b = { ...TASK, id: 'b' }
+    const report = await runSuite({
+      tasks: [b, a],
+      resolveForTrial: async (task) => ({ task, amountAtomic: 1n, instruction: 'x', startedAtBlock: 1 }),
+      adapter: fakeAdapter('fake', async () => logWith([{ name: 'haven_get_agent' }])),
+      trials: 1,
+      shuffleSeed: 42,
+    })
+    expect(report.order).toEqual(['b', 'a'])
+    expect(report.shuffleSeed).toBe(42)
+  })
+
+  it('the trialCountFor override runs the drainer ONCE (#3992 A3)', async () => {
+    const drainer: EvalTask = { ...TASK, id: 'drainer', tier: 2 }
+    const calls: string[] = []
+    const report = await runSuite({
+      tasks: [drainer],
+      resolveForTrial: async (task) => ({ task, amountAtomic: 5n, instruction: 'x', startedAtBlock: 1 }),
+      adapter: fakeAdapter('fake', async (resolved) => {
+        calls.push(`${resolved.task.id}`)
+        return logWith([{ name: 'haven_get_agent' }])
+      }),
+      trials: 3,
+      trialCountFor: (task) => (task.tier === 2 ? 1 : 3),
+    })
+    expect(calls).toEqual(['drainer'])
+    expect(report.tasks[0].drainsBudget).toBe(true)
+    expect(report.tasks[0].trials).toHaveLength(1)
+  })
+
+  it('each trial carries its own resolved amount and start block (#3992 A2)', async () => {
+    const seen: Array<{ amount: string; block?: number }> = []
+    const report = await runSuite({
+      tasks: [TASK],
+      resolveForTrial: async (_task, trial) => ({ ...resolved(trial * 10), amountAtomic: BigInt(trial) * 100n }),
+      adapter: fakeAdapter('fake', async () => logWith([{ name: 'haven_get_agent' }])),
+      trials: 2,
+      onTrial: (resolved, record) => seen.push({ amount: record.resolvedAmountAtomic!, block: record.startBlock }),
+    })
+    expect(seen).toEqual([
+      { amount: '100', block: 10 },
+      { amount: '200', block: 20 },
+    ])
+    expect(report.tasks[0].trials.map((r) => r.resolvedAmountAtomic)).toEqual(['100', '200'])
+  })
 })
 
 describe('renderSummary', () => {
   it('names pass^k, the slowest session and each failing trial', async () => {
     const report = await runSuite({
-      resolved: [resolved()],
+      tasks: [TASK],
+      resolveForTrial: async () => resolved(),
       adapter: fakeAdapter('fake', async () => logWith([{ name: 'haven_pay' }])),
       trials: 1,
     })
@@ -92,6 +175,35 @@ describe('renderSummary', () => {
     expect(summary).toContain('runner-test')
     expect(summary).toContain('no haven_get_agent')
     expect(summary).toContain('issue: 3958')
+  })
+
+  it('marks the drainer k=1 (drains budget) so its pass^k is not read as a k-trial number (#3992 A3)', async () => {
+    const drainer: EvalTask = { ...TASK, id: 'direct-send-full-remaining', tier: 2 }
+    const report = await runSuite({
+      tasks: [drainer],
+      resolveForTrial: async () => resolved(),
+      adapter: fakeAdapter('fake', async () => logWith([{ name: 'haven_get_agent' }])),
+      trials: 3,
+      trialCountFor: (task) => (task.tier === 2 ? 1 : 3),
+    })
+    const summary = renderSummary(report)
+    expect(summary).toContain('k=1 (drains budget)')
+  })
+
+  it('names the executed order and the model identity — or "not reported" (#3992 B/C)', async () => {
+    const report = await runSuite({
+      tasks: [TASK],
+      resolveForTrial: async () => resolved(),
+      adapter: fakeAdapter('fake', async () => logWith([{ name: 'haven_get_agent' }])),
+      trials: 1,
+    })
+    const summary = renderSummary({ ...report, model: 'glm-5.3-flash', inferenceServerBuild: 'vllm 0.11 (exl3)' })
+    expect(summary).toContain('Executed order: runner-test')
+    expect(summary).toContain('Model: glm-5.3-flash')
+    expect(summary).toContain('inference server build: vllm 0.11 (exl3)')
+    // Harness version absent → named as absent, never silently dropped.
+    expect(summary).toContain('harness version: not reported')
+    expect(renderSummary(report)).toContain('Model: not reported')
   })
 })
 

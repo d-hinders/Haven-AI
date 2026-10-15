@@ -3,25 +3,43 @@
  *
  * Modes:
  *   --list           print the loaded tasks and exit (no agent, no chain).
- *   (default)        run the suite: resolve every task against the live
- *                    budget, run k trials per task through the adapter lane
- *                    (`QA_EVAL_ADAPTER`: `hermes` default, `claude-code` for
- *                    #3959's lane), apply the graders, write the JSON report
- *                    + readable summary + the `$GITHUB_STEP_SUMMARY` markdown.
- *   --limit=N        run only the FIRST N tasks in sequence order — the
- *                    5-task cost-pilot / PR-subset slice (#3959).
+ *   --compare-with=… regression-only compare: the new report (--new-report=)
+ *                    against earlier comparable reports (#3992 D) — alerts
+ *                    only on a task that failed pass^k on the last two
+ *                    comparable nights after a stable 5-of-7 baseline. No
+ *                    agent, no chain, no eval env needed.
+ *   (default)        run the suite: k trials per task through the adapter
+ *                    lane (`QA_EVAL_ADAPTER`: `hermes` default,
+ *                    `claude-code` for #3959's lane), applying the graders,
+ *                    writing the JSON report + readable summary + the
+ *                    `$GITHUB_STEP_SUMMARY` markdown.
+ *   --limit=N        run only the FIRST N tasks in the canonical (tiered)
+ *                    order — chosen BEFORE any `--shuffle`, so the 5-task
+ *                    cost-pilot / PR-subset slice is stable (#3992 B).
+ *   --shuffle=SEED   shuffle the task order WITHIN tiers only; the seed and
+ *                    the executed order are recorded in the report (#3992 B).
  *
- * The run needs: QA_API_URL, the eval agent's API key (QA_DELEGATION_AGENT_API_KEY
+ * Per-trial resolution (#3992 A2): the suite no longer resolves every task
+ * once at launch. A resolver is called immediately before EACH trial; it
+ * reads the observer block and the live budget at that moment (and waits,
+ * bounded, until the backend reflects the previous settled spend — the
+ * /allowances read can lag the observer node). A resolve failure is a RED
+ * TRIAL, not an exit. The runner itself still reads no budget and no chain
+ * (runner.ts's contract); everything live is injected here.
+ *
+ * The run needs: QA_API_URL, the eval agent's API key (QA_EVAL_AGENT_API_KEY
  * by convention — the runbook names the exact env), the recipient
- * (QA_PAYMENT_TO), the agent account (QA_DELEGATION_ACCOUNT) and — for the
- * chain probe — QA_RPC_URL_BASE_SEPOLIA is inherited from `lib/chain.ts`.
+ * (QA_EVAL_RECIPIENT), the agent account (QA_EVAL_AGENT_ACCOUNT) and — for
+ * the chain probe — QA_RPC_URL_BASE_SEPOLIA is inherited from `lib/chain.ts`.
  * The x402 URL tasks additionally read QA_EVAL_X402_TARGET (the `{target}`
  * placeholder — an address and a URL cannot be one env var); required only
- * when the loaded task set renders it.
+ * when the loaded task set renders it. Model identity rides env too
+ * (#3992 C): QA_EVAL_MODEL, QA_EVAL_INFERENCE_SERVER_BUILD,
+ * QA_EVAL_HARNESS_VERSION — anything absent renders "not reported".
  * Missing config fails BEFORE the first agent session, not mid-night.
  */
 
-import { writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import {
   ClaudeCodeAdapter,
@@ -30,13 +48,27 @@ import {
   type ClaudeCodeSession,
 } from './claude-code.js'
 import { hermesAdapterConfigFromEnv, runHermesTask } from './hermes.js'
-import { anyTaskUsesTarget, loadTasks, orderTasksForSequence, resolveTask } from './tasks.js'
-import { renderSummary, runSuite, type EvalAdapter, type HostedMcpInfo } from './runner.js'
+import {
+  anyTaskUsesTarget,
+  loadTasks,
+  resolveTask,
+  selectTaskSequence,
+} from './tasks.js'
+import {
+  renderSummary,
+  runSuite,
+  type BudgetIncreaseEvent,
+  type EvalAdapter,
+  type HostedMcpInfo,
+  type PriorTrialOutcome,
+} from './runner.js'
 import { renderMarkdownSummary } from './summary.js'
+import { compareAgainstBaseline, formatCompareVerdict, parseCompareReport } from './compare.js'
 import { observerProvider, describeObserverRpc } from '../lib/chain.js'
 import { HavenApi } from '../lib/haven-api.js'
-import { readOnchainBudget } from '../lib/delegation-budget.js'
+import { readOnchainBudget, type BudgetUse } from '../lib/delegation-budget.js'
 import { loadQaConfig } from '../config.js'
+import type { AgentRunLog, EvalTask, GraderContext, ResolvedTask } from './types.js'
 
 function env(name: string): string {
   const v = process.env[name]?.trim()
@@ -47,17 +79,178 @@ function env(name: string): string {
   return v
 }
 
+/** Anything that can name the current observer block height (the real provider does). */
+export interface BlockNumberSource {
+  getBlockNumber(): Promise<number>
+}
+
+/**
+ * The grader probes, built once per run and injected into the runner
+ * (#3992 A1): BOTH probes now live here. `probePaymentStatus` reads the
+ * payment object off the dev backend — without it the
+ * `payment_status_settled` grader failed every live trial by construction.
+ */
+export function buildGraderContext(deps: { api: HavenApi; provider: BlockNumberSource }): Omit<GraderContext, 'resolved'> {
+  return {
+    probeTransfer: async (expected) => {
+      const { proveUsdcTransferSince } = await import('../lib/chain.js')
+      return proveUsdcTransferSince(
+        { from: expected.from, to: expected.to, amount: expected.amountAtomic },
+        { fromBlock: expected.fromBlock ?? (await deps.provider.getBlockNumber()), timeoutMs: 120_000, provider: deps.provider as never },
+      )
+    },
+    probePaymentStatus: async (paymentId) => {
+      const res = await deps.api.getPayment(paymentId)
+      if (!res.ok) {
+        return { ok: false, error: `HTTP ${res.status} reading payment ${paymentId}: ${res.data.error ?? 'backend rejected the read'}` }
+      }
+      return { ok: true, status: res.data.status }
+    },
+  }
+}
+
+export interface BudgetSourceFor {
+  (use: BudgetUse): Promise<{ remaining: bigint } | { error: string }>
+}
+
+const defaultSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+export interface PerTrialResolverDeps {
+  /** The live budget read; `use` carries the refusal semantics (delegation-budget.ts). */
+  readBudget: BudgetSourceFor
+  /** The observer node's current block height. */
+  blockNumber: () => Promise<number>
+  recipient?: string
+  x402Target?: string
+  agentAccount?: string
+  /** How long the consistency guard waits for the backend to reflect a settled spend. */
+  consistencyTimeoutMs?: number
+  consistencyPollMs?: number
+  /** Injectable delay for tests. */
+  sleep?: (ms: number) => Promise<void>
+}
+
+export interface PerTrialResolver {
+  resolve: (task: EvalTask, trial: number, prior?: PriorTrialOutcome) => Promise<ResolvedTask>
+  /** Budget INCREASES detected between trials (a refill boundary crossed mid-run). */
+  budgetEvents: BudgetIncreaseEvent[]
+}
+
+/**
+ * The CLI's per-trial resolver (#3992 A2). Immediately before each trial:
+ * 1. the consistency guard — when the previous trial (of ANY task) settled a
+ *    payment, wait until the backend budget read reflects that spend (it
+ *    reads /allowances, which can lag the observer node). A budget INCREASE
+ *    is recorded as a refill-boundary event instead. On timeout: throw → the
+ *    trial is red with the named cause.
+ * 2. a fresh observer block — the trial's own `fromBlock`, so its evidence
+ *    can never see an earlier trial's transfer.
+ * 3. the amount from the budget read of THIS moment (tier-3 tasks read with
+ *    `exhausted-ok`: their precondition IS a spent budget).
+ */
+export function createPerTrialResolver(deps: PerTrialResolverDeps): PerTrialResolver {
+  const timeoutMs = deps.consistencyTimeoutMs ?? 120_000
+  const pollMs = deps.consistencyPollMs ?? 2_000
+  const sleep = deps.sleep ?? defaultSleep
+  const budgetEvents: BudgetIncreaseEvent[] = []
+  let lastRemaining: bigint | undefined
+
+  const readRemaining = async (use: BudgetUse): Promise<bigint> => {
+    const read = await deps.readBudget(use)
+    if ('error' in read) throw new Error(read.error)
+    return read.remaining
+  }
+
+  const resolve = async (task: EvalTask, trial: number, prior?: PriorTrialOutcome): Promise<ResolvedTask> => {
+    const use: BudgetUse = task.tier === 3 ? 'exhausted-ok' : 'floor'
+    const spend = prior?.settled === true ? prior.resolved.amountAtomic : 0n
+    if (spend > 0n && lastRemaining !== undefined) {
+      const deadline = Date.now() + timeoutMs
+      for (;;) {
+        const remaining = await readRemaining(use)
+        if (lastRemaining !== undefined && remaining > lastRemaining) {
+          // A refill boundary was crossed mid-run (the runbook's Daily
+          // period question) — record it, don't fight it.
+          budgetEvents.push({
+            detectedBeforeTask: task.id,
+            detectedBeforeTrial: trial,
+            previousRemainingAtomic: lastRemaining.toString(),
+            observedRemainingAtomic: remaining.toString(),
+          })
+          lastRemaining = remaining
+          break
+        }
+        if (remaining <= lastRemaining - spend) {
+          lastRemaining = remaining
+          break
+        }
+        if (Date.now() > deadline) {
+          throw new Error(
+            `budget consistency timeout: the backend still reports ${remaining} after the previous ` +
+              `trial's settled spend of ${spend} (expected ≤ ${lastRemaining - spend}) — the ` +
+              `/allowances read did not catch up within ${timeoutMs}ms`,
+          )
+        }
+        await sleep(pollMs)
+      }
+    } else {
+      lastRemaining = await readRemaining(use)
+    }
+    const startedAtBlock = await deps.blockNumber()
+    const remaining = lastRemaining
+    const r = await resolveTask(task, {
+      budget: async () => ({ remaining }),
+      recipient: deps.recipient,
+      x402Target: deps.x402Target,
+      agentAccount: deps.agentAccount,
+      startedAtBlock,
+    })
+    if ('error' in r) throw new Error(r.error)
+    return r.resolved
+  }
+
+  return { resolve, budgetEvents }
+}
+
+/** The compare mode (#3992 D): no eval env, no agent, no chain — pure report reading. */
+async function runCompare(args: string[]): Promise<void> {
+  const newReportPath = args.find((a) => a.startsWith('--new-report='))?.split('=')[1]
+  if (!newReportPath) {
+    throw new Error('--compare-with needs --new-report=<path> naming the NEW report.')
+  }
+  const historyArg = args.find((a) => a.startsWith('--compare-with='))?.split('=')[1] ?? ''
+  const historyPaths = historyArg.split(',').map((s) => s.trim()).filter(Boolean)
+  const newRaw = await readFile(resolve(newReportPath), 'utf8')
+  const newOutcome = parseCompareReport(newRaw, newReportPath)
+  if ('error' in newOutcome) throw new Error(newOutcome.error)
+  const history: Array<{ outcome: ReturnType<typeof parseCompareReport> }> = []
+  for (const p of historyPaths) {
+    try {
+      history.push({ outcome: parseCompareReport(await readFile(resolve(p), 'utf8'), p) })
+    } catch (err) {
+      history.push({ outcome: { error: `${p}: ${(err as Error).message}` } })
+    }
+  }
+  const verdict = compareAgainstBaseline(newOutcome.report, history)
+  console.log(formatCompareVerdict(verdict, newOutcome.report))
+  process.exit(verdict.alerts.length > 0 ? 1 : 0)
+}
+
 async function main() {
   const args = process.argv.slice(2)
   const { tasks, invalid } = await loadTasks()
 
   if (args.includes('--list')) {
     for (const t of tasks) {
-      console.log(`${t.id}  [${t.category}]  graders: ${t.graders.map((g) => g.name).join(', ')}`)
+      console.log(`${t.id}  [${t.category}]  tier ${t.tier ?? 1}  graders: ${t.graders.map((g) => g.name).join(', ')}`)
       console.log(`  source: ${t.source.kind}: ${t.source.ref} — ${t.source.note}`)
     }
     for (const i of invalid) console.error(`INVALID ${i.error}`)
     process.exit(invalid.length > 0 ? 1 : 0)
+  }
+
+  if (args.some((a) => a.startsWith('--compare-with='))) {
+    await runCompare(args)
   }
 
   if (invalid.length > 0) {
@@ -69,14 +262,26 @@ async function main() {
     console.error('--trials must be a positive integer')
     process.exit(2)
   }
-  // The cost pilot / PR subset slice (#3959): the FIRST N tasks in sequence
-  // order — slice tasks first, the budget-draining full-remaining send last,
-  // so a 5-task pilot cannot zero the period budget on task one.
+  // The cost pilot / PR subset slice (#3959): the FIRST N tasks in the
+  // canonical (tiered) order — slice tasks first, the budget-draining
+  // full-remaining send in tier 2, the exhausted-budget tasks in tier 3 —
+  // so a 5-task pilot cannot zero the period budget on task one (#3992 B:
+  // the subset is chosen BEFORE any shuffle and is shuffle-stable).
   const limitRaw = args.find((a) => a.startsWith('--limit='))?.split('=')[1]
   const limit = limitRaw === undefined ? undefined : Number(limitRaw)
   if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
     console.error('--limit must be a positive integer')
     process.exit(2)
+  }
+  // Deterministic within-tier shuffle (#3992 B); the seed rides the report.
+  const shuffleRaw = args.find((a) => a.startsWith('--shuffle='))?.split('=')[1]
+  let shuffleSeed: number | undefined
+  if (shuffleRaw !== undefined) {
+    shuffleSeed = Number(shuffleRaw)
+    if (!Number.isInteger(shuffleSeed) || shuffleSeed < 0) {
+      console.error('--shuffle must be a non-negative integer seed')
+      process.exit(2)
+    }
   }
 
   const cfg = loadQaConfig()
@@ -86,8 +291,7 @@ async function main() {
   // The x402 URL tasks render {target}, not {recipient}: an address and an
   // HTTP target cannot be one env var. Required only when a loaded task
   // actually renders it, and checked BEFORE the first agent session.
-  const ordered = orderTasksForSequence(tasks)
-  const selected = limit !== undefined ? ordered.slice(0, limit) : ordered
+  const selected = selectTaskSequence(tasks, { limit, shuffleSeed })
   const x402Target = process.env.QA_EVAL_X402_TARGET?.trim() || undefined
   if (anyTaskUsesTarget(selected) && !x402Target) {
     console.error('Missing QA_EVAL_X402_TARGET — a loaded task renders {target} (the x402 URL tasks); see docs/operations/agent-evals.md.')
@@ -97,24 +301,24 @@ async function main() {
 
   // The budget read: live, or nothing — a guessed amount would turn a
   // success task into a refusal three trials deep (the #2016 discipline).
+  // Tier-3 tasks read with `exhausted-ok` (their precondition IS a spent
+  // budget); everything else refuses an exhausted/fallback read.
   const api = new HavenApi(cfg, apiKey)
-  const budgetSource = async () => {
-    const read = await readOnchainBudget(api, 'USDC', 'floor')
+  const budgetSource: BudgetSourceFor = async (use) => {
+    const read = await readOnchainBudget(api, 'USDC', use)
     return 'error' in read ? read : { remaining: read.remaining }
   }
 
   const provider = observerProvider()
-  const startedAtBlock = await provider.getBlockNumber()
-
-  const resolved = []
-  for (const task of selected) {
-    const r = await resolveTask(task, { budget: budgetSource, recipient, x402Target, agentAccount, startedAtBlock })
-    if ('error' in r) {
-      console.error(r.error)
-      process.exit(2)
-    }
-    resolved.push(r.resolved)
-  }
+  // Per-trial resolution (#3992 A2): the block and the budget are read
+  // immediately before each trial, never once at launch.
+  const resolver = createPerTrialResolver({
+    readBudget: budgetSource,
+    blockNumber: () => provider.getBlockNumber(),
+    recipient,
+    x402Target,
+    agentAccount,
+  })
 
   // The lane switch (#3959): `claude-code` runs the SAME task files and
   // graders through `claude -p`; `hermes` (default) is lane 1. Both refuse to
@@ -146,23 +350,34 @@ async function main() {
       }
     : undefined
 
-  console.log(`Running ${resolved.length} tasks × ${trials} trials via ${adapter.name}.`)
-  console.log(`Observer: ${describeObserverRpc()}; chain evidence reads from block ${startedAtBlock}.`)
+  // The tier-2 drainer runs ONE trial regardless of --trials (#3992 A3):
+  // after one it has nothing left to drain, so its pass^k is not a k-trial
+  // number and the report marks it "k=1 (drains budget)".
+  const trialCountFor = (task: EvalTask): number => (task.tier === 2 ? 1 : trials)
+
+  console.log(`Running ${selected.length} tasks (order: ${selected.map((t) => t.id).join(' → ')}) — tier-1 tasks × ${trials} trials, the drainer × 1, via ${adapter.name}.`)
+  console.log(`Observer: ${describeObserverRpc()}; chain evidence reads from each trial's own start block.`)
   const report = await runSuite({
-    resolved,
+    tasks: selected,
+    resolveForTrial: resolver.resolve,
     adapter,
     trials,
+    trialCountFor,
+    shuffleSeed,
     hostedMcp,
-    graderContext: {
-      probeTransfer: async (expected) => {
-        const { proveUsdcTransferSince } = await import('../lib/chain.js')
-        return proveUsdcTransferSince(
-          { from: expected.from, to: expected.to, amount: expected.amountAtomic },
-          { fromBlock: expected.fromBlock ?? startedAtBlock, timeoutMs: 120_000, provider },
-        )
-      },
-    },
+    graderContext: buildGraderContext({ api, provider }),
   })
+  if (resolver.budgetEvents.length > 0) report.budgetEvents = resolver.budgetEvents
+
+  // Model identity in every report (#3992 C): env-supplied for the Hermes
+  // lane (the runbook names the vars); the Claude Code lane's stream value
+  // stands when the env does not name one.
+  const envModel = process.env.QA_EVAL_MODEL?.trim() || undefined
+  const envInferenceBuild = process.env.QA_EVAL_INFERENCE_SERVER_BUILD?.trim() || undefined
+  const envHarnessVersion = process.env.QA_EVAL_HARNESS_VERSION?.trim() || undefined
+  report.model = envModel ?? report.model
+  if (envInferenceBuild) report.inferenceServerBuild = envInferenceBuild
+  if (envHarnessVersion) report.harnessVersion = envHarnessVersion
 
   // Cost + model enrichment (the Claude Code lane's `total_cost_usd`, #3959):
   // the runner stays adapter-agnostic, so the CLI merges the adapter's
@@ -176,7 +391,7 @@ async function main() {
       }
     }
     report.totalCostUsd = adapter.sessions.reduce((acc, s) => acc + (s.costUsd ?? 0), 0)
-    report.model = [...adapter.sessions].reverse().find((s) => s.model !== undefined)?.model
+    report.model = envModel ?? [...adapter.sessions].reverse().find((s) => s.model !== undefined)?.model ?? report.model
     // The pilot's per-session evidence: cost + wall time + model per session.
     await writeSessionEvidence(adapter.sessions, resolve(`${outPath}.sessions.json`))
   }
@@ -192,7 +407,18 @@ async function main() {
   process.exit(anyFail ? 1 : 0)
 }
 
-main().catch((err) => {
-  console.error((err as Error).message)
-  process.exit(2)
-})
+/** Runs only when this file is the process entry (the balances-cli.ts idiom) — tests import the helpers. */
+const isMain = (() => {
+  try {
+    return import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('evals/cli.ts')
+  } catch {
+    return false
+  }
+})()
+
+if (isMain) {
+  main().catch((err) => {
+    console.error((err as Error).message)
+    process.exit(2)
+  })
+}

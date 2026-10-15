@@ -11,15 +11,15 @@
  * with `--runtime hermes` + a `hv_setup_…` dashboard token. Inside a Hermes
  * session the MCP tools are namespaced `mcp__<server>__<tool>`.
  *
- * THE SEAM (partner open question #2, recorded in the runbook): nothing in
- * this repo documents how to run ONE task through Hermes non-interactively,
- * have it exit when done, and WHERE it writes the tool-call log. So the
- * adapter takes the harness command and log path from env and refuses to
- * invent a default — a guessed flag would burn a night of the partner's
- * machine on a run that never launched. The LOG PARSER, though, is concrete
- * and tested: it reads the Anthropic-style session JSONL (assistant
- * `tool_use` blocks + user `tool_result` blocks) and our own normalized JSON,
- * which is what "collects the tool-call log" means until the partner answers.
+ * THE SEAM (answered live 2026-10-15, runbook § the wrapper): `hermes -z
+ * {instruction} --yolo` runs ONE task non-interactively and exits; the tool
+ * trace lives in the profile's `state.db`, which a wrapper reads and emits
+ * as the normalized log. The adapter takes the harness command and log path
+ * from env and refuses to invent a default — a guessed flag would burn a
+ * night of the partner's machine on a run that never launched. The LOG
+ * PARSER, though, is concrete and tested: it reads the Anthropic-style
+ * session JSONL (assistant `tool_use` blocks + user `tool_result` blocks)
+ * and our own normalized JSON.
  *
  * #3959 (Claude Code adapter) reuses the task format, graders and this log
  * contract; it must NOT copy them.
@@ -65,9 +65,11 @@ export function hermesAdapterConfigFromEnv(env: NodeJS.ProcessEnv = process.env)
   if (!template) {
     throw new HermesAdapterError(
       `${HERMES_COMMAND_ENV} is not set — the adapter does not guess how Hermes runs one task ` +
-        `non-interactively (partner open question #2, docs/operations/agent-evals.md). ` +
-        `Set it to a command template containing {instruction} and optionally {log}.`,
-      'open-question-2',
+        `non-interactively. The verified shape is a wrapper around ` +
+        `\`hermes -z {instruction} --yolo\` that reads the profile's state.db and emits the ` +
+        `normalized AgentRunLog JSON — see docs/operations/agent-evals.md § "The Hermes lane ` +
+        `as actually run". Set it to that wrapper command containing {instruction}.`,
+      'runbook-hermes-wrapper',
     )
   }
   if (!template.includes('{instruction}')) {
@@ -165,26 +167,33 @@ function deepFind(obj: unknown, key: string): unknown {
 }
 
 /** Extract the refusal envelope fields a hosted MCP tool result carries. */
-export function resultFieldsFromText(text: string): { errorCode?: string; nextTool?: string; nextToolServerRole?: ServerRole; ok?: boolean } {
+export function resultFieldsFromText(text: string): { errorCode?: string; nextTool?: string; nextToolServerRole?: ServerRole; ok?: boolean; paymentId?: string } {
   const parsed = parseMaybeJson(text)
   if (parsed !== undefined) {
     const errorCode = deepFind(parsed, 'error_code')
     const nextTool = deepFind(parsed, 'next_tool_name')
     const role = deepFind(parsed, 'next_tool_server_role')
     const success = deepFind(parsed, 'success')
+    const paymentId = deepFind(parsed, 'payment_id')
     return {
       ...(typeof errorCode === 'string' ? { errorCode } : {}),
       ...(typeof nextTool === 'string' ? { nextTool: bareToolName(nextTool) } : {}),
       ...(role === 'hosted' || role === 'signer' ? { nextToolServerRole: role } : {}),
       ...(success === false ? { ok: false } : success === true ? { ok: true } : {}),
+      // #3992 A1: a payment id that only appears in the RESULT (the create
+      // call's own response, not the next call's arguments) still reaches
+      // `payment_status_settled`.
+      ...(typeof paymentId === 'string' ? { paymentId } : {}),
     }
   }
   // Best-effort regex fallback for prose-wrapped envelopes.
   const errorCode = /"error_code"\s*:\s*"([A-Za-z0-9_]+)"/.exec(text)?.[1]
   const nextTool = /"next_tool_name"\s*:\s*"([A-Za-z0-9_]+)"/.exec(text)?.[1]
+  const paymentId = /"payment_id"\s*:\s*"([^"]+)"/.exec(text)?.[1]
   return {
     ...(errorCode !== undefined ? { errorCode } : {}),
     ...(nextTool !== undefined ? { nextTool: bareToolName(nextTool) } : {}),
+    ...(paymentId !== undefined ? { paymentId } : {}),
   }
 }
 

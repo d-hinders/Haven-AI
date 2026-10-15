@@ -22,21 +22,37 @@ export function renderMarkdownSummary(report: EvalReport): string {
   lines.push('')
   lines.push(`${report.generatedAt} · ${report.trialsPerTask} trial(s) per task · pass^k on **${report.tasksPassingAll}/${report.tasksRun}** tasks`)
   lines.push('')
+  lines.push(`Executed order: ${report.order.join(' → ')}${report.shuffleSeed !== undefined ? ` (shuffle seed ${report.shuffleSeed})` : ''}`)
+  lines.push('')
   lines.push('| Task | Category | Pass rate | pass^k | Median session | Cost (USD) |')
   lines.push('|---|---|---|---|---|---|')
   for (const t of report.tasks) {
     const rate = `${Math.round(t.passRate * 100)}%`
-    const passK = t.passAll ? 'yes' : 'no'
+    // The drainer runs ONE trial on purpose — its pass^k is not comparable
+    // with the k-trial tasks', so the cell says so instead of yes/no.
+    const passK = t.drainsBudget ? 'k=1 (drains budget)' : t.passAll ? 'yes' : 'no'
     const costs = t.trials.map((r) => r.costUsd).filter((c): c is number => c !== undefined)
     const cost = costs.length > 0 ? usd(costs.reduce((a, b) => a + b, 0) / costs.length) : '—'
     lines.push(`| ${t.id} | ${t.category} | ${rate} | ${passK} | ${ms(t.medianSessionMs)} | ${cost} |`)
   }
   lines.push('')
-  if (report.totalCostUsd !== undefined) {
-    lines.push(`**Total cost the run reported:** ${usd(report.totalCostUsd)}`)
+  // Model identity in EVERY report (#3992 C): absent values say so instead
+  // of disappearing — an unpinned model change must never read as a
+  // regression in the trend lines.
+  lines.push(`**Model:** ${report.model ?? 'not reported'}`)
+  lines.push(`**Inference server build:** ${report.inferenceServerBuild ?? 'not reported'}`)
+  lines.push(`**Harness version:** ${report.harnessVersion ?? 'not reported'}`)
+  if (report.budgetEvents && report.budgetEvents.length > 0) {
+    lines.push('')
+    for (const e of report.budgetEvents) {
+      lines.push(
+        `> Budget increase detected before ${e.detectedBeforeTask} trial ${e.detectedBeforeTrial}: ${e.previousRemainingAtomic} → ${e.observedRemainingAtomic} (refill boundary crossed mid-run).`,
+      )
+    }
   }
-  if (report.model) {
-    lines.push(`**Model:** ${report.model}`)
+  if (report.totalCostUsd !== undefined) {
+    lines.push('')
+    lines.push(`**Total cost the run reported:** ${usd(report.totalCostUsd)}`)
   }
   if (report.hostedMcp) {
     const where =

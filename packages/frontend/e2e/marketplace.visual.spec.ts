@@ -56,6 +56,10 @@ import { assertCaptureNotBlank, unclipScrollShell } from '../scripts/full-page-c
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .ts constant with no default export shape to widen.
 import { THEME_STORAGE_KEY } from '../src/lib/theme-bootstrap'
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore — plain .ts constant; imported so the e2e assert cannot drift
+// from the component's TEST_MERCHANT_NOTE (round-1 #4003 review defect).
+import { TEST_MERCHANT_NOTE } from '../src/components/marketplace/MerchantHeader'
 
 const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{ name: string; width: number; height: number }>
 const DESKTOP_ONLY = VIEWPORTS.filter((vp) => vp.name === 'desktop')
@@ -131,7 +135,7 @@ const SCENARIOS: Scenario[] = [
           return prospect !== null && Boolean(live.compareDocumentPosition(prospect) & Node.DOCUMENT_POSITION_FOLLOWING)
         }, `[data-testid="merchant-card-${bergetAi.slug}"]`)
       expect(liveBeforeProspect).toBe(true)
-      await expect(grid.getByText('Haven test merchant — real payments, demo goods')).toHaveCount(1)
+      await expect(grid.getByText(TEST_MERCHANT_NOTE)).toHaveCount(1)
       // "Show test merchants" defaults ON: the grid lists both chains
       // (decision 11) and one of them is Sepolia, so the test merchant card
       // is visible without any interaction.

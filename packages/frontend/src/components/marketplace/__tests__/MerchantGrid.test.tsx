@@ -185,7 +185,7 @@ describe('MerchantGrid', () => {
     render(<MerchantGrid merchants={[]} loading={false} error={null} onSubmit={vi.fn()} />)
     expect(screen.queryByLabelText('Search merchants')).toBeNull()
     expect(screen.queryByLabelText('Verified only')).toBeNull()
-    expect(screen.getByRole('button', { name: 'List your payable service' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'List your service' })).toBeDefined()
   })
 
   it('offers "Clear filters" when a filter hides every merchant, and it restores the grid', () => {
@@ -217,7 +217,7 @@ describe('MerchantGrid', () => {
   it('opens the submit modal from the empty marketplace', () => {
     const onSubmit = vi.fn()
     render(<MerchantGrid merchants={[]} loading={false} error={null} onSubmit={onSubmit} />)
-    fireEvent.click(screen.getByRole('button', { name: 'List your payable service' }))
+    fireEvent.click(screen.getByRole('button', { name: 'List your service' }))
     expect(onSubmit).toHaveBeenCalled()
   })
 
@@ -226,7 +226,8 @@ describe('MerchantGrid', () => {
   it('opens the submit modal from the seller note below a populated grid, not from the toolbar', () => {
     const onSubmit = vi.fn()
     render(<MerchantGrid merchants={[merchant()]} loading={false} error={null} onSubmit={onSubmit} />)
-    expect(screen.queryByRole('button', { name: 'List your payable service' })).toBeNull()
+    // One entry point, below the cards — none in the toolbar.
+    expect(screen.getAllByRole('button', { name: 'List your service' })).toHaveLength(1)
     const note = screen.getByTestId('marketplace-list-service')
     expect(within(note).getByText('Sell an API or MCP tool?')).toBeDefined()
     fireEvent.click(within(note).getByRole('button', { name: 'List your service' }))

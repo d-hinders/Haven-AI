@@ -361,11 +361,12 @@ Structure:
    instruction per offer with a copy button, and an offers table.
 4. A `coming_soon` merchant page shows only its description, website and
    "Coming soon — not payable yet" — no instruction, no price.
-5. A "List your service" entry point for sellers, reusing the existing
-   submission modal: on the grid, a note below the cards that says who it is
-   for ("Sell an API or MCP tool?") rather than a toolbar button; an empty
-   marketplace offers it as the empty state's action; a merchant page offers
-   it as a button.
+5. An entry point for sellers, reusing the existing submission modal: on the
+   grid, a note below the cards that says who it is for ("Sell an API or MCP
+   tool?") with a "List your service" button rather than a toolbar button; an
+   empty marketplace offers the same "List your service" button as the empty
+   state's action, and a merchant page offers a "List your payable service"
+   button.
 
 Money and risk clarity:
 - Every offer's instruction is the exact text an agent pastes to pay it —

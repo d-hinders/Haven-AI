@@ -174,7 +174,7 @@ export function MerchantGrid({
         body="The marketplace is curated — new payable merchants appear here as they are verified."
         action={
           <Button variant="ghost" size="sm" onClick={onSubmit}>
-            List your payable service
+            List your service
           </Button>
         }
       />

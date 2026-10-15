@@ -43,10 +43,23 @@ const BUDGET_ROW = {
   token_symbol: 'USDC',
   token_decimals: 6,
   delegation_hash: `0x${'a'.repeat(64)}`,
+  recipient_address: null,
   budget_atomic: '1000000',
   period_seconds: 86400,
   start_date: String(NOW_SEC - 60),
   expires_at: String(NOW_SEC + 30 * 86400),
+}
+
+// A merchant-locked budget (#3331): the pin rides the wire so the display
+// helper can tell it from the open one (#4004).
+const PINNED_ROW = {
+  ...BUDGET_ROW,
+  id: 'd2',
+  agent_id: AGENT_B,
+  delegation_hash: `0x${'b'.repeat(64)}`,
+  recipient_address: '0x' + 'ab'.repeat(20),
+  budget_atomic: '2000000',
+  start_date: String(NOW_SEC - 120),
 }
 
 describe('GET /dashboard/budget-remaining (#3804)', () => {
@@ -106,7 +119,34 @@ describe('GET /dashboard/budget-remaining (#3804)', () => {
       sub_budget_spend: [{ agent_id: AGENT_B, spent_atomic: '150000' }],
     })
     expect(body.budgets[0].read_at).not.toBeNull()
+    // #4004: the pin and the window-open instant ride the wire — the display
+    // helper needs both to mirror the payment's own selection.
+    expect(body.budgets[0].recipient_address).toBeNull()
+    expect(body.budgets[0].start_date).toBe(new Date(NOW_SEC * 1000 - 60_000).toISOString())
     // The round trip against the spec is the shape gate (see #2392/#1090).
+    expectMatchesSpec('get', '/dashboard/budget-remaining', body)
+  })
+
+  it('carries a pinned delegation\u2019s recipient_address, and still returns the future-dated re-key row (#3802)', async () => {
+    // The re-key's dormant half: start_date in the future, listed ON PURPOSE.
+    const futureRow = { ...PINNED_ROW, id: 'd3', delegation_hash: `0x${'c'.repeat(64)}`, start_date: String(NOW_SEC + 3600) }
+    repoMocks.listDashboardBudgetDelegations.mockResolvedValue([PINNED_ROW, futureRow])
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/dashboard/budget-remaining',
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = response.json()
+    expect(body.budgets).toHaveLength(2)
+    const pinned = body.budgets.find((b: { delegation_hash: string }) => b.delegation_hash === PINNED_ROW.delegation_hash)
+    expect(pinned.recipient_address).toBe(PINNED_ROW.recipient_address)
+    // The future-dated row is NOT filtered here — that is the display
+    // helper's job (#4004); the route keeps the #3802 decision.
+    const future = body.budgets.find((b: { delegation_hash: string }) => b.delegation_hash === futureRow.delegation_hash)
+    expect(future.start_date).toBe(new Date((NOW_SEC + 3600) * 1000).toISOString())
     expectMatchesSpec('get', '/dashboard/budget-remaining', body)
   })
 

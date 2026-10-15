@@ -13807,6 +13807,16 @@ export const openapiSpec = {
           remaining_atomic: { type: ['string', 'null'], description: 'Null when the read is unknown — never "0", never the full budget.' },
           remaining_from_chain: { type: 'boolean' },
           used_atomic: { type: ['string', 'null'], description: 'Null when the read is unknown.' },
+          recipient_address: {
+            type: ['string', 'null'],
+            pattern: '^0x[0-9a-fA-F]{40}$',
+            description: '#4004 — the delegation\u2019s recipient pin; null = open budget. The display helper reads it to tell a budget locked to a merchant\u2019s verified pay-to from the open one, the same distinction the payment\u2019s own selection makes.',
+          },
+          start_date: {
+            type: ['string', 'null'],
+            format: 'date-time',
+            description: '#4004 — the instant the budget\u2019s window opens. The future-dated re-key row is still returned beside its live carry row (#3802 owner decision stands); the display helper is what skips a row whose start_date is in the future.',
+          },
           sub_budget_spend: {
             type: 'array',
             items: {

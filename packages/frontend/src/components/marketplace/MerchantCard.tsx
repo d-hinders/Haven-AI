@@ -17,7 +17,8 @@ const USDC_DECIMALS = 6
  * the footer then falls back to the offer count alone. `price_atomic` is the
  * merchant's own advertised value, so a malformed one is a real possibility
  * rather than a shape confusion; it renders as no price at all, the same
- * defensiveness `withinBudget` applies (`lib/marketplace.ts`).
+ * defensiveness the per-offer budget answer applies
+ * (`agentsThatCanPay`, `lib/marketplace.ts`).
  */
 function lowestPrice(merchant: Merchant): string | null {
   if (!merchant.lowest_price_atomic) return null

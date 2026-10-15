@@ -16,6 +16,7 @@ import { useAgents } from '@/hooks/useAgents'
 import { chainName } from '@/lib/marketplace'
 import { useAuth } from '@/context/AuthContext'
 import { resolveDefaultAccount } from '@/lib/default-account'
+import { useBudgetRemaining } from '@/hooks/useBudgetRemaining'
 import { useMerchant } from '@/hooks/useCatalog'
 import { useMerchantBudgets } from '@/hooks/useMerchantBudgets'
 
@@ -55,6 +56,10 @@ export default function MerchantPage() {
   } = useMerchantBudgets(slug, {
     enabled: !comingSoonForBudgets,
   })
+  // #4004: the per-offer budget answer reads what is LEFT on each budget (the
+  // cached, 60 s-polled enforcer read) — not just the cap `GET /agents`
+  // projects, which could answer yes when no agent could actually pay.
+  const { data: budgetRemaining } = useBudgetRemaining()
 
   if (loading) {
     return (
@@ -226,7 +231,14 @@ export default function MerchantPage() {
 
           <section>
             <h2 className="mb-2 text-sm font-semibold text-[var(--v2-ink)]">Offers</h2>
-            <OffersTable offers={offers} agents={agents} defaultChainId={defaultChainId} />
+            <OffersTable
+              offers={offers}
+              agents={agents}
+              budgets={budgetRemaining?.budgets ?? []}
+              merchantBudgets={merchantBudgets ?? []}
+              funding={funding}
+              defaultChainId={defaultChainId}
+            />
           </section>
         </>
       )}

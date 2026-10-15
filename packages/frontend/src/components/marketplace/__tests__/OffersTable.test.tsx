@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { OffersTable } from '../OffersTable'
-import { agentInstruction, ANY_RECIPIENT_BUDGET_TAG } from '@/lib/marketplace'
+import { agentInstruction, ANY_RECIPIENT_BUDGET_TAG, type BudgetAgent } from '@/lib/marketplace'
 import type { CatalogEntry } from '@/hooks/useCatalog'
+import type { DashboardBudgetRemainingEntry } from '@/hooks/useBudgetRemaining'
 
 /**
  * The merchant page's single offers list (#3981). The deleted
@@ -59,8 +60,48 @@ function plain(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
   })
 }
 
-const oneAgent = [
-  { status: 'active', allowances: [{ token_symbol: 'USDC', allowance_amount: '25.00' }] },
+// #4004: the budget answer is computed from the spec-derived agent shape plus
+// the two budget wires — the cap-only `{ status, allowances }` pair is gone.
+const NOW_MS = Date.parse('2026-10-15T12:00:00.000Z')
+const USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
+
+const atlas: BudgetAgent = {
+  id: 'agent-1',
+  name: 'Atlas',
+  status: 'active',
+  account_chain_id: 84532,
+  // The cap, weekly — read for the period word only, never the comparison.
+  allowances: [
+    { id: 'alw-1', agent_id: 'agent-1', token_address: USDC, token_symbol: 'USDC', allowance_amount: '25.00', reset_period_min: 10080 },
+  ],
+  receivedSubBudgets: [],
+}
+
+function budgetRow(overrides: Partial<DashboardBudgetRemainingEntry> = {}): DashboardBudgetRemainingEntry {
+  return {
+    agent_id: 'agent-1',
+    chain_id: 84532,
+    delegation_hash: `0x${'1'.repeat(64)}`,
+    token_address: USDC,
+    token_symbol: 'USDC',
+    token_decimals: 6,
+    budget_atomic: '25000000',
+    read_at: null,
+    period_end: new Date(NOW_MS + 86_400_000).toISOString(),
+    remaining_atomic: '20000000',
+    remaining_from_chain: true,
+    used_atomic: '5000000',
+    sub_budget_spend: [],
+    ...overrides,
+  }
+}
+
+const usdcWithRoom = [budgetRow()]
+// 20 USDC left covers $0.01, not $99; an EURe budget whose read went unknown
+// answers nothing — the row renders without a hint line (#2295).
+const threeStates = [
+  usdcWithRoom[0]!,
+  budgetRow({ delegation_hash: `0x${'2'.repeat(64)}`, token_symbol: 'EURe', token_address: `0x${'e'.repeat(40)}`, remaining_atomic: null }),
 ]
 
 function row(id: string) {
@@ -84,14 +125,30 @@ describe('OffersTable', () => {
           offer({ id: 'above', name: 'Bulk video render', price_atomic: '99000000', price_display: '$99.00 USDC' }),
           offer({ id: 'unknown', name: 'Currency reference', asset: 'EURe', price_atomic: '500000000000000000', price_display: '€0.50 EURe' }),
         ]}
-        agents={oneAgent}
+        agents={[atlas]}
+        budgets={threeStates}
       />,
     )
-    expect(row('within').getByText('Within your agent budget')).toBeDefined()
-    expect(row('above').getByText('Above every agent budget — a payment would be declined')).toBeDefined()
+    expect(row('within').getByText('Atlas can pay this')).toBeDefined()
+    expect(row('above').getByText('More than Atlas has left this week')).toBeDefined()
     // Positive control for the absence: the row rendered, with neither line.
     expect(row('unknown').getByText('Currency reference')).toBeDefined()
-    expect(row('unknown').queryByText(/agent budget/)).toBeNull()
+    expect(row('unknown').queryByText(/can pay this|has left/)).toBeNull()
+  })
+
+  it('names the agent that can pay when one agent can and one cannot', () => {
+    const blinks: BudgetAgent = { ...atlas, id: 'agent-2', name: 'Blinks' }
+    render(
+      <OffersTable
+        offers={[offer({ id: 'named' })]}
+        agents={[{ ...atlas, allowances: [] }, blinks]}
+        budgets={[
+          budgetRow({ agent_id: 'agent-1', remaining_atomic: '1000' }),
+          budgetRow({ agent_id: 'agent-2', delegation_hash: `0x${'3'.repeat(64)}`, remaining_atomic: '20000000' }),
+        ]}
+      />,
+    )
+    expect(row('named').getByText('Blinks can pay this')).toBeDefined()
   })
 
   it('keeps a degraded offer usable with the badge and a calm availability note, and only there', () => {
@@ -260,17 +317,18 @@ describe('OffersTable', () => {
     render(
       <OffersTable
         offers={[offer({ id: 'within' }), offer({ id: 'above', name: 'Bulk video render', price_atomic: '99000000', price_display: '$99.00 USDC' })]}
-        agents={oneAgent}
+        agents={[atlas]}
+        budgets={usdcWithRoom}
       />,
     )
     const list = screen.getByTestId('offers-list')
     expect(list.className).toContain('md:hidden')
     expect(screen.getByTestId('offers-table').className).toMatch(/\bhidden\b.*md:block/)
     const above = within(screen.getByTestId('offer-card-above'))
-    expect(above.getByText('Above every agent budget — a payment would be declined')).toBeDefined()
+    expect(above.getByText('More than Atlas has left this week')).toBeDefined()
     expect(above.getByText('Base Sepolia')).toBeDefined()
     expect(above.getByText('Pay https://mcp.text.example/mcp via create_text for <what you want>')).toBeDefined()
-    expect(within(screen.getByTestId('offer-card-within')).getByText('Within your agent budget')).toBeDefined()
+    expect(within(screen.getByTestId('offer-card-within')).getByText('Atlas can pay this')).toBeDefined()
     // One labelled button per shape: the desktop row and the phone card.
     expect(screen.getAllByRole('button', { name: 'Copy instruction for Bulk video render' })).toHaveLength(2)
   })

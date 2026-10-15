@@ -77,6 +77,23 @@ export interface BudgetRemainingEntry {
   remaining_from_chain: boolean
   /** Null when the read is unknown. */
   used_atomic: string | null
+  /**
+   * #4004 — additive, optional and nullable. The delegation's recipient pin
+   * (null = open budget): the budget answer reads it to tell a budget locked
+   * to this merchant's verified pay-to from the open one, the same
+   * distinction the payment's own selection makes. Never widened `GET
+   * /agents`; this route is cached and polled at 60 s, so the extra columns
+   * add no RPC load.
+   */
+  recipient_address?: string | null
+  /**
+   * #4004 — additive, optional and nullable. Unix-second BIGINT ISO'd: the
+   * instant the budget's window opens. The route deliberately still returns
+   * the future-dated re-key row beside its live carry row (#3802 owner
+   * decision stands) — the DISPLAY helper is what skips a row whose
+   * `start_date` is in the future, so the field has to ride the wire.
+   */
+  start_date?: string | null
   sub_budget_spend: Array<{ agent_id: string; spent_atomic: string }>
 }
 
@@ -103,6 +120,8 @@ function shapeEntry(
     remaining_atomic: null,
     remaining_from_chain: false,
     used_atomic: null,
+    recipient_address: row.recipient_address,
+    start_date: new Date(Number(row.start_date) * 1000).toISOString(),
     sub_budget_spend: spend.map((s) => ({ agent_id: s.agent_id, spent_atomic: s.spent_atomic })),
   }
   if (outcome.status !== 'known') return base

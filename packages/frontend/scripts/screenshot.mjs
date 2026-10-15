@@ -5972,7 +5972,7 @@ export const SCENARIOS = {
   },
   'catalog-budget-states': {
     description:
-      'A merchant page\'s offers table with all three budget states side by side — within budget, above budget, and unknown (#2295; re-pointed from the /catalog card grid by #3079)',
+      'A merchant page\'s offers table with all three budget states side by side — a named "can pay", a named "more than left", and the silent unknown (#4004; re-pointed from the /catalog card grid by #3079)',
     // ── Why this scenario exists ─────────────────────────────────────────
     //
     // Before #2295, `withinBudget` compared a HUMAN-DECIMAL `allowance_amount`
@@ -5983,28 +5983,40 @@ export const SCENARIOS = {
     // were unreachable in production. The `false` copy in particular had gone
     // stale unnoticed while dead, still promising the retired approval queue.
     //
+    // #4004 replaced the cap-only answer with `agentsThatCanPay`: the row now
+    // names WHO can pay and, for a known no, what period ran out — reading
+    // what is LEFT (`GET /dashboard/budget-remaining`, cached and polled at
+    // 60 s) rather than the cap, plus the merchant-budgets wire. So the three
+    // states are now: one open USDC budget with 20 USDC left answers both
+    // priced offers (can / more-than-left), and an EURe budget whose chain
+    // read went UNKNOWN renders as an absence — never as a warning. The old
+    // `/agent budget/` absence check would have passed vacuously forever; the
+    // new one checks the actual answer phrases.
+    //
     // A route capture cannot evidence this on its own: the shared fixture
     // serves no merchants, so `/marketplace` photographs its empty state.
-    // Three offers against one agent's single 25 USDC budget produce all
-    // three states in one frame, which is the only way to judge whether they
-    // read as answer / answer / absence rather than as error states.
+    // Three offers against one agent produce all three states in one frame,
+    // which is the only way to judge whether they read as answer / answer /
+    // absence rather than as error states.
     //
     // #3079 moved the hint from the `/catalog` card to the merchant page's
-    // `OfferRow` (`withinBudget` itself moved byte-identical to
-    // `lib/marketplace.ts`), so the scenario now answers `GET /merchants/{slug}`
-    // and captures `/marketplace/{slug}`. The three fixture offers are the
-    // same three, under one fixture merchant.
+    // `OfferRow` (`withinBudget` itself lived in `lib/marketplace.ts` until
+    // #4004 replaced it), so the scenario still answers `GET
+    // /merchants/{slug}` and captures `/marketplace/{slug}` — plus the two
+    // reads the helper now consumes.
     api(apiPath) {
       if (apiPath === '/agents') {
-        // ONE active agent, ONE USDC budget, in the shape `GET /agents`
-        // actually returns: human-decimal, per `allowanceHumanAmount` and
-        // `rails/delegation-budget-view.ts`. An atomic string here would make
-        // the capture evidence of the bug rather than of the fix.
+        // ONE active agent on the offer's chain. `GET /agents` still carries
+        // the human-decimal CAP (`allowance_amount`) — the period word reads
+        // it (weekly → "this week"); the ANSWER reads what is left.
         return {
           agents: [
             {
               ...FIXTURE_AGENTS[0],
+              name: 'Atlas',
               status: 'active',
+              account_chain_id: FIXTURE_ACCOUNT.chain_id,
+              receivedSubBudgets: [],
               allowances: [
                 {
                   id: 'alw-catalog-fixture',
@@ -6018,6 +6030,49 @@ export const SCENARIOS = {
             },
           ],
         }
+      }
+      if (apiPath === '/dashboard/budget-remaining') {
+        // What is LEFT, per budget: 20 of 25 USDC on the open USDC budget —
+        // covers $0.01, not $99. The EURe budget's read went unknown, so the
+        // EURe row renders nothing at all.
+        return {
+          budgets: [
+            {
+              agent_id: FIXTURE_AGENTS[0].id,
+              chain_id: FIXTURE_ACCOUNT.chain_id,
+              delegation_hash: `0x${'a'.repeat(64)}`,
+              token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+              token_symbol: 'USDC',
+              token_decimals: 6,
+              budget_atomic: '25000000',
+              read_at: new Date().toISOString(),
+              period_end: new Date(Date.now() + 86_400_000).toISOString(),
+              remaining_atomic: '20000000',
+              remaining_from_chain: true,
+              used_atomic: '5000000',
+              sub_budget_spend: [],
+            },
+            {
+              agent_id: FIXTURE_AGENTS[0].id,
+              chain_id: FIXTURE_ACCOUNT.chain_id,
+              delegation_hash: `0x${'b'.repeat(64)}`,
+              token_address: `0x${'e'.repeat(40)}`,
+              token_symbol: 'EURe',
+              token_decimals: 18,
+              budget_atomic: '5000000000000000000',
+              read_at: null,
+              period_end: new Date(Date.now() + 86_400_000).toISOString(),
+              remaining_atomic: null,
+              remaining_from_chain: false,
+              used_atomic: null,
+              sub_budget_spend: [],
+            },
+          ],
+        }
+      }
+      if (apiPath === '/merchants/budget-fixture/budgets') {
+        // No merchant-locked budgets — the open budget is the selected one.
+        return { budgets: [] }
       }
       if (apiPath === '/merchants/budget-fixture') {
         const merchant = {
@@ -6074,21 +6129,20 @@ export const SCENARIOS = {
       await dismissMobileSidebar(page, vp)
 
       // Wait on the two ANSWERING states by their copy, not on the table. The
-      // table renders as soon as offers arrive, and the pre-#2295 defect
-      // rendered a complete, plausible-looking grid with no budget line on any
-      // card — so a capture that waited on the rows alone would have
-      // photographed the bug and called it evidence.
-      await page.getByText('Within your agent budget').first().waitFor({ timeout: 20_000 })
-      await page.getByText(/^Above every agent budget/).first().waitFor({ timeout: 20_000 })
+      // table renders as soon as offers arrive, and a defect that rendered a
+      // complete, plausible-looking grid with no budget line on any row — the
+      // pre-#2295 shape — would otherwise photograph as evidence.
+      await page.getByText('Atlas can pay this').first().waitFor({ timeout: 20_000 })
+      await page.getByText(/^More than Atlas has left this week$/).first().waitFor({ timeout: 20_000 })
 
       // Positive control for the ABSENCE. The third row must render (its name
-      // is on screen) while carrying neither budget line — otherwise "no
-      // warning" would be indistinguishable from "row never rendered".
+      // is on screen) while carrying neither answer — otherwise "unknown is
+      // silent" would be indistinguishable from "row never rendered".
       const unknownRow = page.locator('[data-testid="offer-row-cat-unknown"]')
       await unknownRow.waitFor({ timeout: 20_000 })
-      if ((await unknownRow.getByText(/agent budget/).count()) > 0) {
+      if ((await unknownRow.getByText(/can pay this|has left/).count()) > 0) {
         throw new Error(
-          'catalog-budget-states: the EURe row rendered a budget line; the unknown state is not absent',
+          'catalog-budget-states: the EURe row rendered a budget answer; the unknown state is not absent',
         )
       }
 

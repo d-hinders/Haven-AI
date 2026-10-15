@@ -104,8 +104,10 @@ const SCENARIOS: Scenario[] = [
       const grid = page.getByTestId('marketplace-page')
       await expect(page.getByLabel('Filter marketplace by network')).toHaveValue('84532')
       // Listing a service is a note for sellers below the cards, not a toolbar button.
-      await expect(grid.getByRole('button', { name: 'List your payable service' })).toHaveCount(0)
-      await expect(grid.getByTestId('marketplace-list-service')).toHaveCount(1)
+      await expect(grid.getByRole('button', { name: 'List your service' })).toHaveCount(1)
+      await expect(
+        grid.getByTestId('marketplace-list-service').getByRole('button', { name: 'List your service' }),
+      ).toHaveCount(1)
       await expect(grid.getByTestId(`merchant-card-${ampersendDemoApi.slug}`)).toHaveCount(1)
       await expect(grid.getByTestId(`merchant-card-${havenDemoStore.slug}`)).toHaveCount(1)
       await expect(grid.getByText(ampersendDemoApi.name)).toHaveCount(1)

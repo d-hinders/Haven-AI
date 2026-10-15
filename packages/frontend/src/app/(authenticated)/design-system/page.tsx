@@ -3151,7 +3151,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="BudgetMeter"
-        description="How much of a delegation's own period is spent — the ONE progress bar for a budget measurement (#3692). An h-1.5 `--v2-surface-2` track with a `--v2-brand` fill and a progressbar ARIA contract. `usedPercent` is clamped to 0–100, `label` is the accessible name, and an optional `caption` slot carries the “1.20 of 3.00 USDC used · refills …” line. The label row above the bar belongs to the caller — it is the caller's tabular typography, not part of the measurement."
+        description="How much of a delegation's own period is spent — the ONE progress bar for a budget measurement (#3692). An h-1.5 `--v2-surface-2` track with a `--v2-brand` fill and a progressbar ARIA contract. `usedPercent` is clamped to 0–100, `label` is the accessible name, and an optional `caption` slot carries the “1.20 of 3.00 USDC used · refills …” line. An optional `trailing` node (#3989) rides on that same line, right-aligned: it is a SIBLING of the caption `<p>`, never inside it, and when the two do not fit it wraps to its own right-aligned line — the caption is never squeezed. The label row above the bar belongs to the caller — it is the caller's tabular typography, not part of the measurement."
       >
         <div className="max-w-md space-y-6">
           <div>
@@ -3165,6 +3165,18 @@ export default function DesignSystemPage() {
             <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
               The analytics agents table renders exactly this shape — the helper's next-refill line is the
               caption slot.
+            </p>
+          </div>
+          <div>
+            <BudgetMeter
+              usedPercent={40}
+              label="USDC budget used"
+              caption={dsMeterCaption(DS_METER_ROW)}
+              trailing={<p className="ml-auto whitespace-nowrap text-xs text-[var(--v2-ink-3)]">Last paid 6d ago</p>}
+            />
+            <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
+              With a `trailing` node — the dashboard agent row's labelled “Last paid” time (#3989), a
+              sibling of the caption on one wrapping line.
             </p>
           </div>
           <div>

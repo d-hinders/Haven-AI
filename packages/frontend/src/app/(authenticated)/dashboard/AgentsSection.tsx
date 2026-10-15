@@ -36,7 +36,7 @@
  */
 
 import Link from 'next/link'
-import { Fragment, useMemo, useRef } from 'react'
+import { Fragment, useMemo, useRef, type ReactNode } from 'react'
 import { Bot, ChevronRight } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { Button } from '@/components/ui/Button'
@@ -52,7 +52,6 @@ import {
   type BudgetCaptionRow,
   type BudgetRate,
 } from '@/lib/budget-caption'
-import { counterpartyLabel, type CounterpartyFields } from '@/lib/transaction-presentation'
 import { timeAgo } from '@/lib/format'
 import { AGENT_PAUSED_SHORT } from '@/lib/agent-pause-copy'
 
@@ -209,12 +208,15 @@ function AgentBudget({
   spotRates,
   currency,
   nowMs,
+  trailing,
 }: {
   agent: DashboardAgent
   budgetRemaining: DashboardBudgetRemaining | null
   spotRates: DashboardOverview['spotRates'] | undefined
   currency: DashboardCurrency
   nowMs: number
+  /** The row's "Last paid …" node, right-aligned on the caption line (#3989). */
+  trailing?: ReactNode
 }) {
   // A zero cap is no authority (#3802's rule): it reads "No budget", never a
   // meter captioned "≈$0.00 of $0.00 used" (#3897 item 8 — the exact string
@@ -228,8 +230,15 @@ function AgentBudget({
     // The overview's budgets array carries only live budgets (#3802/#3803), so
     // this is the no-authority state — except that an open RECEIVED
     // sub-budget is real authority and must never read "No budget" (#3803).
+    // The row's "Last paid" node rides on the same line, right-aligned
+    // (#3989): rows without a bar keep the time on the line they have.
     const subBudgetLine = receivedSubBudgetLine(agent)
-    return <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{subBudgetLine ?? 'No budget'}</p>
+    return (
+      <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-3">
+        <p className="text-xs text-[var(--v2-ink-3)]">{subBudgetLine ?? 'No budget'}</p>
+        {trailing}
+      </div>
+    )
   }
 
   const perToken = spotRates?.[selected.primary.symbol]
@@ -241,8 +250,15 @@ function AgentBudget({
 
   if (caption.kind !== 'meter') {
     // Unknown remaining, a failed read, a read past its period — an em dash,
-    // never a 0% bar and never the full budget stated as fact.
-    return <p className="mt-1 text-sm text-[var(--v2-ink-3)]">—</p>
+    // never a 0% bar and never the full budget stated as fact. The dash sits
+    // on the same line as the row's time node, so it drops to `text-xs` —
+    // the two then share one baseline (#3989).
+    return (
+      <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-3 text-xs text-[var(--v2-ink-3)]">
+        <p>—</p>
+        {trailing}
+      </div>
+    )
   }
 
   // The extra-budget count rides in the caption line (#3908, the mockup's
@@ -265,6 +281,7 @@ function AgentBudget({
       <BudgetMeter
         usedPercent={caption.usedPercent}
         label={caption.label}
+        trailing={trailing}
         caption={segments.map((segment, index) => (
           <Fragment key={index}>
             {index > 0 ? ' · ' : null}
@@ -481,60 +498,33 @@ function AgentRow({
   const accountName =
     (agent.accountId ? accountNames[agent.accountId] : undefined) ?? agent.accountName
 
-  // #3810's naming: the counterparty through `counterpartyLabel`'s no-address
-  // mode — a raw address can never surface. The backend resolved the name
-  // (`merchantName`); there is no chain-scoped map client-side, so it rides
-  // in as `resolvedName`, the same shim the activity rows use.
-  const lastCounterparty = agent.stats?.lastCounterparty
-  // `lastCounterparty` carries no activityType/agentName (it is a payment's
-  // counterparty, not a row) — the fields the label can read are mapped, the
-  // rest undefined, so the shim stays honest (same as the activity rows).
-  const counterparty: CounterpartyFields | null = lastCounterparty
-    ? {
-        activityType: undefined,
-        agentName: undefined,
-        source: lastCounterparty.source ?? undefined,
-        x402ResourceUrl: lastCounterparty.x402ResourceUrl ?? undefined,
-        direction: 'out',
-        to: lastCounterparty.to ?? '',
-        from: lastCounterparty.to ?? '',
-        chainId: agent.accountChainId ?? 0,
-      }
-    : null
-  const counterpartyLabelValue = counterparty
-    ? counterpartyLabel(counterparty, undefined, undefined, {
-        noAddress: true,
-        resolvedName: lastCounterparty?.merchantName,
-      })
-    : null
-
-  const hasLastPaymentColumn = agent.status !== 'pending_approval' && Boolean(agent.stats)
+  // #3989: the row's last-payment time, labelled "Last paid" (the owner's
+  // decision — the value is `stats.lastPaymentAt`, not the agent page's
+  // `mcp_last_seen_at` "Last activity", so "Active" would disagree with that
+  // page). It rides on the budget's caption line, right-aligned, and moves to
+  // `AgentBudget`'s `trailing` slot for rows WITH a bar. The visible label
+  // replaces the old `sr-only` "Last payment" prefix, so the label is not
+  // read twice. `whitespace-nowrap` keeps "Last paid" and its time together —
+  // they wrap as ONE unit onto their own line, never split from each other.
+  const hasLastPayment = agent.status !== 'pending_approval' && Boolean(agent.stats)
+  const lastPayment = hasLastPayment ? (
+    <p
+      data-testid="agent-row-last-payment"
+      className="ml-auto whitespace-nowrap text-xs text-[var(--v2-ink-3)]"
+    >
+      {agent.stats?.lastPaymentAt ? `Last paid ${timeAgo(agent.stats.lastPaymentAt)}` : 'No payments yet'}
+    </p>
+  ) : null
 
   return (
-    // #3910: one grid, two flows. Below `sm` the last-payment time sits on the
-    // name line and the body (bar, caption, paused line) spans the row's full
-    // width — a 390px paused row ran ~9 lines squeezed beside the column.
-    // From `sm` the column sits beside the body (the name line spans the row)
-    // at ONE fixed width, 10rem, in every row (#3912): each row is its own
-    // grid, so a content-sized column (`fit-content(40%)`, #3910) gave every
-    // bar a different length depending on its merchant. The merchant truncates
-    // and carries its full name as a tooltip. Below `sm` the time-only column
-    // stays content-sized. The column renders once.
+    // #3989: the bar and its caption line span the row at EVERY width — one
+    // three-track grid, no time column and no `time` area. The last-payment
+    // time lives on the caption line under the bar (through `AgentBudget`'s
+    // `trailing` slot), styled like a transaction row's timestamp, so a 390px
+    // row keeps its badge beside the name instead of wrapping under it.
     <Link
       href={`/agents/${agent.id}`}
-      className={`grid grid-cols-[2rem_minmax(0,1fr)_fit-content(40%)_1rem] items-center sm:grid-cols-[2rem_minmax(0,1fr)_10rem_1rem] gap-x-3 px-5 py-3.5 transition-colors hover:bg-[var(--v2-surface-hover)] ${
-        hasLastPaymentColumn
-          ? // From `sm` the name line spans the row and the time column sits
-            // beside the body only: with a fixed 10rem column, a name sharing
-            // the 1fr track pushed a "92% used" badge under the name (#3912).
-            "[grid-template-areas:'icon_name_time_chev'_'icon_body_body_chev'] sm:[grid-template-areas:'icon_name_name_chev'_'icon_body_time_chev']"
-          : // No time cell (a setup row, or no stats): below `sm` the name and
-            // body span the empty column and its gap, or the badge wraps at 390
-            // (#3910 review). From `sm` the column is a fixed 10rem, so the
-            // body stays out of it — or this row's bar would run 172px longer
-            // than everyone else's (#3912). The name may still span it.
-            "[grid-template-areas:'icon_name_name_chev'_'icon_body_body_chev'] sm:[grid-template-areas:'icon_name_name_chev'_'icon_body_._chev']"
-      }`}
+      className="grid grid-cols-[2rem_minmax(0,1fr)_1rem] items-center gap-x-3 px-5 py-3.5 transition-colors hover:bg-[var(--v2-surface-hover)] [grid-template-areas:'icon_name_chev'_'icon_body_chev']"
     >
       {/* Robot mark matches the sidebar's "agents" icon so the dashboard and
           nav read as the same system (carried from the old section). */}
@@ -557,39 +547,15 @@ function AgentRow({
           spotRates={spotRates}
           currency={currency}
           nowMs={nowMs}
+          trailing={lastPayment}
         />
         {agent.status === 'paused' && (
           // The owner-approved pause wording, short form — the same module the
-          // agent page's banner reads, so the two cannot drift.
+          // agent page's banner reads, so the two cannot drift. It stays BELOW
+          // the caption line, so the "Last paid" time sits under the bar.
           <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{AGENT_PAUSED_SHORT}</p>
         )}
       </div>
-      {/* #3908: the last payment in a right-hand column, as the mockup draws
-          it — the time on top, the merchant (never a raw address) under it.
-          The merchant shows from `sm` only (#3910): at 390 it truncated to a
-          few characters, and it stays on the agent page. A setup row has
-          nothing to say here yet. */}
-      {hasLastPaymentColumn && agent.stats ? (
-        <div data-testid="agent-row-last-payment" className="min-w-0 self-start text-right [grid-area:time] sm:self-center">
-          {agent.stats.lastPaymentAt ? (
-            <>
-              <p className="text-sm font-medium text-[var(--v2-ink)] whitespace-nowrap">
-                {/* The column drops the visible "Last payment" words; a screen
-                    reader still hears what the time is. */}
-                <span className="sr-only">Last payment </span>
-                {timeAgo(agent.stats.lastPaymentAt)}
-              </p>
-              {counterpartyLabelValue ? (
-                <p className="mt-0.5 hidden truncate text-xs text-[var(--v2-ink-3)] sm:block" title={counterpartyLabelValue}>
-                  {counterpartyLabelValue}
-                </p>
-              ) : null}
-            </>
-          ) : (
-            <p className="text-sm font-medium text-[var(--v2-ink)] whitespace-nowrap">No payments yet</p>
-          )}
-        </div>
-      ) : null}
       <Icon icon={ChevronRight} className="h-4 w-4 flex-shrink-0 text-[var(--v2-ink-3)] [grid-area:chev]" />
     </Link>
   )

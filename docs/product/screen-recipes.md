@@ -351,16 +351,22 @@ Structure:
 1. Grid of merchant cards: monogram or logo, name, category chip, two-line
    description, network chips, and a footer that reads an offer count, "Coming
    soon" or the Haven test-merchant label.
-2. Filters above the grid: category pills, a network dropdown (only offered
-   when more than one chain is listed), search, "Verified only", and "Show
-   test merchants".
+2. Filters above the grid, in two rows: search (leading icon, filling the
+   row) with a network dropdown beside it (only offered when more than one
+   chain is listed, starting on the user's own network); then category pills
+   with "Verified only" and "Show test merchants" beside them. Test content
+   has one control — the checkbox — and no category pill.
 3. Merchant page: header (monogram/logo, name, category, website, networks,
    Verified), a "Pay this with Haven" block of one paste-into-agent
    instruction per offer with a copy button, and an offers table.
 4. A `coming_soon` merchant page shows only its description, website and
    "Coming soon — not payable yet" — no instruction, no price.
-5. "List your payable service" entry point from the grid and from a merchant
-   page, reusing the existing submission modal.
+5. An entry point for sellers, reusing the existing submission modal: on the
+   grid, a note below the cards that says who it is for ("Sell an API or MCP
+   tool?") with a "List your service" button rather than a toolbar button; an
+   empty marketplace offers the same "List your service" button as the empty
+   state's action, and a merchant page offers a "List your payable service"
+   button.
 
 Money and risk clarity:
 - Every offer's instruction is the exact text an agent pastes to pay it —

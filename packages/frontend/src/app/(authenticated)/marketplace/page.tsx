@@ -6,6 +6,8 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { MerchantGrid } from '@/components/marketplace/MerchantGrid'
 import CatalogSubmitModal from '@/components/CatalogSubmitModal'
 import { useMerchants } from '@/hooks/useCatalog'
+import { useAuth } from '@/context/AuthContext'
+import { resolveDefaultAccount } from '@/lib/default-account'
 
 /**
  * The grid half of `/marketplace` (#3079, epic #3077). Rendered inside
@@ -19,6 +21,9 @@ function MarketplaceContent() {
   const { merchants, loading, error, refetch } = useMerchants()
   const [submitOpen, setSubmitOpen] = useState(false)
   const initialCategory = useSearchParams()?.get('category') ?? null
+  // #3979: the grid's network filter starts on the user's own network.
+  const { user } = useAuth()
+  const defaultChainId = resolveDefaultAccount(user?.accounts)?.chain_id ?? null
 
   return (
     <>
@@ -29,6 +34,7 @@ function MarketplaceContent() {
         onSubmit={() => setSubmitOpen(true)}
         onRetry={() => void refetch()}
         initialCategory={initialCategory}
+        defaultChainId={defaultChainId}
       />
 
       <CatalogSubmitModal
@@ -45,7 +51,7 @@ export default function MarketplacePage() {
     <div className="max-w-5xl" data-testid="marketplace-page">
       <PageHeader
         title="Marketplace"
-        subtitle="Merchants your agents can pay — one instruction per offer."
+        subtitle="Paid APIs and tools your agents can use. Copy an instruction and give it to an agent."
       />
       {/* The grid's own measured skeleton, so a capture between shell paint
           and boundary resolve is not an empty page that clears the content floor. */}

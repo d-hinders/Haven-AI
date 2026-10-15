@@ -44,7 +44,7 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
-import { dismissMobileSidebar, mockHavenApi, seedAuthenticatedSession, testAgent } from './fixtures/haven-api'
+import { dismissMobileSidebar, mockHavenApi, seedAuthenticatedSession, serveAddFundsAccount, testAgent } from './fixtures/haven-api'
 import { ampersendDemoApi, bergetAi, havenDemoStore, havenDemoStoreOffers } from './fixtures/marketplace'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports.
@@ -83,6 +83,8 @@ type Scenario = {
   path: string
   viewports: ReadonlyArray<{ name: string; width: number; height: number }>
   heading: string
+  /** Route overlays registered before navigation (later routes win). */
+  setup?: (page: Page) => Promise<void>
   assert: (page: Page) => Promise<void>
 }
 
@@ -92,8 +94,20 @@ const SCENARIOS: Scenario[] = [
     path: '/marketplace',
     viewports: VIEWPORTS,
     heading: 'Marketplace',
+    // #3979: the network filter opens on the user's own network. The shared
+    // `testSafe` is on Base, which would filter the Sepolia-only demo store
+    // out of this baseline; a Base Sepolia account (the dev-environment
+    // shape) keeps every fixture merchant on screen and photographs the
+    // defaulted dropdown.
+    setup: (page) => serveAddFundsAccount(page, 84532),
     async assert(page) {
       const grid = page.getByTestId('marketplace-page')
+      await expect(page.getByLabel('Filter marketplace by network')).toHaveValue('84532')
+      // Listing a service is a note for sellers below the cards, not a toolbar button.
+      await expect(grid.getByRole('button', { name: 'List your service' })).toHaveCount(1)
+      await expect(
+        grid.getByTestId('marketplace-list-service').getByRole('button', { name: 'List your service' }),
+      ).toHaveCount(1)
       await expect(grid.getByTestId(`merchant-card-${ampersendDemoApi.slug}`)).toHaveCount(1)
       await expect(grid.getByTestId(`merchant-card-${havenDemoStore.slug}`)).toHaveCount(1)
       await expect(grid.getByText(ampersendDemoApi.name)).toHaveCount(1)
@@ -237,6 +251,7 @@ test.describe('marketplace visual regression', () => {
 
         await page.setViewportSize({ width: vp.width, height: vp.height })
         await page.clock.setFixedTime(FROZEN_NOW)
+        if (scenario.setup) await scenario.setup(page)
         await page.goto(scenario.path)
 
         await expect(

@@ -12,7 +12,7 @@
  * every one of the new marketplace components needs at least one.
  *
  * NOT moved: the old card's `isVerified` (`source === 'ingestion'`). The
- * Verified badge now follows `verified_payable` — the epic's trust claim is
+ * Verified marker now follows `verified_payable` — the epic's trust claim is
  * "domain controlled AND verified payable", and since #3078 the wire carries
  * that proof per entry and per merchant, so the badge reads the proof rather
  * than the row's provenance (an ingestion row is verified payable the moment

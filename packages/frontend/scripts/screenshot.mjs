@@ -2006,7 +2006,7 @@ const FIXTURE_MERCHANT_OFFERS = [
     resource_url: 'https://services.sandbox.ampersend.ai/api/fact',
     merchant: { id: 'merchant-ampersend', slug: 'ampersend-demo-api', name: 'Ampersend Demo API', listing_status: 'live', is_test_merchant: false },
     rail: 'x402', protocol: 'http', tool_name: null, tool_arguments: null,
-    price_display: '$0.001 USDC', price_atomic: '1000', asset: 'USDC', network: 'eip155:84532',
+    price_display: '0.001 USDC', price_atomic: '1000', asset: 'USDC', network: 'eip155:84532',
     asset_transfer_methods: null, status: 'active', verified_at: '2026-09-15T12:00:00.000Z',
     source: 'operator', domain_verified: true, verified_payable: true,
   },
@@ -2015,7 +2015,7 @@ const FIXTURE_MERCHANT_OFFERS = [
     resource_url: 'https://services.ampersend.ai/api/quote',
     merchant: { id: 'merchant-ampersend', slug: 'ampersend-demo-api', name: 'Ampersend Demo API', listing_status: 'live', is_test_merchant: false },
     rail: 'x402', protocol: 'http', tool_name: null, tool_arguments: null,
-    price_display: '$0.001 USDC', price_atomic: '1000', asset: 'USDC', network: 'eip155:8453',
+    price_display: '0.001 USDC', price_atomic: '1000', asset: 'USDC', network: 'eip155:8453',
     asset_transfer_methods: null, status: 'active', verified_at: '2026-09-15T12:00:00.000Z',
     source: 'operator', domain_verified: true, verified_payable: true,
   },
@@ -2024,7 +2024,7 @@ const FIXTURE_MERCHANT_OFFERS = [
     resource_url: 'https://demo-merchant-dev.example/mcp',
     merchant: { id: 'merchant-haven-demo-store', slug: 'haven-demo-store', name: 'Haven Demo Store', listing_status: 'live', is_test_merchant: true },
     rail: 'x402', protocol: 'mcp', tool_name: 'buy_vpn', tool_arguments: null,
-    price_display: '$0.10 USDC', price_atomic: '100000', asset: 'USDC', network: 'eip155:84532',
+    price_display: '0.10 USDC', price_atomic: '100000', asset: 'USDC', network: 'eip155:84532',
     asset_transfer_methods: 'eip3009,erc7710', status: 'active', verified_at: '2026-09-15T12:00:00.000Z',
     source: 'operator', domain_verified: true, verified_payable: true,
   },
@@ -6100,7 +6100,7 @@ export const SCENARIOS = {
               ...base, id: 'cat-within', name: 'Text generation',
               description: 'Generate short-form text. Priced well inside the agent budget.',
               resource_url: 'https://mcp.text.example/mcp',
-              price_display: '$0.01 USDC', price_atomic: '10000', asset: 'USDC',
+              price_display: '0.01 USDC', price_atomic: '10000', asset: 'USDC',
             },
             {
               // 99 USDC against a 25 USDC budget — the state that could not
@@ -6108,7 +6108,7 @@ export const SCENARIOS = {
               ...base, id: 'cat-above', name: 'Bulk video render',
               description: 'Render a full video. Priced above every configured agent budget.',
               resource_url: 'https://mcp.video.example/mcp',
-              price_display: '$99.00 USDC', price_atomic: '99000000', asset: 'USDC',
+              price_display: '99.00 USDC', price_atomic: '99000000', asset: 'USDC',
             },
             {
               // No agent holds an EURe budget, so the comparison has nothing

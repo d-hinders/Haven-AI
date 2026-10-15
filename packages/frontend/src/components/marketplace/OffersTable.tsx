@@ -84,6 +84,30 @@ function OfferCard({
 }
 
 /**
+ * #4008: ONE shared column layout for the merchant page's desktop offers
+ * table and the nested "Other networks" table inside its disclosure.
+ *
+ * The disclosure renders a second `Table` inside a `colSpan={4}` cell, and
+ * on dev its columns sized on their own — auto layout over different
+ * content — so the nested cells' left edges sat up to 16px off the outer
+ * table's (measured at 1280: 273/744/889/1022 vs 289/737/898/982). Both
+ * tables therefore carry `table-fixed` and THIS `colgroup`, so their columns
+ * are decided by the same declaration rather than by their own rows. Merging
+ * the rows into one table is not an option: `<details>` cannot wrap `<tr>`s,
+ * and the #3998 structural test asserts the nested table. The proportions
+ * follow the auto layout the outer table had on dev (≈48.75/15/13.75/22.5),
+ * so the change is alignment, not a new look.
+ */
+const OFFER_COLUMN_LAYOUT = (
+  <colgroup>
+    <col className="w-[48.75%]" />
+    <col className="w-[15%]" />
+    <col className="w-[13.75%]" />
+    <col className="w-[22.5%]" />
+  </colgroup>
+)
+
+/**
  * The merchant page's ONE offers section (#3981, epic #3077): each offer is a
  * single row — a `Table` from `md` up, the stacked card below — carrying its
  * price, network and a labelled "Copy prompt" button (#3998, #4003 wording).
@@ -202,7 +226,8 @@ export function OffersTable({
       </ul>
 
       <div className="hidden overflow-x-auto rounded-xl border border-[var(--v2-border)] md:block" data-testid="offers-table">
-        <Table className="min-w-[560px]">
+        <Table className="min-w-[560px] table-fixed">
+          {OFFER_COLUMN_LAYOUT}
           <Table.Head collapseWhenNarrow={false}>
             <tr>
               <Table.HeaderCell align="left">Offer</Table.HeaderCell>
@@ -225,13 +250,20 @@ export function OffersTable({
             ))}
             {others.length > 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-3">
+                <td colSpan={4} className="py-3">
+                  {/* #4008: no horizontal padding here — the nested table
+                      spans the row's full width, so its `table-fixed` +
+                      shared `colgroup` lines its columns up with the outer
+                      table's (the Offer cells' own `px-4` insets match).
+                      With `px-4` the nested table was offset by the cell's
+                      own gutter AND sized on its own content. */}
                   <details data-testid="other-networks" className="text-sm">
                     <summary className="cursor-pointer font-medium text-[var(--v2-ink)]">
                       {disclosure}
                     </summary>
                     <div className="mt-2">
-                      <Table className="min-w-[560px]">
+                      <Table className="table-fixed">
+                        {OFFER_COLUMN_LAYOUT}
                         <Table.Body>
                           {others.map((offer) => (
                             <OfferRow

@@ -35,7 +35,7 @@ function offer(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
     http_method: null,
     body_type: null,
     body_example: null,
-    price_display: '$0.01 USDC',
+    price_display: '0.01 USDC',
     price_atomic: '10000',
     asset: 'USDC',
     network: 'eip155:84532',
@@ -122,7 +122,7 @@ describe('OffersTable', () => {
       <OffersTable
         offers={[
           offer({ id: 'within' }),
-          offer({ id: 'above', name: 'Bulk video render', price_atomic: '99000000', price_display: '$99.00 USDC' }),
+          offer({ id: 'above', name: 'Bulk video render', price_atomic: '99000000', price_display: '99.00 USDC' }),
           offer({ id: 'unknown', name: 'Currency reference', asset: 'EURe', price_atomic: '500000000000000000', price_display: '€0.50 EURe' }),
         ]}
         agents={[atlas]}
@@ -155,7 +155,7 @@ describe('OffersTable', () => {
     render(<OffersTable offers={[offer({ id: 'ok' }), offer({ id: 'down', status: 'degraded' })]} agents={[]} />)
     expect(row('down').getByText('Limited availability')).toBeDefined()
     expect(row('down').getByText(/Recently unreachable on our checks/)).toBeDefined()
-    expect(row('down').getByText('$0.01 USDC')).toBeDefined()
+    expect(row('down').getByText('0.01 USDC')).toBeDefined()
     expect(row('ok').queryByText('Limited availability')).toBeNull()
     expect(row('ok').queryByText(/Recently unreachable/)).toBeNull()
   })
@@ -378,7 +378,7 @@ describe('OffersTable', () => {
   it('renders the same offers as stacked cards for phone widths, budget hint and labelled copy button included', () => {
     render(
       <OffersTable
-        offers={[offer({ id: 'within' }), offer({ id: 'above', name: 'Bulk video render', price_atomic: '99000000', price_display: '$99.00 USDC' })]}
+        offers={[offer({ id: 'within' }), offer({ id: 'above', name: 'Bulk video render', price_atomic: '99000000', price_display: '99.00 USDC' })]}
         agents={[atlas]}
         budgets={usdcWithRoom}
       />,

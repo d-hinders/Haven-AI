@@ -457,6 +457,32 @@ function DotIcon() {
   return <Icon icon={Circle} className="h-full w-full" />
 }
 
+/**
+ * The labelled CopyButton as its real caller uses it (#3998): the value is
+ * NOT printed, so a refused copy reveals it — the showcase models the rule
+ * its description states, rather than a no-op callback.
+ */
+function LabelledCopyDemo() {
+  const value = 'Pay https://services.ampersend.ai/api/fact and return the result'
+  const [revealed, setRevealed] = useState(false)
+  return (
+    <div className="mt-4">
+      <CopyButton
+        value={value}
+        label="instruction for Ampersend — fact"
+        text="Copy instruction"
+        onCopyFailed={() => setRevealed(true)}
+      />
+      {revealed ? (
+        <p className="mt-2 text-xs text-[var(--v2-ink-3)]" role="status">
+          <code className="select-all [overflow-wrap:anywhere] text-[var(--v2-ink-2)]">{value}</code> — copying was
+          blocked, so the value is shown instead.
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 export default function DesignSystemPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [dsFilterPillActive, setDsFilterPillActive] = useState<string | null>(null)
@@ -1499,14 +1525,7 @@ export default function DesignSystemPage() {
               <CopyButton value="sk_agent_a1b2c3" label="API key prefix" />
             </span>
           </div>
-          <div className="mt-4">
-            <CopyButton
-              value="Pay https://services.ampersend.ai/api/fact and return the result"
-              label="instruction for Ampersend — fact"
-              text="Copy instruction"
-              onCopyFailed={() => {}}
-            />
-          </div>
+          <LabelledCopyDemo />
           <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
             Click one — the icon swaps to a success check for 1.5s, then reverts; the labelled shape also reads “Copied”.
           </p>

@@ -68,7 +68,7 @@ export function OfferRow({
             </p>
           )}
         </td>
-        <td className="px-4 py-3 align-top text-xs text-[var(--v2-ink-2)]">
+        <td className="whitespace-nowrap px-4 py-3 align-top text-xs text-[var(--v2-ink-2)]">
           {chainId === undefined ? '—' : chainName(chainId)}
         </td>
         <td className="px-4 py-3 text-right align-top">

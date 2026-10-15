@@ -147,9 +147,15 @@ describe('OffersTable', () => {
   ])('does not print the instruction of a copy-only offer (%s); the meta line shows where and how fresh', (_kind, entry) => {
     render(<OffersTable offers={[entry]} agents={[]} />)
     expect(screen.queryByText(agentInstruction(entry))).toBeNull()
-    const meta = row(entry.id).getByTitle(entry.resource_url)
-    expect(meta.textContent).toBe('services.example/api/fact · verified just now')
-    expect(meta.className).toContain('truncate')
+    const meta = row(entry.id).getByTestId(`offer-meta-${entry.id}`)
+    expect(meta.textContent).toBe('services.example/api/fact\u00a0· verified just now')
+    // Only the URL truncates; the freshness is never what gets cut.
+    const url = row(entry.id).getByTitle(entry.resource_url)
+    expect(url.className).toContain('truncate')
+    expect(url.textContent).toBe('services.example/api/fact')
+    const fresh = meta.lastElementChild as HTMLElement
+    expect(fresh.className).toContain('shrink-0')
+    expect(fresh.className).not.toContain('truncate')
   })
 
   it('copies the exact instruction from a labelled button whose name keeps its visible words, then reads "Copied"', async () => {
@@ -168,7 +174,9 @@ describe('OffersTable', () => {
     render(<OffersTable offers={[offer()]} agents={[]} />)
     const printed = row('offer-1').getByText(agentInstruction(offer()))
     expect(printed.className).not.toContain('truncate')
-    expect(printed.className).toContain('break-all')
+    // Wraps at spaces first; never splits a word like "via" mid-word.
+    expect(printed.className).toContain('[overflow-wrap:anywhere]')
+    expect(printed.className).not.toContain('break-all')
     expect(row('offer-1').getByText('Replace <what you want> before sending.')).toBeDefined()
   })
 
@@ -184,7 +192,7 @@ describe('OffersTable', () => {
     await vi.waitFor(() => {
       expect(row(entry.id).getByText(agentInstruction(entry))).toBeDefined()
     })
-    expect(row(entry.id).getByText(/Copying was blocked/)).toBeDefined()
+    expect(row(entry.id).getByText(/Copying was blocked/).getAttribute('role')).toBe('status')
     const card = within(screen.getByTestId(`offer-card-${entry.id}`))
     expect(card.queryByText(agentInstruction(entry))).toBeNull()
     fireEvent.click(card.getByRole('button', { name: 'Copy instruction for Fact' }))

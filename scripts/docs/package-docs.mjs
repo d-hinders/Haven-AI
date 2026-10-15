@@ -207,6 +207,11 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/mcp/src/**'],
+    // #3996: EDITED, scope = the new § "Per-chain RPC endpoints" (the
+    // HAVEN_RPC_URL_<chainId> env map read by resolveHavenClient in
+    // src/server.ts, and what wiring one changes on an x402 idempotency
+    // collision: a funded delegate resumes, a drained one refuses settled).
+    // Nothing else re-verified. Prior:
     // #3645: EDITED, scope = § Audit log (rows only for the backend's
     // MCP_TOOL_NAMES allowlist, named in full), verified against
     // packages/backend/src/middleware/agentToolAudit.ts. Nothing else
@@ -235,7 +240,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     // SDK's own LLM tool schemas and REST /x402/authorize still spell it
     // `idempotencyKey`). Written against `packages/mcp/src/tools.ts` on this
     // branch. Rest of the README NOT re-verified.
-    'last-verified': '2026-10-01',
+    'last-verified': '2026-10-15',
   },
   {
     doc: 'packages/connect/README.md',

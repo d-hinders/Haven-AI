@@ -105,6 +105,44 @@ Environment variable form:
 }
 ```
 
+## Per-chain RPC endpoints
+
+When an x402 payment hits an idempotency collision, the server can tell a
+finished payment from a stuck one only by reading the agent delegate's balance
+on chain. Without an RPC endpoint it cannot, so every collision is refused as
+`unverifiable`, including the recoverable case where the delegate is still
+funded and the payment could resume.
+
+Give the server a read-only RPC endpoint per chain and it can check:
+
+```json
+{
+  "mcpServers": {
+    "haven": {
+      "command": "npx",
+      "args": ["@haven_ai/mcp"],
+      "env": {
+        "HAVEN_CREDENTIALS": "/absolute/path/to/haven-agent.json",
+        "HAVEN_RPC_URL_8453": "https://your-rpc.example/v3/key",
+        "HAVEN_RPC_URL_84532": "https://your-rpc.example/sepolia/v3/key"
+      }
+    }
+  }
+}
+```
+
+One variable per chain: the suffix is the chain id (`8453` is Base mainnet,
+`84532` is Base Sepolia). An unset variable changes nothing: collisions are
+refused exactly as before. A value whose suffix is not a positive integer is
+ignored, and a malformed or unreachable URL degrades to the same refusal.
+Nothing is written to stdout in any of these cases, because stdout is the
+protocol channel.
+
+With an endpoint wired for the payment's chain, a collision where the delegate
+is still funded resumes: the balance says the merchant never pulled the
+payment, so the server mints a fresh authorization. A drained delegate still
+refuses, with a settled basis, because the payment already completed.
+
 ## Tools
 
 - `haven_quote_x402`

@@ -7,7 +7,7 @@ import {
   unsupportedNodeVersionMessage,
   type HavenClientUpdate,
 } from '@haven_ai/sdk'
-import { loadCredentials, type HavenCredentialFile } from './credentials.js'
+import { chainRpcsFromEnv, loadCredentials, type HavenCredentialFile } from './credentials.js'
 import {
   createToolHandlers,
   toolDescriptions,
@@ -69,10 +69,24 @@ export async function resolveHavenClient(options: HavenMcpServerOptions = {}): P
       }
     : undefined
   const credentials = options.credentials ?? await loadCredentials(credentialSource)
+  // #3996: per-chain read-only RPC endpoints from the environment — one flat
+  // scalar per chain, `HAVEN_RPC_URL_<chainId>` (e.g. `HAVEN_RPC_URL_8453`,
+  // `HAVEN_RPC_URL_84532`). With an entry for the payment's chain the SDK can
+  // read the delegate's balance on an x402 idempotency collision and refuse on
+  // the verifiable basis (`basis: 'settled'`) instead of `unverifiable`; a
+  // funded delegate then resumes instead of refusing (the settled #3996 owner
+  // decision). A malformed or unreachable URL degrades to `null` →
+  // `unverifiable` inside the SDK — today's behaviour. No entries means no
+  // key, and the client is constructed exactly as before. Read-only RPC: no
+  // signing capability crosses this path.
+  const chainRpcs = chainRpcsFromEnv(process.env)
   const client = new HavenClient({
     apiKey: credentials.apiKey,
     delegateKey: credentials.delegateKey,
     baseUrl: credentials.apiUrl,
+    // Only added when non-empty so the unset-variable construction is byte-for-byte
+    // today's: the SDK defaults `chainRpcs` to `{}` either way.
+    ...(Object.keys(chainRpcs).length > 0 ? { chainRpcs } : {}),
     // #3303: name this package, not the SDK inside it, so the backend's
     // update hint and refusal speak about what the user actually installed.
     clientIdentity: havenClientIdentity(MCP_NAME, MCP_VERSION),

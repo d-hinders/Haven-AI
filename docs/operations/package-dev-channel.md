@@ -25,9 +25,10 @@ covers:
   - packages/signer/src/credentials.ts
   - packages/signer/src/file-mode.ts
   - packages/mcp/src/credentials.ts
+  - packages/mcp/src/server.ts
   - packages/backend/src/middleware/retired-safe-names.ts
   - packages/core/src/client-compat.ts
-last-verified: "2026-10-09"
+last-verified: "2026-10-15"
 ---
 
 > **Re-verification (#3819, 2026-10-09):** coupled through
@@ -1116,3 +1117,15 @@ compatibility contract — the manifest table, version skew, `--doctor`'s checks
 > the signer's `tools.ts` since #3454. The snapshot version format, the
 > guards, `HAVEN_CONNECTOR_CHANNEL` and the `dev` dist-tag publish did not
 > move.
+
+> **Re-verified #3996 (2026-10-15 — an additive env reader in
+> `packages/mcp/src/credentials.ts`).** The diff touches two covered paths:
+> `packages/mcp/src/credentials.ts`, which gains the exported
+> `chainRpcsFromEnv(env)` helper, and `packages/mcp/src/server.ts`, newly
+> declared in `covers:` so this doc is implicated the next time that file
+> changes. The helper scans for `HAVEN_RPC_URL_<chainId>` scalars, consumed by
+> `resolveHavenClient`. It does not touch `HAVEN_CONNECTOR_CHANNEL`, the
+> credential-file shape, the consent inputs, any version constant, or any
+> field this document names; nothing about channel selection, dist-tag
+> resolution, the snapshot path or publish behaviour moves. Scope of this
+> note: confirming that. Nothing else in this document was re-verified.

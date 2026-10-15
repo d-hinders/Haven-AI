@@ -357,16 +357,18 @@ Structure:
    with "Verified only" and "Show test merchants" beside them. Test content
    has one control — the checkbox — and no category pill.
 3. Merchant page: header (monogram/logo, name, category, website, networks,
-   Verified), a "Pay this with Haven" block of one paste-into-agent
-   instruction per offer with a copy button, and an offers table.
+   Verified — with the funding action, when shown, on its right-hand side),
+   and ONE offers list: each offer a single row — table on desktop, stacked
+   card on phone — with a Copy instruction button and the offer's full
+   instruction printed under the row; the user's network's offers first,
+   other networks behind an "Other networks (n)" disclosure.
 4. A `coming_soon` merchant page shows only its description, website and
-   "Coming soon — not payable yet" — no instruction, no price.
+   "Coming soon — not payable yet" — no offers list, no price.
 5. An entry point for sellers, reusing the existing submission modal: on the
    grid, a note below the cards that says who it is for ("Sell an API or MCP
-   tool?") with a "List your service" button rather than a toolbar button; an
-   empty marketplace offers the same "List your service" button as the empty
-   state's action, and a merchant page offers a "List your payable service"
-   button.
+   tool?") with a "List your service" button rather than a toolbar button;
+   an empty marketplace offers the same "List your service" button as the
+   empty state's action. A merchant page offers no seller entry point.
 
 Money and risk clarity:
 - Every offer's instruction is the exact text an agent pastes to pay it —
@@ -375,9 +377,11 @@ Money and risk clarity:
 - Show the per-agent "within budget" / "above every agent budget" hint next to
   the price, never as a claim that a payment will succeed — the on-chain
   caveat enforcer is what actually decides.
-- Name the settlement method plainly: an offer without `erc7710` support
-  states that the paying agent needs an unpinned budget, since the EIP-3009
-  bridge cannot spend from a recipient-pinned one.
+- State the payment requirement once, in plain language: what makes the
+  payment work is a budget that can pay any recipient — the agent's budget
+  must not be limited to one recipient. No protocol names and no jargon
+  ("EIP-3009", "unpinned") in rendered copy; in a mixed merchant, tag the
+  offers that need it.
 - A prospect ("Coming soon") must never look payable: no price, no
   instruction, no offers table.
 - The Verified badge means domain control plus a confirmed payable endpoint —

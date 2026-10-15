@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Monogram } from '@/components/ui/Monogram'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { categoryLabel, chainName, networkToChainId, VERIFIED_MEANING } from '@/lib/marketplace'
@@ -13,14 +14,21 @@ export const TEST_MERCHANT_NOTE = 'Haven test merchant — real payments, demo g
  * before pasting a payment instruction. A test merchant is labelled HERE,
  * where a user is one paste away from a real payment, as a wrapping line —
  * a `StatusBadge` is a one-line stadium and clipped the sentence at 390.
+ *
+ * #3981: the shared `PageHeader` cannot hold the Monogram/logo, its `title`
+ * is a plain string with no badge slot, and its `subtitle`/`meta` render
+ * inside a `<p>` (the chips and warning paragraphs would be invalid nesting)
+ * — so the header STAYS, aligned with `PageHeader`'s type scale and spacing,
+ * and gains its `actions` slot: "Fund this merchant" renders on the right,
+ * the way `PageHeader` places actions.
  */
-export function MerchantHeader({ merchant }: { merchant: Merchant }) {
+export function MerchantHeader({ merchant, actions }: { merchant: Merchant; actions?: ReactNode }) {
   const networks = merchant.networks
     .map((n) => networkToChainId(n))
     .filter((id): id is number => id !== undefined)
 
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div className="flex items-start gap-3">
         <Monogram name={merchant.name} logoUrl={merchant.logo_url} size="md" />
         <div className="min-w-0">
@@ -42,9 +50,9 @@ export function MerchantHeader({ merchant }: { merchant: Merchant }) {
               {TEST_MERCHANT_NOTE}
             </p>
           )}
-          <p className="mt-2 max-w-xl text-sm text-[var(--v2-ink-3)]">{merchant.description}</p>
+          <p className="mt-2 max-w-2xl v2-text-body text-[var(--v2-ink-2)]">{merchant.description}</p>
           {merchant.verified_payable && (
-            <p className="mt-1 max-w-xl text-xs text-[var(--v2-ink-3)]" data-testid="verified-meaning">
+            <p className="mt-2 max-w-2xl v2-text-meta text-[var(--v2-ink-3)]" data-testid="verified-meaning">
               {VERIFIED_MEANING}
             </p>
           )}
@@ -70,6 +78,7 @@ export function MerchantHeader({ merchant }: { merchant: Merchant }) {
           </div>
         </div>
       </div>
+      {actions && <div className="flex flex-shrink-0 flex-wrap items-center gap-2">{actions}</div>}
     </div>
   )
 }

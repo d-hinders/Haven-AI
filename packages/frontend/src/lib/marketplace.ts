@@ -34,6 +34,21 @@ export function networkToChainId(network: string | null | undefined): number | u
 }
 
 /**
+ * The one plain-language payment note (#3981). Replaces the old
+ * protocol-jargon EIP-3009 line and the funding-level "How this merchant is
+ * paid" box: the requirement that makes payment work is that the agent's
+ * budget is not limited to one recipient, said once per merchant page in the
+ * budget UI's own terms ("to any recipient", `DelegationBudgetCard.tsx`).
+ * Rendered when ANY offer needs it; when only some do, those rows carry the
+ * "any-recipient budget" tag. No "EIP-3009" and no "unpinned" reaches the page.
+ */
+export const ANY_RECIPIENT_BUDGET_NOTE =
+  "Your agent pays this merchant from a budget that can pay any recipient. A budget limited to one recipient can't pay it — keep that budget open on the agent's page."
+
+/** The per-offer tag for the mixed-merchant case, in place of "unpinned budget". */
+export const ANY_RECIPIENT_BUDGET_TAG = 'any-recipient budget'
+
+/**
  * The Verified badge's meaning, spelled out where the badge is (epic #3077's
  * trust claim): domain control plus a confirmed payable endpoint — never
  * merchant honesty, quality or settlement reliability.

@@ -1,14 +1,17 @@
-import { render, screen, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen, within } from '@testing-library/react'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { OffersTable } from '../OffersTable'
+import { agentInstruction, ANY_RECIPIENT_BUDGET_TAG } from '@/lib/marketplace'
 import type { CatalogEntry } from '@/hooks/useCatalog'
 
 /**
- * The offers table's render branches (#3079). The deleted
- * `CatalogPanel.test.tsx` guarded the degraded badge, the over-budget warning
- * and the verified badge on the old card; those guards live here now, against
- * the row that replaced it — plus the three budget states in ONE frame, the
- * chain-NAME network cell and the MCP method/path split.
+ * The merchant page's single offers list (#3981). The deleted
+ * `PayWithHavenBlock.test.tsx` guarded the payment note and the per-offer
+ * tag here — the block folded into this section — and the old guards on the
+ * per-row Verified badge and the Method column are rewritten as their
+ * absences. The `agentInstruction` string itself is guarded byte-for-byte in
+ * `lib/__tests__/marketplace.test.ts` and is NOT retested here; what IS
+ * tested is that the copy button and the printed line carry it.
  */
 function offer(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
   return {
@@ -48,6 +51,14 @@ function row(id: string) {
   return within(screen.getByTestId(`offer-row-${id}`))
 }
 
+beforeEach(() => {
+  // The copy button writes through `navigator.clipboard`; jsdom ships none.
+  Object.defineProperty(navigator, 'clipboard', {
+    value: { writeText: vi.fn().mockResolvedValue(undefined) },
+    configurable: true,
+  })
+})
+
 describe('OffersTable', () => {
   it('renders all three budget states in one frame: answer, answer, absence', () => {
     render(
@@ -76,22 +87,101 @@ describe('OffersTable', () => {
     expect(row('ok').queryByText(/Recently unreachable/)).toBeNull()
   })
 
-  it('shows the Verified badge exactly when the entry is verified payable, with the honest claim', () => {
+  it('has no Method column and no per-row Verified badge — the method survives inside the instruction', () => {
     render(
       <OffersTable
-        offers={[offer({ id: 'proved', verified_payable: true }), offer({ id: 'unproved', source: 'ingestion' })]}
+        offers={[offer({ id: 'mcp' }), offer({ id: 'unproved', verified_payable: true })]}
         agents={[]}
       />,
     )
-    expect(row('proved').getByText('Verified')).toBeDefined()
-    // Provenance alone (an ingestion row) does not earn the badge — the proof does.
-    expect(row('unproved').queryByText('Verified')).toBeNull()
+    const headers = screen.getAllByRole('columnheader').map((h) => h.textContent)
+    expect(headers).not.toContain('Method')
+    // The trust claim lives once, in the merchant header — never per row.
+    expect(screen.queryByText('Verified')).toBeNull()
+    // The MCP tool name — the old Method cell — is still on screen, inside
+    // the instruction the user pastes.
+    expect(screen.getAllByText('Pay https://mcp.text.example/mcp via create_text for <what you want>').length).toBeGreaterThan(0)
   })
 
-  it('renders the same offers as stacked cards for phone widths, budget hint included', () => {
+  it('prints the full instruction under the row, wrapping not truncating, and copies the same string', async () => {
+    render(<OffersTable offers={[offer()]} agents={[]} />)
+    const instruction = agentInstruction(offer())
+    const printed = screen.getAllByText(instruction)
+    expect(printed.length).toBeGreaterThan(0)
+    for (const node of printed) {
+      expect(node.className).not.toContain('truncate')
+      expect(node.className).toContain('break-all')
+    }
+    const buttons = screen.getAllByLabelText('Copy agent instruction for Text generation')
+    // One per shape: the desktop row and the phone card.
+    expect(buttons).toHaveLength(2)
+    for (const button of buttons) {
+      fireEvent.click(button)
+    }
+    await vi.waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(instruction)
+    })
+  })
+
+  it('renders the payment note once when every offer needs an any-recipient budget, and never when none does', () => {
+    const { unmount } = render(<OffersTable offers={[offer(), offer({ id: 'o-2' })]} agents={[]} />)
+    expect(screen.getAllByText(/budget that can pay any recipient/)).toHaveLength(1)
+    expect(screen.queryByText(ANY_RECIPIENT_BUDGET_TAG)).toBeNull()
+    unmount()
     render(
       <OffersTable
-        offers={[offer({ id: 'within' }), offer({ id: 'above', price_atomic: '99000000' })]}
+        offers={[offer({ asset_transfer_methods: 'eip3009,erc7710' }), offer({ id: 'o-2', asset_transfer_methods: 'eip3009,erc7710' })]}
+        agents={[]}
+      />,
+    )
+    expect(screen.queryByText(/budget that can pay any recipient/)).toBeNull()
+  })
+
+  it('tags only the offers that need it when the merchant is mixed', () => {
+    render(
+      <OffersTable
+        offers={[offer(), offer({ id: 'o-2', asset_transfer_methods: 'eip3009,erc7710' })]}
+        agents={[]}
+      />,
+    )
+    expect(screen.getAllByText(/budget that can pay any recipient/)).toHaveLength(1)
+    expect(screen.getAllByText(/Offers marked "any-recipient budget" need this/)).toHaveLength(1)
+    expect(row('offer-1').getByText(ANY_RECIPIENT_BUDGET_TAG)).toBeDefined()
+    expect(row('o-2').queryByText(ANY_RECIPIENT_BUDGET_TAG)).toBeNull()
+    // The banned protocol jargon never reaches the page.
+    expect(document.body.textContent).not.toContain('EIP-3009')
+    expect(document.body.textContent).not.toContain('unpinned')
+  })
+
+  it('shows the offers on the user’s network first and the rest behind an "Other networks (n)" disclosure, once per shape', () => {
+    const sepolia = [offer({ id: 's1' }), offer({ id: 's2' }), offer({ id: 's3' })]
+    const base = [offer({ id: 'b1', network: 'eip155:8453' }), offer({ id: 'b2', network: 'eip155:8453' }), offer({ id: 'b3', network: 'eip155:8453' })]
+    render(<OffersTable offers={[...sepolia, ...base]} agents={[]} defaultChainId={84532} />)
+    // The disclosure carries the count of the OTHER networks' offers.
+    expect(screen.getAllByText('Other networks (3)')).toHaveLength(2)
+    // Each offer id appears exactly once per shape — desktop row and phone
+    // card — with every disclosure expanded (jsdom renders details children).
+    for (const id of ['s1', 's2', 's3', 'b1', 'b2', 'b3']) {
+      expect(screen.getAllByTestId(`offer-row-${id}`)).toHaveLength(1)
+      expect(screen.getAllByTestId(`offer-card-${id}`)).toHaveLength(1)
+    }
+    // The user's own network's offers sit OUTSIDE the disclosure.
+    expect(within(screen.getByTestId('offers-table')).getByTestId('offer-row-s1')).toBeDefined()
+  })
+
+  it('renders every offer flat when the user’s default network serves none of the merchant’s offers', () => {
+    render(
+      <OffersTable offers={[offer({ id: 'a', network: 'eip155:84532' }), offer({ id: 'b', network: 'eip155:8453' })]} agents={[]} defaultChainId={null} />,
+    )
+    expect(screen.queryByText(/Other networks/)).toBeNull()
+    expect(screen.getAllByTestId('offer-row-a')).toHaveLength(1)
+    expect(screen.getAllByTestId('offer-row-b')).toHaveLength(1)
+  })
+
+  it('renders the same offers as stacked cards for phone widths, budget hint and instruction included', () => {
+    render(
+      <OffersTable
+        offers={[offer({ id: 'within' }), offer({ id: 'above', name: 'Bulk video render', price_atomic: '99000000', price_display: '$99.00 USDC' })]}
         agents={oneAgent}
       />,
     )
@@ -101,30 +191,8 @@ describe('OffersTable', () => {
     const above = within(screen.getByTestId('offer-card-above'))
     expect(above.getByText('Above every agent budget — a payment would be declined')).toBeDefined()
     expect(above.getByText('Base Sepolia')).toBeDefined()
-    expect(above.getByText('create_text')).toBeDefined()
+    expect(above.getByText('Pay https://mcp.text.example/mcp via create_text for <what you want>')).toBeDefined()
     expect(within(screen.getByTestId('offer-card-within')).getByText('Within your agent budget')).toBeDefined()
-  })
-
-  it('names the network and splits an MCP offer into Method (tool) and path (resource URL)', () => {
-    render(
-      <OffersTable
-        offers={[
-          offer({ id: 'mcp' }),
-          offer({ id: 'http', protocol: 'http', tool_name: null, resource_url: 'https://api.example/fact', network: 'eip155:8453' }),
-          offer({ id: 'nowhere', network: null }),
-        ]}
-        agents={[]}
-      />,
-    )
-    expect(screen.getByRole('columnheader', { name: 'Offer' })).toBeDefined()
-    expect(row('mcp').getByText('Base Sepolia')).toBeDefined()
-    expect(row('mcp').getByText('create_text')).toBeDefined()
-    expect(row('mcp').getByText('https://mcp.text.example/mcp')).toBeDefined()
-    expect(row('http').getByText('Base')).toBeDefined()
-    // The protocol is `x402` everywhere in Haven — never upper-cased.
-    expect(row('http').getByText('x402')).toBeDefined()
-    expect(row('http').getByText('https://api.example/fact')).toBeDefined()
-    expect(row('nowhere').getByText('—')).toBeDefined()
-    expect(screen.queryByText(/eip155:/)).toBeNull()
+    expect(screen.getAllByLabelText('Copy agent instruction for Bulk video render')).toHaveLength(2)
   })
 })

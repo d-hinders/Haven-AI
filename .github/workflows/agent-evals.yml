@@ -1,0 +1,268 @@
+name: Agent evals — Claude Code lane
+
+# Agent evals lane 2 (#3959): `claude -p` headless on the OWNER'S Max 5x
+# subscription, graded with the exact same task files and graders as the
+# Hermes lane (#3958). Testnet-only (Base Sepolia); never touches mainnet.
+#
+# ⚠ MONEY-PATH — read before editing:
+#   - CLAUDE_CODE_OAUTH_TOKEN (the owner's real subscription, from
+#     `claude setup-token`) and this lane's own eval-agent credentials
+#     (AGENT_EVALS_* — NEVER the QA_DELEGATION_* secrets, which drive the
+#     qa-freshness promotion gate) live ONLY as secrets of the protected
+#     `agent-evals` GitHub environment, with the owner as required reviewer.
+#     The evals job below declares `environment: agent-evals`, so every run —
+#     weekly, PR-subset or manual — waits for the owner's approval before any
+#     secret exists on the runner.
+#   - Never put a token in the command template, a log line, or an artifact.
+#     The token travels only as an env var inherited by `claude`.
+#   - Not a required check on `dev` or `main` (no push trigger; not wired
+#     into dev-gate.yml) — and deliberately so: a spend-incurring suite must
+#     never block a promotion.
+#
+# Modes:
+#   - workflow_dispatch (Run workflow button): choose `subset` (the 5-task
+#     cost-pilot slice) or `full`. Waits for the environment approval like
+#     every other run.
+#   - schedule: weekly FULL run against the deployed dev stack.
+#   - pull_request (paths below): the SUBSET, which builds and boots
+#     `packages/mcp-server` from the PR checkout and points it at the dev
+#     backend — evaluating a PR against the dev hosted URL would measure
+#     `dev` and say nothing about the change (the same race qa-dev.yml's
+#     header names). Error bodies produced by `packages/backend` stay
+#     dev-deployed whatever this job checks out; the report says so.
+#
+# `claude -p` is limited to the Haven MCP tools ONLY, in the open, in
+# QA_EVAL_CLAUDE_CODE_COMMAND below: `--allowedTools` names the two Haven
+# MCP servers this run wires (`mcp__haven-eval` — the hosted pair — and
+# `mcp__haven-signer-eval`), and `--disallowedTools` explicitly denies every
+# built-in Bash/file/web tool. Nothing else is allowlisted, so in headless
+# mode anything not on the list is denied.
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: 'Which slice to run'
+        type: choice
+        default: 'subset'
+        options:
+          - subset
+          - full
+      trials:
+        description: 'Trials per task (cost pilot: 1)'
+        type: string
+        default: '1'
+  schedule:
+    # Weekly, Monday 04:23 UTC. Odd minute to dodge the top-of-hour
+    # Actions scheduling surge (same rationale as qa-dev.yml).
+    - cron: '23 4 * * 1'
+  pull_request:
+    paths:
+      # The subset trigger paths (#3959 scope 4): what `claude -p` actually
+      # sees through the MCP pair.
+      - 'packages/mcp-server/src/server.ts'
+      - 'packages/mcp-server/src/tools/**'
+      - 'packages/mcp-server/src/tools-list.snapshot.json'
+      - 'packages/mcp-server/src/next-arguments-corpus.json'
+      - 'packages/sdk/src/skill-content.ts'
+      - 'packages/sdk/src/agent-guidance.ts'
+      - 'packages/signer/src/tools.ts'
+      - 'packages/signer/src/server.ts'
+      - 'packages/signer/src/consent.ts'
+
+permissions:
+  contents: read
+
+jobs:
+  # Same changes job as ci.yml: the preflight battery routes gates by the
+  # surfaces a job declares through `needs.changes.outputs.* == 'true'`, and
+  # an ungated package build would join every diff's battery, docs-only
+  # included. The surfaces here are the packages this lane builds and runs.
+  changes:
+    name: Detect changed surfaces
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      ui: ${{ steps.filter.outputs.ui }}
+      ops: ${{ steps.filter.outputs.ops }}
+      backend: ${{ steps.filter.outputs.backend }}
+      sdk: ${{ steps.filter.outputs.sdk }}
+      connect: ${{ steps.filter.outputs.connect }}
+      mcp: ${{ steps.filter.outputs.mcp }}
+      mcp_server: ${{ steps.filter.outputs.mcp_server }}
+      signer: ${{ steps.filter.outputs.signer }}
+      cli: ${{ steps.filter.outputs.cli }}
+      demo_merchant: ${{ steps.filter.outputs.demo_merchant }}
+      core: ${{ steps.filter.outputs.core }}
+      qa_agent: ${{ steps.filter.outputs.qa_agent }}
+      full: ${{ steps.filter.outputs.full }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      - name: Classify changed files
+        id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/ci/change-classifier.mjs
+
+  claude-code-evals:
+    name: Agent evals — Claude Code
+    needs: changes
+    # Fork PRs can never receive environment secrets — GitHub withholds them
+    # on forked head repos. Skip instead of red-failing after approval. The
+    # surface gate mirrors the workflow's own pull_request paths: the lane is
+    # about what `claude -p` sees through the MCP pair (mcp_server, sdk,
+    # signer) plus the harness itself (qa_agent).
+    if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.mcp_server == 'true' || needs.changes.outputs.sdk == 'true' || needs.changes.outputs.signer == 'true' || needs.changes.outputs.qa_agent == 'true'))
+    runs-on: ubuntu-latest
+    # THE gate (#3959, owner decision 2026-10-15): this protected environment
+    # holds the subscription token + eval-agent keys and requires the owner's
+    # approval. No job in this workflow may drop this line.
+    environment: agent-evals
+    timeout-minutes: 150
+    # Job-level group (the qa-dev.yml pattern): one money-moving lane at a
+    # time, and an in-flight run finishes rather than being cancelled.
+    concurrency:
+      group: agent-evals-claude-code
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The subset tests the PR's OWN text: on pull_request, github.sha is
+          # the merge commit — build the hosted MCP from the PR head instead.
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Decide the slice
+        id: slice
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_SUITE: ${{ github.event.inputs.suite || 'subset' }}
+          INPUT_TRIALS: ${{ github.event.inputs.trials || '1' }}
+        run: |
+          set -euo pipefail
+          MODE=subset
+          TRIALS=1
+          LIMIT_ARG=''
+          if [ "$EVENT_NAME" = 'workflow_dispatch' ]; then MODE="$INPUT_SUITE"; TRIALS="$INPUT_TRIALS"; fi
+          if [ "$EVENT_NAME" = 'schedule' ]; then MODE=full; fi
+          if [ "$MODE" = 'subset' ]; then LIMIT_ARG='--limit=5'; fi
+          HOSTED_COMMIT="$(git rev-parse HEAD)"
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "trials=$TRIALS" >> "$GITHUB_OUTPUT"
+          echo "limit_arg=$LIMIT_ARG" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$HOSTED_COMMIT" >> "$GITHUB_OUTPUT"
+          echo "::notice::agent-evals mode=$MODE trials=$TRIALS $LIMIT_ARG; hosted MCP: $([ "$MODE" = 'subset' ] && echo "commit $HOSTED_COMMIT (the PR head, not dev)" || echo 'the deployed dev stack')"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+      - run: npm ci
+
+      # qa-agent resolves @haven_ai/sdk and the signer as workspace deps →
+      # dist must exist. The subset additionally boots the hosted MCP from
+      # this checkout, so it is built here too (serial on purpose — tsup
+      # cleans sdk/dist mid-run).
+      - name: Build the workspace packages the lane runs from
+        run: |
+          npm run build -w packages/sdk
+          npm run build -w packages/signer
+          npm run build -w packages/mcp-server
+
+      # Subset only: boot the hosted MCP FROM THE PR CHECKOUT, relaying to
+      # the dev backend (`packages/mcp-server/src/boot.ts`: the server runs
+      # locally against HAVEN_API_URL). The custody guard is still on: this
+      # process env carries no delegate key, ever.
+      - name: Boot the PR-checkout hosted MCP (subset)
+        if: steps.slice.outputs.mode == 'subset'
+        env:
+          QA_HAVEN_API_URL: ${{ vars.AGENT_EVALS_HAVEN_API_URL || secrets.AGENT_EVALS_HAVEN_API_URL }}
+        run: |
+          set -euo pipefail
+          HAVEN_API_URL="$QA_HAVEN_API_URL" PORT=8788 node packages/mcp-server/dist/cli.js > mcp-server.log 2>&1 &
+          for i in $(seq 1 30); do curl -s -o /dev/null -X POST 'http://127.0.0.1:8788/v1' -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"ping"}' && READY=1 && break; sleep 1; done
+          if [ "$READY" = '1' ]; then echo "hosted MCP (commit $(git rev-parse HEAD)) is listening on :8788 → dev backend"; else echo "::error::PR-checkout hosted MCP did not come up in 30s"; cat mcp-server.log; exit 1; fi
+
+      # The lane's own eval identity, written from the PROTECTED environment
+      # secrets at runtime and never echoed. The delegate key NEVER reaches
+      # the hosted server env (the custody guard would refuse to boot) — only
+      # the signer process gets it, via the credential file.
+      - name: Write the eval-agent credentials from the protected environment (never echoed)
+        env:
+          DELEGATE_KEY: ${{ secrets.AGENT_EVALS_DELEGATE_KEY }}
+          API_KEY: ${{ secrets.AGENT_EVALS_API_KEY }}
+          API_URL: ${{ vars.AGENT_EVALS_HAVEN_API_URL || secrets.AGENT_EVALS_HAVEN_API_URL }}
+        run: |
+          set -euo pipefail
+          DIR="$RUNNER_TEMP/haven-eval-agent"
+          mkdir -p "$DIR"; chmod 700 "$DIR"
+          CRED_DIR="$DIR" DELEGATE_KEY="$DELEGATE_KEY" API_KEY="$API_KEY" API_URL="$API_URL" node -e "const fs = require('node:fs'); const missing = ['DELEGATE_KEY', 'API_KEY', 'API_URL'].filter((n) => !(process.env[n] ?? '').trim()); if (missing.length > 0) { console.error('::error::the agent-evals environment is missing: ' + missing.join(', ')); process.exit(1); } fs.writeFileSync(process.env.CRED_DIR + '/agent.json', JSON.stringify({ delegate_key: process.env.DELEGATE_KEY }, null, 2), { mode: 0o600 }); fs.writeFileSync(process.env.CRED_DIR + '/identity.json', JSON.stringify({ api_url: process.env.API_URL, api_key: process.env.API_KEY }, null, 2), { mode: 0o600 });"
+          echo "HAVEN_CREDENTIALS=$DIR/agent.json" >> "$GITHUB_ENV"
+
+      - name: Write the MCP config the lane wires (hosted + signer pair)
+        env:
+          MODE: ${{ steps.slice.outputs.mode }}
+          QA_HAVEN_API_URL: ${{ vars.AGENT_EVALS_HAVEN_API_URL || secrets.AGENT_EVALS_HAVEN_API_URL }}
+          DEV_HOSTED_MCP_URL: ${{ vars.QA_HOSTED_MCP_URL || secrets.QA_HOSTED_MCP_URL }}
+          AGENT_EVALS_API_KEY: ${{ secrets.AGENT_EVALS_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ "$MODE" = 'subset' ]; then HOSTED_URL='http://127.0.0.1:8788/v1'; else HOSTED_URL="$DEV_HOSTED_MCP_URL"; fi
+          if [ -z "$HOSTED_URL" ]; then echo "::error::no hosted MCP URL for mode $MODE — set QA_HOSTED_MCP_URL (full mode)"; exit 1; fi
+          # The API key lands in this config file's Authorization header —
+          # RUNNER_TEMP only, never committed, never echoed.
+          CRED="$RUNNER_TEMP/haven-eval-agent" HOSTED_URL="$HOSTED_URL" AGENT_EVALS_API_KEY="$AGENT_EVALS_API_KEY" node -e "const fs = require('node:fs'); const cfg = { mcpServers: { 'haven-eval': { type: 'http', url: process.env.HOSTED_URL, headers: { Authorization: 'Bearer ' + process.env.AGENT_EVALS_API_KEY } }, 'haven-signer-eval': { type: 'stdio', command: 'node', args: ['packages/signer/dist/cli.js', '--ack'], env: { HAVEN_CREDENTIALS: process.env.CRED + '/agent.json' } } } }; fs.writeFileSync(process.env.RUNNER_TEMP + '/haven-eval-mcp.json', JSON.stringify(cfg, null, 2), { mode: 0o600 });"
+          echo "mcp config written for $MODE (hosted: $HOSTED_URL)"
+
+      # THE spend step — reached only after the owner approved the
+      # environment. The allowlist in QA_EVAL_CLAUDE_CODE_COMMAND IS the
+      # "Haven MCP tools only" guarantee, visible right here.
+      - name: Run the eval slice
+        env:
+          QA_EVAL_ADAPTER: claude-code
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          QA_EVAL_CLAUDE_CODE_COMMAND: >-
+            claude -p {instruction} --output-format stream-json --verbose
+            --model sonnet --max-turns 30
+            --allowedTools mcp__haven-eval mcp__haven-signer-eval
+            --disallowedTools Bash,BashOutput,KillShell,Read,Edit,Write,NotebookEdit,Glob,Grep,WebFetch,WebSearch,TodoWrite,Task,SlashCommand,ExitPlanMode
+            --mcp-config "$RUNNER_TEMP/haven-eval-mcp.json"
+          QA_EVAL_CLAUDE_CODE_SESSION_LOG: ${{ runner.temp }}/claude-sessions
+          QA_HAVEN_API_URL: ${{ vars.AGENT_EVALS_HAVEN_API_URL || secrets.AGENT_EVALS_HAVEN_API_URL }}
+          QA_EVAL_AGENT_API_KEY: ${{ secrets.AGENT_EVALS_API_KEY }}
+          QA_EVAL_RECIPIENT: ${{ vars.AGENT_EVALS_RECIPIENT }}
+          QA_EVAL_AGENT_ACCOUNT: ${{ vars.AGENT_EVALS_AGENT_ACCOUNT }}
+          QA_EVAL_X402_TARGET: ${{ vars.AGENT_EVALS_X402_TARGET }}
+          QA_RPC_URL_BASE_SEPOLIA: ${{ secrets.QA_RPC_URL_BASE_SEPOLIA }}
+          MODE: ${{ steps.slice.outputs.mode }}
+          TRIALS: ${{ steps.slice.outputs.trials }}
+          LIMIT_ARG: ${{ steps.slice.outputs.limit_arg }}
+          HOSTED_COMMIT: ${{ steps.slice.outputs.head_sha }}
+          DEV_HOSTED_MCP_URL: ${{ vars.QA_HOSTED_MCP_URL || secrets.QA_HOSTED_MCP_URL }}
+        run: |
+          set -o pipefail
+          if [ "$MODE" = 'subset' ]; then SOURCE=pr-checkout; HOSTED_URL='http://127.0.0.1:8788/v1'; else SOURCE=dev-deployed; HOSTED_URL="$DEV_HOSTED_MCP_URL"; fi
+          npm run evals -w packages/qa-agent -- --trials="$TRIALS" $LIMIT_ARG --out=evals-report.json --hosted-mcp-source="$SOURCE" --hosted-mcp-commit="$HOSTED_COMMIT" --hosted-mcp-url="$HOSTED_URL"
+
+      - name: Append the results table to the job summary
+        if: hashFiles('evals-report.json.summary.md') != ''
+        run: cat evals-report.json.summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the full report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-evals-report-${{ github.run_id }}
+          path: |
+            evals-report.json
+            evals-report.json.summary.md
+            evals-report.json.summary.txt
+            evals-report.json.sessions.json
+          if-no-files-found: warn

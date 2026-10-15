@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { renderSummary, runSuite, type EvalAdapter } from './runner.js'
+import { medianMs, renderSummary, runSuite, type EvalAdapter } from './runner.js'
 import type { AgentRunLog, EvalTask, ResolvedTask } from './types.js'
 
 const TASK: EvalTask = {
@@ -92,5 +92,15 @@ describe('renderSummary', () => {
     expect(summary).toContain('runner-test')
     expect(summary).toContain('no haven_get_agent')
     expect(summary).toContain('issue: 3958')
+  })
+})
+
+describe('medianMs', () => {
+  it('is the middle value for odd counts and the mean of the middle two for even', () => {
+    expect(medianMs([])).toBe(0)
+    expect(medianMs([5])).toBe(5)
+    expect(medianMs([30, 10, 20])).toBe(20)
+    expect(medianMs([10, 20, 30, 40])).toBe(25)
+    expect(medianMs([40, 10])).toBe(25)
   })
 })

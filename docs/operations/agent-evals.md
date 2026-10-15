@@ -8,6 +8,15 @@ covers:
   - packages/qa-agent/src/evals/runner.ts
   - packages/qa-agent/src/evals/graders.ts
   - packages/qa-agent/src/evals/hermes.ts
+  - packages/qa-agent/src/evals/claude-code.ts
+  - packages/qa-agent/src/evals/summary.ts
+  - .github/workflows/agent-evals.yml
+  - packages/mcp-server/src/server.ts
+  - packages/mcp-server/src/boot.ts
+  - packages/sdk/src/skill-content.ts
+  - packages/sdk/src/agent-guidance.ts
+  - packages/signer/src/tools.ts
+  - packages/signer/src/server.ts
   - packages/qa-agent/src/seed.ts
   - packages/qa-agent/src/config.ts
   - packages/qa-agent/src/lib/chain.ts
@@ -178,6 +187,98 @@ CLI exits non-zero if any task failed any trial.
   is submitted by the merchant's facilitator, so the backend payment object
   is the outcome there, not a transfer from the agent's account.
 
+## Lane 2: Claude Code headless (#3959)
+
+The second runner lane runs the SAME task files and graders through
+`claude -p` in `--output-format stream-json --verbose` mode, authenticated
+with the **owner's Max 5x subscription** via `CLAUDE_CODE_OAUTH_TOKEN` (a
+long-lived token from `claude setup-token`). Nothing from the #3958 harness
+is copied: the adapter (`packages/qa-agent/src/evals/claude-code.ts`) parses
+the stream into the same `AgentRunLog` model and reuses the shared refusal
+envelope reader, so every grader applies unmodified.
+
+**Where the credentials live (money-path).** The subscription token and this
+lane's eval-agent keys are secrets of the protected **`agent-evals` GitHub
+environment** (owner = required reviewer) — NEVER repository secrets, NEVER
+in code, fixtures or artifacts. Every job in `.github/workflows/agent-evals.yml`
+declares that environment, so each run — weekly, PR subset or manual — waits
+for the owner's approval before any secret reaches a runner. The env
+inventory:
+
+| Name | Kind | What it is |
+|---|---|---|
+| `CLAUDE_CODE_OAUTH_TOKEN` | env secret | the owner's subscription token (`claude setup-token`) |
+| `AGENT_EVALS_API_KEY` | env secret | this lane's eval agent `sk_agent_...` key (its OWN agent, not the Hermes lane's and never `QA_DELEGATION_*`) |
+| `AGENT_EVALS_DELEGATE_KEY` | env secret | this lane's delegate private key |
+| `AGENT_EVALS_HAVEN_API_URL` | var (or secret) | the dev backend URL |
+| `AGENT_EVALS_RECIPIENT` / `AGENT_EVALS_AGENT_ACCOUNT` / `AGENT_EVALS_X402_TARGET` | vars | the graders' address/URL fixtures (same roles as the `QA_EVAL_*` env) |
+
+**Token rotation.** The token does not refresh on its own (reportedly about
+one year). It is stored ONLY as the `agent-evals` environment secret above.
+To rotate: run `claude setup-token` on a machine with the owner's login,
+update the `CLAUDE_CODE_OAUTH_TOKEN` environment secret in the GitHub UI
+(Settings → Environments → agent-evals), and delete the old token from the
+Anthropic console. The workflow file references no repository-level secret
+for any of these.
+
+**The allowlist.** `claude -p` is limited to the Haven MCP tools only —
+visible in the workflow file (`QA_EVAL_CLAUDE_CODE_COMMAND`):
+`--allowedTools mcp__haven-eval mcp__haven-signer-eval` (the hosted + signer
+pair the job wires through `--mcp-config`) and an explicit
+`--disallowedTools` list denying every built-in Bash/file/web tool. Anything
+not allowlisted is denied in headless mode; a denied call still appears in
+the stream, which is what the no-retry graders need.
+
+**Env the lane needs** (set by the workflow; set the same names by hand for
+a local run):
+
+- `QA_EVAL_ADAPTER=claude-code` — the lane switch (default `hermes`).
+- `QA_EVAL_CLAUDE_CODE_COMMAND` — the full `claude -p` command template
+  containing `{instruction}`. There is no default: the allowlist, the MCP
+  config and the model belong in this template, where they are reviewable.
+  Never put a token in it — the token travels only as `CLAUDE_CODE_OAUTH_TOKEN`.
+- `QA_EVAL_CLAUDE_CODE_SESSION_LOG` — optional base path for the captured
+  session streams (`<base>.<task>.trial<N>.jsonl`); the adapter writes them
+  itself.
+- The common env from "Running the suite" above (`QA_HAVEN_API_URL`,
+  `QA_EVAL_*`, `QA_RPC_URL_BASE_SEPOLIA`) — the same eval-agent contract.
+
+**Cost pilot (the cadence decider).** Run the 5-task slice, one trial:
+
+```
+npm run evals -w packages/qa-agent -- --trials=1 --limit=5 \
+  --out=evals-pilot.json --hosted-mcp-source=dev-deployed --hosted-mcp-url=<dev hosted MCP>
+```
+
+Every session's `total_cost_usd` (plus wall time and the model the session
+actually ran on) is recorded in `evals-pilot.json.sessions.json` and summed
+into the report (`totalCostUsd`, `model`). Post the per-session numbers on
+#3959 — the pilot sets the cadence. Estimates before the pilot: roughly
+$0.20–0.40 per session on Sonnet, $1–2 on Opus; a 90-session full run on
+Opus would use most of a month's Agent SDK credit (~$100 on Max 5x).
+
+**The workflow** (`.github/workflows/agent-evals.yml`) runs three ways:
+
+- weekly schedule — the FULL suite against the deployed dev stack;
+- `pull_request` on the trigger paths (`packages/mcp-server/src/server.ts`,
+  `packages/mcp-server/src/tools/**`, the snapshot/corpus JSONs,
+  `packages/sdk/src/skill-content.ts`, `packages/sdk/src/agent-guidance.ts`,
+  `packages/signer/src/tools.ts`, `packages/signer/src/server.ts`,
+  `packages/signer/src/consent.ts`) — the 5-task SUBSET, which builds and
+  boots `packages/mcp-server` FROM THE PR CHECKOUT (it runs locally against
+  `HAVEN_API_URL`, see `packages/mcp-server/src/boot.ts`) pointed at the dev
+  backend, and launches the signer and skill from the workspace, not npm.
+  The subset report names the commit of the hosted MCP it ran against — the
+  PR head, not dev — and states that backend error bodies stay
+  dev-deployed. It is NOT a required check on `dev` or `main`.
+- `workflow_dispatch` — the Run workflow button, choosing full suite or
+  subset; it waits for the same environment approval as every other run.
+
+Every run writes a per-task table (pass rate, pass^k, median wall time per
+session) plus total cost, model and hosted MCP provenance to the GitHub job
+summary (`evals-report.json.summary.md` → `$GITHUB_STEP_SUMMARY`); the full
+JSON report and the per-session cost evidence are uploaded as artifacts.
+
 ## Open questions (partner) — the adapter's recorded seams
 
 1. Which model and inference server (Ollama, vLLM, llama.cpp, MLX...), and
@@ -203,4 +304,4 @@ CLI exits non-zero if any task failed any trial.
 - The deterministic, no-LLM money-flow harness: `docs/operations/agent-qa.md`
   (the deploy-confidence core; this suite is the model-behaviour layer on top).
 - Slice 2, the Claude Code adapter: #3959 — reuses the task format, graders
-  and log contract from here; nothing is copied.
+  and log contract from here; nothing is copied. See "Lane 2" above.

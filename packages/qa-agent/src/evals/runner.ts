@@ -29,6 +29,11 @@ export interface TrialRecord {
   graders: Array<GraderResult & { name: string }>
   /** Wall time of the agent session, ms. */
   wallMs: number
+  /**
+   * Session cost in USD when the adapter reports one (the Claude Code lane's
+   * `total_cost_usd`, #3959). Absent for lanes that cannot know it.
+   */
+  costUsd?: number
   /** First failing grader's detail, or '' when the trial passed. */
   detail: string
 }
@@ -46,6 +51,19 @@ export interface TaskReport {
   passAll: boolean
   /** Wall time of the SLOWEST session, ms — the nightly-run bound. */
   slowestSessionMs: number
+  /** Median wall time across the task's sessions, ms (#3959's summary metric). */
+  medianSessionMs: number
+}
+
+/**
+ * Where the hosted MCP leg ran. Recorded by the CLI from its args and echoed
+ * into both report halves (#3959: the subset must name the PR head, not dev).
+ */
+export interface HostedMcpInfo {
+  source: 'pr-checkout' | 'dev-deployed'
+  url?: string
+  /** The commit the hosted MCP served — the PR head for the subset lane. */
+  commit?: string
 }
 
 export interface EvalReport {
@@ -56,12 +74,19 @@ export interface EvalReport {
   /** Tasks that produced a usable verdict. */
   tasksRun: number
   tasksPassingAll: number
+  /** Sum of the session costs the adapter reported, when it does (#3959). */
+  totalCostUsd?: number
+  /** The model the adapter's sessions ran on, when reported (#3959). */
+  model?: string
+  hostedMcp?: HostedMcpInfo
 }
 
 export interface RunSuiteOptions {
   resolved: ResolvedTask[]
   adapter: EvalAdapter
   trials: number
+  /** Where the hosted MCP leg ran, echoed into the report (#3959). */
+  hostedMcp?: HostedMcpInfo
   /** Grader probes live here (chain/backend), injected per suite. */
   graderContext?: Omit<GraderContext, 'resolved'>
   /** Hook for the tests: observe each trial as it lands. */
@@ -118,7 +143,16 @@ export async function runTaskTrials(
     passRate: records.length === 0 ? 0 : passed / records.length,
     passAll: records.length > 0 && passed === records.length,
     slowestSessionMs: Math.max(0, ...records.map((r) => r.wallMs)),
+    medianSessionMs: medianMs(records.map((r) => r.wallMs)),
   }
+}
+
+/** Median wall time in ms — the summary metric #3959 reports per task. */
+export function medianMs(values: number[]): number {
+  if (values.length === 0) return 0
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 1 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2)
 }
 
 export async function runSuite(opts: RunSuiteOptions): Promise<EvalReport> {
@@ -137,6 +171,7 @@ export async function runSuite(opts: RunSuiteOptions): Promise<EvalReport> {
     tasks,
     tasksRun: tasks.length,
     tasksPassingAll: tasks.filter((t) => t.passAll).length,
+    ...(opts.hostedMcp ? { hostedMcp: opts.hostedMcp } : {}),
   }
 }
 
@@ -149,7 +184,7 @@ export function renderSummary(report: EvalReport): string {
   for (const t of report.tasks) {
     const rate = `${Math.round(t.passRate * 100)}%`
     lines.push(
-      `${t.passAll ? 'PASS^k' : 'fail  '}  ${t.id}  (${t.category})  pass ${rate}  slowest session ${t.slowestSessionMs}ms  [${t.source.kind}: ${t.source.ref}]`,
+      `${t.passAll ? 'PASS^k' : 'fail  '}  ${t.id}  (${t.category})  pass ${rate}  median session ${t.medianSessionMs}ms  slowest ${t.slowestSessionMs}ms  [${t.source.kind}: ${t.source.ref}]`,
     )
     for (const trial of t.trials) {
       if (!trial.pass) {
@@ -158,6 +193,17 @@ export function renderSummary(report: EvalReport): string {
     }
   }
   lines.push('')
+  if (report.totalCostUsd !== undefined) {
+    lines.push(`Total cost the adapter reported: $${report.totalCostUsd.toFixed(4)}${report.model ? ` (model: ${report.model})` : ''}`)
+  }
+  if (report.hostedMcp) {
+    lines.push(
+      `Hosted MCP: ${report.hostedMcp.source}${report.hostedMcp.commit ? ` @ ${report.hostedMcp.commit}` : ''}${report.hostedMcp.url ? ` (${report.hostedMcp.url})` : ''}`,
+    )
+    if (report.hostedMcp.source === 'pr-checkout') {
+      lines.push('Error bodies produced by packages/backend stay dev-deployed whatever this job checked out.')
+    }
+  }
   lines.push('Wall time per session is measured around the adapter call (the partner-experienced session time).')
   return lines.join('\n')
 }

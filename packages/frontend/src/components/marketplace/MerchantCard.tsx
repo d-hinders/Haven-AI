@@ -1,6 +1,5 @@
 import Link from 'next/link'
 import { Check } from 'lucide-react'
-import { formatTokenAmount } from '@haven_ai/core'
 import { Monogram } from '@/components/ui/Monogram'
 import { TEST_MERCHANT_NOTE } from './MerchantHeader'
 import { Icon } from '@/components/ui/Icon'
@@ -19,14 +18,23 @@ const USDC_DECIMALS = 6
  * rather than a shape confusion; it renders as no price at all, the same
  * defensiveness the per-offer budget answer applies
  * (`agentsThatCanPay`, `lib/marketplace.ts`).
+ *
+ * #4008: ONE number format for prices on Haven's frontend. The card used to
+ * run core's `formatTokenAmount`, which trims trailing zeros to one fractional
+ * digit ("0.1", "1.0") while the offer row's `price_display` — the backend's
+ * `formatPriceDisplay` — pads to at least two ("0.10", "1.00"). The card now
+ * applies the backend's rule (mirror of `merchant-catalog.ts`: pad out, split
+ * on the decimals, trim trailing zeros, then pad the fraction to TWO), so
+ * both surfaces read the same string. `price_display` itself is untouched on
+ * the wire — the MCP tools, `packages/mcp`, the CLI and the SDK read it.
  */
 function lowestPrice(merchant: Merchant): string | null {
-  if (!merchant.lowest_price_atomic) return null
-  try {
-    return formatTokenAmount(BigInt(merchant.lowest_price_atomic), USDC_DECIMALS)
-  } catch {
-    return null
-  }
+  const atomic = merchant.lowest_price_atomic
+  if (!atomic || !/^[0-9]+$/.test(atomic)) return null
+  const padded = atomic.padStart(USDC_DECIMALS + 1, '0')
+  const intPart = padded.slice(0, padded.length - USDC_DECIMALS)
+  const frac = padded.slice(padded.length - USDC_DECIMALS).replace(/0+$/, '').padEnd(2, '0')
+  return `${intPart}.${frac}`
 }
 
 /**
@@ -51,9 +59,11 @@ function footer(merchant: Merchant): string {
  *
  * #3980: the card answers "can I pay this, and what does it cost?" at a
  * glance. A coming-soon merchant is muted and says so in the badge slot with
- * no footer; verified is a quiet check after the name, not a green badge
- * (most cards are verified, so the badge said nothing); the category is plain
- * text so it stops dressing up like the network chips.
+ * no footer; verified is a quiet check after the name — since #4008 the ONE
+ * Verified treatment: the merchant header carries the same check plus the
+ * word in sentence case, and no surface renders an ALL-CAPS badge any more
+ * (the category is plain text so it stops dressing up like the network
+ * chips).
  */
 export function MerchantCard({ merchant }: { merchant: Merchant }) {
   const networks = merchant.networks

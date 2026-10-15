@@ -395,8 +395,10 @@ Money and risk clarity:
   offers that need it.
 - A prospect ("Coming soon") must never look payable: no price, no
   instruction, no offers table.
-- The Verified badge means domain control plus a confirmed payable endpoint —
-  never merchant honesty, quality, or settlement reliability.
+- The Verified marker means domain control plus a confirmed payable endpoint —
+  never merchant honesty, quality, or settlement reliability. One treatment
+  everywhere (#4008): the quiet check plus the word "Verified" in sentence
+  case, on the grid card and the merchant header alike — no uppercase badge.
 
 ## Approve Payment — RETIRED, kept as history
 

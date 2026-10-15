@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
+import { Check } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { Monogram } from '@/components/ui/Monogram'
-import { StatusBadge } from '@/components/ui/StatusBadge'
 import { categoryLabel, chainName, networkToChainId, verifiedMeaning } from '@/lib/marketplace'
 import type { Merchant } from '@/hooks/useCatalog'
 
@@ -36,10 +37,18 @@ export function MerchantHeader({ merchant, actions }: { merchant: Merchant; acti
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="v2-text-h1 text-[var(--v2-ink)]">{merchant.name}</h1>
             {merchant.verified_payable && (
-              <span title={verifiedMeaning(merchant.name)}>
-                <StatusBadge tone="success" className="uppercase tracking-wide">
-                  Verified
-                </StatusBadge>
+              // #4008: ONE Verified treatment — the grid card's quiet check
+              // (#3980) plus the word, in sentence case, here too. The old
+              // `StatusBadge` rendered an ALL-CAPS "VERIFIED" stadium, a
+              // different-looking claim for the same proof. The visible
+              // meaning line below stays; `title` carries it for AT.
+              <span
+                title={verifiedMeaning(merchant.name)}
+                data-testid="verified-marker"
+                className="inline-flex items-center gap-1 text-sm font-medium text-[var(--v2-success)]"
+              >
+                <Icon icon={Check} className="h-3.5 w-3.5" />
+                <span>Verified</span>
               </span>
             )}
           </div>

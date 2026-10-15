@@ -91,18 +91,51 @@ export function MerchantGrid({
   const showTestMerchants = testMerchantsChoice ?? testMerchantsDefaultOn
   const setShowTestMerchants = setTestMerchantsChoice
 
+  // #4008: the pill list is built from the merchants that pass the NETWORK
+  // filter and the "Show test merchants" toggle — but NOT the category,
+  // search or verified filters — so pills never vanish while you are using
+  // them. On dev, "Media" and "Search" matched only Base merchants, so under
+  // the Base Sepolia default clicking one emptied the grid with "No
+  // merchants match this filter". A merchant that lists no network survives
+  // any network filter (the rule `visible` applies below), so its category
+  // counts too.
+  const pillPool = useMemo(
+    () =>
+      merchants.filter((m) => {
+        if (!showTestMerchants && m.is_test_merchant) return false
+        if (
+          chainFilter !== 'all' &&
+          m.networks.length > 0 &&
+          !m.networks.some((n) => networkToChainId(n) === chainFilter)
+        ) {
+          return false
+        }
+        return true
+      }),
+    [merchants, showTestMerchants, chainFilter],
+  )
+
   const categories = useMemo(
     () =>
-      Array.from(new Set(merchants.map((m) => m.category)))
+      Array.from(new Set(pillPool.map((m) => m.category)))
         .filter((c) => c !== TEST_FIXTURE_CATEGORY)
         .sort(),
-    [merchants],
+    [pillPool],
   )
+
+  // #4008: a selected category that no longer has a pill resets to "All",
+  // derived at read time — the same rule #3979 applied to `test-fixture`
+  // (`:45-47`): no filter is ever active without a visible pill. This also
+  // catches a deep link such as `?category=media` under the Base Sepolia
+  // default. The state keeps the raw choice, so a pill that comes back (the
+  // network filter widens) re-activates the selection instead of silently
+  // forgetting it.
+  const activeCategory = category !== null && categories.includes(category) ? category : null
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase()
     const filtered = merchants.filter((m) => {
-      if (category && m.category !== category) return false
+      if (activeCategory && m.category !== activeCategory) return false
       if (verifiedOnly && !m.verified_payable) return false
       if (!showTestMerchants && m.is_test_merchant) return false
       // A merchant that lists no network — coming soon, or every offer
@@ -131,9 +164,10 @@ export function MerchantGrid({
         a.name.localeCompare(b.name) ||
         a.id.localeCompare(b.id),
     )
-  }, [merchants, category, verifiedOnly, showTestMerchants, chainFilter, search])
+  }, [merchants, activeCategory, verifiedOnly, showTestMerchants, chainFilter, search])
 
-  const filtered = category !== null || search.trim() !== '' || verifiedOnly || chainFilter !== 'all'
+  const filtered =
+    activeCategory !== null || search.trim() !== '' || verifiedOnly || chainFilter !== 'all'
   const clearFilters = () => {
     setCategory(null)
     setSearch('')
@@ -239,11 +273,11 @@ export function MerchantGrid({
       <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 sm:mb-4">
         {categories.length > 1 ? (
           <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by category">
-            <FilterPill active={category === null} onClick={() => setCategory(null)}>
+            <FilterPill active={activeCategory === null} onClick={() => setCategory(null)}>
               All
             </FilterPill>
             {categories.map((c) => (
-              <FilterPill key={c} active={category === c} onClick={() => setCategory(c)}>
+              <FilterPill key={c} active={activeCategory === c} onClick={() => setCategory(c)}>
                 {categoryLabel(c)}
               </FilterPill>
             ))}

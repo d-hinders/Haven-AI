@@ -8,11 +8,11 @@ import type { CatalogEntry } from '@/hooks/useCatalog'
 
 /**
  * One offer's row in the merchant page's single offers list (#3981, epic
- * #3978): no Method column and no per-row Verified badge (the merchant-level
- * badge in `MerchantHeader` is the trust claim). Since #3998 it is ONE table
- * row: the instruction is no longer printed as a second row — the labelled
- * "Copy prompt" button copies it byte-for-byte, and the Offer cell
- * prints it only when the user must edit it or the clipboard refused it
+ * #3978): no Method column and no per-row Verified marker (the merchant-level
+ * check-plus-word in `MerchantHeader` is the trust claim, #4008). Since #3998
+ * it is ONE table row: the instruction is no longer printed as a second row —
+ * the labelled "Copy prompt" button copies it byte-for-byte, and the Offer
+ * cell prints it only when the user must edit it or the clipboard refused it
  * (`OfferInstructionText`).
  */
 export function OfferRow({

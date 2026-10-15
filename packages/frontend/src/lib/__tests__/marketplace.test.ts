@@ -46,7 +46,7 @@ function entry(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
     body_example: null,
     asset_transfer_methods: null,
     tool_name: 'create_text',
-    price_display: '$0.01 USDC',
+    price_display: '0.01 USDC',
     price_atomic: '10000',
     asset: 'USDC',
     network: 'eip155:8453',

@@ -509,7 +509,10 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   that answers "can I pay this, and what does it cost?" (#3980): live
   merchants show "From <price> USDC" — the lowest USDC price over the counted
   offers, served as the nullable `lowest_price_atomic` on `GET /merchants`
-  (atomic units; the card scales by 10^-6), with the offer count after it
+  (atomic units; the card formats it with the backend's two-decimal rule —
+  trailing zeros trimmed to at least two decimals, "0.10" and "1.00" but
+  "0.001" stays — the ONE price format on the frontend, matching the offer
+  row's `price_display`; #4008), with the offer count after it
   when there is more than one offer, and the offer count alone when no
   counted offer prices in USDC — while a coming-soon merchant shows no footer
   at all (nothing there is comparable), renders muted, and carries "Coming
@@ -534,11 +537,19 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   network — coming soon, or every offer self-submitted — stays visible under
   any network filter. "Show test merchants" is the one control for test
   content: the `test-fixture` category gets no pill, and a
-  `?category=test-fixture` deep link opens as "All". The checkbox defaults
+  `?category=test-fixture` deep link opens as "All". The pills are built
+  from the merchants that pass the NETWORK filter and the "Show test
+  merchants" toggle — not the category or search filters (#4008) — so pills
+  never vanish while you use them, and a selected category that has no pill
+  under the current network filter resets to "All", derived at read time: a
+  deep link such as `?category=media` under the Base Sepolia default opens
+  as "All", the same no-filter-without-a-pill rule. The checkbox defaults
   **on** when any of the merchants' listed networks is a testnet (core's
   faucet field, `isTestnetChain`, not a hard-coded id), read off the served
   data rather than `NEXT_PUBLIC_HAVEN_ENV` (epic decision 10). Any other
-  `/catalog?category=…` deep link keeps its category. A failed load offers
+  `/catalog?category=…` deep link keeps its category — unless the current
+  network filter leaves it no pill, in which case it opens as "All" (#4008).
+  A failed load offers
   "Try again"; a filter that hides everything offers "Clear filters" (which
   returns the network to "All networks"); an empty marketplace shows no
   filter row, only the submit entry point. Below a populated grid, a note for
@@ -546,7 +557,9 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   service is not a toolbar action.
 - **Merchant page** (`app/(authenticated)/marketplace/[slug]/page.tsx`,
   `MerchantHeader.tsx`, `OffersTable.tsx`) — header (monogram/logo, name,
-  category, website link, networks, Verified with its meaning as VISIBLE text
+  category, website link, networks, the Verified marker as the quiet check
+  plus the word "Verified" in sentence case — the ONE treatment, shared with
+  the grid card (#4008) — with its meaning as VISIBLE text
   under the description — never only a tooltip — the Haven test-merchant note
   as a wrapping line on a test merchant, where a payment is one paste away,
   and "Set a budget for this merchant" in the header's right-hand actions slot when the
@@ -572,7 +585,12 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   `resolveDefaultAccount`) come first; offers on other networks sit behind an
   "n more on <chain names>" disclosure (#4003 — with "— none of your agents
   can pay on that network" when no active agent's account chain is among the
-  hidden chains), and every offer renders flat when the
+  hidden chains). The nested table inside the disclosure shares the outer
+  table's fixed column layout — one `table-layout: fixed` and one `colgroup`
+  for both, and no extra horizontal padding on the disclosure's cell — so
+  their columns line up to the pixel (#4008); the rows stay in the DOM while
+  the disclosure is collapsed, and the phone `OfferCard` disclosure is
+  unchanged. Every offer renders flat when the
   user's default network serves none of the merchant's offers. (#4005: the
   offer-level any-recipient NOTE is gone from the table — the "How to buy"
   panel's step 2 states that requirement in plain words, next to the state

@@ -3125,7 +3125,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Merchant card (marketplace)"
-        description="The /marketplace grid's card (#3079, epic #3077; footer and markers per #3980): monogram or logo, name, the category as plain ink-3 text (not a chip — the network chips keep their surface-2 pills), description clamped to two lines, network chips, and a bottom-pinned footer: 'From <price> USDC' with the offer count after it when there is more than one, the count alone when no counted offer prices in USDC, and nothing at all on a coming-soon card, which renders muted with 'Coming soon' in the badge slot. Verified is a quiet check after the name — title = the meaning, sr-only 'Verified' — following verified_payable, the wire's own proof (#3078)."
+        description="The /marketplace grid's card (#3079, epic #3077; footer and markers per #3980): monogram or logo, name, the category as plain ink-3 text (not a chip — the network chips keep their surface-2 pills), description clamped to two lines, network chips, and a bottom-pinned footer: 'From <price> USDC' on the ONE frontend price format (#4008) — the backend's two-decimal rule, trailing zeros trimmed to at least two decimals ('0.10', '1.00'; '0.001' stays) — with the offer count after it when there is more than one, the count alone when no counted offer prices in USDC, and nothing at all on a coming-soon card, which renders muted with 'Coming soon' in the badge slot. Verified is a quiet check after the name — title = the meaning, sr-only 'Verified' — following verified_payable, the wire's own proof (#3078)."
       >
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <MerchantCard

@@ -67,6 +67,27 @@ describe('MerchantGrid', () => {
     expect(screen.getByText('From 0.001 USDC · 2 offers')).toBeDefined()
   })
 
+  it('#4008: the card and the offer row agree on the two-decimal price rule ("0.10 USDC", "1.00 USDC")', () => {
+    // These are exactly the strings `price_display` carries on the wire for
+    // these atomic amounts (the backend's `formatPriceDisplay`, which the
+    // card now mirrors), so the grid card's footer and the merchant page's
+    // offer row read the same price. Trailing zeros are trimmed down to two
+    // decimals, never fewer: 0.001 stays "0.001", 0.1 renders "0.10".
+    render(
+      <MerchantGrid
+        merchants={[
+          merchant({ id: 'a', slug: 'tenth', name: 'Tenth', lowest_price_atomic: '100000' }),
+          merchant({ id: 'b', slug: 'one', name: 'One', lowest_price_atomic: '1000000' }),
+        ]}
+        loading={false}
+        error={null}
+        onSubmit={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('From 0.10 USDC · 2 offers')).toBeDefined()
+    expect(screen.getByText('From 1.00 USDC · 2 offers')).toBeDefined()
+  })
+
   it('shows the offer count alone when no counted offer prices in USDC', () => {
     render(
       <MerchantGrid
@@ -123,10 +144,14 @@ describe('MerchantGrid', () => {
     )
     const card = screen.getByTestId('merchant-card-verified')
     // The quiet marker: `title` spells the meaning out on hover/AT, sr-only
-    // "Verified" names it, and the uppercase badge is gone.
-    expect(within(card).getByTitle(verifiedMeaning('Merchant One'))).toBeDefined()
-    expect(within(card).getByText('Verified').className).toContain('sr-only')
-    expect(within(card).queryByText('VERIFIED')).toBeNull()
+    // "Verified" names it, and the uppercase badge is gone. Asserted by
+    // element and class, not text alone: CSS `uppercase` leaves the text
+    // node unchanged, so only the class list proves the treatment (#4008).
+    const marker = within(card).getByTitle(verifiedMeaning('Merchant One'))
+    expect(marker.querySelector('svg')).not.toBeNull()
+    expect(marker.className).not.toContain('uppercase')
+    expect(within(marker).getByText('Verified').className).toContain('sr-only')
+    expect(within(card).queryByTestId('verified-marker')).toBeNull()
     // The unverified card carries no marker at all.
     const { unmount } = render(<MerchantGrid merchants={[merchant()]} loading={false} error={null} onSubmit={vi.fn()} />)
     expect(screen.getByTestId('merchant-card-merchant-one').querySelector('[title]')).toBeNull()
@@ -236,6 +261,92 @@ describe('MerchantGrid', () => {
     fireEvent.change(screen.getByLabelText('Search merchants'), { target: { value: 'media' } })
     expect(screen.getByText('Media Co')).toBeDefined()
     expect(screen.queryByText('Data Co')).toBeNull()
+  })
+
+  describe('#4008: the pills respect the network filter and the test toggle, not the category or search filters', () => {
+    // Two categories survive a Base Sepolia filter (so the pill group renders
+    // — these tests must not pass vacuously), and "media" exists ONLY on
+    // Base: on dev the Media pill showed under the Base Sepolia default and
+    // clicking it emptied the grid with "No merchants match this filter".
+    const pool = [
+      merchant({ id: 'a', slug: 'api-one', name: 'API Co', category: 'api', networks: ['eip155:84532'] }),
+      merchant({ id: 'd', slug: 'data-one', name: 'Data Co', category: 'data', networks: ['eip155:84532'] }),
+      merchant({ id: 'm', slug: 'media-one', name: 'Media Co', category: 'media', networks: ['eip155:8453'] }),
+    ]
+    const group = () => screen.getByRole('group', { name: 'Filter by category' })
+    const select = () => screen.getByLabelText('Filter marketplace by network') as HTMLSelectElement
+
+    it('shows no pill for a category the network filter has', () => {
+      render(<MerchantGrid merchants={pool} loading={false} error={null} onSubmit={vi.fn()} defaultChainId={84532} />)
+      expect(select().value).toBe('84532')
+      expect(within(group()).getByRole('button', { name: 'All' }).getAttribute('aria-pressed')).toBe('true')
+      expect(within(group()).getByRole('button', { name: 'API' })).toBeDefined()
+      expect(within(group()).getByRole('button', { name: 'Data' })).toBeDefined()
+      expect(within(group()).queryByRole('button', { name: 'Media' })).toBeNull()
+      // And the grid itself is not emptied by the absent pill's category.
+      expect(screen.getByText('API Co')).toBeDefined()
+      expect(screen.getByText('Data Co')).toBeDefined()
+    })
+
+    it('brings the pill back when the network filter widens to All networks', () => {
+      render(<MerchantGrid merchants={pool} loading={false} error={null} onSubmit={vi.fn()} defaultChainId={84532} />)
+      fireEvent.change(select(), { target: { value: 'all' } })
+      expect(within(group()).getByRole('button', { name: 'Media' })).toBeDefined()
+    })
+
+    it('resets a deep-linked category that has no pill to All, derived at read time', () => {
+      // `?category=media` under the Base Sepolia default: no Media pill can
+      // be visible, so the filter opens as "All" — no filter is ever active
+      // without a visible pill, the rule #3979 applied to `test-fixture`.
+      render(
+        <MerchantGrid
+          merchants={pool}
+          loading={false}
+          error={null}
+          onSubmit={vi.fn()}
+          defaultChainId={84532}
+          initialCategory="media"
+        />,
+      )
+      expect(within(group()).getByRole('button', { name: 'All' }).getAttribute('aria-pressed')).toBe('true')
+      expect(screen.getByText('API Co')).toBeDefined()
+      expect(screen.getByText('Data Co')).toBeDefined()
+      // Media Co is hidden by the NETWORK filter, not by a dead category
+      // filter nothing on screen could clear.
+      expect(screen.queryByText('Media Co')).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Clear filters' })).toBeNull()
+    })
+
+    it('keeps a pill while only the search filter would empty its category', () => {
+      // The pill pool ignores the category and search filters, so pills
+      // never vanish while you are using them.
+      render(<MerchantGrid merchants={pool} loading={false} error={null} onSubmit={vi.fn()} />)
+      fireEvent.change(screen.getByLabelText('Search merchants'), { target: { value: 'zzz-no-hit' } })
+      expect(screen.getByText('No merchants match this filter')).toBeDefined()
+      expect(within(group()).getByRole('button', { name: 'Media' })).toBeDefined()
+    })
+
+    it('respects the test toggle: a category carried only by a test merchant loses its pill when the toggle is off', () => {
+      const withTest = [
+        merchant({ id: 'a', slug: 'api-one', name: 'API Co', category: 'api', networks: ['eip155:8453'] }),
+        merchant({
+          id: 't',
+          slug: 'test-one',
+          name: 'Test One',
+          category: 'media',
+          is_test_merchant: true,
+          networks: ['eip155:8453'],
+        }),
+      ]
+      render(<MerchantGrid merchants={withTest} loading={false} error={null} onSubmit={vi.fn()} />)
+      // Mainnet-only data: the toggle defaults OFF, so the pill group does
+      // not even render — 'media' would be its second category, and the row
+      // only renders at two or more.
+      expect(screen.queryByRole('group', { name: 'Filter by category' })).toBeNull()
+      fireEvent.click(screen.getByLabelText('Show test merchants'))
+      const group = screen.getByRole('group', { name: 'Filter by category' })
+      expect(within(group).getByRole('button', { name: 'Media' })).toBeDefined()
+    })
   })
 
   it('offers a retry on a failed load, and hides the filter row over an empty marketplace', () => {

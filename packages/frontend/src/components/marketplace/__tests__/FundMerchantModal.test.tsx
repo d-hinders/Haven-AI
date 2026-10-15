@@ -87,7 +87,7 @@ function offer(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
     http_method: null,
     body_type: null,
     body_example: null,
-    price_display: '$0.001 USDC',
+    price_display: '0.001 USDC',
     price_atomic: '1000',
     asset: 'USDC',
     network: 'eip155:84532',

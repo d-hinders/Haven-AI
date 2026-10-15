@@ -420,7 +420,7 @@ describe('DashboardClient', () => {
       // locale — sv-SE under SEK: decimal comma, NBSP before `%` (normalized
       // to a plain space by getByText). The kr half was already sv-SE; the
       // line no longer mixes a hand-rolled English percent scaffold into it.
-      expect(screen.getByText('+130,00 kr (+1,00 %) since yesterday')).toBeInTheDocument()
+      expect(screen.getByText('+130,00 kr (+1,00 %) since yesterday (UTC)')).toBeInTheDocument()
       // #3807: the monthly-spend SEK figure lives in the spending block now,
       // read from `spend.d30` — this fixture carries no spend block, so the
       // block renders its quiet placeholder instead of a number.

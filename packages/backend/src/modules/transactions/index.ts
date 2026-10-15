@@ -52,12 +52,14 @@ export {
   buildActivityFeed,
   buildActivityGroups,
   isValidActivityTimeZone,
+  localDayBounds,
   localDayKey,
   activityOutcome,
   type ActivityFeed,
   type ActivityOutcome,
   type BuildActivityGroupsParams,
   type DashboardActivityGroup,
+  type LocalDayBounds,
 } from './activity.js'
 export { fetchConfirmedX402Transactions, mergeX402Transactions } from './x402.js'
 export {

@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { api } from '@/lib/api'
 import { useVisiblePolling } from '@/hooks/useVisiblePolling'
+import { browserTimeZone } from '@/lib/analytics-range'
 import type { PaymentStatus } from '@/lib/payment-status'
 
 /**
@@ -109,7 +110,6 @@ export function isMcpToolCallActivityItem(item: ActivityItem): item is McpToolCa
 export interface AgentStats {
   all_time: { token: string; total_spent: string; tx_count: number }[]
   today: { token: string; total_spent: string; tx_count: number }[]
-  this_week: { token: string; total_spent: string; tx_count: number }[]
   pending_approvals: number
 }
 
@@ -121,6 +121,22 @@ export function useAgentActivity(agentId: string | null) {
   // refetch must not interleave late responses over newer data.
   const requestIdRef = useRef(0)
 
+  // #3977: the stats response's "today" is the USER's local day, so the
+  // request names the browser's IANA zone — exactly as `/dashboard/overview`
+  // receives its `tz` (same validation server-side, and the same
+  // `browserTimeZone` rule: an unresolvable zone is omitted and the
+  // documented UTC default takes over, never a guess). Memoized so a
+  // re-render that changes nothing cannot re-issue the request.
+  const statsPath = useMemo(() => {
+    const params = new URLSearchParams()
+    const zone = browserTimeZone()
+    if (zone !== undefined) params.set('tz', zone)
+    const query = params.toString()
+    return query
+      ? `/agent-activity/${agentId}/stats?${query}`
+      : `/agent-activity/${agentId}/stats`
+  }, [agentId])
+
   const fetchData = useCallback(
     async (silent = false) => {
       if (!agentId) return
@@ -128,7 +144,7 @@ export function useAgentActivity(agentId: string | null) {
       try {
         const [activityRes, statsRes] = await Promise.all([
           api.get<{ activity: ActivityItem[] }>(`/agent-activity/${agentId}/activity`),
-          api.get<AgentStats>(`/agent-activity/${agentId}/stats`),
+          api.get<AgentStats>(statsPath),
         ])
         if (requestIdRef.current !== requestId) return
         // A 200 whose body omits `activity` must not void the array the page
@@ -144,7 +160,7 @@ export function useAgentActivity(agentId: string | null) {
         }
       }
     },
-    [agentId],
+    [agentId, statsPath],
   )
 
   useEffect(() => {

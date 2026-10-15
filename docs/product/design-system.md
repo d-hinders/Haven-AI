@@ -893,8 +893,18 @@ in the agents section (#3809), the spend total is the analytics page's own
 has no honest successor. When every linked account is a test account
 (`spend.scope === 'testnet'`, #3803 owner decision 3) the balance carries
 a quiet "Test network" label rather than a silently mislabelled total,
-and the balance's change line reads "since yesterday" — the diff is against
-the yesterday snapshot.
+and the balance's change line reads "since yesterday (UTC)" — the diff is
+against the yesterday snapshot. **The snapshot rows are UTC-dated, and the
+copy says so (#3977).** There is no end-of-day job: `GET /dashboard/overview`
+inserts one row per UTC day on the first clean load, and
+`/analytics/overview`'s contract declares the table "a UTC-dated daily
+snapshot … regardless of the caller's `tz`". Re-keying the writer by local
+date would mix history, let the zone vary per device, and change that
+contract, so the figures keep their UTC keys and the label names what is
+measured: the change line reads "since yesterday (UTC)" and the sparkline's
+aria-label reads "over the last 30 UTC days". The Activity card beside it
+buckets the USER's local days — the two windows deliberately do not read
+alike.
 
 ### Buttons
 

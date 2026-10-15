@@ -241,6 +241,24 @@ describe('MoneyPanel — spending half to the mockup (#3902)', () => {
   })
 })
 
+describe('MoneyPanel — the balance figures say what they measure (#3977)', () => {
+  it('the sparkline aria-label names the UTC days the series is dated by', () => {
+    // The snapshot rows are UTC-dated (builder's choice (b) on #3977), so the
+    // label must not read like the Activity card's local-day windows beside
+    // it. The empty-state variant carries the same qualifier — the flat
+    // placeholder renders with < 3 measured days, and this fixture has none.
+    render(
+      <MoneyPanel
+        {...baseProps}
+        currency="USD"
+        totalFiat={0}
+        overview={overview({ d30NetUsd: 0, agents: [] })}
+      />,
+    )
+    expect(screen.getByRole('img', { name: 'Balance over the last 30 UTC days. No snapshots yet.' })).toBeInTheDocument()
+  })
+})
+
 describe('MoneyPanel — exactly one primary "Add funds" (#3902)', () => {
   const addFunds = () => screen.getByRole('button', { name: 'Add funds' })
 

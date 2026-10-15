@@ -1558,8 +1558,8 @@ export const FIXTURE_DELEGATE_BALANCES = {
 export const FIXTURE_AGENT_STATS = {
   all_time: [{ token: 'USDC', total_spent: '482.50', tx_count: 37 }],
   today: [{ token: 'USDC', total_spent: '25.00', tx_count: 1 }],
-  this_week: [{ token: 'USDC', total_spent: '109.75', tx_count: 6 }],
-  // #2120: 0, not 1 — `routes/agent-activity.ts:129` hardcodes it.
+  // #2120: 0, not 1 — `routes/agent-activity.ts` hardcodes it. #3977: the
+  // dead `this_week` bucket is gone with the wire field.
   pending_approvals: 0,
 }
 

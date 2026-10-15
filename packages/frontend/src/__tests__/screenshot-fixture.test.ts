@@ -224,7 +224,6 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       expect(fx('/agent-activity/agent-research/stats')).toMatchObject({
         all_time: expect.any(Array),
         today: expect.any(Array),
-        this_week: expect.any(Array),
         pending_approvals: expect.any(Number),
       })
 

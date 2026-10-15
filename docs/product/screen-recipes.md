@@ -515,7 +515,9 @@ done, and how to stop it (#3691, epic). Sections, in order:
    (`TransactionsTable` in card variant), empty state "No activity yet". The
    header's right side carries the counts summary — "{n} today · {m} all
    time · View in Transactions", the link to `/transactions?agentId={id}` —
-   in place of stat cards (#3696). MCP tool calls, if the agent has any,
+   in place of stat cards (#3696); "{n} today" counts on `confirmed_at`
+   within the user's LOCAL day — the hook sends the browser's IANA zone and
+   the route cuts the day in it, defaulting to UTC (#3977). MCP tool calls, if the agent has any,
    render directly under the table as part of this section.
 
 Money and risk clarity:

@@ -71,7 +71,14 @@ function formatSignedCurrency(value: number, currency: 'USD' | 'EUR' | 'SEK'): s
   return `${sign}${formatFiat(Math.abs(value), currency)}`
 }
 
-/** UTC `YYYY-MM-DD`, `offset` days from today — the snapshot date key. */
+/**
+ * UTC `YYYY-MM-DD`, `offset` days from today — the snapshot date key.
+ * Deliberately UTC (#3977, builder's choice (b)): the snapshot rows are
+ * UTC-dated — `GET /dashboard/overview` writes one per UTC day, and
+ * `/analytics/overview`'s contract declares the table "a UTC-dated daily
+ * snapshot … regardless of the caller's `tz`" — so re-keying the client side
+ * would mislabel the rows. The copy below says what is measured instead.
+ */
 function snapshotDate(offset: number): string {
   const day = new Date()
   day.setUTCDate(day.getUTCDate() + offset)
@@ -122,13 +129,16 @@ function seriesColor(index: number): string {
 }
 
 function sparklineAriaLabel(points: SparklinePoint[], currency: 'USD' | 'EUR' | 'SEK'): string {
+  // #3977: the series is UTC-dated — the aria-label names what it measures
+  // rather than implying the viewer's local days (the Activity card beside
+  // it buckets the USER's local days, so the two must not read alike).
   const measured = points.filter((point) => point.value !== null)
   if (measured.length === 0) {
-    return 'Balance over the last 30 days. No snapshots yet.'
+    return 'Balance over the last 30 UTC days. No snapshots yet.'
   }
   const first = measured[0]
   const last = measured[measured.length - 1]
-  return `Balance over the last 30 days, from ${formatFiat(first.value as number, currency)} to ${formatFiat(last.value as number, currency)}.`
+  return `Balance over the last 30 UTC days, from ${formatFiat(first.value as number, currency)} to ${formatFiat(last.value as number, currency)}.`
 }
 
 export interface MoneyPanelProps {
@@ -471,9 +481,15 @@ export default function MoneyPanel({
                 </p>
               ) : changeAvailable && !sekChangeUnavailable && !changeUnavailable && changeAmount !== null ? (
                 <p className={`mt-2 text-sm font-medium ${changeAmount >= 0 ? 'text-[var(--v2-success)]' : 'text-[var(--v2-danger)]'}`}>
-                  {formatSignedCurrency(changeAmount, currency)} ({formatPercent(changePercent, currency)}) since yesterday
+                  {formatSignedCurrency(changeAmount, currency)} ({formatPercent(changePercent, currency)}) since yesterday (UTC)
                 </p>
               ) : null}
+              {/* #3977: "(UTC)" is the honest label — the snapshot the change
+                  diffs against is keyed by the first clean dashboard load of
+                  each UTC day (there is no end-of-day job), so a Stockholm
+                  user's "yesterday" is the UTC yesterday. The Activity card
+                  beside it buckets the USER's local days; without the
+                  qualifier the two windows would read as the same thing. */}
             </div>
 
             {/* #3908: side by side (lg), the balance half shares a grid row

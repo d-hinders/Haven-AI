@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { ANY_RECIPIENT_BUDGET_TAG, chainName, networkToChainId } from '@/lib/marketplace'
 import { OfferCopyButton, OfferInstructionText, OfferMeta } from './OfferInstruction'
+import type { OfferBudgetHint } from './OffersTable'
 import type { CatalogEntry } from '@/hooks/useCatalog'
 
 /**
@@ -20,7 +21,8 @@ export function OfferRow({
   tagged,
 }: {
   entry: CatalogEntry
-  budget: boolean | null
+  /** The shared per-offer budget answer (`OffersTable.hintFor`, #4004). */
+  budget: OfferBudgetHint
   tagged: boolean
 }) {
   const degraded = entry.status === 'degraded'
@@ -59,12 +61,10 @@ export function OfferRow({
           {budget !== null && (
             <p
               className={`mt-0.5 text-xs font-medium ${
-                budget ? 'text-[var(--v2-success)]' : 'text-[var(--v2-warning)]'
+                budget.tone === 'can' ? 'text-[var(--v2-success)]' : 'text-[var(--v2-warning)]'
               }`}
             >
-              {budget
-                ? 'Within your agent budget'
-                : 'Above every agent budget — a payment would be declined'}
+              {budget.text}
             </p>
           )}
         </td>

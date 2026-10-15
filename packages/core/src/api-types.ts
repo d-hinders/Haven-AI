@@ -6563,6 +6563,13 @@ export type components = {
             remaining_from_chain: boolean;
             /** @description Null when the read is unknown. */
             used_atomic: string | null;
+            /** @description #4004 — the delegation’s recipient pin; null = open budget. The display helper reads it to tell a budget locked to a merchant’s verified pay-to from the open one, the same distinction the payment’s own selection makes. */
+            recipient_address?: string | null;
+            /**
+             * Format: date-time
+             * @description #4004 — the instant the budget’s window opens. The future-dated re-key row is still returned beside its live carry row (#3802 owner decision stands); the display helper is what skips a row whose start_date is in the future.
+             */
+            start_date?: string | null;
             sub_budget_spend: {
                 /** Format: uuid */
                 agent_id: string;

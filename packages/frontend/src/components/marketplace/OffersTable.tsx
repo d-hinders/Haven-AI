@@ -2,18 +2,21 @@
 
 import { useState } from 'react'
 import { Table } from '@/components/ui/Table'
-import { ANY_RECIPIENT_BUDGET_NOTE, ANY_RECIPIENT_BUDGET_TAG, chainName, needsUnpinnedBudget, networkToChainId, withinBudget } from '@/lib/marketplace'
+import { ANY_RECIPIENT_BUDGET_NOTE, ANY_RECIPIENT_BUDGET_TAG, agentsThatCanPay, budgetAnswerLine, chainName, needsUnpinnedBudget, networkToChainId, type BudgetAgent } from '@/lib/marketplace'
 import { OfferCopyButton, OfferInstructionText, OfferMeta } from './OfferInstruction'
 import { OfferRow } from './OfferRow'
-import type { CatalogEntry } from '@/hooks/useCatalog'
+import type { CatalogEntry, MerchantFundingTarget } from '@/hooks/useCatalog'
+import type { DashboardBudgetRemainingEntry } from '@/hooks/useBudgetRemaining'
+import type { MerchantBudget } from '@/hooks/useMerchantBudgets'
 
-type Agents = Array<{ status: string; allowances: Array<{ token_symbol: string; allowance_amount: string }> }>
+/** One row's budget answer: the line and its tone, or null when nothing is known. */
+export type OfferBudgetHint = { text: string; tone: 'can' | 'cannot' } | null
 
-function BudgetHint({ budget }: { budget: boolean | null }) {
-  if (budget === null) return null
+function BudgetHint({ budget }: { budget: OfferBudgetHint }) {
+  if (!budget) return null
   return (
-    <p className={`mt-0.5 text-xs font-medium ${budget ? 'text-[var(--v2-success)]' : 'text-[var(--v2-warning)]'}`}>
-      {budget ? 'Within your agent budget' : 'Above every agent budget — a payment would be declined'}
+    <p className={`mt-0.5 text-xs font-medium ${budget.tone === 'can' ? 'text-[var(--v2-success)]' : 'text-[var(--v2-warning)]'}`}>
+      {budget.text}
     </p>
   )
 }
@@ -31,7 +34,7 @@ function OfferCard({
   tagged,
 }: {
   entry: CatalogEntry
-  budget: boolean | null
+  budget: OfferBudgetHint
   tagged: boolean
 }) {
   const degraded = entry.status === 'degraded'
@@ -94,13 +97,32 @@ function OfferCard({
 export function OffersTable({
   offers,
   agents,
+  budgets = [],
+  merchantBudgets = [],
+  funding = [],
   defaultChainId = null,
 }: {
   offers: CatalogEntry[]
-  agents: Agents
+  /** The spec-derived agent shape `agentsThatCanPay` reads (#4004). */
+  agents: BudgetAgent[]
+  /** `GET /dashboard/budget-remaining` rows — what is LEFT, per agent and budget. */
+  budgets?: DashboardBudgetRemainingEntry[]
+  /** `GET /merchants/{slug}/budgets` rows — the merchant-locked budgets. */
+  merchantBudgets?: MerchantBudget[]
+  /** The merchant's funding targets — the verified pay-to a locked budget pins. */
+  funding?: MerchantFundingTarget[]
   defaultChainId?: number | null
 }) {
   if (offers.length === 0) return null
+
+  // One answer per offer, shared by the table row and the phone card — the
+  // two shapes must never disagree about who can pay (#4004).
+  const hintFor = (offer: CatalogEntry): OfferBudgetHint => {
+    const answers = agentsThatCanPay({ offer, agents, budgets, merchantBudgets, funding })
+    const text = budgetAnswerLine(answers)
+    if (!text) return null
+    return { text, tone: answers.some((a) => a.answer === 'can') ? 'can' : 'cannot' }
+  }
 
   const chainIdOf = (offer: CatalogEntry) => networkToChainId(offer.network)
   const here = defaultChainId === null ? [] : offers.filter((o) => chainIdOf(o) === defaultChainId)
@@ -127,7 +149,7 @@ export function OffersTable({
 
       <ul className="space-y-2 md:hidden" data-testid="offers-list">
         {visible.map((offer) => (
-          <OfferCard key={offer.id} entry={offer} budget={withinBudget(offer, agents)} tagged={tagged(offer)} />
+          <OfferCard key={offer.id} entry={offer} budget={hintFor(offer)} tagged={tagged(offer)} />
         ))}
         {others.length > 0 && (
           <li>
@@ -137,7 +159,7 @@ export function OffersTable({
               </summary>
               <ul className="mt-2 space-y-2">
                 {others.map((offer) => (
-                  <OfferCard key={offer.id} entry={offer} budget={withinBudget(offer, agents)} tagged={tagged(offer)} />
+                  <OfferCard key={offer.id} entry={offer} budget={hintFor(offer)} tagged={tagged(offer)} />
                 ))}
               </ul>
             </details>
@@ -159,7 +181,7 @@ export function OffersTable({
           </Table.Head>
           <Table.Body>
             {visible.map((offer) => (
-              <OfferRow key={offer.id} entry={offer} budget={withinBudget(offer, agents)} tagged={tagged(offer)} />
+              <OfferRow key={offer.id} entry={offer} budget={hintFor(offer)} tagged={tagged(offer)} />
             ))}
             {others.length > 0 && (
               <tr>
@@ -175,7 +197,7 @@ export function OffersTable({
                             <OfferRow
                               key={offer.id}
                               entry={offer}
-                              budget={withinBudget(offer, agents)}
+                              budget={hintFor(offer)}
                               tagged={tagged(offer)}
                             />
                           ))}

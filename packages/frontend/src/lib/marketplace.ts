@@ -1,12 +1,15 @@
 /**
  * Marketplace — merchant-facing pure helpers (#3079, epic #3077).
  *
- * Moved out of `CatalogPanel.tsx` (deleted by this issue) unchanged in
- * behaviour: `agentInstruction` and `withinBudget` keep their exact
- * contracts, byte-identical output, so a merchant page's copy button and
- * per-agent budget hint read the same as the old catalog card's did.
- * `networkToChainId`, `chainName` and `freshness` moved alongside them
- * because every one of the new marketplace components needs at least one.
+ * Moved out of `CatalogPanel.tsx` (deleted by that issue): `agentInstruction`
+ * kept its exact contract, byte-identical output, so a merchant page's copy
+ * button reads the same as the old catalog card's did. The old cap-only
+ * budget check lived here too, until #4004 replaced it: a cap-only yes could
+ * be a lie (it ignored what is LEFT, WHICH agent, recipient pins and
+ * chains), so the hint is now `agentsThatCanPay`, a named, truthful
+ * per-offer answer that mirrors how a payment picks its budget.
+ * `networkToChainId`, `chainName` and `freshness` moved alongside because
+ * every one of the new marketplace components needs at least one.
  *
  * NOT moved: the old card's `isVerified` (`source === 'ingestion'`). The
  * Verified badge now follows `verified_payable` — the epic's trust claim is
@@ -16,9 +19,12 @@
  * it is marked; an operator row can be too). Stated in PR #3087.
  */
 import { getFaucetUrl, isRegisteredChain } from '@haven_ai/core'
-import { ALL_CHAINS, resolveChainOrNull } from '@/lib/chains'
-import { getTokenDecimals, humanAmountToAtomic } from '@/lib/allowance-format'
-import type { CatalogEntry, Merchant } from '@/hooks/useCatalog'
+import { ALL_CHAINS, getChainTokens, resolveChainOrNull } from '@/lib/chains'
+import { getTokenDecimals } from '@/lib/allowance-format'
+import type { CatalogEntry, Merchant, MerchantFundingTarget } from '@/hooks/useCatalog'
+import type { Agent } from '@/hooks/useAgents'
+import type { MerchantBudget } from '@/hooks/useMerchantBudgets'
+import type { DashboardBudgetRemainingEntry } from '@/hooks/useBudgetRemaining'
 
 /**
  * Resolve a catalog entry's `network` to a chain id. The field is heterogeneous
@@ -119,53 +125,286 @@ export function agentInstruction(entry: CatalogEntry): string {
   return `Pay ${entry.resource_url} and return the result`
 }
 
+// ── The per-offer budget answer (#4004) ─────────────────────────────────────
+//
+// ── The units, stated because getting them wrong was silent (#2295) ──────────
+//
+// `offer.price_atomic` is atomic. The remaining figures on both budget wires
+// (`remaining_atomic` on `GET /dashboard/budget-remaining` and on
+// `GET /merchants/{slug}/budgets`) are atomic too, so the comparison is a
+// plain bigint one. `allowance_amount` on `Agent.allowances` is NOT — it is
+// the human-decimal delegation projection — and is read here ONLY for the
+// period word (its `reset_period_min`), never for a comparison; #4003's copy
+// pass owns the wording around it.
+
 /**
- * Budget check against configured agent allowances: an entry is "within
- * budget" when at least one active agent has an allowance for the entry's
- * asset that covers the price.
- *
- * ── The units, stated because getting them wrong was silent (#2295) ──────────
- *
- * `entry.price_atomic` is atomic. `allowance_amount` on `Agent.allowances` is
- * NOT — it is the human-decimal delegation projection (`"25.00"` for a 25 USDC
- * budget). The comparison is done in atomic units, with the human budget
- * scaled up by the token's decimals rather than the price scaled down — no
- * rounding. `null` means "cannot answer" (no price, no matching allowance,
- * unresolvable decimals, unparseable budget), never "over budget": this badge
- * is advisory, and the on-chain caveat enforcer is what actually refuses.
+ * The spec-derived agent shape the budget answer reads — narrower than
+ * `Agent`, and a replacement for `OffersTable`'s old hand-written
+ * `{ status, allowances }` pair (#4004): the answer needs the agent's NAME
+ * (the row names who can pay), its account CHAIN (an agent on another chain
+ * cannot pay the offer), its liveness, the reset period of its budgets in
+ * the offer's token (the period word) and whether it pays from a RECEIVED
+ * sub-budget (`receivedSubBudgets[].open`, #3988 — a power this helper does
+ * not model, so such an agent is never reported unable).
  */
-export function withinBudget(
-  entry: CatalogEntry,
-  agents: Array<{ status: string; allowances: Array<{ token_symbol: string; allowance_amount: string }> }>,
-): boolean | null {
-  if (!entry.price_atomic || !entry.asset) return null
-  const candidates = agents
-    .filter((a) => a.status === 'active')
-    .flatMap((a) => a.allowances)
-    .filter((al) => al.token_symbol === entry.asset)
-  if (candidates.length === 0) return null
+export type BudgetAgent = Pick<
+  Agent,
+  'id' | 'name' | 'status' | 'account_chain_id' | 'allowances' | 'receivedSubBudgets'
+>
 
-  const chainId = networkToChainId(entry.network)
-  const decimals = chainId != null ? getTokenDecimals(chainId, entry.asset) : undefined
-  // Without decimals the two units cannot be reconciled, and guessing 18 for
-  // a 6-decimal stablecoin would answer "within budget" by a factor of 10^12.
-  if (decimals == null) return null
+export interface AgentsThatCanPayInput {
+  offer: CatalogEntry
+  agents: ReadonlyArray<BudgetAgent>
+  /** `GET /dashboard/budget-remaining` (`useBudgetRemaining`). */
+  budgets: ReadonlyArray<DashboardBudgetRemainingEntry>
+  /** `GET /merchants/{slug}/budgets` (`useMerchantBudgets`, already on the page). */
+  merchantBudgets: ReadonlyArray<MerchantBudget>
+  /** The merchant's funding targets (`useMerchant`) — where a pinned budget may pay. */
+  funding: ReadonlyArray<MerchantFundingTarget>
+  /** Required for tests; defaults to now. */
+  nowMs?: number
+}
 
-  let price: bigint
+/** One agent's per-offer verdict. `unknown` is silent, never "can't pay" (#2295). */
+export interface BudgetAgentAnswer {
+  agentId: string
+  agentName: string
+  answer: 'can' | 'cannot' | 'unknown'
+  /**
+   * WHY a 'cannot' — the row names the agent only when the reason is about
+   * the offer's token ('insufficient' / 'no-budget': the price is genuinely
+   * more than what the agent has left in that token). A 'wrong-chain' or
+   * 'inactive' no is not about any balance, so naming it as "more than
+   * {agent} has left" would state a fact nobody measured — those render as
+   * "No agent can pay this yet" (once every agent is a known no) or nothing.
+   */
+  reason: 'insufficient' | 'no-budget' | 'wrong-chain' | 'inactive' | null
+  /**
+   * The period word for a 'cannot' — "today", "this week" — from the
+   * selected budget's period (the merchant-budgets wire) or the agent's
+   * allowance projection in the offer's token. Null when neither carries it.
+   */
+  periodPhrase: string | null
+}
+
+/**
+ * The period words the row speaks: the budget's own period, not a
+ * re-derivation. `budgetPeriodWords` ("per week") is the meter's adverbial
+ * form; the row needs the left-over form. Unknown periods render without a
+ * phrase rather than guessing one.
+ */
+const PERIOD_PHRASES: Record<number, string> = {
+  0: 'in total',
+  3_600: 'this hour',
+  86_400: 'today',
+  604_800: 'this week',
+  2_592_000: 'this month',
+}
+
+export function budgetPeriodPhrase(periodSeconds: number | null | undefined): string | null {
+  if (periodSeconds == null) return null
+  return PERIOD_PHRASES[periodSeconds] ?? null
+}
+
+interface BudgetReading {
+  delegationHash: string
+  recipientAddress: string | null
+  remainingAtomic: string | null
+  fromChain: boolean
+  /** Unix seconds — a future-dated row is the dormant half of a re-key (#3802). */
+  startSec: number | null
+  periodSeconds: number | null
+}
+
+/**
+ * Per agent and offer, the verdict for the budget a payment would SELECT:
+ * a budget locked to the offer's verified pay-to always wins over the open
+ * one, whatever is left on it (`SELECT_DELEGATION_FOR_PAYMENT_SQL`'s
+ * `ORDER BY (recipient_address IS NULL)`); for a bridge-only offer —
+ * `needsUnpinnedBudget` — only the open budget is eligible (the EIP-3009
+ * bridge path). The #3802 future-dated re-key row is skipped here, not at
+ * the route: the wire still carries it on purpose.
+ *
+ * Unknown is silent, never "can't pay": an unreadable remaining
+ * (`remaining_atomic` null, or either wire's from-chain flag false), missing
+ * decimals, or an agent that pays from a received sub-budget all answer
+ * 'unknown' — the #2295 misleading-direction rule.
+ *
+ * The slot invariant (#3933 — one live budget per (agent, token, recipient)
+ * slot) means at most one locked and one open row exist per token, so
+ * "the" locked / open budget is a lookup, not a reduction.
+ */
+export function agentsThatCanPay(input: AgentsThatCanPayInput): BudgetAgentAnswer[] {
+  const { offer, agents, budgets, merchantBudgets, funding, nowMs = Date.now() } = input
+  if (!offer.price_atomic || !offer.asset) {
+    // No price to check against — nobody's answer is known.
+    return agents.map((agent) => ({
+      agentId: agent.id,
+      agentName: agent.name,
+      answer: 'unknown',
+      reason: null,
+      periodPhrase: null,
+    }))
+  }
+  const chainId = networkToChainId(offer.network)
+  const decimals = chainId != null ? getTokenDecimals(chainId, offer.asset) : undefined
+  let price: bigint | null = null
   try {
-    price = BigInt(entry.price_atomic)
+    price = BigInt(offer.price_atomic)
   } catch {
     // `price_atomic` is the merchant's own advertised value, so a malformed
     // one is a real possibility rather than a shape confusion.
-    return null
+    price = null
   }
-  const budgets = candidates.map((al) => humanAmountToAtomic(al.allowance_amount, decimals))
-  if (budgets.some((budget) => budget != null && budget >= price)) return true
-  // A budget we could not parse is not a budget we know to be too small.
-  // Reporting `false` there would paint "over budget" on an agent that may
-  // well cover the price — the misleading direction. Only a set of budgets we
-  // fully understood, none of which covers the price, is an honest `false`.
-  return budgets.every((budget) => budget != null) ? false : null
+  const isErc7710 = !needsUnpinnedBudget(offer.asset_transfer_methods)
+  const payTo =
+    isErc7710 && chainId != null
+      ? (funding.find((f) => f.chain_id === chainId && f.pay_to_status === 'verified' && f.erc7710)?.pay_to ?? null)?.toLowerCase() ?? null
+      : null
+  // The merchant-budgets wire names tokens by ADDRESS; the offer names its
+  // asset by SYMBOL. Resolve once — an unregistered symbol simply matches
+  // nothing on that wire (the budget-remaining wire carries the symbol).
+  const tokenAddress = chainId != null ? (getChainTokens(chainId)[offer.asset]?.address ?? null) : null
+
+  return agents.map((agent) => {
+    const base = { agentId: agent.id, agentName: agent.name }
+
+    // 1. Liveness and network. A paused or revoked agent cannot pay — a known
+    //    no (the payment path refuses before any budget is read). An agent
+    //    whose account chain we do not know is unknown, not unable.
+    if (agent.status !== 'active') {
+      return { ...base, answer: 'cannot' as const, reason: 'inactive' as const, periodPhrase: null }
+    }
+    if (chainId == null) return { ...base, answer: 'unknown' as const, reason: null, periodPhrase: null }
+    if (agent.account_chain_id == null) {
+      return { ...base, answer: 'unknown' as const, reason: null, periodPhrase: null }
+    }
+    if (agent.account_chain_id !== chainId) {
+      return { ...base, answer: 'cannot' as const, reason: 'wrong-chain' as const, periodPhrase: null }
+    }
+    if (decimals == null || price == null) {
+      return { ...base, answer: 'unknown' as const, reason: null, periodPhrase: null }
+    }
+
+    // 2. The budgets in the offer's token, from both wires, deduped by
+    //    delegation hash (a merchant-locked budget rides both).
+    const readings: BudgetReading[] = []
+    const seen = new Map<string, BudgetReading>()
+    for (const row of budgets) {
+      if (row.agent_id !== agent.id || row.token_symbol !== offer.asset) continue
+      const reading: BudgetReading = {
+        delegationHash: row.delegation_hash,
+        recipientAddress: row.recipient_address ?? null,
+        remainingAtomic: row.remaining_atomic,
+        fromChain: row.remaining_from_chain,
+        startSec: row.start_date ? Date.parse(row.start_date) / 1000 : null,
+        periodSeconds: null,
+      }
+      readings.push(reading)
+      if (reading.delegationHash) seen.set(reading.delegationHash, reading)
+    }
+    for (const row of merchantBudgets) {
+      if (row.agent_id !== agent.id) continue
+      if (!tokenAddress || row.token_address.toLowerCase() !== tokenAddress.toLowerCase()) continue
+      const dup = seen.get(row.delegation_hash)
+      if (dup) {
+        dup.fromChain = dup.fromChain || row.remaining_is_from_chain
+        if (row.remaining_is_from_chain) dup.remainingAtomic = row.remaining_atomic
+        if (dup.periodSeconds == null) dup.periodSeconds = row.period_seconds
+        continue
+      }
+      const reading: BudgetReading = {
+        delegationHash: row.delegation_hash,
+        recipientAddress: row.recipient_address,
+        remainingAtomic: row.remaining_atomic,
+        fromChain: row.remaining_is_from_chain,
+        startSec: null,
+        periodSeconds: row.period_seconds,
+      }
+      readings.push(reading)
+      if (reading.delegationHash) seen.set(reading.delegationHash, reading)
+    }
+
+    // 3. The budget the payment would select. The #3802 future-dated row is
+    //    skipped here — it is the dormant half of a re-key, not spendable.
+    const nowSec = nowMs / 1000
+    const live = readings.filter((r) => r.startSec == null || r.startSec <= nowSec)
+    const locked = payTo ? live.find((r) => r.recipientAddress?.toLowerCase() === payTo) : undefined
+    const selected = locked ?? live.find((r) => r.recipientAddress == null)
+
+    // 4. A received sub-budget (#3988) is spending power this helper does not
+    //    model — so a budget-level no would be the misleading direction.
+    const holdsOpenSubBudget = agent.receivedSubBudgets?.some((s) => s.open) ?? false
+
+    if (selected == null) {
+      // No budget in the token the payment would select — the payment would
+      // be declined. Unless the agent pays from a received sub-budget, which
+      // would make this a guess; then it is unknown.
+      return {
+        ...base,
+        answer: holdsOpenSubBudget ? ('unknown' as const) : ('cannot' as const),
+        reason: holdsOpenSubBudget ? null : ('no-budget' as const),
+        periodPhrase: null,
+      }
+    }
+    if (!selected.fromChain || selected.remainingAtomic == null) {
+      return { ...base, answer: 'unknown' as const, reason: null, periodPhrase: null }
+    }
+    let remaining: bigint
+    try {
+      remaining = BigInt(selected.remainingAtomic)
+    } catch {
+      // A figure we cannot parse is not a figure we know to be too small.
+      return { ...base, answer: 'unknown' as const, reason: null, periodPhrase: null }
+    }
+    if (remaining >= price) {
+      return { ...base, answer: 'can' as const, reason: null, periodPhrase: null }
+    }
+    if (holdsOpenSubBudget) {
+      return { ...base, answer: 'unknown' as const, reason: null, periodPhrase: null }
+    }
+    const allowancePeriodSeconds =
+      agent.allowances.find((al) => al.token_symbol === offer.asset)?.reset_period_min
+    const periodSeconds = selected.periodSeconds ?? (allowancePeriodSeconds != null ? allowancePeriodSeconds * 60 : null)
+    return {
+      ...base,
+      answer: 'cannot' as const,
+      reason: 'insufficient' as const,
+      periodPhrase: budgetPeriodPhrase(periodSeconds ?? null),
+    }
+  })
+}
+
+/**
+ * The row's one line, from the agents' answers:
+ *  - any 'can' → "{Name} can pay this" / "{Name} and {n} other agents can pay this";
+ *  - exactly one known no, and it is about the offer's token ('insufficient'
+ *    or 'no-budget') → "More than {Name} has left {period word}";
+ *  - every agent a known no → "No agent can pay this yet" (naming each would
+ *    be a sentence no one reads);
+ *  - anything else → null: the hint is absent, not a warning (#2295). A
+ *    wrong-chain or inactive no beside an unknown agent supports neither
+ *    line, so it renders nothing rather than a claim nobody measured.
+ */
+export function budgetAnswerLine(answers: ReadonlyArray<BudgetAgentAnswer>): string | null {
+  const cans = answers.filter((a) => a.answer === 'can')
+  if (cans.length > 0) {
+    const [first, ...rest] = cans
+    return rest.length === 0
+      ? `${first!.agentName} can pay this`
+      : `${first!.agentName} and ${rest.length} other agent${rest.length === 1 ? '' : 's'} can pay this`
+  }
+  const knownNos = answers.filter((a) => a.answer === 'cannot')
+  if (knownNos.length === 0) return null
+  const aboutTheToken = knownNos.filter((a) => a.reason === 'insufficient' || a.reason === 'no-budget')
+  if (aboutTheToken.length === 1 && knownNos.length === 1) {
+    const phrase = aboutTheToken[0]!.periodPhrase
+    return phrase
+      ? `More than ${aboutTheToken[0]!.agentName} has left ${phrase}`
+      : `More than ${aboutTheToken[0]!.agentName} has left`
+  }
+  if (answers.every((a) => a.answer === 'cannot')) return 'No agent can pay this yet'
+  return null
 }
 
 export function freshness(verifiedAt: string | null): string {

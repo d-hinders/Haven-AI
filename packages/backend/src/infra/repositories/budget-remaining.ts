@@ -44,6 +44,8 @@ export interface DashboardBudgetRow {
   token_symbol: string
   token_decimals: number
   delegation_hash: string
+  /** #4004: the delegation's recipient pin (null = open budget). */
+  recipient_address: string | null
   budget_atomic: string
   period_seconds: number
   /** Unix-second BIGINTs (node-postgres decodes them as strings). */
@@ -59,7 +61,8 @@ export interface DashboardBudgetRow {
  */
 
 export const LIST_DASHBOARD_BUDGET_DELEGATIONS_SQL = `SELECT ad.id, ad.agent_id, ad.chain_id,
-         ad.token_address, ad.delegation_hash, ad.budget_atomic, ad.period_seconds,
+         ad.token_address, ad.delegation_hash, ad.recipient_address, ad.budget_atomic,
+         ad.period_seconds,
          ad.start_date::text AS start_date, ad.expires_at::text AS expires_at
        FROM agent_delegations ad
        JOIN agents a ON a.id = ad.agent_id

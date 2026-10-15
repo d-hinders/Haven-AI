@@ -260,6 +260,62 @@ for the modal's own shape.
   name its merchant. A deleted merchant leaves the budget pinned and drops
   only the label.
 
+## The per-offer budget answer (#4004)
+
+The merchant page's offers table answers, per offer, **which of the owner's
+agents can pay it** — a named, truthful answer (`agentsThatCanPay` in
+`packages/frontend/src/lib/marketplace.ts`), not the old cap-only
+`withinBudget` check, which compared the price against the CAP of any agent's
+allowance and could say yes when no agent could actually pay (it ignored what
+is left, which agent, recipient pins and networks).
+
+The answer mirrors how a payment picks its budget
+(`SELECT_DELEGATION_FOR_PAYMENT_SQL`) — it is a display mirror, not a second
+authority:
+
+1. The agent is active and its account chain is the offer's chain; otherwise
+   the agent **cannot** pay (or is unknown, when the chain itself is unknown).
+2. For an ERC-7710 offer, the selected budget is the one locked to the
+   merchant's verified pay-to **if one exists**, else the open budget; a
+   bridge-only offer selects only the open budget. A budget locked to the
+   offer's payee always wins over the open one, whatever is left on it.
+3. The selected budget must be live, in the offer's token, and its
+   **remaining** amount must cover the price. The cap (`allowance_amount`)
+   is read only for the period word, never for the comparison.
+
+**Unknown is silent, never "can't pay"** (the #2295 misleading-direction
+rule): a `remaining_atomic` of null, a from-chain flag of false on either
+budget wire, missing decimals, and an agent that pays from a received
+sub-budget (`receivedSubBudgets[].open`, #3988 — a power the helper does not
+model) all answer **unknown**, and unknown renders as NO line at all — the
+absence is the honest state, not a warning.
+
+The row then says one of:
+
+- "`Atlas` can pay this", or "`Atlas` and 2 other agents can pay this";
+- "More than `Atlas` has left this week" — the period word ("today", "this
+  week") comes from the selected budget's period. Only a no that is ABOUT the
+  offer's token is named this way: "insufficient" (the selected budget's
+  remaining is below the price) or "no budget in the token";
+- "No agent can pay this yet" — when every agent's answer is a known no,
+  whatever the reasons. A wrong-chain or paused agent is never named as
+  "more than … has left": its balance was never measured, and the sentence
+  would state a fact nobody has;
+- nothing, when the remaining answers cannot honestly fill either form —
+  a wrong-chain or paused agent beside an unknown one, or all unknown.
+
+**Data.** The helper reads two wires already on the page or the dashboard —
+`GET /dashboard/budget-remaining` (per budget: `remaining_atomic`, cached up
+to 60 s) and `GET /merchants/{slug}/budgets` (the merchant-locked budgets)
+— plus `GET /agents` for the agent's name, status, account chain and the
+period word. #4004 added two additive, nullable fields to
+`DashboardBudgetRemainingEntry` — `recipient_address` (the pin; null = open)
+and `start_date` — so the locked-vs-open and live-vs-dormant distinctions can
+be made client-side without widening the byte-frozen `GET /agents`
+projection. The future-dated re-key row is still returned by the route (#3802
+owner decision stands); the HELPER is what skips a row whose `start_date` is
+in the future — the dormant half of a re-key is not spendable.
+
 ## Prospects
 
 A `coming_soon` merchant is a company Haven is in conversation with — migration

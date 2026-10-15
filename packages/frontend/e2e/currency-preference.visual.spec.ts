@@ -107,12 +107,12 @@ test.describe('currency preference renders SEK (#3127 finding 8)', () => {
       // percent renders in sv-SE through Intl (#3195 round-2 finding b):
       // decimal comma, NBSP before `%` — getByText normalizes it, so the
       // needle is plain-space; the exact bytes are pinned on the formatter.
-      // #3807: the line reads "since yesterday" — the diff is against the
-      // yesterday snapshot, not a same-day one.
+      // #3807: the line reads "since yesterday (UTC)" — the diff is against
+      // the yesterday snapshot, not a same-day one, and the snapshot is UTC.
       // #3897: the filler caption is gone, so the positive check is the one
-      // that proves the change line rendered: exactly one "since yesterday".
-      await expect(main.getByText('+30,00 kr (+0,20 %) since yesterday')).toHaveCount(1)
-      await expect(main.getByText(/since yesterday$/)).toHaveCount(1)
+      // that proves the change line rendered: exactly one "since yesterday (UTC)".
+      await expect(main.getByText('+30,00 kr (+0,20 %) since yesterday (UTC)')).toHaveCount(1)
+      await expect(main.getByText(/since yesterday \(UTC\)$/)).toHaveCount(1)
       // #3807: the "Monthly agent spend" tile is gone. The templated 7-day
       // summary names the fixture's dominant agent beside its share of the
       // week (Research agent's 80,70 of 119,46 kr is ≥ 40 %), and the 30-day

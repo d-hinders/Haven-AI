@@ -778,9 +778,10 @@ beforehand. Preflight's treasury check has only a FAIL floor (one run's cost),
 and preflight output reaches only a run log.
 
 `qa-balances.yml` runs once a day (06:00 UTC, and on `workflow_dispatch`). It
-calls `npm run qa:balances -w packages/qa-agent`, which reads three wallets on
+calls `npm run qa:balances -w packages/qa-agent`, which reads five wallets on
 Base Sepolia and may request testnet faucet ETH for the demo merchant's
-settlement wallet and the dev relayer. Then
+settlement wallet and the dev relayer, and testnet faucet USDC for the two
+agent-eval accounts (#3997). Then
 `scripts/ci/qa-balance-issue.mjs` keeps **one standing issue**, `QA wallet
 balances low` (label `qa-funding`):
 
@@ -789,6 +790,8 @@ balances low` (label `qa-funding`):
 | Delegation treasury | USDC | `GET /machine-payments/agent` with the QA agent key, the same derivation as preflight |
 | Demo-merchant settlement wallet | ETH (gas) | the merchant's own `/healthz` |
 | Dev backend relayer (84532) | ETH (gas) | the repo **variable** `QA_DEV_RELAYER_ADDRESS`, a recorded exception to preflight's "derive, never restate" rule, because no CI-readable source exists (owner decision on #3631) |
+| Eval agent (Hermes lane) | USDC | the repo **variable** `QA_EVAL_HERMES_ACCOUNT` — the lane's eval **smart account** (the payer the eval graders probe), not the delegate EOA (#3997) |
+| Eval agent (Claude Code lane) | USDC | the repo **variable** `QA_EVAL_CLAUDE_ACCOUNT`, which must hold the same address as the `agent-evals` environment's `AGENT_EVALS_AGENT_ACCOUNT` — the balances workflow has no environment and cannot read that one (#3997) |
 
 **What the bands mean.** Runway is the balance divided by the median observed
 daily drop over the last 14 daily readings; a top-up (a rise) is ignored. The
@@ -798,17 +801,23 @@ readings exist, a fixed fallback floor decides, and the row says so:
 - delegation treasury: 1.0 USDC (about 30 runs);
 - demo merchant: its own `warn_floor`, from `/healthz`;
 - dev relayer: 0.01 ETH, the backend's `RELAYER_LOW_BALANCE_WEI`, restated in
-  qa-agent.
+  qa-agent;
+- eval agents: 21 USDC, seven nights of the configured 3 USDC Daily budget
+  (#3997). The Hermes lane's eval agent carries 3 USDC Daily
+  (`allowance_amount: 3000000`, `reset_period_min: 1440`, checked 2026-10-15)
+  and the Claude Code lane is provisioned to the same size; if a lane's Daily
+  budget changes, adjust its row's target and floor.
 
 `warn` means under 7 days of runway. `critical` means under 1 day, or below one
-run's cost: 0.034 USDC for the treasury, the merchant's `fail_floor`, or 0.01 ETH
-for the relayer. `unknown` means a missing config value or a failed read.
+run's cost: 0.034 USDC for the treasury, the merchant's `fail_floor`, 0.01 ETH
+for the relayer, or below one night's eval budget (3 USDC). `unknown` means a
+missing config value or a failed read.
 
 **How the issue behaves.**
 
 - **Before reporting:** bounded CDP Base Sepolia ETH faucet requests, one wallet
   at a time, each accepted claim 0.0001 ETH; a 429 or any faucet error stops
-  that wallet's loop only. Both loops share one six-minute budget.
+  that wallet's loop only. All four loops share one six-minute budget (#3997).
   - **The demo merchant goes first** (#3836). It is topped up whenever it is
     below a 0.004 ETH target (1,600 settlements; #3896), **whatever its band**:
     its `critical` floor is its own payment-refusal point and its fallback
@@ -816,10 +825,22 @@ for the relayer. `unknown` means a missing config value or a failed read.
     between two runs on 2026-10-09. It needs at most 40 claims. It is topped up only when
     its `/healthz` reports `chain_id` 84532 and a valid settlement address;
     otherwise the top-up is skipped with that reason and the row keeps its band.
+  - **The eval agents' USDC loops run before the relayer's** (#3997): each is
+    topped up whenever it is readable and below a 21 USDC target (seven nights
+    of the configured 3 USDC Daily budget — the drainer task can spend the
+    whole remaining budget in one night, so a band trigger fires too late), at
+    most 10 claims of 1 USDC. The faucet limits USDC to 10 USDC per address
+    per rolling 24 hours, separately from ETH, so the cap matches the limit
+    and refilling an empty account takes about three nightly runs. An unset or
+    invalid `QA_EVAL_*` variable is a skipped loop and an `unknown` row —
+    never a request and never a red run. Each eval loop's accepted claims are
+    waited on (like the merchant's) before its re-read.
   - **The dev relayer** is topped up when it is `warn` or `critical`, toward a
-    0.03 ETH target, at most 300 claims.
-  - After both loops, the job waits for the merchant's accepted claims to be
-    mined (#3896): it polls each claim's transaction receipt, every 3 s, for up
+    0.03 ETH target, at most 300 claims. It runs last so its claims cannot use
+    up the shared deadline ahead of the USDC loops.
+  - After the loops, the job waits for the merchant's and the eval accounts'
+    accepted claims to be mined (#3896, #3997): it polls each claim's
+    transaction receipt, every 3 s, for up
     to 60 s or until the shared budget ends. Re-reading straight away recorded
     the pre-top-up balance on 2026-10-10 and 10-11. A claim still unmined then
     is reported as unconfirmed, not as missing. The relayer's claims are spread
@@ -851,7 +872,8 @@ for the relayer. `unknown` means a missing config value or a failed read.
   or one whose title contains the words, is never edited or closed.
 
 The check is read-only except for testnet faucet requests for the demo
-merchant's settlement wallet and the dev relayer. It never signs or moves Haven
+merchant's settlement wallet, the dev relayer, and the two agent-eval accounts
+(USDC only; it receives no eval API or delegate key). It never signs or moves Haven
 or customer funds, and it receives neither a
 delegate private key nor a CDP Wallet Secret.
 
@@ -925,6 +947,45 @@ is 0.01 ETH.
    `merchant top-up:` log line with accepted claims and more than 0 ETH
    received, a post-top-up merchant balance of at least 0.0039 ETH (the target
    minus one claim), and an `ok` merchant row, before closing #3836 and #3896.
+
+### Top up the eval agent (Hermes lane)
+
+The job does this automatically (#3997): when `QA_EVAL_HERMES_ACCOUNT` holds a
+valid address and the account's USDC balance is below 21 USDC (seven nights of
+the configured 3 USDC Daily budget), it requests Base Sepolia test USDC from
+CDP in 1 USDC claims, at most 10 per run (the faucet's own 10 USDC per-address
+rolling-24h limit), until the balance reaches the target, the cap is hit, the
+shared six-minute budget expires, or CDP returns an error or 429. It waits for
+the claims to be mined before re-reading the account, and logs an
+`eval-hermes top-up:` line. Eval payments are **paymaster-sponsored**
+(`agent-qa.md` § QA wallet balances; `agent-evals.md` § Funding), so the eval
+account needs no ETH. Until the operator sets `QA_EVAL_HERMES_ACCOUNT`, the
+row is `unknown` (not configured) and the run stays green.
+
+Manual fallback: send Base Sepolia USDC (`0x036CbD53842c5426634e7929541eC2318f3dCF7e`)
+to the address the issue names.
+
+### Top up the eval agent (Claude Code lane)
+
+The same loop as the Hermes lane, for the Claude Code lane's eval smart
+account: `QA_EVAL_CLAUDE_ACCOUNT` must hold the SAME address as the
+`agent-evals` environment's `AGENT_EVALS_AGENT_ACCOUNT` (the balances workflow
+has no environment and cannot read that variable). Until it is set, the row is
+`unknown` (not configured) and the run stays green. It logs an
+`eval-claude top-up:` line.
+
+**Operator steps (once, #3997):**
+
+1. Set the repo variables `QA_EVAL_HERMES_ACCOUNT` (the partner supplies the
+   address) and `QA_EVAL_CLAUDE_ACCOUNT` (equal to `AGENT_EVALS_AGENT_ACCOUNT`)
+   in Settings → Secrets and variables → Actions → Variables. Both are the
+   eval agents' SMART accounts (the payer `graders.ts` probes), not the
+   delegate EOAs.
+2. With an eval account below 21 USDC, manually dispatch **QA wallet balances**
+   and require an `eval-hermes top-up:` (and/or `eval-claude top-up:`) log
+   line with accepted USDC claims, a post-top-up balance reflecting them, and
+   the on-chain USDC transfer landing in the Hybrid DeleGator eval account —
+   record the tx hash on #3997 before closing it.
 
 ## Automation & gating
 

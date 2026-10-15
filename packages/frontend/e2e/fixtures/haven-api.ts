@@ -535,9 +535,12 @@ export const dashboardOverview = {
   ],
   // #3944: the two empty-state facts. The fixture renders activity rows, so
   // `hasOlderActivity` is false; `activityWindowDays` mirrors the backend's
-  // ACTIVITY_WINDOW_DAYS.
+  // ACTIVITY_WINDOW_DAYS. `activityWindowStart` (#3975) is the rolling
+  // window's start instant — 7×24h before the row's timestamp, so the rows
+  // sit inside it and no heading reads partial.
   hasOlderActivity: false,
   activityWindowDays: 7,
+  activityWindowStart: new Date((1_779_000_000 - 7 * 86_400) * 1000).toISOString(),
 }
 
 /**

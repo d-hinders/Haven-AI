@@ -20,10 +20,11 @@ type ActivityGroup = ApiSchema<'DashboardActivityGroup'>
  * The dashboard's merchant-first activity list (#3810, epic #3801).
  *
  * The rows are #3824's server-side groups (agent + counterparty + token +
- * user-local day + outcome + activityType, capped at 8 over the last 7 local
- * days), so the list is: day headings, one row per group, "×N" when a group
- * bundles more than one payment. The old 5-row `transactions` preview left
- * the wire in #3858 — nothing has read it since #3810.
+ * user-local day + outcome + activityType, capped at 8 over the ROLLING last
+ * 7 days — 24h × 7, the owner decision #3975), so the list is: day headings,
+ * one row per group, "×N" when a group bundles more than one payment. The
+ * old 5-row `transactions` preview left the wire in #3858 — nothing has read
+ * it since #3810.
  *
  * Two empty states (#3944). `activity.length === 0` is ambiguous — an empty
  * 7-day window is also a feed with no activity at all — so the overview
@@ -34,6 +35,14 @@ type ActivityGroup = ApiSchema<'DashboardActivityGroup'>
  * today's copy stands unchanged — an older backend renders exactly what it
  * always has. The window state implies accounts exist (the flag is derived
  * from account transactions), so its action is always the transactions page.
+ *
+ * The rolling window starts at an instant, not at a local midnight, so its
+ * oldest day heading can cover part of a day (#3975): when the wire's
+ * `activityWindowStart` cuts its own local day, the day heading carrying
+ * that key reads "(partial)" — the analytics precedent
+ * (`docs/product/analytics.md`), computed from the boundary instant the
+ * SERVER served rather than a client clock re-derivation. Absent (an older
+ * backend), no heading is ever marked.
  *
  * Merchant first means the TITLE is the counterparty — read through
  * `counterpartyLabel`'s no-address mode, so a raw address can never surface
@@ -56,6 +65,7 @@ export function ActivitySection({
   onRetry,
   hasOlderActivity,
   activityWindowDays,
+  activityWindowStart,
 }: {
   activity: ActivityGroup[]
   accountCount: number
@@ -67,6 +77,8 @@ export function ActivitySection({
   hasOlderActivity?: boolean
   /** #3944 — the backend's window (`ACTIVITY_WINDOW_DAYS`); the empty-state copy names it. */
   activityWindowDays?: number
+  /** #3975 — the rolling window's start instant; marks the oldest day heading partial. */
+  activityWindowStart?: string
 }) {
   // The window-naming empty state needs BOTH fields: a `hasOlderActivity`
   // without its window cannot state the window it means. Both arrive
@@ -150,7 +162,11 @@ export function ActivitySection({
           />
         </div>
       ) : (
-        <ActivityRows activity={activity} accountCount={accountCount} />
+        <ActivityRows
+          activity={activity}
+          accountCount={accountCount}
+          activityWindowStart={activityWindowStart}
+        />
       )}
     </div>
   )
@@ -160,14 +176,27 @@ export function ActivitySection({
  * Day buckets + rows. The server grouped by the USER's local day already
  * (#3824) — the client only derives each heading from the group's
  * `latestAt`, so the buckets cannot disagree with the grouping.
+ *
+ * The oldest heading can cover part of a day (#3975): when
+ * `activityWindowStart` is present and cuts its own local day (the
+ * analytics rule — a boundary that is not local midnight), the bucket whose
+ * key is that day reads "(partial)". The bucket keys and the partial check
+ * use the same runtime zone, so they cannot disagree.
  */
 function ActivityRows({
   activity,
   accountCount,
+  activityWindowStart,
 }: {
   activity: ActivityGroup[]
   accountCount: number
+  activityWindowStart?: string
 }) {
+  const partialDayKey = useMemo(() => {
+    if (activityWindowStart == null || !cutsItsDay(activityWindowStart)) return null
+    return localDayKey(activityWindowStart)
+  }, [activityWindowStart])
+
   const days = useMemo(() => {
     const buckets = new Map<string, ActivityGroup[]>()
     for (const group of activity) {
@@ -179,16 +208,17 @@ function ActivityRows({
     return Array.from(buckets.entries(), ([key, groups]) => ({
       key,
       label: activityDayLabel(key),
+      partial: key === partialDayKey,
       groups,
     }))
-  }, [activity])
+  }, [activity, partialDayKey])
 
   return (
     <div className="divide-y divide-[var(--v2-border)] v2-animate-fade-in">
       {days.map((day) => (
         <div key={day.key}>
           <p className="px-4 pt-3 pb-1 text-xs font-medium text-[var(--v2-ink-3)] sm:px-5">
-            {day.label}
+            {day.partial ? `${day.label} (partial)` : day.label}
           </p>
           {day.groups.map((group, index) => {
             const groupKey = `${group.latestAt}-${group.to}-${group.tokenSymbol}-${index}`
@@ -309,6 +339,23 @@ function localDayKey(iso: string): string {
     month: '2-digit',
     day: '2-digit',
   }).format(new Date(iso))
+}
+
+/**
+ * True when the instant is not local midnight in the runtime zone — a
+ * boundary that cuts its day. The analytics page applies the same rule to
+ * its range edges (`SpendSection`'s `cutsItsDay`); #3975 applies it to the
+ * Activity window's start so the oldest day heading can say "(partial)".
+ */
+function cutsItsDay(iso: string): boolean {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(iso))
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00'
+  return !(get('hour') === '00' && get('minute') === '00' && get('second') === '00')
 }
 
 /**

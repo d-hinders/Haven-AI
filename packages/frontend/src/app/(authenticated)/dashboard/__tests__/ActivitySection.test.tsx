@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ApiSchema } from '@haven_ai/core'
 import { ActivitySection, activityDayLabel } from '../ActivitySection'
 
@@ -265,6 +265,70 @@ describe('activityDayLabel', () => {
     expect(activityDayLabel(formatDayKey(today))).toBe('Today')
     expect(activityDayLabel(formatDayKey(yesterday))).toBe('Yesterday')
     expect(activityDayLabel(formatDayKey(lastWeek))).toMatch(/^\d{1,2} \w+$/)
+  })
+})
+
+// #3975: the rolling window starts at an instant, not at a local midnight,
+// so its oldest day heading can cover part of a day — and says so, following
+// the analytics precedent. Pinned on a frozen clock so the day labels (and
+// the exact strings) cannot drift with the wall clock the suite runs at.
+describe('the partial oldest day heading (#3975)', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  /** Freeze the clock at the issue's observed instant (09:12 Stockholm). */
+  function freezeAtObservedInstant() {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-15T07:12:00Z'))
+  }
+
+  /** The fixture's two groups: one yesterday, one on the window-start day. */
+  function observedRows() {
+    return [
+      group({ latestAt: '2026-10-14T06:00:00.000Z', x402ResourceUrl: 'https://b.example/x' }),
+      group({ latestAt: '2026-10-08T11:48:00.000Z' }),
+    ]
+  }
+
+  it('marks the oldest day heading partial when the window start cuts its day', () => {
+    freezeAtObservedInstant()
+    renderSection({
+      activity: observedRows(),
+      activityWindowStart: '2026-10-08T07:12:00.000Z',
+    })
+
+    // The EXACT string, pinned: the short date plus the analytics wording.
+    expect(screen.getByText('8 Oct (partial)')).toBeInTheDocument()
+    // A day fully inside the window keeps its bare label.
+    expect(screen.getByText('Yesterday')).toBeInTheDocument()
+    expect(screen.queryByText('Yesterday (partial)')).not.toBeInTheDocument()
+  })
+
+  it('marks nothing when the window start sits on a local midnight', () => {
+    freezeAtObservedInstant()
+    // Local midnight of the runtime zone, seven days before the frozen now —
+    // computed, not written, so the pin holds in every CI zone.
+    const midnight = new Date('2026-10-15T07:12:00Z')
+    midnight.setHours(0, 0, 0, 0)
+    const windowStartAtMidnight = new Date(
+      midnight.getTime() - 7 * 24 * 60 * 60 * 1000,
+    ).toISOString()
+    renderSection({
+      activity: observedRows(),
+      activityWindowStart: windowStartAtMidnight,
+    })
+
+    expect(screen.getByText('8 Oct')).toBeInTheDocument()
+    expect(screen.queryByText(/partial/)).not.toBeInTheDocument()
+  })
+
+  it('marks nothing when the signal is absent (an older backend)', () => {
+    freezeAtObservedInstant()
+    renderSection({ activity: observedRows() })
+
+    expect(screen.getByText('8 Oct')).toBeInTheDocument()
+    expect(screen.queryByText(/partial/)).not.toBeInTheDocument()
   })
 })
 

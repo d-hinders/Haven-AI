@@ -66,8 +66,46 @@ const TERMINAL_PROOF_STATUSES = new Set([
  * The activity window and group budget. "Up to 8 groups over the last 7
  * days, newest first" — the route feeds this the whole merged feed; the
  * window and the slice bound the response.
+ *
+ * The window is ROLLING (owner decision, epic #3801, 2026-10-09: "Rolling 7
+ * and 30 days; no calendar month"): `[now − 7×24h, now)` on the transaction
+ * instant — the same definition the route's `spend.d7` window and
+ * `/analytics/overview` use. #3975 moved the card off its original 7
+ * user-local calendar days (#3824): the local-day HEADINGS stay (the group
+ * key still buckets per `tz` day), but window membership no longer walks
+ * local days — a payment is in the card iff it is in the header's 7-day
+ * window, so the two can never disagree. Because the rolling window spans
+ * one more local day than seven whenever a 23h DST day sits inside it, the
+ * oldest day's heading can cover part of a day — the client marks it
+ * partial, following the analytics precedent (`docs/product/analytics.md`).
  */
 export const ACTIVITY_WINDOW_DAYS = 7
+/** The rolling window in milliseconds — `ACTIVITY_WINDOW_DAYS × 24h`. */
+export const ACTIVITY_WINDOW_MS = ACTIVITY_WINDOW_DAYS * 24 * 60 * 60 * 1000
+
+/**
+ * The window's start instant, `now − ACTIVITY_WINDOW_MS`. THE window
+ * predicate: the route feeds its `spend.d7` SQL (`from7Iso`) this same
+ * derivation off the same `now` it hands the feed, so a confirmed agent
+ * payment is inside `spend.d7` IFF it is inside the Activity card — one
+ * function, every consumer (#3975).
+ */
+export function activityWindowStartIso(nowMs: number): string {
+  return new Date(nowMs - ACTIVITY_WINDOW_MS).toISOString()
+}
+
+/**
+ * The window membership predicate: a transaction (unix seconds) is in the
+ * Activity card iff it is in the rolling window that ends at `nowMs` — the
+ * same `[now − 7×24h, now)` interval `spend.d7` applies to `confirmed_at`.
+ * The window's start is INCLUSIVE, its end exclusive; feed rows are never in
+ * the future, so the end bound is enforced by the data, not here.
+ */
+export function isInsideActivityWindow(unixSeconds: number, nowMs: number): boolean {
+  return unixSeconds * 1000 >= nowMs - ACTIVITY_WINDOW_MS
+}
+
+/** The per-response group cap (#3824). */
 export const ACTIVITY_GROUP_LIMIT = 8
 
 /**
@@ -84,10 +122,9 @@ export function isValidActivityTimeZone(tz: string): boolean {
 
 /**
  * One `en-CA` day-key formatter per zone, cached: `localDayKey` runs once per
- * transaction in `buildActivityGroups` (and per hour-step in
- * `activityWindowDays`), and the constructor dominates that cost. The map is
- * bounded — the route only accepts zones from `Intl.supportedValuesOf` (or
- * 'UTC'), a fixed list of a few hundred.
+ * transaction in `buildActivityGroups`, and the constructor dominates that
+ * cost. The map is bounded — the route only accepts zones from
+ * `Intl.supportedValuesOf` (or 'UTC'), a fixed list of a few hundred.
  */
 const dayKeyFormatters = new Map<string, Intl.DateTimeFormat>()
 
@@ -103,48 +140,6 @@ function dayKeyFormatter(tz: string): Intl.DateTimeFormat {
 /** `YYYY-MM-DD` of `unixSeconds` in `tz` (en-CA yields ISO calendar dates). */
 export function localDayKey(unixSeconds: number, tz: string): string {
   return dayKeyFormatter(tz).format(new Date(unixSeconds * 1000))
-}
-
-/**
- * The calendar day immediately before `dayKey` — pure `YYYY-MM-DD` arithmetic
- * on the UTC clock. A date decrements by exactly one day in every zone, so
- * no DST awareness belongs here.
- */
-function previousDayKey(dayKey: string): string {
-  return new Date(Date.parse(`${dayKey}T00:00:00Z`) - 86_400_000)
-    .toISOString()
-    .slice(0, 10)
-}
-
-/**
- * The user-local days covered by "the last 7 days" ending now.
- *
- * The walk is LOCAL: starting from `now`'s own day key, each step targets
- * the previous calendar day and hour-steps an instant back until it lands
- * there. Sampling fixed 24h offsets instead (`now - i * 86_400`) silently
- * skips a local day: local days are 23/24/25h long, so on the morning after
- * a 23h spring-forward day the samples land twice in one day and never in
- * the transition day — and `buildActivityGroups` then drops every
- * transaction of that day from the dashboard. An hourly step can never jump
- * over a whole local day (none is shorter than 23h), so the walk always
- * lands in the target day itself, transition or not.
- *
- * (`activityWindowDays` is exported for the pinned-clock regression tests —
- * the window is the one piece of derived state a once-a-year wall-clock bug
- * can silently corrupt.)
- */
-export function activityWindowDays(nowMs: number, tz: string): Set<string> {
-  const days = new Set<string>()
-  let cursor = Math.floor(nowMs / 1000)
-  let current = localDayKey(cursor, tz)
-  days.add(current)
-  while (days.size < ACTIVITY_WINDOW_DAYS) {
-    const target = previousDayKey(current)
-    while (localDayKey(cursor, tz) !== target) cursor -= 3_600
-    days.add(target)
-    current = target
-  }
-  return days
 }
 
 export function activityOutcome(tx: {
@@ -215,7 +210,9 @@ export interface BuildActivityGroupsParams {
   tz: string
   /** The user's preferred currency; the serve-time pricing denominator. */
   currency?: TransactionCurrency
-  /** Injectable for tests; defaults to Date.now(). */
+  /** Injectable; the route passes its own `now` so every 7-day window — the
+   * spend SQL's and this feed's — derives from ONE instant. Defaults to
+   * Date.now(). */
   now?: number
   /**
    * Contact/receipt merchant-name resolution, wired by the route (it owns
@@ -255,12 +252,15 @@ export async function buildActivityGroups(
     resolveMerchantName,
   } = params
 
-  const windowDays = activityWindowDays(now, tz)
+  // One instant comparison, no tz: the rolling window `[now − 168h, now)` is
+  // the same predicate the route's `spend.d7` SQL applies to `confirmed_at`
+  // (`isInsideActivityWindow`), so the header and the card can never
+  // disagree (#3975). The local-day key still buckets the groups.
   const groups = new Map<string, GroupAccumulator>()
 
   for (const tx of transactions) {
+    if (!isInsideActivityWindow(tx.timestamp, now)) continue
     const day = localDayKey(tx.timestamp, tz)
-    if (!windowDays.has(day)) continue
 
     const key = [
       tx.agentId ?? '',
@@ -348,24 +348,28 @@ export async function buildActivityGroups(
  * two empty-state facts the card needs but cannot derive from the rows.
  *
  * `hasOlderActivity` is true when the feed carries any transaction OUTSIDE
- * the `ACTIVITY_WINDOW_DAYS` window — activity exists, just not in the
- * window, so the empty state may not say "No activity yet". The flag reads
- * from the SAME feed the groups bucket (an explorer-read failure degrades it
- * to false, the same posture as the rows). The window set here is the same
- * pure walk `buildActivityGroups` runs (`activityWindowDays(now, tz)` —
- * identical inputs, identical set, so the flag can never disagree with the
- * rows); it is computed twice rather than threaded through, because the walk
- * is a few hundred clock comparisons against a cache-hot formatter.
+ * the rolling 7-day window — activity exists, just not in the window, so the
+ * empty state may not say "No activity yet". The flag reads from the SAME
+ * feed the groups bucket (an explorer-read failure degrades it to false, the
+ * same posture as the rows), and applies the SAME instant predicate
+ * `buildActivityGroups` runs — identical inputs, so the flag can never
+ * disagree with the rows.
  *
  * `windowDays` rides the wire so the client can NAME the window ("No
  * activity in the last N days") without hard-coding a 7 that would drift
  * from `ACTIVITY_WINDOW_DAYS` — the dashboard has no window constant of its
  * own, and #3944's rule is that the copy may not invent one.
+ *
+ * `windowStartIso` rides the wire too (#3975): the instant the rolling
+ * window starts. The client marks the oldest day heading partial when the
+ * window start cuts its own local day — the analytics precedent, computed
+ * from the boundary instant rather than re-derived from a second clock.
  */
 export interface ActivityFeed {
   groups: DashboardActivityGroup[]
   hasOlderActivity: boolean
   windowDays: number
+  windowStartIso: string
 }
 
 export async function buildActivityFeed(
@@ -373,9 +377,13 @@ export async function buildActivityFeed(
 ): Promise<ActivityFeed> {
   const now = params.now ?? Date.now()
   const groups = await buildActivityGroups({ ...params, now })
-  const windowDays = activityWindowDays(now, params.tz)
   const hasOlderActivity = params.transactions.some(
-    (tx) => !windowDays.has(localDayKey(tx.timestamp, params.tz)),
+    (tx) => !isInsideActivityWindow(tx.timestamp, now),
   )
-  return { groups, hasOlderActivity, windowDays: ACTIVITY_WINDOW_DAYS }
+  return {
+    groups,
+    hasOlderActivity,
+    windowDays: ACTIVITY_WINDOW_DAYS,
+    windowStartIso: activityWindowStartIso(now),
+  }
 }

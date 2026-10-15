@@ -27,12 +27,18 @@ const { mockQuery, portfolioMocks, transactionMocks } = vi.hoisted(() => ({
     // #3824: the route derives the tz validity check and the grouped rows
     // from this module; the characterization below feeds it directly.
     isValidActivityTimeZone: vi.fn(() => true),
+    // #3975: the route derives the rolling 7-day boundary (`from7Iso`) from
+    // the real predicate — the tests pin it against the wire below.
+    activityWindowStartIso: vi.fn(
+      (nowMs: number) => new Date(nowMs - 7 * 24 * 60 * 60 * 1000).toISOString(),
+    ),
     // #3944: the route reads the feed BUILDER — rows plus the two
     // empty-state facts — not the bare group list any more.
     buildActivityFeed: vi.fn(async () => ({
       groups: [] as never[],
       hasOlderActivity: false,
       windowDays: 7,
+      windowStartIso: '2026-10-08T07:12:00.000Z',
     })),
     enrichedTransactionIdentityKey: vi.fn((tx: {
       chainId: number
@@ -430,6 +436,7 @@ describe('dashboard routes', () => {
       groups: [],
       hasOlderActivity: true,
       windowDays: 7,
+      windowStartIso: '2026-10-08T07:12:00.000Z',
     })
 
     const older = await app.inject({
@@ -442,12 +449,33 @@ describe('dashboard routes', () => {
     const olderBody = older.json()
     expect(olderBody.hasOlderActivity).toBe(true)
     expect(olderBody.activityWindowDays).toBe(7)
+    // #3975: the rolling window's start instant rides the wire — the same
+    // boundary the spend SQL received (pinned below) and the instant the
+    // Activity card's partial-day heading reads. The route emits it from its
+    // OWN now, the one it handed the feed builder, not the mock's value.
+    const feedCalls = transactionMocks.buildActivityFeed.mock
+      .calls as unknown as Array<[{ now?: number }]>
+    const feedNow = feedCalls.at(-1)?.[0].now
+    expect(feedNow).toBeTypeOf('number')
+    expect(olderBody.activityWindowStart).toBe(
+      new Date((feedNow as number) - 7 * 24 * 60 * 60 * 1000).toISOString(),
+    )
     expectMatchesSpec('GET', '/dashboard/overview', olderBody)
+
+    // The ONE window predicate, pinned at the route: the instant the spend
+    // SQL binds as its 7-day boundary ($3 of the in_7d queries) IS the wire
+    // instant above — a confirmed agent payment is inside `spend.d7` iff it
+    // is inside the Activity card, by construction.
+    const queryCalls = mockQuery.mock.calls as unknown as Array<[string, unknown[]]>
+    const spendCalls = queryCalls.filter(([sql]) => sql.includes('AS in_7d'))
+    expect(spendCalls.length).toBeGreaterThan(0)
+    for (const [, params] of spendCalls) expect(params[2]).toBe(olderBody.activityWindowStart)
 
     transactionMocks.buildActivityFeed.mockResolvedValue({
       groups: [],
       hasOlderActivity: false,
       windowDays: 7,
+      windowStartIso: '2026-10-08T07:12:00.000Z',
     })
 
     const fresh = await app.inject({

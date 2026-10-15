@@ -30,6 +30,7 @@ import {
   needsBackupSignerRecommendation,
 } from '../modules/accounts/index.js'
 import {
+  activityWindowStartIso,
   buildActivityFeed,
   compareTransactions,
   isValidActivityTimeZone,
@@ -215,7 +216,11 @@ export default async function dashboardRoutes(
 
     const now = new Date()
     const toIso = now.toISOString()
-    const from7Iso = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()
+    // THE window predicate (#3975): one derivation for every 7-day consumer —
+    // the `spend.d7` SQL below, the Activity feed filter and the wire's
+    // `activityWindowStart` all read this instant, so a confirmed agent
+    // payment is inside `spend.d7` iff it is inside the Activity card.
+    const from7Iso = activityWindowStartIso(now.getTime())
     const from30Iso = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString()
 
     // Testnet scope (owner decision 3): the figures cover mainnet accounts
@@ -562,12 +567,15 @@ export default async function dashboardRoutes(
     // empty-state facts — `hasOlderActivity` (any feed transaction outside
     // the window) and `windowDays` (ACTIVITY_WINDOW_DAYS, carried so the
     // client can name the window without hard-coding a 7 that drifts).
+    // #3975: the route's OWN `now` rides in, so the feed's rolling window is
+    // the SAME instant `from7Iso` was derived from — one clock, one window.
     const { groups: activity, hasOlderActivity, windowDays: activityWindowDays } =
       await buildActivityFeed({
         transactions: enrichedTransactions,
         truncated: explorerTruncated,
         tz,
         currency,
+        now: now.getTime(),
         resolveMerchantName,
       })
 
@@ -721,10 +729,11 @@ export default async function dashboardRoutes(
         failedIntents7d,
         balance_by_day: balanceByDay,
       },
-      // #3824: up to 8 grouped-activity rows over the last 7 user-local days,
-      // newest first, grouped server-side over the feed above.
-      // #3858: the former 5-row `transactions` preview is gone — nothing has
-      // read it since #3810 (the dashboard renders `activity`).
+      // #3824: up to 8 grouped-activity rows over the rolling last 7 days
+      // (24h × 7, the owner decision — #3975), newest first, grouped
+      // server-side over the feed above. #3858: the former 5-row
+      // `transactions` preview is gone — nothing has read it since #3810
+      // (the dashboard renders `activity`).
       activity,
       // #3944: the Activity card's empty state must distinguish "no activity
       // ever" from "nothing in the window" — the rows above cannot carry
@@ -735,6 +744,11 @@ export default async function dashboardRoutes(
       // backend actually buckets over, never a client-side constant.
       hasOlderActivity,
       activityWindowDays,
+      // #3975: the rolling window's start instant — the same `from7Iso` the
+      // spend SQL received. The client marks the oldest Activity day heading
+      // partial when this instant cuts its own local day, so the boundary is
+      // the server's, never a client clock re-derivation.
+      activityWindowStart: from7Iso,
     }
   })
 }

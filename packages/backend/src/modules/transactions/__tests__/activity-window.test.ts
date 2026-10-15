@@ -1,22 +1,21 @@
 /**
- * Pinned-clock regression tests for the #3824 follow-up: the dashboard
- * activity window must cover the SEVEN user-local calendar days ending at
- * `now` — including the transition day, on the morning after a 23h
- * spring-forward day.
+ * Pinned-clock regression tests for the dashboard Activity window — the
+ * ROLLING `[now − 7×24h, now)` interval the owner decision fixed (epic
+ * #3801, 2026-10-09: "Rolling 7 and 30 days; no calendar month"), the same
+ * definition `spend.d7` and `/analytics/overview` use (#3975).
  *
- * The bug this pins: `activityWindowDays` used to sample fixed 24h offsets
- * (`now - i * 86_400`) and take each sample's local day. Local days are
- * 23/24/25h long, so on the morning after a 23h spring-forward day the
- * samples landed twice in one day and never in the transition day — and
- * `buildActivityGroups` (which drops every transaction whose local day is
- * not in the window) silently lost that day's real payments from the
- * dashboard for roughly the first hour of the morning. Once a year,
- * production-only, invisible to every test that runs at a normal clock.
- *
- * The expected windows below are HARDCODED (independently derived calendar
- * arithmetic — python zoneinfo cross-checked), not computed with the code
- * under test: an expectation that shares the implementation's walk cannot
- * fail when the walk is wrong.
+ * History this file carries. #3824 originally windowed the card over the
+ * seven user-local calendar days ending today, via a local-day walk —
+ * `activityWindowDays(now, tz)` — whose once-a-year bug (fixed 24h-offset
+ * sampling skipped the 23h spring-forward transition day) #3869 pinned here
+ * with spring-forward clocks, a fall-back control and a 10-zone DST sweep.
+ * #3975 moved membership to the rolling instant predicate
+ * `isInsideActivityWindow`, which involves no zone arithmetic at all — so
+ * the day-walk pins are gone and every one of them has an equivalent pin on
+ * the new predicate: the boundary holds at every instant, the transition
+ * day's payments still group on the mornings after spring-forward and
+ * fall-back, and the window's extra local day (a 168h span covers EIGHT
+ * local days once a 23h day is inside it) survives the group cap.
  */
 
 import { describe, expect, it, vi } from 'vitest'
@@ -26,10 +25,13 @@ vi.mock('../../../infra/prices.js', () => ({
 }))
 
 import {
+  ACTIVITY_GROUP_LIMIT,
   ACTIVITY_WINDOW_DAYS,
-  activityWindowDays,
+  ACTIVITY_WINDOW_MS,
+  activityWindowStartIso,
   buildActivityFeed,
   buildActivityGroups,
+  isInsideActivityWindow,
   localDayKey,
 } from '../activity.js'
 import type { EnrichedTransaction } from '../types.js'
@@ -62,89 +64,67 @@ function row(
   }
 }
 
-/**
- * The seven consecutive `YYYY-MM-DD` keys ending at `endingOn` — the shape
- * every window must have, spelled out day by day.
- */
-function sevenDaysEndingAt(endingOn: string): string[] {
-  const days: string[] = []
-  for (let i = 0; i < ACTIVITY_WINDOW_DAYS; i += 1) {
-    days.push(
-      new Date(Date.parse(`${endingOn}T00:00:00Z`) - i * 86_400_000)
-        .toISOString()
-        .slice(0, 10),
-    )
-  }
-  return days
-}
+const sec = (iso: string): number => Math.floor(Date.parse(iso) / 1000)
 
-describe('activityWindowDays — pinned clocks', () => {
-  /**
-   * Each case: (zone, pinned `now`, the local wall clock that instant
-   * represents, the local day whose payments the old fixed-offset sampling
-   * lost). Every `now` sits in the first hour of the morning AFTER a
-   * spring-forward transition — the exact production window of the bug.
-   */
-  const pinned = [
-    {
+describe('isInsideActivityWindow — the rolling 168h predicate (#3975)', () => {
+  // The exact scenario the issue observed: 2026-10-15 09:12 Europe/Stockholm
+  // (07:12 UTC) and a payment at 2026-10-08 13:48 local (11:48 UTC). The
+  // rolling window starts 2026-10-08 07:12 UTC, so the payment is INSIDE —
+  // under the old 7-local-day window (Oct 9–15) it was dropped, and the
+  // header counted a payment the Activity card never showed.
+  it('admits the observed payment: 13:48 Stockholm inside a window opened 07:12 UTC', async () => {
+    const now = Date.parse('2026-10-15T07:12:00Z') // 09:12 CEST
+    const payment = sec('2026-10-08T11:48:00Z') // 13:48 CEST
+
+    expect(isInsideActivityWindow(payment, now)).toBe(true)
+    expect(activityWindowStartIso(now)).toBe('2026-10-08T07:12:00.000Z')
+
+    const groups = await buildActivityGroups({
+      transactions: [row({ timestamp: payment })],
+      truncated: false,
       tz: 'Europe/Stockholm',
-      now: Date.parse('2026-03-29T22:20:00Z'), // 00:20 CEST Mon Mar 30
-      wall: '2026-03-30 00:20 CEST',
-      transitionDay: '2026-03-29', // 23h day (02:00 → 03:00)
-    },
-    {
-      tz: 'America/New_York',
-      now: Date.parse('2026-03-09T04:20:00Z'), // 00:20 EDT Mon Mar 9
-      wall: '2026-03-09 00:20 EDT',
-      transitionDay: '2026-03-08', // 23h day (02:00 → 03:00)
-    },
-    {
-      tz: 'Australia/Lord_Howe',
-      now: Date.parse('2026-10-04T13:20:00Z'), // 00:20 +11:00 Mon Oct 5
-      wall: '2026-10-05 00:20 +11:00',
-      transitionDay: '2026-10-04', // 30-minute shift (02:00 → 02:30)
-    },
-    {
-      tz: 'Pacific/Chatham',
-      now: Date.parse('2026-09-27T10:35:00Z'), // 00:20 +13:45 Mon Sep 28
-      wall: '2026-09-28 00:20 +13:45',
-      transitionDay: '2026-09-27', // 45-minute offset zone
-    },
-  ]
-
-  for (const { tz, now, wall, transitionDay } of pinned) {
-    it(`covers the transition day at ${tz} ${wall}`, () => {
-      const window = activityWindowDays(now, tz)
-
-      // The window is exactly the seven local calendar days ending at now —
-      // the transition day included. Under the old fixed-offset sampling the
-      // transition day is absent from this exact clock (the samples step
-      // 24h apart across a 23h day and jump clean over it).
-      expect([...window].sort()).toEqual(
-        sevenDaysEndingAt(localDayKey(Math.floor(now / 1000), tz)).sort(),
-      )
-      expect(window.has(transitionDay)).toBe(true)
-      expect(window.size).toBe(ACTIVITY_WINDOW_DAYS)
+      now,
     })
-  }
-
-  it('survives the morning after a 25h fall-back day too (Europe/Stockholm 2026-10-26 00:20 CET)', () => {
-    // The negative control: after a 25h day the OLD sampling happened to
-    // stay correct (it duplicated a day rather than skipping one). The new
-    // walk must produce the same seven-day window there, not just fix the
-    // spring-forward side.
-    const now = Date.parse('2026-10-25T23:20:00Z') // 00:20 CET Mon Oct 26
-    const window = activityWindowDays(now, 'Europe/Stockholm')
-    expect([...window].sort()).toEqual(sevenDaysEndingAt('2026-10-26').sort())
-    expect(window.has('2026-10-25')).toBe(true) // the 25h transition day
+    expect(groups).toHaveLength(1)
+    // Still bucketed under its own local day — the heading, not the window.
+    expect(groups[0].latestAt).toBe('2026-10-08T11:48:00.000Z')
   })
 
-  it('keeps the seven window days consecutive for every hour of the 2026 DST transition months', () => {
-    // The sweep property the pinned clocks generalize: at EVERY instant the
-    // window is exactly seven consecutive local calendar days ending at
-    // now's own local day. The old sampling breaks the consecutiveness on
-    // spring-forward mornings (a two-day gap where the transition day was
-    // skipped); this assertion is what fails there.
+  it('admits a payment exactly at the window start and rejects one second before', () => {
+    const now = Date.parse('2026-10-15T07:12:00Z')
+    const cutoffSec = Math.floor((now - ACTIVITY_WINDOW_MS) / 1000)
+    expect(isInsideActivityWindow(cutoffSec, now)).toBe(true)
+    expect(isInsideActivityWindow(cutoffSec - 1, now)).toBe(false)
+  })
+
+  it('flags a feed that only carries older activity, beside rows inside the window (#3944)', async () => {
+    const now = Date.parse('2026-10-15T07:12:00Z')
+    const inside = sec('2026-10-14T06:00:00Z')
+    const outside = sec('2026-10-08T07:11:59Z') // one second before the cutoff
+
+    const feed = await buildActivityFeed({
+      transactions: [row({ timestamp: inside }), row({ timestamp: outside })],
+      truncated: false,
+      tz: 'Europe/Stockholm',
+      now,
+    })
+    // The out-of-window row is dropped from the GROUPS but still sets the
+    // flag — the empty 7-day list and "activity exists" are independent.
+    expect(feed.groups).toHaveLength(1)
+    expect(feed.hasOlderActivity).toBe(true)
+    expect(feed.windowDays).toBe(ACTIVITY_WINDOW_DAYS)
+    // The boundary rides the wire: the client marks the oldest day heading
+    // partial from THIS instant, not a second clock of its own.
+    expect(feed.windowStartIso).toBe('2026-10-08T07:12:00.000Z')
+  })
+})
+
+describe('isInsideActivityWindow — the boundary holds at every instant', () => {
+  // The successor of the old 10-zone consecutiveness sweep: the new predicate
+  // has no zone arithmetic to break, so what is swept is the BOUNDARY itself,
+  // over every hour of the two DST transition months — at no instant does the
+  // window admit its own start minus one second, or reject its own start.
+  it('a payment at the window start is always in, one second before never is', () => {
     const zones = [
       'Europe/Stockholm',
       'Europe/London',
@@ -160,43 +140,36 @@ describe('activityWindowDays — pinned clocks', () => {
     let instants = 0
     for (const tz of zones) {
       for (const monthStart of ['2026-03-01T00:00:00Z', '2026-10-01T00:00:00Z']) {
-        for (let ms = Date.parse(monthStart); ms < Date.parse(monthStart) + 31 * 86_400_000; ms += 3_600_000) {
+        for (
+          let ms = Date.parse(monthStart);
+          ms < Date.parse(monthStart) + 31 * 86_400_000;
+          ms += 3_600_000
+        ) {
           instants += 1
-          const window = activityWindowDays(ms, tz)
-          const sorted = [...window].sort()
-          expect(sorted, `${tz} @ ${new Date(ms).toISOString()}`).toHaveLength(
-            ACTIVITY_WINDOW_DAYS,
-          )
-          for (let i = 1; i < sorted.length; i += 1) {
-            const gap =
-              Date.parse(`${sorted[i]}T00:00:00Z`) -
-              Date.parse(`${sorted[i - 1]}T00:00:00Z`)
-            expect(gap, `${tz} @ ${new Date(ms).toISOString()}`).toBe(86_400_000)
-          }
-          // The newest window day is now's own local day, and now's day is
-          // in the window (buildActivityGroups relies on both).
-          const today = localDayKey(Math.floor(ms / 1000), tz)
-          expect(sorted[sorted.length - 1], `${tz} @ ${new Date(ms).toISOString()}`).toBe(today)
-          expect(window.has(today), `${tz} @ ${new Date(ms).toISOString()}`).toBe(true)
+          const cutoffSec = Math.floor((ms - ACTIVITY_WINDOW_MS) / 1000)
+          expect(isInsideActivityWindow(cutoffSec, ms), `${tz} @ ${new Date(ms).toISOString()}`).toBe(true)
+          expect(isInsideActivityWindow(cutoffSec - 1, ms), `${tz} @ ${new Date(ms).toISOString()}`).toBe(false)
+          // The wire instant and the predicate agree at every clock.
+          expect(Date.parse(activityWindowStartIso(ms))).toBe((cutoffSec) * 1000)
+          // The day key still resolves for the sweep zones (the group key
+          // needs it) — the tz parameter's remaining job.
+          expect(localDayKey(cutoffSec, tz)).toMatch(/^\d{4}-\d{2}-\d{2}$/)
         }
       }
     }
-    // Guard the sweep itself: it must have actually run over the transition
-    // mornings, not been silently emptied by a bad range.
     expect(instants).toBeGreaterThan(10 * 30 * 24)
   }, 60_000)
 })
 
-describe('buildActivityGroups — pinned spring-forward clock', () => {
+describe('buildActivityGroups — pinned DST clocks on the rolling window', () => {
   it('keeps the transition day’s payments groupable on the morning after a 23h day', async () => {
-    // Europe/Stockholm, 2026-03-30 00:20 CEST — the production bug window.
-    // One payment yesterday afternoon (the 23h transition day, 2026-03-29),
-    // one right now. Both must group. Under the old fixed-offset window the
-    // transition day was not in the set, so `buildActivityGroups` dropped
-    // every transition-day row and this returns ONE group, not two.
+    // Europe/Stockholm, 2026-03-30 00:20 CEST — the #3869 production bug
+    // window. One payment on the 23h transition day (2026-03-29), one right
+    // now. Both sit inside the rolling 168h, so both must group; under the
+    // original fixed-offset sampling the transition day was lost entirely.
     const now = Date.parse('2026-03-29T22:20:00Z')
     const transactions = [
-      row({ timestamp: Math.floor(Date.parse('2026-03-29T12:00:00Z') / 1000) }), // 14:00 CEST on the transition day
+      row({ timestamp: sec('2026-03-29T12:00:00Z') }), // 14:00 CEST on the transition day
       row({ timestamp: Math.floor(now / 1000) }), // 00:20 CEST, the morning after
     ]
 
@@ -212,51 +185,70 @@ describe('buildActivityGroups — pinned spring-forward clock', () => {
     // Newest first: the morning-after group leads, the transition day's
     // payment is still present behind it (not dropped from the window).
     expect(groups[0].latestAt).toBe(new Date(now).toISOString())
-    expect(new Date(groups[1].latestAt).toISOString()).toBe('2026-03-29T12:00:00.000Z')
-  })
-})
-
-// #3944: the feed builder returns the grouped rows BESIDE the two
-// empty-state facts. The flag must agree with the window the groups were
-// bucketed over — same `activityWindowDays(now, tz)` walk, same clock — so
-// these run against the REAL module, not a mock of it.
-describe('buildActivityFeed — hasOlderActivity and the carried window', () => {
-  const now = Date.parse('2026-04-05T10:00:00Z')
-
-  it('is false when every transaction is inside the window, true when any is outside', async () => {
-    const inside = Math.floor(Date.parse('2026-04-03T09:00:00Z') / 1000)
-    const outside = Math.floor(Date.parse('2026-03-20T09:00:00Z') / 1000) // 14+ days back
-
-    const fresh = await buildActivityFeed({
-      transactions: [row({ timestamp: inside })],
-      truncated: false,
-      tz: 'UTC',
-      now,
-    })
-    expect(fresh.hasOlderActivity).toBe(false)
-    expect(fresh.groups).toHaveLength(1)
-
-    const older = await buildActivityFeed({
-      transactions: [row({ timestamp: inside }), row({ timestamp: outside })],
-      truncated: false,
-      tz: 'UTC',
-      now,
-    })
-    // The out-of-window row is dropped from the GROUPS but still sets the
-    // flag — the empty 7-day list and "activity exists" are independent.
-    expect(older.groups).toHaveLength(1)
-    expect(older.hasOlderActivity).toBe(true)
+    expect(groups[1].latestAt).toBe('2026-03-29T12:00:00.000Z')
   })
 
-  it('an empty feed is both flag-false and rowless, and the window rides the wire', async () => {
-    const feed = await buildActivityFeed({
-      transactions: [],
+  it('survives the morning after a 25h fall-back day too (Europe/Stockholm 2026-10-26 00:20 CET)', async () => {
+    // The negative control, carried over from #3869: the 25h day's payments
+    // group as well, under their own local day.
+    const now = Date.parse('2026-10-25T23:20:00Z') // 00:20 CET Mon Oct 26
+    const groups = await buildActivityGroups({
+      transactions: [
+        row({ timestamp: sec('2026-10-25T12:00:00Z') }), // 13:00 CET, the 25h day
+        row({ timestamp: Math.floor(now / 1000) }),
+      ],
       truncated: false,
       tz: 'Europe/Stockholm',
       now,
     })
-    expect(feed.hasOlderActivity).toBe(false)
-    expect(feed.groups).toEqual([])
-    expect(feed.windowDays).toBe(ACTIVITY_WINDOW_DAYS)
+    expect(groups).toHaveLength(2)
+    expect(groups[1].latestAt).toBe('2026-10-25T12:00:00.000Z')
+  })
+
+  it('the window spans EIGHT local days after a 23h day, and all eight survive the group cap', async () => {
+    // 168h is longer than seven local days whenever a 23h day sits inside it:
+    // with `now` on the morning after Stockholm's spring-forward, the window
+    // reaches back to 2026-03-22 22:20 UTC — 23:20 CET on Mar 22 — so the
+    // local days Mar 22 through Mar 29 are all in. The old seven-local-day
+    // window structurally capped at seven days and dropped the eighth; the
+    // rolling window keeps it (and exactly fits the 8-group cap).
+    const now = Date.parse('2026-03-29T22:20:00Z')
+    const days = [
+      sec('2026-03-22T22:20:00Z'), // exactly the window start (23:20 CET Mar 22)
+      sec('2026-03-23T12:00:00Z'),
+      sec('2026-03-24T12:00:00Z'),
+      sec('2026-03-25T12:00:00Z'),
+      sec('2026-03-26T12:00:00Z'),
+      sec('2026-03-27T12:00:00Z'),
+      sec('2026-03-28T12:00:00Z'),
+      sec('2026-03-29T12:00:00Z'), // the 23h transition day
+    ]
+    expect(new Set(days.map((ts) => localDayKey(ts, 'Europe/Stockholm'))).size).toBe(8)
+
+    const groups = await buildActivityGroups({
+      transactions: days.map((timestamp) => row({ timestamp })),
+      truncated: false,
+      tz: 'Europe/Stockholm',
+      now,
+    })
+    expect(groups).toHaveLength(ACTIVITY_GROUP_LIMIT)
+    // The oldest group is the one ON the window boundary — the day heading
+    // the client will mark partial (its day starts before the window does).
+    expect(groups[groups.length - 1].latestAt).toBe('2026-03-22T22:20:00.000Z')
+  })
+
+  it('a feed row one second older than the eighth day is outside the window, not a ninth group', async () => {
+    const now = Date.parse('2026-03-29T22:20:00Z')
+    const feed = await buildActivityFeed({
+      transactions: [
+        row({ timestamp: sec('2026-03-22T22:19:59Z') }), // one second before the window start
+        row({ timestamp: sec('2026-03-29T12:00:00Z') }),
+      ],
+      truncated: false,
+      tz: 'Europe/Stockholm',
+      now,
+    })
+    expect(feed.groups).toHaveLength(1)
+    expect(feed.hasOlderActivity).toBe(true)
   })
 })

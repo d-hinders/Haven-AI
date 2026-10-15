@@ -13512,11 +13512,12 @@ export const openapiSpec = {
             additionalProperties: false,
           },
           agents: { type: 'array', items: { $ref: '#/components/schemas/DashboardAgentPreview' }, description: '#3803: EVERY delegation-rail agent in active/paused/pending_approval — the former at-most-6 cap moved to the client (#3809).' },
-          // #3824: grouped dashboard activity — up to 8 groups over the last 7
-          // user-local days (bucketed by the `tz` query parameter, default
-          // UTC), newest first, grouped server-side in memory over the
-          // transaction feed. Optional so pre-#3824
-          // consumers read the same response unchanged.
+          // #3824: grouped dashboard activity — up to 8 groups over the
+          // ROLLING last 7 days (`[now − 7×24h, now)` on the transaction
+          // instant, the owner decision — #3975; the `tz` query parameter
+          // buckets the day headings, default UTC), newest first, grouped
+          // server-side in memory over the transaction feed. Optional so
+          // pre-#3824 consumers read the same response unchanged.
           activity: {
             type: 'array',
             maxItems: 8,
@@ -13525,22 +13526,32 @@ export const openapiSpec = {
           },
           // #3944: the two empty-state facts. `hasOlderActivity` is true when
           // the feed the `activity` groups bucket over carries ANY
-          // transaction outside `activityWindowDays` — activity exists, just
+          // transaction outside the rolling window — activity exists, just
           // not in the window, so the card may not say "No activity yet".
           // Optional so a pre-#3944 response reads unchanged (the client
           // keeps today's copy when the signal is absent). `activityWindowDays`
-          // is the `ACTIVITY_WINDOW_DAYS` the backend bucketed over, carried
-          // on the wire because the frontend has no window constant and the
-          // empty-state copy may not hard-code a 7 that can drift. Both live
-          // at the ENVELOPE level — a per-row `DashboardActivityGroup` field
-          // would say nothing about the rows that are absent.
+          // is the rolling window's length in days (the backend's
+          // `ACTIVITY_WINDOW_DAYS`), carried on the wire because the frontend
+          // has no window constant and the empty-state copy may not hard-code
+          // a 7 that can drift. `activityWindowStart` (#3975) is the window's
+          // start instant — the same boundary the `spend.d7` SQL applies, so
+          // the header's "last 7 days" and the Activity card are one window;
+          // the client marks the oldest day heading partial when it cuts its
+          // own local day. All three live at the ENVELOPE level — a per-row
+          // `DashboardActivityGroup` field would say nothing about the rows
+          // that are absent.
           hasOlderActivity: {
             type: 'boolean',
-            description: 'True when the merged transaction feed carries any transaction outside the `activityWindowDays` window — activity exists, just not in it. False (not absent) when an account read failed, the same degradation as the rows.',
+            description: 'True when the merged transaction feed carries any transaction outside the rolling `activityWindowDays` window — activity exists, just not in it. False (not absent) when an account read failed, the same degradation as the rows.',
           },
           activityWindowDays: {
             type: 'integer',
-            description: 'The window (in days) `activity` is bucketed over — the backend\u2019s `ACTIVITY_WINDOW_DAYS`, carried on the wire so the client names the window without hard-coding it.',
+            description: 'The ROLLING window, in days — `[now − N×24h, now)`, the backend\u2019s `ACTIVITY_WINDOW_DAYS` (#3975: the same definition as `spend.d7`), carried on the wire so the client names the window without hard-coding it.',
+          },
+          activityWindowStart: {
+            type: 'string',
+            format: 'date-time',
+            description: 'The rolling window\u2019s start instant, `now − 7×24h` — the same boundary the `spend.d7` SQL applies (#3975), so the header\u2019s "last 7 days" and the Activity card are one window. The client marks the oldest Activity day heading partial when this instant cuts its own local day.',
           },
           // #3858: the former 5-row `transactions` preview is removed from the
           // wire — no dashboard surface has read it since #3810.

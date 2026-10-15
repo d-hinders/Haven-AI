@@ -159,6 +159,27 @@ const SCENARIOS: Scenario[] = [
       // One offers section (#3981): no "Pay this with Haven" heading.
       await expect(merchantPage.getByRole('heading', { name: 'Pay this with Haven' })).toHaveCount(0)
       await expect(merchantPage.getByRole('heading', { name: 'Offers' })).toHaveCount(1)
+      // #4005: the "How to buy" panel sits between the header and the offers.
+      // The fixture's active agent (Research agent, Base) holds an open 20
+      // USDC budget, so it can pay the Base-priced Quote offer: step 1 done,
+      // step 2 done naming the agent and its remaining, with the
+      // any-recipient requirement in plain words (all offers are bridge-only,
+      // so there are no tags to point at).
+      const panel = merchantPage.getByTestId('how-to-buy-panel')
+      await expect(panel).toBeVisible()
+      await expect(panel.getByTestId('how-to-buy-step-1')).toContainText('Research agent is connected on Base.')
+      await expect(panel.getByTestId('how-to-buy-step-2')).toContainText(
+        'Research agent has 20 USDC left of 250 USDC this month, and can pay anyone — so it can pay Ampersend Demo API for some offers.',
+      )
+      await expect(panel.getByTestId('how-to-buy-step-2')).toContainText(
+        "A budget limited to one recipient can't pay Ampersend Demo API — keep the budget that can pay anyone open.",
+      )
+      // The old offer-level note paragraph is gone (#4005).
+      await expect(merchantPage.getByTestId('any-recipient-budget-note')).toHaveCount(0)
+      await expect(merchantPage.getByText(/any-recipient budget/)).toHaveCount(0)
+      // No protocol jargon reaches the page (#3981).
+      await expect(merchantPage.getByText(/EIP-3009/)).toHaveCount(0)
+      await expect(merchantPage.getByText(/unpinned/)).toHaveCount(0)
       // Each offer is ONE row per shape: desktop table row and phone card.
       // Fact and Joke are on the user's network; Quote sits in the disclosure
       // (its rows are in the DOM either way — the disclosure is collapsed).
@@ -172,14 +193,6 @@ const SCENARIOS: Scenario[] = [
       await expect(merchantPage.getByText(FROZEN_FRESHNESS).locator('visible=true').first()).toBeVisible()
       // The network column shows the chain's NAME, never the raw CAIP-2 id.
       await expect(merchantPage.getByText('eip155:')).toHaveCount(0)
-      // None of the three offers advertises erc7710 (asset_transfer_methods:
-      // null in the fixture), so the offer-level payment note is present —
-      // ONCE — and no offer carries the mixed-merchant tag.
-      await expect(merchantPage.getByTestId('any-recipient-budget-note')).toHaveCount(1)
-      await expect(merchantPage.getByText(/any-recipient budget/)).toHaveCount(0)
-      // No protocol jargon reaches the page (#3981).
-      await expect(merchantPage.getByText(/EIP-3009/)).toHaveCount(0)
-      await expect(merchantPage.getByText(/unpinned/)).toHaveCount(0)
       // One labelled copy button per offer per shape (#3998). The value it
       // copies is `agentInstruction()`, guarded byte-for-byte in the unit
       // tests; these offers have no placeholder, so it is not printed.
@@ -230,9 +243,18 @@ const SCENARIOS: Scenario[] = [
       await expect(merchantPage.getByText(FROZEN_FRESHNESS).locator('visible=true').first()).toBeVisible()
       await expect(merchantPage.getByText(/via buy_vpn for/).locator('visible=true')).toHaveCount(1)
       await expect(merchantPage.getByText('Replace <what you want> before sending.').locator('visible=true')).toHaveCount(1)
-      // The fixture's one offer DOES advertise erc7710, so the payment note
-      // must be absent here — the negative half of the merchant-page case.
+      // The fixture's one offer DOES advertise erc7710, so there is no
+      // any-recipient requirement anywhere (#4005).
       await expect(merchantPage.getByText(/budget that can pay any recipient/)).toHaveCount(0)
+      // #4005: the panel reflects the user's real state — the shared agent
+      // sits on Base while this offer is on Base Sepolia, so step 2 says so
+      // plainly (no in-app fix, no button), and step 1 is still done.
+      const panel = merchantPage.getByTestId('how-to-buy-panel')
+      await expect(panel.getByTestId('how-to-buy-step-1')).toContainText('Research agent is connected on Base.')
+      await expect(panel.getByTestId('how-to-buy-step-2')).toContainText(
+        "Research agent's Haven wallet is on Base — this merchant's offers are on Base Sepolia. Haven can't add a second account from here.",
+      )
+      await expect(panel.getByRole('button')).toHaveCount(0)
     },
   },
   {
@@ -495,6 +517,17 @@ test.describe('marketplace visual regression', () => {
     await expect(page.getByRole('button', { name: 'Set a budget for this merchant' })).toHaveCount(1)
     await expect(page.getByText('Fund Agent', { exact: true }).first()).toBeVisible()
     await expect(page.getByText("Haven could not load this merchant's budgets.")).toHaveCount(0)
+    // #4005: the panel's step 2 reads DONE — the Fund Agent's merchant-locked
+    // budget has 12.5 of 20 USDC left this period and pays Haven Demo Store
+    // only (the offer advertises erc7710, so no any-recipient requirement).
+    const panel = page.getByTestId('how-to-buy-panel')
+    await expect(panel.getByTestId('how-to-buy-step-1')).toContainText(
+      'Research agent is connected on Base, along with 1 more agent.',
+    )
+    await expect(panel.getByTestId('how-to-buy-step-2')).toContainText(
+      'Fund Agent has 12.5 USDC left of 20 USDC this month, and can pay only Haven Demo Store.',
+    )
+    await expect(panel.getByRole('button')).toHaveCount(0)
 
     await page.evaluate(() => document.fonts.ready)
     await page.waitForLoadState('networkidle')

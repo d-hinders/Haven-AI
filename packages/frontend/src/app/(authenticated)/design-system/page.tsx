@@ -1512,7 +1512,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="CopyButton — the one copy affordance"
-        description="The inline check-pop copy button, extracted from <Address> on its second call site (#1878). Any value a user is expected to paste elsewhere gets this, never a hand-rolled button: it owns the hit area, the focus ring, the 1.5s confirmation, and the catch around navigator.clipboard — which rejects on insecure origins, denied permissions, and in most headless captures. Where the value is printed beside the button, failing quietly is correct: the value stays on screen and selectable. Pass `label` lowercase and name the thing, not the widget — it reads as “Copy address”, then “Address copied”. Two additions (#3998): `text` renders the labelled ghost-button shape for a value that is NOT printed (the marketplace’s “Copy prompt”) — keep the visible words at the start of the accessible name (“Copy prompt for Fact”); and `onCopyFailed`, which such a caller must pass to reveal the value when the clipboard refuses it."
+        description="The inline check-pop copy button, extracted from <Address> on its second call site (#1878). Any value a user is expected to paste elsewhere gets this, never a hand-rolled button: it owns the hit area, the focus ring, the 1.5s confirmation, and the catch around navigator.clipboard — which rejects on insecure origins, denied permissions, and in most headless captures. Where the value is printed beside the button, failing quietly is correct: the value stays on screen and selectable. Pass `label` lowercase and name the thing, not the widget — it reads as “Copy address”, then “Address copied”. Three additions (#3998, #4005): `text` renders the labelled ghost-button shape for a value that is NOT printed (the marketplace’s “Copy prompt”) — keep the visible words at the start of the accessible name (“Copy prompt for Fact”); `onCopyFailed`, which such a caller must pass to reveal the value when the clipboard refuses it; and `copiedText`, which replaces the confirmation when “Copied” alone would drop the caller’s next step (“Copied — paste it to Atlas”, #4005) — the longer label wraps instead of truncating."
       >
         <Card hover={false} className="p-5">
           <div className="flex flex-wrap items-center gap-6 text-sm text-[var(--v2-ink-2)]">
@@ -1521,13 +1521,22 @@ export default function DesignSystemPage() {
               <CopyButton value="haven-research" label="MCP server name" />
             </span>
             <span className="inline-flex items-center gap-1">
-              sk_agent_a1b2c3
-              <CopyButton value="sk_agent_a1b2c3" label="API key prefix" />
+              ***
+              <CopyButton value="***" label="API key prefix" />
             </span>
           </div>
           <LabelledCopyDemo />
+          <div className="mt-3">
+            <CopyButton
+              value="Pay https://services.ampersend.ai/api/joke and return the result"
+              label="prompt for Ampersand — joke"
+              text="Copy prompt"
+              copiedText="Copied — paste it to Research agent"
+            />
+            <span className="ml-2 text-xs text-[var(--v2-ink-3)]">— `copiedText` (#4005): the confirmation names the next step.</span>
+          </div>
           <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
-            Click one — the icon swaps to a success check for 1.5s, then reverts; the labelled shape also reads “Copied”.
+            Click one — the icon swaps to a success check for 1.5s, then reverts; the labelled shape also reads “Copied”, or the caller’s `copiedText`.
           </p>
         </Card>
       </Section>

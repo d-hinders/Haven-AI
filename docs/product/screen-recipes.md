@@ -360,8 +360,16 @@ Structure:
    has one control — the checkbox — and no category pill.
 3. Merchant page: header (monogram/logo, name, category, website, networks,
    Verified — with the funding action, when shown, on its right-hand side),
-   and ONE offers list: each offer a single row — table on desktop, stacked
-   card on phone — with a labelled Copy prompt button; the instruction
+   then the "How to buy" panel (#4005, live merchants with offers only): one
+   Card, three steps whose state is claimed from the user's real data — the
+   agent connected (or the failed read), the budget that can pay here named
+   with its remaining amount (or the specific fix: the fund action, the
+   agent's page, or a plain wrong-network sentence), then "ask your agent to
+   buy" pointing at the offers below. Loading steps are skeletons that
+   claim nothing. Then ONE offers list: each offer a single row — table on
+   desktop, stacked card on phone — with a labelled Copy prompt button whose
+   confirmation names the one agent that can pay ("Copied — paste it to
+   <agent>"); the instruction
    itself is printed in the offer only when the user must edit it (a
    placeholder) or the clipboard refused it (#3998); the user's network's offers first,
    other networks behind an "n more on <chain names>" disclosure.

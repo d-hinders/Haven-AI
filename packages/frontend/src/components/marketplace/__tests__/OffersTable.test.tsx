@@ -258,10 +258,11 @@ describe('OffersTable', () => {
     })
   })
 
-  it('renders the payment note once when every offer needs an any-recipient budget, and never when none does', () => {
+  it('#4005: no offer-level note paragraph renders above the table — the How to buy panel owns that copy', () => {
     const { unmount } = render(<OffersTable offers={[offer(), offer({ id: 'o-2' })]} agents={[]} />)
-    expect(screen.getAllByText(/budget that can pay any recipient/)).toHaveLength(1)
-    expect(screen.queryByText(ANY_RECIPIENT_BUDGET_TAG)).toBeNull()
+    // The requirement moved into the panel's step 2 (#4005); the table itself
+    // renders no note paragraph even when every offer needs an open budget.
+    expect(screen.queryByTestId('any-recipient-budget-note')).toBeNull()
     unmount()
     render(
       <OffersTable
@@ -269,7 +270,7 @@ describe('OffersTable', () => {
         agents={[]}
       />,
     )
-    expect(screen.queryByText(/budget that can pay any recipient/)).toBeNull()
+    expect(screen.queryByTestId('any-recipient-budget-note')).toBeNull()
   })
 
   it('tags only the offers that need it when the merchant is mixed', () => {
@@ -279,13 +280,37 @@ describe('OffersTable', () => {
         agents={[]}
       />,
     )
-    expect(screen.getAllByText(/budget that can pay any recipient/)).toHaveLength(1)
-    expect(screen.getAllByText(/Offers marked "any-recipient budget" need this/)).toHaveLength(1)
     expect(row('offer-1').getByText(ANY_RECIPIENT_BUDGET_TAG)).toBeDefined()
     expect(row('o-2').queryByText(ANY_RECIPIENT_BUDGET_TAG)).toBeNull()
     // The banned protocol jargon never reaches the page.
     expect(document.body.textContent).not.toContain('EIP-3009')
     expect(document.body.textContent).not.toContain('unpinned')
+  })
+
+  it('#4005: when exactly ONE agent can pay, the copied confirmation names it; with two, it stays "Copied"', async () => {
+    const blinks: BudgetAgent = { ...atlas, id: 'agent-2', name: 'Blinks' }
+    const { unmount } = render(
+      <OffersTable offers={[offer({ id: 'one' })]} agents={[atlas]} budgets={usdcWithRoom} />,
+    )
+    fireEvent.click(row('one').getByRole('button', { name: 'Copy prompt for Text generation' }))
+    await vi.waitFor(() => {
+      expect(row('one').getByRole('button', { name: 'Prompt for Text generation copied' }).textContent).toBe(
+        'Copied — paste it to Atlas',
+      )
+    })
+    unmount()
+
+    render(
+      <OffersTable
+        offers={[offer({ id: 'two' })]}
+        agents={[atlas, blinks]}
+        budgets={[...usdcWithRoom, budgetRow({ agent_id: 'agent-2', delegation_hash: `0x${'3'.repeat(64)}` })]}
+      />,
+    )
+    fireEvent.click(row('two').getByRole('button', { name: 'Copy prompt for Text generation' }))
+    await vi.waitFor(() => {
+      expect(row('two').getByRole('button', { name: 'Prompt for Text generation copied' }).textContent).toBe('Copied')
+    })
   })
 
   it('discloses the other networks as "n more on <chain names>" with the cannot-pay warning when no agent is there, once per shape', () => {

@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { Button } from '@/components/ui/Button'
 import Link from 'next/link'
 import { MerchantHeader } from '@/components/marketplace/MerchantHeader'
+import { HowToBuyPanel } from '@/components/marketplace/HowToBuyPanel'
 import { OffersTable } from '@/components/marketplace/OffersTable'
 import FundMerchantModal, { eligibleFundingAgents } from '@/components/marketplace/FundMerchantModal'
 import { MerchantBudgetsList } from '@/components/marketplace/MerchantBudgetsList'
@@ -51,6 +52,7 @@ export default function MerchantPage() {
   const comingSoonForBudgets = merchant?.listing_status === 'coming_soon'
   const {
     budgets: merchantBudgets,
+    loading: merchantBudgetsLoading,
     error: merchantBudgetsError,
     refetch: refetchMerchantBudgets,
   } = useMerchantBudgets(slug, {
@@ -59,7 +61,9 @@ export default function MerchantPage() {
   // #4004: the per-offer budget answer reads what is LEFT on each budget (the
   // cached, 60 s-polled enforcer read) — not just the cap `GET /agents`
   // projects, which could answer yes when no agent could actually pay.
-  const { data: budgetRemaining } = useBudgetRemaining()
+  // #4005: the "How to buy" panel reads the same two wires, so its step 2
+  // and the offers' per-row answers come from one set of verdicts.
+  const { data: budgetRemaining, loading: budgetRemainingLoading, error: budgetRemainingError, refetch: refetchBudgetRemaining } = useBudgetRemaining()
 
   if (loading) {
     return (
@@ -136,32 +140,11 @@ export default function MerchantPage() {
   const pinnableFunding = verifiedFunding.filter((f) => f.erc7710)
   const hasEligibleAgent = eligibleFundingAgents(agents, funding).length > 0
   const showFundAction = !comingSoon && pinnableFunding.length > 0 && hasEligibleAgent
-  // Round 2 review finding R2-5 (design 3): the merchant CAN be pinned to, but
-  // none of the owner's own agents qualify (wrong chain, revoked, archived) —
-  // the page used to show nothing at all where the action would be. Gated on
-  // `!agentsLoading` so the note never flashes on then off again once agents
-  // resolves and `hasEligibleAgent` flips true (or the plain Fund button
-  // takes over) — before that resolves, this slot renders nothing, exactly
-  // like `showFundAction` already does with an empty `agents` array.
-  // Design review round 3, finding C (code F5): `agents` reads `[]` on a
-  // failed `useAgents` fetch, which is indistinguishable from "no eligible
-  // agent" here — that used to claim "Connect an agent" for a read that
-  // simply failed. `agentsError` splits the two: the note below only fires
-  // once the read actually succeeded and came up empty.
-  const showConnectAgentNote =
-    !comingSoon && !agentsLoading && !agentsError && pinnableFunding.length > 0 && !hasEligibleAgent
-  const showAgentsErrorNote =
-    !comingSoon && !agentsLoading && agentsError && pinnableFunding.length > 0 && !hasEligibleAgent
-  // Design review round 3, finding C: name every pinnable chain rather than
-  // always reading the first — a merchant qualifying on two chains used to
-  // silently drop the second from this sentence.
-  const pinnableChainIds = Array.from(new Set(pinnableFunding.map((f) => f.chain_id)))
-  const pinnableChainLabel =
-    pinnableChainIds.length === 1
-      ? chainName(pinnableChainIds[0]!)
-      : pinnableChainIds.length > 1
-        ? pinnableChainIds.map(chainName).join(' or ')
-        : 'a supported network'
+  // #4005: the panel's step 2 may offer the same action, but only when an
+  // agent it could name is ACTIVE — `eligibleFundingAgents` admits paused and
+  // pending agents (the modal's own shape), and the panel must not point a
+  // paused agent at an action it cannot complete.
+  const hasActiveEligibleAgent = eligibleFundingAgents(agents, funding).some((a) => a.status === 'active')
 
   return (
     <div className="max-w-5xl space-y-6" data-testid="merchant-page">
@@ -198,22 +181,29 @@ export default function MerchantPage() {
         />
       ) : (
         <>
-          {showAgentsErrorNote ? (
-            // Design review round 3, finding C: a failed agents read must not
-            // claim "Connect an agent" — that would tell an owner who already
-            // has an eligible agent to connect a new one, over a read that
-            // simply failed.
-            <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
-              Haven could not load your agents just now, so funding is unavailable. Reload the page to try again.
-            </p>
-          ) : showConnectAgentNote ? (
-            <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
-              Connect an agent on {pinnableChainLabel} to give it a budget for {merchant.name}.{' '}
-              <Link href="/agents" className="font-medium text-[var(--v2-brand)] hover:underline">
-                Go to Agents
-              </Link>
-            </p>
-          ) : null}
+          {/* #4005: the "How to buy" panel sits between the header and the
+              offers, and owns what the old connect-agent / agents-error
+              paragraphs above the table used to say — its step 1 names the
+              user's real agents (or the failed read), its step 2 names the
+              budget fix. Coming-soon and no-offer merchants show no panel. */}
+          <HowToBuyPanel
+            merchantName={merchant.name}
+            offers={offers}
+            agents={agents}
+            agentsLoading={agentsLoading}
+            agentsError={agentsError}
+            budgets={budgetRemaining?.budgets ?? []}
+            budgetsPending={merchantBudgetsLoading || budgetRemainingLoading}
+            budgetsError={merchantBudgetsError ?? budgetRemainingError}
+            merchantBudgets={merchantBudgets ?? []}
+            funding={funding}
+            fundActionAvailable={showFundAction && hasActiveEligibleAgent}
+            onSetBudget={() => setFundOpen(true)}
+            onRetryBudgets={() => {
+              void refetchMerchantBudgets()
+              void refetchBudgetRemaining()
+            }}
+          />
 
           {merchantBudgetsError ? (
             // #3331 review finding design-8: `useMerchantBudgets().error` was

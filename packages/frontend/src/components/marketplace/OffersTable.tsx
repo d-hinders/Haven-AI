@@ -1,8 +1,9 @@
 'use client'
 
-import { CopyButton } from '@/components/ui/CopyButton'
+import { useState } from 'react'
 import { Table } from '@/components/ui/Table'
-import { ANY_RECIPIENT_BUDGET_NOTE, ANY_RECIPIENT_BUDGET_TAG, agentInstruction, chainName, freshness, needsUnpinnedBudget, networkToChainId, withinBudget } from '@/lib/marketplace'
+import { ANY_RECIPIENT_BUDGET_NOTE, ANY_RECIPIENT_BUDGET_TAG, chainName, needsUnpinnedBudget, networkToChainId, withinBudget } from '@/lib/marketplace'
+import { OfferCopyButton, OfferInstructionText, OfferMeta } from './OfferInstruction'
 import { OfferRow } from './OfferRow'
 import type { CatalogEntry } from '@/hooks/useCatalog'
 
@@ -19,9 +20,10 @@ function BudgetHint({ budget }: { budget: boolean | null }) {
 
 /**
  * One offer as a stacked card — the phone-width shape of the table row
- * below (same cells, same copy, same budget hint, same copy button and
- * printed instruction), so the warning that prevents a declined payment is
- * never behind a horizontal scroll.
+ * below (same cells, same copy, same budget hint, same labelled copy button
+ * and the same rule for when the instruction is printed, #3998), so the
+ * warning that prevents a declined payment is never behind a horizontal
+ * scroll.
  */
 function OfferCard({
   entry,
@@ -33,8 +35,8 @@ function OfferCard({
   tagged: boolean
 }) {
   const degraded = entry.status === 'degraded'
-  const instruction = agentInstruction(entry)
   const chainId = networkToChainId(entry.network)
+  const [revealed, setRevealed] = useState(false)
   return (
     <li
       data-testid={`offer-card-${entry.id}`}
@@ -54,7 +56,7 @@ function OfferCard({
         )}
       </div>
       <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{entry.description}</p>
-      <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">{freshness(entry.verified_at)}</p>
+      <OfferMeta entry={entry} />
       {degraded && (
         <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
           Recently unreachable on our checks — a payment may need a retry until it recovers.
@@ -69,13 +71,8 @@ function OfferCard({
         <dt className="text-[var(--v2-ink-3)]">Network</dt>
         <dd className="text-[var(--v2-ink-2)]">{chainId === undefined ? '—' : chainName(chainId)}</dd>
       </dl>
-      <p className="mt-1 text-xs font-medium text-[var(--v2-ink-3)]">Copy instruction</p>
-      <div className="mt-1 flex items-center justify-between gap-2">
-        <code className="min-w-0 flex-1 whitespace-pre-wrap break-all text-xs text-[var(--v2-ink-2)]">
-          {instruction}
-        </code>
-        <CopyButton value={instruction} label={`agent instruction for ${entry.name}`} />
-      </div>
+      <OfferInstructionText entry={entry} revealed={revealed} />
+      <OfferCopyButton entry={entry} onCopyFailed={() => setRevealed(true)} className="mt-3 w-full" />
     </li>
   )
 }
@@ -83,8 +80,10 @@ function OfferCard({
 /**
  * The merchant page's ONE offers section (#3981, epic #3077): each offer is a
  * single row — a `Table` from `md` up, the stacked card below — carrying its
- * price, network and copy button, with the full paste-into-agent instruction
- * printed under the row (it becomes a payment, so it wraps, never truncates).
+ * price, network and a labelled "Copy instruction" button (#3998). The
+ * instruction itself is printed only where the user must see it: an offer
+ * whose instruction has a placeholder to replace, or after a refused copy
+ * (`OfferInstruction.tsx`).
  *
  * The offers on the user's own network (the chain of
  * `resolveDefaultAccount(user.accounts)`, passed as `defaultChainId`) come

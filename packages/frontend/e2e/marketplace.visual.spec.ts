@@ -13,10 +13,10 @@
  *   - `marketplace-grid`      — the grid with three merchants (live/verified,
  *     test, coming-soon), at desktop and mobile.
  *   - `merchant-page`         — a live merchant (Ampersend Demo API) with
- *     three offers, the "Pay this with Haven" block and the offers table, at
- *     desktop and mobile.
+ *     three offers in the one offers list — one row per offer with a labelled
+ *     Copy instruction button (#3981, #3998) — at desktop and mobile.
  *   - `merchant-coming-soon`  — a `coming_soon` merchant page (desktop only):
- *     no instruction block, no price, no offers table.
+ *     no offers list, no price, no copy button.
  *   - `merchant-test-merchant`— a live `is_test_merchant` merchant page at
  *     desktop AND mobile: the safety note that stops a real-money paste
  *     against demo goods once clipped at 390, so the phone frame is a gate.
@@ -173,10 +173,12 @@ const SCENARIOS: Scenario[] = [
       // No protocol jargon reaches the page (#3981).
       await expect(merchantPage.getByText(/EIP-3009/)).toHaveCount(0)
       await expect(merchantPage.getByText(/unpinned/)).toHaveCount(0)
-      // One copy button per offer per shape — the value it copies is the
-      // printed instruction, guarded byte-for-byte in the unit tests.
-      await expect(merchantPage.getByTestId('offers-table').getByLabel(/Copy agent instruction for/)).toHaveCount(3)
-      await expect(merchantPage.getByTestId('offers-list').getByLabel(/Copy agent instruction for/)).toHaveCount(3)
+      // One labelled copy button per offer per shape (#3998). The value it
+      // copies is `agentInstruction()`, guarded byte-for-byte in the unit
+      // tests; these offers have no placeholder, so it is not printed.
+      await expect(merchantPage.getByTestId('offers-table').getByLabel(/^Copy instruction for /)).toHaveCount(3)
+      await expect(merchantPage.getByTestId('offers-list').getByLabel(/^Copy instruction for /)).toHaveCount(3)
+      await expect(merchantPage.getByText(/^Pay https:\/\//)).toHaveCount(0)
       // Owner decision: a merchant page is not a seller entry point.
       await expect(merchantPage.getByText('List your payable service')).toHaveCount(0)
     },
@@ -193,7 +195,7 @@ const SCENARIOS: Scenario[] = [
       ).toHaveCount(1)
       await expect(merchantPage.getByRole('heading', { name: 'Pay this with Haven' })).toHaveCount(0)
       await expect(merchantPage.getByRole('heading', { name: 'Offers' })).toHaveCount(0)
-      await expect(merchantPage.getByLabel(/Copy agent instruction/)).toHaveCount(0)
+      await expect(merchantPage.getByLabel(/Copy instruction/)).toHaveCount(0)
       await expect(merchantPage.getByText('List your payable service')).toHaveCount(0)
     },
   },
@@ -212,13 +214,15 @@ const SCENARIOS: Scenario[] = [
       await expect(merchantPage.getByRole('heading', { name: 'Pay this with Haven' })).toHaveCount(0)
       // The one offer, by id in both its shapes (table row from md up, stacked
       // card below — a role query skips whichever is hidden), and its
-      // instruction, which names the tool.
+      // instruction: an MCP tool call with a placeholder, so it stays printed
+      // in the offer cell with its replace hint (#3998).
       await expect(merchantPage.getByTestId('offer-row-offer-nordshield-vpn')).toHaveCount(1)
       await expect(merchantPage.getByTestId('offer-card-offer-nordshield-vpn')).toHaveCount(1)
       // Labelled on the page itself, not only on the grid card (decision 6).
       await expect(merchantPage.getByTestId('test-merchant-note')).toBeInViewport()
       await expect(merchantPage.getByText(FROZEN_FRESHNESS).locator('visible=true').first()).toBeVisible()
       await expect(merchantPage.getByText(/via buy_vpn for/).locator('visible=true')).toHaveCount(1)
+      await expect(merchantPage.getByText('Replace <what you want> before sending.').locator('visible=true')).toHaveCount(1)
       // The fixture's one offer DOES advertise erc7710, so the payment note
       // must be absent here — the negative half of the merchant-page case.
       await expect(merchantPage.getByText(/budget that can pay any recipient/)).toHaveCount(0)

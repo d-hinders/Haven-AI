@@ -457,6 +457,32 @@ function DotIcon() {
   return <Icon icon={Circle} className="h-full w-full" />
 }
 
+/**
+ * The labelled CopyButton as its real caller uses it (#3998): the value is
+ * NOT printed, so a refused copy reveals it — the showcase models the rule
+ * its description states, rather than a no-op callback.
+ */
+function LabelledCopyDemo() {
+  const value = 'Pay https://services.ampersend.ai/api/fact and return the result'
+  const [revealed, setRevealed] = useState(false)
+  return (
+    <div className="mt-4">
+      <CopyButton
+        value={value}
+        label="instruction for Ampersend — fact"
+        text="Copy instruction"
+        onCopyFailed={() => setRevealed(true)}
+      />
+      {revealed ? (
+        <p className="mt-2 text-xs text-[var(--v2-ink-3)]" role="status">
+          <code className="select-all [overflow-wrap:anywhere] text-[var(--v2-ink-2)]">{value}</code> — copying was
+          blocked, so the value is shown instead.
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 export default function DesignSystemPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [dsFilterPillActive, setDsFilterPillActive] = useState<string | null>(null)
@@ -1486,7 +1512,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="CopyButton — the one copy affordance"
-        description="The inline check-pop copy button, extracted from <Address> on its second call site (#1878). Any value a user is expected to paste elsewhere gets this, never a hand-rolled button: it owns the hit area, the focus ring, the 1.5s confirmation, and the silent catch around navigator.clipboard — which rejects on insecure origins, denied permissions, and in most headless captures. Failing quietly is correct for an accelerator; the value stays on screen and selectable. Pass `label` lowercase and name the thing, not the widget — it reads as “Copy address”, then “Address copied”."
+        description="The inline check-pop copy button, extracted from <Address> on its second call site (#1878). Any value a user is expected to paste elsewhere gets this, never a hand-rolled button: it owns the hit area, the focus ring, the 1.5s confirmation, and the catch around navigator.clipboard — which rejects on insecure origins, denied permissions, and in most headless captures. Where the value is printed beside the button, failing quietly is correct: the value stays on screen and selectable. Pass `label` lowercase and name the thing, not the widget — it reads as “Copy address”, then “Address copied”. Two additions (#3998): `text` renders the labelled ghost-button shape for a value that is NOT printed (the marketplace’s “Copy instruction”) — keep the visible words at the start of the accessible name (“Copy instruction for Fact”); and `onCopyFailed`, which such a caller must pass to reveal the value when the clipboard refuses it."
       >
         <Card hover={false} className="p-5">
           <div className="flex flex-wrap items-center gap-6 text-sm text-[var(--v2-ink-2)]">
@@ -1499,8 +1525,9 @@ export default function DesignSystemPage() {
               <CopyButton value="sk_agent_a1b2c3" label="API key prefix" />
             </span>
           </div>
+          <LabelledCopyDemo />
           <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
-            Click one — the icon swaps to a success check for 1.5s, then reverts.
+            Click one — the icon swaps to a success check for 1.5s, then reverts; the labelled shape also reads “Copied”.
           </p>
         </Card>
       </Section>

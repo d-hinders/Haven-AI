@@ -1106,9 +1106,14 @@ a code change nobody has scoped yet, not a longer paragraph here.
 One member of that class is no longer hand-rolled: the **copy affordance** is now
 `components/ui/CopyButton.tsx` ([#1878](https://github.com/d-hinders/Haven-AI/issues/1878)),
 extracted from `Address` on its second call site per the pattern-absorption preflight. It owns
-the hit area, the focus ring, the 1.5s check-pop and the silent catch around
+the hit area, the focus ring, the 1.5s check-pop and the catch around
 `navigator.clipboard` — which rejects on insecure origins, denied permissions, and in most
-headless captures, so every hand-rolled copy has to rediscover that. `CodeBlock`'s copy button
+headless captures, so every hand-rolled copy has to rediscover that. The catch is silent by
+default, which is right only while the value is printed beside the button. Since
+[#3998](https://github.com/d-hinders/Haven-AI/issues/3998) it has a labelled shape (`text`, a
+ghost `Button` reading "Copy instruction" → "Copied", the visible words kept at the start of the
+accessible name) for a value that is *not* printed, and `onCopyFailed`, which such a caller must
+pass to reveal the value when the clipboard refuses it. `CodeBlock`'s copy button
 is still its own implementation and is the obvious next adopter; it is listed above as a blind
 spot of the *check*, which it remains, but it is no longer a shape with nowhere to go.
 

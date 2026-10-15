@@ -208,7 +208,7 @@ describe('MerchantPage', () => {
     expect(screen.getByRole('heading', { name: 'Offers' })).toBeDefined()
     expect(screen.queryByText('Pay this with Haven')).toBeNull()
     // One copy button per shape: the desktop row and the phone card.
-    expect(screen.getAllByLabelText('Copy agent instruction for Joke')).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'Copy instruction for Joke' })).toHaveLength(2)
     expect(screen.queryByText('List your payable service')).toBeNull()
     // The header is still the page's only h1.
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
@@ -268,7 +268,7 @@ describe('MerchantPage', () => {
     expect(screen.getByText('Coming soon — not payable yet')).toBeDefined()
     expect(screen.queryByText('Pay this with Haven')).toBeNull()
     expect(screen.queryByRole('heading', { name: 'Offers' })).toBeNull()
-    expect(screen.queryByLabelText(/Copy agent instruction/)).toBeNull()
+    expect(screen.queryByRole('button', { name: /Copy instruction/ })).toBeNull()
     expect(screen.queryByText('List your payable service')).toBeNull()
   })
 

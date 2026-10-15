@@ -95,12 +95,22 @@ export function listsTestnet(merchants: ReadonlyArray<Pick<Merchant, 'networks'>
 }
 
 /**
+ * Whether an offer's instruction carries a placeholder the user must replace
+ * before an agent can act on it — exactly the branch of `agentInstruction`
+ * that writes `<what you want>` (#3998). The merchant page keeps such an
+ * instruction printed in the row; every other instruction is copy-only.
+ */
+export function instructionNeedsEdit(entry: CatalogEntry): boolean {
+  return entry.protocol === 'mcp' && Boolean(entry.tool_name)
+}
+
+/**
  * The ready-to-paste instruction for an offer, phrased so the MCP tool set
  * routes it without extra prompting (mirrors the epic's acceptance phrasing:
  * "pay <url> via <tool> for ...").
  */
 export function agentInstruction(entry: CatalogEntry): string {
-  if (entry.protocol === 'mcp' && entry.tool_name) {
+  if (instructionNeedsEdit(entry) && entry.tool_name) {
     return `Pay ${entry.resource_url} via ${entry.tool_name} for <what you want>`
   }
   if (entry.rail === 'mpp') {

@@ -596,6 +596,16 @@ describe('DashboardClient', () => {
       },
     }
   }
+  /** A `pending_approval` agent (no budget): waits for setup, never completes step 2. */
+  function pendingPreview(id: string, name: string): DashboardAgentPreview {
+    return {
+      ...setUpAgentPreview(),
+      id,
+      name,
+      status: 'pending_approval',
+      budgets: [],
+    }
+  }
   function mockCompletedSetup() {
     mockBaseState([setUpAgentPreview()], {
       accounts: [FUNDED_ACCOUNT],
@@ -749,6 +759,59 @@ describe('DashboardClient', () => {
     // …so its "Needs setup" row is not repeated; the other agent keeps its row.
     expect(screen.queryByText('Beta is waiting to be set up')).not.toBeInTheDocument()
     expect(screen.getByText('Alpha is waiting to be set up')).toBeInTheDocument()
+  })
+
+  it('a completed step 2 names nobody; the waiting agent keeps its row — funded (#3976)', () => {
+    // One set-up agent (completes step 2) plus one pending_approval agent:
+    // the ticked step 2 used to read "Finish setting up Sdf" while the de-dup
+    // filter dropped the agent's only other mention. Now the guide names
+    // nobody and the row renders again.
+    mockBaseState([setUpAgentPreview(), pendingPreview('agent-sdf', 'Sdf')], {
+      accounts: [FUNDED_ACCOUNT],
+    })
+    mockUseAgents.mockReturnValue({
+      agents: [
+        { id: 'agent-1', name: 'Research agent', created_at: '2026-10-01T00:00:00Z' },
+        { id: 'agent-sdf', name: 'Sdf', created_at: '2026-10-08T00:00:00Z' },
+      ],
+      loading: false,
+      refetch: vi.fn(),
+    })
+
+    render(<DashboardClient />)
+
+    // Step 2 is complete — the guide names no pending agent…
+    expect(screen.getByText('agent-set-up')).toBeInTheDocument()
+    expect(screen.queryByText('pending-Sdf-0')).not.toBeInTheDocument()
+    // …and the agent's own row is back (not swallowed by the de-dup filter).
+    expect(screen.getByText('Sdf is waiting to be set up')).toBeInTheDocument()
+  })
+
+  it('a completed step 2 names nobody; the waiting agent keeps its row — unfunded focused view (#3976)', () => {
+    // The issue's measured case: an unfunded account renders the focused
+    // view, where the Agents card is held back — so before the fix the wrong
+    // "Finish setting up Sdf" title was the ONLY place the pending agent
+    // appeared at all.
+    mockBaseState([setUpAgentPreview(), pendingPreview('agent-sdf', 'Sdf')], {
+      accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: '0', funded: false }],
+    })
+    mockUseAgents.mockReturnValue({
+      agents: [
+        { id: 'agent-1', name: 'Research agent', created_at: '2026-10-01T00:00:00Z' },
+        { id: 'agent-sdf', name: 'Sdf', created_at: '2026-10-08T00:00:00Z' },
+      ],
+      loading: false,
+      refetch: vi.fn(),
+    })
+
+    render(<DashboardClient />)
+
+    expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
+    // Step 2 is complete and names nobody in the focused view…
+    expect(screen.getByText('agent-set-up')).toBeInTheDocument()
+    expect(screen.queryByText('pending-Sdf-0')).not.toBeInTheDocument()
+    // …so the row below the steps is where the agent is named.
+    expect(screen.getByText('Sdf is waiting to be set up')).toBeInTheDocument()
   })
 
   it('shows a focused first-run guide instead of the full dashboard when the account needs funds', () => {

@@ -137,6 +137,30 @@ describe('DashboardOnboardingGuide — step 2 and 3 (#3818)', () => {
     expect(props.onAddAgent).toHaveBeenCalledTimes(1)
   })
 
+  it('a completed step 2 names nobody — "Connect your first agent", no Finish setup (#3976)', () => {
+    // The regression: with a set-up agent completing the step AND a pending
+    // agent waiting, the ticked step still read "Finish setting up X" — and
+    // in the unfunded focused view that wrong title was the only place the
+    // waiting agent appeared at all. The caller is fixed at the source
+    // (`stepTwoAgent`), but the component is guarded too so the title is
+    // correct whatever a caller passes.
+    const { container } = renderGuide({
+      usdcFunded: true,
+      hasSetUpAgent: true,
+      pendingAgent: { id: 'agt-p', name: 'Sdf', moreCount: 0, awaiting: 'approval' as const },
+    })
+    // Step 2 is complete…
+    const statuses = [...container.querySelectorAll('li[data-status]')].map((li) => li.getAttribute('data-status'))
+    expect(statuses).toEqual(['complete', 'complete', 'active'])
+    // …titled with the step's own imperative default, exactly…
+    expect(screen.getByText('Connect your first agent')).toBeInTheDocument()
+    expect(document.body.textContent).toContain('An agent is connected with a budget.')
+    // …and no trace of a pending-agent ask anywhere in the step.
+    expect(document.body.textContent).not.toContain('Finish setting up')
+    expect(screen.queryByRole('link', { name: 'Finish setup' })).not.toBeInTheDocument()
+    expect(document.body.textContent).not.toContain('Approve its budget so it can pay.')
+  })
+
   it('an agent set up BEFORE funding: step 3 is available, not a second highlighted step', () => {
     const { container } = renderGuide({ usdcFunded: false, hasSetUpAgent: true })
     const statuses = [...container.querySelectorAll('li[data-status]')].map((li) => li.getAttribute('data-status'))

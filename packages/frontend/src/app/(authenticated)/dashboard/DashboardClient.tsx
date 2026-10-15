@@ -126,6 +126,11 @@ export default function DashboardClient() {
   const usdcFunded = firstRun?.usdcFunded ?? null
   const hasSetUpAgent = Boolean(firstRun?.hasSetUpAgent)
   const pendingSetupAgent = firstRun?.pendingAgent ?? null
+  // #3976: the agent step 2 names, only while step 2 is OPEN. Once a set-up
+  // agent completes the step, it names nobody — the waiting agent's own
+  // "X is waiting to be set up" row renders instead (in the focused view
+  // it is the only place that names it).
+  const stepTwoAgent = hasSetUpAgent ? null : pendingSetupAgent
   // #2534: the suggested amount for step 1, from the endpoint `haven wallets
   // funding` prints. Fetched only while the account is known to hold no USDC.
   const { funding: fundingForOnboarding } = useAccountFunding(
@@ -389,14 +394,17 @@ export default function DashboardClient() {
         : null,
     [overview, budgetRemaining, budgetRemainingLoading],
   )
-  // The agent step 2 names is not listed twice: its "Needs setup" row drops
-  // while the steps show. Other waiting agents keep theirs.
+  // The agent step 2 names is not listed twice: while the steps show AND step
+  // 2 is open, its "Needs setup" row drops. Other waiting agents keep theirs.
+  // #3976: with step 2 complete, `stepTwoAgent` is null, so nothing is
+  // dropped and the waiting agent's row renders again (the guide no longer
+  // names it, either).
   const cardItems = useMemo(
     () =>
-      showSetupSteps && pendingSetupAgent
-        ? attentionItems.filter((item) => item.id !== `needs-setup:${pendingSetupAgent.id}`)
+      showSetupSteps && stepTwoAgent
+        ? attentionItems.filter((item) => item.id !== `needs-setup:${stepTwoAgent.id}`)
         : attentionItems,
-    [attentionItems, showSetupSteps, pendingSetupAgent],
+    [attentionItems, showSetupSteps, stepTwoAgent],
   )
 
   const attentionVisible = Boolean(overview) || Boolean(overviewError)
@@ -537,7 +545,7 @@ export default function DashboardClient() {
           <DashboardOnboardingGuide
             usdcFunded={usdcFunded}
             hasSetUpAgent={hasSetUpAgent}
-            pendingAgent={pendingSetupAgent}
+            pendingAgent={stepTwoAgent}
             hasFirstAgentPayment={hasFirstAgentPayment}
             funding={fundingForOnboarding}
             onAddFunds={() => openHeroAction('add-funds')}
@@ -591,7 +599,10 @@ export default function DashboardClient() {
           The old hero-plus-aside row put this card ("Needs you" then) in a side column beside
           the balance. A brand-new, unfunded user (the focused view) sees the
           money panel and the guide only; the backup and pending-agent items
-          that still apply render below the guide's steps (#3808). */}
+          that still apply render below the guide's steps (#3808). #3976:
+          once a set-up agent completes step 2, that set includes the waiting
+          agent's "Needs setup" row — the completed guide names nobody, so
+          the row is the only place the agent is named. */}
       <div className="space-y-6">
         {moneyPanel}
         {attentionPanel}

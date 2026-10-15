@@ -4,9 +4,12 @@
  * Modes:
  *   --list           print the loaded tasks and exit (no agent, no chain).
  *   (default)        run the suite: resolve every task against the live
- *                    budget, run k trials per task through the adapter
- *                    (Hermes, `QA_EVAL_HERMES_COMMAND`), apply the graders,
- *                    write the JSON report + readable summary.
+ *                    budget, run k trials per task through the adapter lane
+ *                    (`QA_EVAL_ADAPTER`: `hermes` default, `claude-code` for
+ *                    #3959's lane), apply the graders, write the JSON report
+ *                    + readable summary + the `$GITHUB_STEP_SUMMARY` markdown.
+ *   --limit=N        run only the FIRST N tasks in sequence order — the
+ *                    5-task cost-pilot / PR-subset slice (#3959).
  *
  * The run needs: QA_API_URL, the eval agent's API key (QA_DELEGATION_AGENT_API_KEY
  * by convention — the runbook names the exact env), the recipient
@@ -20,9 +23,16 @@
 
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import {
+  ClaudeCodeAdapter,
+  claudeCodeConfigFromEnv,
+  writeSessionEvidence,
+  type ClaudeCodeSession,
+} from './claude-code.js'
 import { hermesAdapterConfigFromEnv, runHermesTask } from './hermes.js'
 import { anyTaskUsesTarget, loadTasks, orderTasksForSequence, resolveTask } from './tasks.js'
-import { renderSummary, runSuite, type EvalAdapter } from './runner.js'
+import { renderSummary, runSuite, type EvalAdapter, type HostedMcpInfo } from './runner.js'
+import { renderMarkdownSummary } from './summary.js'
 import { observerProvider, describeObserverRpc } from '../lib/chain.js'
 import { HavenApi } from '../lib/haven-api.js'
 import { readOnchainBudget } from '../lib/delegation-budget.js'
@@ -59,6 +69,15 @@ async function main() {
     console.error('--trials must be a positive integer')
     process.exit(2)
   }
+  // The cost pilot / PR subset slice (#3959): the FIRST N tasks in sequence
+  // order — slice tasks first, the budget-draining full-remaining send last,
+  // so a 5-task pilot cannot zero the period budget on task one.
+  const limitRaw = args.find((a) => a.startsWith('--limit='))?.split('=')[1]
+  const limit = limitRaw === undefined ? undefined : Number(limitRaw)
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+    console.error('--limit must be a positive integer')
+    process.exit(2)
+  }
 
   const cfg = loadQaConfig()
   const apiKey = env('QA_EVAL_AGENT_API_KEY')
@@ -67,8 +86,10 @@ async function main() {
   // The x402 URL tasks render {target}, not {recipient}: an address and an
   // HTTP target cannot be one env var. Required only when a loaded task
   // actually renders it, and checked BEFORE the first agent session.
+  const ordered = orderTasksForSequence(tasks)
+  const selected = limit !== undefined ? ordered.slice(0, limit) : ordered
   const x402Target = process.env.QA_EVAL_X402_TARGET?.trim() || undefined
-  if (anyTaskUsesTarget(tasks) && !x402Target) {
+  if (anyTaskUsesTarget(selected) && !x402Target) {
     console.error('Missing QA_EVAL_X402_TARGET — a loaded task renders {target} (the x402 URL tasks); see docs/operations/agent-evals.md.')
     process.exit(2)
   }
@@ -86,7 +107,7 @@ async function main() {
   const startedAtBlock = await provider.getBlockNumber()
 
   const resolved = []
-  for (const task of orderTasksForSequence(tasks)) {
+  for (const task of selected) {
     const r = await resolveTask(task, { budget: budgetSource, recipient, x402Target, agentAccount, startedAtBlock })
     if ('error' in r) {
       console.error(r.error)
@@ -95,11 +116,35 @@ async function main() {
     resolved.push(r.resolved)
   }
 
-  const hermesCfg = hermesAdapterConfigFromEnv()
-  const adapter: EvalAdapter = {
-    name: 'hermes',
-    runTask: (task, trial) => runHermesTask(hermesCfg, { taskId: task.task.id, trial, instruction: task.instruction }),
+  // The lane switch (#3959): `claude-code` runs the SAME task files and
+  // graders through `claude -p`; `hermes` (default) is lane 1. Both refuse to
+  // invent their command — each lane's template is caller-owned env.
+  const adapterKind = process.env.QA_EVAL_ADAPTER?.trim() || 'hermes'
+  if (!['hermes', 'claude-code'].includes(adapterKind)) {
+    console.error(`QA_EVAL_ADAPTER must be "hermes" or "claude-code", got "${adapterKind}"`)
+    process.exit(2)
   }
+  let adapter: EvalAdapter
+  if (adapterKind === 'claude-code') {
+    adapter = new ClaudeCodeAdapter(claudeCodeConfigFromEnv())
+  } else {
+    const hermesCfg = hermesAdapterConfigFromEnv()
+    adapter = {
+      name: 'hermes',
+      runTask: (task, trial) => runHermesTask(hermesCfg, { taskId: task.task.id, trial, instruction: task.instruction }),
+    }
+  }
+
+  // Where the hosted MCP leg ran (#3959): the subset names the commit it
+  // built from the PR checkout; a dev-deployed run names the URL and says so.
+  const hostedMcpSource = args.find((a) => a.startsWith('--hosted-mcp-source='))?.split('=')[1]
+  const hostedMcp: HostedMcpInfo | undefined = hostedMcpSource
+    ? {
+        source: hostedMcpSource === 'pr-checkout' ? 'pr-checkout' : 'dev-deployed',
+        url: args.find((a) => a.startsWith('--hosted-mcp-url='))?.split('=')[1],
+        commit: args.find((a) => a.startsWith('--hosted-mcp-commit='))?.split('=')[1],
+      }
+    : undefined
 
   console.log(`Running ${resolved.length} tasks × ${trials} trials via ${adapter.name}.`)
   console.log(`Observer: ${describeObserverRpc()}; chain evidence reads from block ${startedAtBlock}.`)
@@ -107,6 +152,7 @@ async function main() {
     resolved,
     adapter,
     trials,
+    hostedMcp,
     graderContext: {
       probeTransfer: async (expected) => {
         const { proveUsdcTransferSince } = await import('../lib/chain.js')
@@ -118,10 +164,30 @@ async function main() {
     },
   })
 
+  // Cost + model enrichment (the Claude Code lane's `total_cost_usd`, #3959):
+  // the runner stays adapter-agnostic, so the CLI merges the adapter's
+  // per-session cost records into the report before it is written.
+  if (adapter instanceof ClaudeCodeAdapter && adapter.sessions.length > 0) {
+    const byKey = new Map<string, ClaudeCodeSession>(adapter.sessions.map((s) => [`${s.taskId}:${s.trial}`, s]))
+    for (const task of report.tasks) {
+      for (const trial of task.trials) {
+        const session = byKey.get(`${task.id}:${trial.trial}`)
+        if (session?.costUsd !== undefined) trial.costUsd = session.costUsd
+      }
+    }
+    report.totalCostUsd = adapter.sessions.reduce((acc, s) => acc + (s.costUsd ?? 0), 0)
+    report.model = [...adapter.sessions].reverse().find((s) => s.model !== undefined)?.model
+    // The pilot's per-session evidence: cost + wall time + model per session.
+    await writeSessionEvidence(adapter.sessions, resolve(`${outPath}.sessions.json`))
+  }
+
   await writeFile(resolve(outPath), JSON.stringify(report, null, 2))
   const summary = renderSummary(report)
   console.log(summary)
   await writeFile(resolve(`${outPath}.summary.txt`), summary + '\n')
+  // The $GITHUB_STEP_SUMMARY half (#3959 scope 7): the agent-evals workflow
+  // appends this file; readable without opening the artifact.
+  await writeFile(resolve(`${outPath}.summary.md`), renderMarkdownSummary(report))
   const anyFail = report.tasks.some((t) => !t.passAll)
   process.exit(anyFail ? 1 : 0)
 }

@@ -1,8 +1,8 @@
 'use client'
 
-import { StatusBadge } from '@/components/ui/StatusBadge'
+import { CopyButton } from '@/components/ui/CopyButton'
 import { Table } from '@/components/ui/Table'
-import { chainName, freshness, networkToChainId, VERIFIED_MEANING, withinBudget } from '@/lib/marketplace'
+import { ANY_RECIPIENT_BUDGET_NOTE, ANY_RECIPIENT_BUDGET_TAG, agentInstruction, chainName, freshness, needsUnpinnedBudget, networkToChainId, withinBudget } from '@/lib/marketplace'
 import { OfferRow } from './OfferRow'
 import type { CatalogEntry } from '@/hooks/useCatalog'
 
@@ -19,12 +19,21 @@ function BudgetHint({ budget }: { budget: boolean | null }) {
 
 /**
  * One offer as a stacked card — the phone-width shape of the table row
- * below (same cells, same copy, same budget hint), so the warning that
- * prevents a declined payment is never behind a horizontal scroll.
+ * below (same cells, same copy, same budget hint, same copy button and
+ * printed instruction), so the warning that prevents a declined payment is
+ * never behind a horizontal scroll.
  */
-function OfferCard({ entry, budget }: { entry: CatalogEntry; budget: boolean | null }) {
+function OfferCard({
+  entry,
+  budget,
+  tagged,
+}: {
+  entry: CatalogEntry
+  budget: boolean | null
+  tagged: boolean
+}) {
   const degraded = entry.status === 'degraded'
-  const method = entry.protocol === 'mcp' ? entry.tool_name : entry.rail
+  const instruction = agentInstruction(entry)
   const chainId = networkToChainId(entry.network)
   return (
     <li
@@ -38,15 +47,14 @@ function OfferCard({ entry, budget }: { entry: CatalogEntry; budget: boolean | n
             Limited availability
           </span>
         )}
-        {entry.verified_payable && (
-          <span title={VERIFIED_MEANING}>
-            <StatusBadge tone="success" className="uppercase tracking-wide">
-              Verified
-            </StatusBadge>
+        {tagged && (
+          <span className="rounded-full bg-[var(--v2-warning-soft)] px-2 py-0.5 text-xs font-medium text-[var(--v2-warning)]">
+            {ANY_RECIPIENT_BUDGET_TAG}
           </span>
         )}
       </div>
       <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{entry.description}</p>
+      <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">{freshness(entry.verified_at)}</p>
       {degraded && (
         <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
           Recently unreachable on our checks — a payment may need a retry until it recovers.
@@ -58,52 +66,130 @@ function OfferCard({ entry, budget }: { entry: CatalogEntry; budget: boolean | n
           {entry.price_display ?? 'Price on request'}
           <BudgetHint budget={budget} />
         </dd>
-        <dt className="text-[var(--v2-ink-3)]">Method</dt>
-        <dd className="text-[var(--v2-ink-2)]">{method}</dd>
         <dt className="text-[var(--v2-ink-3)]">Network</dt>
         <dd className="text-[var(--v2-ink-2)]">{chainId === undefined ? '—' : chainName(chainId)}</dd>
-        <dt className="text-[var(--v2-ink-3)]">Freshness</dt>
-        <dd className="text-[var(--v2-ink-3)]">{freshness(entry.verified_at)}</dd>
       </dl>
-      <p className="mt-1 break-all text-xs text-[var(--v2-ink-3)]">{entry.resource_url}</p>
+      <p className="mt-1 text-xs font-medium text-[var(--v2-ink-3)]">Copy instruction</p>
+      <div className="mt-1 flex items-center justify-between gap-2">
+        <code className="min-w-0 flex-1 whitespace-pre-wrap break-all text-xs text-[var(--v2-ink-2)]">
+          {instruction}
+        </code>
+        <CopyButton value={instruction} label={`agent instruction for ${entry.name}`} />
+      </div>
     </li>
   )
 }
 
 /**
- * The merchant page's offers (#3079, epic #3077). From `md` up: the dense,
- * non-collapsing table. Below `md`: one stacked card per offer — a 720px
- * table behind `overflow-x-auto` at 390 showed one column, a header cut
- * mid-word and no scroll affordance, and hid the budget warning off-screen.
- * Both render the same offers and the same `withinBudget` answer.
+ * The merchant page's ONE offers section (#3981, epic #3077): each offer is a
+ * single row — a `Table` from `md` up, the stacked card below — carrying its
+ * price, network and copy button, with the full paste-into-agent instruction
+ * printed under the row (it becomes a payment, so it wraps, never truncates).
+ *
+ * The offers on the user's own network (the chain of
+ * `resolveDefaultAccount(user.accounts)`, passed as `defaultChainId`) come
+ * first; offers on other networks sit behind an "Other networks (n)"
+ * disclosure in BOTH shapes. When the user's default network serves none of
+ * the merchant's offers, everything renders flat.
  */
-export function OffersTable({ offers, agents }: { offers: CatalogEntry[]; agents: Agents }) {
+export function OffersTable({
+  offers,
+  agents,
+  defaultChainId = null,
+}: {
+  offers: CatalogEntry[]
+  agents: Agents
+  defaultChainId?: number | null
+}) {
+  if (offers.length === 0) return null
+
+  const chainIdOf = (offer: CatalogEntry) => networkToChainId(offer.network)
+  const here = defaultChainId === null ? [] : offers.filter((o) => chainIdOf(o) === defaultChainId)
+  const others = here.length > 0 ? offers.filter((o) => chainIdOf(o) !== defaultChainId) : []
+  const visible = here.length > 0 ? here : offers
+
+  const bridgeOnly = offers.filter((o) => needsUnpinnedBudget(o.asset_transfer_methods))
+  const mixed = bridgeOnly.length > 0 && bridgeOnly.length < offers.length
+  const tagged = (offer: CatalogEntry) => mixed && needsUnpinnedBudget(offer.asset_transfer_methods)
+  const note =
+    bridgeOnly.length > 0
+      ? mixed
+        ? `${ANY_RECIPIENT_BUDGET_NOTE} Offers marked "${ANY_RECIPIENT_BUDGET_TAG}" need this.`
+        : ANY_RECIPIENT_BUDGET_NOTE
+      : null
+
   return (
-    <>
+    <div className="space-y-3">
+      {note && (
+        <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]" data-testid="any-recipient-budget-note">
+          {note}
+        </p>
+      )}
+
       <ul className="space-y-2 md:hidden" data-testid="offers-list">
-        {offers.map((offer) => (
-          <OfferCard key={offer.id} entry={offer} budget={withinBudget(offer, agents)} />
+        {visible.map((offer) => (
+          <OfferCard key={offer.id} entry={offer} budget={withinBudget(offer, agents)} tagged={tagged(offer)} />
         ))}
+        {others.length > 0 && (
+          <li>
+            <details data-testid="other-networks" className="rounded-lg border border-[var(--v2-border)] p-3">
+              <summary className="cursor-pointer text-sm font-medium text-[var(--v2-ink)]">
+                Other networks ({others.length})
+              </summary>
+              <ul className="mt-2 space-y-2">
+                {others.map((offer) => (
+                  <OfferCard key={offer.id} entry={offer} budget={withinBudget(offer, agents)} tagged={tagged(offer)} />
+                ))}
+              </ul>
+            </details>
+          </li>
+        )}
       </ul>
+
       <div className="hidden overflow-x-auto rounded-xl border border-[var(--v2-border)] md:block" data-testid="offers-table">
-        <Table className="min-w-[720px]">
+        <Table className="min-w-[560px]">
           <Table.Head collapseWhenNarrow={false}>
             <tr>
               <Table.HeaderCell align="left">Offer</Table.HeaderCell>
-              <Table.HeaderCell align="left">Method</Table.HeaderCell>
-              <Table.HeaderCell align="left">Description</Table.HeaderCell>
               <Table.HeaderCell align="left">Price</Table.HeaderCell>
               <Table.HeaderCell align="left">Network</Table.HeaderCell>
-              <Table.HeaderCell align="left">Freshness</Table.HeaderCell>
+              <Table.HeaderCell align="left">
+                <span className="sr-only">Copy instruction</span>
+              </Table.HeaderCell>
             </tr>
           </Table.Head>
           <Table.Body>
-            {offers.map((offer) => (
-              <OfferRow key={offer.id} entry={offer} budget={withinBudget(offer, agents)} />
+            {visible.map((offer) => (
+              <OfferRow key={offer.id} entry={offer} budget={withinBudget(offer, agents)} tagged={tagged(offer)} />
             ))}
+            {others.length > 0 && (
+              <tr>
+                <td colSpan={4} className="px-4 py-3">
+                  <details data-testid="other-networks" className="text-sm">
+                    <summary className="cursor-pointer font-medium text-[var(--v2-ink)]">
+                      Other networks ({others.length})
+                    </summary>
+                    <div className="mt-2">
+                      <Table className="min-w-[560px]">
+                        <Table.Body>
+                          {others.map((offer) => (
+                            <OfferRow
+                              key={offer.id}
+                              entry={offer}
+                              budget={withinBudget(offer, agents)}
+                              tagged={tagged(offer)}
+                            />
+                          ))}
+                        </Table.Body>
+                      </Table>
+                    </div>
+                  </details>
+                </td>
+              </tr>
+            )}
           </Table.Body>
         </Table>
       </div>
-    </>
+    </div>
   )
 }

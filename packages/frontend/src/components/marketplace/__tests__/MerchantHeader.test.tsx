@@ -46,6 +46,14 @@ describe('MerchantHeader', () => {
     expect(screen.queryByText(/Haven test merchant/)).toBeNull()
   })
 
+  it('renders the actions slot on the header\'s right-hand side, and nothing extra when absent', () => {
+    const { unmount } = render(<MerchantHeader merchant={merchant()} actions={<button type="button">Fund this merchant</button>} />)
+    expect(screen.getByRole('button', { name: 'Fund this merchant' })).toBeDefined()
+    unmount()
+    render(<MerchantHeader merchant={merchant()} />)
+    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
+  })
+
   it('shows the Verified badge with the honest claim only when verified payable', () => {
     const { unmount } = render(<MerchantHeader merchant={merchant()} />)
     expect(screen.getByText('Verified')).toBeDefined()

@@ -142,35 +142,43 @@ const SCENARIOS: Scenario[] = [
     path: `/marketplace/${ampersendDemoApi.slug}`,
     viewports: VIEWPORTS,
     heading: ampersendDemoApi.name,
+    // #3981: the offers on the user's own network come first — a Base Sepolia
+    // default account (the dev-environment shape) keeps Fact and Joke on
+    // screen and Quote behind the "Other networks (1)" disclosure.
+    setup: (page) => serveAddFundsAccount(page, 84532),
     async assert(page) {
       const merchantPage = page.getByTestId('merchant-page')
       await expect(merchantPage.getByRole('link', { name: 'Back to Marketplace' })).toBeVisible()
-      await expect(merchantPage.getByRole('heading', { name: 'Pay this with Haven' })).toHaveCount(1)
+      // One offers section (#3981): no "Pay this with Haven" heading.
+      await expect(merchantPage.getByRole('heading', { name: 'Pay this with Haven' })).toHaveCount(0)
       await expect(merchantPage.getByRole('heading', { name: 'Offers' })).toHaveCount(1)
-      // `exact` — a substring match also hits the merchant description ("Fact,
-      // joke and quote endpoints") and each offer's own description.
-      // Each offer is on screen twice by design: its table row and its
-      // labelled instruction block — one of each, located by id.
+      // Each offer is ONE row per shape: desktop table row and phone card.
+      // Fact and Joke are on the user's network; Quote sits in the disclosure
+      // (its rows are in the DOM either way — the disclosure is collapsed).
       for (const id of ['offer-ampersend-fact', 'offer-ampersend-joke', 'offer-ampersend-quote']) {
         await expect(merchantPage.getByTestId(`offer-row-${id}`)).toHaveCount(1)
-        await expect(merchantPage.getByTestId(`pay-block-${id}`)).toHaveCount(1)
+        await expect(merchantPage.getByTestId(`offer-card-${id}`)).toHaveCount(1)
       }
+      await expect(merchantPage.getByText('Other networks (1)')).toHaveCount(2)
       // The frozen clock is in effect (see FROZEN_NOW). The string renders in
       // both the table and the phone-width list; only one is visible at a time.
       await expect(merchantPage.getByText(FROZEN_FRESHNESS).locator('visible=true').first()).toBeVisible()
       // The network column shows the chain's NAME, never the raw CAIP-2 id.
       await expect(merchantPage.getByText('eip155:')).toHaveCount(0)
       // None of the three offers advertises erc7710 (asset_transfer_methods:
-      // null in the fixture), so the merchant-level unpinned-budget line is
-      // present — ONCE, not once per offer — and no offer is tagged.
-      await expect(
-        merchantPage.getByText(
-          'This merchant settles by EIP-3009 — the paying agent needs an unpinned budget.',
-          { exact: true },
-        ),
-      ).toHaveCount(1)
-      await expect(merchantPage.getByText('unpinned budget', { exact: true })).toHaveCount(0)
-      await expect(merchantPage.getByLabel(/Copy agent instruction/)).toHaveCount(3)
+      // null in the fixture), so the offer-level payment note is present —
+      // ONCE — and no offer carries the mixed-merchant tag.
+      await expect(merchantPage.getByTestId('any-recipient-budget-note')).toHaveCount(1)
+      await expect(merchantPage.getByText(/any-recipient budget/)).toHaveCount(0)
+      // No protocol jargon reaches the page (#3981).
+      await expect(merchantPage.getByText(/EIP-3009/)).toHaveCount(0)
+      await expect(merchantPage.getByText(/unpinned/)).toHaveCount(0)
+      // One copy button per offer per shape — the value it copies is the
+      // printed instruction, guarded byte-for-byte in the unit tests.
+      await expect(merchantPage.getByTestId('offers-table').getByLabel(/Copy agent instruction for/)).toHaveCount(3)
+      await expect(merchantPage.getByTestId('offers-list').getByLabel(/Copy agent instruction for/)).toHaveCount(3)
+      // Owner decision: a merchant page is not a seller entry point.
+      await expect(merchantPage.getByText('List your payable service')).toHaveCount(0)
     },
   },
   {
@@ -186,6 +194,7 @@ const SCENARIOS: Scenario[] = [
       await expect(merchantPage.getByRole('heading', { name: 'Pay this with Haven' })).toHaveCount(0)
       await expect(merchantPage.getByRole('heading', { name: 'Offers' })).toHaveCount(0)
       await expect(merchantPage.getByLabel(/Copy agent instruction/)).toHaveCount(0)
+      await expect(merchantPage.getByText('List your payable service')).toHaveCount(0)
     },
   },
   {
@@ -195,9 +204,12 @@ const SCENARIOS: Scenario[] = [
     // real-money paste against demo goods, and a badge once clipped it at 390.
     viewports: VIEWPORTS,
     heading: havenDemoStore.name,
+    // #3981: the one offer is on Base Sepolia — seed the user's default
+    // account there so it renders as the user's network, not in a disclosure.
+    setup: (page) => serveAddFundsAccount(page, 84532),
     async assert(page) {
       const merchantPage = page.getByTestId('merchant-page')
-      await expect(merchantPage.getByRole('heading', { name: 'Pay this with Haven' })).toHaveCount(1)
+      await expect(merchantPage.getByRole('heading', { name: 'Pay this with Haven' })).toHaveCount(0)
       // The one offer, by id in both its shapes (table row from md up, stacked
       // card below — a role query skips whichever is hidden), and its
       // instruction, which names the tool.
@@ -206,14 +218,10 @@ const SCENARIOS: Scenario[] = [
       // Labelled on the page itself, not only on the grid card (decision 6).
       await expect(merchantPage.getByTestId('test-merchant-note')).toBeInViewport()
       await expect(merchantPage.getByText(FROZEN_FRESHNESS).locator('visible=true').first()).toBeVisible()
-      await expect(merchantPage.getByText(/via buy_vpn for/)).toHaveCount(1)
-      // The fixture's one offer DOES advertise erc7710, so the unpinned-budget
-      // line must be absent here — the negative half of the merchant-page case.
-      await expect(
-        merchantPage.getByText(
-          'This merchant settles by EIP-3009 — the paying agent needs an unpinned budget.',
-        ),
-      ).toHaveCount(0)
+      await expect(merchantPage.getByText(/via buy_vpn for/).locator('visible=true')).toHaveCount(1)
+      // The fixture's one offer DOES advertise erc7710, so the payment note
+      // must be absent here — the negative half of the merchant-page case.
+      await expect(merchantPage.getByText(/budget that can pay any recipient/)).toHaveCount(0)
     },
   },
   {
@@ -459,6 +467,9 @@ test.describe('marketplace visual regression', () => {
         },
       ],
     })
+    // #3981: the offer is on Base Sepolia — seed the default account there so
+    // it renders as the user's network rather than inside the disclosure.
+    await serveAddFundsAccount(page, 84532)
 
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.clock.setFixedTime(FROZEN_NOW)

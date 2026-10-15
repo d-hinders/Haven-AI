@@ -10,12 +10,12 @@ import { Button } from '@/components/ui/Button'
 import Link from 'next/link'
 import { MerchantHeader } from '@/components/marketplace/MerchantHeader'
 import { OffersTable } from '@/components/marketplace/OffersTable'
-import { PayWithHavenBlock } from '@/components/marketplace/PayWithHavenBlock'
 import FundMerchantModal, { eligibleFundingAgents } from '@/components/marketplace/FundMerchantModal'
 import { MerchantBudgetsList } from '@/components/marketplace/MerchantBudgetsList'
-import CatalogSubmitModal from '@/components/CatalogSubmitModal'
 import { useAgents } from '@/hooks/useAgents'
 import { chainName } from '@/lib/marketplace'
+import { useAuth } from '@/context/AuthContext'
+import { resolveDefaultAccount } from '@/lib/default-account'
 import { useMerchant } from '@/hooks/useCatalog'
 import { useMerchantBudgets } from '@/hooks/useMerchantBudgets'
 
@@ -41,8 +41,12 @@ export default function MerchantPage() {
   const slug = params.slug
   const { merchant, offers, funding = [], loading, error, notFound, refetch } = useMerchant(slug)
   const { agents, loading: agentsLoading, error: agentsError } = useAgents()
-  const [submitOpen, setSubmitOpen] = useState(false)
   const [fundOpen, setFundOpen] = useState(false)
+  // #3981: the offers on the user's own network come first — the chain of the
+  // account a surface falls back to when it needs one (`resolveDefaultAccount`),
+  // the same read the marketplace grid's network filter starts from.
+  const { user } = useAuth()
+  const defaultChainId = resolveDefaultAccount(user?.accounts)?.chain_id ?? null
   const comingSoonForBudgets = merchant?.listing_status === 'coming_soon'
   const {
     budgets: merchantBudgets,
@@ -127,7 +131,6 @@ export default function MerchantPage() {
   const pinnableFunding = verifiedFunding.filter((f) => f.erc7710)
   const hasEligibleAgent = eligibleFundingAgents(agents, funding).length > 0
   const showFundAction = !comingSoon && pinnableFunding.length > 0 && hasEligibleAgent
-  const showOpenBudgetNote = !comingSoon && pinnableFunding.length === 0 && verifiedFunding.length > 0
   // Round 2 review finding R2-5 (design 3): the merchant CAN be pinned to, but
   // none of the owner's own agents qualify (wrong chain, revoked, archived) —
   // the page used to show nothing at all where the action would be. Gated on
@@ -159,8 +162,24 @@ export default function MerchantPage() {
     <div className="max-w-5xl space-y-6" data-testid="merchant-page">
       <BackToMarketplace />
       {/* The merchant header IS the page header — one h1 (a second `PageHeader`
-          made the name two headings, which the visual spec's anchor refused). */}
-      <MerchantHeader merchant={merchant} />
+          made the name two headings, which the visual spec's anchor refused).
+          #3981: "Fund this merchant" sits in its right-hand actions slot, the
+          way `PageHeader` places actions. */}
+      <MerchantHeader
+        merchant={merchant}
+        actions={
+          showFundAction ? (
+            <div className="flex flex-col items-start gap-1 sm:items-end">
+              <Button size="sm" onClick={() => setFundOpen(true)}>
+                Fund this merchant
+              </Button>
+              <p className="text-xs text-[var(--v2-ink-3)]">
+                Give one of your agents a budget that pays only {merchant.name}.
+              </p>
+            </div>
+          ) : undefined
+        }
+      />
 
       {comingSoon ? (
         <EmptyState
@@ -174,21 +193,7 @@ export default function MerchantPage() {
         />
       ) : (
         <>
-          <section>
-            <h2 className="mb-2 text-sm font-semibold text-[var(--v2-ink)]">Pay this with Haven</h2>
-            <PayWithHavenBlock offers={offers} />
-          </section>
-
-          {showFundAction ? (
-            <div>
-              <Button size="sm" onClick={() => setFundOpen(true)}>
-                Fund this merchant
-              </Button>
-              <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-                Give one of your agents a budget that pays only {merchant.name}.
-              </p>
-            </div>
-          ) : showAgentsErrorNote ? (
+          {showAgentsErrorNote ? (
             // Design review round 3, finding C: a failed agents read must not
             // claim "Connect an agent" — that would tell an owner who already
             // has an eligible agent to connect a new one, over a read that
@@ -203,16 +208,6 @@ export default function MerchantPage() {
                 Go to Agents
               </Link>
             </p>
-          ) : showOpenBudgetNote ? (
-            // #3331 review finding design-12: plain wording, no "pinning it to
-            // a recipient", and its own small heading rather than a bare line.
-            <div className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
-              <p className="text-xs font-medium text-[var(--v2-ink-3)]">How this merchant is paid</p>
-              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                Payments to {merchant.name} use an agent's open budget, not a merchant-only one — keep that budget
-                open on the agent's page.
-              </p>
-            </div>
           ) : null}
 
           {merchantBudgetsError ? (
@@ -231,22 +226,10 @@ export default function MerchantPage() {
 
           <section>
             <h2 className="mb-2 text-sm font-semibold text-[var(--v2-ink)]">Offers</h2>
-            <OffersTable offers={offers} agents={agents} />
+            <OffersTable offers={offers} agents={agents} defaultChainId={defaultChainId} />
           </section>
         </>
       )}
-
-      <div>
-        <Button variant="ghost" size="sm" onClick={() => setSubmitOpen(true)}>
-          List your payable service
-        </Button>
-      </div>
-
-      <CatalogSubmitModal
-        open={submitOpen}
-        onClose={() => setSubmitOpen(false)}
-        onVerifiedPayable={() => void refetch()}
-      />
 
       {fundOpen ? (
         <FundMerchantModal

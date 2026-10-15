@@ -21,7 +21,6 @@ covers:
   - packages/frontend/src/components/marketplace/MerchantHeader.tsx
   - packages/frontend/src/components/marketplace/OffersTable.tsx
   - packages/frontend/src/components/marketplace/OfferRow.tsx
-  - packages/frontend/src/components/marketplace/PayWithHavenBlock.tsx
   - packages/frontend/src/components/marketplace/FundMerchantModal.tsx
   - packages/frontend/src/components/marketplace/MerchantBudgetsList.tsx
   - packages/frontend/src/components/DelegationBudgetCard.tsx
@@ -376,7 +375,7 @@ URL). They are used only if no merchant owns the host when the submission is
 verified; on a curated merchant's host they are ignored. The `website` field
 of that request is the bot honeypot and is unrelated. The submit modal exposes
 both as optional inputs (`components/CatalogSubmitModal.tsx`), reachable from
-the marketplace grid and from a merchant page.
+the marketplace grid — a merchant page carries no seller entry point (#3981).
 
 ## Screens (#3079)
 
@@ -431,23 +430,32 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   sellers ("Sell an API or MCP tool?") opens the submit modal — listing a
   service is not a toolbar action.
 - **Merchant page** (`app/(authenticated)/marketplace/[slug]/page.tsx`,
-  `MerchantHeader.tsx`, `PayWithHavenBlock.tsx`, `OffersTable.tsx`) — header
-  (monogram/logo, name, category, website link, networks, Verified with its
-  meaning as VISIBLE text under the description — never only a tooltip — and
-  the Haven test-merchant note as a wrapping line on a test merchant, where a
-  payment is one paste away), a "Pay this with Haven"
-  block with one paste-into-agent instruction per offer, each labelled with
-  the offer's name and price and printed in full (`agentInstruction()`, moved
-  to `lib/marketplace.ts`) with a copy button, the line "This merchant
-  settles by EIP-3009 — the paying agent needs an unpinned budget" **once**
-  when any offer's `asset_transfer_methods` lacks `erc7710` (the offers that
-  need it are tagged when the merchant is mixed), and the offers: a table from
-  `md` up (Offer · Method · Description · Price · Network · Freshness — the
-  network cell names the chain) and one stacked card per offer below `md`,
-  both reusing `withinBudget()` for the per-agent budget hint so the warning
-  is never behind a horizontal scroll on a phone. A `coming_soon` merchant renders its description, website and
-  "Coming soon — not payable yet" — no instruction block, no offers table, no
-  price. Loading, empty, error (with "Try again") and unknown-slug (404 via
+  `MerchantHeader.tsx`, `OffersTable.tsx`) — header (monogram/logo, name,
+  category, website link, networks, Verified with its meaning as VISIBLE text
+  under the description — never only a tooltip — the Haven test-merchant note
+  as a wrapping line on a test merchant, where a payment is one paste away,
+  and "Fund this merchant" in the header's right-hand actions slot when the
+  action shows), and ONE offers section (#3981): each offer is a single row —
+  a table from `md` up, one stacked card below — carrying name, description,
+  price with the `withinBudget()` per-agent hint (so the warning is never
+  behind a horizontal scroll on a phone), the network's chain name and a copy
+  button; the full paste-into-agent instruction (`agentInstruction()`,
+  byte-stable in `lib/marketplace.ts`) is printed under the row in
+  monospace, wrapping, never truncated, because it becomes a payment. There
+  is no Method column (the rail or MCP tool name survives inside the
+  instruction) and no per-row Verified badge — the trust claim lives once, in
+  the header; freshness is a quiet line under the description. Offers on the
+  user's own network (the chain of the default account,
+  `resolveDefaultAccount`) come first; offers on other networks sit behind an
+  "Other networks (n)" disclosure, and every offer renders flat when the
+  user's default network serves none of the merchant's offers. The payment
+  requirement is stated ONCE, offer-level and in plain language — a budget
+  that can pay any recipient — when any offer's `asset_transfer_methods`
+  lacks `erc7710`; no "EIP-3009" and no "unpinned" reaches the page, and in a
+  mixed merchant the offers that need it carry an "any-recipient budget" tag.
+  A `coming_soon` merchant renders its description, website and
+  "Coming soon — not payable yet" — no offers section, no price. Loading,
+  empty, error (with "Try again") and unknown-slug (404 via
   `next/navigation`'s `notFound()`, landing on the segment's own
   `not-found.tsx` with "Back to Marketplace") states are covered by unit
   tests, not baselines — except the unknown slug, whose `notFound()` →
@@ -465,10 +473,10 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   `verified` and `erc7710`, AND the owner has at least one ELIGIBLE agent for
   one of those chains (`eligibleFundingAgents`) — a qualifying chain with no
   eligible agent hides the action too, rather than opening a modal that can
-  only ever say "no eligible agent". The open-budget note shows instead ONLY
-  when no chain qualifies (no verified+`erc7710` funding entry) but at least
-  one chain has a verified payTo that is not `erc7710`; neither the action nor
-  the note shows when no chain has a verified payTo at all. The modal: pick
+  only ever say "no eligible agent". The action's old funding-level
+  "open-budget note" is gone since #3981: the offers section's own
+  plain-language payment note (above) is offer-level and covers it — when no
+  offer is `erc7710` the note shows and the action is withheld. The modal: pick
   one of the eligible agents, an amount in whichever token the merchant
   actually sells in on that chain (`merchantTokenOptions`, restricted to its
   ERC-7710 offers) and a period, a review step naming the agent, the budget

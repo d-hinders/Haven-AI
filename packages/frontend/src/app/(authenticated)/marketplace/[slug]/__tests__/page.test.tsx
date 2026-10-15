@@ -1,10 +1,11 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
-const { mockUseMerchant, mockUseAgents, mockUseMerchantBudgets, mockNotFound } = vi.hoisted(() => ({
+const { mockUseMerchant, mockUseAgents, mockUseMerchantBudgets, mockUseAuth, mockNotFound } = vi.hoisted(() => ({
   mockUseMerchant: vi.fn(),
   mockUseAgents: vi.fn(),
   mockUseMerchantBudgets: vi.fn(),
+  mockUseAuth: vi.fn(),
   mockNotFound: vi.fn(),
 }))
 
@@ -19,6 +20,10 @@ vi.mock('@/hooks/useAgents', () => ({
 
 vi.mock('@/hooks/useMerchantBudgets', () => ({
   useMerchantBudgets: () => mockUseMerchantBudgets(),
+}))
+
+vi.mock('@/context/AuthContext', () => ({
+  useAuth: () => mockUseAuth(),
 }))
 
 vi.mock('next/navigation', () => ({
@@ -113,6 +118,9 @@ describe('MerchantPage', () => {
     vi.clearAllMocks()
     mockUseAgents.mockReturnValue({ agents: [] })
     mockUseMerchantBudgets.mockReturnValue({ budgets: [], loading: false, error: null, forbidden: false, refetch: vi.fn() })
+    // #3981: the offers on the user's own network come first — the default
+    // account here is on Base Sepolia.
+    mockUseAuth.mockReturnValue({ user: { accounts: [{ id: 'acc-1', chain_id: 84532, is_default: true }] } })
   })
 
   it('renders a loading state', () => {
@@ -186,7 +194,7 @@ describe('MerchantPage', () => {
     expect(mockNotFound).toHaveBeenCalled()
   })
 
-  it('renders the pay-with-Haven block and offers table for a live merchant with offers', () => {
+  it('renders ONE offers section for a live merchant with offers — no "Pay this with Haven", no "List your payable service"', () => {
     mockUseMerchant.mockReturnValue({
       merchant,
       offers: [offer()],
@@ -196,12 +204,17 @@ describe('MerchantPage', () => {
       refetch: vi.fn(),
     })
     render(<MerchantPage />)
-    expect(screen.getByText('Pay this with Haven')).toBeDefined()
-    expect(screen.getByText('Offers')).toBeDefined()
-    expect(screen.getByLabelText(/Copy agent instruction/)).toBeDefined()
+    // #3981: the pay block folded into the offers section — one heading, not two.
+    expect(screen.getByRole('heading', { name: 'Offers' })).toBeDefined()
+    expect(screen.queryByText('Pay this with Haven')).toBeNull()
+    // One copy button per shape: the desktop row and the phone card.
+    expect(screen.getAllByLabelText('Copy agent instruction for Joke')).toHaveLength(2)
+    expect(screen.queryByText('List your payable service')).toBeNull()
+    // The header is still the page's only h1.
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
   })
 
-  it('shows the unpinned-budget line only when erc7710 is absent from asset_transfer_methods', () => {
+  it('shows the any-recipient-budget note once, tagging only the offers that need it', () => {
     mockUseMerchant.mockReturnValue({
       merchant,
       offers: [offer({ asset_transfer_methods: null }), offer({ id: 'offer-2', asset_transfer_methods: 'eip3009,erc7710' })],
@@ -211,15 +224,38 @@ describe('MerchantPage', () => {
       refetch: vi.fn(),
     })
     render(<MerchantPage />)
-    // The merchant-level note renders ONCE (not per offer), and in the mixed
-    // case the offers that need the unpinned budget are the tagged ones.
-    expect(screen.getAllByText(/This merchant settles by EIP-3009 — the paying agent needs an unpinned budget\./)).toHaveLength(1)
-    expect(screen.getAllByText('unpinned budget')).toHaveLength(1)
-    expect(screen.getByTestId('pay-block-offer-1').textContent).toContain('unpinned budget')
-    expect(screen.getByTestId('pay-block-offer-2').textContent).not.toContain('unpinned budget')
+    // The offer-level note renders ONCE (not per offer), and in the mixed
+    // case only the offers that need an any-recipient budget are tagged.
+    expect(screen.getAllByText(/budget that can pay any recipient/)).toHaveLength(1)
+    expect(screen.getAllByText(/Offers marked "any-recipient budget" need this/)).toHaveLength(1)
+    expect(screen.getByTestId('offer-row-offer-1').textContent).toContain('any-recipient budget')
+    expect(screen.getByTestId('offer-row-offer-2').textContent).not.toContain('any-recipient budget')
+    // No protocol jargon reaches the page.
+    expect(document.body.textContent).not.toContain('EIP-3009')
+    expect(document.body.textContent).not.toContain('unpinned')
   })
 
-  it('renders the coming-soon branch with no instruction block and no offers table', () => {
+  it('groups a merchant\'s offers by the user\'s default network, others behind a disclosure; flat when the default network serves none', () => {
+    mockUseMerchant.mockReturnValue({
+      merchant,
+      offers: [offer({ id: 'sepolia' }), offer({ id: 'base', network: 'eip155:8453' })],
+      loading: false,
+      error: null,
+      notFound: false,
+      refetch: vi.fn(),
+    })
+    const { unmount } = render(<MerchantPage />)
+    expect(screen.getAllByText('Other networks (1)')).toHaveLength(2)
+    expect(screen.getAllByTestId('offer-row-sepolia')).toHaveLength(1)
+    expect(screen.getAllByTestId('offer-row-base')).toHaveLength(1)
+    unmount()
+    // No default account on any network the offers use → all flat.
+    mockUseAuth.mockReturnValue({ user: null })
+    render(<MerchantPage />)
+    expect(screen.queryByText(/Other networks/)).toBeNull()
+  })
+
+  it('renders the coming-soon branch with no offers section and no copy buttons', () => {
     mockUseMerchant.mockReturnValue({
       merchant: { ...merchant, listing_status: 'coming_soon', offer_count: 0 },
       offers: [],
@@ -231,11 +267,12 @@ describe('MerchantPage', () => {
     render(<MerchantPage />)
     expect(screen.getByText('Coming soon — not payable yet')).toBeDefined()
     expect(screen.queryByText('Pay this with Haven')).toBeNull()
-    expect(screen.queryByText('Offers')).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Offers' })).toBeNull()
     expect(screen.queryByLabelText(/Copy agent instruction/)).toBeNull()
+    expect(screen.queryByText('List your payable service')).toBeNull()
   })
 
-  it('renders an empty-offers state for a live merchant with none', () => {
+  it('renders an empty-offers state for a live merchant with none, and no "List your payable service" either', () => {
     mockUseMerchant.mockReturnValue({
       merchant,
       offers: [],
@@ -246,6 +283,7 @@ describe('MerchantPage', () => {
     })
     render(<MerchantPage />)
     expect(screen.getByText('No offers listed yet')).toBeDefined()
+    expect(screen.queryByText('List your payable service')).toBeNull()
   })
 
   // ── "Fund this merchant" (#3331) ──────────────────────────────────────────
@@ -294,7 +332,9 @@ describe('MerchantPage', () => {
     })
     render(<MerchantPage />)
     expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
-    expect(screen.queryByText(/use an agent's open budget/)).toBeNull()
+    // The payment note is offer-level (#3981): these offers lack erc7710, so
+    // it shows here too — the connect-agent line is about FUNDING, not payment.
+    expect(screen.getByText(/budget that can pay any recipient/)).toBeDefined()
     expect(
       screen.getByText(/Connect an agent on Base Sepolia to give it a budget for Ampersend Demo API\./),
     ).toBeDefined()
@@ -359,7 +399,7 @@ describe('MerchantPage', () => {
     expect(screen.queryByText(/Connect an agent on/)).toBeNull()
   })
 
-  it('withholds the action, with open-budget copy, when the only verified payTo is not ERC-7710', () => {
+  it('withholds the action and shows the plain payment note when the only verified payTo is not ERC-7710', () => {
     mockUseMerchant.mockReturnValue({
       merchant,
       offers: [offer()],
@@ -371,13 +411,15 @@ describe('MerchantPage', () => {
     })
     render(<MerchantPage />)
     expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
-    expect(screen.getByText(/use an agent's open budget/)).toBeDefined()
+    // The note is offer-level (#3981): the offers lack erc7710, so it shows
+    // regardless of the funding shape.
+    expect(screen.getByText(/budget that can pay any recipient/)).toBeDefined()
   })
 
-  it('renders neither the action nor the open-budget copy with no verified payTo at all', () => {
+  it('renders no payment note when the offers advertise erc7710, even with no verified payTo at all', () => {
     mockUseMerchant.mockReturnValue({
       merchant,
-      offers: [offer()],
+      offers: [offer({ asset_transfer_methods: 'eip3009,erc7710' })],
       funding: unstatedFunding,
       loading: false,
       error: null,
@@ -386,7 +428,7 @@ describe('MerchantPage', () => {
     })
     render(<MerchantPage />)
     expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
-    expect(screen.queryByText(/use an agent's open budget/)).toBeNull()
+    expect(screen.queryByText(/budget that can pay any recipient/)).toBeNull()
   })
 
   it('never renders the action for a coming_soon merchant, even with funding data', () => {

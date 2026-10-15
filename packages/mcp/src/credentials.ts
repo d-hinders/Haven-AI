@@ -415,3 +415,32 @@ export async function warnIfCredentialFilePermissive(
     )
   }
 }
+
+/**
+ * Per-chain read-only RPC endpoints from the environment (#3996): one flat
+ * scalar per chain, `HAVEN_RPC_URL_<chainId>` (e.g. `HAVEN_RPC_URL_8453`,
+ * `HAVEN_RPC_URL_84532`). Settled shape is a suffixed map rather than a single
+ * JSON-valued variable because the consumer is an MCP client's `env` block (a
+ * JSON object of strings), a malformed value costs one chain instead of the
+ * whole map, and a stdio server has no safe place to report a parse failure —
+ * stdout is protocol framing. It also matches this package's convention of
+ * flat `HAVEN_*` scalars.
+ *
+ * Behaviour on bad input: a suffix that is not a positive integer is ignored,
+ * and an empty value is ignored. A malformed or unreachable URL is NOT
+ * rejected here — it degrades to `null` → `unverifiable` inside the SDK, the
+ * same as no entry. Neither throws, and neither writes to stdout.
+ */
+export function chainRpcsFromEnv(env: NodeJS.ProcessEnv): Record<number, string> {
+  const chainRpcs: Record<number, string> = {}
+  for (const [name, value] of Object.entries(env)) {
+    const match = /^HAVEN_RPC_URL_(\d+)$/.exec(name)
+    if (!match) continue
+    const chainId = Number.parseInt(match[1]!, 10)
+    // `\d+` admits `0` and zero-padded forms; a non-positive id is not a chain.
+    if (!Number.isSafeInteger(chainId) || chainId <= 0) continue
+    const url = value?.trim()
+    if (url) chainRpcs[chainId] = url
+  }
+  return chainRpcs
+}

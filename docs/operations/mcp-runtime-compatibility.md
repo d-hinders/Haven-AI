@@ -5899,3 +5899,15 @@ to call next in structured fields, and those fields are typed end to end
 > ignores unknown response fields, so no expected-context version,
 > consent-hash input or version floor moves. `last-verified` is bumped to
 > 2026-10-15 for exactly this coverage.
+
+> **Re-verified #3996 (2026-10-15 — the local MCP server wires per-chain RPC
+> endpoints).** The diff touches two covered files, `packages/mcp/src/server.ts`
+> and `packages/mcp/src/credentials.ts`: `resolveHavenClient` now reads
+> `HAVEN_RPC_URL_<chainId>` scalars and passes a `chainRpcs` map into
+> `HavenClient` when any are set. Config-only and additive — no tool is added,
+> renamed or removed, no request or response schema moves, no version floor,
+> expected-context version or consent-hash input changes (the env scalars are
+> read outside the consent inputs). With the variables unset the client is
+> constructed exactly as before, so an old credential file and an old flow are
+> unaffected both ways; the hosted server already wires `chainRpcs` its own
+> way and is untouched. `last-verified` already reads 2026-10-15.

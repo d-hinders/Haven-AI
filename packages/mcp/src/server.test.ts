@@ -1,11 +1,11 @@
 import { chmod, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { HavenClient } from '@haven_ai/sdk'
-import { buildMcpServer, createHavenMcpServer, MCP_INSTRUCTIONS, MCP_VERSION } from './server.js'
+import { buildMcpServer, createHavenMcpServer, MCP_INSTRUCTIONS, MCP_VERSION, resolveHavenClient } from './server.js'
 
 // Pinned so the #1161 Node floor cannot make these host-dependent: the
 // guard lives at the credential/client choke point, which these exercise.
@@ -260,5 +260,65 @@ describe('local MCP instructions', () => {
     // literal or the package's own version constant would.
     expect(MCP_INSTRUCTIONS).not.toMatch(/\d+\.\d+\.\d+/)
     expect(MCP_INSTRUCTIONS).not.toContain(MCP_VERSION)
+  })
+})
+
+describe('resolveHavenClient chainRpcs — HAVEN_RPC_URL_<chainId> (#3996)', () => {
+  // Same fixture key node-version.test.ts uses: a well-formed delegate key, so
+  // the constructor derives a delegate address without any network.
+  const DELEGATE_KEY = '0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38'
+
+  const savedRpcEnv: Record<string, string | undefined> = {}
+
+  beforeEach(() => {
+    for (const key of Object.keys(process.env)) {
+      if (/^HAVEN_RPC_URL_/.test(key)) {
+        savedRpcEnv[key] = process.env[key]
+        delete process.env[key]
+      }
+    }
+  })
+
+  afterEach(() => {
+    for (const [key, value] of Object.entries(savedRpcEnv)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  })
+
+  const resolveChainRpcs = async (): Promise<Record<number, string>> => {
+    const { client } = await resolveHavenClient({
+      credentials: { apiKey: 'sk_test', delegateKey: DELEGATE_KEY },
+      nodeVersion: SUPPORTED_NODE,
+    })
+    // `chainRpcs` is private readonly on HavenClient (client.ts:248). The
+    // #3996 acceptance criteria offer a cast or a narrow SDK accessor; the
+    // cast, because #3996 forbids touching the SDK.
+    return (client as unknown as { chainRpcs: Record<number, string> }).chainRpcs
+  }
+
+  it('puts an entry in chainRpcs for every HAVEN_RPC_URL_<chainId> set, trimmed', async () => {
+    process.env.HAVEN_RPC_URL_8453 = 'https://mainnet.base.example'
+    process.env.HAVEN_RPC_URL_84532 = '  https://sepolia.base.example  '
+
+    await expect(resolveChainRpcs()).resolves.toEqual({
+      8453: 'https://mainnet.base.example',
+      84532: 'https://sepolia.base.example',
+    })
+  })
+
+  it('ignores a suffix that is not a positive integer and an empty value', async () => {
+    process.env.HAVEN_RPC_URL_NOT_A_CHAIN = 'https://ignored.example'
+    process.env.HAVEN_RPC_URL_0 = 'https://zero.example'
+    process.env.HAVEN_RPC_URL_1e2 = 'https://exponent.example'
+    process.env.HAVEN_RPC_URL_8453 = '   '
+
+    await expect(resolveChainRpcs()).resolves.toEqual({})
+  })
+
+  it('constructs the client with no chainRpcs key when the variable is unset (today)', async () => {
+    // No HAVEN_RPC_URL_* in the environment. The spread omits `chainRpcs`
+    // entirely, so the SDK default (`?? {}`) applies exactly as before #3996.
+    await expect(resolveChainRpcs()).resolves.toEqual({})
   })
 })

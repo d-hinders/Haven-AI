@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * "Fund this merchant" — a merchant-locked budget from a marketplace merchant
+ * "Set a budget for this merchant" (#4003) — a merchant-locked budget from a marketplace merchant
  * page (#3331, epic #3328).
  *
  * An ordinary recipient-pinned budget whose recipient is the merchant's own
@@ -412,7 +412,7 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
         <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-6 py-5">
           <div>
             <h2 id="fund-merchant-title" className="text-lg font-semibold text-[var(--v2-ink)]">
-              Fund {merchant.name}
+              Set a budget for {merchant.name}
             </h2>
             <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
               Give an agent a budget that pays only {merchant.name}. Nothing changes until you sign.

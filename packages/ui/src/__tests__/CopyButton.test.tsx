@@ -41,12 +41,12 @@ describe('CopyButton', () => {
 
   it('labelled: shows its text, copies the exact value, then reads "Copied" — the visible words inside the name', async () => {
     const write = mockClipboard(() => Promise.resolve())
-    render(<CopyButton value="Pay https://x.example/a and return the result" label="instruction for Fact" text="Copy instruction" />)
-    const button = screen.getByRole('button', { name: 'Copy instruction for Fact' })
-    expect(button.textContent).toBe('Copy instruction')
+    render(<CopyButton value="Pay https://x.example/a and return the result" label="prompt for Fact" text="Copy prompt" />)
+    const button = screen.getByRole('button', { name: 'Copy prompt for Fact' })
+    expect(button.textContent).toBe('Copy prompt')
     await click(button)
     expect(write).toHaveBeenCalledWith('Pay https://x.example/a and return the result')
-    const copied = screen.getByRole('button', { name: 'Instruction for Fact copied' })
+    const copied = screen.getByRole('button', { name: 'Prompt for Fact copied' })
     expect(copied.textContent).toBe('Copied')
   })
 

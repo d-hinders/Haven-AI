@@ -11,7 +11,7 @@ import type { CatalogEntry } from '@/hooks/useCatalog'
  * #3978): no Method column and no per-row Verified badge (the merchant-level
  * badge in `MerchantHeader` is the trust claim). Since #3998 it is ONE table
  * row: the instruction is no longer printed as a second row — the labelled
- * "Copy instruction" button copies it byte-for-byte, and the Offer cell
+ * "Copy prompt" button copies it byte-for-byte, and the Offer cell
  * prints it only when the user must edit it or the clipboard refused it
  * (`OfferInstructionText`).
  */

@@ -168,15 +168,15 @@ export default function MerchantPage() {
       <BackToMarketplace />
       {/* The merchant header IS the page header — one h1 (a second `PageHeader`
           made the name two headings, which the visual spec's anchor refused).
-          #3981: "Fund this merchant" sits in its right-hand actions slot, the
-          way `PageHeader` places actions. */}
+          #3981: "Set a budget for this merchant" (#4003 wording) sits in its
+          right-hand actions slot, the way `PageHeader` places actions. */}
       <MerchantHeader
         merchant={merchant}
         actions={
           showFundAction ? (
             <div className="flex flex-col items-start gap-1 sm:items-end">
               <Button size="sm" onClick={() => setFundOpen(true)}>
-                Fund this merchant
+                Set a budget for this merchant
               </Button>
               <p className="text-xs text-[var(--v2-ink-3)]">
                 Give one of your agents a budget that pays only {merchant.name}.

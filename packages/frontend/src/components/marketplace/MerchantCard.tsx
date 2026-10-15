@@ -6,7 +6,7 @@ import { TEST_MERCHANT_NOTE } from './MerchantHeader'
 import { Icon } from '@/components/ui/Icon'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { entityCardClassName } from '@/components/ui/entityCardStyles'
-import { categoryLabel, chainName, networkToChainId, VERIFIED_MEANING } from '@/lib/marketplace'
+import { categoryLabel, chainName, networkToChainId, verifiedMeaning } from '@/lib/marketplace'
 import type { Merchant } from '@/hooks/useCatalog'
 
 /** USDC is 6 decimals on every chain core registers (`packages/core/src/chains.ts`). */
@@ -83,7 +83,7 @@ export function MerchantCard({ merchant }: { merchant: Merchant }) {
                 // opens. The sr-only text is SHORT — the whole sentence would
                 // become part of the card link's accessible name.
                 <span
-                  title={VERIFIED_MEANING}
+                  title={verifiedMeaning(merchant.name)}
                   className="ml-1 inline-flex items-center align-[-2px] text-[var(--v2-success)]"
                 >
                   <Icon icon={Check} className="h-3.5 w-3.5" />

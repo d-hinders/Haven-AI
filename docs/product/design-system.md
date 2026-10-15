@@ -1111,7 +1111,7 @@ the hit area, the focus ring, the 1.5s check-pop and the catch around
 headless captures, so every hand-rolled copy has to rediscover that. The catch is silent by
 default, which is right only while the value is printed beside the button. Since
 [#3998](https://github.com/d-hinders/Haven-AI/issues/3998) it has a labelled shape (`text`, a
-ghost `Button` reading "Copy instruction" → "Copied", the visible words kept at the start of the
+ghost `Button` reading "Copy prompt" → "Copied" (#4003), the visible words kept at the start of the
 accessible name) for a value that is *not* printed, and `onCopyFailed`, which such a caller must
 pass to reveal the value when the clipboard refuses it. `CodeBlock`'s copy button
 is still its own implementation and is the obvious next adopter; it is listed above as a blind

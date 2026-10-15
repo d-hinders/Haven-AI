@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { MerchantHeader } from '../MerchantHeader'
+import { MerchantHeader, TEST_MERCHANT_NOTE } from '../MerchantHeader'
+import { verifiedMeaning } from '@/lib/marketplace'
 import type { Merchant } from '@/hooks/useCatalog'
 
 function merchant(overrides: Partial<Merchant> = {}): Merchant {
@@ -40,28 +41,27 @@ describe('MerchantHeader', () => {
     // A wrapping paragraph, not a one-line badge (a badge clipped it at 390).
     const note = screen.getByTestId('test-merchant-note')
     expect(note.tagName).toBe('P')
-    expect(note.textContent).toBe('Haven test merchant — real payments, demo goods')
+    expect(note.textContent).toBe(TEST_MERCHANT_NOTE)
     unmount()
     render(<MerchantHeader merchant={merchant()} />)
     expect(screen.queryByText(/Haven test merchant/)).toBeNull()
   })
 
   it('renders the actions slot on the header\'s right-hand side, and nothing extra when absent', () => {
-    const { unmount } = render(<MerchantHeader merchant={merchant()} actions={<button type="button">Fund this merchant</button>} />)
-    expect(screen.getByRole('button', { name: 'Fund this merchant' })).toBeDefined()
+    const { unmount } = render(<MerchantHeader merchant={merchant()} actions={<button type="button">Set a budget for this merchant</button>} />)
+    expect(screen.getByRole('button', { name: 'Set a budget for this merchant' })).toBeDefined()
     unmount()
     render(<MerchantHeader merchant={merchant()} />)
-    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Set a budget for this merchant' })).toBeNull()
   })
 
   it('shows the Verified badge with the honest claim only when verified payable', () => {
     const { unmount } = render(<MerchantHeader merchant={merchant()} />)
     expect(screen.getByText('Verified')).toBeDefined()
     // The meaning is VISIBLE text on the page (a tooltip is not a home for
-    // essential copy), reachable without hover, focus or tap.
-    expect(screen.getByTestId('verified-meaning').textContent).toContain(
-      'not a claim about quality or settlement',
-    )
+    // essential copy), reachable without hover, focus or tap — and it names
+    // the merchant (#4003).
+    expect(screen.getByTestId('verified-meaning').textContent).toBe(verifiedMeaning('Ampersend Demo API'))
     unmount()
     render(<MerchantHeader merchant={merchant({ verified_payable: false })} />)
     expect(screen.queryByText('Verified')).toBeNull()

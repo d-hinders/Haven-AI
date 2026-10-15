@@ -190,7 +190,7 @@ describe('OffersTable', () => {
       />,
     )
     const tbody = screen.getByTestId('offers-table').querySelector('tbody')!
-    // Two visible offers + the "Other networks" disclosure row.
+    // Two visible offers + the "n more on <chain names>" disclosure row.
     expect(tbody.querySelectorAll(':scope > tr')).toHaveLength(3)
     // The nested table inside the disclosure: one row for its one offer.
     const nested = within(screen.getAllByTestId('other-networks')[1]).getByRole('table')
@@ -218,13 +218,13 @@ describe('OffersTable', () => {
   it('copies the exact instruction from a labelled button whose name keeps its visible words, then reads "Copied"', async () => {
     const entry = plain()
     render(<OffersTable offers={[entry]} agents={[]} />)
-    const button = row(entry.id).getByRole('button', { name: 'Copy instruction for Fact' })
-    expect(button.textContent).toBe('Copy instruction')
+    const button = row(entry.id).getByRole('button', { name: 'Copy prompt for Fact' })
+    expect(button.textContent).toBe('Copy prompt')
     fireEvent.click(button)
     await vi.waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(agentInstruction(entry))
     })
-    expect((await row(entry.id).findByRole('button', { name: 'Instruction for Fact copied' })).textContent).toBe('Copied')
+    expect((await row(entry.id).findByRole('button', { name: 'Prompt for Fact copied' })).textContent).toBe('Copied')
   })
 
   it('keeps an instruction with a placeholder printed in the Offer cell, with the hint, wrapping not truncating', () => {
@@ -245,14 +245,14 @@ describe('OffersTable', () => {
     const entry = plain()
     render(<OffersTable offers={[entry]} agents={[]} />)
     expect(screen.queryByText(agentInstruction(entry))).toBeNull()
-    fireEvent.click(row(entry.id).getByRole('button', { name: 'Copy instruction for Fact' }))
+    fireEvent.click(row(entry.id).getByRole('button', { name: 'Copy prompt for Fact' }))
     await vi.waitFor(() => {
       expect(row(entry.id).getByText(agentInstruction(entry))).toBeDefined()
     })
     expect(row(entry.id).getByText(/Copying was blocked/).getAttribute('role')).toBe('status')
     const card = within(screen.getByTestId(`offer-card-${entry.id}`))
     expect(card.queryByText(agentInstruction(entry))).toBeNull()
-    fireEvent.click(card.getByRole('button', { name: 'Copy instruction for Fact' }))
+    fireEvent.click(card.getByRole('button', { name: 'Copy prompt for Fact' }))
     await vi.waitFor(() => {
       expect(card.getByText(agentInstruction(entry))).toBeDefined()
     })
@@ -288,12 +288,13 @@ describe('OffersTable', () => {
     expect(document.body.textContent).not.toContain('unpinned')
   })
 
-  it('shows the offers on the user’s network first and the rest behind an "Other networks (n)" disclosure, once per shape', () => {
+  it('discloses the other networks as "n more on <chain names>" with the cannot-pay warning when no agent is there, once per shape', () => {
     const sepolia = [offer({ id: 's1' }), offer({ id: 's2' }), offer({ id: 's3' })]
     const base = [offer({ id: 'b1', network: 'eip155:8453' }), offer({ id: 'b2', network: 'eip155:8453' }), offer({ id: 'b3', network: 'eip155:8453' })]
     render(<OffersTable offers={[...sepolia, ...base]} agents={[]} defaultChainId={84532} />)
-    // The disclosure carries the count of the OTHER networks' offers.
-    expect(screen.getAllByText('Other networks (3)')).toHaveLength(2)
+    // #4003: the disclosure names the hidden chain, and with NO agents at all
+    // the warning fires — in BOTH shapes (desktop summary, phone summary).
+    expect(screen.getAllByText('3 more on Base — none of your agents can pay on that network')).toHaveLength(2)
     // Each offer id appears exactly once per shape — desktop row and phone
     // card — with every disclosure expanded (jsdom renders details children).
     for (const id of ['s1', 's2', 's3', 'b1', 'b2', 'b3']) {
@@ -304,11 +305,47 @@ describe('OffersTable', () => {
     expect(within(screen.getByTestId('offers-table')).getByTestId('offer-row-s1')).toBeDefined()
   })
 
+  it('#4003 predicate, both ways: the cannot-pay warning fires only when no active agent’s account chain is among the hidden chains', () => {
+    const sepolia = [offer({ id: 's1' }), offer({ id: 's2' })]
+    const base = [offer({ id: 'b1', network: 'eip155:8453' })]
+    // An ACTIVE agent whose account sits ON the hidden chain can pay there —
+    // the split is by the default account, but a second account's agent
+    // counts, so the warning must NOT fire.
+    const { unmount } = render(
+      <OffersTable
+        offers={[...sepolia, ...base]}
+        agents={[{ ...atlas, account_chain_id: 8453, allowances: [] }]}
+        defaultChainId={84532}
+      />,
+    )
+    expect(screen.getAllByText('1 more on Base')).toHaveLength(2)
+    unmount()
+    // An active agent on the DEFAULT chain does not reach the hidden one —
+    // the warning fires. A paused agent would too: only `active` counts.
+    const second = render(
+      <OffersTable
+        offers={[...sepolia, ...base]}
+        agents={[{ ...atlas, allowances: [] }]}
+        defaultChainId={84532}
+      />,
+    )
+    expect(screen.getAllByText('1 more on Base — none of your agents can pay on that network')).toHaveLength(2)
+    second.unmount()
+    render(
+      <OffersTable
+        offers={[...sepolia, ...base]}
+        agents={[{ ...atlas, status: 'paused', account_chain_id: 8453, allowances: [] }]}
+        defaultChainId={84532}
+      />,
+    )
+    expect(screen.getAllByText('1 more on Base — none of your agents can pay on that network')).toHaveLength(2)
+  })
+
   it('renders every offer flat when the user’s default network serves none of the merchant’s offers', () => {
     render(
       <OffersTable offers={[offer({ id: 'a', network: 'eip155:84532' }), offer({ id: 'b', network: 'eip155:8453' })]} agents={[]} defaultChainId={null} />,
     )
-    expect(screen.queryByText(/Other networks/)).toBeNull()
+    expect(screen.queryByText(/more on/)).toBeNull()
     expect(screen.getAllByTestId('offer-row-a')).toHaveLength(1)
     expect(screen.getAllByTestId('offer-row-b')).toHaveLength(1)
   })
@@ -330,6 +367,6 @@ describe('OffersTable', () => {
     expect(above.getByText('Pay https://mcp.text.example/mcp via create_text for <what you want>')).toBeDefined()
     expect(within(screen.getByTestId('offer-card-within')).getByText('Atlas can pay this')).toBeDefined()
     // One labelled button per shape: the desktop row and the phone card.
-    expect(screen.getAllByRole('button', { name: 'Copy instruction for Bulk video render' })).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'Copy prompt for Bulk video render' })).toHaveLength(2)
   })
 })

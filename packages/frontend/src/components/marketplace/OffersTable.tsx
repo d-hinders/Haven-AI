@@ -83,14 +83,15 @@ function OfferCard({
 /**
  * The merchant page's ONE offers section (#3981, epic #3077): each offer is a
  * single row — a `Table` from `md` up, the stacked card below — carrying its
- * price, network and a labelled "Copy instruction" button (#3998). The
+ * price, network and a labelled "Copy prompt" button (#3998, #4003 wording).
+ * The
  * instruction itself is printed only where the user must see it: an offer
  * whose instruction has a placeholder to replace, or after a refused copy
  * (`OfferInstruction.tsx`).
  *
  * The offers on the user's own network (the chain of
  * `resolveDefaultAccount(user.accounts)`, passed as `defaultChainId`) come
- * first; offers on other networks sit behind an "Other networks (n)"
+ * first; offers on other networks sit behind an "n more on <chain names>"
  * disclosure in BOTH shapes. When the user's default network serves none of
  * the merchant's offers, everything renders flat.
  */
@@ -129,6 +130,23 @@ export function OffersTable({
   const others = here.length > 0 ? offers.filter((o) => chainIdOf(o) !== defaultChainId) : []
   const visible = here.length > 0 ? here : offers
 
+  // #4003's one predicate: the disclosure names the hidden chains, and adds
+  // "— none of your agents can pay on that network" ONLY when no active
+  // agent's account chain is among them. The SPLIT above is by the default
+  // account, but an agent can sit on any account — a user with a second
+  // account may still have an agent that can pay on a hidden network, and
+  // then the warning must not fire.
+  const hiddenChainIds = Array.from(
+    new Set(others.map((o) => chainIdOf(o)).filter((id): id is number => id !== undefined)),
+  )
+  const agentChainIds = new Set(
+    agents.filter((a) => a.status === 'active' && a.account_chain_id !== null).map((a) => a.account_chain_id),
+  )
+  const noAgentCanPayHidden = !hiddenChainIds.some((id) => agentChainIds.has(id))
+  const disclosure =
+    `${others.length} more on ${hiddenChainIds.map(chainName).join(', ')}` +
+    (noAgentCanPayHidden ? ' — none of your agents can pay on that network' : '')
+
   const bridgeOnly = offers.filter((o) => needsUnpinnedBudget(o.asset_transfer_methods))
   const mixed = bridgeOnly.length > 0 && bridgeOnly.length < offers.length
   const tagged = (offer: CatalogEntry) => mixed && needsUnpinnedBudget(offer.asset_transfer_methods)
@@ -155,7 +173,7 @@ export function OffersTable({
           <li>
             <details data-testid="other-networks" className="rounded-lg border border-[var(--v2-border)] p-3">
               <summary className="cursor-pointer text-sm font-medium text-[var(--v2-ink)]">
-                Other networks ({others.length})
+                {disclosure}
               </summary>
               <ul className="mt-2 space-y-2">
                 {others.map((offer) => (
@@ -175,7 +193,7 @@ export function OffersTable({
               <Table.HeaderCell align="left">Price</Table.HeaderCell>
               <Table.HeaderCell align="left">Network</Table.HeaderCell>
               <Table.HeaderCell align="left">
-                <span className="sr-only">Copy instruction</span>
+                <span className="sr-only">Copy prompt</span>
               </Table.HeaderCell>
             </tr>
           </Table.Head>
@@ -188,7 +206,7 @@ export function OffersTable({
                 <td colSpan={4} className="px-4 py-3">
                   <details data-testid="other-networks" className="text-sm">
                     <summary className="cursor-pointer font-medium text-[var(--v2-ink)]">
-                      Other networks ({others.length})
+                      {disclosure}
                     </summary>
                     <div className="mt-2">
                       <Table className="min-w-[560px]">

@@ -361,10 +361,10 @@ Structure:
 3. Merchant page: header (monogram/logo, name, category, website, networks,
    Verified — with the funding action, when shown, on its right-hand side),
    and ONE offers list: each offer a single row — table on desktop, stacked
-   card on phone — with a labelled Copy instruction button; the instruction
+   card on phone — with a labelled Copy prompt button; the instruction
    itself is printed in the offer only when the user must edit it (a
    placeholder) or the clipboard refused it (#3998); the user's network's offers first,
-   other networks behind an "Other networks (n)" disclosure.
+   other networks behind an "n more on <chain names>" disclosure.
 4. A `coming_soon` merchant page shows only its description, website and
    "Coming soon — not payable yet" — no offers list, no price.
 5. An entry point for sellers, reusing the existing submission modal: on the

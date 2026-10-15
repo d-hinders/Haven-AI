@@ -34,9 +34,11 @@ const PIN_STATUS_COPY: Record<
     // qualifies), so the helper names both steps' locations rather than
     // leaving the owner to find them. Not extended to `unverified` below:
     // funding again there needs the merchant to confirm an address first, so
-    // there is nothing to point at yet.
+    // there is nothing to point at yet. #4003: the funding action's name is
+    // not quoted here — #4005 may move it, so the helper names the OUTCOME,
+    // not the button or where it lives.
     helper: (agentName) =>
-      `This merchant now uses a new address. Payments there come from the agent's open budget, if it has one — this budget still only pays the old address. Stop this budget on ${agentName}'s page, then use “Fund this merchant” above.`,
+      `This merchant now uses a new address. Payments there come from the agent's open budget, if it has one — this budget still only pays the old address. Stop this budget on ${agentName}'s page, then set a budget for this merchant.`,
   },
   unverified: {
     label: 'Address unconfirmed',

@@ -56,11 +56,14 @@ export const ANY_RECIPIENT_BUDGET_TAG = 'any-recipient budget'
 
 /**
  * The Verified badge's meaning, spelled out where the badge is (epic #3077's
- * trust claim): domain control plus a confirmed payable endpoint — never
- * merchant honesty, quality or settlement reliability.
+ * trust claim): Haven checked domain control and a confirmed payable
+ * endpoint — never merchant honesty, quality or settlement reliability.
+ * #4003: the sentence names the merchant, so the meaning is a function of
+ * the merchant's name, not a constant.
  */
-export const VERIFIED_MEANING =
-  'Verified means domain controlled and verified payable — not a claim about quality or settlement.'
+export function verifiedMeaning(merchantName: string): string {
+  return `Verified: Haven checked that ${merchantName} controls this website and that its offers accept payment. It doesn't vouch for quality.`
+}
 
 /** Display label for a merchant category: acronyms stay acronyms (api → API, not "Api"). */
 export function categoryLabel(category: string): string {

@@ -4,7 +4,8 @@
  *
  * Five FULL-PAGE scenarios (the `SCENARIOS` loop below), each a distinct
  * branch the merchant layer added, PLUS two element-scoped clips of the
- * "Fund this merchant" modal (#3331 round 1/2 — the plain review step and
+ * "Set a budget for this merchant" modal (#3331, #4003 wording — round 1/2:
+ * the plain review step and
  * the replace-warning review step) that run outside that loop, the same
  * scoping `settings-accounting.visual.spec.ts` uses for its own dialog
  * (design review round 2, finding 8 — this docstring used to name only the
@@ -14,7 +15,7 @@
  *     test, coming-soon), at desktop and mobile.
  *   - `merchant-page`         — a live merchant (Ampersend Demo API) with
  *     three offers in the one offers list — one row per offer with a labelled
- *     Copy instruction button (#3981, #3998) — at desktop and mobile.
+ *     Copy prompt button (#3981, #3998, #4003) — at desktop and mobile.
  *   - `merchant-coming-soon`  — a `coming_soon` merchant page (desktop only):
  *     no offers list, no price, no copy button.
  *   - `merchant-test-merchant`— a live `is_test_merchant` merchant page at
@@ -24,7 +25,7 @@
  *     `notFound()` must land on the segment's own `not-found.tsx` inside
  *     the shell, a join the unit tests cannot see.
  *   - `merchant-page-fund-merchant-modal` (desktop AND mobile, element-scoped) —
- *     the "Fund this merchant" modal's plain SELECT step (agent, amount,
+ *     the "Set a budget for this merchant" modal's plain SELECT step (agent, amount,
  *     token, period) — not the review step; that is the scenario just below.
  *     The mobile clip is #3398's: below 640 px the shared `BudgetAmountRow`
  *     keeps the token symbol inside the amount input, so no line holds only
@@ -55,6 +56,10 @@ import { assertCaptureNotBlank, unclipScrollShell } from '../scripts/full-page-c
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .ts constant with no default export shape to widen.
 import { THEME_STORAGE_KEY } from '../src/lib/theme-bootstrap'
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore — plain .ts constant; imported so the e2e assert cannot drift
+// from the component's TEST_MERCHANT_NOTE (round-1 #4003 review defect).
+import { TEST_MERCHANT_NOTE } from '../src/components/marketplace/MerchantHeader'
 
 const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{ name: string; width: number; height: number }>
 const DESKTOP_ONLY = VIEWPORTS.filter((vp) => vp.name === 'desktop')
@@ -130,7 +135,7 @@ const SCENARIOS: Scenario[] = [
           return prospect !== null && Boolean(live.compareDocumentPosition(prospect) & Node.DOCUMENT_POSITION_FOLLOWING)
         }, `[data-testid="merchant-card-${bergetAi.slug}"]`)
       expect(liveBeforeProspect).toBe(true)
-      await expect(grid.getByText('Haven test merchant — real payments, demo goods')).toHaveCount(1)
+      await expect(grid.getByText(TEST_MERCHANT_NOTE)).toHaveCount(1)
       // "Show test merchants" defaults ON: the grid lists both chains
       // (decision 11) and one of them is Sepolia, so the test merchant card
       // is visible without any interaction.
@@ -144,7 +149,9 @@ const SCENARIOS: Scenario[] = [
     heading: ampersendDemoApi.name,
     // #3981: the offers on the user's own network come first — a Base Sepolia
     // default account (the dev-environment shape) keeps Fact and Joke on
-    // screen and Quote behind the "Other networks (1)" disclosure.
+    // screen and Quote behind the "1 more on Base" disclosure (#4003). No
+    // cannot-pay warning: the fixture's active agent sits on an account on
+    // Base (8453), one of the hidden chains.
     setup: (page) => serveAddFundsAccount(page, 84532),
     async assert(page) {
       const merchantPage = page.getByTestId('merchant-page')
@@ -159,7 +166,7 @@ const SCENARIOS: Scenario[] = [
         await expect(merchantPage.getByTestId(`offer-row-${id}`)).toHaveCount(1)
         await expect(merchantPage.getByTestId(`offer-card-${id}`)).toHaveCount(1)
       }
-      await expect(merchantPage.getByText('Other networks (1)')).toHaveCount(2)
+      await expect(merchantPage.getByText('1 more on Base')).toHaveCount(2)
       // The frozen clock is in effect (see FROZEN_NOW). The string renders in
       // both the table and the phone-width list; only one is visible at a time.
       await expect(merchantPage.getByText(FROZEN_FRESHNESS).locator('visible=true').first()).toBeVisible()
@@ -176,8 +183,8 @@ const SCENARIOS: Scenario[] = [
       // One labelled copy button per offer per shape (#3998). The value it
       // copies is `agentInstruction()`, guarded byte-for-byte in the unit
       // tests; these offers have no placeholder, so it is not printed.
-      await expect(merchantPage.getByTestId('offers-table').getByLabel(/^Copy instruction for /)).toHaveCount(3)
-      await expect(merchantPage.getByTestId('offers-list').getByLabel(/^Copy instruction for /)).toHaveCount(3)
+      await expect(merchantPage.getByTestId('offers-table').getByLabel(/^Copy prompt for /)).toHaveCount(3)
+      await expect(merchantPage.getByTestId('offers-list').getByLabel(/^Copy prompt for /)).toHaveCount(3)
       await expect(merchantPage.getByText(/^Pay https:\/\//)).toHaveCount(0)
       // Owner decision: a merchant page is not a seller entry point.
       await expect(merchantPage.getByText('List your payable service')).toHaveCount(0)
@@ -195,7 +202,7 @@ const SCENARIOS: Scenario[] = [
       ).toHaveCount(1)
       await expect(merchantPage.getByRole('heading', { name: 'Pay this with Haven' })).toHaveCount(0)
       await expect(merchantPage.getByRole('heading', { name: 'Offers' })).toHaveCount(0)
-      await expect(merchantPage.getByLabel(/Copy instruction/)).toHaveCount(0)
+      await expect(merchantPage.getByLabel(/Copy prompt/)).toHaveCount(0)
       await expect(merchantPage.getByText('List your payable service')).toHaveCount(0)
     },
   },
@@ -321,7 +328,7 @@ test.describe('marketplace visual regression', () => {
   }
 
   /**
-   * "Fund this merchant" (#3331) — element-scoped, like the Settings →
+   * "Set a budget for this merchant" (#3331, #4003 wording) — element-scoped, like the Settings →
    * Accounting backfill dialog (`settings-accounting.visual.spec.ts`), not a
    * full-page SCENARIOS entry: the dialog is the same size regardless of the
    * page behind it. `havenDemoStore`'s one offer already advertises ERC-7710
@@ -485,7 +492,7 @@ test.describe('marketplace visual regression', () => {
       timeout: ANCHOR_TIMEOUT_MS,
     })
     await dismissMobileSidebar(page)
-    await expect(page.getByRole('button', { name: 'Fund this merchant' })).toHaveCount(1)
+    await expect(page.getByRole('button', { name: 'Set a budget for this merchant' })).toHaveCount(1)
     await expect(page.getByText('Fund Agent', { exact: true }).first()).toBeVisible()
     await expect(page.getByText("Haven could not load this merchant's budgets.")).toHaveCount(0)
 
@@ -514,10 +521,10 @@ test.describe('marketplace visual regression', () => {
     })
     await dismissMobileSidebar(page)
 
-    await page.getByRole('button', { name: 'Fund this merchant' }).click()
+    await page.getByRole('button', { name: 'Set a budget for this merchant' }).click()
     const dialog = page.getByTestId('fund-merchant-modal')
     await expect(dialog).toHaveCount(1)
-    await expect(dialog.getByRole('heading', { name: `Fund ${havenDemoStore.name}` })).toHaveCount(1)
+    await expect(dialog.getByRole('heading', { name: `Set a budget for ${havenDemoStore.name}` })).toHaveCount(1)
     await expect(dialog.getByLabel('Agent')).toHaveCount(1)
     // Anchored and case-sensitive: `getByText` with a string is a
     // case-insensitive substring match, and the modal's intro ("…a budget that
@@ -558,10 +565,10 @@ test.describe('marketplace visual regression', () => {
     })
     await dismissMobileSidebar(page)
 
-    await page.getByRole('button', { name: 'Fund this merchant' }).click()
+    await page.getByRole('button', { name: 'Set a budget for this merchant' }).click()
     const dialog = page.getByTestId('fund-merchant-modal')
     await expect(dialog).toHaveCount(1)
-    await expect(dialog.getByRole('heading', { name: `Fund ${havenDemoStore.name}` })).toHaveCount(1)
+    await expect(dialog.getByRole('heading', { name: `Set a budget for ${havenDemoStore.name}` })).toHaveCount(1)
     await expect(dialog.getByLabel('Agent')).toHaveCount(1)
     // The suffix is aria-hidden — the token is readable through the input's
     // own accessible name pattern ("Budget amount"), not as a stray node.
@@ -599,7 +606,7 @@ test.describe('marketplace visual regression', () => {
     })
     await dismissMobileSidebar(page)
 
-    await page.getByRole('button', { name: 'Fund this merchant' }).click()
+    await page.getByRole('button', { name: 'Set a budget for this merchant' }).click()
     const dialog = page.getByTestId('fund-merchant-modal')
     await expect(dialog).toHaveCount(1)
     await dialog.getByLabel('Budget amount').fill('5')

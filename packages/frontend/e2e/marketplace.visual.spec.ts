@@ -110,11 +110,27 @@ const SCENARIOS: Scenario[] = [
       ).toHaveCount(1)
       await expect(grid.getByTestId(`merchant-card-${ampersendDemoApi.slug}`)).toHaveCount(1)
       await expect(grid.getByTestId(`merchant-card-${havenDemoStore.slug}`)).toHaveCount(1)
+      await expect(grid.getByTestId(`merchant-card-${bergetAi.slug}`)).toHaveCount(1)
       await expect(grid.getByText(ampersendDemoApi.name)).toHaveCount(1)
-      await expect(grid.getByText('3 offers')).toHaveCount(1)
-      await expect(
-        grid.getByText('Haven test merchant — real payments, demo goods'),
-      ).toHaveCount(1)
+      // #3980: the footer is the decision line — "From <price> USDC", the
+      // offer count after it when there is more than one offer. One offer
+      // prices alone; a coming-soon card carries NO footer at all.
+      await expect(grid.getByText('From 0.001 USDC · 3 offers')).toHaveCount(1)
+      await expect(grid.getByText('From 0.05 USDC', { exact: true })).toHaveCount(1)
+      const bergetCard = grid.getByTestId(`merchant-card-${bergetAi.slug}`)
+      await expect(bergetCard.getByText('Coming soon')).toHaveCount(1)
+      await expect(bergetCard.getByText(/offer/)).toHaveCount(0)
+      await expect(bergetCard.getByText(/From /)).toHaveCount(0)
+      // No coming-soon card renders before a live one (the endpoint's own
+      // order would put Berget first — the grid re-sorts it client-side).
+      const liveBeforeProspect = await grid
+        .getByTestId(`merchant-card-${ampersendDemoApi.slug}`)
+        .evaluate((live, prospectSelector) => {
+          const prospect = document.querySelector(prospectSelector)
+          return prospect !== null && Boolean(live.compareDocumentPosition(prospect) & Node.DOCUMENT_POSITION_FOLLOWING)
+        }, `[data-testid="merchant-card-${bergetAi.slug}"]`)
+      expect(liveBeforeProspect).toBe(true)
+      await expect(grid.getByText('Haven test merchant — real payments, demo goods')).toHaveCount(1)
       // "Show test merchants" defaults ON: the grid lists both chains
       // (decision 11) and one of them is Sepolia, so the test merchant card
       // is visible without any interaction.
@@ -253,6 +269,11 @@ test.describe('marketplace visual regression', () => {
         await page.clock.setFixedTime(FROZEN_NOW)
         if (scenario.setup) await scenario.setup(page)
         await page.goto(scenario.path)
+        // The dev server's overlay ("N · n Issues") renders in a
+        // `nextjs-portal` web component the baselines never saw — same hide
+        // as `home.visual.spec.ts` and `scripts/screenshot.mjs`; CI runs the
+        // standalone production server, where it doesn't exist.
+        await page.addStyleTag({ content: 'nextjs-portal { display: none !important; }' })
 
         await expect(
           page.getByRole('heading', { name: scenario.heading, exact: true }),
@@ -442,6 +463,9 @@ test.describe('marketplace visual regression', () => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.clock.setFixedTime(FROZEN_NOW)
     await page.goto(`/marketplace/${havenDemoStore.slug}`)
+    // Same dev-overlay hide as the SCENARIOS loop above — the funded page is
+    // a full-page capture, so the badge would land in it.
+    await page.addStyleTag({ content: 'nextjs-portal { display: none !important; }' })
     await expect(page.getByRole('heading', { name: havenDemoStore.name, exact: true })).toBeVisible({
       timeout: ANCHOR_TIMEOUT_MS,
     })

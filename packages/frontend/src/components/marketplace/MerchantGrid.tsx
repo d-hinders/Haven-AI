@@ -101,7 +101,7 @@ export function MerchantGrid({
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase()
-    return merchants.filter((m) => {
+    const filtered = merchants.filter((m) => {
       if (category && m.category !== category) return false
       if (verifiedOnly && !m.verified_payable) return false
       if (!showTestMerchants && m.is_test_merchant) return false
@@ -118,6 +118,19 @@ export function MerchantGrid({
       if (q && !`${m.name} ${m.description}`.toLowerCase().includes(q)) return false
       return true
     })
+    // #3980: payable merchants first — `coming_soon` sorts before `live` in
+    // `GET /merchants` (alphabetically), so the cards you cannot pay headed
+    // the grid. The reorder is CLIENT-side on purpose: the endpoint's order
+    // is read by other clients (agents among them) and this slice must not
+    // change it. Within each group the served order survives: test merchants
+    // last, then by name — the same keys the SQL's ORDER BY carries.
+    return filtered.sort(
+      (a, b) =>
+        (a.listing_status === 'coming_soon' ? 1 : 0) - (b.listing_status === 'coming_soon' ? 1 : 0) ||
+        (a.is_test_merchant ? 1 : 0) - (b.is_test_merchant ? 1 : 0) ||
+        a.name.localeCompare(b.name) ||
+        a.id.localeCompare(b.id),
+    )
   }, [merchants, category, verifiedOnly, showTestMerchants, chainFilter, search])
 
   const filtered = category !== null || search.trim() !== '' || verifiedOnly || chainFilter !== 'all'
@@ -137,7 +150,13 @@ export function MerchantGrid({
     return (
       <div role="status" aria-busy="true" aria-label="Loading merchants">
         <Skeleton className="mb-3 h-9 w-full rounded-lg" />
-        <Skeleton className="mb-4 h-7 w-80 max-w-full rounded-full" />
+        {/* #3979 deferred nit: the second row is two SHORT blocks (pills
+            left, checkboxes right) on every width, not one long bar — a
+            phone-width bar under-reserved the row it stands for. */}
+        <div className="mb-4 flex items-center justify-between gap-x-4 gap-y-2">
+          <Skeleton className="h-7 w-48 max-w-[45%] rounded-full" />
+          <Skeleton className="h-7 w-36 max-w-[40%] rounded-full" />
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {[0, 1, 2].map((i) => (
             <Skeleton key={i} className="h-40 rounded-xl" />
@@ -213,8 +232,11 @@ export function MerchantGrid({
       </div>
 
       {/* Second row: what kind of merchant (pills) on the left, which ones
-          (checkboxes) on the right; the checkboxes wrap beneath on a phone. */}
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          (checkboxes) on the right; the checkboxes wrap beneath on a phone.
+          #3979 deferred nit: the 44px tap boxes add their height below `sm`,
+          so the row's bottom margin is trimmed there — the gap under the
+          checkboxes no longer doubles the reserved space. */}
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 sm:mb-4">
         {categories.length > 1 ? (
           <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by category">
             <FilterPill active={category === null} onClick={() => setCategory(null)}>

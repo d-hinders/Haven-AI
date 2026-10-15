@@ -33,14 +33,16 @@ async function insertOffer(
     payTo?: string | null
     methods?: string | null
     rail?: 'x402' | 'mpp'
+    priceAtomic?: string | null
+    asset?: string | null
   } = {},
 ): Promise<string> {
   seq += 1
   const { rows } = await db.query<{ id: string }>(
     `INSERT INTO merchant_catalog
        (name, description, category, resource_url, rail, protocol, tool_name, network, status, verified_at, merchant_id,
-        pay_to, asset_transfer_methods)
-     VALUES ($1, 'x', 'api', $2, $7, 'http', NULL, $3, $4, $5, $6, $8, $9)
+        pay_to, asset_transfer_methods, price_atomic, asset)
+     VALUES ($1, 'x', 'api', $2, $7, 'http', NULL, $3, $4, $5, $6, $8, $9, $10, $11)
      RETURNING id`,
     [
       `offer-${seq}`,
@@ -52,6 +54,8 @@ async function insertOffer(
       opts.rail ?? 'x402',
       opts.payTo ?? null,
       opts.methods ?? null,
+      opts.priceAtomic ?? null,
+      opts.asset ?? null,
     ],
   )
   return rows[0].id
@@ -348,6 +352,44 @@ describeDb('merchants repository (#3078)', () => {
     await insertOffer(real.id, 'https://zzz.example/a')
     const rows = await listMerchants({ chainIds: null, includeProspects: false })
     expect(rows.map((m) => m.slug)).toEqual(['zzz-real', 'aaa-demo'])
+  })
+
+  it('reports the lowest USDC price over the counted offers — symbol or contract address, never another asset (#3980)', async () => {
+    const m = await findOrCreateMerchantByHost('price.example', { name: 'Priced' })
+    // The seed data carries the symbol on most rows and Circle's canonical
+    // address on the Ampersend seeds (`088_merchants.ts`) — both must match,
+    // in any case the operator wrote. A lexicographic MIN would answer
+    // '1000000' over '900' here, so the order is numeric.
+    await insertOffer(m.id, 'https://price.example/a', { priceAtomic: '1000000', asset: 'USDC' })
+    await insertOffer(m.id, 'https://price.example/b', { priceAtomic: '900', asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' })
+    await insertOffer(m.id, 'https://price.example/c', { priceAtomic: '2000', asset: 'usdc' })
+    // None of these may move the answer: another asset, no price at all, a
+    // malformed price, a DELISTED row (the count's own scope), an unlisted
+    // chain, and a verified submission (the ingestion half carries no price).
+    await insertOffer(m.id, 'https://price.example/d', { priceAtomic: '1', asset: 'ETH' })
+    await insertOffer(m.id, 'https://price.example/e', { priceAtomic: null, asset: 'USDC' })
+    await insertOffer(m.id, 'https://price.example/f', { priceAtomic: 'not-a-number', asset: 'USDC' })
+    await insertOffer(m.id, 'https://price.example/g', { priceAtomic: '5', asset: 'USDC', status: 'delisted' })
+    await insertOffer(m.id, 'https://price.example/h', { priceAtomic: '4', asset: 'USDC', network: 'eip155:11155111' })
+    await insertVerifiedSubmission('price.example', m.id)
+
+    const [row] = await listMerchants({ chainIds: null, includeProspects: false })
+    // Every chain counts (the count's own scope), so the 11155111 row's 4 wins.
+    expect(row.lowest_price_atomic).toBe('4')
+    // Chain-scoped like the count: on a 8453-only deployment the 11155111
+    // offer is invisible and the address-priced 900 wins.
+    const [prod] = await listMerchants({ chainIds: [8453], includeProspects: false })
+    expect(prod.lowest_price_atomic).toBe('900')
+
+    // No USDC-priced offer at all → null, not zero — "From 0 USDC" would be a
+    // lie about a merchant whose prices we cannot state.
+    const free = await findOrCreateMerchantByHost('free.example', { name: 'Unpriced' })
+    await insertOffer(free.id, 'https://free.example/a', { priceAtomic: '10', asset: 'ETH' })
+    await insertVerifiedSubmission('free.example', free.id)
+    const freeRow = (await listMerchants({ chainIds: null, includeProspects: false })).find(
+      (m) => m.slug === 'unpriced',
+    )
+    expect(freeRow?.lowest_price_atomic).toBeNull()
   })
 
   it('includes prospects only when asked, with zero offers', async () => {

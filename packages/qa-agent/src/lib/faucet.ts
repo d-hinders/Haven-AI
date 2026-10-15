@@ -38,6 +38,8 @@ export interface CdpEvmFaucetOptions {
   address: string
   /** Explicit chain ID; only Base Sepolia (84532) is permitted. */
   chainId: number
+  /** Which faucet to draw from: native ETH or test USDC (#3997). */
+  token: 'eth' | 'usdc'
   apiKeyId: string
   apiKeySecret: string
   idempotencyKey?: string
@@ -54,7 +56,8 @@ interface CdpFaucetResponse {
 }
 
 /**
- * Request test ETH for a Base Sepolia QA address from Coinbase's CDP faucet.
+ * Request test ETH or test USDC for a Base Sepolia QA address from Coinbase's
+ * CDP faucet (#3997 added USDC for the eval accounts).
  *
  * This helper intentionally accepts only an API key ID and secret. It neither
  * accepts nor uses a CDP wallet secret, and it performs exactly one bounded
@@ -109,7 +112,7 @@ export async function requestCdpEvmFaucet(
       body: JSON.stringify({
         address: options.address,
         network: 'base-sepolia',
-        token: 'eth',
+        token: options.token,
       }),
       signal: controller.signal,
     })

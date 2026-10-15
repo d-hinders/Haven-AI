@@ -21,6 +21,7 @@ import {
   type BalanceSources,
   type HistoryEntry,
 } from './balances.js'
+import type { BalanceReadings } from './balances.js'
 import { TREASURY_RUN_COST_ATOMIC } from './preflight.js'
 
 const USDC = (n: number) => BigInt(Math.round(n * 1_000_000))
@@ -44,6 +45,8 @@ function provider(usdcAtomic: bigint | Error, weiByAddress: Record<string, bigin
 const TREASURY = '0x9281d7c312e67859c65f4A3449F0548ea2f90974'
 const RELAYER = '0x' + 'ab'.repeat(20)
 const SETTLEMENT = '0x' + 'cd'.repeat(20)
+const EVAL_HERMES = '0x' + 'ef'.repeat(20)
+const EVAL_CLAUDE = '0x' + 'fe'.repeat(20)
 
 const api = (address = TREASURY) => ({ getAgent: async () => ({ ok: true, status: 200, data: { account_address: address } }) }) as never
 
@@ -152,23 +155,40 @@ describe('history', () => {
 describe('collectBalances', () => {
   const now = new Date('2026-10-05T06:00:00Z')
 
-  it('emits all three wallets with address, balance and band', async () => {
+  it('emits all five wallets with address, balance and band', async () => {
     const src: BalanceSources = {
       api: api(),
       demoMerchantUrl: 'https://merchant.test',
       relayerAddress: RELAYER,
+      evalHermesAccount: EVAL_HERMES,
+      evalClaudeAccount: EVAL_CLAUDE,
       provider: provider(USDC(5), { [RELAYER]: ETH(0.5) }),
       fetchImpl: merchantOk,
     }
     const report = await collectBalances(src, [], now)
+    // The stub answers every ERC-20 read with one value, so the three USDC
+    // wallets (treasury + both eval accounts) read the same 5 USDC; the eval
+    // accounts have no history yet, so their fallback floor (the 21 USDC
+    // target) makes them `warn`.
     expect(report.rows.map((r) => [r.key, r.band, r.balance, r.address])).toEqual([
       ['treasury', 'ok', '5', TREASURY],
       ['merchant', 'ok', '0.01', SETTLEMENT],
       ['relayer', 'ok', '0.5', RELAYER],
+      ['eval-hermes', 'warn', '5', EVAL_HERMES],
+      ['eval-claude', 'warn', '5', EVAL_CLAUDE],
     ])
     expect(report.configMissing).toBe(false)
     expect(report.history).toEqual([
-      { date: '2026-10-05', balances: { treasury: '5000000', merchant: ETH(0.01).toString(), relayer: ETH(0.5).toString() } },
+      {
+        date: '2026-10-05',
+        balances: {
+          treasury: '5000000',
+          merchant: ETH(0.01).toString(),
+          relayer: ETH(0.5).toString(),
+          'eval-hermes': '5000000',
+          'eval-claude': '5000000',
+        },
+      },
     ])
   })
 
@@ -211,7 +231,7 @@ describe('collectBalances', () => {
       fetchImpl: healthz({}, 503),
     }
     const report = await collectBalances(src, [], now)
-    expect(report.rows.map((r) => r.band)).toEqual(['unknown', 'unknown', 'unknown'])
+    expect(report.rows.map((r) => r.band)).toEqual(['unknown', 'unknown', 'unknown', 'unknown', 'unknown'])
     expect(report.rows.every((r) => typeof r.reason === 'string' && r.reason.length > 0)).toBe(true)
     expect(report.configMissing).toBe(false)
     expect(report.history[0]!.balances).toEqual({})
@@ -256,6 +276,9 @@ describe('collectBalances', () => {
       ['unknown', 'read timed out after 0 s'],
       ['unknown', 'read timed out after 0 s'],
       ['unknown', 'read timed out after 0 s'],
+      // The eval rows need no RPC: an unset variable answers before the deadline.
+      ['unknown', 'not configured: QA_EVAL_HERMES_ACCOUNT is unset'],
+      ['unknown', 'not configured: QA_EVAL_CLAUDE_ACCOUNT is unset'],
     ])
   })
 })
@@ -327,7 +350,11 @@ describe('merchant top-up target (#3896)', () => {
       }))
       const merchant = { ok: true as const, address: '0x' + 'cd'.repeat(20), atomic: todayWei, criticalFloor, fallbackFloor, chainId: 84532 }
       const off = { ok: false as const, reason: 'unused' }
-      return buildBalancesReport({ treasury: off, merchant, relayer: off }, history, new Date('2026-10-12T12:00:00Z'))
+      return buildBalancesReport(
+        { treasury: off, merchant, relayer: off, 'eval-hermes': off, 'eval-claude': off } as BalanceReadings,
+        history,
+        new Date('2026-10-12T12:00:00Z'),
+      )
         .rows.find((r) => r.key === 'merchant')!
     }
     expect(MERCHANT_TOPUP_TARGET_WEI).toBe(ETH(0.004))

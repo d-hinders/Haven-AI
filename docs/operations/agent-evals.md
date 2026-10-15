@@ -159,9 +159,22 @@ unattended start.
 ## Funding and the nightly budget
 
 - **Initial funding of the eval account:** Circle faucet test USDC on Base
-  Sepolia; the dev relayer sponsors gas, the same funding model
-  `packages/qa-agent/src/seed.ts` documents. The eval agent is provisioned
+  Sepolia. Eval payments are **paymaster-sponsored** (the relayer submits the
+  UserOp; see `agent-qa.md` § QA wallet balances, "agent payment UserOps are
+  paymaster-sponsored"), so the eval account needs no ETH — the dev relayer
+  pays only protocol gas (activations, attestations), not the agent's
+  payments. The eval agent is provisioned
   through connect (above), not seed.ts.
+- **The daily balances run keeps the account supplied (#3997):**
+  `qa-balances.yml` (the QA wallet balances workflow) reads both eval smart
+  accounts by address — the repo **variables** `QA_EVAL_HERMES_ACCOUNT` and
+  `QA_EVAL_CLAUDE_ACCOUNT` — and requests Base Sepolia test USDC from the CDP
+  faucet when an account is below its target (21 USDC, about seven nights of
+  the 3 USDC Daily budget; the faucet pays 1 USDC per claim, at most 10 USDC
+  per address per rolling 24 hours). An unset or invalid variable is an
+  `unknown` row that never turns the run red. The one-time setup below
+  remains the operator step; the standing issue reports a low balance instead
+  of a failed night finding it.
 - **Period:** give the eval agent a **Daily** period (the dashboard supports
   it — `PERIODS` in `packages/frontend/src/components/haven/DelegationBudgetCard.tsx`),
   sized so the tiered run fits inside one refill: the tier-1 slices shrink
@@ -201,8 +214,10 @@ Env the run needs (all dev/testnet):
   renders `{target}`, and checked before the first agent session. With
   `QA_EVAL_RECIPIENT` + `QA_EVAL_X402_TARGET` set, ONE suite invocation
   covers all 10 tasks — no per-task config or task filter needed.
-- `QA_EVAL_AGENT_ACCOUNT` — the eval agent's account/delegate address (the
-  payer the chain probe accepts).
+- `QA_EVAL_AGENT_ACCOUNT` — the eval agent's **smart account** address (the
+  payer the chain probe accepts; not the delegate EOA). The Claude Code lane's
+  `AGENT_EVALS_AGENT_ACCOUNT` (below) holds the same role, and the daily
+  balances run's `QA_EVAL_CLAUDE_ACCOUNT` must repeat it.
 - `QA_EVAL_HERMES_COMMAND` — how ONE task runs through Hermes,
   non-interactively: a command template containing `{instruction}` (and
   `{log}` when the wrapper writes the log itself). The VERIFIED shape is a

@@ -45,7 +45,7 @@ export const LABEL = 'qa-funding'
 const LABEL_COLOR = 'd93f0b'
 const LABEL_DESCRIPTION = 'A QA wallet is within 7 days of running dry (#3631)'
 const MARKER = 'qa-balance-bands'
-const WALLETS = ['treasury', 'merchant', 'relayer']
+const WALLETS = ['treasury', 'merchant', 'relayer', 'eval-hermes', 'eval-claude']
 const ALARM = new Set(['warn', 'critical'])
 
 const DOCS = 'docs/operations/agent-qa.md'
@@ -54,6 +54,8 @@ export const TOP_UP_ANCHOR = {
   treasury: 'top-up-the-delegation-treasury',
   merchant: 'top-up-the-demo-merchant-settlement-wallet',
   relayer: 'top-up-the-dev-relayer',
+  'eval-hermes': 'top-up-the-eval-agent-hermes-lane',
+  'eval-claude': 'top-up-the-eval-agent-claude-code-lane',
 }
 
 const defaultGh = (args, { input } = {}) =>
@@ -111,20 +113,28 @@ function fmtRunway(row) {
   return row.basis === 'observed' ? 'no observed burn' : '—'
 }
 
-function fmtWei(atomic) {
+/** Format an atomic amount by unit: the report's rows and top-ups carry theirs. */
+const UNIT_DECIMALS = { USDC: 6, ETH: 18 }
+function fmtAmount(atomic, unit) {
+  const decimals = UNIT_DECIMALS[unit] ?? 18
   try {
-    const value = BigInt(atomic ?? '0')
-    const whole = value / 1_000_000_000_000_000_000n
-    const fraction = (value % 1_000_000_000_000_000_000n).toString().padStart(18, '0').replace(/0+$/, '')
-    return fraction ? `${whole}.${fraction}` : String(whole)
+    const s = BigInt(atomic ?? '0').toString().padStart(decimals + 1, '0')
+    const whole = s.slice(0, -decimals)
+    const fraction = s.slice(-decimals).replace(/0+$/, '')
+    return fraction ? `${whole}.${fraction}` : whole
   } catch {
     return '0'
   }
 }
 
-/** The wallets the harness may top up from the faucet, in the order it does (#3836). */
-const TOP_UP_WALLETS = ['merchant', 'relayer']
-const TOP_UP_NAMES = { merchant: 'Demo-merchant settlement wallet', relayer: 'Dev backend relayer' }
+/** The wallets the harness may top up from the faucet, in the order it does (#3836, #3997). */
+const TOP_UP_WALLETS = ['merchant', 'eval-hermes', 'eval-claude', 'relayer']
+const TOP_UP_NAMES = {
+  merchant: 'Demo-merchant settlement wallet',
+  relayer: 'Dev backend relayer',
+  'eval-hermes': 'Eval agent (Hermes lane)',
+  'eval-claude': 'Eval agent (Claude Code lane)',
+}
 
 /**
  * Why a top-up was skipped, when the harness gave no reason. Every skip has
@@ -148,7 +158,8 @@ export function topUpSummary(wallet, topUp) {
     return `${head}: not requested — ${why}.`
   }
   const reason = topUp.reason ? ` — ${publicReason(topUp.reason)}` : ''
-  return `${head}: ${Number(topUp.claimsMade) || 0} accepted claim(s), ${fmtWei(topUp.amountReceivedAtomic)} ETH received; stop: \`${topUp.stopReason}\`${reason}.`
+  const unit = topUp.unit ?? 'ETH'
+  return `${head}: ${Number(topUp.claimsMade) || 0} accepted claim(s), ${fmtAmount(topUp.amountReceivedAtomic, unit)} ${unit} received; stop: \`${topUp.stopReason}\`${reason}.`
 }
 
 /** The issue body: one row per wallet, the top-up links, the time and the run. */
@@ -156,7 +167,9 @@ export function buildBody(report, { runUrl, repo, bands }) {
   const docBase = `https://github.com/${repo}/blob/dev/${DOCS}`
   const lines = [
     `One or more wallets the QA flows depend on has **less than 7 days of runway** (or cannot cover one run). ` +
-      `Money-flow QA fails in preflight once a wallet runs dry — top it up before then.`,
+      `Money-flow QA fails in preflight once a core wallet (treasury, merchant, relayer) runs dry — top it up before then. ` +
+      `The eval-agent rows are reported here so a low eval balance is found before a failed night, ` +
+      `not by one: an eval run fails long before preflight does.`,
     '',
     '| Wallet | Band | Address | Balance | Burn / day | Runway | Asset | Top up |',
     '|---|---|---|---|---|---|---|---|',

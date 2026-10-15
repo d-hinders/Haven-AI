@@ -43,10 +43,15 @@ const { mockQuery, portfolioMocks, transactionMocks, fiatMocks } = vi.hoisted(()
     // #3824: the route derives the tz check and the grouped rows from this
     // module; this file characterizes the aggregates, not the grouping.
     isValidActivityTimeZone: vi.fn(() => true),
+    // #3975: the route derives the rolling 7-day boundary from this module.
+    activityWindowStartIso: vi.fn(
+      (nowMs: number) => new Date(nowMs - 7 * 24 * 60 * 60 * 1000).toISOString(),
+    ),
     buildActivityFeed: vi.fn(async () => ({
       groups: [] as never[],
       hasOlderActivity: false,
       windowDays: 7,
+      windowStartIso: '2026-10-08T07:12:00.000Z',
     })),
     enrichedTransactionIdentityKey: vi.fn((tx: { hash: string }) => tx.hash),
     enrichTransactionsWithAgents: vi.fn(

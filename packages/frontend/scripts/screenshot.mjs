@@ -1265,9 +1265,12 @@ export const FIXTURE_OVERVIEW = {
   // #3944: the two empty-state facts (shape parity with the e2e fixture —
   // fixture-shape-parity.test.ts compares the top-level key SETS). Rows
   // render, so `hasOlderActivity` is false; `activityWindowDays` mirrors
-  // the backend's ACTIVITY_WINDOW_DAYS.
+  // the backend's ACTIVITY_WINDOW_DAYS; `activityWindowStart` (#3975) is
+  // 7×24h before T0, so the rows sit inside the window and no heading
+  // reads partial.
   hasOlderActivity: false,
   activityWindowDays: 7,
+  activityWindowStart: new Date((T0 - 7 * 86_400) * 1000).toISOString(),
 }
 
 // #3804: the cached budget-remaining read. One KNOWN row (chain-backed,

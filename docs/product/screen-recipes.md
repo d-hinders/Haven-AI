@@ -551,25 +551,44 @@ Money and risk clarity:
   rejected`, or similar human event copy, not a raw recipient address.
 - Put recipient, source, and links in row metadata or detail actions.
 
+**One window for every "last 7 days" (#3975).** The dashboard's time windows
+are ROLLING — the owner decision (epic #3801, 2026-10-09): `[now − 7×24h,
+now)` on the payment instant, the same definition `/analytics/overview` uses;
+no calendar months. The header sentence, the Needs-attention items that say
+"in the last 7 days" and the Activity card all cover that one interval (the
+wire's `activityWindowStart` is its boundary). They differ in what they put
+in it, not when it ends: the header counts confirmed agent payments, the
+Activity card also carries deposits, sweeps, failed and pending rows.
+
 **The dashboard's activity list is grouped and merchant-first (#3810).** The
 preview renders `GET /dashboard/overview`'s `activity` groups — one row per
-group under user-local day headings, at most eight rows over the last seven
-days. The title is the counterparty through `counterpartyLabel`'s no-address
-mode (merchant site, receipt name, "Deposit", "New recipient" — never a
-truncated address); the subtitle is the agent's name; a group of N renders
-"×N" ("×N+" when the count is a floor). The 5-row `transactions` preview is
-removed from the wire (#3858) — no dashboard surface reads it.
+group under user-local day headings, at most eight rows over the rolling
+last seven days. The title is the counterparty through `counterpartyLabel`'s
+no-address mode (merchant site, receipt name, "Deposit", "New recipient" —
+never a truncated address); the subtitle is the agent's name; a group of N
+renders "×N" ("×N+" when the count is a floor). The 5-row `transactions`
+preview is removed from the wire (#3858) — no dashboard surface reads it.
+
+The local day is the HEADING, not the window: the groups bucket by the
+user's local day (`tz`), but membership is the rolling instant, so a
+payment inside the header's 7-day window is always inside the card. Because
+the window starts at an instant rather than a local midnight, its oldest
+day heading can cover part of a day — when `activityWindowStart` cuts its
+own local day, that heading reads "(partial)", the analytics precedent
+(`docs/product/analytics.md`: an edge day is marked, never dropped or
+stretched).
 
 **Empty state distinguishes no activity from an empty window (#3944).** The
-card covers only the last seven user-local days (`ACTIVITY_WINDOW_DAYS`),
-so an empty list means one of two things and the copy says which: a feed
-with no activity at all renders "No activity yet" (first-run copy); a feed
-whose newest transaction is older than the window renders "No activity in
-the last N days" with the transactions page as its action — never a claim
-that nothing has happened. The signal (`hasOlderActivity`) and the window
-(`activityWindowDays`) ride the `/dashboard/overview` response; the client
-names the window from the wire and never hard-codes the 7, because the
-constant it would copy lives behind the backend's window and can drift.
+card covers only the rolling last seven days (`[now − 7×24h, now)`, the
+backend's `ACTIVITY_WINDOW_DAYS`), so an empty list means one of two things
+and the copy says which: a feed with no activity at all renders "No
+activity yet" (first-run copy); a feed whose newest transaction is older
+than the window renders "No activity in the last N days" with the
+transactions page as its action — never a claim that nothing has happened.
+The signal (`hasOlderActivity`) and the window (`activityWindowDays` and its
+`activityWindowStart` boundary) ride the `/dashboard/overview` response; the
+client names the window from the wire and never hard-codes the 7, because
+the constant it would copy lives behind the backend's window and can drift.
 
 ## Policy Violation
 

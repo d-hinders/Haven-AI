@@ -47,6 +47,8 @@ export { serveTimeAmount } from './serve-time.js'
 export {
   ACTIVITY_GROUP_LIMIT,
   ACTIVITY_WINDOW_DAYS,
+  ACTIVITY_WINDOW_MS,
+  activityWindowStartIso,
   buildActivityFeed,
   buildActivityGroups,
   isValidActivityTimeZone,

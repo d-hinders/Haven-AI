@@ -582,6 +582,7 @@ export default function DashboardClient() {
         activity={overview?.activity ?? []}
         hasOlderActivity={overview?.hasOlderActivity}
         activityWindowDays={overview?.activityWindowDays}
+        activityWindowStart={overview?.activityWindowStart}
         accountCount={accounts.length}
         hasAccounts={accounts.length > 0}
         loading={overviewInitialLoading}

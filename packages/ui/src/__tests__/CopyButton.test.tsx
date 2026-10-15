@@ -50,6 +50,30 @@ describe('CopyButton', () => {
     expect(copied.textContent).toBe('Copied')
   })
 
+  it('labelled with copiedText: the confirmation is the caller\'s next step, then reverts', async () => {
+    const write = mockClipboard(() => Promise.resolve())
+    render(
+      <CopyButton
+        value="Pay https://x.example/a and return the result"
+        label="prompt for Fact"
+        text="Copy prompt"
+        copiedText="Copied — paste it to Atlas"
+      />,
+    )
+    const button = screen.getByRole('button', { name: 'Copy prompt for Fact' })
+    expect(button.textContent).toBe('Copy prompt')
+    await click(button)
+    const copied = screen.getByRole('button', { name: 'Prompt for Fact copied' })
+    expect(copied.textContent).toBe('Copied — paste it to Atlas')
+  })
+
+  it('labelled without copiedText keeps the plain "Copied" confirmation', async () => {
+    const write = mockClipboard(() => Promise.resolve())
+    render(<CopyButton value="v" label="prompt for Fact" text="Copy prompt" />)
+    await click(screen.getByRole('button', { name: 'Copy prompt for Fact' }))
+    expect(screen.getByRole('button', { name: 'Prompt for Fact copied' }).textContent).toBe('Copied')
+  })
+
   it('calls onCopyFailed only when the clipboard write rejects', async () => {
     const onCopyFailed = vi.fn()
     mockClipboard(() => Promise.resolve())

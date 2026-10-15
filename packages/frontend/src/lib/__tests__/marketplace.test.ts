@@ -5,6 +5,7 @@ import {
   budgetAnswerLine,
   categoryLabel,
   freshness,
+  howToBuy,
   isTestnetChain,
   listsTestnet,
   merchantInitials,
@@ -359,6 +360,142 @@ describe('budgetAnswerLine (#4004)', () => {
   it('says nothing when nothing is known', () => {
     expect(budgetAnswerLine([answer('Atlas', 'unknown'), answer('Blinks', 'unknown')])).toBeNull()
     expect(budgetAnswerLine([])).toBeNull()
+  })
+})
+
+// ── #4005: the selected-budget figures ride on the answer ───────────────────
+
+describe('agentsThatCanPay selected figures (#4005)', () => {
+  it('carries the open budget that pays, with its cap and period word', () => {
+    const answers = run()
+    expect(answers[0]!.selected).toEqual({
+      recipientAddress: null,
+      remainingAtomic: '20000000',
+      budgetAtomic: '25000000',
+      tokenSymbol: 'USDC',
+      tokenDecimals: 6,
+      periodPhrase: 'this week',
+    })
+  })
+
+  it('carries the LOCKED budget that pays an erc7710 offer', () => {
+    const answers = agentsThatCanPay({
+      offer: entry({ price_atomic: '10000000', asset_transfer_methods: 'eip3009,erc7710' }),
+      agents: [agent()],
+      budgets: [budgetRow({ recipient_address: PAY_TO })],
+      merchantBudgets: [],
+      funding: [verifiedFunding],
+      nowMs: NOW_MS,
+    })
+    expect(answers[0]!.answer).toBe('can')
+    expect(answers[0]!.selected!.recipientAddress).toBe(PAY_TO)
+  })
+
+  it('carries the figures on an insufficient no too — the panel names what is left', () => {
+    const answers = run({ budgets: [budgetRow({ remaining_atomic: '1000000' })] })
+    expect(answers[0]!.answer).toBe('cannot')
+    expect(answers[0]!.selected!.remainingAtomic).toBe('1000000')
+  })
+
+  it('carries nothing when the answer is unknown or has no budget', () => {
+    expect(run({ budgets: [budgetRow({ remaining_atomic: null })] })[0]!.selected).toBeUndefined()
+    expect(run({ budgets: [] })[0]!.selected).toBeUndefined()
+  })
+})
+
+// ── The "How to buy" panel's merchant-level answer (#4005) ──────────────────
+
+describe('howToBuy (#4005)', () => {
+  function runHowToBuy(overrides: {
+    offers?: CatalogEntry[]
+    agents?: BudgetAgent[]
+    budgets?: DashboardBudgetRemainingEntry[]
+    merchantBudgets?: MerchantBudget[]
+    fundActionAvailable?: boolean
+  }) {
+    return howToBuy({
+      merchantName: 'Merchant Example',
+      offers: overrides.offers ?? [entry({ price_atomic: '10000000' })],
+      agents: overrides.agents ?? [agent()],
+      budgets: overrides.budgets ?? [budgetRow()],
+      merchantBudgets: overrides.merchantBudgets ?? [],
+      funding: [verifiedFunding],
+      fundActionAvailable: overrides.fundActionAvailable ?? false,
+      nowMs: NOW_MS,
+    })
+  }
+
+  it('is done, naming the agent and the budget that pays — an open budget can pay anyone', () => {
+    const result = runHowToBuy({})
+    expect(result).toEqual({
+      kind: 'done',
+      agentName: 'Atlas',
+      partial: false,
+      selected: expect.objectContaining({ recipientAddress: null, remainingAtomic: '20000000' }),
+    })
+  })
+
+  it('is done with partial=true when the agent cannot pay EVERY offer', () => {
+    // The second offer is on another chain — the agent cannot pay it.
+    const result = runHowToBuy({ offers: [entry({ price_atomic: '10000000' }), entry({ id: 'cat-2', network: 'eip155:84532' })] })
+    if (result.kind !== 'done') throw new Error(`expected done, got ${result.kind}`)
+    expect(result.partial).toBe(true)
+  })
+
+  it('names the budget fix when the agent has no budget it can spend here', () => {
+    const result = runHowToBuy({ budgets: [] })
+    expect(result).toMatchObject({ kind: 'budget-fix', agentName: 'Atlas', agentId: 'agent-1', selected: null })
+  })
+
+  it('names the budget fix when the agent\\u2019s only budget is locked to ANOTHER recipient', () => {
+    const result = runHowToBuy({ budgets: [budgetRow({ recipient_address: OTHER_PAY_TO })] })
+    expect(result.kind).toBe('budget-fix')
+    expect(result).toMatchObject({ agentName: 'Atlas', selected: null })
+  })
+
+  it('names the budget fix with the figures when the budget here is real but SHORT', () => {
+    const result = runHowToBuy({ budgets: [budgetRow({ remaining_atomic: '1000000' })] })
+    expect(result.kind).toBe('budget-fix')
+    expect((result as { selected: { remainingAtomic: string } | null }).selected!.remainingAtomic).toBe('1000000')
+  })
+
+  it('says wrong-network when no agent can pay and every no is a chain no — no in-app fix exists', () => {
+    const result = runHowToBuy({
+      agents: [agent({ account_chain_id: 84532, allowances: [] })],
+      budgets: [],
+    })
+    expect(result).toEqual({ kind: 'wrong-network', agentName: 'Atlas', agentChainId: 84532, offerChainIds: [8453] })
+  })
+
+  it('claims nothing when the answers are unknown', () => {
+    expect(runHowToBuy({ budgets: [budgetRow({ remaining_atomic: null })] }).kind).toBe('uncertain')
+    expect(runHowToBuy({ agents: [], budgets: [] }).kind).toBe('uncertain')
+  })
+
+  it('prefers a budget fix over a chain no when agents disagree, and nothing over both when unknowns exist', () => {
+    // Blinks has no budget at all; Atlas is on the wrong chain. A budget is
+    // the actionable fix, so it names Blinks.
+    const disagreement = runHowToBuy({
+      agents: [agent({ account_chain_id: 84532, allowances: [] }), agent({ id: 'agent-2', name: 'Blinks', account_chain_id: 8453, allowances: [] })],
+      budgets: [],
+    })
+    expect(disagreement).toMatchObject({ kind: 'budget-fix', agentName: 'Blinks' })
+    // An unknown anywhere beats both — the panel never claims what the data
+    // cannot support.
+    const withUnknown = runHowToBuy({
+      agents: [
+        agent({ account_chain_id: 84532, allowances: [] }),
+        agent({
+          id: 'agent-3',
+          name: 'Holder',
+          account_chain_id: 8453,
+          allowances: [],
+          receivedSubBudgets: [{ parent_agent_id: 'p', parent_agent_name: 'P', open: true }],
+        }),
+      ],
+      budgets: [],
+    })
+    expect(withUnknown.kind).toBe('uncertain')
   })
 })
 

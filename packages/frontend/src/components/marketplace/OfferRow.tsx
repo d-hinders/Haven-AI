@@ -19,11 +19,14 @@ export function OfferRow({
   entry,
   budget,
   tagged,
+  copiedText,
 }: {
   entry: CatalogEntry
-  /** The shared per-offer budget answer (`OffersTable.hintFor`, #4004). */
+  /** The shared per-offer budget answer (`OffersTable`'s hint map, #4004). */
   budget: OfferBudgetHint
   tagged: boolean
+  /** Set when exactly one agent can pay this offer — the confirmation names it (#4005). */
+  copiedText?: string | null
 }) {
   const degraded = entry.status === 'degraded'
   const chainId = networkToChainId(entry.network)
@@ -72,7 +75,10 @@ export function OfferRow({
           {chainId === undefined ? '—' : chainName(chainId)}
         </td>
         <td className="px-4 py-3 text-right align-top">
-          <OfferCopyButton entry={entry} onCopyFailed={() => setRevealed(true)} className="whitespace-nowrap" />
+          {/* No `whitespace-nowrap` here: the resting label is short, and the
+              #4005 confirmation ("Copied — paste it to <agent>") is longer —
+              it must wrap cleanly in the cell rather than widen the row. */}
+          <OfferCopyButton entry={entry} copiedText={copiedText} onCopyFailed={() => setRevealed(true)} />
         </td>
       </tr>
   )

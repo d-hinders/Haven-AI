@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Table } from '@/components/ui/Table'
-import { ANY_RECIPIENT_BUDGET_NOTE, ANY_RECIPIENT_BUDGET_TAG, agentsThatCanPay, budgetAnswerLine, chainName, needsUnpinnedBudget, networkToChainId, type BudgetAgent } from '@/lib/marketplace'
+import { ANY_RECIPIENT_BUDGET_TAG, agentsThatCanPay, budgetAnswerLine, chainName, needsUnpinnedBudget, networkToChainId, type BudgetAgent } from '@/lib/marketplace'
 import { OfferCopyButton, OfferInstructionText, OfferMeta } from './OfferInstruction'
 import { OfferRow } from './OfferRow'
 import type { CatalogEntry, MerchantFundingTarget } from '@/hooks/useCatalog'
@@ -32,10 +32,13 @@ function OfferCard({
   entry,
   budget,
   tagged,
+  copiedText,
 }: {
   entry: CatalogEntry
   budget: OfferBudgetHint
   tagged: boolean
+  /** Set when exactly one agent can pay this offer — the confirmation names it (#4005). */
+  copiedText?: string | null
 }) {
   const degraded = entry.status === 'degraded'
   const chainId = networkToChainId(entry.network)
@@ -75,7 +78,7 @@ function OfferCard({
         <dd className="text-[var(--v2-ink-2)]">{chainId === undefined ? '—' : chainName(chainId)}</dd>
       </dl>
       <OfferInstructionText entry={entry} revealed={revealed} />
-      <OfferCopyButton entry={entry} onCopyFailed={() => setRevealed(true)} className="mt-3 w-full" />
+      <OfferCopyButton entry={entry} copiedText={copiedText} onCopyFailed={() => setRevealed(true)} className="mt-3 w-full" />
     </li>
   )
 }
@@ -117,12 +120,21 @@ export function OffersTable({
   if (offers.length === 0) return null
 
   // One answer per offer, shared by the table row and the phone card — the
-  // two shapes must never disagree about who can pay (#4004).
+  // two shapes must never disagree about who can pay (#4004). The same
+  // answers drive the #4005 copy confirmation: when exactly one agent can
+  // pay an offer, its button names that agent once copied.
+  const answersFor = (offer: CatalogEntry) =>
+    agentsThatCanPay({ offer, agents, budgets, merchantBudgets, funding })
+  const perOffer = new Map(offers.map((offer) => [offer.id, answersFor(offer)]))
   const hintFor = (offer: CatalogEntry): OfferBudgetHint => {
-    const answers = agentsThatCanPay({ offer, agents, budgets, merchantBudgets, funding })
+    const answers = perOffer.get(offer.id)!
     const text = budgetAnswerLine(answers)
     if (!text) return null
     return { text, tone: answers.some((a) => a.answer === 'can') ? 'can' : 'cannot' }
+  }
+  const copiedTextFor = (offer: CatalogEntry): string | null => {
+    const cans = perOffer.get(offer.id)!.filter((a) => a.answer === 'can')
+    return cans.length === 1 ? `Copied — paste it to ${cans[0]!.agentName}` : null
   }
 
   const chainIdOf = (offer: CatalogEntry) => networkToChainId(offer.network)
@@ -150,24 +162,22 @@ export function OffersTable({
   const bridgeOnly = offers.filter((o) => needsUnpinnedBudget(o.asset_transfer_methods))
   const mixed = bridgeOnly.length > 0 && bridgeOnly.length < offers.length
   const tagged = (offer: CatalogEntry) => mixed && needsUnpinnedBudget(offer.asset_transfer_methods)
-  const note =
-    bridgeOnly.length > 0
-      ? mixed
-        ? `${ANY_RECIPIENT_BUDGET_NOTE} Offers marked "${ANY_RECIPIENT_BUDGET_TAG}" need this.`
-        : ANY_RECIPIENT_BUDGET_NOTE
-      : null
+  // #4005: the any-recipient NOTE is no longer a paragraph above the table —
+  // the "How to buy" panel's step 2 carries it in plain words, next to the
+  // state that makes it matter. The per-offer TAG stays on the rows that
+  // need it in a mixed merchant.
 
   return (
     <div className="space-y-3">
-      {note && (
-        <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]" data-testid="any-recipient-budget-note">
-          {note}
-        </p>
-      )}
-
       <ul className="space-y-2 md:hidden" data-testid="offers-list">
         {visible.map((offer) => (
-          <OfferCard key={offer.id} entry={offer} budget={hintFor(offer)} tagged={tagged(offer)} />
+          <OfferCard
+            key={offer.id}
+            entry={offer}
+            budget={hintFor(offer)}
+            tagged={tagged(offer)}
+            copiedText={copiedTextFor(offer)}
+          />
         ))}
         {others.length > 0 && (
           <li>
@@ -177,7 +187,13 @@ export function OffersTable({
               </summary>
               <ul className="mt-2 space-y-2">
                 {others.map((offer) => (
-                  <OfferCard key={offer.id} entry={offer} budget={hintFor(offer)} tagged={tagged(offer)} />
+                  <OfferCard
+                    key={offer.id}
+                    entry={offer}
+                    budget={hintFor(offer)}
+                    tagged={tagged(offer)}
+                    copiedText={copiedTextFor(offer)}
+                  />
                 ))}
               </ul>
             </details>
@@ -199,7 +215,13 @@ export function OffersTable({
           </Table.Head>
           <Table.Body>
             {visible.map((offer) => (
-              <OfferRow key={offer.id} entry={offer} budget={hintFor(offer)} tagged={tagged(offer)} />
+              <OfferRow
+                key={offer.id}
+                entry={offer}
+                budget={hintFor(offer)}
+                tagged={tagged(offer)}
+                copiedText={copiedTextFor(offer)}
+              />
             ))}
             {others.length > 0 && (
               <tr>
@@ -217,6 +239,7 @@ export function OffersTable({
                               entry={offer}
                               budget={hintFor(offer)}
                               tagged={tagged(offer)}
+                              copiedText={copiedTextFor(offer)}
                             />
                           ))}
                         </Table.Body>

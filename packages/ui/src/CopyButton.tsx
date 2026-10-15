@@ -23,6 +23,12 @@
  * visible words inside it (WCAG 2.5.3, label in name): pass a `label` that
  * starts with the visible noun, e.g. `text="Copy prompt"` with
  * `label="prompt for Fact"` → "Copy prompt for Fact".
+ *
+ * `copiedText` (#4005): what the labelled shape reads once the write
+ * succeeds, when "Copied" alone would drop the caller's next step — the
+ * marketplace names the agent the prompt is pasted to ("Copied — paste it
+ * to Atlas"). The longer label is allowed to wrap (the default stays on one
+ * line); the confirmation is still the 1.5s state.
  */
 
 import { Check, Clipboard } from 'lucide-react'
@@ -39,6 +45,7 @@ export function CopyButton({
   value,
   label,
   text,
+  copiedText,
   onCopyFailed,
   className = '',
 }: {
@@ -55,6 +62,13 @@ export function CopyButton({
    * reading "Copied" once the write succeeds. Omit for the icon-only button.
    */
   text?: string
+  /**
+   * What the labelled shape reads once the write succeeds (#4005), when
+   * "Copied" alone would drop the caller's next step ("Copied — paste it to
+   * Atlas"). Labelled shape only; defaults to "Copied". The longer label may
+   * wrap — the confirmation is transient, so wrapping beats truncating.
+   */
+  copiedText?: string
   /**
    * Called only when `navigator.clipboard.writeText` rejects, the
    * `CodeBlock` precedent. A caller whose value is not on screen must use it
@@ -80,13 +94,19 @@ export function CopyButton({
 
   if (text) {
     return (
-      <Button variant="ghost" size="sm" onClick={() => void handleCopy()} aria-label={accessibleName} className={className}>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => void handleCopy()}
+        aria-label={accessibleName}
+        className={className}
+      >
         {copied ? (
           <Icon icon={Check} className="h-3.5 w-3.5 text-[var(--v2-success)]" />
         ) : (
           <Icon icon={Clipboard} className="h-3.5 w-3.5" />
         )}
-        {copied ? 'Copied' : text}
+        {copied ? (copiedText ?? 'Copied') : text}
       </Button>
     )
   }

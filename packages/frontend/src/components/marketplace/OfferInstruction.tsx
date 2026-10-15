@@ -68,16 +68,20 @@ export function OfferCopyButton({
   entry,
   onCopyFailed,
   className,
+  copiedText,
 }: {
   entry: CatalogEntry
   onCopyFailed: () => void
   className?: string
+  /** The #4005 confirmation, when exactly one agent can pay this offer. */
+  copiedText?: string | null
 }) {
   return (
     <CopyButton
       value={agentInstruction(entry)}
       label={`prompt for ${entry.name}`}
       text="Copy prompt"
+      copiedText={copiedText ?? undefined}
       onCopyFailed={onCopyFailed}
       className={className}
     />

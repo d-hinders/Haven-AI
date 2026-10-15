@@ -316,6 +316,65 @@ projection. The future-dated re-key row is still returned by the route (#3802
 owner decision stands); the HELPER is what skips a row whose `start_date` is
 in the future — the dormant half of a re-key is not spendable.
 
+## The "How to buy" panel (#4005)
+
+Between the header and the offers, a live merchant with at least one offer
+renders a one-Card panel (`components/marketplace/HowToBuyPanel.tsx`) with
+three steps, each claimed from data the page already loads — `useAgents`,
+the two budget wires (#4004) and the funding targets — never asserted.
+Coming-soon and no-offer merchants show no panel.
+
+1. **Connect an agent.** Done when the user has at least one ACTIVE agent —
+   "Atlas is connected on Base Sepolia"; with several, the count names one.
+   Open when there are none: "Connect an agent to buy from <merchant>" with
+   a link to `/agents`. A FAILED agents read says "Haven couldn't load your
+   agents" and never "Connect an agent" (the same distinction the page's
+   funding slot draws). While agents load, the step is a skeleton.
+2. **Give it a budget it can spend here.** The merchant-level reduction of
+   #4004's per-offer verdicts (`howToBuy` in `lib/marketplace.ts`), so the
+   panel and the offers answer from one set of computations:
+   - **Done** when an active agent can pay at least one offer — the line
+     names the agent and the SELECTED budget's remaining and cap ("Atlas has
+     $0.65 left of $1.00 today, and can pay anyone — so it can pay
+     <merchant>"), or "can pay only <merchant>" when the paying budget is
+     merchant-locked. When the agent cannot pay EVERY offer (a mixed
+     merchant, or offers on more than one chain) the line says "for some
+     offers". When any offer needs an any-recipient budget, the step carries
+     that requirement in plain words — the old offer-level note, moved here
+     (#4005).
+   - **A budget fix** when no agent can pay and a budget-shaped no exists:
+     the panel names the first agent with one and offers "Set a budget for
+     this merchant" (the same modal as the header action) ONLY when the
+     action is available AND an eligible agent is ACTIVE —
+     `eligibleFundingAgents` admits paused and pending agents, the panel
+     does not point a paused agent at an action. A merchant-locked budget
+     wins over the open one for this payee, so the action is never offered
+     while an open budget already covers the offers (that state is "done"
+     instead). Otherwise the fix links to the agent's page. A depleted
+     budget names what is left ("not enough for any offer here"); a budget
+     locked to another recipient is simply "no budget that can pay
+     <merchant>" — true either way.
+   - **Wrong network** when every known no is a chain no: the step names the
+     agent's chain and the offers' chains and says plainly that Haven can't
+     add a second account from here — no fix button.
+   - **No claim** when the answers are unknown (remaining unreadable, a
+     received sub-budget in play) — "couldn't confirm what your agent can
+     spend here just now". A failed budget read (either wire) is a
+     retryable "Haven couldn't check budgets — try again".
+3. **Ask your agent to buy.** "Copy an offer's prompt below and paste it
+   into <agent>'s chat. It pays from its budget and brings back the result.
+   The payment shows up in Transactions", linked to `/transactions`. The
+   named target is the agent step 2 claimed can pay, else the only active
+   agent, else the generic "your agent's" — never a name the data does not
+   single out.
+
+The panel is one `Card` of three `Card.Section` rows — no nested filled
+cards (CLAUDE.md § UI Surface Hierarchy). The copy confirmation on an
+offer's "Copy prompt" button becomes "Copied — paste it to <agent>" when
+exactly one agent can pay that offer (`CopyButton`'s optional `copiedText`,
+shown on `/design-system`), and the longer label wraps rather than widening
+the row.
+
 ## Prospects
 
 A `coming_soon` merchant is a company Haven is in conversation with — migration
@@ -514,10 +573,14 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   "n more on <chain names>" disclosure (#4003 — with "— none of your agents
   can pay on that network" when no active agent's account chain is among the
   hidden chains), and every offer renders flat when the
-  user's default network serves none of the merchant's offers. The payment
-  requirement is stated ONCE, offer-level and in plain language — a budget
-  that can pay any recipient — when any offer's `asset_transfer_methods`
-  lacks `erc7710`; no "EIP-3009" and no "unpinned" reaches the page, and in a
+  user's default network serves none of the merchant's offers. (#4005: the
+  offer-level any-recipient NOTE is gone from the table — the "How to buy"
+  panel's step 2 states that requirement in plain words, next to the state
+  that makes it matter; the per-offer TAG stays in a mixed merchant. The copy
+  confirmation names the ONE agent that can pay — "Copied — paste it to
+  <agent>" via `CopyButton`'s `copiedText` — and stays "Copied" when the
+  answer is none, unknown or more than one.) No "EIP-3009" and no
+  "unpinned" reaches the page, and in a
   mixed merchant the offers that need it carry an "any-recipient budget" tag.
   A `coming_soon` merchant renders its description, website and
   "Coming soon — not payable yet" — no offers section, no price. Loading,

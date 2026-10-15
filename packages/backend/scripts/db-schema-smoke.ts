@@ -66,6 +66,7 @@ import {
   LIST_LIVE_BROADCAST_NONCES_FROM_SQL,
 } from '../src/infra/repositories/outbound-txs.js'
 import {
+  RECEIVED_GRANTS_FOR_AGENTS_SQL,
   SUM_OPEN_RESERVED_FOR_BUDGET_DELEGATION_SQL,
   SUM_OPEN_RESERVED_FOR_PARENT_SQL,
 } from '../src/infra/repositories/sub-budgets.js'
@@ -331,7 +332,6 @@ import {
   DASHBOARD_SPEND_GROUPS_SQL,
   FAILED_INTENTS_7D_SQL,
   PENDING_AGENT_SETUP_STATUSES_SQL,
-  RECEIVED_SUB_BUDGETS_FOR_AGENTS_SQL,
   REFUSAL_BUCKETS_BY_AGENT_SQL,
 } from '../src/infra/repositories/dashboard.js'
 import {
@@ -516,7 +516,7 @@ const QUERIES: SmokeQuery[] = [
   // against the real schema — the ANY($n) array parameters and the
   // `WITH legs AS` CTEs are part of the checked surface, same as the rest.
   { name: 'dashboard: pending-agent setup statuses', sql: PENDING_AGENT_SETUP_STATUSES_SQL },
-  { name: 'dashboard: received sub-budgets', sql: RECEIVED_SUB_BUDGETS_FOR_AGENTS_SQL },
+  { name: 'agents: received grants (chain-qualified)', sql: RECEIVED_GRANTS_FOR_AGENTS_SQL },
   { name: 'dashboard: 7/30-day spend groups (netting + pace)', sql: DASHBOARD_SPEND_GROUPS_SQL },
   { name: 'dashboard: distinct merchants + top merchant', sql: DASHBOARD_MERCHANTS_SQL },
   { name: 'dashboard: per-agent last payment', sql: AGENT_LAST_PAYMENT_SQL },

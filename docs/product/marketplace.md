@@ -391,17 +391,29 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   the card, the merchant header) or a logo when `logo_url` is set, name,
   category chip (acronyms kept: API, AI), description clamped to two lines,
   network chips, and a bottom-pinned footer with the offer count or "Coming
-  soon", plus the Haven test-merchant label on a test merchant. Filters:
-  category pills (`components/ui/FilterPill.tsx`, moved out of
-  `CatalogPanel.tsx`), a network dropdown shown only when the listed chains
-  are more than one, search over name and description, "Verified only", and
-  "Show test merchants" — defaulted **on** when any of the merchants' listed
-  networks is a testnet (core's faucet field, `isTestnetChain`, not a
-  hard-coded id), read off the served data rather than
-  `NEXT_PUBLIC_HAVEN_ENV` (epic decision 10). A `/catalog?category=…` deep
-  link keeps its category. A failed load offers "Try again"; a filter that
-  hides everything offers "Clear filters"; an empty marketplace shows no
-  filter row, only the submit entry point.
+  soon", plus the Haven test-merchant label on a test merchant. Filters, in
+  two rows (#3979): first a search over name and description (leading icon,
+  filling the row, as on Contacts) with the network dropdown beside it, shown
+  only when the listed chains are more than one; then category pills
+  (`components/ui/FilterPill.tsx`, moved out of `CatalogPanel.tsx`) on the
+  left and the "Verified only" and "Show test merchants" checkboxes on the
+  right. The network dropdown starts on the chain of the user's default
+  account (`resolveDefaultAccount`) when the listed merchants serve it, else
+  "All networks"; it is derived at read time, so it holds once the user and
+  the merchants load, and any choice overrides it. A merchant that lists no
+  network — coming soon, or every offer self-submitted — stays visible under
+  any network filter. "Show test merchants" is the one control for test
+  content: the `test-fixture` category gets no pill, and a
+  `?category=test-fixture` deep link opens as "All". The checkbox defaults
+  **on** when any of the merchants' listed networks is a testnet (core's
+  faucet field, `isTestnetChain`, not a hard-coded id), read off the served
+  data rather than `NEXT_PUBLIC_HAVEN_ENV` (epic decision 10). Any other
+  `/catalog?category=…` deep link keeps its category. A failed load offers
+  "Try again"; a filter that hides everything offers "Clear filters" (which
+  returns the network to "All networks"); an empty marketplace shows no
+  filter row, only the submit entry point. Below a populated grid, a note for
+  sellers ("Sell an API or MCP tool?") opens the submit modal — listing a
+  service is not a toolbar action.
 - **Merchant page** (`app/(authenticated)/marketplace/[slug]/page.tsx`,
   `MerchantHeader.tsx`, `PayWithHavenBlock.tsx`, `OffersTable.tsx`) — header
   (monogram/logo, name, category, website link, networks, Verified with its

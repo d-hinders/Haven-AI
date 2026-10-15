@@ -214,10 +214,140 @@ describe('MerchantGrid', () => {
     expect(within(group).getByRole('button', { name: 'API' })).toBeDefined()
   })
 
-  it('opens the submit modal callback', () => {
+  it('opens the submit modal from the empty marketplace', () => {
     const onSubmit = vi.fn()
     render(<MerchantGrid merchants={[]} loading={false} error={null} onSubmit={onSubmit} />)
     fireEvent.click(screen.getByRole('button', { name: 'List your payable service' }))
     expect(onSubmit).toHaveBeenCalled()
+  })
+
+  // #3979: on a populated grid, listing a service is a note for sellers below
+  // the cards — not a button in the buyer's toolbar.
+  it('opens the submit modal from the seller note below a populated grid, not from the toolbar', () => {
+    const onSubmit = vi.fn()
+    render(<MerchantGrid merchants={[merchant()]} loading={false} error={null} onSubmit={onSubmit} />)
+    expect(screen.queryByRole('button', { name: 'List your payable service' })).toBeNull()
+    const note = screen.getByTestId('marketplace-list-service')
+    expect(within(note).getByText('Sell an API or MCP tool?')).toBeDefined()
+    fireEvent.click(within(note).getByRole('button', { name: 'List your service' }))
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+  })
+
+  it('puts the search field and the network dropdown on one row, the search with a leading icon', () => {
+    render(
+      <MerchantGrid
+        merchants={[
+          merchant({ id: 'a', slug: 'a', networks: ['eip155:8453'] }),
+          merchant({ id: 'b', slug: 'b', networks: ['eip155:84532'] }),
+        ]}
+        loading={false}
+        error={null}
+        onSubmit={vi.fn()}
+      />,
+    )
+    const search = screen.getByLabelText('Search merchants')
+    const field = search.closest('div.relative') as HTMLElement
+    expect(search.className).toContain('pl-9')
+    expect(field.querySelector('svg')).not.toBeNull()
+    expect(within(field.parentElement!.parentElement!).getByLabelText('Filter marketplace by network')).toBeDefined()
+  })
+
+  describe('default network (#3979)', () => {
+    const twoChains = [
+      merchant({ id: 'base', slug: 'base-only', name: 'Base Co', networks: ['eip155:8453'] }),
+      merchant({ id: 'sep', slug: 'sepolia-only', name: 'Sepolia Co', networks: ['eip155:84532'] }),
+      merchant({ id: 'soon', slug: 'coming-soon', name: 'Soon Co', listing_status: 'coming_soon', networks: [] }),
+    ]
+    const select = () => screen.getByLabelText('Filter marketplace by network') as HTMLSelectElement
+
+    it("opens on the user's network and keeps network-less merchants visible", () => {
+      render(
+        <MerchantGrid merchants={twoChains} loading={false} error={null} onSubmit={vi.fn()} defaultChainId={84532} />,
+      )
+      expect(select().value).toBe('84532')
+      expect(screen.getByText('Sepolia Co')).toBeDefined()
+      expect(screen.queryByText('Base Co')).toBeNull()
+      // Coming soon (and ingestion-only) merchants list no network: no filter hides them.
+      expect(screen.getByText('Soon Co')).toBeDefined()
+    })
+
+    it('derives the default from a user and merchants that arrive AFTER mount', () => {
+      const { rerender } = render(
+        <MerchantGrid merchants={[]} loading={true} error={null} onSubmit={vi.fn()} defaultChainId={null} />,
+      )
+      rerender(
+        <MerchantGrid merchants={twoChains} loading={false} error={null} onSubmit={vi.fn()} defaultChainId={null} />,
+      )
+      expect(select().value).toBe('all')
+      rerender(
+        <MerchantGrid merchants={twoChains} loading={false} error={null} onSubmit={vi.fn()} defaultChainId={84532} />,
+      )
+      expect(select().value).toBe('84532')
+      expect(screen.queryByText('Base Co')).toBeNull()
+    })
+
+    it('falls back to All networks when the user has no account on a listed chain', () => {
+      render(
+        <MerchantGrid merchants={twoChains} loading={false} error={null} onSubmit={vi.fn()} defaultChainId={1} />,
+      )
+      expect(select().value).toBe('all')
+      expect(screen.getByText('Base Co')).toBeDefined()
+      expect(screen.getByText('Sepolia Co')).toBeDefined()
+    })
+
+    it('lets a choice override the default, and Clear filters goes to All networks', () => {
+      render(
+        <MerchantGrid merchants={twoChains} loading={false} error={null} onSubmit={vi.fn()} defaultChainId={84532} />,
+      )
+      fireEvent.change(select(), { target: { value: 'all' } })
+      expect(screen.getByText('Base Co')).toBeDefined()
+
+      fireEvent.change(select(), { target: { value: '84532' } })
+      fireEvent.change(screen.getByLabelText('Search merchants'), { target: { value: 'base' } })
+      expect(screen.getByText('No merchants match this filter')).toBeDefined()
+      fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
+      expect(select().value).toBe('all')
+      expect(screen.getByText('Base Co')).toBeDefined()
+    })
+  })
+
+  describe('test content has one control (#3979)', () => {
+    const withFixture = [
+      merchant({ id: 'a', slug: 'api-one', name: 'API Co', category: 'api' }),
+      merchant({ id: 'd', slug: 'data-one', name: 'Data Co', category: 'data' }),
+      merchant({
+        id: 'f',
+        slug: 'minifetch',
+        name: 'Minifetch',
+        category: 'test-fixture',
+        is_test_merchant: true,
+        networks: ['eip155:84532'],
+      }),
+    ]
+
+    it('renders no Test-fixture pill; the checkbox alone shows and hides test merchants', () => {
+      render(<MerchantGrid merchants={withFixture} loading={false} error={null} onSubmit={vi.fn()} />)
+      const group = screen.getByRole('group', { name: 'Filter by category' })
+      expect(within(group).queryByRole('button', { name: /test/i })).toBeNull()
+      expect(within(group).getByRole('button', { name: 'Data' })).toBeDefined()
+      expect(screen.getByText('Minifetch')).toBeDefined()
+      fireEvent.click(screen.getByLabelText('Show test merchants'))
+      expect(screen.queryByText('Minifetch')).toBeNull()
+    })
+
+    it('opens a ?category=test-fixture deep link as All, so no filter is active without a pill', () => {
+      render(
+        <MerchantGrid
+          merchants={withFixture}
+          loading={false}
+          error={null}
+          onSubmit={vi.fn()}
+          initialCategory="test-fixture"
+        />,
+      )
+      const group = screen.getByRole('group', { name: 'Filter by category' })
+      expect(within(group).getByRole('button', { name: 'All' }).getAttribute('aria-pressed')).toBe('true')
+      expect(screen.getByText('API Co')).toBeDefined()
+    })
   })
 })

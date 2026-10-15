@@ -11,7 +11,12 @@ import type { CatalogEntry } from '@/hooks/useCatalog'
  * per-row Verified badge and the Method column are rewritten as their
  * absences. The `agentInstruction` string itself is guarded byte-for-byte in
  * `lib/__tests__/marketplace.test.ts` and is NOT retested here; what IS
- * tested is that the copy button and the printed line carry it.
+ * tested is that the labelled copy button carries it, and when it is printed
+ * (#3998: only when the user must edit it, or after a refused copy).
+ *
+ * NOTE the fixture: `offer()` defaults to an MCP offer WITH a tool, the one
+ * branch whose instruction stays printed. A test about the copy-only rows
+ * must override it — `plain()` below.
  */
 function offer(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
   return {
@@ -41,6 +46,17 @@ function offer(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
     verified_payable: false,
     ...overrides,
   }
+}
+
+/** A copy-only offer: plain HTTP x402, no tool — its instruction is never printed unasked. */
+function plain(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
+  return offer({
+    protocol: 'http',
+    tool_name: null,
+    resource_url: 'https://services.example/api/fact',
+    name: 'Fact',
+    ...overrides,
+  })
 }
 
 const oneAgent = [
@@ -103,23 +119,77 @@ describe('OffersTable', () => {
     expect(screen.getAllByText('Pay https://mcp.text.example/mcp via create_text for <what you want>').length).toBeGreaterThan(0)
   })
 
-  it('prints the full instruction under the row, wrapping not truncating, and copies the same string', async () => {
-    render(<OffersTable offers={[offer()]} agents={[]} />)
-    const instruction = agentInstruction(offer())
-    const printed = screen.getAllByText(instruction)
-    expect(printed.length).toBeGreaterThan(0)
-    for (const node of printed) {
-      expect(node.className).not.toContain('truncate')
-      expect(node.className).toContain('break-all')
-    }
-    const buttons = screen.getAllByLabelText('Copy agent instruction for Text generation')
-    // One per shape: the desktop row and the phone card.
-    expect(buttons).toHaveLength(2)
-    for (const button of buttons) {
-      fireEvent.click(button)
-    }
+  // #3998: one row per offer — the instruction is no longer a second row.
+  it('renders ONE table row per offer, plus only the disclosure row when other networks exist', () => {
+    render(
+      <OffersTable
+        offers={[
+          plain({ id: 'a', network: 'eip155:84532' }),
+          plain({ id: 'b', network: 'eip155:84532', name: 'Joke' }),
+          plain({ id: 'c', network: 'eip155:8453', name: 'Quote' }),
+        ]}
+        agents={[]}
+        defaultChainId={84532}
+      />,
+    )
+    const tbody = screen.getByTestId('offers-table').querySelector('tbody')!
+    // Two visible offers + the "Other networks" disclosure row.
+    expect(tbody.querySelectorAll(':scope > tr')).toHaveLength(3)
+    // The nested table inside the disclosure: one row for its one offer.
+    const nested = within(screen.getAllByTestId('other-networks')[1]).getByRole('table')
+    expect(nested.querySelectorAll('tbody > tr')).toHaveLength(1)
+  })
+
+  it.each([
+    ['plain HTTP x402', plain({ id: 'http' })],
+    ['machine-payment (mpp)', plain({ id: 'mpp', rail: 'mpp' })],
+    ['MCP without a tool', plain({ id: 'mcp-bare', protocol: 'mcp', tool_name: null })],
+  ])('does not print the instruction of a copy-only offer (%s); the meta line shows where and how fresh', (_kind, entry) => {
+    render(<OffersTable offers={[entry]} agents={[]} />)
+    expect(screen.queryByText(agentInstruction(entry))).toBeNull()
+    const meta = row(entry.id).getByTitle(entry.resource_url)
+    expect(meta.textContent).toBe('services.example/api/fact · verified just now')
+    expect(meta.className).toContain('truncate')
+  })
+
+  it('copies the exact instruction from a labelled button whose name keeps its visible words, then reads "Copied"', async () => {
+    const entry = plain()
+    render(<OffersTable offers={[entry]} agents={[]} />)
+    const button = row(entry.id).getByRole('button', { name: 'Copy instruction for Fact' })
+    expect(button.textContent).toBe('Copy instruction')
+    fireEvent.click(button)
     await vi.waitFor(() => {
-      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(instruction)
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(agentInstruction(entry))
+    })
+    expect((await row(entry.id).findByRole('button', { name: 'Instruction for Fact copied' })).textContent).toBe('Copied')
+  })
+
+  it('keeps an instruction with a placeholder printed in the Offer cell, with the hint, wrapping not truncating', () => {
+    render(<OffersTable offers={[offer()]} agents={[]} />)
+    const printed = row('offer-1').getByText(agentInstruction(offer()))
+    expect(printed.className).not.toContain('truncate')
+    expect(printed.className).toContain('break-all')
+    expect(row('offer-1').getByText('Replace <what you want> before sending.')).toBeDefined()
+  })
+
+  it('reveals a copy-only instruction when the clipboard refuses it — row and card alike', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
+      configurable: true,
+    })
+    const entry = plain()
+    render(<OffersTable offers={[entry]} agents={[]} />)
+    expect(screen.queryByText(agentInstruction(entry))).toBeNull()
+    fireEvent.click(row(entry.id).getByRole('button', { name: 'Copy instruction for Fact' }))
+    await vi.waitFor(() => {
+      expect(row(entry.id).getByText(agentInstruction(entry))).toBeDefined()
+    })
+    expect(row(entry.id).getByText(/Copying was blocked/)).toBeDefined()
+    const card = within(screen.getByTestId(`offer-card-${entry.id}`))
+    expect(card.queryByText(agentInstruction(entry))).toBeNull()
+    fireEvent.click(card.getByRole('button', { name: 'Copy instruction for Fact' }))
+    await vi.waitFor(() => {
+      expect(card.getByText(agentInstruction(entry))).toBeDefined()
     })
   })
 
@@ -178,7 +248,7 @@ describe('OffersTable', () => {
     expect(screen.getAllByTestId('offer-row-b')).toHaveLength(1)
   })
 
-  it('renders the same offers as stacked cards for phone widths, budget hint and instruction included', () => {
+  it('renders the same offers as stacked cards for phone widths, budget hint and labelled copy button included', () => {
     render(
       <OffersTable
         offers={[offer({ id: 'within' }), offer({ id: 'above', name: 'Bulk video render', price_atomic: '99000000', price_display: '$99.00 USDC' })]}
@@ -193,6 +263,7 @@ describe('OffersTable', () => {
     expect(above.getByText('Base Sepolia')).toBeDefined()
     expect(above.getByText('Pay https://mcp.text.example/mcp via create_text for <what you want>')).toBeDefined()
     expect(within(screen.getByTestId('offer-card-within')).getByText('Within your agent budget')).toBeDefined()
-    expect(screen.getAllByLabelText('Copy agent instruction for Bulk video render')).toHaveLength(2)
+    // One labelled button per shape: the desktop row and the phone card.
+    expect(screen.getAllByRole('button', { name: 'Copy instruction for Bulk video render' })).toHaveLength(2)
   })
 })

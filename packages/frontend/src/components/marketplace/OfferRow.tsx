@@ -1,15 +1,18 @@
-import { CopyButton } from '@/components/ui/CopyButton'
-import { ANY_RECIPIENT_BUDGET_TAG, agentInstruction, chainName, freshness, networkToChainId } from '@/lib/marketplace'
+'use client'
+
+import { useState } from 'react'
+import { ANY_RECIPIENT_BUDGET_TAG, chainName, networkToChainId } from '@/lib/marketplace'
+import { OfferCopyButton, OfferInstructionText, OfferMeta } from './OfferInstruction'
 import type { CatalogEntry } from '@/hooks/useCatalog'
 
 /**
- * One offer's row content in the merchant page's single offers list (#3981,
- * epic #3077). Since #3981 the page lists each offer ONCE: no Method column
- * (the rail or MCP tool name survives inside the instruction text) and no
- * per-row Verified badge (the merchant-level badge in `MerchantHeader` is the
- * trust claim). The full instruction is rendered as the second row — one
- * line of monospace text that wraps, never truncates, because it becomes a
- * payment — and the copy button carries the same byte-identical string.
+ * One offer's row in the merchant page's single offers list (#3981, epic
+ * #3978): no Method column and no per-row Verified badge (the merchant-level
+ * badge in `MerchantHeader` is the trust claim). Since #3998 it is ONE table
+ * row: the instruction is no longer printed as a second row — the labelled
+ * "Copy instruction" button copies it byte-for-byte, and the Offer cell
+ * prints it only when the user must edit it or the clipboard refused it
+ * (`OfferInstructionText`).
  */
 export function OfferRow({
   entry,
@@ -21,11 +24,10 @@ export function OfferRow({
   tagged: boolean
 }) {
   const degraded = entry.status === 'degraded'
-  const instruction = agentInstruction(entry)
   const chainId = networkToChainId(entry.network)
+  const [revealed, setRevealed] = useState(false)
 
   return (
-    <>
       <tr data-testid={`offer-row-${entry.id}`}>
         <td className="px-4 py-3 align-top">
           <div className="flex flex-wrap items-center gap-2">
@@ -42,7 +44,8 @@ export function OfferRow({
             ) : null}
           </div>
           <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">{entry.description}</p>
-          <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">{freshness(entry.verified_at)}</p>
+          <OfferMeta entry={entry} />
+          <OfferInstructionText entry={entry} revealed={revealed} />
           {degraded ? (
             <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
               Recently unreachable on our checks — a payment may need a retry until it recovers.
@@ -68,17 +71,9 @@ export function OfferRow({
         <td className="px-4 py-3 align-top text-xs text-[var(--v2-ink-2)]">
           {chainId === undefined ? '—' : chainName(chainId)}
         </td>
-        <td className="px-2 py-3 align-top">
-          <CopyButton value={instruction} label={`agent instruction for ${entry.name}`} />
+        <td className="px-4 py-3 text-right align-top">
+          <OfferCopyButton entry={entry} onCopyFailed={() => setRevealed(true)} className="whitespace-nowrap" />
         </td>
       </tr>
-      <tr data-testid={`offer-instruction-${entry.id}`}>
-        <td colSpan={4} className="px-4 pb-3">
-          <code className="block whitespace-pre-wrap break-all text-xs text-[var(--v2-ink-2)]">
-            {instruction}
-          </code>
-        </td>
-      </tr>
-    </>
   )
 }

@@ -438,13 +438,21 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   action shows), and ONE offers section (#3981): each offer is a single row —
   a table from `md` up, one stacked card below — carrying name, description,
   price with the `withinBudget()` per-agent hint (so the warning is never
-  behind a horizontal scroll on a phone), the network's chain name and a copy
-  button; the full paste-into-agent instruction (`agentInstruction()`,
-  byte-stable in `lib/marketplace.ts`) is printed under the row in
-  monospace, wrapping, never truncated, because it becomes a payment. There
-  is no Method column (the rail or MCP tool name survives inside the
-  instruction) and no per-row Verified badge — the trust claim lives once, in
-  the header; freshness is a quiet line under the description. Offers on the
+  behind a horizontal scroll on a phone), the network's chain name and a
+  labelled **Copy instruction** button (#3998) that copies the full
+  paste-into-agent instruction (`agentInstruction()`, byte-stable in
+  `lib/marketplace.ts`). The instruction is not printed under every offer:
+  the row carries a quiet line under the description — the resource URL
+  without its scheme, truncated with the full URL as its title, then the
+  freshness — and prints the instruction (monospace, wrapping, never
+  truncated) only where the user must see it: when it carries a placeholder
+  to replace (`instructionNeedsEdit`: an MCP offer with a tool, "… for
+  <what you want>", with a "Replace <what you want> before sending" hint),
+  or after the clipboard refused a copy, when it is revealed in place. The
+  button's accessible name keeps its visible words ("Copy instruction for
+  <offer>"). There is no Method column (the MCP tool name survives inside the
+  printed instruction) and no per-row Verified badge — the trust claim lives
+  once, in the header. Offers on the
   user's own network (the chain of the default account,
   `resolveDefaultAccount`) come first; offers on other networks sit behind an
   "Other networks (n)" disclosure, and every offer renders flat when the

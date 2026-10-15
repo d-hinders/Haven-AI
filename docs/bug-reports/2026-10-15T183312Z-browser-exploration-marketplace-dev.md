@@ -26,7 +26,7 @@ last-verified: "2026-10-15"
 - **Exact command:** `/qa-explore-ui` (scope: epic #3978)
 - **Process exit code:** n/a (interactive)
 - **Git branch / SHA:** `docs/3978-qa-explore-ui` / report written at dev `355af0718`
-- **Frontend URL / build SHA:** `haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app` (the stable `dev` preview) / not exposed by the page. It serves a build that includes PR #4001 (`e47bddcaf`), because the labelled "Copy instruction" button and the one-row offers were present.
+- **Frontend URL / build SHA:** `haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app` (the stable `dev` preview) / not exposed by the page. It serves a build that includes PR #4001 (`e47bddcaf`), because the labelled "Copy instruction" button and the one-row offers were present. It very likely also includes PR #4007 (#4004); see the budget-hint row.
 - **Backend URL / deploy SHA:** `havenbackend-dev-8b95.up.railway.app`, through the `?apiBaseUrl` override, with requests proxied as same-origin `/api/*` / not checked
 - **Merchant URL / version:** `services.sandbox.ampersend.ai` (listing data only; no payment made)
 - **Chain:** Base Sepolia (`84532`), the default network
@@ -49,6 +49,7 @@ last-verified: "2026-10-15"
 ## Command And Artifacts
 
 - **Command output summary:** 8 views explored. Measured layout with in-page DOM reads (document and `<main id="main-content">` scroll boxes, cell positions). Read console errors and the network list.
+- **Playwright base URL / project / retries:** n/a (Claude browser pane, not Playwright)
 - **Artifacts:** screenshots viewed in-session only; none committed.
 - **Artifact secret review completed:** yes. This report holds no tokens, cookies, emails or credentials. The network list was read for status codes only, and `_rsc` values were already redacted by the tool.
 
@@ -82,7 +83,7 @@ last-verified: "2026-10-15"
 | nit | product | Verified marker | One treatment | The grid card uses the quiet check (#3980), while the merchant page header still shows the uppercase "VERIFIED" badge | always | dev | rendered | #4008 | new |
 | nit | product (data) | Haven demo store card | The test-merchant note appears once | The card prints the note, then a description that starts with the same sentence | always | dev | card text | #4002 Notes | known |
 | nit | product (data) | Offer names | The name does not repeat the Network column | "Ampersend — fact (Base Sepolia)" | always | dev | row text | #3998, out of scope | known |
-| info | product | Merchant page budget hint | n/a | No per-offer budget answer showed for this user. That matches `withinBudget()` returning unknown for a user with no matching budget. The truthful, named answer is #4004 | always | dev | rows render with no hint line | #4004 | known |
+| info | product | Merchant page budget hint | n/a | No per-offer budget answer showed for this user. The build very likely included #4004 (PR #4007, merged 17:58Z, about 7 minutes before this run): the merchant-page load requested `GET /api/dashboard/budget-remaining`, which the merchant page reads only since #4007 (`[slug]/page.tsx` `useBudgetRemaining`). Not confirmed, because other parts of the shell may make that call. Under #4007 the answer comes from `agentsThatCanPay` / `budgetAnswerLine`, which render nothing when no answer is a known yes or no, consistent with a user who has no matching live budget | always | dev | rows render with no answer line; network list | #4004 (shipped) | known |
 | info | environment | Console | No app errors | The only console errors are the Vercel preview toolbar's report-only CSP warnings ("Framing 'https://vercel.live/' violates … report-only …"), plus aborted Vercel toolbar and prefetch requests (`/.well-known/vercel/jwe`, `OPTIONS /`, `HEAD`) | always on preview hosts | dev preview | console and network list | n/a | preview noise, not the app |
 | info | environment | Clipboard | n/a | The embedded browser pane refuses `navigator.clipboard.writeText`, which is what exercised the reveal path above | always in this runner | Claude browser pane | reveal rendered | n/a | — |
 
@@ -97,4 +98,4 @@ last-verified: "2026-10-15"
 
 - The two minor findings and the two price/verified nits are filed together as #4008. They share the marketplace surface, so they are batched per new-task § Epics.
 - The merchant-page buying journey that this run makes visible (no "how to buy", a cap-only budget hint, generic copy) is already filed as epic #4002 (#4003, #4004, #4005).
-- To see the per-offer budget answer at all on dev, the QA identity needs an agent with a live USDC budget on Base Sepolia. Seed one before #4004's verification run.
+- To see the per-offer budget answer (#4004, shipped) on dev, the QA identity needs an agent with a live USDC budget on Base Sepolia. Seed one before epic #4002's promotion-checklist run, which calls for "a signed-in user with one connected agent and a budget".

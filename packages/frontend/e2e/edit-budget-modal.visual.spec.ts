@@ -2,7 +2,7 @@
  * Visual regression for the EditBudgetModal (#3398).
  *
  * One ELEMENT-SCOPED clip (the same scoping `marketplace.visual.spec.ts`
- * uses for its "Fund this merchant" modal clips and
+ * uses for its "Set a budget for this merchant" modal clips and
  * `settings-accounting.visual.spec.ts` for its backfill dialog): the
  * modal's FORM step at the 390 px evidence viewport
  * (`scripts/evidence-viewports.mjs`, `-mobile.png` under

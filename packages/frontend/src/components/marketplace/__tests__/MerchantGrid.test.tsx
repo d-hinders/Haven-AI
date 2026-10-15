@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { MerchantGrid } from '../MerchantGrid'
-import { VERIFIED_MEANING } from '@/lib/marketplace'
+import { verifiedMeaning } from '@/lib/marketplace'
 import type { Merchant } from '@/hooks/useCatalog'
 
 function merchant(overrides: Partial<Merchant> = {}): Merchant {
@@ -124,7 +124,7 @@ describe('MerchantGrid', () => {
     const card = screen.getByTestId('merchant-card-verified')
     // The quiet marker: `title` spells the meaning out on hover/AT, sr-only
     // "Verified" names it, and the uppercase badge is gone.
-    expect(within(card).getByTitle(VERIFIED_MEANING)).toBeDefined()
+    expect(within(card).getByTitle(verifiedMeaning('Merchant One'))).toBeDefined()
     expect(within(card).getByText('Verified').className).toContain('sr-only')
     expect(within(card).queryByText('VERIFIED')).toBeNull()
     // The unverified card carries no marker at all.
@@ -142,7 +142,7 @@ describe('MerchantGrid', () => {
     expect(screen.queryByTestId('merchant-card-test-one')).toBeNull()
     fireEvent.click(screen.getByLabelText('Show test merchants'))
     expect(screen.getByTestId('merchant-card-test-one')).toBeDefined()
-    expect(screen.getByText('Haven test merchant — real payments, demo goods')).toBeDefined()
+    expect(screen.getByText('A Haven test merchant: payments are real (small amounts of USDC), but what you get is demo content.')).toBeDefined()
   })
 
   it('derives the "Show test merchants" default from data that arrives AFTER mount — the grid mounts on an empty list', () => {

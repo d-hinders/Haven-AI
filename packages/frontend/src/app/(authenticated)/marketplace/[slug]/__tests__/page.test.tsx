@@ -208,7 +208,7 @@ describe('MerchantPage', () => {
     expect(screen.getByRole('heading', { name: 'Offers' })).toBeDefined()
     expect(screen.queryByText('Pay this with Haven')).toBeNull()
     // One copy button per shape: the desktop row and the phone card.
-    expect(screen.getAllByRole('button', { name: 'Copy instruction for Joke' })).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'Copy prompt for Joke' })).toHaveLength(2)
     expect(screen.queryByText('List your payable service')).toBeNull()
     // The header is still the page's only h1.
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
@@ -245,14 +245,14 @@ describe('MerchantPage', () => {
       refetch: vi.fn(),
     })
     const { unmount } = render(<MerchantPage />)
-    expect(screen.getAllByText('Other networks (1)')).toHaveLength(2)
+    expect(screen.getAllByText('1 more on Base — none of your agents can pay on that network')).toHaveLength(2)
     expect(screen.getAllByTestId('offer-row-sepolia')).toHaveLength(1)
     expect(screen.getAllByTestId('offer-row-base')).toHaveLength(1)
     unmount()
     // No default account on any network the offers use → all flat.
     mockUseAuth.mockReturnValue({ user: null })
     render(<MerchantPage />)
-    expect(screen.queryByText(/Other networks/)).toBeNull()
+    expect(screen.queryByText(/more on/)).toBeNull()
   })
 
   it('renders the coming-soon branch with no offers section and no copy buttons', () => {
@@ -268,7 +268,7 @@ describe('MerchantPage', () => {
     expect(screen.getByText('Coming soon — not payable yet')).toBeDefined()
     expect(screen.queryByText('Pay this with Haven')).toBeNull()
     expect(screen.queryByRole('heading', { name: 'Offers' })).toBeNull()
-    expect(screen.queryByRole('button', { name: /Copy instruction/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Copy prompt/ })).toBeNull()
     expect(screen.queryByText('List your payable service')).toBeNull()
   })
 
@@ -286,7 +286,7 @@ describe('MerchantPage', () => {
     expect(screen.queryByText('List your payable service')).toBeNull()
   })
 
-  // ── "Fund this merchant" (#3331) ──────────────────────────────────────────
+  // ── "Set a budget for this merchant" (#3331, #4003 wording) ───────────────
   const verifiedErc7710Funding: MerchantFundingTarget[] = [
     { network: 'eip155:84532', chain_id: 84532, pay_to: '0x' + 'f0'.repeat(20), pay_to_status: 'verified', erc7710: true },
   ]
@@ -309,7 +309,7 @@ describe('MerchantPage', () => {
       refetch: vi.fn(),
     })
     render(<MerchantPage />)
-    expect(screen.getByRole('button', { name: 'Fund this merchant' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Set a budget for this merchant' })).toBeDefined()
   })
 
   // #3331 review finding F6: the chain qualifies but NONE of the owner's own
@@ -331,7 +331,7 @@ describe('MerchantPage', () => {
       refetch: vi.fn(),
     })
     render(<MerchantPage />)
-    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Set a budget for this merchant' })).toBeNull()
     // The payment note is offer-level (#3981): these offers lack erc7710, so
     // it shows here too — the connect-agent line is about FUNDING, not payment.
     expect(screen.getByText(/budget that can pay any recipient/)).toBeDefined()
@@ -358,7 +358,7 @@ describe('MerchantPage', () => {
       refetch: vi.fn(),
     })
     render(<MerchantPage />)
-    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Set a budget for this merchant' })).toBeNull()
     expect(screen.queryByText(/Connect an agent/)).toBeNull()
     expect(screen.getByText(/Haven could not load your agents just now, so funding is unavailable\. Reload the page to try again\./)).toBeDefined()
   })
@@ -395,7 +395,7 @@ describe('MerchantPage', () => {
       refetch: vi.fn(),
     })
     render(<MerchantPage />)
-    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Set a budget for this merchant' })).toBeNull()
     expect(screen.queryByText(/Connect an agent on/)).toBeNull()
   })
 
@@ -410,7 +410,7 @@ describe('MerchantPage', () => {
       refetch: vi.fn(),
     })
     render(<MerchantPage />)
-    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Set a budget for this merchant' })).toBeNull()
     // The note is offer-level (#3981): the offers lack erc7710, so it shows
     // regardless of the funding shape.
     expect(screen.getByText(/budget that can pay any recipient/)).toBeDefined()
@@ -427,7 +427,7 @@ describe('MerchantPage', () => {
       refetch: vi.fn(),
     })
     render(<MerchantPage />)
-    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Set a budget for this merchant' })).toBeNull()
     expect(screen.queryByText(/budget that can pay any recipient/)).toBeNull()
   })
 
@@ -442,7 +442,7 @@ describe('MerchantPage', () => {
       refetch: vi.fn(),
     })
     render(<MerchantPage />)
-    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Set a budget for this merchant' })).toBeNull()
   })
 
   it('renders merchant-locked budgets, with pin_status and #1319 provenance, when GET /merchants/:slug/budgets returns rows', () => {

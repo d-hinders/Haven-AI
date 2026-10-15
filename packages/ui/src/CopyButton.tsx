@@ -15,14 +15,14 @@
  * and in most headless captures. Where the value is already on screen the
  * button is only an accelerator, so failing silently is right — the value is
  * still readable and selectable. A caller whose value is NOT printed (the
- * marketplace's labelled Copy instruction, #3998) passes `onCopyFailed` and
+ * marketplace's labelled Copy prompt, #3998, #4003) passes `onCopyFailed` and
  * reveals the value itself, because there a silent failure loses it.
  *
  * Two shapes (#3998): icon-only by default; with `text`, a labelled ghost
- * `Button` ("Copy instruction" → "Copied"). The accessible name keeps the
+ * `Button` ("Copy prompt" → "Copied"). The accessible name keeps the
  * visible words inside it (WCAG 2.5.3, label in name): pass a `label` that
- * starts with the visible noun, e.g. `text="Copy instruction"` with
- * `label="instruction for Fact"` → "Copy instruction for Fact".
+ * starts with the visible noun, e.g. `text="Copy prompt"` with
+ * `label="prompt for Fact"` → "Copy prompt for Fact".
  */
 
 import { Check, Clipboard } from 'lucide-react'

@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react'
 import { Monogram } from '@/components/ui/Monogram'
 import { StatusBadge } from '@/components/ui/StatusBadge'
-import { categoryLabel, chainName, networkToChainId, VERIFIED_MEANING } from '@/lib/marketplace'
+import { categoryLabel, chainName, networkToChainId, verifiedMeaning } from '@/lib/marketplace'
 import type { Merchant } from '@/hooks/useCatalog'
 
-export const TEST_MERCHANT_NOTE = 'Haven test merchant — real payments, demo goods'
+export const TEST_MERCHANT_NOTE =
+  'A Haven test merchant: payments are real (small amounts of USDC), but what you get is demo content.'
 
 /**
  * The merchant page's header (#3079, epic #3077) — and its one `h1`. The
@@ -19,8 +20,8 @@ export const TEST_MERCHANT_NOTE = 'Haven test merchant — real payments, demo g
  * is a plain string with no badge slot, and its `subtitle`/`meta` render
  * inside a `<p>` (the chips and warning paragraphs would be invalid nesting)
  * — so the header STAYS, aligned with `PageHeader`'s type scale and spacing,
- * and gains its `actions` slot: "Fund this merchant" renders on the right,
- * the way `PageHeader` places actions.
+ * and gains its `actions` slot: "Set a budget for this merchant" renders on
+ * the right, the way `PageHeader` places actions (#4003 wording).
  */
 export function MerchantHeader({ merchant, actions }: { merchant: Merchant; actions?: ReactNode }) {
   const networks = merchant.networks
@@ -35,7 +36,7 @@ export function MerchantHeader({ merchant, actions }: { merchant: Merchant; acti
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="v2-text-h1 text-[var(--v2-ink)]">{merchant.name}</h1>
             {merchant.verified_payable && (
-              <span title={VERIFIED_MEANING}>
+              <span title={verifiedMeaning(merchant.name)}>
                 <StatusBadge tone="success" className="uppercase tracking-wide">
                   Verified
                 </StatusBadge>
@@ -53,7 +54,7 @@ export function MerchantHeader({ merchant, actions }: { merchant: Merchant; acti
           <p className="mt-2 max-w-2xl v2-text-body text-[var(--v2-ink-2)]">{merchant.description}</p>
           {merchant.verified_payable && (
             <p className="mt-2 max-w-2xl v2-text-meta text-[var(--v2-ink-3)]" data-testid="verified-meaning">
-              {VERIFIED_MEANING}
+              {verifiedMeaning(merchant.name)}
             </p>
           )}
           <div className="mt-2 flex flex-wrap items-center gap-2">

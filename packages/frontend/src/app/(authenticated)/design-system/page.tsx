@@ -469,8 +469,8 @@ function LabelledCopyDemo() {
     <div className="mt-4">
       <CopyButton
         value={value}
-        label="instruction for Ampersend — fact"
-        text="Copy instruction"
+        label="prompt for Ampersend — fact"
+        text="Copy prompt"
         onCopyFailed={() => setRevealed(true)}
       />
       {revealed ? (
@@ -1512,7 +1512,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="CopyButton — the one copy affordance"
-        description="The inline check-pop copy button, extracted from <Address> on its second call site (#1878). Any value a user is expected to paste elsewhere gets this, never a hand-rolled button: it owns the hit area, the focus ring, the 1.5s confirmation, and the catch around navigator.clipboard — which rejects on insecure origins, denied permissions, and in most headless captures. Where the value is printed beside the button, failing quietly is correct: the value stays on screen and selectable. Pass `label` lowercase and name the thing, not the widget — it reads as “Copy address”, then “Address copied”. Two additions (#3998): `text` renders the labelled ghost-button shape for a value that is NOT printed (the marketplace’s “Copy instruction”) — keep the visible words at the start of the accessible name (“Copy instruction for Fact”); and `onCopyFailed`, which such a caller must pass to reveal the value when the clipboard refuses it."
+        description="The inline check-pop copy button, extracted from <Address> on its second call site (#1878). Any value a user is expected to paste elsewhere gets this, never a hand-rolled button: it owns the hit area, the focus ring, the 1.5s confirmation, and the catch around navigator.clipboard — which rejects on insecure origins, denied permissions, and in most headless captures. Where the value is printed beside the button, failing quietly is correct: the value stays on screen and selectable. Pass `label` lowercase and name the thing, not the widget — it reads as “Copy address”, then “Address copied”. Two additions (#3998): `text` renders the labelled ghost-button shape for a value that is NOT printed (the marketplace’s “Copy prompt”) — keep the visible words at the start of the accessible name (“Copy prompt for Fact”); and `onCopyFailed`, which such a caller must pass to reveal the value when the clipboard refuses it."
       >
         <Card hover={false} className="p-5">
           <div className="flex flex-wrap items-center gap-6 text-sm text-[var(--v2-ink-2)]">

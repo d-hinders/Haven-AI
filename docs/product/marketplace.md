@@ -121,7 +121,7 @@ caller, including `haven_discover_tools`.
 An owner can give an agent a budget that pays **one merchant only**. It is an
 ordinary recipient-pinned budget delegation, and its pin is the merchant's
 verified payTo on the agent's chain. This section covers the backend slice
-and the "Fund this merchant" modal, the frontend slice — see *Screens* below
+and the "Set a budget for this merchant" modal, the frontend slice — see *Screens* below
 for the modal's own shape.
 
 - **Where a merchant is paid.** The catalog refresh probe (at backend boot,
@@ -490,12 +490,12 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   category, website link, networks, Verified with its meaning as VISIBLE text
   under the description — never only a tooltip — the Haven test-merchant note
   as a wrapping line on a test merchant, where a payment is one paste away,
-  and "Fund this merchant" in the header's right-hand actions slot when the
+  and "Set a budget for this merchant" in the header's right-hand actions slot when the
   action shows), and ONE offers section (#3981): each offer is a single row —
   a table from `md` up, one stacked card below — carrying name, description,
   price with the `withinBudget()` per-agent hint (so the warning is never
   behind a horizontal scroll on a phone), the network's chain name and a
-  labelled **Copy instruction** button (#3998) that copies the full
+  labelled **Copy prompt** button (#3998, #4003 wording) that copies the full
   paste-into-agent instruction (`agentInstruction()`, byte-stable in
   `lib/marketplace.ts`). The instruction is not printed under every offer:
   the row carries a quiet line under the description — the resource URL
@@ -505,13 +505,15 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   to replace (`instructionNeedsEdit`: an MCP offer with a tool, "… for
   <what you want>", with a "Replace <what you want> before sending" hint),
   or after the clipboard refused a copy, when it is revealed in place. The
-  button's accessible name keeps its visible words ("Copy instruction for
+  button's accessible name keeps its visible words ("Copy prompt for
   <offer>"). There is no Method column (the MCP tool name survives inside the
   printed instruction) and no per-row Verified badge — the trust claim lives
   once, in the header. Offers on the
   user's own network (the chain of the default account,
   `resolveDefaultAccount`) come first; offers on other networks sit behind an
-  "Other networks (n)" disclosure, and every offer renders flat when the
+  "n more on <chain names>" disclosure (#4003 — with "— none of your agents
+  can pay on that network" when no active agent's account chain is among the
+  hidden chains), and every offer renders flat when the
   user's default network serves none of the merchant's offers. The payment
   requirement is stated ONCE, offer-level and in plain language — a budget
   that can pay any recipient — when any offer's `asset_transfer_methods`
@@ -531,7 +533,7 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   `CatalogCard` is now `components/marketplace/OfferRow.tsx`;
   `hooks/useCatalog.ts` gains `useMerchants()` / `useMerchant(slug)`, and
   `useMerchant`'s response now also carries `funding` (#3331).
-- **"Fund this merchant"** (`components/marketplace/FundMerchantModal.tsx`,
+- **"Set a budget for this merchant"** (`components/marketplace/FundMerchantModal.tsx`,
   #3331) — the action shows on the merchant page ONLY when ALL of these hold:
   the merchant is live, AT LEAST ONE listed chain's `funding` entry is
   `verified` and `erc7710`, AND the owner has at least one ELIGIBLE agent for

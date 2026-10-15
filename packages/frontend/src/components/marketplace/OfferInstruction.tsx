@@ -52,11 +52,11 @@ export function OfferInstructionText({ entry, revealed }: { entry: CatalogEntry;
       <code className="block select-all whitespace-pre-wrap [overflow-wrap:anywhere] text-xs text-[var(--v2-ink-2)]">
         {agentInstruction(entry)}
       </code>
-      {/* Announced: a screen-reader user who pressed Copy instruction and was
+      {/* Announced: a screen-reader user who pressed Copy prompt and was
           refused would otherwise hear nothing. */}
       <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]" role={revealed ? 'status' : undefined}>
         {revealed && !needsEdit
-          ? 'Copying was blocked — select the instruction above to copy it.'
+          ? 'Copying was blocked — select the prompt above to copy it.'
           : 'Replace <what you want> before sending.'}
       </p>
     </div>
@@ -76,8 +76,8 @@ export function OfferCopyButton({
   return (
     <CopyButton
       value={agentInstruction(entry)}
-      label={`instruction for ${entry.name}`}
-      text="Copy instruction"
+      label={`prompt for ${entry.name}`}
+      text="Copy prompt"
       onCopyFailed={onCopyFailed}
       className={className}
     />

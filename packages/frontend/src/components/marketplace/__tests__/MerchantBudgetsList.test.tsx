@@ -72,13 +72,13 @@ describe('MerchantBudgetsList (#3331)', () => {
   it('pin_status stale names the agent by name in the "stop it, fund again" step', () => {
     render(<MerchantBudgetsList budgets={[row({ pin_status: 'stale', agent_name: 'Research Agent' })]} />)
     expect(
-      screen.getByText(/Stop this budget on Research Agent's page, then use “Fund this merchant” above\./),
+      screen.getByText(/Stop this budget on Research Agent's page, then set a budget for this merchant\./),
     ).toBeDefined()
   })
 
   it('pin_status unverified does NOT claim funding again is available yet', () => {
     render(<MerchantBudgetsList budgets={[row({ pin_status: 'unverified' })]} />)
-    expect(screen.queryByText(/Fund this merchant above/)).toBeNull()
+    expect(screen.queryByText(/set a budget for this merchant/)).toBeNull()
   })
 
   it('current carries no helper explanation', () => {

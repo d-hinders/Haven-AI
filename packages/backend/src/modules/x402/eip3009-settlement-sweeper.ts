@@ -470,9 +470,9 @@ async function sweepOne(
     return
   }
 
-  // `false` needs no scan: the blocks up to the head are covered by the
-  // nonce being unburned. `true` scans as far as the call budget reaches.
-  let toBlock = head
+  // `false` needs no scan and advances the cursor one default span, as it
+  // always has. `true` scans only as far as the call budget reaches (#4012).
+  let toBlock = Math.min(head, cursor + EIP3009_SCAN_SPAN_BLOCKS - 1)
   if (state) {
     // The span is the provider's (#4012): the default narrowed by the env cap
     // and by any limit a refusal taught this chain. The call count is bounded

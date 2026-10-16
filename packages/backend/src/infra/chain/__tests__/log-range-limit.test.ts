@@ -50,15 +50,19 @@ function alchemyFreeTierError(): Error {
 }
 
 const savedCap = config.getLogsMaxBlockRange
+/** `config` is `as const`; tests flip the one field this change reads. */
+const setCap = (cap: number | null): void => {
+  ;(config as { getLogsMaxBlockRange: number | null }).getLogsMaxBlockRange = cap
+}
 
 beforeEach(() => {
   resetLogRangeLimits()
   getLogs.mockReset()
-  config.getLogsMaxBlockRange = null
+  setCap(null)
 })
 
 afterEach(() => {
-  config.getLogsMaxBlockRange = savedCap
+  setCap(savedCap)
   vi.useRealTimers()
 })
 
@@ -101,10 +105,10 @@ describe('the learned limit and the env cap (#4012)', () => {
   })
 
   it('ETH_GETLOGS_MAX_BLOCK_RANGE caps the span with no refusal needed', () => {
-    config.getLogsMaxBlockRange = 10
+    setCap(10)
     expect(effectiveLogBatchBlocks(CHAIN, 500)).toBe(10)
     // The default stays a ceiling: a wider cap never widens a request.
-    config.getLogsMaxBlockRange = 2000
+    setCap(2000)
     expect(effectiveLogBatchBlocks(CHAIN, 500)).toBe(500)
   })
 

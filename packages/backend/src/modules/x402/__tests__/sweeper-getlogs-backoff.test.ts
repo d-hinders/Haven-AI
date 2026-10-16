@@ -111,6 +111,10 @@ function eip3009Chain(findUsed: Eip3009ChainDeps['findUsed']) {
 }
 
 const savedCap = config.getLogsMaxBlockRange
+/** `config` is `as const`; tests flip the one field this change reads. */
+const setCap = (cap: number | null): void => {
+  ;(config as { getLogsMaxBlockRange: number | null }).getLogsMaxBlockRange = cap
+}
 
 beforeEach(() => {
   vi.useFakeTimers()
@@ -120,11 +124,11 @@ beforeEach(() => {
   resetLogRangeLimits()
   getLogs.mockReset()
   log.debug.mockReset(); log.info.mockReset(); log.warn.mockReset()
-  config.getLogsMaxBlockRange = null
+  setCap(null)
 })
 
 afterEach(() => {
-  config.getLogsMaxBlockRange = savedCap
+  setCap(savedCap)
   vi.useRealTimers()
 })
 
@@ -265,7 +269,7 @@ describe('eip3009 sweeper — the span adapts to the provider (#4012)', () => {
   })
 
   it('ETH_GETLOGS_MAX_BLOCK_RANGE fits the span before any refusal', async () => {
-    config.getLogsMaxBlockRange = 10
+    setCap(10)
     providerCappedAt(10)
     const { chain } = eip3009Chain(findAuthorizationUsedTx)
     const result = await runEip3009SettlementSweepTick(log, { findCandidates: async () => [eip3009Row(1)], chain })
@@ -368,7 +372,7 @@ describe('erc7710 sweeper — a failed scan backs off (#4012)', () => {
   })
 
   it('a window too wide for the call budget at the provider span is not walked: no scan, backed off, cause named', async () => {
-    config.getLogsMaxBlockRange = 10
+    setCap(10)
     const scan = vi.fn(async () => new Map())
     const deps = erc7710Deps(scan, [erc7710Row(1)])
 
@@ -388,7 +392,7 @@ describe('erc7710 sweeper — a failed scan backs off (#4012)', () => {
   })
 
   it('the span the scanner is asked for is the provider span, and the call count fits it', async () => {
-    config.getLogsMaxBlockRange = 200
+    setCap(200)
     const scan = vi.fn(async () => new Map())
     await runSettlementSweepTick(log, erc7710Deps(scan, [erc7710Row(1)]))
     expect(scan).toHaveBeenCalledTimes(1)

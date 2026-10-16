@@ -51,7 +51,7 @@ test('the wallet menu shows the marker-matched and fallback credentials as diffe
   await page.goto('/design-system')
   await page.evaluate(() => document.fonts.ready)
 
-  const heading = page.getByRole('heading', { name: 'Signing credential (wallet menu)' })
+  const heading = page.getByRole('heading', { name: 'Approving credential (wallet menu)' })
   await expect(heading).toHaveCount(1)
   await heading.scrollIntoViewIfNeeded()
 

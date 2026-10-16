@@ -626,7 +626,7 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                   Back
                 </Button>
                 <Button onClick={() => void run()} disabled={busy || !ready} className="flex-1">
-                  {replacedBudget ? 'Edit current budget' : 'Sign budget'}
+                  {replacedBudget ? 'Edit current budget' : 'Approve budget'}
                 </Button>
               </div>
               {ready && passkeyElsewhere ? <PasskeyElsewhereHint /> : null}

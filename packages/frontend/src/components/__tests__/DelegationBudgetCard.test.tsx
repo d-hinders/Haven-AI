@@ -1024,7 +1024,7 @@ describe('DelegationBudgetCard — occupied slot and replaced-but-enabled budget
     render(<DelegationBudgetCard {...PROPS} />)
     await openFormAndType('10', PINNED)
     // The hint says what happens on-chain before anything is signed.
-    expect(screen.getByText(/so you edit it: you approve the new budget, then approve stopping the old one\. The review step shows how many approvals that takes\./)).toBeTruthy()
+    expect(screen.getByText(/so you edit it: you approve the new budget, then approve once more to stop the old one\. The review step shows how many approvals that takes\./)).toBeTruthy()
     expect(screen.getByText(/Stopping it ends any open task budget or sub-budget taken from it/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Edit existing budget' }))
     const dialog = await screen.findByRole('dialog', { name: 'Edit budget' })

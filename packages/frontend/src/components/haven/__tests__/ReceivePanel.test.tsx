@@ -211,6 +211,10 @@ describe('ReceivePanel (#3333)', () => {
       render(<ReceivePanel accountAddress={ADDRESS} chainId={8453} />)
       fireEvent.click(screen.getByRole('button', { name: 'Prepare transfer' }))
       await waitFor(() => expect(screen.getByRole('button', { name: 'Approve transfer' })).toBeTruthy())
+      // Owner money actions say approve, not sign (copy-guidelines.md).
+      expect(screen.getByText(/Ready to approve:/)).toBeTruthy()
+      expect(screen.getByText(/You approve it from this account\./)).toBeTruthy()
+      expect(screen.queryByText(/Ready to sign|You sign with/)).toBeNull()
     }
 
     it('an owner-only account with no wallet here is offered the connect, and Sign waits', async () => {

@@ -422,8 +422,8 @@ export function ReplaceSigningKeyModal({
         <ApprovalRequiredBanner title="You cannot replace this key from this device" tone="warning">
           <p className="text-sm leading-relaxed">
             Connect your account owner wallet, or use a device with one of the account’s
-            passkeys. Replacing a signing key needs the account owner’s approval, and Haven never
-            approves on your behalf.
+            passkeys. Replacing a signing key needs the account owner’s approval, and Haven can
+            never give it for you.
           </p>
           {/* #3812: the owner's wallet can be connected right here — only
               once the signer set is known, never while it loads or after a
@@ -720,7 +720,7 @@ export function ReplaceSigningKeyModal({
         {issuedDelegations.length > 0 ? (
           <p className="text-sm text-[var(--v2-ink-3)]">
             You will be asked to approve {issuedDelegations.length}{' '}
-            {issuedDelegations.length === 1 ? 'budget rule' : 'budget rules'} — one signature each.
+            {issuedDelegations.length === 1 ? 'budget rule' : 'budget rules'} — one approval each.
           </p>
         ) : null}
       </div>

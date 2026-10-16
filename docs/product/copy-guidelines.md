@@ -148,16 +148,23 @@ The user does not need to understand ownership architecture during onboarding.
 ### The owner approves; only an agent's key signs (owner decision 2026-10-16)
 
 When the account holder authorises a money action — granting, editing or
-stopping a budget, removing an agent, approving a transfer — the copy says
-**approve**, never **sign**. The passkey or wallet prompt is how they approve,
+stopping a budget, removing an agent, approving a transfer, or changing who can
+approve for the account — the copy says **approve**, never **sign**. The passkey or wallet prompt is how they approve,
 not a separate act the copy should name. That covers buttons, busy labels
 ("Waiting for your approval…"), counts ("two more approvals") and the
 cancelled/"nothing changed" lines around them.
 
 "Sign" stays where it is literally true and is not the owner's action: the
 agent's own key signs payments ("private signing key", "Replace signing key"),
-an attestation is a "signed record", and retired-rail or protocol prose names
-real signatures.
+a sharing agent signs the sub-budget its owner issues (the owner neither signs
+nor approves there: "{agent} signs it with its own key — no passkey prompt for
+you"), an attestation is a "signed record", retired-rail or protocol prose
+names real signatures, and dated verification or changelog records keep the
+wording they recorded.
+
+`npm run lint:copy` bans the common owner phrasings ("waiting for your
+signature", "signature was cancelled", "no signature yet", "sign new budget",
+"you sign once").
 
 Prefer:
 - “Approve new budget”, “Approve transfer”

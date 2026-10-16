@@ -251,7 +251,7 @@ function slotOccupiedFrom(err: unknown): SlotOccupiedResult | null {
  *   re-key in flight, off-rail account). `detail` is the backend's own
  *   sentence; the old budget is live and untouched.
  * - `revoke_unfinished` — the new grant is LIVE but the old one is not yet
- *   revoked on-chain (the stop signature was cancelled or the submit failed).
+ *   revoked on-chain (the owner cancelled the stop approval or the submit failed).
  *   `newDelegationHash` lets the caller point at the live budget; the owner
  *   finishes the stop from the budget card's own Stop button.
  * - `oldDelegationRevoked` is false in the one success-shaped race where the

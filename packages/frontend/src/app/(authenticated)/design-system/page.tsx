@@ -3048,8 +3048,8 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
-        title="Signing credential (wallet menu)"
-        description="Which passkey is about to sign, as the wallet menu states it. Two states, because they are two different facts: a credential this device's marker matched, and the passkeys[0] fallback used when no enrolled passkey carries this device's marker. The fallback is deliberate and load-bearing — see delegation-rail-security-model.md §6 — and until #1952 the menu rendered NOTHING in that case, going silent in exactly the case where the credential was chosen by array position."
+        title="Approving credential (wallet menu)"
+        description="Which passkey you are about to approve with, as the wallet menu states it. Two states, because they are two different facts: a credential this device's marker matched, and the passkeys[0] fallback used when no enrolled passkey carries this device's marker. The fallback is deliberate and load-bearing — see delegation-rail-security-model.md §6 — and until #1952 the menu rendered NOTHING in that case, going silent in exactly the case where the credential was chosen by array position."
       >
         {/*
           Rendered with props forced, as every gallery state is. Since #3825

@@ -162,7 +162,7 @@ interface PopoverProps {
    *
    * #1952: `onThisDevice` is NOT decoration. It separates two different facts
    * that used to share one rendering — and, worse, used to share it with
-   * "nothing at all". "Signing with X" (this device's marker picked X) and
+   * "nothing at all". "Approving with X" (this device's marker picked X) and
    * "no passkey is registered here, so X is what will be offered" are not the
    * same statement to a user about to authorise a spend, so they do not get
    * the same words.
@@ -544,11 +544,11 @@ export function WalletPopover({
             // only the eyebrow string, and the design pass measured that the
             // distinction then rested on incidental text wrap: at `w-72` minus
             // `p-4` the content box is 256px, so a 54-character `text-xs` eyebrow
-            // happened to run to two lines while "Signing with" did not. That is
+            // happened to run to two lines while "Approving with" did not. That is
             // a coincidence of string length, and it also pushed the bold
             // credential name — the fact that matters most — into the middle of
             // two muted paragraphs. The rule and the icon are independent of copy
-            // length, and keeping the "Signing with" eyebrow identical in both
+            // length, and keeping the "Approving with" eyebrow identical in both
             // states preserves the hierarchy the name sits in.
             <div
               className={

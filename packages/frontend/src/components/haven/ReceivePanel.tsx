@@ -331,7 +331,7 @@ function ReceiveHandoff({ accountAddress, chainId, prepared, onDone, onCancel }:
       onDone()
       return done
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Signing was cancelled or failed')
+      toast.error(err instanceof Error ? err.message : 'Approval was cancelled or failed')
       return null
     } finally {
       setSignBusy(false)
@@ -341,11 +341,11 @@ function ReceiveHandoff({ accountAddress, chainId, prepared, onDone, onCancel }:
   return (
     <div className="mt-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
       <p className="text-sm font-semibold text-[var(--v2-ink)]">
-        Ready to sign: {prepared.submit.amount_atomic} atomic units to{' '}
+        Ready to approve: {prepared.submit.amount_atomic} atomic units to{' '}
         <Address value={prepared.submit.to} truncate />
       </p>
       <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-        You sign with this account&apos;s own signer. The transfer can only go to the saved address.
+        You approve it from this account. The transfer can only go to the saved address.
       </p>
       {passkeyElsewhere ? <PasskeyElsewhereHint className="mt-3" /> : null}
       {needsOwnerWallet ? (

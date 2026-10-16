@@ -23,6 +23,11 @@ export const TEST_MERCHANT_NOTE =
  * — so the header STAYS, aligned with `PageHeader`'s type scale and spacing,
  * and gains its `actions` slot: "Set a budget for this merchant" renders on
  * the right, the way `PageHeader` places actions (#4003 wording).
+ *
+ * #4015: the actions sit BELOW the text until `xl` (1280px) — at 1024 the
+ * side-by-side row left the merchant's text about 262px — and the text
+ * column takes the free width (`min-w-0 flex-1`) when they share a row.
+ * `merchant-page-fit-measure.spec.ts` pins the text column's share.
  */
 export function MerchantHeader({ merchant, actions }: { merchant: Merchant; actions?: ReactNode }) {
   const networks = merchant.networks
@@ -30,10 +35,10 @@ export function MerchantHeader({ merchant, actions }: { merchant: Merchant; acti
     .filter((id): id is number => id !== undefined)
 
   return (
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-      <div className="flex items-start gap-3">
+    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+      <div className="flex min-w-0 flex-1 items-start gap-3">
         <Monogram name={merchant.name} logoUrl={merchant.logo_url} size="md" />
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1" data-testid="merchant-header-text">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="v2-text-h1 text-[var(--v2-ink)]">{merchant.name}</h1>
             {merchant.verified_payable && (

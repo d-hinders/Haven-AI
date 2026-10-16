@@ -114,6 +114,8 @@ const baseProps = {
   budgetsError: null as string | null,
   merchantBudgets: [] as MerchantBudget[],
   funding,
+  // The default account is on the agent's chain unless a test says otherwise.
+  defaultChainId: 84532 as number | null,
   fundActionAvailable: false,
   onSetBudget: vi.fn(),
   onRetryBudgets: vi.fn(),
@@ -165,15 +167,16 @@ describe('HowToBuyPanel', () => {
     expect(onRetryBudgets).toHaveBeenCalledTimes(1)
   })
 
-  it('an agent that can pay: all three steps read done or ready, and step 2 names the agent and its remaining amount', () => {
+  it('an agent that can pay: all three steps read done or ready, and step 2 says "can pay anyone" once — no repeated any-recipient line (#4015)', () => {
     render(<HowToBuyPanel {...baseProps} agents={[atlas]} budgets={[budgetRow()]} />)
     // The offer is bridge-only and the paying budget is open: "can pay anyone".
     expect(step(1).getByText('Atlas is connected on Base Sepolia.')).toBeDefined()
     expect(step(2).getByText('Give it a budget it can spend here')).toBeDefined()
-    expect(stepText(2)).toContain(
-      'Atlas has 20 USDC left of 25 USDC this week, and can pay anyone — so it can pay Merchant Example.',
+    expect(stepText(2)).toBe(
+      '✓Give it a budget it can spend hereAtlas has 20 USDC left of 25 USDC this week, and can pay anyone — so it can pay Merchant Example.',
     )
-    expect(stepText(2)).toContain("A budget limited to one recipient can't pay Merchant Example")
+    // The open budget already says it — the sentence that repeated it is gone.
+    expect(stepText(2)).not.toContain("A budget limited to one recipient can't pay")
     expect(step(2).queryByRole('button')).toBeNull()
     // Step 3 names the agent the panel just claimed can pay.
     expect(stepText(3)).toContain("paste it into Atlas's chat")
@@ -194,7 +197,7 @@ describe('HowToBuyPanel', () => {
     expect(stepText(2)).not.toContain('any-recipient')
   })
 
-  it('says "for some offers" when the agent cannot pay every offer, and carries the mixed-merchant tag line', () => {
+  it('says "for some offers" when the agent cannot pay every offer on its own chain, and carries the mixed-merchant tag line (#4015)', () => {
     render(
       <HowToBuyPanel
         {...baseProps}
@@ -202,14 +205,62 @@ describe('HowToBuyPanel', () => {
         budgets={[budgetRow()]}
         offers={[
           offer({ asset_transfer_methods: null }),
-          // On ANOTHER chain: the agent cannot pay it, so the merchant-level
-          // answer is partial even though the first offer pays.
-          offer({ id: 'o-2', asset_transfer_methods: 'eip3009,erc7710', network: 'eip155:8453' }),
+          // SAME chain, erc7710, and more than the 20 USDC left: the agent
+          // cannot pay it, so the answer is partial — and the set is mixed.
+          offer({ id: 'o-2', asset_transfer_methods: 'eip3009,erc7710', price_atomic: '50000000' }),
         ]}
       />,
     )
     expect(stepText(2)).toContain('so it can pay Merchant Example for some offers.')
     expect(stepText(2)).toContain('The offers marked "any-recipient budget" need a budget that can pay anyone.')
+  })
+
+  it('does not say "for some offers" when the only offers it cannot pay are on another network — and no tag line from them (#4015)', () => {
+    render(
+      <HowToBuyPanel
+        {...baseProps}
+        agents={[atlas]}
+        budgets={[budgetRow()]}
+        offers={[
+          offer({ asset_transfer_methods: null }),
+          // On ANOTHER chain (Base): the offers table puts it behind its own
+          // disclosure, so it neither makes step 2 partial nor makes the set
+          // mixed.
+          offer({ id: 'o-2', asset_transfer_methods: 'eip3009,erc7710', network: 'eip155:8453' }),
+        ]}
+      />,
+    )
+    expect(stepText(2)).toContain('and can pay anyone — so it can pay Merchant Example.')
+    expect(stepText(2)).not.toContain('for some offers')
+    expect(stepText(2)).not.toContain('any-recipient')
+  })
+
+  it("names the network when the agent's chain is not the user's default chain (#4015)", () => {
+    render(
+      <HowToBuyPanel
+        {...baseProps}
+        // The default account is on Base; the agent pays on Base Sepolia.
+        defaultChainId={8453}
+        agents={[atlas]}
+        budgets={[budgetRow()]}
+        offers={[offer(), offer({ id: 'o-2', network: 'eip155:8453' })]}
+      />,
+    )
+    expect(stepText(2)).toContain('and can pay anyone — so it can pay Merchant Example on Base Sepolia.')
+    expect(stepText(2)).not.toContain('for some offers')
+  })
+
+  it('names the network AND keeps "for some offers" when the agent is partial on its own, non-default chain (#4015)', () => {
+    render(
+      <HowToBuyPanel
+        {...baseProps}
+        defaultChainId={8453}
+        agents={[atlas]}
+        budgets={[budgetRow()]}
+        offers={[offer(), offer({ id: 'o-2', price_atomic: '50000000' }), offer({ id: 'o-3', network: 'eip155:8453' })]}
+      />,
+    )
+    expect(stepText(2)).toContain('so it can pay Merchant Example on Base Sepolia for some offers.')
   })
 
   it('no budget: step 2 names the fix — the fund action when available, else a link to the agent page', () => {
@@ -225,6 +276,11 @@ describe('HowToBuyPanel', () => {
     render(<HowToBuyPanel {...baseProps} agents={[atlas]} />)
     expect(stepText(2)).toContain('Atlas has no budget that can pay Merchant Example yet.')
     expect(step(2).getByRole('link', { name: /Atlas's page/ }).getAttribute('href')).toBe('/agents/agent-1')
+    // #4015: the budget-fix branch keeps the any-recipient sentence — the
+    // offer is bridge-only, and here it is the rule the fix must follow.
+    expect(stepText(2)).toContain(
+      "A budget limited to one recipient can't pay Merchant Example — keep the budget that can pay anyone open.",
+    )
   })
 
   it('a budget locked to another recipient is no budget that can pay here — the same fix is named', () => {
@@ -281,6 +337,19 @@ describe('HowToBuyPanel', () => {
     )
     expect(step(2).getByText(/Haven couldn't confirm what your agent can spend here just now\./)).toBeDefined()
     expect(step(2).queryByRole('button')).toBeNull()
+  })
+
+  it('the title is a Card.Header band, with the h2 kept, and the rows section drops its own top border (#4015)', () => {
+    render(<HowToBuyPanel {...baseProps} />)
+    const heading = screen.getByRole('heading', { level: 2, name: 'How to buy' })
+    // Card.Header renders the heading inside a flex wrapper inside the band.
+    const band = heading.closest('[class*="bg-[var(--v2-surface)]"]')
+    expect(band).not.toBeNull()
+    expect(band!.className).toContain('border-b')
+    // The rows' section follows the band and carries no second hairline.
+    const section = screen.getByTestId('how-to-buy-step-1').parentElement!
+    expect(band!.nextElementSibling).toBe(section)
+    expect(section.className.split(/\s+/)).toContain('border-t-0')
   })
 
   it('every step row owns its vertical padding — no first:/last: overrides that strip it (#4014)', () => {

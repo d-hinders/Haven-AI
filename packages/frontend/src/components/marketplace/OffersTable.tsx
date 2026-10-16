@@ -2,7 +2,18 @@
 
 import { useState } from 'react'
 import { Table } from '@/components/ui/Table'
-import { ANY_RECIPIENT_BUDGET_TAG, agentsThatCanPay, budgetAnswerLine, chainName, needsUnpinnedBudget, networkToChainId, type BudgetAgent } from '@/lib/marketplace'
+import {
+  ANY_RECIPIENT_BUDGET_TAG,
+  agentsThatCanPay,
+  anyRecipientRule,
+  budgetAnswerLine,
+  chainName,
+  needsUnpinnedBudget,
+  networkToChainId,
+  offersOnChain,
+  offersOnUserNetwork,
+  type BudgetAgent,
+} from '@/lib/marketplace'
 import { OfferCopyButton, OfferInstructionText, OfferMeta } from './OfferInstruction'
 import { OfferRow } from './OfferRow'
 import type { CatalogEntry, MerchantFundingTarget } from '@/hooks/useCatalog'
@@ -95,15 +106,19 @@ function OfferCard({
  * are decided by the same declaration rather than by their own rows. Merging
  * the rows into one table is not an option: `<details>` cannot wrap `<tr>`s,
  * and the #3998 structural test asserts the nested table. The proportions
- * follow the auto layout the outer table had on dev (≈48.75/15/13.75/22.5),
- * so the change is alignment, not a new look.
+ * started from the auto layout the outer table had on dev
+ * (≈48.75/15/13.75/22.5); #4015 moved width from Offer to Price, because at
+ * 1280 a 15% Price cell left ≈115px for text and a one-agent budget answer
+ * ("Delegate can pay this") wrapped under the price
+ * (`merchant-page-fit-measure.spec.ts` measures it on one line;
+ * `offers-table-alignment-measure.spec.ts` keeps the two tables aligned).
  */
 const OFFER_COLUMN_LAYOUT = (
   <colgroup>
-    <col className="w-[48.75%]" />
-    <col className="w-[15%]" />
+    <col className="w-[42%]" />
+    <col className="w-[22%]" />
     <col className="w-[13.75%]" />
-    <col className="w-[22.5%]" />
+    <col className="w-[22.25%]" />
   </colgroup>
 )
 
@@ -162,9 +177,10 @@ export function OffersTable({
   }
 
   const chainIdOf = (offer: CatalogEntry) => networkToChainId(offer.network)
-  const here = defaultChainId === null ? [] : offers.filter((o) => chainIdOf(o) === defaultChainId)
-  const others = here.length > 0 ? offers.filter((o) => chainIdOf(o) !== defaultChainId) : []
-  const visible = here.length > 0 ? here : offers
+  // #4015: the split is `offersOnUserNetwork` — the same set the header's
+  // coverage check reads.
+  const visible = offersOnUserNetwork(offers, defaultChainId)
+  const others = visible.length < offers.length ? offers.filter((o) => chainIdOf(o) !== defaultChainId) : []
 
   // #4003's one predicate: the disclosure names the hidden chains, and adds
   // "— none of your agents can pay on that network" ONLY when no active
@@ -183,9 +199,17 @@ export function OffersTable({
     `${others.length} more on ${hiddenChainIds.map(chainName).join(', ')}` +
     (noAgentCanPayHidden ? ' — none of your agents can pay on that network' : '')
 
-  const bridgeOnly = offers.filter((o) => needsUnpinnedBudget(o.asset_transfer_methods))
-  const mixed = bridgeOnly.length > 0 && bridgeOnly.length < offers.length
-  const tagged = (offer: CatalogEntry) => mixed && needsUnpinnedBudget(offer.asset_transfer_methods)
+  // #4015: "mixed" is decided per chain, through the panel's own
+  // `anyRecipientRule` — so a tag the panel's step 2 points at always sits
+  // among the offers on the named agent's chain.
+  const tagged = (offer: CatalogEntry) => {
+    const chainId = chainIdOf(offer)
+    return (
+      chainId !== undefined &&
+      needsUnpinnedBudget(offer.asset_transfer_methods) &&
+      anyRecipientRule(offersOnChain(offers, chainId)).mixed
+    )
+  }
   // #4005: the any-recipient NOTE is no longer a paragraph above the table —
   // the "How to buy" panel's step 2 carries it in plain words, next to the
   // state that makes it matter. The per-offer TAG stays on the rows that

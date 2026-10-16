@@ -475,6 +475,12 @@ export interface HowToBuyInput {
   merchantBudgets: ReadonlyArray<MerchantBudget>
   /** The merchant's funding targets (`useMerchant`). */
   funding: ReadonlyArray<MerchantFundingTarget>
+  /**
+   * #4015: the default account's chain. Step 2 names an agent on THIS chain
+   * first (when it can pay, or for the budget fix), so it matches the offers
+   * the table puts first.
+   */
+  preferChainId?: number | null
   /** Required for tests; defaults to now. */
   nowMs?: number
 }
@@ -485,10 +491,13 @@ export interface HowToBuyInput {
  *
  *  - `done` — an active agent can pay at least one offer. `selected` is the
  *    budget that pays (the figures the done line names); `partial` is true
- *    when that agent cannot pay EVERY offer (a mixed merchant, or offers on
- *    more than one chain) and the line says "for some offers".
+ *    when that agent cannot pay every offer ON ITS OWN CHAIN
+ *    (`agentChainId`) — offers on another network have their own disclosure
+ *    line, so they never make the answer partial (#4015). The panel names
+ *    the network when `agentChainId` is not the user's default chain.
  *  - `budget-fix` — no agent can pay and the fix is a budget: name the first
- *    agent with a budget-shaped no. `selected` is non-null exactly when the
+ *    agent with a budget-shaped no (on its chain, `agentChainId` — a
+ *    budget-shaped no is only ever reached on the offer's own chain). `selected` is non-null exactly when the
  *    agent's budget here is real but SHORT for every offer ("nothing left
  *    this period"); null means no budget in the offers' token can pay —
  *    including one locked to another recipient, which is unusable here just
@@ -505,11 +514,12 @@ export interface HowToBuyInput {
  * offer; this is the one-line merchant summary only.
  */
 export type HowToBuyAnswer =
-  | { kind: 'done'; agentName: string; selected: SelectedBudget; partial: boolean }
+  | { kind: 'done'; agentName: string; agentChainId: number; selected: SelectedBudget; partial: boolean }
   | {
       kind: 'budget-fix'
       agentName: string
       agentId: string
+      agentChainId: number
       periodPhrase: string | null
       selected: SelectedBudget | null
     }
@@ -517,8 +527,17 @@ export type HowToBuyAnswer =
   | { kind: 'uncertain' }
 
 export function howToBuy(input: HowToBuyInput): HowToBuyAnswer {
-  const { merchantName: _merchantName, offers, agents, budgets, merchantBudgets, funding, nowMs = Date.now() } = input
+  const { merchantName: _merchantName, offers, agents, budgets, merchantBudgets, funding, nowMs = Date.now(), preferChainId = null } = input
   const activeAgents = agents.filter(isActiveAgent)
+  // An agent on the preferred chain is named before one elsewhere — the
+  // able agent in step 1, the budget-fix agent in step 3; otherwise the
+  // list order stands (a stable sort).
+  const byPreference =
+    preferChainId == null
+      ? activeAgents
+      : [...activeAgents].sort(
+          (a, b) => Number(b.account_chain_id === preferChainId) - Number(a.account_chain_id === preferChainId),
+        )
   if (offers.length === 0 || activeAgents.length === 0) return { kind: 'uncertain' }
 
   const perOffer = offers.map((offer) =>
@@ -527,8 +546,9 @@ export function howToBuy(input: HowToBuyInput): HowToBuyAnswer {
   const answerFor = (offerIndex: number, agentId: string): BudgetAgentAnswer =>
     perOffer[offerIndex]!.find((a) => a.agentId === agentId)!
 
-  // 1. Done — the first active agent that can pay at least one offer.
-  for (const agent of activeAgents) {
+  // 1. Done — the first active agent (default-chain agents first) that can
+  //    pay at least one offer.
+  for (const agent of byPreference) {
     const canIndex = perOffer.findIndex((answers) => answers.find((a) => a.agentId === agent.id)?.answer === 'can')
     if (canIndex === -1) continue
     const answer = answerFor(canIndex, agent.id)
@@ -536,8 +556,15 @@ export function howToBuy(input: HowToBuyInput): HowToBuyAnswer {
     // selected figures ride on it — the non-null assertion mirrors the
     // helper's own invariant.
     const selected = answer.selected!
-    const partial = !perOffer.every((answers) => answers.find((a) => a.agentId === agent.id)?.answer === 'can')
-    return { kind: 'done', agentName: agent.name, selected, partial }
+    // A 'can' is only reached past the chain check, so the chain is known.
+    const agentChainId = agent.account_chain_id!
+    // #4015: partial over the offers on the agent's own chain only — the
+    // offers table splits by network, and another network's offers sit
+    // behind their own disclosure line.
+    const partial = !offers.every(
+      (o, i) => networkToChainId(o.network) !== agentChainId || answerFor(i, agent.id).answer === 'can',
+    )
+    return { kind: 'done', agentName: agent.name, agentChainId, selected, partial }
   }
 
   // 2. Unknown anywhere → the panel claims nothing. This runs BEFORE the
@@ -549,8 +576,9 @@ export function howToBuy(input: HowToBuyInput): HowToBuyAnswer {
     return { kind: 'uncertain' }
   }
 
-  // 3. No one can pay — the first budget-shaped no names the fix.
-  for (const agent of activeAgents) {
+  // 3. No one can pay — the first budget-shaped no names the fix
+  //    (default-chain agents first, as in step 1).
+  for (const agent of byPreference) {
     for (let i = 0; i < offers.length; i++) {
       const answer = answerFor(i, agent.id)
       if (answer.answer !== 'cannot') continue
@@ -559,6 +587,7 @@ export function howToBuy(input: HowToBuyInput): HowToBuyAnswer {
           kind: 'budget-fix',
           agentName: agent.name,
           agentId: agent.id,
+          agentChainId: agent.account_chain_id!,
           periodPhrase: answer.periodPhrase,
           selected: answer.selected ?? null,
         }
@@ -578,6 +607,65 @@ export function howToBuy(input: HowToBuyInput): HowToBuyAnswer {
       new Set(offers.map((o) => networkToChainId(o.network)).filter((id): id is number => id != null)),
     ),
   }
+}
+
+/**
+ * #4015: the offers the merchant page treats as "on the user's network" —
+ * the ones on the default account's chain (`resolveDefaultAccount`), or
+ * every offer when that chain serves none (the offers table then renders
+ * flat). The offers table's split and the header action's coverage check
+ * both read this one set.
+ */
+export function offersOnUserNetwork<T extends Pick<CatalogEntry, 'network'>>(
+  offers: ReadonlyArray<T>,
+  defaultChainId: number | null,
+): T[] {
+  const here = defaultChainId === null ? [] : offers.filter((o) => networkToChainId(o.network) === defaultChainId)
+  return here.length > 0 ? here : [...offers]
+}
+
+/**
+ * #4015: the any-recipient rule over ONE set of offers — the offers on one
+ * chain. `needsAnyRecipient` when any of them lacks erc7710; `mixed` when
+ * some do and some don't, which is when the rows carry the
+ * "any-recipient budget" tag. The panel's step 2 and the offers table read
+ * this one predicate over the same per-chain set, so step 2 never points at
+ * a tag that sits on another network.
+ */
+export function anyRecipientRule(
+  offers: ReadonlyArray<Pick<CatalogEntry, 'asset_transfer_methods'>>,
+): { needsAnyRecipient: boolean; mixed: boolean } {
+  const bridgeOnly = offers.filter((o) => needsUnpinnedBudget(o.asset_transfer_methods)).length
+  return { needsAnyRecipient: bridgeOnly > 0, mixed: bridgeOnly > 0 && bridgeOnly < offers.length }
+}
+
+/** The offers on one chain — the set `partial` and `anyRecipientRule` read. */
+export function offersOnChain<T extends Pick<CatalogEntry, 'network'>>(offers: ReadonlyArray<T>, chainId: number): T[] {
+  return offers.filter((o) => networkToChainId(o.network) === chainId)
+}
+
+/**
+ * #4015 owner decision (a), 2026-10-16 — "No need to push for merchant
+ * specific budgets here." True when one active agent's OPEN budget already
+ * pays every one of `offers` (the page passes `offersOnUserNetwork`): the
+ * same `agentsThatCanPay` verdicts step 2 reads, each a 'can' whose selected
+ * budget has no recipient. The header then hides "Set a budget for this
+ * merchant". A merchant-locked budget does not count — it is the thing the
+ * action manages, so the action stays.
+ */
+export function openBudgetCoversOffers(input: Omit<HowToBuyInput, 'merchantName'>): boolean {
+  const { offers, agents, budgets, merchantBudgets, funding, nowMs = Date.now() } = input
+  const activeAgents = agents.filter(isActiveAgent)
+  if (offers.length === 0 || activeAgents.length === 0) return false
+  const perOffer = offers.map((offer) =>
+    agentsThatCanPay({ offer, agents: activeAgents, budgets, merchantBudgets, funding, nowMs }),
+  )
+  return activeAgents.some((agent) =>
+    perOffer.every((answers) => {
+      const a = answers.find((x) => x.agentId === agent.id)
+      return a?.answer === 'can' && a.selected != null && a.selected.recipientAddress == null
+    }),
+  )
 }
 
 export function freshness(verifiedAt: string | null): string {

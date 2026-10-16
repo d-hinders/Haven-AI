@@ -1095,7 +1095,7 @@ function SubBudgetTreeRow({ tree, tokens }: { tree: SubBudgetTree; tokens: Token
     subBudgetEndText(parent),
   ]
   if (parent.recipient_address) parentParts.push(`to ${truncateAddress(parent.recipient_address)}`)
-  if (parent.status === 'pending') parentParts.push('waiting for signature')
+  if (parent.status === 'pending') parentParts.push('waiting for the sharing agent to sign it')
   return (
     <div className="py-3">
       <Row density="flush" title={parent.label || 'Sub-agent budget'} subtitle={parentParts.join(' · ')} />
@@ -1119,7 +1119,7 @@ function SubBudgetGrantRow({ grant, tokens }: { grant: SubBudgetTree['grants'][n
     subBudgetEndText(grant),
   ]
   // #3506: a freshly issued slice is pending until the sharing agent signs.
-  if (grant.status === 'pending') parts.push('waiting for signature')
+  if (grant.status === 'pending') parts.push('waiting for the sharing agent to sign it')
   if (grant.recipient_address) parts.push(`to ${truncateAddress(grant.recipient_address)}`)
   return (
     <div className="py-2">

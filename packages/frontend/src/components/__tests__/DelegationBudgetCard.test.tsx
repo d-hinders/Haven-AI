@@ -1186,11 +1186,11 @@ describe('DelegationBudgetCard sub-budget "ends" follows is_live (#3922)', () =>
     expect(document.body.textContent).toMatch(/up to 2 USDC · ended/)
   })
 
-  it('a pending, unexpired grant still shows when it ends, beside "waiting for signature"', () => {
+  it('a pending, unexpired grant still shows when it ends, beside "waiting for the sharing agent to sign it"', () => {
     mockGet.mockReturnValue([budget()])
     mockTrees.mockReturnValue(tree(sub({ status: 'pending', is_live: false })))
     render(<DelegationBudgetCard {...PROPS} />)
-    expect(document.body.textContent).toMatch(/up to 2 USDC · ends .*waiting for signature/)
+    expect(document.body.textContent).toMatch(/up to 2 USDC · ends .*waiting for the sharing agent to sign it/)
   })
 })
 

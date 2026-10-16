@@ -25,6 +25,20 @@ test('flags a banned multi-word phrase (case-insensitive)', () => {
   assert.equal(r[0].line, 1)
 })
 
+test('flags owner signing phrasings: owner money actions say approve (copy-guidelines.md)', () => {
+  for (const phrase of [
+    'Waiting for your signature…',
+    'Signature was cancelled.',
+    'No signature yet — nothing changed.',
+    'Sign new budget',
+    'You sign once and every budget it holds ends',
+  ]) {
+    assert.ok(findCopyIssues(`const s = "${phrase}"\n`).length > 0, `expected a flag for: ${phrase}`)
+  }
+  // The agent's key signing stays legitimate copy.
+  assert.equal(findCopyIssues('const s = "the agent signs the payment with its own key"\n').length, 0)
+})
+
 test('does NOT flag a bare generic word', () => {
   // "Safe", "owner", "deploy" must never trip the lint (only multi-word phrases).
   assert.equal(findCopyIssues('const safe = useSafe(); const owner = a.owner\n').length, 0)

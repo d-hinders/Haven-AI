@@ -68,7 +68,7 @@ async function buildAccount(signers: AccountSigners) {
   // `undefined` here means an EMPTY signer set and nothing else, so this is
   // also the account-has-no-passkey guard — one check, not two.
   const signWith = hybridPasskeyToSignWith(signers)
-  if (!signWith) throw new Error('Account has no passkey to sign with')
+  if (!signWith) throw new Error('This account has no passkey to approve with')
 
   const [{ Implementation, toMetaMaskSmartAccount }, { toWebAuthnAccount }] = await Promise.all([
     import('@metamask/smart-accounts-kit'),

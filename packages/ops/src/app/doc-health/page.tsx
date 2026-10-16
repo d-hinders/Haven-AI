@@ -101,6 +101,7 @@ function DocHealthView({ client }: { client: ReturnType<typeof useOpsClient> }) 
               <Card.Header
                 as="h2"
                 padding="none"
+                className="px-5"
                 title="Docs"
                 actions={<span className="v2-tabular text-xs text-[var(--v2-ink-3)]">{rows.length}</span>}
               />

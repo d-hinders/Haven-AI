@@ -142,6 +142,7 @@ function AgentsCard({ detail }: { detail: OpsUserDetail }) {
       <Card.Header
         as="h2"
         padding="none"
+        className="px-5"
         title="Agents"
         actions={<span className="v2-tabular text-xs text-[var(--v2-ink-3)]">{detail.agents.length}</span>}
       />
@@ -189,6 +190,7 @@ function DelegationsCard({ detail }: { detail: OpsUserDetail }) {
       <Card.Header
         as="h2"
         padding="none"
+        className="px-5"
         title="Active delegations"
         actions={
           <span className="v2-tabular text-xs text-[var(--v2-ink-3)]">{detail.active_delegations.length}</span>
@@ -234,6 +236,7 @@ function PaymentsCard({ detail }: { detail: OpsUserDetail }) {
       <Card.Header
         as="h2"
         padding="none"
+        className="px-5"
         title="Recent payments"
         description="Status plus the stored, redacted error."
       />
@@ -278,6 +281,7 @@ function RefusalsCard({ detail }: { detail: OpsUserDetail }) {
       <Card.Header
         as="h2"
         padding="none"
+        className="px-5"
         title="Refusals"
         description="Classified: over budget, wrong recipient, expired. Everything else renders as what it is."
       />

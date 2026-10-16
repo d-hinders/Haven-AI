@@ -33,9 +33,13 @@ function SectionCard({
 }) {
   return (
     <Card className="overflow-hidden" hover={false}>
+      {/* px-5 (not default padding): the rows below own px-5 py-3, so the
+          header's title must sit at the same inset. `padding="none"` drops
+          the horizontal padding along with the vertical (#4016). */}
       <Card.Header
         as="h2"
         padding="none"
+        className="px-5"
         title={title}
         description={description}
         actions={
@@ -179,50 +183,55 @@ function HealthView({ client }: { client: ReturnType<typeof useOpsClient> }) {
               <Card.Header
                 as="h2"
                 padding="none"
+                className="px-5"
                 title="Delegate balances"
                 description="The monitor's last report. On a replica without the monitor's leader lock there is no report — that is a condition of this process, not an error."
               />
+              {/* Plain padded block, not a default Card.Section: this card is
+                  unpadded with overflow-hidden, so a default section's
+                  -mx-5/md:-mx-6 bleed gets clipped at the card edge and its
+                  border-t doubles the header's border-b (#4016). The header
+                  above already carries the divider; the block just insets to
+                  the rows' px-5. */}
               {health.delegate_balances.available ? (
-                <Card.Section>
-                  <div className="space-y-2 text-sm">
-                    <p className="text-xs text-[var(--v2-ink-3)]">
-                      Scanned {utcLine(health.delegate_balances.scanned_at)} ·{' '}
-                      {health.delegate_balances.report.scanned_delegates.toLocaleString('en-US')} delegates ·{' '}
-                      {health.delegate_balances.report.unread} unread
-                    </p>
-                    {health.delegate_balances.report.lingering.length === 0 ? (
-                      <p className="text-sm text-[var(--v2-ink-2)]">No lingering balances.</p>
-                    ) : (
-                      health.delegate_balances.report.lingering.map((row, index) => (
-                        <div
-                          key={`${row.agent_id}-${index}`}
-                          className="flex flex-wrap items-center justify-between gap-2"
-                        >
-                          <span className="text-[var(--v2-ink-2)]">
-                            {row.agent_name} · <AgentLink agentId={row.agent_id} /> ·{' '}
-                            <span className="v2-tabular">{row.delegate_address}</span>
-                          </span>
-                          <span className="v2-tabular text-[var(--v2-ink)]">
-                            {formatAtomic(row.balance_atomic, 6)} USDC · chain {row.chain_id}
-                          </span>
-                        </div>
-                      ))
-                    )}
-                    <p className="v2-tabular text-xs text-[var(--v2-ink-3)]">
-                      Dust total {formatAtomic(health.delegate_balances.report.dust_total_atomic, 6)}
-                      {health.delegate_balances.report.dust_alert ? ' (alerting)' : ''} · chain errors:{' '}
-                      {Object.keys(health.delegate_balances.report.chain_errors).length}
-                    </p>
-                  </div>
-                </Card.Section>
+                <div className="space-y-2 px-5 py-4 text-sm">
+                  <p className="text-xs text-[var(--v2-ink-3)]">
+                    Scanned {utcLine(health.delegate_balances.scanned_at)} ·{' '}
+                    {health.delegate_balances.report.scanned_delegates.toLocaleString('en-US')} delegates ·{' '}
+                    {health.delegate_balances.report.unread} unread
+                  </p>
+                  {health.delegate_balances.report.lingering.length === 0 ? (
+                    <p className="text-sm text-[var(--v2-ink-2)]">No lingering balances.</p>
+                  ) : (
+                    health.delegate_balances.report.lingering.map((row, index) => (
+                      <div
+                        key={`${row.agent_id}-${index}`}
+                        className="flex flex-wrap items-center justify-between gap-2"
+                      >
+                        <span className="text-[var(--v2-ink-2)]">
+                          {row.agent_name} · <AgentLink agentId={row.agent_id} /> ·{' '}
+                          <span className="v2-tabular">{row.delegate_address}</span>
+                        </span>
+                        <span className="v2-tabular text-[var(--v2-ink)]">
+                          {formatAtomic(row.balance_atomic, 6)} USDC · chain {row.chain_id}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                  <p className="v2-tabular text-xs text-[var(--v2-ink-3)]">
+                    Dust total {formatAtomic(health.delegate_balances.report.dust_total_atomic, 6)}
+                    {health.delegate_balances.report.dust_alert ? ' (alerting)' : ''} · chain errors:{' '}
+                    {Object.keys(health.delegate_balances.report.chain_errors).length}
+                  </p>
+                </div>
               ) : (
-                <Card.Section>
+                <div className="px-5 py-4">
                   <StatusBadge tone="neutral">not_available_on_this_replica</StatusBadge>
                   <p className="mt-2 text-xs text-[var(--v2-ink-2)]">
                     This backend does not hold the delegate-balance monitor's leader lock, so it holds no
                     last report. No scan is performed on request.
                   </p>
-                </Card.Section>
+                </div>
               )}
             </Card>
 
@@ -230,14 +239,15 @@ function HealthView({ client }: { client: ReturnType<typeof useOpsClient> }) {
               <Card.Header
                 as="h2"
                 padding="none"
+                className="px-5"
                 title="Ops diagnostics"
                 description="The GET /health/ops payload: relayer balances, passport state, accounting counters, request validation."
               />
-              <Card.Section>
+              <div className="px-5 py-4">
                 <pre className="v2-tabular overflow-x-auto text-xs text-[var(--v2-ink-2)]">
                   {JSON.stringify(health.ops_diagnostics, null, 2)}
                 </pre>
-              </Card.Section>
+              </div>
             </Card>
           </div>
         ) : null}

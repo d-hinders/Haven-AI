@@ -88,7 +88,7 @@ export function PolicyStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           is the bare choice: the owner trimmed the explainer and the fee
           helper line to declutter the step. */
       /* ink-2, NOT ink-3: the label sits one tier above the step's ink-3
-          helper and summary text — an on-chain attestation is a decision,
+          eyebrow and summary line — an on-chain attestation is a decision,
           not a footnote (design review, #1411). */}
       <Checkbox
         checked={flow.issuePassport}

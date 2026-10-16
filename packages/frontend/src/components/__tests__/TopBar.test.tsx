@@ -139,54 +139,24 @@ describe('TopBar', () => {
     expect(screen.queryByText('Manage accounts')).toBeNull()
   })
 
-  // #4020 — the back link is a DETAIL-route affordance only. The resolver's
-  // regexes used to lack the `$` end anchor, so every sub-page under
-  // `/agents/<id>/` (the recover-funds sweep page, live today) inherited the
-  // hub link and the page rendered TWO back links pointing at different
-  // places: the bar's "‹ Agents" → /agents beside the page's own "Back to
-  // agent" → /agents/<id>. Sub-pages carry their own back link to the parent
-  // detail page; the bar must stay out of the way.
-  describe('back link resolves on detail routes only (#4020)', () => {
-    it('shows "Agents" → /agents on the agent detail route', () => {
-      navigation.pathname = '/agents/agent-1'
-      renderBar()
-      const link = screen.getByRole('link', { name: 'Agents' })
-      expect(link.getAttribute('href')).toBe('/agents')
-    })
-
-    it('shows "Accounts" → /accounts on the account detail route', () => {
-      navigation.pathname = '/accounts/acc-1'
-      renderBar()
-      const link = screen.getByRole('link', { name: 'Accounts' })
-      expect(link.getAttribute('href')).toBe('/accounts')
-    })
-
-    it('shows no back link on a sub-page of the agent detail route', () => {
-      // The case that failed on the unanchored resolver: /agents/<id>/sweep
-      // matched `/^\/agents\/[^/]+/` and rendered the hub link.
-      navigation.pathname = '/agents/agent-1/sweep'
-      renderBar()
-      expect(screen.queryByRole('link', { name: 'Agents' })).toBeNull()
-      expect(screen.queryByRole('link', { name: 'Accounts' })).toBeNull()
-    })
-
-    it('shows no back link on a sub-page of the account detail route', () => {
-      // Latent today (no nested route under /accounts/<id>/), pinned so a
-      // future nested route does not inherit the hub link.
-      navigation.pathname = '/accounts/acc-1/settings'
-      renderBar()
-      expect(screen.queryByRole('link', { name: 'Agents' })).toBeNull()
-      expect(screen.queryByRole('link', { name: 'Accounts' })).toBeNull()
-    })
-
-    it.each([['/agents'], ['/accounts']])(
-      'shows no back link on the %s hub page',
-      (pathname: string) => {
-        navigation.pathname = pathname
-        renderBar()
-        expect(screen.queryByRole('link', { name: 'Agents' })).toBeNull()
-        expect(screen.queryByRole('link', { name: 'Accounts' })).toBeNull()
-      },
-    )
+  // #4028 (epic #4027) — the bar renders NO back link on any route. Detail
+  // pages carry their own above the page title (`PageHeader`'s `back`, or
+  // `BackLink` in branches without a header). These are the routes the old
+  // resolver answered (#4020's detail routes) plus the sub-pages and hubs it
+  // was pinned against, so re-adding a resolver of either shape fails here.
+  // `usePathname` stays mocked and mutable for exactly that reason: a
+  // resolver that came back would read it.
+  it.each([
+    ['/agents/agent-1'],
+    ['/accounts/acc-1'],
+    ['/agents/agent-1/sweep'],
+    ['/accounts/acc-1/settings'],
+    ['/marketplace/some-merchant'],
+    ['/agents'],
+    ['/accounts'],
+  ])('renders no back link on %s (#4028)', (pathname: string) => {
+    navigation.pathname = pathname
+    renderBar()
+    expect(screen.queryAllByRole('link')).toHaveLength(0)
   })
 })

@@ -106,6 +106,9 @@ describe('the @haven_ai/ui import boundary (#3508)', () => {
     // — or one moving here without the move list gaining it — breaks the shim
     // contract silently, so the set is pinned.
     const expected = [
+      // BackLink is not an ops need on its own: PageHeader renders it for its
+      // `back` prop (#4028), so it has to live beside PageHeader.
+      'BackLink.tsx',
       'Button.tsx',
       'Card.tsx',
       'CopyButton.tsx',

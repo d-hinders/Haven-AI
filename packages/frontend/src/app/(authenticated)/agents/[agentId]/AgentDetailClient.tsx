@@ -59,6 +59,7 @@ import {
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { BackLink } from '@haven_ai/ui/BackLink'
 import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -372,8 +373,11 @@ export default function AgentDetailClient({ agentId }: Props) {
 
   if (loading) {
     return (
-      <div role="status" aria-busy="true" aria-live="polite" aria-label="Loading agent details" className="max-w-5xl">
-        <div className="space-y-4">
+      <div className="max-w-5xl">
+        {/* The way back exists in every state of the page (#4028), and sits
+            OUTSIDE the live region so it is not announced as loading text. */}
+        <BackLink href="/agents" label="Agents" className="mb-4" />
+        <div role="status" aria-busy="true" aria-live="polite" aria-label="Loading agent details" className="space-y-4">
           <Skeleton variant="text" className="h-6 w-40" />
           <Skeleton className="h-24 rounded-xl" />
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -389,6 +393,7 @@ export default function AgentDetailClient({ agentId }: Props) {
   if (!agent) {
     return (
       <div className="max-w-3xl">
+        <BackLink href="/agents" label="Agents" className="mb-4" />
         <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-8 text-center shadow-card">
           <h1 className="text-xl font-semibold text-[var(--v2-ink)]">
             {agentsError ? 'Agent could not load' : 'Agent not found'}
@@ -527,6 +532,7 @@ export default function AgentDetailClient({ agentId }: Props) {
   return (
     <div className="max-w-5xl">
       <PageHeader
+        back={{ href: '/agents', label: 'Agents' }}
         title={currentAgent.name}
         subtitle={currentAgent.description || undefined}
         // #3694: the identity row that was the "About this agent" card —

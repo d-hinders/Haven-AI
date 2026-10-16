@@ -42,6 +42,7 @@ import ConfirmDialog from '@/components/ConfirmDialog'
 import ComingSoonModal from '@/components/ComingSoonModal'
 import InfoModal, { type InfoPage } from '@/components/InfoModal'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { BackLink } from '@haven_ai/ui/BackLink'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Row } from '@/components/ui/Row'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -3250,6 +3251,29 @@ export default function DesignSystemPage() {
               </>
             }
           />
+        </div>
+      </Section>
+
+      <Section
+        title="BackLink and PageHeader back"
+        description="The one way back from a detail page (#4028): above the title, named by the parent alone (“Agents”, never “Back to …”). Drawn at text height so it costs the title almost no room on a phone; a transparent ::after extends the target to 44 px, Button’s mechanism (#1726). Pass `back` to PageHeader; a branch without a PageHeader (a loading skeleton, a not-found card, the merchant page’s own header) renders BackLink directly with the same values, so every state of the page has the same way back."
+      >
+        <div className="max-w-2xl space-y-8">
+          <PageHeader
+            back={{ href: '/agents', label: 'Agents' }}
+            title="Research agent"
+            meta="My account · Created 3 weeks ago · Active 2h ago"
+            inlineActions
+            actions={
+              <Button variant="ghost" size="sm" aria-label="More actions">
+                ⋮
+              </Button>
+            }
+          />
+          <div>
+            <BackLink href="/accounts" label="Accounts" />
+            <p className="mt-4 text-sm text-[var(--v2-ink-3)]">Account not found</p>
+          </div>
         </div>
       </Section>
 

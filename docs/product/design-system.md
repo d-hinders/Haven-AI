@@ -585,7 +585,7 @@ The authenticated app uses one stable product shell:
 - Sidebar nav: 36px row height, 16px icon box, 13px medium label. (The Approvals item and its live actionable-count badge were the nav's only dynamic entry; both are deleted with the Safe rail, [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) — every nav item is static now.)
 - Brand: the wordmark may use `.v2-brand-gradient-text`; do not repeat the gradient elsewhere in nav.
 - User menu: two-line user card with a kebab menu using popover shadow; destructive menu items use danger styling.
-- Top bar: a 56px blurred white bar with an unblurred status-bar band above it — the `<header>` is the whole chrome band and grows by `--v2-safe-top`, the blurred bar inside it stays 56px (§ *Safe areas*). The band is not breakpoint-gated: the inset is 0 on anything without a notch, so it collapses on its own rather than needing `max-lg:`. Detail routes show a back link to the parent collection; page-level CTAs go in the `actionSlot`.
+- Top bar: a 56px blurred white bar with an unblurred status-bar band above it — the `<header>` is the whole chrome band and grows by `--v2-safe-top`, the blurred bar inside it stays 56px (§ *Safe areas*). The band is not breakpoint-gated: the inset is 0 on anything without a notch, so it collapses on its own rather than needing `max-lg:`. Since #4028 the bar carries no back link: detail pages show theirs in the page, above the title (`PageHeader`'s `back`, or `BackLink`). Page-level CTAs go in the `PageHeader` actions, not the bar's unused `actionSlot`.
 - Main content: scrolls inside the shell, with `p-6 lg:p-8` — below `lg` its bottom, left and right also take the safe-area insets (§ *Safe areas*) — and a skip link targeting `main#main-content`.
 
 ### PageHeader
@@ -603,6 +603,13 @@ Use `components/ui/PageHeader.tsx` on authenticated pages instead of hand-rolled
   a quiet identity line is text that can break, not a control that must stay
   whole.
   Additive — a `PageHeader` without `meta` renders exactly as before.
+- Optional `back` link above the title
+  ([#4028](https://github.com/d-hinders/Haven-AI/issues/4028)): `{ href, label }`,
+  naming the parent only ("Agents"). It renders `BackLink`
+  (`packages/ui/src/BackLink.tsx`), drawn at text height with a 44px target. A
+  branch of the page with no `PageHeader` (loading, not found) renders
+  `BackLink` directly, so every state has the same way back. Additive — a
+  `PageHeader` without `back` renders exactly as before.
 - Right-side actions that wrap on narrow viewports — and **stack onto their own
   row below `sm`**, which is right for a row of labelled buttons and wrong for a
   single icon-only control.

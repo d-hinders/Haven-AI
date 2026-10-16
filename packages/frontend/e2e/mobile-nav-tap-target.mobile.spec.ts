@@ -159,11 +159,15 @@ const MIN_NEIGHBOUR_CLEARANCE_PX = 14
  */
 const MIN_CONTROL_GAP_PX = 8
 /**
- * The least a bar control's measured hit rectangle may be on either axis. The
- * back link is a 13px text row, not a 44px target, so this is deliberately a
- * "not collapsed / not covered" floor and not the comfort target.
+ * The page back link's measured hit HEIGHT (#4028). It moved out of the top
+ * bar into the page, drawn at text height (about 20px) with a transparent
+ * `::after` extending its target to 44px, Button's mechanism (#1726). So this
+ * is the comfort target itself, measured the way a finger meets it, not the
+ * "not collapsed" floor the bar's 13px text link used to get. Width is not
+ * extended (the label already makes it wide), so width gets the old floor.
  */
-const BACK_LINK_MIN_HIT_PX = 12
+const BACK_LINK_MIN_HIT_PX = COMFORTABLE_TAP_TARGET_PX
+const BACK_LINK_MIN_HIT_W_PX = 12
 
 type Measurement = {
   painted: { w: number; h: number }
@@ -469,6 +473,48 @@ async function measureBar(page: Page) {
 }
 
 /**
+ * The page's back link (#4028), measured the way `measureBar` measures a bar
+ * control: a hit rectangle walked with `elementFromPoint` out from its centre,
+ * so a transparent `::after` target counts and a covered pixel does not.
+ */
+async function measurePageBackLink(page: Page, href: string) {
+  return page.evaluate((target) => {
+    const el = document.querySelector<HTMLElement>(`#main-content a[href="${target}"]`)!
+    const walk = (ox: number, oy: number, dx: number, dy: number, cap: number) => {
+      let n = 0
+      while (n < cap) {
+        const x = ox + dx * (n + 1)
+        const y = oy + dy * (n + 1)
+        if (x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) break
+        const top = document.elementFromPoint(x, y)
+        if (!(!!top && (top === el || el.contains(top)))) break
+        n += 1
+      }
+      return n
+    }
+    const b = el.getBoundingClientRect()
+    const cx = Math.round(b.left + b.width / 2)
+    const cy = Math.round(b.top + b.height / 2)
+    const top = document.elementFromPoint(cx, cy)
+    const cap = 40
+    const h1 = document.querySelector<HTMLElement>('#main-content h1')
+    return {
+      label: (el.textContent || '').trim(),
+      left: Math.round(b.left),
+      right: Math.round(b.right),
+      bottom: Math.round(b.bottom),
+      titleTop: h1 ? Math.round(h1.getBoundingClientRect().top) : Number.POSITIVE_INFINITY,
+      painted: { w: Math.round(b.width), h: Math.round(b.height) },
+      reachableAtCentre: !!top && (top === el || el.contains(top)),
+      hit: {
+        w: walk(cx, cy, -1, 0, cap) + walk(cx, cy, 1, 0, cap) + 1,
+        h: walk(cx, cy, 0, -1, cap) + walk(cx, cy, 0, 1, cap) + 1,
+      },
+    }
+  }, href)
+}
+
+/**
  * The bottom tab bar's geometry (#2731), which is where the toggle went.
  *
  * Read from the LIVE elements rather than from classes: the bar's slots are
@@ -642,39 +688,40 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
         expect(m.accountChipCount).toBe(0)
       })
 
-      test('on a detail route the bar keeps exactly its back link, which is reachable and clear of the edges (#3825)', async ({
+      test('on a detail route the back link is in the page, not the bar, and keeps a 44px target (#4028)', async ({
         page,
       }) => {
-        // The one control the phone bar still holds. This is the "remaining
-        // items keep their tap target and do not overlap" half of the pill's
-        // removal: with the right cluster empty the back link is alone in the
-        // band, so a regression that re-crowds it shows as a second control
-        // (count) or as an overlap (gap floor), at the widths where the old
-        // row ran out of room.
+        // #3825 left the back link as the one control in the phone bar; #4028
+        // moved it into the page, above the title. So the bar now holds no
+        // control at all on a detail route, and the link the user reaches is
+        // the page's: measured with the same finger's-view walk as the toggle.
         await page.goto('/agents/agent-research')
-        await page.locator('header[data-app-chrome] a[href="/agents"]').waitFor()
+        // Wait for the LOADED page, not just a link: the loading branch renders
+        // the same BackLink with no title, and measuring there would make the
+        // "above the title" assertion compare against nothing.
+        await page.locator('#main-content h1').waitFor()
+        // ...and the agent's page, not its not-found card, which also has a
+        // BackLink above an h1.
+        await expect(page.locator('#main-content h1')).not.toHaveText(/Agent not found|Agent could not load/)
 
         const bar = await measureBar(page)
-
-        // Exactly the back link: one control, labelled, in the LEFT region.
-        expect(bar.controls.map((c) => c.label)).toEqual(['Agents'])
+        expect(bar.controls.map((c) => c.label)).toEqual([])
         expect(bar.rightClusterControls).toEqual([])
         expect(bar.chromeControlNames).toEqual([])
 
-        const back = bar.controls[0]
-        // It is the thing a finger reaches at its own centre: nothing in the
-        // chrome (and no stale overlay) has taken its taps.
+        const back = await measurePageBackLink(page, '/agents')
+        expect(back.label).toBe('Agents')
+        // It is the thing a finger reaches at its own centre.
         expect(back.reachableAtCentre).toBe(true)
-        // Measured hit rectangle, the same walk the toggle's uses. The link is
-        // a 13px text row, so this records the real number instead of a
-        // comfort target it never had; the floor is "not collapsed".
+        // The extended target, measured: 44px tall although it paints ~20px.
         expect(back.hit.h).toBeGreaterThanOrEqual(BACK_LINK_MIN_HIT_PX)
-        expect(back.hit.w).toBeGreaterThanOrEqual(BACK_LINK_MIN_HIT_PX)
-        // On the left, inside the viewport, and nowhere near the right edge
-        // the pill used to occupy.
+        expect(back.painted.h).toBeLessThan(BACK_LINK_MIN_HIT_PX)
+        expect(back.hit.w).toBeGreaterThanOrEqual(BACK_LINK_MIN_HIT_W_PX)
+        // Above the page title, inside the viewport, on the left.
         expect(back.left).toBeGreaterThanOrEqual(0)
         expect(back.right).toBeLessThanOrEqual(width / 2)
-        // Nothing overflowed the bar sideways.
+        expect(Number.isFinite(back.titleTop)).toBe(true)
+        expect(back.bottom).toBeLessThanOrEqual(back.titleTop)
         expect(bar.scrollOverflowPx).toBeLessThanOrEqual(0)
       })
     })

@@ -368,6 +368,52 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(header).toHaveTextContent('Main account · Gnosis Chain · Created 1mo ago · Last activity 2h ago')
   })
 
+  // #4028 — the way back to the agents list exists in EVERY state of the
+  // page. The top bar's link used to cover the loading and not-found states
+  // by accident of living outside the page; with it gone, each branch carries
+  // its own BackLink.
+  describe('back link to the agents list (#4028)', () => {
+    function expectBackToAgents() {
+      const link = screen.getByRole('link', { name: 'Agents' })
+      expect(link.getAttribute('href')).toBe('/agents')
+    }
+
+    it('renders above the title in the loaded page', () => {
+      render(<AgentDetailClient agentId="agent-1" />)
+      expectBackToAgents()
+      const link = screen.getByRole('link', { name: 'Agents' })
+      const title = screen.getByRole('heading', { level: 1, name: 'Research agent' })
+      expect(link.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    })
+
+    it('renders while the agent is loading, outside the live region', () => {
+      mockUseAgents.mockReturnValue({ ...mockUseAgents(), agents: [], loading: true })
+      render(<AgentDetailClient agentId="agent-1" />)
+      expectBackToAgents()
+      const status = screen.getByRole('status', { name: 'Loading agent details' })
+      expect(status.contains(screen.getByRole('link', { name: 'Agents' }))).toBe(false)
+    })
+
+    it('renders when the agent is not found', () => {
+      mockUseAgents.mockReturnValue({ ...mockUseAgents(), agents: [], loading: false })
+      render(<AgentDetailClient agentId="agent-1" />)
+      expect(screen.getByRole('heading', { name: 'Agent not found' })).toBeInTheDocument()
+      expectBackToAgents()
+    })
+
+    it('renders when the agent could not load', () => {
+      mockUseAgents.mockReturnValue({
+        ...mockUseAgents(),
+        agents: [],
+        loading: false,
+        error: new Error('offline'),
+      })
+      render(<AgentDetailClient agentId="agent-1" />)
+      expect(screen.getByRole('heading', { name: 'Agent could not load' })).toBeInTheDocument()
+      expectBackToAgents()
+    })
+  })
+
   it('says "No activity yet" in the meta when the agent was never seen (#3694)', () => {
     const base = mockUseAgents()
     mockUseAgents.mockReturnValue({

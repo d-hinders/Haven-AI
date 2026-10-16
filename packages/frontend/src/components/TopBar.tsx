@@ -1,10 +1,6 @@
 'use client'
 
-import { usePathname } from 'next/navigation'
-import Link from 'next/link'
 import EnvBadge from './EnvBadge'
-import { ChevronLeft } from 'lucide-react'
-import { Icon } from '@/components/ui/Icon'
 import { SafeAreaBand } from '@/components/ui/SafeAreaBand'
 import { ThemeToggle } from '@/components/ui/ThemeToggle'
 
@@ -12,31 +8,13 @@ interface TopBarProps {
   actionSlot?: React.ReactNode
 }
 
-interface BackLink {
-  href: string
-  label: string
-}
-
-function resolveBackLink(pathname: string): BackLink | null {
-  // Only show on DETAIL routes — never on hub pages and never on sub-pages of
-  // a detail route. The `$` end anchor is load-bearing (#4020): without it,
-  // `/agents/<id>/sweep` matched and the top bar showed a second back link
-  // ("‹ Agents" → /agents) beside the page's own "Back to agent" →
-  // /agents/<id>. Sub-pages of a detail route carry their own back link to
-  // the parent detail page; the bar stays out of the way.
-  if (/^\/agents\/[^/]+$/.test(pathname)) {
-    return { href: '/agents', label: 'Agents' }
-  }
-  if (/^\/accounts\/[^/]+$/.test(pathname)) {
-    return { href: '/accounts', label: 'Accounts' }
-  }
-  return null
-}
+// No back link (#4028, epic #4027). Detail pages carry their own, above the
+// page title, through `PageHeader`'s `back` prop or `BackLink` — in every
+// state of the page, which the bar never covered (loading and not-found
+// branches) and on routes it never matched (the merchant page). Until #4029
+// removes the bar, it holds only the env badge and the desktop theme toggle.
 
 export default function TopBar({ actionSlot }: TopBarProps) {
-  const pathname = usePathname()
-  const back = resolveBackLink(pathname)
-
   return (
     // z-[var(--v2-z-chrome)]: the app chrome tier. Deliberately BELOW the
     // mobile navigation tiers, so a bar that outranks the drawer covers the
@@ -107,7 +85,7 @@ export default function TopBar({ actionSlot }: TopBarProps) {
         className="h-14 flex items-center px-6 lg:px-8 max-lg:pl-[max(1.5rem,var(--v2-safe-left))] max-lg:pr-[max(1.5rem,var(--v2-safe-right))] border-b border-[var(--v2-border)] bg-bg/85 backdrop-blur-md"
       >
         {/*
-          Left region: hamburger spacer + optional back-link.
+          Left region: the env badge (non-production only).
 
           `mr-3` is a floor, not decoration (#1767, design review). This region is
           the compressible one and the right region carries `ml-auto`, so on a
@@ -130,18 +108,6 @@ export default function TopBar({ actionSlot }: TopBarProps) {
             row and lets the control paint over its neighbour.
           */}
           <EnvBadge />
-          {back && (
-            <Link
-              href={back.href}
-              className="group inline-flex items-center gap-1.5 text-[13px] font-medium text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] transition-colors"
-            >
-              <Icon
-                icon={ChevronLeft}
-                className="w-3.5 h-3.5 text-[var(--v2-ink-3)] group-hover:text-[var(--v2-ink-2)] transition-colors"
-              />
-              <span>{back.label}</span>
-            </Link>
-          )}
         </div>
 
         {/* Center / action slot */}

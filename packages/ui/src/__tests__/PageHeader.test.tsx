@@ -35,3 +35,37 @@ describe('PageHeader meta slot (#3692)', () => {
     expect(container.textContent).toContain('Just a subtitle.')
   })
 })
+
+describe('PageHeader back link (#4028)', () => {
+  it('renders the back link ABOVE the title row, not inside the title column', () => {
+    const { container, getByRole } = render(
+      <PageHeader
+        title="Research agent"
+        back={{ href: '/agents', label: 'Agents' }}
+        actions={<button type="button">Pause payments</button>}
+      />,
+    )
+    const link = getByRole('link', { name: 'Agents' })
+    expect(link.getAttribute('href')).toBe('/agents')
+    const header = container.querySelector('header')!
+    const h1 = container.querySelector('h1')!
+    // the link is a direct child of the header, and precedes the title
+    expect(link.parentElement).toBe(header)
+    expect(link.compareDocumentPosition(h1)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    // the title column does not contain the link, so actions stay centred on the title
+    expect(h1.parentElement!.contains(link)).toBe(false)
+  })
+
+  it('renders the same markup as before when no back is passed — existing callers are unchanged', () => {
+    const { container } = render(
+      <PageHeader title="Agents" actions={<button type="button">New</button>} />,
+    )
+    const header = container.querySelector('header')!
+    expect(container.querySelectorAll('a').length).toBe(0)
+    // the header is still itself the flex row
+    expect(header.className).toBe(
+      'mb-6 flex gap-4 sm:flex-row sm:items-center sm:justify-between flex-col',
+    )
+    expect(header.firstElementChild!.querySelector('h1')).not.toBeNull()
+  })
+})

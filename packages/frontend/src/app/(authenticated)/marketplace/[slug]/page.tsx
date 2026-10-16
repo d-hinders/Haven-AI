@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { AlertTriangle, ChevronLeft } from 'lucide-react'
+import { AlertTriangle } from 'lucide-react'
+import { BackLink } from '@haven_ai/ui/BackLink'
 import { Icon } from '@/components/ui/Icon'
 import { notFound as nextNotFound, useParams } from 'next/navigation'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -24,16 +25,14 @@ import { useMerchantBudgets } from '@/hooks/useMerchantBudgets'
 /**
  * The way back on a phone, where Marketplace lives in the More drawer —
  * rendered by EVERY branch of the page (loading, error, merchant-less,
- * success), the `Button` primitive (44 px hit area, focus ring), the same
- * shape as the sweep page's "Back to agent".
+ * success). The app's one back link, `BackLink` (#4028): above the title,
+ * named by the parent alone. The merchant page has no `PageHeader` (its
+ * header is `MerchantHeader`), so it renders the link directly.
  */
 function BackToMarketplace() {
   return (
-    <div className="mb-4">
-      <Button href="/marketplace" variant="tertiary" size="sm" className="-ml-3">
-        <Icon icon={ChevronLeft} className="h-3.5 w-3.5" />
-        Back to Marketplace
-      </Button>
+    <div className="mb-2">
+      <BackLink href="/marketplace" label="Marketplace" />
     </div>
   )
 }
@@ -70,10 +69,13 @@ export default function MerchantPage() {
       // `aria-busy` + `role="status"`: the skeletons are aria-hidden, so the
       // capture harness's content floor must not certify this frame (and a
       // screen reader must hear that the merchant is still loading).
-      <div className="max-w-5xl space-y-4" role="status" aria-busy="true" aria-label="Loading merchant">
+      <div className="max-w-5xl">
+        {/* Outside the live region, as on agent and account detail (#4028). */}
         <BackToMarketplace />
-        <Skeleton className="h-16 rounded-xl" />
-        <Skeleton className="h-64 rounded-xl" />
+        <div className="space-y-4" role="status" aria-busy="true" aria-label="Loading merchant">
+          <Skeleton className="h-16 rounded-xl" />
+          <Skeleton className="h-64 rounded-xl" />
+        </div>
       </div>
     )
   }
@@ -165,29 +167,33 @@ export default function MerchantPage() {
 
   return (
     <div className="max-w-5xl space-y-6" data-testid="merchant-page">
-      <BackToMarketplace />
-      {/* The merchant header IS the page header — one h1 (a second `PageHeader`
-          made the name two headings, which the visual spec's anchor refused).
-          #3981: "Set a budget for this merchant" (#4003 wording) sits in its
-          right-hand actions slot, the way `PageHeader` places actions —
-          withheld when an open budget already covers the offers here
-          (#4015). The helper's width is capped so it never squeezes the
-          merchant's own text (#4015). */}
-      <MerchantHeader
-        merchant={merchant}
-        actions={
-          showHeaderFundAction ? (
-            <div className="flex flex-col items-start gap-1 xl:items-end">
-              <Button size="sm" onClick={() => setFundOpen(true)}>
-                Set a budget for this merchant
-              </Button>
-              <p className="max-w-[16rem] text-xs text-[var(--v2-ink-3)] xl:text-right">
-                Give one of your agents a budget that pays only {merchant.name}.
-              </p>
-            </div>
-          ) : undefined
-        }
-      />
+      {/* The link and the header are one block, so the link sits 8px above
+          the title as it does under PageHeader, not a section gap away. */}
+      <div>
+        <BackToMarketplace />
+        {/* The merchant header IS the page header — one h1 (a second `PageHeader`
+            made the name two headings, which the visual spec's anchor refused).
+            #3981: "Set a budget for this merchant" (#4003 wording) sits in its
+            right-hand actions slot, the way `PageHeader` places actions —
+            withheld when an open budget already covers the offers here
+            (#4015). The helper's width is capped so it never squeezes the
+            merchant's own text (#4015). */}
+        <MerchantHeader
+          merchant={merchant}
+          actions={
+            showHeaderFundAction ? (
+              <div className="flex flex-col items-start gap-1 xl:items-end">
+                <Button size="sm" onClick={() => setFundOpen(true)}>
+                  Set a budget for this merchant
+                </Button>
+                <p className="max-w-[16rem] text-xs text-[var(--v2-ink-3)] xl:text-right">
+                  Give one of your agents a budget that pays only {merchant.name}.
+                </p>
+              </div>
+            ) : undefined
+          }
+        />
+      </div>
 
       {comingSoon ? (
         <EmptyState

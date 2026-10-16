@@ -155,7 +155,7 @@ Any remaining matches should be deliberate technical disclosure, developer copy,
   excluded work, review status, risk level, merge rationale, residual risk, and
   recommended merge order when multiple PRs are open.
 - For table changes, verify amount sorting uses raw values rather than formatted strings.
-- For app-shell changes, verify sidebar active state, TopBar back links,
+- For app-shell changes, verify sidebar active state, detail-page back links,
   environment badge, skip link, and mobile navigation. (The
   Approvals badge was on this list until
   [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) deleted the nav

@@ -28,7 +28,15 @@ import { formatUnits } from 'viem'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { chainName, howToBuy, needsUnpinnedBudget, type BudgetAgent, type SelectedBudget } from '@/lib/marketplace'
+import {
+  anyRecipientRule,
+  chainName,
+  howToBuy,
+  offersOnChain,
+  offersOnUserNetwork,
+  type BudgetAgent,
+  type SelectedBudget,
+} from '@/lib/marketplace'
 import type { CatalogEntry, MerchantFundingTarget } from '@/hooks/useCatalog'
 import type { DashboardBudgetRemainingEntry } from '@/hooks/useBudgetRemaining'
 import type { MerchantBudget } from '@/hooks/useMerchantBudgets'
@@ -83,6 +91,9 @@ function StepRow({
  * The any-recipient requirement (#3981's note, moved here in plain words):
  * in a mixed merchant the tagged offers need it; when EVERY offer does,
  * there are no tags to point at, so the sentence carries the whole rule.
+ * #4015: the done line with an open budget already says "can pay anyone",
+ * so there it renders only for the mixed case; the budget-fix line keeps
+ * both forms.
  */
 function AnyRecipientLine({ merchantName, mixed }: { merchantName: string; mixed: boolean }) {
   return (
@@ -130,6 +141,7 @@ export function HowToBuyPanel({
   budgetsError,
   merchantBudgets,
   funding,
+  defaultChainId = null,
   fundActionAvailable,
   onSetBudget,
   onRetryBudgets,
@@ -149,6 +161,11 @@ export function HowToBuyPanel({
   budgetsError: string | null
   merchantBudgets: MerchantBudget[]
   funding: MerchantFundingTarget[]
+  /**
+   * The default account's chain — the offers table's split (#4015). Step 2
+   * names the network when the agent it names sits on another chain.
+   */
+  defaultChainId?: number | null
   /** `showFundAction` AND at least one ACTIVE eligible agent (the page computes both). */
   fundActionAvailable: boolean
   onSetBudget: () => void
@@ -157,9 +174,6 @@ export function HowToBuyPanel({
   const activeAgents = agents.filter((a) => a.status === 'active')
   const firstActive = activeAgents[0] ?? null
   const activeCount = activeAgents.length
-  const bridgeOnly = offers.filter((o) => needsUnpinnedBudget(o.asset_transfer_methods))
-  const needsAnyRecipient = bridgeOnly.length > 0
-  const mixed = needsAnyRecipient && bridgeOnly.length < offers.length
 
   // ── Step 1 — Connect an agent ─────────────────────────────────────────────
   // Done when the user has at least one ACTIVE agent — paused, pending,
@@ -194,6 +208,15 @@ export function HowToBuyPanel({
     : null
   const pasteTargetName =
     answer?.kind === 'done' ? answer.agentName : activeCount === 1 ? firstActive!.name : null
+  // #4015: `partial`, `mixed` and `needsAnyRecipient` all read ONE offer set —
+  // the offers on the named agent's chain (the offers table tags per chain
+  // through the same `anyRecipientRule`). Before an agent is named, the
+  // set is the offers on the user's network, the table's visible rows.
+  const ruleOffers =
+    answer?.kind === 'done' || answer?.kind === 'budget-fix'
+      ? offersOnChain(offers, answer.agentChainId)
+      : offersOnUserNetwork(offers, defaultChainId)
+  const { needsAnyRecipient, mixed } = anyRecipientRule(ruleOffers)
 
   let step2State: StepState = 'open'
   let step2Body: ReactNode
@@ -214,24 +237,34 @@ export function HowToBuyPanel({
     step2Body = <p>Once an agent is connected, it needs a budget it can spend here.</p>
   } else if (answer?.kind === 'done') {
     step2State = 'done'
-    const { selected, partial } = answer
+    const { selected, partial, agentChainId } = answer
     const openBudget = selected.recipientAddress == null
+    // #4015: an agent on another network than the user's default pays only
+    // the offers on its own chain — the line says which network, so it is
+    // never read against the unpayable rows the table puts first.
+    const onNetwork = agentChainId !== defaultChainId ? ` on ${chainName(agentChainId)}` : ''
     step2Body = (
       <p>
         {answer.agentName} has {amountLine(selected)}, and can pay{' '}
         {openBudget ? (
           <>
             anyone — so it can pay {merchantName}
+            {onNetwork}
             {partial ? ' for some offers' : ''}
           </>
         ) : (
           <>
             only {merchantName}
+            {onNetwork}
             {partial ? ' — for some offers' : ''}
           </>
         )}
         .
-        {needsAnyRecipient ? <AnyRecipientLine merchantName={merchantName} mixed={mixed} /> : null}
+        {/* An open budget already reads "can pay anyone": the line adds
+            something only when some offers are tagged (#4015). A locked
+            budget that pays here implies erc7710 offers, so any bridge-only
+            offer beside them makes the set mixed. */}
+        {mixed ? <AnyRecipientLine merchantName={merchantName} mixed /> : null}
       </p>
     )
   } else if (answer?.kind === 'budget-fix') {

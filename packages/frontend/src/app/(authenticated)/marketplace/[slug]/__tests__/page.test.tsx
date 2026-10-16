@@ -479,13 +479,54 @@ describe('MerchantPage', () => {
 
   // The old open-budget note's case: offers lack erc7710, so the requirement
   // shows in the panel's step 2 — even when no budget can be PINNED here.
-  it('withholds the fund action and carries the any-recipient requirement in step 2 when the only verified payTo is not ERC-7710', () => {
+  it('withholds the fund action when the only verified payTo is not ERC-7710, and step 2 says "can pay anyone" once (#4015)', () => {
     seedPayingState(verifiedNotErc7710Funding)
     render(<MerchantPage />)
     const step2 = screen.getByTestId('how-to-buy-step-2')
     expect(step2.textContent).toContain('and can pay anyone — so it can pay Ampersend Demo API.')
-    expect(step2.textContent).toContain("A budget limited to one recipient can't pay Ampersend Demo API — keep the budget that can pay anyone open.")
+    // #4015: the open budget's own sentence carries the rule; the line that
+    // repeated it stays only for the budget-fix and mixed cases.
+    expect(step2.textContent).not.toContain("A budget limited to one recipient can't pay")
     expect(screen.queryByRole('button', { name: 'Set a budget for this merchant' })).toBeNull()
+  })
+
+  // #4015 owner decision (a), 2026-10-16 — "No need to push for merchant
+  // specific budgets here."
+  it('hides the header action and its helper when an active agent\'s open budget already covers the offers here', () => {
+    seedPayingState()
+    render(<MerchantPage />)
+    expect(screen.queryByRole('button', { name: 'Set a budget for this merchant' })).toBeNull()
+    expect(screen.queryByText(/Give one of your agents a budget that pays only/)).toBeNull()
+  })
+
+  it('keeps the header action when no open budget covers the offers here — none, or not enough left', () => {
+    // No budget at all: the header action and the panel's step-2 fix.
+    mockUseAgents.mockReturnValue({ agents: [eligibleAgent] })
+    mockUseMerchant.mockReturnValue({ merchant, offers: [offer()], funding: verifiedErc7710Funding, loading: false, error: null, notFound: false, refetch: vi.fn() })
+    const { unmount } = render(<MerchantPage />)
+    expect(screen.getAllByRole('button', { name: 'Set a budget for this merchant' })).toHaveLength(2)
+    expect(screen.getByText('Give one of your agents a budget that pays only Ampersend Demo API.')).toBeDefined()
+    unmount()
+
+    // An open budget with less left than the offer costs: still not covered.
+    mockUseBudgetRemaining.mockReturnValue({
+      data: { budgets: [{ ...sepoliaBudgetRow, remaining_atomic: '500' }] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    render(<MerchantPage />)
+    expect(screen.getByText('Give one of your agents a budget that pays only Ampersend Demo API.')).toBeDefined()
+    expect(screen.getAllByRole('button', { name: 'Set a budget for this merchant' }).length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('counts only the offers on the user\'s network: an open budget there covers them even with an unpayable offer on another network', () => {
+    seedPayingState(verifiedErc7710Funding, [offer(), offer({ id: 'offer-2', network: 'eip155:8453' })])
+    render(<MerchantPage />)
+    expect(screen.queryByRole('button', { name: 'Set a budget for this merchant' })).toBeNull()
+    // Step 2 follows the same split: not "for some offers".
+    expect(screen.getByTestId('how-to-buy-step-2').textContent).toContain('so it can pay Ampersend Demo API.')
+    expect(screen.getByTestId('how-to-buy-step-2').textContent).not.toContain('for some offers')
   })
 
   it('renders no any-recipient requirement anywhere when the offers advertise erc7710, even with no verified payTo at all', () => {

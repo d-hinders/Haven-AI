@@ -162,18 +162,22 @@ const SCENARIOS: Scenario[] = [
       // #4005: the "How to buy" panel sits between the header and the offers.
       // The fixture's active agent (Research agent, Base) holds an open 20
       // USDC budget, so it can pay the Base-priced Quote offer: step 1 done,
-      // step 2 done naming the agent and its remaining, with the
-      // any-recipient requirement in plain words (all offers are bridge-only,
-      // so there are no tags to point at).
+      // step 2 done naming the agent and its remaining. #4015: the agent is
+      // on Base while the default account is on Base Sepolia, so step 2
+      // names the network — an unqualified "so it can pay Ampersend Demo
+      // API" would be false next to the unpayable Fact and Joke rows. It
+      // pays every offer ON Base (Quote is the only one), so no "for some
+      // offers"; and the open budget's "can pay anyone" is the whole
+      // any-recipient rule (every offer is bridge-only, no tags), so no
+      // second sentence repeats it.
       const panel = merchantPage.getByTestId('how-to-buy-panel')
       await expect(panel).toBeVisible()
       await expect(panel.getByTestId('how-to-buy-step-1')).toContainText('Research agent is connected on Base.')
       await expect(panel.getByTestId('how-to-buy-step-2')).toContainText(
-        'Research agent has 20 USDC left of 250 USDC this month, and can pay anyone — so it can pay Ampersend Demo API for some offers.',
+        'Research agent has 20 USDC left of 250 USDC this month, and can pay anyone — so it can pay Ampersend Demo API on Base.',
       )
-      await expect(panel.getByTestId('how-to-buy-step-2')).toContainText(
-        "A budget limited to one recipient can't pay Ampersend Demo API — keep the budget that can pay anyone open.",
-      )
+      await expect(panel.getByTestId('how-to-buy-step-2')).not.toContainText('for some offers')
+      await expect(panel.getByTestId('how-to-buy-step-2')).not.toContainText("A budget limited to one recipient can't pay")
       // The old offer-level note paragraph is gone (#4005).
       await expect(merchantPage.getByTestId('any-recipient-budget-note')).toHaveCount(0)
       await expect(merchantPage.getByText(/any-recipient budget/)).toHaveCount(0)
@@ -514,6 +518,9 @@ test.describe('marketplace visual regression', () => {
       timeout: ANCHOR_TIMEOUT_MS,
     })
     await dismissMobileSidebar(page)
+    // #4015 owner decision (a): the action hides only when an OPEN budget
+    // covers the offers here. The Fund Agent's budget is merchant-locked and
+    // Research agent sits on Base, so the action stays — deliberately.
     await expect(page.getByRole('button', { name: 'Set a budget for this merchant' })).toHaveCount(1)
     await expect(page.getByText('Fund Agent', { exact: true }).first()).toBeVisible()
     await expect(page.getByText("Haven could not load this merchant's budgets.")).toHaveCount(0)

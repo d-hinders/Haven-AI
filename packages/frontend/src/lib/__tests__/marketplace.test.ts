@@ -6,6 +6,10 @@ import {
   categoryLabel,
   freshness,
   howToBuy,
+  offersOnChain,
+  offersOnUserNetwork,
+  anyRecipientRule,
+  openBudgetCoversOffers,
   isTestnetChain,
   listsTestnet,
   merchantInitials,
@@ -428,16 +432,42 @@ describe('howToBuy (#4005)', () => {
     expect(result).toEqual({
       kind: 'done',
       agentName: 'Atlas',
+      agentChainId: 8453,
       partial: false,
       selected: expect.objectContaining({ recipientAddress: null, remainingAtomic: '20000000' }),
     })
   })
 
-  it('is done with partial=true when the agent cannot pay EVERY offer', () => {
-    // The second offer is on another chain — the agent cannot pay it.
-    const result = runHowToBuy({ offers: [entry({ price_atomic: '10000000' }), entry({ id: 'cat-2', network: 'eip155:84532' })] })
+  it('is done with partial=true when the agent cannot pay every offer on ITS OWN chain (#4015)', () => {
+    // Both offers are on the agent's chain (Base); the second costs more than
+    // the 20 USDC left — a same-chain no, so the answer is partial.
+    const result = runHowToBuy({
+      offers: [entry({ price_atomic: '10000000' }), entry({ id: 'cat-2', price_atomic: '50000000' })],
+    })
     if (result.kind !== 'done') throw new Error(`expected done, got ${result.kind}`)
     expect(result.partial).toBe(true)
+    expect(result.agentChainId).toBe(8453)
+  })
+
+  it('is done with partial=false when the only offers it cannot pay are on ANOTHER chain (#4015)', () => {
+    // The second offer is on Base Sepolia — the offers table puts it behind
+    // its own network disclosure, so it does not make step 2 partial.
+    const result = runHowToBuy({ offers: [entry({ price_atomic: '10000000' }), entry({ id: 'cat-2', network: 'eip155:84532' })] })
+    if (result.kind !== 'done') throw new Error(`expected done, got ${result.kind}`)
+    expect(result.partial).toBe(false)
+    expect(result.agentChainId).toBe(8453)
+  })
+
+  it('still counts an unknown answer on an offer on the agent\u2019s chain as partial (#4015)', () => {
+    // An offer with no price on the same chain answers unknown: not a 'can'.
+    const result = runHowToBuy({ offers: [entry({ price_atomic: '10000000' }), entry({ id: 'cat-2', price_atomic: null })] })
+    if (result.kind !== 'done') throw new Error(`expected done, got ${result.kind}`)
+    expect(result.partial).toBe(true)
+  })
+
+  it('carries the agent\u2019s chain on a budget fix (#4015)', () => {
+    const result = runHowToBuy({ budgets: [] })
+    expect(result).toMatchObject({ kind: 'budget-fix', agentChainId: 8453 })
   })
 
   it('names the budget fix when the agent has no budget it can spend here', () => {
@@ -628,4 +658,62 @@ describe('needsUnpinnedBudget agrees with the agents\' funding_leg_expected hint
       expect(needsUnpinnedBudget(value)).toBe(catalogFundingLegExpected(value) !== false)
     })
   }
+})
+
+// ── #4015: the shared offer sets and the header's coverage check ────────────
+
+describe('offersOnUserNetwork / offersOnChain / anyRecipientRule (#4015)', () => {
+  const base = entry({ id: 'b', network: 'eip155:8453' })
+  const sepolia = entry({ id: 's', network: 'eip155:84532' })
+
+  it('keeps the offers on the default chain, or every offer when that chain serves none', () => {
+    expect(offersOnUserNetwork([base, sepolia], 8453).map((o) => o.id)).toEqual(['b'])
+    expect(offersOnUserNetwork([base, sepolia], 100).map((o) => o.id)).toEqual(['b', 's'])
+    expect(offersOnUserNetwork([base, sepolia], null).map((o) => o.id)).toEqual(['b', 's'])
+    expect(offersOnChain([base, sepolia], 84532).map((o) => o.id)).toEqual(['s'])
+  })
+
+  it('is mixed only when the one set holds both shapes', () => {
+    const bridge = entry({ asset_transfer_methods: null })
+    const erc7710 = entry({ asset_transfer_methods: 'eip3009,erc7710' })
+    expect(anyRecipientRule([bridge, erc7710])).toEqual({ needsAnyRecipient: true, mixed: true })
+    expect(anyRecipientRule([bridge, bridge])).toEqual({ needsAnyRecipient: true, mixed: false })
+    expect(anyRecipientRule([erc7710])).toEqual({ needsAnyRecipient: false, mixed: false })
+  })
+})
+
+describe('openBudgetCoversOffers (#4015 owner decision (a))', () => {
+  function run(overrides: { offers?: CatalogEntry[]; agents?: BudgetAgent[]; budgets?: DashboardBudgetRemainingEntry[]; merchantBudgets?: MerchantBudget[] }) {
+    return openBudgetCoversOffers({
+      offers: overrides.offers ?? [entry({ price_atomic: '10000000' })],
+      agents: overrides.agents ?? [agent()],
+      budgets: overrides.budgets ?? [budgetRow()],
+      merchantBudgets: overrides.merchantBudgets ?? [],
+      funding: [verifiedFunding],
+      nowMs: NOW_MS,
+    })
+  }
+
+  it('is true when one active agent\u2019s open budget pays every offer', () => {
+    expect(run({})).toBe(true)
+  })
+
+  it('is false with no budget, or one that cannot cover every offer', () => {
+    expect(run({ budgets: [] })).toBe(false)
+    expect(run({ budgets: [budgetRow({ remaining_atomic: '1000000' })] })).toBe(false)
+    expect(run({ offers: [entry({ price_atomic: '10000000' }), entry({ id: 'cat-2', price_atomic: '50000000' })] })).toBe(false)
+  })
+
+  it('is false when the budget that pays is locked to the merchant — that is the budget the action manages', () => {
+    expect(
+      run({
+        offers: [entry({ price_atomic: '10000000', asset_transfer_methods: 'eip3009,erc7710' })],
+        budgets: [budgetRow({ recipient_address: PAY_TO })],
+      }),
+    ).toBe(false)
+  })
+
+  it('is false for a paused agent, however large its budget', () => {
+    expect(run({ agents: [agent({ status: 'paused' })] })).toBe(false)
+  })
 })

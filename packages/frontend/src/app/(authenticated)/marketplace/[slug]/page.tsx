@@ -14,7 +14,7 @@ import { OffersTable } from '@/components/marketplace/OffersTable'
 import FundMerchantModal, { eligibleFundingAgents } from '@/components/marketplace/FundMerchantModal'
 import { MerchantBudgetsList } from '@/components/marketplace/MerchantBudgetsList'
 import { useAgents } from '@/hooks/useAgents'
-import { chainName } from '@/lib/marketplace'
+import { offersOnUserNetwork, openBudgetCoversOffers } from '@/lib/marketplace'
 import { useAuth } from '@/context/AuthContext'
 import { resolveDefaultAccount } from '@/lib/default-account'
 import { useBudgetRemaining } from '@/hooks/useBudgetRemaining'
@@ -145,6 +145,23 @@ export default function MerchantPage() {
   // pending agents (the modal's own shape), and the panel must not point a
   // paused agent at an action it cannot complete.
   const hasActiveEligibleAgent = eligibleFundingAgents(agents, funding).some((a) => a.status === 'active')
+  // #4015 owner decision (a), 2026-10-16 — "No need to push for merchant
+  // specific budgets here.": the header hides the action when an active
+  // agent's OPEN budget already pays every offer on the user's network
+  // (the same per-offer verdicts step 2 reads). Only once both budget wires
+  // have answered: unread, it shows as before; it may reappear later as
+  // the budget drains, which is accepted.
+  const budgetsRead = !merchantBudgetsLoading && !budgetRemainingLoading && !merchantBudgetsError && !budgetRemainingError
+  const openBudgetCoversHere =
+    budgetsRead &&
+    openBudgetCoversOffers({
+      offers: offersOnUserNetwork(offers, defaultChainId),
+      agents,
+      budgets: budgetRemaining?.budgets ?? [],
+      merchantBudgets: merchantBudgets ?? [],
+      funding,
+    })
+  const showHeaderFundAction = showFundAction && !openBudgetCoversHere
 
   return (
     <div className="max-w-5xl space-y-6" data-testid="merchant-page">
@@ -152,16 +169,19 @@ export default function MerchantPage() {
       {/* The merchant header IS the page header — one h1 (a second `PageHeader`
           made the name two headings, which the visual spec's anchor refused).
           #3981: "Set a budget for this merchant" (#4003 wording) sits in its
-          right-hand actions slot, the way `PageHeader` places actions. */}
+          right-hand actions slot, the way `PageHeader` places actions —
+          withheld when an open budget already covers the offers here
+          (#4015). The helper's width is capped so it never squeezes the
+          merchant's own text (#4015). */}
       <MerchantHeader
         merchant={merchant}
         actions={
-          showFundAction ? (
-            <div className="flex flex-col items-start gap-1 sm:items-end">
+          showHeaderFundAction ? (
+            <div className="flex flex-col items-start gap-1 xl:items-end">
               <Button size="sm" onClick={() => setFundOpen(true)}>
                 Set a budget for this merchant
               </Button>
-              <p className="text-xs text-[var(--v2-ink-3)]">
+              <p className="max-w-[16rem] text-xs text-[var(--v2-ink-3)] xl:text-right">
                 Give one of your agents a budget that pays only {merchant.name}.
               </p>
             </div>
@@ -197,6 +217,7 @@ export default function MerchantPage() {
             budgetsError={merchantBudgetsError ?? budgetRemainingError}
             merchantBudgets={merchantBudgets ?? []}
             funding={funding}
+            defaultChainId={defaultChainId}
             fundActionAvailable={showFundAction && hasActiveEligibleAgent}
             onSetBudget={() => setFundOpen(true)}
             onRetryBudgets={() => {

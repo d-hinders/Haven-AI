@@ -337,11 +337,17 @@ Coming-soon and no-offer merchants show no panel.
      names the agent and the SELECTED budget's remaining and cap ("Atlas has
      $0.65 left of $1.00 today, and can pay anyone — so it can pay
      <merchant>"), or "can pay only <merchant>" when the paying budget is
-     merchant-locked. When the agent cannot pay EVERY offer (a mixed
-     merchant, or offers on more than one chain) the line says "for some
-     offers". When any offer needs an any-recipient budget, the step carries
-     that requirement in plain words — the old offer-level note, moved here
-     (#4005).
+     merchant-locked. The step reads the offers on the named agent's own
+     chain — the offers table's split (#4015): when the agent cannot pay
+     every offer THERE, the line says "for some offers"; offers on another
+     network have their own disclosure line and never make it partial. When
+     the agent's chain is not the default account's chain, the line names
+     the network ("…so it can pay <merchant> on Base"). The any-recipient
+     requirement (the old offer-level note, moved here in #4005) reads the
+     same per-chain set through one predicate (`anyRecipientRule`): in the
+     done line it renders only when that set is mixed ("The offers marked
+     'any-recipient budget' need a budget that can pay anyone") — an open
+     budget's "can pay anyone" already says the rest.
    - **A budget fix** when no agent can pay and a budget-shaped no exists:
      the panel names the first agent with one and offers "Set a budget for
      this merchant" (the same modal as the header action) ONLY when the
@@ -350,7 +356,10 @@ Coming-soon and no-offer merchants show no panel.
      does not point a paused agent at an action. A merchant-locked budget
      wins over the open one for this payee, so the action is never offered
      while an open budget already covers the offers (that state is "done"
-     instead). Otherwise the fix links to the agent's page. A depleted
+     instead) — and since #4015 the header action follows the same rule
+     (see *"Set a budget for this merchant"* below). Otherwise the fix links
+     to the agent's page. The fix line keeps the any-recipient sentence in
+     both forms, mixed or not. A depleted
      budget names what is left ("not enough for any offer here"); a budget
      locked to another recipient is simply "no budget that can pay
      <merchant>" — true either way.
@@ -564,8 +573,10 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   the grid card (#4008) — with its meaning as VISIBLE text
   under the description — never only a tooltip — the Haven test-merchant note
   as a wrapping line on a test merchant, where a payment is one paste away,
-  and "Set a budget for this merchant" in the header's right-hand actions slot when the
-  action shows), and ONE offers section (#3981): each offer is a single row —
+  and "Set a budget for this merchant" in the header's actions slot when the
+  action shows — below the text until `xl` (1280px), beside it from there
+  with its helper capped at `16rem`, so the merchant's own text keeps the
+  width (#4015, `merchant-page-fit-measure.spec.ts`)), and ONE offers section (#3981): each offer is a single row —
   a table from `md` up, one stacked card below — carrying name, description,
   price with the `withinBudget()` per-agent hint (so the warning is never
   behind a horizontal scroll on a phone), the network's chain name and a
@@ -600,8 +611,10 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   confirmation names the ONE agent that can pay — "Copied — paste it to
   <agent>" via `CopyButton`'s `copiedText` — and stays "Copied" when the
   answer is none, unknown or more than one.) No "EIP-3009" and no
-  "unpinned" reaches the page, and in a
-  mixed merchant the offers that need it carry an "any-recipient budget" tag.
+  "unpinned" reaches the page, and where one network's offers are mixed
+  the offers there that need it carry an "any-recipient budget" tag —
+  decided per chain through the panel's own `anyRecipientRule` (#4015), so
+  step 2 never points at a tag on another network.
   A `coming_soon` merchant renders its description, website and
   "Coming soon — not payable yet" — no offers section, no price. Loading,
   empty, error (with "Try again") and unknown-slug (404 via
@@ -622,7 +635,14 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   `verified` and `erc7710`, AND the owner has at least one ELIGIBLE agent for
   one of those chains (`eligibleFundingAgents`) — a qualifying chain with no
   eligible agent hides the action too, rather than opening a modal that can
-  only ever say "no eligible agent". The action's old funding-level
+  only ever say "no eligible agent". In the header it is also withheld when
+  an active agent's OPEN budget already pays every offer on the user's
+  network (`openBudgetCoversOffers` over `offersOnUserNetwork`, the same
+  per-offer verdicts step 2 reads; only once both budget wires answered) —
+  owner decision (a), 2026-10-16, #4015: "No need to push for merchant
+  specific budgets here." A merchant-locked budget does not count, so the
+  action stays beside one; it may reappear as the open budget drains. The
+  modal is unchanged. The action's old funding-level
   "open-budget note" is gone since #3981: the offers section's own
   plain-language payment note (above) is offer-level and covers it — when no
   offer is `erc7710` the note shows and the action is withheld. The modal: pick

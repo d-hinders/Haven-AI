@@ -60,12 +60,12 @@
  * ## The mobile half
  *
  * "Mobile" is decided by the caller's `narrow` flag and not by a media query
- * inside the primitive — the same partition `ThemeToggle` takes with
- * `variant`: the caller owns breakpoints, the primitive owns the treatment,
- * and it is what makes the density behaviour unit-testable instead of
- * e2e-only. What the primitive DOES own is that it never scrolls its
- * ancestor: the svg is `block w-full`, sized by its viewBox rather than by a
- * pixel width, so a chart cannot be wider than the page body holding it.
+ * inside the primitive — the same partition the shell's call sites draw
+ * (`Sidebar` owns breakpoints, the primitive owns the treatment), and it is
+ * what makes the density behaviour unit-testable instead of e2e-only. What the
+ * primitive DOES own is that it never scrolls its ancestor: the svg is
+ * `block w-full`, sized by its viewBox rather than by a pixel width, so a
+ * chart cannot be wider than the page body holding it.
  *
  * ## Sparse data
  *

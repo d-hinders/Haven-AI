@@ -1138,37 +1138,29 @@ export default function DesignSystemPage() {
 
           <Card hover={false} className="p-5">
             <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Theme toggle</h3>
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <ThemeToggle />
-              <span className="text-xs text-[var(--v2-ink-3)]">
-                The icon button, as the top bar's right cluster renders it — one click
-                flips the palette, light to dark and back, and the accessible name says
-                what the click will do, not only what the icon is.
-              </span>
-            </div>
             <div className="mt-3 rounded-lg border border-[var(--v2-border)] p-2">
-              <ThemeToggle variant="row" />
-              <span className="sr-only">The row variant shown outside the sheet it lives in</span>
+              <ThemeToggle />
+              <span className="sr-only">The row shown outside the sidebar footer it lives in</span>
             </div>
             <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
               The one-gesture theme control, the quick half
               (<code className="rounded bg-[var(--v2-surface)] px-1">ui/ThemeToggle</code>,
-              from the top bar and the mobile sheet's control block — Settings keeps its
-              three explicit choices on its own screen). The glyph answers what you are
+              shown here outside the sidebar footer it lives in at every width —
+              Settings keeps its three explicit choices on its own screen). The glyph
+              answers what you are
               (<code className="rounded bg-[var(--v2-surface)] px-1">Sun</code> in light,{' '}
               <code className="rounded bg-[var(--v2-surface)] px-1">Moon</code> in dark;
               the quick toggle has no system step — that choice lives in Settings); the
               name answers where you are going
               (&quot;Theme: dark. Switch to light&quot;), because a control whose label is only
-              its current state cannot be predicted. The icon is a plain clickable
-              button with no hover or focus tooltip (#2953): the icon alone is the
-              affordance, and the accessible name carries the whole message for screen
-              readers. The swap cross-fades under{' '}
+              its current state cannot be predicted. The swap cross-fades under{' '}
               <code className="rounded bg-[var(--v2-surface)] px-1">prefers-reduced-motion:
-              no-preference</code> and snaps otherwise, and the row variant's visible
-              label is a prefix of the name, so the label sits in the name. Never hand-roll
-              a second control of this shape; both surfaces here are the primitive's
-              variants, and the two call sites decide which one renders.
+              no-preference</code> and snaps otherwise, and the visible label is a prefix
+              of the name, so the label sits in the name. There is one rendering since
+              #4029: the icon variant that lived in the top bar's right cluster was
+              deleted with the bar, so the footer row is the app's only theme control
+              and the primitive takes no variant prop at all. Never hand-roll a second
+              control of this shape.
             </p>
           </Card>
 
@@ -1356,7 +1348,7 @@ export default function DesignSystemPage() {
               {[
                 ['--v2-z-content', '10', 'In-flow overlaps: badges, gradient washes'],
                 ['--v2-z-sticky', '20', 'Sticky table headers'],
-                ['--v2-z-chrome', '100', 'TopBar — the app shell’s own bar'],
+                ['--v2-z-chrome', '100', 'App chrome — the shell’s non-production warning line'],
                 ['--v2-z-tab-bar', '105', 'The bottom tab bar (#2731) — the shell’s other bar'],
                 ['--v2-z-chrome-popover', '110', 'Popovers anchored in the chrome (notifications, wallet, user menu)'],
                 ['--v2-z-nav-scrim', '130', 'Mobile drawer scrim'],
@@ -1411,15 +1403,20 @@ export default function DesignSystemPage() {
             Safe areas — <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">SafeAreaBand</code>
           </h3>
           <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-            The strip behind the iOS status bar is its own element, never padding inside the bar.{' '}
+            The strip behind the iOS status bar is its own element, never padding inside a
+            bar.{' '}
             <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">ui/SafeAreaBand</code> renders
             it: unblurred, and opaque by default, sized by{' '}
-            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">--v2-safe-top</code>, and a
-            sibling above the blurred bar. It has no rendered sample here because it is a zero-height
+            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">--v2-safe-top</code>. The
+            authenticated shell renders it directly above the scroll region (#4029 — there
+            is no top bar for it to sit inside any more), and the marketing
+            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">Header</code> takes it
+            with <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">bg-transparent</code>.
+            It has no rendered sample here because it is a zero-height
             box at every viewport this page can show — the inset is 0 without a notch. Keep{' '}
             <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">backdrop-filter</code> off
             anything that spans a safe-area band: blur is for content scrolling under a bar, and
-            nothing scrolls under the status bar. Opaque is the default, not the rule: a bar
+            nothing scrolls under the status bar. Opaque is the default, not the rule: a surface
             whose own background is translucent by design passes{' '}
             <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">bg-transparent</code> so its
             colour shows through — an exception to <em>opaque</em>, never to <em>unfiltered</em>.

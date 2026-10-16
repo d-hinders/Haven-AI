@@ -34,9 +34,10 @@
 //
 // But `all` cannot simply be deleted, and that is the whole reason this file
 // exists. #1760 made `=all` load-bearing: `changed` refuses to rewrite drift
-// that sits UNDER the gate's tolerance, which once made a 2,084-pixel stale
-// TopBar band permanently un-refreshable — every regeneration anyone dispatched
-// reported "Baselines unchanged" and committed nothing. A full refresh has to
+// that sits UNDER the gate's tolerance, which once left a 2,084-pixel stale
+// 56px chrome band (the top bar, since deleted by #4029) permanently
+// un-refreshable — every regeneration anyone dispatched reported "Baselines
+// unchanged" and committed nothing. A full refresh has to
 // stay reachable, so the unsafe mode survives as a deliberate, declared act
 // rather than as the default. Something has to watch that path, and "the author
 // remembers to diff 22 blob hashes" is exactly the control that failed.

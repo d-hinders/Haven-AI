@@ -582,8 +582,8 @@ type ContentProbe = {
  * `app/(authenticated)/dashboard/page.tsx`: a pulse dot and a `<span>` reading
  * `Loading...` inside a flex wrapper. Three elements, ten characters — and
  * `renderedChars` is in the THOUSANDS, because the shell around it (sidebar
- * nav, TopBar, account chip) rendered perfectly. That gap between the two
- * numbers is the whole defect.
+ * nav, user card) rendered perfectly. That gap between the two numbers is the
+ * whole defect.
  */
 const DASHBOARD_LOADING: ContentProbe = {
   found: true,

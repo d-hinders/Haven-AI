@@ -27,9 +27,9 @@ covers:
   - packages/ui/src/Tooltip.tsx
   - packages/frontend/src/app/(authenticated)/dashboard/**
   - packages/frontend/src/components/DashboardOnboardingGuide.tsx
-  - packages/frontend/src/components/TopBar.tsx
+  - packages/frontend/src/components/AuthenticatedShell.tsx
   - packages/frontend/src/components/sidebar/Sidebar.tsx
-last-verified: "2026-10-14"
+last-verified: "2026-10-16"
 ---
 
 # Haven Product & UX Guide

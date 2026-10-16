@@ -116,12 +116,15 @@ async function applyInsets(page: Page) {
 /**
  * Controls inside the app CHROME that intersect a reserved band.
  *
- * Scoped to the chrome — the top bar, the drawer, the fixed toggle, an open
- * dialog — and deliberately NOT to the scroll region, because a control passing
- * through the bottom 34px mid-scroll is what a scroll region does, not a
- * defect. What the scroll region owes the home indicator is that its content
- * can be scrolled CLEAR of it, and that is asserted separately below, at the
- * one scroll position where it is a real claim: the end.
+ * Scoped to the chrome — the drawer, the fixed toggle, an open dialog — and
+ * deliberately NOT to the scroll region, because a control passing through the
+ * bottom 34px mid-scroll is what a scroll region does, not a defect. What the
+ * scroll region owes the home indicator is that its content can be scrolled
+ * CLEAR of it, and that is asserted separately below, at the one scroll
+ * position where it is a real claim: the end. There is no bare `header` here
+ * since #4029: the top bar is gone, and the only `<header>` left on a route is
+ * `ui/PageHeader`'s, INSIDE the scroll region — scanning it would flag
+ * ordinary scrolled content as chrome offenders.
  *
  * Elements outside the viewport are skipped rather than counted: the closed
  * drawer is translated off the left edge, and everything below the fold is
@@ -133,7 +136,7 @@ async function chromeControlsInBands(page: Page, top: number, bottom: number) {
   return page.evaluate(
     ({ top, bottom }) => {
       const roots = Array.from(
-        document.querySelectorAll<HTMLElement>('header, aside, [role="dialog"], [aria-label="Open sidebar"]'),
+        document.querySelectorAll<HTMLElement>('aside, [role="dialog"], [aria-label="Open sidebar"]'),
       )
       const nodes = new Set<HTMLElement>()
       for (const root of roots) {
@@ -206,28 +209,25 @@ async function controlsUnderIndicatorAtScrollEnd(page: Page, bottom: number) {
 
 async function shellGeometry(page: Page) {
   return page.evaluate(() => {
-    // `<header>` is the whole chrome band since #2819; the blurred 56px bar is
-    // its `[data-app-bar]` child and the status-bar strip its `[data-safe-area-band]`.
-    // `[data-app-chrome]`, not `querySelector('header')`: `ui/PageHeader` also
-    // renders a `<header>`, so the bare tag is the ambiguity #1820 argued against.
-    const chrome = document.querySelector('[data-app-chrome]') as HTMLElement | null
-    const bar = document.querySelector('[data-app-bar]') as HTMLElement | null
+    // The status-bar strip is `[data-safe-area-band]`, rendered by the shell
+    // directly above the scroll region since #4029 — there is no top bar
+    // (`[data-app-bar]`/`[data-app-chrome]` are gone) for it to be a child
+    // of, and a bare `querySelector('header')` would now find `PageHeader`'s
+    // header INSIDE the scroll region, which is exactly the silent re-point
+    // this helper refuses. Measuring the BAND directly is the point: the
+    // user-facing property is that the shell reserves the inset in an opaque,
+    // unblurred strip, whatever renders it.
     const band = document.querySelector('[data-safe-area-band]') as HTMLElement | null
     const main = document.getElementById('main-content')
     const toggle = document.querySelector('[aria-label="Open sidebar"]') as HTMLElement | null
     return {
-      // #2819 split the status-bar band OUT of the blurred header, so the
-      // inset is now the band's height rather than the header's padding. The
-      // user-facing property is unchanged and asserted the same way: the chrome
-      // as a whole reserves 56px + the inset, and no control sits in the band.
+      // The inset the band actually consumes — the property under test.
       bandHeight: band ? Math.round(band.getBoundingClientRect().height) : null,
       bandBackdropFilter: band ? getComputedStyle(band).backdropFilter : null,
       bandBackground: band ? getComputedStyle(band).backgroundColor : null,
-      chromeHeight: chrome ? Math.round(chrome.getBoundingClientRect().height) : null,
-      chromeBackdropFilter: chrome ? getComputedStyle(chrome).backdropFilter : null,
-      headerHeight: bar ? Math.round(bar.getBoundingClientRect().height) : null,
-      headerBackdropFilter: bar ? getComputedStyle(bar).backdropFilter : null,
-      headerLeft: chrome ? Math.round(chrome.getBoundingClientRect().left) : null,
+      // Viewport-anchored: the band spans the frame edge to edge, so the
+      // reserved strip cannot be pushed sideways by a bad landscape inset rule.
+      bandLeft: band ? Math.round(band.getBoundingClientRect().left) : null,
       mainPaddingBottom: main ? getComputedStyle(main).paddingBottom : null,
       mainOverscroll: main ? getComputedStyle(main).overscrollBehaviorY : null,
       // By attribute, not `parentElement.parentElement`: a wrapper inserted
@@ -278,16 +278,15 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
         'the scroll region pads its own 24px PLUS the tab bar PLUS the home indicator — all three, not two of them',
       ).toBe(`${24 + TAB_BAR_H + INSET_BOTTOM}px`)
 
-      // The chrome as a whole still grows by the inset rather than squashing the
-      // bar's contents into the same 56px — the status bar sits over the app's
-      // own background, not over its controls.
-      expect(shell.chromeHeight, 'the chrome grows by the top inset').toBe(56 + INSET_TOP)
-      expect(shell.headerHeight, 'the bar itself stays 56px').toBe(56)
+      // The chrome as a whole is GONE (#4029): the band IS the top chrome now,
+      // so its own height is the reservation — the inset, opaque, in an
+      // element of its own. Nothing else above `<main>` grows by the inset
+      // any more.
+      expect(shell.bandHeight, 'the safe-area band must consume --v2-safe-top').toBe(INSET_TOP)
 
       // THE FIX (#2819). The band is opaque and carries no backdrop-filter, so
       // no composited blur layer spans the status bar and nothing there can
-      // retain a stale frame of an overlay that has unmounted. The bar keeps
-      // its blur — content scrolls under it, which is what the blur is for.
+      // retain a stale frame of an overlay that has unmounted.
       expect(
         shell.bandBackdropFilter,
         'the status-bar band must not be a backdrop-filter layer',
@@ -299,22 +298,13 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
         shell.bandBackground,
         'the status-bar band must be opaque, not a translucent blur of what is beneath',
       ).toMatch(/^rgb\([^)]+\)$/)
-      // `toContain('blur(')` with a non-zero radius, not `not.toBe('none')`,
-      // which `blur(0px)` would satisfy while blurring nothing.
-      expect(shell.headerBackdropFilter, 'the bar itself keeps its blur').toMatch(
-        /blur\((?!0px\))[^)]+\)/,
-      )
-      // And the blur is on the BAR, not on the element spanning the status bar.
-      expect(
-        shell.chromeBackdropFilter,
-        'the chrome band as a whole must not be a backdrop-filter layer',
-      ).toBe('none')
-      // Viewport-anchored (#1779): a relative check cannot see the whole shell
+      // Viewport-anchored (#1779): a relative check cannot see the whole strip
       // move sideways, which is what a bad landscape inset rule would do.
-      expect(shell.headerLeft).toBe(0)
+      expect(shell.bandLeft).toBe(0)
 
-      // The drawer toggle is `fixed`, so it carries its own offset and would
-      // otherwise sit under the status bar with the bar's padding around it.
+      // The toggle is `fixed` with its own offsets, so it would sit in the
+      // reserved bands however the chrome above the page is built — the
+      // assertion survives the top bar's removal (#4029) unchanged.
       expect(shell.toggleTop, 'the sidebar toggle clears the status bar').toBeGreaterThanOrEqual(
         INSET_TOP,
       )

@@ -11,16 +11,15 @@ import { describe, expect, it } from 'vitest'
  *      navigation tiers, or drops a nav tier below the chrome, that is the
  *      exact inversion that made the mobile sidebar toggle unreachable;
  *   2. the shell components reaching for a token instead of a bare number —
- *      a fresh `z-[60]` in Sidebar or TopBar is how the defect is reintroduced,
- *      and it is invisible to every other frontend gate.
+ *      a fresh `z-[60]` in Sidebar or AuthenticatedShell is how the defect is
+ *      reintroduced, and it is invisible to every other frontend gate.
  *
  * ── What it CANNOT catch, and this matters ──────────────────────────────────
  * It cannot see stacking contexts, and it cannot hit-test. A correctly ordered
  * scale still fails to produce a clickable button if some ancestor creates a
  * stacking context that traps one of these layers — `transform`, `filter`,
- * `opacity < 1`, `will-change`, `backdrop-filter` (which TopBar HAS, via
- * `backdrop-blur-md`) all do that, and the numbers would still read correctly
- * here while the button stayed buried.
+ * `opacity < 1`, `will-change`, `backdrop-filter` all do that, and the numbers
+ * would still read correctly here while the button stayed buried.
  *
  * So this test is the cheap half of the guard and deliberately not the whole
  * one. The half that actually proves a user can tap the control is
@@ -39,7 +38,7 @@ function zToken(name: string): number {
   return Number(match[1])
 }
 
-const SHELL_FILES = ['components/TopBar.tsx', 'components/sidebar/Sidebar.tsx']
+const SHELL_FILES = ['components/AuthenticatedShell.tsx', 'components/sidebar/Sidebar.tsx']
 
 describe('z-index scale (#1749)', () => {
   it('the mobile navigation tiers all outrank the app chrome', () => {
@@ -57,8 +56,9 @@ describe('z-index scale (#1749)', () => {
     // `--v2-z-nav-drawer` or above is the #1749 inversion, one surface over.
     expect(zToken('tab-bar')).toBeLessThan(zToken('nav-scrim'))
     expect(zToken('tab-bar')).toBeLessThan(zToken('nav-drawer'))
-    // And above the content it scrolls over, but below the popovers anchored in
-    // the top bar, which can extend down across the bar's band on a phone.
+    // And above the content it scrolls over, but below the popovers anchored
+    // in the chrome (user menu, wallet), which can extend down across the
+    // bar's band on a phone.
     expect(zToken('tab-bar')).toBeGreaterThan(zToken('sticky'))
     expect(zToken('tab-bar')).toBeLessThan(zToken('chrome-popover'))
   })

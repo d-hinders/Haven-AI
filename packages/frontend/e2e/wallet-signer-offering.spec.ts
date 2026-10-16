@@ -6,9 +6,9 @@
  *
  * It used to read the resolved signer off the header's wallet pill ("Passkey",
  * "Wrong wallet", the truncated address) and its menu. #3825 removed that pill
- * from `TopBar` — signers live in Settings → Signers and every signing flow
- * carries its own in-flow connect (#3812) — so there is no global surface that
- * names the resolved signer any more.
+ * from the top bar — signers live in Settings → Signers and every signing flow
+ * carries its own in-flow connect (#3812; the bar itself is gone since #4029) —
+ * so there is no global surface that names the resolved signer any more.
  *
  * The STATES still matter, and they are still reachable through the product's
  * own resolution path: `AuthContext` hydrates the hybrid signer set from the

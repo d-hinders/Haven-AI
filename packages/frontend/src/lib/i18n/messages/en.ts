@@ -181,14 +181,15 @@ export const en = {
     },
     /**
      * The quick toggle (#2928, epic #2925 slice 2; two-state flip per
-     * #2953): the TopBar icon button and the More sheet's row. The
-     * accessible name states the palette on screen and the one a click
-     * brings — "Theme: dark. Switch to light" — so a user can predict the
-     * flip from the name alone. The values arrive lower-case because the
-     * sentence reads them as values, not as button labels.
+     * #2953) — since #4029 the sidebar footer's row, the app's only quick
+     * theme control. The accessible name states the palette on screen and
+     * the one a click brings — "Theme: dark. Switch to light" — so a user
+     * can predict the flip from the name alone. The values arrive
+     * lower-case because the sentence reads them as values, not as button
+     * labels.
      */
     themeToggle: {
-      /** Visible label of the More-sheet row. */
+      /** Visible label of the sidebar footer's theme row. */
       label: 'Theme',
       ariaLabel: (current: string, next: string) => `Theme: ${current}. Switch to ${next}`,
     },

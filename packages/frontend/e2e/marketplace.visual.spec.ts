@@ -107,6 +107,12 @@ const SCENARIOS: Scenario[] = [
     setup: (page) => serveAddFundsAccount(page, 84532),
     async assert(page) {
       const grid = page.getByTestId('marketplace-page')
+      // #4034: the grid speaks the merchant pages' word — "Copy prompt" (#4003),
+      // never the retired "instruction".
+      await expect(
+        page.getByText('Paid APIs and tools your agents can use. Copy a prompt and give it to an agent.', { exact: true }),
+      ).toHaveCount(1)
+      await expect(page.getByText(/instruction/i)).toHaveCount(0)
       await expect(page.getByLabel('Filter marketplace by network')).toHaveValue('84532')
       // Listing a service is a note for sellers below the cards, not a toolbar button.
       await expect(grid.getByRole('button', { name: 'List your service' })).toHaveCount(1)

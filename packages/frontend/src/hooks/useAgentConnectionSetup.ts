@@ -168,6 +168,9 @@ export function headerSubtitle(step: SetupStep, status: string | undefined, appr
     if (status === 'active') return 'What your agent can do now'
     if (status === 'expired') return 'This setup prompt expired'
     if (status === 'cancelled') return 'This setup was cancelled'
+    // Without its own line a failed setup kept the in-progress subtitle
+    // ("Give your agent the setup prompt…") over a failure.
+    if (status === 'failed') return 'This setup could not finish'
     // #3832: the step list below spells out copy → paste → approve, so the
     // subtitle states the whole job in one line rather than repeating step 2.
     // It must not say the agent "does the rest": the last step — the

@@ -26,6 +26,7 @@
 import { useState, type ReactNode } from 'react'
 import type { GrantInput, GrantResult } from '@/hooks/useDelegationBudget'
 import { Button } from './ui/Button'
+import { DialogActions } from './ui/DialogActions'
 
 interface Props {
   /** `grant` from the caller's `useDelegationBudget` instance. */
@@ -47,6 +48,12 @@ interface Props {
    * form on a page wants.
    */
   leadingAction?: ReactNode
+  /**
+   * Extra classes for the action row when `leadingAction` is set — the
+   * connect modal pulls it out to the dialog body's edges from inside an
+   * indented checklist row.
+   */
+  actionsClassName?: string
   /**
    * Rendered right AFTER the grant button in the page-form row — the Cancel
    * of a form that opened in place (#3695). Unlike `leadingAction` it keeps
@@ -101,6 +108,7 @@ export default function BudgetGrantAction({
   busyLabel,
   helper,
   leadingAction,
+  actionsClassName = '',
   trailingAction,
   notReadyHint,
   notReadyAction,
@@ -212,27 +220,35 @@ export default function BudgetGrantAction({
           the row stacks: button on its own line at full width, helper under
           it; from `sm` up it is the same side-by-side row as before. Layout
           only: the button, its disabled predicate and the helper text are
-          unchanged. */}
-      <div
-        className={
-          leadingAction
-            ? 'flex items-center gap-3'
-            : 'flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3'
-        }
-      >
-        {leadingAction}
-        <Button
-          onClick={handleClick}
-          disabled={busy || !ready || !input || outcome === 'slot_occupied'}
-          className={leadingAction ? 'flex-1' : 'sm:w-auto'}
-        >
-          {busy ? busyLabel : label}
-        </Button>
-        {!leadingAction ? trailingAction : null}
-        {helper && !leadingAction && (
-          <span className="text-xs text-[var(--v2-ink-muted)] sm:ml-auto">{helper}</span>
-        )}
-      </div>
+          unchanged.
+
+          With a leadingAction the row is a dialog footer, so it is the shared
+          DialogActions: equal halves from `sm` up, stacked primary-on-top
+          below it. */}
+      {leadingAction ? (
+        <DialogActions className={actionsClassName}>
+          {leadingAction}
+          <Button
+            onClick={handleClick}
+            disabled={busy || !ready || !input || outcome === 'slot_occupied'}
+            className="flex-1"
+          >
+            {busy ? busyLabel : label}
+          </Button>
+        </DialogActions>
+      ) : (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+          <Button
+            onClick={handleClick}
+            disabled={busy || !ready || !input || outcome === 'slot_occupied'}
+            className="sm:w-auto"
+          >
+            {busy ? busyLabel : label}
+          </Button>
+          {trailingAction}
+          {helper && <span className="text-xs text-[var(--v2-ink-muted)] sm:ml-auto">{helper}</span>}
+        </div>
+      )}
     </div>
   )
 }

@@ -46,6 +46,9 @@ function isCoarsePointer(): boolean {
 /** Stepper labels, index-aligned with the hook's `setupSteps` (details → policy → connect). */
 const SETUP_STEP_LABELS = ['Name', 'Budget', 'Connect'] as const
 
+/** Connect-step views where the flow has stopped: nothing more happens on this setup. */
+const HALTED_VIEWS = new Set(['expired', 'cancelled', 'failed'])
+
 /**
  * The connect-agent flow's shell: dialog chrome, stepper, and step dispatch.
  *
@@ -110,13 +113,17 @@ export default function ConnectAgentModal({
         // (ConnectSteps) is now an unnumbered status checklist: it reports
         // progress WITHIN the Connect step and never counts. Once the budget
         // is approved the flow is finished, so the band reads all-done
-        // rather than Connect still in progress over a success screen.
+        // rather than Connect still in progress over a success screen. On an
+        // expired, cancelled or failed setup the band reads stopped: Connect
+        // goes neutral instead of showing the brand "in progress" ring over
+        // a screen that says nothing more will happen.
         <StepProgress
           totalSteps={flow.setupStepCount}
           currentStep={
             flow.connectView?.kind === 'active' ? flow.setupStepCount : Math.max(flow.currentStepIndex, 0)
           }
           labels={SETUP_STEP_LABELS}
+          halted={HALTED_VIEWS.has(flow.connectView?.kind ?? '')}
         />
       }
       showCloseButton
@@ -124,6 +131,11 @@ export default function ConnectAgentModal({
       closeButtonDisabled={flow.busy}
       width="xl"
       maxHeight="tight"
+      // Top-anchored: every screen of this flow has a different height, and a
+      // centred dialog moved its header (and the band) with each one — the
+      // title swung between y 130 and 294 at 1280×900. Anchored, the header
+      // holds still and the body grows downward only.
+      placement="top"
       closeOnBackdrop={!flow.busy}
       closeOnEscape={false}
       bodyClassName="p-5"

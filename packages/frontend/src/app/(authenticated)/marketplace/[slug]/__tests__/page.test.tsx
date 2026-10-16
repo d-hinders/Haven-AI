@@ -192,6 +192,9 @@ describe('MerchantPage', () => {
       // the 44 px hit area and the focus ring on a phone.
       expect(link.className).toContain('focus-visible:')
       expect(link.className).toContain('after:h-11')
+      // Never inside a loading live region (#4028): it is navigation, not status.
+      const status = screen.queryByRole('status')
+      if (status) expect(status.contains(link)).toBe(false)
       unmount()
     }
   })

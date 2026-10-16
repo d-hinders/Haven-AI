@@ -20,4 +20,14 @@ describe('BackLink (#4028)', () => {
     expect(cls).toContain('leading-5')
     expect(cls.split(/\s+/)).not.toContain('h-11')
   })
+
+  it('truncates a long label on one line instead of wrapping (#4028)', () => {
+    const { getByRole } = render(
+      <BackLink href="/agents/a1" label="A research agent with an unusually long name for a phone" />,
+    )
+    const link = getByRole('link', { name: 'A research agent with an unusually long name for a phone' })
+    expect(link.className.split(/\s+/)).toContain('max-w-full')
+    const span = link.querySelector('span')!
+    expect(span.className.split(/\s+/)).toEqual(expect.arrayContaining(['min-w-0', 'truncate']))
+  })
 })

@@ -700,6 +700,9 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
         // the same BackLink with no title, and measuring there would make the
         // "above the title" assertion compare against nothing.
         await page.locator('#main-content h1').waitFor()
+        // ...and the agent's page, not its not-found card, which also has a
+        // BackLink above an h1.
+        await expect(page.locator('#main-content h1')).not.toHaveText(/Agent not found|Agent could not load/)
 
         const bar = await measureBar(page)
         expect(bar.controls.map((c) => c.label)).toEqual([])

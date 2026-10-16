@@ -46,6 +46,7 @@ import { ethers } from 'ethers'
 import { hashDelegation } from '@metamask/smart-accounts-kit/utils'
 import { getProvider } from '../../infra/chain/relayer-reads.js'
 import { getDelegationContracts } from '../../rails/delegation-contracts.js'
+import { noteLogScanFailure } from './log-range-limit.js'
 
 /**
  * The pinned DelegationManager's redemption event (#2094). The `Delegation`
@@ -125,7 +126,10 @@ export interface ScanRange {
 export interface ScanOptions {
   /** Blocks per `eth_getLogs` call. Providers cap the span they will serve. */
   batchBlocks: number
-  /** Hard ceiling on calls per scan, so one tick cannot become an unbounded walk. */
+  /**
+   * Hard ceiling on calls per scan, so one tick cannot become an unbounded walk.
+   * A range it cannot cover in full returns `null`, never a partial index (#4012).
+   */
   maxBatches: number
 }
 
@@ -177,7 +181,10 @@ export async function scanRedeemedDelegations(
         fromBlock: cursor,
         toBlock: to,
       })) as never
-    } catch {
+    } catch (err) {
+      // #4012: a provider that refuses the span names its limit; remember it
+      // so the sweeper's NEXT request fits. This batch is still "could not ask".
+      noteLogScanFailure(chainId, err)
       // A partial index is worse than none: the sweeper would read "hash absent"
       // as "not settled yet" for everything the failed batch would have carried,
       // which is indistinguishable from a real negative. Abandon the whole scan
@@ -199,6 +206,11 @@ export async function scanRedeemedDelegations(
     cursor = to + 1
     batches += 1
   }
+
+  // #4012: a scan the batch budget cut short is not a scan of the range. The
+  // caller would read every block past the cut as "nothing there", which is
+  // the partial-index failure the catch above refuses. "Could not ask", then.
+  if (cursor <= range.toBlock) return null
 
   return index
 }

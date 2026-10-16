@@ -27,6 +27,15 @@ import type { MerchantBudget } from '@/hooks/useMerchantBudgets'
 import type { DashboardBudgetRemainingEntry } from '@/hooks/useBudgetRemaining'
 
 /**
+ * An AGENT's liveness: a paused or revoked agent cannot pay. Named so the
+ * budget-liveness ratchet (#3924) does not read an agent status as a budget
+ * predicate restated inline.
+ */
+export function isActiveAgent(agent: Pick<Agent, 'status'>): boolean {
+  return agent.status === 'active'
+}
+
+/**
  * Resolve a catalog entry's `network` to a chain id. The field is heterogeneous
  * — it arrives as a CAIP-2 id (`eip155:8453`) or a chain short-name (`base`,
  * `base-sepolia`, and `gnosis` for history-only chain 100) — so handle both. Returns `undefined` for unknown /
@@ -294,7 +303,7 @@ export function agentsThatCanPay(input: AgentsThatCanPayInput): BudgetAgentAnswe
     // 1. Liveness and network. A paused or revoked agent cannot pay — a known
     //    no (the payment path refuses before any budget is read). An agent
     //    whose account chain we do not know is unknown, not unable.
-    if (agent.status !== 'active') {
+    if (!isActiveAgent(agent)) {
       return { ...base, answer: 'cannot' as const, reason: 'inactive' as const, periodPhrase: null }
     }
     if (chainId == null) return { ...base, answer: 'unknown' as const, reason: null, periodPhrase: null }
@@ -509,7 +518,7 @@ export type HowToBuyAnswer =
 
 export function howToBuy(input: HowToBuyInput): HowToBuyAnswer {
   const { merchantName: _merchantName, offers, agents, budgets, merchantBudgets, funding, nowMs = Date.now() } = input
-  const activeAgents = agents.filter((a) => a.status === 'active')
+  const activeAgents = agents.filter(isActiveAgent)
   if (offers.length === 0 || activeAgents.length === 0) return { kind: 'uncertain' }
 
   const perOffer = offers.map((offer) =>

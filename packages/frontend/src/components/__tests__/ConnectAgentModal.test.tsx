@@ -167,3 +167,26 @@ describe('ConnectAgentModal focus (#3687)', () => {
     expect(description).toHaveFocus()
   })
 })
+
+/**
+ * One counter for the whole flow (owner review, 2026-10-16, superseding
+ * #1418): the header StepProgress renders on every step, Connect active on
+ * step 3, where it used to be hidden in favour of the step-3 list.
+ */
+describe('ConnectAgentModal stepper', () => {
+  it.each([
+    ['details', 0, 'Name'],
+    ['policy', 1, 'Budget'],
+    ['connect', 2, 'Connect'],
+  ] as const)('renders the band on %s with %s active', (step, index, label) => {
+    mockUseAgentConnectionSetup.mockReturnValue(flow({ step, currentStepIndex: index }))
+    render(<ConnectAgentModal open onClose={vi.fn()} />)
+    const current = document.querySelectorAll('[aria-current="step"]')
+    // The mocked ConnectStep renders no checklist, so the band's item is the
+    // only current step here; the real step 3 adds the checklist's own.
+    expect(current).toHaveLength(1)
+    expect(current[0]).toHaveTextContent(`Step ${index + 1} of 3`)
+    expect(current[0]).toHaveTextContent(label)
+  })
+})
+

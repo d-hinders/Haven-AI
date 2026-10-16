@@ -3,10 +3,10 @@
  *
  * Polling (`statusLoading` flips on every tick) must not change any rendered
  * text or the container's size, and every sub-state renders inside the one
- * ConnectStepShell silhouette. These tests drive a full poll cycle
+ * ConnectStepShell frame. These tests drive a full poll cycle
  * (loading true → false → true) and assert the DOM is IDENTICAL across it.
  */
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, within } from '@testing-library/react'
 import { WaitingForConnector } from '../WaitingForConnector'
 import { TerminalSetupState } from '../SetupStates'
@@ -341,7 +341,7 @@ describe('server-side credential path (#2482)', () => {
 
 
 describe('one frame, one rhythm (#1392)', () => {
-  it('the shell body carries the rhythm and distributes reserved slack — at the source', () => {
+  it('the shell body carries the rhythm, top-aligned, with no reserved floor', () => {
     const { container } = render(
       <ConnectStepShell stateKey="w">
         <p>block one</p>
@@ -349,41 +349,151 @@ describe('one frame, one rhythm (#1392)', () => {
       </ConnectStepShell>,
     )
     // gap-5 = the 20px rhythm fragment sub-states lost when #1380 replaced
-    // the space-y-5 wrapper; flex-col + justify-center = short content sits
-    // within the reserved floor instead of leaving slack under its button.
-    const body = container.querySelector('.min-h-\\[340px\\]')
+    // the space-y-5 wrapper.
+    const body = container.querySelector('.v2-animate-step-rise')
     expect(body).not.toBeNull()
     expect(body!.className).toContain('flex-col')
     expect(body!.className).toContain('gap-5')
-    expect(body!.className).toContain('justify-center')
-    // The floor itself is untouched — the silhouette guarantee from #1377
-    // (asserted across phases below) still rests on min-h.
+    // Owner review, 2026-10-16: the frame sizes to its content. The 340px
+    // floor and the centring that spread a short sub-state across it are
+    // gone — they left empty bands above and below "Finishing local setup".
+    expect(body!.className).not.toContain('justify-center')
+    expect(container.querySelector('[class*="min-h-["]')).toBeNull()
   })
 })
 
 describe('ConnectStepShell (#1377 C, #3832)', () => {
-  it('keeps one silhouette — a reserved-height body — and renders no ticker of its own', () => {
-    // #3832: the Waiting → Connected → Approved ticker is gone. The numbered
-    // list is step 3's one progress signal (#1418), so the shell must not
-    // bring a second one back.
+  it('renders no ticker of its own', () => {
+    // #3832: the Waiting → Connected → Approved ticker is gone. The header
+    // StepProgress counts the steps and the status checklist reports within
+    // step 3, so the shell must not bring a third signal back.
     const { container, queryByLabelText, rerender } = render(
       <ConnectStepShell stateKey="a">
         <p>body A</p>
       </ConnectStepShell>,
     )
     expect(queryByLabelText('Connection progress')).toBeNull()
-    expect(container.querySelector('.min-h-\\[340px\\]')).not.toBeNull()
     rerender(
       <ConnectStepShell stateKey="b">
         <p>body B</p>
       </ConnectStepShell>,
     )
-    expect(container.querySelector('.min-h-\\[340px\\]')).not.toBeNull()
+    expect(container.textContent).toBe('body B')
     expect(container.textContent).not.toMatch(/WaitingConnectedApproved/)
+  })
+
+  // #1377's no-jump intent, kept by motion rather than by a floor: a
+  // sub-state change eases the frame from the old content height to the new.
+  // jsdom has no layout, so the heights are stubbed per sub-state.
+  describe('height transition between sub-states', () => {
+    const HEIGHT: Record<string, number> = { short: 120, tall: 360 }
+    let offsetHeight: PropertyDescriptor | undefined
+
+    beforeEach(() => {
+      vi.useFakeTimers()
+      offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')
+      Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+        configurable: true,
+        get(this: HTMLElement) {
+          const key = this.querySelector('[data-height-key]')?.getAttribute('data-height-key')
+          return key ? HEIGHT[key] : 0
+        },
+      })
+    })
+
+    afterEach(() => {
+      if (offsetHeight) Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offsetHeight)
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+    })
+
+    function stubReducedMotion(reduce: boolean) {
+      vi.stubGlobal('matchMedia', (query: string) => ({
+        matches: reduce && query === '(prefers-reduced-motion: reduce)',
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }))
+    }
+
+    function shell(key: 'short' | 'tall') {
+      return (
+        <ConnectStepShell stateKey={key}>
+          <p data-height-key={key}>{key}</p>
+        </ConnectStepShell>
+      )
+    }
+
+    it('pins the old height, eases to the new one, then releases to auto', () => {
+      stubReducedMotion(false)
+      const { container, rerender } = render(shell('short'))
+      const frame = container.firstElementChild as HTMLElement
+      // The first render sizes naturally — nothing to ease from.
+      expect(frame.style.height).toBe('')
+
+      rerender(shell('tall'))
+      expect(frame.style.height).toBe('360px')
+      expect(frame.style.transition).toContain('height')
+      expect(frame.style.overflow).toBe('hidden')
+
+      // Released on the frame's own height transitionend…
+      const end = new Event('transitionend', { bubbles: true }) as TransitionEvent
+      Object.defineProperty(end, 'propertyName', { value: 'height' })
+      frame.dispatchEvent(end)
+      expect(frame.style.height).toBe('')
+      expect(frame.style.overflow).toBe('')
+
+      // …or by the backstop when it never fires.
+      rerender(shell('short'))
+      expect(frame.style.height).toBe('120px')
+      vi.advanceTimersByTime(400)
+      expect(frame.style.height).toBe('')
+    })
+
+    it('ignores a transition that ends on a control inside the body', () => {
+      stubReducedMotion(false)
+      const { container, rerender } = render(shell('short'))
+      const frame = container.firstElementChild as HTMLElement
+      rerender(shell('tall'))
+      const inner = container.querySelector('p') as HTMLElement
+      const end = new Event('transitionend', { bubbles: true }) as TransitionEvent
+      Object.defineProperty(end, 'propertyName', { value: 'background-color' })
+      inner.dispatchEvent(end)
+      expect(frame.style.height).toBe('360px')
+    })
+
+    it('resizes at once under prefers-reduced-motion: reduce', () => {
+      stubReducedMotion(true)
+      const { container, rerender } = render(shell('short'))
+      const frame = container.firstElementChild as HTMLElement
+      rerender(shell('tall'))
+      expect(frame.style.height).toBe('')
+      expect(frame.style.transition).toBe('')
+    })
   })
 })
 
-describe('the numbered step list on the waiting screen (#3832)', () => {
+/** The checklist's current row — never the header band's current step. */
+const CURRENT_ROW = 'ol[aria-label="Connection steps"] > li[aria-current="step"]'
+
+describe('the status checklist on the waiting screen (#3832)', () => {
+  it('markers carry no numerals: the header band is the only counter', () => {
+    const { container } = render(renderWaiting(false, 'starting', () => {}, true))
+    const rows = Array.from(container.querySelectorAll('ol[aria-label="Connection steps"] > li'))
+    expect(rows.map((li) => li.getAttribute('data-step-state'))).toEqual(['done', 'active', 'working'])
+    for (const li of rows) {
+      const marker = li.querySelector('[aria-hidden="true"]') as HTMLElement
+      expect(marker.textContent).not.toMatch(/\d/)
+      // One disc for every state, so the marker column is a straight edge —
+      // the working spinner sits INSIDE a brand-soft disc, not bare.
+      expect(marker.className).toContain('h-7 w-7')
+      expect(marker.className).toContain('sm:h-8 sm:w-8')
+    }
+    expect(rows[2].querySelector('[aria-hidden="true"]')!.className).toContain('bg-[var(--v2-brand-soft)]')
+    // The row text is still the accessible content, state prefix included.
+    expect(rows[2].querySelector('h3')?.textContent).toBe('In progress: Approve the budget')
+  })
+
   function rowStates(container: HTMLElement) {
     return Array.from(container.querySelectorAll('ol[aria-label="Connection steps"] > li')).map((li) =>
       li.getAttribute('data-step-state'),
@@ -460,9 +570,13 @@ describe('the numbered step list on the waiting screen (#3832)', () => {
     expect(document.activeElement).toBe(getByRole('button', { name: 'Copy again' }))
   })
 
-  it('marks exactly one row as the current step', () => {
+  // Scoped to the checklist on purpose. In the modal the header StepProgress
+  // carries its own `aria-current="step"` (Connect) on this screen, so the
+  // dialog has TWO — intended since the band stays on step 3 (owner review,
+  // 2026-10-16): one for the wizard step, one for the row within it.
+  it('marks exactly one checklist row as the current step', () => {
     const { container } = render(renderWaiting(false, 'starting', () => {}, true))
-    const current = container.querySelectorAll('[aria-current="step"]')
+    const current = container.querySelectorAll(CURRENT_ROW)
     expect(current).toHaveLength(1)
     expect(current[0].getAttribute('data-step-state')).toBe('active')
   })
@@ -497,7 +611,7 @@ describe('the numbered step list on the waiting screen (#3832)', () => {
     expect(slot?.textContent).not.toMatch(/nothing else to click/i)
     // One current step, and it is row 3 — the likeliest server-path state is
     // credentials issued with the prompt never copied.
-    const current = container.querySelectorAll('[aria-current="step"]')
+    const current = container.querySelectorAll(CURRENT_ROW)
     expect(current).toHaveLength(1)
     expect(container.querySelectorAll('ol[aria-label="Connection steps"] > li')[2]).toBe(current[0])
   })
@@ -532,7 +646,7 @@ describe('the numbered step list on the waiting screen (#3832)', () => {
     // The next move is the user's, so row 3 is the current step, not a spinner.
     const rows = container.querySelectorAll('ol[aria-label="Connection steps"] > li')
     expect(rows[2].getAttribute('data-step-state')).toBe('active')
-    expect(container.querySelectorAll('[aria-current="step"]')).toHaveLength(1)
+    expect(container.querySelectorAll(CURRENT_ROW)).toHaveLength(1)
     expect(container.querySelector('[aria-live="polite"]')?.textContent).toMatch(/continue to wallet approval/i)
     // Exactly one cancel: the footer's, since the recovery block (which owns
     // "Cancel this setup" in recovery) is not shown.
@@ -549,8 +663,8 @@ describe('the numbered step list on the waiting screen (#3832)', () => {
   })
 
   // #3895: on the server-credential path the paste row describes a step the
-  // user is not taking. It is retitled, not hidden — hiding renumbers the
-  // approve row and jumps the list 3 → 2 → 3 when the approval screen appears.
+  // user is not taking. It is retitled, not hidden — hiding drops the approve
+  // row to second place and jumps the list 3 → 2 → 3 rows when the approval screen appears.
   it('server path: row 2 is done — "Credentials created", no connector-command sentence', () => {
     const { container } = render(
       <WaitingForConnector
@@ -579,7 +693,7 @@ describe('the numbered step list on the waiting screen (#3832)', () => {
     expect(rows[1].textContent).not.toMatch(/Paste it into your agent|connector command/)
     // Still exactly one current row, and it is row 3 (the positional pin at
     // the #2482 tests above).
-    const current = container.querySelectorAll('[aria-current="step"]')
+    const current = container.querySelectorAll(CURRENT_ROW)
     expect(current).toHaveLength(1)
     expect(rows[2]).toBe(current[0])
   })

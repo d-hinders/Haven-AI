@@ -32,7 +32,7 @@ test.describe('Connect agent setup acceptance', () => {
     await dialog.getByPlaceholder('Amount').fill('10')
     await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
 
-    // #3832: the connect step is a numbered list. Before copying, its one
+    // #3832: the connect step is a status checklist. Before copying, its one
     // full-width primary is the copy action, and the prompt text sits in a
     // CLOSED disclosure — hidden until opened (jsdom cannot prove this; a
     // browser can).

@@ -151,8 +151,8 @@ export function WaitingForConnector({
       // #3895: the credential IS issued on this path, so the row reads done —
       // "Credentials created", the same words connectedRows uses — and drops
       // the paste body that describes a step this path never takes. The row
-      // is retitled, not hidden: hiding renumbers the approve row and makes
-      // the list jump 3 → 2 → 3 when the approval screen appears.
+      // is retitled, not hidden: hiding drops the approve row to second place
+      // and makes the list jump 3 → 2 → 3 rows when the approval screen appears.
       state: manualInProgress ? 'done' : promptCopied ? 'active' : 'pending',
       title: manualInProgress ? 'Credentials created' : 'Paste it into your agent',
       children:

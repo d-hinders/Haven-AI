@@ -102,20 +102,18 @@ export default function ConnectAgentModal({
       title="Connect agent"
       subtitle={flow.headerSubtitleText}
       headerAccessory={
-        // #1418: ONE status voice. On steps 1-2 the wizard band is the only
-        // status signal. On step 3 the numbered step list (ConnectSteps:
-        // copy → paste → approve, #3832) takes over as the single voice — the
-        // epic's rule 2 — so the wizard band does not render there: two
-        // trackers on one screen made the user decode which meant what, on
-        // the screen whose whole job is calm. The list also carries the
-        // remaining journey, so "step 3 of 3" loses no information.
-        flow.step !== 'connect' ? (
-          <StepProgress
-            totalSteps={flow.setupStepCount}
-            currentStep={Math.max(flow.currentStepIndex, 0)}
-            labels={SETUP_STEP_LABELS}
-          />
-        ) : undefined
+        // ONE counter for the whole flow (owner review, 2026-10-16, superseding
+        // #1418's hide-the-band rule): the wizard band renders on every step,
+        // Connect active on step 3. Hiding it there swapped one progress model
+        // for another mid-flow — a horizontal 1 → 2 → 3 band, then a vertical
+        // numbered list — so the user met two counters. The step-3 list
+        // (ConnectSteps) is now an unnumbered status checklist: it reports
+        // progress WITHIN the Connect step and never counts.
+        <StepProgress
+          totalSteps={flow.setupStepCount}
+          currentStep={Math.max(flow.currentStepIndex, 0)}
+          labels={SETUP_STEP_LABELS}
+        />
       }
       showCloseButton
       initialFocusRef={coarsePointer ? undefined : nameInputRef}

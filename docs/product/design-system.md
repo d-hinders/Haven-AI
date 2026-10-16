@@ -603,6 +603,13 @@ Use `components/ui/PageHeader.tsx` on authenticated pages instead of hand-rolled
   a quiet identity line is text that can break, not a control that must stay
   whole.
   Additive — a `PageHeader` without `meta` renders exactly as before.
+- Optional `back` link above the title
+  ([#4028](https://github.com/d-hinders/Haven-AI/issues/4028)): `{ href, label }`,
+  naming the parent only ("Agents"). It renders `BackLink`
+  (`packages/ui/src/BackLink.tsx`), drawn at text height with a 44px target. A
+  branch of the page with no `PageHeader` (loading, not found) renders
+  `BackLink` directly, so every state has the same way back. Additive — a
+  `PageHeader` without `back` renders exactly as before.
 - Right-side actions that wrap on narrow viewports — and **stack onto their own
   row below `sm`**, which is right for a row of labelled buttons and wrong for a
   single icon-only control.

@@ -226,6 +226,40 @@ describe('AccountDetailClient', () => {
     vi.useRealTimers()
   })
 
+  // #4028 — the way back to the accounts list exists in every state of the
+  // page, now that the top bar no longer supplies it.
+  describe('back link to the accounts list (#4028)', () => {
+    function expectBackToAccounts() {
+      const link = screen.getByRole('link', { name: 'Accounts' })
+      expect(link.getAttribute('href')).toBe('/accounts')
+    }
+
+    it('renders above the title in the loaded page', () => {
+      render(<AccountDetailClient />)
+      expectBackToAccounts()
+      const title = screen.getByRole('heading', { level: 1, name: 'Main account' })
+      expect(
+        screen.getByRole('link', { name: 'Accounts' }).compareDocumentPosition(title) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy()
+    })
+
+    it('renders while auth is still loading, outside the live region', () => {
+      mockUseAuth.mockReturnValue({ ...mockUseAuth(), user: null, loading: true })
+      render(<AccountDetailClient />)
+      expectBackToAccounts()
+      const status = screen.getByRole('status', { name: 'Loading account' })
+      expect(status.contains(screen.getByRole('link', { name: 'Accounts' }))).toBe(false)
+    })
+
+    it('renders when the account is not found', () => {
+      mockUseAuth.mockReturnValue({ ...mockUseAuth(), user: { ...mockUseAuth().user, accounts: [] } })
+      render(<AccountDetailClient />)
+      expect(screen.getByText('Account not found')).toBeInTheDocument()
+      expectBackToAccounts()
+    })
+  })
+
   it('leads with wallet control, agent access, and advanced account details', () => {
     render(<AccountDetailClient />)
 

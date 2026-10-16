@@ -473,14 +473,6 @@ async function measureBar(page: Page) {
 }
 
 /**
- * The bottom tab bar's geometry (#2731), which is where the toggle went.
- *
- * Read from the LIVE elements rather than from classes: the bar's slots are
- * `grid-cols-5` cells and the More control is a `w-1/5` sibling, so "they line
- * up" is an arithmetic claim about two independently positioned boxes and is
- * exactly the kind that a class read cannot check.
- */
-/**
  * The page's back link (#4028), measured the way `measureBar` measures a bar
  * control: a hit rectangle walked with `elementFromPoint` out from its centre,
  * so a transparent `::after` target counts and a covered pixel does not.
@@ -522,6 +514,14 @@ async function measurePageBackLink(page: Page, href: string) {
   }, href)
 }
 
+/**
+ * The bottom tab bar's geometry (#2731), which is where the toggle went.
+ *
+ * Read from the LIVE elements rather than from classes: the bar's slots are
+ * `grid-cols-5` cells and the More control is a `w-1/5` sibling, so "they line
+ * up" is an arithmetic claim about two independently positioned boxes and is
+ * exactly the kind that a class read cannot check.
+ */
 async function measureTabBar(page: import('@playwright/test').Page) {
   return page.evaluate(({ half }) => {
     const bar = document.querySelector<HTMLElement>('[data-mobile-tab-bar]')
@@ -696,8 +696,10 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
         // control at all on a detail route, and the link the user reaches is
         // the page's: measured with the same finger's-view walk as the toggle.
         await page.goto('/agents/agent-research')
-        const link = page.locator('#main-content a[href="/agents"]').first()
-        await link.waitFor()
+        // Wait for the LOADED page, not just a link: the loading branch renders
+        // the same BackLink with no title, and measuring there would make the
+        // "above the title" assertion compare against nothing.
+        await page.locator('#main-content h1').waitFor()
 
         const bar = await measureBar(page)
         expect(bar.controls.map((c) => c.label)).toEqual([])
@@ -715,6 +717,7 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
         // Above the page title, inside the viewport, on the left.
         expect(back.left).toBeGreaterThanOrEqual(0)
         expect(back.right).toBeLessThanOrEqual(width / 2)
+        expect(Number.isFinite(back.titleTop)).toBe(true)
         expect(back.bottom).toBeLessThanOrEqual(back.titleTop)
         expect(bar.scrollOverflowPx).toBeLessThanOrEqual(0)
       })

@@ -20,6 +20,7 @@ covers:
   - packages/frontend/src/components/OnchainActionGate.tsx
   - packages/frontend/src/hooks/useEscapeToClose.ts
   - packages/ui/src/tokens.css
+  - packages/ui/src/BackLink.tsx
   - packages/ui/src/Button.tsx
   - packages/ui/src/Card.tsx
   - packages/ui/src/Input.tsx

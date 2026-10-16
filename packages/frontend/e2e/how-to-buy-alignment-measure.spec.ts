@@ -14,7 +14,7 @@
  * THE FIX, and why it is measured. One `Card.Section divided` holds the
  * three rows in an unpadded card, and the rows own their padding. The
  * assertions read the elements that DRAW the hairlines — anything inside the
- * panel with a top border — not the step rows, which sat inside the card
+ * panel with a one-sided border (see the #4015 note below) — not the step rows, which sat inside the card
  * even with the bug. A screenshot could absorb a 3px overshoot inside its
  * pixel budget; these read the geometry. The fixture is the
  * `offers-table-alignment-measure.spec.ts` one.

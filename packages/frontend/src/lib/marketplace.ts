@@ -475,13 +475,13 @@ export interface HowToBuyInput {
   merchantBudgets: ReadonlyArray<MerchantBudget>
   /** The merchant's funding targets (`useMerchant`). */
   funding: ReadonlyArray<MerchantFundingTarget>
-  /** Required for tests; defaults to now. */
   /**
-   * #4015: the default account's chain. When agents on several chains can
-   * pay, step 2 names one on THIS chain first, so it matches the offers the
-   * table puts first.
+   * #4015: the default account's chain. Step 2 names an agent on THIS chain
+   * first (when it can pay, or for the budget fix), so it matches the offers
+   * the table puts first.
    */
   preferChainId?: number | null
+  /** Required for tests; defaults to now. */
   nowMs?: number
 }
 
@@ -545,7 +545,8 @@ export function howToBuy(input: HowToBuyInput): HowToBuyAnswer {
   const answerFor = (offerIndex: number, agentId: string): BudgetAgentAnswer =>
     perOffer[offerIndex]!.find((a) => a.agentId === agentId)!
 
-  // 1. Done — the first active agent that can pay at least one offer.
+  // 1. Done — the first active agent (default-chain agents first) that can
+  //    pay at least one offer.
   for (const agent of byPreference) {
     const canIndex = perOffer.findIndex((answers) => answers.find((a) => a.agentId === agent.id)?.answer === 'can')
     if (canIndex === -1) continue
@@ -574,8 +575,9 @@ export function howToBuy(input: HowToBuyInput): HowToBuyAnswer {
     return { kind: 'uncertain' }
   }
 
-  // 3. No one can pay — the first budget-shaped no names the fix.
-  for (const agent of activeAgents) {
+  // 3. No one can pay — the first budget-shaped no names the fix
+  //    (default-chain agents first, as in step 1).
+  for (const agent of byPreference) {
     for (let i = 0; i < offers.length; i++) {
       const answer = answerFor(i, agent.id)
       if (answer.answer !== 'cannot') continue

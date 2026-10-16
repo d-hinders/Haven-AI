@@ -359,7 +359,8 @@ Structure:
    with "Verified only" and "Show test merchants" beside them. Test content
    has one control — the checkbox — and no category pill.
 3. Merchant page: header (monogram/logo, name, category, website, networks,
-   Verified — with the funding action, when shown, on its right-hand side),
+   Verified — with the funding action, when shown, below the text until
+   `xl` and on its right-hand side from there),
    then the "How to buy" panel (#4005, live merchants with offers only): one
    Card, three steps whose state is claimed from the user's real data — the
    agent connected (or the failed read), the budget that can pay here named

@@ -475,6 +475,15 @@ describe('howToBuy (#4005)', () => {
     expect(run(84532)).toMatchObject({ kind: 'done', agentName: 'Blinks', agentChainId: 84532 })
   })
 
+  it('names the budget fix for an agent on the preferred chain before one earlier in the list (#4015)', () => {
+    const offers = [entry({ price_atomic: '10000000' }), entry({ id: 'cat-2', network: 'eip155:84532', price_atomic: '10000000' })]
+    const agents = [agent(), agent({ id: 'agent-2', name: 'Blinks', account_chain_id: 84532 })]
+    const run = (preferChainId: number | null) =>
+      howToBuy({ merchantName: 'M', offers, agents, budgets: [], merchantBudgets: [], funding: [verifiedFunding], nowMs: NOW_MS, preferChainId })
+    expect(run(null)).toMatchObject({ kind: 'budget-fix', agentName: 'Atlas' })
+    expect(run(84532)).toMatchObject({ kind: 'budget-fix', agentName: 'Blinks', agentChainId: 84532 })
+  })
+
   it('carries the agent\u2019s chain on a budget fix (#4015)', () => {
     const result = runHowToBuy({ budgets: [] })
     expect(result).toMatchObject({ kind: 'budget-fix', agentChainId: 8453 })

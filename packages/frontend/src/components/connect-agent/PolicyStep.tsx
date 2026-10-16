@@ -15,8 +15,10 @@ import { InlineErrorNote, WarningCallout } from './SetupNotices'
  * select) and a valid amount alone enables Continue. #1381: the inputs ARE
  * the draft — nothing mounts below them mid-typing, so the confirmation the
  * old Review step carried is a single summary LINE, always mounted with
- * reserved height, under the fields (#3688). Additional tokens for legacy
- * multi-token accounts are added later from the agent's page.
+ * reserved height, under the fields (#3688) — it is the step's only
+ * explainer, so no helper line sits under the budget inputs. Additional
+ * tokens for legacy multi-token accounts are added later from the agent's
+ * page.
  *
  * #1411: no rhythm of its own — see DetailsStep's note. Root is a Fragment;
  * the shared `flex flex-col gap-5` wrapper in ConnectAgentModal owns the
@@ -79,28 +81,20 @@ export function PolicyStep({ flow }: { flow: AgentConnectionSetupFlow }) {
             ))}
           </Select>
         </div>
-        <p className="mt-1.5 text-xs text-[var(--v2-ink-3)]">
-          Setup grants one {flow.budgetToken?.symbol ?? 'USDC'} budget, approved
-          with a single signature. More tokens can be added from the
-          agent&apos;s page once it is running.
-        </p>
       </div>
 
       {/* #1411: the Agent Passport opt-in keeps Checkbox weight — it mints an
           on-chain attestation, a real decision, not a footnote — but the copy
-          tightens to one outcome-first sentence plus one short helper line,
-          matching every other helper in the flow instead of a three-line
-          explainer. */
-      /* ink-2, NOT ink-3: the Checkbox primitive renders helperText at ink-3
-          by design, so the label must sit one tier darker for the built-in
-          label/helper hierarchy to read — an on-chain attestation is a
-          decision, not a footnote (design review, #1411). */}
+          is the bare choice: the owner trimmed the explainer and the fee
+          helper line to declutter the step. */
+      /* ink-2, NOT ink-3: the label sits one tier above the step's ink-3
+          helper and summary text — an on-chain attestation is a decision,
+          not a footnote (design review, #1411). */}
       <Checkbox
         checked={flow.issuePassport}
         onChange={(event) => flow.setIssuePassport(event.target.checked)}
         className="py-1 text-xs text-[var(--v2-ink-2)]"
-        label="Issue an Agent Passport — a signed, revocable record that Haven issued this agent."
-        helperText="Optional. Haven covers the small on-chain fee."
+        label="Issue an Agent Passport"
         disabled={flow.creating}
       />
 

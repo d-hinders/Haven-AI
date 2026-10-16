@@ -101,7 +101,7 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
      ties the merchant's on-chain `AuthorizationUsed(delegate, nonce)` to the
      Haven payment, so the backend's settlement sweeper can attribute a
      settlement the agent never reported
-     (`packages/backend/src/modules/x402/eip3009-settlement-sweeper.ts:386-387`).
+     (`packages/backend/src/modules/x402/eip3009-settlement-sweeper.ts:464`, the nonce the scan looks up).
      Signers older than #3888 still send a random nonce. Why this is safe is in
      the [delegation-rail security model](../security/delegation-rail-security-model.md)
      ("Since #3888 the 3009 header's nonce is derived, not random"); the

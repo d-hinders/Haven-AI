@@ -789,8 +789,8 @@ transactions") grows past it and its badge sits further left.
 Below `sm` the trailing slot also wraps under the body. `fullBleed` is for
 a list that **is** the card's body, as on the dashboard (#3902): rows run
 edge to edge with hairline dividers and take the card's 20px side inset
-instead of `Row`'s 16px; only the horizontal padding changes, so the
-first-line alignment holds. The `/design-system` sample renders it, so the
+instead of `Row`'s 16px; only the horizontal padding changes, so the row
+stays centred. The `/design-system` sample renders it, so the
 geometry guards in `e2e/attention-list-title-measure.spec.ts` measure the
 dashboard's shape. Zero items renders nothing — the caller owns the empty
 state.

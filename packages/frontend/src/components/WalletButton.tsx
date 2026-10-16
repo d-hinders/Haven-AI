@@ -90,20 +90,23 @@ function AddressAvatar({ address }: { address: string }) {
  * Below `sm`, every state of this control collapses to a 40px square: the icon
  * or the address avatar, and no label (#1803, owner decision 2026-08-23).
  *
- * `TopBar` is over-subscribed at 320px and always was. #1767 stopped the
- * controls OVERLAPPING by making the account chip the only compressible item,
- * which paid for the whole deficit out of one label: measured on `/dashboard`
- * under Pixel 5 emulation, the account name rendered **17px** wide — present,
- * orderly, unreadable. This control is the widest thing in the bar (88.64px as
- * "Connect wallet" at 320, 119.33px at 390) and the biggest single saving
- * available, so it is what gets dropped. Measured with the collapse applied:
- * the account name goes 17px -> **66px** at 320 and 57px -> 68px at 390, which
- * is within 2px of never truncating at all in the screenshot fixture.
+ * The chrome row this control once shared was over-subscribed at 320px and
+ * always was. #1767 stopped the controls OVERLAPPING by making the account
+ * chip (removed with the global active account in #3719) the only
+ * compressible item, which paid for the whole deficit out of one label:
+ * measured on `/dashboard` under Pixel 5 emulation, the account name rendered
+ * **17px** wide — present, orderly, unreadable. This control is the widest
+ * thing in the row (88.64px as "Connect wallet" at 320, 119.33px at 390) and
+ * the biggest single saving available, so it is what gets dropped. Measured
+ * with the collapse applied: the account name goes 17px -> **66px** at 320 and
+ * 57px -> 68px at 390, which is within 2px of never truncating at all in the
+ * screenshot fixture.
  *
  * Dropped, not squeezed, and PRESENTATION rather than capability: the control
- * stays in the bar and stays reachable, only its label goes. At 320 the label
+ * stays in the row and stays reachable, only its label goes. At 320 the label
  * was not readable in the first place — the brand pill wrapped to two lines
- * ("Connect" / "wallet") and painted taller than the 56px band.
+ * ("Connect" / "wallet"). (Where the row itself lived — the deleted top bar —
+ * is #4029's history; the collapse rule outlives the surface.)
  *
  * Same rule #1767 applied one control over, where the chain segment is dropped
  * below `sm` and carried by the coloured dot plus the trigger's `aria-label`.
@@ -644,10 +647,11 @@ function getAccountChainName(chainId?: number): string | undefined {
 }
 
 /**
- * Single Haven-styled wallet entry point for the TopBar. Replaces RainbowKit's
- * default ConnectButton: no separate chain icon, one pill that opens a Haven
- * popover when connected. Falls back to RainbowKit's connect/account modals
- * for the heavy lifting (connector picker, account modal).
+ * Single Haven-styled wallet entry point for the app's account surfaces.
+ * Replaces RainbowKit's default ConnectButton: no separate chain icon, one
+ * pill that opens a Haven popover when connected. Falls back to RainbowKit's
+ * connect/account modals for the heavy lifting (connector picker, account
+ * modal). (It lived in the top bar until #3825/#4029 retired that surface.)
  */
 export default function WalletButton({
   accountId,

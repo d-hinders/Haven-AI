@@ -22,6 +22,7 @@ import {
 import { Icon } from '@/components/ui/Icon'
 import { MobileTabBar } from './MobileTabBar'
 import { ThemeToggle } from '@/components/ui/ThemeToggle'
+import EnvBadge from '@/components/EnvBadge'
 import { useAuth } from '@/context/AuthContext'
 import { displayName, userInitial as getUserInitial } from '@/lib/user'
 import { HavenMark } from '@/components/brand/HavenMark'
@@ -369,39 +370,37 @@ export default function Sidebar() {
       {/*
         Mobile toggle.
 
-        Tap target (#1766). The control paints 32x32 — deliberately, because it
-        shared a 56px bar with the account chip (removed in #3719) and a larger
-        visible box would crowd it — which left it 12px under the 44px comfort target
-        `docs/product/design-system.md` § Buttons documents. It is not a
-        `Button`, so it inherited none of #1726's mechanism; it borrows it here
-        instead: a transparent `::after` extends the HIT area to 44x44 while the
-        painted pixels stay exactly where they were.
+        Tap target (#1766). The control paints its own band in the tab bar's
+        fifth slot — the same 56px row its four tab neighbours occupy — and
+        grew from the original 32px icon to that full-slot cell, so the comfort
+        target `docs/product/design-system.md` § Buttons documents is painted
+        pixels rather than an invisible overlay. It is not a `Button`, so it
+        inherited none of #1726's mechanism; when it was a 32px icon it
+        borrowed it here instead: a transparent `::after` extended the HIT area
+        to 44x44 while the painted pixels stayed exactly where they were.
+        (#4029's `mobile-nav-tap-target.mobile.spec.ts` still walks the
+        hit rectangle the same way.)
 
-        Two deliberate deviations from `Button`'s version of the same trick:
+        Deliberate deviations from `Button`'s version of the same trick, as
+        they applied to the 32px icon and why they still shape the geometry:
 
         1. **The target grows in BOTH axes**, where `Button` grows vertically
            only. That rule exists because an `sm` Button's width already clears
            44px once it carries a label, so widening it would only let it steal
            a neighbour's taps in a tight toolbar. Neither half holds for an
-           icon-only 32px square: its width is the short axis too, and the
-           nearest interactive control in this bar starts at x=68, which leaves
-           14px of clearance beyond the 44px target's right edge (x=54). The
-           mobile spec asserts that clearance so a future move of either control
-           cannot quietly close it.
+           icon-only square: its width is the short axis too. Today the tab
+           cells ABUT by design (#2731) and the mobile spec asserts the seam is
+           exactly 0 — neither overlap nor dead strip.
         2. **No `relative`.** `Button` adds it to create a positioning context;
            `fixed` already is one, and adding `relative` here would un-fix the
-           button and drop it back under `TopBar` — the #1749 defect, restored.
-        3. **`top-3 left-4`, and the `left` is deliberate (#1767).** `top-3`
-           centres the 32px box in the 56px bar (y 12-44, centre 28 — it was
-           `top-4` and 4px low). The obvious matching change, `left-6`, would
-           make the box concentric with `TopBar`'s `w-8` spacer (x 24-56), and
-           it was measured and REJECTED: it costs 8px of the 44px target's
-           right-hand clearance (14px -> 6px, under the 8px § Buttons asks
-           between adjacent targets) AND it pushes the target's right edge from
-           x=54 to x=62, past the centre of the open drawer's own Haven logo
-           link at x=56 — turning the last assertion in the mobile spec red.
-           The spacer's job is to keep the bar's content CLEAR of this control,
-           not to be concentric with it; `left-4` is what clears it best.
+           button — the #1749 defect class, restored.
+        3. **The `left` was deliberate (#1767).** Centring a wider box would
+           have cost the 44px target's right-hand clearance against the bar's
+           next control (under the 8px § Buttons asks between adjacent
+           targets), and pushed the target's right edge past the centre of the
+           open drawer's own Haven logo link — turning the last assertion in
+           the mobile spec red. The tab-bar slot keeps the control clear of
+           content by geometry instead of by a spacer's reservation.
       */}
       {/*
         The tab bar's fifth slot — "More" (#2731).
@@ -588,6 +587,18 @@ export default function Sidebar() {
             <HavenMark />
             <span className="v2-brand-gradient-text">Haven</span>
           </Link>
+          {/*
+            The environment badge (#4029), beside the wordmark. It lived in the
+            top bar until the bar was deleted; the logo band is its new home and
+            renders at EVERY width — the desktop rail and the phone More sheet
+            are the same element, so the badge shows in both without a
+            breakpoint gate (the "DEV on the main pages" surface is the
+            warning line instead). It renders nothing in production
+            (`lib/env.ts`), so the band is byte-identical there. Outside the
+            Link: a badge is not navigation, and it must not join the
+            wordmark's click target.
+          */}
+          <EnvBadge />
         </div>
 
         {/* Main nav — labeled clusters (#858, regrouped #3024) */}
@@ -636,26 +647,21 @@ export default function Sidebar() {
             footer's two rows keep a shared right edge. `lg` needs none: the
             toggle is `lg:hidden` there. */}
         <div className="flex-shrink-0 border-t border-[var(--v2-border)] max-lg:pr-[calc(20%+var(--v2-safe-right))]">
-          {/* The quick theme toggle, in the sheet's control block — appearance
-              belongs with the app's own controls rather than in the account
-              rows below. `variant="row"`: the sheet is a list of full-width
-              rows and an icon button alone would read as a stray glyph. This
-              row is the mobile half of the toggle; the TopBar carries the
-              desktop half, gated `lg:` there so a phone never sees two of them
-              (#2928 — and #2731's five-tab discipline: one control per
-              surface). The gate has to be reciprocal, and that is what the
-              `lg:hidden` on the wrapper here is for: below `lg` this aside IS
-              the More sheet (#2820), but at `lg` it is the persistent desktop
-              column — so an ungated row would sit in this footer AND in the
-              top bar's right cluster on one 1280 screen, two answers to one
-              question. Each call site hides its half at the other's breakpoint
-              and nothing else decides it, which is the invariant
-              `Sidebar.test.tsx` pins on the className rather than on a
-              viewport (jsdom runs no media queries). It is NOT inert: the
-              #2819 idiom is for the drawer's illustrations, and a control that
-              is announced but unreachable fails no gate. */}
-          <div className="px-3 pt-2 lg:hidden">
-            <ThemeToggle variant="row" />
+          {/* The quick theme toggle (#2928) — the app's ONLY theme control
+              since #4029, shown at every width. Appearance belongs with the
+              app's own controls rather than in the account rows below.
+              `variant="row"`: a list of full-width rows, and an icon button
+              alone would read as a stray glyph. Until the top bar was deleted
+              this row was the mobile half of a reciprocal `lg:hidden` pair —
+              the bar's right cluster carried the desktop icon — and with the
+              bar gone there is no second half to gate against: ungating the
+              row is what one-theme-control-per-screen now means, and the
+              unit pin (`Sidebar.test.tsx`) asserts the row has NO
+              `lg:hidden` ancestor. It is NOT inert: the #2819 idiom is for
+              the drawer's illustrations, and a control that is announced but
+              unreachable fails no gate. */}
+          <div className="px-3 pt-2">
+            <ThemeToggle />
           </div>
           {/* Settings */}
           <div className="px-3 py-2 max-lg:pr-0">

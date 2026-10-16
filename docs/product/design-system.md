@@ -28,7 +28,6 @@ covers:
   - packages/frontend/src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx
   - packages/frontend/src/components/marketing/**
   - packages/frontend/src/components/sidebar/**
-  - packages/frontend/src/components/TopBar.tsx
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
   - packages/frontend/src/components/haven/BudgetMeter.tsx
   - packages/frontend/src/components/haven/ApprovalRequiredBanner.tsx
@@ -237,8 +236,10 @@ The third is the one that matters for how you read this section. It carries no
 `var()` at all — the colour is a perfectly ordinary `white` — and it shipped on a
 marketing surface that design-lint exempts. Every guard written before it matched
 a *shape*, so each new occurrence arrived wearing a shape the previous guard
-could not see. `TopBar`'s dead background was found only because a mutation
-during unrelated work went green when both renders came out byte-identical.
+could not see. The top bar's dead background (a `bg-[var(--v2-bg)]/85` quoted in
+its own source comment until the bar was deleted, #4029) was found only because
+a mutation during unrelated work went green when both renders came out
+byte-identical.
 
 So the check that binds is not a spelling rule. `src/__tests__/compiled-colour-utilities.test.ts`
 reads every opacity-modified colour utility out of the product source, compiles
@@ -486,7 +487,9 @@ that band was seen keeping the nav scrim's grey after the drawer closed. **The
 mechanism is unconfirmed** — the symptom needs a standalone shell with non-zero
 insets and no engine in CI has one — so the rule removes the class of failure
 rather than resting on a diagnosis. Use `ui/SafeAreaBand`: a strip as a sibling
-*above* the bar, never padding inside it.
+*above* whatever carries a blur, never padding inside it. (Since #4029 the
+authenticated shell renders the band itself, directly above the scroll region —
+there is no bar for it to sit inside.)
 
 The **filter** half is absolute; the **opacity** half is a default. Blur is for
 content scrolling under a bar, and nothing scrolls under the status bar, so the
@@ -505,7 +508,7 @@ Every stacking layer has a named token. **Reach for a token, never a fresh numbe
 ```css
 --v2-z-content:        10;   /* in-flow overlaps: badges, gradient washes */
 --v2-z-sticky:         20;   /* sticky table headers */
---v2-z-chrome:        100;   /* TopBar */
+--v2-z-chrome:        100;   /* app chrome — the shell's non-production warning line */
 --v2-z-tab-bar:       105;   /* reserved for the bottom tab bar (#2730, used by #2731) */
 --v2-z-chrome-popover: 110;  /* popovers anchored in the chrome */
 --v2-z-nav-scrim:     130;   /* mobile navigation tier (consumer retired by #2820, ordering kept) */
@@ -517,11 +520,13 @@ Every stacking layer has a named token. **Reach for a token, never a fresh numbe
 --v2-z-toast:        9999;   /* Toast, skip-to-content link */
 ```
 
-The rule the numbers encode: **the mobile navigation overlay outranks the app chrome it opens over, and modals outrank the navigation.** The drawer is `inset-y-0`, so its own logo band shares the top 56px with the bar. Let the bar win and the drawer is decapitated, and the toggle (which sits *inside* that band by design, in the gap the bar reserves for it) cannot be tapped at all. That was #1749: a `z-[100]` header and a `z-[60]` toggle chosen independently in different files left mobile primary navigation unopenable on every authenticated route.
+The rule the numbers encode: **the mobile navigation overlay outranks the app chrome it opens over, and modals outrank the navigation.** The drawer is `inset-y-0`, so its own logo band shares the top strip with whatever chrome is above the page. Let the chrome win and the drawer is decapitated, and the toggle cannot be tapped at all. That was #1749: a `z-[100]` header and a `z-[60]` toggle chosen independently in different files left mobile primary navigation unopenable on every authenticated route.
+
+`--v2-z-chrome` has one consumer since #4029: the authenticated shell's non-production warning line, the 2px `--v2-warning` strip along the top of the app on a dev deploy. The tier stays at 100 so the ordering the tests pin is unchanged — the drawer covers the line (a navigation layer must outrank the chrome it slides over), and the line covers page content. The top bar that used to own the tier was deleted (#4029, epic #4027); the tier is kept as the anchor the nav, tab-bar and popover tiers are ordered against, the same reason `--v2-z-nav-scrim` survives without a consumer.
 
 `--v2-z-nav-scrim` has no consumer since #2820 — the drawer is full width below `lg`, so the slide-over scrim it used to carry was deleted — and the tier stays anyway. The scale's job is ordering, not inventory: removing the tier would renumber the ascent the tests pin and retire a landing place the day a second navigation overlay returns. Nothing new may take the tier back without a consumer that needs it.
 
-Tiers are spaced by 10 so a new layer lands between two without renumbering — `--v2-z-tab-bar` is that mechanism's first use, at 105, in the gap 100 left. It sits under `--v2-z-chrome-popover` because a popover anchored in the top bar can hang down across the bar's band on a phone, and under the nav tiers because the drawer the bar opens has to cover it. Adding a layer means picking the tier it belongs to; if none fits, add one to the scale first. A raw `z-[…]` in a shell component is the failure this scale prevents — `src/__tests__/z-index-scale.test.ts` fails on one, and on any inversion of the order above.
+Tiers are spaced by 10 so a new layer lands between two without renumbering — `--v2-z-tab-bar` is that mechanism's first use, at 105, in the gap 100 left. It sits under `--v2-z-chrome-popover` because a popover anchored in the chrome can hang down across the tab bar's band on a phone, and under the nav tiers because the drawer the toggle opens has to cover it. Adding a layer means picking the tier it belongs to; if none fits, add one to the scale first. A raw `z-[…]` in a shell component is the failure this scale prevents — `src/__tests__/z-index-scale.test.ts` fails on one, and on any inversion of the order above.
 
 That test reads source, so it cannot see stacking contexts or hit-testing. `e2e/mobile-nav-layering.mobile.spec.ts` is the half that can: it drives a real engine at four widths below `lg` and asserts `document.elementFromPoint` at the toggle's centre returns the toggle.
 
@@ -586,8 +591,8 @@ The authenticated app uses one stable product shell:
 - Sidebar nav: 36px row height, 16px icon box, 13px medium label. (The Approvals item and its live actionable-count badge were the nav's only dynamic entry; both are deleted with the Safe rail, [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) — every nav item is static now.)
 - Brand: the wordmark may use `.v2-brand-gradient-text`; do not repeat the gradient elsewhere in nav.
 - User menu: two-line user card with a kebab menu using popover shadow; destructive menu items use danger styling.
-- Top bar: a 56px blurred white bar with an unblurred status-bar band above it — the `<header>` is the whole chrome band and grows by `--v2-safe-top`, the blurred bar inside it stays 56px (§ *Safe areas*). The band is not breakpoint-gated: the inset is 0 on anything without a notch, so it collapses on its own rather than needing `max-lg:`. Since #4028 the bar carries no back link: detail pages show theirs in the page, above the title (`PageHeader`'s `back`, or `BackLink`). Page-level CTAs go in the `PageHeader` actions, not the bar's unused `actionSlot`.
-- Main content: scrolls inside the shell, with `p-6 lg:p-8` — below `lg` its bottom, left and right also take the safe-area insets (§ *Safe areas*) — and a skip link targeting `main#main-content`.
+- **No top bar** ([#4029](https://github.com/d-hinders/Haven-AI/issues/4029), epic #4027): the authenticated chrome above the scroll region is the `SafeAreaBand` — the opaque status-bar strip — plus a 2px `--v2-warning` line on non-production deploys (aria-hidden, pointer-events-none, the frame's last child — positioned against the frame, so it never overflows `h-screen`; on phones it sits directly under the band via `top-[var(--v2-safe-top)]`). There is no `banner` landmark; `nav` and `main` remain. Page-level CTAs go in the `PageHeader` actions, and detail pages carry their own back link above the title (#4028). The environment badge lives beside the wordmark in the sidebar's logo band, and the theme row in the sidebar footer is the app's only theme control at every width.
+- Main content: scrolls inside the shell, with `p-6 pt-4 lg:p-8` — 16px of top padding below `lg` (#4029), 24px elsewhere, 32px at `lg` — below `lg` its bottom, left and right also take the safe-area insets (§ *Safe areas*) — and a skip link targeting `main#main-content`. Sticky table headers compensate through the `--v2-sticky-head` variable the shell sets (`-1rem` below `lg`, `-2rem` at `lg`; the token's `-1.5rem` default is ops' `py-6`).
 
 ### PageHeader
 
@@ -1225,8 +1230,8 @@ on the entry point to primary navigation. It borrows the same mechanism (transpa
   that nothing overlaps. Both are pinned in `e2e/mobile-nav-tap-target.mobile.spec.ts`.
 - **The clearance is only as real as the space the neighbour is standing in
   ([#1767](https://github.com/d-hinders/Haven-AI/issues/1767)).** The 14px above was
-  measured at 768px and assumed to hold on a phone. It did not. `TopBar` reserves the
-  toggle's room with a `w-8` spacer, and `w-8` on a flex item still carries
+  measured at 768px and assumed to hold on a phone. It did not. The then-top bar
+  reserved the toggle's room with a `w-8` spacer, and `w-8` on a flex item still carries
   `flex-shrink: 1` — in a row that does not fit, it is the first thing given away. The
   spacer collapsed to **width 0** below about 700px, `NetworkSwitcher` slid left to
   x=36, and the painted toggle sat on top of it with 18px of the chip's own tap area
@@ -1242,13 +1247,14 @@ on the entry point to primary navigation. It borrows the same mechanism (transpa
   control, not to be concentric with it.
 - **Do not add `relative` to an already-positioned element.** `Button` needs it because
   it is static. A `fixed` or `absolute` control is already a positioning context, and
-  adding `relative` un-fixes it — on the toggle that shifts the whole app shell 32px
-  and drops the control back under `TopBar`, which was #1749. Do not take this on the
+  adding `relative` un-fixes it — on the toggle that shifts the whole app shell 32px,
+  the #1749 defect class. Do not take this on the
   prose's word: it is a claim about which of two same-property utilities the cascade
   keeps, so it is pinned by a test rather than by this paragraph —
-  `e2e/mobile-nav-tap-target.mobile.spec.ts` asserts `header.left === 0` as an absolute
-  anchor, and that assertion exists **because** the mutation passed three other mobile
-  specs first.
+  `e2e/mobile-nav-tap-target.mobile.spec.ts` asserts `frameLeft === 0` (the app
+  frame's left edge; it was the top bar header's until #4029 deleted the bar) as an
+  absolute anchor, and that assertion exists **because** the mutation passed three
+  other mobile specs first.
 
 **The second borrower, and what makes a control need the mechanism
 ([#1803](https://github.com/d-hinders/Haven-AI/issues/1803)).** `WalletButton` collapses
@@ -1256,13 +1262,14 @@ to a 40px icon/avatar square below `sm` — the label is not rendered there — 
 the same `::after` extension for the same reason the toggle did: 40px painted is 4px
 short, and an icon-only square grows in both axes. Two rules generalise from it:
 
-- **In an over-subscribed bar, drop a label rather than squeeze every control.** `TopBar`
-  does not fit three labelled controls at 320px and never did. #1767 removed the
+- **In an over-subscribed row, drop a label rather than squeeze every control.** The
+  chrome row this once shared does not fit three labelled controls at 320px and never
+  did. #1767 removed the
   overlapping by making the account chip (removed with the global active account in #3719)
   the only compressible item, which paid for the
   whole deficit out of one label — the account name rendered **17px** wide, orderly and
-  unreadable — and the brand CTA wrapped to two lines, painting taller than the 56px
-  band. Collapsing the widest control's label returns 48.64px to the row and takes the
+  unreadable — and the brand CTA wrapped to two lines. Collapsing the widest control's
+  label returns 48.64px to the row and takes the
   account name to 66px. Squeezing distributes a deficit; dropping decides what the width
   is for. The decision of WHAT to drop is a product one — it was escalated and taken by
   the owner, not by the layout.
@@ -1273,20 +1280,19 @@ short, and an icon-only square grows in both axes. Two rules generalise from it:
   applies no CSS, so a unit test that queries by role and name keeps passing on text the
   real browser never renders — `WalletButton.test.tsx` asserts the attribute rather than
   the name. (`e2e/mobile-nav-tap-target.mobile.spec.ts` measured the rendered label width
-  and the name together until #3825 took the pill out of the top bar; the spec now
-  asserts the bar's right cluster holds no control at all.)
+  and the name together until #3825 took the pill out of the top bar.)
 
 A collapsed control also takes its neighbour's radius (`rounded-xl` here, the
-notification bell's), because two adjacent 40px squares in one 56px band read as a row
+notification bell's), because two adjacent 40px squares in one band read as a row
 only if they are the same shape.
 
-**Since [#3825](https://github.com/d-hinders/Haven-AI/issues/3825) the top bar carries
-no wallet pill.** Most users sign with a passkey, and a signer with a raw address on every
+**Since [#3825](https://github.com/d-hinders/Haven-AI/issues/3825) no global chrome
+carries a wallet pill** — and the top bar that used to host it is gone entirely
+(#4029). Most users sign with a passkey, and a signer with a raw address on every
 screen is the wrong level of detail; signers have their own home in Settings → Signers,
 and every signing flow offers its own in-flow connect (#3812). `WalletButton` still
 renders in the connect flow's approval step, so the collapse rules above still describe
-it; the over-subscribed-bar argument is history. Below `lg` the bar's right cluster is
-now empty — the theme toggle lives in the More sheet there.
+it; the over-subscribed-bar argument is history.
 
 **The former investor-briefing borrower was retired with the page in #2468.** The
 remaining borrowers and their guards are the live tap-target examples; do not infer a
@@ -2284,7 +2290,7 @@ element-scoped capture clips the very thing it photographs (#1873).
 | UI primitives | `packages/frontend/src/components/ui/Button.tsx`, `Card.tsx`, `CodeBlock.tsx`, `InlineAlert.tsx`, `Input.tsx`, `Modal.tsx`, `PageHeader.tsx`, `Skeleton.tsx`, `Toast.tsx`, `Tooltip.tsx` |
 | Marketing components | `packages/frontend/src/components/marketing/site/**` (the public site), `marketing/Section.tsx`, `BrandBandButton.tsx`, `TrailingArrow.tsx` |
 | Marketing pages | `packages/frontend/src/app/page.tsx`, `app/how-it-works/page.tsx`, `app/how-it-works/protocols/page.tsx`, `app/developers/page.tsx`, `app/for-agents/page.tsx` |
-| Authenticated shell | `packages/frontend/src/components/sidebar/Sidebar.tsx`, `packages/frontend/src/components/TopBar.tsx`, authenticated routes under `packages/frontend/src/app/(authenticated)` |
+| Authenticated shell | `packages/frontend/src/components/AuthenticatedShell.tsx`, `packages/frontend/src/components/sidebar/Sidebar.tsx`, authenticated routes under `packages/frontend/src/app/(authenticated)` |
 | Live product reference | `packages/frontend/src/app/(authenticated)/design-system/page.tsx` |
 | App entity cards | `packages/frontend/src/components/ui/entityCardStyles.ts` shared by Accounts and Agents; linked cards use a stretched semantic name link with sibling controls above its overlay |
 | App modals | `packages/frontend/src/components/ui/Modal.tsx` plus Send, Receive, Add funds, and agent modals in `packages/frontend/src/components` |

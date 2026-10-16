@@ -4,15 +4,19 @@ import { mockHavenApi, seedAuthenticatedSession, waitForDrawerOpen } from './fix
 /**
  * Mobile navigation layering (#1749).
  *
- * The `Open sidebar` toggle is `position: fixed` in the same 56px band that
- * `TopBar` occupies. Whichever of the two wins the stacking contest owns the
- * clicks in that band, and for the whole life of the shell `TopBar` did — so
- * primary navigation was unopenable below `lg` on every authenticated route.
+ * The `Open sidebar` toggle is `position: fixed` and, for most of the shell's
+ * life, sat in the same 56px band the top bar occupied. Whichever of the two
+ * won the stacking contest owned the clicks in that band, and for that whole
+ * period the bar did — so primary navigation was unopenable below `lg` on
+ * every authenticated route. (#4029 deleted the bar; the layering rules it
+ * forced are still the ones the scale encodes, and the toggle's tier is what
+ * keeps the drawer — the bar's successor as the thing the toggle floats over
+ * — closable.)
  *
  * Measured on the pre-fix code, at 320 / 390 / 768 / 1023px on `/dashboard`:
  *
  *   computed z-index            toggle 60, header 100
- *   elementFromPoint(32, 32)    div.flex.items-center.gap-3   ← TopBar's inner div
+ *   elementFromPoint(32, 32)    div.flex.items-center.gap-3   ← the bar's inner div
  *   non-forced .click()         "…intercepts pointer events"
  *
  * ...and after it, at the same four widths:
@@ -47,7 +51,7 @@ import { mockHavenApi, seedAuthenticatedSession, waitForDrawerOpen } from './fix
  *
  * `test.use({ viewport })` stays, and is no longer a lie about the project: a
  * project pins ONE viewport, and the point of this spec is the sweep across
- * the band the toggle is `lg:hidden` for. The override sets the width; the
+ * the widths the toggle is `lg:hidden` for. The override sets the width; the
  * touch/UA emulation the project provides is unaffected by it.
  */
 
@@ -72,18 +76,22 @@ async function expectNavigationReachable(page: Page) {
   //
   //    Every other assertion in this function measures one element against
   //    another: the toggle against whatever `elementFromPoint` returns at the
-  //    toggle's own centre, the drawer against the header's own height. Those
-  //    are all preserved by a transformation that moves the whole shell, so
-  //    this spec passed the mutation that exposed the gap — the toggle's
-  //    `fixed` swapped for `relative`, which drops it into flow as a 32px flex
-  //    item and shifts `<header>` from x=0 to x=32 while every relative
-  //    reading holds. Measured, not predicted.
+  //    toggle's own centre, the drawer against its own logo band. Those are
+  //    all preserved by a transformation that moves the whole shell, so this
+  //    spec passed the mutation that exposed the gap — the toggle's `fixed`
+  //    swapped for `relative`, which drops it into flow and shifts the chrome
+  //    from x=0 to x=32 while every relative reading holds. Measured, not
+  //    predicted.
   //
-  //    The top bar spanning the viewport edge to edge is the right anchor for
-  //    THIS spec specifically: the 56px band is its whole subject — the band
-  //    where the toggle and `TopBar` contest the stacking order — so pinning
-  //    that band to the screen says the geometry the layering claims are made
-  //    against has not moved under them.
+  //    The app FRAME (`[data-app-frame]`, the `h-screen` flex row holding the
+  //    sidebar and the scroll column) spanning the viewport edge to edge is
+  //    the right anchor for THIS spec: it is the box every layered element is
+  //    positioned against, so pinning it to the screen says the geometry the
+  //    layering claims are made against has not moved under them. (It was the
+  //    top bar's `<header>` until the bar was deleted, #4029 — a bare
+  //    `querySelector('header')` now finds `PageHeader`'s header INSIDE the
+  //    scroll region, which is exactly the silent re-point this comment
+  //    refuses.)
   //
   //    Computed here rather than through `expectNoHorizontalOverflow`, on
   //    purpose. `navigation.mobile.spec.ts` gets its anchor from that shared
@@ -94,23 +102,23 @@ async function expectNavigationReachable(page: Page) {
   //    fix's clothes. Two independently-computed anchors can disagree.
   //
   //    Expressed as two GAPS rather than as `right === innerWidth`, so a
-  //    failure prints how far the bar is off each edge instead of two absolute
-  //    numbers the reader then has to subtract.
+  //    failure prints how far the frame is off each edge instead of two
+  //    absolute numbers the reader then has to subtract.
   const shell = await page.evaluate(() => {
-    const header = document.querySelector('header')
-    if (!header) return null
-    const b = header.getBoundingClientRect()
+    const frame = document.querySelector('[data-app-frame]')
+    if (!frame) return null
+    const b = frame.getBoundingClientRect()
     return {
       leftGap: Math.round(b.left),
       rightGap: Math.round(window.innerWidth - b.right),
       viewportWidth: window.innerWidth,
-      headerWidth: Math.round(b.width),
+      frameWidth: Math.round(b.width),
     }
   })
-  expect(shell, 'no <header> — the shell never rendered').not.toBeNull()
+  expect(shell, 'no [data-app-frame] — the shell never rendered').not.toBeNull()
   expect(
     { leftGap: shell!.leftGap, rightGap: shell!.rightGap },
-    `top bar is not anchored to the viewport: ${JSON.stringify(shell)}`,
+    `app frame is not anchored to the viewport: ${JSON.stringify(shell)}`,
   ).toEqual({ leftGap: 0, rightGap: 0 })
 
   // 1. The hit-test from the original report. `elementFromPoint` answers "what
@@ -149,9 +157,14 @@ async function expectNavigationReachable(page: Page) {
   await expect(nav.getByRole('link', { name: 'Dashboard' })).toBeVisible()
 
   // 3. The drawer owns its own top band. It is `inset-y-0`, so its 56px logo
-  //    band shares that band with TopBar; if TopBar wins there the drawer is
-  //    decapitated and the scrim dims everything except the bar it exists to
-  //    dim — the same root cause as the toggle, one layer down.
+  //    band shares the top strip with whatever chrome is above the page; if a
+  //    layer ABOVE the drawer won there, the drawer is decapitated and the
+  //    scrim dims everything except the strip it exists to dim — the same
+  //    root cause as the toggle, one layer down. (The rival used to be the
+  //    top bar's `<header>`, whose half-height the probe ran at; since #4029
+  //    the probe is keyed to the DRAWER's own logo band, so a `querySelector
+  //    ('header')` re-pointing at `PageHeader`'s in-page header could never
+  //    satisfy it.)
   //
   //    Wait for the 200ms slide to FINISH first. A visible link is not enough:
   //    a transforming element still has a non-empty box, so hit-testing here
@@ -162,11 +175,14 @@ async function expectNavigationReachable(page: Page) {
 
   const layering = await page.evaluate(() => {
     const aside = document.querySelector('aside')!
-    const header = document.querySelector('header')!
+    // The drawer's logo band: its first element child (h-14, the band the
+    // Haven link and the env badge live in).
+    const logoBand = aside.firstElementChild as HTMLElement
     const r = aside.getBoundingClientRect()
+    const band = logoBand.getBoundingClientRect()
     const top = document.elementFromPoint(
       Math.round(r.left + r.width / 2),
-      Math.round(header.getBoundingClientRect().height / 2),
+      Math.round(band.top + band.height / 2),
     )
     return {
       drawerOwnsItsTopBand: aside.contains(top),
@@ -194,7 +210,7 @@ test.describe('mobile navigation is reachable below lg (#1749)', () => {
     test.describe(`at ${width}px`, () => {
       test.use({ viewport: { width, height: 844 } })
 
-      test('the toggle is hit-testable and the drawer layers above the top bar', async ({ page }) => {
+      test('the toggle is hit-testable and the drawer owns its top band', async ({ page }) => {
         await page.goto('/dashboard')
         await expectNavigationReachable(page)
       })
@@ -218,7 +234,7 @@ test.describe('mobile navigation is reachable below lg (#1749)', () => {
     test.use({ viewport: { width: 1024, height: 844 } })
 
     // The complement of the checks above: `lg:hidden` must still hide it, so a
-    // fix that raised the toggle above TopBar cannot have leaked a floating
+    // fix that raised the toggle above the chrome cannot have leaked a floating
     // hamburger onto the desktop shell.
     test('no mobile toggle renders at 1024px', async ({ page }) => {
       await page.goto('/dashboard')

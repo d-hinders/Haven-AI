@@ -318,14 +318,17 @@ describe('Sidebar', () => {
   })
 
   /**
-   * The quick theme toggle's row, in the More sheet (#2928).
+   * The quick theme toggle's row, in the sidebar footer at every width
+   * (#2928, ungated by #4029).
    *
-   * The drawer IS the sheet below `lg` (#2820), so the row lives in the
-   * drawer's footer with the drawer's other controls — not in the tab bar
-   * (`MobileTabBar.test.tsx` holds the negative side of that boundary, and
-   * `TopBar.test.tsx` the desktop half of the control). Three claims here,
-   * each because the shape of the drawer is what makes them possible to get
-   * wrong:
+   * The drawer IS the sheet below `lg` (#2820), so below the breakpoint the
+   * row lives in the drawer's footer with the drawer's other controls — not
+   * in the tab bar (`MobileTabBar.test.tsx` holds the negative side of that
+   * boundary). Since #4029 the row is the app's ONLY theme control at every
+   * width: the desktop icon toggle that used to share the job lived in the
+   * top bar and was deleted with it, so there is no second half to gate
+   * against. Three claims here, each because the shape of the drawer is what
+   * makes them possible to get wrong:
    *
    *   1. the row is IN the footer — the region the fixed More/Close toggle
    *      overlaps, so an interactive control placed outside the footer's
@@ -336,11 +339,14 @@ describe('Sidebar', () => {
    *      produce a row that is visible, announced, and unreachable — with no
    *      console warning and no failing gate to notice it, the precise class
    *      of silent break that #2819 documents; and
-   *   3. it is one control, not two: the desktop half is `lg:hidden` in the
-   *      TopBar and the mobile half is this row, so a phone that opened the
-   *      sheet would otherwise have two answers to one question.
+   *   3. it has NO `lg:hidden` ancestor. The old reciprocal gate is dead: a
+   *      wrapper re-added to "keep the mobile half mobile" would hide the
+   *      app's only theme control on the desktop rail. jsdom has no media
+   *      queries, so this is a className pin, not a layout claim; the live
+   *      count-at-two-widths half of the invariant is an e2e assertion (see
+   *      the PR for #4029).
    */
-  it('carries the theme row in the sheet\'s footer, live and not inert (#2928)', () => {
+  it('carries the theme row in the footer, ungated at every width, live and not inert (#2928, #4029)', () => {
     render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
 
     const row = screen.getByRole('button', { name: /^Theme:/ })
@@ -361,17 +367,20 @@ describe('Sidebar', () => {
     // naming the label activates it.
     expect(row.textContent).toContain('Theme')
 
-    // The gate is reciprocal (#2928 review): the TopBar half is `hidden …
-    // lg:` and this half must be `lg:hidden`, or a 1280 screen carries the
-    // icon in the header AND the row in this sidebar's footer — two controls
-    // for one preference. jsdom has no media queries, so this is a className
-    // pin, not a layout claim; the live on-screen half of the invariant is
-    // the Playwright capture's `onScreenToggles` probe.
-    const rowGate = row.closest('div[class*="lg:hidden"]')
-    expect(rowGate, 'the More-sheet row must be lg:hidden — the top bar owns the desktop half').not.toBeNull()
+    // NO `lg:hidden` ancestor (#4029). The row is the app's only theme
+    // control at every width since the top bar — with its desktop icon
+    // toggle — was deleted. A re-added gate would strand desktop users
+    // without any theme control at all, and jsdom has no media queries to
+    // catch it the honest way, so the className is pinned.
+    const gatedAncestor = row.closest('div[class*="lg:hidden"]')
+    expect(
+      gatedAncestor,
+      'the theme row must have no lg:hidden ancestor — it is the only theme control at every width',
+    ).toBeNull()
 
-    // Exactly one theme control in the whole document at this width — the
-    // TopBar's half is gated away, the sheet's half is here.
+    // Exactly one theme control in the whole document — and since the row is
+    // ungated, this is now a claim about the primitive, not about a
+    // breakpoint partition.
     expect(screen.queryAllByRole('button', { name: /^Theme:/ })).toHaveLength(1)
   })
 

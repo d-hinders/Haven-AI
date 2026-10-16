@@ -12,7 +12,6 @@
  *   <div class="flex h-screen … overflow-hidden">   ← the document NEVER scrolls
  *     <Sidebar />
  *     <div class="flex-1 flex flex-col … overflow-hidden">
- *       <TopBar />
  *       <main id="main-content" class="flex-1 … overflow-y-auto">  ← real scroller
  *
  * `Page.getLayoutMetrics` measures layout overflow *through* the clip, so
@@ -150,8 +149,8 @@ export const SETTLED_TALL_FACTOR = 1.25
  *     observed captures were one viewport — so the guard is out of scope by its
  *     own definition and returns "fine";
  *   the shell guards (#1936/#1939) ask whether `#main-content` MOUNTED. It did.
- *     `ProtectedRoute` resolved, the layout rendered, TopBar and sidebar are on
- *     screen. It is the `next/dynamic` chunk INSIDE `<main>` that never arrived;
+ *     `ProtectedRoute` resolved, the layout rendered, sidebar and all. It is
+ *     the `next/dynamic` chunk INSIDE `<main>` that never arrived;
  *   `MIN_RENDERED_CHARS` looks like it should cover the gap and does not,
  *     because it is measured on `document.body` — which on an authenticated
  *     route is thousands of characters of SHELL before the route contributes a
@@ -551,10 +550,10 @@ export function readContentProbe(sel) {
 
   // The ROUTE'S OWN content region, measured separately from the document.
   // `renderedChars` above counts the whole body, which on an authenticated
-  // page is dominated by the shell — sidebar nav, TopBar, account chip. That
-  // is why a route stuck on its loading fallback clears every existing floor
-  // (#2036): the shell alone is thousands of characters, and the region the
-  // capture actually claims to show holds ten.
+  // page is dominated by the shell — sidebar nav, user card. That is why a
+  // route stuck on its loading fallback clears every existing floor (#2036):
+  // the shell alone is thousands of characters, and the region the capture
+  // actually claims to show holds ten.
   const root = document.querySelector(sel)
   const contentText = root ? (root.innerText ?? '').trim() : ''
 

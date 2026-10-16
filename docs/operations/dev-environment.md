@@ -31,7 +31,7 @@ covers:
   - packages/frontend/vercel.json
   - packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts
   - scripts/vercel/**
-last-verified: "2026-10-15"
+last-verified: "2026-10-16"
 ---
 
 > **Re-verified #3913 (2026-10-13, Vercel skip-setting doc corrections):** the
@@ -1150,11 +1150,13 @@ Payments*.
 
 ### The `DEV` badge
 
-`NEXT_PUBLIC_HAVEN_ENV=dev` makes the frontend render a `DEV` chip in the app
-`TopBar` (`components/EnvBadge.tsx`), in the warning tone, so a dev deploy is
-never mistaken for production. `NEXT_PUBLIC_*` is build-time inlined, so the dev
-Vercel deploy bakes the value in; **production leaves the var unset**, which
-renders nothing.
+`NEXT_PUBLIC_HAVEN_ENV=dev` makes the frontend render a `DEV` chip beside the
+"Haven" wordmark in the sidebar's logo band (`components/EnvBadge.tsx`), in the
+warning tone, so a dev deploy is never mistaken for production. (It lived in
+the app `TopBar` until #4029 removed the bar; non-production builds additionally
+paint a 2px warning line along the top of the app.) `NEXT_PUBLIC_*` is
+build-time inlined, so the dev Vercel deploy bakes the value in; **production
+leaves the var unset**, which renders nothing.
 
 "Unset means production" is read in ONE place, `packages/frontend/src/lib/env.ts`
 (#2709): the chip, the `?apiBaseUrl` override gate and the capability manifest's

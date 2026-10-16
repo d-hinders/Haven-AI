@@ -279,8 +279,8 @@ describe('ThemeToggle', () => {
     await waitFor(() => expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark'))
   })
 
-  it('renders the More-sheet row: the visible label is the prefix of the accessible name', async () => {
-    renderToggle(<ThemeToggle variant="row" />)
+  it('renders the row: the visible label is the prefix of the accessible name', async () => {
+    renderToggle(<ThemeToggle />)
     await waitFor(() => buttonIn(MESSAGES.light))
     const row = buttonIn(MESSAGES.light)
 

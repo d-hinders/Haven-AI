@@ -302,17 +302,23 @@ test('/transactions: the sticky header still pins through the container wrapper 
   // WHAT PINNED LOOKS LIKE, and it is not "barely moved" — a third round of
   // the same lesson. A sticky header DOES travel, from its resting position
   // down the page to its pinned offset, and then stops. Measured here: y=297
-  // at rest, y=56 once pinned, which is the same y=56 #1772 recorded on this
-  // page. Unpinned it keeps going with the content — #1772 measured y=-303,
-  // and after a 900px scroll it would be far below that. So the assertion is
-  // about where the header LANDS, inside the scrollport, not about how far it
-  // moved.
+  // at rest. Pinned it lands at ≈0 since #4029: the 56px top bar that used to
+  // put the pin at 56 is gone, and the scroll container's `lg:p-8` top padding
+  // is compensated exactly by Table's `--v2-sticky-head` (-2rem at lg), so the
+  // header pins flush with the TOP of the scrollport. Unpinned it keeps going
+  // with the content — #1772 measured y=-303, and after a 900px scroll it
+  // would be far below that. So the assertion is about where the header LANDS,
+  // inside the scrollport, not about how far it moved. `>= 0` (not `> 0`) is
+  // the load-bearing bound now: a pin at exactly 0 is correct, and a sub-pixel
+  // rounding read of -0.0/-0.5 is the failure shape (a header floating 8px
+  // ABOVE the scrollport reads as a positive offset from the CONTENT's origin
+  // only while the bar existed).
   expect(
     after.theadTop,
-    `thead landed at y=${after.theadTop} after main scrolled ${after.scrollTop}px (pinned is ~56, unpinned is far negative)`,
-  ).toBeGreaterThan(0)
+    `thead landed at y=${after.theadTop} after main scrolled ${after.scrollTop}px (pinned is ~0, unpinned is far negative)`,
+  ).toBeGreaterThanOrEqual(0)
   expect(
     after.theadTop,
-    `thead landed at y=${after.theadTop}, too far down to be pinned against the TopBar`,
+    `thead landed at y=${after.theadTop}, too far down to be pinned against the top of the scrollport`,
   ).toBeLessThan(120)
 })

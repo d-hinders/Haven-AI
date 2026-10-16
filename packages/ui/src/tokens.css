@@ -244,19 +244,26 @@
      The rule the numbers encode, in one sentence: the mobile navigation
      overlay outranks the app chrome it slides over. That direction is not
      arbitrary. The drawer is `inset-y-0`, so its own logo band occupies the
-     same 56px as TopBar; its scrim exists to dim everything behind it, and
-     "everything" includes the bar. Let the bar win and the drawer is
-     decapitated, the scrim dims all but the top strip, and the toggle — which
-     is positioned INSIDE that strip by design, in the gap TopBar reserves for
-     it — is unreachable. Modals and toasts in turn outrank the navigation,
-     because a dialog opened from a nav link must cover the drawer.
+     same top strip the chrome does; its scrim exists to dim everything behind
+     it, and "everything" includes the chrome. Let the chrome win and the
+     drawer is decapitated, the scrim dims all but the top strip, and the
+     toggle — which is positioned INSIDE that strip by design — is
+     unreachable. Modals and toasts in turn outrank the navigation, because a
+     dialog opened from a nav link must cover the drawer.
 
      Tiers are spaced by 10 so a genuinely new layer has room to land between
      two without renumbering the scale. */
   --v2-z-content: 10; /* in-flow overlaps: badges, gradient washes */
   --v2-z-sticky: 20; /* sticky table headers */
-  --v2-z-chrome: 100; /* TopBar — the app shell's own bar */
-  /* The bottom tab bar (#2730, used by #2731) — the shell's OTHER bar, and the
+  /* The app chrome tier. Its only consumer since #4029 is the authenticated
+     shell's non-production warning line — the 2px `--v2-warning` strip along
+     the top of the app on a dev deploy. The ordering the scale encodes is
+     unchanged: the mobile navigation tiers (and modals) still outrank it, so
+     the drawer covers the line, and the line covers page content. The top bar
+     that used to own this tier was deleted (#4029, epic #4027); the tier stays
+     as the anchor the nav, tab-bar and popover tiers are ordered against. */
+  --v2-z-chrome: 100;
+  /* The bottom tab bar (#2730, used by #2731) — the shell's other bar, and the
      one tier the scale's spacing-by-10 was left room for. Between chrome and
      chrome-popover deliberately: a popover anchored in the top bar can extend
      down over the bar's band on a phone and must not be clipped by it, while
@@ -272,7 +279,19 @@
      it is added at each site, because the bar pads itself with it while the
      others clear the bar and the inset together. */
   --v2-tab-bar-h: 3.5rem;
-  --v2-z-chrome-popover: 110; /* popovers anchored in the chrome (notifications, wallet) */
+
+  /* The sticky table-header compensation (#4029): `Table`'s `STICKY_HEAD` /
+     `STICKY_CELL` pin with `top-[var(--v2-sticky-head)]`, the NEGATIVE of the
+     scroll container's top padding (the value is stored negative), so a pinned
+     header sits flush against the top of the scrollport. The default is
+     -1.5rem — the 24px `py-6` the ops shell uses. The authenticated app's
+     shell overrides it on its frame
+     (`max-lg:[--v2-sticky-head:-1rem] lg:[--v2-sticky-head:-2rem]`) to track
+     its own `<main>` padding, 16px below `lg` and 32px at and above. A shell
+     with a different top padding overrides the variable rather than the
+     primitive gaining a responsive class. */
+  --v2-sticky-head: -1.5rem;
+  --v2-z-chrome-popover: 110; /* popovers anchored in the chrome (notifications, wallet, user menu) */
   --v2-z-nav-scrim: 130; /* mobile drawer scrim — dims the chrome, hence > chrome */
   --v2-z-nav-drawer: 140; /* mobile drawer itself */
   --v2-z-nav-toggle: 150; /* the Open/Close toggle — above its own drawer, so one control does both */

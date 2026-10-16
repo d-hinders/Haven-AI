@@ -11,7 +11,7 @@ export const VIEWPORTS = [
  * ── Looking at a width that is NOT in the committed set (#2006) ──────────────
  *
  * `VIEWPORTS` above is not a list of widths, it is the input to four
- * consumers: `design-system.visual.spec.ts` (blocking full-page + TopBar
+ * consumers: `design-system.visual.spec.ts` (blocking sidebar and showcase
  * baselines), `capture-integrity.spec.ts`, `focus-visible.visual.spec.ts` and
  * `scripts/screenshot.mjs`. Adding a width there mints blocking baselines and
  * a PNG of every route in every evidence run, forever — which is why #1944

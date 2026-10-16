@@ -276,9 +276,11 @@ describe('every opacity-modified colour utility compiles to a colour (#1818)', (
     // documentation and the fix would be to delete the explanation.
     expect(bases).not.toContain('ring-current/30') // Toast.tsx:141
     // #3832 deleted the ConnectStepShell ticker and the `bg-[var(--v2-brand)]/40`
-    // comment this line used to target; TopBar's comment quotes another dead
-    // class, so the guard keeps a second real comment to be wrong about.
-    expect(bases).not.toContain('bg-[var(--v2-bg)]/85') // TopBar.tsx:44
+    // comment this line used to target; #4029 deleted TopBar, whose comment
+    // quoted the second dead class, so the shell's warning-line comment
+    // (`AuthenticatedShell.tsx`) carries the fixture now — the scanner must
+    // skip a comment quoting the dead form in the file that owns the chrome.
+    expect(bases).not.toContain('bg-[var(--v2-bg)]/85') // AuthenticatedShell.tsx
   })
 
   it('no dead class outside the triaged inventory', async () => {
@@ -345,10 +347,13 @@ describe('REGRESSION: the three shapes that have actually shipped (#1818)', () =
     ).toEqual([])
   }, COMPILE_TIMEOUT)
 
-  it('the fix TopBar actually shipped is the compiling one', async () => {
-    // Sidebar's scrim is deliberately NOT here: it moved to the shared
-    // `v2-modal-backdrop` class rather than to `bg-ink/40`, so it carries no
-    // opacity modifier at all and this guard has nothing to say about it.
+  it('the prescribed replacement — bg-bg/85 — is the compiling one', async () => {
+    // The channel-token form that #1818's fix shipped (it lived in the top
+    // bar's own background until the bar was deleted, #4029 — the same shape
+    // the shell's chrome still prescribes). Sidebar's scrim is deliberately
+    // NOT here: it moved to the shared `v2-modal-backdrop` class rather than
+    // to `bg-ink/40`, so it carries no opacity modifier at all and this guard
+    // has nothing to say about it.
     const live = await compileLive(['bg-bg/85'])
     expect([...live]).toEqual(['bg-bg/85'])
   }, COMPILE_TIMEOUT)

@@ -8,6 +8,7 @@
     "./tokens.css": "./src/tokens.css",
     "./type.css": "./src/type.css",
     "./tailwind.preset": "./tailwind.preset.js",
+    "./BackLink": "./src/BackLink.tsx",
     "./Button": "./src/Button.tsx",
     "./Card": "./src/Card.tsx",
     "./CopyButton": "./src/CopyButton.tsx",

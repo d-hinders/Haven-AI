@@ -1,7 +1,5 @@
 'use client'
 
-import { ChevronLeft } from 'lucide-react'
-import { Icon } from '@/components/ui/Icon'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 import type { ApiSchema } from '@haven_ai/core'
@@ -76,17 +74,14 @@ export default function SweepClient({ agentId }: { agentId: string }) {
 
   return (
     <div className="max-w-2xl">
+      {/* One way back, above the title, to the agent this page belongs to
+          (#4028). The in-card "Back to agent" buttons below end the flow's
+          outcome states and are calls to action, not navigation chrome. */}
       <PageHeader
+        back={{ href: `/agents/${agentId}`, label: agentLabel }}
         title="Recover funds"
         subtitle={pageSubtitle}
       />
-
-      <div className="mt-1 mb-6">
-        <Button href={`/agents/${agentId}`} variant="tertiary" size="sm" className="-ml-3">
-          <Icon icon={ChevronLeft} className="h-3.5 w-3.5" />
-          Back to agent
-        </Button>
-      </div>
 
       {loading ? (
         <Card>

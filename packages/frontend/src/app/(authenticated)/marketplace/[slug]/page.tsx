@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { AlertTriangle, ChevronLeft } from 'lucide-react'
+import { AlertTriangle } from 'lucide-react'
+import { BackLink } from '@haven_ai/ui/BackLink'
 import { Icon } from '@/components/ui/Icon'
 import { notFound as nextNotFound, useParams } from 'next/navigation'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -24,16 +25,14 @@ import { useMerchantBudgets } from '@/hooks/useMerchantBudgets'
 /**
  * The way back on a phone, where Marketplace lives in the More drawer —
  * rendered by EVERY branch of the page (loading, error, merchant-less,
- * success), the `Button` primitive (44 px hit area, focus ring), the same
- * shape as the sweep page's "Back to agent".
+ * success). The app's one back link, `BackLink` (#4028): above the title,
+ * named by the parent alone. The merchant page has no `PageHeader` (its
+ * header is `MerchantHeader`), so it renders the link directly.
  */
 function BackToMarketplace() {
   return (
-    <div className="mb-4">
-      <Button href="/marketplace" variant="tertiary" size="sm" className="-ml-3">
-        <Icon icon={ChevronLeft} className="h-3.5 w-3.5" />
-        Back to Marketplace
-      </Button>
+    <div className="mb-2">
+      <BackLink href="/marketplace" label="Marketplace" />
     </div>
   )
 }

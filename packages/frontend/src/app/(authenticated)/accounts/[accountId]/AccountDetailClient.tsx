@@ -29,6 +29,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/DropdownMenu'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { BackLink } from '@haven_ai/ui/BackLink'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Row } from '@/components/ui/Row'
@@ -259,17 +260,24 @@ export default function AccountDetailClient() {
   // "Account not found" — the account lookup will resolve once accounts load.
   if (authLoading || !user) {
     return (
-      <div role="status" aria-busy="true" aria-label="Loading account" className="max-w-5xl py-16 flex items-center justify-center gap-2">
-        <span className="w-1.5 h-1.5 rounded-full bg-[var(--v2-brand)] animate-pulse" />
-        <span className="text-xs text-[var(--v2-ink-3)]">Loading account...</span>
+      <div className="max-w-5xl">
+        {/* The way back exists in every state of the page (#4028). */}
+        <BackLink href="/accounts" label="Accounts" />
+        <div role="status" aria-busy="true" aria-label="Loading account" className="py-16 flex items-center justify-center gap-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-[var(--v2-brand)] animate-pulse" />
+          <span className="text-xs text-[var(--v2-ink-3)]">Loading account...</span>
+        </div>
       </div>
     )
   }
 
   if (!account) {
     return (
-      <div className="max-w-5xl py-16 text-center">
-        <p className="text-sm text-[var(--v2-ink-3)]">Account not found</p>
+      <div className="max-w-5xl">
+        <BackLink href="/accounts" label="Accounts" />
+        <div className="py-16 text-center">
+          <p className="text-sm text-[var(--v2-ink-3)]">Account not found</p>
+        </div>
       </div>
     )
   }
@@ -277,6 +285,7 @@ export default function AccountDetailClient() {
   return (
     <div className="max-w-5xl space-y-6">
       <PageHeader
+        back={{ href: '/accounts', label: 'Accounts' }}
         title={account.name}
         subtitle={
           'Control the funds, agent access, and recent activity for this Haven wallet.'

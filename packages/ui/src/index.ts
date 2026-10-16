@@ -4,6 +4,8 @@
 // (`@haven_ai/ui/Button`) keep working for files this barrel has not
 // enumerated. This barrel exists so a consumer can import the whole set from
 // one module; it re-exports ONLY, and adds nothing.
+export { BackLink } from './BackLink'
+export type { BackLinkProps } from './BackLink'
 export { Button } from './Button'
 export { Card } from './Card'
 export { tableColumnClass, tableHideFromClass, Table } from './Table'

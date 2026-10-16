@@ -155,7 +155,7 @@ const SCENARIOS: Scenario[] = [
     setup: (page) => serveAddFundsAccount(page, 84532),
     async assert(page) {
       const merchantPage = page.getByTestId('merchant-page')
-      await expect(merchantPage.getByRole('link', { name: 'Back to Marketplace' })).toBeVisible()
+      await expect(merchantPage.getByRole('link', { name: 'Marketplace', exact: true })).toBeVisible()
       // One offers section (#3981): no "Pay this with Haven" heading.
       await expect(merchantPage.getByRole('heading', { name: 'Pay this with Haven' })).toHaveCount(0)
       await expect(merchantPage.getByRole('heading', { name: 'Offers' })).toHaveCount(1)

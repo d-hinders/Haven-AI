@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { BackLink } from './BackLink'
 
 export type PageHeaderProps = {
   title: string
@@ -29,6 +30,14 @@ export type PageHeaderProps = {
    * knows which shape it has; the primitive owns what to do about it.
    */
   inlineActions?: boolean
+  /**
+   * The way back to the parent page, drawn above the title (#4028, epic
+   * #4027). Name the parent only: `{ href: '/agents', label: 'Agents' }`.
+   * Optional and additive: without it the header renders exactly as before.
+   * A branch of the same page that renders no `PageHeader` (a loading
+   * skeleton, a not-found card) uses `BackLink` directly with the same values.
+   */
+  back?: { href: string; label: string }
 }
 
 export function PageHeader({
@@ -38,13 +47,13 @@ export function PageHeader({
   eyebrow,
   actions,
   inlineActions = false,
+  back,
 }: PageHeaderProps) {
-  return (
-    <header
-      className={`mb-6 flex gap-4 sm:flex-row sm:items-center sm:justify-between ${
-        inlineActions ? 'flex-row items-start justify-between' : 'flex-col'
-      }`}
-    >
+  const rowClass = `flex gap-4 sm:flex-row sm:items-center sm:justify-between ${
+    inlineActions ? 'flex-row items-start justify-between' : 'flex-col'
+  }`
+  const row = (
+    <>
       <div className="min-w-0">
         {eyebrow && (
           <p className="v2-text-meta text-[var(--v2-ink-3)] uppercase tracking-wider mb-1">{eyebrow}</p>
@@ -58,6 +67,21 @@ export function PageHeader({
       {actions && (
         <div className="flex flex-wrap items-center gap-2 flex-shrink-0">{actions}</div>
       )}
+    </>
+  )
+
+  // Without `back` the markup is exactly what it was before #4028: one
+  // `<header>` that is itself the flex row. With it, the link sits ABOVE the
+  // row rather than inside the title column, so the actions stay centred
+  // against the title instead of being pushed down by the link's line.
+  if (!back) {
+    return <header className={`mb-6 ${rowClass}`}>{row}</header>
+  }
+
+  return (
+    <header className="mb-6">
+      <BackLink href={back.href} label={back.label} className="mb-2" />
+      <div className={rowClass}>{row}</div>
     </header>
   )
 }

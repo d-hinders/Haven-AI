@@ -127,7 +127,7 @@ High-level voice rules:
 - Detail routes use an id: `/accounts/[accountId]`, `/agents/[agentId]`.
 - Legacy singular collection routes should redirect to the plural route.
 - Navigation items are stable nouns. Actions such as Send, Receive, Add funds, and Approve live inside the relevant screen.
-- Authenticated pages use the shared shell: sidebar navigation, TopBar back links on the account and agent detail routes, and a PageHeader in the page body.
+- Authenticated pages use the shared shell: sidebar navigation and a PageHeader in the page body. Detail pages carry their back link in the page, above the title.
 - Every "View all" must resolve to a real page and preserve useful filters in the URL.
 - Empty states need a clear next action.
 - Reused concepts should share components. Transaction lists, action buttons, modals, and empty states should not fork visually without a reason.
@@ -176,7 +176,7 @@ Before shipping a UI change, compare it against an existing v2 screen with the s
 
 - Authenticated pages use `PageHeader`.
 - One h1 per page. Use the PageHeader action slot for page-level CTAs.
-- Detail pages rely on TopBar back links; do not duplicate a second large back affordance unless the workflow needs it. Sub-pages of a detail route (e.g. `/agents/:id/sweep`) do not get a TopBar back link — they carry their own back link to the parent detail page.
+- Detail pages carry one back link above the title: `PageHeader`'s `back` prop, or `BackLink` in a branch with no `PageHeader` (loading, not found, the merchant page's own header), so every state of the page has it. It names the parent only ("Agents", never "Back to …"); a sub-page of a detail route (e.g. `/agents/:id/sweep`) points at that detail page. Do not add a second back affordance unless the workflow needs it.
 - Do not use marketing hero type on dashboards, tables, settings, or operational views.
 
 ### Cards And Rows

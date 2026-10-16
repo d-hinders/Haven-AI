@@ -186,11 +186,12 @@ describe('MerchantPage', () => {
     for (const state of states) {
       mockUseMerchant.mockReturnValue(state)
       const { unmount } = render(<MerchantPage />)
-      const link = screen.getByRole('link', { name: 'Back to Marketplace' })
+      const link = screen.getByRole('link', { name: 'Marketplace' })
       expect(link.getAttribute('href')).toBe('/marketplace')
-      // The Button primitive, not a hand-rolled 16 px link: it carries the
-      // 44 px hit area and the focus ring on a phone.
+      // The shared BackLink (#4028), not a hand-rolled 16 px link: it carries
+      // the 44 px hit area and the focus ring on a phone.
       expect(link.className).toContain('focus-visible:')
+      expect(link.className).toContain('after:h-11')
       unmount()
     }
   })

@@ -731,7 +731,10 @@ the read itself failed, never say that; say the read failed ("Couldn't read
 your accounts just now. Check again in a moment."). The unknown-outcome
 message stays up until a sent request gets a definite answer or the account
 is found: a cancelled passkey prompt or a rate-limit refusal on the retry
-shows its own message beside it, not instead of it. If the owner edits an
+shows its own message beside it, not instead of it. So does the account limit
+on a retry, followed by an immediate re-read: the backend checks the limit
+before it would return the first attempt's account (#4044), so the account
+at the limit may be ours. If the owner edits an
 input, the next try is a new request, and the copy says that, short:
 
 ```text

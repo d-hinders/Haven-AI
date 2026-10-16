@@ -701,10 +701,52 @@ describe('NewAccountDialog — the unknown outcome is sticky (R1–R4)', () => {
 
   it('clears when a sent retry comes back with a definite refusal', async () => {
     await reachUnknown()
-    createAccount.mockRejectedValueOnce(new ApiRequestError('x', 422, { error: 'x', error_code: 'ACCOUNT_CAP_REACHED', cap: 10 }))
+    createAccount.mockRejectedValueOnce(new ApiRequestError('x', 422, { error: 'x', error_code: 'SOURCE_HAS_NO_PASSKEY' }))
     await submit()
     expect(unknownShown()).toBe(false)
     expect(screen.queryByRole('button', { name: 'Check again' })).toBeNull()
+    expect(screen.getByRole('alert')).toHaveTextContent('Operating no longer has a passkey')
+  })
+
+  /**
+   * S1 checks the cap BEFORE its idempotency replay (#4044), so on a retry the
+   * cap can be our own first attempt's account. While unknown, a cap refusal
+   * keeps the outcome, shows the cap beside it, and re-reads at once.
+   */
+  const CAP = () => new ApiRequestError('x', 422, { error: 'x', error_code: 'ACCOUNT_CAP_REACHED', cap: 10 })
+
+  it('keeps the unknown outcome on a cap refusal, shows the cap beside it and re-reads once', async () => {
+    await reachUnknown()
+    nextReadReturns([MAIN, OTHER])
+    createAccount.mockRejectedValueOnce(CAP())
+    await submit()
+
+    expect(unknownShown()).toBe(true)
+    expect(screen.getByText(/You already have 10 accounts on Base Sepolia/)).toBeInTheDocument()
+    expect(refreshAccounts).toHaveBeenCalledTimes(1)
+    // The re-read went through the check path, and it found nothing named Reserve.
+    expect(screen.getByTestId('new-account-check')).toHaveTextContent('No new account named Reserve on Base Sepolia yet.')
+  })
+
+  it('shows success when that re-read finds the account the first attempt created', async () => {
+    await reachUnknown()
+    nextReadReturns([MAIN, OTHER, account('created1', 'Reserve', 84532)])
+    createAccount.mockRejectedValueOnce(CAP())
+    await submit()
+
+    const done = await screen.findByTestId('new-account-created')
+    expect(within(done).getByText('Reserve was created on Base Sepolia')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open account' })).toHaveAttribute('href', '/accounts/created1')
+  })
+
+  it('treats the cap as definite when no unknown outcome stands', async () => {
+    createAccount.mockRejectedValueOnce(CAP())
+    setup()
+    typeName('Reserve')
+    await submit()
+    expect(unknownShown()).toBe(false)
+    expect(screen.queryByRole('button', { name: 'Check again' })).toBeNull()
+    expect(refreshAccounts).not.toHaveBeenCalled()
     expect(screen.getByRole('alert')).toHaveTextContent('You already have 10 accounts on Base Sepolia')
   })
 

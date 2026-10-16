@@ -245,14 +245,19 @@ function NewAccountDialogBody({
     // returns an empty list). The name check is the one input guard.
     if (!source || selectedChainId === null || trimmedName === '') return
     generation.current += 1
+    let recheck = false
     try {
-      await attempt(source, selectedChainId)
+      recheck = (await attempt(source, selectedChainId)) === true
     } finally {
       generation.current += 1
     }
+    // After the attempt has ended (so the generation counter keeps this check's
+    // result): the re-read the cap-while-unknown rule below asks for.
+    if (recheck) void checkAgain()
   }
 
-  async function attempt(source: PasskeySource, selectedChainId: number) {
+  /** Resolves true when the caller should re-read the list right away. */
+  async function attempt(source: PasskeySource, selectedChainId: number): Promise<boolean | void> {
     setRefusal(null)
     setCheck('idle')
 
@@ -333,9 +338,20 @@ function NewAccountDialogBody({
       }
       // A 429 is the rate limiter refusing THIS attempt before the route ran:
       // it says nothing about an earlier one, so an unknown outcome stands.
-      // Any other 4xx is the route's definite answer to a sent request.
-      if (outcome.kind !== 'rate_limited') setUnknown(null)
+      //
+      // The cap, while an unknown outcome stands, is not definite either. S1's
+      // route (`routes/hybrid-accounts.ts`, #4023) checks the per-chain cap
+      // BEFORE its idempotency replay — raised on #4044 — so the account our
+      // own first attempt created can be the one that reached the cap, and
+      // the replay that would have returned it never runs. Keep the unknown
+      // outcome, show the cap beside it, and re-read the list at once so
+      // detection can find that account. Drop this branch once S1 replays
+      // before it counts. Without a standing unknown outcome the cap is
+      // definite, as every other 4xx is.
+      const capMayBeOurs = outcome.kind === 'cap_reached' && unknown !== null
+      if (outcome.kind !== 'rate_limited' && !capMayBeOurs) setUnknown(null)
       setRefusal(outcome)
+      return capMayBeOurs
     }
   }
 

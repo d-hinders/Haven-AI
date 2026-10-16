@@ -15,7 +15,7 @@ import { OffersTable } from '@/components/marketplace/OffersTable'
 import FundMerchantModal, { eligibleFundingAgents } from '@/components/marketplace/FundMerchantModal'
 import { MerchantBudgetsList } from '@/components/marketplace/MerchantBudgetsList'
 import { useAgents } from '@/hooks/useAgents'
-import { offersOnUserNetwork, openBudgetCoversOffers } from '@/lib/marketplace'
+import { isActiveAgent, offersOnUserNetwork, openBudgetCoversOffers } from '@/lib/marketplace'
 import { useAuth } from '@/context/AuthContext'
 import { resolveDefaultAccount } from '@/lib/default-account'
 import { useBudgetRemaining } from '@/hooks/useBudgetRemaining'
@@ -146,7 +146,7 @@ export default function MerchantPage() {
   // agent it could name is ACTIVE — `eligibleFundingAgents` admits paused and
   // pending agents (the modal's own shape), and the panel must not point a
   // paused agent at an action it cannot complete.
-  const hasActiveEligibleAgent = eligibleFundingAgents(agents, funding).some((a) => a.status === 'active')
+  const hasActiveEligibleAgent = eligibleFundingAgents(agents, funding).some(isActiveAgent)
   // #4015 owner decision (a), 2026-10-16 — "No need to push for merchant
   // specific budgets here.": the header hides the action when an active
   // agent's OPEN budget already pays every offer on the user's network

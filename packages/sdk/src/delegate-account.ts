@@ -90,7 +90,16 @@ const HYBRID_DELEGATOR_INITIALIZE_ABI = [
   },
 ] as const
 
-/** CREATE2 salt Haven provisions every account with (#970) — no salted variants. */
+/**
+ * CREATE2 salt the SDK's DELEGATE-account derivation uses (#970) — the
+ * literal zero salt, vendored offline (`signer/src/delegate-account.pins.test.ts`),
+ * so installed clients keep deriving exactly what they always have (#4023).
+ * USER accounts are a different surface: since 2026-10-16 each carries a
+ * per-account deploy salt on the backend's `smart_accounts.deploy_salt`
+ * (epic #4022 slice S1) — one passkey can own several accounts — but that
+ * salt never flows through this package, whose only derivations are
+ * delegate accounts.
+ */
 const DEPLOY_SALT = pad('0x', { size: 32 })
 
 /**

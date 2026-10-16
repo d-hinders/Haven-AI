@@ -989,7 +989,7 @@ describe('delegation lifecycle API (#828)', () => {
       const SALT_ONE = '0x' + '00'.repeat(31) + '01'
       mockDb({ agent: agentRow({ treasury_address: SALTED_TREASURY }), deploySalt: SALT_ONE })
       mockEnsureDeployed.mockReset()
-      mockEnsureDeployed.mockResolvedValueOnce({ address: SALTED_TREASURY, alreadyDeployed: false, txHash: '0x' + '22'.repeat(32) })
+      mockEnsureDeployed.mockResolvedValue({ address: SALTED_TREASURY, alreadyDeployed: false, txHash: '0x' + '22'.repeat(32) })
       const salted = await app.inject({
         method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
         payload: { signature: '0x' + 'ab'.repeat(65) },

@@ -1817,6 +1817,20 @@ authority, and the same scope note holds.
 > changes, so the no-rail-authority claim above holds verbatim. Scope of
 > this re-read: this section only; `last-verified` is not bumped.
 
+> **Re-verified #4016 (2026-10-16, console Card.Section alignment):** the
+> change touches `packages/ops` UI pages only —
+> `src/app/health/page.tsx`, `src/app/doc-health/page.tsx`,
+> `src/app/feedback/page.tsx` and `src/components/customer/CustomerView.tsx`
+> (flush `Card.Header padding="none"` bands given `className="px-5"`, and
+> the default `Card.Section`s moved onto plain `px-5 py-4` blocks), plus a
+> new `scripts/measure-card-inset.mjs` geometry probe and a source-level
+> `src/__tests__/card-inset-guard.test.ts`. No client method, read, reveal,
+> sign-in navigation or backend file changes, so the no-rail-authority
+> claim above holds verbatim. Scope of this re-read: this section and the
+> files the diff touches; the invariant, custody, redemption and
+> settlement sections were NOT re-read (the diff touches no file that
+> implements them); `last-verified` is not bumped.
+
 ## 9. Owner CLI sessions — the device-code login (#2526)
 
 `haven login` mints an owner session through a browser approval rather than a

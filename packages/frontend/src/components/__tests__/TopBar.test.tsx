@@ -15,9 +15,8 @@ vi.mock('../EnvBadge', () => ({
   default: () => <span data-testid="stub-env-badge" />,
 }))
 
-vi.mock('next/navigation', () => ({
-  usePathname: () => '/dashboard',
-}))
+const navigation = vi.hoisted(() => ({ pathname: '/dashboard' as string | null }))
+vi.mock('next/navigation', () => ({ usePathname: () => navigation.pathname }))
 
 import TopBar from '../TopBar'
 
@@ -56,6 +55,7 @@ describe('TopBar', () => {
   beforeEach(() => {
     window.localStorage.clear()
     delete document.documentElement.dataset.theme
+    navigation.pathname = '/dashboard'
   })
 
   it('places the theme toggle in the right cluster', () => {
@@ -137,5 +137,56 @@ describe('TopBar', () => {
     // an account-specific action picks its account locally.
     expect(screen.queryByRole('button', { name: /active account/i })).toBeNull()
     expect(screen.queryByText('Manage accounts')).toBeNull()
+  })
+
+  // #4020 — the back link is a DETAIL-route affordance only. The resolver's
+  // regexes used to lack the `$` end anchor, so every sub-page under
+  // `/agents/<id>/` (the recover-funds sweep page, live today) inherited the
+  // hub link and the page rendered TWO back links pointing at different
+  // places: the bar's "‹ Agents" → /agents beside the page's own "Back to
+  // agent" → /agents/<id>. Sub-pages carry their own back link to the parent
+  // detail page; the bar must stay out of the way.
+  describe('back link resolves on detail routes only (#4020)', () => {
+    it('shows "Agents" → /agents on the agent detail route', () => {
+      navigation.pathname = '/agents/agent-1'
+      renderBar()
+      const link = screen.getByRole('link', { name: 'Agents' })
+      expect(link.getAttribute('href')).toBe('/agents')
+    })
+
+    it('shows "Accounts" → /accounts on the account detail route', () => {
+      navigation.pathname = '/accounts/acc-1'
+      renderBar()
+      const link = screen.getByRole('link', { name: 'Accounts' })
+      expect(link.getAttribute('href')).toBe('/accounts')
+    })
+
+    it('shows no back link on a sub-page of the agent detail route', () => {
+      // The case that failed on the unanchored resolver: /agents/<id>/sweep
+      // matched `/^\/agents\/[^/]+/` and rendered the hub link.
+      navigation.pathname = '/agents/agent-1/sweep'
+      renderBar()
+      expect(screen.queryByRole('link', { name: 'Agents' })).toBeNull()
+      expect(screen.queryByRole('link', { name: 'Accounts' })).toBeNull()
+    })
+
+    it('shows no back link on a sub-page of the account detail route', () => {
+      // Latent today (no nested route under /accounts/<id>/), pinned so a
+      // future nested route does not inherit the hub link.
+      navigation.pathname = '/accounts/acc-1/settings'
+      renderBar()
+      expect(screen.queryByRole('link', { name: 'Agents' })).toBeNull()
+      expect(screen.queryByRole('link', { name: 'Accounts' })).toBeNull()
+    })
+
+    it.each([['/agents'], ['/accounts']])(
+      'shows no back link on the %s hub page',
+      (pathname: string) => {
+        navigation.pathname = pathname
+        renderBar()
+        expect(screen.queryByRole('link', { name: 'Agents' })).toBeNull()
+        expect(screen.queryByRole('link', { name: 'Accounts' })).toBeNull()
+      },
+    )
   })
 })

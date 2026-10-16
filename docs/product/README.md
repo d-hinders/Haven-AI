@@ -176,7 +176,7 @@ Before shipping a UI change, compare it against an existing v2 screen with the s
 
 - Authenticated pages use `PageHeader`.
 - One h1 per page. Use the PageHeader action slot for page-level CTAs.
-- Detail pages rely on TopBar back links; do not duplicate a second large back affordance unless the workflow needs it.
+- Detail pages rely on TopBar back links; do not duplicate a second large back affordance unless the workflow needs it. Sub-pages of a detail route (e.g. `/agents/:id/sweep`) do not get a TopBar back link — they carry their own back link to the parent detail page.
 - Do not use marketing hero type on dashboards, tables, settings, or operational views.
 
 ### Cards And Rows

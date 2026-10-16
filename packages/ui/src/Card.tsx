@@ -68,8 +68,10 @@ function CardRoot({
  * Modes:
  * - **default** — hairline `border-t` above, white background, standard
  *   horizontal padding matching the parent Card. Use for a single content
- *   block under a section heading inside a Card with `p-5`/`p-6` padding.
- *   Negative margins bleed the border edge-to-edge.
+ *   block under a section heading inside a Card with `p-5 md:p-6` padding —
+ *   both declarations together, switching at `md`; the section's bleed does
+ *   the same, so `p-5` alone misaligns the hairline from `md` up. Negative
+ *   margins bleed the border edge-to-edge.
  * - **divided** — hairline `border-t` above, row dividers between each child.
  *   Assumes the parent Card has **no inner padding** (the dividers bleed
  *   naturally to the card edges) and children supply their own horizontal
@@ -89,7 +91,7 @@ function CardSection({
   divided?: boolean
 }) {
   if (inset) {
-    // Negative horizontal margin negates the parent Card's p-5/p-6 so the
+    // Negative horizontal margin negates the parent Card's p-5 md:p-6 so the
     // tinted background bleeds edge-to-edge.
     return (
       <div
@@ -111,7 +113,8 @@ function CardSection({
       </div>
     )
   }
-  // Default: subsection inside a Card with p-5/p-6 padding. Negative margins
+  // Default: subsection inside a Card with p-5 md:p-6 padding — both, switching
+  // at md, matching the bleed below. Negative margins
   // bleed the hairline top border to the card's inner edges.
   return (
     <div

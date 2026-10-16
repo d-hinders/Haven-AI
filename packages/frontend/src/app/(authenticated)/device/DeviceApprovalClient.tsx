@@ -161,134 +161,138 @@ export default function DeviceApprovalClient() {
         subtitle="Something is asking to manage agents from a terminal on your behalf."
       />
 
-      <Card>
-        <Card.Section>
-          <form
-            className="flex flex-col gap-5"
-            onSubmit={(event) => {
-              event.preventDefault()
-              if (reviewing) void decide(reviewing, false)
-              else void lookup(code)
-            }}
-          >
-            {/* `Input` carries no `label` prop; the pattern here is the one
-                login/page.tsx uses — an explicit label bound by `htmlFor`. */}
-            <div>
-              <label
-                htmlFor="device-user-code"
-                className="block text-xs font-medium text-[var(--v2-ink-2)] mb-1.5"
-              >
-                Code shown in the terminal
-              </label>
-              <Input
-                id="device-user-code"
-                value={code}
-                onChange={(event) => {
-                  setCode(event.target.value)
-                  // Editing the code invalidates what was looked up. Leaving
-                  // the old label on screen next to a new code is exactly the
-                  // mismatch this whole step exists to prevent.
-                  // Bump the generation so a lookup already in flight for the
-                  // OLD code cannot land its label beside this new one.
-                  generation.current += 1
-                  if (outcome.kind !== 'idle') setOutcome({ kind: 'idle' })
-                }}
-                placeholder="XXXX-XXXX"
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </div>
+      {/* Padded card, no Card.Section: a lone default section at the top of
+          a card draws only a hairline on the card's own top edge (a second
+          rule under the card border) and its -mx-5/md:-mx-6 bleed assumes a
+          p-5 md:p-6 parent this card does not have (#4016). The card owns the
+          padding instead, so the form insets 20px (24px at md+) like every
+          other p-5 md:p-6 card's content. */}
+      <Card className="p-5 md:p-6">
+        <form
+          className="flex flex-col gap-5"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (reviewing) void decide(reviewing, false)
+            else void lookup(code)
+          }}
+        >
+          {/* `Input` carries no `label` prop; the pattern here is the one
+              login/page.tsx uses — an explicit label bound by `htmlFor`. */}
+          <div>
+            <label
+              htmlFor="device-user-code"
+              className="block text-xs font-medium text-[var(--v2-ink-2)] mb-1.5"
+            >
+              Code shown in the terminal
+            </label>
+            <Input
+              id="device-user-code"
+              value={code}
+              onChange={(event) => {
+                setCode(event.target.value)
+                // Editing the code invalidates what was looked up. Leaving
+                // the old label on screen next to a new code is exactly the
+                // mismatch this whole step exists to prevent.
+                // Bump the generation so a lookup already in flight for the
+                // OLD code cannot land its label beside this new one.
+                generation.current += 1
+                if (outcome.kind !== 'idle') setOutcome({ kind: 'idle' })
+              }}
+              placeholder="XXXX-XXXX"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </div>
 
+          {reviewing && (
+            // `ApprovalRequiredBanner`, not a hand-rolled tinted div: this is
+            // the one block on the page carrying attacker-chosen text and the
+            // sentence that should stop a wrong approval, and a flat
+            // `--v2-surface` tint reads as a resting shade rather than a
+            // notice. `warning` is literal here, not decorative.
+            //
+            // Focusable, because the step change is silent otherwise: the
+            // submit button is one node whose label flips from Continue to
+            // Approve, so a keyboard or screen-reader user could be left
+            // focused on a button that quietly changed meaning. Focus moves
+            // here instead, which reads the requester out before the decision
+            // — the same order the sighted screen enforces.
+            //
+            // Focus alone, with NO `aria-live`. It carried one and that was
+            // redundant: moving focus to a container already announces its
+            // contents, so a live region on the same node risks saying it
+            // twice — once for the mutation, once for the focus landing.
+            // `role="status"` would be the same thing under another name.
+            <div
+              ref={reviewPanel}
+              tabIndex={-1}
+              data-testid="device-client-label"
+              className="focus-visible:outline-none"
+            >
+              <ApprovalRequiredBanner title="The request says it is from" tone="warning">
+                <p className="text-sm font-medium text-[var(--v2-ink)] [overflow-wrap:anywhere]">
+                  {reviewing.clientLabel?.trim() ? reviewing.clientLabel : 'An unnamed program'}
+                </p>
+                <p className="mt-2">
+                  {reviewing.clientLabel?.trim()
+                    ? 'If you did not start this from your own terminal just now, deny it.'
+                    : 'It sent no name. A CLI you started yourself normally sends one, so treat an unnamed request as a reason to deny.'}
+                </p>
+              </ApprovalRequiredBanner>
+            </div>
+          )}
+
+          {/*
+            The scope, in the two halves a person deciding actually needs.
+            Not a restatement of the allow-list: a list of twenty routes is
+            not something anyone reads before clicking Approve.
+          */}
+          <div className="text-sm leading-relaxed text-[var(--v2-ink-2)]">
+            <p className="mb-2">
+              <strong className="text-[var(--v2-ink)]">It can</strong> create and manage agents,
+              set up a connection, and read your account — wallets, activity and transactions.
+            </p>
+            <p>
+              <strong className="text-[var(--v2-ink)]">It cannot</strong> sign anything, approve a
+              budget, change your signers, move funds, change your credentials, or re-key an
+              agent — neither its delegate key nor its API key. Approving a budget stays with
+              you, here.
+            </p>
+          </div>
+
+          {outcome.kind === 'error' && (
+            <p role="alert" className="text-sm text-[var(--v2-danger)]">
+              {outcome.message}
+            </p>
+          )}
+
+          <div className="flex gap-3">
+            <Button type="submit" disabled={!code.trim() || busy}>
+              {reviewing
+                ? submitting === 'approve'
+                  ? 'Approving…'
+                  : 'Approve'
+                : submitting === 'lookup'
+                  ? 'Checking…'
+                  : 'Continue'}
+            </Button>
+            {/* `ghost`, not `tertiary`. Tertiary is the system's weakest
+                variant — borderless muted text — and pairing it against a
+                filled primary Approve weights this screen toward granting,
+                on the one screen built to stop a rushed approval. Ghost
+                keeps a border, so Deny reads as a real second option. */}
             {reviewing && (
-              // `ApprovalRequiredBanner`, not a hand-rolled tinted div: this is
-              // the one block on the page carrying attacker-chosen text and the
-              // sentence that should stop a wrong approval, and a flat
-              // `--v2-surface` tint reads as a resting shade rather than a
-              // notice. `warning` is literal here, not decorative.
-              //
-              // Focusable, because the step change is silent otherwise: the
-              // submit button is one node whose label flips from Continue to
-              // Approve, so a keyboard or screen-reader user could be left
-              // focused on a button that quietly changed meaning. Focus moves
-              // here instead, which reads the requester out before the decision
-              // — the same order the sighted screen enforces.
-              //
-              // Focus alone, with NO `aria-live`. It carried one and that was
-              // redundant: moving focus to a container already announces its
-              // contents, so a live region on the same node risks saying it
-              // twice — once for the mutation, once for the focus landing.
-              // `role="status"` would be the same thing under another name.
-              <div
-                ref={reviewPanel}
-                tabIndex={-1}
-                data-testid="device-client-label"
-                className="focus-visible:outline-none"
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => void decide(reviewing, true)}
               >
-                <ApprovalRequiredBanner title="The request says it is from" tone="warning">
-                  <p className="text-sm font-medium text-[var(--v2-ink)] [overflow-wrap:anywhere]">
-                    {reviewing.clientLabel?.trim() ? reviewing.clientLabel : 'An unnamed program'}
-                  </p>
-                  <p className="mt-2">
-                    {reviewing.clientLabel?.trim()
-                      ? 'If you did not start this from your own terminal just now, deny it.'
-                      : 'It sent no name. A CLI you started yourself normally sends one, so treat an unnamed request as a reason to deny.'}
-                  </p>
-                </ApprovalRequiredBanner>
-              </div>
-            )}
-
-            {/*
-              The scope, in the two halves a person deciding actually needs.
-              Not a restatement of the allow-list: a list of twenty routes is
-              not something anyone reads before clicking Approve.
-            */}
-            <div className="text-sm leading-relaxed text-[var(--v2-ink-2)]">
-              <p className="mb-2">
-                <strong className="text-[var(--v2-ink)]">It can</strong> create and manage agents,
-                set up a connection, and read your account — wallets, activity and transactions.
-              </p>
-              <p>
-                <strong className="text-[var(--v2-ink)]">It cannot</strong> sign anything, approve a
-                budget, change your signers, move funds, change your credentials, or re-key an
-                agent — neither its delegate key nor its API key. Approving a budget stays with
-                you, here.
-              </p>
-            </div>
-
-            {outcome.kind === 'error' && (
-              <p role="alert" className="text-sm text-[var(--v2-danger)]">
-                {outcome.message}
-              </p>
-            )}
-
-            <div className="flex gap-3">
-              <Button type="submit" disabled={!code.trim() || busy}>
-                {reviewing
-                  ? submitting === 'approve'
-                    ? 'Approving…'
-                    : 'Approve'
-                  : submitting === 'lookup'
-                    ? 'Checking…'
-                    : 'Continue'}
+                {submitting === 'deny' ? 'Denying…' : 'Deny'}
               </Button>
-              {/* `ghost`, not `tertiary`. Tertiary is the system's weakest
-                  variant — borderless muted text — and pairing it against a
-                  filled primary Approve weights this screen toward granting,
-                  on the one screen built to stop a rushed approval. Ghost
-                  keeps a border, so Deny reads as a real second option. */}
-              {reviewing && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  disabled={busy}
-                  onClick={() => void decide(reviewing, true)}
-                >
-                  {submitting === 'deny' ? 'Denying…' : 'Deny'}
-                </Button>
-              )}
-            </div>
-          </form>
-        </Card.Section>
+            )}
+          </div>
+        </form>
       </Card>
     </>
   )

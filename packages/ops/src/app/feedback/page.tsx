@@ -134,6 +134,7 @@ function FeedbackView({ client }: { client: ReturnType<typeof useOpsClient> }) {
             <Card.Header
               as="h2"
               padding="none"
+              className="px-5"
               title="Messages"
               description="Newest first. A message disappears from this page when it expires; the count is the only content shown until you reveal one."
               actions={

@@ -1544,8 +1544,9 @@ export default function DesignSystemPage() {
       <Section
         title="Card.Section — nested content without grey-on-white"
         description="When you need to group content inside a card, use Card.Section instead of a grey inner wrapper. Renders a hairline top border that bleeds to the card's edges — the canonical way to subsection a card. Pass `divided` for a row list (auto row dividers, no horizontal padding so child rows own theirs)."
+        testId="card-section-default"
       >
-        <Card hover={false} className="p-5">
+        <Card hover={false} className="p-5 md:p-6">
           <div>
             <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Operating wallet</h3>
             <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Base · 0x8f4F…6f4C</p>

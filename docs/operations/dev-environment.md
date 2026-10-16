@@ -131,6 +131,19 @@ last-verified: "2026-10-15"
 >
 > Nothing else in this document was re-verified, and `last-verified` is not bumped.
 
+> **Re-verified (#4012, 2026-10-16, `ETH_GETLOGS_MAX_BLOCK_RANGE` added):** a
+> new optional backend variable: the widest `eth_getLogs` block range the RPC
+> provider serves. The x402 settlement sweepers never ask for more. Dev's RPC
+> is the Alchemy dev app on the free plan, which serves **10**. Unset, the
+> sweepers learn that limit from the provider's refusal, which costs one
+> refused call per chain per hour and a `provider_log_range_limit` warn in the
+> backend logs. Set `ETH_GETLOGS_MAX_BLOCK_RANGE=10` on dev while it stays on
+> the free plan, and unset it (or raise it) after a PAYG upgrade. On a
+> 10-block cap the erc7710 sweep scans nothing (its settlement windows do not
+> fit the call budget). The eip3009 sweep still works, 200 blocks per attempt.
+> No other variable, value or deploy step changes. Nothing else in this
+> document was re-verified, and `last-verified` is not bumped.
+
 > **Re-verified (2026-10-09, `ALCHEMY_HISTORY_API_KEY` added):** a new
 > optional backend variable. When set, Base and Base Sepolia transaction
 > history is read through Alchemy's transfers API (`alchemy_getAssetTransfers`,

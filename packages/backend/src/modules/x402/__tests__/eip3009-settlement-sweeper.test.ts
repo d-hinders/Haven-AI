@@ -53,6 +53,7 @@ vi.mock('../../../infra/prices.js', async (importOriginal) => ({
 import { randomUUID } from 'node:crypto'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
+import { findAuthorizationUsedTx } from '../../../infra/chain/authorization-used-scanner.js'
 import {
   findSweepableEip3009Intents,
   recordEip3009MerchantSettlement,
@@ -383,21 +384,42 @@ describeDb('passive eip3009 settlement sweep (#3888)', () => {
     expect(feedSettledPaymentBestEffort).not.toHaveBeenCalled()
   })
 
-  it('AC 5: a failing log scan is "not known yet" — nothing written, nothing backoff-penalised', async () => {
+  it('AC 5 (#4012): a failing log scan is "not known yet" — nothing written, backed off without moving the cursor, never fruitless', async () => {
     const { agentId, userId } = await seedAgent()
     const p = await fundedPayment(agentId, userId)
     getBlockNumber.mockResolvedValue(HEAD_BLOCK)
     getTransactionReceipt.mockResolvedValue({ blockNumber: FUNDING_BLOCK })
+    let available = false
+    const findUsed = vi.fn(async (...args: Parameters<Eip3009ChainDeps['findUsed']>) =>
+      available ? findAuthorizationUsedTx(...args) : ({ status: 'unavailable' as const }))
 
-    const result = await runEip3009SettlementSweepTick(silentLog, {
-      chain: chainDeps({
-        findUsed: async () => ({ status: 'unavailable' as const }),
-      }),
-    })
+    const result = await runEip3009SettlementSweepTick(silentLog, { chain: chainDeps({ findUsed }) })
 
     expect(result.recorded).toBe(0)
     expect(result.chainsUnavailable).toBe(1)
+    expect(result.unresolved).toBe(0)
     expect((await readIntent(p.id)).machine_metadata.merchant_settlement_tx_hash ?? null).toBeNull()
+
+    // Backed off: the next tick does not ask again.
+    const held = await runEip3009SettlementSweepTick(silentLog, { chain: chainDeps({ findUsed }) })
+    expect(held.suppressed).toBe(1)
+    expect(findUsed).toHaveBeenCalledTimes(1)
+
+    // Once the backoff runs out and the chain answers, the scan starts at the
+    // FUNDING block again — the failure never advanced the cursor — and the
+    // settlement it would otherwise have skipped is recorded.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(Date.now() + 2 * 60 * 1000)
+      available = true
+      chainCarries({ nonce: p.nonce })
+      const recovered = await runEip3009SettlementSweepTick(silentLog, { chain: chainDeps({ findUsed }) })
+      expect(findUsed).toHaveBeenCalledTimes(2)
+      expect((findUsed.mock.calls[1] as unknown as [number, string, string, string, { fromBlock: number }])[4].fromBlock).toBe(FUNDING_BLOCK)
+      expect(recovered.recorded).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('AC 5: block ranges are bounded to the span past the funding block', async () => {

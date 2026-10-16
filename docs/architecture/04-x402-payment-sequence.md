@@ -1758,18 +1758,32 @@ gaps below are permanent for the payments they affect while the database still
 returns them as candidates for a full day: a design that let the oldest
 candidate anchor one shared range would let a single stuck row freeze the scan
 short of the chain head and starve every newer payment on that chain. Overlapping
-windows share their `eth_getLogs` calls (one per 500-block batch, filtered by the
-pinned manager address and the redemption topic), a hard budget of 20 batches per
-chain per tick applies, a candidate the budget did not reach is left untouched
+windows share their `eth_getLogs` calls (filtered by the pinned manager address and
+the redemption topic). Each call covers the **provider's** block span, not a fixed
+one (#4012): the 500-block default, narrowed by `ETH_GETLOGS_MAX_BLOCK_RANGE` and by
+any limit a range refusal named (`infra/chain/log-range-limit.ts`; a learned limit
+expires after an hour, so a plan upgrade takes effect without a redeploy). A hard
+budget of 20 calls per chain per tick applies. A window that cannot fit that budget
+at the provider's span is **not walked**: its candidates back off and a warn
+(`provider_log_range_limit`) names the cause. On Alchemy's free plan (10 blocks) no
+window fits, so the erc7710 sweep scans nothing there. That is an accepted loss of
+passive recovery on that plan, not of the payment: the agent-reported path is
+unaffected. A candidate the budget did not reach is left untouched
 rather than judged, an exponential backoff keeps a fruitlessly-scanned candidate
 from spending the budget every tick, and a 90-second grace means the ordinary
 agent-reported completion happens first so the sweep costs nothing on the happy
 path. **Any** RPC failure
 — an unreadable head, a failed batch — abandons the whole scan for that chain
 and returns "not known yet": nothing is confirmed, nothing is marked failed, and
-there is no in-tick retry, so a dead RPC cannot become a hot loop. A partial log
-index is never used, because "hash absent from a truncated range" is
-indistinguishable from "not settled".
+there is no in-tick retry, so a dead RPC cannot become a hot loop. A failed log
+scan also backs off every candidate it left unjudged, on a separate growing
+schedule capped at an hour, so a provider that refuses the request is not asked
+the same thing every two minutes for a day (#4012). A refusal that names a
+narrower span is the exception: the next tick asks a different, fitting
+question, so nothing is backed off. An unreadable clock costs one read per
+chain and is never backed off. A partial log index is never used, because
+"hash absent from a truncated range" is indistinguishable from "not settled",
+and a scan that its batch budget cuts short counts as partial.
 
 **Accepted residual gaps.** Three, and all three stay `submitted` with no
 evidence row rather than being guessed at. (A *fourth* state — `confirmed` with
@@ -1890,7 +1904,7 @@ the signer, the SDK and the backend — one derivation, one pinned encoding).
 **And a second sweep pass finds the settlement**: `runEip3009SettlementSweepTick`
 runs in the same leader-gated tick as the erc7710 sweep, scans the pinned
 token's `AuthorizationUsed(delegate EOA, derived nonce)` log (both arguments
-are indexed, so one bounded, batched `eth_getLogs` per candidate names the
+are indexed, so a bounded, batched `eth_getLogs` per candidate names the
 transaction exactly), and hands it to the SAME seam the agent-reported path
 uses — `observeEip3009MerchantSettlement`, with its full
 `verifySettlementTransferTx` checks and the guarded compare-and-set writer.
@@ -1901,6 +1915,19 @@ hash ahead of a settlement that exists. The candidate window anchors on the
 FUNDING confirm (not on the report grace), so the hash lands before the
 feed's funding-hash selection runs; a hash already pinned is left alone
 (the writer's CAS refuses it anyway).
+
+The scan's cost is bounded in calls, not blocks (#4012). Each candidate makes
+at most 20 `eth_getLogs` calls per tick, at the provider's span (the same
+`log-range-limit.ts` narrowing as the erc7710 sweep), and the whole chain makes
+at most 20 calls per tick across every candidate. A narrow span (10 blocks on
+Alchemy's free plan) therefore covers 200 blocks per attempt, and the in-memory
+cursor walks forward across later ticks. A genuine settlement sits a few hundred
+blocks past the funding confirm, so it is still reached. A failed read of a
+candidate's own (its funding receipt, `authorizationState`, or the log scan)
+writes nothing, judges nothing and leaves the cursor where it was. It backs the
+candidate off on a growing schedule capped at an hour, kept apart from the
+fruitless backoff, and the next successful read clears it. An unreadable chain
+head is chain-wide and is never backed off.
 
 `authorizationState` is a cheap pre-check, never proof — `cancelAuthorization`
 sets it too — so a `false` answer only skips the log scan and a `true` answer

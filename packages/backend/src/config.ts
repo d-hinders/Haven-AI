@@ -216,6 +216,20 @@ export function parseRpcFallbackUrl(raw: string | undefined): string {
   return raw?.trim() ?? ''
 }
 
+/**
+ * #4012: ETH_GETLOGS_MAX_BLOCK_RANGE — the widest `eth_getLogs` block range the
+ * RPC provider serves (Alchemy's free plan: 10). The settlement sweepers never
+ * ask for more. Unset, blank, zero, negative or non-integer is "no cap": the
+ * sweepers keep their own default span and still learn a provider's limit from
+ * its refusal (`infra/chain/log-range-limit.ts`), so this only saves the one
+ * refused call that learning costs.
+ */
+export function parseGetLogsMaxBlockRange(raw: string | undefined | null): number | null {
+  const n = Number(raw?.trim())
+  if (!raw?.trim() || !Number.isInteger(n) || n <= 0) return null
+  return n
+}
+
 /** #2511, kept as a named call site so the Sepolia consequence has one home. */
 export function warnPublicBaseSepoliaRpc(raw: string | undefined): string {
   return warnPublicRpc({
@@ -385,6 +399,8 @@ export const config = {
   // ahead of the public node in the failover transport. Never logged.
   rpcUrlBaseFallback: parseRpcFallbackUrl(process.env.RPC_URL_BASE_FALLBACK),
   rpcUrlBaseSepoliaFallback: parseRpcFallbackUrl(process.env.RPC_URL_BASE_SEPOLIA_FALLBACK),
+  // #4012: provider's `eth_getLogs` range cap, when known. Null = learn it.
+  getLogsMaxBlockRange: parseGetLogsMaxBlockRange(process.env.ETH_GETLOGS_MAX_BLOCK_RANGE),
 
   // Optional (features degrade gracefully without these)
   gnosisscanApiKey: process.env.GNOSISSCAN_API_KEY ?? '',

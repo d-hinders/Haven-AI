@@ -101,6 +101,12 @@ unchanged and is not described here — see
 [`../contributing/branch-and-release-flow.md`](../contributing/branch-and-release-flow.md)
 and the `release` skill.
 
+> **Re-verified unchanged (#4012, 2026-10-16, `ETH_GETLOGS_MAX_BLOCK_RANGE` added):**
+> - **What changed.** `config.ts` gains `getLogsMaxBlockRange`, read only by the x402 settlement sweepers' `eth_getLogs` span (`infra/chain/log-range-limit.ts`). No connector, dist-tag or channel variable is touched.
+> - **What did not.** No dist-tag, channel or `HAVEN_CONNECTOR_CHANNEL` behaviour moves.
+>
+> The rest of this document was not re-read for it, and `last-verified` is not bumped.
+
 > **Re-verified unchanged (#3732, 2026-10-07, the runtime picker's no-default rule):**
 > - **What changed.** `connect/src/runtime.ts`: the default prompt rung now passes the hint scan's `env` to the installed-client prompt (new `promptRuntimeByInstalledClient` dep), and the prompt itself never pre-selects — an empty answer re-asks and aborts with `runtime_prompt_aborted` after three attempts, writing nothing. `connect/src/installed-clients.ts` (not covered here) gains a `~/.claude.json`-`mcpServers` evidence path and the "(suggested)" marker, which changes which candidate the picker SUGGESTS, not any connector command the route builds.
 > - **What did not.** No dist-tag, channel or `HAVEN_CONNECTOR_CHANNEL` behaviour moves; the loop's `--runtime` / `--json` guidance still holds.

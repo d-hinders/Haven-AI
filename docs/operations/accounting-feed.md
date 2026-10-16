@@ -163,7 +163,8 @@ Transactions, start there; if it has a row, stay here.
 
 **Settlement-side reasons and fixes** (`settlement-sweeper.ts`, verified at
 this head). Three `warn` lines can name such a payment; only the first carries
-a `remedy` field, the other two carry a `reason`:
+a `remedy` field, the other two carry a `reason`. A fourth, chain-level line
+(#4012) explains why NO erc7710 payment on a chain is being swept:
 
 | line | `reason` | what it means | fix |
 |---|---|---|---|
@@ -172,6 +173,7 @@ a `remedy` field, the other two carry a `reason`:
 | `Settlement sweep confirmed an erc7710 payment but no evidence row landed` (`paymentId`, `agentId`, `txHash`, `chainId`, `outcome`, `reason`) | `missing_resource_url`, `intent_not_found`, `write_threw` | the intent flipped `submitted → confirmed` but the `machine_payment_evidence` write failed; the tick counts it as `evidenceFailed`, not `evidencePushed` | nothing, at first: the recovery pass re-derives the hole from state (confirmed erc7710 intent, no evidence row) and retries it every tick — `evidenceRecovered` counts the ones that close |
 | `Settled erc7710 payment is confirmed with no evidence row and the row could not be written` (same fields, from the recovery pass, every attempt it cannot satisfy) | `missing_resource_url` | the one non-transient cause: `machine_payment_evidence.resource_url` is NOT NULL and the intent's `payment_resource_url` and `x402_resource_url` are both null, so the row can never be written | set the intent's resource URL to the merchant resource the payment paid for. The recovery pass backs a repeatedly failing payment off exponentially from the 2-minute tick to a ceiling of **1 h** (`SCAN_BACKOFF_MAX_MS`), so a long-stuck payment may wait up to an hour after the fix; the backoff is in-memory, so **restarting the leader clears it**. After **24 h** (`SWEEP_RECOVERY_HORIZON_SECONDS`) the payment leaves the recovery horizon and needs a manual evidence write — the same `POST /machine-payments/evidence` re-report |
 | same line | `intent_not_found`, `write_threw` | transient (a database blip, a lost connection) | the next tick closes it; if it repeats, read `err` on the neighbouring `Settlement sweep evidence recovery failed` line |
+| `Settlement sweep: settlement windows exceed the eth_getLogs call budget at this provider's block-range limit` (`chainId`, `reason`, `batchBlocks`, `maxBatches`, `windows`, `remedy`; #4012) — chain-level, names no payment | `provider_log_range_limit` | the RPC provider serves fewer `eth_getLogs` blocks per call than a settlement window needs inside the 20-call budget (Alchemy's free plan serves 10), so the sweep scans nothing on that chain and backs its candidates off (≤ 1 h). The same `reason` on `…refused the eth_getLogs block range — narrowing the span` is the hourly learning call, which is expected | upgrade the RPC plan (a learned limit expires within the hour, so no redeploy is needed). Until then the payments are recovered the way `remedy` says: re-report the settlement hash. `ETH_GETLOGS_MAX_BLOCK_RANGE` only removes the learning call. It cannot make a window fit |
 
 ## Where it shows
 

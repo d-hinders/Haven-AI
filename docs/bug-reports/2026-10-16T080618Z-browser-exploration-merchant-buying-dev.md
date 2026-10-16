@@ -5,6 +5,8 @@ covers:
   - packages/frontend/src/components/marketplace/HowToBuyPanel.tsx
   - packages/frontend/src/components/marketplace/MerchantHeader.tsx
   - packages/frontend/src/components/marketplace/OffersTable.tsx
+  - packages/frontend/src/lib/marketplace.ts
+  - packages/frontend/src/app/(authenticated)/marketplace/[slug]/page.tsx
 last-verified: "2026-10-16"
 ---
 

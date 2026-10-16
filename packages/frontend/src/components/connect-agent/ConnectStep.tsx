@@ -148,7 +148,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
             // the budget" over "the connector is finishing local setup" named
             // one thing and described another. The row stays row 3 and stays
             // working, so the list never steps backwards on its way to
-            // "Review and sign".
+            // "Review and approve".
             title: 'Preparing the approval',
             children: (
               // #1377 C: static text — polling must never swap it. The modal
@@ -167,11 +167,12 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           rows={connectedRows({
             id: 'approve',
             state: 'active',
-            // #1684: the modal subtitle names the gate here ("Approve the
-            // agent budget", pinned by e2e/connect-agent.spec.ts), so this
-            // heading says what the row asks for in other words. One sentence,
-            // once per viewport.
-            title: 'Review and sign',
+            // The modal subtitle names the gate ("Approve the agent budget",
+            // pinned by e2e/connect-agent.spec.ts). The heading shares its
+            // verb on purpose (owner decision 2026-10-16): the owner approves,
+            // never "signs" (copy-guidelines.md), which outranks #1684's
+            // "say it in other words" for this one row.
+            title: 'Review and approve',
             wideBodyOnMobile: true,
             children: (
               <DelegationApprovalStep

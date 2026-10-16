@@ -107,14 +107,14 @@ export function DelegationApprovalStep({
       <AgentRulesSummary
         // #1684: no card heading — the modal subtitle already reads "Approve
         // the agent budget" above this card, and since #3832 the step-list
-        // row around it says "Review and sign". One sentence, once.
+        // row around it says "Review and approve". One sentence, once.
         title={null}
         // #1684: one line, not three sentences. What the table below cannot
         // say is kept: the refill, and the guarantee that nothing executes
         // outside this budget — the only statement of it anywhere in the
         // flow, on the screen that grants spend authority. The per-period
         // amount is dropped because the Budget row already carries it.
-        description={`You sign once to give ${status.agent.name ?? 'this agent'} a budget that refills every period — nothing executes outside it.`}
+        description={`You approve once to give ${status.agent.name ?? 'this agent'} a budget that refills every period — nothing executes outside it.`}
         density="compact"
         items={[
           {
@@ -176,7 +176,7 @@ export function DelegationApprovalStep({
           ready={ready}
           input={grantInput}
           label="Approve budget"
-          busyLabel={confirming ? 'Finishing…' : 'Waiting for signature…'}
+          busyLabel={confirming ? 'Finishing…' : 'Waiting for your approval…'}
           // #3895: this screen approves; the agent page sets. Each caller
           // supplies the failure sentence its own button's verb carries.
           // The owner approves by signing, so the sentence never makes

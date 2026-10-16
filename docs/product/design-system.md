@@ -1723,11 +1723,14 @@ Rules:
   ticker or badge restating either.
 - **A row heading says what is happening now.** A working row names the work
   in flight, not the gate it leads to: while the connector finishes local
-  setup, row 3 reads "Preparing the approval", and becomes "Review and sign"
+  setup, row 3 reads "Preparing the approval", and becomes "Review and approve"
   once the approval opens.
 - **Name a gate once per viewport** (#1684). When the modal subtitle names the
-  action, the row heading says it in other words ("Review and sign" under
-  "Approve the agent budget").
+  action, the row heading says what the row asks for rather than repeating the
+  subtitle. One exception: the approve row reads "Review and approve" under
+  "Approve the agent budget" — the owner approves and never "signs"
+  (copy-guidelines.md; owner decision 2026-10-16), and that outranks avoiding a
+  shared verb.
 - A row's done state comes from state that only moves forward (the
   connect flow's `promptCopied`, latched per setup and keyed by `setup_id`, so
   "Create a new setup" starts uncopied), never from a value a later action can

@@ -214,7 +214,7 @@ describe('ConnectStep step list (#3832)', () => {
     expect(rows(container)).toEqual([
       { state: 'done', title: 'Prompt received by your agent' },
       { state: 'done', title: 'Agent connected' },
-      { state: 'active', title: 'Review and sign' },
+      { state: 'active', title: 'Review and approve' },
     ])
     const third = container.querySelectorAll('ol[aria-label="Connection steps"] > li')[2]
     expect(third.textContent).toContain(`approval for agent-1 on ${STATUS.setup_id}`)

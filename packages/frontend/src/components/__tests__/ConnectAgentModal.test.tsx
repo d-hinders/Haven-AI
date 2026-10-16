@@ -188,5 +188,13 @@ describe('ConnectAgentModal stepper', () => {
     expect(current[0]).toHaveTextContent(`Step ${index + 1} of 3`)
     expect(current[0]).toHaveTextContent(label)
   })
-})
 
+  it('reads all-done once the budget is approved: no step is current', () => {
+    mockUseAgentConnectionSetup.mockReturnValue(
+      flow({ step: 'connect', currentStepIndex: 2, connectView: { kind: 'active' } }),
+    )
+    render(<ConnectAgentModal open onClose={vi.fn()} />)
+    expect(document.querySelectorAll('[aria-current="step"]')).toHaveLength(0)
+    expect(screen.getByText(/Step 3 of 3, completed/)).toBeInTheDocument()
+  })
+})

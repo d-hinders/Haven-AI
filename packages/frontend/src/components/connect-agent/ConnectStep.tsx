@@ -151,9 +151,11 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
             // "Review and sign".
             title: 'Preparing the approval',
             children: (
-              // #1377 C: static text — polling must never swap it.
+              // #1377 C: static text — polling must never swap it. The modal
+              // subtitle already says "Finishing local setup"; this line only
+              // sets the wait, so the work is named once per viewport.
               <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                The connector is finishing local setup. This usually takes a few seconds.
+                This usually takes a few seconds.
               </p>
             ),
           }, manualPath)}

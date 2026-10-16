@@ -1663,7 +1663,12 @@ Rules:
   top-aligns it: no reserved floor, no centring. Between sub-states it eases
   its height from the old content to the new (200ms, none under
   `prefers-reduced-motion: reduce`), which is how #1377's no-jump intent is
-  kept now that a short sub-state no longer sits in a 340px band.
+  kept for the body now that a short sub-state no longer sits in a 340px band.
+  The dialog itself is still vertically centred by `Modal`, so a height change
+  also slides its header and band; the ease turns that into motion rather than
+  a jump, but it is not a still header.
+- Once the step is finished (budget approved) the band reads all-done
+  (`currentStep={totalSteps}`), not Connect in progress over a success screen.
 
 It is local to `components/connect-agent/` because it has one call site; a
 second call site is the trigger to promote it to `components/ui/` with a

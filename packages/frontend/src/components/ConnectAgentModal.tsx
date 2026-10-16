@@ -108,10 +108,14 @@ export default function ConnectAgentModal({
         // for another mid-flow — a horizontal 1 → 2 → 3 band, then a vertical
         // numbered list — so the user met two counters. The step-3 list
         // (ConnectSteps) is now an unnumbered status checklist: it reports
-        // progress WITHIN the Connect step and never counts.
+        // progress WITHIN the Connect step and never counts. Once the budget
+        // is approved the flow is finished, so the band reads all-done
+        // rather than Connect still in progress over a success screen.
         <StepProgress
           totalSteps={flow.setupStepCount}
-          currentStep={Math.max(flow.currentStepIndex, 0)}
+          currentStep={
+            flow.connectView?.kind === 'active' ? flow.setupStepCount : Math.max(flow.currentStepIndex, 0)
+          }
           labels={SETUP_STEP_LABELS}
         />
       }

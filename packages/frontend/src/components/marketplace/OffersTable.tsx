@@ -110,7 +110,8 @@ function OfferCard({
  * (≈48.75/15/13.75/22.5); #4015 moved width from Offer to Price, because at
  * 1280 a 15% Price cell left ≈115px for text and a one-agent budget answer
  * ("Delegate can pay this") wrapped under the price
- * (`offers-table-alignment-measure.spec.ts` measures it on one line).
+ * (`merchant-page-fit-measure.spec.ts` measures it on one line;
+ * `offers-table-alignment-measure.spec.ts` keeps the two tables aligned).
  */
 const OFFER_COLUMN_LAYOUT = (
   <colgroup>

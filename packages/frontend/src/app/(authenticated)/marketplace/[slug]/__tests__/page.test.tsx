@@ -520,6 +520,19 @@ describe('MerchantPage', () => {
     expect(screen.getAllByRole('button', { name: 'Set a budget for this merchant' }).length).toBeGreaterThanOrEqual(1)
   })
 
+  it('keeps the header action while the merchant-budgets wire is loading or failed, even with a covering open budget — no hiding on a guess', () => {
+    for (const state of [
+      { budgets: undefined, loading: true, error: null },
+      { budgets: undefined, loading: false, error: 'boom' },
+    ]) {
+      seedPayingState()
+      mockUseMerchantBudgets.mockReturnValue({ ...state, forbidden: false, refetch: vi.fn() })
+      const { unmount } = render(<MerchantPage />)
+      expect(screen.getByText('Give one of your agents a budget that pays only Ampersend Demo API.')).toBeDefined()
+      unmount()
+    }
+  })
+
   it('counts only the offers on the user\'s network: an open budget there covers them even with an unpayable offer on another network', () => {
     seedPayingState(verifiedErc7710Funding, [offer(), offer({ id: 'offer-2', network: 'eip155:8453' })])
     render(<MerchantPage />)

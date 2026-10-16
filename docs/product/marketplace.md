@@ -21,6 +21,7 @@ covers:
   - packages/frontend/src/components/marketplace/MerchantHeader.tsx
   - packages/frontend/src/components/marketplace/OffersTable.tsx
   - packages/frontend/src/components/marketplace/OfferRow.tsx
+  - packages/frontend/src/components/marketplace/HowToBuyPanel.tsx
   - packages/frontend/src/components/marketplace/FundMerchantModal.tsx
   - packages/frontend/src/components/marketplace/MerchantBudgetsList.tsx
   - packages/frontend/src/components/DelegationBudgetCard.tsx
@@ -319,8 +320,9 @@ in the future — the dormant half of a re-key is not spendable.
 ## The "How to buy" panel (#4005)
 
 Between the header and the offers, a live merchant with at least one offer
-renders a one-Card panel (`components/marketplace/HowToBuyPanel.tsx`) with
-three steps, each claimed from data the page already loads — `useAgents`,
+renders a one-Card panel (`components/marketplace/HowToBuyPanel.tsx`) —
+its title in the house `Card.Header` band, one hairline above step 1
+(#4015) — with three steps, each claimed from data the page already loads — `useAgents`,
 the two budget wires (#4004) and the funding targets — never asserted.
 Coming-soon and no-offer merchants show no panel.
 
@@ -342,7 +344,8 @@ Coming-soon and no-offer merchants show no panel.
      every offer THERE, the line says "for some offers"; offers on another
      network have their own disclosure line and never make it partial. When
      the agent's chain is not the default account's chain, the line names
-     the network ("…so it can pay <merchant> on Base"). The any-recipient
+     the network ("…so it can pay <merchant> on Base"); when agents on
+     several chains can pay, one on the default chain is named first. The any-recipient
      requirement (the old offer-level note, moved here in #4005) reads the
      same per-chain set through one predicate (`anyRecipientRule`): in the
      done line it renders only when that set is mixed ("The offers marked
@@ -574,8 +577,8 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   under the description — never only a tooltip — the Haven test-merchant note
   as a wrapping line on a test merchant, where a payment is one paste away,
   and "Set a budget for this merchant" in the header's actions slot when the
-  action shows — below the text until `xl` (1280px), beside it from there
-  with its helper capped at `16rem`, so the merchant's own text keeps the
+  action shows — its helper capped at `16rem`; below the text until `xl`
+  (1280px), beside it from there, so the merchant's own text keeps the
   width (#4015, `merchant-page-fit-measure.spec.ts`)), and ONE offers section (#3981): each offer is a single row —
   a table from `md` up, one stacked card below — carrying name, description,
   price with the `withinBudget()` per-agent hint (so the warning is never

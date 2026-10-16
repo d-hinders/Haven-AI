@@ -476,6 +476,12 @@ export interface HowToBuyInput {
   /** The merchant's funding targets (`useMerchant`). */
   funding: ReadonlyArray<MerchantFundingTarget>
   /** Required for tests; defaults to now. */
+  /**
+   * #4015: the default account's chain. When agents on several chains can
+   * pay, step 2 names one on THIS chain first, so it matches the offers the
+   * table puts first.
+   */
+  preferChainId?: number | null
   nowMs?: number
 }
 
@@ -521,8 +527,16 @@ export type HowToBuyAnswer =
   | { kind: 'uncertain' }
 
 export function howToBuy(input: HowToBuyInput): HowToBuyAnswer {
-  const { merchantName: _merchantName, offers, agents, budgets, merchantBudgets, funding, nowMs = Date.now() } = input
+  const { merchantName: _merchantName, offers, agents, budgets, merchantBudgets, funding, nowMs = Date.now(), preferChainId = null } = input
   const activeAgents = agents.filter(isActiveAgent)
+  // An able agent on the preferred chain is named before one elsewhere;
+  // otherwise the list order stands (a stable sort).
+  const byPreference =
+    preferChainId == null
+      ? activeAgents
+      : [...activeAgents].sort(
+          (a, b) => Number(b.account_chain_id === preferChainId) - Number(a.account_chain_id === preferChainId),
+        )
   if (offers.length === 0 || activeAgents.length === 0) return { kind: 'uncertain' }
 
   const perOffer = offers.map((offer) =>
@@ -532,7 +546,7 @@ export function howToBuy(input: HowToBuyInput): HowToBuyAnswer {
     perOffer[offerIndex]!.find((a) => a.agentId === agentId)!
 
   // 1. Done — the first active agent that can pay at least one offer.
-  for (const agent of activeAgents) {
+  for (const agent of byPreference) {
     const canIndex = perOffer.findIndex((answers) => answers.find((a) => a.agentId === agent.id)?.answer === 'can')
     if (canIndex === -1) continue
     const answer = answerFor(canIndex, agent.id)

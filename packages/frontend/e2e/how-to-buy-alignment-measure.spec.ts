@@ -18,6 +18,13 @@
  * even with the bug. A screenshot could absorb a 3px overshoot inside its
  * pixel budget; these read the geometry. The fixture is the
  * `offers-table-alignment-measure.spec.ts` one.
+ *
+ * #4015: the title became a `Card.Header` band, whose hairline is its
+ * BOTTOM border, and the section dropped its own top border so the two do
+ * not double. A divider is therefore read as a one-sided border at either
+ * edge — a top-only border draws its line at the element's top, a
+ * bottom-only border at its bottom — and the spec asserts exactly ONE such
+ * line between the band and step 1's title.
  */
 import { expect, test, type Page } from '@playwright/test'
 import { mockHavenApi, seedAuthenticatedSession, serveAddFundsAccount } from './fixtures/haven-api'
@@ -35,6 +42,8 @@ type Reading = {
   hairlines: Array<Rect & { label: string }>
   dividerCount: number
   titleGaps: Array<{ step: number; gap: number | null }>
+  /** Divider lines between the header band's top and step 1's title. */
+  linesAboveStep1: number
 }
 
 function readPanel(page: Page) {
@@ -45,13 +54,19 @@ function readPanel(page: Page) {
     }
     const panel = document.querySelector('[data-testid="how-to-buy-panel"]')!
     const card = panel.firstElementChild!
-    const hairlineEls = [...card.querySelectorAll('*')].filter(
-      (el) => parseFloat(getComputedStyle(el).borderTopWidth) > 0,
-    )
-    // A DIVIDER is a top border with no bottom border: the section wrapper's
-    // `border-t` and `divide-y`'s top border on rows 2 and 3. The step dots
-    // have full outlines, so they are hairline elements but never dividers.
-    const dividerEls = hairlineEls.filter((el) => parseFloat(getComputedStyle(el).borderBottomWidth) === 0)
+    const topW = (el: Element) => parseFloat(getComputedStyle(el).borderTopWidth)
+    const bottomW = (el: Element) => parseFloat(getComputedStyle(el).borderBottomWidth)
+    const hairlineEls = [...card.querySelectorAll('*')].filter((el) => topW(el) > 0 || bottomW(el) > 0)
+    // A DIVIDER is a one-sided border: the header band's `border-b` (its
+    // line at its bottom) and `divide-y`'s top border on rows 2 and 3 (at
+    // their tops). The step dots have full outlines, so they are hairline
+    // elements but never dividers.
+    const dividerLines = hairlineEls.flatMap((el) => {
+      const r = el.getBoundingClientRect()
+      if (topW(el) > 0 && bottomW(el) === 0) return [r.top]
+      if (bottomW(el) > 0 && topW(el) === 0) return [r.bottom]
+      return []
+    })
     const hairlines = hairlineEls.map((el) => ({
       ...rect(el),
       label: `${el.tagName.toLowerCase()}${el.getAttribute('data-testid') ? `[${el.getAttribute('data-testid')}]` : ''}`,
@@ -60,14 +75,13 @@ function readPanel(page: Page) {
       const row = panel.querySelector(`[data-testid="how-to-buy-step-${step}"]`)!
       const title = row.querySelector('p')!
       const titleTop = title.getBoundingClientRect().top
-      // The divider above a title is the nearest divider whose top edge is
-      // above it; the hairline is drawn at that top.
-      const above = dividerEls
-        .map((el) => el.getBoundingClientRect().top)
-        .filter((t) => t <= titleTop)
+      // The divider above a title is the nearest divider line above it.
+      const above = dividerLines.filter((t) => t <= titleTop)
       return { step, gap: above.length ? titleTop - Math.max(...above) : null }
     })
-    return { card: rect(card), hairlines, dividerCount: dividerEls.length, titleGaps }
+    const step1TitleTop = panel.querySelector('[data-testid="how-to-buy-step-1"] p')!.getBoundingClientRect().top
+    const linesAboveStep1 = dividerLines.filter((t) => t <= step1TitleTop).length
+    return { card: rect(card), hairlines, dividerCount: dividerLines.length, titleGaps, linesAboveStep1 }
   })
 }
 
@@ -92,6 +106,9 @@ for (const { name, width } of [
       // between each pair — counted over dividers only, so the step dots'
       // outlines cannot stand in for a missing `divide-y`.
       expect(reading.dividerCount, 'the panel should draw three step dividers').toBeGreaterThanOrEqual(3)
+      // #4015: exactly ONE hairline between the header band and step 1 —
+      // the band's own `border-b`; a section `border-t` would make it two.
+      expect(reading.linesAboveStep1, 'hairlines between the "How to buy" header and step 1').toBe(1)
       for (const h of reading.hairlines) {
         expect(
           h.left,

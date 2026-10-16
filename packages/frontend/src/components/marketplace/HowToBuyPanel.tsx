@@ -14,10 +14,12 @@
  * is a retryable "couldn't check", and while anything is loading the steps
  * are skeletons that claim nothing.
  *
- * One unpadded Card: the heading carries its own padding, and one
- * `Card.Section divided` holds the three rows, each owning its padding —
- * the shared row-list pattern, so the dividers meet the card's edges and
- * never overshoot them (#4014). No nested filled cards
+ * One unpadded Card: the title is a `Card.Header` band (#4015 — the house
+ * title row, as on the dashboard's list cards), and one `Card.Section
+ * divided` holds the three rows, each owning its padding — the shared
+ * row-list pattern, so the dividers meet the card's edges and never
+ * overshoot them (#4014). The section drops its own top border, so ONE
+ * hairline (the header's) sits between the title and step 1. No nested filled cards
  * (CLAUDE.md § UI Surface Hierarchy). Coming-soon and no-offer merchants
  * never mount it — the page renders it inside its offers branch only.
  */
@@ -204,7 +206,7 @@ export function HowToBuyPanel({
   // loading (or the read failed) the step claims nothing.
   const answerReady = !agentsLoading && agentsError == null && activeCount > 0 && !budgetsPending && budgetsError == null
   const answer = answerReady
-    ? howToBuy({ merchantName, offers, agents, budgets, merchantBudgets, funding })
+    ? howToBuy({ merchantName, offers, agents, budgets, merchantBudgets, funding, preferChainId: defaultChainId })
     : null
   const pasteTargetName =
     answer?.kind === 'done' ? answer.agentName : activeCount === 1 ? firstActive!.name : null
@@ -311,9 +313,13 @@ export function HowToBuyPanel({
 
   return (
     <div data-testid="how-to-buy-panel">
-      <Card hover={false}>
-        <h2 className="px-5 pt-5 pb-4 text-sm font-semibold text-[var(--v2-ink)] md:px-6 md:pt-6">How to buy</h2>
-        <Card.Section divided>
+      <Card hover={false} className="overflow-hidden">
+        {/* #4015: the house title row — the tinted band with its own
+            hairline below. `md:px-6` keeps the title on the rows' inset. */}
+        <Card.Header as="h2" title="How to buy" className="md:px-6" />
+        {/* `border-t-0`: the header's `border-b` is the one hairline under
+            it; the section's own top border would double it. */}
+        <Card.Section divided className="border-t-0">
           <StepRow n={1} state={step1State} title="Connect an agent">
             {step1Body}
           </StepRow>

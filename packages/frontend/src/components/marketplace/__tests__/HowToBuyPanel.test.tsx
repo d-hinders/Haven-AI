@@ -339,6 +339,19 @@ describe('HowToBuyPanel', () => {
     expect(step(2).queryByRole('button')).toBeNull()
   })
 
+  it('the title is a Card.Header band, with the h2 kept, and the rows section drops its own top border (#4015)', () => {
+    render(<HowToBuyPanel {...baseProps} />)
+    const heading = screen.getByRole('heading', { level: 2, name: 'How to buy' })
+    // Card.Header renders the heading inside a flex wrapper inside the band.
+    const band = heading.closest('[class*="bg-[var(--v2-surface)]"]')
+    expect(band).not.toBeNull()
+    expect(band!.className).toContain('border-b')
+    // The rows' section follows the band and carries no second hairline.
+    const section = screen.getByTestId('how-to-buy-step-1').parentElement!
+    expect(band!.nextElementSibling).toBe(section)
+    expect(section.className.split(/\s+/)).toContain('border-t-0')
+  })
+
   it('every step row owns its vertical padding — no first:/last: overrides that strip it (#4014)', () => {
     render(<HowToBuyPanel {...baseProps} />)
     for (const n of [1, 2, 3]) {

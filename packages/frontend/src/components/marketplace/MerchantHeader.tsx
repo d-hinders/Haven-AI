@@ -27,7 +27,7 @@ export const TEST_MERCHANT_NOTE =
  * #4015: the actions sit BELOW the text until `xl` (1280px) — at 1024 the
  * side-by-side row left the merchant's text about 262px — and the text
  * column takes the free width (`min-w-0 flex-1`) when they share a row.
- * `marketplace-header-measure.spec.ts` pins the text column's share.
+ * `merchant-page-fit-measure.spec.ts` pins the text column's share.
  */
 export function MerchantHeader({ merchant, actions }: { merchant: Merchant; actions?: ReactNode }) {
   const networks = merchant.networks
@@ -38,7 +38,7 @@ export function MerchantHeader({ merchant, actions }: { merchant: Merchant; acti
     <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
       <div className="flex min-w-0 flex-1 items-start gap-3">
         <Monogram name={merchant.name} logoUrl={merchant.logo_url} size="md" />
-        <div className="min-w-0" data-testid="merchant-header-text">
+        <div className="min-w-0 flex-1" data-testid="merchant-header-text">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="v2-text-h1 text-[var(--v2-ink)]">{merchant.name}</h1>
             {merchant.verified_payable && (

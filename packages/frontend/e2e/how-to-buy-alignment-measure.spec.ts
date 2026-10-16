@@ -33,6 +33,7 @@ type Rect = { top: number; right: number; bottom: number; left: number }
 type Reading = {
   card: Rect
   hairlines: Array<Rect & { label: string }>
+  dividerCount: number
   titleGaps: Array<{ step: number; gap: number | null }>
 }
 
@@ -47,6 +48,10 @@ function readPanel(page: Page) {
     const hairlineEls = [...card.querySelectorAll('*')].filter(
       (el) => parseFloat(getComputedStyle(el).borderTopWidth) > 0,
     )
+    // A DIVIDER is a top border with no bottom border: the section wrapper's
+    // `border-t` and `divide-y`'s top border on rows 2 and 3. The step dots
+    // have full outlines, so they are hairline elements but never dividers.
+    const dividerEls = hairlineEls.filter((el) => parseFloat(getComputedStyle(el).borderBottomWidth) === 0)
     const hairlines = hairlineEls.map((el) => ({
       ...rect(el),
       label: `${el.tagName.toLowerCase()}${el.getAttribute('data-testid') ? `[${el.getAttribute('data-testid')}]` : ''}`,
@@ -55,16 +60,14 @@ function readPanel(page: Page) {
       const row = panel.querySelector(`[data-testid="how-to-buy-step-${step}"]`)!
       const title = row.querySelector('p')!
       const titleTop = title.getBoundingClientRect().top
-      // The divider above a title is the nearest DIVIDER — a top border with
-      // no bottom border, which leaves out the step dots' full outlines —
-      // whose top edge is above it; the hairline is drawn at that top.
-      const above = hairlineEls
-        .filter((el) => parseFloat(getComputedStyle(el).borderBottomWidth) === 0)
+      // The divider above a title is the nearest divider whose top edge is
+      // above it; the hairline is drawn at that top.
+      const above = dividerEls
         .map((el) => el.getBoundingClientRect().top)
         .filter((t) => t <= titleTop)
       return { step, gap: above.length ? titleTop - Math.max(...above) : null }
     })
-    return { card: rect(card), hairlines, titleGaps }
+    return { card: rect(card), hairlines, dividerCount: dividerEls.length, titleGaps }
   })
 }
 
@@ -85,9 +88,10 @@ for (const { name, width } of [
       await expect(panel.getByTestId('how-to-buy-step-3')).toBeVisible()
 
       const reading = await readPanel(page)
-      // The instrument can say yes: the panel draws at least the two
-      // dividers between its three steps.
-      expect(reading.hairlines.length, 'no hairlines found inside the panel').toBeGreaterThanOrEqual(2)
+      // The instrument can say yes: one divider above the steps and one
+      // between each pair — counted over dividers only, so the step dots'
+      // outlines cannot stand in for a missing `divide-y`.
+      expect(reading.dividerCount, 'the panel should draw three step dividers').toBeGreaterThanOrEqual(3)
       for (const h of reading.hairlines) {
         expect(
           h.left,
@@ -97,6 +101,8 @@ for (const { name, width } of [
           h.right,
           `${h.label} right ${h.right.toFixed(1)} is outside the card's right edge ${reading.card.right.toFixed(1)}`,
         ).toBeLessThanOrEqual(reading.card.right + 1)
+        expect(h.top, `${h.label} top is above the card`).toBeGreaterThanOrEqual(reading.card.top - 1)
+        expect(h.bottom, `${h.label} bottom is below the card`).toBeLessThanOrEqual(reading.card.bottom + 1)
       }
       for (const { step, gap } of reading.titleGaps) {
         expect(gap, `step ${step} has no divider above it`).not.toBeNull()

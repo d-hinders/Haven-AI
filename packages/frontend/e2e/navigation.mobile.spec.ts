@@ -438,6 +438,73 @@ test.describe('mobile viewport', () => {
 })
 
 /**
+ * One theme control per screen (#4029).
+ *
+ * The issue's AC is a RENDERED-visibility count, not a unit pin. The sidebar
+ * footer row must be the app's ONLY theme control at every width, and the
+ * failure that could regress it is a SECOND render appearing — the icon
+ * variant the top bar used to carry lived exactly there, a breakpoint-gated
+ * second instance in a different component. A unit test on `Sidebar` cannot
+ * see a copy that mounts elsewhere; only a page-level count can.
+ *
+ * 390 and 1280 are the two sides of the `lg` breakpoint the AC names — the
+ * off-canvas drawer below it, the static rail at and above it. Sweeping the
+ * widths in this project is deliberate: the rule the file header states is
+ * about committed BASELINES, not about setting a viewport, and this compares
+ * a count, not pixels (`mobile-nav-layering` sweeps five widths the same
+ * way).
+ */
+test.describe('one theme control per screen (#4029)', () => {
+  test.beforeEach(async ({ page }) => {
+    await mockHavenApi(page)
+    await seedAuthenticatedSession(page)
+  })
+
+  for (const width of [390, 1280] as const) {
+    test(`exactly one visible theme control at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 })
+      await page.goto('/dashboard')
+
+      // The sidebar is `dynamic(..., { ssr: false })` (#2521) — it mounts a
+      // chunk later than the page. Counting before it arrives would read 0
+      // and make "exactly one" pass on a page with NO theme control at all:
+      // the same silent no-op the overflow helper's `contentRegionFound`
+      // guard exists for, one describe above.
+      await page.locator('button[aria-label^="Theme: "]').first().waitFor()
+
+      const controls = await page.evaluate(() => {
+        // The control's contract is its accessible name, not a class or a
+        // test id: `Theme: <current>. Switch to <next>` (`ThemeToggle`),
+        // which is what a screen reader announces and what any future
+        // instance of the component carries with it — a second copy cannot
+        // hide from a role/label query the way it can from a class probe.
+        const buttons = Array.from(
+          document.querySelectorAll<HTMLButtonElement>('button[aria-label^="Theme: "]'),
+        )
+        // "Visible" the way this suite measures it everywhere else: the
+        // element HAS BOXES. At 390px the drawer is off-canvas
+        // (`-translate-x-full`) — a TRANSFORM, not `display: none` — so the
+        // one true control still has client rects and must still be the only
+        // one. A filter keyed on `offsetParent` would misread every `fixed`
+        // element, the drawer included, as invisible.
+        const visible = buttons.filter((el) => el.getClientRects().length > 0)
+        return { total: buttons.length, visible: visible.length }
+      })
+
+      // BOTH halves. `total` is the "one per screen" claim: a hidden second
+      // copy — say a breakpoint-gated variant someone re-adds — would
+      // satisfy a visible-only count while shipping two controls.
+      // `visible` is the AC's literal word: the one control that exists is
+      // actually rendered, never a display:none stub.
+      expect(
+        controls,
+        `@${width}px: expected exactly one rendered theme control on the screen`,
+      ).toEqual({ total: 1, visible: 1 })
+    })
+  }
+})
+
+/**
  * The bottom tab bar drives navigation below `lg` (#2731).
  *
  * Geometry lives in `mobile-nav-tap-target.mobile.spec.ts`; this file asks the

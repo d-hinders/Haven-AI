@@ -113,45 +113,46 @@ export default function AuthenticatedShell({
                 <ErrorBoundary>{children}</ErrorBoundary>
               </main>
             </div>
+            {/*
+              The non-production warning line (#4029). A 2px `--v2-warning` strip
+              along the top of the app wherever this deploy is not production. It
+              is the badge's visual echo, not its replacement: the badge in the
+              sidebar's logo band carries the accessible label, and this line is
+              `aria-hidden` and `pointer-events-none` — it must be seen, never
+              reached.
+
+              The LAST child of the frame, positioned, NOT in flow: the frame is
+              a flex row (sidebar | column), and a 2px flex child would push the
+              whole app down and paint the line over the safe-area band on a
+              phone. `absolute` against the frame's own `relative` (above) keeps
+              `h-screen` exact. The top offset is `var(--v2-safe-top)`, which is
+              0 on desktop — where the line spans the top of the app — and the
+              inset on a notched phone, where the line sits directly UNDER the
+              opaque status-bar band rendered above.
+
+              `z-[var(--v2-z-chrome)]`: the chrome tier. Above page content,
+              below the More sheet, its scrim and modals. The tier used to belong
+              to the top bar; its only remaining consumer is this line, and the
+              ordering the scale encodes (navigation outranks chrome) still
+              holds — the drawer must cover the line that says a deploy is not
+              production.
+
+              Deliberately no opacity modifier on the fill. An opacity-modified
+              arbitrary var (`bg-[var(--v2-bg)]/85`) is the dead shape #1818
+              compiled to nothing — `bg-[var(--v2-warning)]` at full opacity is a
+              real colour, and anything translucent here would defeat the point
+              of a warning you can see from across the room. It renders nothing
+              in production, so production screenshots and CI baselines contain
+              no line.
+            */}
+            {!isProductionEnvironment() && (
+              <div
+                aria-hidden="true"
+                data-warning-line=""
+                className="pointer-events-none absolute inset-x-0 top-[var(--v2-safe-top)] z-[var(--v2-z-chrome)] h-[2px] bg-[var(--v2-warning)]"
+              />
+            )}
           </div>
-          {/*
-            The non-production warning line (#4029). A 2px `--v2-warning` strip
-            along the top of the app wherever this deploy is not production. It
-            is the badge's visual echo, not its replacement: the badge in the
-            sidebar's logo band carries the accessible label, and this line is
-            `aria-hidden` and `pointer-events-none` — it must be seen, never
-            reached.
-
-            Positioned, NOT in flow: the frame is a flex row (sidebar | column),
-            and a 2px flex child would push the whole app down and paint the
-            line over the safe-area band on a phone. `absolute` under the
-            frame's own `relative` keeps `h-screen` exact. The top offset is
-            `var(--v2-safe-top)`, which is 0 on desktop — where the line spans
-            the top of the app — and the inset on a notched phone, where the
-            line sits directly UNDER the opaque status-bar band rendered above.
-
-            `z-[var(--v2-z-chrome)]`: the chrome tier. Above page content,
-            below the More sheet, its scrim and modals. The tier used to belong
-            to the top bar; its only remaining consumer is this line, and the
-            ordering the scale encodes (navigation outranks chrome) still
-            holds — the drawer must cover the line that says a deploy is not
-            production.
-
-            Deliberately no opacity modifier on the fill. An opacity-modified
-            arbitrary var (`bg-[var(--v2-bg)]/85`) is the dead shape #1818
-            compiled to nothing — `bg-[var(--v2-warning)]` at full opacity is a
-            real colour, and anything translucent here would defeat the point
-            of a warning you can see from across the room. It renders nothing
-            in production, so production screenshots and CI baselines contain
-            no line.
-          */}
-          {!isProductionEnvironment() && (
-            <div
-              aria-hidden="true"
-              data-warning-line=""
-              className="pointer-events-none absolute inset-x-0 top-[var(--v2-safe-top)] z-[var(--v2-z-chrome)] h-[2px] bg-[var(--v2-warning)]"
-            />
-          )}
           <Toaster />
         </ToastProvider>
     </ProtectedRoute>

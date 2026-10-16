@@ -121,3 +121,12 @@ export function slotOccupantHashesForEdit<T extends SlotRowWithIdentity>(
     return true
   })
 }
+
+/**
+ * #3933: a small count in words, for the Stop-signature copy ("two parts").
+ * Shared by `EditBudgetModal` and `FundMerchantModal` (#3971) so the two
+ * surfaces count the same way.
+ */
+export function countWord(n: number): string {
+  return ['zero', 'one', 'two', 'three', 'four'][n] ?? String(n)
+}

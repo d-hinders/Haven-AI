@@ -42,7 +42,7 @@ import {
 } from '@/lib/merchantBudgetRefusal'
 import { truncateAddress, BudgetAmountRow, NoticeRow } from './haven'
 import { budgetPeriodWords } from '@/lib/budget-caption'
-import { findOccupyingBudget, sameSlot } from '@/lib/budget-slot'
+import { countWord, findOccupyingBudget, sameSlot } from '@/lib/budget-slot'
 import { Icon } from './ui/Icon'
 import { Button } from './ui/Button'
 import WalletConnectAction from './WalletConnectAction'
@@ -89,11 +89,6 @@ interface Props {
 // The day/week/month rhythm the picker offers (#3806: the words come from the
 // caption helper, so a prefilled period outside this trio still reads right).
 const PERIODS = [86_400, 604_800, 2_592_000] as const
-
-/** #3933: a small count in words, for the Stop-signature copy ("two parts"). */
-function countWord(n: number): string {
-  return ['zero', 'one', 'two', 'three', 'four'][n] ?? String(n)
-}
 
 /**
  * Plain copy for the merchant-STALE build refusals a merchant-locked budget's

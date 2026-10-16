@@ -180,8 +180,9 @@ export interface GrantInput {
  * POST threw and the re-read could not prove what happened (the row is still
  * `pending`, is absent, or the re-read itself failed). The activation may
  * HAVE committed — a proxy 5xx can arrive while the backend is still
- * deploying — so this is never "nothing changed": a retry that trusts it
- * mints a second enabled grant. Renderers must send the owner to check the
+ * deploying — so this is never "nothing changed": the grant may already be
+ * live. (Before #3933 a retry that trusted it minted a second enabled grant;
+ * the backend now refuses a second live budget in the slot, #3971.) Renderers must send the owner to check the
  * agent's budgets before trying again, and never name Haven as the approver.
  */
 export type BudgetResult =
@@ -425,7 +426,9 @@ export function useDelegationBudget(
   // per (token, recipient) slot. The re-read after a lost activate POST can see
   // `pending` while the backend is still deploying, and the commit can land
   // later — so the NEXT /build for the same slot re-reads this hash BEFORE
-  // minting a new one, or the retry adds a second enabled grant. Cleared when
+  // minting a new one, so a landed attempt is reported as landed (before
+  // #3933 the retry also added a second enabled grant; the backend now
+  // refuses one in an occupied slot, #3971). Cleared when
   // the agent changes (the reset effect below): hashes are agent-scoped.
   const lastAttempted = useRef(new Map<string, string>())
   // #3933: an `unconfirmed` EDIT remembers its own attempt, keyed by the
@@ -547,8 +550,9 @@ export function useDelegationBudget(
 
   /**
    * #3930 retry guard: the last attempt for this slot ended `unconfirmed` —
-   * re-read that hash BEFORE a new `/build`, or the retry mints a second
-   * grant. `proceed` covers both "nothing remembered" and "the remembered
+   * re-read that hash BEFORE a new `/build`, so a landed attempt is not
+   * reported as a fresh failure (since #3933 the backend refuses a second
+   * live grant in the slot; before it, the retry minted one). `proceed` covers both "nothing remembered" and "the remembered
    * attempt is definitively dead" (`revoked`, or the row is gone) — a fresh
    * build is safe in both. `unconfirmed` keeps the entry: still unknown, and
    * a build would risk the second grant.
@@ -657,8 +661,9 @@ export function useDelegationBudget(
       setBusy(true)
       try {
         // #3930 retry guard — BEFORE any /build. The previous attempt for this
-        // slot may have ended `unconfirmed`; a retry that trusted that and
-        // built anew would mint a SECOND enabled grant.
+        // slot may have ended `unconfirmed`; re-read it first, so a landed
+        // attempt is reported as landed (the backend, since #3933, refuses a
+        // SECOND live grant in the slot — before it, this retry minted one).
         const guard = await guardRetriedSlot(input)
         if (guard.outcome === 'landed') {
           await reload()
@@ -719,8 +724,9 @@ export function useDelegationBudget(
           }
           // #3930: the response was lost — the activation may still have
           // committed (the counterfactual deploy is the slow path). Re-read
-          // the outcome BEFORE reporting anything: a false `failed` invites a
-          // retry that mints a second enabled grant.
+          // the outcome BEFORE reporting anything: a false `failed` tells the
+          // owner nothing was granted when it may be live (#3971: the retry it
+          // invites is refused by the backend since #3933, not a second grant).
           if (cancelled(err)) return { ok: false, reason: 'cancelled' }
           const reread = await readAttemptedHash(built.delegation_hash)
           if (rereadLanded(reread)) {
@@ -816,8 +822,7 @@ export function useDelegationBudget(
   //   before reporting. The new grant landed → the Stop step runs as if the
   //   POST had returned; a revoke-all raced it → `failed`; still `pending`,
   //   absent, or the re-read itself failed → `unconfirmed` (NEVER "nothing
-  //   was granted" — the old budget may already be `replaced`, and a retry
-  //   that builds again mints a second enabled grant).
+  //   was granted" — the old budget may already be `replaced`).
   // - activation raced a revoke-all: the 409 "no longer pending" is re-read
   //   like any other activate failure (#3930) — `failed` when the row shows
   //   `revoked`, the Stop step when it shows `active`/`replaced`.
@@ -998,8 +1003,7 @@ export function useDelegationBudget(
             // #3930: the response was lost — re-read before reporting anything,
             // exactly as `grant` does. The new grant may already be live (and
             // the old one already `replaced` in the mirror): telling the owner
-            // "nothing was granted" here invites a retry that mints a second
-            // enabled grant.
+            // "nothing was granted" here is false.
             if (cancelled(err)) return { ok: false, reason: 'cancelled' }
             const reread = await readAttemptedHash(builtHash)
             if (rereadLanded(reread)) {

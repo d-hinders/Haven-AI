@@ -97,8 +97,7 @@ describe('BudgetGrantAction (#1073)', () => {
   it('UNCONFIRMED (#3930) gets its OWN sentence: never "nothing changed", sends the owner to check the budgets first', async () => {
     // The activation response was lost — the grant may already be in place.
     // The caller's generic failure sentence ("… Nothing changed — try again.")
-    // would invite a retry that mints a second enabled grant, so it must not
-    // render here.
+    // would be false, so it must not render here.
     const grant = vi.fn().mockResolvedValue({ ok: false, reason: 'unconfirmed' })
     renderAction({
       grant,
@@ -114,6 +113,11 @@ describe('BudgetGrantAction (#1073)', () => {
     // Directs the owner to check the agent's budgets BEFORE trying again,
     // and never names Haven as the approver.
     expect(message.textContent).toMatch(/check the agent's budgets before trying again/i)
+    // #3971: since #3933 the backend refuses a second live budget in the same
+    // slot, and the retry re-reads the attempt first — the old warning that a
+    // second grant "would add a second budget" is no longer true.
+    expect(message.textContent).toMatch(/a retry never adds a second budget for the same token and recipient/i)
+    expect(message.textContent).not.toMatch(/would add a second budget/i)
     expect(message.textContent).not.toMatch(/haven/i)
     expect(screen.queryByText(/could not set the budget/i)).toBeNull()
   })

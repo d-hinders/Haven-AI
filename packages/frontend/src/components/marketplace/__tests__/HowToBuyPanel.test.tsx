@@ -282,4 +282,14 @@ describe('HowToBuyPanel', () => {
     expect(step(2).getByText(/Haven couldn't confirm what your agent can spend here just now\./)).toBeDefined()
     expect(step(2).queryByRole('button')).toBeNull()
   })
+
+  it('every step row owns its vertical padding — no first:/last: overrides that strip it (#4014)', () => {
+    render(<HowToBuyPanel {...baseProps} />)
+    for (const n of [1, 2, 3]) {
+      const classes = screen.getByTestId(`how-to-buy-step-${n}`).className.split(/\s+/)
+      expect(classes).toContain('py-3')
+      expect(classes).not.toContain('first:pt-0')
+      expect(classes).not.toContain('last:pb-0')
+    }
+  })
 })

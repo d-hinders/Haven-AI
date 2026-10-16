@@ -368,8 +368,10 @@ Coming-soon and no-offer merchants show no panel.
    agent, else the generic "your agent's" — never a name the data does not
    single out.
 
-The panel is one `Card` of three `Card.Section` rows — no nested filled
-cards (CLAUDE.md § UI Surface Hierarchy). The copy confirmation on an
+The panel is one unpadded `Card` whose three steps sit in one
+`Card.Section divided`, each row owning its padding — the shared row-list
+pattern, so the dividers meet the card's edges (#4014) — with no nested
+filled cards (CLAUDE.md § UI Surface Hierarchy). The copy confirmation on an
 offer's "Copy prompt" button becomes "Copied — paste it to <agent>" when
 exactly one agent can pay that offer (`CopyButton`'s optional `copiedText`,
 shown on `/design-system`), and the longer label wraps rather than widening

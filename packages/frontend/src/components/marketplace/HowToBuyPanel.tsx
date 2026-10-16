@@ -14,7 +14,10 @@
  * is a retryable "couldn't check", and while anything is loading the steps
  * are skeletons that claim nothing.
  *
- * One Card, three rows (`Card.Section`), no nested filled cards
+ * One unpadded Card: the heading carries its own padding, and one
+ * `Card.Section divided` holds the three rows, each owning its padding —
+ * the shared row-list pattern, so the dividers meet the card's edges and
+ * never overshoot them (#4014). No nested filled cards
  * (CLAUDE.md § UI Surface Hierarchy). Coming-soon and no-offer merchants
  * never mount it — the page renders it inside its offers branch only.
  */
@@ -66,7 +69,7 @@ function StepRow({
   children: ReactNode
 }) {
   return (
-    <div className="flex gap-3 py-3 first:pt-0 last:pb-0" data-testid={`how-to-buy-step-${n}`}>
+    <div className="flex gap-3 px-5 py-3 md:px-6" data-testid={`how-to-buy-step-${n}`}>
       <StepDot state={state} n={n} />
       <div className="min-w-0">
         <p className="text-sm font-medium text-[var(--v2-ink)]">{title}</p>
@@ -275,19 +278,15 @@ export function HowToBuyPanel({
 
   return (
     <div data-testid="how-to-buy-panel">
-      <Card hover={false} className="p-5">
-        <h2 className="text-sm font-semibold text-[var(--v2-ink)]">How to buy</h2>
-        <Card.Section className="mt-4">
+      <Card hover={false}>
+        <h2 className="px-5 pt-5 pb-4 text-sm font-semibold text-[var(--v2-ink)] md:px-6 md:pt-6">How to buy</h2>
+        <Card.Section divided>
           <StepRow n={1} state={step1State} title="Connect an agent">
             {step1Body}
           </StepRow>
-        </Card.Section>
-        <Card.Section>
           <StepRow n={2} state={step2State} title="Give it a budget it can spend here">
             {step2Body}
           </StepRow>
-        </Card.Section>
-        <Card.Section>
           <StepRow n={3} state={activeCount > 0 ? 'open' : 'later'} title="Ask your agent to buy">
             <p>
               Copy an offer's prompt below and paste it into {pasteTargetName ? `${pasteTargetName}'s` : "your agent's"} chat. It

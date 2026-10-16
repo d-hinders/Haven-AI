@@ -74,7 +74,7 @@ covers:
   - packages/backend/src/modules/ops/**
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
-last-verified: "2026-10-15"
+last-verified: "2026-10-16"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -1012,6 +1012,60 @@ further redemption fails. Recorded as a walkthrough with tx links.
   ("your exit path") — not fine print.
 
 ## 6. Recovery & the signer-set model (shipped, epic #836)
+
+> **Re-verified #4023 (2026-10-16, per-account deploy salt + create-additional
+> account, epic #4022 slice S1):** this diff touches nine files in this
+> document's coverage list — `rails/hybrid-account-config.ts`,
+> `rails/hybrid-signer-actions.ts`, `rails/hybrid-transfers.ts`,
+> `routes/hybrid-accounts.ts`, `routes/agent-delegations.ts`,
+> `routes/agent-rekey.ts`, `infra/repositories/smart-accounts.ts`,
+> `sdk/src/delegate-account.ts`, `lib/delegationPasskeySigner.ts` — around one
+> mechanism: a USER account's CREATE2 address is now derived with a
+> **per-account deploy salt** (a never-reused per-(user, signer) counter,
+> migration 114) instead of the literal salt-0, so one passkey can own several
+> accounts on one chain. Read against the model, nothing moves:
+>
+> - **Non-custody is untouched.** The salt is a counter value stored on the
+>   `smart_accounts` row — not a key, not a signature surface, not spend
+>   authority. Haven still provisions through a watch-only owner (invariant 5)
+>   and still signs nothing (invariants 7/12/13); the derivation stays the
+>   read-only factory call. The new `HybridDerivationMismatchError` REFUSES to
+>   deploy when a known address does not match what the config derives — it
+>   can only narrow what the relayer will do, never widen it.
+> - **The delegate account stays at the literal `'0x'`.**
+>   `sdk/src/delegate-account.ts`'s `DEPLOY_SALT` is byte-unchanged (now
+>   documented as the delegate-only constant the signer vendors offline), and
+>   the rails' delegate entry point is a separate
+>   `ensureDelegateHybridDeployed`. Every claim about the agent's own
+>   counterfactual account deriving from its delegate key derives exactly as
+>   before.
+> - **The client never needs the salt.** The signer-set reads
+>   (`GET /agents/:id/account-signers`,
+>   `GET /accounts/hybrid/:address/signers`) carry the same public-key
+>   material as before; the salt deliberately stays server-side, and
+>   `lib/delegationPasskeySigner.ts`'s change is its doc comment: the client
+>   signs with the signers it is handed and never re-derives the address —
+>   the pinned-address rule above holds verbatim.
+> - **The signer-set model holds.** Create-additional copies the new
+>   account's owner passkey SERVER-SIDE from the source account's stored
+>   signer set (never from the request), and the derived address's UNIQUE is
+>   scoped per user (migration 114) so a concurrent create cannot 500. One
+>   passkey can now front several accounts, but "who can change a signer set"
+>   is unchanged: same prepare/submit split, same last-signer guard, one
+>   shared implementation (invariant 13).
+> - **The provisioning SQL moved into `infra/repositories/`**
+>   (`smart-accounts.ts`, `hybrid-signers.ts`) — the last `pg-only-in-infra`
+>   waiver in `routes/` is gone. Verbatim move: same SQL constants, same
+>   parameter order, every new function takes `userId` as a required
+>   parameter and every statement scopes on it, and the transaction still
+>   wraps the counter bump, the derived row and the copied passkeys. The
+>   schema smoke PREPAREs the same constants.
+>
+> Scope of this note: the derivation/salt mechanism, the provisioning route's
+> data access, and the claims above that rest on the pinned-address rule.
+> Invariants 1–13 are untouched. Nothing else in this document was re-read
+> for it, and `last-verified` is bumped to 2026-10-16 for exactly this
+> coverage.
 
 The interim single-passkey stance is retired — recovery shipped.
 

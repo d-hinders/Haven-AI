@@ -16,16 +16,13 @@
  */
 
 import { FastifyInstance } from 'fastify'
-// dep-lint-exempt: 5 provisioning statements (duplicate check, first-account gate, insert with rail+type, passkey persist, ownership read) whose guards travel with the insert; a >100-line move deferred under #999
-import { pad, toHex } from 'viem'
-import pool from '../db.js'
-import { withTransaction } from '../infra/transaction.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import { DELEGATION_RAIL_CHAIN_IDS } from '../rails/delegation-contracts.js'
 import { isValueBearingChain } from '../modules/accounts/index.js'
 import {
   computeUserHybridAccountAddress,
+  deploySaltForCounter,
   type PasskeySigner,
 } from '../rails/hybrid-provisioning.js'
 import {
@@ -38,17 +35,18 @@ import {
 import { prepareTransfer, submitTransfer, type TransferBody } from '../rails/hybrid-transfers.js'
 import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import { loadHybridOwnerConfig } from '../rails/hybrid-account-config.js'
-import { INSERT_HYBRID_ACCOUNT_PASSKEY_SQL, listAccountPasskeys, passkeyEnrollmentDates } from '../infra/repositories/hybrid-signers.js'
+import { insertHybridAccountPasskey, listAccountPasskeys, passkeyEnrollmentDates } from '../infra/repositories/hybrid-signers.js'
 import {
-  ALLOCATE_HYBRID_DEPLOY_SALT_SQL,
-  COUNT_ACCOUNTS_FOR_USER_ON_CHAIN_SQL,
-  COUNT_ACCOUNTS_FOR_USER_SQL,
-  FIND_ACCOUNT_BY_CREATE_IDEMPOTENCY_KEY_SQL,
-  FIND_DELEGATOR_HYBRID_ACCOUNT_FOR_USER_SQL,
-  FIND_HYBRID_ACCOUNT_BY_ADDRESS_FOR_REPLAY_SQL,
-  FIND_HYBRID_ACCOUNT_BY_ADDRESS_FOR_USER_SQL,
-  FIND_OWNED_HYBRID_ACCOUNT_SQL,
-  INSERT_HYBRID_ACCOUNT_SQL,
+  allocateHybridDeploySalt,
+  countAccountsForUser,
+  countAccountsForUserOnChain,
+  findAccountByCreateIdempotencyKey,
+  findDelegatorHybridAccountForUser,
+  findHybridAccountByAddressForReplay,
+  findHybridAccountByAddressForUser,
+  findOwnedHybridAccount,
+  insertHybridAccount,
+  inTransaction,
 } from '../infra/repositories/smart-accounts.js'
 import { boundedErrorDetails } from '../modules/payments/index.js'
 
@@ -240,14 +238,11 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     let ownerPasskeys: PasskeySigner[]
     let saltKey: string
     if (isAdditional) {
-      const source = await pool.query<{ id: string }>(
-        FIND_DELEGATOR_HYBRID_ACCOUNT_FOR_USER_SQL,
-        [source_account_id, sub],
-      )
-      if (source.rows.length === 0) {
+      const source = await findDelegatorHybridAccountForUser(sub, source_account_id as string)
+      if (source === null) {
         return reply.code(404).send({ error: 'Source account not found' })
       }
-      const sourceSigners = await listAccountPasskeys(source.rows[0].id)
+      const sourceSigners = await listAccountPasskeys(source.id)
       if (sourceSigners.length === 0) {
         return reply.code(422).send({
           error: 'The source account has no passkey to copy — EOA-only accounts cannot create an additional account',
@@ -262,8 +257,8 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
 
       // Soft cap (#4023): 10 accounts per user per chain. Deliberately soft —
       // the cap bounds accident and abuse, not a business rule.
-      const cap = await pool.query<{ count: string }>(COUNT_ACCOUNTS_FOR_USER_ON_CHAIN_SQL, [sub, chainId])
-      if (BigInt(cap.rows[0]?.count ?? '0') >= BigInt(MAX_ACCOUNTS_PER_USER_PER_CHAIN)) {
+      const cap = await countAccountsForUserOnChain(sub, chainId)
+      if (cap >= BigInt(MAX_ACCOUNTS_PER_USER_PER_CHAIN)) {
         return reply.code(422).send({
           error: `This user already has ${MAX_ACCOUNTS_PER_USER_PER_CHAIN} accounts on chain ${chainId}`,
         })
@@ -272,18 +267,15 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
       // Idempotent replay (#1207's rule, account-shaped): before anything is
       // derived or written, a retried create answers the FIRST account.
       if (idempotency_key) {
-        const replay = await pool.query<{ id: string; account_address: string; created_at: string }>(
-          FIND_ACCOUNT_BY_CREATE_IDEMPOTENCY_KEY_SQL,
-          [sub, idempotency_key],
-        )
-        if (replay.rows.length > 0) {
+        const replay = await findAccountByCreateIdempotencyKey(sub, idempotency_key)
+        if (replay !== null) {
           return reply.code(201).send({
-            id: replay.rows[0].id,
-            account_address: replay.rows[0].account_address,
+            id: replay.id,
+            account_address: replay.account_address,
             chain_id: chainId,
             account_type: 'delegator_hybrid',
             deployed: false,
-            created_at: replay.rows[0].created_at,
+            created_at: replay.created_at,
           })
         }
       }
@@ -308,16 +300,13 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     // connection for that atomicity; registration is a once-per-account
     // operation, the same trade the #1673 deploy lock measures as acceptable.
     let created: { id: string; account_address: string; created_at: string } | RegistrationRefusal
-    created = await withTransaction(pool, async (tx) => {
-      const saltRow = await tx.query<{ last_allocated: string }>(ALLOCATE_HYBRID_DEPLOY_SALT_SQL, [
-        sub,
-        saltKey,
-      ])
-      const counter = BigInt(saltRow.rows[0].last_allocated)
+    created = await inTransaction(async (tx) => {
+      const lastAllocated = await allocateHybridDeploySalt(sub, saltKey, tx)
+      const counter = BigInt(lastAllocated)
       // Counter value 0 is NEVER issued: pad('0x', {size: 32}) is the same
       // salt as '0x' (sdk/delegate-account.ts), which is every pre-#4023
       // account. The counter starts allocating at 1 (migration 114).
-      const deploySalt = pad(toHex(counter), { size: 32 })
+      const deploySalt = deploySaltForCounter(counter)
 
       let accountAddress: string
       try {
@@ -333,73 +322,69 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
         })
       }
 
-      const existing = await tx.query<{ id: string }>(
-        FIND_HYBRID_ACCOUNT_BY_ADDRESS_FOR_USER_SQL,
-        [sub, accountAddress, chainId],
-      )
-      if (existing.rows.length > 0) {
-        throw new RegistrationRefusal(409, { error: 'Account already registered', id: existing.rows[0].id })
+      const existing = await findHybridAccountByAddressForUser(sub, accountAddress, chainId, tx)
+      if (existing !== null) {
+        throw new RegistrationRefusal(409, { error: 'Account already registered', id: existing.id })
       }
 
       // isFirst gates the SIGNUP default only (#4023: a created account never
       // becomes the default — the additional INSERT passes false whatever the
       // count; only this signup path may set it).
-      const firstCheck = await tx.query<{ count: string }>(COUNT_ACCOUNTS_FOR_USER_SQL, [sub])
-      const isFirst = !isAdditional && firstCheck.rows[0]?.count === '0'
+      const totalCount = await countAccountsForUser(sub, tx)
+      const isFirst = !isAdditional && totalCount === 0n
 
-      const result = await tx.query<{ id: string; created_at: string }>(
-        INSERT_HYBRID_ACCOUNT_SQL,
-        // owner_address: the EOA owner for treasury ops (#828 revoke). A pure-
-        // passkey account has none — its config lives in hybrid_account_passkeys.
-        // ON CONFLICT DO NOTHING: the UNIQUE(user_id, chain_id,
-        // LOWER(account_address)) index (migration 114) is the arbiter when
-        // two concurrent creates derive the same address; the loser re-reads
-        // below instead of 500ing on a bare constraint violation.
-        [
-          sub,
+      const inserted = await insertHybridAccount(
+        {
+          userId: sub,
           accountAddress,
           chainId,
-          name?.trim() || 'My account',
-          isAdditional ? false : isFirst,
-          isAdditional ? null : (owner_address?.toLowerCase() ?? null),
-          recordWaiver ? new Date().toISOString() : null,
+          // owner_address: the EOA owner for treasury ops (#828 revoke). A
+          // pure-passkey account has none — its config lives in
+          // hybrid_account_passkeys.
+          name: name?.trim() || 'My account',
+          isDefault: isAdditional ? false : isFirst,
+          ownerAddress: isAdditional ? null : (owner_address?.toLowerCase() ?? null),
+          singleSignerWaiverAt: recordWaiver ? new Date().toISOString() : null,
           deploySalt,
-          idempotency_key ?? null,
-        ],
+          // ON CONFLICT DO NOTHING: the UNIQUE(user_id, chain_id,
+          // LOWER(account_address)) index (migration 114) is the arbiter when
+          // two concurrent creates derive the same address; the loser
+          // re-reads below instead of 500ing on a bare constraint violation.
+          createIdempotencyKey: idempotency_key ?? null,
+        },
+        tx,
       )
-      if (result.rows.length === 0) {
+      if (inserted === null) {
         // The insert lost the unique-address race. The winner is either this
         // user's own concurrent create (answer it — the idempotency contract)
         // or another user's row at the same derived address (impossible
         // without shared keys, but then the 409 is the honest answer).
-        const winner = await tx.query<{ id: string; created_at: string }>(
-          FIND_HYBRID_ACCOUNT_BY_ADDRESS_FOR_REPLAY_SQL,
-          [sub, accountAddress, chainId],
-        )
-        if (winner.rows.length === 0) {
+        const winner = await findHybridAccountByAddressForReplay(sub, accountAddress, chainId, tx)
+        if (winner === null) {
           throw new RegistrationRefusal(409, { error: 'Account already registered' })
         }
         throw new RegistrationRefusal(201, {
           __replay: true,
-          id: winner.rows[0].id,
+          id: winner.id,
           account_address: accountAddress,
           chain_id: chainId,
-          created_at: winner.rows[0].created_at,
+          created_at: winner.created_at,
         })
       }
-      const accountId = result.rows[0].id
+      const accountId = inserted.id
 
       // Persist the passkey signer set (#885): the account address was derived
       // from EXACTLY these coordinates, so activation (#860 deploy) and revoke
       // can reconstruct the owner config for a pure-passkey account.
       for (const pk of ownerPasskeys) {
-        await tx.query(
-          INSERT_HYBRID_ACCOUNT_PASSKEY_SQL,
-          [accountId, pk.keyId, `0x${pk.x.toString(16)}`, `0x${pk.y.toString(16)}`],
+        await insertHybridAccountPasskey(
+          accountId,
+          { keyId: pk.keyId, x: `0x${pk.x.toString(16)}`, y: `0x${pk.y.toString(16)}` },
+          tx,
         )
       }
 
-      return { id: accountId, account_address: accountAddress, created_at: result.rows[0].created_at }
+      return { id: accountId, account_address: accountAddress, created_at: inserted.created_at }
     }).catch((err: unknown) => {
       if (err instanceof RegistrationRefusal) return err
       throw err
@@ -456,11 +441,8 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     // `SELECT 1`, matching the sibling GET verbatim — the provisioning route's
     // duplicate check is a `SELECT id FROM smart_accounts`, and sharing that shape
     // would make pattern-matched test mocks ambiguous between the two.
-    const owned = await pool.query(
-      FIND_OWNED_HYBRID_ACCOUNT_SQL,
-      [userId, address, chainId],
-    )
-    if (owned.rows.length === 0) {
+    const owned = await findOwnedHybridAccount(userId, address, chainId)
+    if (!owned) {
       return { ok: false, status: 404, error: 'Account not found' }
     }
     const owner = await loadHybridOwnerConfig(userId, address, chainId)

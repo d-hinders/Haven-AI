@@ -619,3 +619,160 @@ export const FIND_DELEGATOR_HYBRID_ACCOUNT_FOR_USER_SQL = `SELECT id FROM smart_
  */
 export const FIND_HYBRID_ACCOUNT_BY_ADDRESS_FOR_REPLAY_SQL = `SELECT id, created_at FROM smart_accounts
        WHERE user_id = $1 AND LOWER(account_address) = LOWER($2) AND chain_id = $3`
+
+// ── Repository entry points for the provisioning route (#4023 round 2) ──────
+//
+// routes/hybrid-accounts.ts ran these statements through an imported pool —
+// the last `pg-only-in-infra` waiver in routes/. Moved VERBATIM: same SQL
+// constants, same parameter order, same row shapes; only the executor wiring
+// changed. Convention (README): every function takes `userId` as a REQUIRED
+// parameter and every statement scopes on it, and the executor comes LAST
+// defaulting to the pool so the provisioning transaction can thread its `tx`
+// through — the counter bump, the derived row and the copied passkeys commit
+// together or not at all, which is the whole point of that transaction.
+
+/** Pool-bound transaction entry point — a route must not import `db.ts`. */
+export async function inTransaction<T>(
+  fn: (tx: Executor) => Promise<T>,
+  db: Executor = pool,
+): Promise<T> {
+  return withTransaction(db, fn)
+}
+
+/** The create-additional source row: null unless it is the caller's delegator_hybrid account. */
+export async function findDelegatorHybridAccountForUser(
+  userId: string,
+  accountId: string,
+  db: Executor = pool,
+): Promise<{ id: string } | null> {
+  const result = await db.query<{ id: string }>(FIND_DELEGATOR_HYBRID_ACCOUNT_FOR_USER_SQL, [
+    accountId,
+    userId,
+  ])
+  return result.rows[0] ?? null
+}
+
+/** The #4023 soft-cap count: accounts the user already has on ONE chain. */
+export async function countAccountsForUserOnChain(
+  userId: string,
+  chainId: number,
+  db: Executor = pool,
+): Promise<bigint> {
+  const result = await db.query<{ count: string }>(COUNT_ACCOUNTS_FOR_USER_ON_CHAIN_SQL, [
+    userId,
+    chainId,
+  ])
+  return BigInt(result.rows[0]?.count ?? '0')
+}
+
+/** The create replay read: the FIRST account a retried create answers, or null. */
+export async function findAccountByCreateIdempotencyKey(
+  userId: string,
+  idempotencyKey: string,
+  db: Executor = pool,
+): Promise<{ id: string; account_address: string; created_at: string } | null> {
+  const result = await db.query<{ id: string; account_address: string; created_at: string }>(
+    FIND_ACCOUNT_BY_CREATE_IDEMPOTENCY_KEY_SQL,
+    [userId, idempotencyKey],
+  )
+  return result.rows[0] ?? null
+}
+
+/**
+ * The counter bump. Atomic on the (user, salt_key) row — two concurrent
+ * creates serialize on the UPDATE and get DISTINCT values. Returns
+ * `last_allocated`, which starts at 1 (counter 0 is never issued).
+ */
+export async function allocateHybridDeploySalt(
+  userId: string,
+  saltKey: string,
+  db: Executor = pool,
+): Promise<string> {
+  const result = await db.query<{ last_allocated: string }>(ALLOCATE_HYBRID_DEPLOY_SALT_SQL, [
+    userId,
+    saltKey,
+  ])
+  return result.rows[0].last_allocated
+}
+
+/** The pre-insert duplicate check: the caller's own row at the derived address, or null. */
+export async function findHybridAccountByAddressForUser(
+  userId: string,
+  accountAddress: string,
+  chainId: number,
+  db: Executor = pool,
+): Promise<{ id: string } | null> {
+  const result = await db.query<{ id: string }>(FIND_HYBRID_ACCOUNT_BY_ADDRESS_FOR_USER_SQL, [
+    userId,
+    accountAddress,
+    chainId,
+  ])
+  return result.rows[0] ?? null
+}
+
+/** The signup-default gate: the user's TOTAL account count across chains. */
+export async function countAccountsForUser(userId: string, db: Executor = pool): Promise<bigint> {
+  const result = await db.query<{ count: string }>(COUNT_ACCOUNTS_FOR_USER_SQL, [userId])
+  return BigInt(result.rows[0]?.count ?? '0')
+}
+
+/**
+ * The provisioning INSERT. Returns the RETURNING row, or null when the insert
+ * lost the (user_id, chain_id, LOWER(account_address)) UNIQUE race — the
+ * caller re-reads the winner instead of 500ing on a bare constraint violation.
+ */
+export async function insertHybridAccount(
+  input: {
+    userId: string
+    accountAddress: string
+    chainId: number
+    name: string
+    isDefault: boolean
+    ownerAddress: string | null
+    singleSignerWaiverAt: string | null
+    deploySalt: string
+    createIdempotencyKey: string | null
+  },
+  db: Executor = pool,
+): Promise<{ id: string; created_at: string } | null> {
+  const result = await db.query<{ id: string; created_at: string }>(
+    INSERT_HYBRID_ACCOUNT_SQL,
+    [
+      input.userId,
+      input.accountAddress,
+      input.chainId,
+      input.name,
+      input.isDefault,
+      input.ownerAddress,
+      input.singleSignerWaiverAt,
+      input.deploySalt,
+      input.createIdempotencyKey,
+    ],
+  )
+  return result.rows[0] ?? null
+}
+
+/** The unique-race loser's re-read: the winner's 201-echo fields, or null (then it is a 409). */
+export async function findHybridAccountByAddressForReplay(
+  userId: string,
+  accountAddress: string,
+  chainId: number,
+  db: Executor = pool,
+): Promise<{ id: string; created_at: string } | null> {
+  const result = await db.query<{ id: string; created_at: string }>(
+    FIND_HYBRID_ACCOUNT_BY_ADDRESS_FOR_REPLAY_SQL,
+    [userId, accountAddress, chainId],
+  )
+  return result.rows[0] ?? null
+}
+
+/** The ownership read behind every account-scoped route (`SELECT 1` → boolean). */
+export async function findOwnedHybridAccount(
+  userId: string,
+  accountAddress: string,
+  chainId: number,
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query(FIND_OWNED_HYBRID_ACCOUNT_SQL, [userId, accountAddress, chainId])
+  return result.rows.length > 0
+}

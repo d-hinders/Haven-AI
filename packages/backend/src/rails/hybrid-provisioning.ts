@@ -32,6 +32,7 @@
 import {
   createPublicClient,
   pad,
+  toHex,
   zeroAddress,
   type Address,
   type Hex,
@@ -86,6 +87,16 @@ export interface SaltedHybridOwnerConfig extends HybridOwnerConfig {
  */
 export function normalizeDeploySalt(salt: Hex): Hex {
   return pad(salt, { size: 32 })
+}
+
+/**
+ * The 32-byte salt for a counter value (migration 114). Lives here — next to
+ * {@link normalizeDeploySalt} — so the provisioning route needs no viem import
+ * of its own: routes are a viem-free zone (`chain-sdk-not-in-routes`), and the
+ * salt's byte-shaping is this module's domain.
+ */
+export function deploySaltForCounter(counter: bigint): Hex {
+  return pad(toHex(counter), { size: 32 })
 }
 
 function watchOnly(address: Address): LocalAccount {

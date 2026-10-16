@@ -776,8 +776,9 @@ The title and the subtitle each line-clamp to two lines at every width
 (`Row` truncates both to one), so an item is never cut to a line that
 cannot be judged — the narrow desktop "Needs attention" card included (#3876).
 The leading icon, and from `sm` up the trailing badge, action and dismiss,
-centre on the title's first line rather than on the whole body, so a
-four-line item still reads as one line with detail beneath (#3880).
+are centred vertically in the row, which keeps `Row`'s symmetric 12px
+padding (#4019, reversing #3880's first-line alignment); on an item whose
+title and subtitle both wrap, the icon sits beside the middle of the text.
 The trailing controls form **one column**: once any row in the list offers
 the dismiss, a row with a badge or action but no dismiss keeps an empty,
 `aria-hidden` slot in its place, so every row's actions end on the same edge
@@ -788,8 +789,8 @@ transactions") grows past it and its badge sits further left.
 Below `sm` the trailing slot also wraps under the body. `fullBleed` is for
 a list that **is** the card's body, as on the dashboard (#3902): rows run
 edge to edge with hairline dividers and take the card's 20px side inset
-instead of `Row`'s 16px; only the horizontal padding changes, so the
-first-line alignment holds. The `/design-system` sample renders it, so the
+instead of `Row`'s 16px; only the horizontal padding changes, so the row
+stays centred. The `/design-system` sample renders it, so the
 geometry guards in `e2e/attention-list-title-measure.spec.ts` measure the
 dashboard's shape. Zero items renders nothing — the caller owns the empty
 state.

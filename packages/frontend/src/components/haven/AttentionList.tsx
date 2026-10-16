@@ -51,13 +51,16 @@
  * with `line-clamp-none`: it sets `overflow: visible`, which defeats the
  * ellipsis (#3861).
  *
- * ── First-line alignment (#3880) ──────────────────────────────────────────
+ * ── Centred in the row (#4019) ─────────────────────────────────────────────
  *
- * With two-line titles and subtitles a row body runs to four lines, and
- * `Row`'s default centring left the icon beside the gap between title and
- * subtitle. The leading icon — and, from `sm` up, the trailing badge, action
- * and dismiss when they sit beside the body — are centred on the title's
- * FIRST line instead, so the item reads as one line with detail beneath.
+ * The row keeps `Row`'s own geometry: `items-center` with `py-3`, so the
+ * leading icon and — from `sm` up, beside the body — the trailing badge,
+ * action and dismiss are centred vertically in the row, with 12px above and
+ * below. This reverses #3880, which pinned the icon and controls to the
+ * title's first line by trading 6px of top padding for a title margin; the
+ * owner found the result top-heavy (2026-10-16). Accepted trade-off: on an
+ * item whose title and subtitle both wrap, the icon sits beside the middle
+ * of the text block rather than its first line.
  *
  * ── Mobile ────────────────────────────────────────────────────────────────
  *
@@ -97,8 +100,8 @@
  * `fullBleed` is for a list that IS the card body: rows run edge to edge
  * with hairline dividers between them and the card's own 20px side inset
  * (`px-5`), as the dashboard's "Needs attention" card draws them. Only the
- * horizontal padding changes — `ROW_TOP` still owns the top, so the
- * first-line alignment above holds. The `/design-system` showcase renders the
+ * horizontal padding changes, so the row stays centred as above. The
+ * `/design-system` showcase renders the
  * same prop, so `e2e/attention-list-title-measure.spec.ts` measures the shape
  * the dashboard uses. Without it the list keeps its inset, spaced rows.
  *
@@ -139,24 +142,6 @@ export interface AttentionListItem {
   /** The caller's action — a button or link, rendered in `trailing` before the dismiss. */
   action?: ReactNode
 }
-
-/**
- * Centre the 32px controls on the title's first line (#3880) without moving
- * anything by a negative margin: the row gives up 6px of top padding
- * (`pt-1.5` overrides Row's `py-3` top) and the title takes it back as a
- * margin (`mt-1.5`), so the text sits exactly where it did — for any item
- * with a subtitle, i.e. a body at least as tall as the 32px icon. Every
- * Needs attention kind has one; a title-only item would sit 3px high in a 6px
- * shorter row, and would need the body pinned too. The icon and,
- * beside the body, the trailing controls then align to the top of the row
- * — 6px above the first line, which is half of 32px minus half of the 20px
- * `text-sm` line, so their centres land on the line's centre. Controls that
- * wrap onto their own line keep Row's full 12px gap: nothing pulls them up
- * (the #3880 code review caught a `-mt-1.5` version doing exactly that to
- * three of the four dashboard rows).
- */
-const ROW_TOP = 'pt-1.5'
-const TITLE_TOP = 'mt-1.5'
 
 /** Two lines, then an ellipsis — see the clamp rule above. */
 const CLAMP = 'whitespace-normal line-clamp-2'
@@ -246,14 +231,13 @@ export function AttentionList({
           <Row
             leading={item.icon ? <Icon icon={item.icon} className="h-4 w-4" /> : undefined}
             leadingTone={item.icon ? item.tone : undefined}
-            leadingClassName="self-start"
             title={item.title}
             subtitle={item.subtitle}
-            titleClassName={`${CLAMP} ${TITLE_TOP}`}
+            titleClassName={CLAMP}
             subtitleClassName={CLAMP}
             bodyClassName="min-w-[10rem]"
-            trailingClassName="w-full basis-full self-start sm:w-auto sm:basis-auto"
-            className={`flex-wrap ${ROW_TOP}${fullBleed ? ` ${FULL_BLEED_ROW}` : ''}`}
+            trailingClassName="w-full basis-full sm:w-auto sm:basis-auto"
+            className={`flex-wrap${fullBleed ? ` ${FULL_BLEED_ROW}` : ''}`}
             trailing={
               <div className="flex items-center justify-end gap-2">
                 {item.badge !== undefined ? (

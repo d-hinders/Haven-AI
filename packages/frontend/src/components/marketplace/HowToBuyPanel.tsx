@@ -46,8 +46,9 @@ import type { MerchantBudget } from '@/hooks/useMerchantBudgets'
 type StepState = 'done' | 'open' | 'later'
 
 /**
- * The numbered dot, in StepProgress's visual language: a success-tinted ✓
- * for a claimed step, the brand dot for the step to act on now, and a muted
+ * The numbered dot, in StepProgress's colours: a success-tinted text ✓ for a
+ * claimed step (StepProgress itself now draws lucide `Check`; this dot has not
+ * followed yet), the brand dot for the step to act on now, and a muted
  * number for a later step that claims nothing.
  */
 function StepDot({ state, n }: { state: StepState; n: number }) {

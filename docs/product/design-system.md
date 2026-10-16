@@ -1560,7 +1560,10 @@ default. A dialog that walks through several screens of different heights
 passes `placement="top"`: the panel hangs from a fixed line — `sm:mt-16` below
 the wrapper's own `max(1rem, safe-top)` padding, so `4rem` + `1rem` on a
 desktop, and just the safe-area padding below `sm` — and grows **downward
-only**, so the header and its `headerAccessory` hold one y on every screen.
+only**, so the title holds one y on every screen. The `headerAccessory` below
+it moves only by the subtitle's own height: below `sm` a long subtitle wraps to
+a second line (the Connect flow's budget and waiting screens), which drops the
+band about 19px there.
 The ceiling subtracts the extra offset for the reason it subtracts the padding
 (#2730): otherwise the footer is what overflows. The Connect agent modal is the
 one caller. Centred, its title moved between y 130 and y 294 across the flow at
@@ -1623,6 +1626,9 @@ top, both full width: two 140px halves at 375px wrapped "Set agent budget" and
 "Create a new setup" onto two lines. `DialogActions` owns only that layout
 (`flex-col-reverse` → `sm:flex-row`); its children are `Button`s with `flex-1`,
 secondary first in the markup, so the desktop Tab order matches the screen.
+Below `sm` the stack is visually reversed, so Tab reaches the lower secondary
+before the upper primary — accepted, since reordering the markup would break
+the desktop order instead and a phone is rarely tabbed.
 
 In the Connect agent modal it carries every pair — Cancel / Set agent budget,
 Back / Create setup prompt, Cancel / Approve budget (through
@@ -1638,9 +1644,13 @@ dialog. Three placements in that flow are decided rather than incidental:
 - **Waiting for the agent.** The forward action is the in-row "Copy setup
   prompt" primary — #3832's one allowed exception to the rule, kept, at 40px
   like everything else — and after that the screen advances on its own. Its
-  only footer action is the exit, so "Cancel setup" is a full-width **ghost**:
-  it takes the footer slot without competing with the copy (#1391). The expiry
-  line sits on its own line above it.
+  only footer action is the exit, so "Cancel setup" is a full-width **ghost**
+  — the same weight as every other secondary in the flow's pairs. Ghost is
+  not a quieter tier, and after the copy it is the largest control on screen;
+  that is accepted because the forward action has already happened by then
+  and the screen advances on its own, so nothing is left for the exit to
+  compete with (#1391's concern). Before the copy, the filled "Copy setup
+  prompt" leads. The expiry line sits on its own line above it.
 - **Done.** One full-width primary, "Done"; the in-list "Download the skill" is
   a 40px ghost, not a 44px one-off (Button's own hit area keeps the 44px tap
   target).

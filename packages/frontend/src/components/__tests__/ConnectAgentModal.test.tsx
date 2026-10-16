@@ -126,6 +126,17 @@ describe('ConnectAgentModal', () => {
     items.forEach((item) => expect(item).not.toHaveAttribute('aria-current'))
   })
 
+  it('does not halt the band off the connect step (a restart before the status clears)', () => {
+    mockUseAgentConnectionSetup.mockReturnValue(
+      flow({ step: 'policy', currentStepIndex: 1, connectView: { kind: 'expired' } }),
+    )
+    render(<ConnectAgentModal open onClose={vi.fn()} accountAddress="0x111" accountId="safe-1" />)
+
+    const items = within(screen.getAllByRole('list')[0]).getAllByRole('listitem')
+    expect(items[1]).toHaveAttribute('aria-current', 'step')
+    items.forEach((item) => expect(item).not.toHaveTextContent(/stopped/))
+  })
+
   it('keeps Connect current while the setup is live', () => {
     mockUseAgentConnectionSetup.mockReturnValue(
       flow({ step: 'connect', currentStepIndex: 2, connectView: { kind: 'waiting_for_connector' } }),

@@ -215,9 +215,8 @@ export default function BudgetGrantAction({
       )}
 
       {/* #2733: the page form's row squeezed the "Set budget" pill at 390px
-          until its label wrapped onto two lines. BELOW `sm` (and only when
-          there is no leadingAction — the modal footer keeps its inline row)
-          the row stacks: button on its own line at full width, helper under
+          until its label wrapped onto two lines. BELOW `sm` the page-form
+          row stacks: button on its own line at full width, helper under
           it; from `sm` up it is the same side-by-side row as before. Layout
           only: the button, its disabled predicate and the helper text are
           unchanged.

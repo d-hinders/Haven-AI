@@ -123,7 +123,10 @@ export default function ConnectAgentModal({
             flow.connectView?.kind === 'active' ? flow.setupStepCount : Math.max(flow.currentStepIndex, 0)
           }
           labels={SETUP_STEP_LABELS}
-          halted={HALTED_VIEWS.has(flow.connectView?.kind ?? '')}
+          // Gated on the step: "Create a new setup" moves to policy before the
+          // status hook clears the old terminal view, which would otherwise
+          // flash Budget as stopped for a render.
+          halted={flow.step === 'connect' && HALTED_VIEWS.has(flow.connectView?.kind ?? '')}
         />
       }
       showCloseButton

@@ -11,7 +11,9 @@ import type { ReactNode } from 'react'
  *   at 375px wrapped labels like "Set agent budget" onto two lines; stacking
  *   gives every label the full width. `flex-col-reverse` puts the primary on
  *   top without reordering the markup, so the desktop Tab order (secondary,
- *   then primary) still matches what is on screen there.
+ *   then primary) still matches what is on screen there. Below `sm` Tab and
+ *   reading order reach the lower secondary first — the accepted cost, since
+ *   reordering the markup would break the desktop order instead.
  *
  * Children are `Button`s at the default `md` size (40px) with `flex-1`; this
  * owns only the layout. A screen with a single action renders a full-width

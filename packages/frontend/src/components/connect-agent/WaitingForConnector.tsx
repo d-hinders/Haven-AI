@@ -377,8 +377,8 @@ export function WaitingForConnector({
             it is a ghost button, because an exit should be findable without
             competing with the action that moves the user forward. It was a
             small one beside the expiry line until the flow took one footer
-            rule (full width, 40px, body edges); ghost weight is what keeps it
-            from competing now. It stays a
+            rule (full width, 40px, body edges); see the footer comment below
+            for why its weight is still right there. It stays a
             <button>: demoting it visually must not demote it semantically, and
             the stage-conditional render below is pinned by a test, since a
             missing exit is worse than a loud one.
@@ -403,8 +403,10 @@ export function WaitingForConnector({
             40px on the body edges. This screen's only footer action is the
             exit — the forward action is the in-row copy, and after that the
             screen advances by itself — so it is a full-width GHOST, not a
-            primary: it takes the footer slot without competing with the
-            copy button (#1391). */}
+            primary. Ghost is the flow's ordinary secondary weight, not a
+            quieter one: before the copy the filled copy button leads, and
+            after it there is no forward action left for the exit to compete
+            with (#1391). */}
         {!showRecovery && (
           <Button variant="ghost" onClick={onCancel} className="w-full">
             Cancel setup

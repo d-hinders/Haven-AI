@@ -22,22 +22,17 @@ import { credentialIdFromKeyId } from './signer'
 type UserSignersResponse = ApiOperations['listUserSigners']['responses']['200']['content']['application/json']
 type UserSigner = UserSignersResponse['signers'][number]
 
-export type CreateAccountBody = {
-  source_account_id: string
-  key_id: string
-  chain_id: number
-  name: string
-  idempotency_key: string
-}
+// The wire shapes come from the spec (`ApiOperations['createHybridAccount']`,
+// #4023), so a contract change shows up here as a type error instead of drift.
+type CreateHybridAccount = ApiOperations['createHybridAccount']
+type CreateHybridAccountRequest = CreateHybridAccount['requestBody']['content']['application/json']
 
-export type CreatedAccount = {
-  id: string
-  account_address: string
-  chain_id: number
-  account_type?: string
-  deployed?: boolean
-  created_at?: string
-}
+/** The create-additional shape: the five fields the dialog always sends. */
+export type CreateAccountBody = Required<
+  Pick<CreateHybridAccountRequest, 'source_account_id' | 'key_id' | 'chain_id' | 'name' | 'idempotency_key'>
+>
+
+export type CreatedAccount = CreateHybridAccount['responses']['201']['content']['application/json']
 
 /**
  * An account that can secure a new one: it has at least one passkey. `keyIds`
@@ -148,10 +143,19 @@ export function submissionFor(
 //
 // The create-additional refusals are mapped by `error_code` FIRST, never by
 // matching the backend's sentence. These are the codes requested on #4044
-// (#4023's PR). Until the backend sends them, the status fallback below
-// applies: a 422 is a typed "could not create" that passes the backend's
-// sentence through as detail, a 429 is the money-path rate limit, and
-// anything else is the generic failure.
+// (#4023's PR); the spec does not carry them yet, so they live here. Without a
+// code, the status decides — and the line that matters is whether the outcome
+// is KNOWN:
+//
+// - a 4xx is a definite refusal: the route answered before (or rolled back)
+//   anything it would have written. 429 is the money-path rate limit; every
+//   other code-less 4xx is a typed "could not create" that passes the
+//   backend's sentence through as detail.
+// - no status (the request never got an answer) or a 5xx is an UNKNOWN
+//   outcome: the create may have committed and only the response been lost.
+//   The dialog then re-reads the account list and says the account may exist,
+//   instead of inviting a retry that a new idempotency key (a reopened dialog,
+//   a corrected name) would turn into a second account.
 
 export const ACCOUNT_CAP_REACHED = 'ACCOUNT_CAP_REACHED'
 export const SOURCE_HAS_NO_PASSKEY = 'SOURCE_HAS_NO_PASSKEY'
@@ -165,9 +169,10 @@ export type CreateAccountRefusal =
   | { kind: 'key_not_on_source' }
   | { kind: 'source_not_found' }
   | { kind: 'rate_limited' }
-  /** A 422 with no code this client knows: the backend's sentence, bounded, or null. */
+  /** A code-less 4xx: a definite refusal. The backend's sentence, bounded, or null. */
   | { kind: 'could_not_create'; detail: string | null }
-  | { kind: 'failed' }
+  /** No answer, or a 5xx: the account may have been created anyway. */
+  | { kind: 'unknown_outcome' }
 
 /** Long enough for every sentence the route sends today; short enough to stay a line. */
 const MAX_DETAIL_CHARS = 200
@@ -179,6 +184,7 @@ function readBody(err: unknown): Record<string, unknown> {
 
 export function classifyCreateAccountError(err: unknown): CreateAccountRefusal {
   const body = readBody(err)
+  const status = (err as { status?: unknown } | null)?.status
   const code = typeof body.error_code === 'string' ? body.error_code : null
 
   switch (code) {
@@ -194,11 +200,8 @@ export function classifyCreateAccountError(err: unknown): CreateAccountRefusal {
       return { kind: 'source_not_found' }
   }
 
-  const status = (err as { status?: unknown } | null)?.status
-  if (status === 422) {
-    const sentence = typeof body.error === 'string' ? body.error.trim() : ''
-    return { kind: 'could_not_create', detail: sentence ? sentence.slice(0, MAX_DETAIL_CHARS) : null }
-  }
+  if (typeof status !== 'number' || status < 400 || status >= 500) return { kind: 'unknown_outcome' }
   if (status === 429) return { kind: 'rate_limited' }
-  return { kind: 'failed' }
+  const sentence = typeof body.error === 'string' ? body.error.trim() : ''
+  return { kind: 'could_not_create', detail: sentence ? sentence.slice(0, MAX_DETAIL_CHARS) : null }
 }

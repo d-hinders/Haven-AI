@@ -95,7 +95,7 @@ function NewAccountDialogBody({
   onClose: () => void
   preferredSourceAccountId?: string | null
 }) {
-  const { accounts, createAccount } = useAccounts()
+  const { accounts, createAccount, refreshAccounts } = useAccounts()
   const { signers, loadError, reload } = useUserSigners()
   const { chains } = useDeployableChains()
 
@@ -133,7 +133,13 @@ function NewAccountDialogBody({
 
   async function submit() {
     setTouched(true)
-    if (busy || !source || selectedChainId === null || trimmedName === '') return
+    // Re-entry is blocked by the submit button's `disabled={busy}`, not here: a
+    // `busy` read in this closure is the render's value, so it could not stop a
+    // second click the button had not yet been re-rendered to refuse. `source`
+    // and `selectedChainId` are type narrowings for states the form never
+    // renders in (the form needs a source; `useDeployableChains` never returns
+    // an empty list). The name check is the one input guard.
+    if (!source || selectedChainId === null || trimmedName === '') return
     setRefusal(null)
 
     // Same name, network and source as the last attempt → the same key, so a
@@ -192,7 +198,12 @@ function NewAccountDialogBody({
       setStage('done')
     } catch (err) {
       setStage('form')
-      setRefusal(classifyCreateAccountError(err))
+      const refusal = classifyCreateAccountError(err)
+      // No answer, or a 5xx: the create may have committed behind a lost
+      // response. Re-read the list so an account that exists shows up behind
+      // the dialog, and say so rather than inviting a blind retry.
+      if (refusal.kind === 'unknown_outcome') void refreshAccounts()
+      setRefusal(refusal)
     }
   }
 
@@ -207,7 +218,7 @@ function NewAccountDialogBody({
     body = (
       <div className="space-y-2" data-testid="new-account-created">
         <p className="text-sm font-medium text-[var(--v2-ink)]">
-          {trimmedName} is ready on {getChainConfig(created.chain_id).name}
+          {trimmedName} was created on {getChainConfig(created.chain_id).name}
         </p>
         <p className="text-sm text-[var(--v2-ink-2)]">
           The passkey you just used is its only way to approve, and it has no backup yet. Add one from the
@@ -379,9 +390,11 @@ function NewAccountDialogBody({
       subtitle="A separate Haven account with its own funds, agents and budgets. It starts empty."
       footer={footer}
       showCloseButton
+      // ONE close guard: while the passkey prompt or the create call is in
+      // flight, `onClose` is a no-op, so Escape, the backdrop and the X all
+      // do nothing (the X and Cancel also render disabled). Closing mid-flight
+      // would drop the idempotency key with the request still running.
       closeButtonDisabled={busy}
-      closeOnBackdrop={!busy}
-      closeOnEscape={!busy}
       initialFocusRef={nameRef}
       panelTestId="new-account-dialog"
     >
@@ -436,6 +449,8 @@ function RefusalMessage({
     case 'rate_limited':
       return <InlineAlert>Too many attempts in a short time. Wait a minute, then try again.</InlineAlert>
     case 'could_not_create':
+      // A definite refusal: no retry promise, because retrying the same
+      // request gets the same answer.
       return (
         <InlineAlert>
           Haven couldn&rsquo;t create the account.{refusal.detail ? ` Details: ${refusal.detail}` : ''}
@@ -450,10 +465,13 @@ function RefusalMessage({
       )
     case 'passkey_failed':
       return <InlineAlert>Your passkey couldn&rsquo;t be read. Try again.</InlineAlert>
-    case 'failed':
+    case 'unknown_outcome':
+      // The retry promise is scoped to what the idempotency key covers: this
+      // open dialog, with the same name and network (and source).
       return (
         <InlineAlert>
-          Haven couldn&rsquo;t create the account. Try again: a retry won&rsquo;t create a second one.
+          Haven couldn&rsquo;t confirm the account. It may have been created anyway, so check your accounts before
+          trying again. Trying again here, with the same name and network, won&rsquo;t create a second one.
         </InlineAlert>
       )
   }

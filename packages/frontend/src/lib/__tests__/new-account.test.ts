@@ -178,17 +178,33 @@ describe('classifyCreateAccountError — error_code first, never the sentence', 
     expect(classifyCreateAccountError(refusal(422, {}))).toEqual({ kind: 'could_not_create', detail: null })
   })
 
-  it('maps the rate limit by status, and everything else to the generic failure', () => {
+  it('maps the rate limit by status, and every other code-less 4xx to a definite "could not create"', () => {
     expect(classifyCreateAccountError(refusal(429, { error: 'Too Many Requests' }))).toEqual({ kind: 'rate_limited' })
-    expect(classifyCreateAccountError(refusal(404, { error: 'Source account not found' }))).toEqual({ kind: 'failed' })
-    expect(classifyCreateAccountError(refusal(409, { error: 'Account already registered' }))).toEqual({ kind: 'failed' })
-    expect(classifyCreateAccountError(refusal(502, { error: 'Could not derive the account address' }))).toEqual({
-      kind: 'failed',
+    expect(classifyCreateAccountError(refusal(404, { error: 'Source account not found' }))).toEqual({
+      kind: 'could_not_create',
+      detail: 'Source account not found',
     })
-    expect(classifyCreateAccountError(new TypeError('Failed to fetch'))).toEqual({ kind: 'failed' })
-    // An unknown code on a non-422 status is not guessed at.
+    expect(classifyCreateAccountError(refusal(409, { error: 'Account already registered' }))).toEqual({
+      kind: 'could_not_create',
+      detail: 'Account already registered',
+    })
+    expect(classifyCreateAccountError(refusal(400, { error: 'chain_id is required' }))).toEqual({
+      kind: 'could_not_create',
+      detail: 'chain_id is required',
+    })
+    // An unknown code is not guessed at: the status decides.
     expect(classifyCreateAccountError(refusal(400, { error: 'x', error_code: 'SOMETHING_NEW' }))).toEqual({
-      kind: 'failed',
+      kind: 'could_not_create',
+      detail: 'x',
     })
+  })
+
+  it('reads no answer, or a 5xx, as an UNKNOWN outcome — the account may exist', () => {
+    expect(classifyCreateAccountError(refusal(502, { error: 'Could not derive the account address' }))).toEqual({
+      kind: 'unknown_outcome',
+    })
+    expect(classifyCreateAccountError(refusal(500, {}))).toEqual({ kind: 'unknown_outcome' })
+    expect(classifyCreateAccountError(new TypeError('Failed to fetch'))).toEqual({ kind: 'unknown_outcome' })
+    expect(classifyCreateAccountError(undefined)).toEqual({ kind: 'unknown_outcome' })
   })
 })

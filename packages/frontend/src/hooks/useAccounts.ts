@@ -82,5 +82,8 @@ export function useAccounts() {
     [refreshUser],
   )
 
-  return { accounts, loading, createAccount, renameAccount, removeAccount, setDefault }
+  // `refreshAccounts` re-reads the session payload without changing anything —
+  // the New account dialog calls it when a create's outcome is unknown, so an
+  // account that was created behind a lost response shows up (#4024).
+  return { accounts, loading, createAccount, refreshAccounts: refreshUser, renameAccount, removeAccount, setDefault }
 }

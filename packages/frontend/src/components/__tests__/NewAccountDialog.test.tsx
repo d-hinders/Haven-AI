@@ -78,6 +78,7 @@ const CREATED = {
 
 let createAccount: ReturnType<typeof vi.fn>
 let reloadSigners: ReturnType<typeof vi.fn>
+let refreshAccounts: ReturnType<typeof vi.fn>
 
 function setup({
   accounts = [MAIN, OTHER],
@@ -90,7 +91,7 @@ function setup({
   loadError?: boolean
   preferredSourceAccountId?: string
 } = {}) {
-  mockUseAccounts.mockReturnValue({ accounts, createAccount })
+  mockUseAccounts.mockReturnValue({ accounts, createAccount, refreshAccounts })
   mockUseUserSigners.mockReturnValue({ signers, loadError, reload: reloadSigners })
   const onClose = vi.fn()
   render(<NewAccountDialog open onClose={onClose} preferredSourceAccountId={preferredSourceAccountId} />)
@@ -121,6 +122,7 @@ beforeEach(() => {
   localStorage.clear()
   createAccount = vi.fn().mockResolvedValue(CREATED)
   reloadSigners = vi.fn()
+  refreshAccounts = vi.fn().mockResolvedValue(undefined)
   assertsWith(CRED_A)
 })
 
@@ -149,7 +151,7 @@ describe('NewAccountDialog — the happy path (#4024)', () => {
     expect(body.idempotency_key).toMatch(/^[0-9a-f-]{36}$/)
 
     const done = await screen.findByTestId('new-account-created')
-    expect(within(done).getByText('Reserve is ready on Base Sepolia')).toBeInTheDocument()
+    expect(within(done).getByText('Reserve was created on Base Sepolia')).toBeInTheDocument()
     expect(within(done).getByText(/has no backup yet/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open account' })).toHaveAttribute('href', '/accounts/new1')
   })
@@ -252,6 +254,15 @@ describe('NewAccountDialog — nothing is sent without a name or a passkey', () 
     expect(createAccount).not.toHaveBeenCalled()
   })
 
+  it('says the passkey could not be read when the prompt fails for another reason', async () => {
+    mockGetPasskeyAssertion.mockRejectedValue(new Error('WebAuthn assertion returned an unexpected response.'))
+    setup()
+    typeName('Reserve')
+    await submit()
+    expect(screen.getByRole('alert')).toHaveTextContent('Your passkey couldn’t be read. Try again.')
+    expect(createAccount).not.toHaveBeenCalled()
+  })
+
   it('says so when this browser cannot use a passkey', async () => {
     mockGetPasskeyAssertion.mockRejectedValue(new PasskeyUnsupportedError())
     setup()
@@ -319,9 +330,30 @@ describe('NewAccountDialog — typed refusals', () => {
     expect(alert).toHaveTextContent('Too many attempts in a short time.')
   })
 
-  it('shows the generic failure for anything else', async () => {
+  const UNKNOWN =
+    'Haven couldn’t confirm the account. It may have been created anyway, so check your accounts before trying again. Trying again here, with the same name and network, won’t create a second one.'
+
+  it('treats a 5xx as an unknown outcome: says the account may exist and re-reads the list', async () => {
     const alert = await refusedWith(502, { error: 'Could not derive the account address' })
-    expect(alert).toHaveTextContent('Haven couldn’t create the account. Try again: a retry won’t create a second one.')
+    expect(alert).toHaveTextContent(UNKNOWN)
+    expect(refreshAccounts).toHaveBeenCalledTimes(1)
+  })
+
+  it('treats no answer at all as an unknown outcome too', async () => {
+    createAccount.mockRejectedValue(new TypeError('Failed to fetch'))
+    setup()
+    typeName('Reserve')
+    await submit()
+    expect(screen.getByRole('alert')).toHaveTextContent(UNKNOWN)
+    expect(refreshAccounts).toHaveBeenCalledTimes(1)
+  })
+
+  it('makes no retry promise for a definite code-less refusal, and does not re-read the list', async () => {
+    const alert = await refusedWith(404, { error: 'Source account not found' })
+    expect(alert).toHaveTextContent('Haven couldn’t create the account. Details: Source account not found')
+    expect(alert).not.toHaveTextContent('second one')
+    expect(alert).not.toHaveTextContent('may have been created')
+    expect(refreshAccounts).not.toHaveBeenCalled()
   })
 
   it('clears a refusal once the inputs it described change', async () => {
@@ -377,11 +409,82 @@ describe('NewAccountDialog — states without a form', () => {
   })
 
   it('renders nothing while closed', () => {
-    mockUseAccounts.mockReturnValue({ accounts: [MAIN], createAccount })
+    mockUseAccounts.mockReturnValue({ accounts: [MAIN], createAccount, refreshAccounts })
     mockUseUserSigners.mockReturnValue({ signers: SHARED_SIGNERS, loadError: false, reload: reloadSigners })
     render(<NewAccountDialog open={false} onClose={vi.fn()} />)
     expect(screen.queryByRole('dialog')).toBeNull()
     // Mounted only while open: the signer read does not run behind a closed dialog.
     expect(mockUseUserSigners).not.toHaveBeenCalled()
+  })
+})
+
+describe('NewAccountDialog — closing is blocked mid-flight', () => {
+  /** Every way out of the dialog, tried while it is busy. */
+  function tryToClose() {
+    fireEvent.keyDown(document, { key: 'Escape' })
+    const backdrop = document.querySelector('.v2-modal-backdrop')
+    expect(backdrop, 'the Modal backdrop handle moved').not.toBeNull()
+    fireEvent.click(backdrop!)
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+  }
+
+  it('while the passkey prompt is open', async () => {
+    let resolveAssertion!: (value: unknown) => void
+    mockGetPasskeyAssertion.mockReturnValue(new Promise((resolve) => (resolveAssertion = resolve)))
+    const { onClose } = setup()
+    typeName('Reserve')
+    await submit()
+
+    expect(screen.getByRole('button', { name: 'Waiting for your passkey…' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Close' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
+    tryToClose()
+    expect(onClose).not.toHaveBeenCalled()
+
+    // Non-vacuity: once the flow settles, the same Escape does close.
+    await act(async () => {
+      resolveAssertion({ credentialId: CRED_A, signatureDER: '0x', authenticatorData: '0x', clientDataJSON: '0x' })
+    })
+    await screen.findByTestId('new-account-created')
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('a second click while the prompt is open does not start a second create', async () => {
+    let resolveAssertion!: (value: unknown) => void
+    mockGetPasskeyAssertion.mockReturnValue(new Promise((resolve) => (resolveAssertion = resolve)))
+    setup()
+    typeName('Reserve')
+    await submit()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Waiting for your passkey…' }))
+    })
+    await act(async () => {
+      resolveAssertion({ credentialId: CRED_A, signatureDER: '0x', authenticatorData: '0x', clientDataJSON: '0x' })
+    })
+    await screen.findByTestId('new-account-created')
+    expect(mockGetPasskeyAssertion).toHaveBeenCalledTimes(1)
+    expect(createAccount).toHaveBeenCalledTimes(1)
+  })
+
+  it('while the create call is in flight', async () => {
+    let resolveCreate!: (value: unknown) => void
+    createAccount.mockReturnValue(new Promise((resolve) => (resolveCreate = resolve)))
+    const { onClose } = setup()
+    typeName('Reserve')
+    await submit()
+
+    expect(screen.getByRole('button', { name: 'Setting up your account…' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Close' })).toBeDisabled()
+    tryToClose()
+    expect(onClose).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolveCreate(CREATED)
+    })
+    await screen.findByTestId('new-account-created')
+    fireEvent.click(document.querySelector('.v2-modal-backdrop')!)
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 })

@@ -709,42 +709,35 @@ account, for example to give an agent a budget. You can add funds before then.
 ```
 
 The waiting labels are onboarding's (`Waiting for your passkey…`,
-`Setting up your account…`), and a dismissed passkey prompt returns to the
-form with no message. A refusal names the limit or the account involved and
-the next step; it never says only that something went wrong. When the outcome
-is unknown (no answer, or a server error), the account may exist: say so,
-check for it inside the dialog (closing it would lose what makes a retry
-safe), and scope any "a retry won't duplicate it" promise to what actually
-guarantees it (this dialog, the same name, network and passkey):
+`Setting up your account…`). A dismissed passkey prompt returns to the form
+and shows **no message**. A refusal names the limit or the account involved
+and the next step; it never says only that something went wrong. A definite
+refusal makes no retry promise: "Haven couldn't create the account." plus the
+reason when there is one.
+
+When the outcome is unknown (no answer, or a server error), the account may
+exist. The dialog says so, locks the details so a retry repeats the same
+request, and lets the owner check from inside the dialog:
 
 ```text
 Haven couldn't confirm the account. It may have been created anyway. Check
-again before trying again: trying again here with the same name, network and
-passkey won't create a second one.
+again before trying again: trying again here won't create a second one.
+
+To keep this from creating a second account, the details are locked until
+Haven knows what happened.
 ```
 
-"Check again" re-reads the accounts (the dialog also does it once on its
-own, a few seconds later) and shows the account as created when one with the
-submitted name appears on that network. When the read worked and found
-nothing, say so plainly ("No new account named Reserve on Base yet."). When
-the read itself failed, never say that; say the read failed ("Couldn't read
-your accounts just now. Check again in a moment."). The unknown-outcome
-message stays up until a sent request gets a definite answer or the account
-is found: a cancelled passkey prompt or a rate-limit refusal on the retry
-shows its own message beside it, not instead of it. So does the account limit
-on a retry, followed by an immediate re-read: the backend checks the limit
-before it would return the first attempt's account (#4044), so the account
-at the limit may be ours. If the owner edits an
-input, the next try is a new request, and the copy says that, short:
-
-```text
-You changed the name, network or passkey, so trying again is a new request.
-If the first one went through, it would create a second account. Check again
-first.
-```
-
-A definite refusal makes no retry promise: "Haven couldn't create the
-account." plus the reason when there is one.
+That message stays until the account is created (a retry answers it) or
+found ("Check again" finds an account with the submitted name on that
+network). Nothing else removes it: a refusal on a retry, of any kind, shows
+its own message beside it, because the backend checks a retry before it
+would return the first attempt's account (#4044), and a cancelled passkey
+prompt shows nothing at all. "Check again" reports one of three things: the
+account, as created; a read that worked and found nothing ("No new account
+named Reserve on Base yet."); or a read that failed ("Couldn't read your
+accounts just now. Check again in a moment."), never confused with the
+second. Closing the dialog drops the record, which is why the message says
+to check before trying again.
 
 Avoid:
 

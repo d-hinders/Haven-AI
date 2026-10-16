@@ -51,7 +51,7 @@ export default function MarketplacePage() {
     <div className="max-w-5xl" data-testid="marketplace-page">
       <PageHeader
         title="Marketplace"
-        subtitle="Paid APIs and tools your agents can use. Copy an instruction and give it to an agent."
+        subtitle="Paid APIs and tools your agents can use. Copy a prompt and give it to an agent."
       />
       {/* The grid's own measured skeleton, so a capture between shell paint
           and boundary resolve is not an empty page that clears the content floor. */}

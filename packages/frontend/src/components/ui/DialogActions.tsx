@@ -16,10 +16,15 @@ import type { ReactNode } from 'react'
  * Children are `Button`s at the default `md` size (40px) with `flex-1`; this
  * owns only the layout. A screen with a single action renders a full-width
  * primary instead and does not need this.
+ *
+ * Below `sm` the children are reset to `flex-none`: in a column, `flex-1`'s
+ * zero basis is a zero HEIGHT, and with no free space to grow into it
+ * collapsed the 40px buttons to their text line (caught in the 375px render).
+ * The column's default stretch gives them the full width.
  */
 export function DialogActions({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
-    <div data-dialog-actions="" className={`flex flex-col-reverse gap-3 sm:flex-row sm:items-center ${className}`}>
+    <div data-dialog-actions="" className={`flex flex-col-reverse gap-3 max-sm:[&>*]:flex-none sm:flex-row sm:items-center ${className}`}>
       {children}
     </div>
   )

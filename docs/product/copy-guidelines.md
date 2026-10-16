@@ -702,7 +702,7 @@ approve actions in the new account.
 
 Backups don't carry over. A backup passkey or wallet on another account
 doesn't protect this one, so add one on the new account's page.
-Settings → Signers shows which accounts each passkey and wallet approves.
+Signers, in Settings, shows which accounts each passkey and wallet approves.
 
 Nothing is set up on Base yet. That happens the first time you use the
 account, for example to give an agent a budget. You can add funds before then.

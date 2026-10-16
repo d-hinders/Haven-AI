@@ -343,7 +343,7 @@ function NewAccountDialogBody({
           <li>
             <span className="font-medium text-[var(--v2-ink)]">Backups don&rsquo;t carry over.</span> A backup
             passkey or wallet on another account doesn&rsquo;t protect this one, so add one on the new
-            account&rsquo;s page. Settings → Signers shows which accounts each passkey and wallet approves.
+            account&rsquo;s page. Signers, in Settings, shows which accounts each passkey and wallet approves.
           </li>
           <li>
             <span className="font-medium text-[var(--v2-ink)]">Nothing is set up on {networkName} yet.</span> That

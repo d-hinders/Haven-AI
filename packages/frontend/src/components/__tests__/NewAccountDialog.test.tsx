@@ -198,7 +198,7 @@ describe('NewAccountDialog — the copy (#4024 acceptance)', () => {
     expect(facts).toHaveTextContent('it becomes the only way to approve actions in the new account')
     expect(within(facts).getByText('Backups don’t carry over.')).toBeInTheDocument()
     expect(facts).toHaveTextContent('A backup passkey or wallet on another account doesn’t protect this one')
-    expect(facts).toHaveTextContent('Settings → Signers shows which accounts each passkey and wallet approves.')
+    expect(facts).toHaveTextContent('Signers, in Settings, shows which accounts each passkey and wallet approves.')
     expect(within(facts).getByText('Nothing is set up on Base Sepolia yet.')).toBeInTheDocument()
   })
 })

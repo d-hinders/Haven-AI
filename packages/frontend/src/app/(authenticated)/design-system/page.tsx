@@ -1750,12 +1750,12 @@ export default function DesignSystemPage() {
 
       <Section
         title="StepProgress"
-        description="Thin step indicator for multi-step flows (connect agent, onboarding). 0-indexed currentStep; pass totalSteps as currentStep to render everything completed."
+        description="Full-width step indicator for multi-step flows (connect agent, replace signing key): discs at the ends, connectors stretch between them, an optional short label under each disc. 0-indexed currentStep; pass totalSteps as currentStep to render everything completed."
       >
         <Card hover={false} className="max-w-sm space-y-4 p-5">
-          <StepProgress totalSteps={3} currentStep={0} />
-          <StepProgress totalSteps={3} currentStep={1} />
-          <StepProgress totalSteps={3} currentStep={3} />
+          <StepProgress totalSteps={3} currentStep={0} labels={['Name', 'Budget', 'Connect']} />
+          <StepProgress totalSteps={3} currentStep={1} labels={['Name', 'Budget', 'Connect']} />
+          <StepProgress totalSteps={3} currentStep={3} labels={['Name', 'Budget', 'Connect']} />
         </Card>
       </Section>
 
@@ -3309,7 +3309,7 @@ export default function DesignSystemPage() {
         subtitle="Set the budget this agent may spend."
         showCloseButton
         width="lg"
-        headerAccessory={<StepProgress totalSteps={3} currentStep={1} />}
+        headerAccessory={<StepProgress totalSteps={3} currentStep={1} labels={['Name', 'Budget', 'Connect']} />}
         footer={
           <>
             <Button variant="ghost" onClick={() => setModalOpen(false)}>

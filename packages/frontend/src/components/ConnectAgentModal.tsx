@@ -43,6 +43,9 @@ function isCoarsePointer(): boolean {
   return window.matchMedia('(pointer: coarse)').matches
 }
 
+/** Stepper labels, index-aligned with the hook's `setupSteps` (details → policy → connect). */
+const SETUP_STEP_LABELS = ['Name', 'Budget', 'Connect'] as const
+
 /**
  * The connect-agent flow's shell: dialog chrome, stepper, and step dispatch.
  *
@@ -107,7 +110,11 @@ export default function ConnectAgentModal({
         // the screen whose whole job is calm. The list also carries the
         // remaining journey, so "step 3 of 3" loses no information.
         flow.step !== 'connect' ? (
-          <StepProgress totalSteps={flow.setupStepCount} currentStep={Math.max(flow.currentStepIndex, 0)} />
+          <StepProgress
+            totalSteps={flow.setupStepCount}
+            currentStep={Math.max(flow.currentStepIndex, 0)}
+            labels={SETUP_STEP_LABELS}
+          />
         ) : undefined
       }
       showCloseButton

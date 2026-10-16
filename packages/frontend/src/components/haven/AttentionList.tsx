@@ -66,7 +66,12 @@
  *
  * Below `sm` the trailing slot wraps onto its own line under the body
  * (`basis-full` on the trailing wrapper, in a `flex-wrap` row). From `sm` up
- * it sits beside the body.
+ * it sits beside the body. The exception is a row with nothing visible to
+ * align — no badge, no action, not dismissible (#4033): it renders no
+ * trailing slot at all, because the wrapper would be a 0px flex line that
+ * still takes `Row`'s 12px row gap below `sm` (and a 12px column gap from
+ * `sm` up). That row's `sr-only` tone word moves into the body instead — the
+ * tone still rides text, just not in a trailing slot.
  *
  * ── A readable body, even beside a wide trailing ───────────────────────────
  *
@@ -84,9 +89,11 @@
  * every row without one keeps an empty, `aria-hidden` 32px slot in its
  * place, so the actions end on one right edge instead of the non-dismissible
  * rows' controls sliding 40px right of the rest. A list with no dismissible
- * row reserves nothing, and neither does a row with nothing visible to align
- * (no badge, no action) — below `sm` its slot would be an empty 32px line
- * under the body. The decision reads the items as given, so dismissing the
+ * row reserves nothing, and a row with nothing visible to align (no badge,
+ * no action, not dismissible) renders no trailing slot at all — wrapper
+ * included: below `sm` its slot would be a 0px flex line under the body
+ * that still takes the row gap (#4033), so the row's `sr-only` tone word
+ * moves into the body instead. The decision reads the items as given, so dismissing the
  * last dismissible row (or "Show N more" revealing the first) shifts the
  * column 40px — accepted: the list is consistent with itself at every render. The action also gets a shared minimum width
  * (`ACTION_MIN`, 112px — room for "Finish setup" and "View activity"), so
@@ -226,49 +233,68 @@ export function AttentionList({
       data-full-bleed={fullBleed ? '' : undefined}
       className={`${fullBleed ? 'divide-y divide-[var(--v2-border)]' : 'space-y-1'} ${className}`.trim()}
     >
-      {items.map((item) => (
-        <li key={item.id}>
-          <Row
-            leading={item.icon ? <Icon icon={item.icon} className="h-4 w-4" /> : undefined}
-            leadingTone={item.icon ? item.tone : undefined}
-            title={item.title}
-            subtitle={item.subtitle}
-            titleClassName={CLAMP}
-            subtitleClassName={CLAMP}
-            bodyClassName="min-w-[10rem]"
-            trailingClassName="w-full basis-full sm:w-auto sm:basis-auto"
-            className={`flex-wrap${fullBleed ? ` ${FULL_BLEED_ROW}` : ''}`}
-            trailing={
-              <div className="flex items-center justify-end gap-2">
-                {item.badge !== undefined ? (
-                  <StatusBadge tone={item.tone}>{item.badge}</StatusBadge>
-                ) : (
-                  <span className="sr-only">{TONE_TEXT[item.tone]}</span>
-                )}
-                {item.action ? <div className={ACTION_MIN}>{item.action}</div> : null}
-                {item.dismissible !== false ? (
-                  <button
-                    type="button"
-                    data-attention-dismiss
-                    data-testid={`attention-dismiss-${item.id}`}
-                    aria-label={`Dismiss: ${item.title}`}
-                    onClick={() => handleDismiss(item)}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-                  >
-                    <Icon icon={X} className="h-4 w-4" />
-                  </button>
-                ) : reserveDismissSlot && (item.badge !== undefined || item.action) ? (
-                  <span
-                    aria-hidden="true"
-                    data-attention-dismiss-slot
-                    className="h-8 w-8 flex-shrink-0"
-                  />
-                ) : null}
-              </div>
-            }
-          />
-        </li>
-      ))}
+      {items.map((item) => {
+        // A trailing wrapper with nothing visible in it — badge-less, no
+        // action, not dismissible, and therefore no reserved slot either —
+        // would still be a flex item: a 0px line taking `Row`'s row gap
+        // below `sm` and a column gap from `sm` up (#4033). Render none, and
+        // carry the tone word in the body instead so it is still read out.
+        const hasVisibleTrailing =
+          item.badge !== undefined || item.action !== undefined || item.dismissible !== false
+        return (
+          <li key={item.id}>
+            <Row
+              leading={item.icon ? <Icon icon={item.icon} className="h-4 w-4" /> : undefined}
+              leadingTone={item.icon ? item.tone : undefined}
+              title={item.title}
+              subtitle={
+                hasVisibleTrailing
+                  ? item.subtitle
+                  : item.subtitle !== undefined
+                    ? (<>
+                        {item.subtitle} <span className="sr-only">{TONE_TEXT[item.tone]}</span>
+                      </>)
+                    : (<span className="sr-only">{TONE_TEXT[item.tone]}</span>)
+              }
+              titleClassName={CLAMP}
+              subtitleClassName={CLAMP}
+              bodyClassName="min-w-[10rem]"
+              trailingClassName="w-full basis-full sm:w-auto sm:basis-auto"
+              className={`flex-wrap${fullBleed ? ` ${FULL_BLEED_ROW}` : ''}`}
+              trailing={
+                hasVisibleTrailing ? (
+                  <div className="flex items-center justify-end gap-2">
+                    {item.badge !== undefined ? (
+                      <StatusBadge tone={item.tone}>{item.badge}</StatusBadge>
+                    ) : (
+                      <span className="sr-only">{TONE_TEXT[item.tone]}</span>
+                    )}
+                    {item.action ? <div className={ACTION_MIN}>{item.action}</div> : null}
+                    {item.dismissible !== false ? (
+                      <button
+                        type="button"
+                        data-attention-dismiss
+                        data-testid={`attention-dismiss-${item.id}`}
+                        aria-label={`Dismiss: ${item.title}`}
+                        onClick={() => handleDismiss(item)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+                      >
+                        <Icon icon={X} className="h-4 w-4" />
+                      </button>
+                    ) : reserveDismissSlot && (item.badge !== undefined || item.action) ? (
+                      <span
+                        aria-hidden="true"
+                        data-attention-dismiss-slot
+                        className="h-8 w-8 flex-shrink-0"
+                      />
+                    ) : null}
+                  </div>
+                ) : undefined
+              }
+            />
+          </li>
+        )
+      })}
     </ul>
   )
 }

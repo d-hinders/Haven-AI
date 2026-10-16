@@ -139,6 +139,24 @@ export function submissionFor(
   return { fingerprint, idempotencyKey: mintKey() }
 }
 
+/**
+ * After an UNKNOWN outcome (no answer, or a 5xx), find the account the lost
+ * create may have made: one that is in the re-read list but was not in the
+ * baseline recorded when the submission started, on the chain it was sent to.
+ * Accounts that were already there, and accounts on another chain, are never
+ * it. When several qualify (another tab created one too), the one carrying the
+ * submitted name wins; otherwise the first.
+ */
+export function findCreatedAccount(
+  accounts: SmartAccount[],
+  baselineIds: ReadonlySet<string>,
+  chainId: number,
+  name: string,
+): SmartAccount | null {
+  const fresh = accounts.filter((a) => !baselineIds.has(a.id) && a.chain_id === chainId)
+  return fresh.find((a) => a.name.trim() === name.trim()) ?? fresh[0] ?? null
+}
+
 // ── Refusals ──────────────────────────────────────────────────────────────
 //
 // The create-additional refusals are mapped by `error_code` FIRST, never by

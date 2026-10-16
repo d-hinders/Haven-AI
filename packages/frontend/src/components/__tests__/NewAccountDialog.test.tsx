@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { toHex } from 'viem'
 
 const { mockUseAccounts, mockUseUserSigners, mockGetPasskeyAssertion, mockCreatePasskey } = vi.hoisted(() => ({
@@ -29,7 +29,7 @@ vi.mock('@/lib/passkey', async (importOriginal) => {
   }
 })
 
-import NewAccountDialog from '../NewAccountDialog'
+import NewAccountDialog, { AUTO_RECHECK_MS } from '../NewAccountDialog'
 import { ApiRequestError } from '@/lib/api'
 import { base64UrlEncode, PasskeyCancelledError, PasskeyUnsupportedError } from '@/lib/passkey'
 
@@ -76,6 +76,9 @@ const CREATED = {
   created_at: '2026-10-16T00:00:00Z',
 }
 
+const UNKNOWN =
+  'Haven couldn’t confirm the account. It may have been created anyway. Check again before trying again: trying again here with the same name, network and passkey won’t create a second one.'
+
 let createAccount: ReturnType<typeof vi.fn>
 let reloadSigners: ReturnType<typeof vi.fn>
 let refreshAccounts: ReturnType<typeof vi.fn>
@@ -104,7 +107,8 @@ function typeName(value: string) {
 
 async function submit() {
   await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: 'Create account with a passkey' }))
+    // After an unknown outcome the same button reads "Try again".
+    fireEvent.click(screen.getByRole('button', { name: /^(Create account with a passkey|Try again)$/ }))
   })
 }
 
@@ -330,13 +334,11 @@ describe('NewAccountDialog — typed refusals', () => {
     expect(alert).toHaveTextContent('Too many attempts in a short time.')
   })
 
-  const UNKNOWN =
-    'Haven couldn’t confirm the account. It may have been created anyway, so check your accounts before trying again. Trying again here, with the same name and network, won’t create a second one.'
-
-  it('treats a 5xx as an unknown outcome: says the account may exist and re-reads the list', async () => {
+  it('treats a 5xx as an unknown outcome: says the account may exist and offers Check again', async () => {
     const alert = await refusedWith(502, { error: 'Could not derive the account address' })
     expect(alert).toHaveTextContent(UNKNOWN)
-    expect(refreshAccounts).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: 'Check again' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled()
   })
 
   it('treats no answer at all as an unknown outcome too', async () => {
@@ -345,7 +347,7 @@ describe('NewAccountDialog — typed refusals', () => {
     typeName('Reserve')
     await submit()
     expect(screen.getByRole('alert')).toHaveTextContent(UNKNOWN)
-    expect(refreshAccounts).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: 'Check again' })).toBeInTheDocument()
   })
 
   it('makes no retry promise for a definite code-less refusal, and does not re-read the list', async () => {
@@ -353,6 +355,7 @@ describe('NewAccountDialog — typed refusals', () => {
     expect(alert).toHaveTextContent('Haven couldn’t create the account. Details: Source account not found')
     expect(alert).not.toHaveTextContent('second one')
     expect(alert).not.toHaveTextContent('may have been created')
+    expect(screen.queryByRole('button', { name: 'Check again' })).toBeNull()
     expect(refreshAccounts).not.toHaveBeenCalled()
   })
 
@@ -487,4 +490,148 @@ describe('NewAccountDialog — closing is blocked mid-flight', () => {
     fireEvent.click(document.querySelector('.v2-modal-backdrop')!)
     expect(onClose).toHaveBeenCalledTimes(1)
   })
+})
+
+describe('NewAccountDialog — the unknown outcome is checked inside the dialog', () => {
+  const NEW_ACCOUNT = account('created1', 'Reserve', 84532)
+
+  async function reachUnknown() {
+    createAccount.mockRejectedValue(new ApiRequestError('Bad gateway', 502, { error: 'Bad gateway' }))
+    const rendered = setup()
+    typeName('Reserve')
+    await submit()
+    expect(screen.getByRole('alert')).toHaveTextContent(UNKNOWN)
+    return rendered
+  }
+
+  /** The re-read the next refresh returns, as `useAccounts` would after `refreshUser`. */
+  function nextReadReturns(accounts: ReturnType<typeof account>[]) {
+    refreshAccounts.mockImplementation(async () => {
+      mockUseAccounts.mockReturnValue({ accounts, createAccount, refreshAccounts })
+    })
+  }
+
+  async function checkAgain() {
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    })
+  }
+
+  it('"Check again" finds the account the lost response created and shows it as created', async () => {
+    await reachUnknown()
+    nextReadReturns([MAIN, OTHER, NEW_ACCOUNT])
+    await checkAgain()
+
+    expect(refreshAccounts).toHaveBeenCalledTimes(1)
+    const done = await screen.findByTestId('new-account-created')
+    expect(within(done).getByText('Reserve was created on Base Sepolia')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open account' })).toHaveAttribute('href', '/accounts/created1')
+    expect(createAccount).toHaveBeenCalledTimes(1)
+  })
+
+  it('"Check again" that finds nothing says so, and "Try again" then replays the same key', async () => {
+    await reachUnknown()
+    nextReadReturns([MAIN, OTHER])
+    await checkAgain()
+
+    expect(screen.getByTestId('new-account-check')).toHaveTextContent('No new account on Base Sepolia yet.')
+    expect(screen.getByRole('alert')).toHaveTextContent(UNKNOWN)
+
+    createAccount.mockResolvedValue(CREATED)
+    await submit()
+    const [first, retry] = createAccount.mock.calls.map((c) => c[0].idempotency_key)
+    expect(retry).toBe(first)
+    await screen.findByTestId('new-account-created')
+  })
+
+  it('ignores accounts that were already there, and a new account on another chain', async () => {
+    await reachUnknown()
+    nextReadReturns([
+      { ...MAIN, name: 'Reserve' }, // in the baseline, whatever it is called now
+      OTHER,
+      account('elsewhere1', 'Reserve', 8453), // new, but not the chain the create was sent to
+    ])
+    await checkAgain()
+
+    expect(screen.queryByTestId('new-account-created')).toBeNull()
+    expect(screen.getByTestId('new-account-check')).toHaveTextContent('No new account on Base Sepolia yet.')
+  })
+
+  it('keeps the alert through an edit, and warns that a changed input makes a retry a new request', async () => {
+    await reachUnknown()
+    expect(screen.queryByTestId('new-account-new-request')).toBeNull()
+
+    typeName('Savings')
+    expect(screen.getByRole('alert')).toHaveTextContent(UNKNOWN)
+    expect(screen.getByTestId('new-account-new-request')).toHaveTextContent(
+      'You changed the name, network or passkey, so trying again is a new request. If the first one went through, it would create a second account. Check again first.',
+    )
+    // The button stops promising a replay.
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Create account with a passkey' })).toBeInTheDocument()
+
+    // Back to the submitted inputs: the same request again, so no warning.
+    typeName('Reserve')
+    expect(screen.queryByTestId('new-account-new-request')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+  })
+})
+
+describe('NewAccountDialog — the automatic re-check', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  async function reachUnknown() {
+    createAccount.mockRejectedValue(new ApiRequestError('Bad gateway', 502, { error: 'Bad gateway' }))
+    const rendered = setup()
+    typeName('Reserve')
+    await submit()
+    expect(screen.getByRole('alert')).toHaveTextContent(UNKNOWN)
+    return rendered
+  }
+
+  it('re-reads the list once, a few seconds after the unknown outcome', async () => {
+    await reachUnknown()
+    expect(refreshAccounts).not.toHaveBeenCalled()
+
+    await act(async () => {
+      vi.advanceTimersByTime(AUTO_RECHECK_MS - 1)
+    })
+    expect(refreshAccounts).not.toHaveBeenCalled()
+
+    await act(async () => {
+      vi.advanceTimersByTime(1)
+    })
+    expect(refreshAccounts).toHaveBeenCalledTimes(1)
+
+    // Once, not on an interval.
+    await act(async () => {
+      vi.advanceTimersByTime(AUTO_RECHECK_MS * 5)
+    })
+    expect(refreshAccounts).toHaveBeenCalledTimes(1)
+  })
+
+  it('is cancelled when the dialog closes', async () => {
+    const { unmount } = await reachUnknownAndUnmountHandle()
+    unmount()
+    await act(async () => {
+      vi.advanceTimersByTime(AUTO_RECHECK_MS * 2)
+    })
+    expect(refreshAccounts).not.toHaveBeenCalled()
+  })
+
+  async function reachUnknownAndUnmountHandle() {
+    createAccount.mockRejectedValue(new ApiRequestError('Bad gateway', 502, { error: 'Bad gateway' }))
+    mockUseAccounts.mockReturnValue({ accounts: [MAIN, OTHER], createAccount, refreshAccounts })
+    mockUseUserSigners.mockReturnValue({ signers: SHARED_SIGNERS, loadError: false, reload: reloadSigners })
+    const rendered = render(<NewAccountDialog open onClose={vi.fn()} />)
+    typeName('Reserve')
+    await submit()
+    expect(screen.getByRole('alert')).toHaveTextContent(UNKNOWN)
+    return rendered
+  }
 })

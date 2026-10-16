@@ -11,6 +11,7 @@ import {
   allowCredentialIdsFor,
   classifyCreateAccountError,
   defaultSource,
+  findCreatedAccount,
   keyIdFromCredentialId,
   passkeySources,
   sourceChoiceMatters,
@@ -206,5 +207,32 @@ describe('classifyCreateAccountError — error_code first, never the sentence', 
     expect(classifyCreateAccountError(refusal(500, {}))).toEqual({ kind: 'unknown_outcome' })
     expect(classifyCreateAccountError(new TypeError('Failed to fetch'))).toEqual({ kind: 'unknown_outcome' })
     expect(classifyCreateAccountError(undefined)).toEqual({ kind: 'unknown_outcome' })
+  })
+})
+
+describe('findCreatedAccount — the unknown-outcome check', () => {
+  const before = [account('one', true), account('two')]
+  const baseline = new Set(before.map((a) => a.id))
+
+  it('finds an account that was not in the baseline, on the chain the create was sent to', () => {
+    const fresh = { ...account('new'), name: 'Reserve' }
+    expect(findCreatedAccount([...before, fresh], baseline, 84532, 'Reserve')?.id).toBe('new')
+  })
+
+  it('ignores accounts that were already in the baseline, even with the submitted name', () => {
+    const renamed = [{ ...before[0]!, name: 'Reserve' }, before[1]!]
+    expect(findCreatedAccount(renamed, baseline, 84532, 'Reserve')).toBeNull()
+  })
+
+  it('ignores a new account on another chain', () => {
+    const elsewhere = { ...account('new', false, 8453), name: 'Reserve' }
+    expect(findCreatedAccount([...before, elsewhere], baseline, 84532, 'Reserve')).toBeNull()
+  })
+
+  it('prefers the one carrying the submitted name when several appeared', () => {
+    const other = { ...account('other'), name: 'Something else' }
+    const ours = { ...account('ours'), name: 'Reserve' }
+    expect(findCreatedAccount([...before, other, ours], baseline, 84532, ' Reserve ')?.id).toBe('ours')
+    expect(findCreatedAccount([...before, other], baseline, 84532, 'Reserve')?.id).toBe('other')
   })
 })

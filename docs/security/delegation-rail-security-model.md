@@ -74,7 +74,7 @@ covers:
   - packages/backend/src/modules/ops/**
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
-last-verified: "2026-10-15"
+last-verified: "2026-10-16"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -3190,3 +3190,22 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > of this note: those reads and the additive `Agent.receivedSubBudgets`
 > wire field. Nothing else in this document was re-verified;
 > `last-verified` already reads 2026-10-15.
+
+> **Re-verified #4026 (2026-10-16 — own-account recipients in the owner send
+> flow).** The diff touches one file in this document's coverage list,
+> `packages/frontend/src/components/DelegationSendModal.tsx`: the send flow
+> now offers the user's OTHER registered accounts on the SENDING account's
+> chain as one-tap recipients (by name, deduped by address), prefilling the
+> same `recipient` state the manual address input already fed. No new
+> authority, signature, or fetch path: the send still goes through the
+> unchanged `useDelegationSend` prepare/submit against
+> `transfers/prepare|submit`, and `encodeTransfer`'s recipient rule is
+> unchanged — any valid non-zero address, "bounded by nothing but the
+> owner's signature" — so an own-account target was always permitted; the
+> UI merely stops requiring the user to paste an address they already own.
+> The chain filter is client-side presentation (a cross-chain own account is
+> simply not offered); it adds no restriction the backend enforces, which is
+> consistent with the owner-send model above. Nothing that decides who
+> signs, what may be spent, or when revocation bites changed. Scope of this
+> note: the send-flow recipient selection and the unchanged hook it feeds;
+> `last-verified` is bumped to 2026-10-16 for exactly this coverage.

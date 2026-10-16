@@ -712,14 +712,27 @@ The waiting labels are onboarding's (`Waiting for your passkey…`,
 `Setting up your account…`), and a dismissed passkey prompt returns to the
 form with no message. A refusal names the limit or the account involved and
 the next step; it never says only that something went wrong. When the outcome
-is unknown (no answer, or a server error), the account may exist: say so, and
-scope any "a retry won't duplicate it" promise to what actually guarantees it
-(this dialog, the same name and network):
+is unknown (no answer, or a server error), the account may exist: say so,
+check for it inside the dialog (closing it would lose what makes a retry
+safe), and scope any "a retry won't duplicate it" promise to what actually
+guarantees it (this dialog, the same name, network and passkey):
 
 ```text
-Haven couldn't confirm the account. It may have been created anyway, so check
-your accounts before trying again. Trying again here, with the same name and
-network, won't create a second one.
+Haven couldn't confirm the account. It may have been created anyway. Check
+again before trying again: trying again here with the same name, network and
+passkey won't create a second one.
+```
+
+"Check again" re-reads the accounts (the dialog also does it once on its
+own, a few seconds later) and shows the account as created when it appears.
+When nothing appears, say so plainly ("No new account on Base yet."). If the
+owner then edits an input, the next try is a new request, and the copy says
+that, short:
+
+```text
+You changed the name, network or passkey, so trying again is a new request.
+If the first one went through, it would create a second account. Check again
+first.
 ```
 
 A definite refusal makes no retry promise: "Haven couldn't create the

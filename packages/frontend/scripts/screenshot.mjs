@@ -4099,6 +4099,52 @@ export const SCENARIOS = {
    * Nothing else in `FIXTURE_AGENTS` is touched: `agent-research` already
    * carries a recorded name, which is why it is not overridden here.
    */
+  'send-own-accounts': {
+    description:
+      'The owner send modal with a SECOND Haven account on the SENDING chain (#4026): the same-chain account is offered as a one-tap recipient by name, and an own account on a different chain is NOT offered. The shared fixture has one account, so both the offer and its negative are unreachable from a route capture.',
+    api(apiPath) {
+      // Two extra registrations: 'Savings' rides the SAME chain as the
+      // fixture account (84532) — it is the one-tap recipient — and
+      // 'Ethereum account' rides 11155111, the never-offered control. The
+      // signers read falls through to the shared fixture (one passkey), so
+      // the modal renders its ready state, not the owner-wallet blocker.
+      const sameChain = {
+        ...FIXTURE_ACCOUNT,
+        id: 'safe-savings',
+        name: 'Savings',
+        account_address: '0x2222222222222222222222222222222222222222',
+        is_default: false,
+      }
+      const otherChain = {
+        ...FIXTURE_ACCOUNT,
+        id: 'safe-ethereum',
+        name: 'Ethereum account',
+        account_address: '0x3333333333333333333333333333333333333333',
+        chain_id: 11155111,
+        is_default: false,
+      }
+      if (apiPath === '/auth/me') {
+        return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT }, sameChain, otherChain] }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/accounts/${FIXTURE_ACCOUNT.id}`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 60_000,
+      })
+      await dismissMobileSidebar(page, vp)
+      const dialog = page.getByRole('dialog', { name: 'Send' })
+      // Positive control: the same-chain own account is offered BY NAME.
+      await page.getByRole('button', { name: 'Send', exact: true }).click()
+      await dialog.getByRole('button', { name: 'Send to Savings' }).waitFor({ timeout: 20_000 })
+      // Negative control: the cross-chain own account must never appear.
+      if (await dialog.getByText('Ethereum account').count()) {
+        throw new Error('send-own-accounts: the cross-chain own account is offered — the #4026 chain filter regressed')
+      }
+      await shoot(dialog, 'modal')
+    },
+  },
   'mcp-name-all-recorded': {
     description:
       'The /agents list with every agent reporting an MCP server name — the hoisted "not recorded" explanation must be ABSENT (#2043)',

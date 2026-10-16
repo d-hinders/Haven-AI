@@ -18,11 +18,16 @@ interface BackLink {
 }
 
 function resolveBackLink(pathname: string): BackLink | null {
-  // Only show on detail routes — never on hub pages
-  if (/^\/agents\/[^/]+/.test(pathname)) {
+  // Only show on DETAIL routes — never on hub pages and never on sub-pages of
+  // a detail route. The `$` end anchor is load-bearing (#4020): without it,
+  // `/agents/<id>/sweep` matched and the top bar showed a second back link
+  // ("‹ Agents" → /agents) beside the page's own "Back to agent" →
+  // /agents/<id>. Sub-pages of a detail route carry their own back link to
+  // the parent detail page; the bar stays out of the way.
+  if (/^\/agents\/[^/]+$/.test(pathname)) {
     return { href: '/agents', label: 'Agents' }
   }
-  if (/^\/accounts\/[^/]+/.test(pathname)) {
+  if (/^\/accounts\/[^/]+$/.test(pathname)) {
     return { href: '/accounts', label: 'Accounts' }
   }
   return null

@@ -56,7 +56,7 @@ export async function loadHybridOwnerConfig(
     config: {
       ownerAddress: (account.owner_address as Address | null) ?? undefined,
       passkeys: passkeys.length > 0 ? passkeys : undefined,
-      deploySalt: (account.deploy_salt ?? '0x') as Hex,
+      deploySalt: account.deploy_salt as Hex,
     },
   }
 }

@@ -90,7 +90,7 @@ export async function up(client: PoolClient): Promise<void> {
 export async function down(client: PoolClient): Promise<void> {
   await client.query(`
     DROP INDEX IF EXISTS idx_smart_accounts_create_idempotency;
-    DROP INDEX IF EXISTS idx_smart_accounts_chain_derived_address;
+    DROP INDEX IF EXISTS idx_smart_accounts_user_chain_derived_address;
     DROP TABLE IF EXISTS hybrid_deploy_salt_counters;
     ALTER TABLE smart_accounts DROP COLUMN IF EXISTS create_idempotency_key;
     ALTER TABLE smart_accounts DROP COLUMN IF EXISTS deploy_salt;

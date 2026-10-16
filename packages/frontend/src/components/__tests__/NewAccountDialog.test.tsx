@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { toHex } from 'viem'
 
 const { mockUseAccounts, mockUseUserSigners, mockGetPasskeyAssertion, mockCreatePasskey } = vi.hoisted(() => ({
@@ -29,7 +29,7 @@ vi.mock('@/lib/passkey', async (importOriginal) => {
   }
 })
 
-import NewAccountDialog, { AUTO_RECHECK_MS } from '../NewAccountDialog'
+import NewAccountDialog from '../NewAccountDialog'
 import { ApiRequestError } from '@/lib/api'
 import { base64UrlEncode, PasskeyCancelledError, PasskeyUnsupportedError } from '@/lib/passkey'
 
@@ -77,7 +77,8 @@ const CREATED = {
 }
 
 const UNKNOWN =
-  'Haven couldn’t confirm the account. It may have been created anyway. Check again before trying again: trying again here with the same name, network and passkey won’t create a second one.'
+  'Haven couldn’t confirm the account. It may have been created anyway. Check again before trying again: trying again here won’t create a second one.'
+const LOCKED = 'To keep this from creating a second account, the details are locked until Haven knows what happened.'
 
 let createAccount: ReturnType<typeof vi.fn>
 let reloadSigners: ReturnType<typeof vi.fn>
@@ -367,24 +368,6 @@ describe('NewAccountDialog — typed refusals', () => {
   })
 })
 
-describe('NewAccountDialog — the idempotency key', () => {
-  it('reuses the key when the same submission is retried, and mints a new one when it changes', async () => {
-    createAccount.mockRejectedValueOnce(new ApiRequestError('Bad gateway', 502, { error: 'Bad gateway' }))
-    createAccount.mockRejectedValueOnce(new ApiRequestError('Bad gateway', 502, { error: 'Bad gateway' }))
-    setup()
-    typeName('Reserve')
-    await submit()
-    await submit()
-    const [first, retry] = createAccount.mock.calls.map((c) => c[0].idempotency_key)
-    expect(retry).toBe(first)
-
-    typeName('Savings')
-    await submit()
-    const changed = createAccount.mock.calls[2]![0].idempotency_key
-    expect(changed).not.toBe(first)
-  })
-})
-
 describe('NewAccountDialog — states without a form', () => {
   it('explains that a passkey account is needed when every account is wallet-only', () => {
     setup({
@@ -492,163 +475,20 @@ describe('NewAccountDialog — closing is blocked mid-flight', () => {
   })
 })
 
-describe('NewAccountDialog — the unknown outcome is checked inside the dialog', () => {
-  const NEW_ACCOUNT = account('created1', 'Reserve', 84532)
+describe('NewAccountDialog — the unknown submission', () => {
+  const BAD_GATEWAY = () => new ApiRequestError('Bad gateway', 502, { error: 'Bad gateway' })
 
   async function reachUnknown() {
-    createAccount.mockRejectedValue(new ApiRequestError('Bad gateway', 502, { error: 'Bad gateway' }))
+    createAccount.mockRejectedValueOnce(BAD_GATEWAY())
     const rendered = setup()
-    typeName('Reserve')
-    await submit()
-    expect(screen.getByRole('alert')).toHaveTextContent(UNKNOWN)
-    return rendered
-  }
-
-  /** The re-read the next refresh returns, as `useAccounts` would after `refreshUser`. */
-  function nextReadReturns(accounts: ReturnType<typeof account>[]) {
-    refreshAccounts.mockImplementation(async () => {
-      mockUseAccounts.mockReturnValue({ accounts, createAccount, refreshAccounts })
-      return true
-    })
-  }
-
-  async function checkAgain() {
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
-    })
-  }
-
-  it('"Check again" finds the account the lost response created and shows it as created', async () => {
-    await reachUnknown()
-    nextReadReturns([MAIN, OTHER, NEW_ACCOUNT])
-    await checkAgain()
-
-    expect(refreshAccounts).toHaveBeenCalledTimes(1)
-    const done = await screen.findByTestId('new-account-created')
-    expect(within(done).getByText('Reserve was created on Base Sepolia')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Open account' })).toHaveAttribute('href', '/accounts/created1')
-    expect(createAccount).toHaveBeenCalledTimes(1)
-  })
-
-  it('"Check again" that finds nothing says so, and "Try again" then replays the same key', async () => {
-    await reachUnknown()
-    nextReadReturns([MAIN, OTHER])
-    await checkAgain()
-
-    expect(screen.getByTestId('new-account-check')).toHaveTextContent('No new account named Reserve on Base Sepolia yet.')
-    expect(screen.getByRole('alert')).toHaveTextContent(UNKNOWN)
-
-    createAccount.mockResolvedValue(CREATED)
-    await submit()
-    const [first, retry] = createAccount.mock.calls.map((c) => c[0].idempotency_key)
-    expect(retry).toBe(first)
-    await screen.findByTestId('new-account-created')
-  })
-
-  it('ignores accounts that were already there, and a new account on another chain', async () => {
-    await reachUnknown()
-    nextReadReturns([
-      { ...MAIN, name: 'Reserve' }, // in the baseline, whatever it is called now
-      OTHER,
-      account('elsewhere1', 'Reserve', 8453), // new, but not the chain the create was sent to
-    ])
-    await checkAgain()
-
-    expect(screen.queryByTestId('new-account-created')).toBeNull()
-    expect(screen.getByTestId('new-account-check')).toHaveTextContent('No new account named Reserve on Base Sepolia yet.')
-  })
-
-  it('keeps the alert through an edit, and warns that a changed input makes a retry a new request', async () => {
-    await reachUnknown()
-    expect(screen.queryByTestId('new-account-new-request')).toBeNull()
-
-    typeName('Savings')
-    expect(screen.getByRole('alert')).toHaveTextContent(UNKNOWN)
-    expect(screen.getByTestId('new-account-new-request')).toHaveTextContent(
-      'You changed the name, network or passkey, so trying again is a new request. If the first one went through, it would create a second account. Check again first.',
-    )
-    // The button stops promising a replay.
-    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Create account with a passkey' })).toBeInTheDocument()
-
-    // Back to the submitted inputs: the same request again, so no warning.
-    typeName('Reserve')
-    expect(screen.queryByTestId('new-account-new-request')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
-  })
-})
-
-describe('NewAccountDialog — the automatic re-check', () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-  })
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  async function reachUnknown() {
-    createAccount.mockRejectedValue(new ApiRequestError('Bad gateway', 502, { error: 'Bad gateway' }))
-    const rendered = setup()
-    typeName('Reserve')
-    await submit()
-    expect(screen.getByRole('alert')).toHaveTextContent(UNKNOWN)
-    return rendered
-  }
-
-  it('re-reads the list once, a few seconds after the unknown outcome', async () => {
-    await reachUnknown()
-    expect(refreshAccounts).not.toHaveBeenCalled()
-
-    await act(async () => {
-      vi.advanceTimersByTime(AUTO_RECHECK_MS - 1)
-    })
-    expect(refreshAccounts).not.toHaveBeenCalled()
-
-    await act(async () => {
-      vi.advanceTimersByTime(1)
-    })
-    expect(refreshAccounts).toHaveBeenCalledTimes(1)
-
-    // Once, not on an interval.
-    await act(async () => {
-      vi.advanceTimersByTime(AUTO_RECHECK_MS * 5)
-    })
-    expect(refreshAccounts).toHaveBeenCalledTimes(1)
-  })
-
-  it('is cancelled when the dialog closes', async () => {
-    const { unmount } = await reachUnknownAndUnmountHandle()
-    unmount()
-    await act(async () => {
-      vi.advanceTimersByTime(AUTO_RECHECK_MS * 2)
-    })
-    expect(refreshAccounts).not.toHaveBeenCalled()
-  })
-
-  async function reachUnknownAndUnmountHandle() {
-    createAccount.mockRejectedValue(new ApiRequestError('Bad gateway', 502, { error: 'Bad gateway' }))
-    mockUseAccounts.mockReturnValue({ accounts: [MAIN, OTHER], createAccount, refreshAccounts })
-    mockUseUserSigners.mockReturnValue({ signers: SHARED_SIGNERS, loadError: false, reload: reloadSigners })
-    const rendered = render(<NewAccountDialog open onClose={vi.fn()} />)
-    typeName('Reserve')
-    await submit()
-    expect(screen.getByRole('alert')).toHaveTextContent(UNKNOWN)
-    return rendered
-  }
-})
-
-describe('NewAccountDialog — the unknown outcome is sticky (R1–R4)', () => {
-  async function reachUnknown() {
-    createAccount.mockRejectedValueOnce(new ApiRequestError('Bad gateway', 502, { error: 'Bad gateway' }))
-    setup()
     typeName('Reserve')
     await submit()
     expect(screen.getByTestId('new-account-unknown')).toHaveTextContent(UNKNOWN)
+    return rendered
   }
 
-  function unknownShown() {
-    return screen.queryByTestId('new-account-unknown') !== null
-  }
+  const unknownShown = () => screen.queryByTestId('new-account-unknown') !== null
+  const sentKeys = () => createAccount.mock.calls.map((c) => c[0].idempotency_key)
 
   function nextReadReturns(accounts: ReturnType<typeof account>[]) {
     refreshAccounts.mockImplementation(async () => {
@@ -663,118 +503,212 @@ describe('NewAccountDialog — the unknown outcome is sticky (R1–R4)', () => {
     })
   }
 
-  it('survives a cancelled passkey prompt on the retry', async () => {
+  it('shows the alert, why the details are locked, Check again and Try again', async () => {
+    await reachUnknown()
+    expect(screen.getByTestId('new-account-unknown')).toHaveTextContent(LOCKED)
+    expect(screen.getByRole('button', { name: 'Check again' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled()
+  })
+
+  it('locks the name, network and passkey source while it stands', async () => {
+    await reachUnknown()
+    expect(screen.getByLabelText('Account name')).toBeDisabled()
+    expect(screen.getByLabelText('Account name')).toHaveValue('Reserve')
+    expect(screen.getByLabelText('Network')).toBeDisabled()
+  })
+
+  it('locks the source picker too, when there is one', async () => {
+    createAccount.mockRejectedValueOnce(BAD_GATEWAY())
+    setup({ signers: SPLIT_SIGNERS })
+    typeName('Reserve')
+    await submit()
+    expect(screen.getByLabelText('Use a passkey from')).toBeDisabled()
+  })
+
+  it('sends the recorded key on every retry, across a cancelled passkey in between', async () => {
+    await reachUnknown()
+    mockGetPasskeyAssertion.mockRejectedValueOnce(new PasskeyCancelledError())
+    await submit() // cancelled: nothing sent
+    createAccount.mockRejectedValueOnce(BAD_GATEWAY())
+    await submit() // unknown again
+    createAccount.mockResolvedValueOnce(CREATED)
+    await submit() // 201
+
+    expect(createAccount).toHaveBeenCalledTimes(3)
+    const [first, second, third] = sentKeys()
+    expect(second).toBe(first)
+    expect(third).toBe(first)
+    for (const call of createAccount.mock.calls) {
+      expect(call[0]).toMatchObject({ name: 'Reserve', chain_id: 84532, source_account_id: 'main1' })
+    }
+    expect(await screen.findByTestId('new-account-created')).toBeInTheDocument()
+  })
+
+  it('keeps the source pinned when the default it came from changes', async () => {
+    createAccount.mockRejectedValueOnce(BAD_GATEWAY())
+    mockUseAccounts.mockReturnValue({ accounts: [MAIN, OTHER], createAccount, refreshAccounts })
+    mockUseUserSigners.mockReturnValue({ signers: SHARED_SIGNERS, loadError: false, reload: reloadSigners })
+    const { rerender } = render(<NewAccountDialog open onClose={vi.fn()} />)
+    typeName('Reserve')
+    await submit()
+    // The caller now scopes the dialog to the other account.
+    rerender(<NewAccountDialog open onClose={vi.fn()} preferredSourceAccountId="other1" />)
+    createAccount.mockResolvedValueOnce(CREATED)
+    await submit()
+    expect(createAccount.mock.calls.map((c) => c[0].source_account_id)).toEqual(['main1', 'main1'])
+  })
+
+  it('sends nothing on a retry once the pinned source is no longer a source', async () => {
+    createAccount.mockRejectedValueOnce(BAD_GATEWAY())
+    mockUseAccounts.mockReturnValue({ accounts: [MAIN, OTHER], createAccount, refreshAccounts })
+    mockUseUserSigners.mockReturnValue({ signers: SHARED_SIGNERS, loadError: false, reload: reloadSigners })
+    const { rerender } = render(<NewAccountDialog open onClose={vi.fn()} />)
+    typeName('Reserve')
+    await submit()
+    // main1 lost its passkey; other1 still has one. No fallback to it.
+    mockUseUserSigners.mockReturnValue({
+      signers: [{ kind: 'passkey', key_id: KEY_A, created_at: null, accounts: [approved(OTHER)] }],
+      loadError: false,
+      reload: reloadSigners,
+    })
+    rerender(<NewAccountDialog open onClose={vi.fn()} />)
+    await submit()
+    expect(createAccount).toHaveBeenCalledTimes(1)
+    expect(mockGetPasskeyAssertion).toHaveBeenCalledTimes(1)
+  })
+
+  it('mints a fresh key for a new submission when nothing is unknown', async () => {
+    createAccount.mockRejectedValueOnce(new ApiRequestError('x', 422, { error: 'x', error_code: 'SOURCE_HAS_NO_PASSKEY' }))
+    setup()
+    typeName('Reserve')
+    await submit()
+    expect(unknownShown()).toBe(false)
+    await submit()
+    const [first, second] = sentKeys()
+    expect(second).not.toBe(first)
+  })
+
+  describe('survives every kind of refusal on a retry, with that refusal shown beside it', () => {
+    const cases: Array<[string, () => unknown, RegExp]> = [
+      ['a coded cap', () => new ApiRequestError('x', 422, { error: 'x', error_code: 'ACCOUNT_CAP_REACHED', cap: 10 }), /You already have 10 accounts/],
+      ['a code-less 422 cap sentence', () => new ApiRequestError('x', 422, { error: 'This user already has 10 accounts on chain 84532' }), /Details: This user already has 10 accounts on chain 84532/],
+      ['a code-less 404', () => new ApiRequestError('x', 404, { error: 'Source account not found' }), /Details: Source account not found/],
+      ['a coded key refusal', () => new ApiRequestError('x', 422, { error: 'x', error_code: 'KEY_NOT_ON_SOURCE' }), /That passkey isn’t one of Operating’s/],
+      ['a code-less 409', () => new ApiRequestError('x', 409, { error: 'Account already registered' }), /Details: Account already registered/],
+      ['a 429', () => new ApiRequestError('x', 429, { error: 'Too Many Requests' }), /Too many attempts in a short time/],
+    ]
+    for (const [label, refusal, message] of cases) {
+      it(label, async () => {
+        await reachUnknown()
+        createAccount.mockRejectedValueOnce(refusal())
+        await submit()
+        expect(createAccount).toHaveBeenCalledTimes(2)
+        expect(unknownShown()).toBe(true)
+        expect(screen.getByText(message)).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled()
+      })
+    }
+  })
+
+  it('survives a cancelled passkey prompt, which shows no message of its own', async () => {
     await reachUnknown()
     mockGetPasskeyAssertion.mockRejectedValueOnce(new PasskeyCancelledError())
     await submit()
     expect(unknownShown()).toBe(true)
     expect(screen.getAllByRole('alert')).toHaveLength(1)
-    expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled()
-    expect(createAccount).toHaveBeenCalledTimes(1)
   })
 
-  it('survives a passkey read failure, with that failure shown beside it', async () => {
+  it('survives a passkey read failure and the client key check', async () => {
     await reachUnknown()
     mockGetPasskeyAssertion.mockRejectedValueOnce(new Error('WebAuthn assertion returned an unexpected response.'))
     await submit()
     expect(unknownShown()).toBe(true)
     expect(screen.getByText('Your passkey couldn’t be read. Try again.')).toBeInTheDocument()
-  })
 
-  it('survives the client key check refusing the passkey', async () => {
-    await reachUnknown()
     assertsWith(CRED_B)
     await submit()
     expect(unknownShown()).toBe(true)
     expect(screen.getByText(/That passkey isn’t one of Operating’s/)).toBeInTheDocument()
-    expect(createAccount).toHaveBeenCalledTimes(1)
   })
 
-  it('survives a 429 on the retry: the rate limiter answered for the retry, not the first attempt', async () => {
+  it('clears on a 201', async () => {
     await reachUnknown()
-    createAccount.mockRejectedValueOnce(new ApiRequestError('Too Many Requests', 429, { error: 'Too Many Requests' }))
+    createAccount.mockResolvedValueOnce(CREATED)
     await submit()
-    expect(createAccount).toHaveBeenCalledTimes(2)
-    expect(unknownShown()).toBe(true)
-    expect(screen.getByText(/Too many attempts in a short time/)).toBeInTheDocument()
+    expect(await screen.findByTestId('new-account-created')).toHaveTextContent('Reserve was created on Base Sepolia')
   })
 
-  it('clears when a sent retry comes back with a definite refusal', async () => {
-    await reachUnknown()
-    createAccount.mockRejectedValueOnce(new ApiRequestError('x', 422, { error: 'x', error_code: 'SOURCE_HAS_NO_PASSKEY' }))
-    await submit()
-    expect(unknownShown()).toBe(false)
-    expect(screen.queryByRole('button', { name: 'Check again' })).toBeNull()
-    expect(screen.getByRole('alert')).toHaveTextContent('Operating no longer has a passkey')
-  })
-
-  /**
-   * S1 checks the cap BEFORE its idempotency replay (#4044), so on a retry the
-   * cap can be our own first attempt's account. While unknown, a cap refusal
-   * keeps the outcome, shows the cap beside it, and re-reads at once.
-   */
-  const CAP = () => new ApiRequestError('x', 422, { error: 'x', error_code: 'ACCOUNT_CAP_REACHED', cap: 10 })
-
-  it('keeps the unknown outcome on a cap refusal, shows the cap beside it and re-reads once', async () => {
-    await reachUnknown()
-    nextReadReturns([MAIN, OTHER])
-    createAccount.mockRejectedValueOnce(CAP())
-    await submit()
-
-    expect(unknownShown()).toBe(true)
-    expect(screen.getByText(/You already have 10 accounts on Base Sepolia/)).toBeInTheDocument()
-    expect(refreshAccounts).toHaveBeenCalledTimes(1)
-    // The re-read went through the check path, and it found nothing named Reserve.
-    expect(screen.getByTestId('new-account-check')).toHaveTextContent('No new account named Reserve on Base Sepolia yet.')
-  })
-
-  it('shows success when that re-read finds the account the first attempt created', async () => {
+  it('clears on detection: Check again finds the account by name on the chain', async () => {
     await reachUnknown()
     nextReadReturns([MAIN, OTHER, account('created1', 'Reserve', 84532)])
-    createAccount.mockRejectedValueOnce(CAP())
-    await submit()
-
+    await checkAgain()
     const done = await screen.findByTestId('new-account-created')
     expect(within(done).getByText('Reserve was created on Base Sepolia')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open account' })).toHaveAttribute('href', '/accounts/created1')
   })
 
-  it('treats the cap as definite when no unknown outcome stands', async () => {
-    createAccount.mockRejectedValueOnce(CAP())
-    setup()
-    typeName('Reserve')
-    await submit()
-    expect(unknownShown()).toBe(false)
-    expect(screen.queryByRole('button', { name: 'Check again' })).toBeNull()
-    expect(refreshAccounts).not.toHaveBeenCalled()
-    expect(screen.getByRole('alert')).toHaveTextContent('You already have 10 accounts on Base Sepolia')
-  })
-
-  it('clears when a sent retry comes back 201', async () => {
+  it('is not resolved by accounts already there, another name, or another chain', async () => {
     await reachUnknown()
-    createAccount.mockResolvedValueOnce(CREATED)
-    await submit()
-    expect(unknownShown()).toBe(false)
-    expect(await screen.findByTestId('new-account-created')).toBeInTheDocument()
-  })
-
-  it('is not resolved by a new account with another name', async () => {
-    await reachUnknown()
-    nextReadReturns([MAIN, OTHER, account('savings1', 'Savings', 84532)])
+    nextReadReturns([
+      { ...MAIN, name: 'Reserve' }, // in the baseline
+      OTHER,
+      account('savings1', 'Savings', 84532), // new, another name
+      account('elsewhere1', 'Reserve', 8453), // new, another chain
+    ])
     await checkAgain()
     expect(screen.queryByTestId('new-account-created')).toBeNull()
     expect(unknownShown()).toBe(true)
     expect(screen.getByTestId('new-account-check')).toHaveTextContent('No new account named Reserve on Base Sepolia yet.')
   })
 
-  it('never says "No new account" after a re-read that failed', async () => {
+  it('reports a failed re-read as a failed read, never as "No new account"', async () => {
     await reachUnknown()
-    refreshAccounts.mockResolvedValue(false)
+    refreshAccounts.mockResolvedValueOnce(false)
     await checkAgain()
     const status = screen.getByTestId('new-account-check')
     expect(status).toHaveTextContent('Couldn’t read your accounts just now. Check again in a moment.')
     expect(status).not.toHaveTextContent('No new account')
     expect(unknownShown()).toBe(true)
+  })
+
+  it('does not detect while an attempt is in flight: the attempt answers first', async () => {
+    createAccount.mockRejectedValueOnce(BAD_GATEWAY())
+    mockUseAccounts.mockReturnValue({ accounts: [MAIN, OTHER], createAccount, refreshAccounts })
+    mockUseUserSigners.mockReturnValue({ signers: SHARED_SIGNERS, loadError: false, reload: reloadSigners })
+    const { rerender } = render(<NewAccountDialog open onClose={vi.fn()} />)
+    typeName('Reserve')
+    await submit()
+
+    let finishCreate!: (err: unknown) => void
+    createAccount.mockReturnValueOnce(new Promise((_, reject) => (finishCreate = reject)))
+    await submit() // the retry waits on the create call
+    // Something else refreshes the session meanwhile, and the account is in it.
+    mockUseAccounts.mockReturnValue({
+      accounts: [MAIN, OTHER, account('created1', 'Reserve', 84532)],
+      createAccount,
+      refreshAccounts,
+    })
+    rerender(<NewAccountDialog open onClose={vi.fn()} />)
+    expect(screen.queryByTestId('new-account-created')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Setting up your account…' })).toBeDisabled()
+
+    await act(async () => {
+      finishCreate(BAD_GATEWAY())
+    })
+    expect(screen.getByTestId('new-account-created')).toHaveTextContent('Reserve was created on Base Sepolia')
+  })
+
+  it('disables Try again while a check is in flight', async () => {
+    await reachUnknown()
+    let finishRead!: (ok: boolean) => void
+    refreshAccounts.mockReturnValueOnce(new Promise<boolean>((resolve) => (finishRead = resolve)))
+    await checkAgain()
+    expect(screen.getByTestId('new-account-check')).toHaveTextContent('Checking your accounts…')
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeDisabled()
+    await act(async () => {
+      finishRead(true)
+    })
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled()
   })
 
   it('disables Check again while an attempt is in flight', async () => {
@@ -784,117 +718,28 @@ describe('NewAccountDialog — the unknown outcome is sticky (R1–R4)', () => {
     expect(screen.getByRole('button', { name: 'Check again' })).toBeDisabled()
   })
 
-  it('drops a check result that lands after a retry has started', async () => {
-    await reachUnknown()
-    let finishRead!: (ok: boolean) => void
-    refreshAccounts.mockReturnValueOnce(new Promise<boolean>((resolve) => (finishRead = resolve)))
-    await checkAgain()
-    expect(screen.getByTestId('new-account-check')).toHaveTextContent('Checking your accounts…')
-
-    // The retry starts while the read is still out, and comes back unknown again.
-    createAccount.mockRejectedValueOnce(new ApiRequestError('Bad gateway', 502, { error: 'Bad gateway' }))
-    await submit()
-    await act(async () => {
-      finishRead(true)
-    })
-    // The stale "found nothing" belongs to the first attempt's state: dropped.
-    expect(screen.getByTestId('new-account-check')).not.toHaveTextContent('No new account')
-    expect(unknownShown()).toBe(true)
-  })
-})
-
-describe('NewAccountDialog — the automatic re-check after a failed read', () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-  })
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  async function reachUnknownNow() {
-    createAccount.mockRejectedValueOnce(new ApiRequestError('Bad gateway', 502, { error: 'Bad gateway' }))
-    setup()
+  it('Close drops the record: reopened, the dialog starts clean', async () => {
+    createAccount.mockRejectedValueOnce(BAD_GATEWAY())
+    mockUseAccounts.mockReturnValue({ accounts: [MAIN, OTHER], createAccount, refreshAccounts })
+    mockUseUserSigners.mockReturnValue({ signers: SHARED_SIGNERS, loadError: false, reload: reloadSigners })
+    const onClose = vi.fn()
+    const { rerender } = render(<NewAccountDialog open onClose={onClose} />)
     typeName('Reserve')
     await submit()
-    expect(screen.getByTestId('new-account-unknown')).toHaveTextContent(UNKNOWN)
-  }
+    expect(unknownShown()).toBe(true)
 
-  it('stops when a sent retry comes back 201: no re-check fires afterwards', async () => {
-    await reachUnknownNow()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+    rerender(<NewAccountDialog open={false} onClose={onClose} />)
+    rerender(<NewAccountDialog open onClose={onClose} />)
+
+    expect(unknownShown()).toBe(false)
+    expect(screen.getByLabelText('Account name')).toBeEnabled()
+    expect(screen.getByLabelText('Account name')).toHaveValue('')
+    typeName('Reserve')
     createAccount.mockResolvedValueOnce(CREATED)
     await submit()
-    expect(screen.getByTestId('new-account-created')).toBeInTheDocument()
-    await act(async () => {
-      vi.advanceTimersByTime(AUTO_RECHECK_MS * 3)
-    })
-    expect(refreshAccounts).not.toHaveBeenCalled()
-  })
-
-  it('does not detect mid-attempt: the retry’s own answer decides first', async () => {
-    await reachUnknownNow()
-    let finishCreate!: (err: unknown) => void
-    createAccount.mockReturnValueOnce(new Promise((_, reject) => (finishCreate = reject)))
-    refreshAccounts.mockImplementationOnce(async () => {
-      mockUseAccounts.mockReturnValue({
-        accounts: [MAIN, OTHER, account('created1', 'Reserve', 84532)],
-        createAccount,
-        refreshAccounts,
-      })
-      return true
-    })
-    await submit() // the retry waits on the create call
-
-    // The timer's re-read lands the account while the retry is in flight.
-    await act(async () => {
-      vi.advanceTimersByTime(AUTO_RECHECK_MS)
-    })
-    expect(screen.queryByTestId('new-account-created')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Setting up your account…' })).toBeDisabled()
-
-    // The retry comes back unknown again; back on the form, detection runs.
-    await act(async () => {
-      finishCreate(new ApiRequestError('Bad gateway', 502, { error: 'Bad gateway' }))
-    })
-    expect(screen.getByTestId('new-account-created')).toHaveTextContent('Reserve was created on Base Sepolia')
-  })
-
-  it('drops a re-check whose read overlapped a retry that came back unknown again', async () => {
-    await reachUnknownNow()
-    let finishCreate!: (err: unknown) => void
-    createAccount.mockReturnValueOnce(new Promise((_, reject) => (finishCreate = reject)))
-    let finishRead!: (ok: boolean) => void
-    refreshAccounts.mockReturnValueOnce(new Promise<boolean>((resolve) => (finishRead = resolve)))
-    await submit() // the retry is now waiting on the create call
-
-    // The first outcome's timer fires mid-retry and its read goes out.
-    await act(async () => {
-      vi.advanceTimersByTime(AUTO_RECHECK_MS)
-    })
-    expect(refreshAccounts).toHaveBeenCalledTimes(1)
-
-    await act(async () => {
-      finishCreate(new ApiRequestError('Bad gateway', 502, { error: 'Bad gateway' }))
-    })
-    await act(async () => {
-      finishRead(true)
-    })
-    // The read predates the second outcome: it must not report on it.
-    expect(screen.getByTestId('new-account-check')).not.toHaveTextContent('No new account')
-  })
-
-  it('says nothing new when its read fails, and keeps the state', async () => {
-    createAccount.mockRejectedValue(new ApiRequestError('Bad gateway', 502, { error: 'Bad gateway' }))
-    refreshAccounts.mockResolvedValue(false)
-    setup()
-    typeName('Reserve')
-    await submit()
-    await act(async () => {
-      vi.advanceTimersByTime(AUTO_RECHECK_MS)
-    })
-    expect(refreshAccounts).toHaveBeenCalledTimes(1)
-    const status = screen.getByTestId('new-account-check')
-    expect(status).not.toHaveTextContent('No new account')
-    expect(status).toHaveTextContent(/^$/)
-    expect(screen.getByTestId('new-account-unknown')).toHaveTextContent(UNKNOWN)
+    const [first, afterReopen] = sentKeys()
+    expect(afterReopen).not.toBe(first)
   })
 })

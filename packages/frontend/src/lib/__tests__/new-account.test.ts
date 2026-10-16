@@ -16,8 +16,6 @@ import {
   passkeySources,
   sourceChoiceMatters,
   sourceHoldsKey,
-  submissionFingerprint,
-  submissionFor,
 } from '@/lib/new-account'
 
 function account(id: string, isDefault = false, chainId = 84532): SmartAccount {
@@ -110,33 +108,6 @@ describe('credential id ↔ key_id', () => {
     const [source] = passkeySources([ONE], SIGNERS)
     expect(sourceHoldsKey(source!, KEY_A.toUpperCase().replace('0X', '0x'))).toBe(true)
     expect(sourceHoldsKey(source!, KEY_B)).toBe(false)
-  })
-})
-
-describe('submissionFor — the idempotency key', () => {
-  let n = 0
-  const mint = () => `key-${++n}`
-  const fp = submissionFingerprint({ name: 'Reserve', chainId: 84532, sourceAccountId: 'one' })
-
-  it('reuses the key for a retry of the same submission', () => {
-    const first = submissionFor(null, fp, mint)
-    const retry = submissionFor(first, submissionFingerprint({ name: ' Reserve ', chainId: 84532, sourceAccountId: 'one' }), mint)
-    expect(retry.idempotencyKey).toBe(first.idempotencyKey)
-  })
-
-  it('mints a fresh key when the name, network or source changed', () => {
-    const first = submissionFor(null, fp, mint)
-    for (const changed of [
-      { name: 'Savings', chainId: 84532, sourceAccountId: 'one' },
-      { name: 'Reserve', chainId: 8453, sourceAccountId: 'one' },
-      { name: 'Reserve', chainId: 84532, sourceAccountId: 'two' },
-    ]) {
-      expect(submissionFor(first, submissionFingerprint(changed), mint).idempotencyKey).not.toBe(first.idempotencyKey)
-    }
-  })
-
-  it('defaults to a random UUID', () => {
-    expect(submissionFor(null, fp).idempotencyKey).toMatch(/^[0-9a-f-]{36}$/)
   })
 })
 

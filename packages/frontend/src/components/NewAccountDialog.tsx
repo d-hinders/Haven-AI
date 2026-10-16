@@ -54,11 +54,8 @@ import {
   passkeySources,
   sourceChoiceMatters,
   sourceHoldsKey,
-  submissionFingerprint,
-  submissionFor,
   type CreateAccountRefusal,
   type PasskeySource,
-  type PendingSubmission,
 } from '@/lib/new-account'
 
 export interface NewAccountDialogProps {
@@ -86,29 +83,31 @@ type DialogRefusal =
   | { kind: 'passkey_failed' }
 
 /**
- * After an unknown outcome the dialog re-reads the account list once on its
- * own, this long after the failure, so a create that was still committing
- * when the response was lost is usually found without the owner doing
- * anything. Exported for the test's fake clock.
+ * A sent create whose outcome is UNKNOWN (no answer, or a 5xx): the account
+ * may exist. The record holds what a retry must repeat and detection must
+ * match: the idempotency key that was sent, the name and network, and the
+ * account ids the dialog saw when that attempt started. The inputs are locked
+ * (and the source pinned) while it stands, so every retry is that submission.
+ *
+ * Exactly two things clear it: a 201 on a retry, or detection (an account
+ * outside `baselineIds`, on `chainId`, named `name`). Closing the dialog drops
+ * it with the rest of the dialog's state. Nothing else does — no refusal of
+ * any status, no early return, no edit (the inputs are locked). A refusal on a
+ * retry proves nothing about the first attempt: #4023's route validates
+ * (source, key, the per-chain cap) BEFORE its idempotency replay — raised on
+ * #4044 — so a retry can be refused even when the first attempt's account is
+ * the one it would have replayed.
  */
-export const AUTO_RECHECK_MS = 3_000
-
-/**
- * What an unknown outcome is about: the submission that may have committed.
- * `baseline` is the account ids the dialog saw when that attempt started, so
- * "Check again" can tell a new account from one that was already there.
- */
-interface UnknownOutcome {
-  fingerprint: string
-  chainId: number
+interface UnknownSubmission {
+  key: string
+  baselineIds: ReadonlySet<string>
   name: string
-  baseline: ReadonlySet<string>
+  chainId: number
 }
 
 /**
- * The last "Check again" (or automatic re-check). `read_failed` is kept apart
- * from `none_found` on purpose: "no new account yet" is only true after a read
- * that succeeded.
+ * The last "Check again". `read_failed` is kept apart from `none_found`: "no
+ * new account yet" is only true after a read that succeeded.
  */
 type CheckState = 'idle' | 'checking' | 'none_found' | 'read_failed'
 
@@ -137,142 +136,81 @@ function NewAccountDialogBody({
   const [sourceId, setSourceId] = useState<string | null>(null)
   const [chainId, setChainId] = useState<number | null>(null)
   const [stage, setStage] = useState<Stage>('form')
-  /** The latest attempt's own message (a refusal, or a passkey-step failure). */
+  /** The latest attempt's own message, shown beside a standing unknown outcome. */
   const [refusal, setRefusal] = useState<DialogRefusal | null>(null)
   const [created, setCreated] = useState<{ id: string; chain_id: number; name: string } | null>(null)
-  /**
-   * The unknown outcome, STICKY. Exactly two things clear it: a create request
-   * that was actually sent coming back definite (201, or a 4xx other than the
-   * rate limit), or the check finding the account. Nothing that stops before
-   * the request is sent — a cancelled or failed passkey prompt, the client's
-   * key check, a 429 — says anything about the earlier attempt, so none of
-   * them clears it; their own message shows beside it.
-   */
-  const [unknown, setUnknown] = useState<UnknownOutcome | null>(null)
+  const [unknown, setUnknown] = useState<UnknownSubmission | null>(null)
   const [check, setCheck] = useState<CheckState>('idle')
-  const pending = useRef<PendingSubmission | null>(null)
-  // The account ids seen when the latest attempt began.
-  const baseline = useRef<ReadonlySet<string>>(new Set())
-  // Bumped when an attempt starts AND when it ends: a check whose read
-  // overlapped an attempt has its result dropped, because the attempt's own
-  // answer has moved the state past it (the `budgetsGeneration` pattern in
-  // useDelegationBudget).
-  const generation = useRef(0)
   const nameRef = useRef<HTMLInputElement>(null)
 
-  const source: PasskeySource | null = sources.find((s) => s.account.id === sourceId) ?? initialSource
+  // While an unknown outcome stands the source is pinned (`sourceId` is set
+  // when the record is made) and never falls back to the default: if the
+  // pinned account stops being a source, there is no source to retry with.
+  const source: PasskeySource | null =
+    sources.find((s) => s.account.id === sourceId) ?? (unknown ? null : initialSource)
   // The network starts on the source account's own when the backend serves
-  // deploys there, else on the first network it does.
+  // deploys there, else on the first network it does. With the source pinned
+  // and the network field locked, this is stable while an outcome is unknown.
   const sourceChainServed = source !== null && chains.some((c) => c.chainId === source.account.chain_id)
   const selectedChainId = chainId ?? (sourceChainServed ? source!.account.chain_id : chains[0]?.chainId ?? null)
   const networkName = selectedChainId !== null ? getChainConfig(selectedChainId).name : ''
 
   const busy = stage === 'passkey' || stage === 'creating'
   const checking = check === 'checking'
+  // While an unknown outcome stands the inputs are locked, so every retry is
+  // the recorded submission and nothing the owner types can turn it into a
+  // new one.
+  const locked = busy || unknown !== null
   const trimmedName = name.trim()
   const nameMissing = touched && trimmedName === ''
-  const currentFingerprint =
-    source && selectedChainId !== null
-      ? submissionFingerprint({ name: trimmedName, chainId: selectedChainId, sourceAccountId: source.account.id })
-      : null
-  // An edit after an unknown outcome makes the next submit a NEW request with
-  // a new key — one that could create a second account if the first went
-  // through. The dialog says so instead of hiding the outcome.
-  const unknownInputsChanged = unknown !== null && currentFingerprint !== unknown.fingerprint
 
   function edit<T>(setter: (value: T) => void) {
     return (value: T) => {
       setter(value)
-      // The latest attempt's message describes the inputs it was given; once
-      // they change it is stale. The unknown outcome is separate state and
-      // stays: it is about an account that may exist whatever the inputs say.
+      // The latest attempt's message describes the inputs it was given.
       setRefusal(null)
     }
   }
 
-  // ── The in-dialog check after an unknown outcome ─────────────────────────
-  //
-  // Closing the dialog would drop the idempotency key, and a retry from a
-  // reopened dialog mints a new one — a second account if the first create
-  // committed. So the check happens HERE: re-read the list ("Check again", and
-  // once automatically), and when the account appears, show it as created.
-
-  async function checkAgain({ quietOnFailure = false } = {}) {
-    const startedAt = generation.current
-    setCheck('checking')
-    const ok = await refreshAccounts()
-    // An attempt started or ended meanwhile: this result is about a state
-    // that attempt has moved past, so it is dropped. (The re-read list itself
-    // still feeds the detection effect — the accounts are what they are.)
-    if (generation.current !== startedAt) return
-    // If the re-read found the account, the detection effect below moves the
-    // dialog to the success state; what is set here shows only otherwise. The
-    // automatic re-check stays quiet when its read fails — nothing new to say.
-    if (ok) setCheck('none_found')
-    else setCheck(quietOnFailure ? 'idle' : 'read_failed')
-  }
-  const checkAgainRef = useRef(checkAgain)
-  checkAgainRef.current = checkAgain
-
-  // Detection runs only between attempts: while a retry is in flight its own
-  // answer decides, and the effect re-runs when the stage returns to the form.
+  // Detection: between attempts, an account the lost create made resolves the
+  // unknown outcome. While an attempt is in flight its own answer decides.
   useEffect(() => {
     if (!unknown || stage !== 'form') return
-    const found = findCreatedAccount(accounts, unknown.baseline, unknown.chainId, unknown.name)
+    const found = findCreatedAccount(accounts, unknown.baselineIds, unknown.chainId, unknown.name)
     if (!found) return
-    pending.current = null
+    // The success state ends the dialog, and the record with it.
     setCreated({ id: found.id, chain_id: found.chain_id, name: found.name })
-    setUnknown(null)
-    setRefusal(null)
     setStage('done')
   }, [accounts, unknown, stage])
 
-  // One automatic re-check per unknown outcome (a new outcome object is a new
-  // timer; an early-returning retry leaves the object, and the timer, alone).
-  useEffect(() => {
-    if (!unknown) return
-    const timer = setTimeout(() => void checkAgainRef.current({ quietOnFailure: true }), AUTO_RECHECK_MS)
-    return () => clearTimeout(timer)
-  }, [unknown])
+  // "Check again" re-reads the list; detection above turns a found account
+  // into the success state. It is disabled while an attempt is in flight, and
+  // "Try again" is disabled while it runs, so a result is never stale.
+  async function checkAgain() {
+    setCheck('checking')
+    const ok = await refreshAccounts()
+    setCheck(ok ? 'none_found' : 'read_failed')
+  }
 
   async function submit() {
     setTouched(true)
-    // Re-entry is blocked by the submit button's `disabled={busy}`, not here: a
-    // `busy` read in this closure is the render's value, so it could not stop
-    // a second click the button had not yet been re-rendered to refuse.
-    // `source` and `selectedChainId` are type narrowings for states the form
-    // never renders in (the form needs a source; `useDeployableChains` never
-    // returns an empty list). The name check is the one input guard.
+    // Re-entry is blocked by the submit button's `disabled`, not here: a
+    // `busy` read in this closure is the render's value. `source` and
+    // `selectedChainId` are type narrowings for states the form never renders
+    // in (the form needs a source; `useDeployableChains` never returns an
+    // empty list). The name check is the one input guard.
     if (!source || selectedChainId === null || trimmedName === '') return
-    generation.current += 1
-    let recheck = false
-    try {
-      recheck = (await attempt(source, selectedChainId)) === true
-    } finally {
-      generation.current += 1
-    }
-    // After the attempt has ended (so the generation counter keeps this check's
-    // result): the re-read the cap-while-unknown rule below asks for.
-    if (recheck) void checkAgain()
-  }
-
-  /** Resolves true when the caller should re-read the list right away. */
-  async function attempt(source: PasskeySource, selectedChainId: number): Promise<boolean | void> {
     setRefusal(null)
     setCheck('idle')
 
-    // Same name, network and source as the last attempt → the same key, so a
-    // retry after a lost response answers the account it already created.
-    const submission = submissionFor(
-      pending.current,
-      submissionFingerprint({ name: trimmedName, chainId: selectedChainId, sourceAccountId: source.account.id }),
-    )
-    // The baseline is the list as it is when this attempt starts. Recording it
-    // again on a retry is safe: between attempts any account that enters the
-    // list is caught by the detection effect, so one that is in the list when
-    // the retry starts and was not caught was already there.
-    baseline.current = new Set(accounts.map((a) => a.id))
-    pending.current = submission
+    // A retry while unknown repeats the record — its key above all. Otherwise
+    // this is a new submission with a fresh key, and its baseline is the list
+    // as it is now.
+    const key = unknown?.key ?? crypto.randomUUID()
+    // The list as this attempt starts. Detection runs whenever the list
+    // changes between attempts, so an account already here was not created
+    // by an earlier attempt that is still unknown.
+    const baselineIds = new Set(accounts.map((a) => a.id))
 
     setStage('passkey')
     let credentialId: string
@@ -315,43 +253,25 @@ function NewAccountDialogBody({
         key_id: keyId,
         chain_id: selectedChainId,
         name: trimmedName,
-        idempotency_key: submission.idempotencyKey,
+        idempotency_key: key,
       })
-      pending.current = null
-      setUnknown(null)
+      // The success state ends the dialog, and the record with it.
       setCreated({ id: account.id, chain_id: account.chain_id, name: trimmedName })
       setStage('done')
     } catch (err) {
       setStage('form')
       const outcome = classifyCreateAccountError(err)
       if (outcome.kind === 'unknown_outcome') {
-        // No answer, or a 5xx: the create may have committed behind a lost
-        // response. Keep the key, remember what the list looked like, and
-        // check in the dialog rather than inviting a blind retry.
-        setUnknown({
-          fingerprint: submission.fingerprint,
-          chainId: selectedChainId,
-          name: trimmedName,
-          baseline: baseline.current,
-        })
+        // Record the submission (on a retry: the same key, the same name and
+        // network). Pinning `sourceId` keeps the locked source from following
+        // a changed default account.
+        setSourceId(source.account.id)
+        setUnknown({ key, baselineIds, name: trimmedName, chainId: selectedChainId })
         return
       }
-      // A 429 is the rate limiter refusing THIS attempt before the route ran:
-      // it says nothing about an earlier one, so an unknown outcome stands.
-      //
-      // The cap, while an unknown outcome stands, is not definite either. S1's
-      // route (`routes/hybrid-accounts.ts`, #4023) checks the per-chain cap
-      // BEFORE its idempotency replay — raised on #4044 — so the account our
-      // own first attempt created can be the one that reached the cap, and
-      // the replay that would have returned it never runs. Keep the unknown
-      // outcome, show the cap beside it, and re-read the list at once so
-      // detection can find that account. Drop this branch once S1 replays
-      // before it counts. Without a standing unknown outcome the cap is
-      // definite, as every other 4xx is.
-      const capMayBeOurs = outcome.kind === 'cap_reached' && unknown !== null
-      if (outcome.kind !== 'rate_limited' && !capMayBeOurs) setUnknown(null)
+      // Any refusal: its own message. A standing unknown outcome stays (see
+      // UnknownSubmission for why a refusal proves nothing about it).
       setRefusal(outcome)
-      return capMayBeOurs
     }
   }
 
@@ -449,7 +369,7 @@ function NewAccountDialogBody({
             placeholder="For example, Reserve"
             autoComplete="off"
             invalid={nameMissing}
-            disabled={busy}
+            disabled={locked}
           />
           {nameMissing ? <InlineAlert>Give the account a name.</InlineAlert> : null}
         </div>
@@ -462,7 +382,7 @@ function NewAccountDialogBody({
             id="new-account-network"
             value={selectedChainId ?? ''}
             onChange={(e) => edit(setChainId)(Number(e.target.value))}
-            disabled={busy}
+            disabled={locked}
           >
             {chains.map((chain) => (
               <option key={chain.chainId} value={chain.chainId}>
@@ -481,7 +401,7 @@ function NewAccountDialogBody({
               id="new-account-source"
               value={source?.account.id ?? ''}
               onChange={(e) => edit(setSourceId)(e.target.value)}
-              disabled={busy}
+              disabled={locked}
             >
               {sources.map((s) => (
                 <option key={s.account.id} value={s.account.id}>
@@ -515,8 +435,9 @@ function NewAccountDialogBody({
           <div className="space-y-1.5 text-xs text-[var(--v2-ink-2)]" data-testid="new-account-unknown">
             <InlineAlert>
               Haven couldn&rsquo;t confirm the account. It may have been created anyway. Check again before trying
-              again: trying again here with the same name, network and passkey won&rsquo;t create a second one.
+              again: trying again here won&rsquo;t create a second one.
             </InlineAlert>
+            <p>To keep this from creating a second account, the details are locked until Haven knows what happened.</p>
             <p role="status" aria-live="polite" data-testid="new-account-check">
               {check === 'checking'
                 ? 'Checking your accounts…'
@@ -526,12 +447,6 @@ function NewAccountDialogBody({
                     ? 'Couldn’t read your accounts just now. Check again in a moment.'
                     : ''}
             </p>
-            {unknownInputsChanged ? (
-              <p data-testid="new-account-new-request">
-                You changed the name, network or passkey, so trying again is a new request. If the first one went
-                through, it would create a second account. Check again first.
-              </p>
-            ) : null}
           </div>
         ) : null}
         {/* The latest attempt's own message, beside a standing unknown outcome. */}
@@ -548,15 +463,14 @@ function NewAccountDialogBody({
             Check again
           </Button>
         ) : null}
-        {/* Stays enabled during a check: an attempt makes the check's result
-            stale, and the generation counter drops it. "Check again" is the
-            one disabled while an attempt is in flight. */}
-        <Button onClick={() => void submit()} className="whitespace-nowrap" disabled={busy}>
+        {/* Disabled while a check runs; "Check again" is disabled while an
+            attempt runs. The two never overlap, so no result is stale. */}
+        <Button onClick={() => void submit()} className="whitespace-nowrap" disabled={busy || checking}>
           {stage === 'passkey'
             ? 'Waiting for your passkey…'
             : stage === 'creating'
               ? 'Setting up your account…'
-              : unknown && !unknownInputsChanged
+              : unknown
                 ? 'Try again'
                 : 'Create account with a passkey'}
         </Button>

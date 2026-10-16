@@ -8,7 +8,8 @@
  * signer set — the client never sends key material — and the new account is
  * never the default. This module holds the decisions that do not need React:
  * which accounts can be a source, which one is picked by default, how a
- * credential id becomes a `key_id`, when the idempotency key is reused, and how
+ * credential id becomes a `key_id`, how the account a lost create made is
+ * recognised, and how
  * a refusal is classified. The words the user reads live in the dialog
  * (`components/NewAccountDialog.tsx`), inside the copy lint's scan.
  */
@@ -113,33 +114,6 @@ export function sourceHoldsKey(source: PasskeySource, keyId: string): boolean {
 }
 
 /**
- * The idempotency key for one dialog submission (#4023's retried-create
- * dedup). A retry of the SAME submission — same name, network and source —
- * reuses the key, so a request whose response was lost answers the account it
- * already created instead of minting a second. Any change to those inputs is a
- * different submission and gets a fresh key: the server matches on the key
- * alone, so reusing it after the user switched networks would answer the
- * account created on the first one.
- */
-export interface PendingSubmission {
-  fingerprint: string
-  idempotencyKey: string
-}
-
-export function submissionFingerprint(input: { name: string; chainId: number; sourceAccountId: string }): string {
-  return JSON.stringify([input.name.trim(), input.chainId, input.sourceAccountId])
-}
-
-export function submissionFor(
-  previous: PendingSubmission | null,
-  fingerprint: string,
-  mintKey: () => string = () => crypto.randomUUID(),
-): PendingSubmission {
-  if (previous && previous.fingerprint === fingerprint) return previous
-  return { fingerprint, idempotencyKey: mintKey() }
-}
-
-/**
  * After an UNKNOWN outcome (no answer, or a 5xx), find the account the lost
  * create may have made. It must be all three: absent from the baseline
  * recorded when the attempt started, on the chain the create was sent to, and
@@ -167,15 +141,15 @@ export function findCreatedAccount(
 // code, the status decides — and the line that matters is whether the outcome
 // is KNOWN:
 //
-// - a 4xx is a definite refusal: the route answered before (or rolled back)
-//   anything it would have written. 429 is the money-path rate limit; every
-//   other code-less 4xx is a typed "could not create" that passes the
-//   backend's sentence through as detail.
+// - a 4xx is a definite refusal OF THIS REQUEST: the route answered before
+//   (or rolled back) anything it would have written for it. 429 is the
+//   money-path rate limit; every other code-less 4xx is a typed "could not
+//   create" that passes the backend's sentence through as detail. It says
+//   nothing about an EARLIER attempt (the route validates before its replay),
+//   which is why the dialog never lets a refusal clear an unknown outcome.
 // - no status (the request never got an answer) or a 5xx is an UNKNOWN
 //   outcome: the create may have committed and only the response been lost.
-//   The dialog then re-reads the account list and says the account may exist,
-//   instead of inviting a retry that a new idempotency key (a reopened dialog,
-//   a corrected name) would turn into a second account.
+//   The dialog records that submission and repeats it exactly on a retry.
 
 export const ACCOUNT_CAP_REACHED = 'ACCOUNT_CAP_REACHED'
 export const SOURCE_HAS_NO_PASSKEY = 'SOURCE_HAS_NO_PASSKEY'

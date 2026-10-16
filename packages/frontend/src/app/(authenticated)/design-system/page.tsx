@@ -30,6 +30,7 @@ import { Textarea } from '@/components/ui/Textarea'
 import { Table, tableColumnClass, tableHideFromClass } from '@/components/ui/Table'
 import { SidePanel } from '@/components/ui/SidePanel'
 import { StepProgress } from '@/components/ui/StepProgress'
+import { DialogActions } from '@/components/ui/DialogActions'
 import { SeriesSwatch, StackedBarChart } from '@/components/ui/StackedBarChart'
 import type { StackedBarDay } from '@/components/ui/StackedBarChart'
 import { AreaChart } from '@/components/ui/AreaChart'
@@ -516,6 +517,8 @@ export default function DesignSystemPage() {
   const [comingSoonOpen, setComingSoonOpen] = useState(false)
   const [panelOpen, setPanelOpen] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [topModalOpen, setTopModalOpen] = useState(false)
+  const [topModalTall, setTopModalTall] = useState(false)
   const [checkboxOn, setCheckboxOn] = useState(true)
   const [sampleAmount, setSampleAmount] = useState('')
   const [dsBudgetAmount, setDsBudgetAmount] = useState('')
@@ -1753,6 +1756,22 @@ export default function DesignSystemPage() {
           <StepProgress totalSteps={3} currentStep={0} labels={['Name', 'Budget', 'Connect']} />
           <StepProgress totalSteps={3} currentStep={1} labels={['Name', 'Budget', 'Connect']} />
           <StepProgress totalSteps={3} currentStep={3} labels={['Name', 'Budget', 'Connect']} />
+          {/* `halted`: the flow stopped on Connect (expired / cancelled / failed). */}
+          <StepProgress totalSteps={3} currentStep={2} labels={['Name', 'Budget', 'Connect']} halted />
+        </Card>
+      </Section>
+
+      <Section
+        title="DialogActions"
+        description="A dialog screen's action pair: secondary then primary, equal halves on the body edges at 40px. Below sm (640px) the pair stacks, primary on top, both full width — resize to see it. A screen with a single action uses one full-width primary instead."
+      >
+        <Card hover={false} className="max-w-xl p-5" data-testid="ds-dialog-actions">
+          <DialogActions>
+            <Button variant="ghost" className="flex-1">
+              Back
+            </Button>
+            <Button className="flex-1">Create setup prompt</Button>
+          </DialogActions>
         </Card>
       </Section>
 
@@ -2802,6 +2821,17 @@ export default function DesignSystemPage() {
               </p>
             </div>
             <div>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Placement</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                Centred by default. A flow whose screens change height in one dialog passes{' '}
+                <code className="rounded bg-[var(--v2-surface)] px-1">placement=&quot;top&quot;</code> so the header holds
+                still and the body grows downward.
+              </p>
+              <Button variant="ghost" size="sm" className="mt-2" onClick={() => setTopModalOpen(true)}>
+                Open top-anchored modal
+              </Button>
+            </div>
+            <div>
               <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Close behavior</h3>
               <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
                 Backdrop, Escape, and the optional close button dismiss ordinary dialogs. Disable only the affordances an active execution step must protect.
@@ -3298,6 +3328,42 @@ export default function DesignSystemPage() {
           </div>
         </div>
       </Section>
+
+      <Modal
+        open={topModalOpen}
+        onClose={() => {
+          setTopModalOpen(false)
+          setTopModalTall(false)
+        }}
+        title="Top-anchored modal"
+        subtitle="Change the body height — the header stays where it is."
+        showCloseButton
+        width="xl"
+        placement="top"
+      >
+        <div className="flex flex-col gap-5">
+          <p>
+            {topModalTall
+              ? 'A taller screen. In a centred dialog the title would have moved up by half the difference; here only the bottom edge moves.'
+              : 'A short screen.'}
+          </p>
+          {topModalTall && (
+            <div className="space-y-3">
+              <p>The budget refills at the end of each period. Nothing carries over.</p>
+              <p>The agent can spend up to the budget you set, from this Haven wallet only.</p>
+              <p>It cannot move funds anywhere else, and it never holds a key of its own.</p>
+            </div>
+          )}
+          <DialogActions>
+            <Button variant="ghost" className="flex-1" onClick={() => setTopModalOpen(false)}>
+              Close
+            </Button>
+            <Button className="flex-1" onClick={() => setTopModalTall((tall) => !tall)}>
+              {topModalTall ? 'Show short screen' : 'Show tall screen'}
+            </Button>
+          </DialogActions>
+        </div>
+      </Modal>
 
       <Modal
         open={modalOpen}

@@ -4,6 +4,7 @@ status: current
 covers:
   - packages/frontend/src/app/globals.css
   - packages/frontend/src/components/connect-agent/ConnectSteps.tsx
+  - packages/frontend/src/components/ui/DialogActions.tsx
   - packages/frontend/src/components/connect-agent/ConnectStepShell.tsx
   - packages/frontend/src/context/ThemeContext.tsx
   - packages/frontend/src/lib/theme-bootstrap.ts
@@ -1031,7 +1032,7 @@ its *text* colour on hover (`ink-2` → `ink`), pinned by
 That difference has a shipped consequence, and it is the rule to take from it: **tertiary
 needs surrounding structure to be legible as pressable.** It works inside a dialog's action
 row or at the end of a card, where position tells you it is a control. It fails in running
-content — `connect-agent/SetupStates.tsx:208` records the case where a tertiary button
+content — `connect-agent/SetupStates.tsx:214` records the case where a tertiary button
 "rendered as stray bold text in the middle of a checklist rather than a control", and was
 changed to ghost for the border alone while keeping secondary weight. Reach for ghost when
 the control has to announce itself; tertiary when its context already has.
@@ -1554,6 +1555,23 @@ no information a screen reader user needs, and hit-testing must pass straight
 through it so a control at the bottom of a scrolled body stays clickable. See
 also the `role="dialog"` bullet in § 6.
 
+**Placement: centred, or `placement="top"`.** The panel centres vertically by
+default. A dialog that walks through several screens of different heights
+passes `placement="top"`: the panel hangs from a fixed line — `sm:mt-16` below
+the wrapper's own `max(1rem, safe-top)` padding, so `4rem` + `1rem` on a
+desktop, and just the safe-area padding below `sm` — and grows **downward
+only**, so the title holds one y on every screen. The `headerAccessory` below
+it moves only by the subtitle's own height: below `sm` a long subtitle wraps to
+a second line (the Connect flow's budget and waiting screens), which drops the
+band about 19px there.
+The ceiling subtracts the extra offset for the reason it subtracts the padding
+(#2730): otherwise the footer is what overflows. The Connect agent modal is the
+one caller. Centred, its title moved between y 130 and y 294 across the flow at
+1280×900 and between 43 and 255 at 375×812; anchored it holds one y at each
+width. A one-screen dialog keeps the default — a centred dialog that never
+changes height never moves. The wrapper exposes the choice as
+`data-modal-placement`.
+
 **Actions belong in the `footer` prop.** `ConfirmDialog`, `AccountSignersCard`,
 `ReplaceSigningKeyModal` and `contacts/page.tsx` do this. Do not add new dialogs
 that render an action row as the last children *inside* the scroll body.
@@ -1598,6 +1616,45 @@ button placed there is no longer a descendant of a `<form>` in the body.
 resolves rather than that the attribute string matches — a stale id compares
 equal and still submits nothing.
 
+### Dialog actions (`ui/DialogActions`)
+
+The one footer rule for a multi-screen dialog: **the screen's main action pair
+sits full width at the bottom, at `Button`'s default `md` (40px), on the body's
+edges — secondary left, primary right, equal halves.** A screen with a single
+action gets one full-width primary. Below `sm` the pair **stacks**, primary on
+top, both full width: two 140px halves at 375px wrapped "Set agent budget" and
+"Create a new setup" onto two lines. `DialogActions` owns only that layout
+(`flex-col-reverse` → `sm:flex-row`); its children are `Button`s with `flex-1`,
+secondary first in the markup, so the desktop Tab order matches the screen.
+Below `sm` the stack is visually reversed, so Tab reaches the lower secondary
+before the upper primary — accepted, since reordering the markup would break
+the desktop order instead and a phone is rarely tabbed.
+
+In the Connect agent modal it carries every pair — Cancel / Set agent budget,
+Back / Create setup prompt, Cancel / Approve budget (through
+the budget-grant control's own action row) and Close / Create a new setup on
+the expired, cancelled and failed screens. Where those screens draw them inside
+the scroll body rather than in Modal's `footer`, that is the flow's existing
+shape (each screen owns its actions and their state), not a pattern for a new
+dialog. Three placements in that flow are decided rather than incidental:
+
+- **Approve.** The pair lives inside the checklist's last row, so it is pulled
+  out over the marker column (`ROW_FOOTER_OUTDENT_CLASS` in `ConnectSteps`)
+  to the body edges instead of the text column.
+- **Waiting for the agent.** The forward action is the in-row "Copy setup
+  prompt" primary — #3832's one allowed exception to the rule, kept, at 40px
+  like everything else — and after that the screen advances on its own. Its
+  only footer action is the exit, so "Cancel setup" is a full-width **ghost**
+  — the same weight as every other secondary in the flow's pairs. Ghost is
+  not a quieter tier, and after the copy it is the largest control on screen;
+  that is accepted because the forward action has already happened by then
+  and the screen advances on its own, so nothing is left for the exit to
+  compete with (#1391's concern). Before the copy, the filled "Copy setup
+  prompt" leads. The expiry line sits on its own line above it.
+- **Done.** One full-width primary, "Done"; the in-list "Download the skill" is
+  a 40px ghost, not a 44px one-off (Button's own hit area keeps the 44px tap
+  target).
+
 ### Wizard progress (`StepProgress`)
 
 `ui/StepProgress` is the numbered disc band a multi-step modal carries in its
@@ -1610,7 +1667,18 @@ and medium on the active step, `--v2-ink-3` otherwise. It says **where the user
 is in a wizard**, and nothing else: a step's own instructions live in its body.
 It renders as an `<ol>`: `aria-current="step"` on the active item, an `sr-only`
 "Step N of M" prefix before the label, the disc glyph and connectors
-`aria-hidden`. Call sites: the Connect agent modal (every step: Name / Budget /
+`aria-hidden`. The tick is lucide `Check` at `h-3.5 w-3.5`, stroke 2 — the
+same mark, size and stroke as `ConnectSteps`' done disc, so the band and the
+step-3 checklist draw one check when they share a screen (it was a text "✓",
+which rendered visibly different beside it).
+
+**`halted`** marks a flow that stopped on `currentStep` — the Connect agent
+modal's expired, cancelled and failed screens. That step renders with the
+pending ring and numeral instead of the brand "in progress" ring, loses
+`aria-current`, and its `sr-only` prefix says "stopped"; earlier steps stay
+done, because they were. Neutral, not an error tone: a cancel is the user's own
+choice, and the screen's status badge already carries the tone of what
+happened. Call sites: the Connect agent modal (every step: Name / Budget /
 Connect) and `ReplaceSigningKeyModal` (Reason / New key / Review / Approve);
 its `/design-system` specimen is the "StepProgress" section, after SidePanel.
 

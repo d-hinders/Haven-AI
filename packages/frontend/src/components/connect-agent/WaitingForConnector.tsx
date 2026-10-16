@@ -119,10 +119,12 @@ export function WaitingForConnector({
                   itself is long and only matters to someone checking what
                   they hand their agent, so it sits behind a closed
                   disclosure instead of a 192px scrolling preview that
-                  pushed this button down the screen. */}
+                  pushed this button down the screen. In the row, not the
+                  footer (#3832's one allowed exception to the footer rule),
+                  but at the flow's standard 40px. */}
               <Button
                 variant={manualInProgress ? 'ghost' : 'primary'}
-                size={manualInProgress ? 'sm' : 'lg'}
+                size={manualInProgress ? 'sm' : 'md'}
                 className={manualInProgress ? 'self-start' : 'w-full'}
                 onClick={() => onCopy('prompt', setup.setup_prompt)}
               >
@@ -372,10 +374,11 @@ export function WaitingForConnector({
         {/* #1391: this screen offers EXACTLY ONE cancel-the-setup action at any
             moment. In the recovery stage the warning block above owns it
             ("Cancel this setup"), where it is both visible and warranted; here
-            it is a small ghost button beside the expiry line, not full-width,
-            because an exit should be findable without competing with the action that moves
-            the user forward. (Called "a quiet link" in an earlier draft of this
-            comment; it is not link-styled and never was.) It stays a
+            it is a ghost button, because an exit should be findable without
+            competing with the action that moves the user forward. It was a
+            small one beside the expiry line until the flow took one footer
+            rule (full width, 40px, body edges); see the footer comment below
+            for why its weight is still right there. It stays a
             <button>: demoting it visually must not demote it semantically, and
             the stage-conditional render below is pinned by a test, since a
             missing exit is worse than a loud one.
@@ -388,19 +391,27 @@ export function WaitingForConnector({
             two unlabelled-vs-labelled affordances is a real question, and it
             belongs to the modal-chrome track (#1406), not here. */}
 
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-          {/* #1377 C: fixed-height slot — the error suffix must not reflow on
-              a poll tick. Two reserved lines cover the longest content. */}
-          <p className="min-h-8 min-w-0 flex-1 text-xs text-[var(--v2-ink-3)]">
-            Expires {formatAbsoluteDate(expiresAt)}.{' '}
-            {error ? `Status check failed: ${error}` : 'Haven keeps checking in the background.'}
-          </p>
-          {!showRecovery && (
-            <Button variant="ghost" size="sm" onClick={onCancel}>
-              Cancel setup
-            </Button>
-          )}
-        </div>
+        {/* #1377 C: fixed-height slot — the error suffix must not reflow on
+            a poll tick. Two reserved lines cover the longest content. Its own
+            full-width line now: beside the button it wrapped to three lines
+            at 375px. */}
+        <p className="min-h-8 text-xs text-[var(--v2-ink-3)]">
+          Expires {formatAbsoluteDate(expiresAt)}.{' '}
+          {error ? `Status check failed: ${error}` : 'Haven keeps checking in the background.'}
+        </p>
+        {/* The flow's footer rule: the screen's action sits full width at
+            40px on the body edges. This screen's only footer action is the
+            exit — the forward action is the in-row copy, and after that the
+            screen advances by itself — so it is a full-width GHOST, not a
+            primary. Ghost is the flow's ordinary secondary weight, not a
+            quieter one: before the copy the filled copy button leads, and
+            after it there is no forward action left for the exit to compete
+            with (#1391). */}
+        {!showRecovery && (
+          <Button variant="ghost" onClick={onCancel} className="w-full">
+            Cancel setup
+          </Button>
+        )}
       </div>
     </>
   )

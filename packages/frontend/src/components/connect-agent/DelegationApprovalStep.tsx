@@ -14,6 +14,7 @@ import WalletButton from '../WalletButton'
 import { Button } from '../ui/Button'
 import { AgentRulesSummary } from '../haven'
 import { ConnectionVerificationFooter } from './ConnectionVerificationFooter'
+import { ROW_FOOTER_OUTDENT_CLASS } from './ConnectSteps'
 import { WarningCallout } from './SetupNotices'
 
 /**
@@ -159,7 +160,7 @@ export function DelegationApprovalStep({
       )}
 
       {confirmFailed ? (
-        <div className="flex gap-3">
+        <div className={`flex gap-3 ${ROW_FOOTER_OUTDENT_CLASS}`}>
           {/* The budget is signed and the agent is live. Closing is all that
               is left — to stop it, the user uses Stop budget or Remove
               agent… on its own page. Offering a cancel here would promise a reversal
@@ -197,6 +198,9 @@ export function DelegationApprovalStep({
           }
           // Same footer shape as the legacy step: equal-width ghost-then-
           // primary, with the money-authority action carrying the weight.
+          // Outdented to the dialog body's edges (the flow's one footer rule)
+          // rather than sitting in the checklist's text column.
+          actionsClassName={ROW_FOOTER_OUTDENT_CLASS}
           leadingAction={
             granted ? (
               <Button variant="ghost" onClick={onClose} disabled={confirming} className="flex-1">

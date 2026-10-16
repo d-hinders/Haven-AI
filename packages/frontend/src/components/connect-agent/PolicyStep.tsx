@@ -4,6 +4,7 @@ import type { AgentConnectionSetupFlow } from '@/hooks/useAgentConnectionSetup'
 import { accountWithChainLabel } from '@/lib/account-label'
 import { budgetPeriodLabel } from '@/lib/budget-period'
 import { Button } from '../ui/Button'
+import { DialogActions } from '../ui/DialogActions'
 import { Checkbox } from '../ui/Checkbox'
 import { Input } from '../ui/Input'
 import { Select } from '../ui/Select'
@@ -128,7 +129,7 @@ export function PolicyStep({ flow }: { flow: AgentConnectionSetupFlow }) {
         />
       )}
 
-      <div className="flex gap-3">
+      <DialogActions>
         <Button variant="ghost" onClick={() => flow.setStep('details')} className="flex-1" disabled={flow.creating}>
           Back
         </Button>
@@ -144,7 +145,7 @@ export function PolicyStep({ flow }: { flow: AgentConnectionSetupFlow }) {
         >
           {flow.creating ? 'Creating setup...' : 'Create setup prompt'}
         </Button>
-      </div>
+      </DialogActions>
     </>
   )
 }

@@ -49,6 +49,16 @@ export interface ConnectStepRow {
   wideBodyOnMobile?: boolean
 }
 
+/**
+ * Pulls a row's footer (its action pair) out over the marker column from `sm`
+ * up — 2rem disc + 0.875rem gap — so it lines up with the dialog body's edges
+ * like every other footer in the flow, instead of with the indented text
+ * column. Below `sm` a `wideBodyOnMobile` row is already at those edges. Last
+ * row only, for the same reason as `wideBodyOnMobile`: no connector line runs
+ * under the last marker.
+ */
+export const ROW_FOOTER_OUTDENT_CLASS = 'sm:-ml-[2.875rem]'
+
 // Screen-reader state prefix for the row heading. None for `active`: that row
 // carries `aria-current="step"`, which already announces it — a prefix would
 // say it twice.

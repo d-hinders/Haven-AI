@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { useState, type ComponentType } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ConnectAgentModal from '../ConnectAgentModal'
@@ -107,6 +107,45 @@ describe('ConnectAgentModal', () => {
 
     expect(screen.getByText('Agent details')).toBeInTheDocument()
     expect(screen.queryByText('Haven no longer sends payments from this account.')).not.toBeInTheDocument()
+  })
+  it('is top-anchored, so the header holds one y across steps of different heights', () => {
+    render(<ConnectAgentModal open onClose={vi.fn()} accountAddress="0x111" accountId="safe-1" />)
+
+    expect(screen.getByRole('dialog')).toHaveAttribute('data-modal-placement', 'top')
+  })
+
+  it.each(['expired', 'cancelled', 'failed'])('shows the band stopped, not in progress, on a %s setup', (kind) => {
+    mockUseAgentConnectionSetup.mockReturnValue(
+      flow({ step: 'connect', currentStepIndex: 2, connectView: { kind } }),
+    )
+    render(<ConnectAgentModal open onClose={vi.fn()} accountAddress="0x111" accountId="safe-1" />)
+
+    const band = screen.getAllByRole('list')[0]
+    const items = within(band).getAllByRole('listitem')
+    expect(items[2]).toHaveTextContent(/Step 3 of 3, stopped/)
+    items.forEach((item) => expect(item).not.toHaveAttribute('aria-current'))
+  })
+
+  it('does not halt the band off the connect step (a restart before the status clears)', () => {
+    mockUseAgentConnectionSetup.mockReturnValue(
+      flow({ step: 'policy', currentStepIndex: 1, connectView: { kind: 'expired' } }),
+    )
+    render(<ConnectAgentModal open onClose={vi.fn()} accountAddress="0x111" accountId="safe-1" />)
+
+    const items = within(screen.getAllByRole('list')[0]).getAllByRole('listitem')
+    expect(items[1]).toHaveAttribute('aria-current', 'step')
+    items.forEach((item) => expect(item).not.toHaveTextContent(/stopped/))
+  })
+
+  it('keeps Connect current while the setup is live', () => {
+    mockUseAgentConnectionSetup.mockReturnValue(
+      flow({ step: 'connect', currentStepIndex: 2, connectView: { kind: 'waiting_for_connector' } }),
+    )
+    render(<ConnectAgentModal open onClose={vi.fn()} accountAddress="0x111" accountId="safe-1" />)
+
+    const items = within(screen.getAllByRole('list')[0]).getAllByRole('listitem')
+    expect(items[2]).toHaveAttribute('aria-current', 'step')
+    expect(items[2]).not.toHaveTextContent(/stopped/)
   })
 })
 

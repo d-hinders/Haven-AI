@@ -1989,7 +1989,7 @@ export type paths = {
         put?: never;
         /**
          * Provision a counterfactual Hybrid DeleGator account.
-         * @description Computes the deterministic account address for an owner configuration (an EOA, P256 passkeys, or both) and records the row. **No transaction happens here** — the address is derived, not deployed, and `deployed: false` says so; the first sponsored operation (the budget grant) deploys the code. Refusals guard the derivation's own traps: the zero address is rejected because it derives the SAME account as the pure-passkey configuration while counting as a second signer, and duplicate passkey key_ids are rejected because they collapse to one on-chain key. A single-signer account is permitted (#1153) — the backup recommendation reaches the user after funding instead of walling the first minute.
+         * @description Computes the deterministic account address for an owner configuration and records the row. **No transaction happens here** — the address is derived, not deployed, and `deployed: false` says so; the first sponsored operation (the budget grant) deploys the code. Two request shapes share this route: the historical SIGNUP (owner_address and/or passkeys from the client) and the #4023 CREATE-ADDITIONAL (source_account_id + key_id), which copies the named passkey's coordinates SERVER-SIDE from the source account's stored signer set — the new account's owner is that passkey alone and it never becomes the default. Each account is derived at its own per-account deploy salt (#4023), so one passkey can own several accounts on one chain; the salt is a monotonic per-(user, signer) counter that is never reused, and a user can hold any derived address only once per chain (UNIQUE(user_id, chain_id, LOWER(account_address))). Refusals guard the derivation's own traps: the zero address is rejected because it derives the SAME account as the pure-passkey configuration while counting as a second signer, and duplicate passkey key_ids are rejected because they collapse to one on-chain key. A single-signer account is permitted (#1153) — the backup recommendation reaches the user after funding instead of walling the first minute.
          */
         post: operations["createHybridAccount"];
         delete?: never;
@@ -15340,15 +15340,16 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description Defaults to Base Sepolia while delegation onboarding is dark-launched. */
+                    /** @description The chain the account is created on. REQUIRED for a create-additional request (no fallback); defaults to Base Sepolia for a signup request while delegation onboarding is dark-launched. */
                     chain_id?: number;
                     /** @description Display label; defaults to 'My account'. */
                     name?: string;
                     /**
-                     * @description EOA owner. Must not be the zero address.
+                     * @description EOA owner. Must not be the zero address. Signup shape only.
                      * @example 0x1111111111111111111111111111111111111111
                      */
                     owner_address?: string;
+                    /** @description Signup shape only. */
                     passkeys?: {
                         key_id: string;
                         /** @description P256 public-key x coordinate. */
@@ -15356,6 +15357,15 @@ export interface operations {
                         /** @description P256 public-key y coordinate. */
                         y: string;
                     }[];
+                    /**
+                     * Format: uuid
+                     * @description #4023 create-additional: an account the caller owns whose stored signer set the new owner passkey is copied FROM. Required together with key_id; owner_address/passkeys must be omitted.
+                     */
+                    source_account_id?: string;
+                    /** @description #4023 create-additional: the WebAuthn credential the user authenticated the dialog with. Must be a passkey on the source account; the new account derives from it alone (no backups, no EOA). */
+                    key_id?: string;
+                    /** @description #4023: retried-create dedup (the send_idempotency_key pattern). A retried create returns the FIRST account it created instead of minting a second. */
+                    idempotency_key?: string;
                     /** @description Accepted and recorded as history, but REQUIRED FOR NOTHING (#1153) — sending it changes no outcome and omitting it changes no outcome. Kept on the request shape so existing clients keep working. */
                     single_signer_waiver?: {
                         acknowledged?: boolean;
@@ -15364,7 +15374,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Account row recorded. Counterfactual — nothing was deployed. */
+            /** @description Account row recorded. Counterfactual — nothing was deployed. Also answers an idempotent retry (the first account) and the winner of a concurrent create at the same derived address. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -15388,7 +15398,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Bad owner configuration, or a chain the delegation rail does not serve. */
+            /** @description Bad owner configuration, a chain the delegation rail does not serve, or a mixed/ambiguous request shape. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -15418,8 +15428,38 @@ export interface operations {
                     };
                 };
             };
+            /** @description Create-additional: the named source_account_id is not an account the caller owns. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
             /** @description This account is already registered for the caller. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Create-additional: the source account has no passkey to copy, the key_id is not one of its passkeys, or the per-user per-chain soft cap (10) is reached. */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

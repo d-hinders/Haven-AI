@@ -1,7 +1,8 @@
 /**
  * #825 Hybrid provisioning route. Pattern-matched DB mocks (#775); the
  * address derivation (network-touching) is mocked — its determinism is the
- * kit's contract, exercised live by pilot:provision-hybrid.
+ * kit's contract, exercised offline by the salt characterization fixture and
+ * on the real-DB harness by the repository tests (#4023).
  */
 import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
@@ -19,25 +20,68 @@ vi.mock('../../middleware/auth.js', () => ({
 }))
 vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../rails/hybrid-provisioning.js')>()
-  return { ...actual, computeHybridAccountAddress: (...a: unknown[]) => mockCompute(...a) }
+  return {
+    ...actual,
+    // The register route derives through the SALTED entry point (#4023).
+    computeUserHybridAccountAddress: (...a: unknown[]) => mockCompute(...a),
+  }
 })
 
 const hybridAccountRoutes = (await import('../hybrid-accounts.js')).default
 
 const OWNER = '0x' + 'ab'.repeat(20)
 const HYBRID = '0x' + 'cd'.repeat(20)
+const SOURCE_ID = '5a2f8d31-6c04-4e97-b183-9e7d2c6a0f58'
+/** Counter 1's salt: toHex(1) padded to 32 bytes (#4023 — 0 is never issued). */
+const SALT_ONE = '0x' + '00'.repeat(31) + '01'
 
-function mockDb(opts: { existing?: boolean; count?: string } = {}) {
+interface MockDbOpts {
+  existing?: boolean
+  count?: string
+  /** Accounts the user already has ON THE REQUEST's chain (the #4023 cap). */
+  chainCount?: string
+  /** Whether the create-additional source row exists (default: found). */
+  source?: 'found' | 'missing'
+  /** The source account's stored signer set (default: one passkey). */
+  sourcePasskeys?: Array<{ key_id: string; public_key_x: string; public_key_y: string }>
+  /** Whether the create idempotency replay read finds a row. */
+  replay?: { id: string; account_address: string; created_at: string } | null
+}
+
+function mockDb(opts: MockDbOpts = {}) {
   mockQuery.mockImplementation((sql: string) => {
     const s = String(sql)
+    // #4023: the salt counter's atomic allocation. Default counter 1.
+    if (/INSERT INTO hybrid_deploy_salt_counters/.test(s)) {
+      return Promise.resolve({ rows: [{ last_allocated: '1' }] })
+    }
+    if (/WHERE id = \$1 AND user_id = \$2 AND account_type = 'delegator_hybrid'/.test(s)) {
+      return Promise.resolve({ rows: opts.source === 'missing' ? [] : [{ id: SOURCE_ID }] })
+    }
+    if (/create_idempotency_key = \$2/.test(s)) {
+      return Promise.resolve({ rows: opts.replay ? [opts.replay] : [] })
+    }
     if (/SELECT id FROM smart_accounts/.test(s)) {
       return Promise.resolve({ rows: opts.existing ? [{ id: 'acct-0' }] : [] })
+    }
+    // The source account's stored signer set (listAccountPasskeys).
+    if (/FROM hybrid_account_passkeys/.test(s)) {
+      return Promise.resolve({
+        rows: opts.sourcePasskeys ?? [
+          { key_id: 'cred-1', public_key_x: '0x' + '11'.repeat(32), public_key_y: '0x' + '22'.repeat(32) },
+        ],
+      })
+    }
+    // The per-chain count (cap) is more specific than the total count — match
+    // it first.
+    if (/COUNT\(\*\) AS count FROM smart_accounts WHERE user_id = \$1 AND chain_id = \$2/.test(s)) {
+      return Promise.resolve({ rows: [{ count: opts.chainCount ?? '0' }] })
     }
     if (/COUNT\(\*\)/.test(s)) return Promise.resolve({ rows: [{ count: opts.count ?? '1' }] })
     if (/INSERT INTO smart_accounts/.test(s)) {
       // smart_accounts.id is a UUID column, so 'acct-1' described a row the
       // database cannot produce (#1446).
-      return Promise.resolve({ rows: [{ id: '5a2f8d31-6c04-4e97-b183-9e7d2c6a0f58', created_at: '2026-07-10T00:00:00Z' }] })
+      return Promise.resolve({ rows: [{ id: SOURCE_ID, created_at: '2026-07-10T00:00:00Z' }] })
     }
     return Promise.resolve({ rows: [] })
   })
@@ -84,11 +128,13 @@ describe('POST /accounts/hybrid (#825)', () => {
     expect(res.statusCode).toBe(201)
     expect(mockCompute).toHaveBeenCalledWith(84532, expect.objectContaining({
       passkeys: [expect.objectContaining({ keyId: 'cred-1' })],
+      // #4023: the derivation carries the allocated counter salt.
+      deploySalt: SALT_ONE,
     }))
     // #885: the passkey set is persisted so the config round-trips for deploy/revoke.
     const pkInsert = mockQuery.mock.calls.find((c) => /INSERT INTO hybrid_account_passkeys/.test(String(c[0])))!
     expect(pkInsert, 'passkey set must be persisted').toBeDefined()
-    expect(pkInsert[1]).toEqual(['5a2f8d31-6c04-4e97-b183-9e7d2c6a0f58', 'cred-1', '0x' + '11'.repeat(32), '0x' + '22'.repeat(32)])
+    expect(pkInsert[1]).toEqual([SOURCE_ID, 'cred-1', '0x' + '11'.repeat(32), '0x' + '22'.repeat(32)])
   })
 
   it.each([
@@ -130,7 +176,9 @@ describe('POST /accounts/hybrid (#825)', () => {
       method: 'POST', url: '/accounts/hybrid', payload: { owner_address: OWNER },
     })
     expect(res.statusCode).toBe(502)
-    expect(mockQuery.mock.calls.some((c) => /INSERT/.test(String(c[0])))).toBe(false)
+    // #4023: the counter bump is inside the same transaction — nothing
+    // committed, so no ACCOUNT row may exist either.
+    expect(mockQuery.mock.calls.some((c) => /INSERT INTO smart_accounts/.test(String(c[0])))).toBe(false)
   })
 })
 
@@ -289,5 +337,133 @@ describe('#908 mainnet signer floor (provisioning gate)', () => {
     })
     expect(res.statusCode).toBe(400)
     expect(res.json().error).toMatch(/not available on chain/i)
+  })
+})
+
+describe('POST /accounts/hybrid — create-additional (#4023)', () => {
+  let app: FastifyInstance
+  beforeAll(async () => {
+    app = Fastify({ logger: false })
+    await app.register(hybridAccountRoutes, { prefix: '/accounts' })
+  })
+  afterAll(async () => app.close())
+  beforeEach(() => {
+    mockQuery.mockReset()
+    mockCompute.mockReset()
+    mockCompute.mockResolvedValue(HYBRID)
+  })
+
+  const ADDITIONAL = {
+    chain_id: 84532,
+    source_account_id: SOURCE_ID,
+    key_id: 'cred-1',
+    idempotency_key: 'create-1',
+  }
+
+  it('creates an additional account additively: owner copied from the SOURCE signer set, never the client', async () => {
+    mockDb({})
+    const res = await app.inject({ method: 'POST', url: '/accounts/hybrid', payload: ADDITIONAL })
+    expect(res.statusCode).toBe(201)
+    expect(res.json()).toMatchObject({ account_address: HYBRID, chain_id: 84532, deployed: false })
+    expectMatchesSpec('POST', '/accounts/hybrid', res.json(), '201')
+    // The derivation used the COPIED passkey at the allocated counter salt.
+    expect(mockCompute).toHaveBeenCalledWith(84532, expect.objectContaining({
+      ownerAddress: undefined,
+      deploySalt: SALT_ONE,
+      passkeys: [{ keyId: 'cred-1', x: BigInt('0x' + '11'.repeat(32)), y: BigInt('0x' + '22'.repeat(32)) }],
+    }))
+    // The INSERT never becomes the default — even as the first account.
+    const insert = mockQuery.mock.calls.find((c) => /INSERT INTO smart_accounts/.test(String(c[0])))!
+    expect(insert[1][4]).toBe(false) // is_default, whatever the count
+    expect(insert[1][7]).toBe(SALT_ONE) // deploy_salt
+    expect(insert[1][8]).toBe('create-1') // idempotency key persisted
+  })
+
+  it('a created account NEVER becomes the default (count 0 still inserts false)', async () => {
+    mockDb({ count: '0' })
+    const res = await app.inject({ method: 'POST', url: '/accounts/hybrid', payload: ADDITIONAL })
+    expect(res.statusCode).toBe(201)
+    const insert = mockQuery.mock.calls.find((c) => /INSERT INTO smart_accounts/.test(String(c[0])))!
+    expect(insert[1][4]).toBe(false)
+  })
+
+  it('the single-signer waiver is recorded for a value-bearing single-passkey account', async () => {
+    mockDb({})
+    const res = await app.inject({
+      method: 'POST', url: '/accounts/hybrid',
+      payload: { ...ADDITIONAL, chain_id: 8453, single_signer_waiver: { acknowledged: true } },
+    })
+    expect(res.statusCode).toBe(201)
+    const insert = mockQuery.mock.calls.find((c) => /INSERT INTO smart_accounts/.test(String(c[0])))!
+    expect(insert[1][6]).not.toBeNull()
+  })
+
+  it('404s a source account the caller does not own', async () => {
+    mockDb({ source: 'missing' })
+    const res = await app.inject({ method: 'POST', url: '/accounts/hybrid', payload: ADDITIONAL })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('422s an EOA-only source (no passkey to copy)', async () => {
+    mockDb({ sourcePasskeys: [] })
+    const res = await app.inject({ method: 'POST', url: '/accounts/hybrid', payload: ADDITIONAL })
+    expect(res.statusCode).toBe(422)
+    expect(res.json().error).toMatch(/no passkey/)
+  })
+
+  it('422s a key_id that is not in the source signer set', async () => {
+    mockDb({})
+    const res = await app.inject({
+      method: 'POST', url: '/accounts/hybrid',
+      payload: { ...ADDITIONAL, key_id: '0xother' },
+    })
+    expect(res.statusCode).toBe(422)
+    expect(res.json().error).toMatch(/not a passkey on the source account/)
+  })
+
+  it('422s at the soft cap of 10 accounts per user per chain', async () => {
+    mockDb({ chainCount: '10' })
+    const res = await app.inject({ method: 'POST', url: '/accounts/hybrid', payload: ADDITIONAL })
+    expect(res.statusCode).toBe(422)
+    expect(res.json().error).toMatch(/10 accounts/)
+  })
+
+  it('400s a create-additional without an explicit chain_id (no bare fallback)', async () => {
+    mockDb({})
+    const res = await app.inject({
+      method: 'POST', url: '/accounts/hybrid',
+      payload: { source_account_id: SOURCE_ID, key_id: 'cred-1' },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toMatch(/chain_id is required/)
+  })
+
+  it('400s a mixed request: owner fields beside the source shape', async () => {
+    mockDb({})
+    const res = await app.inject({
+      method: 'POST', url: '/accounts/hybrid',
+      payload: { ...ADDITIONAL, owner_address: OWNER },
+    })
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('400s a partial additional shape (source without key_id)', async () => {
+    mockDb({})
+    const res = await app.inject({
+      method: 'POST', url: '/accounts/hybrid',
+      payload: { chain_id: 84532, source_account_id: SOURCE_ID },
+    })
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('a retried create returns the FIRST account (idempotency replay)', async () => {
+    mockDb({
+      replay: { id: SOURCE_ID, account_address: HYBRID, created_at: '2026-07-10T00:00:00Z' },
+    })
+    const res = await app.inject({ method: 'POST', url: '/accounts/hybrid', payload: ADDITIONAL })
+    expect(res.statusCode).toBe(201)
+    expect(res.json()).toMatchObject({ id: SOURCE_ID, account_address: HYBRID })
+    expect(mockCompute).not.toHaveBeenCalled()
+    expect(mockQuery.mock.calls.some((c) => /INSERT INTO smart_accounts/.test(String(c[0])))).toBe(false)
   })
 })

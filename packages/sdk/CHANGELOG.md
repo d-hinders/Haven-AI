@@ -17,6 +17,12 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
+- Doc-only (#4023): `delegate-account.ts`'s salt comment now states precisely
+  what the package derives — DELEGATE accounts, always at the literal zero
+  salt. Haven's USER accounts gained per-account deploy salts
+  (epic #4022 slice S1) on the backend's `smart_accounts.deploy_salt`; that
+  salt never flows through this package, and no client update is needed.
+
 - Against an older backend that sends no `is_live`, the agent summary's
   task-budget list now drops an expired `closing` task budget too (#3923), as
   the backend has since #3773. A current backend already omits it, so nothing

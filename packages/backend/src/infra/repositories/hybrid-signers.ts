@@ -123,3 +123,25 @@ export function passkeyEnrollmentDates(rows: AccountPasskeyRow[]): Map<string, s
 export const INSERT_HYBRID_ACCOUNT_PASSKEY_SQL = `INSERT INTO hybrid_account_passkeys (account_id, key_id, public_key_x, public_key_y)
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (account_id, key_id) DO NOTHING`
+
+/**
+ * The provisioning-path passkey persist (#4023 round 2): the account address
+ * was derived from EXACTLY these coordinates, so activation (#860 deploy) and
+ * revoke can reconstruct the owner config for a pure-passkey account. Kept
+ * distinct from {@link addAccountPasskey} (whose statement is a plain
+ * `ON CONFLICT DO NOTHING`): this one names the (account_id, key_id)
+ * constraint and was moved verbatim from the route — same SQL constant, same
+ * parameter order.
+ */
+export async function insertHybridAccountPasskey(
+  accountId: string,
+  passkey: { keyId: string; x: string; y: string },
+  executor: Executor = pool,
+): Promise<void> {
+  await executor.query(INSERT_HYBRID_ACCOUNT_PASSKEY_SQL, [
+    accountId,
+    passkey.keyId,
+    passkey.x,
+    passkey.y,
+  ])
+}

@@ -105,6 +105,7 @@ export async function prepareTransfer(
     const treasury = await createTreasuryOps({
       ownerAddress: account.config.ownerAddress,
       passkeys: account.config.passkeys,
+      deploySalt: account.config.deploySalt,
       accountAddress: account.accountAddress,
       chainId: account.chainId,
       bundlerUrl: delegationRailBundlerUrl(account.chainId),
@@ -169,6 +170,7 @@ export async function submitTransfer(
     const treasury = await createTreasuryOps({
       ownerAddress: account.config.ownerAddress,
       passkeys: account.config.passkeys,
+      deploySalt: account.config.deploySalt,
       accountAddress: account.accountAddress,
       chainId: account.chainId,
       bundlerUrl: delegationRailBundlerUrl(account.chainId),

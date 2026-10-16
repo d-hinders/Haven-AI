@@ -14,7 +14,7 @@ import { findX402IntentByIdempotencyKey } from '../../infra/repositories/x402-au
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import { DelegationRailChainUnavailableError, railUnavailableRefusalBody } from '../../rails/delegation-rail.js'
 import { prepareDelegationPayment } from '../../rails/delegation-authorization.js'
-import { computeHybridAccountAddress, ensureHybridDeployed } from '../../rails/hybrid-provisioning.js'
+import { computeHybridAccountAddress, ensureDelegateHybridDeployed } from '../../rails/hybrid-provisioning.js'
 import { RelayerBudgetExceededError } from '../../infra/relayer-spend-guard.js'
 import {
   buildSettlementDelegation,
@@ -901,11 +901,11 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
   // is erc7710 never ran one, and a recipient-pinned agent never can (they
   // are erc7710-only). The factory deploy is permissionless and relayer-paid
   // (#860's treasury pattern at grant activation); once deployed,
-  // ensureHybridDeployed short-circuits on a single getBytecode. Fail-closed
+  // ensureDelegateHybridDeployed short-circuits on a single getBytecode. Fail-closed
   // BEFORE the intent row exists, so a failed deploy leaves nothing half
   // created and authorize can simply be retried.
   try {
-    await ensureHybridDeployed(
+    await ensureDelegateHybridDeployed(
       agent.chain_id,
       { ownerAddress: agent.delegate_address as `0x${string}` },
       delegateAccountAddress as `0x${string}`,

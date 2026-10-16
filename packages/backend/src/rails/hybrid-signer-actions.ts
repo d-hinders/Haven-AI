@@ -23,7 +23,7 @@ import {
   removeAccountPasskey,
   setAccountOwnerAddress,
 } from '../infra/repositories/hybrid-signers.js'
-import type { HybridOwnerConfig } from './hybrid-provisioning.js'
+import type { SaltedHybridOwnerConfig } from './hybrid-provisioning.js'
 import { createTreasuryOps, delegationRailBundlerUrl } from './delegation-rail.js'
 import { boundedErrorDetails } from '../modules/payments/index.js'
 
@@ -47,7 +47,7 @@ export interface SignerActionAccount {
   accountAddress: Address
   chainId: number
   accountId: string
-  config: HybridOwnerConfig
+  config: SaltedHybridOwnerConfig
   /**
    * The account's recorded single-signer waiver (#908), when loaded. Consulted
    * only by removals that would drop a value-bearing account below the signer
@@ -74,7 +74,7 @@ function safeDetails(err: unknown): string {
  */
 export function resolveSignatureScheme(
   requested: string | undefined,
-  config: HybridOwnerConfig,
+  config: SaltedHybridOwnerConfig,
 ): { scheme: 'eip712_userop' | 'webauthn_userop' } | { error: string } {
   const hasPasskeys = !!config.passkeys && config.passkeys.length > 0
   if (requested === undefined) {
@@ -235,6 +235,7 @@ export async function prepareSignerChange(
     const treasury = await createTreasuryOps({
       ownerAddress: account.config.ownerAddress,
       passkeys: account.config.passkeys,
+      deploySalt: account.config.deploySalt,
       accountAddress: account.accountAddress,
       chainId: account.chainId,
       bundlerUrl: delegationRailBundlerUrl(account.chainId),
@@ -307,6 +308,7 @@ export async function submitSignerChange(
     const treasury = await createTreasuryOps({
       ownerAddress: account.config.ownerAddress,
       passkeys: account.config.passkeys,
+      deploySalt: account.config.deploySalt,
       accountAddress: account.accountAddress,
       chainId: account.chainId,
       bundlerUrl: delegationRailBundlerUrl(account.chainId),

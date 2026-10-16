@@ -112,7 +112,7 @@ const { STALE_BROADCAST_SECONDS } = await import('../../infra/outbound-bump-work
 const { ensureHybridDeployed, HYBRID_DEPLOY_CONFIRM_TIMEOUT_MS } = await import(
   '../hybrid-provisioning.js'
 )
-const OWNER = { ownerAddress: ('0x' + 'aa'.repeat(20)) as `0x${string}` }
+const OWNER = { ownerAddress: ('0x' + 'aa'.repeat(20)) as `0x${string}`, deploySalt: '0x' as const }
 
 // Warm the deploy path's LAZY imports (`relayer-spend-guard`, `relayer` and
 // `outbound-queue` are imported INSIDE the function) and the advisory lock's

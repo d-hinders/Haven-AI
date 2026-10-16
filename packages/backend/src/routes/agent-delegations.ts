@@ -401,7 +401,11 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
   // ── GET /:id/account-signers — the treasury's signer set (#887) ───────────
   // The dashboard builds the account's WebAuthn signer from this (kit
   // deployParams must match EXACTLY what provisioning derived the address
-  // from). Owner-scoped; public-key material only — nothing secret.
+  // from — including the account's per-account deploy salt, #4023, which
+  // stays server-side on the smart_accounts row and is NOT part of this
+  // response: the client signs with the signers it is handed; it never
+  // re-derives the address). Owner-scoped; public-key material only —
+  // nothing secret.
   app.get<{ Params: { id: string } }>('/:id/account-signers', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const agent = await loadOwnedDelegationAgent(request.params.id, sub)
@@ -1075,6 +1079,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       const treasury = await createTreasuryOps({
         ownerAddress: owner.config.ownerAddress,
         passkeys: owner.config.passkeys,
+        deploySalt: owner.config.deploySalt,
         accountAddress: agent.treasury_address as Address,
         chainId: agent.chain_id,
         bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
@@ -1167,6 +1172,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       const treasury = await createTreasuryOps({
         ownerAddress: owner.config.ownerAddress,
         passkeys: owner.config.passkeys,
+        deploySalt: owner.config.deploySalt,
         accountAddress: agent.treasury_address as Address,
         chainId: agent.chain_id,
         bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
@@ -1254,6 +1260,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         const treasury = await createTreasuryOps({
           ownerAddress: owner.config.ownerAddress,
           passkeys: owner.config.passkeys,
+          deploySalt: owner.config.deploySalt,
           accountAddress: agent.treasury_address as Address,
           chainId: agent.chain_id,
           bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
@@ -1345,6 +1352,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       const treasury = await createTreasuryOps({
         ownerAddress: owner.config.ownerAddress,
         passkeys: owner.config.passkeys,
+        deploySalt: owner.config.deploySalt,
         accountAddress: agent.treasury_address as Address,
         chainId: agent.chain_id,
         bundlerUrl: delegationRailBundlerUrl(agent.chain_id),

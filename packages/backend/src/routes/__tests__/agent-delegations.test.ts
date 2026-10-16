@@ -217,6 +217,11 @@ function mockDb(opts: {
   reusable?: { id: string; delegation_hash: string; version: number; delegation_json: string }
   passkeys?: Array<{ key_id: string; public_key_x: string; public_key_y: string; created_at?: Date | string | null }>
   waiverAt?: string | null
+  /**
+   * #4023: the deploy salt on the mocked owner row. Unset = salt-0 ('0x'),
+   * which is every pre-#4023 account and every pre-#4023 test.
+   */
+  deploySalt?: string
   list?: Array<Record<string, unknown>>
   /**
    * #3693: what `listDelegationJsonByIds` answers for the ACTIVE rows. Unset
@@ -267,12 +272,15 @@ function mockDb(opts: {
       return Promise.resolve({ rows: opts.reusable ? [opts.reusable] : [] })
     }
     // loadHybridOwnerConfig (#885): the account row, then its passkey set.
-    if (/SELECT id, owner_address, single_signer_waiver_at FROM smart_accounts/.test(s)) {
+    if (/SELECT id, owner_address, single_signer_waiver_at.*FROM smart_accounts/.test(s)) {
       // owner === null AND no passkeys → account row still exists (so the
       // config loader can look up passkeys); a truly-missing row is opts.owner
       // === undefined with no passkeys handled below via the null return.
       const ownerAddr = opts.owner === undefined ? OWNER : opts.owner
-      return Promise.resolve({ rows: [{ id: 'safe-1', owner_address: ownerAddr }] })
+      // #4023: the row now carries the account's deploy salt; existing tests
+      // pin the salt-0 world, so the default '0x' keeps every derivation here
+      // exactly where it was.
+      return Promise.resolve({ rows: [{ id: 'safe-1', owner_address: ownerAddr, deploy_salt: opts.deploySalt ?? '0x' }] })
     }
     if (/FROM hybrid_account_passkeys/.test(s)) {
       return Promise.resolve({ rows: opts.passkeys ?? [] })
@@ -973,6 +981,26 @@ describe('delegation lifecycle API (#828)', () => {
       })
       expect(res.statusCode).toBe(200)
       expect(mockEnsureDeployed).toHaveBeenCalledWith(84532, expect.objectContaining({ ownerAddress: OWNER }), TREASURY, { agentId: AGENT_ID, userId: 'user-1' })
+
+      // #4023: the salt rides the SAME call. An undeployed SALTED account must
+      // deploy the salted derivation — deploying the config without its salt
+      // would spend relayer gas bringing up the salt-0 account instead.
+      const SALTED_TREASURY = '0x' + 'bb'.repeat(20)
+      const SALT_ONE = '0x' + '00'.repeat(31) + '01'
+      mockDb({ agent: agentRow({ treasury_address: SALTED_TREASURY }), deploySalt: SALT_ONE })
+      mockEnsureDeployed.mockReset()
+      mockEnsureDeployed.mockResolvedValue({ address: SALTED_TREASURY, alreadyDeployed: false, txHash: '0x' + '22'.repeat(32) })
+      const salted = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+        payload: { signature: '0x' + 'ab'.repeat(65) },
+      })
+      expect(salted.statusCode).toBe(200)
+      expect(mockEnsureDeployed).toHaveBeenCalledWith(
+        84532,
+        expect.objectContaining({ ownerAddress: OWNER, deploySalt: SALT_ONE }),
+        SALTED_TREASURY,
+        { agentId: AGENT_ID, userId: 'user-1' },
+      )
     })
 
     it('502s WITHOUT activating when the deploy fails — grant stays pending, retryable (#860)', async () => {
@@ -1009,9 +1037,11 @@ describe('delegation lifecycle API (#828)', () => {
       })
       expect(res.statusCode).toBe(200)
       // The relayer deploys from the stored passkey set — the #885 unblock.
+      // #4023: the config is salted (the salt-0 default here).
       expect(mockEnsureDeployed).toHaveBeenCalledWith(84532, {
         ownerAddress: undefined,
         passkeys: [{ keyId: 'cred-1', x: 0x11n, y: 0x22n }],
+        deploySalt: '0x',
       }, TREASURY, { agentId: AGENT_ID, userId: 'user-1' })
     })
 
@@ -2005,9 +2035,10 @@ describe('POST /:id/delegations/revoke-all — #1400: one signature, every budge
       if (/FROM agents a/.test(s)) {
         return Promise.resolve({ rows: opts.agent === null ? [] : [opts.agent ?? agentRow()] })
       }
-      if (/SELECT id, owner_address, single_signer_waiver_at FROM smart_accounts/.test(s)) {
+      if (/SELECT id, owner_address, single_signer_waiver_at.*FROM smart_accounts/.test(s)) {
         const ownerAddr = opts.owner === undefined ? OWNER : opts.owner
-        return Promise.resolve({ rows: [{ id: 'safe-1', owner_address: ownerAddr }] })
+        // #4023: salt-0 default keeps these pins unchanged.
+        return Promise.resolve({ rows: [{ id: 'safe-1', owner_address: ownerAddr, deploy_salt: '0x' }] })
       }
       if (/FROM hybrid_account_passkeys/.test(s)) {
         return Promise.resolve({ rows: opts.passkeys ?? [] })

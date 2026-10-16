@@ -67,7 +67,7 @@ vi.mock('../../infra/chain/delegation-budget-reader.js', () => ({
 }))
 vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../rails/hybrid-provisioning.js')>()
-  return { ...actual, computeHybridAccountAddress: mockCompute, ensureHybridDeployed: mockEnsureDeployed }
+  return { ...actual, computeHybridAccountAddress: mockCompute, ensureDelegateHybridDeployed: mockEnsureDeployed }
 })
 // The delegation-rail authorize orchestration writes the intent via the
 // repository directly now (#997 removed the `lib/machine-payments.js`

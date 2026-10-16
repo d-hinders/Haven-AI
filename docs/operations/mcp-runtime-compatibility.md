@@ -80,9 +80,26 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-10-15"
+last-verified: "2026-10-16"
 ---
 
+
+> **Re-verified unchanged (#4023, 2026-10-16, per-account deploy salt):** this
+> diff touches one covered file,
+> `packages/backend/src/modules/x402/delegation-authorize.ts`, in a six-line
+> rename: the counterfactual deploy helper it calls became
+> `ensureDelegateHybridDeployed` because #4023 split the rails entry point
+> into a salted USER-account arm and a literal-`'0x'` DELEGATE-account arm —
+> and the x402 authorize path is the DELEGATE arm. Its behaviour is
+> unchanged: the same fail-closed getBytecode short-circuit before the intent
+> row exists, the same ownerAddress-only derivation, the same relayer
+> attribution, and every response shape the hosted tools parse is
+> byte-identical. No Supported Runtime Manifest row, channel, dist-tag,
+> release step, tool, argument, input schema, description or consent surface
+> moves, so the version-skew and consent-hash contracts do not move. An older
+> hosted server and an older backend interoperate exactly as before.
+> `last-verified` is bumped to 2026-10-16 for this note. Nothing else in this
+> document was re-verified.
 
 > **#3817 (2026-10-10, the hosted `tools/list` contract is snapshotted and
 > stale-client impact is reported in CI):** CI-only, tests and skill text —

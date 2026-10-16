@@ -11,6 +11,7 @@ covers:
   - packages/backend/src/rails/hybrid-signer-actions.ts
   - packages/frontend/src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx
   - packages/backend/src/routes/passkeys.ts
+  - packages/frontend/src/components/NewAccountDialog.tsx
 last-verified: "2026-10-09"
 ---
 
@@ -98,6 +99,24 @@ On your account page, open **Backup & recovery** and choose one:
   giving up, and you decide.
 
 Each takes one approval from a signer you already have.
+
+## Several accounts: a backup protects one account
+
+You can hold more than one Haven account: **New account** on the Accounts
+screen creates another one, secured by a passkey one of your accounts
+already has (#4024). Ways to approve belong to **one account each**:
+
+- **A backup on one account does not protect another.** The new account gets
+  only the passkey you used in the New account dialog. A backup passkey or
+  wallet you added to another account is not copied, so the new account
+  starts with exactly one way to approve, and with no recovery until you add
+  a backup on **its own** page.
+- **Losing a shared passkey affects every account it approves.** Accounts
+  created from the same passkey share it. Recover each one from its own
+  **Backup & recovery** card, with a backup enrolled on that account.
+- **Settings → Signers** lists each passkey and wallet once, with every
+  account it approves, so you can check which accounts a backup actually
+  covers.
 
 ## Recover after a lost device
 

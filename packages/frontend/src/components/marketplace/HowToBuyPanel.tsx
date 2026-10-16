@@ -296,6 +296,10 @@ export function HowToBuyPanel({
       </p>
     )
   } else if (answer?.kind === 'wrong-network') {
+    // "Haven can't add a second account from here" stays after #4024's New
+    // account action: an agent spends only from the account it is linked to,
+    // so a new account on the offers' chain would not let THIS agent buy.
+    // Decision and reasoning: docs/product/marketplace.md, How to buy, step 2.
     const offerChains =
       answer.offerChainIds.length === 1
         ? chainName(answer.offerChainIds[0]!)

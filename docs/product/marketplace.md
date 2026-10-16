@@ -369,7 +369,15 @@ Coming-soon and no-offer merchants show no panel.
      <merchant>" — true either way.
    - **Wrong network** when every known no is a chain no: the step names the
      agent's chain and the offers' chains and says plainly that Haven can't
-     add a second account from here — no fix button.
+     add a second account from here — no fix button. **The sentence stays
+     after #4024** (decision recorded 2026-10-16), even though the Accounts
+     screen now has a **New account** action. It is still literally true of
+     this panel, and New account would not fix the step: an agent spends only
+     from the one account it is linked to (`agents.account_id`), so a new
+     account on the offers' chain leaves *this* agent exactly where it was —
+     it would need its own agent connection and budget there. Linking the
+     action here would offer a step that cannot make the named agent able to
+     buy. Revisit if agents can move between accounts.
    - **No claim** when the answers are unknown (remaining unreadable, a
      received sub-budget in play) — "couldn't confirm what your agent can
      spend here just now". A failed budget read (either wire) is a

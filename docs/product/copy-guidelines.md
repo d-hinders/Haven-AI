@@ -728,8 +728,12 @@ Haven knows what happened.
 ```
 
 That message stays until the account is created (a retry answers it) or
-found ("Check again" finds an account with the submitted name on that
-network). Nothing else removes it: a refusal on a retry, of any kind, shows
+found: whenever the account list changes between attempts ("Check again", or
+any other refresh), an account with the submitted name on that network ends
+it. If the account the details came from can no longer secure a new account,
+"Try again" is disabled and the dialog says so: "Operating can no longer
+secure a new account, so Haven can't try again from here. Check again to see
+whether the account was created anyway." Nothing else removes it: a refusal on a retry, of any kind, shows
 its own message beside it, because the backend checks a retry before it
 would return the first attempt's account (#4044), and a cancelled passkey
 prompt shows nothing at all. "Check again" reports one of three things: the

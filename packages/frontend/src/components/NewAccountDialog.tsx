@@ -148,12 +148,26 @@ function NewAccountDialogBody({
   // pinned account stops being a source, there is no source to retry with.
   const source: PasskeySource | null =
     sources.find((s) => s.account.id === sourceId) ?? (unknown ? null : initialSource)
-  // The network starts on the source account's own when the backend serves
-  // deploys there, else on the first network it does. With the source pinned
-  // and the network field locked, this is stable while an outcome is unknown.
+  // The pinned source can stop being a source while the record stands (its
+  // passkey removed elsewhere). Then there is nothing to retry with: "Try
+  // again" is disabled and the dialog says why; checking and closing remain.
+  const pinnedSourceLost = unknown !== null && source === null
+  const pinnedSourceName = accounts.find((a) => a.id === sourceId)?.name ?? null
+  // While the record stands the network IS the record's — never derived from
+  // state or the source, so a deployable-chains list that narrows later (or a
+  // lost source) cannot move the retry's `chain_id`. Otherwise it starts on
+  // the source account's own when the backend serves deploys there, else on
+  // the first network it does.
   const sourceChainServed = source !== null && chains.some((c) => c.chainId === source.account.chain_id)
-  const selectedChainId = chainId ?? (sourceChainServed ? source!.account.chain_id : chains[0]?.chainId ?? null)
+  const selectedChainId = unknown
+    ? unknown.chainId
+    : chainId ?? (sourceChainServed ? source!.account.chain_id : chains[0]?.chainId ?? null)
   const networkName = selectedChainId !== null ? getChainConfig(selectedChainId).name : ''
+  // The locked network field shows the record's network even if the served
+  // list no longer includes it, so it never displays one network while the
+  // retry sends another.
+  const networkOptions =
+    unknown && !chains.some((c) => c.chainId === unknown.chainId) ? [...chains, getChainConfig(unknown.chainId)] : chains
 
   const busy = stage === 'passkey' || stage === 'creating'
   const checking = check === 'checking'
@@ -195,10 +209,12 @@ function NewAccountDialogBody({
   async function submit() {
     setTouched(true)
     // Re-entry is blocked by the submit button's `disabled`, not here: a
-    // `busy` read in this closure is the render's value. `source` and
-    // `selectedChainId` are type narrowings for states the form never renders
-    // in (the form needs a source; `useDeployableChains` never returns an
-    // empty list). The name check is the one input guard.
+    // `busy` read in this closure is the render's value. `!source` IS
+    // reachable — a pinned source that stopped being a source while an
+    // unknown outcome stands — and the button is disabled with a message
+    // then; this is the backstop. `selectedChainId === null` is a type
+    // narrowing (`useDeployableChains` never returns an empty list, and the
+    // record carries its own chain). The name check is the one input guard.
     if (!source || selectedChainId === null || trimmedName === '') return
     setRefusal(null)
     setCheck('idle')
@@ -384,7 +400,7 @@ function NewAccountDialogBody({
             onChange={(e) => edit(setChainId)(Number(e.target.value))}
             disabled={locked}
           >
-            {chains.map((chain) => (
+            {networkOptions.map((chain) => (
               <option key={chain.chainId} value={chain.chainId}>
                 {chain.name}
               </option>
@@ -399,7 +415,7 @@ function NewAccountDialogBody({
             </label>
             <Select
               id="new-account-source"
-              value={source?.account.id ?? ''}
+              value={(unknown ? sourceId : source?.account.id) ?? ''}
               onChange={(e) => edit(setSourceId)(e.target.value)}
               disabled={locked}
             >
@@ -447,6 +463,12 @@ function NewAccountDialogBody({
                     ? 'Couldn’t read your accounts just now. Check again in a moment.'
                     : ''}
             </p>
+            {pinnedSourceLost ? (
+              <InlineAlert id="new-account-source-lost">
+                {pinnedSourceName ?? 'The account it was created from'} can no longer secure a new account, so
+                Haven can&rsquo;t try again from here. Check again to see whether the account was created anyway.
+              </InlineAlert>
+            ) : null}
           </div>
         ) : null}
         {/* The latest attempt's own message, beside a standing unknown outcome. */}
@@ -463,9 +485,14 @@ function NewAccountDialogBody({
             Check again
           </Button>
         ) : null}
-        {/* Disabled while a check runs; "Check again" is disabled while an
-            attempt runs. The two never overlap, so no result is stale. */}
-        <Button onClick={() => void submit()} className="whitespace-nowrap" disabled={busy || checking}>
+        {/* Disabled while a check runs ("Check again" is disabled while an
+            attempt runs, so no result is stale), and when the pinned source
+            is lost: there is nothing to retry with. */}
+        <Button
+          onClick={() => void submit()}
+          className="whitespace-nowrap"
+          disabled={busy || checking || pinnedSourceLost}
+        >
           {stage === 'passkey'
             ? 'Waiting for your passkey…'
             : stage === 'creating'

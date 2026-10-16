@@ -2,7 +2,12 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { toHex } from 'viem'
 
-const { mockUseAccounts, mockUseUserSigners, mockGetPasskeyAssertion, mockCreatePasskey } = vi.hoisted(() => ({
+const BOTH_CHAINS = [
+  { chainId: 8453, name: 'Base' },
+  { chainId: 84532, name: 'Base Sepolia' },
+]
+const { mockUseAccounts, mockUseUserSigners, mockGetPasskeyAssertion, mockCreatePasskey, mockChains } = vi.hoisted(() => ({
+  mockChains: { current: [] as Array<{ chainId: number; name: string }> },
   mockUseAccounts: vi.fn(),
   mockUseUserSigners: vi.fn(),
   mockGetPasskeyAssertion: vi.fn(),
@@ -12,13 +17,7 @@ const { mockUseAccounts, mockUseUserSigners, mockGetPasskeyAssertion, mockCreate
 vi.mock('@/hooks/useAccounts', () => ({ useAccounts: () => mockUseAccounts() }))
 vi.mock('@/hooks/useUserSigners', () => ({ useUserSigners: () => mockUseUserSigners() }))
 vi.mock('@/hooks/useDeployableChains', () => ({
-  useDeployableChains: () => ({
-    chains: [
-      { chainId: 8453, name: 'Base' },
-      { chainId: 84532, name: 'Base Sepolia' },
-    ],
-    loading: false,
-  }),
+  useDeployableChains: () => ({ chains: mockChains.current, loading: false }),
 }))
 vi.mock('@/lib/passkey', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/passkey')>()
@@ -125,6 +124,7 @@ function assertsWith(credentialId: string) {
 beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
+  mockChains.current = BOTH_CHAINS
   createAccount = vi.fn().mockResolvedValue(CREATED)
   reloadSigners = vi.fn()
   refreshAccounts = vi.fn().mockResolvedValue(true)
@@ -558,7 +558,7 @@ describe('NewAccountDialog — the unknown submission', () => {
     expect(createAccount.mock.calls.map((c) => c[0].source_account_id)).toEqual(['main1', 'main1'])
   })
 
-  it('sends nothing on a retry once the pinned source is no longer a source', async () => {
+  it('says so and disables Try again once the pinned source is no longer a source', async () => {
     createAccount.mockRejectedValueOnce(BAD_GATEWAY())
     mockUseAccounts.mockReturnValue({ accounts: [MAIN, OTHER], createAccount, refreshAccounts })
     mockUseUserSigners.mockReturnValue({ signers: SHARED_SIGNERS, loadError: false, reload: reloadSigners })
@@ -572,9 +572,37 @@ describe('NewAccountDialog — the unknown submission', () => {
       reload: reloadSigners,
     })
     rerender(<NewAccountDialog open onClose={vi.fn()} />)
+
+    expect(screen.getByTestId('new-account-unknown')).toHaveTextContent(
+      'Operating can no longer secure a new account, so Haven can’t try again from here. Check again to see whether the account was created anyway.',
+    )
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Check again' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled()
+    // The network stays the record's, not the first option.
+    expect(screen.getByLabelText('Network')).toHaveValue('84532')
     await submit()
     expect(createAccount).toHaveBeenCalledTimes(1)
     expect(mockGetPasskeyAssertion).toHaveBeenCalledTimes(1)
+  })
+
+  it('sends the record’s network on a retry even after the deployable chains change', async () => {
+    createAccount.mockRejectedValueOnce(BAD_GATEWAY())
+    mockUseAccounts.mockReturnValue({ accounts: [MAIN, OTHER], createAccount, refreshAccounts })
+    mockUseUserSigners.mockReturnValue({ signers: SHARED_SIGNERS, loadError: false, reload: reloadSigners })
+    const { rerender } = render(<NewAccountDialog open onClose={vi.fn()} />)
+    typeName('Reserve')
+    await submit()
+    expect(createAccount.mock.calls[0]![0].chain_id).toBe(84532)
+
+    // `/chains` answers late and narrows the list: Base Sepolia is gone.
+    mockChains.current = [{ chainId: 8453, name: 'Base' }]
+    rerender(<NewAccountDialog open onClose={vi.fn()} />)
+    // The locked field still shows the network the retry will send.
+    expect(screen.getByLabelText('Network')).toHaveValue('84532')
+    createAccount.mockResolvedValueOnce(CREATED)
+    await submit()
+    expect(createAccount.mock.calls[1]![0]).toMatchObject({ chain_id: 84532, idempotency_key: createAccount.mock.calls[0]![0].idempotency_key })
   })
 
   it('mints a fresh key for a new submission when nothing is unknown', async () => {

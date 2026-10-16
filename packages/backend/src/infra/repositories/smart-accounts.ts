@@ -580,13 +580,15 @@ export const FIND_OWNED_HYBRID_ACCOUNT_SQL = `SELECT 1 FROM smart_accounts
 //
 // The deploy salt is the linchpin: one passkey owns several accounts on one
 // chain because each account's address is derived at its own salt. The
-// counter lives OUTSIDE smart_accounts on purpose — unlink is a hard DELETE
+// The counter lives OUTSIDE smart_accounts on purpose — unlink is a hard DELETE
 // of the account row (user-accounts.ts), and a counter kept there would
 // reset, re-issuing the deleted account's salt and silently re-linking a
 // possibly funded old address. The uniqueness rules are explicit UNIQUE
 // constraints in migration 114: one on the derived address
-// (chain_id, LOWER(account_address)) so two concurrent creates cannot both
-// claim one address, and one on the create idempotency key
+// (user_id, chain_id, LOWER(account_address)) — the app-level duplicate
+// check's rule, now carried by the database so a concurrent create cannot
+// 500 on a bare constraint violation (the insert is ON CONFLICT DO NOTHING
+// and re-reads the winner) — and one on the create idempotency key
 // (user_id, create_idempotency_key) so a retried create answers the FIRST
 // account, the payments.ts send_idempotency_key pattern.
 

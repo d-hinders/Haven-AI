@@ -158,9 +158,9 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     }
 
     // #4023: the create-additional request has NO bare fallback — the chain is
-    // part of what the dialog names (signup keeps its dark-launch default; no
-    // existing field changes meaning).
-    const chainId = chain_id ?? (isAdditional ? undefined : 84532)
+    // part of what the dialog names. Signup keeps its dark-launch default (the
+    // sanctioned `?? 84532`); no existing field changes meaning.
+    const chainId = isAdditional ? chain_id : (chain_id ?? 84532)
     if (chainId === undefined) {
       return reply.code(400).send({ error: 'chain_id is required' })
     }
@@ -351,10 +351,10 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
         INSERT_HYBRID_ACCOUNT_SQL,
         // owner_address: the EOA owner for treasury ops (#828 revoke). A pure-
         // passkey account has none — its config lives in hybrid_account_passkeys.
-        // ON CONFLICT DO NOTHING: the UNIQUE(chain_id, LOWER(account_address))
-        // index (migration 114) is the arbiter when two concurrent creates
-        // derive the same address; the loser re-reads below instead of 500ing
-        // on a bare constraint violation.
+        // ON CONFLICT DO NOTHING: the UNIQUE(user_id, chain_id,
+        // LOWER(account_address)) index (migration 114) is the arbiter when
+        // two concurrent creates derive the same address; the loser re-reads
+        // below instead of 500ing on a bare constraint violation.
         [
           sub,
           accountAddress,

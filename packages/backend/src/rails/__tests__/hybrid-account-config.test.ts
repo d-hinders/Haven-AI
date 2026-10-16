@@ -10,7 +10,7 @@ const SAFE = '0x' + 'ab'.repeat(20)
 
 function mock(safe: { id: string; owner_address: string | null } | null, passkeys: Array<{ key_id: string; public_key_x: string; public_key_y: string }> = []) {
   mockQuery.mockImplementation((sql: string) => {
-    if (/SELECT id, owner_address, single_signer_waiver_at FROM smart_accounts/.test(String(sql))) {
+    if (/SELECT id, owner_address, single_signer_waiver_at.*FROM smart_accounts/.test(String(sql))) {
       return Promise.resolve({ rows: safe ? [safe] : [] })
     }
     if (/FROM hybrid_account_passkeys/.test(String(sql))) {
@@ -26,7 +26,9 @@ describe('loadHybridOwnerConfig (#885)', () => {
   it('returns the EOA owner config when owner_address is set', async () => {
     mock({ id: 's1', owner_address: '0x' + 'ee'.repeat(20) })
     const res = await loadHybridOwnerConfig(USER, SAFE, 84532)
-    expect(res?.config).toEqual({ ownerAddress: '0x' + 'ee'.repeat(20), passkeys: undefined })
+    // #4023: the config is salted; a row without the column answers the
+    // salt-0 default, which is every pre-#4023 account.
+    expect(res?.config).toEqual({ ownerAddress: '0x' + 'ee'.repeat(20), passkeys: undefined, deploySalt: '0x' })
     expect(res && isPasskeyOnly(res.config)).toBe(false)
   })
 
@@ -37,6 +39,7 @@ describe('loadHybridOwnerConfig (#885)', () => {
     ])
     const res = await loadHybridOwnerConfig(USER, SAFE, 84532)
     expect(res?.config.ownerAddress).toBeUndefined()
+    expect(res?.config.deploySalt).toBe('0x')
     expect(res?.config.passkeys).toEqual([
       { keyId: 'k1', x: 0x11n, y: 0x22n },
       { keyId: 'k2', x: 0x33n, y: 0x44n },

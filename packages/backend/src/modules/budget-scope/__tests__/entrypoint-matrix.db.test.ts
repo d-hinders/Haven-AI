@@ -53,7 +53,10 @@ vi.mock('../../../rails/hybrid-provisioning.js', async (importOriginal) => {
   return {
     ...actual,
     computeHybridAccountAddress: (...a: unknown[]) => mockCompute(...a),
-    ensureHybridDeployed: (...a: unknown[]) => mockEnsureDeployed(...a),
+    ensureHybridDeployed: (...a: unknown[]) => mockEnsureDeployed(...(a as [])),
+    // #4023: the delegate-account deploy moved to its own entry point; the
+    // matrix must not reach the real relayer through it.
+    ensureDelegateHybridDeployed: (...a: unknown[]) => mockEnsureDeployed(...(a as [])),
   }
 })
 vi.mock('../../../rails/delegation-rail.js', async (importOriginal) => {

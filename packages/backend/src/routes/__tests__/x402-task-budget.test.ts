@@ -66,7 +66,7 @@ vi.mock('../../infra/chain/delegation-budget-reader.js', () => ({
 }))
 vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../rails/hybrid-provisioning.js')>()
-  return { ...actual, computeHybridAccountAddress: mockCompute, ensureHybridDeployed: mockEnsureDeployed }
+  return { ...actual, computeHybridAccountAddress: mockCompute, ensureDelegateHybridDeployed: mockEnsureDeployed }
 })
 vi.mock('../../infra/repositories/payment-intents.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../infra/repositories/payment-intents.js')>()

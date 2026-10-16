@@ -18,12 +18,16 @@ export const version = '114_smart_account_deploy_salt'
  *    the register route with the salt they were derived at. The uniqueness
  *    rule this column serves is stated explicitly on the address itself:
  *
- *      UNIQUE (chain_id, LOWER(account_address))  — WHERE delegator_hybrid
+ *      UNIQUE (user_id, chain_id, LOWER(account_address)) — WHERE hybrid
  *
- *    so two concurrent creates can never both claim one derived address
- *    (the app-level duplicate check races; the constraint cannot). Scoped
- *    to `delegator_hybrid` because the retired Safe-rail rows were never
- *    salt-derived and must not retroactively constrain this table.
+ *    the same rule the app-level duplicate check
+ *    (FIND_HYBRID_ACCOUNT_BY_ADDRESS_FOR_USER_SQL) has always enforced, now
+ *    carried by the database so two concurrent creates cannot both claim one
+ *    derived address — the loser's `ON CONFLICT DO NOTHING` insert returns
+ *    no row and the route answers the winner instead of 500ing on a bare
+ *    constraint violation. Scoped to `delegator_hybrid` because the retired
+ *    Safe-rail rows were never salt-derived and must not retroactively
+ *    constrain this table.
  *
  * 2. `hybrid_deploy_salt_counters` — the never-reused counter, keyed
  *    `(user_id, salt_key)` where `salt_key` is the signer the account's
@@ -73,8 +77,8 @@ export async function up(client: PoolClient): Promise<void> {
   // The uniqueness rules, stated explicitly (see the docblock). Partial unique
   // INDEXes because both rules are qualified (expression / partial).
   await client.query(`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_smart_accounts_chain_derived_address
-      ON smart_accounts (chain_id, LOWER(account_address))
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_smart_accounts_user_chain_derived_address
+      ON smart_accounts (user_id, chain_id, LOWER(account_address))
       WHERE account_type = 'delegator_hybrid';
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_smart_accounts_create_idempotency

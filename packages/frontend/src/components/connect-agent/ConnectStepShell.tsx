@@ -53,14 +53,23 @@ export function ConnectStepShell({
   // sub-state change. Kept current between changes, so growth within a
   // sub-state (an opened disclosure) is the height the next change starts at.
   const settledHeight = useRef<number | null>(null)
+  // The on-screen height of a transition cut short by another sub-state
+  // change, so the next one eases on from there instead of snapping first.
+  const interruptedAt = useRef<number | null>(null)
 
   useEffect(() => {
     const content = contentRef.current
     if (!content || typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(() => {
-      // Mid-transition the frame carries an inline height; the layout effect
-      // below owns the measurement until it is released.
-      if (!frameRef.current?.style.height) settledHeight.current = content.offsetHeight
+      const frame = frameRef.current
+      if (frame?.style.height) {
+        // Pinned mid-transition: content that resizes now (an approval card
+        // filling in from async data) retargets the ease rather than being
+        // clipped and then snapping in on release.
+        frame.style.height = `${content.offsetHeight}px`
+      } else {
+        settledHeight.current = content.offsetHeight
+      }
     })
     observer.observe(content)
     return () => observer.disconnect()
@@ -73,22 +82,33 @@ export function ConnectStepShell({
     const frame = frameRef.current
     const content = contentRef.current
     if (!frame || !content) return
-    const from = settledHeight.current
+    const from = interruptedAt.current ?? settledHeight.current
+    interruptedAt.current = null
     const to = content.offsetHeight
     settledHeight.current = to
     if (from === null || from === to || prefersReducedMotion()) return
 
-    frame.style.overflow = 'hidden'
+    // `clip`, not `hidden`: it cannot be scrolled by a programmatic focus,
+    // and it leaves the horizontal axis visible, so focus rings on controls
+    // flush with the frame's sides are not cut off during the ease.
+    frame.style.overflowY = 'clip'
     frame.style.height = `${from}px`
     // Commit the start height before setting the target, or no transition runs.
     void frame.offsetHeight
     frame.style.transition = `height ${HEIGHT_TRANSITION_MS}ms ease-out`
     frame.style.height = `${to}px`
 
-    const release = () => {
+    const unpin = () => {
       frame.style.height = ''
-      frame.style.overflow = ''
+      frame.style.overflowY = ''
       frame.style.transition = ''
+    }
+    const release = () => {
+      unpin()
+      // Re-measure: a resize the observer retargeted during the pin is not
+      // otherwise recorded as the settled height. (Not in the cleanup below:
+      // by then the NEXT sub-state is in the DOM.)
+      settledHeight.current = content.offsetHeight
     }
     // Only the frame's own height transition ends the pin: transitions on
     // controls inside the body (hover colours) bubble here too.
@@ -102,7 +122,13 @@ export function ConnectStepShell({
     return () => {
       window.clearTimeout(timer)
       frame.removeEventListener('transitionend', onEnd)
-      release()
+      // Still pinned: the next sub-state arrived mid-ease. Hand it the height
+      // on screen right now.
+      if (frame.style.height) {
+        const current = frame.getBoundingClientRect().height
+        if (current > 0) interruptedAt.current = current
+      }
+      unpin()
     }
   }, [stateKey])
 

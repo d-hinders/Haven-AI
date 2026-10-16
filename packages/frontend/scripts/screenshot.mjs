@@ -5239,7 +5239,7 @@ export const SCENARIOS = {
 
 
       await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
-      // #3832: the connect step is a numbered list whose row 1 is the copy
+      // #3832: the connect step is a status checklist whose row 1 is the copy
       // action. Captured BEFORE the copy (the ready frame), then with the
       // prompt disclosure open, then copied, at each stage.
       const copyPrompt = dialog.getByRole('button', { name: 'Copy setup prompt' })

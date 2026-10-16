@@ -424,28 +424,54 @@ describe('ConnectStepShell (#1377 C, #3832)', () => {
       )
     }
 
+    /** Every value written to the frame's inline height, in order. */
+    function recordHeights(frame: HTMLElement) {
+      const writes: string[] = []
+      const style = frame.style
+      const proto = Object.getPrototypeOf(style)
+      const descriptor = Object.getOwnPropertyDescriptor(proto, 'height')!
+      Object.defineProperty(style, 'height', {
+        configurable: true,
+        get: () => descriptor.get!.call(style),
+        set: (value: string) => {
+          writes.push(value)
+          descriptor.set!.call(style, value)
+        },
+      })
+      return writes
+    }
+
+    function heightEnd() {
+      const end = new Event('transitionend', { bubbles: true }) as TransitionEvent
+      Object.defineProperty(end, 'propertyName', { value: 'height' })
+      return end
+    }
+
     it('pins the old height, eases to the new one, then releases to auto', () => {
       stubReducedMotion(false)
       const { container, rerender } = render(shell('short'))
       const frame = container.firstElementChild as HTMLElement
       // The first render sizes naturally — nothing to ease from.
       expect(frame.style.height).toBe('')
+      const writes = recordHeights(frame)
 
       rerender(shell('tall'))
+      // Pinned at the OLD height first, then targeted at the new one. (Empty
+      // writes are the previous sub-state's cleanup unpinning.)
+      expect(writes.filter(Boolean)).toEqual(['120px', '360px'])
       expect(frame.style.height).toBe('360px')
       expect(frame.style.transition).toContain('height')
-      expect(frame.style.overflow).toBe('hidden')
+      expect(frame.style.overflowY).toBe('clip')
 
       // Released on the frame's own height transitionend…
-      const end = new Event('transitionend', { bubbles: true }) as TransitionEvent
-      Object.defineProperty(end, 'propertyName', { value: 'height' })
-      frame.dispatchEvent(end)
+      frame.dispatchEvent(heightEnd())
       expect(frame.style.height).toBe('')
-      expect(frame.style.overflow).toBe('')
+      expect(frame.style.overflowY).toBe('')
 
       // …or by the backstop when it never fires.
+      writes.length = 0
       rerender(shell('short'))
-      expect(frame.style.height).toBe('120px')
+      expect(writes.filter(Boolean).slice(0, 2)).toEqual(['360px', '120px'])
       vi.advanceTimersByTime(400)
       expect(frame.style.height).toBe('')
     })
@@ -460,6 +486,50 @@ describe('ConnectStepShell (#1377 C, #3832)', () => {
       Object.defineProperty(end, 'propertyName', { value: 'background-color' })
       inner.dispatchEvent(end)
       expect(frame.style.height).toBe('360px')
+    })
+
+    describe('content that resizes on its own', () => {
+      let observed: (() => void) | null = null
+      beforeEach(() => {
+        observed = null
+        vi.stubGlobal(
+          'ResizeObserver',
+          class {
+            constructor(callback: () => void) {
+              observed = callback
+            }
+            observe() {}
+            disconnect() {}
+          },
+        )
+      })
+
+      it('growth within a sub-state is the next change\'s starting height', () => {
+        stubReducedMotion(false)
+        const { container, rerender } = render(shell('short'))
+        const frame = container.firstElementChild as HTMLElement
+        HEIGHT.short = 200 // a disclosure opened
+        observed!()
+        const writes = recordHeights(frame)
+        rerender(shell('tall'))
+        expect(writes.filter(Boolean)).toEqual(['200px', '360px'])
+        HEIGHT.short = 120
+      })
+
+      it('a resize while pinned retargets the ease and is the settled height after release', () => {
+        stubReducedMotion(false)
+        const { container, rerender } = render(shell('short'))
+        const frame = container.firstElementChild as HTMLElement
+        rerender(shell('tall'))
+        HEIGHT.tall = 420 // async data filled the new sub-state in
+        observed!()
+        expect(frame.style.height).toBe('420px')
+        frame.dispatchEvent(heightEnd())
+        const writes = recordHeights(frame)
+        rerender(shell('short'))
+        expect(writes.filter(Boolean).slice(0, 2)).toEqual(['420px', '120px'])
+        HEIGHT.tall = 360
+      })
     })
 
     it('resizes at once under prefers-reduced-motion: reduce', () => {

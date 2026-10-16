@@ -141,11 +141,11 @@ export function submissionFor(
 
 /**
  * After an UNKNOWN outcome (no answer, or a 5xx), find the account the lost
- * create may have made: one that is in the re-read list but was not in the
- * baseline recorded when the submission started, on the chain it was sent to.
- * Accounts that were already there, and accounts on another chain, are never
- * it. When several qualify (another tab created one too), the one carrying the
- * submitted name wins; otherwise the first.
+ * create may have made. It must be all three: absent from the baseline
+ * recorded when the attempt started, on the chain the create was sent to, and
+ * carrying the submitted name (the backend stores the name trimmed). A new
+ * account with any other name is not ours — another tab, another device — so
+ * it never resolves the outcome.
  */
 export function findCreatedAccount(
   accounts: SmartAccount[],
@@ -153,8 +153,10 @@ export function findCreatedAccount(
   chainId: number,
   name: string,
 ): SmartAccount | null {
-  const fresh = accounts.filter((a) => !baselineIds.has(a.id) && a.chain_id === chainId)
-  return fresh.find((a) => a.name.trim() === name.trim()) ?? fresh[0] ?? null
+  const wanted = name.trim()
+  return (
+    accounts.find((a) => !baselineIds.has(a.id) && a.chain_id === chainId && a.name.trim() === wanted) ?? null
+  )
 }
 
 // ── Refusals ──────────────────────────────────────────────────────────────

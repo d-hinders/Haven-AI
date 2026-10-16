@@ -6,7 +6,7 @@ import { useAuth, type SmartAccount } from '@/context/AuthContext'
 import type { CreateAccountBody, CreatedAccount } from '@/lib/new-account'
 
 export function useAccounts() {
-  const { user, refreshUser } = useAuth()
+  const { user, refreshUser, reloadUser } = useAuth()
   const [loading, setLoading] = useState(false)
 
   const accounts = user?.accounts ?? []
@@ -82,8 +82,10 @@ export function useAccounts() {
     [refreshUser],
   )
 
-  // `refreshAccounts` re-reads the session payload without changing anything —
-  // the New account dialog calls it when a create's outcome is unknown, so an
-  // account that was created behind a lost response shows up (#4024).
-  return { accounts, loading, createAccount, refreshAccounts: refreshUser, renameAccount, removeAccount, setDefault }
+  // `refreshAccounts` re-reads the session payload without changing anything,
+  // and resolves whether the read happened (`reloadUser`). The New account
+  // dialog calls it after an unknown create outcome, so an account created
+  // behind a lost response shows up — and so a failed read is never reported
+  // as "no new account" (#4024).
+  return { accounts, loading, createAccount, refreshAccounts: reloadUser, renameAccount, removeAccount, setDefault }
 }

@@ -1,9 +1,10 @@
 import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { mockPost, mockRefreshUser, callOrder } = vi.hoisted(() => ({
+const { mockPost, mockRefreshUser, mockReloadUser, callOrder } = vi.hoisted(() => ({
   mockPost: vi.fn(),
   mockRefreshUser: vi.fn(),
+  mockReloadUser: vi.fn(),
   callOrder: [] as string[],
 }))
 
@@ -11,7 +12,7 @@ vi.mock('@/lib/api', () => ({
   api: { post: (...args: unknown[]) => mockPost(...args), put: vi.fn(), delete: vi.fn() },
 }))
 vi.mock('@/context/AuthContext', () => ({
-  useAuth: () => ({ user: { accounts: [] }, refreshUser: mockRefreshUser }),
+  useAuth: () => ({ user: { accounts: [] }, refreshUser: mockRefreshUser, reloadUser: mockReloadUser }),
 }))
 
 import { useAccounts } from '../useAccounts'
@@ -61,5 +62,14 @@ describe('useAccounts().createAccount (#4024)', () => {
     })
     expect(mockRefreshUser).not.toHaveBeenCalled()
     expect(result.current.loading).toBe(false)
+  })
+
+  it('refreshAccounts reports whether the re-read happened (reloadUser, not refreshUser)', async () => {
+    const { result } = renderHook(() => useAccounts())
+    mockReloadUser.mockResolvedValueOnce(false)
+    await expect(result.current.refreshAccounts()).resolves.toBe(false)
+    mockReloadUser.mockResolvedValueOnce(true)
+    await expect(result.current.refreshAccounts()).resolves.toBe(true)
+    expect(mockRefreshUser).not.toHaveBeenCalled()
   })
 })

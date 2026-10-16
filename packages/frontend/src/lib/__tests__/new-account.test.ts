@@ -229,10 +229,10 @@ describe('findCreatedAccount — the unknown-outcome check', () => {
     expect(findCreatedAccount([...before, elsewhere], baseline, 84532, 'Reserve')).toBeNull()
   })
 
-  it('prefers the one carrying the submitted name when several appeared', () => {
+  it('never takes a new account with another name: it is not ours', () => {
     const other = { ...account('other'), name: 'Something else' }
+    expect(findCreatedAccount([...before, other], baseline, 84532, 'Reserve')).toBeNull()
     const ours = { ...account('ours'), name: 'Reserve' }
     expect(findCreatedAccount([...before, other, ours], baseline, 84532, ' Reserve ')?.id).toBe('ours')
-    expect(findCreatedAccount([...before, other], baseline, 84532, 'Reserve')?.id).toBe('other')
   })
 })

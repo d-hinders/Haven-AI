@@ -126,7 +126,7 @@ beforeEach(() => {
   localStorage.clear()
   createAccount = vi.fn().mockResolvedValue(CREATED)
   reloadSigners = vi.fn()
-  refreshAccounts = vi.fn().mockResolvedValue(undefined)
+  refreshAccounts = vi.fn().mockResolvedValue(true)
   assertsWith(CRED_A)
 })
 
@@ -508,6 +508,7 @@ describe('NewAccountDialog — the unknown outcome is checked inside the dialog'
   function nextReadReturns(accounts: ReturnType<typeof account>[]) {
     refreshAccounts.mockImplementation(async () => {
       mockUseAccounts.mockReturnValue({ accounts, createAccount, refreshAccounts })
+      return true
     })
   }
 
@@ -534,7 +535,7 @@ describe('NewAccountDialog — the unknown outcome is checked inside the dialog'
     nextReadReturns([MAIN, OTHER])
     await checkAgain()
 
-    expect(screen.getByTestId('new-account-check')).toHaveTextContent('No new account on Base Sepolia yet.')
+    expect(screen.getByTestId('new-account-check')).toHaveTextContent('No new account named Reserve on Base Sepolia yet.')
     expect(screen.getByRole('alert')).toHaveTextContent(UNKNOWN)
 
     createAccount.mockResolvedValue(CREATED)
@@ -554,7 +555,7 @@ describe('NewAccountDialog — the unknown outcome is checked inside the dialog'
     await checkAgain()
 
     expect(screen.queryByTestId('new-account-created')).toBeNull()
-    expect(screen.getByTestId('new-account-check')).toHaveTextContent('No new account on Base Sepolia yet.')
+    expect(screen.getByTestId('new-account-check')).toHaveTextContent('No new account named Reserve on Base Sepolia yet.')
   })
 
   it('keeps the alert through an edit, and warns that a changed input makes a retry a new request', async () => {
@@ -634,4 +635,224 @@ describe('NewAccountDialog — the automatic re-check', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(UNKNOWN)
     return rendered
   }
+})
+
+describe('NewAccountDialog — the unknown outcome is sticky (R1–R4)', () => {
+  async function reachUnknown() {
+    createAccount.mockRejectedValueOnce(new ApiRequestError('Bad gateway', 502, { error: 'Bad gateway' }))
+    setup()
+    typeName('Reserve')
+    await submit()
+    expect(screen.getByTestId('new-account-unknown')).toHaveTextContent(UNKNOWN)
+  }
+
+  function unknownShown() {
+    return screen.queryByTestId('new-account-unknown') !== null
+  }
+
+  function nextReadReturns(accounts: ReturnType<typeof account>[]) {
+    refreshAccounts.mockImplementation(async () => {
+      mockUseAccounts.mockReturnValue({ accounts, createAccount, refreshAccounts })
+      return true
+    })
+  }
+
+  async function checkAgain() {
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    })
+  }
+
+  it('survives a cancelled passkey prompt on the retry', async () => {
+    await reachUnknown()
+    mockGetPasskeyAssertion.mockRejectedValueOnce(new PasskeyCancelledError())
+    await submit()
+    expect(unknownShown()).toBe(true)
+    expect(screen.getAllByRole('alert')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled()
+    expect(createAccount).toHaveBeenCalledTimes(1)
+  })
+
+  it('survives a passkey read failure, with that failure shown beside it', async () => {
+    await reachUnknown()
+    mockGetPasskeyAssertion.mockRejectedValueOnce(new Error('WebAuthn assertion returned an unexpected response.'))
+    await submit()
+    expect(unknownShown()).toBe(true)
+    expect(screen.getByText('Your passkey couldn’t be read. Try again.')).toBeInTheDocument()
+  })
+
+  it('survives the client key check refusing the passkey', async () => {
+    await reachUnknown()
+    assertsWith(CRED_B)
+    await submit()
+    expect(unknownShown()).toBe(true)
+    expect(screen.getByText(/That passkey isn’t one of Operating’s/)).toBeInTheDocument()
+    expect(createAccount).toHaveBeenCalledTimes(1)
+  })
+
+  it('survives a 429 on the retry: the rate limiter answered for the retry, not the first attempt', async () => {
+    await reachUnknown()
+    createAccount.mockRejectedValueOnce(new ApiRequestError('Too Many Requests', 429, { error: 'Too Many Requests' }))
+    await submit()
+    expect(createAccount).toHaveBeenCalledTimes(2)
+    expect(unknownShown()).toBe(true)
+    expect(screen.getByText(/Too many attempts in a short time/)).toBeInTheDocument()
+  })
+
+  it('clears when a sent retry comes back with a definite refusal', async () => {
+    await reachUnknown()
+    createAccount.mockRejectedValueOnce(new ApiRequestError('x', 422, { error: 'x', error_code: 'ACCOUNT_CAP_REACHED', cap: 10 }))
+    await submit()
+    expect(unknownShown()).toBe(false)
+    expect(screen.queryByRole('button', { name: 'Check again' })).toBeNull()
+    expect(screen.getByRole('alert')).toHaveTextContent('You already have 10 accounts on Base Sepolia')
+  })
+
+  it('clears when a sent retry comes back 201', async () => {
+    await reachUnknown()
+    createAccount.mockResolvedValueOnce(CREATED)
+    await submit()
+    expect(unknownShown()).toBe(false)
+    expect(await screen.findByTestId('new-account-created')).toBeInTheDocument()
+  })
+
+  it('is not resolved by a new account with another name', async () => {
+    await reachUnknown()
+    nextReadReturns([MAIN, OTHER, account('savings1', 'Savings', 84532)])
+    await checkAgain()
+    expect(screen.queryByTestId('new-account-created')).toBeNull()
+    expect(unknownShown()).toBe(true)
+    expect(screen.getByTestId('new-account-check')).toHaveTextContent('No new account named Reserve on Base Sepolia yet.')
+  })
+
+  it('never says "No new account" after a re-read that failed', async () => {
+    await reachUnknown()
+    refreshAccounts.mockResolvedValue(false)
+    await checkAgain()
+    const status = screen.getByTestId('new-account-check')
+    expect(status).toHaveTextContent('Couldn’t read your accounts just now. Check again in a moment.')
+    expect(status).not.toHaveTextContent('No new account')
+    expect(unknownShown()).toBe(true)
+  })
+
+  it('disables Check again while an attempt is in flight', async () => {
+    await reachUnknown()
+    mockGetPasskeyAssertion.mockReturnValueOnce(new Promise(() => undefined))
+    await submit()
+    expect(screen.getByRole('button', { name: 'Check again' })).toBeDisabled()
+  })
+
+  it('drops a check result that lands after a retry has started', async () => {
+    await reachUnknown()
+    let finishRead!: (ok: boolean) => void
+    refreshAccounts.mockReturnValueOnce(new Promise<boolean>((resolve) => (finishRead = resolve)))
+    await checkAgain()
+    expect(screen.getByTestId('new-account-check')).toHaveTextContent('Checking your accounts…')
+
+    // The retry starts while the read is still out, and comes back unknown again.
+    createAccount.mockRejectedValueOnce(new ApiRequestError('Bad gateway', 502, { error: 'Bad gateway' }))
+    await submit()
+    await act(async () => {
+      finishRead(true)
+    })
+    // The stale "found nothing" belongs to the first attempt's state: dropped.
+    expect(screen.getByTestId('new-account-check')).not.toHaveTextContent('No new account')
+    expect(unknownShown()).toBe(true)
+  })
+})
+
+describe('NewAccountDialog — the automatic re-check after a failed read', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  async function reachUnknownNow() {
+    createAccount.mockRejectedValueOnce(new ApiRequestError('Bad gateway', 502, { error: 'Bad gateway' }))
+    setup()
+    typeName('Reserve')
+    await submit()
+    expect(screen.getByTestId('new-account-unknown')).toHaveTextContent(UNKNOWN)
+  }
+
+  it('stops when a sent retry comes back 201: no re-check fires afterwards', async () => {
+    await reachUnknownNow()
+    createAccount.mockResolvedValueOnce(CREATED)
+    await submit()
+    expect(screen.getByTestId('new-account-created')).toBeInTheDocument()
+    await act(async () => {
+      vi.advanceTimersByTime(AUTO_RECHECK_MS * 3)
+    })
+    expect(refreshAccounts).not.toHaveBeenCalled()
+  })
+
+  it('does not detect mid-attempt: the retry’s own answer decides first', async () => {
+    await reachUnknownNow()
+    let finishCreate!: (err: unknown) => void
+    createAccount.mockReturnValueOnce(new Promise((_, reject) => (finishCreate = reject)))
+    refreshAccounts.mockImplementationOnce(async () => {
+      mockUseAccounts.mockReturnValue({
+        accounts: [MAIN, OTHER, account('created1', 'Reserve', 84532)],
+        createAccount,
+        refreshAccounts,
+      })
+      return true
+    })
+    await submit() // the retry waits on the create call
+
+    // The timer's re-read lands the account while the retry is in flight.
+    await act(async () => {
+      vi.advanceTimersByTime(AUTO_RECHECK_MS)
+    })
+    expect(screen.queryByTestId('new-account-created')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Setting up your account…' })).toBeDisabled()
+
+    // The retry comes back unknown again; back on the form, detection runs.
+    await act(async () => {
+      finishCreate(new ApiRequestError('Bad gateway', 502, { error: 'Bad gateway' }))
+    })
+    expect(screen.getByTestId('new-account-created')).toHaveTextContent('Reserve was created on Base Sepolia')
+  })
+
+  it('drops a re-check whose read overlapped a retry that came back unknown again', async () => {
+    await reachUnknownNow()
+    let finishCreate!: (err: unknown) => void
+    createAccount.mockReturnValueOnce(new Promise((_, reject) => (finishCreate = reject)))
+    let finishRead!: (ok: boolean) => void
+    refreshAccounts.mockReturnValueOnce(new Promise<boolean>((resolve) => (finishRead = resolve)))
+    await submit() // the retry is now waiting on the create call
+
+    // The first outcome's timer fires mid-retry and its read goes out.
+    await act(async () => {
+      vi.advanceTimersByTime(AUTO_RECHECK_MS)
+    })
+    expect(refreshAccounts).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      finishCreate(new ApiRequestError('Bad gateway', 502, { error: 'Bad gateway' }))
+    })
+    await act(async () => {
+      finishRead(true)
+    })
+    // The read predates the second outcome: it must not report on it.
+    expect(screen.getByTestId('new-account-check')).not.toHaveTextContent('No new account')
+  })
+
+  it('says nothing new when its read fails, and keeps the state', async () => {
+    createAccount.mockRejectedValue(new ApiRequestError('Bad gateway', 502, { error: 'Bad gateway' }))
+    refreshAccounts.mockResolvedValue(false)
+    setup()
+    typeName('Reserve')
+    await submit()
+    await act(async () => {
+      vi.advanceTimersByTime(AUTO_RECHECK_MS)
+    })
+    expect(refreshAccounts).toHaveBeenCalledTimes(1)
+    const status = screen.getByTestId('new-account-check')
+    expect(status).not.toHaveTextContent('No new account')
+    expect(status).toHaveTextContent(/^$/)
+    expect(screen.getByTestId('new-account-unknown')).toHaveTextContent(UNKNOWN)
+  })
 })

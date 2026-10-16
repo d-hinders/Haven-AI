@@ -711,7 +711,19 @@ account, for example to give an agent a budget. You can add funds before then.
 The waiting labels are onboarding's (`Waiting for your passkey…`,
 `Setting up your account…`), and a dismissed passkey prompt returns to the
 form with no message. A refusal names the limit or the account involved and
-the next step; it never says only that something went wrong.
+the next step; it never says only that something went wrong. When the outcome
+is unknown (no answer, or a server error), the account may exist: say so, and
+scope any "a retry won't duplicate it" promise to what actually guarantees it
+(this dialog, the same name and network):
+
+```text
+Haven couldn't confirm the account. It may have been created anyway, so check
+your accounts before trying again. Trying again here, with the same name and
+network, won't create a second one.
+```
+
+A definite refusal makes no retry promise: "Haven couldn't create the
+account." plus the reason when there is one.
 
 Avoid:
 

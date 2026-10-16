@@ -12,7 +12,7 @@ covers:
   - packages/frontend/src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx
   - packages/backend/src/routes/passkeys.ts
   - packages/frontend/src/components/NewAccountDialog.tsx
-last-verified: "2026-10-09"
+last-verified: "2026-10-16"
 ---
 
 # Account recovery (delegation-rail accounts)

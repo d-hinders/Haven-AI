@@ -1,0 +1,204 @@
+/**
+ * The pure half of the "New account" dialog (#4024, epic #4022 slice S2).
+ *
+ * The dialog creates an ADDITIONAL Hybrid DeleGator account through #4023's
+ * create-additional request: `POST /accounts/hybrid` with
+ * `{ source_account_id, key_id, chain_id, name, idempotency_key }`. The server
+ * copies the ONE passkey named by `key_id` from the source account's stored
+ * signer set — the client never sends key material — and the new account is
+ * never the default. This module holds the decisions that do not need React:
+ * which accounts can be a source, which one is picked by default, how a
+ * credential id becomes a `key_id`, when the idempotency key is reused, and how
+ * a refusal is classified. The words the user reads live in the dialog
+ * (`components/NewAccountDialog.tsx`), inside the copy lint's scan.
+ */
+
+import { toHex } from 'viem'
+import type { ApiOperations } from '@haven_ai/core'
+import type { SmartAccount } from '@/context/AuthContext'
+import { base64UrlDecode } from './passkey'
+import { credentialIdFromKeyId } from './signer'
+
+type UserSignersResponse = ApiOperations['listUserSigners']['responses']['200']['content']['application/json']
+type UserSigner = UserSignersResponse['signers'][number]
+
+export type CreateAccountBody = {
+  source_account_id: string
+  key_id: string
+  chain_id: number
+  name: string
+  idempotency_key: string
+}
+
+export type CreatedAccount = {
+  id: string
+  account_address: string
+  chain_id: number
+  account_type?: string
+  deployed?: boolean
+  created_at?: string
+}
+
+/**
+ * An account that can secure a new one: it has at least one passkey. `keyIds`
+ * are the hex `key_id`s (hybrid_account_passkeys storage form, #885) exactly as
+ * `GET /user/signers` lists them.
+ */
+export interface PasskeySource {
+  account: SmartAccount
+  keyIds: string[]
+}
+
+/**
+ * Accounts with a passkey, in the account list's own order. Built from ONE
+ * read — `GET /user/signers` (#3825) lists each passkey once with every account
+ * it approves — instead of one signer-set fetch per account. An account the
+ * signer read does not mention (EOA-only, or skipped by the backend because its
+ * owner config could not be resolved) is not a source: the backend would
+ * refuse it as SOURCE_HAS_NO_PASSKEY anyway.
+ */
+export function passkeySources(accounts: SmartAccount[], signers: UserSigner[]): PasskeySource[] {
+  const byAccount = new Map<string, string[]>()
+  for (const signer of signers) {
+    if (signer.kind !== 'passkey') continue
+    for (const approved of signer.accounts) {
+      const list = byAccount.get(approved.account_id) ?? []
+      if (!list.includes(signer.key_id)) list.push(signer.key_id)
+      byAccount.set(approved.account_id, list)
+    }
+  }
+  return accounts
+    .filter((account) => (byAccount.get(account.id)?.length ?? 0) > 0)
+    .map((account) => ({ account, keyIds: byAccount.get(account.id)! }))
+}
+
+/**
+ * The source the dialog starts on: the account the caller is scoped to when it
+ * has a passkey (an account page, #4021's tile), else the default account when
+ * it has one, else the first account that does. `null` only when no account
+ * has a passkey — the state the dialog explains instead of offering a form.
+ */
+export function defaultSource(sources: PasskeySource[], preferredAccountId?: string | null): PasskeySource | null {
+  if (preferredAccountId) {
+    const preferred = sources.find((s) => s.account.id === preferredAccountId)
+    if (preferred) return preferred
+  }
+  return sources.find((s) => s.account.is_default) ?? sources[0] ?? null
+}
+
+/**
+ * Whether the source is worth asking about. The choice only changes which
+ * passkeys the device may offer, so it is a real question only when the
+ * sources hold DIFFERENT passkey sets. Two accounts behind the same passkey —
+ * the common case once a user has created one — would present a field whose
+ * answer changes nothing.
+ */
+export function sourceChoiceMatters(sources: PasskeySource[]): boolean {
+  const sets = new Set(sources.map((s) => [...s.keyIds].map((k) => k.toLowerCase()).sort().join(',')))
+  return sets.size > 1
+}
+
+/** The WebAuthn `allowCredentials` ids (base64url) for a source's passkeys. */
+export function allowCredentialIdsFor(source: PasskeySource): string[] {
+  return source.keyIds.map(credentialIdFromKeyId)
+}
+
+/**
+ * base64url credential id (what `navigator.credentials.get` returns) → hex
+ * `key_id`, the form the backend stores and compares. The same conversion
+ * signup performs (`HybridEnrollFlow`), lowercase as `toHex` emits it.
+ */
+export function keyIdFromCredentialId(credentialId: string): string {
+  return toHex(base64UrlDecode(credentialId))
+}
+
+/** Whether an asserted `key_id` is one of the source's passkeys (case-insensitive, like the server). */
+export function sourceHoldsKey(source: PasskeySource, keyId: string): boolean {
+  return source.keyIds.some((k) => k.toLowerCase() === keyId.toLowerCase())
+}
+
+/**
+ * The idempotency key for one dialog submission (#4023's retried-create
+ * dedup). A retry of the SAME submission — same name, network and source —
+ * reuses the key, so a request whose response was lost answers the account it
+ * already created instead of minting a second. Any change to those inputs is a
+ * different submission and gets a fresh key: the server matches on the key
+ * alone, so reusing it after the user switched networks would answer the
+ * account created on the first one.
+ */
+export interface PendingSubmission {
+  fingerprint: string
+  idempotencyKey: string
+}
+
+export function submissionFingerprint(input: { name: string; chainId: number; sourceAccountId: string }): string {
+  return JSON.stringify([input.name.trim(), input.chainId, input.sourceAccountId])
+}
+
+export function submissionFor(
+  previous: PendingSubmission | null,
+  fingerprint: string,
+  mintKey: () => string = () => crypto.randomUUID(),
+): PendingSubmission {
+  if (previous && previous.fingerprint === fingerprint) return previous
+  return { fingerprint, idempotencyKey: mintKey() }
+}
+
+// ── Refusals ──────────────────────────────────────────────────────────────
+//
+// The create-additional refusals are mapped by `error_code` FIRST, never by
+// matching the backend's sentence. These are the codes requested on #4044
+// (#4023's PR). Until the backend sends them, the status fallback below
+// applies: a 422 is a typed "could not create" that passes the backend's
+// sentence through as detail, a 429 is the money-path rate limit, and
+// anything else is the generic failure.
+
+export const ACCOUNT_CAP_REACHED = 'ACCOUNT_CAP_REACHED'
+export const SOURCE_HAS_NO_PASSKEY = 'SOURCE_HAS_NO_PASSKEY'
+export const KEY_NOT_ON_SOURCE = 'KEY_NOT_ON_SOURCE'
+export const SOURCE_ACCOUNT_NOT_FOUND = 'SOURCE_ACCOUNT_NOT_FOUND'
+
+export type CreateAccountRefusal =
+  /** The per-user per-chain soft cap (#4023: 10). `cap` when the body carries it. */
+  | { kind: 'cap_reached'; cap: number | null }
+  | { kind: 'source_has_no_passkey' }
+  | { kind: 'key_not_on_source' }
+  | { kind: 'source_not_found' }
+  | { kind: 'rate_limited' }
+  /** A 422 with no code this client knows: the backend's sentence, bounded, or null. */
+  | { kind: 'could_not_create'; detail: string | null }
+  | { kind: 'failed' }
+
+/** Long enough for every sentence the route sends today; short enough to stay a line. */
+const MAX_DETAIL_CHARS = 200
+
+function readBody(err: unknown): Record<string, unknown> {
+  const body = (err as { body?: unknown } | null)?.body
+  return body !== null && typeof body === 'object' ? (body as Record<string, unknown>) : {}
+}
+
+export function classifyCreateAccountError(err: unknown): CreateAccountRefusal {
+  const body = readBody(err)
+  const code = typeof body.error_code === 'string' ? body.error_code : null
+
+  switch (code) {
+    case ACCOUNT_CAP_REACHED: {
+      const cap = typeof body.cap === 'number' && Number.isFinite(body.cap) ? body.cap : null
+      return { kind: 'cap_reached', cap }
+    }
+    case SOURCE_HAS_NO_PASSKEY:
+      return { kind: 'source_has_no_passkey' }
+    case KEY_NOT_ON_SOURCE:
+      return { kind: 'key_not_on_source' }
+    case SOURCE_ACCOUNT_NOT_FOUND:
+      return { kind: 'source_not_found' }
+  }
+
+  const status = (err as { status?: unknown } | null)?.status
+  if (status === 422) {
+    const sentence = typeof body.error === 'string' ? body.error.trim() : ''
+    return { kind: 'could_not_create', detail: sentence ? sentence.slice(0, MAX_DETAIL_CHARS) : null }
+  }
+  if (status === 429) return { kind: 'rate_limited' }
+  return { kind: 'failed' }
+}

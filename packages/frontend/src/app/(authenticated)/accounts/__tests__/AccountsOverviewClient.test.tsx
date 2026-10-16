@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
@@ -17,6 +17,11 @@ vi.mock('@/context/AuthContext', () => ({ useAuth: () => mockUseAuth() }))
 vi.mock('@/hooks/useAccounts', () => ({ useAccounts: () => mockUseAccounts() }))
 vi.mock('@/hooks/useAgents', () => ({ useAgents: () => mockUseAgents() }))
 vi.mock('@/hooks/usePreferences', () => ({ usePreferences: () => mockUsePreferences() }))
+// The New account dialog's own signer read (#4024) — only reached once the
+// dialog is open; its behaviour is NewAccountDialog.test.tsx's.
+vi.mock('@/hooks/useUserSigners', () => ({
+  useUserSigners: () => ({ signers: [], loadError: false, reload: vi.fn() }),
+}))
 const { mockUsePortfolio } = vi.hoisted(() => ({ mockUsePortfolio: vi.fn() }))
 vi.mock('@/hooks/usePortfolio', () => ({
   usePortfolio: (...args: unknown[]) => mockUsePortfolio(...args),
@@ -191,6 +196,11 @@ describe('AccountsOverviewClient — the Safe inflow is closed (#1984)', () => {
     // The cards still render — this is a read/manage surface, not a deletion.
     expect(screen.getByRole('link', { name: 'Base account' })).toBeInTheDocument()
 
+    // Non-vacuity (#4024): the page DOES offer a create action now, and the
+    // scan below would see it — it is the delegation-rail New account, not
+    // the Safe flow.
+    expect(screen.getByRole('button', { name: 'New account' })).toBeInTheDocument()
+
     expectNoSafeInflow()
   })
 
@@ -201,6 +211,50 @@ describe('AccountsOverviewClient — the Safe inflow is closed (#1984)', () => {
 
     expect(screen.getByText('No Haven accounts yet')).toBeInTheDocument()
     expectNoSafeInflow()
+  })
+})
+
+/**
+ * #4024: the "New account" header action. It sits in `PageHeader`'s actions
+ * slot (owner decision 2026-10-16, label verbatim) and opens the create
+ * dialog; the dialog's flow is NewAccountDialog.test.tsx's.
+ */
+describe('AccountsOverviewClient — the New account action (#4024)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockUseAgents.mockReturnValue({ agents: [] })
+    mockUsePreferences.mockReturnValue({ currency: 'USD' })
+    mockUsePortfolio.mockReturnValue({ totalUsd: 0, totalEur: 0, totalSek: 0, breakdown: [], loading: false })
+    mockUseAuth.mockReturnValue({ user: { accounts: [BASE, SEPOLIA] } })
+  })
+
+  it('sits in the page header and opens the New account dialog', () => {
+    mockUseAccounts.mockReturnValue({ accounts: [BASE, SEPOLIA], loading: false })
+    render(<AccountsOverviewClient />)
+
+    const header = screen.getByRole('heading', { name: 'Accounts', level: 1 }).closest('header')
+    expect(header).not.toBeNull()
+    const action = within(header as HTMLElement).getByRole('button', { name: 'New account' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+
+    fireEvent.click(action)
+
+    expect(screen.getByRole('dialog', { name: 'New account' })).toBeInTheDocument()
+  })
+
+  it('is offered with a single account too', () => {
+    mockUseAccounts.mockReturnValue({ accounts: [BASE], loading: false })
+    render(<AccountsOverviewClient />)
+    expect(screen.getByRole('button', { name: 'New account' })).toBeInTheDocument()
+  })
+
+  it('is hidden with no accounts: there is no passkey to create from', () => {
+    mockUseAccounts.mockReturnValue({ accounts: [], loading: false })
+    render(<AccountsOverviewClient />)
+
+    // Non-vacuity: the page rendered its empty state.
+    expect(screen.getByText('No Haven accounts yet')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'New account' })).toBeNull()
   })
 })
 

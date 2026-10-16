@@ -3048,6 +3048,27 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > nothing else in this document was re-read for it, and `last-verified` is not
 > bumped.
 >
+> **Re-verified unchanged (#4049, 2026-10-16, owner money actions say
+> "approve", not "sign"):** this diff is copy only. It touches four covered
+> files: `components/AccountSignersCard.tsx` and
+> `components/DelegationSendModal.tsx` (a cancelled-prompt toast now reads
+> "Approval was cancelled."), `components/DelegationBudgetCard.tsx` (helper,
+> toast and notice wording; pending sub-budget rows now name the actor,
+> "waiting for the sharing agent to sign it"), and
+> `hooks/useDelegationBudget.ts` (one JSDoc sentence). `pickSigningPath`,
+> `ready`, every signing step, the Stop/Edit/Remove gates and the signer-set
+> removal gate are untouched; no signature is added, removed or reordered. The
+> owner still authorises every money action with their own passkey or wallet —
+> "approve" names that act, it does not move it to Haven, and the re-key
+> refusal banner still says Haven can never give that approval for the owner.
+> The dated #3812 note in §3 quotes the button names of its day ("Sign new
+> budget", "Sign transfer"); they now read "Approve new budget" and "Approve
+> transfer", and that note is left as recorded. No new spender, no authority
+> grant, no custody change. Scope of this re-read: the four files above and
+> the sections that quote UI copy for them (§3's #3812 note, this run of
+> notes); nothing else in this document was re-read for it, and
+> `last-verified` is not bumped.
+>
 > **Re-verified (#3825, 2026-10-09, Settings → Signers; wallet pill leaves the
 > top bar):** the covered files this diff touches are
 > `domain/user-signers.ts` (new: the signer aggregation behind

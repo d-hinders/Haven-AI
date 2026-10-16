@@ -4,6 +4,7 @@ status: current
 covers:
   - packages/frontend/src/app/globals.css
   - packages/frontend/src/components/connect-agent/ConnectSteps.tsx
+  - packages/frontend/src/components/connect-agent/ConnectStepShell.tsx
   - packages/frontend/src/context/ThemeContext.tsx
   - packages/frontend/src/lib/theme-bootstrap.ts
   - packages/frontend/src/lib/theme-tokens.ts
@@ -97,7 +98,7 @@ covers:
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
-last-verified: "2026-10-16"
+last-verified: 2026-10-16
 ---
 
 # Haven Design System
@@ -1602,12 +1603,18 @@ equal and still submits nothing.
 `ui/StepProgress` is the numbered disc band a multi-step modal carries in its
 header (`Modal`'s `headerAccessory`): one disc per step, the current one
 brand-soft with a brand ring, finished ones success-soft with a tick, the rest
-a `--v2-border` ring, joined by 1px lines. It says **where the user is in a
-wizard**, and nothing else: a step's own instructions live in its body. Call
-sites: the Connect agent modal (steps 1-2) and `ReplaceSigningKeyModal`; its `/design-system` specimen is the "StepProgress"
-section, after SidePanel.
+a `--v2-border` ring, joined by 1px lines that **stretch to fill the band**, so
+the track spans the same edges as the content below it. Each disc may carry a
+short `labels` entry beneath it (a word or two — "Name", "Budget"), `--v2-ink`
+and medium on the active step, `--v2-ink-3` otherwise. It says **where the user
+is in a wizard**, and nothing else: a step's own instructions live in its body.
+It renders as an `<ol>`: `aria-current="step"` on the active item, an `sr-only`
+"Step N of M" prefix before the label, the disc glyph and connectors
+`aria-hidden`. Call sites: the Connect agent modal (every step: Name / Budget /
+Connect) and `ReplaceSigningKeyModal` (Reason / New key / Review / Approve);
+its `/design-system` specimen is the "StepProgress" section, after SidePanel.
 
-### Numbered step list (`ConnectSteps`, #3832)
+### Step status checklist (`ConnectSteps`, #3832)
 
 A vertical list in which **each row is both an instruction and its status**:
 a disc, a section-tier heading, and the row's own body (a control, a line of
@@ -1615,24 +1622,41 @@ copy, or a whole sub-flow) beneath it. Use it when one screen walks the user
 through a short sequence they act on in order and the screen itself observes
 the progress — today, step 3 of the Connect agent modal (copy → paste →
 approve), where the old Waiting → Connected → Approved ticker said where the
-user was without saying what to do. Use `StepProgress` instead when the steps
-are separate screens of a wizard.
+user was without saying what to do.
 
-Done, active and pending reuse `StepProgress`'s disc treatments, so the wizard
-band and the list read as one progress language rather than two; working adds
-the brand spinner:
+**It reports progress within a step and never counts.** `StepProgress` counts
+the wizard's steps; this list says how far the current step has got. So its
+discs carry no numerals — a numbered column under a numbered band reads as a
+second stepper. The discs share `StepProgress`'s size (`h-7 w-7 sm:h-8 sm:w-8`)
+and tokens, so the two read as one progress language, a counter above and a
+status column below, and every state fills the same disc, so the marker column
+is a straight edge:
 
 | State | Disc | Heading |
 |---|---|---|
 | done | `--v2-success-soft` fill, `border-success/30`, lucide `Check` | `--v2-ink-3` |
-| active | `--v2-brand-soft` fill, `--v2-brand` ring and numeral | `--v2-ink` |
-| working | lucide `Loader2` in `--v2-brand`, `motion-safe:animate-spin` | `--v2-ink` |
-| pending | `--v2-border` ring, `--v2-ink-3` numeral | `--v2-ink-2` |
+| active | `--v2-brand-soft` fill, `--v2-brand` ring, a `--v2-brand` dot | `--v2-ink` |
+| working | `--v2-brand-soft` fill, lucide `Loader2` in `--v2-brand`, `motion-safe:animate-spin` | `--v2-ink` |
+| pending | empty `--v2-border` ring | `--v2-ink-2` |
+
+The disc is `aria-hidden`; the row heading is the accessible content, with an
+`sr-only` "Done: " / "In progress: " / "Not started: " prefix. The active row —
+the one the user acts on — carries `aria-current="step"`; a working row is
+Haven's to finish, so it is not current.
 
 Rules:
-- **One progress signal per surface** (#1418). A screen that renders this list
-  renders no ticker, badge or wizard band saying the same thing — the Connect
-  agent modal hides its `StepProgress` on step 3 for exactly this reason.
+- **One counter per flow** (owner review, 2026-10-16, superseding #1418's
+  "one progress signal per surface"). A wizard that uses this list inside a
+  step keeps its `StepProgress` band on that step too — the Connect agent modal
+  shows Name / Budget / Connect on every step, Connect active on step 3. Hiding
+  the band there swapped one progress model for another mid-flow. Two
+  `aria-current="step"` items on step 3 are intended: one for the wizard step,
+  one for the row within it. What the rule still forbids is a third signal — a
+  ticker or badge restating either.
+- **A row heading says what is happening now.** A working row names the work
+  in flight, not the gate it leads to: while the connector finishes local
+  setup, row 3 reads "Preparing the approval", and becomes "Review and sign"
+  once the approval opens.
 - **Name a gate once per viewport** (#1684). When the modal subtitle names the
   action, the row heading says it in other words ("Review and sign" under
   "Approve the agent budget").
@@ -1642,6 +1666,16 @@ Rules:
   overwrite.
 - Live status inside a row goes in an `aria-live="polite"` region with a
   reserved height, so a status change swaps words without moving the rows below.
+- The frame around it (`ConnectStepShell`) **sizes to its content** and
+  top-aligns it: no reserved floor, no centring. Between sub-states it eases
+  its height from the old content to the new (200ms, none under
+  `prefers-reduced-motion: reduce`), which is how #1377's no-jump intent is
+  kept for the body now that a short sub-state no longer sits in a 340px band.
+  The dialog itself is still vertically centred by `Modal`, so a height change
+  also slides its header and band; the ease turns that into motion rather than
+  a jump, but it is not a still header.
+- Once the step is finished (budget approved) the band reads all-done
+  (`currentStep={totalSteps}`), not Connect in progress over a success screen.
 
 It is local to `components/connect-agent/` because it has one call site; a
 second call site is the trigger to promote it to `components/ui/` with a

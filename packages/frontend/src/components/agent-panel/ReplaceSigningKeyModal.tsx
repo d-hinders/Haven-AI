@@ -84,6 +84,9 @@ type Step = 'reason' | 'address' | 'consequences' | 'signing' | 'stalled' | 'don
 
 const STEP_ORDER: Step[] = ['reason', 'address', 'consequences', 'signing']
 
+/** StepProgress labels, index-aligned with STEP_ORDER. */
+const STEP_LABELS = ['Reason', 'New key', 'Review', 'Approve'] as const
+
 /** USDC everywhere the sweep helper is concerned; see `sweepUsdcAddress`. */
 const RESIDUAL_DECIMALS = 6
 
@@ -370,7 +373,10 @@ export function ReplaceSigningKeyModal({
   }, [rekey, issuedDelegations, runRekey])
 
   const blocked = rekey.signingBlockedReason
-  const stepIndex = step === 'done' ? STEP_ORDER.length : STEP_ORDER.indexOf(step)
+  // 'stalled' happens after the owner approved (the revoke landed), so it
+  // keeps the last step active rather than showing every step as unstarted.
+  const stepIndex =
+    step === 'done' ? STEP_ORDER.length : step === 'stalled' ? STEP_ORDER.length - 1 : STEP_ORDER.indexOf(step)
 
   /**
    * Whether the irreversibility gate is on screen — the red banner and the
@@ -396,7 +402,7 @@ export function ReplaceSigningKeyModal({
       closeOnEscape={closeIsSafe}
       showCloseButton={closeIsSafe}
       headerAccessory={
-        step === 'done' ? null : <StepProgress totalSteps={STEP_ORDER.length} currentStep={stepIndex} />
+        step === 'done' ? null : <StepProgress totalSteps={STEP_ORDER.length} currentStep={stepIndex} labels={STEP_LABELS} />
       }
       footer={renderFooter()}
     >

@@ -141,11 +141,21 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           rows={connectedRows({
             id: 'approve',
             state: 'working',
-            title: 'Approve the budget',
+            // `connected_local` before the install is approval-ready: the
+            // agent IS connected (row 2 is honestly done) and the approval is
+            // not open yet, so the in-flight row says what it is doing — the
+            // approval being prepared — not the gate it leads to. "Approve
+            // the budget" over "the connector is finishing local setup" named
+            // one thing and described another. The row stays row 3 and stays
+            // working, so the list never steps backwards on its way to
+            // "Review and sign".
+            title: 'Preparing the approval',
             children: (
-              // #1377 C: static text — polling must never swap it.
+              // #1377 C: static text — polling must never swap it. The modal
+              // subtitle already says "Finishing local setup"; this line only
+              // sets the wait, so the work is named once per viewport.
               <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                The connector is finishing local setup. This usually takes a few seconds.
+                This usually takes a few seconds.
               </p>
             ),
           }, manualPath)}

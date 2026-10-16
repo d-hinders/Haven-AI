@@ -15,9 +15,28 @@
  * - EOA owner:      deployParams [ownerAddress, [], [], []]
  * - Passkey owner:  deployParams [zeroAddress, [keyId], [x], [y]] — pure P256;
  *   both may be combined (EOA + N passkeys) which #836 (recovery) will use.
+ *
+ * Deploy salt (#4023, epic #4022 slice S1): a USER account's address is
+ * derived with the per-account deploy salt stored on its `smart_accounts`
+ * row — a monotonic per-(user, signer) counter that never repeats, so one
+ * passkey can own several accounts on one chain and an address identifies
+ * exactly one Haven account. The salt is a REQUIRED parameter on every
+ * user-account entry point ({@link SaltedHybridOwnerConfig}): a forgotten
+ * caller must fail to compile, never silently derive the salt-0 account.
+ * DELEGATE accounts (the agent's own hybrid) keep the literal `'0x'` — the
+ * SDK and signer vendor that offline (`packages/sdk/src/delegate-account.ts`),
+ * and their derivation is {@link computeHybridAccountAddress} /
+ * {@link ensureDelegateHybridDeployed}, which stay on the historical salt.
  */
 
-import { createPublicClient, zeroAddress, type Address, type LocalAccount } from 'viem'
+import {
+  createPublicClient,
+  pad,
+  zeroAddress,
+  type Address,
+  type Hex,
+  type LocalAccount,
+} from 'viem'
 import { KEYED_LOCK_NAMESPACES, withKeyedAdvisoryLock } from '../platform/leader-lock.js'
 import { toAccount } from 'viem/accounts'
 import { Implementation, toMetaMaskSmartAccount } from '@metamask/smart-accounts-kit'
@@ -40,6 +59,35 @@ export interface HybridOwnerConfig {
   passkeys?: PasskeySigner[]
 }
 
+/**
+ * A USER-account owner configuration: the base config plus the account's
+ * REQUIRED deploy salt (#4023). `deploySalt` has no default and no `?` —
+ * a caller that forgets it must fail to compile rather than silently derive
+ * the salt-0 account (`salt ?? '0x'` is the bug class this type exists to
+ * make unrepresentable). Delegate accounts use {@link HybridOwnerConfig} and
+ * stay on the literal `'0x'`.
+ */
+export interface SaltedHybridOwnerConfig extends HybridOwnerConfig {
+  /**
+   * The account's per-account deploy salt, as stored on its
+   * `smart_accounts.deploy_salt` row: `'0x'` for every account created
+   * before #4023, otherwise the 32-byte hex of the account's never-reused
+   * counter value (counter 1 = `0x…01`, because `pad('0x', {size: 32})` is
+   * the SAME salt as `'0x'`).
+   */
+  deploySalt: Hex
+}
+
+/**
+ * Normalize a stored salt to the kit's canonical 32-byte form. `'0x'` and
+ * `pad('0x', {size: 32})` are the SAME salt (sdk/delegate-account.ts), so
+ * historical rows keep their address; a counter salt is stored already
+ * padded and round-trips unchanged.
+ */
+export function normalizeDeploySalt(salt: Hex): Hex {
+  return pad(salt, { size: 32 })
+}
+
 function watchOnly(address: Address): LocalAccount {
   const refuse = async (): Promise<never> => {
     throw new Error('non-custody: provisioning is watch-only and cannot sign')
@@ -52,7 +100,12 @@ function watchOnly(address: Address): LocalAccount {
   })
 }
 
-async function buildWatchOnlyAccount(chainId: number, owner: HybridOwnerConfig) {
+async function buildWatchOnlyAccount(
+  chainId: number,
+  owner: HybridOwnerConfig,
+  /** #4023: `'0x'` for delegate accounts; the STORED salt on the user-account path. */
+  deploySalt: Hex,
+) {
   getDelegationContracts(chainId) // fail-closed on unpinned chains
 
   const eoa = owner.ownerAddress ?? zeroAddress
@@ -74,22 +127,41 @@ async function buildWatchOnlyAccount(chainId: number, owner: HybridOwnerConfig) 
       passkeys.map((p) => p.x),
       passkeys.map((p) => p.y),
     ],
-    deploySalt: '0x',
+    deploySalt: normalizeDeploySalt(deploySalt),
     signer: { account: watchOnly(eoa === zeroAddress ? '0x0000000000000000000000000000000000000001' : eoa) },
   })
   return { account, client }
 }
 
 /**
- * The deterministic account address for an owner configuration. Read-only:
- * one RPC to derive via the pinned factory. Throws on a chain without pinned
- * delegation contracts (fail-closed, #825).
+ * The deterministic account address for a DELEGATE account — always the
+ * literal `'0x'` salt. Read-only: one RPC to derive via the pinned factory.
+ * Throws on a chain without pinned delegation contracts (fail-closed, #825).
+ *
+ * The USER-account counterpart is {@link computeUserHybridAccountAddress},
+ * which REQUIRES the stored salt. Keeping the two apart is the #4023 design
+ * rule: no caller can omit a salt and silently land on account 0.
  */
 export async function computeHybridAccountAddress(
   chainId: number,
   owner: HybridOwnerConfig,
 ): Promise<Address> {
-  const { account } = await buildWatchOnlyAccount(chainId, owner)
+  const { account } = await buildWatchOnlyAccount(chainId, owner, '0x')
+  return account.address
+}
+
+/**
+ * The deterministic account address for a USER account, derived with the
+ * account's REQUIRED stored deploy salt (#4023). Same read-only contract as
+ * {@link computeHybridAccountAddress}: one RPC to the pinned factory,
+ * fail-closed on unpinned chains. A salted owner config is a compile-time
+ * requirement — the compiler, not a reviewer, catches the forgotten salt.
+ */
+export async function computeUserHybridAccountAddress(
+  chainId: number,
+  owner: SaltedHybridOwnerConfig,
+): Promise<Address> {
+  const { account } = await buildWatchOnlyAccount(chainId, owner, owner.deploySalt)
   return account.address
 }
 
@@ -166,10 +238,14 @@ export interface EnsureDeployedResult {
  *
  * Non-custody unchanged: the relayer signs a plain transaction to the audited
  * factory; the deployed account's signers are the owner's keys, never Haven's.
+ *
+ * This is the USER-account entry point: `owner` carries the account's
+ * REQUIRED stored deploy salt (#4023). The delegate-account counterpart is
+ * {@link ensureDelegateHybridDeployed}.
  */
 export async function ensureHybridDeployed(
   chainId: number,
-  owner: HybridOwnerConfig,
+  owner: SaltedHybridOwnerConfig,
   /**
    * The account's KNOWN address, when the caller has one (#891 fix). Checked
    * FIRST: a deployed account short-circuits before any derivation — the
@@ -179,6 +255,50 @@ export async function ensureHybridDeployed(
    */
   expectedAddress?: Address,
   /** #717: who this deploy is billed to (relayer gas budget + attribution). */
+  attribution?: { agentId?: string | null; userId?: string | null },
+): Promise<EnsureDeployedResult> {
+  return ensureHybridDeployedWithSalt(chainId, owner, owner.deploySalt, expectedAddress, attribution)
+}
+
+/**
+ * Deploy a DELEGATE account's counterfactual Hybrid — the literal `'0x'`
+ * salt, unchanged since #860 (#4023). The delegate's own address is derived
+ * from its EOA alone, and the SDK/signer vendor that derivation offline, so
+ * the salt must never become configurable here.
+ */
+export async function ensureDelegateHybridDeployed(
+  chainId: number,
+  owner: HybridOwnerConfig,
+  expectedAddress?: Address,
+  attribution?: { agentId?: string | null; userId?: string | null },
+): Promise<EnsureDeployedResult> {
+  return ensureHybridDeployedWithSalt(chainId, owner, '0x', expectedAddress, attribution)
+}
+
+/**
+ * Raised when the caller's KNOWN address does not match what the owner
+ * config derives (#4023). Thrown BEFORE any relayer interaction: deploying
+ * "whatever the config derives" and letting the caller notice afterwards
+ * spent relayer gas on the WRONG account (the salt-0 account, when the salt
+ * was missing) and then 500ed. Refusing first costs nothing.
+ */
+export class HybridDerivationMismatchError extends Error {
+  constructor(
+    readonly derived: Address,
+    readonly expected: Address,
+  ) {
+    super(
+      `hybrid provisioning: the owner config derives ${derived}, not the expected ${expected} — refusing to deploy a different account`,
+    )
+    this.name = 'HybridDerivationMismatchError'
+  }
+}
+
+async function ensureHybridDeployedWithSalt(
+  chainId: number,
+  owner: HybridOwnerConfig,
+  deploySalt: Hex,
+  expectedAddress?: Address,
   attribution?: { agentId?: string | null; userId?: string | null },
 ): Promise<EnsureDeployedResult> {
   if (expectedAddress) {
@@ -197,7 +317,16 @@ export async function ensureHybridDeployed(
       return { address: expectedAddress, alreadyDeployed: true }
     }
   }
-  const { account, client } = await buildWatchOnlyAccount(chainId, owner)
+  const { account, client } = await buildWatchOnlyAccount(chainId, owner, deploySalt)
+
+  // #4023: refuse BEFORE anything is spent when the derivation does not land
+  // on the address the caller knows. Everything below this line broadcasts
+  // to `account.address`; with a mismatched config that means a spurious
+  // relayer deploy on an account the user does not own, followed by the
+  // caller's post-hoc 500. The refusal is free; the deploy is not.
+  if (expectedAddress && account.address.toLowerCase() !== expectedAddress.toLowerCase()) {
+    throw new HybridDerivationMismatchError(account.address, expectedAddress)
+  }
 
   // #1673: everything from the bytecode check to the mined receipt runs under
   // a per-(chain, address) advisory lock, so two concurrent first payments

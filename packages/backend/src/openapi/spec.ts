@@ -5492,7 +5492,7 @@ export const openapiSpec = {
         operationId: 'createHybridAccount',
         summary: 'Provision a counterfactual Hybrid DeleGator account.',
         description:
-          "Computes the deterministic account address for an owner configuration (an EOA, P256 passkeys, or both) and records the row. **No transaction happens here** — the address is derived, not deployed, and `deployed: false` says so; the first sponsored operation (the budget grant) deploys the code. Refusals guard the derivation's own traps: the zero address is rejected because it derives the SAME account as the pure-passkey configuration while counting as a second signer, and duplicate passkey key_ids are rejected because they collapse to one on-chain key. A single-signer account is permitted (#1153) — the backup recommendation reaches the user after funding instead of walling the first minute.",
+          "Computes the deterministic account address for an owner configuration and records the row. **No transaction happens here** — the address is derived, not deployed, and `deployed: false` says so; the first sponsored operation (the budget grant) deploys the code. Two request shapes share this route: the historical SIGNUP (owner_address and/or passkeys from the client) and the #4023 CREATE-ADDITIONAL (source_account_id + key_id), which copies the named passkey's coordinates SERVER-SIDE from the source account's stored signer set — the new account's owner is that passkey alone and it never becomes the default. Each account is derived at its own per-account deploy salt (#4023), so one passkey can own several accounts on one chain; the salt is a monotonic per-(user, signer) counter that is never reused, and a created account's address is unique per chain (UNIQUE(chain_id, LOWER(account_address))). Refusals guard the derivation's own traps: the zero address is rejected because it derives the SAME account as the pure-passkey configuration while counting as a second signer, and duplicate passkey key_ids are rejected because they collapse to one on-chain key. A single-signer account is permitted (#1153) — the backup recommendation reaches the user after funding instead of walling the first minute.",
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,
@@ -5500,13 +5500,19 @@ export const openapiSpec = {
             'application/json': {
               schema: {
                 type: 'object',
-                description: 'At least one owner is required: owner_address, passkeys, or both.',
+                description:
+                  'Signup: at least one owner is required (owner_address, passkeys, or both). Create-additional: source_account_id + key_id are required together and owner fields must be omitted.',
                 properties: {
-                  chain_id: { type: 'integer', description: 'Defaults to Base Sepolia while delegation onboarding is dark-launched.' },
+                  chain_id: {
+                    type: 'integer',
+                    description:
+                      'The chain the account is created on. REQUIRED for a create-additional request (no fallback); defaults to Base Sepolia for a signup request while delegation onboarding is dark-launched.',
+                  },
                   name: { type: 'string', description: "Display label; defaults to 'My account'." },
-                  owner_address: { ...address, description: 'EOA owner. Must not be the zero address.' },
+                  owner_address: { ...address, description: 'EOA owner. Must not be the zero address. Signup shape only.' },
                   passkeys: {
                     type: 'array',
+                    description: 'Signup shape only.',
                     items: {
                       type: 'object',
                       required: ['key_id', 'x', 'y'],
@@ -5516,6 +5522,22 @@ export const openapiSpec = {
                         y: { type: 'string', pattern: '^0x[0-9a-fA-F]{1,64}$', description: 'P256 public-key y coordinate.' },
                       },
                     },
+                  },
+                  source_account_id: {
+                    type: 'string',
+                    format: 'uuid',
+                    description:
+                      '#4023 create-additional: an account the caller owns whose stored signer set the new owner passkey is copied FROM. Required together with key_id; owner_address/passkeys must be omitted.',
+                  },
+                  key_id: {
+                    type: 'string',
+                    description:
+                      '#4023 create-additional: the WebAuthn credential the user authenticated the dialog with. Must be a passkey on the source account; the new account derives from it alone (no backups, no EOA).',
+                  },
+                  idempotency_key: {
+                    type: 'string',
+                    description:
+                      '#4023: retried-create dedup (the send_idempotency_key pattern). A retried create returns the FIRST account it created instead of minting a second.',
                   },
                   single_signer_waiver: {
                     type: 'object',
@@ -5530,7 +5552,8 @@ export const openapiSpec = {
         },
         responses: {
           '201': {
-            description: 'Account row recorded. Counterfactual — nothing was deployed.',
+            description:
+              'Account row recorded. Counterfactual — nothing was deployed. Also answers an idempotent retry (the first account) and the winner of a concurrent create at the same derived address.',
             content: {
               'application/json': {
                 schema: {
@@ -5548,9 +5571,15 @@ export const openapiSpec = {
               },
             },
           },
-          '400': { ...errorResponse, description: 'Bad owner configuration, or a chain the delegation rail does not serve.' },
+          '400': { ...errorResponse, description: 'Bad owner configuration, a chain the delegation rail does not serve, or a mixed/ambiguous request shape.' },
           '401': errorResponse,
+          '404': { ...errorResponse, description: 'Create-additional: the named source_account_id is not an account the caller owns.' },
           '409': { ...errorResponse, description: 'This account is already registered for the caller.' },
+          '422': {
+            ...errorResponse,
+            description:
+              'Create-additional: the source account has no passkey to copy, the key_id is not one of its passkeys, or the per-user per-chain soft cap (10) is reached.',
+          },
           '502': { ...errorResponse, description: 'The account address could not be derived.' },
         },
       },

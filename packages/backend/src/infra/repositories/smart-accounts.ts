@@ -406,13 +406,20 @@ export async function deleteAccountForUser(
  * review (a testnet row's backup passkey must never satisfy the mainnet
  * signer floor).
  */
-export const FIND_HYBRID_OWNER_ACCOUNT_ROW_SQL = `SELECT id, owner_address, single_signer_waiver_at FROM smart_accounts
+export const FIND_HYBRID_OWNER_ACCOUNT_ROW_SQL = `SELECT id, owner_address, single_signer_waiver_at, deploy_salt FROM smart_accounts
      WHERE user_id = $1 AND LOWER(account_address) = LOWER($2) AND chain_id = $3`
 
 export interface HybridOwnerAccountRow {
   id: string
   owner_address: string | null
   single_signer_waiver_at: string | null
+  /**
+   * The account's per-account deploy salt (#4023): `'0x'` for every account
+   * created before migration 114, otherwise the 32-byte hex of the account's
+   * never-reused counter value. Deriving or deploying this account at any
+   * other salt derives a DIFFERENT account.
+   */
+  deploy_salt: string
 }
 
 /** `userId` is REQUIRED — owner-scoped account lookup. */
@@ -560,9 +567,53 @@ export async function listSessionAccountsForUser(
 export const FIND_HYBRID_ACCOUNT_BY_ADDRESS_FOR_USER_SQL = `SELECT id FROM smart_accounts
        WHERE user_id = $1 AND LOWER(account_address) = LOWER($2) AND chain_id = $3`
 export const COUNT_ACCOUNTS_FOR_USER_SQL = `SELECT COUNT(*) AS count FROM smart_accounts WHERE user_id = $1`
-export const INSERT_HYBRID_ACCOUNT_SQL = `INSERT INTO smart_accounts (user_id, account_address, chain_id, name, is_default, account_type, execution_rail, owner_address, single_signer_waiver_at)
-       VALUES ($1, $2, $3, $4, $5, 'delegator_hybrid', 'delegation', $6, $7)
+export const COUNT_ACCOUNTS_FOR_USER_ON_CHAIN_SQL = `SELECT COUNT(*) AS count FROM smart_accounts WHERE user_id = $1 AND chain_id = $2`
+export const INSERT_HYBRID_ACCOUNT_SQL = `INSERT INTO smart_accounts (user_id, account_address, chain_id, name, is_default, account_type, execution_rail, owner_address, single_signer_waiver_at, deploy_salt, create_idempotency_key)
+       VALUES ($1, $2, $3, $4, $5, 'delegator_hybrid', 'delegation', $6, $7, $8, $9)
+       ON CONFLICT DO NOTHING
        RETURNING id, created_at`
 export const FIND_OWNED_HYBRID_ACCOUNT_SQL = `SELECT 1 FROM smart_accounts
        WHERE user_id = $1 AND LOWER(account_address) = LOWER($2) AND chain_id = $3
          AND account_type = 'delegator_hybrid'`
+
+// ── Multiple accounts (#4023, epic #4022 slice S1) ───────────────────────────
+//
+// The deploy salt is the linchpin: one passkey owns several accounts on one
+// chain because each account's address is derived at its own salt. The
+// counter lives OUTSIDE smart_accounts on purpose — unlink is a hard DELETE
+// of the account row (user-accounts.ts), and a counter kept there would
+// reset, re-issuing the deleted account's salt and silently re-linking a
+// possibly funded old address. The uniqueness rules are explicit UNIQUE
+// constraints in migration 114: one on the derived address
+// (chain_id, LOWER(account_address)) so two concurrent creates cannot both
+// claim one address, and one on the create idempotency key
+// (user_id, create_idempotency_key) so a retried create answers the FIRST
+// account, the payments.ts send_idempotency_key pattern.
+
+/**
+ * The per-(user, signer) salt counter's allocation. Atomic on the row: two
+ * concurrent creates serialize on the UPDATE and return DISTINCT values.
+ * `last_allocated` starts at 0; every allocation returns 1, 2, 3, … — the
+ * salt stored on the account row is `pad(toHex(value), { size: 32 })`.
+ */
+export const ALLOCATE_HYBRID_DEPLOY_SALT_SQL = `INSERT INTO hybrid_deploy_salt_counters (user_id, salt_key, last_allocated)
+       VALUES ($1, $2, 1)
+       ON CONFLICT (user_id, salt_key)
+       DO UPDATE SET last_allocated = hybrid_deploy_salt_counters.last_allocated + 1, updated_at = NOW()
+       RETURNING last_allocated`
+
+/** The create-additional replay read: a retried create returns the FIRST account. */
+export const FIND_ACCOUNT_BY_CREATE_IDEMPOTENCY_KEY_SQL = `SELECT id, account_address, chain_id, created_at FROM smart_accounts
+       WHERE user_id = $1 AND create_idempotency_key = $2`
+
+/** The source account a create-additional copies its owner passkey from — owner-scoped. */
+export const FIND_DELEGATOR_HYBRID_ACCOUNT_FOR_USER_SQL = `SELECT id FROM smart_accounts
+       WHERE id = $1 AND user_id = $2 AND account_type = 'delegator_hybrid'`
+
+/**
+ * The unique-address race loser's read: the winner's row with the fields the
+ * 201 response echoes. User-scoped — a foreign row at the same derived
+ * address is refused, not answered.
+ */
+export const FIND_HYBRID_ACCOUNT_BY_ADDRESS_FOR_REPLAY_SQL = `SELECT id, created_at FROM smart_accounts
+       WHERE user_id = $1 AND LOWER(account_address) = LOWER($2) AND chain_id = $3`

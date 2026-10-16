@@ -43,6 +43,7 @@ import {
 import { encodeFunctionData, parseAbi } from 'viem'
 
 import { getDelegationContracts, DELEGATION_RAIL_CHAIN_IDS, chainForId } from './delegation-contracts.js'
+import { normalizeDeploySalt } from './hybrid-provisioning.js'
 import { rpcTransport } from '../infra/chain/rpc-transport.js'
 
 // Re-exported so route handlers can name the delegation type without importing
@@ -602,6 +603,14 @@ export interface TreasuryOpsConfig {
   /** P256 signer set for a pure-passkey account (#885). */
   passkeys?: TreasuryPasskey[]
   /**
+   * The account's REQUIRED per-account deploy salt (#4023) — the stored
+   * `smart_accounts.deploy_salt`. Used ONLY by the counterfactual branch
+   * below (an undeployed account with no `accountAddress`); it has no
+   * default, so a caller that forgets it fails to compile instead of
+   * silently deriving the salt-0 account.
+   */
+  deploySalt: Hex
+  /**
    * The account's DEPLOYED address (#891 fix). Treasury ops only exist after
    * the account is deployed (the grant deploys it, #860), and the signer set
    * can have EVOLVED since provisioning (addKey/removeKey, #888) — deriving
@@ -692,7 +701,7 @@ export async function createTreasuryOps(cfg: TreasuryOpsConfig): Promise<Treasur
   const location =
     cfg.accountAddress && pinnedDeployed
       ? ({ address: cfg.accountAddress } as const)
-      : ({ deployParams: fullDeployParams, deploySalt: '0x' } as const)
+      : ({ deployParams: fullDeployParams, deploySalt: normalizeDeploySalt(cfg.deploySalt) } as const)
   const signerConfig = isPasskey
     ? {
         webAuthnAccount: toWebAuthnAccount({

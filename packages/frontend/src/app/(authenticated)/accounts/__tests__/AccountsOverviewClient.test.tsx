@@ -144,11 +144,34 @@ describe('AccountsOverviewClient — no global active account (#3719)', () => {
  * attach a Safe: a three-mode modal (choose / deploy / import) reached from
  * an "Add account" button in the page header and from the empty state's
  * "Add your first account". Both routes it called now answer 410, so the
- * trigger is gone with the modal. Asserting the ABSENCE of an affordance is
- * weak by nature, so this asserts it in both states the page can be in and
- * on both the accessible name and the modal's own headings — the specific
- * strings a reintroduction would have to render.
+ * trigger is gone with the modal.
+ *
+ * #4024 re-scoped these from "no account entry point" to "no SAFE entry
+ * point". The Accounts screen now has a create action — "New account", which
+ * provisions a passkey-owned delegation-rail account — so a test that asked
+ * whether any add/create control exists would be asserting something false,
+ * and one that only queried `/add account/i` would pass vacuously next to it.
+ * What #1984 closed is the Safe deploy/import flow, so the absences below are
+ * that flow's own strings: its trigger labels and its modal's headings and
+ * actions, the specific text a reintroduction would have to render.
  */
+const SAFE_INFLOW_STRINGS = [
+  'Add your first account',
+  'Import existing account',
+  'Import account',
+  'Create Haven account',
+  'Connect a wallet to deploy',
+  'Create a new Haven account or import one you already use.',
+]
+
+function expectNoSafeInflow() {
+  expect(screen.queryByRole('button', { name: /^add account$/i })).toBeNull()
+  for (const text of SAFE_INFLOW_STRINGS) {
+    expect(screen.queryByText(text), `the retired Safe flow rendered "${text}"`).toBeNull()
+    expect(screen.queryByRole('button', { name: text })).toBeNull()
+  }
+}
+
 describe('AccountsOverviewClient — the Safe inflow is closed (#1984)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -157,7 +180,7 @@ describe('AccountsOverviewClient — the Safe inflow is closed (#1984)', () => {
     mockUseAuth.mockReturnValue({ user: { accounts: [BASE, SEPOLIA] } })
   })
 
-  it('offers no Add-account entry point when accounts exist', () => {
+  it('offers no Safe deploy or import entry point when accounts exist', () => {
     mockUseAccounts.mockReturnValue({
       accounts: [BASE, SEPOLIA],
       loading: false,
@@ -168,23 +191,18 @@ describe('AccountsOverviewClient — the Safe inflow is closed (#1984)', () => {
     // The cards still render — this is a read/manage surface, not a deletion.
     expect(screen.getByRole('link', { name: 'Base account' })).toBeInTheDocument()
 
-    expect(screen.queryByRole('button', { name: /add account/i })).toBeNull()
-    expect(screen.queryByRole('button', { name: /add your first account/i })).toBeNull()
-    expect(screen.queryByText('Import existing account')).toBeNull()
-    expect(screen.queryByText('Create Haven account')).toBeNull()
+    expectNoSafeInflow()
   })
 
-  it('offers no Add-account entry point from the empty state either', () => {
+  it('offers no Safe deploy or import entry point from the empty state either', () => {
     mockUseAccounts.mockReturnValue({ accounts: [], loading: false })
 
     render(<AccountsOverviewClient />)
 
     expect(screen.getByText('No Haven accounts yet')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /add/i })).toBeNull()
-    expect(screen.queryByText('Import existing account')).toBeNull()
+    expectNoSafeInflow()
   })
 })
-
 
 /**
  * #2374 — the card's "set as default" star is gone, by owner decision.

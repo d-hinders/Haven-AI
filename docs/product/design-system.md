@@ -98,7 +98,7 @@ covers:
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
-last-verified: "2026-10-14"
+last-verified: 2026-10-16
 ---
 
 # Haven Design System
@@ -1592,10 +1592,16 @@ equal and still submits nothing.
 `ui/StepProgress` is the numbered disc band a multi-step modal carries in its
 header (`Modal`'s `headerAccessory`): one disc per step, the current one
 brand-soft with a brand ring, finished ones success-soft with a tick, the rest
-a `--v2-border` ring, joined by 1px lines. It says **where the user is in a
-wizard**, and nothing else: a step's own instructions live in its body. Call
-sites: the Connect agent modal (steps 1-2) and `ReplaceSigningKeyModal`; its `/design-system` specimen is the "StepProgress"
-section, after SidePanel.
+a `--v2-border` ring, joined by 1px lines that **stretch to fill the band**, so
+the track spans the same edges as the content below it. Each disc may carry a
+short `labels` entry beneath it (a word or two — "Name", "Budget"), `--v2-ink`
+and medium on the active step, `--v2-ink-3` otherwise. It says **where the user
+is in a wizard**, and nothing else: a step's own instructions live in its body.
+It renders as an `<ol>`: `aria-current="step"` on the active item, an `sr-only`
+"Step N of M" prefix before the label, the disc glyph and connectors
+`aria-hidden`. Call sites: the Connect agent modal (steps 1-2: Name / Budget /
+Connect) and `ReplaceSigningKeyModal` (Reason / New key / Review / Approve);
+its `/design-system` specimen is the "StepProgress" section, after SidePanel.
 
 ### Numbered step list (`ConnectSteps`, #3832)
 

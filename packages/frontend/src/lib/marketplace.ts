@@ -529,8 +529,9 @@ export type HowToBuyAnswer =
 export function howToBuy(input: HowToBuyInput): HowToBuyAnswer {
   const { merchantName: _merchantName, offers, agents, budgets, merchantBudgets, funding, nowMs = Date.now(), preferChainId = null } = input
   const activeAgents = agents.filter(isActiveAgent)
-  // An able agent on the preferred chain is named before one elsewhere;
-  // otherwise the list order stands (a stable sort).
+  // An agent on the preferred chain is named before one elsewhere — the
+  // able agent in step 1, the budget-fix agent in step 3; otherwise the
+  // list order stands (a stable sort).
   const byPreference =
     preferChainId == null
       ? activeAgents

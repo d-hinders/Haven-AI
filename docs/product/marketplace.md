@@ -352,7 +352,8 @@ Coming-soon and no-offer merchants show no panel.
      'any-recipient budget' need a budget that can pay anyone") — an open
      budget's "can pay anyone" already says the rest.
    - **A budget fix** when no agent can pay and a budget-shaped no exists:
-     the panel names the first agent with one and offers "Set a budget for
+     the panel names the first agent with one (one on the default
+     account's chain first, as in the done line) and offers "Set a budget for
      this merchant" (the same modal as the header action) ONLY when the
      action is available AND an eligible agent is ACTIVE —
      `eligibleFundingAgents` admits paused and pending agents, the panel

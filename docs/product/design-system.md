@@ -1728,9 +1728,9 @@ Rules:
 - **Name a gate once per viewport** (#1684). When the modal subtitle names the
   action, the row heading says what the row asks for rather than repeating the
   subtitle. One exception: the approve row reads "Review and approve" under
-  "Approve the agent budget" — the owner approves and never "signs"
-  (copy-guidelines.md; owner decision 2026-10-16), and that outranks avoiding a
-  shared verb.
+  "Approve the agent budget": owner decision 2026-10-16 that this step says
+  "approve", not "sign" (copy-guidelines.md prefers "approve actions"), which
+  outranks avoiding a shared verb.
 - A row's done state comes from state that only moves forward (the
   connect flow's `promptCopied`, latched per setup and keyed by `setup_id`, so
   "Create a new setup" starts uncopied), never from a value a later action can

@@ -179,7 +179,7 @@ export function DelegationApprovalStep({
           busyLabel={confirming ? 'Finishing…' : 'Waiting for your approval…'}
           // #3895: this screen approves; the agent page sets. Each caller
           // supplies the failure sentence its own button's verb carries.
-          // The owner approves by signing, so the sentence never makes
+          // The owner approves, so the sentence never makes
           // Haven the approver (copy-guidelines.md, attribution).
           failureMessage="The budget was not approved. Nothing changed — try again."
           // #3933: on a resume or a retry the agent may already hold a live

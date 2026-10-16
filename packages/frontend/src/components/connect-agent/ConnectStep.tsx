@@ -169,9 +169,9 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
             state: 'active',
             // The modal subtitle names the gate ("Approve the agent budget",
             // pinned by e2e/connect-agent.spec.ts). The heading shares its
-            // verb on purpose (owner decision 2026-10-16): the owner approves,
-            // never "signs" (copy-guidelines.md), which outranks #1684's
-            // "say it in other words" for this one row.
+            // verb on purpose: owner decision 2026-10-16 that this step says
+            // "approve", not "sign" (copy-guidelines.md prefers "approve
+            // actions"), which outranks #1684's "say it in other words" here.
             title: 'Review and approve',
             wideBodyOnMobile: true,
             children: (

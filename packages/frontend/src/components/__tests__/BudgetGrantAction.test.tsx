@@ -47,7 +47,7 @@ describe('BudgetGrantAction (#1073)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
 
-    const message = await screen.findByText(/No signature yet — nothing changed/)
+    const message = await screen.findByText(/No approval yet — nothing changed/)
     expect(message.className).not.toMatch(/danger/)
     expect(screen.getByRole('button', { name: 'Approve budget' })).toBeEnabled()
     expect(onGranted).not.toHaveBeenCalled()
@@ -88,10 +88,10 @@ describe('BudgetGrantAction (#1073)', () => {
     renderAction({ grant })
 
     fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
-    await screen.findByText(/No signature yet/)
+    await screen.findByText(/No approval yet/)
 
     fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
-    await waitFor(() => expect(screen.queryByText(/No signature yet/)).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText(/No approval yet/)).not.toBeInTheDocument())
   })
 
   it('UNCONFIRMED (#3930) gets its OWN sentence: never "nothing changed", sends the owner to check the budgets first', async () => {

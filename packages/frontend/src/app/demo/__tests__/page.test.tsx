@@ -129,7 +129,7 @@ describe('/demo page', () => {
     // Step 8 is an UNNUMBERED summary surface now, not StepCard 8 (design
     // review round 4). No false "never held custody" claim either — EIP-3009
     // funds the agent's delegate transiently (review round 1, F4).
-    expect(screen.getByText(/budget you signed and it could not exceed/)).toBeInTheDocument()
+    expect(screen.getByText(/budget you approved and it could not exceed/)).toBeInTheDocument()
     expect(screen.queryByText('8')).not.toBeInTheDocument()
     // "Questions? Ask the team." is plain text: no contact destination exists
     // (the site has no contact page), and a link that goes nowhere

@@ -268,8 +268,8 @@ and a recording failure is swallowed: metrics can never gate a payment. See
 > showed. `useAgentRekey.ts` gains a read-only `signersState`
 > (`loading`/`loaded`/`error`), so a connect offer can tell a pending signer
 > read from a failed one; `signingBlockedReason` and every signing step are
-> unchanged. Elsewhere the change only adds restrictions: "Sign new budget" and
-> the off-ramp "Sign transfer" are disabled while no one on this device can
+> unchanged. Elsewhere the change only adds restrictions: "Approve new budget" and
+> the off-ramp "Approve transfer" are disabled while no one on this device can
 > sign. (`WalletButton.tsx`, whose
 > disconnect-then-reopen-the-picker logic moved unchanged into a shared
 > `useSwitchWallet` hook, is not in the coverage list.) Nothing that decides

@@ -175,7 +175,7 @@ export default function BudgetGrantAction({
       */}
       {outcome === 'cancelled' && (
         <p className="mb-3 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-          No signature yet — nothing changed. You can try again when you are ready.
+          No approval yet — nothing changed. You can try again when you are ready.
         </p>
       )}
 

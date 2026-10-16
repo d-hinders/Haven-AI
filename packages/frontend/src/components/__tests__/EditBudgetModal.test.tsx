@@ -127,8 +127,8 @@ describe('EditBudgetModal (#3166) — form', () => {
 
   it('states the old budget keeps working and nothing changes until signed', () => {
     renderModal()
-    expect(screen.getByText(/Your current budget keeps working until the new one is signed/)).toBeInTheDocument()
-    expect(screen.getByText(/Nothing changes until you sign/)).toBeInTheDocument()
+    expect(screen.getByText(/Your current budget keeps working until the new one is approved/)).toBeInTheDocument()
+    expect(screen.getByText(/Nothing changes until you approve/)).toBeInTheDocument()
   })
 })
 
@@ -138,10 +138,10 @@ describe('EditBudgetModal (#3166) — review', () => {
   it('offers the owner wallet connect on the review step when nobody here can sign', () => {
     mockReady.mockReturnValue(false)
     toReview()
-    expect(screen.getByText(/Connect your account owner wallet to sign the new budget/)).toBeInTheDocument()
+    expect(screen.getByText(/Connect your account owner wallet to approve the new budget/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeInTheDocument()
     // Same gate as BudgetGrantAction: the signature is dead while the hint shows.
-    expect(screen.getByRole('button', { name: 'Sign new budget' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Approve new budget' })).toBeDisabled()
   })
 
   it('no wallet connect while the signer set loads — connecting would not fix it', () => {
@@ -155,13 +155,13 @@ describe('EditBudgetModal (#3166) — review', () => {
     mockPasskeyElsewhere.mockReturnValue(true)
     toReview()
     expect(screen.getByText(/passkey may be on another device/)).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Sign new budget' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Approve new budget' })).toBeEnabled()
   })
 
   it('a signable review offers no wallet connect', () => {
     toReview()
     expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Sign new budget' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Approve new budget' })).toBeEnabled()
   })
 
   it('shows a RAISE explicitly before signing', () => {
@@ -180,14 +180,14 @@ describe('EditBudgetModal (#3166) — review', () => {
   it('states the brief two-grants window and that the flow asks for the second signature', () => {
     toReview('10')
     expect(screen.getByText(/both the old and the new budget exist briefly/)).toBeInTheDocument()
-    expect(screen.getByText(/Haven will ask for that second signature/)).toBeInTheDocument()
+    expect(screen.getByText(/Haven will ask for that second approval/)).toBeInTheDocument()
   })
 
   it('runs the composition on sign and refreshes the card on success (#1090)', async () => {
     const { onBudgetChange } = renderModal({ budget: budget({ recipient_address: RECIPIENT }) })
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve new budget' }))
 
     await waitFor(() => expect(mockEditBudget).toHaveBeenCalledTimes(1))
     // The OLD hash goes to the composition; the new limits are the input.
@@ -216,7 +216,7 @@ describe('EditBudgetModal (#3166) — review', () => {
     renderModal({ budget: budget({ recipient_address: RECIPIENT }) })
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve new budget' }))
     await waitFor(() => expect(screen.getByText('Your earlier change went through')).toBeInTheDocument())
     expect(screen.getByText(/The budget has the amount, period and recipient you chose then, not the ones you entered now/)).toBeInTheDocument()
     expect(screen.queryByText(/The new limits took effect/)).toBeNull()
@@ -249,7 +249,7 @@ describe('EditBudgetModal (#3331 F3) — merchant-locked budgets', () => {
     renderModal({ budget: merchantLockedBudget() })
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve new budget' }))
     await waitFor(() => expect(mockEditBudget).toHaveBeenCalledTimes(1))
     expect(mockEditBudget.mock.calls[0][1]).toMatchObject({
       recipientAddress: RECIPIENT,
@@ -300,7 +300,7 @@ describe('EditBudgetModal (#3331 F3) — merchant-locked budgets', () => {
     renderModal({ budget: merchantLockedBudget() })
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve new budget' }))
     await waitFor(() => expect(screen.getByText(/The budget could not be changed/)).toBeInTheDocument())
     expect(screen.getByText(expected)).toBeInTheDocument()
     // Never the raw backend sentence verbatim.
@@ -321,7 +321,7 @@ describe('EditBudgetModal (#3331 F3) — merchant-locked budgets', () => {
     renderModal({ budget: merchantLockedBudget() })
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve new budget' }))
     await waitFor(() => expect(screen.getByText(/The budget could not be changed/)).toBeInTheDocument())
     expect(screen.getByText(/A key rotation is in flight for this agent/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled()
@@ -332,7 +332,7 @@ describe('EditBudgetModal (#3331 F3) — merchant-locked budgets', () => {
     expect(screen.getByLabelText('Recipient')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve new budget' }))
     await waitFor(() => expect(mockEditBudget).toHaveBeenCalledTimes(1))
     expect(mockEditBudget.mock.calls[0][1]).not.toHaveProperty('merchantSlug')
   })
@@ -342,17 +342,17 @@ describe('EditBudgetModal (#3166) — outcomes', () => {
   it('a CANCELLED signature reopens the review — nothing changed, no error', async () => {
     mockEditBudget.mockResolvedValue({ ok: false, reason: 'cancelled' })
     toReview('10')
-    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve new budget' }))
     await waitFor(() => expect(mockEditBudget).toHaveBeenCalled())
     // Back on the review step, still retryable in place.
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign new budget' })).toBeEnabled())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve new budget' })).toBeEnabled())
     expect(screen.queryByText(/Budget update failed/)).toBeNull()
   })
 
   it('a FAILED run says nothing changed and the old budget still works', async () => {
     mockEditBudget.mockResolvedValue({ ok: false, reason: 'failed' })
     toReview('10')
-    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve new budget' }))
     await waitFor(() => expect(screen.getByText('Budget update failed')).toBeInTheDocument())
     expect(screen.getByText(/Nothing changed — your current budget still works/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled()
@@ -365,7 +365,7 @@ describe('EditBudgetModal (#3166) — outcomes', () => {
       detail: 'A key rotation is in flight for this agent — finish or abandon the re-key before granting a new budget',
     })
     toReview('10')
-    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve new budget' }))
     await waitFor(() => expect(screen.getByText(/The budget could not be changed/)).toBeInTheDocument())
     expect(screen.getByText(/A key rotation is in flight for this agent/)).toBeInTheDocument()
     expect(screen.getByText(/Your current budget is unchanged/)).toBeInTheDocument()
@@ -380,7 +380,7 @@ describe('EditBudgetModal (#3166) — outcomes', () => {
     })
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve new budget' }))
     await waitFor(() => expect(screen.getByText(/New budget is live — one step left/)).toBeInTheDocument())
     // #3933: the replaced budget no longer has a row with a Stop beside it —
     // the screen names it, says what it can still do, and offers the Stop.
@@ -393,7 +393,7 @@ describe('EditBudgetModal (#3166) — outcomes', () => {
   it('success with oldDelegationRevoked: false still reads as done', async () => {
     mockEditBudget.mockResolvedValue({ ok: true, newDelegationHash: '0x' + 'be'.repeat(32), oldDelegationRevoked: false })
     toReview('10')
-    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve new budget' }))
     await waitFor(() => expect(screen.getByText(/the previous budget was already stopped/)).toBeInTheDocument())
   })
 
@@ -470,11 +470,11 @@ describe('EditBudgetModal (#3537) — background poll', () => {
     const { rerenderWith } = renderControlled()
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
-    expect(screen.getByRole('button', { name: 'Sign new budget' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Approve new budget' })).toBeInTheDocument()
 
     rerenderWith()
 
-    expect(screen.getByRole('button', { name: 'Sign new budget' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Approve new budget' })).toBeInTheDocument()
   })
 
   it('keeps the revoke_unfinished outcome across a poll', async () => {
@@ -486,7 +486,7 @@ describe('EditBudgetModal (#3537) — background poll', () => {
     const { rerenderWith } = renderControlled()
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve new budget' }))
     await waitFor(() => expect(screen.getByText(/New budget is live — one step left/)).toBeInTheDocument())
 
     rerenderWith()
@@ -503,7 +503,7 @@ describe('EditBudgetModal (#3537) — background poll', () => {
     rerenderWith({ open: true, budget: budget({ budget_atomic: '7000000' }) })
 
     expect(screen.getByLabelText('Budget amount')).toHaveValue('7')
-    expect(screen.queryByRole('button', { name: 'Sign new budget' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Approve new budget' })).not.toBeInTheDocument()
   })
 })
 
@@ -539,7 +539,7 @@ describe('EditBudgetModal — replace without a silent leftover (#3933)', () => 
     expect(screen.getByText(/Pays Ampersend Demo API only/)).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve new budget' }))
     await waitFor(() => expect(mockEditBudget).toHaveBeenCalled())
     const [oldHash, input] = mockEditBudget.mock.calls[0]!
     expect(oldHash).toBe(OLD_HASH)
@@ -557,7 +557,7 @@ describe('EditBudgetModal — replace without a silent leftover (#3933)', () => 
     mockEditBudget.mockResolvedValue({ ok: false, reason: 'revoke_unfinished', newDelegationHash: '0x' + 'be'.repeat(32) })
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve new budget' }))
     await screen.findByRole('button', { name: 'Stop old budget' })
     return view
   }
@@ -591,7 +591,7 @@ describe('EditBudgetModal — replace without a silent leftover (#3933)', () => 
     mockEditBudget.mockResolvedValue({ ok: false, reason: 'slot_occupied', existingDelegationHash: '0x' + 'e1'.repeat(32) })
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve new budget' }))
     await waitFor(() => expect(screen.getByText('This budget has changed')).toBeInTheDocument())
     expect(screen.getByText(/nothing was changed\. Close this and edit the current budget/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
@@ -617,17 +617,17 @@ describe('EditBudgetModal — a re-key pair and a recipient change (#3933 review
     withPair()
     toReview('10')
     expect(
-      screen.getByText(/It is held in two parts since this agent.s signing key was replaced, so stopping it takes two more signatures, one per part\. Haven will ask for each\./),
+      screen.getByText(/It is held in two parts since this agent.s signing key was replaced, so stopping it takes two more approvals, one per part\. Haven will ask for each\./),
     ).toBeInTheDocument()
-    expect(screen.queryByText(/Haven will ask for that second signature/)).toBeNull()
+    expect(screen.queryByText(/Haven will ask for that second approval/)).toBeNull()
     expect(mockEditBudget).not.toHaveBeenCalled()
   })
 
   it('a single budget keeps the one-signature copy', () => {
     mockBudgets.mockReturnValue([budget()])
     toReview('10')
-    expect(screen.getByText(/Haven will ask for that second signature/)).toBeInTheDocument()
-    expect(screen.queryByText(/two more signatures/)).toBeNull()
+    expect(screen.getByText(/Haven will ask for that second approval/)).toBeInTheDocument()
+    expect(screen.queryByText(/two more approvals/)).toBeNull()
   })
 
   it('a pair left half-stopped: the finish action Stops each row still enabled, then reads as done', async () => {
@@ -641,16 +641,16 @@ describe('EditBudgetModal — a re-key pair and a recipient change (#3933 review
     })
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve new budget' }))
     await screen.findByRole('button', { name: 'Stop old budget' })
-    expect(screen.getByText('It is held in two parts, so stopping it takes two signatures.')).toBeInTheDocument()
+    expect(screen.getByText('It is held in two parts, so stopping it takes two approvals.')).toBeInTheDocument()
 
     // First Stop lands, the second is cancelled: the screen stays, naming one part left.
     mockRevoke.mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({ ok: false, reason: 'cancelled' })
     fireEvent.click(screen.getByRole('button', { name: 'Stop old budget' }))
-    await waitFor(() => expect(screen.getByText('No signature yet. The previous budget is not stopped.')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('No approval yet. The previous budget is not stopped.')).toBeInTheDocument())
     expect(mockRevoke.mock.calls.map((c) => c[0])).toEqual([OLD_HASH, PAIR_HASH])
-    expect(screen.queryByText(/stopping it takes two signatures/)).toBeNull()
+    expect(screen.queryByText(/stopping it takes two approvals/)).toBeNull()
     expect(screen.queryByText(/the previous budget is stopped/)).toBeNull()
 
     // The retry resumes at the row still enabled — never re-asks for the first.
@@ -665,7 +665,7 @@ describe('EditBudgetModal — a re-key pair and a recipient change (#3933 review
     renderModal({ budget: budget({ recipient_address: RECIPIENT }) })
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve new budget' }))
     await waitFor(() => expect(mockEditBudget).toHaveBeenCalled())
     expect(mockEditBudget.mock.calls[0][2]).toEqual({ oldSlot: { tokenAddress: USDC, recipientAddress: RECIPIENT } })
   })
@@ -693,7 +693,7 @@ describe('EditBudgetModal — a re-key pair and a recipient change (#3933 review
     mockEditBudget.mockResolvedValue({ ok: false, reason: 'target_slot_occupied', existingDelegationHash: TARGET_HASH })
     fireEvent.change(screen.getByLabelText('Recipient'), { target: { value: OTHER } })
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve new budget' }))
     await waitFor(() => expect(screen.getByText('This recipient already has a budget')).toBeInTheDocument())
     expect(
       screen.getByText(
@@ -722,7 +722,7 @@ describe('EditBudgetModal — a re-key pair and a recipient change (#3933 review
       newDelegationHash: '0x' + 'be'.repeat(32),
       unstoppedDelegationHashes: [OLD_HASH],
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve new budget' }))
     await screen.findByRole('button', { name: 'Stop old budget' })
     expect(
       screen.getByText(/budget pays a different recipient, so it keeps working, in Haven and outside it, until it is stopped\./),

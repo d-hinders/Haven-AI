@@ -420,7 +420,7 @@ export default function EditBudgetModal({
           <div>
             <h2 className="text-lg font-semibold text-[var(--v2-ink)]">Edit budget</h2>
             <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
-              Change what this agent can spend. Nothing changes until you sign.
+              Change what this agent can spend. Nothing changes until you approve.
             </p>
           </div>
           <button
@@ -466,7 +466,7 @@ export default function EditBudgetModal({
                     — "budget for its recipient" here would be a second, vaguer
                     way of saying the same thing. */}
                 {!isMerchantLocked && budget.recipient_address ? ' for its recipient' : ''}. Your current
-                budget keeps working until the new one is signed.
+                budget keeps working until the new one is approved.
               </p>
               {/* #3398: the amount row is the shared `BudgetAmountRow` — the
                   token symbol rides inside the amount input as a suffix, so
@@ -575,7 +575,7 @@ export default function EditBudgetModal({
                   </p>
                 </div>
                 <div>
-                  <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">After you sign</p>
+                  <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">After you approve</p>
                   <p className="text-sm font-medium text-[var(--v2-ink)]">
                     {changes.newAmount} {changes.symbol} {budgetPeriodWords(changes.newPeriod)}
                     {isMerchantLocked && changes.newRecipient
@@ -599,7 +599,7 @@ export default function EditBudgetModal({
               </div>
               <div className="space-y-2 rounded-xl border border-[var(--v2-border)] p-4 text-xs leading-relaxed text-[var(--v2-ink-2)]">
                 <p>
-                  Signing once sets the new limits. Your current budget keeps working until then —
+                  Approving once sets the new limits. Your current budget keeps working until then —
                   if you stop here, nothing changes.
                 </p>
                 {stopCount > 1 ? (
@@ -607,17 +607,17 @@ export default function EditBudgetModal({
                   // signing key" is held as more than one part, and each part
                   // takes its own Stop signature. Say so before signing.
                   <p>
-                    Right after you sign, both the old and the new budget exist briefly (the
+                    Right after you approve, both the old and the new budget exist briefly (the
                     agent could spend up to their combined limit) until you stop the old one. It
                     is held in {countWord(stopCount)} parts since this agent&apos;s signing key
-                    was replaced, so stopping it takes {countWord(stopCount)} more signatures,
+                    was replaced, so stopping it takes {countWord(stopCount)} more approvals,
                     one per part. Haven will ask for each.
                   </p>
                 ) : (
                   <p>
-                    Right after you sign, both the old and the new budget exist briefly (the
-                    agent could spend up to their combined limit) until you sign once more to stop
-                    the old one. Haven will ask for that second signature.
+                    Right after you approve, both the old and the new budget exist briefly (the
+                    agent could spend up to their combined limit) until you approve once more to stop
+                    the old one. Haven will ask for that second approval.
                   </p>
                 )}
                 {/* #3933: what the Stop signature does on-chain, and what it
@@ -643,7 +643,7 @@ export default function EditBudgetModal({
                 // fails, and offer the way back in place.
                 <div className="space-y-2">
                   <p className="text-xs text-[var(--v2-ink-3)]">
-                    Connect your account owner wallet to sign the new budget.
+                    Connect your account owner wallet to approve the new budget.
                   </p>
                   <WalletConnectAction />
                 </div>
@@ -659,7 +659,7 @@ export default function EditBudgetModal({
                   disabled={busy || (!ready && !signersError && !signersLoading)}
                   className="flex-1"
                 >
-                  Sign new budget
+                  Approve new budget
                 </Button>
               </div>
             </div>
@@ -668,10 +668,10 @@ export default function EditBudgetModal({
           {step === 'working' && (
             <div className="space-y-4 py-8 text-center">
               <div className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-[var(--v2-brand)] border-t-transparent" />
-              <p className="text-sm font-medium text-[var(--v2-ink)]">Waiting for your signature…</p>
+              <p className="text-sm font-medium text-[var(--v2-ink)]">Waiting for your approval…</p>
               <p className="mx-auto max-w-xs text-xs text-[var(--v2-ink-3)]">
                 Approve in your wallet or with your passkey. The budget changes only after you
-                sign.
+                approve.
               </p>
             </div>
           )}
@@ -748,7 +748,7 @@ export default function EditBudgetModal({
                     {unstoppedCount > 1 ? (
                       <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
                         It is held in {countWord(unstoppedCount)} parts, so stopping it takes{' '}
-                        {countWord(unstoppedCount)} signatures.
+                        {countWord(unstoppedCount)} approvals.
                       </p>
                     ) : null}
                     {finishState === 'failed' ? (
@@ -757,7 +757,7 @@ export default function EditBudgetModal({
                       </p>
                     ) : finishState === 'cancelled' ? (
                       <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                        No signature yet. The previous budget is not stopped.
+                        No approval yet. The previous budget is not stopped.
                       </p>
                     ) : null}
                   </>

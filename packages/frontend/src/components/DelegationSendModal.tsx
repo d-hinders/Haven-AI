@@ -92,7 +92,7 @@ export default function DelegationSendModal({ open, onClose, accountAddress, cha
       onSent?.()
       onClose()
     } else if (result.reason === 'cancelled') {
-      toast.info('Signature was cancelled.')
+      toast.info('Approval was cancelled.')
     } else {
       toast.error(result.message ?? 'Haven could not send this payment. Try again.')
     }

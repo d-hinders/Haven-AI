@@ -30,7 +30,7 @@ covers:
   - packages/frontend/src/lib/agent-skill-index.ts
   - scripts/frontend-copy-lint.mjs
   - scripts/lib/ratchet.mjs
-last-verified: "2026-09-26"
+last-verified: 2026-10-16
 ---
 
 # Haven UX Copy Guidelines
@@ -144,6 +144,30 @@ Avoid:
 - “Passkey-backed signer as owner”
 
 The user does not need to understand ownership architecture during onboarding.
+
+### The owner approves; only an agent's key signs (owner decision 2026-10-16)
+
+When the account holder authorises a money action — granting, editing or
+stopping a budget, removing an agent, approving a transfer — the copy says
+**approve**, never **sign**. The passkey or wallet prompt is how they approve,
+not a separate act the copy should name. That covers buttons, busy labels
+("Waiting for your approval…"), counts ("two more approvals") and the
+cancelled/"nothing changed" lines around them.
+
+"Sign" stays where it is literally true and is not the owner's action: the
+agent's own key signs payments ("private signing key", "Replace signing key"),
+an attestation is a "signed record", and retired-rail or protocol prose names
+real signatures.
+
+Prefer:
+- “Approve new budget”, “Approve transfer”
+- “You approve once and every budget it holds ends”
+- “Waiting for your approval…”, “No approval yet — nothing changed.”
+
+Avoid:
+- “Sign new budget”, “Sign transfer”
+- “You sign once to give …”
+- “Waiting for your signature…”, “Signature was cancelled.”
 
 ### Use “passkey” but anchor it in familiar actions
 

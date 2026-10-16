@@ -342,7 +342,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
       } else if (result.reason === 'cancelled') {
         // #1085: a dismissed sheet is a decision, not a failure — neutral
         // tone, matching BudgetGrantAction's inline treatment.
-        toast.info('Signature was cancelled.')
+        toast.info('Approval was cancelled.')
       }
       else toast.error('Could not stop the budget. Try again.')
     },
@@ -360,7 +360,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
         toast.success(result.alreadyStopped ? 'That old budget was already stopped.' : 'Old budget stopped.')
         onBudgetChange?.()
       } else if (result.reason === 'cancelled') {
-        toast.info('Signature was cancelled.')
+        toast.info('Approval was cancelled.')
       } else {
         toast.error('Could not stop the old budget. Try again.')
       }
@@ -488,7 +488,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
             </Button>
           }
         >
-          This agent already has a live budget for this token and recipient. Nothing was signed. Edit that
+          This agent already has a live budget for this token and recipient. Nothing was approved. Edit that
           budget to change its limits.
         </NoticeRow>
       ) : null}
@@ -614,8 +614,8 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
               budgetsError
                 ? 'Reload the current budgets before setting one — a budget for a token and recipient that already has one is edited, not added.'
                 : formSlotMatch
-                  ? 'This agent already has a budget for this token and recipient, so you edit it: you sign the new budget, then sign to stop the old one. The review step shows how many signatures that takes. Stopping it ends any open task budget or sub-budget taken from it.'
-                  : 'One signature. Refills every period automatically.'
+                  ? 'This agent already has a budget for this token and recipient, so you edit it: you approve the new budget, then approve stopping the old one. The review step shows how many approvals that takes. Stopping it ends any open task budget or sub-budget taken from it.'
+                  : 'One approval. Refills every period automatically.'
             }
             onSlotOccupied={handleSlotOccupied}
             onGranted={handleGranted}

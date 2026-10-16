@@ -102,7 +102,7 @@ function formatUsdc(atomic: string): string {
 function failureCopy(failure: RekeyFailure): string {
   switch (failure.kind) {
     case 'cancelled':
-      return 'Signing was cancelled. Nothing changed.'
+      return 'Approval was cancelled. Nothing changed.'
     case 'delegate_in_use':
       return 'Another one of your agents is already using that signing address. Generate a fresh key on the agent’s machine and paste the new address.'
     case 'residual_read_failed':
@@ -118,7 +118,7 @@ function failureCopy(failure: RekeyFailure): string {
     case 'out_of_order':
       return 'This key replacement has already moved past that step. Reopen it to see where it stands.'
     case 'missing_signature':
-      return 'One of the replacement budget rules was not signed, so nothing was changed. Try again and approve every prompt.'
+      return 'One of the replacement budget rules was not approved, so nothing was changed. Try again and approve every prompt.'
     case 'completion_failed':
       return 'The replacement could not be finished, and nothing was changed by this attempt. You can try again.'
     default:
@@ -287,7 +287,7 @@ export function ReplaceSigningKeyModal({
     setStep('signing')
 
     if (rekey.resumeMode === 'full') {
-      setSigningLabel('Waiting for your signature to switch off the old key…')
+      setSigningLabel('Waiting for your approval to switch off the old key…')
       const revoked = await rekey.revoke()
       if (!revoked.ok) {
         // Nothing landed: the re-key is still at `preflight` and the old key
@@ -422,8 +422,8 @@ export function ReplaceSigningKeyModal({
         <ApprovalRequiredBanner title="You cannot replace this key from this device" tone="warning">
           <p className="text-sm leading-relaxed">
             Connect your account owner wallet, or use a device with one of the account’s
-            passkeys. Replacing a signing key needs the account owner’s signature, and Haven never
-            signs on your behalf.
+            passkeys. Replacing a signing key needs the account owner’s approval, and Haven never
+            approves on your behalf.
           </p>
           {/* #3812: the owner's wallet can be connected right here — only
               once the signer set is known, never while it loads or after a

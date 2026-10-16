@@ -56,6 +56,8 @@ export function ConnectStepShell({
   // The on-screen height of a transition cut short by another sub-state
   // change, so the next one eases on from there instead of snapping first.
   const interruptedAt = useRef<number | null>(null)
+  // Restarts the pin's backstop timer — set while a transition is pinned.
+  const rearmBackstop = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     const content = contentRef.current
@@ -67,6 +69,8 @@ export function ConnectStepShell({
         // filling in from async data) retargets the ease rather than being
         // clipped and then snapping in on release.
         frame.style.height = `${content.offsetHeight}px`
+        // The retargeted ease runs a full duration from now.
+        rearmBackstop.current?.()
       } else {
         settledHeight.current = content.offsetHeight
       }
@@ -118,8 +122,13 @@ export function ConnectStepShell({
     frame.addEventListener('transitionend', onEnd)
     // Backstop: a transition that never ends (the tab is hidden) must not
     // leave the frame clipped at a fixed height.
-    const timer = window.setTimeout(release, HEIGHT_TRANSITION_MS + 100)
+    let timer = window.setTimeout(release, HEIGHT_TRANSITION_MS + 100)
+    rearmBackstop.current = () => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(release, HEIGHT_TRANSITION_MS + 100)
+    }
     return () => {
+      rearmBackstop.current = null
       window.clearTimeout(timer)
       frame.removeEventListener('transitionend', onEnd)
       // Still pinned: the next sub-state arrived mid-ease. Hand it the height

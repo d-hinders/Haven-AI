@@ -402,6 +402,8 @@ describe('ConnectStepShell (#1377 C, #3832)', () => {
     })
 
     afterEach(() => {
+      HEIGHT.short = 120
+      HEIGHT.tall = 360
       if (offsetHeight) Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offsetHeight)
       vi.useRealTimers()
       vi.unstubAllGlobals()
@@ -476,6 +478,18 @@ describe('ConnectStepShell (#1377 C, #3832)', () => {
       expect(frame.style.height).toBe('')
     })
 
+    it('a change mid-ease continues from the height on screen, not the old target', () => {
+      stubReducedMotion(false)
+      const { container, rerender } = render(shell('short'))
+      const frame = container.firstElementChild as HTMLElement
+      rerender(shell('tall'))
+      // Mid-ease: the frame is on its way from 120 to 360.
+      vi.spyOn(frame, 'getBoundingClientRect').mockReturnValue({ height: 240 } as DOMRect)
+      const writes = recordHeights(frame)
+      rerender(shell('short'))
+      expect(writes.filter(Boolean).slice(0, 2)).toEqual(['240px', '120px'])
+    })
+
     it('ignores a transition that ends on a control inside the body', () => {
       stubReducedMotion(false)
       const { container, rerender } = render(shell('short'))
@@ -513,7 +527,6 @@ describe('ConnectStepShell (#1377 C, #3832)', () => {
         const writes = recordHeights(frame)
         rerender(shell('tall'))
         expect(writes.filter(Boolean)).toEqual(['200px', '360px'])
-        HEIGHT.short = 120
       })
 
       it('a resize while pinned retargets the ease and is the settled height after release', () => {
@@ -528,7 +541,20 @@ describe('ConnectStepShell (#1377 C, #3832)', () => {
         const writes = recordHeights(frame)
         rerender(shell('short'))
         expect(writes.filter(Boolean).slice(0, 2)).toEqual(['420px', '120px'])
-        HEIGHT.tall = 360
+      })
+
+      it('a late retarget restarts the backstop, so the retargeted ease is not cut short', () => {
+        stubReducedMotion(false)
+        const { container, rerender } = render(shell('short'))
+        const frame = container.firstElementChild as HTMLElement
+        rerender(shell('tall'))
+        vi.advanceTimersByTime(250)
+        HEIGHT.tall = 420
+        observed!()
+        vi.advanceTimersByTime(100) // past the ORIGINAL backstop
+        expect(frame.style.height).toBe('420px')
+        vi.advanceTimersByTime(300)
+        expect(frame.style.height).toBe('')
       })
     })
 

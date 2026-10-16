@@ -724,10 +724,15 @@ passkey won't create a second one.
 ```
 
 "Check again" re-reads the accounts (the dialog also does it once on its
-own, a few seconds later) and shows the account as created when it appears.
-When nothing appears, say so plainly ("No new account on Base yet."). If the
-owner then edits an input, the next try is a new request, and the copy says
-that, short:
+own, a few seconds later) and shows the account as created when one with the
+submitted name appears on that network. When the read worked and found
+nothing, say so plainly ("No new account named Reserve on Base yet."). When
+the read itself failed, never say that; say the read failed ("Couldn't read
+your accounts just now. Check again in a moment."). The unknown-outcome
+message stays up until a sent request gets a definite answer or the account
+is found: a cancelled passkey prompt or a rate-limit refusal on the retry
+shows its own message beside it, not instead of it. If the owner edits an
+input, the next try is a new request, and the copy says that, short:
 
 ```text
 You changed the name, network or passkey, so trying again is a new request.

@@ -1,5 +1,10 @@
 import { expect, test, type Page } from '@playwright/test'
-import { mockHavenApi, seedAuthenticatedSession, waitForDrawerOpen } from './fixtures/haven-api'
+import {
+  mockHavenApi,
+  seedAuthenticatedSession,
+  serveAgentDetailResponses,
+  waitForDrawerOpen,
+} from './fixtures/haven-api'
 
 /**
  * Mobile navigation toggle — tap target (#1766).
@@ -695,14 +700,16 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
         // moved it into the page, above the title. So the bar now holds no
         // control at all on a detail route, and the link the user reaches is
         // the page's: measured with the same finger's-view walk as the toggle.
+        // The shared fixture alone renders this route as "Agent not found"
+        // (the old top-bar assertion passed there anyway, because the bar's
+        // link rendered on every state). Serve the agent-detail reads, the
+        // same way agent-detail.mobile.spec.ts does.
+        await serveAgentDetailResponses(page, 'agent-research')
         await page.goto('/agents/agent-research')
-        // Wait for the LOADED page, not just a link: the loading branch renders
-        // the same BackLink with no title, and measuring there would make the
-        // "above the title" assertion compare against nothing.
-        await page.locator('#main-content h1').waitFor()
-        // ...and the agent's page, not its not-found card, which also has a
-        // BackLink above an h1.
-        await expect(page.locator('#main-content h1')).not.toHaveText(/Agent not found|Agent could not load/)
+        // Wait for the agent's OWN title: the loading branch renders the
+        // same BackLink with no h1, and the not-found card has a BackLink
+        // above a different h1, so either would measure the wrong thing.
+        await expect(page.locator('#main-content h1')).toHaveText('Research agent', { timeout: 60_000 })
 
         const bar = await measureBar(page)
         expect(bar.controls.map((c) => c.label)).toEqual([])

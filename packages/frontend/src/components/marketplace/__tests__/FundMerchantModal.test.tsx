@@ -275,7 +275,7 @@ describe('FundMerchantModal (#3331)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
     // #3933: an occupied slot is edited, never signed as a second grant.
     await waitFor(() => expect(screen.getByRole('button', { name: 'Edit current budget' })).toBeDefined())
-    expect(screen.queryByRole('button', { name: 'Sign budget' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Approve budget' })).toBeNull()
     expect(screen.getByText(/replaces this agent's current budget to the same address/)).toBeDefined()
   })
 
@@ -296,7 +296,7 @@ describe('FundMerchantModal (#3331)', () => {
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve budget' })).toBeDefined())
     expect(screen.queryByText(/replaces/)).toBeNull()
   })
 
@@ -310,7 +310,7 @@ describe('FundMerchantModal (#3331)', () => {
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve budget' })).toBeDefined())
     expect(screen.queryByText(/replaces/)).toBeNull()
   })
 
@@ -324,7 +324,7 @@ describe('FundMerchantModal (#3331)', () => {
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve budget' })).toBeDefined())
     expect(screen.queryByText(/replaces/)).toBeNull()
   })
 
@@ -337,7 +337,7 @@ describe('FundMerchantModal (#3331)', () => {
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve budget' })).toBeDefined())
     expect(screen.queryByText(/replaces/)).toBeNull()
   })
 
@@ -382,7 +382,7 @@ describe('FundMerchantModal (#3331)', () => {
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve budget' })).toBeDefined())
     expect(screen.queryByText(/replaces/)).toBeNull()
   })
 
@@ -394,7 +394,7 @@ describe('FundMerchantModal (#3331)', () => {
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve budget' })).toBeDefined())
     expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeDefined()
     mockReady.mockReturnValue(true)
   })
@@ -402,9 +402,9 @@ describe('FundMerchantModal (#3331)', () => {
   // #3845: the not-ready line offers a passkey only to an account that has
   // one enrolled; unknown keeps the offer.
   it.each([
-    [false, 'Connect your account owner wallet to sign this budget.'],
-    [true, 'Connect your account owner wallet, or use one of the account’s passkeys, to sign this budget.'],
-    [null, 'Connect your account owner wallet, or use one of the account’s passkeys, to sign this budget.'],
+    [false, 'Connect your account owner wallet to approve this budget.'],
+    [true, 'Connect your account owner wallet, or use one of the account’s passkeys, to approve this budget.'],
+    [null, 'Connect your account owner wallet, or use one of the account’s passkeys, to approve this budget.'],
   ])('review step: hasPasskeys=%s words the not-ready line for the signer set', async (has, text) => {
     mockBudgets.mockReturnValue([])
     mockReady.mockReturnValue(false)
@@ -412,7 +412,7 @@ describe('FundMerchantModal (#3331)', () => {
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve budget' })).toBeDefined())
     expect(screen.getByText(text)).toBeDefined()
     if (has === false) expect(screen.queryByText(/passkey/i)).toBeNull()
   })
@@ -423,7 +423,7 @@ describe('FundMerchantModal (#3331)', () => {
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve budget' })).toBeDefined())
     expect(screen.getByText(/passkey may be on another device/)).toBeDefined()
   })
 
@@ -434,7 +434,7 @@ describe('FundMerchantModal (#3331)', () => {
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve budget' })).toBeDefined())
     expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
   })
 
@@ -443,7 +443,7 @@ describe('FundMerchantModal (#3331)', () => {
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve budget' })).toBeDefined())
     expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
   })
 
@@ -511,8 +511,8 @@ describe('FundMerchantModal (#3331)', () => {
     render(<FundMerchantModal {...PROPS} onGranted={onGranted} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
-    await waitFor(() => screen.getByRole('button', { name: 'Sign budget' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Sign budget' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Approve budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
     await waitFor(() => expect(screen.getByText('Budget set')).toBeDefined())
     expect(mockGrant).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -572,8 +572,8 @@ describe('FundMerchantModal (#3331)', () => {
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
-    await waitFor(() => screen.getByRole('button', { name: 'Sign budget' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Sign budget' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Approve budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
     await waitFor(() => expect(screen.getByText('The budget could not be set')).toBeDefined())
     expect(screen.getByText(expected)).toBeDefined()
     expect(screen.getByText(/Nothing changed\.$/)).toBeDefined()
@@ -602,8 +602,8 @@ describe('FundMerchantModal (#3331)', () => {
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
-    await waitFor(() => screen.getByRole('button', { name: 'Sign budget' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Sign budget' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Approve budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
     await waitFor(() => expect(screen.getByText('The budget could not be set')).toBeDefined())
     expect(screen.getByRole('button', { name: 'Reload page' })).toBeDefined()
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
@@ -623,8 +623,8 @@ describe('FundMerchantModal (#3331)', () => {
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
-    await waitFor(() => screen.getByRole('button', { name: 'Sign budget' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Sign budget' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Approve budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
     await waitFor(() => expect(screen.getByText('The budget could not be set')).toBeDefined())
     expect(screen.getByText('Close').closest('button')).toBeDefined()
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
@@ -639,8 +639,8 @@ describe('FundMerchantModal (#3331)', () => {
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
-    await waitFor(() => screen.getByRole('button', { name: 'Sign budget' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Sign budget' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Approve budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
     await waitFor(() => expect(screen.getByText('The budget could not be set')).toBeDefined())
     expect(screen.getByRole('button', { name: 'Try again' })).toBeDefined()
     expect(screen.getByText('Close').closest('button')).toBeDefined()
@@ -651,8 +651,8 @@ describe('FundMerchantModal (#3331)', () => {
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
-    await waitFor(() => screen.getByRole('button', { name: 'Sign budget' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Sign budget' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Approve budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
     await waitFor(() => expect(screen.getByText(/Haven could not set up this budget\./)).toBeDefined())
     expect(screen.queryByText('some future backend refusal text')).toBeNull()
   })
@@ -662,8 +662,8 @@ describe('FundMerchantModal (#3331)', () => {
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
-    await waitFor(() => screen.getByRole('button', { name: 'Sign budget' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Sign budget' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Approve budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
     await waitFor(() => expect(screen.getByText('The budget could not be set')).toBeDefined())
     expect(screen.getByText(/Haven could not set up this budget\. Nothing changed\./)).toBeDefined()
   })
@@ -673,9 +673,9 @@ describe('FundMerchantModal (#3331)', () => {
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
-    await waitFor(() => screen.getByRole('button', { name: 'Sign budget' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Sign budget' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
+    await waitFor(() => screen.getByRole('button', { name: 'Approve budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve budget' })).toBeDefined())
     expect(screen.queryByText('The budget could not be set')).toBeNull()
   })
 
@@ -698,7 +698,7 @@ describe('FundMerchantModal — occupied slot routes to the edit flow (#3933)', 
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '9' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'Edit current budget' })).toBeDefined())
-    expect(screen.getByText(/sign the new limits, then sign once more to stop the old budget/)).toBeDefined()
+    expect(screen.getByText(/approve the new limits, then approve once more to stop the old budget/)).toBeDefined()
     expect(screen.getByText(/Until it is stopped, it can still be spent outside Haven/)).toBeDefined()
     expect(screen.getByText(/Stopping it also ends any open task budget or sub-budget taken from it/)).toBeDefined()
     expect(screen.queryByText(/activates the new budget in its place/)).toBeNull()
@@ -719,8 +719,8 @@ describe('FundMerchantModal — occupied slot routes to the edit flow (#3933)', 
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '9' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'Edit current budget' })).toBeDefined())
-    expect(screen.getByText(/sign the new limits, then stop the old budget with two more signatures, one for each part/)).toBeDefined()
-    expect(screen.queryByText(/sign once more/)).toBeNull()
+    expect(screen.getByText(/approve the new limits, then stop the old budget with two more approvals, one for each part/)).toBeDefined()
+    expect(screen.queryByText(/approve once more/)).toBeNull()
   })
 
   it('#3971: UNCONFIRMED never claims a retry adds a second budget — since #3933 the backend refuses one', async () => {
@@ -729,7 +729,7 @@ describe('FundMerchantModal — occupied slot routes to the edit flow (#3933)', 
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Sign budget' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve budget' }))
     await waitFor(() => expect(screen.getByText(/could not be confirmed/)).toBeDefined())
     expect(screen.getByText(/a retry never adds a second budget for the same token and recipient/)).toBeDefined()
     expect(screen.queryByText(/would add a second budget/)).toBeNull()
@@ -755,7 +755,7 @@ describe('FundMerchantModal — occupied slot routes to the edit flow (#3933)', 
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '9' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Sign budget' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve budget' }))
     await waitFor(() => expect(mockGrant).toHaveBeenCalled())
   })
 
@@ -770,9 +770,9 @@ describe('FundMerchantModal — occupied slot routes to the edit flow (#3933)', 
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '9' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Sign budget' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve budget' }))
     await waitFor(() => expect(screen.getByText('This agent already has a budget here')).toBeDefined())
-    expect(screen.getByText(/already has a live budget that pays Ampersend Demo API's address\. Nothing was signed/)).toBeDefined()
+    expect(screen.getByText(/already has a live budget that pays Ampersend Demo API's address\. Nothing was approved/)).toBeDefined()
     expect(screen.queryByText('The budget could not be set')).toBeNull()
     expect(screen.queryByText(/Haven could not set up this budget/)).toBeNull()
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
@@ -787,7 +787,7 @@ describe('FundMerchantModal — occupied slot routes to the edit flow (#3933)', 
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '9' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Sign budget' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve budget' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Reload budgets' }))
     expect(mockReload).toHaveBeenCalled()
   })

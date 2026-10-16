@@ -474,9 +474,9 @@ describe('WalletButton', () => {
   })
 
   // #1126: the Hybrid DeleGator branch — the PR's core deliverable. The
-  // 'Signing with' block names the on-device credential WITHOUT an address
+  // 'Approving with' block names the on-device credential WITHOUT an address
   // (Hybrid passkeys are raw P256 coordinates; none exists).
-  it('Hybrid dropdown: honest account label + address-free Signing with block', async () => {
+  it('Hybrid dropdown: honest account label + address-free Approving with block', async () => {
     const KEY_A = '0x' + '11'.repeat(32)
     const KEY_B = '0x' + '22'.repeat(32)
     const ACCOUNT = '0x' + 'aa'.repeat(20)
@@ -509,7 +509,7 @@ describe('WalletButton', () => {
     // global active account, the default one here.
     expect(within(dialog).getByText('Main account')).toBeInTheDocument()
     expect(within(dialog).queryByText('Haven account (passkey)')).not.toBeInTheDocument()
-    expect(within(dialog).getByText('Signing with')).toBeInTheDocument()
+    expect(within(dialog).getByText('Approving with')).toBeInTheDocument()
     // #1679: the credential is named by kind + enrollment date, never
     // positionally ("Backup 1") and never by platform brand.
     expect(within(dialog).getByText('Passkey · added May 10, 2026')).toBeInTheDocument()
@@ -517,7 +517,7 @@ describe('WalletButton', () => {
     expect(within(dialog).getByText('0x2222…2222')).toBeInTheDocument()
     // #1952: the matched rendering must NOT carry the fallback's words, or the
     // two facts are indistinguishable in the direction that matters least
-    // visibly — a positive-only assertion on 'Signing with' would pass against
+    // visibly — a positive-only assertion on 'Approving with' would pass against
     // BOTH renderings, since the fallback eyebrow contains that substring.
     expect(
       within(dialog).queryByText('No passkey enrolled on this device'),
@@ -583,7 +583,7 @@ describe('WalletButton', () => {
     // will actually use — passkeys[0], not the second key.
     const marker = within(dialog).getByText('No passkey enrolled on this device')
     expect(marker).toBeInTheDocument()
-    expect(within(dialog).getByText('Signing with')).toBeInTheDocument()
+    expect(within(dialog).getByText('Approving with')).toBeInTheDocument()
     expect(within(dialog).getByText('Passkey · added March 3, 2026')).toBeInTheDocument()
     expect(within(dialog).getByText('0x1111…1111')).toBeInTheDocument()
     expect(
@@ -627,7 +627,7 @@ describe('WalletButton', () => {
     // copy must not claim one. This is the ONLY case where silence is correct,
     // which is why it is pinned: it is what stops the fix from being written as
     // "always render something".
-    expect(within(dialog).queryByText('Signing with')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('Approving with')).not.toBeInTheDocument()
     expect(
       within(dialog).queryByText('No passkey enrolled on this device'),
     ).not.toBeInTheDocument()

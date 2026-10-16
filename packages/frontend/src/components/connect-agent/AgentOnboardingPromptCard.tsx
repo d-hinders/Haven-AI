@@ -69,7 +69,7 @@ export function AgentOnboardingPromptCard({ className }: { className?: string })
     <Card hover={false} className={`overflow-hidden ${className ?? ''}`.trim()}>
       <Card.Header
         title="Set up with your AI agent"
-        description="Paste this to an agent with a terminal and it can do the setup. You still approve the budget and fund the account — nothing spends without your signature."
+        description="Paste this to an agent with a terminal and it can do the setup. You still approve the budget and fund the account — nothing spends without your approval."
       />
       {/* A padded body, NOT a Card.Section: Card.Header already draws the
           separating band, and Card.Section would add a second hairline border

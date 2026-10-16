@@ -4218,7 +4218,7 @@ export const SCENARIOS = {
       await revokedCard.getByRole('button', { name: 'Finish revoking Legacy research agent' }).click()
       const finishDialog = page.getByRole('dialog', { name: 'Finish revoking Legacy research agent?' })
       await finishDialog.waitFor({ timeout: 20_000 })
-      await finishDialog.getByText(/You sign once and every budget it still holds ends/).waitFor({ timeout: 20_000 })
+      await finishDialog.getByText(/You approve once and every budget it still holds ends/).waitFor({ timeout: 20_000 })
       await shoot(finishDialog, 'finish-dialog')
       await finishDialog.getByRole('button', { name: 'Cancel' }).click()
       await finishDialog.waitFor({ state: 'detached', timeout: 20_000 })

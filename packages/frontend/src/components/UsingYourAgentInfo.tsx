@@ -31,7 +31,7 @@ const PAGES: InfoPage[] = [
             <code className="rounded bg-[var(--v2-surface-2)] px-1.5 py-0.5 text-[12px] text-[var(--v2-ink)]">
               402 Payment Required
             </code>
-            , your agent&apos;s own key signs the payment automatically, within the budget you signed.
+            , your agent&apos;s own key signs the payment automatically, within the budget you approved.
           </InfoStep>
 
           <InfoStep number={3} title="Watch the payment land here">

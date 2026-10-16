@@ -88,7 +88,7 @@ describe('DelegationSendModal (#1083)', () => {
     fireEvent.change(screen.getByLabelText('Recipient address'), { target: { value: '0x' + 'cc'.repeat(20) } })
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     await waitFor(() => expect(send).toHaveBeenCalled())
-    expect(mockToast.info).toHaveBeenCalledWith('Signature was cancelled.')
+    expect(mockToast.info).toHaveBeenCalledWith('Approval was cancelled.')
     expect(mockToast.error).not.toHaveBeenCalled()
   })
 

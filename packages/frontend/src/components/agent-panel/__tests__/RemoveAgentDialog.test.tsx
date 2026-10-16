@@ -281,7 +281,7 @@ describe('RemoveAgentDialog', () => {
     mockBudgetState.budgets = [{ id: 'd-1', status: 'active' }]
     renderDialog(agentFixture({ status: 'revoked' }))
     expect(document.body.textContent).not.toMatch(/already ended/i)
-    expect(document.body.textContent).toMatch(/you sign once/i)
+    expect(document.body.textContent).toMatch(/you approve once/i)
   })
 
   it('while the list loads, a signature is still required (Remove waits for a signer)', () => {

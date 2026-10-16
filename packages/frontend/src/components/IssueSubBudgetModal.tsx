@@ -205,7 +205,7 @@ export default function IssueSubBudgetModal({ open, onClose, agentId, budgets, t
       open={open}
       onClose={busy ? () => undefined : onClose}
       title="Issue sub-budget"
-      subtitle={`Share part of ${delegatingName}'s budget with another agent. No signature needed from you.`}
+      subtitle={`Share part of ${delegatingName}'s budget with another agent. ${delegatingName} signs it with its own key — no passkey prompt for you.`}
       footer={footer}
       showCloseButton
       closeButtonDisabled={busy}

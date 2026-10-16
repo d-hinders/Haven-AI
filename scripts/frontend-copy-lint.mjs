@@ -285,6 +285,12 @@ export function missingTargets(entries, exists) {
 // Multi-word banned phrases (from copy-guidelines.md's terminology mapping +
 // the Vale Haven.Terminology list). Each maps to the preferred user-facing term.
 export const BANNED = [
+  // Owner money actions say approve, not sign (copy-guidelines.md, owner decision 2026-10-16).
+  ['waiting for your signature', "'Waiting for your approval…'"],
+  ['signature was cancelled', "'Approval was cancelled.'"],
+  ['no signature yet', "'No approval yet'"],
+  ['sign new budget', "'Approve new budget'"],
+  ['you sign once', "'You approve once'"],
   ['spending policies', 'agent rules'],
   ['spending policy', 'agent rule'],
   ['policy engine', 'agent rules'],
@@ -393,7 +399,7 @@ export const BANNED = [
   // a single-line literal match. Reword the claim ("the key we issued you") and
   // it goes green. The claim is what the avoid list bans; the phrase is only
   // what a matcher can hold.
-  ['haven signs and settles', "the real actor: 'signed by your agent's key and constrained by the budget you signed'"],
+  ['haven signs and settles', "the real actor: 'signed by your agent's key and constrained by the budget you approved'"],
   ['haven gave you', 'the credential is generated on the user’s device; Haven never receives the signing key'],
 ]
 

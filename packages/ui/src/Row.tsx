@@ -13,7 +13,7 @@ interface BaseRowProps {
    * Extra classes for the leading wrapper (the 32px circle, or the 16px icon
    * span without a tone). The row centres it on the whole body by default; a
    * caller whose body runs to several lines can pin it to the first line
-   * instead (AttentionList, #3880).
+   * instead with `self-start`.
    */
   leadingClassName?: string
   /** Primary label. Rendered as 14px medium ink. */

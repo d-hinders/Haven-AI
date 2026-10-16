@@ -252,7 +252,7 @@ export default function NeedsYou({
 
       {showEmpty && emptyState?.kind === 'caught-up' ? (
         // An unboxed success row on the attention rows' geometry (20px inset,
-        // 32px icon centred on the title's first line) — the mockup's clear
+        // 32px icon centred in the row) — the mockup's clear
         // card. Not a dashed EmptyState tile: that is the "nothing here yet"
         // placeholder, and nested in this card it stacks a second surface
         // (#3902 design review).

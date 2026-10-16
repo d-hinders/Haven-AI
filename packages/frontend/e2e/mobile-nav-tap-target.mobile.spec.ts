@@ -460,13 +460,10 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
         // below measured a page that was never the one under test.)
         await serveAgentDetailResponses(page, 'agent-research')
         await page.goto('/agents/agent-research')
-        // Wait for the LOADED page, not just a link: the loading branch renders
-        // the same BackLink with no title, and measuring there would make the
-        // "above the title" assertion compare against nothing.
-        await page.locator('#main-content h1').waitFor()
-        // ...and the agent's page, not its not-found card, which also has a
-        // BackLink above an h1.
-        await expect(page.locator('#main-content h1')).not.toHaveText(/Agent not found|Agent could not load/)
+        // Wait for the agent's OWN title: the loading branch renders the
+        // same BackLink with no h1, and the not-found card has a BackLink
+        // above a different h1, so either would measure the wrong thing.
+        await expect(page.locator('#main-content h1')).toHaveText('Research agent', { timeout: 60_000 })
 
         // No banner landmark here either — the bar's absence is a property of
         // the shell, not of one route (see assertion 8 above).

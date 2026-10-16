@@ -798,7 +798,11 @@ instead of staggering by the dismiss's width. Actions also share a 7rem
 minimum width (room for "Finish setup" and "View activity"), so badges beside
 actions up to that width end on one edge too; a wider label ("View
 transactions") grows past it and its badge sits further left.
-Below `sm` the trailing slot also wraps under the body. `fullBleed` is for
+Below `sm` the trailing slot also wraps under the body — except on a row
+with nothing visible to align (no badge, no action, not dismissible), which
+renders no trailing slot at all: the wrapper would be a 0px flex line that
+still takes the row gap, so its `sr-only` tone word moves into the body
+instead (#4033). `fullBleed` is for
 a list that **is** the card's body, as on the dashboard (#3902): rows run
 edge to edge with hairline dividers and take the card's 20px side inset
 instead of `Row`'s 16px; only the horizontal padding changes, so the row

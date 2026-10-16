@@ -1,6 +1,6 @@
 'use client'
 
-import { ArrowDown, ArrowUp, Bot, Check, Circle, EllipsisVertical, Info, OctagonAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Bot, Check, Circle, CirclePause, EllipsisVertical, Info, OctagonAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
 import { MobileTabBar } from '@/components/sidebar/MobileTabBar'
 import { baseNavItems } from '@/components/sidebar/Sidebar'
 import { Icon } from '@/components/ui/Icon'
@@ -303,7 +303,12 @@ const DS_SPARKLINE_SUMMARY =
 /**
  * The AttentionList sample's items — one per tone, one of them without a badge
  * label, and one (the failure) without the dismiss, so the reserved slot and
- * the one trailing column are on show.
+ * the one trailing column are on show. The badge-less item carries an action:
+ * the product's only badge-less kind (`haven-paused`) has neither badge nor
+ * action and is not dismissible, so a badge-less dismiss-only row would render
+ * a shape no product kind has — a lone × on its own line below `sm` (#4033).
+ * The `haven-paused`-shaped row shows that shape: nothing visible to align,
+ * so it renders no trailing slot at all and its tone word rides in the body.
  */
 const DS_ATTENTION_ITEMS: AttentionListItem[] = [
   {
@@ -334,6 +339,11 @@ const DS_ATTENTION_ITEMS: AttentionListItem[] = [
     subtitle: 'The spending summary for the week ending Sunday is ready to read.',
     tone: 'brand',
     icon: Sparkles,
+    action: (
+      <Button size="sm" variant="ghost">
+        Read summary
+      </Button>
+    ),
   },
   {
     id: 'payment-failed',
@@ -350,6 +360,21 @@ const DS_ATTENTION_ITEMS: AttentionListItem[] = [
         View activity
       </Button>
     ),
+  },
+  {
+    // The `haven-paused` shape (#4033): no badge, no action, not dismissible —
+    // nothing visible to align, so the row renders no trailing slot and the
+    // sr-only tone word rides in the body. Equal space above and below the
+    // body at every width.
+    id: 'haven-paused',
+    title: 'Haven paused sponsored payments',
+    subtitle: "Your budgets are untouched. Haven's own cap stopped a payment.",
+    tone: 'neutral',
+    icon: CirclePause,
+    // As in the product: `haven-paused` is not in DISMISSIBLE_ATTENTION_KINDS,
+    // so the default-true dismissible would hang a fourth × on the list —
+    // and this row's whole point is having nothing visible to align.
+    dismissible: false,
   },
 ]
 
@@ -2903,7 +2928,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="AttentionList"
-        description="The list of things that need your eye (#3805), built from Row, StatusBadge and Icon. The rows are static — the action and the dismiss live in trailing, never on the row itself, so an action is never nested inside another control. The tone always rides text as well as colour (Row's leading icon is aria-hidden): a StatusBadge label, or an sr-only tone word when the item has no badge. Budget reached is neutral — the budget did its job; danger is for real failures only. Dismiss is labelled Dismiss: {title} and calls onDismiss(id); the list holds no dismissal state, and after a dismiss focus moves to the next item, or to the list heading when the list empties. The title and subtitle each line-clamp to two lines at every width; the icon (and, from sm up, the trailing controls) are centred vertically in the row, with Row's symmetric padding; the trailing controls form one column — a row with a badge or action but no dismiss keeps an empty slot in its place whenever another row has one, and actions share a 7rem minimum width (a wider label grows past it); below sm the trailing slot wraps under the body. fullBleed is for a list that is the card's body, as on the dashboard: rows run edge to edge with hairline dividers and the card's 20px side inset, and this sample renders it so the centring and clamp measurements cover the dashboard's shape. Zero items renders nothing — the caller shows the empty state."
+        description="The list of things that need your eye (#3805), built from Row, StatusBadge and Icon. The rows are static — the action and the dismiss live in trailing, never on the row itself, so an action is never nested inside another control. The tone always rides text as well as colour (Row's leading icon is aria-hidden): a StatusBadge label, or an sr-only tone word when the item has no badge. Budget reached is neutral — the budget did its job; danger is for real failures only. Dismiss is labelled Dismiss: {title} and calls onDismiss(id); the list holds no dismissal state, and after a dismiss focus moves to the next item, or to the list heading when the list empties. The title and subtitle each line-clamp to two lines at every width; the icon (and, from sm up, the trailing controls) are centred vertically in the row, with Row's symmetric padding; the trailing controls form one column — a row with a badge or action but no dismiss keeps an empty slot in its place whenever another row has one, and actions share a 7rem minimum width (a wider label grows past it); below sm the trailing slot wraps under the body — except on a row with nothing visible to align (no badge, no action, not dismissible), which renders no trailing slot at all and carries its sr-only tone word in the body instead (#4033). fullBleed is for a list that is the card's body, as on the dashboard: rows run edge to edge with hairline dividers and the card's 20px side inset, and this sample renders it so the centring and clamp measurements cover the dashboard's shape. Zero items renders nothing — the caller shows the empty state."
       >
         <div data-testid="ds-attention-list">
           <Card hover={false} className="overflow-hidden">

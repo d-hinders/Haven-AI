@@ -233,6 +233,32 @@ describe('AttentionList (#3805)', () => {
     expect(container.querySelector('[data-attention-dismiss-slot]')).toBeNull()
   })
 
+  // #4033: a row with nothing visible to align used to render a trailing
+  // wrapper holding only the sr-only tone word — a 0px flex line that still
+  // took the row gap below sm (and a column gap from sm up). It renders no
+  // trailing slot at all now, and the tone word moves into the body.
+  it('renders no trailing slot for a row with nothing visible, its tone word riding in the body', () => {
+    const { container } = render(
+      <AttentionList
+        items={[
+          { id: 'bare', title: 'Paused', subtitle: 'Untouched.', tone: 'neutral', dismissible: false },
+          { ...ITEMS[0] },
+        ]}
+        onDismiss={() => {}}
+      />,
+    )
+    const rows = container.querySelectorAll('li')
+    // The trailing wrapper is Row's only `div.flex-shrink-0`; the bare row has none.
+    expect(rows[0].querySelector('div.flex-shrink-0')).toBeNull()
+    // The still-visible row keeps its trailing slot (its badge).
+    expect(rows[1].querySelector('div.flex-shrink-0')).not.toBeNull()
+    // The tone word still exists, still hidden from the eye but not the
+    // reader — carried inside the body's subtitle paragraph now.
+    const word = screen.getByText('Informational')
+    expect(word.className).toContain('sr-only')
+    expect(rows[0].querySelector('p.text-xs')?.contains(word)).toBe(true)
+  })
+
   // Focus after a dismiss is counted among the dismiss BUTTONS, not among the
   // rows: with non-dismissible rows above, an index into `items` overshoots
   // and skips the next dismissible row.

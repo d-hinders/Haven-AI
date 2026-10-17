@@ -116,7 +116,8 @@ import {
 
 // The toggle is `lg:hidden`. Four widths: the narrowest phone we support, the
 // width the visual baseline and the design evidence render at, a tablet (768,
-// where #4058's `max-w-md` cap and centring first bite), and the last pixel
+// the first of these widths where #4058's `max-w-md` cap and centring apply —
+// the cap bites above 472px, 448 plus two 12px insets), and the last pixel
 // below the `lg` breakpoint where a regression would most plausibly
 // reappear. (`mobile-nav-layering.mobile.spec.ts` already proves the toggle
 // vanishes AT 1024px.)

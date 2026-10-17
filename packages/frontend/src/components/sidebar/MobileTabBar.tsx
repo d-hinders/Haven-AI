@@ -69,7 +69,7 @@ export function isActiveRoute(pathname: string, href: string): boolean {
 }
 
 /**
- * A cell is a full RECTANGLE of the grid, and the pill shape is painted by an
+ * A cell is a full RECTANGLE of the grid, and the active shape is painted by an
  * indicator span inside it (#4058). Chromium hit-tests `border-radius`, so a
  * `rounded-full` cell left its four corners dead — taps there fell through to
  * the bar — and the e2e corner probes caught it. The cells abut (no gap), so
@@ -162,7 +162,7 @@ export function MobileTabBar({
           >
             {/* One "you are here" idiom across the navigation (#2818),
                 and since #4058 the SAME one the app's other selections use:
-                brand ink on a `--v2-brand-soft` pill bounded by a 1px inset
+                brand ink on a rounded `--v2-brand-soft` indicator bounded by a 1px inset
                 brand OUTLINE — `SegmentedControl`'s selected option (#4056).
                 It replaced a 2px rail across the cell's top edge, which an
                 edge-less floating pill has nowhere to hang.

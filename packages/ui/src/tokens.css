@@ -276,8 +276,8 @@
      pill, and the toast container lifts by the same sum so the payoff
      notification is not hidden behind the thing everyone is looking at.
 
-     `--v2-tab-bar-h` is the pill's OUTER height: 52px cells, `p-1` (4px)
-     around them and the 1px border — 62px. `--v2-tab-bar-bottom` is the gap
+     `--v2-tab-bar-h` is the pill's OUTER height: 52px cells, `py-1` (4px)
+     above and below them and the 1px border — 62px. `--v2-tab-bar-bottom` is the gap
      between the pill and the viewport bottom: 12px in a browser tab, and the
      home-indicator inset itself on a notched phone, where adding a gap ON TOP
      of the inset would float the pill visibly high. */

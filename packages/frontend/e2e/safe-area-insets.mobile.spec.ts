@@ -51,7 +51,7 @@ const INSET_BOTTOM = 34
  * from the token deliberately: reading `--v2-tab-bar-h` here would make the
  * assertion agree with the CSS by construction, and this file exists to catch
  * the CSS being wrong. 62 since #4058: the floating pill's 52px cells, its
- * `p-1` and its 1px border.
+ * `py-1` and its 1px border.
  *
  * The pill floats `max(12px, inset)` above the bottom edge. At this file's
  * INSET_BOTTOM (34) that is the inset itself, so every "bar + inset" sum

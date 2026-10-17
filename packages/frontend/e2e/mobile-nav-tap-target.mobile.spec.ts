@@ -396,13 +396,13 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
         //    grow the visible control; here growing it is the design, so what
         //    replaces that guard is exactness: More is one fifth of the bar's
         //    content box, the same size as the tabs beside it. Since #4058
-        //    the bar floats, so the fifth is of the pill (its `p-1` and
-        //    border excluded), not of the viewport.
+        //    the bar floats, so the fifth is of the pill (its 2px side
+        //    padding and 1px border each side excluded), not of the viewport.
         for (const slot of t.slots) {
           expect(Math.abs(slot.w - t.slots[4].w)).toBeLessThanOrEqual(1)
           expect(slot.h).toBe(t.slots[4].h)
         }
-        expect(Math.abs(t.slots[4].w - (t.barWidth - 10) / 5)).toBeLessThanOrEqual(1)
+        expect(Math.abs(t.slots[4].w - (t.barWidth - 6) / 5)).toBeLessThanOrEqual(1)
 
         // 4. It did not eat its neighbour, and did not leave a dead strip
         //    either. The old neighbour was `NetworkSwitcher` 14px away in the

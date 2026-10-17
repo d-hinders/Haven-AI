@@ -141,7 +141,7 @@ export function MobileTabBar({
       // #2819's capture surfaced the warning.
       {...(presentational ? { inert: true } : {})}
       data-mobile-tab-bar=""
-      className={`grid max-w-md grid-cols-5 rounded-full border border-[var(--v2-border)] bg-[var(--v2-bg)] p-1 shadow-popover ${
+      className={`grid max-w-md grid-cols-5 rounded-full border border-[var(--v2-border)] bg-[var(--v2-bg)] px-0.5 py-1 shadow-popover ${
         presentational
           ? 'relative mx-auto w-full'
           : 'lg:hidden fixed left-[max(0.75rem,var(--v2-safe-left))] right-[max(0.75rem,var(--v2-safe-right))] bottom-[var(--v2-tab-bar-bottom)] mx-auto z-[var(--v2-z-tab-bar)]'
@@ -194,11 +194,14 @@ export function MobileTabBar({
                 rather than written here on purpose: the lint greps this file's
                 text and cannot tell a class from a comment about one.)
 
-                So the label, not the font, gives: the bar says "Activity"
-                (`TAB_LABELS`, #4058), and every label renders whole from
-                375px up. 320px, the narrowest phone in the support matrix, is
+                So the label and the padding give, not the font: the bar says
+                "Activity" (`TAB_LABELS`, #4058), the label span carries no
+                side padding, and the pill pads only 2px sideways — which is
+                what keeps "Dashboard" whole at 375px on CI's font
+                rasteriser, where it measured a few pixels wider than locally.
+                Every label renders whole from 375px up. 320px, the narrowest phone in the support matrix, is
                 reported in the PR rather than promised here. */}
-            <span className="relative min-w-0 max-w-full truncate px-0.5">
+            <span className="relative min-w-0 max-w-full truncate">
               {TAB_LABELS[item.href as (typeof TAB_ROUTES)[number]] ?? item.label}
             </span>
           </Link>
@@ -227,7 +230,7 @@ export function MobileTabBar({
           <span className="relative h-5 w-5" aria-hidden="true">
             <Icon icon={Menu} className="w-full h-full" />
           </span>
-          <span aria-hidden="true" className="relative min-w-0 max-w-full truncate px-0.5">
+          <span aria-hidden="true" className="relative min-w-0 max-w-full truncate">
             More
           </span>
         </button>
@@ -236,7 +239,7 @@ export function MobileTabBar({
           <span className="h-5 w-5" aria-hidden="true">
             <Icon icon={Menu} className="w-full h-full" />
           </span>
-          <span className="min-w-0 max-w-full truncate px-0.5">More</span>
+          <span className="relative min-w-0 max-w-full truncate">More</span>
         </span>
       ) : null}
     </nav>

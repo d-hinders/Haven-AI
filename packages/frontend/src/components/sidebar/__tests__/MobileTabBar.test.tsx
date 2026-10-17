@@ -171,7 +171,7 @@ describe('MobileTabBar — five cells, and the theme row is not one of them (#29
   it('the live bar carries More as its fifth cell — its only button (#4053)', () => {
     const ref = { current: null }
     const { container } = render(
-      <MobileTabBar items={baseNavItems} more={{ open: false, onToggle: () => {}, buttonRef: ref }} />,
+      <MobileTabBar items={baseNavItems} more={{ open: false, onToggle: () => {}, onClose: () => {}, buttonRef: ref }} />,
     )
     const bar = container.querySelector('[data-mobile-tab-bar]')!
     expect(bar.children).toHaveLength(5)

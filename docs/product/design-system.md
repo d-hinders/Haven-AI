@@ -509,7 +509,7 @@ Every stacking layer has a named token. **Reach for a token, never a fresh numbe
 ```css
 --v2-z-content:        10;   /* in-flow overlaps: badges, gradient washes */
 --v2-z-sticky:         20;   /* sticky table headers */
---v2-z-chrome:        100;   /* app chrome — the shell's non-production warning line */
+--v2-z-chrome:        100;   /* app chrome — no consumer; the ordering anchor */
 --v2-z-tab-bar:       105;   /* reserved for the bottom tab bar (#2730, used by #2731) */
 --v2-z-chrome-popover: 110;  /* popovers anchored in the chrome */
 --v2-z-nav-scrim:     130;   /* mobile navigation tier (consumer retired by #2820, ordering kept) */
@@ -523,7 +523,7 @@ Every stacking layer has a named token. **Reach for a token, never a fresh numbe
 
 The rule the numbers encode: **the mobile navigation overlay outranks the app chrome it opens over, and modals outrank the navigation.** The drawer is `inset-y-0`, so its own logo band shares the top strip with whatever chrome is above the page. Let the chrome win and the drawer is decapitated, and the toggle cannot be tapped at all. That was #1749: a `z-[100]` header and a `z-[60]` toggle chosen independently in different files left mobile primary navigation unopenable on every authenticated route.
 
-`--v2-z-chrome` has one consumer since #4029: the authenticated shell's non-production warning line, the 2px `--v2-warning` strip along the top of the app on a dev deploy. The tier stays at 100 so the ordering the tests pin is unchanged — the drawer covers the line (a navigation layer must outrank the chrome it slides over), and the line covers page content. The top bar that used to own the tier was deleted (#4029, epic #4027); the tier is kept as the anchor the nav, tab-bar and popover tiers are ordered against, the same reason `--v2-z-nav-scrim` survives without a consumer.
+`--v2-z-chrome` has no consumer. The top bar that owned it was deleted (#4029, epic #4027), and the non-production warning line that briefly inherited it was removed the next day — on a phone it read as a rendering bug. The tier stays at 100 so the ordering the tests pin is unchanged; it is kept as the anchor the nav, tab-bar and popover tiers are ordered against, the same reason `--v2-z-nav-scrim` survives without a consumer.
 
 `--v2-z-nav-scrim` has no consumer since #2820 — the drawer is full width below `lg`, so the slide-over scrim it used to carry was deleted — and the tier stays anyway. The scale's job is ordering, not inventory: removing the tier would renumber the ascent the tests pin and retire a landing place the day a second navigation overlay returns. Nothing new may take the tier back without a consumer that needs it.
 
@@ -592,7 +592,7 @@ The authenticated app uses one stable product shell:
 - Sidebar nav: 36px row height, 16px icon box, 13px medium label. (The Approvals item and its live actionable-count badge were the nav's only dynamic entry; both are deleted with the Safe rail, [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) — every nav item is static now.)
 - Brand: the wordmark may use `.v2-brand-gradient-text`; do not repeat the gradient elsewhere in nav.
 - User menu: two-line user card with a kebab menu using popover shadow; destructive menu items use danger styling.
-- **No top bar** ([#4029](https://github.com/d-hinders/Haven-AI/issues/4029), epic #4027): the authenticated chrome above the scroll region is the `SafeAreaBand` — the opaque status-bar strip — plus a 2px `--v2-warning` line on non-production deploys (aria-hidden, pointer-events-none, the frame's last child — positioned against the frame, so it never overflows `h-screen`; on phones it sits directly under the band via `top-[var(--v2-safe-top)]`). There is no `banner` landmark; `nav` and `main` remain. Page-level CTAs go in the `PageHeader` actions, and detail pages carry their own back link above the title (#4028). The environment badge lives beside the wordmark in the sidebar's logo band, and the theme row in the sidebar footer is the app's only theme control at every width.
+- **No top bar** ([#4029](https://github.com/d-hinders/Haven-AI/issues/4029), epic #4027): the authenticated chrome above the scroll region is the `SafeAreaBand` — the opaque status-bar strip — and nothing else; the 2px non-production warning line #4029 added was removed the next day, because on a phone, with no label in view, it read as a rendering bug. There is no `banner` landmark; `nav` and `main` remain. Page-level CTAs go in the `PageHeader` actions, and detail pages carry their own back link above the title (#4028). The environment badge lives beside the wordmark in the sidebar's logo band — the app's only environment marker — and the theme row in the sidebar footer is the app's only theme control at every width.
 - Main content: scrolls inside the shell, with `p-6 pt-4 lg:p-8` — 16px of top padding below `lg` (#4029), 24px elsewhere, 32px at `lg` — below `lg` its bottom, left and right also take the safe-area insets (§ *Safe areas*) — and a skip link targeting `main#main-content`. Sticky table headers compensate through the `--v2-sticky-head` variable the shell sets (`-1rem` below `lg`, `-2rem` at `lg`; the token's `-1.5rem` default is ops' `py-6`).
 
 ### PageHeader

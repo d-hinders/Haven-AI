@@ -277,7 +277,7 @@ describe('every opacity-modified colour utility compiles to a colour (#1818)', (
     expect(bases).not.toContain('ring-current/30') // Toast.tsx:141
     // #3832 deleted the ConnectStepShell ticker and the `bg-[var(--v2-brand)]/40`
     // comment this line used to target; #4029 deleted TopBar, whose comment
-    // quoted the second dead class, so the shell's warning-line comment
+    // quoted the second dead class, so the shell's safe-area-band comment
     // (`AuthenticatedShell.tsx`) carries the fixture now — the scanner must
     // skip a comment quoting the dead form in the file that owns the chrome.
     expect(bases).not.toContain('bg-[var(--v2-bg)]/85') // AuthenticatedShell.tsx

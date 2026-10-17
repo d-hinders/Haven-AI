@@ -592,8 +592,8 @@ export default function Sidebar() {
             top bar until the bar was deleted; the logo band is its new home and
             renders at EVERY width — the desktop rail and the phone More sheet
             are the same element, so the badge shows in both without a
-            breakpoint gate (the "DEV on the main pages" surface is the
-            warning line instead). It renders nothing in production
+            breakpoint gate. It is the ONLY environment marker in the app since
+            the non-production warning line was removed. It renders nothing in production
             (`lib/env.ts`), so the band is byte-identical there. Outside the
             Link: a badge is not navigation, and it must not join the
             wordmark's click target.

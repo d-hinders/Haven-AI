@@ -1153,8 +1153,9 @@ Payments*.
 `NEXT_PUBLIC_HAVEN_ENV=dev` makes the frontend render a `DEV` chip beside the
 "Haven" wordmark in the sidebar's logo band (`components/EnvBadge.tsx`), in the
 warning tone, so a dev deploy is never mistaken for production. (It lived in
-the app `TopBar` until #4029 removed the bar; non-production builds additionally
-paint a 2px warning line along the top of the app.) `NEXT_PUBLIC_*` is
+the app `TopBar` until #4029 removed the bar. The 2px warning line #4029 added
+along the top of the app was removed the next day: on a phone it read as a
+rendering bug.) `NEXT_PUBLIC_*` is
 build-time inlined, so the dev Vercel deploy bakes the value in; **production
 leaves the var unset**, which renders nothing.
 

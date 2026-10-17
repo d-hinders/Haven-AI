@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { MerchantGrid } from '../MerchantGrid'
 import { verifiedMeaning } from '@/lib/marketplace'
+import { TEST_MERCHANT_NOTE } from '../MerchantHeader'
 import type { Merchant } from '@/hooks/useCatalog'
 
 function merchant(overrides: Partial<Merchant> = {}): Merchant {
@@ -29,6 +30,33 @@ function cardSlugs(container: HTMLElement): string[] {
   return [...container.querySelectorAll('[data-testid^="merchant-card-"]')].map((el) =>
     (el.getAttribute('data-testid') ?? '').replace('merchant-card-', ''),
   )
+}
+
+/** The coming-soon section's rows (#4052), in DOM order. */
+function rowSlugs(container: HTMLElement): string[] {
+  return [...container.querySelectorAll('[data-testid^="merchant-row-"]')].map((el) =>
+    (el.getAttribute('data-testid') ?? '').replace('merchant-row-', ''),
+  )
+}
+
+/**
+ * The footer's two spans (#4052): the price leads in ink and semibold, the
+ * offer count after it stays ink-3 (inherited from the footer line).
+ */
+function expectFooter(card: HTMLElement, price: string, count: string | null) {
+  const priceSpan = within(card).getByText(`From ${price} USDC`, { exact: true })
+  expect(priceSpan.tagName).toBe('SPAN')
+  expect(priceSpan.className).toContain('text-[var(--v2-ink)]')
+  expect(priceSpan.className).toContain('font-semibold')
+  const line = priceSpan.parentElement as HTMLElement
+  expect(line.className).toContain('text-[var(--v2-ink-3)]')
+  if (count === null) {
+    expect(line.textContent).toBe(`From ${price} USDC`)
+  } else {
+    const countSpan = within(line).getByText(`· ${count}`, { exact: true })
+    expect(countSpan.className).not.toContain('text-[var(--v2-ink)]')
+    expect(line.textContent).toBe(`From ${price} USDC · ${count}`)
+  }
 }
 
 describe('MerchantGrid', () => {
@@ -64,7 +92,12 @@ describe('MerchantGrid', () => {
     expect(screen.getByText('Merchant One')).toBeDefined()
     // Two offers: the lowest USDC price leads ("From 0.001 USDC" — 1000
     // atomic, 6 decimals), the offer count follows it.
-    expect(screen.getByText('From 0.001 USDC · 2 offers')).toBeDefined()
+    expectFooter(screen.getByTestId('merchant-card-merchant-one'), '0.001', '2 offers')
+  })
+
+  it('#4052: one offer prices alone — the whole footer is the ink price', () => {
+    render(<MerchantGrid merchants={[merchant({ offer_count: 1 })]} loading={false} error={null} onSubmit={vi.fn()} />)
+    expectFooter(screen.getByTestId('merchant-card-merchant-one'), '0.001', null)
   })
 
   it('#4008: the card and the offer row agree on the two-decimal price rule ("0.10 USDC", "1.00 USDC")', () => {
@@ -84,8 +117,8 @@ describe('MerchantGrid', () => {
         onSubmit={vi.fn()}
       />,
     )
-    expect(screen.getByText('From 0.10 USDC · 2 offers')).toBeDefined()
-    expect(screen.getByText('From 1.00 USDC · 2 offers')).toBeDefined()
+    expectFooter(screen.getByTestId('merchant-card-tenth'), '0.10', '2 offers')
+    expectFooter(screen.getByTestId('merchant-card-one'), '1.00', '2 offers')
   })
 
   it('shows the offer count alone when no counted offer prices in USDC', () => {
@@ -97,11 +130,12 @@ describe('MerchantGrid', () => {
         onSubmit={vi.fn()}
       />,
     )
-    expect(screen.getByText('2 offers')).toBeDefined()
+    const count = screen.getByText('2 offers')
+    expect(count.className).toContain('text-[var(--v2-ink-3)]')
     expect(screen.queryByText(/From /)).toBeNull()
   })
 
-  it('renders a coming-soon card muted: "Coming soon" in the badge slot and no offer or price footer', () => {
+  it('#4052: lists a coming-soon merchant as a linked row in the "Coming soon" section, never as a card', () => {
     render(
       <MerchantGrid
         merchants={[merchant({ id: 's', slug: 'soon', name: 'Soon Co', listing_status: 'coming_soon' })]}
@@ -110,13 +144,51 @@ describe('MerchantGrid', () => {
         onSubmit={vi.fn()}
       />,
     )
-    const card = screen.getByTestId('merchant-card-soon')
-    expect(within(card).getByText('Coming soon')).toBeDefined()
-    expect(within(card).queryByText(/offer/)).toBeNull()
-    expect(within(card).queryByText(/From /)).toBeNull()
+    expect(screen.queryByTestId('merchant-card-soon')).toBeNull()
+    const section = screen.getByTestId('marketplace-coming-soon')
+    expect(within(section).getByRole('heading', { level: 2, name: 'Coming soon' })).toBeDefined()
+    const row = within(section).getByTestId('merchant-row-soon')
+    expect(within(row).getByRole('link').getAttribute('href')).toBe('/marketplace/soon')
+    expect(within(row).getByText('Soon Co')).toBeDefined()
+    // Nothing comparable on a merchant you cannot pay: no price, no count.
+    expect(within(row).queryByText(/offer/)).toBeNull()
+    expect(within(row).queryByText(/From /)).toBeNull()
+    // No payable merchant is listed, yet the section is not an empty grid.
+    expect(screen.queryByText('No merchants match this filter')).toBeNull()
   })
 
-  it('sorts payable merchants before coming-soon ones, keeping the served order inside each group', () => {
+  it('#4052: renders no "Coming soon" section when no coming-soon merchant is visible', () => {
+    render(<MerchantGrid merchants={[merchant()]} loading={false} error={null} onSubmit={vi.fn()} />)
+    expect(screen.queryByTestId('marketplace-coming-soon')).toBeNull()
+    expect(screen.queryByText('Coming soon')).toBeNull()
+  })
+
+  it('#4052: filters reach the section — search hides it, and the empty state shows only when both groups are empty', () => {
+    render(
+      <MerchantGrid
+        merchants={[merchant(), merchant({ id: 's', slug: 'soon', name: 'Soon Co', listing_status: 'coming_soon' })]}
+        loading={false}
+        error={null}
+        onSubmit={vi.fn()}
+      />,
+    )
+    const search = screen.getByLabelText('Search merchants')
+    // Only the payable merchant matches: the section goes, the card stays.
+    fireEvent.change(search, { target: { value: 'Merchant One' } })
+    expect(screen.queryByTestId('marketplace-coming-soon')).toBeNull()
+    expect(screen.getByTestId('merchant-card-merchant-one')).toBeDefined()
+    // Only the coming-soon merchant matches: the section stands alone, no empty state.
+    fireEvent.change(search, { target: { value: 'Soon' } })
+    expect(screen.queryByTestId('merchant-card-merchant-one')).toBeNull()
+    expect(screen.getByTestId('merchant-row-soon')).toBeDefined()
+    expect(screen.queryByText('No merchants match this filter')).toBeNull()
+    // Neither matches: now, and only now, the empty state.
+    fireEvent.change(search, { target: { value: 'nothing at all' } })
+    expect(screen.queryByTestId('marketplace-coming-soon')).toBeNull()
+    expect(screen.getByText('No merchants match this filter')).toBeDefined()
+  })
+
+  it('splits payable merchants (cards) from coming-soon ones (rows after the grid), keeping the served order inside each group', () => {
     // Exactly `GET /merchants`' order (coming_soon sorts before `live`
     // alphabetically, so Berget and Redpine head the raw list) — the grid
     // must not present a card you cannot pay before one you can, while the
@@ -130,7 +202,12 @@ describe('MerchantGrid', () => {
       merchant({ id: 'z', slug: 'zzz', name: 'Zzz live' }),
     ]
     const { container } = render(<MerchantGrid merchants={served} loading={false} error={null} onSubmit={vi.fn()} />)
-    expect(cardSlugs(container)).toEqual(['zzz', 'test-one', 'berget-ai', 'redpine'])
+    expect(cardSlugs(container)).toEqual(['zzz', 'test-one'])
+    expect(rowSlugs(container)).toEqual(['berget-ai', 'redpine'])
+    // The section comes after the grid in DOM order.
+    const lastCard = screen.getByTestId('merchant-card-test-one')
+    const section = screen.getByTestId('marketplace-coming-soon')
+    expect(lastCard.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('marks a verified merchant with the quiet check — title carries the meaning, sr-only the word, and no uppercase badge', () => {
@@ -158,7 +235,7 @@ describe('MerchantGrid', () => {
     unmount()
   })
 
-  it('shows the test-merchant footer label and hides it behind the toggle by default when no listed network is a testnet', () => {
+  it('#4052: marks a test merchant with a neutral "Test" badge (not the full note), hidden behind the toggle by default when no listed network is a testnet', () => {
     const merchants = [
       merchant({ id: 't', slug: 'test-one', is_test_merchant: true, networks: ['eip155:8453'] }),
     ]
@@ -166,8 +243,16 @@ describe('MerchantGrid', () => {
     // Mainnet-only data: the toggle defaults OFF, so the card starts hidden.
     expect(screen.queryByTestId('merchant-card-test-one')).toBeNull()
     fireEvent.click(screen.getByLabelText('Show test merchants'))
-    expect(screen.getByTestId('merchant-card-test-one')).toBeDefined()
-    expect(screen.getByText('A Haven test merchant: payments are real (small amounts of USDC), but what you get is demo content.')).toBeDefined()
+    const card = screen.getByTestId('merchant-card-test-one')
+    const badge = within(card).getByText('Test', { exact: true })
+    expect(badge.className).toContain('rounded-full')
+    expect(badge.className).not.toContain('warning')
+    // The full sentence lives on the merchant page, not the grid.
+    expect(screen.queryByText(TEST_MERCHANT_NOTE)).toBeNull()
+    // A live, non-test card carries no badge.
+    const { unmount } = render(<MerchantGrid merchants={[merchant()]} loading={false} error={null} onSubmit={vi.fn()} />)
+    expect(within(screen.getByTestId('merchant-card-merchant-one')).queryByText('Test', { exact: true })).toBeNull()
+    unmount()
   })
 
   it('derives the "Show test merchants" default from data that arrives AFTER mount — the grid mounts on an empty list', () => {
@@ -445,7 +530,7 @@ describe('MerchantGrid', () => {
       expect(screen.getByText('Sepolia Co')).toBeDefined()
       expect(screen.queryByText('Base Co')).toBeNull()
       // Coming soon (and ingestion-only) merchants list no network: no filter hides them.
-      expect(screen.getByText('Soon Co')).toBeDefined()
+      expect(within(screen.getByTestId('marketplace-coming-soon')).getByText('Soon Co')).toBeDefined()
     })
 
     it('derives the default from a user and merchants that arrive AFTER mount', () => {

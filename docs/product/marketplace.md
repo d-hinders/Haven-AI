@@ -18,6 +18,7 @@ covers:
   - packages/frontend/src/app/(authenticated)/marketplace/[slug]/page.tsx
   - packages/frontend/src/components/marketplace/MerchantGrid.tsx
   - packages/frontend/src/components/marketplace/MerchantCard.tsx
+  - packages/frontend/src/components/marketplace/ComingSoonMerchants.tsx
   - packages/frontend/src/components/marketplace/MerchantHeader.tsx
   - packages/frontend/src/components/marketplace/OffersTable.tsx
   - packages/frontend/src/components/marketplace/OfferRow.tsx
@@ -530,16 +531,21 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   "0.001" stays — the ONE price format on the frontend, matching the offer
   row's `price_display`; #4008), with the offer count after it
   when there is more than one offer, and the offer count alone when no
-  counted offer prices in USDC — while a coming-soon merchant shows no footer
-  at all (nothing there is comparable), renders muted, and carries "Coming
-  soon" in the badge slot. The grid sorts payable merchants before
-  coming-soon ones, CLIENT-side in `MerchantGrid`'s `visible` memo — the
-  endpoint's own order (test merchants last, then by name) is preserved
+  counted offer prices in USDC. The price leads in ink and semibold, the
+  count stays ink-3 (#4052). Only payable merchants get a card (#4052):
+  coming-soon merchants list below the grid in `ComingSoonMerchants`, one
+  Card titled "Coming soon" with a divided list of linked rows (monogram,
+  name, one-line description) and nothing comparable — no price, no
+  count. The section renders only when it has rows, and "No merchants match
+  this filter" shows only when both the grid and the section are empty. The
+  split (#3980 sorted, #4052 partitions) is CLIENT-side in `MerchantGrid` —
+  the endpoint's own order (test merchants last, then by name) is preserved
   within each group and must not change for its other clients. Verified is a
   quiet check after the name (`title` = the meaning, sr-only "Verified" so
   the card link's accessible name stays the merchant's) — the merchant page
-  still spells the meaning out in visible text; the Haven test-merchant label
-  renders on a test merchant. Filters, in
+  still spells the meaning out in visible text. A test merchant carries a
+  neutral "Test" badge in the card's badge slot; the full test-merchant note
+  ("payments are real … demo content") is the merchant page's (#4052). Filters, in
   two rows (#3979): first a search over name and description (leading icon,
   filling the row, as on Contacts) with the network dropdown beside it, shown
   only when the listed chains are more than one; then category pills

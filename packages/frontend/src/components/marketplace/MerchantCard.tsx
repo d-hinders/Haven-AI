@@ -1,7 +1,6 @@
 import Link from 'next/link'
 import { Check } from 'lucide-react'
 import { Monogram } from '@/components/ui/Monogram'
-import { TEST_MERCHANT_NOTE } from './MerchantHeader'
 import { Icon } from '@/components/ui/Icon'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { entityCardClassName } from '@/components/ui/entityCardStyles'
@@ -40,14 +39,26 @@ function lowestPrice(merchant: Merchant): string | null {
 /**
  * The footer's one line (#3980): what a buyer decides on, first — "From
  * 0.001 USDC" — with the offer count after it when there is more than one
- * offer to count. A merchant with no USDC-priced offer shows the count alone;
- * a coming-soon card shows no footer at all.
+ * offer to count. A merchant with no USDC-priced offer shows the count alone.
+ *
+ * #4052: the price leads in ink and semibold, the count stays ink-3 — the
+ * price is the datum a buyer compares across cards, the count is context.
  */
-function footer(merchant: Merchant): string {
+function Footer({ merchant }: { merchant: Merchant }) {
   const count = merchant.offer_count === 1 ? '1 offer' : `${merchant.offer_count} offers`
   const price = lowestPrice(merchant)
-  if (price === null) return count
-  return merchant.offer_count > 1 ? `From ${price} USDC · ${count}` : `From ${price} USDC`
+  return (
+    <p className="mt-auto text-xs font-medium text-[var(--v2-ink-3)]">
+      {price === null ? (
+        count
+      ) : (
+        <>
+          <span className="font-semibold text-[var(--v2-ink)]">From {price} USDC</span>
+          {merchant.offer_count > 1 && <span> · {count}</span>}
+        </>
+      )}
+    </p>
+  )
 }
 
 /**
@@ -58,18 +69,22 @@ function footer(merchant: Merchant): string {
  * cards aligns whatever each one lists above it.
  *
  * #3980: the card answers "can I pay this, and what does it cost?" at a
- * glance. A coming-soon merchant is muted and says so in the badge slot with
- * no footer; verified is a quiet check after the name — since #4008 the ONE
+ * glance. Verified is a quiet check after the name — since #4008 the ONE
  * Verified treatment: the merchant header carries the same check plus the
  * word in sentence case, and no surface renders an ALL-CAPS badge any more
  * (the category is plain text so it stops dressing up like the network
  * chips).
+ *
+ * #4052: only payable merchants get a card — coming-soon ones list below the
+ * grid in `ComingSoonMerchants`. A test merchant carries a neutral "Test"
+ * badge in the badge slot; the full "payments are real, goods are demo"
+ * sentence lives on the merchant page (`MerchantHeader`), where the user is
+ * one paste away from paying.
  */
 export function MerchantCard({ merchant }: { merchant: Merchant }) {
   const networks = merchant.networks
     .map((n) => networkToChainId(n))
     .filter((id): id is number => id !== undefined)
-  const comingSoon = merchant.listing_status === 'coming_soon'
 
   return (
     <Link
@@ -81,11 +96,7 @@ export function MerchantCard({ merchant }: { merchant: Merchant }) {
         <div className="flex min-w-0 items-center gap-3">
           <Monogram name={merchant.name} logoUrl={merchant.logo_url} />
           <div className="min-w-0">
-            <h3
-              className={`line-clamp-2 text-sm font-semibold ${
-                comingSoon ? 'text-[var(--v2-ink-2)]' : 'text-[var(--v2-ink)]'
-              }`}
-            >
+            <h3 className="line-clamp-2 text-sm font-semibold text-[var(--v2-ink)]">
               {merchant.name}
               {merchant.verified_payable && (
                 // A link cannot host a tooltip trigger (nested interactive); the
@@ -109,17 +120,12 @@ export function MerchantCard({ merchant }: { merchant: Merchant }) {
             </span>
           </div>
         </div>
-        {comingSoon && (
-          // The badge slot: a coming-soon merchant is the one state a buyer
-          // must notice before clicking through, so it keeps a badge while
-          // "Verified" demotes to a check.
-          <StatusBadge tone="neutral">Coming soon</StatusBadge>
+        {merchant.is_test_merchant && (
+          // The badge slot: neutral, not warning — the merchant page carries
+          // the full sentence, so the grid only needs to mark which is which.
+          <StatusBadge tone="neutral">Test</StatusBadge>
         )}
       </div>
-
-      {merchant.is_test_merchant && !comingSoon && (
-        <p className="text-xs font-medium text-[var(--v2-warning)]">{TEST_MERCHANT_NOTE}</p>
-      )}
 
       <p className="line-clamp-2 text-xs text-[var(--v2-ink-3)]">{merchant.description}</p>
 
@@ -136,12 +142,8 @@ export function MerchantCard({ merchant }: { merchant: Merchant }) {
         </div>
       )}
 
-      {/* One line, pinned: the comparable datum in a row aligns across cards.
-          A coming-soon merchant has nothing comparable — no offers, no price —
-          so its footer is empty rather than "0 offers". */}
-      {!comingSoon && (
-        <p className="mt-auto text-xs font-medium text-[var(--v2-ink-3)]">{footer(merchant)}</p>
-      )}
+      {/* One line, pinned: the comparable datum in a row aligns across cards. */}
+      <Footer merchant={merchant} />
     </Link>
   )
 }

@@ -19,6 +19,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterPill } from '@/components/ui/FilterPill'
 import { Monogram } from '@/components/ui/Monogram'
 import { MerchantCard } from '@/components/marketplace/MerchantCard'
+import { ComingSoonMerchants } from '@/components/marketplace/ComingSoonMerchants'
 import { Input, MaxButton, PasteButton } from '@/components/ui/Input'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Modal } from '@/components/ui/Modal'
@@ -3179,7 +3180,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Merchant card (marketplace)"
-        description="The /marketplace grid's card (#3079, epic #3077; footer and markers per #3980): monogram or logo, name, the category as plain ink-3 text (not a chip — the network chips keep their surface-2 pills), description clamped to two lines, network chips, and a bottom-pinned footer: 'From <price> USDC' on the ONE frontend price format (#4008) — the backend's two-decimal rule, trailing zeros trimmed to at least two decimals ('0.10', '1.00'; '0.001' stays) — with the offer count after it when there is more than one, the count alone when no counted offer prices in USDC, and nothing at all on a coming-soon card, which renders muted with 'Coming soon' in the badge slot. Verified is a quiet check after the name — title = the meaning, sr-only 'Verified' — following verified_payable, the wire's own proof (#3078)."
+        description="The /marketplace grid's card (#3079, epic #3077; footer and markers per #3980): monogram or logo, name, the category as plain ink-3 text (not a chip — the network chips keep their surface-2 pills), description clamped to two lines, network chips, and a bottom-pinned footer: 'From <price> USDC' on the ONE frontend price format (#4008) — the backend's two-decimal rule, trailing zeros trimmed to at least two decimals ('0.10', '1.00'; '0.001' stays) — the price in ink and semibold, the offer count after it in ink-3 when there is more than one (#4052), the count alone when no counted offer prices in USDC. A test merchant carries a neutral 'Test' StatusBadge in the badge slot — the full 'payments are real, goods are demo' note is the merchant page's (#4052). Only payable merchants get a card: coming-soon ones list below the grid (next entry). Verified is a quiet check after the name — title = the meaning, sr-only 'Verified' — following verified_payable, the wire's own proof (#3078)."
       >
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <MerchantCard
@@ -3218,8 +3219,16 @@ export default function DesignSystemPage() {
               lowest_price_atomic: '50000',
             }}
           />
-          <MerchantCard
-            merchant={{
+        </div>
+      </Section>
+
+      <Section
+        title="Coming-soon merchants (marketplace)"
+        description="The /marketplace section below the card grid (#4052): merchants not payable yet, as one Card — a Card.Header band titled 'Coming soon' (h2), then a Card.Section divided list of linked Rows (Monogram, name, one-line description — no trailing slot: on a full-width row a lone category read as stray). Rows sit on the header's px-5 inset; the toneless leading box is sized to the 36px Monogram via leadingClassName. Renders nothing when the list is empty, so no heading stands over nothing."
+      >
+        <ComingSoonMerchants
+          merchants={[
+            {
               id: 'ds-merchant-coming-soon',
               slug: 'ds-merchant-coming-soon',
               name: 'Berget AI',
@@ -3234,9 +3243,25 @@ export default function DesignSystemPage() {
               networks: [],
               verified_payable: false,
               lowest_price_atomic: null,
-            }}
-          />
-        </div>
+            },
+            {
+              id: 'ds-merchant-coming-soon-2',
+              slug: 'ds-merchant-coming-soon-2',
+              name: 'Redpine',
+              description: 'Retrieval and search APIs, metered per query.',
+              website: null,
+              logo_url: null,
+              category: 'search',
+              country: null,
+              listing_status: 'coming_soon',
+              is_test_merchant: false,
+              offer_count: 0,
+              networks: [],
+              verified_payable: false,
+              lowest_price_atomic: null,
+            },
+          ]}
+        />
       </Section>
 
       <Section

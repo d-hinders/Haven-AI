@@ -7,7 +7,7 @@ import type { CatalogEntry, Merchant } from '../../src/hooks/useCatalog'
  *   - `ampersendDemoApi`  — live, real third-party content, Sepolia + Base,
  *     three offers, none advertising `erc7710` (the unpinned-budget line).
  *   - `havenDemoStore`    — live, `is_test_merchant`, the "Haven test
- *     merchant" footer/label.
+ *     merchant" badge on the grid card (#4052), the full note on its page.
  *   - `bergetAi`          — `coming_soon`, no offers, the merchant-page
  *     "Coming soon — not payable yet" branch. (The real seed is #3080's; this
  *     fixture only exercises the `listing_status` branch this issue builds.)

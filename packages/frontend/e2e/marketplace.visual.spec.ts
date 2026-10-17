@@ -11,8 +11,9 @@
  * (design review round 2, finding 8 — this docstring used to name only the
  * five full-page ones, undercounting the file's own coverage):
  *
- *   - `marketplace-grid`      — the grid with three merchants (live/verified,
- *     test, coming-soon), at desktop and mobile.
+ *   - `marketplace-grid`      — the grid with two merchant cards (live/verified,
+ *     and a test merchant with its "Test" badge) and the "Coming soon"
+ *     section below it holding one row (#4052), at desktop and mobile.
  *   - `merchant-page`         — a live merchant (Ampersend Demo API) with
  *     three offers in the one offers list — one row per offer with a labelled
  *     Copy prompt button (#3981, #3998, #4003) — at desktop and mobile.
@@ -120,27 +121,37 @@ const SCENARIOS: Scenario[] = [
       ).toHaveCount(1)
       await expect(grid.getByTestId(`merchant-card-${ampersendDemoApi.slug}`)).toHaveCount(1)
       await expect(grid.getByTestId(`merchant-card-${havenDemoStore.slug}`)).toHaveCount(1)
-      await expect(grid.getByTestId(`merchant-card-${bergetAi.slug}`)).toHaveCount(1)
+      // #4052: a coming-soon merchant is a row in its own section, never a card.
+      await expect(grid.getByTestId(`merchant-card-${bergetAi.slug}`)).toHaveCount(0)
       await expect(grid.getByText(ampersendDemoApi.name)).toHaveCount(1)
       // #3980: the footer is the decision line — "From <price> USDC", the
       // offer count after it when there is more than one offer. One offer
-      // prices alone; a coming-soon card carries NO footer at all.
-      await expect(grid.getByText('From 0.001 USDC · 3 offers')).toHaveCount(1)
+      // prices alone. #4052: the price is its own span, the count another.
+      const ampersendCard = grid.getByTestId(`merchant-card-${ampersendDemoApi.slug}`)
+      await expect(ampersendCard.getByText('From 0.001 USDC', { exact: true })).toHaveCount(1)
+      await expect(ampersendCard.getByText('· 3 offers', { exact: true })).toHaveCount(1)
       await expect(grid.getByText('From 0.05 USDC', { exact: true })).toHaveCount(1)
-      const bergetCard = grid.getByTestId(`merchant-card-${bergetAi.slug}`)
-      await expect(bergetCard.getByText('Coming soon')).toHaveCount(1)
-      await expect(bergetCard.getByText(/offer/)).toHaveCount(0)
-      await expect(bergetCard.getByText(/From /)).toHaveCount(0)
-      // No coming-soon card renders before a live one (the endpoint's own
-      // order would put Berget first — the grid re-sorts it client-side).
-      const liveBeforeProspect = await grid
-        .getByTestId(`merchant-card-${ampersendDemoApi.slug}`)
-        .evaluate((live, prospectSelector) => {
-          const prospect = document.querySelector(prospectSelector)
-          return prospect !== null && Boolean(live.compareDocumentPosition(prospect) & Node.DOCUMENT_POSITION_FOLLOWING)
-        }, `[data-testid="merchant-card-${bergetAi.slug}"]`)
+      const comingSoon = grid.getByTestId('marketplace-coming-soon')
+      await expect(comingSoon.getByRole('heading', { level: 2, name: 'Coming soon' })).toHaveCount(1)
+      const bergetRow = comingSoon.getByTestId(`merchant-row-${bergetAi.slug}`)
+      await expect(bergetRow).toHaveCount(1)
+      await expect(bergetRow.getByText(bergetAi.name)).toHaveCount(1)
+      await expect(bergetRow.getByText(/offer/)).toHaveCount(0)
+      await expect(bergetRow.getByText(/From /)).toHaveCount(0)
+      // No coming-soon merchant renders before a live one (the endpoint's own
+      // order would put Berget first — the grid splits it out client-side and
+      // the section sits after the card grid).
+      const liveBeforeProspect = await ampersendCard.evaluate((live, prospectSelector) => {
+        const prospect = document.querySelector(prospectSelector)
+        return prospect !== null && Boolean(live.compareDocumentPosition(prospect) & Node.DOCUMENT_POSITION_FOLLOWING)
+      }, `[data-testid="merchant-row-${bergetAi.slug}"]`)
       expect(liveBeforeProspect).toBe(true)
-      await expect(grid.getByText(TEST_MERCHANT_NOTE)).toHaveCount(1)
+      // #4052: the grid marks the test merchant with a "Test" badge; the full
+      // note is the merchant page's (asserted in the merchant-page scenario).
+      await expect(grid.getByText(TEST_MERCHANT_NOTE)).toHaveCount(0)
+      await expect(
+        grid.getByTestId(`merchant-card-${havenDemoStore.slug}`).getByText('Test', { exact: true }),
+      ).toHaveCount(1)
       // "Show test merchants" defaults ON: the grid lists both chains
       // (decision 11) and one of them is Sepolia, so the test merchant card
       // is visible without any interaction.

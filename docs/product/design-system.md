@@ -1211,6 +1211,14 @@ Consequences worth knowing:
   controls, adjacent targets meet but never overlap. Tighter than that and two buttons
   fight over the same pixels — this is the one new constraint the mechanism introduces.
 - Choosing `size` therefore stays a **density** decision, not an ergonomics one.
+- **`SegmentedControl` carries the same mechanism** ([#4056](https://github.com/d-hinders/Haven-AI/issues/4056)).
+  Each option paints 32px and extends its hit area to 44px vertically (never sideways —
+  the options abut). The overhang is 6px per edge from the option, 1px past the track, so
+  the 8px rule above applies to whatever is stacked above or below the control. Its
+  selected option is brand ink on `--v2-brand-soft` inside a 1px inset brand ring: the
+  ring is the component boundary, 5.95:1 (light) / 7.99:1 (dark) against the
+  `--v2-surface` track, where the old `--v2-surface-2` thumb measured 1.06:1 / 1.10:1 and
+  read as sunken in light.
 
 **The rule outlives the primitive ([#1766](https://github.com/d-hinders/Haven-AI/issues/1766)).**
 A control that is not a `Button` inherits none of the above automatically, and the

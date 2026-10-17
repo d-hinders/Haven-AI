@@ -153,8 +153,8 @@ export const en = {
        * the 240px rail cannot hold "Accounting" and "Coming soon" side by
        * side at 13px (the first #2869 capture truncated the label to
        * "Accoun…"). The full phrase (`common.comingSoon`) is the pill's
-       * accessible name and its visible text below `lg`, where the drawer
-       * is full-width.
+       * accessible name, and its visible text in the phone More sheet, which
+       * has the room (#4053).
        */
       comingSoon: 'Soon',
     },

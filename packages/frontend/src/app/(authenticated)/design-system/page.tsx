@@ -1115,7 +1115,11 @@ export default function DesignSystemPage() {
               <code className="rounded bg-[var(--v2-surface)] px-1">aria-checked</code> options, because the
               choices are mutually exclusive. The group carries <code className="rounded bg-[var(--v2-surface)] px-1">aria-label</code>{' '}
               so a screen reader names the question first; options are real buttons, so keyboard
-              works without extra wiring. Never hand-roll a second control of this shape.
+              works without extra wiring. The selected option uses the app&rsquo;s active idiom —
+              brand ink on brand-soft inside an inset brand ring, a boundary of at least 3:1 against
+              the track in both themes — and every option&rsquo;s hit area is 44px tall while it
+              paints 32px (#4056, the same mechanism as Button). Never hand-roll a second control
+              of this shape.
             </p>
           </Card>
 

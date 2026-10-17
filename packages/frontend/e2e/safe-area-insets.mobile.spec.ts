@@ -116,7 +116,10 @@ async function applyInsets(page: Page) {
 /**
  * Controls inside the app CHROME that intersect a reserved band.
  *
- * Scoped to the chrome — the drawer, the fixed toggle, an open dialog — and
+ * Scoped to the chrome — the rail (`aside`, which matches nothing below `lg`
+ * where it is hidden), the More cell (`[aria-label="Open sidebar"]`; the four
+ * tab links are not scanned) and any open dialog, the More sheet included —
+ * and
  * deliberately NOT to the scroll region, because a control passing through the
  * bottom 34px mid-scroll is what a scroll region does, not a defect. What the
  * scroll region owes the home indicator is that its content can be scrolled

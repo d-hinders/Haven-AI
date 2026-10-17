@@ -97,10 +97,10 @@ describe('Sidebar', () => {
     const labels = ['Overview', 'Money', 'Agents'].map((l) => screen.getByText(l, { selector: 'p' }))
     expect(labels).toHaveLength(3)
     // Order and routes (scoped to the nav — the logo also links to /dashboard):
-    // Scoped to the DRAWER's landmark by name (#2731). `querySelector('nav')`
+    // Scoped to the RAIL's landmark by name (#2731). `querySelector('nav')`
     // took the first `<nav>` in the DOM, and the mobile tab bar now renders
     // before this one — the assertion silently started measuring four tab
-    // routes instead of the drawer's own.
+    // routes instead of the rail's own.
     const links = Array.from(
       document.querySelector('nav[aria-label="All sections"]')!.querySelectorAll('a'),
     ).map((a) =>
@@ -121,7 +121,7 @@ describe('Sidebar', () => {
     ])
     // Header order in the DOM: Overview, then Money, then Agents — and
     // Dashboard sits UNDER the Overview header, not above it (the pre-#2947
-    // ungrouped shape #3024 described as the interim). Scoped to the drawer's
+    // ungrouped shape #3024 described as the interim). Scoped to the rail's
     // `<nav>`, not `getByRole` — the mobile tab bar renders its own
     // "Dashboard" link too.
     const overview = screen.getByText('Overview', { selector: 'p' })
@@ -173,7 +173,7 @@ describe('Sidebar', () => {
     // Scoped like the assertion above (#2731). This one was the more dangerous
     // of the two: it is a NEGATIVE assertion, so pointing it at the tab bar
     // made it unable to FAIL rather than merely wrong — the four tab routes
-    // never contain '/approvals' whatever the drawer does.
+    // never contain '/approvals' whatever the rail does.
     const hrefs = Array.from(
       document.querySelector('nav[aria-label="All sections"]')!.querySelectorAll('a'),
     ).map((a) =>
@@ -630,6 +630,13 @@ describe('More sheet across the desktop breakpoint (#2586, #4053)', () => {
     const profile = s.querySelector('a[aria-label="Open profile for Ada Lovelace"]')!
     expect(profile.getAttribute('href')).toBe('/profile')
     expect(profile.textContent).toContain('ada@example.com')
+    // #4056: a decorative trailing chevron marks the row as tappable.
+    const chevron = profile.querySelector('[data-account-chevron]')!
+    expect(chevron.getAttribute('aria-hidden')).toBe('true')
+    // #4056: the sheet's wordmark sits on the rows' left edge (px-6), the
+    // rail keeps its own px-5.
+    expect(s.querySelector('[data-logo-band]')!.className.split(/\s+/)).toContain('px-6')
+    expect(document.querySelector('aside [data-logo-band]')!.className.split(/\s+/)).toContain('px-5')
     // Account comes before the destinations.
     const firstDestination = s.querySelector('nav a')!
     expect(profile.compareDocumentPosition(firstDestination) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()

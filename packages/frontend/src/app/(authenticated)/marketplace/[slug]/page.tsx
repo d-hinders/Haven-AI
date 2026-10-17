@@ -23,7 +23,7 @@ import { useMerchant } from '@/hooks/useCatalog'
 import { useMerchantBudgets } from '@/hooks/useMerchantBudgets'
 
 /**
- * The way back on a phone, where Marketplace lives in the More drawer —
+ * The way back on a phone, where Marketplace lives in the More sheet —
  * rendered by EVERY branch of the page (loading, error, merchant-less,
  * success). The app's one back link, `BackLink` (#4028): above the title,
  * named by the parent alone. The merchant page has no `PageHeader` (its

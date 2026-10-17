@@ -242,14 +242,13 @@
      authenticated route.
 
      The rule the numbers encode, in one sentence: the mobile navigation
-     overlay outranks the app chrome it slides over. That direction is not
-     arbitrary. The drawer is `inset-y-0`, so its own logo band occupies the
-     same top strip the chrome does; its scrim exists to dim everything behind
-     it, and "everything" includes the chrome. Let the chrome win and the
-     drawer is decapitated, the scrim dims all but the top strip, and the
-     toggle — which is positioned INSIDE that strip by design — is
-     unreachable. Modals and toasts in turn outrank the navigation, because a
-     dialog opened from a nav link must cover the drawer.
+     overlay outranks the app chrome it opens over. That direction is not
+     arbitrary: let the chrome win and the navigation is covered and its
+     control cannot be tapped (#1749). Since #4053 the phone overlay is the
+     More sheet, which stops at the tab bar's top edge, so the bar stays
+     reachable by geometry rather than by rank. Modals and toasts in turn
+     outrank the navigation, because a dialog opened from a nav link must
+     cover the sheet.
 
      Tiers are spaced by 10 so a genuinely new layer has room to land between
      two without renumbering the scale. */

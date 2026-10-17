@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import Link from 'next/link'
-import { LogOut } from 'lucide-react'
+import { ChevronRight, LogOut } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { SegmentedControl } from '@haven_ai/ui/SegmentedControl'
 import { useTheme, type ThemePreference } from '@/context/ThemeContext'
@@ -217,6 +217,12 @@ export function MoreSheet({
               {account.email && (
                 <span className="mt-0.5 block truncate text-xs leading-tight text-[var(--v2-ink-3)]">{account.email}</span>
               )}
+            </span>
+            {/* The row's tappable cue (#4056): on a phone this is the only
+                route to Profile, and a bare name read as a label. Decorative —
+                the link's name stays `Open profile for …`. */}
+            <span aria-hidden="true" data-account-chevron="" className="inline-flex h-4 w-4 flex-shrink-0 text-[var(--v2-ink-3)]">
+              <Icon icon={ChevronRight} className="h-full w-full" />
             </span>
           </Link>
 

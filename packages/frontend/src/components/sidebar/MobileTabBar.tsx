@@ -115,19 +115,16 @@ export function MobileTabBar({
               active ? 'text-[var(--v2-brand)]' : 'text-[var(--v2-ink-3)]'
             }`}
           >
-            {/* One "you are here" idiom across both halves of the same
-                navigation (#2818). The drawer this bar opens is two feet away
-                on one 390px screen and marks active — still, and unchanged
-                by this commit — in brand ink on a `--v2-brand-soft` fill with
-                a 2px brand rail down the left edge. The bar did not match it:
-                it marked active in ink value alone. On `/agents` with the
-                drawer open both idioms were visible at once.
-
-                The bar is the side that moved, and it takes the drawer's idiom
-                translated from a row to a cell: the rail runs across the TOP
-                edge instead of the left, and the fill is dropped because a
-                tinted 56px cell reads as a pressed button rather than as a
-                selection.
+            {/* One "you are here" idiom across the navigation (#2818). The
+                desktop rail marks the active row in brand ink on a
+                `--v2-brand-soft` fill with a 2px brand rail down its left
+                edge, and the bar takes that idiom translated from a row to a
+                cell: the rail runs across the TOP edge instead of the left,
+                and the fill is dropped because a tinted 56px cell reads as a
+                pressed button rather than as a selection. (Until #4053 the
+                phone menu was the rail itself, full-screen; the More sheet
+                that replaced it marks its active rows by the fill and brand
+                ink alone — its rows are never the route a tab is lit for.)
 
                 The rail is NOT decoration. Brand ink alone would be a WCAG
                 1.4.1 regression: `--v2-brand` against `--v2-ink-3` is 1.18:1,
@@ -135,8 +132,8 @@ export function MobileTabBar({
                 tab would be indistinguishable in greyscale and to a
                 colour-blind user — where the `--v2-ink`/`--v2-ink-3` pair
                 this replaces differ by ~3:1. The rail is the non-colour cue
-                that makes brand ink acceptable, and it is the cue the drawer
-                already uses. Both text states still clear AA at 12px on
+                that makes brand ink acceptable, and it is the cue the desktop
+                rail already uses. Both text states still clear AA at 12px on
                 their own (6.29 and 5.32).
 
                 It adds no height: `top-0` is inside the bar's `border-t` and

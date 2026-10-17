@@ -74,7 +74,7 @@ const icons = {
 
 /**
  * Exported for `MobileTabBar` (#2731), which picks its four tabs from this list
- * **by `href`**, never by position — the bar's order differs from the drawer's
+ * **by `href`**, never by position — the bar's order differs from the rail's
  * and an inserted entry would otherwise reorder it silently. The index reads
  * inside `navGroups` below predate that and are left alone: they are grouped by
  * cluster, not selected by route, so they are a different kind of read.
@@ -357,7 +357,10 @@ export default function Sidebar() {
   // The logo band, shared by the rail and the sheet. `gap-2` keeps the
   // environment badge off the wordmark (#4053 — it rendered "HavenDEV").
   // In the sheet the wordmark is not a link: Dashboard is a tab one cell
-  // away, and the sheet carries no tab destination.
+  // away, and the sheet carries no tab destination. And it is inset `px-6`
+  // there, not the rail's `px-5`: the sheet's rows sit at `px-3` inside a
+  // `px-3` column, so `px-6` puts the mark on the same left edge as the avatar
+  // and the row icons (#4056 — it sat 4px outside them). The rail keeps `px-5`.
   const wordmarkClass = 'flex items-center gap-2 text-[15px] font-semibold tracking-tight text-[var(--v2-ink)]'
   const wordmark = (
     <>
@@ -366,7 +369,7 @@ export default function Sidebar() {
     </>
   )
   const logoBand = (linked: boolean) => (
-    <div data-logo-band="" className="h-14 flex items-center gap-2 px-5 flex-shrink-0">
+    <div data-logo-band="" className={`h-14 flex items-center gap-2 ${linked ? 'px-5' : 'px-6'} flex-shrink-0`}>
       {linked ? (
         <Link href="/dashboard" className={wordmarkClass}>
           {wordmark}
@@ -432,7 +435,7 @@ export default function Sidebar() {
             unnamed `<nav>` landmarks are ambiguous to a screen reader and to
             every `getByRole('navigation')` in the suite — `Sidebar.test.tsx`
             was reading `document.querySelector('nav')` and silently started
-            measuring the tab bar instead of this drawer. */}
+            measuring the tab bar instead of this rail. */}
         <nav
           aria-label="All sections"
           className="flex-1 px-3 py-4 overflow-y-auto"

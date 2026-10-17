@@ -88,4 +88,21 @@ describe('SegmentedControl', () => {
       expect(screen.getByRole('radio', { name })).toHaveAttribute('type', 'button')
     }
   })
+
+  // #4056 — className pins (jsdom has no layout; the rendered hit area is
+  // asserted by `more-sheet` e2e). The selected option carries a boundary that
+  // clears 3:1 against the track (the inset brand ring), only the selected one
+  // does, and every option carries the vertical 44px hit-area pseudo-element.
+  it('marks only the selected option with the brand ring, and every option has a 44px hit area', () => {
+    renderControl()
+    const classes = (name: string) => screen.getByRole('radio', { name }).className.split(/\s+/)
+    expect(classes('System')).toEqual(expect.arrayContaining(['ring-1', 'ring-inset', 'ring-brand']))
+    expect(classes('Light')).not.toContain('ring-brand')
+    expect(classes('Dark')).not.toContain('ring-brand')
+    for (const name of ['Light', 'Dark', 'System']) {
+      expect(classes(name)).toEqual(expect.arrayContaining(['relative', 'after:absolute', 'after:h-11']))
+      // Vertical only: the options abut, so the target must not grow sideways.
+      expect(classes(name)).toContain('after:inset-x-0')
+    }
+  })
 })

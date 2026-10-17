@@ -2027,9 +2027,9 @@ export async function openReceiveFundsModal(page: Page) {
  *
  * These three are deliberately NOT asserted here, and that is the design rather
  * than an omission. This helper has three classes of caller with three
- * different CORRECT answers: below `lg` the drawer is `fixed`, so `<main>`
- * spans the full viewport (`0 → innerWidth`); on desktop the drawer is
- * `lg:static` and legitimately occupies the first 240px, so `contentLeft` is
+ * different CORRECT answers: below `lg` the rail is hidden (#4053), so
+ * `<main>` spans the full viewport (`0 → innerWidth`); on desktop the rail is
+ * an in-flow column and legitimately occupies the first 240px, so `contentLeft` is
  * 240; and `/login` is outside the shell entirely and has no content region at
  * all. A single anchor baked in here would have to be loose enough to hold for
  * all three, which is another way of saying it would hold for the defect too.

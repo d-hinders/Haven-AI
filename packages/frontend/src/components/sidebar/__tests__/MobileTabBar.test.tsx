@@ -70,7 +70,7 @@ describe('MobileTabBar — the presentational copy is inert (#2819)', () => {
  * class here is "the active cell renders like the inactive one", and a source
  * grep for `--v2-brand` finds the token in a comment just as happily.
  */
-describe('MobileTabBar — active cell marks itself the way the drawer does (#2818)', () => {
+describe('MobileTabBar — active cell marks itself with the rail idiom (#2818)', () => {
   const renderBar = () =>
     render(<MobileTabBar items={baseNavItems} presentational activeHref="/agents" />)
 

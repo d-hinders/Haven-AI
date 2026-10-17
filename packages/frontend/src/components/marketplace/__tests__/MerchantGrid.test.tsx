@@ -188,6 +188,28 @@ describe('MerchantGrid', () => {
     expect(screen.getByText('No merchants match this filter')).toBeDefined()
   })
 
+  it('#4052: a category filter reaches the section — a pill with no coming-soon merchant hides it', () => {
+    render(
+      <MerchantGrid
+        merchants={[
+          merchant({ category: 'api' }),
+          merchant({ id: 's', slug: 'soon', name: 'Soon Co', category: 'ai', listing_status: 'coming_soon' }),
+        ]}
+        loading={false}
+        error={null}
+        onSubmit={vi.fn()}
+      />,
+    )
+    const pills = screen.getByRole('group', { name: 'Filter by category' })
+    expect(screen.getByTestId('merchant-row-soon')).toBeDefined()
+    fireEvent.click(within(pills).getByRole('button', { name: 'API' }))
+    expect(screen.queryByTestId('marketplace-coming-soon')).toBeNull()
+    expect(screen.getByTestId('merchant-card-merchant-one')).toBeDefined()
+    fireEvent.click(within(pills).getByRole('button', { name: 'AI' }))
+    expect(screen.getByTestId('merchant-row-soon')).toBeDefined()
+    expect(screen.queryByTestId('merchant-card-merchant-one')).toBeNull()
+  })
+
   it('splits payable merchants (cards) from coming-soon ones (rows after the grid), keeping the served order inside each group', () => {
     // Exactly `GET /merchants`' order (coming_soon sorts before `live`
     // alphabetically, so Berget and Redpine head the raw list) — the grid

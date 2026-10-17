@@ -448,7 +448,7 @@ Dev's standing env is `HAVEN_MARKETPLACE_PROSPECTS=true` **and**
 `HAVEN_MARKETPLACE_CHAIN_IDS=84532,8453` (the list is restored to that value
 as the operator step after PR #3202 lands; for the 2026-09-20 demo it was
 narrowed to `84532`), so a logged-in dev user sees the mainnet merchants, the
-Ampersend sandbox and the "Coming soon" prospects on one grid, all the time;
+Ampersend sandbox and the "Coming soon" prospects on one page, all the time;
 nothing is flipped before or after a meeting. Two things still hold: agents and
 credential-less readers never see a prospect (measured 2026-09-20 on dev at
 `84532`, before this rule change — the property, not the count, is what the
@@ -536,7 +536,7 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   coming-soon merchants list below the grid in `ComingSoonMerchants`, one
   Card titled "Coming soon" with a divided list of linked rows (monogram,
   name, one-line description) and nothing comparable — no price, no
-  count. The section renders only when it has rows, and "No merchants match
+  count; its header says "Not payable through Haven yet.". The section renders only when it has rows, and "No merchants match
   this filter" shows only when both the grid and the section are empty. The
   split (#3980 sorted, #4052 partitions) is CLIENT-side in `MerchantGrid` —
   the endpoint's own order (test merchants last, then by name) is preserved

@@ -535,7 +535,7 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   count stays ink-3 (#4052). Only payable merchants get a card (#4052):
   coming-soon merchants list below the grid in `ComingSoonMerchants`, one
   Card titled "Coming soon" with a divided list of linked rows (monogram,
-  name, one-line description) and nothing comparable — no price, no
+  name, one-line description, an ink-3 chevron) and nothing comparable — no price, no
   count; its header says "Not payable through Haven yet.". The section renders only when it has rows, and "No merchants match
   this filter" shows only when both the grid and the section are empty. The
   split (#3980 sorted, #4052 partitions) is CLIENT-side in `MerchantGrid` —

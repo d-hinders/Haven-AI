@@ -1,4 +1,6 @@
+import { ChevronRight } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
+import { Icon } from '@/components/ui/Icon'
 import { Monogram } from '@/components/ui/Monogram'
 import { Row } from '@/components/ui/Row'
 import type { Merchant } from '@/hooks/useCatalog'
@@ -35,6 +37,9 @@ export function ComingSoonMerchants({ merchants }: { merchants: Merchant[] }) {
                 leadingClassName="h-9 w-9"
                 title={merchant.name}
                 subtitle={merchant.description}
+                // The row's one affordance: on a full-width desktop row nothing
+                // else says "this opens" (design review, #4052).
+                trailing={<Icon icon={ChevronRight} className="h-4 w-4 text-[var(--v2-ink-3)]" />}
               />
             </div>
           ))}

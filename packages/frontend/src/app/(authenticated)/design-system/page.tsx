@@ -3224,7 +3224,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Coming-soon merchants (marketplace)"
-        description="The /marketplace section below the card grid (#4052): merchants not payable yet, as one Card — a Card.Header band titled 'Coming soon' (h2), then a Card.Section divided list of linked Rows (Monogram, name, one-line description — no trailing slot: on a full-width row a lone category read as stray). Rows sit on the header's px-5 inset; the toneless leading box is sized to the 36px Monogram via leadingClassName. Renders nothing when the list is empty, so no heading stands over nothing."
+        description="The /marketplace section below the card grid (#4052): merchants not payable yet, as one Card — a Card.Header band titled 'Coming soon' (h2), then a Card.Section divided list of linked Rows (Monogram, name, one-line description, an ink-3 chevron trailing — the row's one affordance; a trailing category read as stray on a full-width row). Rows sit on the header's px-5 inset; the toneless leading box is sized to the 36px Monogram via leadingClassName. Renders nothing when the list is empty, so no heading stands over nothing."
       >
         <ComingSoonMerchants
           merchants={[

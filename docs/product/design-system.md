@@ -99,10 +99,14 @@ covers:
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
-last-verified: 2026-10-16
+last-verified: 2026-10-17
 ---
 
 # Haven Design System
+
+> Re-verified 2026-10-17 for #4056: § Tap targets' `SegmentedControl` passage
+> (44px hit area, inset brand outline on the selected option). This note covers
+> that passage only.
 
 > Re-verified 2026-09-03 for #2468: the investor-briefing route, its tap-target
 > borrower, and its marketing exemption were retired; the surviving focus-ring
@@ -1215,8 +1219,10 @@ Consequences worth knowing:
   Each option paints 32px and extends its hit area to 44px vertically (never sideways —
   the options abut). The overhang is 6px per edge from the option, 1px past the track, so
   the 8px rule above applies to whatever is stacked above or below the control. Its
-  selected option is brand ink on `--v2-brand-soft` inside a 1px inset brand ring: the
-  ring is the component boundary, 5.95:1 (light) / 7.99:1 (dark) against the
+  selected option is brand ink on `--v2-brand-soft` inside a 1px inset brand outline
+  (`-outline-offset-1`, not `ring-inset`, which would leak into the focus ring and
+  leave the selected option's focus a 1px thickening; focus stays the outset
+  `ring-2`): the outline is the component boundary, 5.95:1 (light) / 7.99:1 (dark) against the
   `--v2-surface` track, where the old `--v2-surface-2` thumb measured 1.06:1 / 1.10:1 and
   read as sunken in light.
 

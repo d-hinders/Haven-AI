@@ -444,7 +444,7 @@ describe('More sheet across the desktop breakpoint (#2586, #4053)', () => {
     snapshotted, and `change` is the only type that registers a listener.
   */
   const DESKTOP_QUERY = '(min-width: 1024px)'
-  // #2928: the drawer now renders the theme row, so these tests mount a real
+  // #2928: the rail now renders the theme row, so these tests mount a real
   // ThemeProvider and a real ThemeToggle on top of the mock. They ask two
   // further questions of `matchMedia` — the provider the colour-scheme one, the
   // toggle the motion one — and both are modelled here (answered, never
@@ -465,7 +465,7 @@ describe('More sheet across the desktop breakpoint (#2586, #4053)', () => {
       writable: true,
       configurable: true,
       value: (query: string) => {
-        // #2928: the drawer footer gained the theme row, so these tests now
+        // #2928: the rail footer gained the theme row, so these tests now
         // mount a real ThemeProvider and a real ThemeToggle on top of this
         // mock. They ask two further questions of it — the provider the
         // colour-scheme one, the toggle the motion one — and both are ANSWERED

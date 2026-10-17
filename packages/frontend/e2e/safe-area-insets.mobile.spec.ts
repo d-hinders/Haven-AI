@@ -705,7 +705,7 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     expect(modal.coversTopBand, 'the backdrop covers the band with no navigation involved').toBe(
       true,
     )
-    // Dim, where the drawer is opaque. This is the surface the operator's
+    // Dim, where #2820's drawer was opaque. This is the surface the operator's
     // discriminating test actually exercises, so what it puts on the strip is
     // the whole of what that test asks about.
     expect(modal.background, 'and it covers the band with a DIM layer').toMatch(DIM_FILL)

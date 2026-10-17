@@ -20,15 +20,19 @@
  *
  * ## The selected option uses the app's "active" idiom (#4056)
  *
- * Brand ink on `--v2-brand-soft`, bounded by a 1px inset brand ring — the
+ * Brand ink on `--v2-brand-soft`, bounded by a 1px inset brand outline — the
  * same pairing the nav uses for "you are here". It replaced a `--v2-surface-2`
  * thumb whose only boundary against the track was 1.06:1 (light) / 1.10:1
  * (dark), and which read as SUNKEN in light because `--v2-surface-2` is
- * darker than `--v2-surface`. Measured from the tokens: the brand ring against
+ * darker than `--v2-surface`. Measured from the tokens: the brand boundary against
  * the track is 5.95:1 (light) / 7.99:1 (dark), clearing WCAG 1.4.11's 3:1 for
  * a component boundary, and brand text on brand-soft is 5.62:1 / 6.63:1. The
- * ring is `inset`, so the painted size does not move; a focused option's
- * `ring-2 ring-brand/80` replaces it while focused.
+ * boundary is an OUTLINE at `-outline-offset-1`, so the painted size does not
+ * move — and deliberately not an inset ring: `ring-inset` would leak into the
+ * focus ring (`--tw-ring-inset` is never reset), shrinking focus on the
+ * selected option to a 1px thickening of the same hue. Under `:focus-visible`
+ * the outline is cleared and the option takes the same outset
+ * `ring-2 ring-brand/80` every other option does.
  *
  * ## 44px hit area, painted size unchanged (#4056)
  *
@@ -71,7 +75,7 @@ export function SegmentedControl<T extends string>({
             disabled={disabled}
             className={`relative rounded px-3 py-1.5 text-sm font-medium transition-colors after:absolute after:inset-x-0 after:top-1/2 after:h-11 after:-translate-y-1/2 after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 ${
               active
-                ? 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] ring-1 ring-inset ring-brand'
+                ? 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] outline outline-1 -outline-offset-1 outline-brand'
                 : 'text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)]'
             } disabled:cursor-not-allowed disabled:opacity-50`}
           >

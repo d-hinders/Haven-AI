@@ -500,6 +500,12 @@ test.describe('one theme control per screen (#4029, #4053)', () => {
       [box.x + box.width / 2, box.y - 4] as const,
     )
     expect(hit, 'the tap 4px above the painted option still reaches it').toBe('Light')
+    // And the bottom edge, at the full 6px overhang (1px past the track).
+    const below = await page.evaluate(
+      ([x, y]) => document.elementFromPoint(x, y)?.closest('[role="radio"]')?.textContent ?? null,
+      [box.x + box.width / 2, box.y + box.height + 5.5] as const,
+    )
+    expect(below, 'the tap 5.5px below the painted option still reaches it').toBe('Light')
     await page.mouse.click(box.x + box.width / 2, box.y - 4)
     await expect(light).toHaveAttribute('aria-checked', 'true')
   })

@@ -3,9 +3,10 @@
 import { useState, useCallback } from 'react'
 import { api } from '@/lib/api'
 import { useAuth, type SmartAccount } from '@/context/AuthContext'
+import type { CreateAccountBody, CreatedAccount } from '@/lib/new-account'
 
 export function useAccounts() {
-  const { user, refreshUser } = useAuth()
+  const { user, refreshUser, reloadUser } = useAuth()
   const [loading, setLoading] = useState(false)
 
   const accounts = user?.accounts ?? []
@@ -19,6 +20,27 @@ export function useAccounts() {
   // `src/__tests__/safe-inflow-frontend-residue.test.ts` now holds that line.
   // Rename, remove and set-default all stay: they operate on EXISTING
   // accounts, which must keep working.
+  //
+  // `createAccount` (#4024) is NOT that route coming back. It creates an
+  // additional delegation-rail account through #4023's create-additional
+  // request on `POST /accounts/hybrid`: the owner passkey is copied
+  // server-side from a source account the user already owns, and the new
+  // account is never the default. It refreshes the session payload afterwards
+  // so the account list (read from `user.accounts`) shows the new account.
+
+  const createAccount = useCallback(
+    async (body: CreateAccountBody): Promise<CreatedAccount> => {
+      setLoading(true)
+      try {
+        const created = await api.post<CreatedAccount>('/accounts/hybrid', body)
+        await refreshUser()
+        return created
+      } finally {
+        setLoading(false)
+      }
+    },
+    [refreshUser],
+  )
 
   const renameAccount = useCallback(
     async (accountId: string, name: string): Promise<SmartAccount> => {
@@ -60,5 +82,10 @@ export function useAccounts() {
     [refreshUser],
   )
 
-  return { accounts, loading, renameAccount, removeAccount, setDefault }
+  // `refreshAccounts` re-reads the session payload without changing anything,
+  // and resolves whether the read happened (`reloadUser`). The New account
+  // dialog calls it after an unknown create outcome, so an account created
+  // behind a lost response shows up — and so a failed read is never reported
+  // as "no new account" (#4024).
+  return { accounts, loading, createAccount, refreshAccounts: reloadUser, renameAccount, removeAccount, setDefault }
 }

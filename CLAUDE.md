@@ -86,8 +86,14 @@ the live EIP-3009 bridge.
 **Accounts.** Signup provisions **one** passkey-owned Hybrid DeleGator, on the
 network chosen at signup (`POST /accounts/hybrid` takes one `chain_id`),
 counterfactually and with zero transactions — one passkey prompt, the only
-onboarding path. There is no in-app path to a second account yet. The
-**signer set** is user-managed (`/agents/:id/account-signers/*`): every change
+onboarding path. A **further account** comes from the Accounts screen's
+**New account** dialog (#4024, epic #4022): one passkey *assertion* picks a
+passkey an existing account already has, and `POST /accounts/hybrid`'s
+create-additional request (#4023) copies it server-side and derives the new
+account at its own per-account deploy salt. The new account's only signer is
+that passkey; it is never the default and starts with no agents or budgets.
+Signer sets are **per account** — a backup on one account protects no other.
+The **signer set** is user-managed (`/agents/:id/account-signers/*`): every change
 is signed by an existing signer, never by Haven; recovery is a backup signer
 replacing a lost one.
 **Single-signer accounts are permitted and have no recovery** — recommended

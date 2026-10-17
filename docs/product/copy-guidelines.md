@@ -10,6 +10,7 @@ covers:
   - packages/frontend/src/app/for-agents/**
   - packages/frontend/src/components/marketing/site/**
   - packages/frontend/src/app/onboarding/**
+  - packages/frontend/src/components/NewAccountDialog.tsx
   - packages/frontend/src/app/login/page.tsx
   - packages/frontend/src/app/signup/page.tsx
   - packages/frontend/src/components/onboarding/AgentHandoffNote.tsx
@@ -331,7 +332,7 @@ recovery as a separate action where relevant.
 
 Onboarding is **one screen and passkey-only** (#1162). There is no sign-in method
 to choose, so there is no copy for choosing one — a wallet is something the user
-adds to an existing account later (Accounts → Add account, or Backup & recovery),
+adds to an existing account later (Backup & recovery on the account's page),
 described in that surface's copy rather than here.
 
 Preferred:
@@ -717,6 +718,69 @@ procedure: its shared label copy lives in `lib/label-copy.ts` and is named in
 8. Use “rules” and “budgets” for agent spending controls.
 9. Keep advanced details available, but not central.
 10. Prefer confidence over over-explanation.
+
+### Accounts: New account ([#4024](https://github.com/d-hinders/Haven-AI/issues/4024))
+
+The live reference is `components/NewAccountDialog.tsx`. A further account is
+secured by a passkey the user already has, so the dialog asks for **one**
+passkey prompt and no new passkey. Before that prompt it states three facts,
+each as an outcome:
+
+```text
+Secured by the passkey you use next. Your device asks for it once (Face ID,
+Touch ID, Windows Hello, or your device PIN), and it becomes the only way to
+approve actions in the new account.
+
+Backups don't carry over. A backup passkey or wallet on another account
+doesn't protect this one, so add one on the new account's page.
+Signers, in Settings, shows which accounts each passkey and wallet approves.
+
+Nothing is set up on Base yet. That happens the first time you use the
+account, for example to give an agent a budget. You can add funds before then.
+```
+
+The waiting labels are onboarding's (`Waiting for your passkey…`,
+`Setting up your account…`). A dismissed passkey prompt returns to the form
+and shows **no message**. A refusal names the limit or the account involved
+and the next step; it never says only that something went wrong. A definite
+refusal makes no retry promise: "Haven couldn't create the account." plus the
+reason when there is one.
+
+When the outcome is unknown (no answer, or a server error), the account may
+exist. The dialog says so, locks the details so a retry repeats the same
+request, and lets the owner check from inside the dialog:
+
+```text
+Haven couldn't confirm the account. It may have been created anyway. Check
+again before trying again: trying again here won't create a second one.
+
+To keep this from creating a second account, the details are locked until
+Haven knows what happened.
+```
+
+That message stays until the account is created (a retry answers it) or
+found: whenever the account list changes between attempts ("Check again", or
+any other refresh), an account with the submitted name on that network ends
+it. If the account the details came from can no longer secure a new account,
+"Try again" is disabled and the dialog says so: "Operating can no longer
+secure a new account, so Haven can't try again from here. Check again to see
+whether the account was created anyway." Nothing else removes it: a refusal on a retry, of any kind, shows
+its own message beside it, because the backend checks a retry before it
+would return the first attempt's account (#4044), and a cancelled passkey
+prompt shows nothing at all. "Check again" reports one of three things: the
+account, as created; a read that worked and found nothing ("No new account
+named Reserve on Base yet."); or a read that failed ("Couldn't read your
+accounts just now. Check again in a moment."), never confused with the
+second. Closing the dialog drops the record, which is why the message says
+to check before trying again.
+
+Avoid:
+
+```text
+Deploy a new smart account
+Copy signers from your existing account
+Your new account is protected by all your existing backups.
+```
 
 ## Money and authority copy
 

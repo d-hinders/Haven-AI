@@ -33,7 +33,7 @@ covers:
   - packages/frontend/src/lib/merchantBudgetRefusal.ts
   - packages/frontend/src/hooks/useCatalog.ts
   - packages/frontend/src/components/CatalogSubmitModal.tsx
-last-verified: "2026-09-27"
+last-verified: "2026-10-17"
 ---
 
 # Marketplace
@@ -516,7 +516,7 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
 `baseNavItems`, same More-sheet position.
 
 - **Grid** (`components/marketplace/MerchantGrid.tsx`,
-  `MerchantCard.tsx`) — one card per merchant on the shared entity-card
+  `MerchantCard.tsx`, `ComingSoonMerchants.tsx`) — one card per payable merchant on the shared entity-card
   idiom (`entityCardClassName`: hover lift, product focus ring): a monogram
   (`components/ui/Monogram.tsx`, promoted on its third copy — `/contacts`,
   the card, the merchant header) or a logo when `logo_url` is set, name,

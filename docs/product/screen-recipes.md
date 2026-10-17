@@ -40,7 +40,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-10-16"
+last-verified: "2026-10-17"
 ---
 
 # Haven Screen Recipes
@@ -353,7 +353,8 @@ redirects to `/marketplace`.
 Structure:
 1. Grid of payable merchant cards: monogram or logo, name, category as plain
    text, two-line description, network chips, and a footer that leads with the
-   price ("From <price> USDC", ink) and the offer count after it. A test
+   price ("From <price> USDC", ink) and the offer count after it when there
+   is more than one. A test
    merchant carries a neutral "Test" badge; its full note is on the merchant
    page. Coming-soon merchants are not cards: they list below the grid as
    linked rows in one "Coming soon" card, which renders only when it has rows

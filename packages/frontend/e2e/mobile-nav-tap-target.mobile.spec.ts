@@ -114,12 +114,14 @@ import {
  * Pixel/iPhone actually has.
  */
 
-// The toggle is `lg:hidden`. Three widths: the narrowest phone we support, the
-// width the visual baseline and the design evidence render at, and the last
-// pixel below the `lg` breakpoint where a regression would most plausibly
+// The toggle is `lg:hidden`. Four widths: the narrowest phone we support, the
+// width the visual baseline and the design evidence render at, a tablet (768,
+// the first of these widths where #4058's `max-w-md` cap and centring apply —
+// the cap bites above 472px, 448 plus two 12px insets), and the last pixel
+// below the `lg` breakpoint where a regression would most plausibly
 // reappear. (`mobile-nav-layering.mobile.spec.ts` already proves the toggle
 // vanishes AT 1024px.)
-const WIDTHS = [320, 390, 1023]
+const WIDTHS = [320, 390, 768, 1023]
 
 const COMFORTABLE_TAP_TARGET_PX = 44
 /**
@@ -331,10 +333,11 @@ async function measureTabBar(page: import('@playwright/test').Page) {
         bottomLeft: at(moreBox.left + 1, moreBox.bottom - 1),
         bottomRight: at(moreBox.right - 1, moreBox.bottom - 1),
       },
-      // Flush to the bottom of the viewport, and spanning it.
+      // Floating since #4058: the gaps to the viewport's bottom and sides.
       barBottomGap: Math.round(window.innerHeight - barBox.bottom),
-      barSpansViewport:
-        Math.round(barBox.left) === 0 && Math.round(barBox.right) === Math.round(window.innerWidth),
+      barLeftGap: Math.round(barBox.left),
+      barRightGap: Math.round(window.innerWidth - barBox.right),
+      barWidth: Math.round(barBox.width),
       // What `<main>` reserves for it. The bar is `fixed` and consumes no
       // layout, so this padding is the only thing keeping the last row out
       // from under it.
@@ -393,12 +396,15 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
         // 3. The painted box IS the target now, and that is the change. The
         //    old assertion pinned 32px painted so a "fix" could not simply
         //    grow the visible control; here growing it is the design, so what
-        //    replaces that guard is exactness: More is one fifth of the bar,
-        //    the same height as the tabs beside it. A control that drifted to
-        //    a different width would look like a design decision and be a
-        //    misalignment.
-        expect(t.slots[4].w).toBe(Math.round(width / 5))
-        expect(t.slots[4].h).toBe(t.slots[0].h)
+        //    replaces that guard is exactness: More is one fifth of the bar's
+        //    content box, the same size as the tabs beside it. Since #4058
+        //    the bar floats, so the fifth is of the pill (its 2px side
+        //    padding and 1px border each side excluded), not of the viewport.
+        for (const slot of t.slots) {
+          expect(Math.abs(slot.w - t.slots[4].w)).toBeLessThanOrEqual(1)
+          expect(slot.h).toBe(t.slots[4].h)
+        }
+        expect(Math.abs(t.slots[4].w - (t.barWidth - 6) / 5)).toBeLessThanOrEqual(1)
 
         // 4. It did not eat its neighbour, and did not leave a dead strip
         //    either. The old neighbour was `NetworkSwitcher` 14px away in the
@@ -421,16 +427,20 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
         //    that a naive edit drops, whose absence is invisible until the
         //    last row of a long page sits under the chrome. The bar is
         //    `fixed`, so nothing else keeps content clear of it.
-        expect(t.mainPaddingBottom).toBeGreaterThanOrEqual(t.barHeight)
+        expect(t.mainPaddingBottom).toBeGreaterThanOrEqual(t.barHeight + t.barBottomGap)
 
-        // 7. Flush to the bottom, spanning the width. The old control was
-        //    centred in the header band; this one owns its own band, and the
-        //    failure it replaces is the same shape — a control placed against
-        //    the wrong box. A bar floating a few pixels off the bottom leaves
-        //    a strip of page showing under it that scrolls, which reads as a
-        //    rendering bug rather than a design.
-        expect(t.barBottomGap).toBe(0)
-        expect(t.barSpansViewport).toBe(true)
+        // 7. Floating, and placed against the right box (#4058, replacing
+        //    #2731's flush, edge-to-edge assertion). The pill sits 12px above
+        //    the viewport bottom (`--v2-tab-bar-bottom` with no inset here —
+        //    the inset case is safe-area-insets.mobile.spec.ts), at least
+        //    12px in from each side, centred, and no wider than `max-w-md`
+        //    (448px), so a tablet does not get 200px cells. The failure
+        //    shape is the old one — a control placed against the wrong box.
+        expect(t.barBottomGap).toBe(12)
+        expect(t.barLeftGap).toBeGreaterThanOrEqual(12)
+        expect(t.barRightGap).toBeGreaterThanOrEqual(12)
+        expect(Math.abs(t.barLeftGap - t.barRightGap)).toBeLessThanOrEqual(1)
+        expect(t.barWidth).toBeLessThanOrEqual(448)
 
         // 8. NO banner landmark (#4029). The top bar was the app's only
         //    `<header>` outside the page; with it deleted the shell renders
@@ -511,21 +521,18 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
       const nav = page.locator('[data-more-sheet]').getByRole('navigation', { name: 'All sections' })
       await expect(nav.getByRole('link', { name: 'Marketplace' })).toBeVisible()
 
-      // ...and the ordinary centre click still closes it.
+      // ...and the sheet's own ✕ closes it (#4058: the cell is covered).
       await page.getByRole('button', { name: 'Close sidebar' }).click()
       await expect(page.locator('[data-more-sheet]')).toHaveCount(0)
       await expect(page.getByRole('button', { name: 'Open sidebar' })).toBeVisible()
     })
 
     // The OPEN state, which the closed-state measurements above cannot see.
-    // Re-aimed by #4053: this used to prove the toggle — floating over the
-    // full-screen drawer on a higher tier — did not swallow the drawer's logo
-    // link. Nothing floats over the sheet now (More is a tab-bar cell, and the
-    // sheet stops at the bar), so the claim becomes the one a user meets
-    // first: with the sheet open, its top row (the account) is reachable at
-    // its own centre, and the More cell is still the topmost thing in its
-    // slot.
-    test('with the sheet open, its account row and the More cell are each reachable', async ({ page }) => {
+    // Re-aimed by #4053, and inverted by #4058: the sheet now floats OVER the
+    // bar, so the claim is that its top row (the account) and its ✕ are each
+    // reachable at their own centre, and that the More cell is NOT — it is
+    // covered by the sheet or its scrim, never the topmost thing in its slot.
+    test('with the sheet open, its account row and ✕ are reachable, and the More cell is covered', async ({ page }) => {
       await page.goto('/dashboard')
       await page.getByRole('button', { name: 'Open sidebar' }).click()
 
@@ -545,11 +552,23 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
           }
         }
         const account = document.querySelector('[data-more-sheet] a[href="/profile"]')!
+        const close = document.querySelector('[data-more-sheet-close]')!
         const more = document.querySelector('[data-more-toggle]')!
-        return { account: probe(account), more: probe(more) }
+        const mb = more.getBoundingClientRect()
+        const atMore = document.elementFromPoint(Math.round(mb.left + mb.width / 2), Math.round(mb.top + mb.height / 2))
+        return {
+          account: probe(account),
+          close: probe(close),
+          moreCoveredBy: atMore?.closest('[data-more-sheet]')
+            ? 'sheet'
+            : atMore?.closest('[data-more-sheet-scrim]')
+              ? 'scrim'
+              : (atMore?.tagName.toLowerCase() ?? 'nothing'),
+        }
       })
       expect(reach.account, `account row taken by ${reach.account.takenBy}`).toMatchObject({ ok: true })
-      expect(reach.more, `More cell taken by ${reach.more.takenBy}`).toMatchObject({ ok: true })
+      expect(reach.close, `✕ taken by ${reach.close.takenBy}`).toMatchObject({ ok: true })
+      expect(['sheet', 'scrim']).toContain(reach.moreCoveredBy)
     })
   })
 })

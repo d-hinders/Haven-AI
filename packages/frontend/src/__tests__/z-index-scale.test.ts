@@ -64,25 +64,35 @@ describe('z-index scale (#1749)', () => {
     expect(zToken('tab-bar')).toBeLessThan(zToken('nav-drawer'))
   })
 
-  it('the More sheet and its scrim STOP at the tab bar, so the bar stays reachable (#4053)', () => {
-    // Under #2820 the drawer covered the bar, and the tier order alone
-    // decided what was on top. The sheet replaced that with GEOMETRY: the
-    // sheet and the scrim both end at the bar's top edge, so the bar is never
-    // underneath them and needs no tier above them. The ordering assertions
-    // above stay true either way — this is the half they cannot see.
+  it('the More sheet floats OVER the tab bar, its scrim shading to the viewport bottom (#4058)', () => {
+    // #4053 kept the bar reachable by GEOMETRY: sheet and scrim ended at the
+    // bar's top edge. Once the bar became a floating pill (#4058) that edge
+    // cut through the pill and left the strip around it undimmed, so the
+    // sheet now covers the bar BY RANK (the ordering assertions above) and
+    // carries its own ✕. This pins the half the ordering cannot see: the scrim
+    // runs to the bottom edge, and the card floats clear of it rather than
+    // stopping at the bar.
     const sheet = readFileSync(resolve(root, 'components/sidebar/MoreSheet.tsx'), 'utf8')
-    expect(sheet).toMatch(/const bottom = 'bottom-\[calc\(var\(--v2-tab-bar-h\)\+var\(--v2-safe-bottom\)\+1px\)\]'/)
-    // Both layers use it, and neither reaches the viewport's bottom edge.
-    expect(sheet.match(/\$\{bottom\}/g) ?? []).toHaveLength(2)
-    expect(sheet).not.toMatch(/\binset-0\b|\binset-y-0\b|\bbottom-0\b/)
+    const scrim = sheet.match(/data-more-sheet-scrim=""[\s\S]*?className="([^"]+)"/)
+    expect(scrim, 'scrim className not found').not.toBeNull()
+    expect(scrim![1].split(/\s+/)).toEqual(
+      expect.arrayContaining(['fixed', 'inset-x-0', 'top-[var(--v2-safe-top)]', 'bottom-0', 'z-[var(--v2-z-nav-scrim)]']),
+    )
+    // Never `inset-0` / `top-0`: the status band stays opaque (#2819).
+    expect(scrim![1]).not.toMatch(/\binset-0\b|\btop-0\b/)
+    expect(sheet).toContain('bottom-[max(0.5rem,var(--v2-safe-bottom))]')
+    expect(sheet).toContain('aria-label="Close sidebar"')
+    // The geometry `const bottom` that made the sheet stop at the bar is gone.
+    expect(sheet).not.toMatch(/const bottom = /)
   })
 
   it('the More control is a cell of the tab bar, not a control floating over a drawer (#4053)', () => {
     // #2731–#2820 painted it from outside the bar on `--v2-z-nav-toggle`,
     // because the full-screen drawer covered the bar and the same button had
-    // to stay on top of it. Nothing covers the bar now, so the tier has no
-    // consumer; a control reappearing on it means something is covering the
-    // bar again.
+    // to stay on top of it to close it. Since #4058 the sheet covers the bar
+    // again, but it closes itself (its ✕), so no control has to float over
+    // it: the tier keeps no consumer, and one reappearing on it means the
+    // close control has moved back out of the sheet.
     const bar = readFileSync(resolve(root, 'components/sidebar/MobileTabBar.tsx'), 'utf8')
     const sidebar = readFileSync(resolve(root, 'components/sidebar/Sidebar.tsx'), 'utf8')
     expect(bar).toContain('data-more-toggle')
@@ -150,8 +160,9 @@ describe('z-index scale (#1749)', () => {
     // overlay is unambiguous — `fixed inset-0` is the shape — so a new one on
     // a fresh number fails here rather than being discovered by a user who
     // cannot dismiss a dialog.
-    // The mobile navigation scrim (the More sheet's, #4053 — it stops at the
-    // tab bar, so it is not `inset-0` today) is the one legitimate overlay
+    // The mobile navigation scrim (the More sheet's, #4053 — full-height
+    // since #4058 but still below the status band, so not `inset-0`) is the
+    // one legitimate overlay
     // that is NOT a modal — it belongs to the navigation tier by construction, and
     // is allowed here by its token rather than by filename, so renaming the
     // file cannot smuggle a modal through.

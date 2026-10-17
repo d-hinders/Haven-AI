@@ -70,11 +70,11 @@ const MOBILE_HEIGHT = 844
  *
  * This used to be `MOBILE_HEIGHT`, and that was written when the bottom of the
  * viewport was empty. Since #2731 the bottom of every authenticated route is
- * the tab bar — `--v2-tab-bar-h` (56pt) plus the home-indicator inset it
- * reserves, which is 34pt in the installed shell and 0 in a headless engine.
- * A fold of 844 therefore measured up to 90pt of screen that is covered, in the
- * direction that HIDES a defect: the budget row can sit under the bar and the
- * assertion still passes.
+ * the tab bar — since #4058 a floating pill, `--v2-tab-bar-h` (62pt) tall and
+ * `--v2-tab-bar-bottom` above the edge (12pt in a headless engine, the 34pt
+ * home-indicator inset in the installed shell). A fold of 844 therefore
+ * measured up to 96pt of screen that is covered, in the direction that HIDES a
+ * defect: the budget row can sit under the bar and the assertion still passes.
  *
  * Read from the live bar rather than recomputed from the tokens. The bar's own
  * top edge already is the answer, it carries the safe-area inset without this

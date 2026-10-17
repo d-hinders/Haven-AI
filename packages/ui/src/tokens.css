@@ -244,9 +244,10 @@
      The rule the numbers encode, in one sentence: the mobile navigation
      overlay outranks the app chrome it opens over. That direction is not
      arbitrary: let the chrome win and the navigation is covered and its
-     control cannot be tapped (#1749). Since #4053 the phone overlay is the
-     More sheet, which stops at the tab bar's top edge, so the bar stays
-     reachable by geometry rather than by rank. Modals and toasts in turn
+     control cannot be tapped (#1749). The phone overlay is the More sheet
+     (#4053), which since #4058 floats OVER the tab bar with a full-height
+     scrim: the bar is covered by rank while the sheet is open, and the sheet
+     carries its own close control. Modals and toasts in turn
      outrank the navigation, because a dialog opened from a nav link must
      cover the sheet.
 
@@ -264,18 +265,24 @@
      one tier the scale's spacing-by-10 was left room for. Between chrome and
      chrome-popover deliberately: a popover can extend down over the bar's
      band on a phone and must not be clipped by it. Its fifth cell is More
-     (#4053), which opens a sheet that STOPS at the bar's top edge — the bar is
-     kept reachable by geometry, not by out-ranking the sheet (130/140). */
+     (#4053), which opens a sheet that, since #4058, floats over the bar: the
+     scrim (130) and the sheet (140) out-rank it on purpose, and the sheet's
+     own ✕ closes it. */
   --v2-z-tab-bar: 105;
 
-  /* The bottom tab bar's height (#2731), as a token because three places need
-     the same number and two of them are not the bar: `<main>`'s scroll region
-     reserves it so the last row does not sit under the bar, and the toast
-     container lifts by it so the payoff notification is not hidden behind the
-     thing everyone is looking at. The safe-area inset is NOT folded in here —
-     it is added at each site, because the bar pads itself with it while the
-     others clear the bar and the inset together. */
-  --v2-tab-bar-h: 3.5rem;
+  /* The floating tab bar's geometry (#2731, floating since #4058), as tokens
+     because the places that need the numbers are mostly not the bar:
+     `<main>`'s scroll region reserves `h + bottom` so the last row clears the
+     pill, and the toast container lifts by the same sum so the payoff
+     notification is not hidden behind the thing everyone is looking at.
+
+     `--v2-tab-bar-h` is the pill's OUTER height: 52px cells, `py-1` (4px)
+     above and below them and the 1px border — 62px. `--v2-tab-bar-bottom` is the gap
+     between the pill and the viewport bottom: 12px in a browser tab, and the
+     home-indicator inset itself on a notched phone, where adding a gap ON TOP
+     of the inset would float the pill visibly high. */
+  --v2-tab-bar-h: 3.875rem;
+  --v2-tab-bar-bottom: max(0.75rem, var(--v2-safe-bottom));
 
   /* The sticky table-header compensation (#4029): `Table`'s `STICKY_HEAD` /
      `STICKY_CELL` pin with `top-[var(--v2-sticky-head)]`, the NEGATIVE of the

@@ -553,9 +553,11 @@ test.describe('bottom tab bar (#2731)', () => {
       'page',
     )
 
-    await bar.getByRole('link', { name: 'Transactions' }).click()
+    // The bar labels /transactions "Activity" (#4058, owner decision); the
+    // route and the page keep "Transactions".
+    await bar.getByRole('link', { name: 'Activity' }).click()
     await page.waitForURL('**/transactions')
-    await expect(bar.getByRole('link', { name: 'Transactions' })).toHaveAttribute(
+    await expect(bar.getByRole('link', { name: 'Activity' })).toHaveAttribute(
       'aria-current',
       'page',
     )
@@ -594,35 +596,79 @@ test.describe('bottom tab bar (#2731)', () => {
     await expect(page.getByRole('button', { name: 'Open sidebar' })).toBeVisible()
   })
 
-  test('the tab bar stays live under the open sheet, and a tab tap closes it (#4053)', async ({ page }) => {
+  test('the open sheet covers the bar and makes it inert; Tab stays in the sheet; its ✕ closes it (#4058)', async ({ page }) => {
+    // Inverted from #4053's "the bar stays live under the sheet": since #4058
+    // the sheet floats OVER the floating bar, so the bar is covered by the
+    // scrim/sheet and `inert`, and the sheet carries its own way out.
     await page.goto('/dashboard')
     await page.getByRole('button', { name: 'Open sidebar' }).click()
     await waitForDrawerOpen(page)
 
-    // Hit-test the Agents tab with the sheet open: the bar must be the
-    // topmost element at its own centre — the drawer #4053 replaced covered it.
-    const bar = page.locator('[data-mobile-tab-bar]')
-    const agents = bar.getByRole('link', { name: 'Agents' })
-    const box = (await agents.boundingBox())!
-    const hit = await page.evaluate(
+    const bar = page.locator('nav[data-mobile-tab-bar]')
+    const sheet = page.locator('[data-more-sheet]')
+    await expect(sheet).toHaveAttribute('aria-modal', 'true')
+    await expect(bar).toHaveAttribute('inert', '')
+    await expect(page.locator('#main-content')).toHaveAttribute('inert', '')
+
+    // The Agents tab's centre is covered — by the sheet or its scrim, not the bar.
+    const box = (await bar.getByRole('link', { name: 'Agents', includeHidden: true }).boundingBox())!
+    const coveredBy = await page.evaluate(
       ([x, y]) => {
         const el = document.elementFromPoint(x, y)
-        return el?.closest('a')?.getAttribute('href') ?? null
+        if (el?.closest('[data-mobile-tab-bar]')) return 'BAR'
+        if (el?.closest('[data-more-sheet]')) return 'sheet'
+        if (el?.closest('[data-more-sheet-scrim]')) return 'scrim'
+        return el?.tagName.toLowerCase() ?? 'nothing'
       },
       [box.x + box.width / 2, box.y + box.height / 2] as const,
     )
-    expect(hit, 'the Agents tab is reachable while the sheet is open').toBe('/agents')
+    expect(['sheet', 'scrim'], 'the Agents tab is covered while the sheet is open').toContain(coveredBy)
 
-    await agents.click()
-    await page.waitForURL('**/agents')
-    await expect(page.locator('[data-more-sheet]')).toHaveCount(0)
+    // Tab cycles inside the card: from the last stop, Tab lands back on the
+    // first (the ✕), never on the inert page behind.
+    const close = page.getByRole('button', { name: 'Close sidebar' })
+    await expect(close).toBeFocused()
+    await sheet.getByRole('button', { name: 'Log out' }).focus()
+    await page.keyboard.press('Tab')
+    await expect(close).toBeFocused()
 
-    // The SAME-route case: on /agents, tapping Agents changes no route, so
-    // only the tab's own click can close the sheet.
-    await page.getByRole('button', { name: 'Open sidebar' }).click()
-    await waitForDrawerOpen(page)
-    await bar.getByRole('link', { name: 'Agents' }).click()
-    await expect(page.locator('[data-more-sheet]')).toHaveCount(0)
+    await close.click()
+    await expect(sheet).toHaveCount(0)
+    await expect(bar).not.toHaveAttribute('inert', '')
+    await expect(page.locator('#main-content')).not.toHaveAttribute('inert', '')
+    await expect(page.getByRole('button', { name: 'Open sidebar' })).toBeFocused()
+  })
+
+  test('every bar label renders whole from 375px, and the focused active tab gets an OUTSET ring (#4058)', async ({ page }) => {
+    for (const width of [375, 390]) {
+      await page.setViewportSize({ width, height: 844 })
+      await page.goto('/dashboard')
+      const bar = page.locator('nav[data-mobile-tab-bar]')
+      await bar.waitFor()
+      const clipped = await bar.evaluate((nav) =>
+        Array.from(nav.querySelectorAll<HTMLElement>('a > span:last-child, button > span:last-child'))
+          .filter((el) => el.scrollWidth > el.clientWidth)
+          .map((el) => el.textContent),
+      )
+      expect(clipped, `labels clipped at ${width}px`).toEqual([])
+    }
+
+    // Keyboard focus on the ACTIVE tab: the ring is the outset system ring —
+    // computed box-shadow without `inset` — and the selection outline is
+    // cleared under it. jsdom cannot compute this; the unit test pins classes.
+    const active = page.locator('nav[data-mobile-tab-bar] a[aria-current="page"]')
+    await active.focus()
+    await page.keyboard.press('Shift+Tab')
+    await page.keyboard.press('Tab')
+    const ring = await active.evaluate((a) => {
+      const pill = a.querySelector('[data-tab-indicator]')!
+      const cs = getComputedStyle(pill)
+      return { focusVisible: a.matches(':focus-visible'), shadow: cs.boxShadow, outlineColor: cs.outlineColor }
+    })
+    expect(ring.focusVisible).toBe(true)
+    expect(ring.shadow).not.toBe('none')
+    expect(ring.shadow).not.toContain('inset')
+    expect(ring.outlineColor).toBe('rgba(0, 0, 0, 0)')
   })
 
   test('the sheet dismisses on a scrim tap and on Escape, handing focus back to More (#4053)', async ({ page }) => {

@@ -1870,10 +1870,12 @@ export async function dismissMobileSidebar(page: Page) {
   const sheet = page.locator('[data-more-sheet]')
   if ((await sheet.count()) === 0) return
 
-  // Open: dismiss it with the real control. A plain click — no
-  // `{ force: true }` (#1749) — keeps this helper the regression canary for
-  // the More cell being covered: if something paints over the tab bar again,
-  // mobile e2e fails here with "intercepts pointer events". Bounded at 10 s.
+  // Open: dismiss it with the real control — since #4058 the sheet's own ✕,
+  // which carries `Close sidebar` (the sheet covers the bar, and the More
+  // cell is only ever `Open sidebar`). A plain click — no `{ force: true }`
+  // (#1749) — keeps this helper a regression canary for the sheet's way out
+  // being covered: mobile e2e fails here with "intercepts pointer events".
+  // Bounded at 10 s.
   await page.getByRole('button', { name: 'Close sidebar' }).click({ timeout: 10_000 })
   await sheet.waitFor({ state: 'detached', timeout: 10_000 })
 }

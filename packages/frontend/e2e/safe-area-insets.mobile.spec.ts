@@ -50,9 +50,14 @@ const INSET_BOTTOM = 34
  * now have to clear as well as the inset. Written as a NUMBER rather than read
  * from the token deliberately: reading `--v2-tab-bar-h` here would make the
  * assertion agree with the CSS by construction, and this file exists to catch
- * the CSS being wrong.
+ * the CSS being wrong. 62 since #4058: the floating pill's 52px cells, its
+ * `py-1` and its 1px border.
+ *
+ * The pill floats `max(12px, inset)` above the bottom edge. At this file's
+ * INSET_BOTTOM (34) that is the inset itself, so every "bar + inset" sum
+ * below is also "bar + its float gap" — and the shell test pins the gap.
  */
-const TAB_BAR_H = 56
+const TAB_BAR_H = 62
 
 /**
  * A dim layer that actually dims: any colour, at an alpha that reads as a
@@ -240,6 +245,11 @@ async function shellGeometry(page: Page) {
         return frame ? getComputedStyle(frame).overscrollBehaviorY : null
       })(),
       toggleTop: toggle ? Math.round(toggle.getBoundingClientRect().top) : null,
+      // The floating pill's distance from the bottom edge (#4058).
+      barBottomGap: (() => {
+        const bar = document.querySelector('nav[data-mobile-tab-bar]')
+        return bar ? Math.round(window.innerHeight - bar.getBoundingClientRect().bottom) : null
+      })(),
       viewportHeight: window.innerHeight,
     }
   })
@@ -280,6 +290,10 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
         shell.mainPaddingBottom,
         'the scroll region pads its own 24px PLUS the tab bar PLUS the home indicator — all three, not two of them',
       ).toBe(`${24 + TAB_BAR_H + INSET_BOTTOM}px`)
+      // The floating pill sits exactly ON the home-indicator inset (#4058):
+      // `max(12px, inset)`, not 12px stacked on top of it, which would float
+      // it visibly high on a notched phone.
+      expect(shell.barBottomGap, 'the pill floats on the inset, not above it').toBe(INSET_BOTTOM)
 
       // The chrome as a whole is GONE (#4029): the band IS the top chrome now,
       // so its own height is the reservation — the inset, opaque, in an
@@ -366,7 +380,7 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     })
   }
 
-  test('the open More sheet clears the tab bar and the home indicator (#4053)', async ({ page }) => {
+  test('the open More sheet floats above the home indicator, over the bar, below the status band (#4058)', async ({ page }) => {
     await page.goto('/dashboard')
     await page.getByRole('button', { name: 'Open sidebar' }).click()
     await applyInsets(page)
@@ -376,32 +390,42 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
 
     const sheet = await page.evaluate(() => {
       const el = document.querySelector('[data-more-sheet]') as HTMLElement
-      const bar = document.querySelector('[data-mobile-tab-bar]') as HTMLElement
+      const scrim = document.querySelector('[data-more-sheet-scrim]') as HTMLElement
+      const bar = document.querySelector('nav[data-mobile-tab-bar]') as HTMLElement
       const profile = el.querySelector('a[href="/profile"]') as HTMLElement
       const logOut = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Log out')!
+      const r = el.getBoundingClientRect()
+      const b = bar.getBoundingClientRect()
+      const s = scrim.getBoundingClientRect()
       return {
-        top: Math.round(el.getBoundingClientRect().top),
-        bottom: Math.round(el.getBoundingClientRect().bottom),
-        barTop: Math.round(bar.getBoundingClientRect().top),
-        barPaddingBottom: getComputedStyle(bar).paddingBottom,
+        top: Math.round(r.top),
+        bottom: Math.round(r.bottom),
+        barBottom: Math.round(b.bottom),
+        barBottomGap: Math.round(window.innerHeight - b.bottom),
+        scrimTop: Math.round(s.top),
+        scrimBottom: Math.round(s.bottom),
         profileBottom: Math.round(profile.getBoundingClientRect().bottom),
         logOutBottom: Math.round(logOut.getBoundingClientRect().bottom),
         viewportHeight: window.innerHeight,
       }
     })
 
-    // Control: the bar consumes the injected inset, so a home indicator exists
-    // in this run.
-    expect(sheet.barPaddingBottom).toBe(`${INSET_BOTTOM}px`)
-    // The sheet ends exactly on the bar's top edge — which is itself the bar's
-    // height plus the home-indicator inset above the screen's bottom.
-    expect(sheet.bottom).toBe(sheet.barTop)
-    expect(sheet.barTop).toBeLessThanOrEqual(sheet.viewportHeight - INSET_BOTTOM)
+    // Control: the bar consumes the injected inset (it floats ON it), so a
+    // home indicator exists in this run.
+    expect(sheet.barBottomGap).toBe(INSET_BOTTOM)
+    // The card floats on the inset too — `max(8px, inset)` — so it ends above
+    // the home indicator, and over the bar rather than at its top edge (#4053's
+    // geometry, replaced by #4058).
+    expect(sheet.bottom).toBe(sheet.viewportHeight - INSET_BOTTOM)
+    expect(sheet.bottom).toBeGreaterThanOrEqual(sheet.barBottom)
     // ...and never climbs into the status-bar band.
     expect(sheet.top).toBeGreaterThanOrEqual(INSET_TOP)
-    // Its first and last rows sit above the bar, so above the home indicator.
-    expect(sheet.profileBottom).toBeLessThanOrEqual(sheet.barTop)
-    expect(sheet.logOutBottom).toBeLessThanOrEqual(sheet.barTop)
+    // The scrim shades from below the status band to the very bottom edge.
+    expect(sheet.scrimTop).toBe(INSET_TOP)
+    expect(sheet.scrimBottom).toBe(sheet.viewportHeight)
+    // Its first and last rows sit above the home indicator.
+    expect(sheet.profileBottom).toBeLessThanOrEqual(sheet.viewportHeight - INSET_BOTTOM)
+    expect(sheet.logOutBottom).toBeLessThanOrEqual(sheet.viewportHeight - INSET_BOTTOM)
 
     const offenders = await chromeControlsInBands(page, INSET_TOP, INSET_BOTTOM)
     expect(offenders, 'the open sheet puts no control in a reserved band').toEqual([])
@@ -488,10 +512,11 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     })
 
     // CONTROL: the region consumes the inset rather than its old flat 1rem.
-    // #2731 added the tab bar to this offset, and all three terms ADD. An
+    // #2731 added the tab bar to this offset, and all three terms ADD. (Since
+    // #4058 the bar floats on `max(12px, inset)`, which is the inset here.) An
     // earlier revision of this line read `max(16, inset) + bar`, which is what
-    // the CSS said at the time and was wrong in the same way: the bar already
-    // pads itself with the inset, so folding the inset into a `max()` with the
+    // the CSS said at the time and was wrong in the same way: the (then
+    // edge-to-edge) bar padded itself with the inset, so folding the inset into a `max()` with the
     // gutter collapsed the gap between toast and bar to ZERO at inset 34 —
     // both edges landed on 90px. Three owners, three terms.
     expect(toast.bottom, 'the toast region must clear the tab bar AND --v2-safe-bottom').toBe(

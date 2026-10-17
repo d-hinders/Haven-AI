@@ -1,12 +1,13 @@
 /**
- * Visual regression for the phone "More" sheet (#4053): the bottom sheet the
+ * Visual regression for the phone "More" sheet (#4053): the floating card the
  * tab bar's More cell opens, in light and dark.
  *
  * No baseline showed the open phone menu before #4053 — the drawer it
  * replaced was only ever captured closed — so this is the first pixel guard
- * on it. The clip is the SHEET plus the TAB BAR beneath it, because the
- * relationship between the two is the design: the sheet stops at the bar's
- * top edge and the bar's fifth cell reads "Close" while the sheet is open.
+ * on it. The clip runs from the card's top to the viewport bottom, because
+ * the shading is the design (#4058): the card floats over the tab bar, and
+ * the scrim dims everything beneath it to the bottom edge — no scrim edge, no
+ * undimmed strip, no part of the pill showing.
  */
 import { expect, test } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
@@ -51,6 +52,11 @@ test.describe('More sheet visual regression (#4053)', () => {
     await page.goto('/dashboard')
     await page.getByRole('button', { name: 'Open sidebar' }).click()
     await waitForDrawerOpen(page)
+    // The click leaves the pointer where the More cell was — and since #4058
+    // the card covers that spot, so its Log out row would render in its hover
+    // tint. Park the pointer on the scrim, above the card, so the baseline
+    // shows the sheet at rest (a tap on a phone leaves no hover there).
+    await page.mouse.move(4, 4)
 
     const sheet = page.locator('[data-more-sheet]')
     // State anchors before the shot: the account row has loaded, and the
@@ -59,7 +65,7 @@ test.describe('More sheet visual regression (#4053)', () => {
     await expect(sheet.getByRole('navigation', { name: 'All sections' }).getByRole('link')).toHaveCount(5)
     await expect(sheet.getByRole('radiogroup', { name: 'Theme' })).toBeVisible()
 
-    // Sheet top to the bottom of the viewport: the sheet and the bar together.
+    // Card top to the bottom of the viewport: the card and the shading beneath it.
     const top = (await sheet.boundingBox())!.y
     await expect(page).toHaveScreenshot(`more-sheet-open-mobile${scheme === 'dark' ? '-dark' : ''}.png`, {
       ...SNAPSHOT_OPTIONS,

@@ -92,7 +92,7 @@ describe('MobileTabBar — active cell carries the selection idiom (#2818, #4058
       expect.arrayContaining([
         'absolute',
         'inset-0',
-        'rounded-full',
+        'rounded-2xl',
         'bg-[var(--v2-brand-soft)]',
         'outline',
         'outline-1',

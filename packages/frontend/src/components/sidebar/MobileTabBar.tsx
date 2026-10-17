@@ -81,11 +81,14 @@ const CELL =
  * The indicator carries the selection AND the focus ring. Active: brand-soft
  * fill bounded by a 1px inset brand outline (the `SegmentedControl` idiom).
  * Focused: the system's outset `ring-2 ring-brand/80`, with the outline
- * cleared so the ring reads as one edge. Icon and label are `relative`, so
+ * cleared so the ring reads as one edge. `rounded-2xl`, not `rounded-full`:
+ * a full capsule curves in at the label's baseline, and at 390px it crossed
+ * the first and last letters of "Dashboard" — the landing tab, so the active
+ * state users see most (#4058 design review). Icon and label are `relative`, so
  * they paint above this absolutely placed span.
  */
 function indicatorClass(active: boolean): string {
-  return `absolute inset-0 rounded-full group-focus-visible:ring-2 group-focus-visible:ring-brand/80 ${
+  return `absolute inset-0 rounded-2xl group-focus-visible:ring-2 group-focus-visible:ring-brand/80 ${
     active ? 'bg-[var(--v2-brand-soft)] outline outline-1 -outline-offset-1 outline-brand group-focus-visible:outline-none' : ''
   }`
 }

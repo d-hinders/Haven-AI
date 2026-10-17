@@ -122,6 +122,23 @@ function editMerchantRefusalCopy(detail: string | undefined, merchantName: strin
   }
 }
 
+/**
+ * The amount the form opens with: the limits the owner typed when a
+ * new-budget form routed here (#3933), else the budget's own. A malformed
+ * stored amount gives `''` — the human types it.
+ */
+function openingAmount(
+  prefill: Props['prefill'],
+  budget: DelegationBudget,
+  token: TokenOption | undefined,
+): string {
+  try {
+    return formatUnits(BigInt(prefill?.budgetAtomic ?? budget.budget_atomic), token?.decimals ?? 18)
+  } catch {
+    return ''
+  }
+}
+
 export default function EditBudgetModal({
   open,
   onClose,
@@ -161,8 +178,14 @@ export default function EditBudgetModal({
   const newMerchantName = merchant?.name ?? oldMerchantName ?? 'this merchant'
 
   const [step, setStep] = useState<Step>('form')
-  const [amount, setAmount] = useState('')
-  const [period, setPeriod] = useState(budget.period_seconds)
+  // Sync prefill for a mount that opens (the card mounts us already-open):
+  // the open-edge effect below only runs after the first commit, and a test —
+  // or the user's first paint — can read the dialog between the two and see
+  // an empty field. The effect still owns every LATER open edge.
+  const [amount, setAmount] = useState(() => (open ? openingAmount(prefill, budget, token) : ''))
+  const [period, setPeriod] = useState(() =>
+    open ? (prefill?.periodSeconds ?? budget.period_seconds) : budget.period_seconds,
+  )
   const [recipient, setRecipient] = useState(budget.recipient_address ?? '')
   const [outcome, setOutcome] = useState<EditBudgetResult | null>(null)
   // #3933: the finish action on the `revoke_unfinished` screen — the Stop of
@@ -185,13 +208,7 @@ export default function EditBudgetModal({
     // #3933: a routed grant opens with the limits the owner typed.
     setPeriod(prefill?.periodSeconds ?? budget.period_seconds)
     setRecipient(budget.recipient_address ?? '')
-    try {
-      setAmount(formatUnits(BigInt(prefill?.budgetAtomic ?? budget.budget_atomic), token?.decimals ?? 18))
-    } catch {
-      // A malformed stored amount leaves the field empty rather than
-      // prefilling something the form would refuse — the human types it.
-      setAmount('')
-    }
+    setAmount(openingAmount(prefill, budget, token))
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `prefill` is read on the open edge only, like `budget`
   }, [open, budget, token])
 

@@ -561,18 +561,47 @@ describe('More sheet across the desktop breakpoint (#2586, #4053)', () => {
     expect(moreButton().getAttribute('aria-label')).toBe('Open sidebar')
   })
 
-  it('the More cell OPENS the sheet at mobile width, and closes it again', () => {
-    // The More cell is the only way in below `lg`: if it stopped toggling,
+  it("the More cell OPENS the sheet at mobile width, and the sheet's own ✕ closes it (#4058)", () => {
+    // The More cell is the only way in below `lg`: if it stopped opening,
     // everything the tab bar does not carry would be unreachable on a phone.
+    // Since #4058 the sheet covers the bar, so the way out is the sheet's ✕ —
+    // and the cell keeps its `Open sidebar` name, so exactly ONE button is
+    // named `Close sidebar` (the harness relies on that under strict mode).
     mountAt(390)
     openSheet()
     expect(sheet()).not.toBeNull()
-    expect(moreButton().getAttribute('aria-label')).toBe('Close sidebar')
+    expect(moreButton().getAttribute('aria-label')).toBe('Open sidebar')
     expect(moreButton().getAttribute('aria-expanded')).toBe('true')
-    act(() => {
-      screen.getByRole('button', { name: 'Close sidebar' }).click()
-    })
+    const close = screen.getByRole('button', { name: 'Close sidebar' })
+    expect(sheet()!.contains(close)).toBe(true)
+    act(() => close.click())
     expect(sheet()).toBeNull()
+    expect(document.activeElement).toBe(moreButton())
+  })
+
+  it('is modal while open: aria-modal, the bar inert, and Tab cycles inside the card (#4058)', async () => {
+    mountAt(390)
+    const bar = document.querySelector('nav[data-mobile-tab-bar]')!
+    expect(bar.hasAttribute('inert')).toBe(false)
+    openSheet()
+    expect(sheet()!.getAttribute('aria-modal')).toBe('true')
+    expect(bar.hasAttribute('inert')).toBe(true)
+
+    const stops = Array.from(sheet()!.querySelectorAll<HTMLElement>('a[href], button:not([disabled])'))
+    const first = stops[0]
+    const last = stops[stops.length - 1]
+    // Focus moved in on open, onto the first stop — the ✕.
+    expect(document.activeElement).toBe(first)
+    expect(first.getAttribute('aria-label')).toBe('Close sidebar')
+    act(() => last.focus())
+    await userEvent.tab()
+    expect(document.activeElement).toBe(first)
+    await userEvent.tab({ shift: true })
+    expect(document.activeElement).toBe(last)
+
+    await userEvent.keyboard('{Escape}')
+    expect(sheet()).toBeNull()
+    expect(bar.hasAttribute('inert')).toBe(false)
   })
 
   it('never renders on desktop, even when More is pressed', () => {
@@ -690,7 +719,10 @@ describe('More sheet across the desktop breakpoint (#2586, #4053)', () => {
     expect(sheet()).toBeNull()
   })
 
-  it('closes on any route change — a tab tap included', () => {
+  it('closes on any route change (a back gesture, an in-page link)', () => {
+    // Re-mocks the pathname: what is under test is the pathname effect, not a
+    // tab tap — since #4058 the bar is covered and inert while the sheet is
+    // open, so a tab tap cannot reach it.
     const view = mountAt(390)
     openSheet()
     expect(sheet()).not.toBeNull()
@@ -699,14 +731,16 @@ describe('More sheet across the desktop breakpoint (#2586, #4053)', () => {
     expect(sheet()).toBeNull()
   })
 
-  it('a tap on the tab you are already on closes it — no route change involved', () => {
-    // On /dashboard, tapping Dashboard navigates nowhere, so the pathname
-    // effect cannot fire; the tab's own click has to close the sheet.
+  it('the ✕ is a 44px control in the sheet header, and the only button named Close sidebar (#4058)', () => {
     mountAt(390)
     openSheet()
-    const bar = document.querySelector('[data-mobile-tab-bar]')!
-    act(() => (bar.querySelector('a[href="/dashboard"]') as HTMLAnchorElement).click())
-    expect(sheet()).toBeNull()
+    const closes = screen.getAllByRole('button', { name: 'Close sidebar' })
+    expect(closes).toHaveLength(1)
+    const close = closes[0]
+    expect(close.hasAttribute('data-more-sheet-close')).toBe(true)
+    expect(close.className.split(/\s+/)).toEqual(expect.arrayContaining(['h-11', 'w-11']))
+    // In the header row, beside the logo band.
+    expect(close.parentElement!.querySelector('[data-logo-band]')).not.toBeNull()
   })
 
   it('shows Accounting with its full Coming soon phrase and its attention dot', () => {
@@ -726,10 +760,11 @@ describe('More sheet across the desktop breakpoint (#2586, #4053)', () => {
     expect(sheet()!.querySelector('[data-testid="nav-attention-accounting"]')).not.toBeNull()
   })
 
-  it('a destination tap closes it', () => {
+  it('a destination tap closes it, without pulling focus back onto More', () => {
     mountAt(390)
     openSheet()
     act(() => (sheet()!.querySelector('a[href="/analytics"]') as HTMLAnchorElement).click())
     expect(sheet()).toBeNull()
+    expect(document.activeElement).not.toBe(moreButton())
   })
 })

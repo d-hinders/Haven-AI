@@ -35,6 +35,7 @@ named where they belong below.
 
 | Date | Decision | Refs |
 |---|---|---|
+| 2026-10-17 | Phone navigation floats: the tab bar is a floating pill, and the More sheet a floating card that covers it with its own ✕; the bar labels `/transactions` "Activity" | #4058 (supersedes #4053's "stops at the bar's top edge") |
 | 2026-10-17 | The phone More menu is a bottom sheet over the tab bar; its theme control is three-way (Light / Dark / System), superseding #2953 for the phone | #4053 (supersedes #2820's drawer) |
 | 2026-10-09 | Any of the three maintainers merges a promotion; test a partner merge before changing any rule | #3798, PR #3794 |
 | 2026-10-01 | Sub-agent budgets: the delegating agent submits its own sub-budget signatures; the owner relay is optional, not required | #3506, epic #3328 |
@@ -57,6 +58,26 @@ named where they belong below.
 | — | Historical: POC scope and phased roadmap | — |
 
 ---
+
+## 2026-10-17 — phone navigation floats; the sheet covers the bar (#4058)
+
+Owner decisions, 2026-10-17, on #4058, from two native-app references the
+owner supplied (a floating tab bar; sheets that float over the menu) and a
+prototype of both on the real app:
+
+- The tab bar below `lg` is a **floating pill**, near-solid rather than glass
+  (shipped solid: without a blur, 95% opacity let page text ghost through
+  behind the labels). Its active tab uses the `SegmentedControl` selection
+  idiom — a brand-soft pill with a 1px inset brand outline — in place of the
+  top rail.
+- The bar labels `/transactions` **"Activity"**; the rail, the route and the
+  page keep "Transactions". The longer label truncated in the pill.
+- The More sheet is a **floating card that covers the bar**, with its own ✕
+  and a scrim shading to the viewport bottom. This supersedes the #4053 entry
+  below on one point only — that the sheet "stops at the tab bar's top edge":
+  with a floating pill that edge cut through the pill and left the strip
+  around it undimmed, which the owner flagged. The sheet is now modal
+  (`aria-modal`, the page `inert`). The three-way theme control stands.
 
 ## 2026-10-17 — the phone More menu is a bottom sheet; its theme choice is three-way (#4053)
 

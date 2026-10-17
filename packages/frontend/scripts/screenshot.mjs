@@ -2958,8 +2958,9 @@ async function newFixtureContext(browser, vp, scenario, { signedOut = false, col
   return context
 }
 
-// The phone More sheet (#4053) covers the page above the tab bar while it is
-// open; the e2e suite dismisses it the same way before driving mobile UI. It
+// The phone More sheet (#4053) covers the page — and since #4058 the floating
+// tab bar too — while it is open, and closes on its own ✕ (`Close sidebar`);
+// the e2e suite dismisses it the same way before driving mobile UI. It
 // exists in the DOM only while open, so presence is the whole check — the
 // e2e twin in `e2e/fixtures/haven-api.ts` explains why nothing needs settling.
 async function dismissMobileSidebar(page, vp) {

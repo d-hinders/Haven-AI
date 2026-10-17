@@ -101,7 +101,10 @@ export default function AuthenticatedShell({
                   layout, so without this the last row sits under the BAR
                   instead of under the home indicator. Three terms, three
                   different owners — content padding, chrome height, device
-                  inset — which is why they add rather than `max`. `calc` on the bottom because the 24px of `p-6` is
+                  inset — which is why they add rather than `max`. Since
+                  #4058 the bar floats, and its distance from the bottom
+                  (`--v2-tab-bar-bottom`, which already takes the inset into
+                  account) replaces the bare inset term. `calc` on the bottom because the 24px of `p-6` is
                   padding the CONTENT wants and the inset is clearance the
                   device demands, so they add; `max` on the sides because there
                   both are the same gutter measured two ways and the larger
@@ -110,7 +113,7 @@ export default function AuthenticatedShell({
               <main
                 id="main-content"
                 tabIndex={-1}
-                className="flex-1 bg-[var(--v2-bg)] p-6 pt-4 lg:p-8 max-lg:pb-[calc(1.5rem+var(--v2-tab-bar-h)+var(--v2-safe-bottom))] max-lg:pl-[max(1.5rem,var(--v2-safe-left))] max-lg:pr-[max(1.5rem,var(--v2-safe-right))] overflow-y-auto focus:outline-none"
+                className="flex-1 bg-[var(--v2-bg)] p-6 pt-4 lg:p-8 max-lg:pb-[calc(1.5rem+var(--v2-tab-bar-h)+var(--v2-tab-bar-bottom))] max-lg:pl-[max(1.5rem,var(--v2-safe-left))] max-lg:pr-[max(1.5rem,var(--v2-safe-right))] overflow-y-auto focus:outline-none"
               >
                 <ErrorBoundary>{children}</ErrorBoundary>
               </main>

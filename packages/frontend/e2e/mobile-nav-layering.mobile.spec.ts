@@ -9,9 +9,10 @@ import { mockHavenApi, seedAuthenticatedSession, waitForDrawerOpen } from './fix
  * won the stacking contest owned the clicks in that band, and for that whole
  * period the bar did — so primary navigation was unopenable below `lg` on
  * every authenticated route. (#4029 deleted the bar. Since #4053 the control
- * is the tab bar's More cell and opens a bottom sheet that stops at the bar's
- * top edge, so nothing floats over anything: the hit-tests below now prove
- * the More cell is reachable before AND while the sheet is open.)
+ * is the tab bar's More cell; since #4058 the sheet it opens floats OVER the
+ * floating bar with its own ✕, so the hit-tests below prove the More cell is
+ * reachable before the sheet opens, and that while it is open the pill is
+ * covered and the shading reaches the bottom edge.)
  *
  * Measured on the pre-fix code, at 320 / 390 / 768 / 1023px on `/dashboard`:
  *
@@ -157,8 +158,12 @@ async function expectNavigationReachable(page: Page) {
   const nav = sheet.getByRole('navigation', { name: 'All sections' })
   await expect(nav.getByRole('link', { name: 'Marketplace' })).toBeVisible()
 
-  // 3. The sheet owns its own top band, and the tab bar stays the topmost
-  //    thing in its own band (#4053). Wait for the slide-up to FINISH first:
+  // 3. The sheet owns its own top band, and since #4058 it floats OVER the
+  //    tab bar: every probe on the pill (centre and four corners) lands in the
+  //    sheet or the scrim, never the bar, and a point beside the card at the
+  //    viewport bottom lands in the scrim — no undimmed strip. (Until #4058 the
+  //    bar stayed topmost and the sheet ended at its top edge.) Wait for the
+  //    slide-up to FINISH first:
   //    a moving element still has a non-empty box, so hit-testing mid-slide
   //    lands on the scrim and reports a defect that does not exist (#1749's
   //    false failures on three of four widths).
@@ -173,22 +178,34 @@ async function expectNavigationReachable(page: Page) {
       Math.round(band.top + band.height / 2),
     )
     const bar = document.querySelector('[data-mobile-tab-bar]')!
-    const more = bar.querySelector('[data-more-toggle]')!.getBoundingClientRect()
-    const atMore = document.elementFromPoint(
-      Math.round(more.left + more.width / 2),
-      Math.round(more.top + more.height / 2),
-    )
+    const b = bar.getBoundingClientRect()
+    const coveredBy = (x: number, y: number) => {
+      const el = document.elementFromPoint(Math.round(x), Math.round(y))
+      if (!el) return 'nothing'
+      if (bar.contains(el)) return 'BAR'
+      if (el.closest('[data-more-sheet]')) return 'sheet'
+      if (el.closest('[data-more-sheet-scrim]')) return 'scrim'
+      return el.tagName.toLowerCase()
+    }
+    const pill = [
+      coveredBy(b.left + b.width / 2, b.top + b.height / 2),
+      coveredBy(b.left + 2, b.top + 2),
+      coveredBy(b.right - 2, b.top + 2),
+      coveredBy(b.left + 2, b.bottom - 2),
+      coveredBy(b.right - 2, b.bottom - 2),
+    ]
     return {
       sheetOwnsItsTopBand: sheetEl.contains(topOfSheet),
-      moreCellIsTopmost: !!atMore && bar.contains(atMore),
-      // The sheet ends at the bar's top edge — never overlapping it.
-      sheetBottomAtBarTop: Math.round(r.bottom) === Math.round(bar.getBoundingClientRect().top),
+      pillCovered: pill.every((c) => c === 'sheet' || c === 'scrim'),
+      pill,
+      // Outside the card's 8px side inset, at the viewport bottom: shaded.
+      besideCardIsScrim: coveredBy(4, window.innerHeight - 2) === 'scrim',
       topElement: topOfSheet?.tagName.toLowerCase() ?? null,
     }
   })
-  expect(layering).toMatchObject({ sheetOwnsItsTopBand: true, moreCellIsTopmost: true, sheetBottomAtBarTop: true })
+  expect(layering).toMatchObject({ sheetOwnsItsTopBand: true, pillCovered: true, besideCardIsScrim: true })
 
-  // 4. ...and back out, through the same cell.
+  // 4. ...and back out, through the sheet's own ✕ (#4058).
   const close = page.getByRole('button', { name: 'Close sidebar' })
   await expect(close).toBeVisible()
   await close.click()
@@ -206,7 +223,7 @@ test.describe('mobile navigation is reachable below lg (#1749)', () => {
     test.describe(`at ${width}px`, () => {
       test.use({ viewport: { width, height: 844 } })
 
-      test('More is hit-testable and the sheet owns its top band without covering the bar', async ({ page }) => {
+      test('More is hit-testable and the sheet owns its top band, floating over the bar', async ({ page }) => {
         await page.goto('/dashboard')
         await expectNavigationReachable(page)
       })
@@ -350,18 +367,17 @@ test.describe('the rail leaves the screen when the viewport narrows (#2586)', ()
     const hit = await page.evaluate(() => {
       const aside = document.querySelector('aside')
       const bar = document.querySelector('[data-mobile-tab-bar]')
-      const barH = bar ? Math.round(bar.getBoundingClientRect().height) : 0
+      const b = bar?.getBoundingClientRect()
       // ABOVE the tab bar (#2731). The probe used to sit 40px off the bottom,
-      // which was page content then and is the bar's own band now — the bar is
-      // 56px tall and `fixed`. Reading the old coordinate would have reported
-      // "the page is covered" about chrome that is supposed to be there, which
-      // is a false defect rather than a missed one, but still a spec measuring
-      // the wrong box.
-      const top = document.elementFromPoint(24, window.innerHeight - barH - 40)
+      // which was page content then and is the bar's own band now. Read from
+      // the bar's live box since #4058: the pill floats above the bottom edge
+      // and is rounded, so a probe derived from `innerHeight` and a fixed x
+      // can land beside the pill rather than on it.
+      const top = document.elementFromPoint(24, b ? Math.round(b.top) - 40 : window.innerHeight - 40)
       // ...and the bar's OWN band, which is new ground this spec should hold:
-      // after the crossing, the bottom strip must belong to the tab bar
+      // after the crossing, the pill's first cell must belong to the tab bar
       // and not to the rail.
-      const inBar = bar ? document.elementFromPoint(24, window.innerHeight - barH / 2) : null
+      const inBar = b ? document.elementFromPoint(Math.round(b.left + b.width / 10), Math.round(b.top + b.height / 2)) : null
       return {
         insideDrawer: !!(top && aside?.contains(top)),
         insidePageContent: !!top?.closest('main'),

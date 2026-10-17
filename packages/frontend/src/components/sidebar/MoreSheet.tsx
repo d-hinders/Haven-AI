@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import Link from 'next/link'
-import { ChevronRight, LogOut } from 'lucide-react'
+import { ChevronRight, LogOut, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { SegmentedControl } from '@haven_ai/ui/SegmentedControl'
 import { useTheme, type ThemePreference } from '@/context/ThemeContext'
@@ -12,27 +12,31 @@ import type { NavItem } from './Sidebar'
 /**
  * Distance, in CSS pixels, a downward drag on the handle has to travel before
  * release dismisses the sheet. Below it the sheet returns to rest. A quarter of
- * the tab bar's 56px row would trigger on a tap that wobbles; 80 is a gesture.
+ * a 56px row would trigger on a tap that wobbles; 80 is a gesture.
  */
 export const SWIPE_DISMISS_PX = 80
 
 /**
- * The phone "More" menu (#4053): a bottom sheet over a still-visible tab bar.
+ * The phone "More" menu (#4053): a floating card over the floating tab bar
+ * (#4058).
  *
  * It replaced #2820's full-screen drawer, which was the desktop rail stretched
- * to the screen — it covered the tab bar, so the bar's More control floated
- * alone over it as "Close", and the footer kept a 20% strip clear of that
- * control. Stopping the sheet ABOVE the bar removes both at once.
+ * to the screen. #4053 first made it a bottom sheet that STOPPED at the bar's
+ * top edge so the bar stayed live beneath it; once the bar became a floating
+ * pill (#4058) that edge cut straight through the pill and left the strip
+ * around it undimmed, so the sheet now floats over the bar instead, the way
+ * native sheets float over a tab bar.
  *
- * ## Geometry, not tiers, keeps the tab bar reachable
+ * ## Geometry: covered by rank, shaded edge to edge
  *
- * The sheet and its scrim both end at `--v2-tab-bar-h + --v2-safe-bottom +
- * 1px` (the bar's border) from the bottom of the viewport — exactly the bar's
- * top edge. They sit on the nav tiers above the bar, but they never overlap
- * it, so the bar stays
- * painted and tappable without any tier change.
+ * The card floats 8px in from the sides and the bottom (or the safe-area
+ * inset, whichever is larger), `rounded-3xl`, capped at `max-w-lg` and
+ * centred on a tablet. It sits on `--v2-z-nav-drawer` (140) and its scrim on
+ * `--v2-z-nav-scrim` (130), both above the bar (105), and the scrim runs to
+ * the viewport BOTTOM, edge to edge — so the pill is dimmed with everything
+ * else and no scrim edge or undimmed strip is drawn anywhere.
  *
- * The scrim's TOP stops at `--v2-safe-top`, deliberately unlike a modal
+ * The scrim's TOP still stops at `--v2-safe-top`, deliberately unlike a modal
  * backdrop (which dims to `y=0`): the status-bar band stays the shell's
  * opaque `SafeAreaBand` and nothing translucent ever enters it. #2819 is the
  * reason — on an installed iPhone the band kept the old nav scrim's grey
@@ -41,13 +45,18 @@ export const SWIPE_DISMISS_PX = 80
  * scrim reaches the top like any backdrop. It is `.v2-modal-backdrop`, so no
  * `backdrop-filter` either.
  *
- * ## Non-modal, on purpose
+ * ## Modal, and it closes itself
  *
- * `role="dialog"` without `aria-modal`: the tab bar beneath stays live, so
- * the rest of the page is not inert and claiming it is would be false. Focus
- * moves into the sheet on open and returns to the More control when the sheet
- * is dismissed (`returnFocusRef`). No scroll lock: the page scrolls inside `<main>`, and
- * the scrim is not a descendant of it, so a drag on the scrim scrolls nothing.
+ * The bar is covered, so the sheet carries its own ✕ — named `Close sidebar`,
+ * the name the harness matches (the More cell is now only ever
+ * `Open sidebar`). It is `aria-modal`: while it is open the tab bar and
+ * `<main>` are `inert`, and Tab cycles inside the card. Focus moves in on open
+ * and returns to the More control on a DISMISSAL (✕, Escape, scrim, swipe) —
+ * after the `inert` comes off, since an inert control cannot take focus — but
+ * not when a destination tap or a route change closes it. `useFocusTrap` is
+ * not reused for that reason: it restores focus on every close. No scroll
+ * lock: the page scrolls inside `<main>`, and the scrim is not a descendant of
+ * it, so a drag on the scrim scrolls nothing.
  *
  * ## The harness reads `data-more-sheet`
  *
@@ -90,15 +99,36 @@ export function MoreSheet({
     sheetRef.current?.querySelector<HTMLElement>('a[href], button')?.focus({ preventScroll: true })
   }, [open])
 
-  // A DISMISSAL (Escape, scrim, swipe) hands focus back to the More control.
-  // Navigating away does not: a destination link or a tab tap closes the
-  // sheet too, and pulling focus back onto More after a route change would
-  // be wrong. The More control itself already holds focus when it closes.
+  // A DISMISSAL (✕, Escape, scrim, swipe) hands focus back to the More
+  // control. Navigating away does not: a destination link closes the sheet
+  // too, and pulling focus back onto More after a route change would be
+  // wrong. The hand-back happens in the `inert` effect's cleanup below,
+  // because More is inside the inert bar until that cleanup runs.
+  const refocusMore = useRef(false)
   const dismiss = useRef(() => {})
   dismiss.current = () => {
+    refocusMore.current = true
     onClose()
-    returnFocusRef.current?.focus({ preventScroll: true })
   }
+
+  // Modal (#4058): the page behind leaves the tab order and the a11y tree
+  // while the sheet is open. The live bar is the one NAMED `Primary` — the
+  // `/design-system` illustration is a nameless `inert` copy, and removing
+  // `inert` from it on close would make its links focusable.
+  useEffect(() => {
+    if (!open) return
+    const behind = Array.from(
+      document.querySelectorAll<HTMLElement>('nav[data-mobile-tab-bar][aria-label="Primary"], #main-content'),
+    )
+    for (const el of behind) el.setAttribute('inert', '')
+    return () => {
+      for (const el of behind) el.removeAttribute('inert')
+      if (refocusMore.current) {
+        refocusMore.current = false
+        returnFocusRef.current?.focus({ preventScroll: true })
+      }
+    }
+  }, [open, returnFocusRef])
 
   useEffect(() => {
     if (!open) return
@@ -106,6 +136,22 @@ export function MoreSheet({
       if (e.key === 'Escape') {
         e.stopImmediatePropagation()
         dismiss.current()
+        return
+      }
+      // Tab cycles inside the card: the page behind is inert, so without
+      // this the next stop after the last row is the browser chrome.
+      if (e.key === 'Tab' && sheetRef.current) {
+        const stops = Array.from(sheetRef.current.querySelectorAll<HTMLElement>('a[href], button:not([disabled])'))
+        if (stops.length === 0) return
+        const first = stops[0]
+        const last = stops[stops.length - 1]
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault()
+          last.focus()
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault()
+          first.focus()
+        }
       }
     }
     window.addEventListener('keydown', onKey)
@@ -152,10 +198,6 @@ export function MoreSheet({
     if (travelled >= SWIPE_DISMISS_PX) dismiss.current()
   }
 
-  // The bar's top edge: its cells are `--v2-tab-bar-h` tall, it pads the
-  // home-indicator inset below them, and it draws a 1px `border-t` above them.
-  // Without the 1px the sheet would sit on the bar's border line.
-  const bottom = 'bottom-[calc(var(--v2-tab-bar-h)+var(--v2-safe-bottom)+1px)]'
 
   return (
     <>
@@ -163,12 +205,13 @@ export function MoreSheet({
         aria-hidden="true"
         data-more-sheet-scrim=""
         onClick={() => dismiss.current()}
-        className={`lg:hidden fixed inset-x-0 top-[var(--v2-safe-top)] ${bottom} z-[var(--v2-z-nav-scrim)] v2-modal-backdrop`}
+        className="lg:hidden fixed inset-x-0 top-[var(--v2-safe-top)] bottom-0 z-[var(--v2-z-nav-scrim)] v2-modal-backdrop"
       />
       <div
         ref={sheetRef}
         id="more-sheet"
         role="dialog"
+        aria-modal="true"
         aria-label="More"
         data-more-sheet=""
         data-state={settled ? 'open' : 'opening'}
@@ -176,7 +219,11 @@ export function MoreSheet({
           if (e.target === e.currentTarget) setSettled(true)
         }}
         style={dragY ? { transform: `translateY(${dragY}px)` } : undefined}
-        className={`lg:hidden fixed inset-x-0 ${bottom} z-[var(--v2-z-nav-drawer)] flex max-h-[calc(100dvh-var(--v2-tab-bar-h)-var(--v2-safe-bottom)-var(--v2-safe-top)-1rem)] flex-col rounded-t-xl border-x border-t border-[var(--v2-border)] bg-[var(--v2-surface)] pl-[var(--v2-safe-left)] pr-[var(--v2-safe-right)] shadow-popover v2-sheet-enter`}
+        // The float gap is 8px, or the home-indicator inset where that is
+        // larger, so the card sits just above the indicator on a notched
+        // phone. Written out twice (bottom, max-h) because Tailwind only
+        // compiles class strings it can read whole.
+        className="lg:hidden fixed left-[max(0.5rem,var(--v2-safe-left))] right-[max(0.5rem,var(--v2-safe-right))] bottom-[max(0.5rem,var(--v2-safe-bottom))] mx-auto z-[var(--v2-z-nav-drawer)] flex max-h-[calc(100dvh-var(--v2-safe-top)-max(0.5rem,var(--v2-safe-bottom))-1rem)] max-w-lg flex-col rounded-3xl border border-[var(--v2-border)] bg-[var(--v2-surface)] shadow-popover v2-sheet-enter"
       >
         {/* The drag handle. A pointer target in its own right — the list
             below scrolls, and a swipe that started there must scroll it, not
@@ -194,7 +241,23 @@ export function MoreSheet({
           <span aria-hidden="true" className="h-1 w-9 rounded-full bg-[var(--v2-border-strong)]" />
         </div>
 
-        {header}
+        {/* The logo band and the sheet's own ✕ (#4058). The bar is covered,
+            so this is the visible way out; it carries `Close sidebar`, the
+            name the harness and the e2e fixtures match. */}
+        <div className="flex flex-shrink-0 items-center justify-between gap-2 pr-3">
+          {header}
+          <button
+            type="button"
+            onClick={() => dismiss.current()}
+            aria-label="Close sidebar"
+            data-more-sheet-close=""
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-[var(--v2-ink-2)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+          >
+            <span className="h-5 w-5" aria-hidden="true">
+              <Icon icon={X} className="h-full w-full" />
+            </span>
+          </button>
+        </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
           {/* Account first: who you are, then where you can go. The whole

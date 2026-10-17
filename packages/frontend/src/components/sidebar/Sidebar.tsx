@@ -300,8 +300,8 @@ export default function Sidebar() {
   }, [])
 
   // Any route change closes the sheet (#4053) — a back gesture or an in-page
-  // link included. A tab tap also closes it directly (`more.onClose`), because
-  // tapping the tab you are already on changes no route.
+  // link included. (A tab tap no longer can: since #4058 the sheet covers the
+  // bar and the bar is `inert` while it is open.)
   useEffect(() => {
     setMoreOpen(false)
   }, [pathname])
@@ -393,14 +393,14 @@ export default function Sidebar() {
     <>
       {/*
         Below `lg` the primary navigation is the tab bar (#2731), and its fifth
-        cell, More, opens the sheet (#4053). The sheet replaced #2820's
-        full-screen drawer — the desktop rail stretched to the screen, which
-        covered the bar and left the More control floating over it as "Close"
-        — and the rail itself no longer renders below `lg` at all.
+        cell, More, opens the sheet (#4053). Since #4058 the bar is a floating
+        pill and the sheet a floating card that covers it, closed by its own ✕
+        — not #2820's full-screen drawer, which was the desktop rail stretched
+        to the screen. The rail itself no longer renders below `lg` at all.
       */}
       <MobileTabBar
         items={baseNavItems}
-        more={{ open: sheetOpen, onToggle: () => setMoreOpen((v) => !v), onClose: closeMore, buttonRef: moreButtonRef }}
+        more={{ open: sheetOpen, onToggle: () => setMoreOpen((v) => !v), buttonRef: moreButtonRef }}
       />
       <MoreSheet
         open={sheetOpen}

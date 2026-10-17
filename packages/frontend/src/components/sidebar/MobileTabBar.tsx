@@ -3,24 +3,37 @@
 import type { RefObject } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Menu, X } from 'lucide-react'
+import { Menu } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import type { NavItem } from './Sidebar'
 
 /**
  * The primary navigation below `lg` (#2731).
  *
- * ## "More" is the fifth cell (#4053)
+ * ## A floating pill (#4058)
+ *
+ * The bar floats: inset from the sides, `--v2-tab-bar-bottom` above the
+ * viewport bottom (12px, or the home-indicator inset on a notched phone),
+ * `rounded-full` with a border and the popover shadow, and capped at `max-w-md`
+ * and centred so a 1000px tablet does not get 200px cells. It is still the
+ * `fixed` `<nav data-mobile-tab-bar>` itself, not a wrapper around an inner
+ * pill: specs select `nav.fixed[data-mobile-tab-bar]`. SOLID `--v2-bg`, with
+ * NO `backdrop-filter`: the owner chose near-solid over glass, and a blur is
+ * out because the installed-iOS stale-frame class `SafeAreaBand` documents
+ * cannot be tested by any CI engine. Without a blur, even 95% opacity let page
+ * text ghost through behind the labels (measured at 390px on `/agents`), so
+ * the pill is opaque and the shadow alone lifts it.
+ *
+ * ## "More" is the fifth cell, and only opens (#4053, #4058)
  *
  * Until #4053 the More control was a DOM sibling of this bar, painted into
  * the fifth column from outside on the higher `--v2-z-nav-toggle` tier,
- * because #2820's full-screen drawer covered the bar and the same button had
- * to stay on top of it to close it again. The phone menu is now a bottom
- * sheet that stops at this bar's top edge — it never covers the bar — so the
- * control is an ordinary cell of the grid, on the bar's own tier, beside the
- * four tabs it belongs with. Its accessible name stays `Open sidebar` /
- * `Close sidebar`: the capture harness and the e2e fixtures match those
- * whole strings.
+ * because #2820's full-screen drawer covered the bar. #4053 made it an
+ * ordinary cell beside the four tabs. Since #4058 the sheet it opens floats
+ * OVER the bar again — with a full-height scrim and its own ✕ — so the cell
+ * only ever opens: its name is a constant `Open sidebar` (`aria-expanded`
+ * carries the state), and `Close sidebar` belongs to the sheet's ✕ alone. Two
+ * buttons with that name would break Playwright's strict mode in the harness.
  *
  * ## Selection is by ROUTE, never by index
  *
@@ -36,12 +49,45 @@ import type { NavItem } from './Sidebar'
 export const TAB_ROUTES = ['/dashboard', '/agents', '/transactions', '/accounts'] as const
 
 /**
+ * Bar-only labels (#4058, owner decision). "Transactions" truncated in the
+ * pill at 390px and already did at 375px (bug report 2026-10-14, N2); the bar
+ * says "Activity" while the rail, the page title and the route stay
+ * "Transactions".
+ */
+export const TAB_LABELS: Partial<Record<(typeof TAB_ROUTES)[number], string>> = {
+  '/transactions': 'Activity',
+}
+
+/**
  * Active for the hub AND its detail pages: `/agents/agent-research` lights
  * Agents. Prefix-matched on a `/` boundary so `/accounts` never lights for a
  * hypothetical `/accounts-archive`.
  */
 export function isActiveRoute(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`)
+}
+
+/**
+ * A cell is a full RECTANGLE of the grid, and the pill shape is painted by an
+ * indicator span inside it (#4058). Chromium hit-tests `border-radius`, so a
+ * `rounded-full` cell left its four corners dead — taps there fell through to
+ * the bar — and the e2e corner probes caught it. The cells abut (no gap), so
+ * there is no dead strip between them either.
+ */
+const CELL =
+  'group relative flex h-[3.25rem] min-w-0 flex-col items-center justify-center gap-0.5 text-xs font-medium transition-colors focus-visible:outline-none'
+
+/**
+ * The indicator carries the selection AND the focus ring. Active: brand-soft
+ * fill bounded by a 1px inset brand outline (the `SegmentedControl` idiom).
+ * Focused: the system's outset `ring-2 ring-brand/80`, with the outline
+ * cleared so the ring reads as one edge. Icon and label are `relative`, so
+ * they paint above this absolutely placed span.
+ */
+function indicatorClass(active: boolean): string {
+  return `absolute inset-0 rounded-full group-focus-visible:ring-2 group-focus-visible:ring-brand/80 ${
+    active ? 'bg-[var(--v2-brand-soft)] outline outline-1 -outline-offset-1 outline-brand group-focus-visible:outline-none' : ''
+  }`
 }
 
 /**
@@ -63,8 +109,6 @@ export function MobileTabBar({
   more?: {
     open: boolean
     onToggle: () => void
-    /** Called on every tab tap — the SAME route included, where no route change would close the sheet. */
-    onClose: () => void
     buttonRef: RefObject<HTMLButtonElement | null>
   }
   /**
@@ -97,10 +141,10 @@ export function MobileTabBar({
       // #2819's capture surfaced the warning.
       {...(presentational ? { inert: true } : {})}
       data-mobile-tab-bar=""
-      className={`grid grid-cols-5 border-t border-[var(--v2-border)] bg-[var(--v2-bg)] ${
+      className={`grid max-w-md grid-cols-5 rounded-full border border-[var(--v2-border)] bg-[var(--v2-bg)] p-1 shadow-popover ${
         presentational
-          ? 'relative w-full'
-          : 'lg:hidden fixed bottom-0 inset-x-0 z-[var(--v2-z-tab-bar)] pb-[var(--v2-safe-bottom)] pl-[var(--v2-safe-left)] pr-[var(--v2-safe-right)]'
+          ? 'relative mx-auto w-full'
+          : 'lg:hidden fixed left-[max(0.75rem,var(--v2-safe-left))] right-[max(0.75rem,var(--v2-safe-right))] bottom-[var(--v2-tab-bar-bottom)] mx-auto z-[var(--v2-z-tab-bar)]'
       }`}
     >
       {tabs.map((item) => {
@@ -109,49 +153,36 @@ export function MobileTabBar({
           <Link
             key={item.href}
             href={item.href}
-            onClick={more?.onClose}
             aria-current={active ? 'page' : undefined}
-            className={`relative flex h-[var(--v2-tab-bar-h)] flex-col items-center justify-center gap-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80 ${
-              active ? 'text-[var(--v2-brand)]' : 'text-[var(--v2-ink-3)]'
-            }`}
+            className={`${CELL} ${active ? 'text-[var(--v2-brand)]' : 'text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)]'}`}
           >
-            {/* One "you are here" idiom across the navigation (#2818). The
-                desktop rail marks the active row in brand ink on a
-                `--v2-brand-soft` fill with a 2px brand rail down its left
-                edge, and the bar takes that idiom translated from a row to a
-                cell: the rail runs across the TOP edge instead of the left,
-                and the fill is dropped because a tinted 56px cell reads as a
-                pressed button rather than as a selection. (Until #4053 the
-                phone menu was the rail itself, full-screen; the More sheet
-                that replaced it marks its active rows by the fill and brand
-                ink alone — its rows are never the route a tab is lit for.)
+            {/* One "you are here" idiom across the navigation (#2818),
+                and since #4058 the SAME one the app's other selections use:
+                brand ink on a `--v2-brand-soft` pill bounded by a 1px inset
+                brand OUTLINE — `SegmentedControl`'s selected option (#4056).
+                It replaced a 2px rail across the cell's top edge, which an
+                edge-less floating pill has nowhere to hang.
 
-                The rail is NOT decoration. Brand ink alone would be a WCAG
+                The outline is NOT decoration. Brand ink alone would be a WCAG
                 1.4.1 regression: `--v2-brand` against `--v2-ink-3` is 1.18:1,
-                a hue difference with no luminance difference, so the active
-                tab would be indistinguishable in greyscale and to a
-                colour-blind user — where the `--v2-ink`/`--v2-ink-3` pair
-                this replaces differ by ~3:1. The rail is the non-colour cue
-                that makes brand ink acceptable, and it is the cue the desktop
-                rail already uses. Both text states still clear AA at 12px on
-                their own (6.29 and 5.32).
+                a hue difference with no luminance difference, and the fill
+                alone is 1.12:1 (light) / 1.30:1 (dark) against the pill. The
+                outline is the non-colour cue — 6.29:1 / 8.65:1 against
+                `--v2-bg` — exactly as the rail was. Both text states still
+                clear AA at 12px on their own (6.29 and 5.32).
 
-                It adds no height: `top-0` is inside the bar's `border-t` and
-                the span is absolutely positioned, so `--v2-tab-bar-h` and the
-                44px tap target the e2e spec asserts are untouched. */}
-            {active && (
-              <span
-                aria-hidden="true"
-                className="absolute inset-x-0 top-0 h-0.5 bg-[var(--v2-brand)]"
-              />
-            )}
-            <span className="h-5 w-5" aria-hidden="true">
+                An outline and not `ring-inset`: an inset ring leaks
+                `--tw-ring-inset` into the focus ring (#4056's review), and
+                every cell's focus ring is OUTSET. Both are painted on the
+                INDICATOR, not the cell — see `indicatorClass`. */}
+            <span aria-hidden="true" data-tab-indicator="" className={indicatorClass(active)} />
+            <span className="relative h-5 w-5" aria-hidden="true">
               {item.icon}
             </span>
             {/* `min-w-0` + `truncate` because the grid cell is the constraint,
-                not the text: at 320px a cell is 64px and "Transactions" is
-                wider than that, so without this it broke OUT of its cell and
-                closed the gap to "Accounts" to 5.2px.
+                not the text: at 320px a cell is under 60px inside the pill,
+                and an over-long label would otherwise break OUT of its cell
+                and close the gap to its neighbour.
 
                 `text-xs` is `--v2-text-meta`, the ramp's smallest step and the
                 floor `design:lint` enforces. An earlier revision reached for
@@ -163,48 +194,45 @@ export function MobileTabBar({
                 rather than written here on purpose: the lint greps this file's
                 text and cannot tell a class from a comment about one.)
 
-                The cost is bounded and honest: at 320px "Transactions"
-                ellipsises. That is the narrowest phone in the support matrix
-                and the only width where it happens — at 390 the cell is 78px
-                and the label fits whole. */}
-            <span className="min-w-0 max-w-full truncate px-0.5">
-              {item.label}
+                So the label, not the font, gives: the bar says "Activity"
+                (`TAB_LABELS`, #4058), and every label renders whole from
+                375px up. 320px, the narrowest phone in the support matrix, is
+                reported in the PR rather than promised here. */}
+            <span className="relative min-w-0 max-w-full truncate px-0.5">
+              {TAB_LABELS[item.href as (typeof TAB_ROUTES)[number]] ?? item.label}
             </span>
           </Link>
         )
       })}
       {/* The fifth cell. Live, it is the More control; on the illustration it
-          is a picture of one (the bar there is `inert`). The visible state
-          follows the sheet: "More" with a menu glyph closed, "Close" with an
-          X open, so a sighted user sees that the same cell now closes it. The
-          closed state's visible "More" is not inside its accessible name
-          `Open sidebar` (WCAG 2.5.3) — #2731's recorded trade, kept because
-          the harness matches that name from every mobile capture. */}
+          is a picture of one (the bar there is `inert`). It only OPENS
+          (#4058): the sheet it opens covers the bar and carries its own ✕, so
+          the cell never turns into "Close" — its name is the constant
+          `Open sidebar`, with `aria-expanded` for the state. The visible
+          "More" is not inside that name (WCAG 2.5.3) — #2731's recorded trade,
+          kept because the harness matches that name from every mobile
+          capture. */}
       {more && !presentational ? (
         <button
           ref={more.buttonRef}
           type="button"
           onClick={more.onToggle}
-          aria-label={more.open ? 'Close sidebar' : 'Open sidebar'}
+          aria-label="Open sidebar"
           aria-expanded={more.open}
           aria-controls={more.open ? 'more-sheet' : undefined}
           data-more-toggle=""
-          className={`relative flex h-[var(--v2-tab-bar-h)] flex-col items-center justify-center gap-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80 ${
-            more.open ? 'text-[var(--v2-brand)]' : 'text-[var(--v2-ink-3)]'
-          }`}
+          className={`${CELL} text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)]`}
         >
-          {/* Brand ink while open, but NO top rail: the rail means "you are
-              here", and the route's own tab keeps it — two lit rails would
-              read as two selected tabs. */}
-          <span className="h-5 w-5" aria-hidden="true">
-            <Icon icon={more.open ? X : Menu} className="w-full h-full" />
+          <span aria-hidden="true" data-tab-indicator="" className={indicatorClass(false)} />
+          <span className="relative h-5 w-5" aria-hidden="true">
+            <Icon icon={Menu} className="w-full h-full" />
           </span>
-          <span aria-hidden="true" className="min-w-0 max-w-full truncate px-0.5">
-            {more.open ? 'Close' : 'More'}
+          <span aria-hidden="true" className="relative min-w-0 max-w-full truncate px-0.5">
+            More
           </span>
         </button>
       ) : presentational ? (
-        <span className="flex h-[var(--v2-tab-bar-h)] flex-col items-center justify-center gap-1 text-xs font-medium text-[var(--v2-ink-3)]">
+        <span className={`${CELL} text-[var(--v2-ink-3)]`}>
           <span className="h-5 w-5" aria-hidden="true">
             <Icon icon={Menu} className="w-full h-full" />
           </span>

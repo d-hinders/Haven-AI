@@ -57,76 +57,102 @@ describe('MobileTabBar — the presentational copy is inert (#2819)', () => {
 })
 
 /**
- * The one active idiom, asserted on the RENDERED markup (#2818).
+ * The one active idiom, asserted on the RENDERED markup (#2818, #4058).
  *
- * Before this, the bar's active state had no unit coverage at all — the only
+ * Before #2818 the bar's active state had no unit coverage at all — the only
  * automated evidence was the visual baselines, which is evidence a reviewer
- * reads rather than evidence a gate reports, and which was stale on this very
- * change until the Linux regeneration ran. These three cases are what would
- * have gone red if the rail were dropped, applied to every cell, or left
- * visible to the accessibility tree.
+ * reads rather than evidence a gate reports. Since #4058 the idiom is the
+ * app's selection idiom (#4056's `SegmentedControl`): a brand-soft pill
+ * bounded by a 1px inset brand OUTLINE, which replaced the 2px top rail a
+ * floating pill has nowhere to hang. These cases go red if the outline is
+ * dropped, applied to every cell, or drawn as an inset ring (which leaks into
+ * the focus ring).
  *
  * Asserted on the element, not on a class string in the source: the defect
  * class here is "the active cell renders like the inactive one", and a source
- * grep for `--v2-brand` finds the token in a comment just as happily.
+ * grep for `--v2-brand` finds the token in a comment just as happily. jsdom
+ * computes no `box-shadow`, so the outset focus ring is pinned here by class
+ * and in `navigation.mobile.spec.ts` by computed style.
  */
-describe('MobileTabBar — active cell marks itself with the rail idiom (#2818)', () => {
+describe('MobileTabBar — active cell carries the selection idiom (#2818, #4058)', () => {
   const renderBar = () =>
     render(<MobileTabBar items={baseNavItems} presentational activeHref="/agents" />)
+  const classes = (el: Element) => el.className.split(/\s+/)
+  /** The pill is painted by an indicator span; the cell stays a rectangle for hit-testing. */
+  const indicatorOf = (cell: HTMLElement) => cell.querySelector('[data-tab-indicator]')!
 
-  /** The rail: a 2px brand span, absolutely placed on the cell's top edge. */
-  const railOf = (link: HTMLElement) =>
-    link.querySelector('span[aria-hidden="true"].absolute')
-
-  it('gives the active cell brand ink and a rail the a11y tree cannot see', () => {
+  it('gives the active cell brand ink on a brand-soft pill with a 1px inset brand outline', () => {
     renderBar()
 
     const active = screen.getByRole('link', { name: 'Agents' })
-    expect(active.className).toContain('text-[var(--v2-brand)]')
-    // `relative` is what SCOPES the rail to this cell. Drop it — a plausible
-    // tidy-up in a 240-char class stack — and the absolutely-positioned rail
-    // resolves against the nearest positioned ancestor, which for the live bar
-    // is the `fixed` <nav>: one 2px line across the WHOLE bar instead of over
-    // the active cell. Every other assertion here stays green through that
-    // edit, which is exactly why this one is separate (round-two review).
-    // `classList.contains`, not `className.toContain`: the substring form also
-    // passes on `lg:relative` or `sm:relative`, neither of which scopes the
-    // rail unconditionally.
-    expect(active.classList.contains('relative')).toBe(true)
-
-    const rail = railOf(active)
-    expect(rail).not.toBeNull()
-    // `aria-hidden` because the rail restates `aria-current`, which is already
-    // on the link — announcing it twice is the accessibility defect, not the
-    // decoration.
-    expect(rail?.getAttribute('aria-hidden')).toBe('true')
-    expect(rail?.className).toContain('top-0')
-    expect(rail?.className).toContain('h-0.5')
-    expect(rail?.className).toContain('bg-[var(--v2-brand)]')
+    expect(classes(active)).toContain('text-[var(--v2-brand)]')
+    const pill = indicatorOf(active)
+    expect(pill.getAttribute('aria-hidden')).toBe('true')
+    expect(classes(pill)).toEqual(
+      expect.arrayContaining([
+        'absolute',
+        'inset-0',
+        'rounded-full',
+        'bg-[var(--v2-brand-soft)]',
+        'outline',
+        'outline-1',
+        '-outline-offset-1',
+        'outline-brand',
+      ]),
+    )
+    // The cell itself is NOT rounded: Chromium hit-tests border-radius, and a
+    // rounded cell has dead corners. `relative` scopes the indicator to it.
+    expect(classes(active)).not.toContain('rounded-full')
+    expect(classes(active)).toContain('relative')
+    // The rail is gone: no top-edge decoration.
+    expect(active.querySelector('.top-0')).toBeNull()
   })
 
-  it('leaves every inactive cell in ink-3, with no rail', () => {
-    // The control. Without it, a rail rendered unconditionally would satisfy
-    // the case above while erasing the distinction the rail exists to draw.
+  it('leaves every inactive cell in ink-3, with no fill and no outline', () => {
+    // The control. Without it, an outline rendered unconditionally would
+    // satisfy the case above while erasing the distinction it exists to draw.
     renderBar()
 
-    for (const name of ['Dashboard', 'Transactions', 'Accounts']) {
+    for (const name of ['Dashboard', 'Activity', 'Accounts']) {
       const inactive = screen.getByRole('link', { name })
-      expect(inactive.className).toContain('text-[var(--v2-ink-3)]')
-      expect(inactive.className).not.toContain('text-[var(--v2-brand)]')
-      expect(railOf(inactive)).toBeNull()
+      expect(classes(inactive)).toContain('text-[var(--v2-ink-3)]')
+      expect(classes(inactive)).not.toContain('text-[var(--v2-brand)]')
+      expect(classes(indicatorOf(inactive))).not.toContain('outline-brand')
+      expect(classes(indicatorOf(inactive))).not.toContain('bg-[var(--v2-brand-soft)]')
     }
   })
 
-  it('keeps aria-current on exactly one tab — the rail did not replace it', () => {
-    // The rail is a second, VISUAL cue. It must not have become the only one:
-    // `aria-current` is what a screen reader has, and it is unaffected by
-    // anything above.
+  it('gives every cell an OUTSET focus ring — no ring-inset anywhere in the bar', () => {
+    renderBar()
+    for (const name of ['Dashboard', 'Agents', 'Activity', 'Accounts']) {
+      const cell = screen.getByRole('link', { name })
+      expect(classes(cell)).toEqual(expect.arrayContaining(['group', 'focus-visible:outline-none']))
+      const pill = indicatorOf(cell)
+      expect(classes(pill)).toEqual(expect.arrayContaining(['group-focus-visible:ring-2', 'group-focus-visible:ring-brand/80']))
+      for (const el of [cell, pill]) {
+        expect(classes(el)).not.toContain('ring-inset')
+        expect(classes(el)).not.toContain('focus-visible:ring-inset')
+      }
+    }
+  })
+
+  it('keeps aria-current on exactly one tab — the visual cue did not replace it', () => {
+    // The outline is a second, VISUAL cue. It must not have become the only
+    // one: `aria-current` is what a screen reader has.
     const { container } = renderBar()
 
     const current = container.querySelectorAll('a[aria-current="page"]')
     expect(current).toHaveLength(1)
     expect(current[0]).toHaveAttribute('href', '/agents')
+  })
+
+  it('labels /transactions "Activity" in the bar only (#4058)', () => {
+    renderBar()
+    const activity = screen.getByRole('link', { name: 'Activity' })
+    expect(activity).toHaveAttribute('href', '/transactions')
+    expect(screen.queryByRole('link', { name: 'Transactions' })).toBeNull()
+    // The rail's own item list is untouched: the override is the bar's.
+    expect(baseNavItems.find((i) => i.href === '/transactions')?.label).toBe('Transactions')
   })
 })
 
@@ -171,7 +197,7 @@ describe('MobileTabBar — five cells, and the theme row is not one of them (#29
   it('the live bar carries More as its fifth cell — its only button (#4053)', () => {
     const ref = { current: null }
     const { container } = render(
-      <MobileTabBar items={baseNavItems} more={{ open: false, onToggle: () => {}, onClose: () => {}, buttonRef: ref }} />,
+      <MobileTabBar items={baseNavItems} more={{ open: false, onToggle: () => {}, buttonRef: ref }} />,
     )
     const bar = container.querySelector('[data-mobile-tab-bar]')!
     expect(bar.children).toHaveLength(5)
@@ -180,5 +206,23 @@ describe('MobileTabBar — five cells, and the theme row is not one of them (#29
     expect(bar.children[4]).toBe(buttons[0])
     expect(buttons[0].getAttribute('aria-label')).toBe('Open sidebar')
     expect(bar.querySelectorAll('[aria-label^="Theme:"], [role="radiogroup"]')).toHaveLength(0)
+  })
+})
+
+/**
+ * More only opens (#4058). The sheet covers the bar and carries its own ✕
+ * named `Close sidebar`; if this cell still flipped to that name, the harness
+ * would find two buttons by it and Playwright's strict mode would fail.
+ */
+describe('MobileTabBar — the More cell is named Open sidebar in both states (#4058)', () => {
+  it.each([false, true])('open=%s', (open) => {
+    const ref = { current: null }
+    const { container } = render(
+      <MobileTabBar items={baseNavItems} more={{ open, onToggle: () => {}, buttonRef: ref }} />,
+    )
+    const more = container.querySelector('[data-more-toggle]')!
+    expect(more.getAttribute('aria-label')).toBe('Open sidebar')
+    expect(more.getAttribute('aria-expanded')).toBe(String(open))
+    expect(more.textContent).toBe('More')
   })
 })

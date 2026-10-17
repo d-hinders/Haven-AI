@@ -1414,9 +1414,10 @@ export default function DesignSystemPage() {
             The mobile navigation overlay outranks the app chrome, and modals outrank the
             navigation. That direction is not arbitrary: let the chrome win and the navigation is
             covered and its control cannot be tapped at all — #1749, a header and a toggle given
-            numbers independently. The tab bar is kept reachable under the open More sheet by
-            geometry rather than rank: the sheet and its scrim end at the bar&rsquo;s top edge.
-            Modals sit above both, because a dialog opened from a nav link has to cover the sheet.
+            numbers independently. The open More sheet covers the floating tab bar by rank: its
+            scrim and card out-rank the bar, the scrim shades to the viewport bottom, and the
+            sheet closes itself with its own ✕ (#4058). Modals sit above both, because a dialog
+            opened from a nav link has to cover the sheet.
           </p>
           <p className="mt-3 text-sm leading-relaxed text-[var(--v2-ink-2)]">
             Adding a layer means picking the tier it belongs to, not picking a number. If none of
@@ -1459,9 +1460,9 @@ export default function DesignSystemPage() {
 
       <Section
         title="Bottom tab bar — primary navigation below lg"
-        description="Below `lg` the primary navigation: four tabs (Dashboard, Agents, Transactions, Accounts) plus More, which opens a bottom sheet with everything the tabs do not carry. Tabs are selected from the sidebar's own list BY ROUTE, never by index — the bar's order differs from the rail's, so a positional read would reorder it the next time an entry is inserted. Active state follows the route including detail pages, so /agents/agent-research lights Agents."
+        description="Below `lg` the primary navigation: a floating pill of four tabs (Dashboard, Agents, Activity — the bar's label for /transactions — and Accounts) plus More, which opens a floating card with everything the tabs do not carry. The active tab is brand ink on a brand-soft pill with a 1px inset brand outline, the same idiom as a selected SegmentedControl option. Tabs are selected from the sidebar's own list BY ROUTE, never by index — the bar's order differs from the rail's, so a positional read would reorder it the next time an entry is inserted. Active state follows the route including detail pages, so /agents/agent-research lights Agents."
       >
-        <Card hover={false} className="max-w-sm overflow-hidden">
+        <Card hover={false} className="max-w-sm p-4">
           {/*
             The REAL component, in `presentational` mode — not a hand-rolled
             copy of it. The showcase's mirror of `TransactionsTable` taught this
@@ -1479,20 +1480,21 @@ export default function DesignSystemPage() {
           <MobileTabBar items={baseNavItems} presentational activeHref="/agents" />
         </Card>
         <p className="mt-3 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-          Three surfaces reserve the bar&rsquo;s height from the{' '}
+          The pill floats{' '}
+          <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">--v2-tab-bar-bottom</code>{' '}
+          above the bottom edge — 12px, or the home-indicator inset on a notched phone — and is{' '}
           <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">--v2-tab-bar-h</code>{' '}
-          token, and only one of them is the bar: <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">&lt;main&gt;</code>{' '}
-          adds it to its bottom padding so the last row does not sit under the bar, and the toast
-          container lifts by it so the payoff notification is not hidden behind the navigation
-          everyone is looking at. The safe-area inset is added at each site rather than folded into
-          the token: the bar pads itself with it, the others clear the bar and the inset together.
+          tall. Two other surfaces clear it with the same sum:{' '}
+          <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">&lt;main&gt;</code> adds it
+          to its bottom padding so the last row does not sit under the pill, and the toast container
+          lifts by it so the payoff notification is not hidden behind the navigation everyone is
+          looking at.
         </p>
         <p className="mt-3 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-          <strong>More is the fifth cell.</strong> It opens a bottom sheet that stops at this
-          bar&rsquo;s top edge, so the bar stays visible and tappable while the sheet is open and
-          More reads &ldquo;Close&rdquo;. It keeps the accessible names{' '}
-          <em>Open sidebar</em> / <em>Close sidebar</em>, which are load-bearing: the capture
-          harness and the e2e fixtures click them.
+          <strong>More is the fifth cell, and only opens.</strong> The card it opens floats over
+          the bar with a scrim to the bottom edge, so the sheet carries its own ✕. The cell is
+          always <em>Open sidebar</em> and the ✕ is <em>Close sidebar</em> — names that are
+          load-bearing: the capture harness and the e2e fixtures click them.
         </p>
       </Section>
 

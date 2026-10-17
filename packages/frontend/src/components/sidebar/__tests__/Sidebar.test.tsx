@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -30,6 +30,7 @@ vi.mock('@/components/ui/Tooltip', () => ({
 
 import Sidebar from '@/components/sidebar/Sidebar'
 import { TAB_ROUTES } from '@/components/sidebar/MobileTabBar'
+import { SWIPE_DISMISS_PX } from '@/components/sidebar/MoreSheet'
 import { LocaleProvider } from '@/context/LocaleContext'
 import { ThemeProvider } from '@/context/ThemeContext'
 import { en } from '@/lib/i18n/messages/en'
@@ -133,32 +134,16 @@ describe('Sidebar', () => {
   })
 
   /**
-   * The mobile *More* sheet (#3024 acceptance criteria).
-   *
-   * There is no separate sheet component to render below `lg` (`Sidebar.tsx`'s
-   * own comment: "below `lg` this aside IS the More sheet", #2820) — the drawer
-   * asserted above is what a phone opens, so its DOM order already answers this
-   * question. What this test pins that the one above does not: the items the
-   * five mobile TABS already cover (`MobileTabBar`'s `TAB_ROUTES` — Dashboard,
-   * Accounts, Transactions, Agents) are filtered OUT, and what remains must
-   * read in the same section order desktop uses for them — Analytics (end of
-   * Overview), Accounting (end of Money), then Marketplace, Contacts (end of
-   * Agents; Marketplace renamed from Catalog by #3079) — with Settings and Profile
-   * after, in the unchanged bottom section.
+   * The rail's bottom section (#3024): Settings and the profile link come after
+   * the labeled `<nav>`, in that order. The phone sheet's contents are pinned
+   * in the `More sheet` block below, against the sheet itself.
    */
-  it('the More sheet lists the remaining items in the same section order as desktop', () => {
+  it('the rail keeps Settings and Profile after the labeled sections', () => {
     render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
-    const nav = document.querySelector('nav[aria-label="All sections"]')!
-    const tabRoutes = new Set<string>(TAB_ROUTES)
-    const remaining = Array.from(nav.querySelectorAll('a'))
-      .map((a) => a.getAttribute('href'))
-      .filter((href): href is string => href !== null && !tabRoutes.has(href))
-    expect(remaining).toEqual(['/analytics', '/accounting', '/marketplace', '/contacts'])
-    // Settings and Profile — the unchanged bottom section — come after, in the
-    // drawer's footer rather than the labeled `<nav>`.
-    const settingsLink = screen.getByRole('link', { name: 'Settings' })
-    const profileLink = screen.getByRole('link', { name: /^Open profile for/ })
-    const lastRemaining = document.querySelector('nav[aria-label="All sections"] a[href="/contacts"]')!
+    const rail = document.querySelector('aside')!
+    const settingsLink = rail.querySelector('a[href="/settings"]')!
+    const profileLink = rail.querySelector('a[aria-label^="Open profile for"]')!
+    const lastRemaining = rail.querySelector('nav[aria-label="All sections"] a[href="/contacts"]')!
     expect(lastRemaining.compareDocumentPosition(settingsLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(settingsLink.compareDocumentPosition(profileLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
@@ -267,7 +252,7 @@ describe('Sidebar', () => {
         (el) => el.textContent === en.accountingPage.nav.comingSoon,
       )
       expect(abbreviated?.getAttribute('aria-hidden')).toBe('true')
-      // Below `lg` the full-width drawer shows the full phrase instead.
+      // Below `lg` (the phone More sheet) the full phrase shows instead.
       const mobilePhrase = Array.from(accountingLink()!.querySelectorAll('span[aria-hidden="true"]')).find(
         (el) => el.textContent === en.common.comingSoon,
       )
@@ -322,18 +307,12 @@ describe('Sidebar', () => {
    * (#2928, ungated by #4029).
    *
    * The drawer IS the sheet below `lg` (#2820), so below the breakpoint the
-   * row lives in the drawer's footer with the drawer's other controls — not
-   * in the tab bar (`MobileTabBar.test.tsx` holds the negative side of that
-   * boundary). Since #4029 the row is the app's ONLY theme control at every
-   * width: the desktop icon toggle that used to share the job lived in the
-   * top bar and was deleted with it, so there is no second half to gate
-   * against. Three claims here, each because the shape of the drawer is what
-   * makes them possible to get wrong:
+   * row lives in the rail's footer with the rail's other controls — not in
+   * the tab bar (`MobileTabBar.test.tsx` holds the negative side of that
+   * boundary). It is the desktop theme control; below `lg` the More sheet
+   * carries the three-way control instead (#4053). Three claims here:
    *
-   *   1. the row is IN the footer — the region the fixed More/Close toggle
-   *      overlaps, so an interactive control placed outside the footer's
-   *      `max-lg:pr` yield would sit under its hit area (#1749's defect
-   *      class, which is exactly how the kebab had to be rescued in #2586);
+   *   1. the row is IN the footer, beside Settings and the user card;
    *   2. it is not inert. #2819 established that an illustration inside the
    *      drawer is `inert`, and an author reaching for that idiom here would
    *      produce a row that is visible, announced, and unreachable — with no
@@ -367,21 +346,41 @@ describe('Sidebar', () => {
     // naming the label activates it.
     expect(row.textContent).toContain('Theme')
 
-    // NO `lg:hidden` ancestor (#4029). The row is the app's only theme
-    // control at every width since the top bar — with its desktop icon
-    // toggle — was deleted. A re-added gate would strand desktop users
-    // without any theme control at all, and jsdom has no media queries to
-    // catch it the honest way, so the className is pinned.
+    // NO `lg:hidden` ancestor (#4029). The row is the rail's — the desktop
+    // — theme control; a gate hiding it at `lg` would strand desktop users
+    // without one, and jsdom has no media queries to catch it the honest way,
+    // so the className is pinned. Below `lg` the whole rail is `hidden` and
+    // the More sheet carries the three-way control instead (#4053).
     const gatedAncestor = row.closest('div[class*="lg:hidden"]')
     expect(
       gatedAncestor,
-      'the theme row must have no lg:hidden ancestor — it is the only theme control at every width',
+      'the theme row must have no lg:hidden ancestor — it is the desktop theme control',
     ).toBeNull()
 
-    // Exactly one theme control in the whole document — and since the row is
-    // ungated, this is now a claim about the primitive, not about a
-    // breakpoint partition.
+    // Exactly one theme control in the document while the sheet is closed.
     expect(screen.queryAllByRole('button', { name: /^Theme:/ })).toHaveLength(1)
+    expect(screen.queryAllByRole('radiogroup', { name: 'Theme' })).toHaveLength(0)
+  })
+
+  /**
+   * The environment badge sits OFF the wordmark (#4053 — it rendered as
+   * "HavenDEV"). No visual baseline can show this: `EnvBadge` renders nothing
+   * in production and the Playwright server sets no `NEXT_PUBLIC_HAVEN_ENV`,
+   * so the band is pinned here with the variable set. A className pin — jsdom
+   * has no layout — on the band that holds both, read from the rendered DOM.
+   */
+  it('keeps a gap between the wordmark and the environment badge', () => {
+    vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', 'dev')
+    try {
+      render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
+      const badge = screen.getByText('dev')
+      const band = badge.closest('[data-logo-band]')!
+      expect(band).not.toBeNull()
+      expect(band.textContent).toContain('Haven')
+      expect(band.className.split(/\s+/)).toContain('gap-2')
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it('opens profile from the bottom-left identity area', () => {
@@ -428,7 +427,7 @@ describe('Sidebar', () => {
  * event, because that is what the component listens to; a test that fired
  * `resize` would pass against an implementation that handles neither.
  */
-describe('Sidebar drawer across the desktop breakpoint (#2586)', () => {
+describe('More sheet across the desktop breakpoint (#2586, #4053)', () => {
   /*
     The mock has to be as strict as the real API, or the tests below are
     theatre — measured, not supposed. An earlier version discarded the query
@@ -529,8 +528,20 @@ describe('Sidebar drawer across the desktop breakpoint (#2586)', () => {
 
   const crossTo = (isMobile: boolean) => setWidth(isMobile ? 390 : 1280)
 
-  const drawer = () => document.querySelector('aside') as HTMLElement
-  const offScreen = () => drawer().className.includes('-translate-x-full')
+  const sheet = () => document.querySelector('[data-more-sheet]') as HTMLElement | null
+  const moreButton = () => document.querySelector('[data-more-toggle]') as HTMLButtonElement
+  const renderSidebar = () =>
+    render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
+  const mountAt = (w: number) => {
+    width = w
+    Object.defineProperty(window, 'innerWidth', { value: w, writable: true, configurable: true })
+    return renderSidebar()
+  }
+  const openSheet = () => {
+    act(() => {
+      screen.getByRole('button', { name: 'Open sidebar' }).click()
+    })
+  }
 
   beforeEach(() => {
     mockUsePathname.mockReturnValue('/dashboard')
@@ -543,85 +554,147 @@ describe('Sidebar drawer across the desktop breakpoint (#2586)', () => {
     installMatchMedia()
   })
 
-  it('collapses when the viewport narrows past the breakpoint', () => {
-    width = 1280
-    Object.defineProperty(window, 'innerWidth', { value: 1280, writable: true, configurable: true })
-    render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
-
-    // Mounted at desktop width: on screen, which is correct — at `lg` the
-    // drawer is `static` and `collapsed` does not hide it.
-    expect(offScreen()).toBe(false)
-
-    crossTo(true)
-
-    // The regression. Before #2586 this stayed false, and the drawer painted
-    // over the page at every width below `lg`.
-    expect(offScreen()).toBe(true)
+  it('a fresh mount at mobile width starts with the sheet closed', () => {
+    mountAt(390)
+    expect(sheet()).toBeNull()
+    expect(moreButton().getAttribute('aria-label')).toBe('Open sidebar')
   })
 
-  it('POSITIVE CONTROL: a fresh mount at mobile width was already collapsed', () => {
-    // Without this, the assertion above could pass against a component that
-    // collapses unconditionally — and it pins why no visual baseline could
-    // have caught the defect, since the capture harness sets the viewport
-    // before it navigates and therefore only ever exercises this path.
-    width = 390
-    Object.defineProperty(window, 'innerWidth', { value: 390, writable: true, configurable: true })
-    render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
-    expect(offScreen()).toBe(true)
+  it('the More cell OPENS the sheet at mobile width, and closes it again', () => {
+    // The More cell is the only way in below `lg`: if it stopped toggling,
+    // everything the tab bar does not carry would be unreachable on a phone.
+    mountAt(390)
+    openSheet()
+    expect(sheet()).not.toBeNull()
+    expect(moreButton().getAttribute('aria-label')).toBe('Close sidebar')
+    expect(moreButton().getAttribute('aria-expanded')).toBe('true')
+    act(() => {
+      screen.getByRole('button', { name: 'Close sidebar' }).click()
+    })
+    expect(sheet()).toBeNull()
+  })
+
+  it('never renders on desktop, even when More is pressed', () => {
+    mountAt(1280)
+    openSheet()
+    expect(sheet()).toBeNull()
   })
 
   it('syncs on mount when the initialiser and the media query disagree', () => {
-    // The initialiser runs during RENDER and reads `window.innerWidth`, which
-    // is `undefined` on the server — so a server-rendered page reaches a phone
-    // with `collapsed = false` no matter how narrow the device is. Anything
-    // that resolves between that render and this effect's first run is lost
-    // until the NEXT crossing, which on a phone that never rotates is never.
-    //
-    // Modelled here as the disagreement itself: `innerWidth` says desktop (what
-    // the initialiser sees) while the media query says mobile (what is true).
-    // Without `sync(query)` at subscribe time this stays open, and the drawer
-    // covers the page from first paint.
+    // `innerWidth` is rounded and the media query is not: a 1023.x CSS-px
+    // viewport reads innerWidth 1024 (the initialiser says desktop) while
+    // `(min-width: 1024px)` is false. Without `sync(query)` at subscribe time
+    // the component would believe it is on desktop and More would do nothing.
     Object.defineProperty(window, 'innerWidth', { value: 1280, writable: true, configurable: true })
     width = 390
-    render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
-    expect(offScreen()).toBe(true)
+    renderSidebar()
+    openSheet()
+    expect(sheet()).not.toBeNull()
   })
 
-  it('the toggle can still OPEN the drawer at mobile width', () => {
-    // The blast radius of `sync(query)`, pinned (review finding). Before that
-    // line existed, losing the effect's `[]` dependency array was a lint-level
-    // slip: only `change` events set state, so re-subscribing every render was
-    // wasteful and nothing more. With a mount-time sync it becomes
-    // product-killing — the effect re-runs after every render, so tapping
-    // `Open sidebar` sets `collapsed = false`, the re-render re-asserts the
-    // media query, and the drawer slams shut. Primary navigation below `lg`
-    // would be unopenable, the #1749 defect class.
-    //
-    // Measured: the suite stayed 8/8 green under exactly that one-token
-    // deletion. Nothing else here taps the toggle — the browser test only
-    // crosses the breakpoint, and the #1749 siblings mount fresh at mobile
-    // width without ever crossing.
-    width = 390
-    Object.defineProperty(window, 'innerWidth', { value: 390, writable: true, configurable: true })
-    render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
-    expect(offScreen()).toBe(true)
-
-    act(() => {
-      screen.getByRole('button', { name: 'Open sidebar' }).click()
-    })
-    expect(offScreen()).toBe(false)
-  })
-
-  it('releases the drawer again when the viewport widens', () => {
-    // Not cosmetic: the state has to be released so a LATER narrowing is a
-    // real crossing rather than a no-op. Invisible at `lg` either way, because
-    // `lg:translate-x-0` pins the drawer open there.
-    width = 390
-    Object.defineProperty(window, 'innerWidth', { value: 390, writable: true, configurable: true })
-    render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
-    expect(offScreen()).toBe(true)
-
+  it('widening past lg closes the sheet, and a later narrowing does not reopen it', () => {
+    mountAt(390)
+    openSheet()
+    expect(sheet()).not.toBeNull()
     crossTo(false)
-    expect(offScreen()).toBe(false)
+    expect(sheet()).toBeNull()
+    crossTo(true)
+    expect(sheet()).toBeNull()
+  })
+
+  it('lists only the destinations the tab bar lacks — no tab route, each item once', () => {
+    mountAt(390)
+    openSheet()
+    const hrefs = Array.from(sheet()!.querySelectorAll('a[href]')).map((a) => a.getAttribute('href'))
+    // ABSENCE, derived from `TAB_ROUTES` itself: the drawer #4053 replaced
+    // listed all four tab routes again.
+    for (const route of TAB_ROUTES) expect(hrefs, `sheet repeats tab route ${route}`).not.toContain(route)
+    const nav = sheet()!.querySelector('nav[aria-label="All sections"]')!
+    const navHrefs = Array.from(nav.querySelectorAll('a')).map((a) => a.getAttribute('href'))
+    expect(navHrefs).toEqual(['/analytics', '/accounting', '/marketplace', '/contacts', '/settings'])
+    // Settings once in the whole sheet (the drawer had it in the footer AND
+    // inside the kebab menu).
+    expect(hrefs.filter((h) => h === '/settings')).toHaveLength(1)
+  })
+
+  it('opens with the account, shows Log out as a visible row and has no kebab', () => {
+    const logout = vi.fn()
+    mockUseAuth.mockReturnValue({
+      user: { name: 'Ada Lovelace', email: 'ada@example.com', accounts: [] },
+      logout,
+    })
+    mountAt(390)
+    openSheet()
+    const s = sheet()!
+    const profile = s.querySelector('a[aria-label="Open profile for Ada Lovelace"]')!
+    expect(profile.getAttribute('href')).toBe('/profile')
+    expect(profile.textContent).toContain('ada@example.com')
+    // Account comes before the destinations.
+    const firstDestination = s.querySelector('nav a')!
+    expect(profile.compareDocumentPosition(firstDestination) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(s.querySelector('button[aria-label="User menu"]')).toBeNull()
+    const logOut = Array.from(s.querySelectorAll('button')).find((b) => b.textContent === 'Log out')!
+    expect(logOut).toBeTruthy()
+    act(() => logOut.click())
+    expect(logout).toHaveBeenCalledTimes(1)
+    expect(mockPush).toHaveBeenCalledWith('/')
+  })
+
+  it('offers the three-way theme choice, writing the same preference as Settings', () => {
+    mountAt(390)
+    openSheet()
+    const group = screen.getByRole('radiogroup', { name: 'Theme' })
+    const options = Array.from(group.querySelectorAll('[role="radio"]')).map((o) => o.textContent)
+    expect(options).toEqual(['Light', 'Dark', 'System'])
+    act(() => (group.querySelector('[role="radio"]') as HTMLButtonElement).click())
+    expect(localStorage.getItem('haven.theme')).toBe('light')
+    expect(document.documentElement.dataset.theme).toBe('light')
+  })
+
+  it('Escape dismisses it and hands focus back to More', async () => {
+    mountAt(390)
+    openSheet()
+    expect(sheet()!.contains(document.activeElement)).toBe(true)
+    await userEvent.keyboard('{Escape}')
+    expect(sheet()).toBeNull()
+    expect(document.activeElement).toBe(moreButton())
+  })
+
+  it('a scrim tap dismisses it', () => {
+    mountAt(390)
+    openSheet()
+    act(() => (document.querySelector('[data-more-sheet-scrim]') as HTMLElement).click())
+    expect(sheet()).toBeNull()
+  })
+
+  it('a downward swipe on the handle past the threshold dismisses it; a short one does not', () => {
+    mountAt(390)
+    openSheet()
+    const drag = (dy: number) => {
+      const handle = document.querySelector('[data-more-sheet-handle]') as HTMLElement
+      fireEvent.pointerDown(handle, { clientY: 400, pointerId: 1 })
+      fireEvent.pointerMove(handle, { clientY: 400 + dy, pointerId: 1 })
+      fireEvent.pointerUp(handle, { clientY: 400 + dy, pointerId: 1 })
+    }
+    drag(SWIPE_DISMISS_PX - 1)
+    expect(sheet()).not.toBeNull()
+    drag(SWIPE_DISMISS_PX)
+    expect(sheet()).toBeNull()
+  })
+
+  it('closes on any route change — a tab tap included', () => {
+    const view = mountAt(390)
+    openSheet()
+    expect(sheet()).not.toBeNull()
+    mockUsePathname.mockReturnValue('/agents')
+    view.rerender(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
+    expect(sheet()).toBeNull()
+  })
+
+  it('a destination tap closes it', () => {
+    mountAt(390)
+    openSheet()
+    act(() => (sheet()!.querySelector('a[href="/analytics"]') as HTMLAnchorElement).click())
+    expect(sheet()).toBeNull()
   })
 })

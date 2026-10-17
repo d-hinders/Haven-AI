@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
@@ -12,15 +12,14 @@ import {
   FileText,
   LayoutGrid,
   LogOut,
-  Menu,
-  X,
   Settings,
   ShieldCheck,
   Store,
   Users,
 } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import { MobileTabBar } from './MobileTabBar'
+import { MobileTabBar, TAB_ROUTES, isActiveRoute } from './MobileTabBar'
+import { MoreSheet } from './MoreSheet'
 import { ThemeToggle } from '@/components/ui/ThemeToggle'
 import EnvBadge from '@/components/EnvBadge'
 import { useAuth } from '@/context/AuthContext'
@@ -37,9 +36,9 @@ export interface NavItem {
   badge?: string
   /**
    * Full text for an abbreviated `badge`: the pill's accessible name, and
-   * its visible text below `lg`, where the drawer is full-width and has the
-   * room (#2869 design review — a `title` is unreachable on touch and to a
-   * screen reader).
+   * its visible text in the phone More sheet, which has the room (#2869
+   * design review — a `title` is unreachable on touch and to a screen
+   * reader).
    */
   badgeTitle?: string
   /**
@@ -155,7 +154,7 @@ function NavLink({
         >
           {item.badgeTitle ? (
             // The abbreviation is for the 240px rail only; the full phrase
-            // is what assistive tech reads and what the mobile drawer shows.
+            // is what assistive tech reads and what the phone sheet shows.
             <>
               <span aria-hidden="true" className="hidden lg:inline">{item.badge}</span>
               <span aria-hidden="true" className="lg:hidden">{item.badgeTitle}</span>
@@ -180,9 +179,16 @@ export default function Sidebar() {
   // read per shell mount; the page refetches its own copy after Sync now,
   // this one refreshes on the next mount.
   const { status: accountingStatus, loading: accountingLoading } = useAccountingFeed()
-  const [collapsed, setCollapsed] = useState(
-    () => typeof window !== 'undefined' && window.innerWidth < DESKTOP_BREAKPOINT_PX,
+  // The phone More sheet (#4053). It only ever opens below `lg`: `sheetOpen`
+  // is the conjunction, so a sheet left open across a widening cannot render
+  // on desktop even for the frame before the crossing listener closes it.
+  const [moreOpen, setMoreOpen] = useState(false)
+  const [isDesktop, setIsDesktop] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth >= DESKTOP_BREAKPOINT_PX,
   )
+  const sheetOpen = moreOpen && !isDesktop
+  const closeMore = useCallback(() => setMoreOpen(false), [])
+  const moreButtonRef = useRef<HTMLButtonElement>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
@@ -264,68 +270,41 @@ export default function Sidebar() {
     },
   ]
 
-  // Keep the drawer honest across the `lg` breakpoint (#2586)
   /*
-    Keep the drawer's state honest when the viewport CROSSES the breakpoint
-    (#2586).
-
-    `collapsed` was decided once, in the `useState` initialiser above, and never
-    again. Below `lg` the drawer is `fixed inset-y-0 left-0` and only
-    `-translate-x-full` keeps it off screen, so a window that STARTS at desktop
-    width and then narrows leaves the drawer sitting on top of the page at
-    `translate-x-0` — its footer row, the account link and the `User menu`
-    kebab included. That is the overlap #2586 reports, and it obscures a real
-    clickable link on the `/agents` empty state.
-
-    It reproduces only after a CROSSING, which is why a fresh capture at 390
-    looks clean and why no visual baseline could have caught it: the capture
-    harness sets the viewport BEFORE it navigates, so the initialiser already
-    sees the narrow width. Measured, with a positive control that a fresh mount
-    at 390 does collapse — so the unchanged result on resize is the missing
-    listener, not a probe that cannot see anything.
+    Which side of `lg` the viewport is on, kept honest across a CROSSING
+    (#2586) and at mount.
 
     `matchMedia` rather than a `resize` listener: it fires on the crossing
-    itself, not on every intermediate pixel, so there is no per-frame work
-    while a window is being dragged. Both directions are synced — going wide
-    releases it (harmless, since `lg:translate-x-0` pins the drawer open at
-    desktop regardless) so that a later narrowing is a real crossing again.
+    itself, not on every intermediate pixel. The query is `min-width: 1024px`
+    — Tailwind's OWN `lg` — rather than `max-width: 1023px`: at a fractional
+    CSS viewport in [1023, 1024), which display scaling and page zoom produce
+    routinely, both of those are false, and asking the question the
+    stylesheet asks cannot drift from it.
 
-    The query is `min-width: 1024px` — Tailwind's OWN `lg` — and the result is
-    negated, rather than the more obvious `max-width: 1023px` (review finding).
-    Those two are not complements. At a fractional CSS viewport in [1023, 1024),
-    which Windows display scaling and Chrome page zoom produce routinely, BOTH
-    are false: measured at cssWidth 1023.2, `(min-width:1024px)` false and
-    `(max-width:1023px)` false. With `max-width` the listener would then report
-    "not mobile" while `lg:static` / `lg:translate-x-0` do not apply — so
-    widening 390 -> 1023.2 would set `collapsed = false` and park the drawer on
-    the page. That is worse than the bug being fixed: a REGRESSION at a width
-    the old initialiser (`1023 < 1024`) handled correctly. Asking the same
-    question the stylesheet asks cannot drift from it.
+    `sync(query)` runs once at subscribe time because the initialiser above
+    and the query can disagree at mount: `window.innerWidth` is rounded, the
+    media query is not (measured at `--force-device-scale-factor=1.1` on a
+    1023px device: innerWidth 1024, `(min-width: 1024px)` false).
+    `Sidebar.test.tsx` pins that case.
 
-    `sync(query)` runs once at subscribe time, not only on later events —
-    because the initialiser above and this query can DISAGREE at mount, on the
-    same device, with no crossing involved. `window.innerWidth` is rounded;
-    the media query is not. Measured in Chromium at
-    `--force-device-scale-factor=1.1` with a device width of 1023:
-    `window.innerWidth` reads 1024 — so the initialiser says desktop — while
-    `(min-width: 1024px)` is false and `lg` does not apply. Without this line
-    the drawer would sit over the page from first paint at that width, and
-    nothing would correct it until the next real crossing.
-
-    An earlier version of this comment justified the line by SSR instead:
-    the initialiser returns `false` on the server, so a phone would hydrate
-    open. That is wrong — React re-runs a `useState` initialiser on the client
-    during hydration, so the client reaches the right value before this effect
-    runs. The rounding case is the one that is provable, and it is what
-    `Sidebar.test.tsx` pins.
+    Widening closes the sheet, so a later narrowing does not reopen it.
   */
   useEffect(() => {
     const query = window.matchMedia(`(min-width: ${DESKTOP_BREAKPOINT_PX}px)`)
-    const sync = (e: MediaQueryListEvent | MediaQueryList) => setCollapsed(!e.matches)
+    const sync = (e: MediaQueryListEvent | MediaQueryList) => {
+      setIsDesktop(e.matches)
+      if (e.matches) setMoreOpen(false)
+    }
     sync(query)
     query.addEventListener('change', sync)
     return () => query.removeEventListener('change', sync)
   }, [])
+
+  // Any route change closes the sheet — including a tab tap, whose `Link`
+  // knows nothing about the sheet (#4053).
+  useEffect(() => {
+    setMoreOpen(false)
+  }, [pathname])
 
   useEffect(() => {
     if (!menuOpen) return
@@ -365,241 +344,88 @@ export default function Sidebar() {
     first?.focus()
   }, [menuOpen])
 
+  // The destinations the tab bar does NOT carry, in rail order, Settings last
+  // (#4053). Derived from `TAB_ROUTES` itself — never a hand-copied list — so
+  // a change to the bar cannot leave the sheet repeating a tab or dropping a
+  // destination.
+  const tabRoutes = new Set<string>(TAB_ROUTES)
+  const sheetItems: NavItem[] = [
+    ...navGroups.flatMap((group) => group.items).filter((item) => !tabRoutes.has(item.href)),
+    { label: 'Settings', href: '/settings', icon: icons.settings },
+  ]
+
+  // The logo band, shared by the rail and the sheet. `gap-2` keeps the
+  // environment badge off the wordmark (#4053 — it rendered "HavenDEV").
+  // In the sheet the wordmark is not a link: Dashboard is a tab one cell
+  // away, and the sheet carries no tab destination.
+  const wordmarkClass = 'flex items-center gap-2 text-[15px] font-semibold tracking-tight text-[var(--v2-ink)]'
+  const wordmark = (
+    <>
+      <HavenMark />
+      <span className="v2-brand-gradient-text">Haven</span>
+    </>
+  )
+  const logoBand = (linked: boolean) => (
+    <div data-logo-band="" className="h-14 flex items-center gap-2 px-5 flex-shrink-0">
+      {linked ? (
+        <Link href="/dashboard" className={wordmarkClass}>
+          {wordmark}
+        </Link>
+      ) : (
+        <span className={wordmarkClass}>{wordmark}</span>
+      )}
+      {/*
+        The environment badge (#4029), beside the wordmark, in the rail and in
+        the phone More sheet alike — the app's ONLY environment marker since
+        the non-production warning line was removed. It renders nothing in
+        production (`lib/env.ts`), so the band is byte-identical there.
+        Outside the Link: a badge is not navigation, and it must not join the
+        wordmark's click target.
+      */}
+      <EnvBadge />
+    </div>
+  )
+
   return (
     <>
       {/*
-        Mobile toggle.
-
-        Tap target (#1766). The control paints its own band in the tab bar's
-        fifth slot — the same 56px row its four tab neighbours occupy — and
-        grew from the original 32px icon to that full-slot cell, so the comfort
-        target `docs/product/design-system.md` § Buttons documents is painted
-        pixels rather than an invisible overlay. It is not a `Button`, so it
-        inherited none of #1726's mechanism; when it was a 32px icon it
-        borrowed it here instead: a transparent `::after` extended the HIT area
-        to 44x44 while the painted pixels stayed exactly where they were.
-        (#4029's `mobile-nav-tap-target.mobile.spec.ts` still walks the
-        hit rectangle the same way.)
-
-        Deliberate deviations from `Button`'s version of the same trick, as
-        they applied to the 32px icon and why they still shape the geometry:
-
-        1. **The target grows in BOTH axes**, where `Button` grows vertically
-           only. That rule exists because an `sm` Button's width already clears
-           44px once it carries a label, so widening it would only let it steal
-           a neighbour's taps in a tight toolbar. Neither half holds for an
-           icon-only square: its width is the short axis too. Today the tab
-           cells ABUT by design (#2731) and the mobile spec asserts the seam is
-           exactly 0 — neither overlap nor dead strip.
-        2. **No `relative`.** `Button` adds it to create a positioning context;
-           `fixed` already is one, and adding `relative` here would un-fix the
-           button — the #1749 defect class, restored.
-        3. **The `left` was deliberate (#1767).** Centring a wider box would
-           have cost the 44px target's right-hand clearance against the bar's
-           next control (under the 8px § Buttons asks between adjacent
-           targets), and pushed the target's right edge past the centre of the
-           open drawer's own Haven logo link — turning the last assertion in
-           the mobile spec red. The tab-bar slot keeps the control clear of
-           content by geometry instead of by a spacer's reservation.
+        Below `lg` the primary navigation is the tab bar (#2731), and its fifth
+        cell, More, opens the sheet (#4053). The sheet replaced #2820's
+        full-screen drawer — the desktop rail stretched to the screen, which
+        covered the bar and left the More control floating over it as "Close"
+        — and the rail itself no longer renders below `lg` at all.
       */}
-      {/*
-        The tab bar's fifth slot — "More" (#2731).
-
-        It is a SIBLING of `<MobileTabBar>` rather than a cell inside it, and
-        that is forced rather than chosen: the bar sits on the `--v2-z-tab-bar`
-        tier so the drawer and its scrim cover it, while this control sits on
-        the higher `--v2-z-nav-toggle` tier so the SAME button that opened the
-        drawer can close it while painted over the drawer. A child cannot climb
-        out of its parent's stacking context, so a control on the toggle tier
-        cannot be nested inside an element on the bar tier — it lives out here
-        and lands in the fifth column by geometry: `w-1/5` of the same bar, same
-        bottom edge, same height.
-
-        (The tier VALUES are deliberately not written out here. `z-index-scale`
-        greps this file for bare `z-<number>` and cannot tell a class from
-        prose — it read the numbers in an earlier draft of this comment as
-        violations. The scale itself is documented on `/design-system`.)
-
-        Two geometry facts, both found by review rather than predicted:
-
-        `bottom-[var(--v2-safe-bottom)]` + `h-[var(--v2-tab-bar-h)]`, NOT a
-        height of `calc(bar + inset)` with `pb-[inset]`. The padding version
-        kept the CONTENT out of the home-indicator band and left the BOX in it:
-        the button reached y=844 on a 393x844 device with a 34px inset, so the
-        fifth slot had 34px more tappable area than its four neighbours and a
-        tap in that band is read by iOS as a swipe-up. That is the exact defect
-        #2730 exists to prevent, reintroduced for one control — and
-        `safe-area-insets.mobile.spec.ts` caught it with an assertion nobody
-        had to change.
-
-        No `border-t` here. The bar draws one, this button is `border-box` and
-        paints over the bar's right fifth, so its own border landed one CSS
-        pixel below the bar's and the fifth slot showed a 2px top edge against
-        1px everywhere else — a visible step. Without it the bar's own border
-        runs unbroken underneath.
-
-        The surface FOLLOWS the drawer (#2820). Closed, the button paints
-        `--v2-bg` — byte-identical to the bar slot it was before #2820, and
-        `MobileTabBar` paints the same token, so the fifth slot does not change
-        colour against its four neighbours. Open, it is transparent: the
-        control floats on the `--v2-z-nav-toggle` tier over the now full-width
-        drawer, and with the scrim gone there is no page behind it — an opaque
-        box there is exactly the detached white rectangle the issue names,
-        belonging to neither the drawer nor the bar. A background that exists
-        only while the drawer is closed lets the single control belong to
-        whichever surface is showing.
-
-        The accessible name is unchanged, and that is load-bearing rather than
-        incidental: `dismissMobileSidebar` in `scripts/screenshot.mjs` waits on
-        `getByRole('button', { name: 'Open sidebar' })` from 25 call sites, with
-        a twin in `e2e/fixtures/haven-api.ts`. Neither file is touched by
-        #2731 — one control, both roles, the #1749 pattern.
-      */}
-      <button
-        onClick={() => setCollapsed(!collapsed)}
-        aria-label={collapsed ? 'Open sidebar' : 'Close sidebar'}
-        className={`lg:hidden fixed bottom-[var(--v2-safe-bottom)] right-[var(--v2-safe-right)] z-[var(--v2-z-nav-toggle)] w-1/5 h-[var(--v2-tab-bar-h)] flex flex-col items-center justify-center gap-1 text-xs font-medium text-[var(--v2-ink-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80 ${
-          collapsed ? 'bg-[var(--v2-bg)]' : 'bg-transparent'
-        }`}
-      >
-        {/* The visible state follows the drawer (#2731 review). It used to
-            read "More" with a hamburger in BOTH states while the accessible
-            name flipped to `Close sidebar` — a sighted user got no affordance
-            that the control now closes something, and the visible label no
-            longer appeared in the accessible name at all (WCAG 2.5.3 Label in
-            Name).
-
-            The open state satisfies that rule now ("Close" is inside "Close
-            sidebar"). The CLOSED state deliberately does not: "More" is not
-            inside "Open sidebar". That pairing is #2731's own specification —
-            the tab is called More, and the accessible name must stay exactly
-            `Open sidebar` because `dismissMobileSidebar` matches it as a whole
-            string from 25 call sites. Recorded rather than quietly resolved,
-            because resolving it means changing one of those two decisions. */}
-        <span className="h-5 w-5" aria-hidden="true">
-          <Icon icon={collapsed ? Menu : X} className="w-full h-full" />
-        </span>
-        <span aria-hidden="true">{collapsed ? 'More' : 'Close'}</span>
-      </button>
+      <MobileTabBar
+        items={baseNavItems}
+        more={{ open: sheetOpen, onToggle: () => setMoreOpen((v) => !v), buttonRef: moreButtonRef }}
+      />
+      <MoreSheet
+        open={sheetOpen}
+        onClose={closeMore}
+        items={sheetItems}
+        isActive={(href) => isActiveRoute(pathname, href)}
+        account={{ name, email: showEmailLine ? emailLine : null, initial: userInitial, active: profileActive }}
+        onLogout={() => {
+          setMoreOpen(false)
+          logout()
+          router.push('/')
+        }}
+        header={logoBand(false)}
+        returnFocusRef={moreButtonRef}
+      />
 
       {/*
-        Overlay for mobile — the same `v2-modal-backdrop` Modal and SidePanel use.
-
-        It was `bg-[var(--v2-ink)]/40 backdrop-blur-sm`, an opacity modifier on a
-        bare var(), which Tailwind v3.4 drops silently (#1818): the scrim had no
-        background at all, so the drawer opened over an undimmed page.
-
-        Fixing it onto `bg-ink/40` would have worked, but it would have shipped a
-        SECOND overlay convention — and worse, it would have made the blur real.
-        `backdrop-blur-sm` was never free by intent, only by accident: with no
-        background painted there was nothing to composite. Painting one activates
-        a full-viewport `backdrop-filter` on a `fixed inset-0` element, which is
-        exactly what globals.css's `.v2-modal-backdrop` documents avoiding — the
-        compositor keeps a GPU snapshot of the whole page and re-blurs it every
-        paint. So this reuses the existing dim token instead, blur included in
-        what it deliberately omits.
-      */}
-      {/*
-        No scrim below `lg` (#2820).
-
-        The drawer used to slide over a `v2-modal-backdrop` sheet — the right
-        answer while it was a 240px column, and a defect once #2731 made it
-        "More": at 390px the sheet left ~150px of dimmed page down the right
-        edge, so the app's own navigation read as a slide-over, and the toggle
-        read as a detached bright rectangle belonging to neither surface. The
-        drawer is `w-full` below `lg` now, so there is nothing left to dim: the
-        drawer IS the screen, and the only thing beneath it at full width is the
-        tab bar it opened from.
-
-        --v2-z-nav-scrim stays in the scale untouched. Its only consumer was
-        this element, and the tier it occupies is still real ordering —
-        `z-index-scale.test.ts` asserts the ascent through it, and retiring a
-        tier because its consumer left would renumber the scale for nothing.
-      */}
-
-      <MobileTabBar items={baseNavItems} />
-
-      {/*
-        Safe-area insets on the drawer (#2730), below `lg` only — at `lg` this
-        is a static column inside the shell and the shell's own chrome already
-        clears the screen edges.
-
-        The drawer is `inset-y-0 h-screen` and, in an installed standalone
-        context, `h-screen` is the WHOLE screen: its logo band would sit under
-        the status bar and its footer row — the account link and the `User
-        menu` kebab, which #2586 already had to rescue once — under the home
-        indicator. Padding on the `<aside>` itself rather than on the two rows
-        it protects, because the middle `<nav>` is `flex-1 overflow-y-auto`:
-        with `box-sizing: border-box` the padding comes out of the scroll
-        region's height, so both ends clear their obstruction and the scroll
-        region absorbs the difference. `pl` covers the landscape notch, where
-        the drawer is on the eaten side.
-
-        The drawer is `w-full` below `lg` (#2820). Under #2731 the tab bar is
-        primary navigation and this surface is "More" — and at 390pt a 240px
-        column sliding over a scrim is a desktop artifact: ~150px of dimmed
-        page down the right edge, a dead middle band, and the toggle reading as
-        a detached bright rectangle. Full width is also the iOS idiom for a
-        tab bar's More: a full-height sheet, not a slide-over. `w-full` below
-        the breakpoint and `lg:w-[240px]` at it keeps the desktop column
-        byte-identical; there is no desktop behaviour in the diff at all.
-
-        Two #2820 consequences live in the classes below:
-
-        1. `max-lg:border-r-0`. The 1px `border-r` was the column's edge
-           against the page. Full width, it is a stray vertical line inside the
-           screen's right edge, and `--v2-border` on `--v2-surface` is visible
-           against both. The border returns at `lg` with the column.
-
-        2. The footer's `max-lg:pr-[calc(20%+var(--v2-safe-right))]`. The
-           Close toggle is `fixed w-1/5` on a higher tier and floats over the
-           drawer's bottom-right corner below `lg` — without a yield it covers
-           the user card's kebab, an interactive control under an invisible
-           hit area, the #1749 defect class one surface over. 20% is exactly
-           the toggle's fifth-of-a-screen column; at `lg` the toggle is
-           `lg:hidden`, so the padding must not exist there. The `Settings`
-           row above carries the same reserve so the two footer rows keep
-           their shared right edge.
-
-        The nav's `max-lg:flex max-lg:flex-col` + the groups' `max-lg:my-auto`
-        kill the dead middle band (#2820 item 2): the desktop column is taller
-        than its content, so the footer sat at the bottom and everything above
-        it left a gap roughly as tall as the nav itself. Auto margins
-        distribute the free space evenly BETWEEN the groups (top and bottom
-        margins cancel pairwise), dropping the first group back to the logo
-        and pinning the last against the footer — on a phone, where the nav
-        has less room than it wants, they resolve to 0 and the list is simply
-        top-aligned, so `overflow-y-auto` keeps doing its job and short or
-        landscape viewports cannot clip the top the way a `justify-evenly`
-        distribution would.
+        The desktop rail: a static 240px column inside the shell at `lg` and
+        above, and `hidden` below it (#4053), where the tab bar and the sheet
+        carry everything it holds. It stays in the DOM there rather than being
+        JS-gated, so the `User menu` kebab the visual specs wait on as a
+        "shell has mounted" signal is attached at every width. At `lg` the
+        classes resolve exactly as before #4053.
       */}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-[var(--v2-z-nav-drawer)] w-full lg:w-[240px] h-screen lg:h-full max-lg:border-r-0 max-lg:pt-[var(--v2-safe-top)] max-lg:pb-[var(--v2-safe-bottom)] max-lg:pl-[var(--v2-safe-left)] bg-[var(--v2-surface)] lg:border-r border-[var(--v2-border)] flex flex-col flex-shrink-0 transition-transform duration-200 ${
-          collapsed ? '-translate-x-full lg:translate-x-0' : 'translate-x-0'
-        }`}
+        className="hidden lg:flex lg:flex-col lg:translate-x-0 w-[240px] h-full z-[var(--v2-z-nav-drawer)] bg-[var(--v2-surface)] border-r border-[var(--v2-border)] flex-shrink-0"
       >
-        {/* Logo */}
-        <div className="h-14 flex items-center px-5 flex-shrink-0">
-          <Link
-            href="/dashboard"
-            className="flex items-center gap-2 text-[15px] font-semibold tracking-tight text-[var(--v2-ink)]"
-          >
-            <HavenMark />
-            <span className="v2-brand-gradient-text">Haven</span>
-          </Link>
-          {/*
-            The environment badge (#4029), beside the wordmark. It lived in the
-            top bar until the bar was deleted; the logo band is its new home and
-            renders at EVERY width — the desktop rail and the phone More sheet
-            are the same element, so the badge shows in both without a
-            breakpoint gate. It is the ONLY environment marker in the app since
-            the non-production warning line was removed. It renders nothing in production
-            (`lib/env.ts`), so the band is byte-identical there. Outside the
-            Link: a badge is not navigation, and it must not join the
-            wordmark's click target.
-          */}
-          <EnvBadge />
-        </div>
+        {logoBand(true)}
 
         {/* Main nav — labeled clusters (#858, regrouped #3024) */}
         {/* Named because #2731 gave the shell a SECOND navigation. Two
@@ -607,17 +433,12 @@ export default function Sidebar() {
             every `getByRole('navigation')` in the suite — `Sidebar.test.tsx`
             was reading `document.querySelector('nav')` and silently started
             measuring the tab bar instead of this drawer. */}
-        {/* `max-lg:flex max-lg:flex-col` (#2820): below `lg` the free vertical
-            space of the drawer's dead middle band is distributed evenly
-            BETWEEN the groups by each group's `max-lg:my-auto` (see the
-            aside's comment above). At `lg` the column is a fixed 240px rail
-            and the block layout is byte-identical to pre-#2820. */}
         <nav
           aria-label="All sections"
-          className="flex-1 px-3 py-4 overflow-y-auto max-lg:flex max-lg:flex-col"
+          className="flex-1 px-3 py-4 overflow-y-auto"
         >
           {navGroups.map((group, groupIndex) => (
-            <div key={group.label} className={groupIndex > 0 ? 'mt-5 max-lg:my-auto' : 'max-lg:my-auto'}>
+            <div key={group.label} className={groupIndex > 0 ? 'mt-5' : undefined}>
               <p className="v2-text-meta px-3 pb-1 uppercase tracking-wider text-[var(--v2-ink-3)]">
                 {group.label}
               </p>
@@ -629,7 +450,6 @@ export default function Sidebar() {
                       key={item.href}
                       item={item}
                       active={active}
-                      onClick={() => setCollapsed(true)}
                     />
                   )
                 })}
@@ -639,36 +459,20 @@ export default function Sidebar() {
         </nav>
 
         {/* Bottom section */}
-        {/* `max-lg:pr-[calc(20%+var(--v2-safe-right))]` (#2820): the Close
-            toggle is `fixed w-1/5` on the `--v2-z-nav-toggle` tier and floats
-            over the full-width drawer's bottom-right corner below `lg`. This
-            yield keeps the kebab — an interactive control — clear of its hit
-            area. The `Settings` row below carries the same reserve, so the
-            footer's two rows keep a shared right edge. `lg` needs none: the
-            toggle is `lg:hidden` there. */}
-        <div className="flex-shrink-0 border-t border-[var(--v2-border)] max-lg:pr-[calc(20%+var(--v2-safe-right))]">
-          {/* The quick theme toggle (#2928) — the app's ONLY theme control
-              since #4029, shown at every width. Appearance belongs with the
-              app's own controls rather than in the account rows below.
+        <div className="flex-shrink-0 border-t border-[var(--v2-border)]">
+          {/* The quick theme toggle (#2928) — the rail's theme control.
               `variant="row"`: a list of full-width rows, and an icon button
-              alone would read as a stray glyph. Until the top bar was deleted
-              this row was the mobile half of a reciprocal `lg:hidden` pair —
-              the bar's right cluster carried the desktop icon — and with the
-              bar gone there is no second half to gate against: ungating the
-              row is what one-theme-control-per-screen now means, and the
-              unit pin (`Sidebar.test.tsx`) asserts the row has NO
-              `lg:hidden` ancestor. It is NOT inert: the #2819 idiom is for
-              the drawer's illustrations, and a control that is announced but
-              unreachable fails no gate. */}
+              alone would read as a stray glyph. Below `lg` the rail is hidden
+              and the More sheet carries the three-way control instead
+              (#4053), so each width shows exactly one theme control. */}
           <div className="px-3 pt-2">
             <ThemeToggle />
           </div>
           {/* Settings */}
-          <div className="px-3 py-2 max-lg:pr-0">
+          <div className="px-3 py-2">
             <NavLink
               item={{ label: 'Settings', href: '/settings', icon: icons.settings }}
               active={pathname === '/settings'}
-              onClick={() => setCollapsed(true)}
             />
           </div>
 
@@ -687,7 +491,6 @@ export default function Sidebar() {
               )}
               <Link
                 href="/profile"
-                onClick={() => setCollapsed(true)}
                 aria-label={`Open profile for ${name}`}
                 aria-current={profileActive ? 'page' : undefined}
                 className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2"
@@ -739,10 +542,7 @@ export default function Sidebar() {
                     <Link
                       href="/profile"
                       role="menuitem"
-                      onClick={() => {
-                        setMenuOpen(false)
-                        setCollapsed(true)
-                      }}
+                      onClick={() => setMenuOpen(false)}
                       className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] w-full text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80"
                     >
                       <span className="inline-flex w-3.5 h-3.5 items-center justify-center flex-shrink-0">
@@ -753,10 +553,7 @@ export default function Sidebar() {
                     <Link
                       href="/settings"
                       role="menuitem"
-                      onClick={() => {
-                        setMenuOpen(false)
-                        setCollapsed(true)
-                      }}
+                      onClick={() => setMenuOpen(false)}
                       className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] w-full text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80"
                     >
                       <span className="inline-flex w-3.5 h-3.5 items-center justify-center flex-shrink-0">

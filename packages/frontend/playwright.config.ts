@@ -341,7 +341,8 @@ export default defineConfig({
       // releases (#3573 — the public pages' redesigned header and footer
       // follow the visitor's theme), how-it-works (#3576 — How it works and
       // its protocols sub-page), home (#3574 — the redesigned home page),
-      // dev-agent-pages (#3577 — For developers and For agents).
+      // dev-agent-pages (#3577 — For developers and For agents), more-sheet
+      // (#4053 — the phone More sheet, light and dark).
       // Baseline counts are not restated here;
       // `git ls-files` the `__screenshots__` tree for them. add-funds-modal
       // seeds `haven.theme='dark'` itself and skips its mobile shots under
@@ -358,6 +359,7 @@ export default defineConfig({
         '**/how-it-works.visual.spec.ts',
         '**/home.visual.spec.ts',
         '**/dev-agent-pages.visual.spec.ts',
+        '**/more-sheet.visual.spec.ts',
       ],
       testIgnore: SUITE_IGNORE,
     },

@@ -30,6 +30,7 @@ import {
   mockHavenApi,
   seedAuthenticatedSession,
   unexpectedBrowserErrors,
+  waitForDrawerOpen,
 } from './fixtures/haven-api'
 
 // Authenticated routes a user reaches from primary navigation. Each is checked
@@ -438,70 +439,51 @@ test.describe('mobile viewport', () => {
 })
 
 /**
- * One theme control per screen (#4029).
+ * One theme control per screen (#4029, #4053).
  *
- * The issue's AC is a RENDERED-visibility count, not a unit pin. The sidebar
- * footer row must be the app's ONLY theme control at every width, and the
- * failure that could regress it is a SECOND render appearing — the icon
- * variant the top bar used to carry lived exactly there, a breakpoint-gated
- * second instance in a different component. A unit test on `Sidebar` cannot
- * see a copy that mounts elsewhere; only a page-level count can.
- *
- * 390 and 1280 are the two sides of the `lg` breakpoint the AC names — the
- * off-canvas drawer below it, the static rail at and above it. Sweeping the
- * widths in this project is deliberate: the rule the file header states is
- * about committed BASELINES, not about setting a viewport, and this compares
- * a count, not pixels (`mobile-nav-layering` sweeps five widths the same
- * way).
+ * A RENDERED-visibility count, not a unit pin: the failure that could regress
+ * it is a second control mounting somewhere a unit test on `Sidebar` cannot
+ * see. Since #4053 the two sides of `lg` carry different controls on purpose —
+ * the rail's two-state flip (`Theme: <current>. Switch to <next>`) at and
+ * above it, the More sheet's three-way radiogroup (`Theme`) below it, owner
+ * decision 2026-10-17 — so the count spans both shapes and asks for exactly
+ * ONE visible where the user can reach it: the rail at 1280, the open sheet at
+ * 390. Visible = has client rects; the hidden rail (`display: none` below
+ * `lg`) has none.
  */
-test.describe('one theme control per screen (#4029)', () => {
+test.describe('one theme control per screen (#4029, #4053)', () => {
   test.beforeEach(async ({ page }) => {
     await mockHavenApi(page)
     await seedAuthenticatedSession(page)
   })
 
-  for (const width of [390, 1280] as const) {
-    test(`exactly one visible theme control at ${width}px`, async ({ page }) => {
-      await page.setViewportSize({ width, height: 844 })
-      await page.goto('/dashboard')
-
-      // The sidebar is `dynamic(..., { ssr: false })` (#2521) — it mounts a
-      // chunk later than the page. Counting before it arrives would read 0
-      // and make "exactly one" pass on a page with NO theme control at all:
-      // the same silent no-op the overflow helper's `contentRegionFound`
-      // guard exists for, one describe above.
-      await page.locator('button[aria-label^="Theme: "]').first().waitFor()
-
-      const controls = await page.evaluate(() => {
-        // The control's contract is its accessible name, not a class or a
-        // test id: `Theme: <current>. Switch to <next>` (`ThemeToggle`),
-        // which is what a screen reader announces and what any future
-        // instance of the component carries with it — a second copy cannot
-        // hide from a role/label query the way it can from a class probe.
-        const buttons = Array.from(
-          document.querySelectorAll<HTMLButtonElement>('button[aria-label^="Theme: "]'),
-        )
-        // "Visible" the way this suite measures it everywhere else: the
-        // element HAS BOXES. At 390px the drawer is off-canvas
-        // (`-translate-x-full`) — a TRANSFORM, not `display: none` — so the
-        // one true control still has client rects and must still be the only
-        // one. A filter keyed on `offsetParent` would misread every `fixed`
-        // element, the drawer included, as invisible.
-        const visible = buttons.filter((el) => el.getClientRects().length > 0)
-        return { total: buttons.length, visible: visible.length }
-      })
-
-      // BOTH halves. `total` is the "one per screen" claim: a hidden second
-      // copy — say a breakpoint-gated variant someone re-adds — would
-      // satisfy a visible-only count while shipping two controls.
-      // `visible` is the AC's literal word: the one control that exists is
-      // actually rendered, never a display:none stub.
-      expect(
-        controls,
-        `@${width}px: expected exactly one rendered theme control on the screen`,
-      ).toEqual({ total: 1, visible: 1 })
+  const countThemeControls = (page: import('@playwright/test').Page) =>
+    page.evaluate(() => {
+      const controls = [
+        ...Array.from(document.querySelectorAll<HTMLElement>('button[aria-label^="Theme: "]')),
+        ...Array.from(document.querySelectorAll<HTMLElement>('[role="radiogroup"][aria-label="Theme"]')),
+      ]
+      return controls.filter((el) => el.getClientRects().length > 0).length
     })
-  }
+
+  test('exactly one visible theme control at 1280px: the rail flip', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 844 })
+    await page.goto('/dashboard')
+    // The sidebar is `dynamic(..., { ssr: false })` (#2521): wait for it, or a
+    // count of 0 would be read before it mounts.
+    await page.locator('button[aria-label^="Theme: "]').first().waitFor()
+    expect(await countThemeControls(page)).toBe(1)
+    await expect(page.locator('[role="radiogroup"][aria-label="Theme"]')).toHaveCount(0)
+  })
+
+  test('exactly one visible theme control at 390px: the sheet radiogroup', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/dashboard')
+    await page.getByRole('button', { name: 'Open sidebar' }).click()
+    await waitForDrawerOpen(page)
+    await page.locator('[role="radiogroup"][aria-label="Theme"]').waitFor()
+    expect(await countThemeControls(page)).toBe(1)
+  })
 })
 
 /**
@@ -525,10 +507,12 @@ test.describe('bottom tab bar (#2731)', () => {
     const bar = page.locator('[data-mobile-tab-bar]')
     await bar.waitFor()
 
-    // The bar renders four tabs; More is a sibling, by stacking-context
-    // necessity (see `MobileTabBar`). Asserted so a fifth link appearing in
-    // here — the obvious "just add More to the grid" edit — is caught.
+    // The bar renders four tab LINKS and one More BUTTON (#4053 — More is a
+    // cell of the bar, not a sibling painted over it). Asserted so a fifth
+    // link — a destination promoted to a tab without updating `TAB_ROUTES`
+    // and the sheet — is caught.
     await expect(bar.getByRole('link')).toHaveCount(4)
+    await expect(bar.getByRole('button', { name: 'Open sidebar' })).toHaveCount(1)
     // ORDER, not just membership. "Selected by route, never by index" is the
     // headline claim in the component, the doc and the showcase caption, and
     // nothing tested it: replacing the route lookup with `items.slice(0, 4)`
@@ -563,19 +547,79 @@ test.describe('bottom tab bar (#2731)', () => {
     await expect(bar.locator('a[aria-current="page"]')).toHaveCount(1)
   })
 
-  test('More opens the drawer, and keeps the name the harness waits on', async ({ page }) => {
+  test('More opens the sheet, and keeps the name the harness waits on', async ({ page }) => {
     await page.goto('/dashboard')
     // `Open sidebar` is not decoration: `dismissMobileSidebar` in
-    // `scripts/screenshot.mjs` waits on this exact name from 25 call sites,
-    // and `e2e/fixtures/haven-api.ts` has a twin. #2731 moved the control and
-    // deliberately did not rename it.
-    const more = page.getByRole('button', { name: 'Open sidebar' })
-    await more.click()
+    // `scripts/screenshot.mjs` and its twin in `e2e/fixtures/haven-api.ts`
+    // click `Close sidebar`, and every mobile capture reaches the page through
+    // them. #2731 and #4053 both moved the control and deliberately did not
+    // rename it.
+    await page.getByRole('button', { name: 'Open sidebar' }).click()
+    await waitForDrawerOpen(page)
+    const sheet = page.locator('[data-more-sheet]')
     await expect(
-      page.getByRole('navigation', { name: 'All sections' }).getByRole('link', { name: 'Marketplace' }),
+      sheet.getByRole('navigation', { name: 'All sections' }).getByRole('link', { name: 'Marketplace' }),
     ).toBeVisible()
+    // Only the destinations the bar lacks (#4053): no tab route in the sheet.
+    for (const route of ['/dashboard', '/agents', '/transactions', '/accounts']) {
+      await expect(sheet.locator(`a[href="${route}"]`), `sheet repeats ${route}`).toHaveCount(0)
+    }
     await page.getByRole('button', { name: 'Close sidebar' }).click()
+    await expect(sheet).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Open sidebar' })).toBeVisible()
+  })
+
+  test('the tab bar stays live under the open sheet, and a tab tap closes it (#4053)', async ({ page }) => {
+    await page.goto('/dashboard')
+    await page.getByRole('button', { name: 'Open sidebar' }).click()
+    await waitForDrawerOpen(page)
+
+    // Hit-test the Agents tab with the sheet open: the bar must be the
+    // topmost element at its own centre — the drawer #4053 replaced covered it.
+    const bar = page.locator('[data-mobile-tab-bar]')
+    const agents = bar.getByRole('link', { name: 'Agents' })
+    const box = (await agents.boundingBox())!
+    const hit = await page.evaluate(
+      ([x, y]) => {
+        const el = document.elementFromPoint(x, y)
+        return el?.closest('a')?.getAttribute('href') ?? null
+      },
+      [box.x + box.width / 2, box.y + box.height / 2] as const,
+    )
+    expect(hit, 'the Agents tab is reachable while the sheet is open').toBe('/agents')
+
+    await agents.click()
+    await page.waitForURL('**/agents')
+    await expect(page.locator('[data-more-sheet]')).toHaveCount(0)
+  })
+
+  test('the sheet dismisses on a scrim tap and on Escape, handing focus back to More (#4053)', async ({ page }) => {
+    await page.goto('/dashboard')
+    await page.getByRole('button', { name: 'Open sidebar' }).click()
+    await waitForDrawerOpen(page)
+    // The scrim's visible strip is above the sheet: tap near the top.
+    await page.locator('[data-more-sheet-scrim]').click({ position: { x: 20, y: 60 } })
+    await expect(page.locator('[data-more-sheet]')).toHaveCount(0)
+
+    await page.getByRole('button', { name: 'Open sidebar' }).click()
+    await waitForDrawerOpen(page)
+    await page.keyboard.press('Escape')
+    await expect(page.locator('[data-more-sheet]')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Open sidebar' })).toBeFocused()
+  })
+
+  test('a downward swipe on the handle dismisses the sheet (#4053)', async ({ page }) => {
+    await page.goto('/dashboard')
+    await page.getByRole('button', { name: 'Open sidebar' }).click()
+    await waitForDrawerOpen(page)
+    const handle = page.locator('[data-more-sheet-handle]')
+    const box = (await handle.boundingBox())!
+    const x = box.x + box.width / 2
+    const y = box.y + box.height / 2
+    await handle.dispatchEvent('pointerdown', { clientX: x, clientY: y, pointerId: 1, isPrimary: true })
+    await handle.dispatchEvent('pointermove', { clientX: x, clientY: y + 120, pointerId: 1, isPrimary: true })
+    await handle.dispatchEvent('pointerup', { clientX: x, clientY: y + 120, pointerId: 1, isPrimary: true })
+    await expect(page.locator('[data-more-sheet]')).toHaveCount(0)
   })
 
   // Both bands, because the offset is carried by THREE variants and only one

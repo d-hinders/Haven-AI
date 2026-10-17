@@ -1,0 +1,69 @@
+/**
+ * Visual regression for the phone "More" sheet (#4053): the bottom sheet the
+ * tab bar's More cell opens, in light and dark.
+ *
+ * No baseline showed the open phone menu before #4053 — the drawer it
+ * replaced was only ever captured closed — so this is the first pixel guard
+ * on it. The clip is the SHEET plus the TAB BAR beneath it, because the
+ * relationship between the two is the design: the sheet stops at the bar's
+ * top edge and the bar's fifth cell reads "Close" while the sheet is open.
+ */
+import { expect, test } from '@playwright/test'
+import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
+import { mockHavenApi, seedAuthenticatedSession, waitForDrawerOpen } from './fixtures/haven-api'
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore — plain .mjs; the SINGLE source of evidence viewports.
+import { VIEWPORTS as SHARED_VIEWPORTS } from '../scripts/evidence-viewports.mjs'
+import { THEME_STORAGE_KEY } from '../src/lib/theme-bootstrap'
+
+const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{ name: string; width: number; height: number }>
+const MOBILE = VIEWPORTS.find((vp) => vp.name === 'mobile')
+if (!MOBILE) {
+  throw new Error('visual gate: evidence-viewports.mjs carries no "mobile" viewport')
+}
+
+const SNAPSHOT_OPTIONS = {
+  animations: 'disabled',
+  caret: 'hide',
+  maxDiffPixels: 50,
+  threshold: 0.02,
+} as const
+
+test.describe('More sheet visual regression (#4053)', () => {
+  test.skip(!VISUAL_SPECS_ENABLED, VISUAL_SKIP_REASON)
+
+  const schemeOf = (testInfo: { project: { name: string } }): 'light' | 'dark' =>
+    testInfo.project.name === 'chromium-desktop-dark' ? 'dark' : 'light'
+
+  test.beforeEach(async ({ page }, testInfo) => {
+    await mockHavenApi(page)
+    await seedAuthenticatedSession(page)
+    if (schemeOf(testInfo) === 'dark') {
+      await page.addInitScript((themeKey: string) => {
+        window.localStorage.setItem(themeKey, 'dark')
+      }, THEME_STORAGE_KEY)
+    }
+  })
+
+  test('open sheet over the tab bar (mobile)', async ({ page }, testInfo) => {
+    const scheme = schemeOf(testInfo)
+    await page.setViewportSize({ width: MOBILE.width, height: MOBILE.height })
+    await page.goto('/dashboard')
+    await page.getByRole('button', { name: 'Open sidebar' }).click()
+    await waitForDrawerOpen(page)
+
+    const sheet = page.locator('[data-more-sheet]')
+    // State anchors before the shot: the account row has loaded, and the
+    // destinations are the four the tab bar lacks plus Settings.
+    await expect(sheet.getByRole('link', { name: /^Open profile for / })).toBeVisible()
+    await expect(sheet.getByRole('navigation', { name: 'All sections' }).getByRole('link')).toHaveCount(5)
+    await expect(sheet.getByRole('radiogroup', { name: 'Theme' })).toBeVisible()
+
+    // Sheet top to the bottom of the viewport: the sheet and the bar together.
+    const top = (await sheet.boundingBox())!.y
+    await expect(page).toHaveScreenshot(`more-sheet-open-mobile${scheme === 'dark' ? '-dark' : ''}.png`, {
+      ...SNAPSHOT_OPTIONS,
+      clip: { x: 0, y: Math.floor(top), width: MOBILE.width, height: MOBILE.height - Math.floor(top) },
+    })
+  })
+})

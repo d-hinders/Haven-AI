@@ -8,10 +8,10 @@ import { mockHavenApi, seedAuthenticatedSession, waitForDrawerOpen } from './fix
  * life, sat in the same 56px band the top bar occupied. Whichever of the two
  * won the stacking contest owned the clicks in that band, and for that whole
  * period the bar did — so primary navigation was unopenable below `lg` on
- * every authenticated route. (#4029 deleted the bar; the layering rules it
- * forced are still the ones the scale encodes, and the toggle's tier is what
- * keeps the drawer — the bar's successor as the thing the toggle floats over
- * — closable.)
+ * every authenticated route. (#4029 deleted the bar. Since #4053 the control
+ * is the tab bar's More cell and opens a bottom sheet that stops at the bar's
+ * top edge, so nothing floats over anything: the hit-tests below now prove
+ * the More cell is reachable before AND while the sheet is open.)
  *
  * Measured on the pre-fix code, at 320 / 390 / 768 / 1023px on `/dashboard`:
  *
@@ -76,7 +76,7 @@ async function expectNavigationReachable(page: Page) {
   //
   //    Every other assertion in this function measures one element against
   //    another: the toggle against whatever `elementFromPoint` returns at the
-  //    toggle's own centre, the drawer against its own logo band. Those are
+  //    toggle's own centre, the sheet against its own logo band. Those are
   //    all preserved by a transformation that moves the whole shell, so this
   //    spec passed the mutation that exposed the gap — the toggle's `fixed`
   //    swapped for `relative`, which drops it into flow and shifts the chrome
@@ -149,54 +149,50 @@ async function expectNavigationReachable(page: Page) {
   //    "intercepts pointer events" rather than silently passing.
   await open.click()
 
-  // Scoped to the DRAWER's landmark (#2731). The shell has two navigation
-  // landmarks now — the drawer and the bottom tab bar — and a bare
+  // Scoped to the SHEET's landmark (#2731, #4053). A bare
   // `getByRole('navigation')` is a strict-mode violation rather than a
-  // silent wrong answer, which is the good failure mode.
-  const nav = page.getByRole('navigation', { name: 'All sections' })
-  await expect(nav.getByRole('link', { name: 'Dashboard' })).toBeVisible()
+  // silent wrong answer, which is the good failure mode. Marketplace, not
+  // Dashboard: the sheet carries only what the tab bar does not.
+  const sheet = page.locator('[data-more-sheet]')
+  const nav = sheet.getByRole('navigation', { name: 'All sections' })
+  await expect(nav.getByRole('link', { name: 'Marketplace' })).toBeVisible()
 
-  // 3. The drawer owns its own top band. It is `inset-y-0`, so its 56px logo
-  //    band shares the top strip with whatever chrome is above the page; if a
-  //    layer ABOVE the drawer won there, the drawer is decapitated and the
-  //    scrim dims everything except the strip it exists to dim — the same
-  //    root cause as the toggle, one layer down. (The rival used to be the
-  //    top bar's `<header>`, whose half-height the probe ran at; since #4029
-  //    the probe is keyed to the DRAWER's own logo band, so a `querySelector
-  //    ('header')` re-pointing at `PageHeader`'s in-page header could never
-  //    satisfy it.)
-  //
-  //    Wait for the 200ms slide to FINISH first. A visible link is not enough:
-  //    a transforming element still has a non-empty box, so hit-testing here
-  //    can land on a part-way drawer, return the scrim, and report a layering
-  //    defect that does not exist. That false failure hit three of four widths
-  //    on this spec's first run.
+  // 3. The sheet owns its own top band, and the tab bar stays the topmost
+  //    thing in its own band (#4053). Wait for the slide-up to FINISH first:
+  //    a moving element still has a non-empty box, so hit-testing mid-slide
+  //    lands on the scrim and reports a defect that does not exist (#1749's
+  //    false failures on three of four widths).
   await waitForDrawerOpen(page)
 
   const layering = await page.evaluate(() => {
-    const aside = document.querySelector('aside')!
-    // The drawer's logo band: its first element child (h-14, the band the
-    // Haven link and the env badge live in).
-    const logoBand = aside.firstElementChild as HTMLElement
-    const r = aside.getBoundingClientRect()
-    const band = logoBand.getBoundingClientRect()
-    const top = document.elementFromPoint(
+    const sheetEl = document.querySelector('[data-more-sheet]')!
+    const band = sheetEl.querySelector('[data-logo-band]')!.getBoundingClientRect()
+    const r = sheetEl.getBoundingClientRect()
+    const topOfSheet = document.elementFromPoint(
       Math.round(r.left + r.width / 2),
       Math.round(band.top + band.height / 2),
     )
+    const bar = document.querySelector('[data-mobile-tab-bar]')!
+    const more = bar.querySelector('[data-more-toggle]')!.getBoundingClientRect()
+    const atMore = document.elementFromPoint(
+      Math.round(more.left + more.width / 2),
+      Math.round(more.top + more.height / 2),
+    )
     return {
-      drawerOwnsItsTopBand: aside.contains(top),
-      topElement: top?.tagName.toLowerCase() ?? null,
+      sheetOwnsItsTopBand: sheetEl.contains(topOfSheet),
+      moreCellIsTopmost: !!atMore && bar.contains(atMore),
+      // The sheet ends at the bar's top edge — never overlapping it.
+      sheetBottomAtBarTop: Math.round(r.bottom) === Math.round(bar.getBoundingClientRect().top),
+      topElement: topOfSheet?.tagName.toLowerCase() ?? null,
     }
   })
-  expect(layering).toMatchObject({ drawerOwnsItsTopBand: true })
+  expect(layering).toMatchObject({ sheetOwnsItsTopBand: true, moreCellIsTopmost: true, sheetBottomAtBarTop: true })
 
-  // 4. ...and back out. The Close affordance is the SAME button, so if the
-  //    drawer or its scrim covered it, the sidebar could be opened and then
-  //    never closed by the control that opened it.
+  // 4. ...and back out, through the same cell.
   const close = page.getByRole('button', { name: 'Close sidebar' })
   await expect(close).toBeVisible()
   await close.click()
+  await expect(sheet).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Open sidebar' })).toBeVisible()
 }
 
@@ -210,7 +206,7 @@ test.describe('mobile navigation is reachable below lg (#1749)', () => {
     test.describe(`at ${width}px`, () => {
       test.use({ viewport: { width, height: 844 } })
 
-      test('the toggle is hit-testable and the drawer owns its top band', async ({ page }) => {
+      test('More is hit-testable and the sheet owns its top band without covering the bar', async ({ page }) => {
         await page.goto('/dashboard')
         await expectNavigationReachable(page)
       })
@@ -248,16 +244,16 @@ test.describe('mobile navigation is reachable below lg (#1749)', () => {
 })
 
 /**
- * The drawer must leave the screen when the viewport CROSSES into mobile
+ * The rail must leave the screen when the viewport CROSSES into mobile
  * (#2586).
  *
- * `collapsed` was decided once, in a `useState` initialiser reading
- * `window.innerWidth`, and never revisited. Below `lg` the drawer is
- * `fixed inset-y-0 left-0` and only `-translate-x-full` keeps it off screen, so
- * a window that starts at desktop width and then narrows leaves the whole
- * sidebar — its footer row, the account link and the `User menu` kebab — parked
- * on top of the page at `translate-x-0`. #2586 reports it obscuring the left
- * edge of the `/agents` empty state's prompt card and clipping its footer link.
+ * #2586's defect: below `lg` the old drawer was `fixed inset-y-0 left-0` and
+ * only a JS-decided `-translate-x-full` kept it off screen, so a window that
+ * started at desktop width and then narrowed left the whole sidebar parked on
+ * top of the page. #4053 changed the mechanism — the rail is `hidden` below
+ * `lg` by CSS, and the phone menu is a separate sheet that starts closed — but
+ * the claim this spec holds is unchanged and still rendered-only: after the
+ * crossing, the coordinate the rail's footer occupied belongs to the page.
  *
  * ── Why this could not have been caught by a visual baseline ────────────────
  * It reproduces only after a CROSSING. `scripts/screenshot.mjs` sets the
@@ -277,7 +273,7 @@ test.describe('mobile navigation is reachable below lg (#1749)', () => {
  * claim that matters — page content at that coordinate is reachable — is a
  * rendered property.
  */
-test.describe('the drawer leaves the screen when the viewport narrows (#2586)', () => {
+test.describe('the rail leaves the screen when the viewport narrows (#2586)', () => {
   test.use({ viewport: { width: 1280, height: 900 } })
 
   test.beforeEach(async ({ page }) => {
@@ -294,7 +290,7 @@ test.describe('the drawer leaves the screen when the viewport narrows (#2586)', 
     })
   })
 
-  test('narrowing past lg puts the drawer off screen and hands the coordinate back to the page', async ({
+  test('narrowing past lg hides the rail and hands the coordinate back to the page', async ({
     page,
   }) => {
     await page.goto('/agents')
@@ -310,12 +306,12 @@ test.describe('the drawer leaves the screen when the viewport narrows (#2586)', 
     await page.addStyleTag({ content: 'nextjs-portal { display: none !important; }' })
     // The shell renders after the auth context resolves, and at 1280 the
     // `Open sidebar` toggle this spec's sibling waits on is `lg:hidden` — so
-    // wait on the drawer itself rather than on a control that is correctly
+    // wait on the rail itself rather than on a control that is correctly
     // absent at this width.
     await page.waitForSelector('aside', { state: 'attached', timeout: 15_000 })
 
     // Mounted wide: on screen and in flow, which is correct — at `lg` the
-    // drawer is `static`, not an overlay. Asserted so the crossing below is
+    // rail is `static`, not an overlay. Asserted so the crossing below is
     // measured against a known start rather than an assumed one.
     const wide = await page.evaluate(() => {
       const r = document.querySelector('aside')!.getBoundingClientRect()
@@ -326,24 +322,23 @@ test.describe('the drawer leaves the screen when the viewport narrows (#2586)', 
 
     await page.setViewportSize({ width: 390, height: 844 })
 
-    // The 200ms slide has to finish before anything is hit-tested: a
-    // transforming element still has a non-empty box, and reading mid-slide is
-    // how this spec's sibling produced three false failures on its first run.
+    // The rail is `hidden` below `lg` (#4053): no box at all after the
+    // crossing, and no sheet either — narrowing never opens the menu.
     await page.waitForFunction(
       () => {
         const r = document.querySelector('aside')?.getBoundingClientRect()
-        return !!r && Math.round(r.right) <= 0
+        return !!r && r.width === 0 && r.height === 0
       },
       undefined,
       { timeout: 10_000 },
     )
 
-    // 1. The drawer is fully clear of the viewport.
+    // 1. The rail is gone from the viewport, and no sheet opened.
     const narrow = await page.evaluate(() => {
       const r = document.querySelector('aside')!.getBoundingClientRect()
-      return { right: Math.round(r.right), viewportWidth: window.innerWidth }
+      return { width: Math.round(r.width), sheet: !!document.querySelector('[data-more-sheet]') }
     })
-    expect(narrow, `drawer still intrudes: ${JSON.stringify(narrow)}`).toMatchObject({ right: 0 })
+    expect(narrow, `rail still intrudes: ${JSON.stringify(narrow)}`).toEqual({ width: 0, sheet: false })
 
     // 2. The claim that actually matters, asked the way a tap asks it: at the
     //    bottom-left coordinate the sidebar's footer row occupied, what would
@@ -364,8 +359,8 @@ test.describe('the drawer leaves the screen when the viewport narrows (#2586)', 
       // the wrong box.
       const top = document.elementFromPoint(24, window.innerHeight - barH - 40)
       // ...and the bar's OWN band, which is new ground this spec should hold:
-      // after the drawer leaves, the bottom strip must belong to the tab bar
-      // and not to the drawer that just slid out of it.
+      // after the crossing, the bottom strip must belong to the tab bar
+      // and not to the rail.
       const inBar = bar ? document.elementFromPoint(24, window.innerHeight - barH / 2) : null
       return {
         insideDrawer: !!(top && aside?.contains(top)),

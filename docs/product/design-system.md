@@ -446,16 +446,15 @@ the wrapper *is* the dim layer. Named by shape rather than by component on
 purpose — a list of file names here is a claim `covers:` has to reach, and the
 gate is right to ask for one fewer of those, not one more.)
 
-The drawer reaches the same strip by the third route: it is `inset-y-0` and,
-below `lg`, `w-full`, with the notch reserved in its own `max-lg:pt-*`. Since
-[#2820](https://github.com/d-hinders/Haven-AI/issues/2820) deleted the nav
-scrim, that drawer is what covers the band when the navigation is open, and it
-covers it **opaquely** with `--v2-surface` where a backdrop covers it dim. Both
-facts are asserted in `e2e/safe-area-insets.mobile.spec.ts`, and the opaque one
-is load-bearing: a translucent value there would mean a dim layer had returned
-to the strip under another name, which is the state
-[#2819](https://github.com/d-hinders/Haven-AI/issues/2819) is trying to get out
-of.
+The phone navigation deliberately does **not** reach that strip. Since
+[#4053](https://github.com/d-hinders/Haven-AI/issues/4053) the More menu is a
+bottom sheet, and its scrim's top stops at `--v2-safe-top` — unlike a modal
+backdrop — so with the sheet open the status-bar band is still the shell's
+opaque `SafeAreaBand`. That is the line [#2820](https://github.com/d-hinders/Haven-AI/issues/2820)
+drew for the full-screen drawer (cover the band opaquely, never dimly), kept
+by covering it not at all: a translucent layer in that strip is the state
+[#2819](https://github.com/d-hinders/Haven-AI/issues/2819) saw stick on a
+device. Both facts are asserted in `e2e/safe-area-insets.mobile.spec.ts`.
 
 That also leaves a modal backdrop as the only `.v2-modal-backdrop` reaching the
 safe area on the demo path, which is what #2819's remaining device test turns
@@ -512,28 +511,28 @@ Every stacking layer has a named token. **Reach for a token, never a fresh numbe
 --v2-z-chrome:        100;   /* app chrome — no consumer; the ordering anchor */
 --v2-z-tab-bar:       105;   /* reserved for the bottom tab bar (#2730, used by #2731) */
 --v2-z-chrome-popover: 110;  /* popovers anchored in the chrome */
---v2-z-nav-scrim:     130;   /* mobile navigation tier (consumer retired by #2820, ordering kept) */
---v2-z-nav-drawer:    140;   /* mobile drawer */
---v2-z-nav-toggle:    150;   /* the Open / Close sidebar toggle */
+--v2-z-nav-scrim:     130;   /* the phone More sheet's scrim (#4053) */
+--v2-z-nav-drawer:    140;   /* the phone More sheet (#4053) */
+--v2-z-nav-toggle:    150;   /* no consumer since #4053; ordering kept */
 --v2-z-modal:         200;   /* Modal, SidePanel */
 --v2-z-tooltip:       210;
 --v2-z-panel:         250;   /* AgentPanel */
 --v2-z-toast:        9999;   /* Toast, skip-to-content link */
 ```
 
-The rule the numbers encode: **the mobile navigation overlay outranks the app chrome it opens over, and modals outrank the navigation.** The drawer is `inset-y-0`, so its own logo band shares the top strip with whatever chrome is above the page. Let the chrome win and the drawer is decapitated, and the toggle cannot be tapped at all. That was #1749: a `z-[100]` header and a `z-[60]` toggle chosen independently in different files left mobile primary navigation unopenable on every authenticated route.
+The rule the numbers encode: **the mobile navigation overlay outranks the app chrome it opens over, and modals outrank the navigation.** Let the chrome win and the navigation is covered and its control cannot be tapped at all. That was #1749: a `z-[100]` header and a `z-[60]` toggle chosen independently in different files left mobile primary navigation unopenable on every authenticated route. Since #4053 the tab bar is kept reachable under the open More sheet by **geometry** rather than by rank: the sheet and its scrim end at the bar's top edge, so the bar is never beneath them.
 
 `--v2-z-chrome` has no consumer. The top bar that owned it was deleted (#4029, epic #4027), and the non-production warning line that briefly inherited it was removed the next day — on a phone it read as a rendering bug. The tier stays at 100 so the ordering the tests pin is unchanged; it is kept as the anchor the nav, tab-bar and popover tiers are ordered against, the same reason `--v2-z-nav-scrim` survives without a consumer.
 
-`--v2-z-nav-scrim` has no consumer since #2820 — the drawer is full width below `lg`, so the slide-over scrim it used to carry was deleted — and the tier stays anyway. The scale's job is ordering, not inventory: removing the tier would renumber the ascent the tests pin and retire a landing place the day a second navigation overlay returns. Nothing new may take the tier back without a consumer that needs it.
+`--v2-z-nav-scrim` has a consumer again since #4053 — the More sheet's scrim — after #2820 had left it empty for the full-width drawer. `--v2-z-nav-toggle` is now the empty one: More became a cell of the tab bar, because nothing covers the bar any more, so no control has to float above an overlay. The tier stays anyway. The scale's job is ordering, not inventory: removing it would renumber the ascent the tests pin. Nothing new may take it without a consumer that needs it — `z-index-scale.test.ts` fails if the shell files use it.
 
-Tiers are spaced by 10 so a new layer lands between two without renumbering — `--v2-z-tab-bar` is that mechanism's first use, at 105, in the gap 100 left. It sits under `--v2-z-chrome-popover` because a popover anchored in the chrome can hang down across the tab bar's band on a phone, and under the nav tiers because the drawer the toggle opens has to cover it. Adding a layer means picking the tier it belongs to; if none fits, add one to the scale first. A raw `z-[…]` in a shell component is the failure this scale prevents — `src/__tests__/z-index-scale.test.ts` fails on one, and on any inversion of the order above.
+Tiers are spaced by 10 so a new layer lands between two without renumbering — `--v2-z-tab-bar` is that mechanism's first use, at 105, in the gap 100 left. It sits under `--v2-z-chrome-popover` because a popover anchored in the chrome can hang down across the tab bar's band on a phone, and under the nav tiers so nothing in the bar can paint over a navigation overlay. Adding a layer means picking the tier it belongs to; if none fits, add one to the scale first. A raw `z-[…]` in a shell component is the failure this scale prevents — `src/__tests__/z-index-scale.test.ts` fails on one, and on any inversion of the order above.
 
 That test reads source, so it cannot see stacking contexts or hit-testing. `e2e/mobile-nav-layering.mobile.spec.ts` is the half that can: it drives a real engine at four widths below `lg` and asserts `document.elementFromPoint` at the toggle's centre returns the toggle.
 
 **One dim treatment for every overlay: `v2-modal-backdrop`** ([#1818](https://github.com/d-hinders/Haven-AI/issues/1818)). `Modal` and `SidePanel` use it. It is a solid `--v2-modal-backdrop` fill and it deliberately carries **no `backdrop-filter`** — the reason is written at its definition in `globals.css`: a full-viewport blur makes the compositor hold a GPU snapshot of the whole page and re-blur it on every paint, which on tall pages ballooned VRAM and made the overlay feel sluggish.
 
-The mobile nav scrim used this token too, until #2820 deleted the scrim outright: with the drawer full width below `lg` there is nothing left to dim, and an element that exists only to be deleted is not a consumer to keep. The paragraph below survives because it is still the best record of WHY the token carries no blur — and because the failure it describes (an opacity modifier that compiles to nothing, making a `backdrop-filter` free by accident) is a trap waiting for the next overlay author, wherever that overlay lives.
+The mobile nav scrim used this token, until #2820 deleted the scrim with the full-width drawer; #4053's More sheet brought a scrim back on the same class, stopped below the status-bar band (§ *Safe areas*). The paragraph below survives because it is still the best record of WHY the token carries no blur — and because the failure it describes (an opacity modifier that compiles to nothing, making a `backdrop-filter` free by accident) is a trap waiting for the next overlay author, wherever that overlay lives.
 
 The nav scrim was the exception until #1818, and instructively so: it read `bg-[var(--v2-ink)]/40 backdrop-blur-sm`, but the opacity modifier on a bare `var()` compiled to nothing (see § "Opacity on a token colour"), so the scrim painted no background — and a `backdrop-filter` with nothing behind it to composite costs nothing. **The blur was free only by accident.** Fixing the fill would have made it real, on a `fixed inset-0` element, which is precisely the shape the rule above exists to prevent. So the fix reused the shared token rather than reviving a second convention.
 
@@ -581,18 +580,19 @@ Marketing pages may still use larger hero type:
 
 The authenticated app uses one stable product shell:
 
-- Sidebar: 240px desktop rail, full-screen mobile sheet below `lg` (#2820), white surface, subtle active tint, and a 2px brand accent bar on the active route.
-- **Below `lg` the drawer is SECONDARY navigation** ([#2731](https://github.com/d-hinders/Haven-AI/issues/2731)). Primary is a five-slot bottom tab bar — Dashboard, Agents, Transactions, Accounts, and More, which opens the drawer for everything else. Four properties are worth knowing before touching it:
-  - **Tabs are selected from `baseNavItems` by ROUTE, never by index.** The bar's order differs from the drawer's, so a positional read reorders the bar the next time an entry is inserted.
-  - **Active state prefix-matches on a `/` boundary**, so `/agents/agent-research` lights Agents — the screen the demo spends its time on — while `/accounts` cannot light for a hypothetical `/accounts-archive`.
-  - **One active idiom across the bar and the drawer it opens** ([#2818](https://github.com/d-hinders/Haven-AI/issues/2818)): active is brand ink plus a 2px brand rail — on the drawer the rail runs down the row's left edge, on the tab bar across the cell's top edge — and the drawer additionally tints the row, which the bar does not, because a fill in a 56px cell reads as a pressed button. The rail carries the accessibility weight rather than decorating: measured against `--v2-bg`, `--v2-ink` is 16.24:1 and `--v2-ink-3` 5.32:1 (the pre-#2818 active/inactive pair, ~3:1 in contrast with each other), while `--v2-brand` is 6.29:1 and `--v2-brand` against `--v2-ink-3` only **1.18:1** — hue with no luminance, so brand ink *alone* would fail WCAG 1.4.1 in greyscale and for a colour-blind user. Both text states clear AA at 12px; the rail is `aria-hidden` and `aria-current="page"` remains the programmatic cue.
-  - **"More" is a sibling of the bar, not a cell in it.** The bar sits on the `--v2-z-tab-bar` tier so the drawer covers it; the control sits on the higher `--v2-z-nav-toggle` tier so one button both opens the drawer and closes it while painted over it. A child cannot climb out of its parent's stacking context, so the bar lays out five columns, fills four, and the button takes the fifth by geometry. It keeps the accessible name *Open sidebar*, which the screenshot harness waits on from 25 call sites.
-- **The drawer is FULL WIDTH below `lg`** ([#2820](https://github.com/d-hinders/Haven-AI/issues/2820)). A tab bar's More is a full-height sheet in the iOS idiom, not a 240px slide-over — so below the breakpoint the drawer takes `w-full`, carries **no scrim** (there is nothing left to dim), drops its `border-r` (a full-width column has no edge against the page), and distributes the space its old dead middle band wasted between the nav groups (`max-lg` auto margins between groups, which resolve to zero when the nav runs out of room, so short and landscape viewports scroll instead of clipping). Its surface shows through the Close control while open — the toggle paints `--v2-bg` only while the drawer is closed — and the drawer's footer reserves the toggle's fifth-of-a-screen column on the right (`max-lg:pr-[calc(20%+var(--v2-safe-right))]`), so the fixed control never sits over the user card's kebab. At `lg` and above none of this exists: the rail is the same 240px static column it has always been.
-- **`--v2-tab-bar-h` is reserved by three surfaces and only one of them is the bar**: `<main>` adds it to its bottom padding so the last row does not sit under the bar, and the toast container lifts by it so a notification is not hidden behind the navigation. The safe-area inset is added at each site rather than folded into the token — the bar pads itself with it, the others clear the bar *and* the inset. Note the toast offset carries on the `sm:` variant as well: `sm:bottom-…` overrides the base, so an offset applied only to the base is silently lost between 640px and 1023px, the band where the bar still renders.
+- Sidebar: 240px desktop rail at `lg` and above, white surface, subtle active tint, and a 2px brand accent bar on the active route. Below `lg` the rail is `hidden` (still in the DOM — the visual specs wait on its `User menu` kebab as a "shell has mounted" signal).
+- **Below `lg`, navigation is the bottom tab bar plus the More sheet** ([#2731](https://github.com/d-hinders/Haven-AI/issues/2731), [#4053](https://github.com/d-hinders/Haven-AI/issues/4053)). Primary is a five-cell bar — Dashboard, Agents, Transactions, Accounts, and More, which opens a bottom sheet holding everything else. Properties worth knowing before touching it:
+  - **Tabs are selected from `baseNavItems` by ROUTE, never by index.** The bar's order differs from the rail's, so a positional read reorders the bar the next time an entry is inserted.
+  - **One active idiom across the bar and the sheet** ([#2818](https://github.com/d-hinders/Haven-AI/issues/2818)): active is brand ink plus a 2px brand rail on the bar's cell (across its top edge) and a brand tint on a rail or sheet row. The rail carries the accessibility weight rather than decorating: measured against `--v2-bg`, `--v2-brand` is 6.29:1 and `--v2-brand` against `--v2-ink-3` only **1.18:1** — hue with no luminance, so brand ink *alone* would fail WCAG 1.4.1 in greyscale and for a colour-blind user. `aria-current="page"` remains the programmatic cue.
+  - **More is a cell of the bar** (#4053). Until then it was a sibling painted over the bar on `--v2-z-nav-toggle`, because #2820's full-screen drawer covered the bar and the same button had to stay on top of it to close it. Its visible label follows the sheet ("More" / "Close") and its accessible name stays *Open sidebar* / *Close sidebar*, which the capture harness and the e2e fixtures click.
+- **The More sheet** (#4053, `components/sidebar/MoreSheet.tsx`) replaced #2820's full-screen drawer — the desktop rail stretched to the screen, which covered the tab bar, left More floating over it as "Close", and reserved a 20% strip in its footer to keep clear of that control.
+  - **Geometry:** anchored to the bottom, ending at the tab bar's top edge (`--v2-tab-bar-h` + `--v2-safe-bottom` + the bar's 1px border); sized to its content up to a max height, scrolling inside beyond that. Its scrim dims the page above the bar and stops below the status-bar band (§ *Safe areas*).
+  - **Content:** a drag handle; the logo band (wordmark — not a link here — and the environment badge); the account row (name, email, links to `/profile`); one compact list of only the destinations the tab bar lacks, derived from `TAB_ROUTES` (Analytics, Accounting when shown, Marketplace, Contacts, Settings); the theme control as a three-way `SegmentedControl`; and a visible **Log out** row — no kebab.
+  - **Behaviour:** a non-modal `role="dialog"` (the tab bar beneath stays live, so nothing is `aria-modal`); closes on scrim tap, Escape, the More cell, a downward swipe on the handle (`SWIPE_DISMISS_PX`), a destination tap and any route change; focus moves in on open and back to More on a dismissal. It exists in the DOM only while open, and `data-state="open"` marks the end of its enter animation (`.v2-sheet-enter`, motion-gated) — the e2e helpers key on both.
 - Sidebar nav: 36px row height, 16px icon box, 13px medium label. (The Approvals item and its live actionable-count badge were the nav's only dynamic entry; both are deleted with the Safe rail, [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) — every nav item is static now.)
 - Brand: the wordmark may use `.v2-brand-gradient-text`; do not repeat the gradient elsewhere in nav.
 - User menu: two-line user card with a kebab menu using popover shadow; destructive menu items use danger styling.
-- **No top bar** ([#4029](https://github.com/d-hinders/Haven-AI/issues/4029), epic #4027): the authenticated chrome above the scroll region is the `SafeAreaBand` — the opaque status-bar strip — and nothing else; the 2px non-production warning line #4029 added was removed the next day, because on a phone, with no label in view, it read as a rendering bug. There is no `banner` landmark; `nav` and `main` remain. Page-level CTAs go in the `PageHeader` actions, and detail pages carry their own back link above the title (#4028). The environment badge lives beside the wordmark in the sidebar's logo band — the app's only environment marker — and the theme row in the sidebar footer is the app's only theme control at every width.
+- **No top bar** ([#4029](https://github.com/d-hinders/Haven-AI/issues/4029), epic #4027): the authenticated chrome above the scroll region is the `SafeAreaBand` — the opaque status-bar strip — and nothing else; the 2px non-production warning line #4029 added was removed the next day, because on a phone, with no label in view, it read as a rendering bug. There is no `banner` landmark; `nav` and `main` remain. Page-level CTAs go in the `PageHeader` actions, and detail pages carry their own back link above the title (#4028). The environment badge lives beside the wordmark in the logo band (rail and More sheet), with a gap between them — the app's only environment marker. Each width shows exactly one theme control: the rail footer's two-state flip at `lg` and above, the More sheet's three-way choice below it (#4053, superseding #2953 for the phone).
 - Main content: scrolls inside the shell, with `p-6 pt-4 lg:p-8` — 16px of top padding below `lg` (#4029), 24px elsewhere, 32px at `lg` — below `lg` its bottom, left and right also take the safe-area insets (§ *Safe areas*) — and a skip link targeting `main#main-content`. Sticky table headers compensate through the `--v2-sticky-head` variable the shell sets (`-1rem` below `lg`, `-2rem` at `lg`; the token's `-1.5rem` default is ops' `py-6`).
 
 ### PageHeader
@@ -1226,9 +1226,11 @@ on the entry point to primary navigation. It borrows the same mechanism (transpa
   reaches, in **both** states the control has. For the toggle, closed: right box edge
   x=54, nearest interactive control (`NetworkSwitcher`, since removed by
   [#3719](https://github.com/d-hinders/Haven-AI/issues/3719)) at x=68, 14px of clearance.
-  Open: the target floats over the drawer's own logo band, which it already did at 32px
-  — what is asserted there is that the logo link is still reachable at its centre, not
-  that nothing overlaps. Both are pinned in `e2e/mobile-nav-tap-target.mobile.spec.ts`.
+  Open (until #4053): the target floated over the drawer's own logo band — what was
+  asserted there was that the logo link stayed reachable at its centre. Since #4053 More is
+  a tab-bar cell and nothing floats over the sheet; the open-state test asserts the sheet's
+  account row and the More cell are each reachable. Both are pinned in
+  `e2e/mobile-nav-tap-target.mobile.spec.ts`.
 - **The clearance is only as real as the space the neighbour is standing in
   ([#1767](https://github.com/d-hinders/Haven-AI/issues/1767)).** The 14px above was
   measured at 768px and assumed to hold on a phone. It did not. The then-top bar

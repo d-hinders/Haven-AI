@@ -323,9 +323,8 @@ const SIDEBAR_MIN_VIEWPORT_WIDTH = 1024
  * Focus indicators. PR #1831 added eleven of them to `Sidebar`, and a scoped
  * capture of the resting state sees none of them — nothing is focused in a
  * screenshot. This gate protects the sidebar's RESTING appearance; focus,
- * hover, the open mobile drawer and the collapse transition are all out of its
- * reach, and closing that gap needs a driven scenario rather than a wider
- * region. Recorded here so the next reader does not infer coverage from the
+ * hover and the collapse transition are out of its reach (the phone More
+ * sheet has its own driven baseline, `more-sheet.visual.spec.ts`, #4053). Recorded here so the next reader does not infer coverage from the
  * fact that a sidebar capture exists.
  */
 const SIDEBAR_MAX_DIFF_PIXELS = 100

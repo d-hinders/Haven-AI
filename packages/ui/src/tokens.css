@@ -263,10 +263,10 @@
   --v2-z-chrome: 100;
   /* The bottom tab bar (#2730, used by #2731) — the shell's only bar, and the
      one tier the scale's spacing-by-10 was left room for. Between chrome and
-     chrome-popover deliberately: a popover anchored in the top bar can extend
-     down over the bar's band on a phone and must not be clipped by it, while
-     the drawer and its scrim (130/140) have to cover the bar so "More" is not
-     painted over by the navigation it opened. */
+     chrome-popover deliberately: a popover can extend down over the bar's
+     band on a phone and must not be clipped by it. Its fifth cell is More
+     (#4053), which opens a sheet that STOPS at the bar's top edge — the bar is
+     kept reachable by geometry, not by out-ranking the sheet (130/140). */
   --v2-z-tab-bar: 105;
 
   /* The bottom tab bar's height (#2731), as a token because three places need
@@ -290,9 +290,9 @@
      primitive gaining a responsive class. */
   --v2-sticky-head: -1.5rem;
   --v2-z-chrome-popover: 110; /* popovers anchored in the chrome (notifications, wallet, user menu) */
-  --v2-z-nav-scrim: 130; /* mobile drawer scrim — dims the chrome, hence > chrome */
-  --v2-z-nav-drawer: 140; /* mobile drawer itself */
-  --v2-z-nav-toggle: 150; /* the Open/Close toggle — above its own drawer, so one control does both */
+  --v2-z-nav-scrim: 130; /* the phone More sheet's scrim (#4053) — dims the page above the tab bar */
+  --v2-z-nav-drawer: 140; /* the phone More sheet itself (#4053) */
+  --v2-z-nav-toggle: 150; /* no consumer since #4053 moved More into the tab bar; kept as an ordering anchor */
   --v2-z-modal: 200; /* Modal, SidePanel */
   --v2-z-tooltip: 210;
   --v2-z-panel: 250; /* AgentPanel */

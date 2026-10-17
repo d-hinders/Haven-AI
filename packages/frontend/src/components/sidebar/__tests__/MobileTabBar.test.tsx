@@ -133,12 +133,11 @@ describe('MobileTabBar — active cell marks itself the way the drawer does (#28
 /**
  * The bar is still five cells and the theme row is not in it (#2928).
  *
- * The quick toggle's mobile home is the More SHEET — the full-width drawer
- * `Sidebar` renders and opens from this bar's fifth slot — and the row lives
- * there, in the drawer's footer (asserted in Sidebar.test.tsx). This bar must
- * not acquire it: #2731 fixed the cell count at five and the e2e geometry spec
- * measures five tappable slots, and a button added to the grid would break
- * both — a sixth tab's width for a control that is not a tab.
+ * The phone theme control lives in the More SHEET this bar's fifth cell opens
+ * (#4053; asserted in Sidebar.test.tsx). This bar must not acquire it: #2731
+ * fixed the cell count at five and the e2e geometry spec measures five
+ * tappable slots, and a control added to the grid would break both — a sixth
+ * tab's width for a control that is not a tab.
  *
  * So the claim this file carries for the slice is a negative one over the
  * bar's own subtree, plus the positive control that keeps it honest: the grid
@@ -163,10 +162,23 @@ describe('MobileTabBar — five cells, and the theme row is not one of them (#29
   it('contains no theme control; the sheet owns it', () => {
     const { container } = renderBar()
     const bar = container.querySelector('[data-mobile-tab-bar]')!
-    // A button inside the bar would be a sixth interactive cell; the present-
-    // ational copy already has none, and the live copy gets one only outside
-    // it (`Sidebar`'s toggle button, painted on the nav-toggle tier).
+    // The presentational copy has no button at all: its fifth cell is a
+    // picture of More.
     expect(bar.querySelectorAll('button')).toHaveLength(0)
     expect(bar.querySelectorAll('[aria-label^="Theme:"]')).toHaveLength(0)
+  })
+
+  it('the live bar carries More as its fifth cell — its only button (#4053)', () => {
+    const ref = { current: null }
+    const { container } = render(
+      <MobileTabBar items={baseNavItems} more={{ open: false, onToggle: () => {}, buttonRef: ref }} />,
+    )
+    const bar = container.querySelector('[data-mobile-tab-bar]')!
+    expect(bar.children).toHaveLength(5)
+    const buttons = bar.querySelectorAll('button')
+    expect(buttons).toHaveLength(1)
+    expect(bar.children[4]).toBe(buttons[0])
+    expect(buttons[0].getAttribute('aria-label')).toBe('Open sidebar')
+    expect(bar.querySelectorAll('[aria-label^="Theme:"], [role="radiogroup"]')).toHaveLength(0)
   })
 })

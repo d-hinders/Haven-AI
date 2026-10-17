@@ -1,34 +1,35 @@
 'use client'
 
+import type { RefObject } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Menu } from 'lucide-react'
+import { Menu, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import type { NavItem } from './Sidebar'
 
 /**
  * The primary navigation below `lg` (#2731).
  *
- * ## Why the "More" control is not in here
+ * ## "More" is the fifth cell (#4053)
  *
- * It is a DOM SIBLING of this bar, rendered by `Sidebar`, and that is a
- * stacking-context fact rather than a preference. #2730's scale puts the bar on
- * the `--v2-z-tab-bar` tier so the drawer and its scrim cover it, and the
- * toggle on the higher `--v2-z-nav-toggle` tier so ONE control both opens and
- * closes the drawer it is painted over. A child cannot climb out of its
- * parent's stacking context, so the button has to live outside this element. This bar therefore lays out **five**
- * columns and fills four; the button occupies the fifth by geometry
- * (`w-1/5`, same height, same bottom edge), which is why the grid is
- * `grid-cols-5` and not `grid-cols-4`.
+ * Until #4053 the More control was a DOM sibling of this bar, painted into
+ * the fifth column from outside on the higher `--v2-z-nav-toggle` tier,
+ * because #2820's full-screen drawer covered the bar and the same button had
+ * to stay on top of it to close it again. The phone menu is now a bottom
+ * sheet that stops at this bar's top edge — it never covers the bar — so the
+ * control is an ordinary cell of the grid, on the bar's own tier, beside the
+ * four tabs it belongs with. Its accessible name stays `Open sidebar` /
+ * `Close sidebar`: the capture harness and the e2e fixtures match those
+ * whole strings.
  *
  * ## Selection is by ROUTE, never by index
  *
- * `baseNavItems` is ordered for the drawer (Dashboard, Analytics, Accounts,
+ * `baseNavItems` is ordered for the rail (Dashboard, Analytics, Accounts,
  * Transactions, Accounting, Agents, Marketplace, Contacts — regrouped by #3024,
  * Analytics from #2947; Marketplace renamed from Catalog by #3079); the bar's order
  * is the issue's (Dashboard, Agents, Transactions, Accounts), unchanged by that
  * regroup. Reading it by position would silently reorder the bar the next
- * time someone inserts a drawer entry, so the tabs are picked by `href` and the
+ * time someone inserts a rail entry, so the tabs are picked by `href` and the
  * lookup throws nothing — a route that disappears simply drops out, and the
  * count assertion in the e2e spec is what notices.
  */
@@ -54,9 +55,12 @@ export function MobileTabBar({
   items,
   presentational = false,
   activeHref,
+  more,
 }: {
   items: NavItem[]
   presentational?: boolean
+  /** The live More cell. Absent on the `/design-system` illustration. */
+  more?: { open: boolean; onToggle: () => void; buttonRef: RefObject<HTMLButtonElement | null> }
   /**
    * Overrides the route for the illustration on `/design-system`, where
    * `usePathname()` matches no tab and every slot would render inactive — the
@@ -165,13 +169,37 @@ export function MobileTabBar({
           </Link>
         )
       })}
-      {/* The fifth slot, ILLUSTRATION ONLY. The live bar leaves this cell empty
-          and `Sidebar` paints the real control into it from outside, because
-          that control has to outrank the drawer it opens. There is no drawer
-          here, so the showcase can simply fill the cell — otherwise the
-          illustration renders four tabs in a five-column grid and reads as a
-          broken bar rather than as an explanation of why More is a sibling. */}
-      {presentational ? (
+      {/* The fifth cell. Live, it is the More control; on the illustration it
+          is a picture of one (the bar there is `inert`). The visible state
+          follows the sheet: "More" with a menu glyph closed, "Close" with an
+          X open, so a sighted user sees that the same cell now closes it. The
+          closed state's visible "More" is not inside its accessible name
+          `Open sidebar` (WCAG 2.5.3) — #2731's recorded trade, kept because
+          the harness matches that name from every mobile capture. */}
+      {more && !presentational ? (
+        <button
+          ref={more.buttonRef}
+          type="button"
+          onClick={more.onToggle}
+          aria-label={more.open ? 'Close sidebar' : 'Open sidebar'}
+          aria-expanded={more.open}
+          aria-controls={more.open ? 'more-sheet' : undefined}
+          data-more-toggle=""
+          className={`relative flex h-[var(--v2-tab-bar-h)] flex-col items-center justify-center gap-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80 ${
+            more.open ? 'text-[var(--v2-brand)]' : 'text-[var(--v2-ink-3)]'
+          }`}
+        >
+          {more.open && (
+            <span aria-hidden="true" className="absolute inset-x-0 top-0 h-0.5 bg-[var(--v2-brand)]" />
+          )}
+          <span className="h-5 w-5" aria-hidden="true">
+            <Icon icon={more.open ? X : Menu} className="w-full h-full" />
+          </span>
+          <span aria-hidden="true" className="min-w-0 max-w-full truncate px-0.5">
+            {more.open ? 'Close' : 'More'}
+          </span>
+        </button>
+      ) : presentational ? (
         <span className="flex h-[var(--v2-tab-bar-h)] flex-col items-center justify-center gap-1 text-xs font-medium text-[var(--v2-ink-3)]">
           <span className="h-5 w-5" aria-hidden="true">
             <Icon icon={Menu} className="w-full h-full" />

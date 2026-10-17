@@ -18,6 +18,7 @@ covers:
   - packages/frontend/src/app/(authenticated)/marketplace/[slug]/page.tsx
   - packages/frontend/src/components/marketplace/MerchantGrid.tsx
   - packages/frontend/src/components/marketplace/MerchantCard.tsx
+  - packages/frontend/src/components/marketplace/ComingSoonMerchants.tsx
   - packages/frontend/src/components/marketplace/MerchantHeader.tsx
   - packages/frontend/src/components/marketplace/OffersTable.tsx
   - packages/frontend/src/components/marketplace/OfferRow.tsx
@@ -32,7 +33,7 @@ covers:
   - packages/frontend/src/lib/merchantBudgetRefusal.ts
   - packages/frontend/src/hooks/useCatalog.ts
   - packages/frontend/src/components/CatalogSubmitModal.tsx
-last-verified: "2026-09-27"
+last-verified: "2026-10-17"
 ---
 
 # Marketplace
@@ -447,7 +448,7 @@ Dev's standing env is `HAVEN_MARKETPLACE_PROSPECTS=true` **and**
 `HAVEN_MARKETPLACE_CHAIN_IDS=84532,8453` (the list is restored to that value
 as the operator step after PR #3202 lands; for the 2026-09-20 demo it was
 narrowed to `84532`), so a logged-in dev user sees the mainnet merchants, the
-Ampersend sandbox and the "Coming soon" prospects on one grid, all the time;
+Ampersend sandbox and the "Coming soon" prospects on one page, all the time;
 nothing is flipped before or after a meeting. Two things still hold: agents and
 credential-less readers never see a prospect (measured 2026-09-20 on dev at
 `84532`, before this rule change — the property, not the count, is what the
@@ -515,7 +516,7 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
 `baseNavItems`, same More-sheet position.
 
 - **Grid** (`components/marketplace/MerchantGrid.tsx`,
-  `MerchantCard.tsx`) — one card per merchant on the shared entity-card
+  `MerchantCard.tsx`, `ComingSoonMerchants.tsx`) — one card per payable merchant on the shared entity-card
   idiom (`entityCardClassName`: hover lift, product focus ring): a monogram
   (`components/ui/Monogram.tsx`, promoted on its third copy — `/contacts`,
   the card, the merchant header) or a logo when `logo_url` is set, name,
@@ -530,16 +531,21 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   "0.001" stays — the ONE price format on the frontend, matching the offer
   row's `price_display`; #4008), with the offer count after it
   when there is more than one offer, and the offer count alone when no
-  counted offer prices in USDC — while a coming-soon merchant shows no footer
-  at all (nothing there is comparable), renders muted, and carries "Coming
-  soon" in the badge slot. The grid sorts payable merchants before
-  coming-soon ones, CLIENT-side in `MerchantGrid`'s `visible` memo — the
-  endpoint's own order (test merchants last, then by name) is preserved
+  counted offer prices in USDC. The price leads in ink and semibold, the
+  count stays ink-3 (#4052). Only payable merchants get a card (#4052):
+  coming-soon merchants list below the grid in `ComingSoonMerchants`, one
+  Card titled "Coming soon" with a divided list of linked rows (monogram,
+  name, one-line description, an ink-3 chevron) and nothing comparable — no price, no
+  count; its header says "Not payable through Haven yet.". The section renders only when it has rows, and "No merchants match
+  this filter" shows only when both the grid and the section are empty. The
+  split (#3980 sorted, #4052 partitions) is CLIENT-side in `MerchantGrid` —
+  the endpoint's own order (test merchants last, then by name) is preserved
   within each group and must not change for its other clients. Verified is a
   quiet check after the name (`title` = the meaning, sr-only "Verified" so
   the card link's accessible name stays the merchant's) — the merchant page
-  still spells the meaning out in visible text; the Haven test-merchant label
-  renders on a test merchant. Filters, in
+  still spells the meaning out in visible text. A test merchant carries a
+  neutral "Test" badge in the card's badge slot; the full test-merchant note
+  ("payments are real … demo content") is the merchant page's (#4052). Filters, in
   two rows (#3979): first a search over name and description (leading icon,
   filling the row, as on Contacts) with the network dropdown beside it, shown
   only when the listed chains are more than one; then category pills

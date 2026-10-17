@@ -12,6 +12,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { Button } from '@/components/ui/Button'
 import { categoryLabel, chainName, listsTestnet, networkToChainId } from '@/lib/marketplace'
 import { MerchantCard } from './MerchantCard'
+import { ComingSoonMerchants } from './ComingSoonMerchants'
 import type { Merchant } from '@/hooks/useCatalog'
 
 /** The fixture category (`088_merchants.ts`) — test content has its own checkbox, so no pill. */
@@ -151,20 +152,24 @@ export function MerchantGrid({
       if (q && !`${m.name} ${m.description}`.toLowerCase().includes(q)) return false
       return true
     })
-    // #3980: payable merchants first — `coming_soon` sorts before `live` in
-    // `GET /merchants` (alphabetically), so the cards you cannot pay headed
-    // the grid. The reorder is CLIENT-side on purpose: the endpoint's order
-    // is read by other clients (agents among them) and this slice must not
-    // change it. Within each group the served order survives: test merchants
-    // last, then by name — the same keys the SQL's ORDER BY carries.
+    // The served order within each group: test merchants last, then by
+    // name — the same keys the SQL's ORDER BY carries.
     return filtered.sort(
       (a, b) =>
-        (a.listing_status === 'coming_soon' ? 1 : 0) - (b.listing_status === 'coming_soon' ? 1 : 0) ||
         (a.is_test_merchant ? 1 : 0) - (b.is_test_merchant ? 1 : 0) ||
         a.name.localeCompare(b.name) ||
         a.id.localeCompare(b.id),
     )
   }, [merchants, activeCategory, verifiedOnly, showTestMerchants, chainFilter, search])
+
+  // #3980 sorted payable merchants first — `coming_soon` sorts before `live`
+  // in `GET /merchants` (alphabetically), so the cards you cannot pay headed
+  // the grid. #4052 goes one step further and splits them: payable merchants
+  // fill the card grid, coming-soon ones list in their own section below it.
+  // CLIENT-side on purpose: the endpoint's order is read by other clients
+  // (agents among them) and must not change.
+  const payable = visible.filter((m) => m.listing_status !== 'coming_soon')
+  const comingSoon = visible.filter((m) => m.listing_status === 'coming_soon')
 
   const filtered =
     activeCategory !== null || search.trim() !== '' || verifiedOnly || chainFilter !== 'all'
@@ -314,10 +319,18 @@ export function MerchantGrid({
           }
         />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {visible.map((merchant) => (
-            <MerchantCard key={merchant.id} merchant={merchant} />
-          ))}
+        // #4052: either group may be empty on its own (a search for one
+        // coming-soon merchant leaves no cards); the empty state above is
+        // for when BOTH are.
+        <div className="flex flex-col gap-6">
+          {payable.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {payable.map((merchant) => (
+                <MerchantCard key={merchant.id} merchant={merchant} />
+              ))}
+            </div>
+          )}
+          <ComingSoonMerchants merchants={comingSoon} />
         </div>
       )}
 

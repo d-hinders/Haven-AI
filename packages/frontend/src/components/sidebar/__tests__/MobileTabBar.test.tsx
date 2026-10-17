@@ -62,8 +62,8 @@ describe('MobileTabBar — the presentational copy is inert (#2819)', () => {
  * Before #2818 the bar's active state had no unit coverage at all — the only
  * automated evidence was the visual baselines, which is evidence a reviewer
  * reads rather than evidence a gate reports. Since #4058 the idiom is the
- * app's selection idiom (#4056's `SegmentedControl`): a brand-soft pill
- * bounded by a 1px inset brand OUTLINE, which replaced the 2px top rail a
+ * app's selection idiom (#4056's `SegmentedControl`): a rounded brand-soft
+ * indicator bounded by a 1px inset brand OUTLINE, which replaced the 2px top rail a
  * floating pill has nowhere to hang. These cases go red if the outline is
  * dropped, applied to every cell, or drawn as an inset ring (which leaks into
  * the focus ring).
@@ -78,10 +78,10 @@ describe('MobileTabBar — active cell carries the selection idiom (#2818, #4058
   const renderBar = () =>
     render(<MobileTabBar items={baseNavItems} presentational activeHref="/agents" />)
   const classes = (el: Element) => el.className.split(/\s+/)
-  /** The pill is painted by an indicator span; the cell stays a rectangle for hit-testing. */
+  /** The active shape is painted by an indicator span; the cell stays a rectangle for hit-testing. */
   const indicatorOf = (cell: HTMLElement) => cell.querySelector('[data-tab-indicator]')!
 
-  it('gives the active cell brand ink on a brand-soft pill with a 1px inset brand outline', () => {
+  it('gives the active cell brand ink on a rounded brand-soft indicator with a 1px inset brand outline', () => {
     renderBar()
 
     const active = screen.getByRole('link', { name: 'Agents' })

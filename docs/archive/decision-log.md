@@ -68,7 +68,7 @@ prototype of both on the real app:
 - The tab bar below `lg` is a **floating pill**, near-solid rather than glass
   (shipped solid: without a blur, 95% opacity let page text ghost through
   behind the labels). Its active tab uses the `SegmentedControl` selection
-  idiom — a brand-soft pill with a 1px inset brand outline — in place of the
+  idiom — a brand-soft fill with a 1px inset brand outline — in place of the
   top rail.
 - The bar labels `/transactions` **"Activity"**; the rail, the route and the
   page keep "Transactions". The longer label truncated in the pill.

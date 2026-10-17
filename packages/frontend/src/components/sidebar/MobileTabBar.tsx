@@ -196,9 +196,9 @@ export function MobileTabBar({
             more.open ? 'text-[var(--v2-brand)]' : 'text-[var(--v2-ink-3)]'
           }`}
         >
-          {more.open && (
-            <span aria-hidden="true" className="absolute inset-x-0 top-0 h-0.5 bg-[var(--v2-brand)]" />
-          )}
+          {/* Brand ink while open, but NO top rail: the rail means "you are
+              here", and the route's own tab keeps it — two lit rails would
+              read as two selected tabs. */}
           <span className="h-5 w-5" aria-hidden="true">
             <Icon icon={more.open ? X : Menu} className="w-full h-full" />
           </span>

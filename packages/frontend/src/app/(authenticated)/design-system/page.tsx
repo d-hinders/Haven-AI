@@ -1174,12 +1174,13 @@ export default function DesignSystemPage() {
             <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
               The one-gesture theme control, the quick half
               (<code className="rounded bg-[var(--v2-surface)] px-1">ui/ThemeToggle</code>,
-              shown here outside the sidebar footer it lives in at every width —
-              Settings keeps its three explicit choices on its own screen). The glyph
+              shown here outside the desktop rail&rsquo;s footer it lives in —
+              Settings and, below lg, the More sheet keep the three explicit choices). The glyph
               answers what you are
               (<code className="rounded bg-[var(--v2-surface)] px-1">Sun</code> in light,{' '}
               <code className="rounded bg-[var(--v2-surface)] px-1">Moon</code> in dark;
-              the quick toggle has no system step — that choice lives in Settings); the
+              the quick toggle has no system step — that choice lives in Settings and the
+              phone More sheet); the
               name answers where you are going
               (&quot;Theme: dark. Switch to light&quot;), because a control whose label is only
               its current state cannot be predicted. The swap cross-fades under{' '}
@@ -1187,7 +1188,8 @@ export default function DesignSystemPage() {
               no-preference</code> and snaps otherwise, and the visible label is a prefix
               of the name, so the label sits in the name. There is one rendering since
               #4029: the icon variant that lived in the top bar's right cluster was
-              deleted with the bar, so the footer row is the app's only theme control
+              deleted with the bar, so the rail footer&rsquo;s row is the desktop&rsquo;s only
+              theme control (below lg the More sheet carries the three-way one, #4053)
               and the primitive takes no variant prop at all. Never hand-roll a second
               control of this shape.
             </p>

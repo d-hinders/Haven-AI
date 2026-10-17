@@ -60,7 +60,13 @@ export function MobileTabBar({
   items: NavItem[]
   presentational?: boolean
   /** The live More cell. Absent on the `/design-system` illustration. */
-  more?: { open: boolean; onToggle: () => void; buttonRef: RefObject<HTMLButtonElement | null> }
+  more?: {
+    open: boolean
+    onToggle: () => void
+    /** Called on every tab tap — the SAME route included, where no route change would close the sheet. */
+    onClose: () => void
+    buttonRef: RefObject<HTMLButtonElement | null>
+  }
   /**
    * Overrides the route for the illustration on `/design-system`, where
    * `usePathname()` matches no tab and every slot would render inactive — the
@@ -103,6 +109,7 @@ export function MobileTabBar({
           <Link
             key={item.href}
             href={item.href}
+            onClick={more?.onClose}
             aria-current={active ? 'page' : undefined}
             className={`relative flex h-[var(--v2-tab-bar-h)] flex-col items-center justify-center gap-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80 ${
               active ? 'text-[var(--v2-brand)]' : 'text-[var(--v2-ink-3)]'

@@ -126,8 +126,8 @@ async function applyInsets(page: Page) {
  * `ui/PageHeader`'s, INSIDE the scroll region — scanning it would flag
  * ordinary scrolled content as chrome offenders.
  *
- * Elements outside the viewport are skipped rather than counted: the closed
- * drawer is translated off the left edge, and everything below the fold is
+ * Elements outside the viewport are skipped rather than counted: the hidden
+ * rail has no box (#4053), and everything below the fold is
  * simply not on screen. Skipping them is why the first version of this helper
  * was wrong — it reported a transaction row at y=1591 as sitting under a home
  * indicator 750px above it.
@@ -152,7 +152,7 @@ async function chromeControlsInBands(page: Page, top: number, bottom: number) {
         // a 1px clipped box holding screen-reader text.
         if (rect.width <= 1 || rect.height <= 1) continue
         if (getComputedStyle(el).visibility === 'hidden') continue
-        // Not on screen at all — the closed drawer lives at negative x.
+        // Not on screen at all (off either edge).
         if (rect.right <= 0 || rect.left >= window.innerWidth) continue
         if (rect.bottom <= 0 || rect.top >= window.innerHeight) continue
         const label =

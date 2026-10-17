@@ -252,12 +252,13 @@ describe('Sidebar', () => {
         (el) => el.textContent === en.accountingPage.nav.comingSoon,
       )
       expect(abbreviated?.getAttribute('aria-hidden')).toBe('true')
-      // Below `lg` (the phone More sheet) the full phrase shows instead.
-      const mobilePhrase = Array.from(accountingLink()!.querySelectorAll('span[aria-hidden="true"]')).find(
+      // The rail shows only the abbreviation (#4053 — it no longer renders
+      // below `lg`, where the sheet shows the full phrase; pinned in the
+      // More sheet block below).
+      const fullVisible = Array.from(accountingLink()!.querySelectorAll('span[aria-hidden="true"]')).find(
         (el) => el.textContent === en.common.comingSoon,
       )
-      expect(mobilePhrase?.className).toContain('lg:hidden')
-      expect(abbreviated?.className).toContain('lg:inline')
+      expect(fullVisible).toBeUndefined()
       expect(attentionDot()).toBeNull()
     })
 
@@ -303,11 +304,10 @@ describe('Sidebar', () => {
   })
 
   /**
-   * The quick theme toggle's row, in the sidebar footer at every width
-   * (#2928, ungated by #4029).
+   * The quick theme toggle's row, in the rail footer (#2928, ungated by
+   * #4029). Below `lg` the rail is hidden (#4053).
    *
-   * The drawer IS the sheet below `lg` (#2820), so below the breakpoint the
-   * row lives in the rail's footer with the rail's other controls — not in
+   * The row lives in the rail's footer with the rail's other controls — not in
    * the tab bar (`MobileTabBar.test.tsx` holds the negative side of that
    * boundary). It is the desktop theme control; below `lg` the More sheet
    * carries the three-way control instead (#4053). Three claims here:
@@ -415,13 +415,14 @@ describe('Sidebar', () => {
 })
 
 /**
- * The drawer must not sit on top of the page after the viewport narrows (#2586).
+ * The phone More sheet across the `lg` breakpoint (#2586, #4053).
  *
- * jsdom has no layout, so this asserts the ONE class that decides it:
- * `-translate-x-full` is the only thing keeping a `fixed inset-y-0 left-0`
- * drawer off screen below `lg`. Without it the drawer paints over the page —
- * the reported symptom, where the sidebar's footer row obscures the left edge
- * of the `/agents` empty state's prompt card and clips its footer link.
+ * #2586's defect was a drawer left on top of the page after a narrowing. Since
+ * #4053 the rail is CSS-hidden below `lg` and the phone menu is a sheet that
+ * starts closed, so what this block pins is the state machine: the sheet only
+ * ever opens below `lg`, widening closes it, narrowing never reopens it, and
+ * the mount-time sync corrects a rounded `innerWidth`. Plus the sheet's own
+ * contents and every way it closes.
  *
  * Driven through `matchMedia` rather than `window.innerWidth` + a `resize`
  * event, because that is what the component listens to; a test that fired
@@ -689,6 +690,33 @@ describe('More sheet across the desktop breakpoint (#2586, #4053)', () => {
     mockUsePathname.mockReturnValue('/agents')
     view.rerender(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
     expect(sheet()).toBeNull()
+  })
+
+  it('a tap on the tab you are already on closes it — no route change involved', () => {
+    // On /dashboard, tapping Dashboard navigates nowhere, so the pathname
+    // effect cannot fire; the tab's own click has to close the sheet.
+    mountAt(390)
+    openSheet()
+    const bar = document.querySelector('[data-mobile-tab-bar]')!
+    act(() => (bar.querySelector('a[href="/dashboard"]') as HTMLAnchorElement).click())
+    expect(sheet()).toBeNull()
+  })
+
+  it('shows Accounting with its full Coming soon phrase and its attention dot', () => {
+    mockAccountingFeed.mockReturnValue(feed(feedStatus({ enabled: false, flagEnabled: false })))
+    const view = mountAt(390)
+    openSheet()
+    const entry = sheet()!.querySelector('a[href="/accounting"]')!
+    expect(entry.textContent).toContain(en.common.comingSoon)
+    expect(entry.textContent).not.toContain(en.accountingPage.nav.comingSoon + en.common.comingSoon)
+    view.unmount()
+
+    mockAccountingFeed.mockReturnValue(
+      feed(feedStatus({ counts: { pending: 0, failed: 0, exhausted: 2 } })),
+    )
+    mountAt(390)
+    openSheet()
+    expect(sheet()!.querySelector('[data-testid="nav-attention-accounting"]')).not.toBeNull()
   })
 
   it('a destination tap closes it', () => {

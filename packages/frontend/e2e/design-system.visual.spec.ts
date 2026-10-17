@@ -104,28 +104,20 @@ const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{
 const APP_SIDEBAR = 'xpath=//*[@id="main-content"]/parent::*/preceding-sibling::aside[1]'
 
 /**
- * Below this width the sidebar is an off-canvas drawer (`fixed`,
- * `-translate-x-full`), not shell chrome — `Sidebar.tsx`'s own
+ * Below this width the sidebar rail is `hidden` (#4053; until then an
+ * off-canvas `fixed` drawer), not shell chrome — `Sidebar.tsx`'s own
  * `DESKTOP_BREAKPOINT_PX`, and the `lg:` breakpoint its classes are gated on.
  *
  * Keyed on the viewport WIDTH rather than on `vp.name === 'desktop'`, so a
  * viewport added to `evidence-viewports.mjs` later is covered or excluded by
  * what it actually renders instead of by what it is called.
  *
- * Measured rather than assumed — and measured on the ELEMENT, because the
- * obvious pixel check is wrong here in a way that looks right. At 390px the
- * aside reports `position: fixed`, `transform: matrix(1,0,0,1,-240,0)` and a
- * bounding rect of `x: -240, width: 240, right: 0`: its right edge is exactly
- * the viewport's left edge, so it contributes nothing to the capture and there
- * is nothing there to scope. At 1280px it is `position: static`, untransformed,
- * `x: 0, width: 240` — in flow, part of the shell.
- *
- * The tempting shortcut is to assert the mobile baseline's x=0..239 band is
- * white. It is NOT: because the drawer is `fixed`, it reserves no space, so
- * `<main>` paints straight through that band and the pixels there are ordinary
- * page content. An earlier draft of this comment claimed whiteness off a
- * too-sparse sample and was wrong — the band being non-white is a CONSEQUENCE
- * of the sidebar being absent, not evidence against it. Measure the element.
+ * Measured on the ELEMENT, not on pixels: at 390px the aside is
+ * `display: none` with an empty bounding rect, so it contributes nothing to
+ * the capture and there is nothing there to scope (under the pre-#4053 drawer
+ * it was `fixed` at `x: -240, right: 0` — absent for a different reason). At
+ * 1280px it is `position: static`, `x: 0, width: 240` — in flow, part of the
+ * shell. The phone More sheet has its own baseline (`more-sheet.visual.spec.ts`).
  */
 const SIDEBAR_MIN_VIEWPORT_WIDTH = 1024
 
@@ -307,7 +299,7 @@ const SIDEBAR_MIN_VIEWPORT_WIDTH = 1024
  * regression that the whole-page gate passed at the time — now moot, since
  * that capture no longer exists to pass anything. The third is the
  * desktop-only decision paying off in the same run — the mutated headings are
- * not painted on mobile at all, because the drawer is off-canvas there.
+ * not painted on mobile at all, because the rail is not rendered there.
  *
  * Two things this measurement teaches that a single number would have hidden.
  * **Local counts are not the gate's counts:** the same mutation is 282 px
@@ -401,7 +393,7 @@ test.describe('design-system visual regression', () => {
       // covered by the visual baselines regenerated in the same PR.
       //
       // ── The sidebar, the other half of the chrome (#1820) ─────────────────
-      // Desktop only — below `lg` it is an off-canvas drawer absent from the
+      // Desktop only — below `lg` the rail is hidden and absent from the
       // capture (see SIDEBAR_MIN_VIEWPORT_WIDTH above for the measurement).
       if (vp.width >= SIDEBAR_MIN_VIEWPORT_WIDTH) {
         const sidebar = page.locator(APP_SIDEBAR)

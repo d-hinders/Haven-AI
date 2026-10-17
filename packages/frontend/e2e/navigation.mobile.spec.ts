@@ -214,8 +214,8 @@ test.describe('mobile viewport', () => {
       // this assertion is the useless one: `contentRight === viewportWidth`
       // holds under the mutation (393 either way) and catches nothing on its
       // own. `contentLeft === 0` is what goes red. Both are asserted because
-      // together they say the real invariant — below `lg` the drawer is
-      // `fixed`, so it consumes no layout and the content region owns the FULL
+      // together they say the real invariant — below `lg` the rail is
+      // `hidden` (#4053), so it consumes no layout and the content region owns the FULL
       // width of the screen — which also catches a gutter opening on the right.
       expect(
         { left: overflow.contentLeft, right: overflow.contentRight },
@@ -590,6 +590,13 @@ test.describe('bottom tab bar (#2731)', () => {
 
     await agents.click()
     await page.waitForURL('**/agents')
+    await expect(page.locator('[data-more-sheet]')).toHaveCount(0)
+
+    // The SAME-route case: on /agents, tapping Agents changes no route, so
+    // only the tab's own click can close the sheet.
+    await page.getByRole('button', { name: 'Open sidebar' }).click()
+    await waitForDrawerOpen(page)
+    await bar.getByRole('link', { name: 'Agents' }).click()
     await expect(page.locator('[data-more-sheet]')).toHaveCount(0)
   })
 

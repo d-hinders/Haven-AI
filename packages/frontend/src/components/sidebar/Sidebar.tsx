@@ -153,11 +153,10 @@ function NavLink({
           }`}
         >
           {item.badgeTitle ? (
-            // The abbreviation is for the 240px rail only; the full phrase
-            // is what assistive tech reads and what the phone sheet shows.
+            // The abbreviation is for the 240px rail; the full phrase is what
+            // assistive tech reads (and what the phone sheet shows, #4053).
             <>
-              <span aria-hidden="true" className="hidden lg:inline">{item.badge}</span>
-              <span aria-hidden="true" className="lg:hidden">{item.badgeTitle}</span>
+              <span aria-hidden="true">{item.badge}</span>
               {/* The leading space keeps the accessible name "Accounting Coming soon", not "AccountingComing soon". */}
               <span className="sr-only"> {item.badgeTitle}</span>
             </>
@@ -300,8 +299,9 @@ export default function Sidebar() {
     return () => query.removeEventListener('change', sync)
   }, [])
 
-  // Any route change closes the sheet — including a tab tap, whose `Link`
-  // knows nothing about the sheet (#4053).
+  // Any route change closes the sheet (#4053) — a back gesture or an in-page
+  // link included. A tab tap also closes it directly (`more.onClose`), because
+  // tapping the tab you are already on changes no route.
   useEffect(() => {
     setMoreOpen(false)
   }, [pathname])
@@ -397,7 +397,7 @@ export default function Sidebar() {
       */}
       <MobileTabBar
         items={baseNavItems}
-        more={{ open: sheetOpen, onToggle: () => setMoreOpen((v) => !v), buttonRef: moreButtonRef }}
+        more={{ open: sheetOpen, onToggle: () => setMoreOpen((v) => !v), onClose: closeMore, buttonRef: moreButtonRef }}
       />
       <MoreSheet
         open={sheetOpen}
@@ -460,9 +460,8 @@ export default function Sidebar() {
 
         {/* Bottom section */}
         <div className="flex-shrink-0 border-t border-[var(--v2-border)]">
-          {/* The quick theme toggle (#2928) — the rail's theme control.
-              `variant="row"`: a list of full-width rows, and an icon button
-              alone would read as a stray glyph. Below `lg` the rail is hidden
+          {/* The quick theme toggle (#2928) — the rail's theme control, a
+              full-width row like its neighbours. Below `lg` the rail is hidden
               and the More sheet carries the three-way control instead
               (#4053), so each width shows exactly one theme control. */}
           <div className="px-3 pt-2">

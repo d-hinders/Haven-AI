@@ -4,14 +4,14 @@ import { useEffect, useRef, useState, type RefObject } from 'react'
 import Link from 'next/link'
 import { LogOut } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import { SegmentedControl } from '@/components/ui/SegmentedControl'
+import { SegmentedControl } from '@haven_ai/ui/SegmentedControl'
 import { useTheme, type ThemePreference } from '@/context/ThemeContext'
 import { useT } from '@/context/LocaleContext'
 import type { NavItem } from './Sidebar'
 
 /**
  * Distance, in CSS pixels, a downward drag on the handle has to travel before
- * release dismisses the sheet. Below it the sheet springs back. A quarter of
+ * release dismisses the sheet. Below it the sheet returns to rest. A quarter of
  * the tab bar's 56px row would trigger on a tap that wobbles; 80 is a gesture.
  */
 export const SWIPE_DISMISS_PX = 80
@@ -104,7 +104,7 @@ export function MoreSheet({
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        e.stopPropagation()
+        e.stopImmediatePropagation()
         dismiss.current()
       }
     }
@@ -254,7 +254,9 @@ export function MoreSheet({
                               : 'bg-[var(--v2-brand)] text-[var(--v2-ink-on-brand)]'
                           }`}
                         >
-                          {item.badgeTitle ?? item.badge}
+                          <span aria-hidden="true">{item.badgeTitle ?? item.badge}</span>
+                          {/* Leading space: the name reads "Accounting Coming soon", never run together. */}
+                          <span className="sr-only"> {item.badgeTitle ?? item.badge}</span>
                         </span>
                       )}
                     </Link>

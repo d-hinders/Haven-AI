@@ -169,7 +169,7 @@ test.describe('Tooltip width and keyboard reach (#2038)', () => {
 
     for (const width of NARROW_WIDTHS) {
       await page.setViewportSize({ width, height: 800 })
-      // Below `lg` the nav drawer overlays the page and intercepts the hover.
+      // Below `lg` an open More sheet would cover the page and take the hover (#4053).
       await dismissMobileSidebar(page)
       await trigger.hover()
 

@@ -484,6 +484,31 @@ test.describe('one theme control per screen (#4029, #4053)', () => {
     await page.locator('[role="radiogroup"][aria-label="Theme"]').waitFor()
     expect(await countThemeControls(page)).toBe(1)
   })
+
+  test('a theme option takes a tap in its 44px hit area, outside the painted 32px (#4056)', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/dashboard')
+    await page.getByRole('button', { name: 'Open sidebar' }).click()
+    await waitForDrawerOpen(page)
+    const light = page.locator('[role="radiogroup"][aria-label="Theme"] [role="radio"]', { hasText: 'Light' })
+    const box = (await light.boundingBox())!
+    // The painted option is ~32px: tap 4px ABOVE its top edge — inside the
+    // 6px overhang of the 44px target, outside every painted pixel.
+    expect(box.height).toBeLessThan(40)
+    const hit = await page.evaluate(
+      ([x, y]) => document.elementFromPoint(x, y)?.closest('[role="radio"]')?.textContent ?? null,
+      [box.x + box.width / 2, box.y - 4] as const,
+    )
+    expect(hit, 'the tap 4px above the painted option still reaches it').toBe('Light')
+    // And the bottom edge, at the full 6px overhang (1px past the track).
+    const below = await page.evaluate(
+      ([x, y]) => document.elementFromPoint(x, y)?.closest('[role="radio"]')?.textContent ?? null,
+      [box.x + box.width / 2, box.y + box.height + 5.5] as const,
+    )
+    expect(below, 'the tap 5.5px below the painted option still reaches it').toBe('Light')
+    await page.mouse.click(box.x + box.width / 2, box.y - 4)
+    await expect(light).toHaveAttribute('aria-checked', 'true')
+  })
 })
 
 /**
@@ -518,7 +543,7 @@ test.describe('bottom tab bar (#2731)', () => {
     // nothing tested it: replacing the route lookup with `items.slice(0, 4)`
     // left every one of these tests green, because the SET of four routes is
     // the same either way and only the order differs. The bar's order is not
-    // the drawer's, which is the whole reason the claim exists.
+    // the rail's, which is the whole reason the claim exists.
     expect(
       await bar.getByRole('link').evaluateAll((els) => els.map((e) => e.getAttribute('href'))),
       'the bar reads baseNavItems by route, not by position',

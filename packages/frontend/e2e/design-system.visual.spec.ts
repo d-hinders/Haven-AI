@@ -396,12 +396,10 @@ test.describe('design-system visual regression', () => {
 
       // ── The app shell ───────────────────────────────────────────────────────
       // There is NO top bar to clip since #4029: the shell's chrome above the
-      // page is the safe-area band (zero-height here) and the non-production
-      // warning line (absent in every baseline render — production renders
-      // nothing). The gate fails on pixels, never on a missing element, so
-      // there is deliberately no chrome locator here to go stale; the whole
-      // authenticated render is covered by the visual baselines regenerated
-      // in the same PR.
+      // page is the safe-area band (zero-height here). The gate fails on
+      // pixels, never on a missing element, so there is deliberately no
+      // chrome locator here to go stale; the whole authenticated render is
+      // covered by the visual baselines regenerated in the same PR.
       //
       // ── The sidebar, the other half of the chrome (#1820) ─────────────────
       // Desktop only — below `lg` it is an off-canvas drawer absent from the

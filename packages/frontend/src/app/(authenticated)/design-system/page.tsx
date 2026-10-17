@@ -1376,8 +1376,8 @@ export default function DesignSystemPage() {
               {[
                 ['--v2-z-content', '10', 'In-flow overlaps: badges, gradient washes'],
                 ['--v2-z-sticky', '20', 'Sticky table headers'],
-                ['--v2-z-chrome', '100', 'App chrome — the shell’s non-production warning line'],
-                ['--v2-z-tab-bar', '105', 'The bottom tab bar (#2731) — the shell’s other bar'],
+                ['--v2-z-chrome', '100', 'App chrome — no consumer; the anchor the nav tiers are ordered against'],
+                ['--v2-z-tab-bar', '105', 'The bottom tab bar (#2731) — the shell’s only bar'],
                 ['--v2-z-chrome-popover', '110', 'Popovers anchored in the chrome (notifications, wallet, user menu)'],
                 ['--v2-z-nav-scrim', '130', 'Mobile drawer scrim'],
                 ['--v2-z-nav-drawer', '140', 'Mobile drawer itself'],

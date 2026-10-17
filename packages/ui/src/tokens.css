@@ -255,15 +255,13 @@
      two without renumbering the scale. */
   --v2-z-content: 10; /* in-flow overlaps: badges, gradient washes */
   --v2-z-sticky: 20; /* sticky table headers */
-  /* The app chrome tier. Its only consumer since #4029 is the authenticated
-     shell's non-production warning line — the 2px `--v2-warning` strip along
-     the top of the app on a dev deploy. The ordering the scale encodes is
-     unchanged: the mobile navigation tiers (and modals) still outrank it, so
-     the drawer covers the line, and the line covers page content. The top bar
-     that used to own this tier was deleted (#4029, epic #4027); the tier stays
-     as the anchor the nav, tab-bar and popover tiers are ordered against. */
+  /* The app chrome tier. It has no consumer: the top bar that owned it was
+     deleted (#4029, epic #4027), and the non-production warning line that
+     briefly inherited it was removed the day after. The tier stays as the
+     anchor the nav, tab-bar and popover tiers are ordered against — the same
+     reason `--v2-z-nav-scrim` survives without a consumer. */
   --v2-z-chrome: 100;
-  /* The bottom tab bar (#2730, used by #2731) — the shell's other bar, and the
+  /* The bottom tab bar (#2730, used by #2731) — the shell's only bar, and the
      one tier the scale's spacing-by-10 was left room for. Between chrome and
      chrome-popover deliberately: a popover anchored in the top bar can extend
      down over the bar's band on a phone and must not be clipped by it, while

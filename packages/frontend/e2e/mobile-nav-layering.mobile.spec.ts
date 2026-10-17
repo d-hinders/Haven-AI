@@ -85,8 +85,8 @@ async function expectNavigationReachable(page: Page) {
   //
   //    The app FRAME (`[data-app-frame]`, the `h-screen` flex row holding the
   //    sidebar and the scroll column) spanning the viewport edge to edge is
-  //    the right anchor for THIS spec: it is the box every layered element is
-  //    positioned against, so pinning it to the screen says the geometry the
+  //    the right anchor for THIS spec: it is the box every layered element
+  //    overlays, so pinning it to the screen says the geometry the
   //    layering claims are made against has not moved under them. (It was the
   //    top bar's `<header>` until the bar was deleted, #4029 — a bare
   //    `querySelector('header')` now finds `PageHeader`'s header INSIDE the

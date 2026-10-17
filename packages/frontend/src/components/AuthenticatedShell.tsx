@@ -5,7 +5,6 @@ import ProtectedRoute from '@/components/ProtectedRoute'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import { SafeAreaBand } from '@/components/ui/SafeAreaBand'
 import { ToastProvider, Toaster } from '@/components/ui/Toast'
-import { isProductionEnvironment } from '@/lib/env'
 
 const Sidebar = dynamic(() => import('@/components/sidebar/Sidebar'), {
   ssr: false,
@@ -59,11 +58,6 @@ export default function AuthenticatedShell({
             there would take momentum scrolling with it, which is the one thing
             a phone must keep.
 
-            `relative` is load-bearing: the warning line at the bottom of this
-            element is positioned against the frame, so a 2px strip can span
-            the top of the app without becoming a flex child that pushes the
-            layout down.
-
             `--v2-sticky-head`: `packages/ui`'s `Table` pins its `<thead>` with
             `-top-[var(--v2-sticky-head)]`, compensating for the scroll
             container's top padding. The token defaults to -1.5rem — the `py-6`
@@ -74,7 +68,7 @@ export default function AuthenticatedShell({
           */}
           <div
             data-app-frame=""
-            className="relative flex h-screen overscroll-none bg-[var(--v2-bg)] text-[var(--v2-ink)] overflow-hidden max-lg:[--v2-sticky-head:-1rem] lg:[--v2-sticky-head:-2rem]"
+            className="flex h-screen overscroll-none bg-[var(--v2-bg)] text-[var(--v2-ink)] overflow-hidden max-lg:[--v2-sticky-head:-1rem] lg:[--v2-sticky-head:-2rem]"
           >
             <Sidebar />
             <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
@@ -85,6 +79,14 @@ export default function AuthenticatedShell({
                 above the scroll region, so the shell owns it directly — same
                 element, same opaque `bg-bg` fill, same contract as the
                 component's docstring (never inside a `backdrop-filter` layer).
+                The fill is the channel alias `bg-bg`, never the opacity-modified
+                arbitrary var (`bg-[var(--v2-bg)]/85`) — the dead shape #1818
+                compiled to nothing.
+
+                No non-production line under it: #4029 added a 2px warning strip
+                here and the owner removed it the next day — on a phone it read
+                as a rendering bug, with no label in view to explain it. The
+                environment badge beside the sidebar wordmark is the only marker.
               */}
               <SafeAreaBand />
               {/*
@@ -113,45 +115,6 @@ export default function AuthenticatedShell({
                 <ErrorBoundary>{children}</ErrorBoundary>
               </main>
             </div>
-            {/*
-              The non-production warning line (#4029). A 2px `--v2-warning` strip
-              along the top of the app wherever this deploy is not production. It
-              is the badge's visual echo, not its replacement: the badge in the
-              sidebar's logo band carries the accessible label, and this line is
-              `aria-hidden` and `pointer-events-none` — it must be seen, never
-              reached.
-
-              The LAST child of the frame, positioned, NOT in flow: the frame is
-              a flex row (sidebar | column), and a 2px flex child would push the
-              whole app down and paint the line over the safe-area band on a
-              phone. `absolute` against the frame's own `relative` (above) keeps
-              `h-screen` exact. The top offset is `var(--v2-safe-top)`, which is
-              0 on desktop — where the line spans the top of the app — and the
-              inset on a notched phone, where the line sits directly UNDER the
-              opaque status-bar band rendered above.
-
-              `z-[var(--v2-z-chrome)]`: the chrome tier. Above page content,
-              below the More sheet, its scrim and modals. The tier used to belong
-              to the top bar; its only remaining consumer is this line, and the
-              ordering the scale encodes (navigation outranks chrome) still
-              holds — the drawer must cover the line that says a deploy is not
-              production.
-
-              Deliberately no opacity modifier on the fill. An opacity-modified
-              arbitrary var (`bg-[var(--v2-bg)]/85`) is the dead shape #1818
-              compiled to nothing — `bg-[var(--v2-warning)]` at full opacity is a
-              real colour, and anything translucent here would defeat the point
-              of a warning you can see from across the room. It renders nothing
-              in production, so production screenshots and CI baselines contain
-              no line.
-            */}
-            {!isProductionEnvironment() && (
-              <div
-                aria-hidden="true"
-                data-warning-line=""
-                className="pointer-events-none absolute inset-x-0 top-[var(--v2-safe-top)] z-[var(--v2-z-chrome)] h-[2px] bg-[var(--v2-warning)]"
-              />
-            )}
           </div>
           <Toaster />
         </ToastProvider>

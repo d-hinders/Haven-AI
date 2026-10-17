@@ -404,7 +404,7 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
         //    either. The old neighbour was `NetworkSwitcher` 14px away in the
         //    header row; the new one is the last tab, and tabs ABUT by design,
         //    so the floor becomes an equality. A negative seam is an overlap
-        //    (a thumb on Accounts opens the drawer); a positive one is a gap
+        //    (a thumb on Accounts opens the sheet); a positive one is a gap
         //    that swallows taps.
         expect(t.seam).toBe(0)
 
@@ -492,7 +492,7 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
     // button (the #1749 defect class) — so the reachability half is
     // re-asserted here with a NON-forced click, which runs Playwright's own
     // hit-test before it fires.
-    test('the enlarged target still opens the drawer, and its edge is live', async ({ page }) => {
+    test('the More cell opens the sheet, and its edge is live', async ({ page }) => {
       await page.goto('/dashboard')
       const open = page.getByRole('button', { name: 'Open sidebar' })
       await open.waitFor()
@@ -503,57 +503,53 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
       // #1766 was an invisible 44px overlay around a 32px control. There is no
       // overlay now: the painted cell IS the target. The analogous pixel-level
       // fact is the seam — one pixel the wrong side of it navigates to
-      // /accounts instead of opening the drawer, and a thumb does not know
+      // /accounts instead of opening the sheet, and a thumb does not know
       // which side it landed on.
       const box = (await open.boundingBox())!
       await page.mouse.click(box.x + 1, box.y + box.height / 2)
 
-      const nav = page.getByRole('navigation', { name: 'All sections' })
-      await expect(nav.getByRole('link', { name: 'Dashboard' })).toBeVisible()
+      const nav = page.locator('[data-more-sheet]').getByRole('navigation', { name: 'All sections' })
+      await expect(nav.getByRole('link', { name: 'Marketplace' })).toBeVisible()
 
       // ...and the ordinary centre click still closes it.
       await page.getByRole('button', { name: 'Close sidebar' }).click()
+      await expect(page.locator('[data-more-sheet]')).toHaveCount(0)
       await expect(page.getByRole('button', { name: 'Open sidebar' })).toBeVisible()
     })
 
-    // The OPEN-drawer state, which the closed-state measurements above cannot
-    // see. The toggle outranks the drawer (`--v2-z-nav-toggle` 150 vs
-    // `--v2-z-nav-drawer` 140) so that one control both opens and closes it —
-    // which means the invisible target now also floats over the drawer's own
-    // 56px logo band, 6px per edge further than it did before.
-    //
-    // Raised by review rather than predicted, and worth an assertion rather
-    // than a judgement: the 6px looks obviously harmless, but "obviously
-    // harmless" is precisely the reasoning that shipped a control nobody could
-    // tap (#1749). What must stay true is not "no overlap" — the 32px box
-    // already overlapped the logo's leading edge before this PR — but that the
-    // Haven logo link is still reachable at its own centre.
-    test('the enlarged target does not swallow the open drawer\'s logo link', async ({ page }) => {
+    // The OPEN state, which the closed-state measurements above cannot see.
+    // Re-aimed by #4053: this used to prove the toggle — floating over the
+    // full-screen drawer on a higher tier — did not swallow the drawer's logo
+    // link. Nothing floats over the sheet now (More is a tab-bar cell, and the
+    // sheet stops at the bar), so the claim becomes the one a user meets
+    // first: with the sheet open, its top row (the account) is reachable at
+    // its own centre, and the More cell is still the topmost thing in its
+    // slot.
+    test('with the sheet open, its account row and the More cell are each reachable', async ({ page }) => {
       await page.goto('/dashboard')
       await page.getByRole('button', { name: 'Open sidebar' }).click()
 
-      // Wait for the 200ms slide to FINISH. Hit-testing a transforming element
-      // lands on a part-way drawer and reports a defect that does not exist —
-      // the false failure that hit three of four widths on #1749's first run.
+      // Wait for the slide-up to FINISH: hit-testing a moving element lands
+      // on a part-way sheet and reports a defect that does not exist.
       await waitForDrawerOpen(page)
 
       const reach = await page.evaluate(() => {
-        const aside = document.querySelector('aside')!
-        const logo = aside.querySelector<HTMLElement>('a[href="/dashboard"]')!
-        const b = logo.getBoundingClientRect()
-        const top = document.elementFromPoint(
-          Math.round(b.left + b.width / 2),
-          Math.round(b.top + b.height / 2),
-        )
-        return {
-          logoReachableAtItsCentre: !!top && (top === logo || logo.contains(top)),
-          // Named, so a red run says WHAT took the tap instead of just `false`.
-          takenBy: top
-            ? `${top.tagName.toLowerCase()}.${String(top.className).trim().split(/\s+/).slice(0, 2).join('.')}`
-            : 'nothing',
+        const probe = (el: Element) => {
+          const b = el.getBoundingClientRect()
+          const top = document.elementFromPoint(Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2))
+          return {
+            ok: !!top && (top === el || el.contains(top)),
+            takenBy: top
+              ? `${top.tagName.toLowerCase()}.${String(top.className).trim().split(/\s+/).slice(0, 2).join('.')}`
+              : 'nothing',
+          }
         }
+        const account = document.querySelector('[data-more-sheet] a[href="/profile"]')!
+        const more = document.querySelector('[data-more-toggle]')!
+        return { account: probe(account), more: probe(more) }
       })
-      expect(reach).toMatchObject({ logoReachableAtItsCentre: true })
+      expect(reach.account, `account row taken by ${reach.account.takenBy}`).toMatchObject({ ok: true })
+      expect(reach.more, `More cell taken by ${reach.more.takenBy}`).toMatchObject({ ok: true })
     })
   })
 })

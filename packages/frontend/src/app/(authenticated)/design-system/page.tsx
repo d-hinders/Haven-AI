@@ -1174,12 +1174,13 @@ export default function DesignSystemPage() {
             <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
               The one-gesture theme control, the quick half
               (<code className="rounded bg-[var(--v2-surface)] px-1">ui/ThemeToggle</code>,
-              shown here outside the sidebar footer it lives in at every width —
-              Settings keeps its three explicit choices on its own screen). The glyph
+              shown here outside the desktop rail&rsquo;s footer it lives in —
+              Settings and, below lg, the More sheet keep the three explicit choices). The glyph
               answers what you are
               (<code className="rounded bg-[var(--v2-surface)] px-1">Sun</code> in light,{' '}
               <code className="rounded bg-[var(--v2-surface)] px-1">Moon</code> in dark;
-              the quick toggle has no system step — that choice lives in Settings); the
+              the quick toggle has no system step — that choice lives in Settings and the
+              phone More sheet); the
               name answers where you are going
               (&quot;Theme: dark. Switch to light&quot;), because a control whose label is only
               its current state cannot be predicted. The swap cross-fades under{' '}
@@ -1187,7 +1188,8 @@ export default function DesignSystemPage() {
               no-preference</code> and snaps otherwise, and the visible label is a prefix
               of the name, so the label sits in the name. There is one rendering since
               #4029: the icon variant that lived in the top bar's right cluster was
-              deleted with the bar, so the footer row is the app's only theme control
+              deleted with the bar, so the rail footer&rsquo;s row is the desktop&rsquo;s only
+              theme control (below lg the More sheet carries the three-way one, #4053)
               and the primitive takes no variant prop at all. Never hand-roll a second
               control of this shape.
             </p>
@@ -1380,9 +1382,9 @@ export default function DesignSystemPage() {
                 ['--v2-z-chrome', '100', 'App chrome — no consumer; the anchor the nav tiers are ordered against'],
                 ['--v2-z-tab-bar', '105', 'The bottom tab bar (#2731) — the shell’s only bar'],
                 ['--v2-z-chrome-popover', '110', 'Popovers anchored in the chrome (notifications, wallet, user menu)'],
-                ['--v2-z-nav-scrim', '130', 'Mobile drawer scrim'],
-                ['--v2-z-nav-drawer', '140', 'Mobile drawer itself'],
-                ['--v2-z-nav-toggle', '150', 'The Open / Close sidebar toggle'],
+                ['--v2-z-nav-scrim', '130', 'The phone More sheet’s scrim'],
+                ['--v2-z-nav-drawer', '140', 'The phone More sheet itself'],
+                ['--v2-z-nav-toggle', '150', 'No consumer since More moved into the tab bar — ordering anchor'],
                 ['--v2-z-modal', '200', 'Modal, SidePanel'],
                 ['--v2-z-tooltip', '210', 'Tooltip'],
                 ['--v2-z-panel', '250', 'AgentPanel'],
@@ -1405,14 +1407,12 @@ export default function DesignSystemPage() {
             The rule the numbers encode
           </h3>
           <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-            The mobile navigation overlay outranks the app chrome it slides over, and modals
-            outrank the navigation. That direction is not arbitrary. The drawer is{' '}
-            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">inset-y-0</code>, so its
-            own logo band shares the top 56px with the bar; its scrim exists to dim everything
-            behind it, and “everything” includes the bar. Let the bar win and the drawer is
-            decapitated, the scrim dims all but the top strip, and the toggle — which sits inside
-            that strip by design, in the gap the bar reserves for it — cannot be tapped at all.
-            Modals sit above both, because a dialog opened from a nav link has to cover the drawer.
+            The mobile navigation overlay outranks the app chrome, and modals outrank the
+            navigation. That direction is not arbitrary: let the chrome win and the navigation is
+            covered and its control cannot be tapped at all — #1749, a header and a toggle given
+            numbers independently. The tab bar is kept reachable under the open More sheet by
+            geometry rather than rank: the sheet and its scrim end at the bar&rsquo;s top edge.
+            Modals sit above both, because a dialog opened from a nav link has to cover the sheet.
           </p>
           <p className="mt-3 text-sm leading-relaxed text-[var(--v2-ink-2)]">
             Adding a layer means picking the tier it belongs to, not picking a number. If none of
@@ -1455,7 +1455,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Bottom tab bar — primary navigation below lg"
-        description="Below `lg` the drawer stops being the primary navigation: four tabs (Dashboard, Agents, Transactions, Accounts) plus More, which opens the drawer for everything else. The drawer is not deleted, it becomes secondary. Tabs are selected from the sidebar's own list BY ROUTE, never by index — the bar's order differs from the drawer's, so a positional read would reorder it the next time an entry is inserted. Active state follows the route including detail pages, so /agents/agent-research lights Agents."
+        description="Below `lg` the primary navigation: four tabs (Dashboard, Agents, Transactions, Accounts) plus More, which opens a bottom sheet with everything the tabs do not carry. Tabs are selected from the sidebar's own list BY ROUTE, never by index — the bar's order differs from the rail's, so a positional read would reorder it the next time an entry is inserted. Active state follows the route including detail pages, so /agents/agent-research lights Agents."
       >
         <Card hover={false} className="max-w-sm overflow-hidden">
           {/*
@@ -1484,12 +1484,11 @@ export default function DesignSystemPage() {
           the token: the bar pads itself with it, the others clear the bar and the inset together.
         </p>
         <p className="mt-3 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-          <strong>More is not a cell of this bar.</strong> It is a sibling of it, on the
-          nav-toggle tier rather than the tab-bar tier, because one control both opens the drawer
-          and closes it while painted over the drawer — and a child cannot climb out of its
-          parent&rsquo;s stacking context. It keeps the accessible name{' '}
-          <em>Open sidebar</em>, which is load-bearing: the screenshot harness waits on that name
-          from 25 call sites.
+          <strong>More is the fifth cell.</strong> It opens a bottom sheet that stops at this
+          bar&rsquo;s top edge, so the bar stays visible and tappable while the sheet is open and
+          More reads &ldquo;Close&rdquo;. It keeps the accessible names{' '}
+          <em>Open sidebar</em> / <em>Close sidebar</em>, which are load-bearing: the capture
+          harness and the e2e fixtures click them.
         </p>
       </Section>
 

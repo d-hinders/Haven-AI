@@ -7,9 +7,11 @@
  * One button, two states, one gesture: it flips light → dark and back. The
  * icon shows the palette on screen — `Sun` in light, `Moon` in dark — and
  * each click flips it. The full three-way choice (light / dark / system)
- * stays in Settings → Theme, on its `SegmentedControl`; the quick
- * toggle is the shortcut, not the full control, so it offers no `system`
- * step and no `Monitor` glyph.
+ * lives on a `SegmentedControl` in Settings → Theme and, below `lg`, in the
+ * phone More sheet (#4053 — owner decision 2026-10-17, superseding #2953's
+ * "only in Settings" for the phone). This toggle is the desktop rail's
+ * shortcut, not the full control, so it offers no `system` step and no
+ * `Monitor` glyph.
  *
  * ## The icon is the state; the label is the transition
  *
@@ -40,8 +42,9 @@
  *
  * ## One rendering
  *
- * The toggle renders the full-width row that lives in the sidebar footer at
- * every width (#4029) — it carries the visible label, and the visible label
+ * The toggle renders the full-width row in the desktop rail's footer (#4029;
+ * below `lg` the rail is hidden and the More sheet carries its own control,
+ * #4053) — it carries the visible label, and the visible label
  * must be contained in the accessible name (WCAG 2.5.3, Label in Name):
  * "Theme" is the prefix of "Theme: …". There was a second, icon-only
  * rendering in the top bar's right cluster until the bar was deleted
@@ -120,11 +123,8 @@ export function ThemeToggle({ className = '' }: ThemeToggleProps) {
     </span>
   )
 
-  // The sidebar footer's row, at every width (#4029). Same classes as the
-  // drawer's own menu rows, so the sheet renders one table, not two. The
-  // yield that keeps interactive rows clear of the fixed More/Close toggle is
-  // carried by the footer this row lives in (Sidebar), and it needs no
-  // partner here.
+  // The rail footer's row (#4029). Same classes as the rail's own menu rows,
+  // so the footer renders one table, not two.
   return (
     <button
       type="button"

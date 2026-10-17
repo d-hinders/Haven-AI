@@ -170,6 +170,18 @@ last-verified: "2026-10-16"
 > bullet drops its Chiado line. Nothing else in this document was re-verified,
 > and `last-verified` is not bumped.
 
+> **Re-verified #4053 (2026-10-17):** `playwright.config.ts`'s dark-project
+> `testMatch` gains `more-sheet.visual.spec.ts` — the phone More sheet joins
+> the pixel gate in light and dark with the same seed-before-navigation dark
+> convention the other specs use (its spec reads `testInfo.project.name`;
+> unlike most specs it does keep a MOBILE dark baseline, because the sheet only
+> exists below `lg`). `webServer.env` and every other project are untouched,
+> so the Playwright build surfaces this document describes are unchanged; the
+> `DEV` badge section above still holds (the badge now sits off the wordmark
+> with a gap, in the rail and in the sheet). No environment variable changes
+> name, meaning, surface, or where it is set. Nothing else in this file's
+> coverage was touched; this note is the only edit.
+
 > **Re-verified #3577 (2026-10-02):** `playwright.config.ts`'s dark-project
 > `testMatch` gains `dev-agent-pages.visual.spec.ts` — For developers and For
 > agents join the pixel gate with the same seed-before-navigation dark

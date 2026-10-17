@@ -195,9 +195,8 @@ const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{
 
 /**
  * Desktop only, and for the SAME measured reason #1820's sidebar capture is:
- * below `lg` the sidebar is an off-canvas drawer (`position: fixed`,
- * `translateX(-240px)`, bounding rect `x: -240, right: 0`), so its kebab and
- * popover are not on screen at all. `AgentCard`'s action row does render at
+ * below `lg` the sidebar rail is `hidden` (#4053; before that an off-canvas
+ * `fixed` drawer), so its kebab and popover are not on screen at all. `AgentCard`'s action row does render at
  * 390px, but it wraps differently there and deserves its own measured spec
  * rather than a desktop proof reused at a width it was not taken at — that is
  * #1797's rule, and this file honours it by not claiming mobile.

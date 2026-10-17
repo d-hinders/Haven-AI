@@ -2958,19 +2958,17 @@ async function newFixtureContext(browser, vp, scenario, { signedOut = false, col
   return context
 }
 
-// The sidebar covers the page below `lg`; the e2e suite dismisses it the same
-// way before driving mobile UI.
+// The phone More sheet (#4053) covers the page above the tab bar while it is
+// open; the e2e suite dismisses it the same way before driving mobile UI. It
+// exists in the DOM only while open, so presence is the whole check — the
+// e2e twin in `e2e/fixtures/haven-api.ts` explains why nothing needs settling.
 async function dismissMobileSidebar(page, vp) {
   if (vp.width >= 1024) return
-  const close = page.getByRole('button', { name: 'Close sidebar' })
-  if (await close.isVisible({ timeout: 1_000 }).catch(() => false)) {
-    // No `{ force: true }` (#1749) — see the note on the e2e twin in
-    // `e2e/fixtures/haven-api.ts`. The forced click was this bug's only
-    // footprint in the repo: the capture tooling had been routing around an
-    // unreachable navigation toggle for months without anyone naming it.
-    await close.click()
-    await page.getByRole('button', { name: 'Open sidebar' }).waitFor({ state: 'visible' })
-  }
+  const sheet = page.locator('[data-more-sheet]')
+  if ((await sheet.count()) === 0) return
+  // No `{ force: true }` (#1749) — see the note on the e2e twin.
+  await page.getByRole('button', { name: 'Close sidebar' }).click()
+  await sheet.waitFor({ state: 'detached' })
 }
 
 /**
@@ -3684,7 +3682,7 @@ export const SCENARIOS = {
       const settle = async (navigate) => {
         await navigate()
         await page.evaluate(() => document.fonts.ready)
-        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await page.locator('button[aria-label="User menu"]').waitFor({ state: 'attached', timeout: 15_000 })
         await dismissMobileSidebar(page, vp)
         await heading.waitFor({ timeout: 15_000 })
         // The rows, not the heading: the card shows a skeleton until BOTH
@@ -3787,7 +3785,7 @@ export const SCENARIOS = {
         setSettingsAccountingStage(stage)
         await page.goto(`${BASE_URL}/settings`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
         await page.evaluate(() => document.fonts.ready)
-        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await page.locator('button[aria-label="User menu"]').waitFor({ state: 'attached', timeout: 15_000 })
         await dismissMobileSidebar(page, vp)
         await heading.waitFor({ timeout: 15_000 })
         await card.getByTestId(testId).waitFor({ timeout: 15_000 })
@@ -3853,7 +3851,7 @@ export const SCENARIOS = {
       const settle = async () => {
         await page.goto(`${BASE_URL}/accounting`, { waitUntil: 'networkidle', timeout: 60_000 })
         await page.evaluate(() => document.fonts.ready)
-        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await page.locator('button[aria-label="User menu"]').waitFor({ state: 'attached', timeout: 15_000 })
         await dismissMobileSidebar(page, vp)
       }
       const openStage = async (stage) => {
@@ -3948,8 +3946,8 @@ export const SCENARIOS = {
       await refuseFeedControls('coming-soon')
       await shoot(main, 'coming-soon')
       // The sidebar reads the same answer: the Accounting entry stays, with
-      // its muted "Soon" pill. Desktop only — below `lg` the drawer is
-      // off-canvas and contributes nothing to a capture.
+      // its muted "Soon" pill. Desktop only — below `lg` the rail is
+      // hidden and contributes nothing to a capture (#4053).
       if (vp.width >= 1024) {
         const entry = page.locator('nav[aria-label="All sections"] a[href="/accounting"]')
         // Visible "Soon" on the rail; the full phrase is the accessible name.
@@ -4580,7 +4578,7 @@ export const SCENARIOS = {
       const settle = async (url) => {
         await page.goto(url, { waitUntil: 'networkidle', timeout: 30_000 })
         await page.evaluate(() => document.fonts.ready)
-        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await page.locator('button[aria-label="User menu"]').waitFor({ state: 'attached', timeout: 15_000 })
         await dismissMobileSidebar(page, vp)
       }
 
@@ -4701,7 +4699,7 @@ export const SCENARIOS = {
         // The sidebar's own ARIA contract — the handle the visual specs use for
         // this widget. Its presence is the proof the chunk mounted and `<main>`
         // has settled to its final width.
-        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await page.locator('button[aria-label="User menu"]').waitFor({ state: 'attached', timeout: 15_000 })
         await dismissMobileSidebar(page, vp)
         await heading.waitFor({ timeout: 15_000 })
       }
@@ -6252,7 +6250,7 @@ export const SCENARIOS = {
       const settle = async (navigate) => {
         await navigate()
         await page.evaluate(() => document.fonts.ready)
-        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await page.locator('button[aria-label="User menu"]').waitFor({ state: 'attached', timeout: 15_000 })
         await dismissMobileSidebar(page, vp)
         await heading.waitFor({ timeout: 15_000 })
       }

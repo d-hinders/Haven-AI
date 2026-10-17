@@ -35,6 +35,7 @@ named where they belong below.
 
 | Date | Decision | Refs |
 |---|---|---|
+| 2026-10-17 | The phone More menu is a bottom sheet over the tab bar; its theme control is three-way (Light / Dark / System), superseding #2953 for the phone | #4053 (supersedes #2820's drawer) |
 | 2026-10-09 | Any of the three maintainers merges a promotion; test a partner merge before changing any rule | #3798, PR #3794 |
 | 2026-10-01 | Sub-agent budgets: the delegating agent submits its own sub-budget signatures; the owner relay is optional, not required | #3506, epic #3328 |
 | 2026-09-27 | Sub-agent budgets: sub-budget issuance is owner-governed; the delegating agent's delegate key only signs within the owner-approved envelope | #3330, epic #3328 |
@@ -54,6 +55,24 @@ named where they belong below.
 | 2026-07-12 | Session rail retired outright; AllowanceModule import-only | #834 (AllowanceModule half superseded) |
 | — | Approval-queue history readability waived | #2021, #2055 |
 | — | Historical: POC scope and phased roadmap | — |
+
+---
+
+## 2026-10-17 — the phone More menu is a bottom sheet; its theme choice is three-way (#4053)
+
+Owner decisions, 2026-10-17, on #4053. Below `lg`, More opens a **bottom
+sheet** that stops at the tab bar's top edge, replacing #2820's full-screen
+drawer (the desktop rail stretched to the screen, which covered the tab bar
+and left More floating over it as "Close"). The sheet carries the account with
+a visible Log out, only the destinations the tab bar lacks, and the theme
+control; the desktop rail is unchanged.
+
+The sheet's theme control is a **three-way `SegmentedControl`** (Light / Dark /
+System). That supersedes, for the phone sheet only, #2953's rule that the
+quick theme control is a two-state flip and the three-way choice lives only in
+Settings → Theme. The owner chose it over keeping the two-state row restyled.
+The desktop rail keeps the two-state flip. `components/ui/ThemeToggle.tsx`'s
+header states the current rule.
 
 ---
 

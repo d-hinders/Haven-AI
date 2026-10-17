@@ -52,6 +52,11 @@ test.describe('More sheet visual regression (#4053)', () => {
     await page.goto('/dashboard')
     await page.getByRole('button', { name: 'Open sidebar' }).click()
     await waitForDrawerOpen(page)
+    // The click leaves the pointer where the More cell was — and since #4058
+    // the card covers that spot, so its Log out row would render in its hover
+    // tint. Park the pointer on the scrim, above the card, so the baseline
+    // shows the sheet at rest (a tap on a phone leaves no hover there).
+    await page.mouse.move(4, 4)
 
     const sheet = page.locator('[data-more-sheet]')
     // State anchors before the shot: the account row has loaded, and the

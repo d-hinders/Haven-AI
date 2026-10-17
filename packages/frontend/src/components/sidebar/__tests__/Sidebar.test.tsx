@@ -28,8 +28,8 @@ vi.mock('@/components/ui/Tooltip', () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
 }))
 
-import Sidebar from '@/components/sidebar/Sidebar'
-import { TAB_ROUTES } from '@/components/sidebar/MobileTabBar'
+import Sidebar, { baseNavItems } from '@/components/sidebar/Sidebar'
+import { MobileTabBar, TAB_ROUTES } from '@/components/sidebar/MobileTabBar'
 import { SWIPE_DISMISS_PX } from '@/components/sidebar/MoreSheet'
 import { LocaleProvider } from '@/context/LocaleContext'
 import { ThemeProvider } from '@/context/ThemeContext'
@@ -729,6 +729,32 @@ describe('More sheet across the desktop breakpoint (#2586, #4053)', () => {
     mockUsePathname.mockReturnValue('/agents')
     view.rerender(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
     expect(sheet()).toBeNull()
+  })
+
+  it('closing the sheet never strips inert from the /design-system illustration (#4058)', () => {
+    // The sheet makes the LIVE bar (named `Primary`) and `<main>` inert while
+    // it is open and removes it on close. The `presentational` copy on
+    // /design-system is a nameless, permanently `inert` <nav data-mobile-tab-bar>;
+    // a selector that matched it would remove its `inert` on close and make
+    // the illustration's links focusable. Widening the selector to
+    // `nav[data-mobile-tab-bar]` must turn this red (#4058 review).
+    width = 390
+    Object.defineProperty(window, 'innerWidth', { value: 390, writable: true, configurable: true })
+    render(
+      <LocaleProvider>
+        <ThemeProvider>
+          <Sidebar />
+          <MobileTabBar items={baseNavItems} presentational activeHref="/agents" />
+        </ThemeProvider>
+      </LocaleProvider>,
+    )
+    const illustration = document.querySelector('nav[data-mobile-tab-bar]:not([aria-label])')!
+    expect(illustration.hasAttribute('inert')).toBe(true)
+    openSheet()
+    expect(sheet()).not.toBeNull()
+    act(() => screen.getByRole('button', { name: 'Close sidebar' }).click())
+    expect(sheet()).toBeNull()
+    expect(illustration.hasAttribute('inert')).toBe(true)
   })
 
   it('the ✕ is a 44px control in the sheet header, and the only button named Close sidebar (#4058)', () => {

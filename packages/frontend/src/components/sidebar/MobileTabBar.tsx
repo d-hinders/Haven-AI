@@ -40,7 +40,8 @@ import type { NavItem } from './Sidebar'
  * `baseNavItems` is ordered for the rail (Dashboard, Analytics, Accounts,
  * Transactions, Accounting, Agents, Marketplace, Contacts — regrouped by #3024,
  * Analytics from #2947; Marketplace renamed from Catalog by #3079); the bar's order
- * is the issue's (Dashboard, Agents, Transactions, Accounts), unchanged by that
+ * is the issue's (Dashboard, Agents, Transactions — labelled Activity since
+ * #4058 — Accounts), unchanged by that
  * regroup. Reading it by position would silently reorder the bar the next
  * time someone inserts a rail entry, so the tabs are picked by `href` and the
  * lookup throws nothing — a route that disappears simply drops out, and the
@@ -172,7 +173,8 @@ export function MobileTabBar({
                 alone is 1.12:1 (light) / 1.30:1 (dark) against the pill. The
                 outline is the non-colour cue — 6.29:1 / 8.65:1 against
                 `--v2-bg` — exactly as the rail was. Both text states still
-                clear AA at 12px on their own (6.29 and 5.32).
+                clear AA at 12px on their own (light: active 5.62 on the brand-soft
+                fill, inactive 5.32 on `--v2-bg`).
 
                 An outline and not `ring-inset`: an inset ring leaks
                 `--tw-ring-inset` into the focus ring (#4056's review), and

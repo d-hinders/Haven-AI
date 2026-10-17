@@ -243,8 +243,8 @@ export function Toaster() {
       
         All three terms ADD, and the `max()` that used to wrap the inset is
         gone. That form — `max(1rem, inset) + bar` — collapsed the gutter to
-        ZERO on a notched device: the bar already pads itself with the inset, so
-        the inset was doing double duty and at inset 34 the toast's bottom edge
+        ZERO on a notched device: the (then edge-to-edge) bar padded itself with
+        the inset, so the inset was doing double duty and at inset 34 the toast's bottom edge
         and the bar's top edge both landed on 90px. The three terms have three
         different owners — the toast's own gutter, the bar it must clear, and
         the device band the bar itself sits above — so none of them substitutes

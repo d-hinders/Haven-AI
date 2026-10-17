@@ -114,12 +114,13 @@ import {
  * Pixel/iPhone actually has.
  */
 
-// The toggle is `lg:hidden`. Three widths: the narrowest phone we support, the
-// width the visual baseline and the design evidence render at, and the last
-// pixel below the `lg` breakpoint where a regression would most plausibly
+// The toggle is `lg:hidden`. Four widths: the narrowest phone we support, the
+// width the visual baseline and the design evidence render at, a tablet (768,
+// where #4058's `max-w-md` cap and centring first bite), and the last pixel
+// below the `lg` breakpoint where a regression would most plausibly
 // reappear. (`mobile-nav-layering.mobile.spec.ts` already proves the toggle
 // vanishes AT 1024px.)
-const WIDTHS = [320, 390, 1023]
+const WIDTHS = [320, 390, 768, 1023]
 
 const COMFORTABLE_TAP_TARGET_PX = 44
 /**

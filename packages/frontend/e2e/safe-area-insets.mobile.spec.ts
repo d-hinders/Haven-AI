@@ -515,8 +515,8 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     // #2731 added the tab bar to this offset, and all three terms ADD. (Since
     // #4058 the bar floats on `max(12px, inset)`, which is the inset here.) An
     // earlier revision of this line read `max(16, inset) + bar`, which is what
-    // the CSS said at the time and was wrong in the same way: the bar already
-    // pads itself with the inset, so folding the inset into a `max()` with the
+    // the CSS said at the time and was wrong in the same way: the (then
+    // edge-to-edge) bar padded itself with the inset, so folding the inset into a `max()` with the
     // gutter collapsed the gap between toast and bar to ZERO at inset 34 —
     // both edges landed on 90px. Three owners, three terms.
     expect(toast.bottom, 'the toast region must clear the tab bar AND --v2-safe-bottom').toBe(

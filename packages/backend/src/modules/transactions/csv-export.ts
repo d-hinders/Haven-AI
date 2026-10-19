@@ -137,7 +137,8 @@ export function transactionCsvRow(
     agent_name: tx.agentName ?? '',
     // #4099 (owner decision, 2026-10-19): the app's words, not the raw
     // enum — "You", the agent's name, or "Unknown"; empty on inbound rows,
-    // which carry no initiator record.
+    // which carry no initiator record — except a delegate sweep, which is
+    // agent-attributed and carries its agent's name.
     initiator: csvInitiator(tx),
     account_address: tx.accountAddress,
     // #3127: the file reports in fixed SEK (see the route); the user's
@@ -153,7 +154,8 @@ export function transactionCsvRow(
 }
 
 /**
- * The `initiator` cell (#4099): the same words the app shows. `'human'` is a
+ * The `initiator` cell (#4099): the same words the app shows. Empty when the
+ * row has no initiator record (inbound rows, bar an agent's delegate sweep). `'human'` is a
  * recorded owner send; `'unknown'` an outbound row with no agent and no
  * record, which includes every owner send made before the record existed.
  * An agent-attributed row always carries its agent's name (both attribution

@@ -1915,7 +1915,8 @@ last-verified: "2026-10-19"
 > **Re-verified (#4099, 2026-10-19 — the CSV `initiator` column's words):**
 > this doc is coupled through `modules/transactions/csv-export.ts`. The
 > server CSV's `initiator` cell now carries the app's words — `You` / the
-> agent's name / `Unknown`, empty on inbound rows — instead of the raw
+> agent's name / `Unknown`, empty on inbound rows except an agent's
+> delegate sweep — instead of the raw
 > `human` / `agent` / `unknown` enum (owner decision, 2026-10-19). Column
 > set and order are unchanged; the VALUES change for anyone reading
 > `GET /transactions/export.csv`, which the dashboard downloads. No local

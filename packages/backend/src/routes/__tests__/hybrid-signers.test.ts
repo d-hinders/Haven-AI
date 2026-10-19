@@ -581,9 +581,9 @@ describe('owner-initiated send (#1083)', () => {
     expectMatchesSpec('POST', '/accounts/hybrid/{address}/transfers/submit', res.json())
   })
 
-  // #4099 characterization (written before the record-at-submit change): what
-  // reaches the bundler is exactly the op and signature the owner signed —
-  // recording the send must not change a byte of it.
+  // #4099 characterization (passes against the pre-record route too): what
+  // reaches the bundler is the op the owner signed, unchanged, and the
+  // signature verbatim — recording the send must not alter either.
   it('submit hands submitCall the signed op and signature unchanged', async () => {
     ownedAccount({ passkeys: [PK1] })
     mockPrepared()

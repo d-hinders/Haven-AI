@@ -17,6 +17,9 @@
  * - `tx_hash` is stored and compared lowercase.
  * - The insert is idempotent on (chain_id, tx_hash, account_id) — a retried
  *   record is a no-op, never a second row.
+ * - The insert joins through the account the user owns (this directory's
+ *   README, rule 3): a `userId` that does not own `accountId` writes nothing
+ *   (`cross-tenant-writes.test.ts`), whatever the route checked first.
  */
 import pool from '../../db.js'
 import type { Executor } from '../transaction.js'
@@ -36,7 +39,9 @@ export interface OwnerTransferRecord {
 
 export const RECORD_OWNER_TRANSFER_SQL = `INSERT INTO owner_transfers
        (user_id, account_id, chain_id, tx_hash, user_op_hash, token_address, to_address, amount_raw)
-     VALUES ($1, $2, $3, LOWER($4), LOWER($5), LOWER($6), LOWER($7), $8)
+     SELECT sa.user_id, sa.id, $3, LOWER($4), LOWER($5), LOWER($6), LOWER($7), $8
+       FROM smart_accounts sa
+      WHERE sa.id = $2 AND sa.user_id = $1
      ON CONFLICT (chain_id, tx_hash, account_id) DO NOTHING`
 
 export async function recordOwnerTransfer(

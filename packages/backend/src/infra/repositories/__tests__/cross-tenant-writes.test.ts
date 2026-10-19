@@ -19,6 +19,7 @@ import db from '../../../db.js'
 import { assertWorkerSchemaAtHead, describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import { deleteAccountForUser, renameAccountForUser, setDefaultAccountForUser } from '../smart-accounts.js'
 import { replaceAgentLabels } from '../agent-labels.js'
+import { recordOwnerTransfer } from '../owner-transfers.js'
 
 let seq = 0
 async function seedUser(accountAddress: string | null = null): Promise<string> {
@@ -171,5 +172,31 @@ describeDb('cross-tenant repository writes are silent no-ops (#3227)', () => {
       [agent],
     )
     expect(rows.map((r) => r.name)).toEqual(['victim-label'])
+  })
+
+  it("recordOwnerTransfer (#4099): an attacker cannot record a send on the victim's account", async () => {
+    const victim = await seedUser()
+    const attacker = await seedUser()
+    const account = await seedAccount(victim, 'c1', true)
+    const record = (userId: string) =>
+      recordOwnerTransfer({
+        userId,
+        accountId: account,
+        chainId: 84532,
+        txHash: '0x' + 'ab'.repeat(32),
+        userOpHash: null,
+        tokenAddress: '0x' + 'cd'.repeat(20),
+        toAddress: '0x' + 'ef'.repeat(20),
+        amountRaw: '1',
+      })
+
+    await record(attacker)
+    const none = await db.query(`SELECT 1 FROM owner_transfers WHERE account_id = $1`, [account])
+    expect(none.rowCount).toBe(0)
+
+    // The owner's own record still lands — the scoping is not a blanket refusal.
+    await record(victim)
+    const mine = await db.query<{ user_id: string }>(`SELECT user_id FROM owner_transfers WHERE account_id = $1`, [account])
+    expect(mine.rows.map((r) => r.user_id)).toEqual([victim])
   })
 })

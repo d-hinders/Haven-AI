@@ -260,7 +260,11 @@ export interface DashboardActivityGroup {
   source: string | null
   x402ResourceUrl: string | null
   to: string
-  /** Contact or receipt-merchant name for the counterparty, when one exists. */
+  /**
+   * Contact or receipt-merchant name for the counterparty, else the name of
+   * the user's own account an outbound transfer went to (#4099); null
+   * otherwise, and always null on deposits.
+   */
   merchantName: string | null
   activityType: string | null
   direction: 'in' | 'out'

@@ -60,8 +60,11 @@ const HOSTED = (name: string) => ({
  * the payment header names the same tool again, hash prefilled. The two
  * other #4061 arms (the outcome report's and the settle/complete mapping)
  * ride existing sites through `evidenceHandoff` / `settlementEvidenceHandoff`.
+ * #4061 review round 2 adds ONE: the same tool's status-unavailable answer —
+ * the agent passed `payment_header` but the payment could not be read, so
+ * nothing was posted and the same call is named again.
  */
-export const EMISSION_SITE_COUNT = 32
+export const EMISSION_SITE_COUNT = 33
 /**
  * Fixtures for those sites: the held-hash site has two branches, the three
  * null-id sites share one helper, the report-outcome accepted site has two
@@ -79,9 +82,10 @@ export const EMISSION_SITE_COUNT = 32
  * #3774 adds five (the submit follow-up's MCP-tool completion, plain-HTTP
  * retry, unreadable-flow, direct done, and status-read arms), one each.
  * #4061 adds two (the missing-proof-header arms: the evidence tool's own new
- * site, and the outcome report's folded-evidence branch), one each.
+ * site, and the outcome report's folded-evidence branch), one each, and
+ * review round 2 one more (the status-unavailable answer).
  */
-export const EMISSION_FIXTURE_COUNT = 42
+export const EMISSION_FIXTURE_COUNT = 43
 
 export const EMISSION_SITES = [
   { site: 'catalog-purchase.ts prepare erc7710', action: AgentPaymentNextAction.SignAndSubmitPayment, tool: 'haven_sign', args: { payment_id: 'pay_1' }, expect: { ...SIGNER('haven_sign'), next_arguments: { payment_id: 'pay_1' } } },
@@ -156,6 +160,7 @@ export const EMISSION_SITES = [
   // error_code settlement_proof_header_missing) names the evidence tool again,
   // payment_id + hash prefilled; the agent adds its own payment_header.
   { site: 'paid-mcp-completion.ts report settlement evidence: proof header missing (re-call adding payment_header)', action: AgentPaymentNextAction.RetryWithExplicitContext, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1', settlement_tx_hash: `0x${'be'.repeat(32)}` }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1', settlement_tx_hash: `0x${'be'.repeat(32)}` } } },
+  { site: 'paid-mcp-completion.ts report settlement evidence: status unreadable with payment_header (nothing posted, call again)', action: AgentPaymentNextAction.RetryWithExplicitContext, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1', settlement_tx_hash: `0x${'be'.repeat(32)}` }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1', settlement_tx_hash: `0x${'be'.repeat(32)}` } } },
   { site: 'plain-http-x402.ts report outcome accepted: folded evidence missing the proof header (re-report adding payment_header)', action: AgentPaymentNextAction.None, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1', settlement_tx_hash: `0x${'be'.repeat(32)}` }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1', settlement_tx_hash: `0x${'be'.repeat(32)}` } } },
 ] as const
 

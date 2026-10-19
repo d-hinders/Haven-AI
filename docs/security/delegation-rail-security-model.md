@@ -3319,7 +3319,9 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > transfer: the `Transfer` immediately after its `AuthorizationUsed`, which
 > is FiatToken v2's emit order, pinned against a live Base Sepolia receipt.
 > Before this, a transaction settling two of a delegate's authorizations
-> could lend one nonce the other's transfer. The hosted tools also forward
+> could lend one nonce the other's transfer. The pairing is FiatToken-specific
+> (`AuthorizationUsed` immediately before its own `Transfer`); a token with
+> another emit order fails closed, refused rather than verified. The hosted tools also forward
 > an agent's header only on the eip3009 settlement branch, which never
 > stores it. And the sibling scan is scoped to the same delegate.
 >

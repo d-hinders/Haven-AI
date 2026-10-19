@@ -1091,29 +1091,42 @@ export function classifySettlementEvidenceReport(
 }
 
 /**
- * #4061 review (nit 3): the agent's `payment_header`, when — and only when —
- * the report is the eip3009 merchant-settlement report it proves: the payment
- * is eip3009, funded, and the reported hash is not its funding hash. Any
- * other shape answers `undefined` (nothing forwarded), so the header can
- * never reach the evidence attach path and overwrite a stored one. A failed
- * status read also answers `undefined`.
+ * #4061 review: what to do with the agent's `payment_header`.
+ *
+ * - `forward` — the report is the eip3009 merchant-settlement report it
+ *   proves: the payment is eip3009, funded, and the reported hash is not its
+ *   funding hash. That backend branch reads the header and never stores it.
+ * - `drop` — any other shape (erc7710, the funding hash itself), or a status
+ *   read the backend REFUSED (a 4xx: a foreign or unknown payment — the
+ *   report gets the same answer). The header would only reach the evidence
+ *   attach path and overwrite a stored one, so it is not sent.
+ * - `unavailable` — the status read failed transiently (5xx, transport,
+ *   timeout). The handler posts NOTHING: posting without the header would
+ *   earn a certain missing-header refusal whose guidance ("add
+ *   payment_header") is false for an agent that passed one — a loop.
  */
+type ProofHeaderDecision =
+  | { kind: 'forward'; paymentHeader: string }
+  | { kind: 'drop' }
+  | { kind: 'unavailable' }
+
 async function settlementProofHeaderFor(
   haven: HavenClient,
   paymentId: string,
   settlementTxHash: string,
   paymentHeader: string,
-): Promise<string | undefined> {
+): Promise<ProofHeaderDecision> {
   let status: Awaited<ReturnType<HavenClient['getPaymentStatus']>>
   try {
     status = await haven.getPaymentStatus(paymentId)
-  } catch {
-    return undefined
+  } catch (err) {
+    const code = err instanceof HavenApiError ? err.statusCode : undefined
+    return code !== undefined && code >= 400 && code < 500 ? { kind: 'drop' } : { kind: 'unavailable' }
   }
   const funding = status.txHash
   return status.settlementScheme === 'eip3009' && !!funding && funding.toLowerCase() !== settlementTxHash.toLowerCase()
-    ? paymentHeader
-    : undefined
+    ? { kind: 'forward', paymentHeader }
+    : { kind: 'drop' }
 }
 
 /**
@@ -1654,14 +1667,35 @@ export function createPaidMcpCompletionHandlers(
         // erc7710 settlement, or the funding hash itself — the report goes
         // through the attach path, which would store the header over the one
         // Haven or the SDK recorded; an agent-chosen value never gets there.
-        // Unknown status (the read failed) forwards nothing, same reason.
-        const proofHeader = args.payment_header
+        // #4061 review round 2: a status read that failed TRANSIENTLY posts
+        // nothing at all — see `settlementProofHeaderFor`.
+        const decision: ProofHeaderDecision = args.payment_header
           ? await settlementProofHeaderFor(haven, args.payment_id, args.settlement_tx_hash, args.payment_header)
-          : undefined
+          : { kind: 'drop' }
+        if (decision.kind === 'unavailable') {
+          return {
+            payment_id: args.payment_id,
+            settled: false,
+            code: 'SETTLEMENT_PENDING',
+            retryable: true,
+            settlement_tx_hash: args.settlement_tx_hash,
+            ...buildAgentGuidance({
+              nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+              nextTool: 'haven_report_settlement_evidence',
+              nextArguments: { payment_id: args.payment_id, settlement_tx_hash: args.settlement_tx_hash },
+              safeToContinue: true,
+              reason:
+                'Nothing was reported yet: Haven could not read this payment just now, and it reads the ' +
+                'payment before it forwards your payment_header. Call next_tool again shortly with ' +
+                'next_arguments plus the same payment_header you passed this time.',
+              summary: { payment_id: args.payment_id, status: 'unknown' },
+            }),
+          }
+        }
         const outcome = await haven.reportSettlementEvidence(
           args.payment_id,
           args.settlement_tx_hash,
-          proofHeader ? { paymentHeader: proofHeader } : {},
+          decision.kind === 'forward' ? { paymentHeader: decision.paymentHeader } : {},
         )
         if (outcome.outcome === 'confirmed') {
           return classifySettlementEvidenceReport(args.payment_id, args.settlement_tx_hash, outcome)

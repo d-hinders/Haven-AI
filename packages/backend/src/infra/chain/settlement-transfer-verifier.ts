@@ -190,34 +190,25 @@ function redeemedDelegationHashes(
 }
 
 /**
- * #4061 review: the Transfer an `AuthorizationUsed` at `logs[i]` belongs to —
- * the NEXT log, a `Transfer` from the same token contract (its `from`/`to`/
- * `value` are then held to checks 3–6 like any candidate). FiatToken v2 emits exactly that pair, in that order, for every
- * `transferWithAuthorization` / `receiveWithAuthorization`. When the receipt
- * carries log indices, the two must also be consecutive by index. `null` when
- * the next log is anything else: the authorization's transfer is then not
- * identifiable, and nothing else in the receipt may stand in for it.
+ * #4061 review: the log an `AuthorizationUsed` at `logs[i]` is paired with —
+ * the NEXT log in the receipt, consecutive by log index when the receipt
+ * carries indices. FiatToken v2 emits an authorization's `AuthorizationUsed`
+ * immediately before its own `Transfer`, for every `transferWithAuthorization`
+ * / `receiveWithAuthorization`. Position is the ONLY thing decided here: that
+ * the paired log is this token's `Transfer` of the right parties and amount is
+ * checks 3–6, which then read nothing else. `null` when there is no such next
+ * log — the authorization's transfer is not identifiable, and nothing else in
+ * the receipt may stand in for it.
  */
-function pairedTransferLog(
-  logs: readonly ethers.Log[],
-  i: number,
-  tokenLower: string,
-): ethers.Log | null {
+function pairedTransferLog(logs: readonly ethers.Log[], i: number): ethers.Log | null {
   const used = logs[i]
   const next = logs[i + 1]
-  if (!used || !next || next.address.toLowerCase() !== tokenLower) return null
+  if (!used || !next) return null
   const usedIndex = (used as { index?: unknown }).index
   const nextIndex = (next as { index?: unknown }).index
   if (typeof usedIndex === 'number' && typeof nextIndex === 'number' && nextIndex !== usedIndex + 1) {
     return null
   }
-  let parsed: ethers.LogDescription | null = null
-  try {
-    parsed = ERC20_TRANSFER_IFACE.parseLog({ topics: [...next.topics], data: next.data })
-  } catch {
-    return null
-  }
-  if (parsed?.name !== 'Transfer') return null
   return next
 }
 
@@ -414,7 +405,7 @@ export async function verifySettlementTransferTx(
       const burnedNonce = (parsed.args.nonce as string).toLowerCase()
       if (burnedNonce === nonceLower) {
         nonceBound = true
-        pairedTransfer = pairedTransferLog(logs, i, tokenLower)
+        pairedTransfer = pairedTransferLog(logs, i)
         break
       }
       burned.push(burnedNonce)
@@ -423,8 +414,8 @@ export async function verifySettlementTransferTx(
       return {
         outcome: 'mismatch',
         reason:
-          `Transaction ${txHash} burned the reported authorization's nonce, but the log after it is ` +
-          `not a ${expected.tokenAddress} Transfer — that authorization's transfer cannot be identified`,
+          `Transaction ${txHash} burned the reported authorization's nonce, but no log immediately ` +
+          `follows it — that authorization's transfer cannot be identified`,
       }
     }
     if (!nonceBound) {

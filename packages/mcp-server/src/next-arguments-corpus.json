@@ -77,6 +77,14 @@
       }
     },
     {
+      "site": "paid-mcp-completion.ts report settlement evidence: status unreadable with payment_header (nothing posted, call again)",
+      "tool": "haven_report_settlement_evidence",
+      "arguments": {
+        "payment_id": "pay_1",
+        "settlement_tx_hash": "0xbebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebe"
+      }
+    },
+    {
       "site": "paid-mcp-completion.ts settle funding pending",
       "tool": "haven_get_payment_status",
       "arguments": {

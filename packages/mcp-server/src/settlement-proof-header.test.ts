@@ -146,7 +146,11 @@ function stubSettlementAnswer(
       }
       return respond(202, { evidence: { id: 'ev_1' } })
     }
-    if (path.endsWith('/status')) return status ? respond(200, status) : respond(503, { error: 'down' })
+    if (path.endsWith('/status')) {
+      if (!status) return respond(503, { error: 'down' })
+      if (status.__status404) return respond(404, { error: 'Payment not found' })
+      return respond(200, status)
+    }
     return respond(404, { error: 'unexpected route' })
   })
 }
@@ -432,15 +436,40 @@ describe('#4061 review: payment_header is forwarded only on the report it proves
     expect(proofPosts()).toHaveLength(0)
   })
 
-  it('haven_report_settlement_evidence: an unreadable status forwards nothing', async () => {
+  it('haven_report_settlement_evidence: a status read that fails transiently posts NOTHING and says to retry with the same header', async () => {
+    // Posting without the header would earn a certain missing-header refusal
+    // telling an agent that DID pass one to "add payment_header" — a loop.
     stubSettlementAnswer(BACKEND_RULE, null)
-    await handlers().haven_report_settlement_evidence({
-      payment_id: 'pay_x402',
-      settlement_tx_hash: MERCHANT_TX,
-      payment_header: PAYMENT_HEADER,
-    })
+    const result = ok<Record<string, any>>(
+      await handlers().haven_report_settlement_evidence({
+        payment_id: 'pay_x402',
+        settlement_tx_hash: MERCHANT_TX,
+        payment_header: PAYMENT_HEADER,
+      }),
+    )
+    expect(recordedCalls().some((c) => c.url.endsWith('/machine-payments/evidence'))).toBe(false)
+    expect(result.data).toMatchObject({ settled: false, code: 'SETTLEMENT_PENDING', retryable: true })
+    expect(result.data.next_action).toBe('retry_with_explicit_context')
+    expect(result.data.next_tool).toBe('mcp__haven__haven_report_settlement_evidence')
+    expect(result.data.next_arguments).toEqual({ payment_id: 'pay_x402', settlement_tx_hash: MERCHANT_TX })
+    expect(result.data.reason).toContain('the same payment_header you passed')
+    expect(result.data.reason).not.toMatch(/carried no payment_header/)
+  })
+
+  it('haven_report_settlement_evidence: a status read the backend refuses (404) drops the header and reports as before', async () => {
+    // A foreign/unknown payment is not transient: the report gets the same
+    // 404, classified as it always was — the header is just never sent.
+    stubSettlementAnswer({ status: 404, body: { error: 'Payment not found' } }, { __status404: true })
+    const result = ok<Record<string, any>>(
+      await handlers().haven_report_settlement_evidence({
+        payment_id: 'pay_x402',
+        settlement_tx_hash: MERCHANT_TX,
+        payment_header: PAYMENT_HEADER,
+      }),
+    )
     expect(settlementPost()).toBeDefined()
     expect(proofPosts()).toHaveLength(0)
+    expect(result.data.code).toBe('DELIVERED_UNSETTLED')
   })
 
   it('haven_report_x402_outcome: folded evidence naming the funding anchor never gets the header', async () => {

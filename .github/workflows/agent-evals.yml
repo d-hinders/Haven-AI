@@ -115,11 +115,12 @@ jobs:
           npm run build -w packages/signer
           npm run build -w packages/mcp-server
 
-      # Subset only: boot the hosted MCP FROM THE PR CHECKOUT, relaying to
+      # Subset only: boot the hosted MCP FROM THIS CHECKOUT (source enum stays
+      # `pr-checkout` internally), relaying to
       # the dev backend (`packages/mcp-server/src/boot.ts`: the server runs
       # locally against HAVEN_API_URL). The custody guard is still on: this
       # process env carries no delegate key, ever.
-      - name: Boot the PR-checkout hosted MCP (subset)
+      - name: Boot the hosted MCP from this checkout (subset)
         if: steps.slice.outputs.mode == 'subset'
         env:
           QA_HAVEN_API_URL: ${{ vars.AGENT_EVALS_HAVEN_API_URL || secrets.AGENT_EVALS_HAVEN_API_URL }}
@@ -128,7 +129,7 @@ jobs:
           READY=0
           HAVEN_API_URL="$QA_HAVEN_API_URL" PORT=8788 node packages/mcp-server/dist/cli.js > mcp-server.log 2>&1 &
           for i in $(seq 1 30); do curl -s -o /dev/null -X POST 'http://127.0.0.1:8788/v1' -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"ping"}' && READY=1 && break; sleep 1; done
-          if [ "$READY" = '1' ]; then echo "hosted MCP (commit $(git rev-parse HEAD)) is listening on :8788 → dev backend"; else echo "::error::PR-checkout hosted MCP did not come up in 30s"; cat mcp-server.log; exit 1; fi
+          if [ "$READY" = '1' ]; then echo "hosted MCP (commit $(git rev-parse HEAD)) is listening on :8788 → dev backend"; else echo "::error::the checkout-built hosted MCP did not come up in 30s"; cat mcp-server.log; exit 1; fi
 
       # The lane's own eval identity, written from the PROTECTED environment
       # secrets at runtime and never echoed. The delegate key NEVER reaches

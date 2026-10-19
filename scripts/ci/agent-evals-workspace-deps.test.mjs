@@ -126,9 +126,11 @@ test('agent-evals is triggered by workflow_dispatch only', () => {
   const on = live.findIndex((line) => /^on:\s*$/.test(line))
   assert.notEqual(on, -1, 'agent-evals.yml has no top-level `on:` block — update this guard')
   const end = live.findIndex((line, i) => i > on && /^\S/.test(line))
-  const triggers = live
-    .slice(on + 1, end === -1 ? undefined : end)
-    .map((line) => line.match(/^ {2}([a-z_]+):/)?.[1])
-    .filter(Boolean)
+  const block = live.slice(on + 1, end === -1 ? undefined : end).filter((line) => line.trim() !== '')
+  // Trigger keys sit at the block's first indentation level, quoted or not.
+  const indent = block.length ? block[0].match(/^\s*/)[0].length : 0
+  const triggers = block
+    .filter((line) => line.match(/^\s*/)[0].length === indent)
+    .map((line) => line.trim().match(/^['"]?([a-z_]+)['"]?:/)?.[1] ?? line.trim())
   assert.deepEqual(triggers, ['workflow_dispatch'])
 })

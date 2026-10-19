@@ -61,12 +61,12 @@ describe('renderMarkdownSummary', () => {
     expect(md).toContain('41.0s')
   })
 
-  it('reports total cost, model and the hosted MCP commit (PR head, not dev)', () => {
+  it('reports total cost, model and the hosted MCP commit (the dispatched commit, not the deployed stack)', () => {
     const md = renderMarkdownSummary(report())
     expect(md).toContain('$0.2137')
     expect(md).toContain('claude-sonnet-4-5')
     expect(md).toContain('abc1234')
-    expect(md).toContain('not dev')
+    expect(md).toContain('the dispatched commit')
     // The standing caveat: backend error bodies stay dev-deployed.
     expect(md).toContain('dev-deployed')
   })

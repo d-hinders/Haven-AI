@@ -174,10 +174,19 @@ export interface LogReader {
 export const GET_LOGS_MAX_RANGE = 10
 
 /**
+ * Blocks at the tip the probe re-reads on every poll. A load-balanced
+ * provider can answer `getBlockNumber` from a node ahead of the one answering
+ * `getLogs`, so a block read right at the tip can come back empty before its
+ * logs are indexed; re-reading the last few heals that.
+ */
+export const GET_LOGS_TIP_RESCAN = 3
+
+/**
  * Prove an exact USDC `Transfer(from -> to, amount)` was emitted at or after
  * `fromBlock`, read from the observer's logs (#3505), in windows of at most
- * {@link GET_LOGS_MAX_RANGE} blocks; each poll scans only blocks it has not
- * scanned yet. For settlements whose tx
+ * {@link GET_LOGS_MAX_RANGE} blocks. Each poll scans the blocks it has not
+ * scanned yet plus the last {@link GET_LOGS_TIP_RESCAN} below them; a failed
+ * window is retried on the next poll, so no block is skipped. For settlements whose tx
  * hash the merchant does not hand back (an erc7710 redemption is submitted by
  * the merchant's facilitator), the chain is still the evidence: a throwaway
  * treasury has exactly one reason to pay this payee. Polled to a deadline for
@@ -196,28 +205,37 @@ export async function proveUsdcTransferSince(
   const pad = (address: string) => ethers.zeroPadValue(address, 32)
   let last = 'no read yet'
   let next = fromBlock
-  let near = 0
+  const near = new Set<string>()
   for (;;) {
+    let head: number | undefined
     try {
-      const head = await provider.getBlockNumber()
-      while (next <= head) {
-        const end = Math.min(next + GET_LOGS_MAX_RANGE - 1, head)
-        const logs = await provider.getLogs({
-          address: SEPOLIA_USDC,
-          topics: [TRANSFER_TOPIC, pad(expected.from), pad(expected.to)],
-          fromBlock: next,
-          toBlock: end,
-        })
-        const hit = logs.find((log) => BigInt(log.data) === expected.amount)
-        if (hit) return { ok: true, txHash: hit.transactionHash }
-        near += logs.length
-        next = end + 1
-      }
-      last = near
-        ? `${near} Transfer(s) from that payer to that payee, none of exactly ${expected.amount}`
-        : 'no Transfer from that payer to that payee'
+      head = await provider.getBlockNumber()
     } catch (err) {
-      last = `getLogs failed: ${(err as Error)?.message ?? err}`
+      last = `getBlockNumber failed: ${(err as Error)?.message ?? err}`
+    }
+    if (head !== undefined) {
+      try {
+        let start = Math.max(fromBlock, next - GET_LOGS_TIP_RESCAN)
+        while (start <= head && Date.now() < deadline) {
+          const end = Math.min(start + GET_LOGS_MAX_RANGE - 1, head)
+          const logs = await provider.getLogs({
+            address: SEPOLIA_USDC,
+            topics: [TRANSFER_TOPIC, pad(expected.from), pad(expected.to)],
+            fromBlock: start,
+            toBlock: end,
+          })
+          const hit = logs.find((log) => BigInt(log.data) === expected.amount)
+          if (hit) return { ok: true, txHash: hit.transactionHash }
+          for (const log of logs) near.add(log.transactionHash)
+          next = Math.max(next, end + 1)
+          start = end + 1
+        }
+        last = near.size
+          ? `${near.size} Transfer(s) from that payer to that payee, none of exactly ${expected.amount}`
+          : 'no Transfer from that payer to that payee'
+      } catch (err) {
+        last = `getLogs failed: ${(err as Error)?.message ?? err}`
+      }
     }
     if (Date.now() >= deadline) {
       return {

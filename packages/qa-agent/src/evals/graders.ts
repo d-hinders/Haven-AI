@@ -206,7 +206,9 @@ export async function paymentStatusSettled(log: AgentRunLog, ctx: GraderContext)
   // Check every id the log produced; ANY unsettled one fails the trial (a
   // retry that left a stranded pending payment is exactly what these tasks
   // exist to catch).
-  const results: Array<{ id: string; ok: true; status: string } | { id: string; ok: false; error: string }> = await Promise.all(
+  const results: Array<
+    { id: string; ok: true; status: string; amountAtomic?: string } | { id: string; ok: false; error: string }
+  > = await Promise.all(
     [...new Set(ids)].map(async (id) => ({ id, ...(await probe(id)) })),
   )
   const unconfirmed = results.filter((r) => !r.ok)
@@ -223,6 +225,18 @@ export async function paymentStatusSettled(log: AgentRunLog, ctx: GraderContext)
     return fail(
       `payment(s) not settled: ${unsettledStatuses.map((r) => `${r.id} is ${r.status}`).join(', ')}`,
     )
+  }
+  // #4091: when the probe read EVERY confirmed payment's amount, the passing
+  // result carries their sum — the trial's actual spend. The consistency
+  // guard deducts THIS (the merchant's real price) instead of the task's
+  // resolved amount, which is a fraction of the budget nobody spent. If any
+  // amount is missing the field is absent and the guard falls back to
+  // waiting for any decrease — it never invents a spend size it cannot see.
+  const confirmed = results.filter((r): r is { id: string; ok: true; status: string; amountAtomic?: string } => r.ok)
+  const amounts = confirmed.map((r) => r.amountAtomic)
+  if (amounts.every((a): a is string => a !== undefined)) {
+    const total = amounts.reduce((acc, a) => acc + BigInt(a), 0n)
+    return { ...pass(`${results.length} payment(s) confirmed settled by the backend: ${results.map((r) => r.id).join(', ')}`), settledSpendAtomic: total.toString() }
   }
   return pass(`${results.length} payment(s) confirmed settled by the backend: ${results.map((r) => r.id).join(', ')}`)
 }

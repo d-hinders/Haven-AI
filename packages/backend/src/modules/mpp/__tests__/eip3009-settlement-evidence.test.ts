@@ -776,6 +776,9 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
       expect(answered.statusCode).toBe(409)
       expect((answered.body as { reason?: string }).reason).toMatch(/no X-PAYMENT payment header/)
       expect((answered.body as { reason?: string }).reason).toMatch(/payment header that was sent to the merchant/)
+      // #4061 CHARACTERIZATION (pre-fix): the refusal carries no machine code,
+      // so a client can only tell it apart by matching the sentence.
+      expect(answered.body).not.toHaveProperty('error_code')
       expect(await recordedHash(a.id)).toBeNull()
     })
 

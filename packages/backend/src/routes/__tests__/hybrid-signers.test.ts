@@ -491,7 +491,9 @@ describe('owner-initiated send (#1083)', () => {
     mockLoadOwner.mockResolvedValue({ accountId: 'account-1', config, singleSignerWaiverAt: null })
   }
 
-  function mockPrepared(submitCall = vi.fn().mockResolvedValue({ txHash: '0x' + 'ff'.repeat(32) })) {
+  function mockPrepared(
+    submitCall = vi.fn().mockResolvedValue({ txHash: '0x' + 'ff'.repeat(32), userOpHash: '0x' + 'dd'.repeat(32) }),
+  ) {
     mockTreasury.mockResolvedValueOnce({
       treasuryAddress: ACCOUNT,
       prepareCall: vi.fn().mockResolvedValue({
@@ -616,7 +618,7 @@ describe('owner-initiated send (#1083)', () => {
     const inserts = mockQuery.mock.calls.filter(isRecordInsert)
     expect(inserts).toHaveLength(1)
     expect(inserts[0][1]).toEqual([
-      'user-1', 'account-1', 84532, '0x' + 'ff'.repeat(32), null, TOKEN, TO, '250000',
+      'user-1', 'account-1', 84532, '0x' + 'ff'.repeat(32), '0x' + 'dd'.repeat(32), TOKEN, TO, '250000',
     ])
   })
 

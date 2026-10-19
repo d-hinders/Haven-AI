@@ -198,7 +198,7 @@ export async function submitTransfer(
     return {
       ok: true,
       txHash: result.txHash,
-      userOpHash: result.userOpHash ?? null,
+      userOpHash: result.userOpHash,
       transfer: { token: encoded.token, to: encoded.to, amount: encoded.amount },
     }
   } catch (err) {

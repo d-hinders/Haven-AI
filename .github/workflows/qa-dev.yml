@@ -65,7 +65,8 @@ name: QA — money-flow (dev)
 #
 # This run is the promotion signal that dev-gate.yml's freshness gate reads before
 # allowing dev → main. On failure it upserts the ONE standing `qa-failure` issue
-# (#2767, scripts/ci/qa-failure-issue.mjs).
+# (#2767, scripts/ci/qa-failure-issue.mjs); on a full-coverage green of dev it
+# closes that issue (#4069).
 on:
   workflow_dispatch:
     inputs:

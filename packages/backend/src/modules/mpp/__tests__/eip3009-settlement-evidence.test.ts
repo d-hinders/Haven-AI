@@ -719,7 +719,7 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
     // payer and signature checks pass; the nonce it names is A's own derived
     // nonce, and the transaction (A's settlement) really burned it — so the
     // burned-nonce check passes too, against B.
-    it('a header lifted from same-shaped sibling A, reported with A’s settlement against B (CHARACTERIZATION, pre-fix: recorded)', async () => {
+    it('a header lifted from same-shaped sibling A, reported with A’s settlement against B, is refused before the chain is read', async () => {
       const { agentId, userId } = await seedAgent()
       const a = await seedFunded({ agentId, userId })
       const b = await seedFunded({ agentId, userId })
@@ -732,8 +732,15 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
         paymentProofHeader: await derivedSettlementHeader(a.id),
       })
 
-      expect(answered.statusCode).toBe(202)
-      expect(await recordedHash(b.id)).toBe(SETTLE_A)
+      expect(answered.statusCode).toBe(409)
+      expect((answered.body as { reason?: string }).reason).toMatch(/derived nonce of another payment/)
+      // Not the missing-header code: re-reporting this header re-refuses.
+      expect(answered.body).not.toHaveProperty('error_code')
+      expect(getTransactionReceipt).not.toHaveBeenCalled()
+      expect(await recordedHash(b.id)).toBeNull()
+      // A keeps its own settlement: reported with its own header, it records.
+      await report(agentId, a.id, SETTLE_A, await derivedSettlementHeader(a.id))
+      expect(await recordedHash(a.id)).toBe(SETTLE_A)
     })
 
     it('the same hash against A — the payment whose nonce it burned — is recorded, nonce-bound', async () => {

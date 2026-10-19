@@ -311,6 +311,28 @@ export async function observeEip3009MerchantSettlement(
     }
   }
 
+  // #4061: a header LIFTED from a same-agent sibling passes every check
+  // above — same delegate, so the payer and signature are right — and a
+  // transaction that settled the sibling really burned the nonce it names.
+  // That nonce is the SIBLING's derived nonce, which is what gives it away:
+  // a nonce derived from another payment's id was signed for that payment.
+  // Refused before the chain is read. (A non-deriving client's random nonce
+  // cannot be tied to a sibling this way; the burned-nonce check still binds
+  // the record to the header the delegate signed.) Only an agent-reported
+  // proof can be non-derived — the sweep always derives from this payment.
+  if (!nonceProof.nonceDerived) {
+    const siblingIds = await findSiblingX402DelegationPaymentIds(intent.agent_id, intent.id)
+    if (siblingIds.some((id) => deriveX402PaymentNonce(id).toLowerCase() === nonceProof.nonce)) {
+      return {
+        outcome: 'unverified',
+        retryable: false,
+        reason:
+          'The X-PAYMENT header’s authorization nonce is the derived nonce of another payment of ' +
+          'this agent — the header was signed for that payment, not this one',
+      }
+    }
+  }
+
   const merchant = intent.x402_merchant_address ?? intent.merchant_address ?? null
   const confirmedSec = Math.floor(new Date(intent.confirmed_at ?? '').getTime() / 1000)
   if (!merchant || !Number.isFinite(confirmedSec)) {

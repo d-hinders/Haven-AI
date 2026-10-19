@@ -134,30 +134,3 @@ test('agent-evals is triggered by workflow_dispatch only', () => {
     .map((line) => line.trim().match(/^['"]?([a-z_]+)['"]?:/)?.[1] ?? line.trim())
   assert.deepEqual(triggers, ['workflow_dispatch'])
 })
-
-// Each person's subscription token and eval-agent keys live in their OWN
-// protected environment, approved by that person (agent-evals-antonio,
-// 2026-10-19). The job must always declare one, and only from the `choice`
-// input, whose options are all agent-evals environments: a free-text input or
-// a dropped `environment:` line would let a run reach secrets nobody approved.
-test('the evals job declares a protected agent-evals environment chosen from a fixed list', () => {
-  const jobs = live.filter((line) => /^\s{4}runs-on:/.test(line)).length
-  const envLines = live.filter((line) => /^\s{4}environment:/.test(line))
-  assert.ok(jobs > 0, 'agent-evals.yml has no job — update this guard')
-  assert.equal(envLines.length, jobs, 'a job in agent-evals.yml does not declare a protected environment')
-  for (const line of envLines) assert.match(line, /^\s{4}environment: \$\{\{ inputs\.environment \|\| 'agent-evals' \}\}\s*$/)
-  // One run per environment at a time: each holds its own agent and budget.
-  const groups = live.filter((l) => /^\s{6}group:/.test(l))
-  assert.equal(groups.length, jobs, 'a job in agent-evals.yml has no concurrency group')
-  for (const line of groups) {
-    assert.ok(line.includes('${{ inputs.environment'), 'the concurrency group is not per environment')
-  }
-  const input = lineOf(/^\s{6}environment:\s*$/)
-  assert.notEqual(input, -1, 'workflow_dispatch has no `environment` input — update this guard')
-  const end = live.findIndex((line, i) => i > input && /^\s{0,6}\S/.test(line))
-  const block = live.slice(input + 1, end === -1 ? undefined : end)
-  assert.ok(block.some((line) => /^\s*type: choice\s*$/.test(line)), 'the environment input is not a `choice`, so any environment name could be dispatched')
-  const options = block.filter((line) => /^\s*- \S/.test(line)).map((line) => line.trim().slice(2).trim())
-  assert.ok(options.includes('agent-evals'), "the owner's agent-evals environment is not an option")
-  for (const option of options) assert.match(option, /^agent-evals(-[a-z0-9-]+)?$/, `environment option ${option} is not an agent-evals environment`)
-})

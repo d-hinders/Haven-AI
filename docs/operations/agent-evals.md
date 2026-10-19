@@ -299,116 +299,96 @@ wall time per session. The CLI exits non-zero if any task failed any trial.
 
 The second runner lane runs the SAME task files and graders through
 `claude -p` in `--output-format stream-json --verbose` mode, authenticated
-with **a person's own Claude subscription** (the owner's Max 5x by default) via `CLAUDE_CODE_OAUTH_TOKEN` (a
+with the **owner's Max 5x subscription** via `CLAUDE_CODE_OAUTH_TOKEN` (a
 long-lived token from `claude setup-token`). Nothing from the #3958 harness
 is copied: the adapter (`packages/qa-agent/src/evals/claude-code.ts`) parses
 the stream into the same `AgentRunLog` model and reuses the shared refusal
 envelope reader, so every grader applies unmodified.
 
 **Where the credentials live (money-path).** The subscription token and this
-lane's eval-agent keys are secrets of a protected **per-person GitHub
-environment** — `agent-evals` is the owner's, `agent-evals-antonio` is
-Antonio's — whose required reviewer is that person. NEVER repository secrets,
-NEVER in code, fixtures or artifacts. The workflow's `environment` input picks
-one (a `choice`, so nothing else can be dispatched) and every job in
-`.github/workflows/agent-evals.yml` declares it, so each run waits for that
-environment's reviewer before any secret reaches a runner, and spends only that
-person's subscription. Choosing someone else's environment just waits for
-them. A new person gets their own environment (next section), never a shared
-token. The inventory, identical in every environment:
+lane's eval-agent keys are secrets of the protected **`agent-evals` GitHub
+environment** (owner = required reviewer) — NEVER repository secrets, NEVER
+in code, fixtures or artifacts. Every job in `.github/workflows/agent-evals.yml`
+declares that environment, so each run waits
+for the owner's approval before any secret reaches a runner. (Anyone else
+runs the lane on their own plan from their fork, below.) The env
+inventory:
 
 | Name | Kind | What it is |
 |---|---|---|
-| `CLAUDE_CODE_OAUTH_TOKEN` | env secret | that person's subscription token (`claude setup-token`) |
-| `AGENT_EVALS_API_KEY` | env secret | that person's eval agent `sk_agent_...` key (its OWN agent, not the Hermes lane's, not another environment's, and never `QA_DELEGATION_*`) |
-| `AGENT_EVALS_DELEGATE_KEY` | env secret | that person's eval agent's delegate private key |
+| `CLAUDE_CODE_OAUTH_TOKEN` | env secret | the owner's subscription token (`claude setup-token`) |
+| `AGENT_EVALS_API_KEY` | env secret | this lane's eval agent `sk_agent_...` key (its OWN agent, not the Hermes lane's and never `QA_DELEGATION_*`) |
+| `AGENT_EVALS_DELEGATE_KEY` | env secret | this lane's delegate private key |
 | `AGENT_EVALS_HAVEN_API_URL` | var (or secret) | the dev backend URL |
 | `AGENT_EVALS_RECIPIENT` / `AGENT_EVALS_AGENT_ACCOUNT` / `AGENT_EVALS_X402_TARGET` | vars | the graders' address/URL fixtures (same roles as the `QA_EVAL_*` env) |
 | `QA_X402_BINDING_SIGNER` | repo var | the public address the signer verifies x402 bindings against, passed as `HAVEN_X402_BINDING_SIGNER`; the job fails before any session when it is unset |
 
 **Token rotation.** The token does not refresh on its own (reportedly about
-one year). It is stored ONLY as the environment secret above. To rotate: run
-`claude setup-token` on a machine with that person's login, have the repo
-owner update the `CLAUDE_CODE_OAUTH_TOKEN` secret of that environment
-(Settings → Environments → `<environment>`), and delete the old token from the
+one year). It is stored ONLY as the `agent-evals` environment secret above.
+To rotate: run `claude setup-token` on a machine with the owner's login,
+update the `CLAUDE_CODE_OAUTH_TOKEN` environment secret in the GitHub UI
+(Settings → Environments → agent-evals), and delete the old token from the
 Anthropic console. The workflow file references no repository-level secret
 for any of these.
 
-### Adding a person: their own environment, subscription and eval agent
+### Running the lane on your own Claude plan (from your fork)
 
-So that someone other than the owner runs the lane on **their own** Claude
-plan, approved by **themselves**, with their own testnet eval agent. Worked
-example: `agent-evals-antonio` (GitHub `AntonioSaaranen`). This repository is
-a personal-account repository, so **only the owner can create an environment
-or set its secrets and variables** (GitHub's rule, not ours): the person
-produces the values, the owner enters them.
+The `agent-evals` environment above holds the **owner's** token and only the
+owner approves it. Anyone else runs the same workflow **from their own fork**,
+where they own the repository and so create the environment, set its secrets
+and approve their own runs. Nothing is handed to the owner, and nothing they
+do touches the owner's plan, agent or secrets: a fork never receives the
+upstream repository's secrets. Testnet only (Base Sepolia).
 
-1. **Owner: create the environment first, before anyone dispatches it.**
-   Settings → Environments → New environment, named exactly as the workflow
-   option (`agent-evals-antonio`). Protection: **Required reviewers** = the
-   person (and only them); leave **Prevent self-review** OFF, since they
-   approve their own runs; give it the same deployment-branch rule as
-   `agent-evals`, and turn **Allow administrators to bypass** OFF so nobody
-   else (the owner included) can approve a run on their plan. Order matters:
-   GitHub auto-creates a missing environment with NO protection on first
-   use. Also confirm `gh secret list` (repository level) shows none of
-   `CLAUDE_CODE_OAUTH_TOKEN` / `AGENT_EVALS_*`: GitHub falls back from a
-   missing environment secret to a repository secret of the same name, so a
-   repo-level copy would let an unset environment spend someone else's plan
-   or agent. With none, an unset environment stops at the credentials step.
-2. **Person: a Claude token.** On their own machine, logged in to their own
-   Pro/Max plan, run `claude setup-token` and keep the printed token for
-   step 5. Never an `ANTHROPIC_API_KEY`: it would bill the API.
-3. **Person: their own eval agent on the dev backend** (Base Sepolia, never
-   mainnet). Sign up on the dev dashboard with their own passkey; that
-   provisions their smart account. Create an agent from the Connect modal
-   and give it a **Daily** budget (3 USDC, see "Funding and the nightly
-   budget"). Copy the exact connector command the modal shows (it carries
-   the one-time `hv_setup_...` token, `--api <dev backend URL>` and
-   `--ack-local-tools`; without `--api` the connector refuses to run) and run
-   it in a throwaway home so their real Claude Code config is untouched,
-   in a terminal they close afterwards: `export HOME="$(mktemp -d)"`, then
-   the command, adding `--runtime claude-code`. It writes `$HOME/.haven/agents/<agent>/`:
-   `identity.json` holds `api_key` (`sk_agent_...`); `signer.json` holds
-   `delegate_key` and `account_address`. **Then approve the agent** back in
-   the dashboard (one passkey prompt): a Connect-modal agent starts
-   `pending_approval` and has no budget delegation until then, so every
-   payment task would fail.
-4. **Person: fund it.** Circle faucet test USDC on Base Sepolia to the smart
-   account address (no ETH needed: payments are paymaster-sponsored).
-   `qa-balances.yml` tops up only the owner's two eval accounts, so this one
-   is topped up by hand.
-5. **Hand the values to the owner over a one-time encrypted channel** (a
-   password-manager share that expires, or pasted live on a call), never
-   chat, email, an issue or a PR: the Claude token, `api_key`,
-   `delegate_key`, and `account_address` (public). Then delete the throwaway
-   home.
-6. **Owner: enter them** (the `gh` form; the Settings page works too):
+1. **Fork and enable Actions.** Fork `d-hinders/Haven-AI` (default branch
+   `dev` is enough). In the fork's **Actions** tab, enable workflows. Forks of
+   a public repository run on free Actions minutes; scheduled workflows stay
+   off in a fork, and any other workflow can be disabled there from its
+   Actions page.
+2. **Create the environment.** Fork → Settings → Environments → New
+   environment named exactly **`agent-evals`** (the name the workflow
+   declares). Required reviewers: yourself. Prevent self-review: off.
+3. **A Claude token.** On your own machine, logged in to your own Pro/Max
+   plan: `claude setup-token`. Never an `ANTHROPIC_API_KEY`: it would bill
+   the API instead of the plan.
+4. **Your own eval agent on the dev backend.** On the dev dashboard with your
+   own passkey: create an agent from the Connect modal with a **Daily** budget
+   of 3 USDC (see "Funding and the nightly budget"). In a terminal you close
+   afterwards, `export HOME="$(mktemp -d)"`, then run the exact connector
+   command the modal shows (it carries `--setup`, `--api` and
+   `--ack-local-tools`) with `--runtime claude-code` added. **Then approve the
+   agent in the dashboard** (one passkey prompt): a Connect-modal agent starts
+   `pending_approval` and has no budget until then. The connector wrote
+   `$HOME/.haven/agents/<agent>/`; `identity.json` and `signer.json` hold
+   every value step 6 needs.
+5. **Fund it** with Circle faucet test USDC on Base Sepolia to the
+   `account_address`. No ETH: payments are paymaster-sponsored.
+   `qa-balances.yml` does not watch this account, so top it up yourself.
+6. **Fill the environment** (fork → Settings → Environments → `agent-evals`,
+   or `gh ... --repo <you>/Haven-AI --env agent-evals`):
 
-   ```
-   E=agent-evals-antonio
-   gh secret set CLAUDE_CODE_OAUTH_TOKEN  --env "$E"   # paste token
-   gh secret set AGENT_EVALS_API_KEY      --env "$E"   # paste sk_agent_...
-   gh secret set AGENT_EVALS_DELEGATE_KEY --env "$E"   # paste delegate_key
-   gh variable set AGENT_EVALS_AGENT_ACCOUNT --env "$E" --body 0x<their smart account>
-   # Shared fixtures: copy the values agent-evals has (gh variable list --env agent-evals)
-   gh variable set AGENT_EVALS_HAVEN_API_URL --env "$E" --body <same>
-   gh variable set AGENT_EVALS_RECIPIENT     --env "$E" --body <same>
-   gh variable set AGENT_EVALS_X402_TARGET   --env "$E" --body <same>
-   ```
+   | Name | Kind | Value |
+   |---|---|---|
+   | `CLAUDE_CODE_OAUTH_TOKEN` | secret | the token from step 3 |
+   | `AGENT_EVALS_API_KEY` | secret | `api_key` from `identity.json` |
+   | `AGENT_EVALS_DELEGATE_KEY` | secret | `delegate_key` from `signer.json` |
+   | `AGENT_EVALS_HAVEN_API_URL` | variable | `api_url` from `identity.json` |
+   | `AGENT_EVALS_AGENT_ACCOUNT` | variable | `account_address` from `signer.json` |
+   | `QA_X402_BINDING_SIGNER` | variable | `x402_binding_signer` from `signer.json` |
+   | `QA_HOSTED_MCP_URL` | variable | `hosted_mcp_url` from `identity.json` (needed for `full` only) |
+   | `AGENT_EVALS_RECIPIENT` / `AGENT_EVALS_X402_TARGET` | variables | the same values as the Hermes lane's `QA_EVAL_RECIPIENT` / `QA_EVAL_X402_TARGET` |
 
-   (`AGENT_EVALS_HAVEN_API_URL` may be a secret in `agent-evals`; either kind
-   is read.) `QA_X402_BINDING_SIGNER`, `QA_HOSTED_MCP_URL` and
-   `QA_RPC_URL_BASE_SEPOLIA` are repository-level and need nothing.
-7. **Person: run it.** Actions → **Agent evals — Claude Code lane** → Run
-   workflow → branch `dev`, environment `agent-evals-antonio`, suite
-   `subset`, trials `1`. The run shows **Review deployments**; they approve
-   it themselves. Results land in the job summary. The login-check step
-   fails fast with Claude's own reason if the token is wrong.
+   `QA_RPC_URL_BASE_SEPOLIA` is optional (the graders fall back to the public
+   Base Sepolia RPC). Then delete the throwaway home.
+7. **Run it.** Fork → Actions → **Agent evals — Claude Code lane** → Run
+   workflow → branch `dev`, suite `subset`, trials `1`. Approve your own
+   deployment under **Review deployments**. Results land in the job summary;
+   the login-check step fails fast with Claude's own reason if the token is
+   wrong. Before later runs, **Sync fork** so the fork runs current `dev`.
 
-**Removing a person:** they revoke the token in their Claude account settings
-and remove the agent on the dev dashboard (that kills the delegate key
-on-chain); the owner deletes the environment and drops its workflow option.
+**Stopping:** revoke the token in your Claude account, remove the agent on
+the dev dashboard (that kills the delegate key on-chain), and delete the
+fork's environment or the fork.
 
 **The allowlist.** `claude -p` is limited to the Haven MCP tools only —
 visible in the workflow file (`QA_EVAL_CLAUDE_CODE_COMMAND`):
@@ -466,7 +446,7 @@ Every session's `total_cost_usd` (plus wall time and the model the session
 actually ran on) is recorded in `evals-pilot.json.sessions.json` and summed
 into the report (`totalCostUsd`, `model`).
 
-**What a run costs the person whose environment ran it.** `total_cost_usd` is Claude Code's client-side
+**What a run costs the owner.** `total_cost_usd` is Claude Code's client-side
 API-list-price **estimate**, not a charge. With `CLAUDE_CODE_OAUTH_TOKEN`
 (a subscription login) the runs draw from the plan's normal usage limits
 (the 5-hour and weekly windows); the previously announced separate Agent SDK
@@ -490,11 +470,10 @@ pilot run (2026-10-19) died on exactly that before any task ran.
 A CI guard checks both: the build order, and that an exactly pinned CLI
 install runs before the eval step.
 
-**The workflow** (`.github/workflows/agent-evals.yml`) runs **only when a
-person starts it** with the Run workflow button (owner decision 2026-10-19:
+**The workflow** (`.github/workflows/agent-evals.yml`) runs **only when the
+owner starts it** with the Run workflow button (owner decision 2026-10-19:
 no schedule and no pull_request trigger, so nothing queues a run that waits
-for an approval). Choose the `environment` (whose subscription and eval agent,
-see above) and the slice:
+for the owner's approval). Two choices:
 
 - **subset**: 5 tasks. It builds and boots `packages/mcp-server` from the
   checked-out commit (it runs locally against `HAVEN_API_URL`, see
@@ -504,7 +483,7 @@ see above) and the slice:
   dev-deployed.
 - **full**: every task, against the deployed dev stack.
 
-Either way the run waits for the chosen environment's approval. It is NOT a required
+Either way the run waits for the environment approval. It is NOT a required
 check on `dev` or `main`.
 
 Every run writes a per-task table (pass rate, pass^k, median wall time per

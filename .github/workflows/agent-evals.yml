@@ -1,29 +1,27 @@
 name: Agent evals — Claude Code lane
 
-# Agent evals lane 2 (#3959): `claude -p` headless on a Claude subscription,
-# graded with the exact same task files and graders as the
+# Agent evals lane 2 (#3959): `claude -p` headless on the OWNER'S Max 5x
+# subscription, graded with the exact same task files and graders as the
 # Hermes lane (#3958). Testnet-only (Base Sepolia); never touches mainnet.
 #
 # ⚠ MONEY-PATH — read before editing:
-#   - CLAUDE_CODE_OAUTH_TOKEN (a person's real subscription, from
-#     `claude setup-token`) and that person's own eval-agent credentials
+#   - CLAUDE_CODE_OAUTH_TOKEN (the owner's real subscription, from
+#     `claude setup-token`) and this lane's own eval-agent credentials
 #     (AGENT_EVALS_* — NEVER the QA_DELEGATION_* secrets, which drive the
-#     qa-freshness promotion gate) live ONLY as secrets of a protected
-#     per-person GitHub environment, with that person as required reviewer:
-#     `agent-evals` is the owner's, `agent-evals-antonio` is Antonio's. The
-#     dispatcher picks one with the `environment` input; the job declares
-#     it, so every run waits for THAT environment's reviewer before any
-#     secret exists on the runner, and spends only that person's
-#     subscription. Picking someone else's environment just waits for them.
+#     qa-freshness promotion gate) live ONLY as secrets of the protected
+#     `agent-evals` GitHub environment, with the owner as required reviewer.
+#     The evals job below declares `environment: agent-evals`, so every run
+#     waits for the owner's approval before any secret exists on the runner.
 #   - Never put a token in the command template, a log line, or an artifact.
 #     The token travels only as an env var inherited by `claude`.
 #   - Not a required check on `dev` or `main` (no push trigger; not wired
 #     into dev-gate.yml) — and deliberately so: a spend-incurring suite must
 #     never block a promotion.
 #
-# Trigger: MANUAL ONLY (owner decision 2026-10-19). A person starts a run
+# Trigger: MANUAL ONLY (owner decision 2026-10-19). The owner starts a run
 # with the Run workflow button when they want one; no schedule and no PR
-# trigger, so nothing else queues a run that waits for an approval. Choose `subset` (5 tasks; boots `packages/mcp-server`
+# trigger, so nothing else queues a run that waits for the
+# owner's approval. Choose `subset` (5 tasks; boots `packages/mcp-server`
 # from this checkout against the dev backend) or `full` (all tasks, against
 # the deployed dev stack). Error bodies produced by `packages/backend` stay
 # dev-deployed either way; the report says so. Guarded by
@@ -50,13 +48,6 @@ on:
         description: 'Trials per task (cost pilot: 1)'
         type: string
         default: '1'
-      environment:
-        description: 'Whose subscription and eval agent (that person approves the run)'
-        type: choice
-        default: 'agent-evals'
-        options:
-          - agent-evals
-          - agent-evals-antonio
 
 permissions:
   contents: read
@@ -65,18 +56,15 @@ jobs:
   claude-code-evals:
     name: Agent evals — Claude Code
     runs-on: ubuntu-latest
-    # THE gate (#3959, owner decision 2026-10-15): the chosen protected
-    # environment holds one person's subscription token + eval-agent keys
-    # and requires that person's approval. No job in this workflow may drop
-    # this line; a new person is a new `environment` option, never a shared
-    # secret. A `choice` input refuses any value not listed above.
-    environment: ${{ inputs.environment || 'agent-evals' }}
+    # THE gate (#3959, owner decision 2026-10-15): this protected environment
+    # holds the subscription token + eval-agent keys and requires the owner's
+    # approval. No job in this workflow may drop this line.
+    environment: agent-evals
     timeout-minutes: 150
-    # Job-level group (the qa-dev.yml pattern): one run per environment at a
-    # time (each has its own eval agent and budget), and an in-flight run
-    # finishes rather than being cancelled.
+    # Job-level group (the qa-dev.yml pattern): one money-moving lane at a
+    # time, and an in-flight run finishes rather than being cancelled.
     concurrency:
-      group: agent-evals-claude-code-${{ inputs.environment || 'agent-evals' }}
+      group: agent-evals-claude-code
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -86,7 +74,6 @@ jobs:
         env:
           INPUT_SUITE: ${{ github.event.inputs.suite || 'subset' }}
           INPUT_TRIALS: ${{ github.event.inputs.trials || '1' }}
-          EVAL_ENVIRONMENT: ${{ inputs.environment || 'agent-evals' }}
         run: |
           set -euo pipefail
           MODE="$INPUT_SUITE"
@@ -98,7 +85,7 @@ jobs:
           echo "trials=$TRIALS" >> "$GITHUB_OUTPUT"
           echo "limit_arg=$LIMIT_ARG" >> "$GITHUB_OUTPUT"
           echo "head_sha=$HOSTED_COMMIT" >> "$GITHUB_OUTPUT"
-          echo "::notice::agent-evals environment=$EVAL_ENVIRONMENT mode=$MODE trials=$TRIALS $LIMIT_ARG; hosted MCP: $([ "$MODE" = 'subset' ] && echo "commit $HOSTED_COMMIT (this checkout)" || echo 'the deployed dev stack')"
+          echo "::notice::agent-evals mode=$MODE trials=$TRIALS $LIMIT_ARG; hosted MCP: $([ "$MODE" = 'subset' ] && echo "commit $HOSTED_COMMIT (this checkout)" || echo 'the deployed dev stack')"
 
       - uses: actions/setup-node@v4
         with:
@@ -108,7 +95,7 @@ jobs:
 
       # The `claude` CLI the adapter shells out to. It is not on the runner
       # image and not a workspace dependency, so without this every task
-      # fails with "claude exited 127" after the run was approved.
+      # fails with "claude exited 127" after the owner has approved the run.
       # Pinned exactly; bump deliberately.
       - name: Install the Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code@2.1.289 && claude --version
@@ -153,12 +140,11 @@ jobs:
           DELEGATE_KEY: ${{ secrets.AGENT_EVALS_DELEGATE_KEY }}
           API_KEY: ${{ secrets.AGENT_EVALS_API_KEY }}
           API_URL: ${{ vars.AGENT_EVALS_HAVEN_API_URL || secrets.AGENT_EVALS_HAVEN_API_URL }}
-          EVAL_ENVIRONMENT: ${{ inputs.environment || 'agent-evals' }}
         run: |
           set -euo pipefail
           DIR="$RUNNER_TEMP/haven-eval-agent"
           mkdir -p "$DIR"; chmod 700 "$DIR"
-          CRED_DIR="$DIR" DELEGATE_KEY="$DELEGATE_KEY" API_KEY="$API_KEY" API_URL="$API_URL" node -e "const fs = require('node:fs'); const missing = ['DELEGATE_KEY', 'API_KEY', 'API_URL'].filter((n) => !(process.env[n] ?? '').trim()); if (missing.length > 0) { console.error('::error::the ' + (process.env.EVAL_ENVIRONMENT || 'agent-evals') + ' environment is missing: ' + missing.join(', ')); process.exit(1); } fs.writeFileSync(process.env.CRED_DIR + '/agent.json', JSON.stringify({ delegate_key: process.env.DELEGATE_KEY }, null, 2), { mode: 0o600 }); fs.writeFileSync(process.env.CRED_DIR + '/identity.json', JSON.stringify({ api_url: process.env.API_URL, api_key: process.env.API_KEY }, null, 2), { mode: 0o600 });"
+          CRED_DIR="$DIR" DELEGATE_KEY="$DELEGATE_KEY" API_KEY="$API_KEY" API_URL="$API_URL" node -e "const fs = require('node:fs'); const missing = ['DELEGATE_KEY', 'API_KEY', 'API_URL'].filter((n) => !(process.env[n] ?? '').trim()); if (missing.length > 0) { console.error('::error::the agent-evals environment is missing: ' + missing.join(', ')); process.exit(1); } fs.writeFileSync(process.env.CRED_DIR + '/agent.json', JSON.stringify({ delegate_key: process.env.DELEGATE_KEY }, null, 2), { mode: 0o600 }); fs.writeFileSync(process.env.CRED_DIR + '/identity.json', JSON.stringify({ api_url: process.env.API_URL, api_key: process.env.API_KEY }, null, 2), { mode: 0o600 });"
           echo "HAVEN_CREDENTIALS=$DIR/agent.json" >> "$GITHUB_ENV"
 
       - name: Write the MCP config the lane wires (hosted + signer pair)
@@ -202,8 +188,8 @@ jobs:
           ( cd "$RUNNER_TEMP/claude-cwd" && claude -p 'Reply with the single word OK.' --model sonnet --output-format json --max-turns 1 --strict-mcp-config ) > "$RUNNER_TEMP/claude-login-check.json" 2> "$RUNNER_TEMP/claude-login-check.err"; echo "$?" > "$RUNNER_TEMP/claude-login-check.exit"
           node "$GITHUB_WORKSPACE/scripts/ci/agent-evals-login-check.mjs" "$RUNNER_TEMP/claude-login-check.json" "$RUNNER_TEMP/claude-login-check.err" "$RUNNER_TEMP/claude-login-check.exit"
 
-      # THE spend step — reached only after the chosen environment's
-      # reviewer approved it. The allowlist in QA_EVAL_CLAUDE_CODE_COMMAND IS the
+      # THE spend step — reached only after the owner approved the
+      # environment. The allowlist in QA_EVAL_CLAUDE_CODE_COMMAND IS the
       # "Haven MCP tools only" guarantee, visible right here.
       - name: Run the eval slice
         env:

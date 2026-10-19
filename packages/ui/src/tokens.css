@@ -49,6 +49,33 @@
   --v2-warning-soft: #fef3c7;
   --v2-danger: #b42318;
   --v2-danger-soft: #fef2f2;
+
+  /* ── Avatar tints (#4066) ──────────────────────────────────────────────
+     Six muted tints for the `Monogram` initials avatar, assigned by hashing
+     the entity's NAME (`lib/avatar-tint.ts` on the frontend) — the same
+     entity keeps the same tint everywhere, light and dark. Unlike the series
+     palette above there is deliberately NO order contract: assignment is by
+     name, never by index, and the family is separate from `--v2-series-*`
+     (charts own those) and from every status colour — the hexes are disjoint
+     from all of them in each theme, asserted in `theme-tokens.test.ts`.
+
+     Each tint is a `-soft` ground with a darker ink, following the
+     `brand-soft` precedent; the pair clears 4.5:1 in its own theme and the
+     six stay pairwise separable (a minimum ΔE is pinned in the same test —
+     unlike the series comment above, only claim what a test holds). */
+  --v2-avatar-1: #8a3a1a;
+  --v2-avatar-1-soft: #f8e6d8;
+  --v2-avatar-2: #0c6b5a;
+  --v2-avatar-2-soft: #dcf1eb;
+  --v2-avatar-3: #6b2fa8;
+  --v2-avatar-3-soft: #e9dbf8;
+  --v2-avatar-4: #4f661a;
+  --v2-avatar-4-soft: #e9efd6;
+  --v2-avatar-5: #9c2759;
+  --v2-avatar-5-soft: #fbe2ec;
+  --v2-avatar-6: #2e5d8f;
+  --v2-avatar-6-soft: #d5e3f1;
+
   --v2-modal-backdrop: rgba(26, 31, 54, 0.66);
 
   /* ── Channel form of the palette above (#1708) ──────────────────────────
@@ -419,6 +446,25 @@
     --v2-danger-rgb: 248 113 113;
     --v2-danger-soft: #3a1512;
     --v2-danger-soft-rgb: 58 21 18;
+
+    /* Avatar tints (#4066) — the dark stops of the family documented in
+       `:root` above: deep-wash grounds with lightened inks, each pair
+       clearing 4.5:1. Assigned by NAME, never by index. Byte-identical in
+       both dark blocks, and disjoint from every series and status hex
+       (asserted in `theme-tokens.test.ts`). */
+    --v2-avatar-1: #f2a884;
+    --v2-avatar-1-soft: #39211a;
+    --v2-avatar-2: #74d6c2;
+    --v2-avatar-2-soft: #0f2f2a;
+    --v2-avatar-3: #c6a8f2;
+    --v2-avatar-3-soft: #2a2044;
+    --v2-avatar-4: #b8cd82;
+    --v2-avatar-4-soft: #242d15;
+    --v2-avatar-5: #f193bd;
+    --v2-avatar-5-soft: #381b2b;
+    --v2-avatar-6: #93c1ea;
+    --v2-avatar-6-soft: #152639;
+
     --v2-modal-backdrop: rgba(0, 0, 0, 0.6);
 
     /*
@@ -539,6 +585,25 @@
   --v2-danger-rgb: 248 113 113;
   --v2-danger-soft: #3a1512;
   --v2-danger-soft-rgb: 58 21 18;
+
+  /* Avatar tints (#4066) — the dark stops of the family documented in
+     `:root` above: deep-wash grounds with lightened inks, each pair
+     clearing 4.5:1. Assigned by NAME, never by index. Byte-identical in
+     both dark blocks, and disjoint from every series and status hex
+     (asserted in `theme-tokens.test.ts`). */
+  --v2-avatar-1: #f2a884;
+  --v2-avatar-1-soft: #39211a;
+  --v2-avatar-2: #74d6c2;
+  --v2-avatar-2-soft: #0f2f2a;
+  --v2-avatar-3: #c6a8f2;
+  --v2-avatar-3-soft: #2a2044;
+  --v2-avatar-4: #b8cd82;
+  --v2-avatar-4-soft: #242d15;
+  --v2-avatar-5: #f193bd;
+  --v2-avatar-5-soft: #381b2b;
+  --v2-avatar-6: #93c1ea;
+  --v2-avatar-6-soft: #152639;
+
   --v2-modal-backdrop: rgba(0, 0, 0, 0.6);
 
   /*

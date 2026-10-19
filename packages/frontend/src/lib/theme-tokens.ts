@@ -1,8 +1,8 @@
 /**
  * The v2 token palette as data (#2927).
  *
- * `THEME_TOKENS` mirrors the colour-valued tokens of `globals.css` — the
- * light values from `:root`, the dark values from the two byte-identical
+ * `THEME_TOKENS` mirrors the colour-valued tokens of `packages/ui/src/tokens.css` —
+ * the light values from `:root`, the dark values from the two byte-identical
  * dark blocks — so `/design-system` can render BOTH palettes and the
  * contrast tooling can measure both. It is DATA, not a second source of
  * truth: `src/lib/__tests__/theme-tokens.test.ts` parses the CSS and fails
@@ -16,10 +16,11 @@
  *     plain node) and the same test cross-checks the two paths against each
  *     other, so neither can drift alone.
  *
- * Scope note: exactly the 45 colour-valued tokens — the 26 with `-rgb`
- * channel twins are listed by their hex form (the channel form is pinned to
- * the hex by `design-token-alpha.test.ts`); `--v2-safe-*` (env() lengths),
- * the shadows/gradients and every non-colour token are out of scope here.
+ * Scope note: exactly the colour-valued tokens (57 as of #4066) — the 26
+ * with `-rgb` channel twins are listed by their hex form (the channel form is
+ * pinned to the hex by `design-token-alpha.test.ts`); `--v2-safe-*` (env()
+ * lengths), the shadows/gradients and every non-colour token are out of scope
+ * here.
  */
 
 export interface TokenSpec {
@@ -60,6 +61,23 @@ export const THEME_TOKENS: TokenSpec[] = [
   { name: 'danger', light: '#b42318', dark: '#f87171' },
   { name: 'danger-soft', light: '#fef2f2', dark: '#3a1512' },
   { name: 'modal-backdrop', light: 'rgba(26, 31, 54, 0.66)', dark: 'rgba(0, 0, 0, 0.6)' },
+  // Avatar tints (#4066) — the Monogram initials family, assigned by hashing
+  // the entity's NAME (lib/avatar-tint.ts), never by index and never from the
+  // series/status palettes (disjointness asserted in theme-tokens.test.ts).
+  // Each ink clears 4.5:1 on its own -soft ground in both themes; see
+  // CONTRAST_PAIRS.
+  { name: 'avatar-1', light: '#8a3a1a', dark: '#f2a884' },
+  { name: 'avatar-1-soft', light: '#f8e6d8', dark: '#39211a' },
+  { name: 'avatar-2', light: '#0c6b5a', dark: '#74d6c2' },
+  { name: 'avatar-2-soft', light: '#dcf1eb', dark: '#0f2f2a' },
+  { name: 'avatar-3', light: '#6b2fa8', dark: '#c6a8f2' },
+  { name: 'avatar-3-soft', light: '#e9dbf8', dark: '#2a2044' },
+  { name: 'avatar-4', light: '#4f661a', dark: '#b8cd82' },
+  { name: 'avatar-4-soft', light: '#e9efd6', dark: '#242d15' },
+  { name: 'avatar-5', light: '#9c2759', dark: '#f193bd' },
+  { name: 'avatar-5-soft', light: '#fbe2ec', dark: '#381b2b' },
+  { name: 'avatar-6', light: '#2e5d8f', dark: '#93c1ea' },
+  { name: 'avatar-6-soft', light: '#d5e3f1', dark: '#152639' },
   // Categorical data-viz series (#2948) — the ordered set the chart primitives
   // paint from. Measured ≥3:1 on their theme's grounds (see CONTRAST_PAIRS).
   { name: 'series-1', light: '#4f46e5', dark: '#8f8ef5' },
@@ -115,6 +133,10 @@ export const CONTRAST_PAIRS: ContrastPair[] = [
   { fg: 'debit', bg: 'debit-soft', min: 3 },
   { fg: 'warning', bg: 'warning-soft', min: 3 },
   { fg: 'danger', bg: 'danger-soft', min: 3 },
+  // The avatar tints (#4066): initials ink on its own tint must read as text
+  // in both themes, so the pair bar is the full 4.5:1 — not the 3:1 the other
+  // -soft pairs get.
+  ...[1, 2, 3, 4, 5, 6].map((n) => ({ fg: `avatar-${n}`, bg: `avatar-${n}-soft`, min: 4.5 as const })),
   // The categorical series (#2948): each stop on the two grounds a chart paints
   // on — the page background and the card surface — in BOTH themes. The dataviz
   // non-text bar is 3:1, and the pair is fg-vs-ground rather than fg-vs-own-tint

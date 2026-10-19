@@ -1537,3 +1537,131 @@ and committed at the path the 2026-10-03 entry names.
 **Disposition upkeep (2026-10-14):** C3 → `shipped` via #3948
 (2026-10-14): the writer takes a prefixed intent lock after its hash lock; the
 direct-SQL interleave test is the compare-and-set's mutation proof.
+
+## 2026-10-19 — whole repo, weighted to the landings since 2026-10-13 (owner request 2026-10-19, no scope named)
+
+Full report: [`docs/bug-reports/quality-scan-2026-10-19-whole-repo.md`](../bug-reports/quality-scan-2026-10-19-whole-repo.md).
+The report holds the file:line evidence; this entry stays path-free. Measured
+on `origin/dev` @ `595b43c07` by one agent in an `npm ci`'d worktree, one
+heavy job at a time, with core, the SDK and the signer built. The window is
+`641f527d..595b43c07` → 101 first-parent landings. Seven mutations were run
+behind `cp` backups, each restored with `cp` and checked with
+`git diff --quiet`. Real-DB runs used a disposable database, dropped at the
+end. GitHub was read-only. No live call was made.
+
+**Excluded this run:** every prior finding and candidate, whatever its
+disposition. None is re-surfaced. C1 sits beside the 2026-09-25 S1 (epic
+#3335, `shipped`): it is one capability that finding's shipped probe does not
+check, with two incidents since, not a re-surface of the qa-dev triage
+finding. None of the re-measured figures worsened materially.
+
+**Structural findings:** none in the examined sample. The four candidates
+share a resemblance (an instrument checking a copy or a neighbour of what it
+claims to check), but they have four mechanisms and four remedies and no
+common census. The eval suite's first-live-week fix wave was refused: it is
+an open epic, and each defect is tracked.
+
+**Improvement candidates (one PR each), pending owner decision:**
+- C1 — the RPC conformance probe checks five capabilities and not
+  `eth_getLogs` range (a grep of the probe for `getLogs` → 0). The Alchemy
+  swap passed the probe on 2026-09-29 and 2026-10-01. The free tier's 10-block
+  log cap then broke the x402 settlement sweepers (#4012: 76–80
+  `chainsUnavailable` per tick, 16.4M of a 30M-CU monthly pool by
+  mid-month) and the QA harness's transfer probe (#4086: the eval pilot
+  graded three real payments missing). Each was fixed in its own package with
+  its own window logic. Untracked.
+- C2 — qa-dev's EIP-3009 legs prove both on-chain legs and never that Haven
+  recorded the merchant settlement (the scenario directory's grep for any
+  evidence field → 0 lines). The hosted signer leg's docblock still says
+  Haven never observes that settlement. From #3925's landing (2026-10-14) to
+  #4075 (2026-10-19), the hosted settle path's settlement report carried no
+  header and was refused (tree at the parent of #4075; #4075's SDK commit).
+  The leg passed on four scheduled runs in that interval. #4061 was found by
+  a hand-run purchase.
+- C3 — the SDK makes the post-funding merchant-answer decision twice (the
+  hosted path in the client facade, 267 lines; the local path in the
+  merchant-completion module, 187 lines). Of 17 commits to the second since
+  the facade refactor, 15 also touched the first, and both of 2026-10-19's
+  money-path fixes edited both. By execution: the hosted copy's #4062 guard
+  disabled leaves every SDK suite that drives it green (90 / 90). It is
+  caught only by the hosted MCP suite against a rebuilt SDK build (1 of 58).
+- C4 — the eval graders' hosted and signer tool lists are hand copies, and
+  their pinning test asserts each copy's own length. A 30th hosted tool added
+  to the hosted snapshot left three eval suites green, 79 / 79 (*weak test*).
+  A missing payment tool would make the no-retry grader false-pass. The
+  repo's precedent for the class is the connect runtime-manifest drift
+  (2026-08-14 entry).
+- Notes, not proposed: a month-to-date spend reader with no caller and
+  calendar-month SQL in the session zone; the unpinned session time zone
+  (tracked as #4084, whose census of zone-dependent live SQL is 2 sites); a
+  block-1 hazard in which deleting the only clause that references a bind
+  parameter reddens on a SQL error, not the guard.
+
+**Dispositions observed (upkeep the ledger lacked):** 2026-10-13 S1 → epic
+#3919 closed 2026-10-19, all five slices merged → `shipped`. 2026-10-13 C1 →
+#3925 closed 2026-10-14 via PR #3961 (`bd808304c`) → `shipped`. Its
+follow-on #4061 (the hosted report tools could not meet the new requirement)
+is open, and its fix #4075 has landed.
+
+**Probed clean** (block → examined / partial / not examined → command → number, all at `595b43c07`):
+- sizing → examined → the 09-22 command pinned with `git ls-tree`/`git show`;
+  the control at `641f527d` reproduces backend 109,321 / 140,397. Now: backend
+  112,970 / 146,150; qa-agent 12,691 / 10,530 (+31 % / +35 %, the eval
+  suite); frontend 67,922 / 69,530; sdk 18,567 / 20,176; mcp-server 13,311 /
+  24,264; the rest within a few percent of 10-13.
+- block 1 (guard falsifiability) → examined. The census script → 31
+  candidate files over 5 of the last 20 landings. The brief chose the sample
+  from the window's landings: five census files and two eval-suite files.
+  7 mutations → **5 caught in their targeted file** (owner-send insert
+  ownership 1 of 12, real DB; sibling-header refusal 1 of 44, real DB;
+  verifier pairing 1 of 7; SDK local-path #4062 guard 1 of 46; grader
+  unsettled filter 1 of 25), **1 caught only across a package boundary** (C3,
+  90 / 90 green in the SDK, 1 of 58 in the hosted suite), **1 survivor** (C4,
+  79 / 79, *weak test*). 24 census files were not mutated.
+- block 2 (`covers:` completeness) → examined. The reference loop under bash
+  with `set -f`, each miss confirmed with the strict gate → 18 across 6 of 8
+  (unchanged since 09-25); 2 raw misses were glob strings.
+  `npm run docs:covers-gaps` → 129 pairs / 35 docs (10-13: 130 / 35).
+- block 3 (stale numbers) → partial. Positive control 3 / 3. The 25 newest
+  shards → 11 figure lines, 1 with a command (10-13: 20 / 6). Two shard
+  figures re-derived and matching. One stale docblock found (C2). `any`
+  37 → 38. db-mock gauge 54 / 270 / 57 (unchanged). Guard scripts 69 → 71.
+  Non-spawning self-tests 23 of 71 → 25 of 74. zod 0.
+- block 4 (retired vocabulary) → examined. Positive control 36 shards. 195
+  files, 46 historical / 149 live (unchanged). Ratchet green, 32 / 30
+  (10-13: 33 / 31). Code half unchanged.
+- block 5 (merge-method drift) → examined. Since 2026-10-13T00:00:00Z → 0
+  merge-commit / 109 squash (clean). Since 2026-08-10T00:00:00Z → 282 /
+  1,155 of 1,440.
+- block 6 (nets with holes) → examined, all four halves → copy lint 56
+  unscanned / 4 with hits (10-13: 52 / 4); money perimeter 32 / 20
+  (unchanged); visual gate 15 of 28 (unchanged); docs boundary 39
+  (unchanged); freshness-gate exit branches unchanged. Probes beyond the
+  reference: C1 and C2.
+- incident clustering → examined. Issues created since
+  2026-10-13T00:00:00Z → 87 (11 open / 76 closed). By hand: marketplace 14,
+  dashboard and agents UI 12, navigation 9, agent evals 8, account-page epic
+  7, budget-liveness epic 6, multiple accounts 6, release/docs/CI/ops 5,
+  time windows 4, then 3 or fewer each. The untracked recurring mechanisms
+  are C1 and C2.
+- workflow archaeology → examined. `ci.yml` newest 100 → 64 / 13 / 23; 7
+  with attempt > 1, all feature branches. `dev` 32 → 26 / 2 / 4. Visual
+  regression is 6 of the 8 failures with a failed job.
+  - qa-dev at the `money-flow` job level: of the newest 30 runs, it ran in 6
+    (5 success, all on attempt 1/2; 1 failure) and was gate-skipped in 24.
+  - Scheduled runs 10-15 → 10-19: 4 success, 1 RPC-shaped failure.
+  - `agent-evals` on 10-19: 14 runs (1 success, 9 failure, 3 cancelled, 1 in
+    progress).
+- comment archaeology → TODO / FIXME / HACK / XXX → 0 (control `import` →
+  2,057 files).
+- live exercise → not taken (a tree scan by brief).
+- Novelty: the tracker was searched per candidate. The ledger and bug
+  reports were grepped for C3's surface. Bug-report bodies were not otherwise
+  re-read.
+
+Instrument lessons: a mutation must keep every bind parameter referenced;
+hosted MCP suites see an SDK mutation only after an SDK rebuild (rebuild
+again after the restore); `\b` in `git grep -E` misread again; a fresh
+worktree needs core built before backend suites that import it.
+
+**Disposition: pending owner decision** (C1, C2, C3, C4).

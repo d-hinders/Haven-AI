@@ -18,21 +18,40 @@ import { Textarea } from '../ui/Textarea'
  * itself, so there is nothing left to ask here.
  *
  * #1411: no rhythm of its own — the vertical gap between fields comes from
- * the shared `flex flex-col gap-5` wrapper ConnectAgentModal renders around
+ * the shared `flex flex-col gap-5` wrapper ConnectAgentFlow renders around
  * whichever of steps 1-2 is current (the same 20px rhythm step 3's shell
  * body carries), not a local `space-y-*`. This component's root is a
  * Fragment so every field is a direct sibling in that flex column.
  *
- * `nameInputRef` is how ConnectAgentModal puts the caret in *Agent name* on
- * open and on Back (#3687).
+ * `nameInputRef` is how the caret lands in *Agent name*: on open in the modal
+ * (its initial focus) and on Back in either container (ConnectAgentFlow's
+ * step-change focus, #3687).
+ *
+ * `showCancel` (default true) is false in the inline first-agent flow on
+ * `/agents` (#4065, owner decision 2026-10-19): there is no dialog to
+ * dismiss, and Cancel's only other effect would be resetting an empty form.
+ * The step's one action then renders full width, the single-action rule
+ * `DialogActions` describes.
  */
 export function DetailsStep({
   flow,
   nameInputRef,
+  showCancel = true,
 }: {
   flow: AgentConnectionSetupFlow
   nameInputRef?: Ref<HTMLInputElement>
+  showCancel?: boolean
 }) {
+  const next = (
+    <Button
+      onClick={() => flow.setStep('policy')}
+      disabled={!flow.name.trim()}
+      className={showCancel ? 'flex-1' : 'w-full'}
+    >
+      Set agent budget
+    </Button>
+  )
+
   return (
     <>
       <div>
@@ -89,21 +108,19 @@ export function DetailsStep({
           label="Run everything on this machine instead of Haven's hosted tools. Only Claude Code, Codex, and Cowork support it — elsewhere, setup stops and you restart without it."
         />
       </details>
-      <DialogActions>
-        {/* handleClose is safe here without a confirm: its only guard
-            (manualCredentialNeedsSave) is a step-4 concern unreachable from
-            step 1, so Cancel behaves exactly like backdrop/X/Escape. */}
-        <Button variant="ghost" onClick={flow.handleClose} disabled={flow.busy} className="flex-1">
-          Cancel
-        </Button>
-        <Button
-          onClick={() => flow.setStep('policy')}
-          disabled={!flow.name.trim()}
-          className="flex-1"
-        >
-          Set agent budget
-        </Button>
-      </DialogActions>
+      {showCancel ? (
+        <DialogActions>
+          {/* handleClose is safe here without a confirm: its only guard
+              (manualCredentialNeedsSave) is a step-4 concern unreachable from
+              step 1, so Cancel behaves exactly like backdrop/X/Escape. */}
+          <Button variant="ghost" onClick={flow.handleClose} disabled={flow.busy} className="flex-1">
+            Cancel
+          </Button>
+          {next}
+        </DialogActions>
+      ) : (
+        next
+      )}
     </>
   )
 }

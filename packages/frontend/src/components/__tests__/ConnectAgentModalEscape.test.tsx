@@ -105,3 +105,35 @@ describe('ConnectAgentModal Escape, rendered with the real flow hook', () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 })
+
+/**
+ * #4065: the modal is unchanged by the inline container. Two of the three
+ * inline differences are pinned here from the modal's side.
+ */
+describe('ConnectAgentModal keeps its own chrome, rendered with the real flow hook', () => {
+  it('keeps Cancel on step 1', () => {
+    render(<ConnectAgentModal open onClose={vi.fn()} accountId={SAFE.id} />)
+
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+  })
+
+  it('keeps each step-3 disclosure CopyBlock a standalone Card', async () => {
+    mockApiPost.mockResolvedValue({
+      setup_id: 'setup-1',
+      setup_token: 'hvn_setup_token',
+      setup_prompt: 'Connect to Haven with this prompt.',
+      connector_command: 'npx -y @haven_ai/connect@alpha --setup hvn_setup_token',
+      expires_at: '2099-01-01T00:00:00.000Z',
+      status: 'awaiting_connection',
+    })
+    render(<ConnectAgentModal open onClose={vi.fn()} accountId={SAFE.id} starterAllowance />)
+    fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Research agent' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Create setup prompt' }))
+    })
+
+    const label = screen.getByText('Local command')
+    expect(label.closest('.shadow-card')).not.toBeNull()
+  })
+})

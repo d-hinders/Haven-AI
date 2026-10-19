@@ -75,6 +75,16 @@ export interface UseAgentConnectionSetupOptions {
    * not to re-run the connector.
    */
   resumeSetupId?: string | null
+  /**
+   * Bind Escape to `handleClose` while `open` (default true — the modal).
+   *
+   * #4065: the inline first-agent flow on `/agents` passes false. It is
+   * mounted with `open` true for as long as it shows, so Escape anywhere on
+   * the page — including the Escape that closes the Labels or Organizations
+   * dialog above it — would reset the form and drop the create-time setup
+   * token. There is nothing for Escape to dismiss there.
+   */
+  escapeToClose?: boolean
 }
 
 // ── Rail awareness (#1069 / #1070) ─────────────────────────────────
@@ -336,6 +346,7 @@ export function useAgentConnectionSetup({
   onSetupUpdated,
   starterAllowance = false,
   resumeSetupId = null,
+  escapeToClose = true,
 }: UseAgentConnectionSetupOptions) {
   const { user } = useAuth()
   const userAccounts = useMemo(() => user?.accounts ?? [], [user?.accounts])
@@ -526,7 +537,7 @@ export function useAgentConnectionSetup({
     onClose()
   }, [manualCredentialNeedsSave, onClose, resetForm])
 
-  useEscapeToClose(open, handleClose, { enabled: !creating && !manualCreating })
+  useEscapeToClose(open, handleClose, { enabled: escapeToClose && !creating && !manualCreating })
 
   const hasMultipleAccounts = userAccounts.length > 1
   const setupSteps: SetupStep[] = ['details', 'policy', 'connect']

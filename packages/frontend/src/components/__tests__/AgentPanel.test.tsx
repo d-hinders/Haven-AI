@@ -30,6 +30,15 @@ vi.mock('../ConnectAgentModal', () => ({
   default: () => null,
 }))
 
+// #4065: the inline first-agent flow is the other container of the shared
+// connect flow. Mocking only the modal left it running the real flow hook
+// (wagmi, the setup-status poll) in every zero-agent case here. Its own
+// behaviour is proven in AgentPanelInlineSetup.test.tsx; this stand-in only
+// says whether the panel mounted it.
+vi.mock('../connect-agent/InlineAgentSetup', () => ({
+  InlineAgentSetup: () => <section aria-label="Connect your first agent" />,
+}))
+
 vi.mock('../ConfirmDialog', () => ({
   default: () => null,
 }))
@@ -185,7 +194,10 @@ describe('AgentPanel rail affordances', () => {
     render(<AgentPanel />)
 
     expect(screen.getByRole('heading', { name: 'Agents could not load' })).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'No agents yet' })).not.toBeInTheDocument()
+    // #4065: the inline first-agent flow replaced "No agents yet"; asserting
+    // that heading's absence would now pass vacuously. A failed load is not
+    // "no agents", so the flow must not render under the retry state.
+    expect(screen.queryByRole('region', { name: 'Connect your first agent' })).not.toBeInTheDocument()
     screen.getByRole('button', { name: 'Try again' }).click()
     expect(refetch).toHaveBeenCalled()
   })
@@ -384,9 +396,10 @@ describe('AgentPanel list toolbar (#3165)', () => {
     expect(screen.queryByText(MCP_NOT_RECORDED_NOTE)).toBeNull()
   })
 
-  it('no toolbar on an empty list — the empty state owns that screen', () => {
+  it('no toolbar on an empty list — the inline first-agent flow owns that screen', () => {
     setAgents([])
     render(<AgentPanel />)
+    expect(screen.getByRole('region', { name: 'Connect your first agent' })).toBeInTheDocument()
     expect(screen.queryByTestId('agent-list-toolbar')).toBeNull()
   })
 

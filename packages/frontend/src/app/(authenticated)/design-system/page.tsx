@@ -111,6 +111,18 @@ const TOKEN_USE: Record<string, string> = {
   'warning-soft': 'Warning fill.',
   danger: 'Errors, destructive confirmations.',
   'danger-soft': 'Danger fill.',
+  'avatar-1': 'Monogram initials ink on tint 1 (terracotta).',
+  'avatar-1-soft': 'Monogram initials ground 1 (terracotta).',
+  'avatar-2': 'Monogram initials ink on tint 2 (teal).',
+  'avatar-2-soft': 'Monogram initials ground 2 (teal).',
+  'avatar-3': 'Monogram initials ink on tint 3 (violet).',
+  'avatar-3-soft': 'Monogram initials ground 3 (violet).',
+  'avatar-4': 'Monogram initials ink on tint 4 (moss).',
+  'avatar-4-soft': 'Monogram initials ground 4 (moss).',
+  'avatar-5': 'Monogram initials ink on tint 5 (rose).',
+  'avatar-5-soft': 'Monogram initials ground 5 (rose).',
+  'avatar-6': 'Monogram initials ink on tint 6 (steel).',
+  'avatar-6-soft': 'Monogram initials ground 6 (steel).',
   'series-1': 'Chart series 1: the first agent, and the balance line.',
   'series-2': 'Chart series 2: the second agent.',
   'series-3': 'Chart series 3: the third agent.',
@@ -132,6 +144,24 @@ const TOKEN_USE: Record<string, string> = {
   'table-row-border': 'Table row divider.',
   'table-row-hover': 'Table row hover fill.',
 }
+
+/**
+ * Six names, one per avatar tint (#4066). Pinned so the showcase always
+ * displays the whole family: `avatarTint` is a pure hash of the name, and
+ * `src/lib/__tests__/avatar-tint.test.ts` holds these six to the
+ * covers-all-six-tints property (it reads them out of this file as text —
+ * a Next.js page may not carry arbitrary named exports). Assignment is by
+ * NAME, never by index — the order here is display order, not an assignment
+ * contract.
+ */
+const MONOGRAM_TINT_EXAMPLES = [
+  'Meridian Labs', // tint 1 — terracotta
+  'Acme Services', // tint 2 — teal
+  'Kaffe & Kod', // tint 3 — violet
+  'Haven Demo Store', // tint 4 — moss
+  'Berget AI', // tint 5 — rose
+  'Ampersend Demo API', // tint 6 — steel
+]
 
 /** The acceptance pairs, measured once per theme for the page's table. */
 const CONTRAST_ROWS_BY_PAIR = (() => {
@@ -2227,9 +2257,7 @@ export default function DesignSystemPage() {
             ['Research API', '0x31bc...8d04'],
           ].map(([name, address]) => (
             <div key={name} className="flex items-center gap-3 border-b border-[var(--v2-border)] px-5 py-3 last:border-b-0">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full border border-brand/20 bg-[var(--v2-brand-soft)]">
-                <span className="text-xs font-semibold text-[var(--v2-brand)]">{name.slice(0, 2).toUpperCase()}</span>
-              </div>
+              <Monogram name={name} />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{name}</p>
                 <p className="mt-0.5 font-mono text-xs text-[var(--v2-ink-3)]">{address}</p>
@@ -3174,11 +3202,12 @@ export default function DesignSystemPage() {
 
       <Section
         title="Monogram"
-        description="Initials-in-a-circle avatar, or the entity's logo when it has one. Promoted to components/ui on its third copy (#3079): the /contacts Initials avatar, the marketplace card and the merchant header all drew the same circle. sm (36px) for lists and cards, md (48px) for a page header."
+        description="Initials-in-a-circle avatar, or the entity's logo when it has one. Promoted to components/ui on its third copy (#3079): the /contacts Initials avatar, the marketplace card and the merchant header all drew the same circle. sm (36px) for lists and cards, md (48px) for a page header. Since #4066 the initials variant is tinted from the entity's NAME — one of six muted avatar tints picked by a pure hash of the trimmed name, so the same entity keeps the same colour everywhere and neighbouring rows are told apart at a glance. Assigned by name, never by index, and never from a status or --v2-series-* chart colour (the hexes are disjoint from both)."
       >
         <div className="flex flex-wrap items-center gap-4">
-          <Monogram name="Ampersend Demo API" />
-          <Monogram name="Berget" />
+          {MONOGRAM_TINT_EXAMPLES.map((name) => (
+            <Monogram key={name} name={name} />
+          ))}
           <Monogram name="Haven Demo Store" size="md" />
         </div>
       </Section>

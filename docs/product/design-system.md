@@ -207,6 +207,34 @@ Same rule as v1: **never repurpose a semantic color**.
 
 **Contrast guarantee:** every ink and semantic text token meets WCAG AA (≥4.5:1) against white, its own `-soft` background, and the tinted surfaces (`--v2-surface`, `--v2-surface-2`, hover) — in BOTH themes since [#2927](https://github.com/d-hinders/Haven-AI/issues/2927) (every `ink*`-on-ground pair ≥ 4.5:1, `ink-on-brand` on brand ≥ 4.5:1, each `-soft` tint vs its foreground ≥ 3:1). Guarded per theme by `packages/frontend/scripts/contrast-check.mjs` (run in the unit suite via `src/lib/__tests__/theme-tokens.test.ts`, table on `/design-system`) on top of `packages/frontend/src/__tests__/token-contrast.test.ts` — if you change a token, the tests tell you whether it still clears the bar, in both palettes.
 
+### Categorical data-viz series ([#2948](https://github.com/d-hinders/Haven-AI/issues/2948))
+
+| Token | Light | Dark |
+|---|---|---|
+| `--v2-series-1` | `#4f46e5` | `#8f8ef5` |
+| `--v2-series-2` | `#0d7f63` | `#59c9a3` |
+| `--v2-series-3` | `#b0500a` | `#f2c94a` |
+| `--v2-series-4` | `#0369a1` | `#59bdf2` |
+| `--v2-series-5` | `#8a1290` | `#c28fff` |
+| `--v2-series-6` | `#a01a63` | `#e878b5` |
+
+The ordered set the chart primitives (`ui/StackedBarChart`, `ui/AreaChart`) paint their series from. Colour identifies the SERIES, never the meaning of a value — a refusal is not red and an incoming payment is not green here; those semantics stay with the ink scale and the semantic tokens above. **Order is the contract: assign series by index, never by hash or by name**, so an agent that keeps the first slot keeps the same colour across the chart, the legend, and the agents table's share column. Series 1 deliberately opens on `--v2-brand`. Never reuse a series colour outside a chart.
+
+### Avatar tints ([#4066](https://github.com/d-hinders/Haven-AI/issues/4066))
+
+| Token | Light ink | Light ground | Dark ink | Dark ground |
+|---|---|---|---|---|
+| `--v2-avatar-1` (terracotta) | `#8a3a1a` | `#f8e6d8` | `#f2a884` | `#39211a` |
+| `--v2-avatar-2` (teal) | `#0c6b5a` | `#dcf1eb` | `#74d6c2` | `#0f2f2a` |
+| `--v2-avatar-3` (violet) | `#6b2fa8` | `#e9dbf8` | `#c6a8f2` | `#2a2044` |
+| `--v2-avatar-4` (moss) | `#4f661a` | `#e9efd6` | `#b8cd82` | `#242d15` |
+| `--v2-avatar-5` (rose) | `#9c2759` | `#fbe2ec` | `#f193bd` | `#381b2b` |
+| `--v2-avatar-6` (steel) | `#2e5d8f` | `#d5e3f1` | `#93c1ea` | `#152639` |
+
+Six muted tints for the `Monogram` initials avatar (the `-soft` ground carries the initials, the ink is the initials colour). Assigned **by hashing the entity's name** (`lib/avatar-tint.ts` — djb2 mod 6 over the trimmed name, a pure function, so the same merchant or contact keeps the same tint everywhere, in light and dark, and SSR hydration agrees). Unlike the series palette there is deliberately **no order contract** — assignment is by name, never by index — which is exactly why the family is separate from `--v2-series-*`: the series contract forbids hashing, the charts own those hexes, and an avatar must not collide with a chart colour on the same screen. The avatar hexes are also disjoint from every status and brand hex (asserted in `theme-tokens.test.ts`), so a tint never reads as success, warning, danger or debit.
+
+Each ink clears 4.5:1 on its own ground in both themes (in `CONTRAST_PAIRS`, unlike the series stops' 3:1 non-text bar — initials are text), and the six grounds and six inks stay pairwise separable (a minimum CIE76 ΔE is pinned in the same test). Do not reach for a `-soft` semantic tint, `brand-soft` or a series stop for an avatar — `Monogram` owns this family.
+
 ### Opacity on a token colour ([#1708](https://github.com/d-hinders/Haven-AI/issues/1708))
 
 **Want a token at partial opacity? Use the Tailwind alias, never the arbitrary

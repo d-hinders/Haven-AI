@@ -1931,7 +1931,7 @@ A standalone trigger takes the same `focus-visible` ring as every other focusabl
 Use `components/transactions/TransactionsTable.tsx` for full transaction history routes. It is a semantic sortable table:
 
 - Desktop columns: direction icon, Activity, Initiator, From/To, Date, Amount, external link.
-- **Initiator semantics (#2097):** the Initiator column reads the transaction record's explicit `initiatedBy` — the agent identity for agent-initiated rows, `You` only for `initiatedBy === 'human'` (no dashboard-send path sets it today), and an explicit unknown (`Unknown`) for un-attributed outbound rows; it never defaults to `You`. The detail panel's Initiator row shares the same helper (`transactionInitiator`).
+- **Initiator semantics (#2097):** the Initiator column reads the transaction record's explicit `initiatedBy` — the agent identity for agent-initiated rows, `You` only for `initiatedBy === 'human'` (set for an owner send recorded at submit since #4099; earlier owner sends stay `Unknown`), and an explicit unknown (`Unknown`) for un-attributed outbound rows; it never defaults to `You`. The detail panel's Initiator row shares the same helper (`transactionInitiator`).
 - Sticky header on desktop.
 - **A row click is convenience only; the title button is the accessible path
   (#3554).** On a selectable table the `<tr>` keeps its native `row` role and an

@@ -221,6 +221,29 @@ and a recording failure is swallowed: metrics can never gate a payment. See
 
 ## 3. Delegation custody semantics (#828's contract)
 
+> **Re-verified #4099 (2026-10-19, the owner-send record):** this diff
+> touches two files in this document's coverage list,
+> `rails/hybrid-transfers.ts` and the submit route that calls it,
+> `routes/hybrid-accounts.ts`. The
+> owner send's discipline in §6 ("Owner send (#1083) rides the same op
+> discipline") is unchanged: the same prepare/submit split, the submitted
+> UserOperation still pinned to the re-derived transfer calldata, the owner
+> still the only signer. `submitTransfer` now also RETURNS the UserOp hash
+> and the transfer it already validated; the route then writes one
+> attribution row to `owner_transfers` (migration 116) after the receipt
+> confirmed the transfer, fail-soft — a failed write is logged and the send
+> still answers success, and a slow one cannot hold the reply past
+> `OWNER_TRANSFER_RECORD_DEADLINE_MS` (500 ms). Nothing on any spend, signing or revocation path
+> reads that row; it only lets the transaction feed say "You" instead of
+> "Unknown". A characterization test, which passes against the pre-change
+> route as well, pins that `submitCall` receives the signed operation
+> unchanged and the signature verbatim
+> (`routes/__tests__/hybrid-signers.test.ts`). Invariants 1–13 are
+> untouched. Scope of this note: the owner-send paragraph of §6 and these
+> two files' changes; nothing else in this document was re-read for it.
+> `last-verified` already reads 2026-10-19 and is left as is. The
+> verification entry is `docs/regulatory/casp-changelog/2026-10-19-4099.md`.
+
 > **Re-verified #4021 (2026-10-19, the account card's "Last payment" field):**
 > this diff touches one file in this document's coverage list,
 > `infra/repositories/dashboard.ts`, and adds no signing step, no gate, no

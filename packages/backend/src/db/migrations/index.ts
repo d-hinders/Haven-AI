@@ -113,6 +113,7 @@ import * as attentionDismissals from './111_attention_dismissals.js'
 import * as agentSupersededBy from './112_agent_superseded_by.js'
 import * as syncDocumentKind from './113_sync_document_kind.js'
 import * as smartAccountDeploySalt from './114_smart_account_deploy_salt.js'
+import * as ownerTransfers from './116_owner_transfers.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -285,4 +286,5 @@ export const migrations: Migration[] = [
   agentSupersededBy,
   syncDocumentKind,
   smartAccountDeploySalt,
+  ownerTransfers,
 ]

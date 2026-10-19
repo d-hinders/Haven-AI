@@ -32,6 +32,9 @@ const { mockQuery, portfolioMocks, transactionMocks } = vi.hoisted(() => ({
     activityWindowStartIso: vi.fn(
       (nowMs: number) => new Date(nowMs - 7 * 24 * 60 * 60 * 1000).toISOString(),
     ),
+    // #4099: the route hands the feed an own-account name lookup built from
+    // its account list.
+    ownAccountNameResolver: vi.fn((_accounts: unknown[]) => (_address: string, _chainId: number): string | null => null),
     // #3944: the route reads the feed BUILDER — rows plus the two
     // empty-state facts — not the bare group list any more.
     buildActivityFeed: vi.fn(async () => ({
@@ -407,6 +410,14 @@ describe('dashboard routes', () => {
       .calls as unknown as Array<[{ transactions: { chainId: number }[] }]>
     const feed = feedCalls.at(-1)?.[0].transactions
     expect(feed?.map((item) => item.chainId).sort()).toEqual([100, 8453])
+    // #4099: the own-account lookup is built from the route's account list
+    // and is the one the feed receives.
+    const resolverCall = transactionMocks.ownAccountNameResolver.mock.calls.at(-1)?.[0] as
+      | Array<{ account_address: string }>
+      | undefined
+    expect(resolverCall?.map((a) => a.account_address)).toContain(SAFE.account_address)
+    const lastFeed = feedCalls.at(-1)?.[0] as unknown as { resolveOwnAccountName?: unknown }
+    expect(lastFeed.resolveOwnAccountName).toBe(transactionMocks.ownAccountNameResolver.mock.results.at(-1)?.value)
   })
 
   // #3944: the overview carries the two empty-state facts the Activity

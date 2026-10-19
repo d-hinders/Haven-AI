@@ -1912,6 +1912,24 @@ last-verified: "2026-10-19"
 > tool, flag, auth step, consent hash, or version-skew contract changes;
 > nothing about the local runtime's capabilities moves.
 
+> **Re-verified (#4099, 2026-10-19 — the CSV `initiator` column's words):**
+> this doc is coupled through `modules/transactions/csv-export.ts`. The
+> server CSV's `initiator` cell now carries the app's words — `You` / the
+> agent's name / `Unknown`, empty on inbound rows except an agent's
+> delegate sweep — instead of the raw
+> `human` / `agent` / `unknown` enum (owner decision, 2026-10-19). Column
+> set and order are unchanged; the VALUES change for anyone reading
+> `GET /transactions/export.csv`, which the dashboard downloads. No local
+> runtime consumes it: `packages/cli`, `packages/mcp`, `packages/mcp-server`
+> and `packages/sdk` neither read `initiatedBy` nor fetch the server CSV
+> (`grep -rn "initiatedBy\|export.csv\|initiator"` over their `src/`,
+> tests excluded, returns nothing at this head), and the CLI's own export
+> builds its file from the JSON feed. On the JSON feed `initiatedBy: 'human'`
+> becomes reachable — a value the spec has always declared — so no schema
+> key, MCP tool, `next_tool` value, consent hash or version-skew contract
+> changes. Scope of this note: the CSV module's `initiator` cell. Nothing
+> else in this document was re-verified.
+
 > **Re-verified unchanged (#3824, 2026-10-09 — serve-time approx amounts +
 > grouped activity):** this doc is coupled through
 > `routes/transactions.ts` (the only coverage-list file in the diff). The

@@ -32,6 +32,7 @@ import {
 import {
   activityWindowStartIso,
   buildActivityFeed,
+  ownAccountNameResolver,
   compareTransactions,
   isValidActivityTimeZone,
   type EnrichedTransaction,
@@ -577,6 +578,9 @@ export default async function dashboardRoutes(
         currency,
         now: now.getTime(),
         resolveMerchantName,
+        // #4099: a send to another of the user's accounts names that
+        // account instead of reading "New recipient".
+        resolveOwnAccountName: ownAccountNameResolver(accounts),
       })
 
     return {

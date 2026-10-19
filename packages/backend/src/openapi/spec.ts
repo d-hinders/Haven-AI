@@ -141,14 +141,15 @@ const transactionBaseProperties = {
   // #2097: backend-recorded initiator classification — never derived
   // in the frontend. `agent` = row carries agent attribution (confirmed
   // x402 intents, delegate sweeps, raw transfers matched to a
-  // confirmed intent). `human` = reserved; no dashboard-initiated send
-  // path populates it (mpp demo & /send retired). `unknown` = outbound
-  // raw transfer with no matched intent. Absent for `direction: in`
-  // rows.
+  // confirmed intent). `human` = an owner send recorded in
+  // `owner_transfers` at submit (#4099). `unknown` = outbound raw
+  // transfer with no matched intent or owner-send record, including
+  // owner sends from before that record existed. Absent for
+  // `direction: in` rows bar a delegate sweep (`agent`).
   initiatedBy: {
     type: 'string',
     enum: ['agent', 'human', 'unknown'],
-    description: 'Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: reserved — nothing populates it today. `unknown`: outbound raw transfer with no matched intent. Absent for inbound (`direction: in`) rows.',
+    description: 'Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: an outbound transfer the account owner sent from the dashboard, recorded when it was submitted (#4099). `unknown`: outbound raw transfer with no matched intent or owner-send record — including owner sends made before that record existed. Absent for inbound (`direction: in`) rows, except an agent\'s delegate sweep, which is `agent`.',
   },
   // #1705 (epic #1704). Read from the intent's `machine_metadata`
   // JSONB, which both delegation-rail branches already stamp
@@ -13806,7 +13807,7 @@ export const openapiSpec = {
           source: { type: ['string', 'null'], description: "The newest member's source, e.g. `x402`." },
           x402ResourceUrl: { type: ['string', 'null'], description: 'The newest member’s x402 resource URL, when it is an x402 payment.' },
           to: { type: 'string', description: 'The newest member’s raw `to` field — the merchant address on outbound payments, the account’s own address on deposits.' },
-          merchantName: { type: ['string', 'null'], description: 'Contact or receipt-merchant name resolved for the counterparty, when one exists; null otherwise (always null on deposits).' },
+          merchantName: { type: ['string', 'null'], description: 'Contact or receipt-merchant name resolved for the counterparty, else the name of the user\'s own account a transfer went to (#4099); null otherwise (always null on deposits).' },
           activityType: { type: ['string', 'null'], description: "The activity class, e.g. `delegate_sweep`; null for plain transfers and x402 payments." },
           direction: { type: 'string', enum: ['in', 'out'] },
           status: { type: 'string', enum: ['confirmed', 'pending', 'failed'], description: 'The DERIVED outcome: isError → failed; a paymentFlowStatus of confirming_merchant/needs_attention or a non-terminal paymentProofStatus → pending; else confirmed.' },

@@ -260,7 +260,11 @@ export interface DashboardActivityGroup {
   source: string | null
   x402ResourceUrl: string | null
   to: string
-  /** Contact or receipt-merchant name for the counterparty, when one exists. */
+  /**
+   * Contact or receipt-merchant name for the counterparty, else the name of
+   * the user's own account an outbound transfer went to (#4099); null
+   * otherwise, and always null on deposits.
+   */
   merchantName: string | null
   activityType: string | null
   direction: 'in' | 'out'
@@ -289,6 +293,31 @@ export interface BuildActivityGroupsParams {
    * the two repository reads). Null/undefined name → the raw address stands.
    */
   resolveMerchantName?: (address: string) => string | null
+  /**
+   * #4099: the name of one of the user's OWN accounts at `address` on
+   * `chainId` (`ownAccountNameResolver`), or null. Names the SENDING side of
+   * a transfer between two own accounts by the receiving account. The
+   * receiving side stays a deposit here: naming it needs the frontend's
+   * inbound label to read `merchantName` first, so it ships with #4099's
+   * frontend half — a named inbound group the client still renders as
+   * "Deposit" would show the day's deposits twice.
+   */
+  resolveOwnAccountName?: (address: string, chainId: number) => string | null
+}
+
+/**
+ * #4099: own-account name lookup — the export route's rule
+ * (`routes/transactions.ts`): the address is case-insensitive, the chain is
+ * not, because an account exists only on the chain it was created on.
+ */
+export function ownAccountNameResolver(
+  accounts: ReadonlyArray<{ account_address: string; chain_id: number; name: string | null }>,
+): (address: string, chainId: number) => string | null {
+  const names = new Map<string, string>()
+  for (const account of accounts) {
+    if (account.name) names.set(`${account.account_address.toLowerCase()}:${account.chain_id}`, account.name)
+  }
+  return (address, chainId) => names.get(`${address.toLowerCase()}:${chainId}`) ?? null
 }
 
 interface GroupAccumulator {
@@ -320,6 +349,7 @@ export async function buildActivityGroups(
     currency = DEFAULT_TRANSACTION_CURRENCY,
     now = Date.now(),
     resolveMerchantName,
+    resolveOwnAccountName,
   } = params
 
   // One instant comparison, no tz: the rolling window `[now − 168h, now)` is
@@ -373,9 +403,14 @@ export async function buildActivityGroups(
         source: sample.source ?? null,
         x402ResourceUrl: sample.x402ResourceUrl ?? null,
         to: sample.to,
+        // Contacts and receipts first, then the user's own accounts (#4099)
+        // — the export's order. Deposits stay unnamed (see
+        // `resolveOwnAccountName`).
         merchantName:
           sample.direction === 'out'
-            ? (resolveMerchantName?.(sample.to) ?? null)
+            ? (resolveMerchantName?.(sample.to) ??
+              resolveOwnAccountName?.(sample.to, sample.chainId) ??
+              null)
             : null,
         activityType: sample.activityType ?? null,
         direction: sample.direction,

@@ -47,6 +47,9 @@ const { mockQuery, portfolioMocks, transactionMocks, fiatMocks } = vi.hoisted(()
     activityWindowStartIso: vi.fn(
       (nowMs: number) => new Date(nowMs - 7 * 24 * 60 * 60 * 1000).toISOString(),
     ),
+    // #4099: the route hands the feed an own-account name lookup built from
+    // its account list.
+    ownAccountNameResolver: vi.fn((_accounts: unknown[]) => (_address: string, _chainId: number): string | null => null),
     buildActivityFeed: vi.fn(async () => ({
       groups: [] as never[],
       hasOlderActivity: false,

@@ -523,7 +523,7 @@ export function createStateDirectRecoveryHandlers(
             : {}),
           next_step:
             coverage.covered === false
-              ? 'The budget is backed by an empty account — stop and tell the user the funds are missing rather than attempting the payment.'
+              ? 'The account holds less than the checked amount (how much less is not returned) — stop and tell the user the account is short rather than attempting the payment.'
               : coverage.covered === null
                 ? 'The chain read failed: treat this as unverifiable, not as absence. Retry shortly or proceed knowing the payment may fail on-chain.'
                 : 'The checked amount is held. Spend AUTHORITY is a separate question — budget_remaining_atomic above is the permitted figure; ask haven_get_allowances for the full per-token breakdown.',

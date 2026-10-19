@@ -80,8 +80,41 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-10-16"
+last-verified: "2026-10-19"
 ---
+
+> **Re-verified (#4061, 2026-10-19, `payment_header` on the settlement
+> reports):** this changes the hosted tool contract additively.
+>
+> - **New argument.** `haven_report_x402_outcome` and
+>   `haven_report_settlement_evidence` gain an optional `payment_header`
+>   (string, 1–16,384 chars).
+> - **Descriptions.** The two report tools, `haven_pay_x402_quote`,
+>   `haven_resume_x402_payment`, and the signer's `haven_sign_x402` now say
+>   to pass it.
+> - **Snapshot and fingerprint.** `tools-list.snapshot.json` and the contract
+>   fingerprint move.
+> - **Corpus.** `next-arguments-corpus.json` gains two emissions, each naming
+>   `haven_report_settlement_evidence` with `{ payment_id,
+>   settlement_tx_hash }`.
+> - **Stale-client check.** `check-stale-client-compat.mjs` reports no
+>   reconnect-required change against `origin/main` or `origin/dev`.
+>
+> Interoperation:
+>
+> - **A stale client** loses only the new argument. Its EIP-3009 settlement
+>   reports stay refused, now with the typed
+>   `SETTLEMENT_PROOF_HEADER_MISSING` answer and its re-report handoff,
+>   until it reloads `tools/list`.
+> - **A new hosted server against a backend that predates #3925** (`main`):
+>   the backend accepts `paymentProofHeader` on the evidence route and does
+>   not read it on the eip3009 branch, so it records as before.
+> - **An older hosted server against a current backend:** it keeps the
+>   refusal it already had.
+>
+> No Supported Runtime Manifest row, channel, dist-tag, release step or
+> consent surface moves. `last-verified` is bumped to 2026-10-19 for this
+> note. Nothing else in this document was re-verified.
 
 
 > **Re-verified unchanged (#4023, 2026-10-16, per-account deploy salt):** this

@@ -1243,6 +1243,18 @@ predicate permanently rather than until the window elapses.
 > tool, so the plain-HTTP eip3009 purchase is six hosted/signer calls, not
 > seven; the standalone `haven_report_settlement_evidence` stays for agents
 > that call it and for the paid-MCP/erc7710 handoffs that already name it.
+>
+> **The proof header rides the report (#4061, passage only).** Since #3925 an
+> EIP-3009 merchant settlement is recorded only with the payment header the
+> agent sent the merchant. Haven never sees that header on this path, so both
+> report tools take an optional `payment_header`: the exact header the agent
+> retried with. It is forwarded as `paymentProofHeader` plus the names
+> `x402PaymentHeaderNamesSent` derives, the funding report's pair. A report
+> without it is refused with `error_code: "settlement_proof_header_missing"`,
+> and the tools answer `SETTLEMENT_PROOF_HEADER_MISSING`, naming
+> `haven_report_settlement_evidence` again with the hash prefilled. The
+> agent adds `payment_header`; the hash was not judged. Every other refusal
+> keeps its terminal answer. `last-verified` unchanged.
 
 The report is caller-**asserted**, and the boundary is drawn the way #2092/#2096
 drew it for a caller-asserted settlement hash:
@@ -1614,6 +1626,17 @@ payment"), and a receipt with no `AuthorizationUsed` from the token for this
 delegate at all is refused as not an EIP-3009 settlement. A report carrying
 no header is refused rather than attributed by shape; the sweep still
 attributes derived-nonce payments without any report.
+
+Since [#4061](https://github.com/d-hinders/Haven-AI/issues/4061) that header
+actually arrives. The hosted report tools take it as `payment_header`, and the
+SDK's own settlement reports (#3764) post the header their retry sent. Before
+this, only the SDK's FUNDING report carried it. A header-less report's 409
+carries `error_code: "settlement_proof_header_missing"`, the one refusal a
+report repeated with the header can clear. A proof whose nonce is NOT this
+payment's derived nonce but IS a sibling payment's is refused before the
+chain is read. That is the shape of a header lifted from a same-agent
+sibling: it has the same delegate, so it passes the signer check, and the
+sibling's settlement burned exactly that nonce.
 
 **Naming the two hashes (#2998).** `tx_hash` on a receipt (`GET
 /machine-payments/receipts`, `HavenPaymentReceipt.txHash`) means something

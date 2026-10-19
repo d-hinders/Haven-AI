@@ -3229,6 +3229,33 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > `infra/repositories/x402-authorizations.ts`; the rest of this document was
 > not re-read for it, and `last-verified` is not bumped.
 
+> **Re-verified unchanged in authority, narrowed in evidence (#4061,
+> 2026-10-19, the #3925 proof header reaches the backend):** the note above
+> assumed that settlement reports post the X-PAYMENT header. None did. The SDK
+> posted it with its funding report only, and the hosted plain-HTTP report
+> tools had no parameter for it. Now:
+>
+> - `haven_report_x402_outcome` and `haven_report_settlement_evidence` take
+>   `payment_header`, and the SDK's settlement reports post the header their
+>   retry sent;
+> - a header-less report's 409 carries `error_code:
+>   "settlement_proof_header_missing"`;
+> - one further misattribution is refused. Payment B's report could carry
+>   same-agent sibling A's header together with A's settlement. The delegate
+>   is the same, so that passed the signer check, and the burned-nonce check
+>   too, and was recorded on B. `observeEip3009MerchantSettlement` now
+>   refuses a non-derived proof nonce that is a sibling's derived nonce,
+>   before the chain is read.
+>
+> The trusted set is unchanged, and the header stays an untrusted input that
+> only names what to verify. No signature, key role, enforcer or custody path
+> moves. The new check only refuses. Residual: a non-deriving client's random
+> nonce cannot be tied to a sibling, and the burned-nonce check still binds it
+> to a header the delegate signed. Scope of this note:
+> `modules/x402/eip3009-settlement-evidence.ts`, `modules/mpp/evidence.ts`,
+> and the SDK's settlement-report call sites. The rest of this document was
+> not re-read for it, and `last-verified` is not bumped.
+
 > **Re-verified #3967 (2026-10-14, the quote-time budget gate):** the diff
 > touches `packages/sdk/src/client.ts` (covered): `precheckBudget` gains an
 > optional `recordRefusal` input, and the quote surfaces call it with

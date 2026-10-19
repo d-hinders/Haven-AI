@@ -161,11 +161,14 @@ so this is a rule to point at rather than a question to ask the release runner.
       then read the run's **per-package summary table**: a package can fail while
       the others publish (#1159), so green-except-one is a real outcome, not a
       binary. Since [#3797](https://github.com/d-hinders/Haven-AI/issues/3797) a
-      package whose internal dependency did not publish in the same run is held
-      back, its row reading **FAILED** — not published: dependency … did not
-      publish in this run, rather than going out against a version npm does not
-      have. Re-running the failed job skips the versions already on npm and
-      publishes the held-back rest.
+      package whose internal dependency neither published in the same run nor
+      was already on npm is held back, its row reading **FAILED** — not
+      published: dependency … did not publish in this run, rather than going out
+      against a version npm does not have. A package whose internal pin has
+      drifted from the workspace version is held back the same way (published
+      packages pin internal dependencies exactly, `lint:workspace-pins`).
+      Re-running the failed job skips the versions already on npm and publishes
+      the held-back rest.
       Since [#2421](https://github.com/d-hinders/Haven-AI/issues/2421) the same
       workflow also publishes `0.0.0-dev.*` snapshots under a separate `dev`
       dist-tag on pushes to `dev`. That is a different channel and changes

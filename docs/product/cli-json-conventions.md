@@ -137,8 +137,11 @@ pending object with **no `ok` key**, and exit 3: the device flow once its 30 s
 `--json` wait runs out, and `--poll` on a code not yet approved.
 
 ```json
-{ "status": "pending", "device_code": "…", "retry_after": 5 }
+{ "status": "pending", "device_code": "…", "retry_after": <seconds> }
 ```
+
+`retry_after` is the server's poll interval on the device-flow path; `--poll`
+sends a fixed 5, or 10 after a `slow_down`.
 
 `haven login --no-wait` returns a **different** envelope, pure snake:
 

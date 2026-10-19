@@ -40,6 +40,11 @@ covers:
   - docs/regulatory/casp-risk-guardrails.md
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/infra/chain/delegation-budget-reader.ts
+  - packages/backend/src/modules/payments/prepare-failure.ts
+  - packages/backend/src/modules/x402/eip3009-settlement-evidence.ts
+  - packages/mcp-server/src/tools/plain-http-x402.ts
+  - packages/mcp-server/src/tools/contracts.ts
+  - packages/backend/src/modules/mpp/sweep.ts
 last-verified: "2026-10-19"
 ---
 
@@ -323,10 +328,14 @@ Merchant-facing fetches on the hosted path are bounded (#1300):
 `merchantTimeout` default 300 s, calibrated to the merchant's own
 `maxTimeoutSeconds: 300`. Since #3747 the hosted client also installs
 `strictMerchantEgressPolicy()` (`packages/sdk/src/merchant-egress.ts`):
-public https URLs only, every GET redirect hop re-checked (at most 3, none on
-other methods), per-use byte caps, and per-use deadlines of 15 s for quote
-probes and MCP session setup, 5 s for discovery and 300 s for paid delivery,
-each the minimum of the policy value and `merchantTimeout`; a timeout AFTER confirmed funding surfaces as
+public https URLs only — a string check on the URL; a public name whose DNS
+answer points at private space is not blocked (#3742–#3744) — per-use byte
+caps, and per-use deadlines of 15 s for quote probes and MCP session setup,
+5 s for discovery and 300 s for paid delivery. In the SDK merchant transport
+every GET redirect hop is re-checked (at most 3, none on other methods) and
+each deadline is the minimum of the policy value and `merchantTimeout`;
+discovery and the #3739 request-mode probe use the policy deadline directly
+and follow no redirect (`redirect: 'error'`); a timeout AFTER confirmed funding surfaces as
 `MERCHANT_UNRESPONSIVE_AFTER_FUNDING` with verify-then-sweep guidance —
 never a blind sweep, since the merchant may still settle late.
 
@@ -403,10 +412,12 @@ reaches `prepareDelegationPayment`'s gas estimation (a budget the pre-check
 could not read, for one) is rejected by the caveat enforcer there. A revert a
 fresh read confirms is the period budget's (#3503) or an open task budget's
 cap (#3500) answers the same typed 403 as that budget's pre-check
-(`delegation_budget_exceeded` / `task_budget_exceeded`); anything else is a
-**502 with no payment row written**, typed since #3609 as `prepare_reverted`
-(an execution revert) or `prepare_failed` with bounded `details`
-(`routes/payments.ts`, `modules/payments/prepare-failure.ts`).
+(`delegation_budget_exceeded` / `task_budget_exceeded`); a chain with no
+bundler credential on this deployment is a typed, non-retryable **503**
+(#3416); anything else is a **502 with no payment row written**, typed since
+#3609 as `prepare_reverted` (an execution revert) or `prepare_failed`, both
+with bounded `details` (`routes/payments.ts`,
+`modules/payments/prepare-failure.ts`).
 In every case there is no intent row, no `payload_hash` to sign, and
 nothing to poll — tell the user to raise the budget in Haven.
 
@@ -431,15 +442,17 @@ agent:   retry merchant, setting BOTH PAYMENT-SIGNATURE + X-PAYMENT
 hosted:  haven_report_x402_outcome { payment_id, outcome, merchant_status, payment_header }
 ```
 
-Since #3762 the pay step takes the quoted request (`url`, `method`,
+Since #3739 (PR #3762) the pay step takes the quoted request (`url`, `method`,
 `headers`, `body`) and re-sends it itself, paying the 402 it got, so the agent
 never copies a challenge. The hosted guidance names the one-call local form,
 `haven_sign_x402` in place of the two local steps (its header is built before
 funding confirms; the `x402_binding` it returns is already spent). The header
 tools return `retry_headers`, the header names to set (#3727). The outcome
-report may fold in the settlement evidence, and since #4061 a reported
-settlement is recorded only when the report carries the `payment_header` the
-agent retried with (`SETTLEMENT_PROOF_HEADER_MISSING` otherwise).
+report may fold in the settlement evidence. On this EIP-3009 path only (erc7710
+needs no header: Haven assembled it), since #3925 a reported settlement is
+recorded only when the report carries the `payment_header` the agent retried
+with; since #4061 a report without it is refused as
+`SETTLEMENT_PROOF_HEADER_MISSING`, and both report tools forward the header.
 
 **Decomposed x402 flow — erc7710 direct settlement**
 ([#2041](https://github.com/d-hinders/Haven-AI/issues/2041)), taken when the
@@ -525,8 +538,11 @@ account is permanently out of scope.
   still never the key. On the plain-HTTP path the agent's settlement report
   (`haven_report_x402_outcome` / `haven_report_settlement_evidence`) carries
   the `payment_header` it retried with, after the merchant has used it: since
-  #4061 an EIP-3009 settlement is recorded only with that header, whose
-  derived nonce proves which payment it was signed for.
+  #3925 an agent-reported EIP-3009 settlement is recorded only with that
+  header — the delegate's signature over its authorization nonce binds the
+  settlement to this payment — and since #4061 both report tools forward it.
+  The #3888 sweep records without one, from the nonce derived from the
+  payment id.
 - The merchant receives the standard signed EIP-3009 payment header, never the
   delegate key. Hosted paid-MCP completion also sends the requested MCP call and
   required session/handshake traffic. Haven never builds the payment header on
@@ -573,7 +589,8 @@ account is permanently out of scope.
   already produced its signature, and `payload_hash` / `typed_data_hash` are
   bounded on the schema to a 32-byte hash so no audit field is
   caller-controlled free text. A `haven_sign_siwx` row (#3728) records the
-  sha256 of the composed EIP-4361 message as its `payload_hash`, plus the
+  sha256 of the JSON-encoded composed EIP-4361 message (`hashPayloadForAudit`)
+  as its `payload_hash`, plus the
   challenge's grammar-validated `domain` and `nonce`; never the message
   itself.
 - Connect Agent 2 creates local credential files during pairing. Registration
@@ -635,8 +652,8 @@ account is permanently out of scope.
 > the #3330 three-link sub-budget chain, not two shapes; the over-budget 502 is
 > typed (#3609) and a confirmed budget revert answers 403; the hosted egress
 > policy's deadlines and caps (#3747); the decomposed x402 flows gain the quote
-> step (#3762) and the outcome / settlement-evidence report, with the proof
-> header #4061 requires; the SIWX audit row; and the sweep supports Base
+> step (#3739) and the outcome / settlement-evidence report, with the proof
+> header #3925 requires; the SIWX audit row; and the sweep supports Base
 > Sepolia as well as Base mainnet (`isSweepableChain`). Checked and accurate:
 > the `core.ts:448-454` and sweeper `:464` line anchors, the tool set and
 > `--help` / unknown-option exit 2 (run), the consent and ack paths, the audit

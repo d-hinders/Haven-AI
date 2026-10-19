@@ -160,6 +160,13 @@ jobs:
     concurrency:
       group: qa-dev-money-flow
       cancel-in-progress: false
+    # Read by scripts/ci/qa-failure-issue.mjs's trigger line (both issue steps).
+    # Empty outside deployment_status; nothing secret.
+    env:
+      DEPLOYMENT_ID: ${{ github.event.deployment.id }}
+      DEPLOYMENT_SHA: ${{ github.event.deployment.sha }}
+      DEPLOYMENT_ENV: ${{ github.event.deployment.environment }}
+      DEPLOYMENT_CREATOR: ${{ github.event.deployment.creator.login }}
     steps:
       # Checkout FIRST: the failure step at the bottom runs
       # scripts/ci/qa-failure-issue.mjs from the checkout, and `if: failure()`
@@ -295,36 +302,39 @@ jobs:
             exit 1
           fi
           echo "all legs executed -- full coverage"
+      # #4069: the other half — CLOSE the standing issue on a full-coverage green.
+      # Placed after Coverage completeness, so a green-with-skips run (red there)
+      # never reaches it. Only a run that tested dev counts as evidence: not a
+      # dispatch with a haven_api_url override (another backend), and not a
+      # dispatch from a feature branch (its harness is not dev's). A schedule or
+      # deployment_status run is always dev's. A failed close is a WARNING, not a
+      # red step: the qa-freshness gate keys on this job's conclusion, so an
+      # issue-API blip must not turn a green money-flow run red — and the job
+      # carries no continue-on-error at all (skip-marker.test.ts pins that, #3368),
+      # hence `|| warn` in the shell instead. The close (bot author + exact title,
+      # lookup fails closed before any write) is in scripts/ci/qa-failure-issue.mjs,
+      # tested with the same stub.
+      - name: Close the standing qa-failure issue on green
+        if: success() && github.event.inputs.haven_api_url == '' && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/dev')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node scripts/ci/qa-failure-issue.mjs --green \
+            || echo "::warning::could not close the standing qa-failure issue on green (#4069) — the next green run retries"
       # #2767: ONE standing `qa-failure` issue, upserted — rewritten with the latest
       # run, a comment per failure, REOPENED when it was closed on green — instead
       # of a new `qa-dev money-flow failed (<date>)` issue whenever none was open
       # (13 between 2026-09-01 and 2026-09-08, up to three a day). The upsert lives in scripts/ci/qa-failure-issue.mjs
       # so scripts/ci/qa-failure-issue.test.mjs can drive all three states with a
-      # recording `gh` stub; this step only builds the trigger line.
+      # recording `gh` stub. The trigger line (#2271: a deployment_status run names
+      # the Railway deployment — id, creator, deployed SHA — and a dispatch names
+      # its actor) and the run URL are built by the script from this job's env
+      # (`triggerLine`), shared with the green step above.
       - name: Update the standing qa-failure issue
         if: failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DEPLOYMENT_ID: ${{ github.event.deployment.id }}
-          DEPLOYMENT_SHA: ${{ github.event.deployment.sha }}
-          DEPLOYMENT_ENV: ${{ github.event.deployment.environment }}
-          DEPLOYMENT_CREATOR: ${{ github.event.deployment.creator.login }}
-        run: |
-          set -euo pipefail
-          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          # #2271: the trigger line must let a reader tell a real post-deploy run
-          # from a hand-started one. A deployment_status run names the Railway
-          # deployment (id, creator, deployed SHA) — GitHub-authored provenance a
-          # curl cannot produce; a workflow_dispatch names the actor who started it.
-          case "$GITHUB_EVENT_NAME" in
-            deployment_status)
-              TRIGGER="deployment_status — Railway deployment ${DEPLOYMENT_ID} of ${DEPLOYMENT_SHA} to '${DEPLOYMENT_ENV}', created by ${DEPLOYMENT_CREATOR}" ;;
-            workflow_dispatch)
-              TRIGGER="workflow_dispatch — started by ${GITHUB_ACTOR}" ;;
-            *)
-              TRIGGER="${GITHUB_EVENT_NAME}" ;;
-          esac
-          # The attempt logs the money-flow step kept (#3338) are classified into the
-          # issue (#3337). If the run failed before the harness, the glob stays
-          # unmatched and the issue says "no harness log".
-          TRIGGER="$TRIGGER" RUN_URL="$RUN_URL" node scripts/ci/qa-failure-issue.mjs qa-run.attempt-*.log
+        # The attempt logs the money-flow step kept (#3338) are classified into the
+        # issue (#3337). If the run failed before the harness, the glob stays
+        # unmatched and the issue says "no harness log".
+        run: node scripts/ci/qa-failure-issue.mjs qa-run.attempt-*.log

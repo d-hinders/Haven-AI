@@ -1434,3 +1434,13 @@ project owner — collaborators have Viewer access, not env-var write access.
 > mode, enforced-module list, environment variable or dev setup step this
 > document describes moved. The rest of this document was not re-read for
 > it; `last-verified` already reads 2026-10-15.
+
+> **Re-verified #4069 (2026-10-19):** `qa-dev.yml`'s money-flow job gains a
+> *Close the standing qa-failure issue on green* step after Coverage
+> completeness — a failed close only warns, so the job conclusion is
+> unaffected — which only closes the standing
+> `qa-failure` issue; the failure step's trigger line moved into the issue
+> script (agent-qa.md § *Automated failure reporting*). The gate job, the Coverage completeness step, the #1047
+> override validation and the `money-flow` job's conclusion are unchanged, so
+> the freshness-gate statements above still hold. The rest of this document was
+> not re-read for it, and `last-verified` is not bumped.

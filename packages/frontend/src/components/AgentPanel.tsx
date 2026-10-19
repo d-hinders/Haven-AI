@@ -22,7 +22,7 @@ import { isHalfRevoked } from '@/lib/half-revoked'
 import { Button } from './ui/Button'
 import { EmptyState } from './ui/EmptyState'
 import { Skeleton } from './ui/Skeleton'
-import { AgentOnboardingPromptCard } from './connect-agent/AgentOnboardingPromptCard'
+import { InlineAgentSetup } from './connect-agent/InlineAgentSetup'
 
 /**
  * The agents panel's shell: header, list layout, empty states, and modals.
@@ -140,6 +140,15 @@ export default function AgentPanel() {
     }
   }, [panel, resumeSetupId])
 
+  // #4065: the inline first-agent flow replaces the empty state. It never
+  // renders while a `?setup=<id>` resume modal is open, so two flows (and two
+  // status polls) never run at once; once a setup exists the latch holds it
+  // until the user leaves (`useAgentPanelState`). Every other part of the
+  // agents surface keys its hiding on THIS value, never on `agents.length`,
+  // so the `pending_approval` agent of the setup in progress does not appear
+  // under it as a card.
+  const showInlineSetup =
+    panel.inlineSetupLatched || (panel.inlineSetupEligible && !activeResumeSetupId)
 
   if (!accountAddress) {
   
@@ -189,14 +198,20 @@ export default function AgentPanel() {
           the wrapped lines; without it the cluster sits flush under the
           chip. */}
       <div className="flex flex-wrap items-center justify-between gap-y-2 mb-4">
-        <div className="flex items-center gap-1">
-          <div className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--v2-surface-2)] text-[var(--v2-ink)]">
-            Agents
-            <span className="ml-1 text-[var(--v2-ink-3)]">
-              {visibleAgents.length}
-            </span>
+        {/* #4065 (owner decision 2026-10-19): no "Agents 0" chip and no
+            header Connect agent while the inline flow shows — the flow IS the
+            way to connect, and a second entry would open the modal over it.
+            Labels and Organizations stay. */}
+        {!showInlineSetup && (
+          <div className="flex items-center gap-1">
+            <div className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--v2-surface-2)] text-[var(--v2-ink)]">
+              Agents
+              <span className="ml-1 text-[var(--v2-ink-3)]">
+                {visibleAgents.length}
+              </span>
+            </div>
           </div>
-        </div>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           <Button onClick={() => panel.setLabelsManagerOpen(true)} size="sm" variant="tertiary">
             <Icon icon={Tag} className="h-3.5 w-3.5" />
@@ -208,232 +223,266 @@ export default function AgentPanel() {
             <Icon icon={Network} className="h-3.5 w-3.5" />
             Organizations
           </Button>
-          <Button onClick={() => panel.setConnectAgentOpen(true)} size="sm">
-            <Icon icon={Plus} className="h-3.5 w-3.5" />
-            Connect agent
-          </Button>
+          {!showInlineSetup && (
+            <Button onClick={() => panel.setConnectAgentOpen(true)} size="sm">
+              <Icon icon={Plus} className="h-3.5 w-3.5" />
+              Connect agent
+            </Button>
+          )}
         </div>
       </div>
 
-      {/* #3164: the organization tree above the list — only when the user HAS
-          organizations. An empty tree would be a permanent empty management
-          panel on every org-less /agents visit (product README, First-Run
-          Simplicity); the header's Organizations button is the entry point
-          until one exists. */}
-      {panel.organizations.length > 0 && (
-        <AgentOrganizationTree
-          organizations={panel.organizations}
-          loading={panel.organizationsLoading}
-          error={panel.organizationsError}
-          selectedId={selectedOrgId}
-          onSelect={selectOrganization}
-          onCreate={() => panel.setOrganizationsManagerOpen(true)}
-          onManage={() => panel.setOrganizationsManagerOpen(true)}
-          onRetry={() => void panel.fetchOrganizations()}
-          counts={listFilters.counts.organization}
+      {showInlineSetup ? (
+        // #4065: the existing connect flow, inline, for a user with no agents
+        // — it replaces the "No agents yet" empty state and the onboarding
+        // prompt card. Keyed so each leave remounts it fresh.
+        <InlineAgentSetup
+          key={panel.inlineSetupKey}
+          onClose={panel.leaveInlineSetup}
+          onSetupStarted={panel.latchInlineSetup}
+          onSetupAbandoned={panel.releaseInlineSetup}
+          accountAddress={accountAddress}
+          accountId={panel.defaultAccountId}
+          onSetupUpdated={panel.handleSetupUpdated}
         />
-      )}
-
-      {visibleAgents.length > 0 && (
-        <AgentListToolbar
-          state={listFilters.state}
-          onChange={listFilters.setState}
-          onReset={listFilters.reset}
-          facets={listFilters.facets}
-          counts={listFilters.counts}
-          shown={listFilters.filtered.length}
-          total={visibleAgents.length}
-          active={listFilters.active}
-        />
-      )}
-
-      {agentsError && agents.length > 0 ? (
-        <div
-          role="alert"
-          className="mb-4 rounded-lg border border-warning/30 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink-2)]"
-        >
-          Agent data could not refresh. Showing the last loaded records.
-          <Button className="ml-2" size="sm" variant="ghost" onClick={() => void refetchAgents()}>
-            Try again
-          </Button>
-        </div>
-      ) : null}
-
-      {/* Agents view */}
-      {loading && agents.length === 0 && (
-        <div
-          className="space-y-3"
-          role="status"
-          aria-busy="true"
-          aria-live="polite"
-          aria-label="Loading agents"
-        >
-          {[0, 1].map((i) => (
-            <div
-              key={i}
-              className="bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-[10px] p-5"
-            >
-              <div className="flex items-center gap-3 mb-4">
-                <Skeleton className="w-9 h-9 rounded-xl" />
-                <div className="space-y-2">
-                  <Skeleton variant="text" className="h-3 w-32" />
-                  <Skeleton variant="text" className="h-2 w-48" />
-                </div>
-              </div>
-              <Skeleton variant="text" className="h-2 w-full" />
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Finalizing placeholder — shown while the post-approval poll waits for a
-          freshly-signed agent to flip active, so the empty state doesn't flash
-          back as if nothing happened. `finalizingAgent` is set for every setup,
-          but this only renders when the list is empty (first agent); for
-          subsequent agents the existing list stays visible and the new one just
-          appends. */}
-      {!loading && agents.length === 0 && finalizingAgent && (
-        <div role="status" aria-busy="true" aria-live="polite" aria-label="Finalizing agent setup">
-          <EmptyState
-            tone="neutral"
-            icon={
-              /* Heavier stroke: matches the original spinner's 3px ring weight. */
-              <Icon icon={LoaderCircle} className="h-5 w-5 animate-spin" strokeWidth={3} />
-            }
-            title="Finalizing your agent…"
-            body="Haven is confirming the new rules on-chain. Your agent will appear here in a moment — no need to refresh."
-          />
-        </div>
-      )}
-
-      {/* Timeout fallback — the poll exhausted its window without the agent
-          appearing. Rather than dropping silently to the empty state, tell the
-          user it may still be confirming and let them re-check. */}
-      {!loading &&
-        agents.length === 0 &&
-        !agentsError &&
-        !finalizingAgent &&
-        finalizeTimedOut && (
-          <EmptyState
-            tone="warning"
-            icon={
-              <Icon icon={Clock} className="h-5 w-5" />
-            }
-            title="Your agent is taking longer than expected"
-            body="Haven is still confirming the new rules on-chain. This can take a little longer under load — check again in a moment."
-            action={
-              <div className="flex flex-wrap items-center justify-center gap-2">
-                <Button onClick={panel.retryFinalizePoll}>
-                  Check again
-                </Button>
-              </div>
-            }
-          />
-        )}
-
-      {/* Empty state */}
-      {!loading &&
-        agents.length === 0 &&
-        !agentsError &&
-        !finalizingAgent &&
-        !finalizeTimedOut && (
-        <EmptyState
-          icon={<BotIcon size={20} />}
-          title="No agents yet"
-          body="Set agent rules, then add your Haven credential to your agent so it can make payments within those rules."
-          action={
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              <Button onClick={() => panel.setConnectAgentOpen(true)}>Connect agent</Button>
-            </div>
-          }
-        />
-      )}
-
-      {/* #2535: the agent-driven ALTERNATIVE to the button above — rendered on the
-          same condition, so a user who would rather hand the whole job to an
-          agent has something to paste before they ever open the modal.
-
-          The "or" divider is not decoration. Without it these are two
-          full-width blocks that both ask the user to start, with no hierarchy
-          saying which — `haven-design-reviewer` read the first version as two
-          competing calls to action rather than one choice, before reading
-          either. The divider is what makes the relationship legible at a glance
-          instead of only after reading the card's description. */}
-      {!loading &&
-        agents.length === 0 &&
-        !agentsError &&
-        !finalizingAgent &&
-        !finalizeTimedOut && (
-          <>
-            <div className="mt-6 flex items-center gap-3" aria-hidden="true">
-              <span className="h-px flex-1 bg-[var(--v2-border)]" />
-              <span className="text-xs text-[var(--v2-ink-3)]">or</span>
-              <span className="h-px flex-1 bg-[var(--v2-border)]" />
-            </div>
-            <AgentOnboardingPromptCard className="mt-6" />
-          </>
-        )}
-
-      {!loading && agents.length === 0 && agentsError ? (
-        <EmptyState
-          tone="warning"
-          icon={<Icon icon={CircleAlert} className="h-5 w-5" />}
-          title="Agents could not load"
-          body="Haven could not load your connected agents right now. Try again before assuming there are none."
-          action={<Button onClick={() => void refetchAgents()}>Try again</Button>}
-        />
-      ) : null}
-
-      {/* Agent list */}
-      {agents.length > 0 && (
-        <div className="space-y-4">
-          {/*
-            #2043: the `not recorded` explanation, ONCE, as visible text, and
-            only when a card on screen actually says `not recorded`.
-
-            #2017's shape (PR #2039), matched rather than re-invented — see
-            `MCP_NOT_RECORDED_NOTE` for why this copy cannot live in the
-            `Tooltip` it came from, and why the OTHER tooltip in the same
-            component stays.
-
-            The predicate reads the cards that are RENDERED, not every agent
-            Haven holds: removed agents are collapsed behind a toggle, so
-            counting them while they are hidden would put a note above the list
-            explaining a label that is nowhere on the page. Expanding Removed
-            reveals both together, which is the honest pairing. The same rule
-            makes it the FILTERED list (#3165), not every visible agent: a
-            filter that hides the only `not recorded` card hides the note.
-          */}
-          {hasUnrecordedMcpServerName([
-            ...listFilters.filtered,
-            ...(panel.showRemovedAgents ? removedAgents : []),
-          ]) && (
-            <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
-              {MCP_NOT_RECORDED_NOTE}
-            </p>
-          )}
-
-          {/* Managed agents */}
-          {visibleAgents.length > 0 && listFilters.filtered.length === 0 && (
-            <EmptyState
-              size="compact"
-              tone="neutral"
-              title="No agents match these filters"
-              body="Widen the search or clear a filter to see your agents again."
-              action={
-                <Button size="sm" variant="tertiary" onClick={listFilters.reset}>
-                  Clear filters
-                </Button>
-              }
+      ) : (
+        <>
+          {/* #3164: the organization tree above the list — only when the user HAS
+              organizations. An empty tree would be a permanent empty management
+              panel on every org-less /agents visit (product README, First-Run
+              Simplicity); the header's Organizations button is the entry point
+              until one exists. */}
+          {panel.organizations.length > 0 && (
+            <AgentOrganizationTree
+              organizations={panel.organizations}
+              loading={panel.organizationsLoading}
+              error={panel.organizationsError}
+              selectedId={selectedOrgId}
+              onSelect={selectOrganization}
+              onCreate={() => panel.setOrganizationsManagerOpen(true)}
+              onManage={() => panel.setOrganizationsManagerOpen(true)}
+              onRetry={() => void panel.fetchOrganizations()}
+              counts={listFilters.counts.organization}
             />
           )}
 
-          {listFilters.filtered.length > 0 && (
-            <div className="grid items-start gap-4 lg:grid-cols-2">
-              {listFilters.filtered.map((agent) => {
-                const agentChainId = agent.account_chain_id ?? DEFAULT_CHAIN_ID
+          {visibleAgents.length > 0 && (
+            <AgentListToolbar
+              state={listFilters.state}
+              onChange={listFilters.setState}
+              onReset={listFilters.reset}
+              facets={listFilters.facets}
+              counts={listFilters.counts}
+              shown={listFilters.filtered.length}
+              total={visibleAgents.length}
+              active={listFilters.active}
+            />
+          )}
 
-                return (
+          {agentsError && agents.length > 0 ? (
+            <div
+              role="alert"
+              className="mb-4 rounded-lg border border-warning/30 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink-2)]"
+            >
+              Agent data could not refresh. Showing the last loaded records.
+              <Button className="ml-2" size="sm" variant="ghost" onClick={() => void refetchAgents()}>
+                Try again
+              </Button>
+            </div>
+          ) : null}
+
+          {/* Agents view */}
+          {loading && agents.length === 0 && (
+            <div
+              className="space-y-3"
+              role="status"
+              aria-busy="true"
+              aria-live="polite"
+              aria-label="Loading agents"
+            >
+              {[0, 1].map((i) => (
+                <div
+                  key={i}
+                  className="bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-[10px] p-5"
+                >
+                  <div className="flex items-center gap-3 mb-4">
+                    <Skeleton className="w-9 h-9 rounded-xl" />
+                    <div className="space-y-2">
+                      <Skeleton variant="text" className="h-3 w-32" />
+                      <Skeleton variant="text" className="h-2 w-48" />
+                    </div>
+                  </div>
+                  <Skeleton variant="text" className="h-2 w-full" />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Finalizing placeholder — shown while the post-approval poll waits for a
+              freshly-signed agent to flip active, so the inline first-agent flow
+              doesn't flash back as if nothing happened. `finalizingAgent` is set
+              for every setup, but this only renders when the list is empty (first
+              agent) and the user has left the inline flow (#4065: while it is
+              latched, its own Done screen is the feedback); for subsequent agents
+              the existing list stays visible and the new one just appends. */}
+          {!loading && agents.length === 0 && finalizingAgent && (
+            <div role="status" aria-busy="true" aria-live="polite" aria-label="Finalizing agent setup">
+              <EmptyState
+                tone="neutral"
+                icon={
+                  /* Heavier stroke: matches the original spinner's 3px ring weight. */
+                  <Icon icon={LoaderCircle} className="h-5 w-5 animate-spin" strokeWidth={3} />
+                }
+                title="Finalizing your agent…"
+                body="Haven is confirming the new rules on-chain. Your agent will appear here in a moment — no need to refresh."
+              />
+            </div>
+          )}
+
+          {/* Timeout fallback — the poll exhausted its window without the agent
+              appearing. Rather than dropping silently back to the inline flow, tell the
+              user it may still be confirming and let them re-check. */}
+          {!loading &&
+            agents.length === 0 &&
+            !agentsError &&
+            !finalizingAgent &&
+            finalizeTimedOut && (
+              <EmptyState
+                tone="warning"
+                icon={
+                  <Icon icon={Clock} className="h-5 w-5" />
+                }
+                title="Your agent is taking longer than expected"
+                body="Haven is still confirming the new rules on-chain. This can take a little longer under load — check again in a moment."
+                action={
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    <Button onClick={panel.retryFinalizePoll}>
+                      Check again
+                    </Button>
+                  </div>
+                }
+              />
+            )}
+
+          {!loading && agents.length === 0 && agentsError ? (
+            <EmptyState
+              tone="warning"
+              icon={<Icon icon={CircleAlert} className="h-5 w-5" />}
+              title="Agents could not load"
+              body="Haven could not load your connected agents right now. Try again before assuming there are none."
+              action={<Button onClick={() => void refetchAgents()}>Try again</Button>}
+            />
+          ) : null}
+
+          {/* Agent list */}
+          {agents.length > 0 && (
+            <div className="space-y-4">
+              {/*
+                #2043: the `not recorded` explanation, ONCE, as visible text, and
+                only when a card on screen actually says `not recorded`.
+
+                #2017's shape (PR #2039), matched rather than re-invented — see
+                `MCP_NOT_RECORDED_NOTE` for why this copy cannot live in the
+                `Tooltip` it came from, and why the OTHER tooltip in the same
+                component stays.
+
+                The predicate reads the cards that are RENDERED, not every agent
+                Haven holds: removed agents are collapsed behind a toggle, so
+                counting them while they are hidden would put a note above the list
+                explaining a label that is nowhere on the page. Expanding Removed
+                reveals both together, which is the honest pairing. The same rule
+                makes it the FILTERED list (#3165), not every visible agent: a
+                filter that hides the only `not recorded` card hides the note.
+              */}
+              {hasUnrecordedMcpServerName([
+                ...listFilters.filtered,
+                ...(panel.showRemovedAgents ? removedAgents : []),
+              ]) && (
+                <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
+                  {MCP_NOT_RECORDED_NOTE}
+                </p>
+              )}
+
+              {/* Managed agents */}
+              {visibleAgents.length > 0 && listFilters.filtered.length === 0 && (
+                <EmptyState
+                  size="compact"
+                  tone="neutral"
+                  title="No agents match these filters"
+                  body="Widen the search or clear a filter to see your agents again."
+                  action={
+                    <Button size="sm" variant="tertiary" onClick={listFilters.reset}>
+                      Clear filters
+                    </Button>
+                  }
+                />
+              )}
+
+              {listFilters.filtered.length > 0 && (
+                <div className="grid items-start gap-4 lg:grid-cols-2">
+                  {listFilters.filtered.map((agent) => {
+                    const agentChainId = agent.account_chain_id ?? DEFAULT_CHAIN_ID
+
+                    return (
+                      <AgentCard
+                        key={agent.id}
+                        agent={agent}
+                        onPause={panel.handlePause}
+                        onResume={panel.handleResume}
+                        onRevokeCredential={panel.revokeAgentCredential}
+                        onArchive={panel.handleArchive}
+                        onRestore={panel.handleRestore}
+                        onMoveToOrganization={panel.handleAgentMoved}
+                        onBudgetEnded={handleBudgetEnded}
+                        busyAction={panel.busyAgentId === agent.id ? panel.busyAction : null}
+                        chainId={agentChainId}
+                        organizations={panel.organizations}
+                      />
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* #1402: Removed = ARCHIVED agents (archived_at set). History
+                  stays readable; Restore returns list placement only. */}
+              {removedAgents.length > 0 && (
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={() => panel.setShowRemovedAgents((prev) => !prev)}
+                    aria-expanded={panel.showRemovedAgents}
+                    aria-controls={removedAgentsPanelId}
+                    className="inline-flex min-h-11 items-center gap-2 rounded-md px-1 text-xs text-[var(--v2-ink-2)] transition-colors hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)]"
+                  >
+                    <Icon
+                      icon={ChevronRight}
+                      className={`h-3 w-3 transition-transform ${panel.showRemovedAgents ? 'rotate-90' : ''}`}
+                    />
+                    Removed
+                    <span className="text-[var(--v2-ink-3)] v2-tabular">({removedAgents.length})</span>
+                    {/* #3542: a collapsed group must not hide an agent whose budget
+                        is still redeemable on-chain. Nothing extra when none is. */}
+                    {removedHalfRevokedCount > 0 && (
+                      <span className="text-[var(--v2-warning)]">
+                        · {removedHalfRevokedCount}{' '}
+                        {removedHalfRevokedCount === 1 ? 'still has' : 'still have'} an active budget
+                      </span>
+                    )}
+                  </button>
+                </div>
+              )}
+
+              <div
+                id={removedAgentsPanelId}
+                hidden={!panel.showRemovedAgents}
+                role="group"
+                aria-label="Removed agents"
+                // The class must toggle too (#3829): `.grid` and preflight's
+                // `[hidden]` rule share specificity and the utility is emitted
+                // later, so `grid` alone keeps the collapsed panel on screen.
+                className={panel.showRemovedAgents ? 'grid items-start gap-4 lg:grid-cols-2' : 'hidden'}
+              >
+                {removedAgents.map((agent) => (
                   <AgentCard
                     key={agent.id}
                     agent={agent}
@@ -445,72 +494,15 @@ export default function AgentPanel() {
                     onMoveToOrganization={panel.handleAgentMoved}
                     onBudgetEnded={handleBudgetEnded}
                     busyAction={panel.busyAgentId === agent.id ? panel.busyAction : null}
-                    chainId={agentChainId}
+                    chainId={agent.account_chain_id ?? DEFAULT_CHAIN_ID}
                     organizations={panel.organizations}
                   />
-                )
-              })}
+                ))}
+              </div>
+
             </div>
           )}
-
-          {/* #1402: Removed = ARCHIVED agents (archived_at set). History
-              stays readable; Restore returns list placement only. */}
-          {removedAgents.length > 0 && (
-            <div className="pt-1">
-              <button
-                type="button"
-                onClick={() => panel.setShowRemovedAgents((prev) => !prev)}
-                aria-expanded={panel.showRemovedAgents}
-                aria-controls={removedAgentsPanelId}
-                className="inline-flex min-h-11 items-center gap-2 rounded-md px-1 text-xs text-[var(--v2-ink-2)] transition-colors hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)]"
-              >
-                <Icon
-                  icon={ChevronRight}
-                  className={`h-3 w-3 transition-transform ${panel.showRemovedAgents ? 'rotate-90' : ''}`}
-                />
-                Removed
-                <span className="text-[var(--v2-ink-3)] v2-tabular">({removedAgents.length})</span>
-                {/* #3542: a collapsed group must not hide an agent whose budget
-                    is still redeemable on-chain. Nothing extra when none is. */}
-                {removedHalfRevokedCount > 0 && (
-                  <span className="text-[var(--v2-warning)]">
-                    · {removedHalfRevokedCount}{' '}
-                    {removedHalfRevokedCount === 1 ? 'still has' : 'still have'} an active budget
-                  </span>
-                )}
-              </button>
-            </div>
-          )}
-
-          <div
-            id={removedAgentsPanelId}
-            hidden={!panel.showRemovedAgents}
-            role="group"
-            aria-label="Removed agents"
-            // The class must toggle too (#3829): `.grid` and preflight's
-            // `[hidden]` rule share specificity and the utility is emitted
-            // later, so `grid` alone keeps the collapsed panel on screen.
-            className={panel.showRemovedAgents ? 'grid items-start gap-4 lg:grid-cols-2' : 'hidden'}
-          >
-            {removedAgents.map((agent) => (
-              <AgentCard
-                key={agent.id}
-                agent={agent}
-                onPause={panel.handlePause}
-                onResume={panel.handleResume}
-                onRevokeCredential={panel.revokeAgentCredential}
-                onArchive={panel.handleArchive}
-                onRestore={panel.handleRestore}
-                onMoveToOrganization={panel.handleAgentMoved}
-                onBudgetEnded={handleBudgetEnded}
-                busyAction={panel.busyAgentId === agent.id ? panel.busyAction : null}
-                chainId={agent.account_chain_id ?? DEFAULT_CHAIN_ID}
-                organizations={panel.organizations}
-              />
-            ))}
-          </div>
-
-        </div>
+        </>
       )}
 
       <ConnectAgentModal

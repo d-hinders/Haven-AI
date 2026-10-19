@@ -5474,6 +5474,109 @@ export const SCENARIOS = {
       await shoot(dialog, 'server-credential-result')
     },
   },
+  'connect-agent-inline': {
+    description:
+      '#4065: the inline first-agent flow on /agents for a user with no agents — the whole page at rest (subtitle, header without the count chip or Connect agent), then the card at step 1, step 2 (starter budget prefilled) and step 3 with BOTH disclosures open, where the copy blocks must not be a card inside the card',
+    // Same pin as `connect-agent`: the setup stays at awaiting_connection, so
+    // step 3 holds still for the capture. No agents and no organizations:
+    // the state a brand-new user meets.
+    api(apiPath, method) {
+      if (apiPath === '/agents' && method === 'GET') return { agents: [] }
+      if (apiPath === '/organizations' && method === 'GET') return { organizations: [] }
+      if (apiPath === '/agent-connection-setups' && method === 'POST') {
+        return {
+          setup_id: CONNECT_SETUP_ID,
+          status: 'awaiting_connection',
+          setup_token: CONNECT_SETUP_TOKEN,
+          expires_at: '2099-01-01T00:00:00.000Z',
+          connector_command: CONNECT_COMMAND,
+          setup_prompt: ['Please connect this workspace to Haven.', '', 'Run this exact command:', '', CONNECT_COMMAND].join('\n'),
+        }
+      }
+      // The server-credential round-trip, so the .env copy block — the other
+      // CopyBlock inside the disclosures — is captured too.
+      if (apiPath === '/agent-connection-setups/resolve') {
+        return {
+          agent: { name: 'Research agent', description: null },
+          haven_wallet: {
+            id: FIXTURE_ACCOUNT.id,
+            name: FIXTURE_ACCOUNT.name,
+            address: FIXTURE_ACCOUNT.account_address,
+            chain_id: FIXTURE_ACCOUNT.chain_id,
+            network: 'Base Sepolia',
+          },
+          agent_budget: [],
+          challenge: { id: 'challenge-capture-1', message: 'Sign to prove control of this delegate address' },
+          hosted_mcp_url: 'https://mcp.haven.example',
+        }
+      }
+      if (apiPath === '/agent-connection-setups/register') {
+        return {
+          setup_id: CONNECT_SETUP_ID,
+          agent_id: 'agent-capture-1',
+          status: 'connected_local',
+          delegate_address: '0x3333333333333333333333333333333333333333',
+          hosted_mcp_url: 'https://mcp.haven.example',
+        }
+      }
+      if (apiPath === `/agent-connection-setups/${CONNECT_SETUP_ID}`) {
+        return {
+          setup_id: CONNECT_SETUP_ID,
+          agent_id: null,
+          status: 'awaiting_connection',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          agent: { name: 'Research agent', description: null },
+          haven_wallet: {
+            id: FIXTURE_ACCOUNT.id,
+            name: FIXTURE_ACCOUNT.name,
+            address: FIXTURE_ACCOUNT.account_address,
+            chain_id: FIXTURE_ACCOUNT.chain_id,
+            network: 'Base Sepolia',
+          },
+          agent_budget: [],
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      const flow = page.getByRole('region', { name: 'Connect your first agent' })
+      await flow.waitFor({ timeout: 30_000 })
+      // The page first: the subtitle, and a header with Labels and
+      // Organizations only. Neither the chip nor the header button may
+      // render while the flow shows — fail the run rather than shoot it.
+      if (await page.getByRole('button', { name: 'Connect agent', exact: true }).count()) {
+        throw new Error('connect-agent-inline: the header Connect agent rendered beside the inline flow')
+      }
+      await shoot(page.locator('main').first(), 'page')
+
+      await flow.getByText('Advanced', { exact: true }).click()
+      await shoot(flow, 'step1-details')
+
+      await flow.getByLabel('Agent name').fill('Research agent')
+      await flow.getByRole('button', { name: 'Set agent budget' }).click()
+      // The starter budget is the point of this frame (owner decision
+      // 2026-10-19): confirm it before capturing it.
+      await flow.getByPlaceholder('Amount').waitFor({ timeout: 10_000 })
+      const amount = await flow.getByPlaceholder('Amount').inputValue()
+      if (amount !== '10') throw new Error(`connect-agent-inline: starter budget is ${JSON.stringify(amount)}, not "10"`)
+      await shoot(flow, 'step2-policy')
+
+      await flow.getByRole('button', { name: 'Create setup prompt' }).click()
+      await flow.getByRole('button', { name: 'Copy setup prompt' }).waitFor({ timeout: 30_000 })
+      await shoot(flow, 'step3-waiting')
+      // Both disclosures open: inside the inline Card their copy blocks drop
+      // their own Card shell (#4065) — this is the frame that shows it.
+      await flow.getByText('Running in a server or hosted backend?').click()
+      await flow.getByText('Having trouble connecting?').click()
+      await flow.getByText('Local command').waitFor({ timeout: 10_000 })
+      await shoot(flow, 'step3-disclosures-open')
+      await flow.getByRole('button', { name: 'Generate credentials' }).click()
+      await flow.getByText('HAVEN_API_KEY=').waitFor({ timeout: 10_000 })
+      await shoot(flow, 'step3-server-credential')
+    },
+  },
   'connect-agent-approve': {
     description: 'Connect agent modal, step 3, manual credential fallback at the owner-signed approval rail (#2472)',
     // The third pin the other two connect scenarios cannot hold: `connect-agent`

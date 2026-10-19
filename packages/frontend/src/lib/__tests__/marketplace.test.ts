@@ -21,7 +21,7 @@ import {
 } from '@/lib/marketplace'
 // #3839: the SDK's discovery hint, by relative path — the frontend keeps no
 // @haven_ai/* runtime dependency (standalone Vercel deploys), the same pattern
-// agent-onboarding-prompt.test.ts uses for cross-package parity.
+// the frontend's cross-package parity tests use (agent-skill-bundle.test.ts).
 import { catalogFundingLegExpected } from '../../../../sdk/src/catalog-funding-leg'
 import type { CatalogEntry, MerchantFundingTarget } from '@/hooks/useCatalog'
 import type { DashboardBudgetRemainingEntry } from '@/hooks/useBudgetRemaining'

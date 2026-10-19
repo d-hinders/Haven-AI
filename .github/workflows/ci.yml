@@ -187,9 +187,9 @@ jobs:
       # are verified here, in the job that owns the canonical source — and the
       # one that runs on a change to it even without the manifest row, via the
       # generic packages/sdk/* arm. It does NOT cover the frontend's
-      # partial copies (agent-onboarding-prompt.ts, agent-skill-bundle.ts),
-      # which is why that file also routes `frontend` so their own pin tests
-      # run. #2713 edited the runbook and left the CLI copy stale; dev did not
+      # partial copy (agent-skill-bundle.ts; #4065 deleted the other,
+      # agent-onboarding-prompt.ts), which is why that file also routes
+      # `frontend` so its own pin test runs. #2713 edited the runbook and left the CLI copy stale; dev did not
       # even go red, because `cli_checks` was skipped -- the stale copy was
       # simply carried until an unrelated backend PR (#2719) regenerated it.
       - name: Generated runbook copies are in sync (#2727)
@@ -856,17 +856,17 @@ jobs:
           npm run visual:baselines
           npm run visual:baselines:test
 
-      # #2727: the frontend holds THREE pinned derivations of
-      # packages/sdk/src/agent-guidance.ts — public/for-agents.md and
-      # src/lib/agent-onboarding-prompt.ts directly, and
+      # #2727: the frontend holds TWO pinned derivations of
+      # packages/sdk/src/agent-guidance.ts — public/for-agents.md directly, and
       # src/lib/agent-skill-bundle.ts via skill-content.ts, which interpolates
       # four of this file's sentence constants (so "pinned to" means that file
-      # for the bundle, and this one for the other two) —
-      # and only the first is checkable by lint:runbook-parity (which since
-      # #3596 also checks the nine public/agent-skills/*.md step-file slices,
-      # eleven copies in all). This job is
-      # named an owner of that source so the other two pin tests below actually
-      # run on a change to agent-guidance.ts; the check here is what makes that
+      # for the bundle) — and only the first is checkable by
+      # lint:runbook-parity (which since #3596 also checks the nine
+      # public/agent-skills/*.md step-file slices, eleven copies in all).
+      # #4065 deleted a third, src/lib/agent-onboarding-prompt.ts, with the
+      # /agents card that rendered it. This job is
+      # named an owner of that source so the bundle's pin test below actually
+      # runs on a change to agent-guidance.ts; the check here is what makes that
       # ownership expressible in root-guard-ownership.json.
       #
       # Still scoped to agent-guidance.ts, and still NOT the same as "any

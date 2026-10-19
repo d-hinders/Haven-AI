@@ -33,7 +33,14 @@ function connectedRows(approve: ConnectStepRow, manual: boolean): ConnectStepRow
   ]
 }
 
-export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
+export function ConnectStep({
+  flow,
+  nestedCopyBlocks = false,
+}: {
+  flow: AgentConnectionSetupFlow
+  /** See WaitingForConnector's prop of the same name (#4065). */
+  nestedCopyBlocks?: boolean
+}) {
   const { setup, setupStatus, connectView, resumed } = flow
   // #2522: `setup` is the CREATE response, and a session resumed from a
   // hand-off link (`/agents?setup=<id>`) never has one — it renders from the
@@ -133,6 +140,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           connectionStage={flow.awaitingConnectionStage}
           expiresAt={setup.expires_at}
           onCancel={flow.handleCancelSetup}
+          nestedCopyBlocks={nestedCopyBlocks}
         />
       )}
 

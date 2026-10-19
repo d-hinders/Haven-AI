@@ -18,7 +18,6 @@ export function CopyBlock({
   value,
   copied,
   onCopy,
-  primary = false,
   nested = false,
 }: {
   label: string
@@ -26,27 +25,21 @@ export function CopyBlock({
   copied: boolean
   onCopy: () => void
   /**
-   * #1391: marks THE action that moves the user forward. Exactly one block per
-   * screen should set this. (#3832 moved the connect step off it — that
-   * screen's primary is now a full-width Copy button with the prompt behind a
-   * disclosure — so the onboarding-prompt card is its one caller.)
-   */
-  primary?: boolean
-  /**
    * #2535: render WITHOUT the `Card` shell, for a caller that is already inside
    * one.
    *
    * The default shell is right for this component's original home — the connect
    * modal, where each block is a standalone content card on a plain background.
    * It is wrong inside another `Card`: `haven-design-reviewer` found the
-   * onboarding-prompt card rendering `Card > Card.Section > CopyBlock`, where
-   * that third `Card` is a second independently bordered and shadowed box —
-   * exactly the nested-filled-card composition
-   * `Card.tsx`'s own invariant forbids and the mechanical gates cannot see.
+   * (since deleted) onboarding-prompt card rendering `Card > Card.Section >
+   * CopyBlock`, where that third `Card` is a second independently bordered and
+   * shadowed box — exactly the nested-filled-card composition `Card.tsx`'s own
+   * invariant forbids and the mechanical gates cannot see.
    *
-   * An opt-in flag rather than a change to the default, because the call
-   * sites in `WaitingForConnector` are genuinely standalone and their
-   * rendering must not move.
+   * An opt-in flag rather than a change to the default, because in the modal
+   * the call sites in `WaitingForConnector` are genuinely standalone and their
+   * rendering must not move. Its caller since #4065 is the inline first-agent
+   * flow on `/agents`, which renders the same step inside a `Card`.
    */
   nested?: boolean
 }) {
@@ -54,16 +47,11 @@ export function CopyBlock({
     <>
       <div className="mb-2 flex items-center justify-between gap-3">
         <p className="text-xs font-medium text-[var(--v2-ink-3)]">{label}</p>
-        {/* #1391 design review: size="sm" is h-9 (36px), under the ≥44px floor
-            design-review.md sets for primary mobile touch targets, so the
-            primary instance carries min-h-11. The ghost instances are
-            secondary and stay compact. */}
-        <Button
-          variant={primary ? 'primary' : 'ghost'}
-          size="sm"
-          className={primary ? 'min-h-11' : undefined}
-          onClick={onCopy}
-        >
+        {/* Secondary by design: since #3832 no screen makes a CopyBlock its
+            forward action (the connect step's primary is a full-width Copy
+            button), and #4065 deleted the onboarding-prompt card that was the
+            last `primary` caller, so the prop went with it. */}
+        <Button variant="ghost" size="sm" onClick={onCopy}>
           {copied ? 'Copied' : 'Copy'}
         </Button>
       </div>

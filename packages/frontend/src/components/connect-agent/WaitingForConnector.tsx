@@ -34,6 +34,7 @@ export function WaitingForConnector({
   connectionStage,
   expiresAt,
   onCancel,
+  nestedCopyBlocks = false,
 }: {
   setup: CreateSetupResponse
   runtime: string
@@ -62,6 +63,14 @@ export function WaitingForConnector({
   connectionStage: AwaitingConnectionStage
   expiresAt: string
   onCancel: () => void
+  /**
+   * #4065: render the two disclosure CopyBlocks without their own `Card`
+   * shell. True in the inline first-agent flow, which already sits inside a
+   * `Card` — there each block's shell would be a Card inside a Card, the
+   * nested filled card `Card.tsx`'s invariant forbids. In the modal the
+   * blocks stay standalone cards, unchanged.
+   */
+  nestedCopyBlocks?: boolean
 }) {
   // Which rendering of the manual credential is shown — .env by default;
   // selecting the format is pure presentation, so it stays local to this
@@ -264,7 +273,9 @@ export function WaitingForConnector({
             lighter convention for exactly this — chevron summary, left rule for
             the body, no box at all (ConnectionVerificationFooter) — so use it. Depth now reads from indentation
             instead of from stacked surfaces, and the only card left inside is
-            the CopyBlock, which is genuinely one.
+            the CopyBlock, which is genuinely one — in the modal. Inline on
+            /agents (#4065) the flow already sits in a Card, so the blocks
+            drop their shell there (`nestedCopyBlocks`).
 
             #2482 lifts the manual path OUT of "Having trouble connecting?" —
             and out of the "one click deeper than the harmless one" rationale
@@ -329,6 +340,7 @@ export function WaitingForConnector({
                   label={manualFormat === 'env' ? '.env block' : 'Agent workspace prompt'}
                   value={manualFormat === 'env' ? manualCredential.env : manualCredential.prompt}
                   copied={copied === 'manual'}
+                  nested={nestedCopyBlocks}
                   onCopy={() =>
                     onCopy(
                       'manual',
@@ -366,6 +378,7 @@ export function WaitingForConnector({
               label="Local command"
               value={setup.connector_command}
               copied={copied === 'command'}
+              nested={nestedCopyBlocks}
               onCopy={() => onCopy('command', setup.connector_command)}
             />
           </div>

@@ -11,6 +11,8 @@ covers:
   - packages/frontend/src/lib/agent-budget.ts
   - packages/frontend/src/lib/agent-list-filters.ts
   - packages/frontend/src/components/ConnectAgentModal.tsx
+  - packages/frontend/src/components/connect-agent/ConnectAgentFlow.tsx
+  - packages/frontend/src/components/connect-agent/InlineAgentSetup.tsx
   - packages/frontend/src/components/EditAgentModal.tsx
   - packages/frontend/src/components/DashboardOnboardingGuide.tsx
   - packages/frontend/src/components/haven/**
@@ -184,6 +186,27 @@ out which runtime that is (#1720) — the user is never asked — so this flow h
 one setup prompt for every environment. Legacy Safe accounts are not rendered at
 all since #2413, so this flow is unreachable for one rather than being refused by
 a notice.
+
+Two containers, one flow (#4065). `ConnectAgentFlow` owns the hook, the step
+dispatch, the step-change focus rule and the stepper; the containers own chrome
+only, so they cannot drift:
+- **Modal** (`ConnectAgentModal`) — every entry except `/agents` with zero
+  agents: the dashboard (with or without agents), `/agents` "Connect agent", and
+  a `/agents?setup=<id>` resume link.
+  Title "Connect agent", the X, backdrop and Escape close it, focus starts in
+  *Agent name* on a fine pointer.
+- **Inline first agent** (`InlineAgentSetup`) — `/agents` for a user with no
+  agents (see Agent List). A `Card` titled "Connect your first agent", the same
+  subtitle and stepper band, the same steps and copy, at the modal's width.
+  Three differences, all for the same reason — there is nothing to dismiss:
+  step 1 has no Cancel (its one action, "Set agent budget", is full width);
+  Escape is not bound, so it never resets the flow or drops the setup prompt;
+  nothing is focused on page load (focus moves on a step change only). Step 3's
+  disclosure copy blocks drop their own card shell inside it (no nested filled
+  card). It opens with the starter budget (10 USDC per day) prefilled. Every exit
+  the flow offers — Done, or Close on the approval step, a terminal state or an
+  unknown status — leaves it; "Cancel setup" moves to the cancelled state and
+  does not.
 
 Structure (the header band — Name / Budget / Connect — stays on step 3 with
 Connect active, and step 3 is one unnumbered status checklist — copy → paste →
@@ -465,11 +488,47 @@ Money and risk clarity:
 Use for `/agents`: every managed agent as a card, with the list controls above it (#3165). The list spans every account the user has — there is no global active account narrowing it (#3719) — so each card names its account with the chain as the secondary half (`Account: Treasury · Base`).
 
 Structure:
-1. Header with the count and the primary action (Connect agent).
+1. Header with the count and the primary action (Connect agent), plus Labels and
+   Organizations.
 2. Toolbar: free-text search (name, description, delegate address; a clear button appears while it has text), one dropdown per facet (a group of toggle buttons with a check mark and a count each; Escape or a click outside closes it; below `sm` the panel spans the toolbar's width), a sort select, and — only while a filter is on — a count line, `12 of 27 agents shown`, with `Clear filters` beside it. At rest the header chip already carries the count, so the bar shows none.
 3. The card grid, filtered and sorted by the toolbar.
 4. Zero-result state inside the list area (`No agents match these filters`) owning the reset action — the bar's own reset steps back so the screen offers one — and the toolbar stays visible so the user can see what they filtered on. The `not recorded` MCP note above the list follows the filtered set: a filter that hides the only unrecorded card hides the note.
 5. Removed agents stay behind their own toggle and are never in the filtered set.
+
+First agent (#4065): a user with no agents — archived and revoked rows count as
+agents, so this is `agents.length === 0` — gets the connect flow inline instead
+of an empty state (see Connect And Approve Agent for the inline container).
+- It appears once the first list load SUCCEEDS (a page load or reload shows
+  the loading skeleton first, then the flow; a failed first load shows "Agents
+  could not load", and its "Try again" shows the skeleton again, never the
+  flow), and never over the "Agents could not load" retry state, the
+  "Finalizing your agent…" placeholder or the taking-longer state. A later
+  refresh of the list that succeeds (after a Labels change, say) does not count
+  as loading again: the flow stays, with what the user typed. One that fails
+  drops a flow with no setup yet into "Agents could not load".
+- Once a setup is being created in it, it stays mounted (a first create that
+  fails releases it again, since nothing is in progress) until the user leaves it,
+  whatever the list says meanwhile: the connector's register adds a
+  `pending_approval` agent the list poll picks up mid-setup, and an approval
+  sets the finalizing state. Unmounting there would drop the flow (and an
+  approval in flight). Before a setup exists (steps 1 and 2) it shows only while
+  the list is empty, so an agent created elsewhere — another tab, an agent-led
+  link — replaces it with the list on the next poll.
+- While it shows, nothing else of the list surface renders: no count chip, no
+  header "Connect agent", no organization tree, no toolbar, no cards, no
+  placeholders. Labels and Organizations stay in the header.
+- Leaving it shows the list when an agent now exists. With the list still empty
+  (a setup cancelled or expired before the connector registered) a fresh flow
+  replaces it, starter budget seeded again — except right after an approval:
+  Done before the post-approval poll has found the new agent shows the
+  "Finalizing your agent…" placeholder (or, if the poll runs out, the
+  taking-longer state), and the list once the agent appears.
+- `?setup=first` lands on the inline flow when there are no agents and opens the
+  modal otherwise, decided after the first list load. A `?setup=<id>` resume
+  link always opens the modal, and the inline flow does not render under it.
+- The page subtitle states the budget boundary: "Agents pay for things up to a
+  budget you set. You approve each budget yourself, and anything over it is
+  refused on-chain."
 
 Rules:
 - Filter state lives in the URL (`?q=…&status=active,paused&budget=none&sort=seen`; the comma is percent-encoded on the wire), so a view is shareable and survives reload; `?setup=` and other parameters on the page are preserved in both directions (closing the setup modal drops only `setup`). Writes use `history.replaceState` with a `null` state (Next treats its own `__NA`-marked state as an internal write and would not re-sync `useSearchParams`), so the URL never lags a keystroke. Unknown values in a pasted link are dropped, never applied silently.

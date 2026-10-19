@@ -298,6 +298,8 @@ test.describe('the rail leaves the screen when the viewport narrows (#2586)', ()
     await seedAuthenticatedSession(page)
     // `/agents` with no agents is #2586's own route and state: the empty state
     // is the first screen tall enough to reach the coordinate in question.
+    // Since #4065 that state is the inline first-agent flow, not the "No
+    // agents yet" empty state and its onboarding-prompt card.
     await page.route('**/api/agents*', async (route) => {
       await route.fulfill({
         status: 200,
@@ -395,29 +397,38 @@ test.describe('the rail leaves the screen when the viewport narrows (#2586)', ()
       barBandInsideDrawer: false,
     })
 
-    // 3. The symptom #2586 actually reported, asserted on the element it named:
-    //    the empty state's footer link must be reachable, not clipped by
-    //    anything. `toBeVisible` is not enough — a covered element is still
-    //    visible — so this hit-tests the link's own centre.
-    const guide = page.getByRole('link', { name: 'Read the agent guide' })
+    // 3. The symptom #2586 actually reported: the bottom of the empty state
+    //    must be reachable, not clipped by anything. #2586 named the
+    //    onboarding-prompt card's footer link; #4065 replaced that card with
+    //    the inline first-agent flow, whose last control on step 1 is its one
+    //    action, so the guard moves to that button rather than going away.
+    //    `toBeVisible` is not enough — a covered element is still visible — so
+    //    this hit-tests the control's own centre. (It is disabled until a name
+    //    is typed; a disabled button is still the element a tap lands on.)
+    const guide = page
+      .getByRole('region', { name: 'Connect your first agent' })
+      .getByRole('button', { name: 'Set agent budget' })
     await expect(guide).toBeVisible()
     // The shell is `h-screen overflow-hidden` with `<main>` as the only
-    // scroller, and the empty state is taller than the viewport — so the link
-    // starts BELOW the fold and `elementFromPoint` at its coordinates returns
-    // null (measured: `covering: null`, which reads as "covered" while nothing
-    // is covering it). Scroll it into view before hit-testing.
+    // scroller, and the empty state is taller than the viewport — so the
+    // control starts BELOW the fold and `elementFromPoint` at its coordinates
+    // returns null (measured on the old link: `covering: null`, which reads as
+    // "covered" while nothing is covering it). Scroll it into view before
+    // hit-testing.
     // No fixed wait after this: nothing in `src/` sets `scroll-behavior:
     // smooth`, so the scroll completes synchronously, and a sleep in a spec
     // whose own comment above argues for `waitForFunction` over fixed waits is
-    // the wrong example to leave behind (review nit). The link's own position
-    // is what the probe reads, and it is settled by the time this returns.
+    // the wrong example to leave behind (review nit). The control's own
+    // position is what the probe reads, and it is settled by the time this
+    // returns.
     await guide.scrollIntoViewIfNeeded()
     const linkReachable = await guide.evaluate((el) => {
-      // Per LINE BOX, not the bounding box. This link WRAPS at 390px, and the
-      // centre of a two-line inline element's bounding box falls in the gap
-      // between the lines — which returns the parent and reads as "covered"
-      // when nothing is covering it. Measured: the first assertion written
-      // this way failed on a page with the link fully legible.
+      // Per LINE BOX, not the bounding box — written for #2586's link, which
+      // WRAPPED at 390px: the centre of a two-line inline element's bounding
+      // box falls in the gap between the lines, which returns the parent and
+      // reads as "covered" when nothing is covering it. A button has one box,
+      // so this is one probe now; kept per-box so a wrapping target stays
+      // honest.
       const rects = Array.from(el.getClientRects())
       const probes = rects.map((r) => {
         const top = document.elementFromPoint(

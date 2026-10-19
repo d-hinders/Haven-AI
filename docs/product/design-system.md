@@ -1104,9 +1104,10 @@ The command is published because it has to be: during review of #1830 two reason
 counting methods disagreed by roughly a factor of two, and a call-site number without its
 command is not reproducible. It misses two things by construction. **`variant` is optional**,
 so every unadorned `<Button>` is an uncounted `primary` — which is why primary shows 0 and is
-nonetheless the most common button in the product. And it cannot see the four dynamic call
-sites (`DashboardClient.tsx:361`, `ConfirmDialog.tsx:60`, `agent-panel/ReplaceSigningKeyModal.tsx:904`,
-`connect-agent/CopyBlock.tsx:62`). The shape of the distribution is the point, not the integer.
+nonetheless the most common button in the product. And it cannot see the dynamic call
+sites (`DashboardClient.tsx:361`, `ConfirmDialog.tsx:60`, `agent-panel/ReplaceSigningKeyModal.tsx:904`;
+a fourth, `connect-agent/CopyBlock.tsx`, became a literal `ghost` in #4065 when its `primary`
+prop lost its last caller). The shape of the distribution is the point, not the integer.
 Re-derived 2026-09-30 for #3195 by running the published command: the previous figure
 (112/11/5/1 — 129, derived by #2203 at `ba4e045b`) had drifted through merged work to
 155/31/7/0 — 193, the same shape (ghost dominates, primary lives in the unadorned call

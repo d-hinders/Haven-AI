@@ -3537,6 +3537,143 @@ export const FIXTURE_PAUSED_AGENT = {
   has_stranded_funds: false,
 }
 
+/**
+ * #4024: the "New account" dialog, behind the Accounts header action. Route
+ * capture cannot see it. Four captures:
+ *
+ *   new-account          — the form (name, network, the three facts);
+ *   new-account-cap      — the per-user cap refusal, by `error_code`;
+ *   new-account-created  — the success state;
+ *   new-account-no-passkey — every account wallet-only: the explanation.
+ *
+ * The passkey prompt is the one browser seam no API answer reaches, so the
+ * submitting captures stub `navigator.credentials.get` in the page (the same
+ * posture as the `connectedWallet` provider stub: the app's own
+ * `getPasskeyAssertion`, key-id conversion and create call all run). The stub
+ * returns a credential whose raw id is the fixture passkey's, so the dialog's
+ * own "is this key on the source account" check passes for real.
+ */
+const NEW_ACCOUNT_KEY_ID = '0x' + '11'.repeat(32)
+
+function newAccountSigners({ walletOnly = false } = {}) {
+  const main = {
+    account_id: FIXTURE_ACCOUNT.id,
+    account_address: FIXTURE_ACCOUNT.account_address,
+    account_name: FIXTURE_ACCOUNT.name,
+    chain_id: FIXTURE_ACCOUNT.chain_id,
+  }
+  return {
+    signers: walletOnly
+      ? [{ kind: 'wallet', address: '0x' + 'ee'.repeat(20), accounts: [main] }]
+      : [{ kind: 'passkey', key_id: NEW_ACCOUNT_KEY_ID, created_at: '2026-03-03T12:00:00.000Z', accounts: [main] }],
+  }
+}
+
+async function stubPasskeyAssertion(page) {
+  await page.addInitScript(() => {
+    const credentials = navigator.credentials
+    if (!credentials || typeof PublicKeyCredential === 'undefined') return
+    credentials.get = async () => {
+      const credential = Object.create(PublicKeyCredential.prototype)
+      Object.defineProperty(credential, 'rawId', { value: new Uint8Array(32).fill(0x11).buffer })
+      Object.defineProperty(credential, 'response', {
+        value: {
+          signature: new ArrayBuffer(64),
+          authenticatorData: new ArrayBuffer(37),
+          clientDataJSON: new ArrayBuffer(16),
+        },
+      })
+      return credential
+    }
+  })
+}
+
+async function openNewAccountDialog(page, vp) {
+  await page.goto(`${BASE_URL}/accounts`, { waitUntil: 'networkidle', timeout: 60_000 })
+  await dismissMobileSidebar(page, vp)
+  await page.getByRole('button', { name: 'New account', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'New account' })
+  await dialog.waitFor({ timeout: 15_000 })
+  return { dialog, panel: page.getByTestId('new-account-dialog') }
+}
+
+function newAccountScenarios() {
+  const chains = (apiPath) => (apiPath === '/chains' ? { deployable: [8453, 84532] } : undefined)
+  return {
+    'new-account': {
+      description: 'The New account dialog (#4024): name, network and the three facts, before the passkey prompt',
+      api(apiPath) {
+        if (apiPath === '/user/signers') return newAccountSigners()
+        return chains(apiPath)
+      },
+      async run({ page, vp, shoot }) {
+        const { dialog, panel } = await openNewAccountDialog(page, vp)
+        await dialog.getByTestId('new-account-facts').waitFor({ timeout: 15_000 })
+        await shoot(panel, 'form')
+      },
+    },
+    'new-account-cap': {
+      description: 'The New account dialog at the per-user cap: the typed refusal, mapped by error_code (#4024)',
+      api(apiPath, method) {
+        if (apiPath === '/user/signers') return newAccountSigners()
+        if (apiPath === '/accounts/hybrid' && method === 'POST') {
+          return httpError(422, {
+            error: 'This user already has 10 accounts on chain 84532',
+            error_code: 'ACCOUNT_CAP_REACHED',
+            cap: 10,
+          })
+        }
+        return chains(apiPath)
+      },
+      async run({ page, vp, shoot }) {
+        await stubPasskeyAssertion(page)
+        const { dialog, panel } = await openNewAccountDialog(page, vp)
+        await dialog.getByLabel('Account name').fill('Reserve')
+        await dialog.getByRole('button', { name: 'Create account with a passkey' }).click()
+        await dialog.getByText(/You already have 10 accounts on Base Sepolia/).waitFor({ timeout: 15_000 })
+        await shoot(panel, 'refusal')
+      },
+    },
+    'new-account-created': {
+      description: 'The New account dialog after a successful create (#4024)',
+      api(apiPath, method) {
+        if (apiPath === '/user/signers') return newAccountSigners()
+        if (apiPath === '/accounts/hybrid' && method === 'POST') {
+          return {
+            id: 'acc-new',
+            account_address: '0x' + '40'.repeat(20),
+            chain_id: 84532,
+            account_type: 'delegator_hybrid',
+            deployed: false,
+            created_at: '2026-10-16T09:00:00.000Z',
+          }
+        }
+        return chains(apiPath)
+      },
+      async run({ page, vp, shoot }) {
+        await stubPasskeyAssertion(page)
+        const { dialog, panel } = await openNewAccountDialog(page, vp)
+        await dialog.getByLabel('Account name').fill('Reserve')
+        await dialog.getByRole('button', { name: 'Create account with a passkey' }).click()
+        await dialog.getByTestId('new-account-created').waitFor({ timeout: 15_000 })
+        await shoot(panel, 'success')
+      },
+    },
+    'new-account-no-passkey': {
+      description: 'The New account dialog when every account is wallet-only: the explanation instead of a form (#4024)',
+      api(apiPath) {
+        if (apiPath === '/user/signers') return newAccountSigners({ walletOnly: true })
+        return chains(apiPath)
+      },
+      async run({ page, vp, shoot }) {
+        const { dialog, panel } = await openNewAccountDialog(page, vp)
+        await dialog.getByTestId('new-account-needs-passkey').waitFor({ timeout: 15_000 })
+        await shoot(panel, 'explanation')
+      },
+    },
+  }
+}
+
 export const SCENARIOS = {
   'auth-shell-states': {
     description:
@@ -5778,6 +5915,7 @@ export const SCENARIOS = {
       await shoot(section, 'section')
     },
   },
+  ...newAccountScenarios(),
   'modal-migrations': {
     description: 'InfoModal and ComingSoonModal rendered from the design-system reference',
     api() {

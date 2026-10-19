@@ -80,6 +80,14 @@ interface AuthState {
   logout: () => void
   updateUser: (partial: Partial<User>) => void
   refreshUser: () => Promise<void>
+  /**
+   * `refreshUser` that SAYS whether the re-read happened (#4024): true when
+   * `/auth/me` answered and the user was replaced, false when it threw. The
+   * New account dialog needs the difference — "no new account yet" is only
+   * true after a read that succeeded. `refreshUser` keeps its swallow-everything
+   * contract for every other caller.
+   */
+  reloadUser: () => Promise<boolean>
 }
 
 const AuthContext = createContext<AuthState | null>(null)
@@ -140,15 +148,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     )
   }, [])
 
-  const refreshUser = useCallback(async () => {
+  const reloadUser = useCallback(async (): Promise<boolean> => {
     try {
       const u = await api.get<User>('/auth/me')
       setUser(u)
       await hydratePasskeys(u)
+      return true
     } catch {
-      // Silently fail — token might be invalid
+      return false
     }
   }, [hydratePasskeys])
+
+  const refreshUser = useCallback(async () => {
+    // Silently fail — token might be invalid
+    await reloadUser()
+  }, [reloadUser])
 
   // On mount, check for existing token.
   // A cancelled ref guards against the effect re-running (e.g. in Strict Mode)
@@ -255,6 +269,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         logout,
         updateUser,
         refreshUser,
+        reloadUser,
       }}
     >
       {children}

@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { ArrowRight, CircleAlert, CreditCard, FlaskConical } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import Link from 'next/link'
@@ -17,18 +18,23 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { truncateAddress } from '@/components/haven'
+import { Button } from '@/components/ui/Button'
+import NewAccountDialog from '@/components/NewAccountDialog'
 
 // The Safe-rail INFLOW IS CLOSED (#1984, epic #1440). `AddSafeModal` lived
 // here and was the dashboard's only Safe entry point: a three-mode modal
 // (choose / deploy / import) that POSTed /user/safes/deploy and then
-// /user/safes. Both routes now answer 410, so the modal could only ever
-// have shown the user an error — it is removed with its trigger rather than
-// left as a door into a wall. Nothing Hybrid is lost: this modal never
-// offered a delegation-rail account, and onboarding provisions one
-// unconditionally. Accounts is now a read + manage surface: list, activate,
-// drill in. Setting the default account lives on `/accounts/<id>` only, since
-// #2374 dropped the card's unlabelled star. Shared legacy Safe COMPONENTS
-// elsewhere are deletion slice #1989's scope, not this one's.
+// /user/safes. Both routes now answer 410, so the modal was removed with its
+// trigger rather than left as a door into a wall. Shared legacy Safe
+// COMPONENTS elsewhere are deletion slice #1989's scope, not this one's.
+//
+// The create action that exists now is a different thing (#4024, epic #4022):
+// "New account" in the header opens `NewAccountDialog`, which creates an
+// ADDITIONAL delegation-rail account from a passkey one of the user's
+// accounts already has (#4023's create-additional request). It never touches
+// a Safe route and never creates the default account. Setting the default
+// account lives on `/accounts/<id>` only, since #2374 dropped the card's
+// unlabelled star. The overview layout around it is #4021's.
 // ── Per-account card (handles its own portfolio fetch) ────────────────
 
 interface AccountCardProps {
@@ -208,6 +214,7 @@ export default function AccountsOverviewClient() {
   const { accounts: accounts } = useAccounts()
   const { agents } = useAgents()
   const { currency } = usePreferences()
+  const [newAccountOpen, setNewAccountOpen] = useState(false)
 
   // Count agents per account
   const agentCountByAccount = new Map<string, number>()
@@ -231,7 +238,16 @@ export default function AccountsOverviewClient() {
             </>
           ) : undefined
         }
+        actions={
+          // Hidden with no accounts: a new account copies its passkey from an
+          // existing one, so there is no source — and ProtectedRoute sends a
+          // user with no accounts to /onboarding, which creates the first.
+          accounts.length > 0 ? (
+            <Button onClick={() => setNewAccountOpen(true)}>New account</Button>
+          ) : undefined
+        }
       />
+      <NewAccountDialog open={newAccountOpen} onClose={() => setNewAccountOpen(false)} />
 
       {/* Orphaned agents warning */}
       {orphanedAgents.length > 0 && (
@@ -246,13 +262,14 @@ export default function AccountsOverviewClient() {
       {/* Account cards grid */}
       {accounts.length === 0 ? (
         // An empty state with no next step would be a dead end, which the
-        // design system forbids — so this one explains itself instead. There
-        // is no "Add account" button any more (#1984: the Safe rail is
-        // retired and its deploy/import routes answer 410), and there is
-        // nothing to put in its place: an account is created at sign-in.
-        // ProtectedRoute redirects a user with no accounts to /onboarding, so
-        // this should be unreachable in practice; the copy says so rather
-        // than leaving a blank card that reads as broken.
+        // design system forbids — so this one explains itself instead. The
+        // header's "New account" action is hidden here (#4024): it copies a
+        // passkey from an existing account, and with none there is no source.
+        // The first account is created at sign-in, and ProtectedRoute
+        // redirects a user with no accounts to /onboarding, so this should be
+        // unreachable in practice; the copy says so rather than leaving a
+        // blank card that reads as broken. (The Safe-era "Add account" button
+        // that used to sit here went with #1984.)
         <EmptyState
           icon={<Icon icon={CreditCard} className="h-5 w-5" />}
           tone="neutral"

@@ -129,6 +129,18 @@ describe('the three owner-route modules enforce per route (#3032)', () => {
     expect(res.json().details).toContain('/passkeys')
   })
 
+  it('POST /accounts/hybrid: an idempotency_key over its 128-character column → the 400 envelope (#4024)', async () => {
+    const body = { chain_id: 84532, source_account_id: UUID, key_id: 'k1' }
+    const res = await inject('POST', '/accounts/hybrid', { ...body, idempotency_key: 'k'.repeat(129) })
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toMatchObject({ error_code: 'invalid_request' })
+    expect(res.json().details).toContain('idempotency_key')
+    // Control: 128 characters passes the edge (the mocked handler answers
+    // whatever it answers — just not the validation envelope).
+    const ok = await inject('POST', '/accounts/hybrid', { ...body, idempotency_key: 'k'.repeat(128) })
+    expect(ok.json().error_code).not.toBe('invalid_request')
+  })
+
   it('agent-passports (already enforced by the 3032 auth-order test): a non-uuid path param → the 400 envelope here too', async () => {
     // agent-passports.ts is NOT registered in this app; this case documents
     // the split of evidence, so it only pins the rekey sibling path param on

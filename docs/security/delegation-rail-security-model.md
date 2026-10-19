@@ -61,6 +61,8 @@ covers:
   - packages/frontend/src/hooks/useDelegationSend.ts
   - packages/frontend/src/lib/hybridAccountOps.ts
   - packages/frontend/src/lib/delegationPasskeySigner.ts
+  - packages/frontend/src/components/NewAccountDialog.tsx
+  - packages/frontend/src/lib/new-account.ts
   - packages/frontend/src/lib/signer.ts
   - packages/frontend/src/hooks/useAccountOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
@@ -1432,6 +1434,67 @@ preflight reads that balance and refuses until the owner says what happened to
 it. After the rotation it is unrecoverable — by the user and by Haven alike —
 in the same structural sense as the single-signer limit above.
 
+### 6b. Several accounts behind one passkey (route B, #4024, epic #4022)
+
+Since #4023 (S1) one passkey can own several accounts, each at its own
+per-account deploy salt, and since #4024 (S2) the Accounts screen's
+**New account** dialog creates one. Owner decision 2026-10-16 ("route B"):
+the new account uses the signed-in user's **existing** passkey; there is no
+new passkey ceremony. Two consequences belong in this model, and both were
+confirmed by the owner with the epic's threat model.
+
+**The route-B residual: one passkey compromise reaches every account that
+shares it.** Accounts created from the same passkey share an owner key. Whoever
+can produce assertions from that credential can sign for every one of them:
+grant a budget, send the funds, change the signer set. Splitting funds across
+accounts isolates them from **agents** (an account with no budget delegation
+cannot be debited by any agent, whatever Haven's database says) and from a
+misconfigured budget on another account. It does **not** isolate them from the
+loss or compromise of the passkey itself. Isolating against that needs a
+separate signer per account (route A), which is out of v1 scope. The dialog
+says the passkey just used becomes the new account's only way to approve; it
+does not claim the accounts are independent of that passkey.
+
+**The key choice is the client's; the server checks membership, not an
+assertion.** The create-additional request names `source_account_id` and
+`key_id`. The server verifies that the source is an account the caller owns
+and that `key_id` is one of **that account's** stored passkeys, then copies
+that passkey's public coordinates from its own signer-set row. It never takes
+key material from the request, and it does **not** receive or verify a
+WebAuthn assertion. The authentication is the dashboard session JWT, the
+same as every other owner route. The dialog's single
+`navigator.credentials.get` is restricted to the source account's credential
+ids, so the user picks the key with the device that holds it, and the returned
+credential id becomes `key_id`. That assertion is a **choice of key, not a
+proof** to Haven. What this permits is bounded: a holder of the session can
+only make a key the user **already** holds on one account the sole signer of a
+new, empty account the user also owns. No key enters a signer set that was not
+already in one of the user's, nothing is funded, and no delegation, agent or
+budget is copied (a new account starts with none, and is never the default, so
+no agent created without an `account_id` falls back to it). A retried create
+carrying the same `idempotency_key` is answered from the caller's OWN first
+account before any of these checks run (#4024) — so a lost response is never
+re-reported as a cap or source refusal — and a key reused for a different
+chain or passkey is refused (409 `IDEMPOTENCY_KEY_REUSED`, with the existing
+account's id). So a replay only ever returns one of the caller's OWN accounts
+that carries that key, on the same chain and with that same passkey —
+normally the first attempt of the same create. (The signup shape stores a key
+it is sent too, and never replays it; a create-additional that reused such a
+key with that account's passkey would replay that signup account, which is
+still the caller's own.) The same answer applies when two attempts with one
+key race inside their transactions: the one that loses on the key's unique
+index re-reads the committed winner and answers it (or the 409), and its own
+counter bump rolls back. Every refusal on
+this path carries an `error_code` (`SOURCE_ACCOUNT_NOT_FOUND`,
+`SOURCE_HAS_NO_PASSKEY`, `KEY_NOT_ON_SOURCE`, `ACCOUNT_CAP_REACHED`).
+
+**Backups do not carry over.** Only the one named passkey is copied. A backup
+passkey or wallet on the source account is not added to the new one, so the
+new account starts **single-signer** and §7's recommendation applies to it on
+its own: the backup prompt follows funding, per account. Settings → Signers
+(#3825) lists each signer once with every account it approves, which is
+where a user can see that a backup covers one account and not another.
+
 ## 7. Two signers: a recommendation, not a gate (#1153)
 
 **This section previously recorded a launch GATE.** It said no mainnet
@@ -1460,6 +1523,11 @@ Haven or anyone else. That is now a risk the user may take. What changed is
 protect, instead of as a wall in the first minute — where it blocked the
 one-Face-ID, zero-transaction onboarding this rail exists to offer, at the
 moment the user has nothing at risk and no context for what a backup protects.
+
+**Per account (#4024).** The recommendation is evaluated per account, because
+the signer set is per account: an account created from the New account
+dialog copies one passkey and no backups (§6b), so it starts single-signer even
+when the account it was created from has a backup.
 
 **The mechanism now:**
 

@@ -357,7 +357,7 @@ export function HomeClosing() {
         Give your agent a budget.
       </h2>
       <p className={`${SITE_TYPE.lede} mx-auto mt-[18px] text-center`}>
-        One passkey, one budget, one command. Nothing spends without your signature.
+        One passkey, one budget, one command. Nothing spends without your approval.
       </p>
       <SiteCtaRow center>
         <BrandBandButton href="/signup" trailingArrow>

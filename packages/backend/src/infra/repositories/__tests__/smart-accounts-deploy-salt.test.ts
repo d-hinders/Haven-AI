@@ -11,6 +11,7 @@ import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-h
 import {
   ALLOCATE_HYBRID_DEPLOY_SALT_SQL,
   FIND_HYBRID_ACCOUNT_BY_ADDRESS_FOR_REPLAY_SQL,
+  findAccountByCreateIdempotencyKey,
 } from '../smart-accounts.js'
 
 let seq = 0
@@ -127,5 +128,15 @@ describeDb('smart_accounts deploy salt (#4023, migration 114)', () => {
     await expect(
       seedHybridAccount(b, '0x' + '34'.repeat(20), 84532, { idempotencyKey: 'shared-key' }),
     ).resolves.toBeDefined()
+  })
+
+  it('#4024: the create replay read returns the STORED chain, numeric, and only for the caller', async () => {
+    const [a, b] = [await seedUser(), await seedUser()]
+    const id = await seedHybridAccount(a, '0x' + '56'.repeat(20), 8453, { idempotencyKey: 'replay-key' })
+    const replay = await findAccountByCreateIdempotencyKey(a, 'replay-key')
+    expect(replay).toMatchObject({ id, chain_id: 8453 })
+    expect(typeof replay!.chain_id).toBe('number')
+    // Scoped by user: another user's identical key replays nothing.
+    await expect(findAccountByCreateIdempotencyKey(b, 'replay-key')).resolves.toBeNull()
   })
 })

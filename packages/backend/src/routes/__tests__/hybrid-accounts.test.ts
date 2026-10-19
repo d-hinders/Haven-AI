@@ -45,10 +45,19 @@ interface MockDbOpts {
   /** The source account's stored signer set (default: one passkey). */
   sourcePasskeys?: Array<{ key_id: string; public_key_x: string; public_key_y: string }>
   /** Whether the create idempotency replay read finds a row. */
-  replay?: { id: string; account_address: string; created_at: string } | null
+  replay?: { id: string; account_address: string; chain_id: number; created_at: string } | null
+  /**
+   * #4024 in-flight race: the replay PRE-check finds nothing, the INSERT
+   * conflicts (writes nothing), and the conflict path's re-read by key finds
+   * this committed winner.
+   */
+  raceWinner?: { id: string; account_address: string; chain_id: number; created_at: string }
+  /** The signup shape runs no pre-check, so its FIRST key read is the conflict path's. */
+  raceWinnerOnFirstRead?: boolean
 }
 
 function mockDb(opts: MockDbOpts = {}) {
+  let keyReads = 0
   mockQuery.mockImplementation((sql: string) => {
     const s = String(sql)
     // #4023: the salt counter's atomic allocation. Default counter 1.
@@ -59,6 +68,11 @@ function mockDb(opts: MockDbOpts = {}) {
       return Promise.resolve({ rows: opts.source === 'missing' ? [] : [{ id: SOURCE_ID }] })
     }
     if (/create_idempotency_key = \$2/.test(s)) {
+      keyReads += 1
+      if (opts.raceWinner) {
+        const winnerVisible = opts.raceWinnerOnFirstRead || keyReads > 1
+        return Promise.resolve({ rows: winnerVisible ? [opts.raceWinner] : [] })
+      }
       return Promise.resolve({ rows: opts.replay ? [opts.replay] : [] })
     }
     if (/SELECT id FROM smart_accounts/.test(s)) {
@@ -78,6 +92,9 @@ function mockDb(opts: MockDbOpts = {}) {
       return Promise.resolve({ rows: [{ count: opts.chainCount ?? '0' }] })
     }
     if (/COUNT\(\*\)/.test(s)) return Promise.resolve({ rows: [{ count: opts.count ?? '1' }] })
+    if (/INSERT INTO smart_accounts/.test(s) && opts.raceWinner) {
+      return Promise.resolve({ rows: [] }) // ON CONFLICT DO NOTHING
+    }
     if (/INSERT INTO smart_accounts/.test(s)) {
       // smart_accounts.id is a UUID column, so 'acct-1' described a row the
       // database cannot produce (#1446).
@@ -398,17 +415,24 @@ describe('POST /accounts/hybrid — create-additional (#4023)', () => {
     expect(insert[1][6]).not.toBeNull()
   })
 
-  it('404s a source account the caller does not own', async () => {
+  it('404s a source account the caller does not own, with SOURCE_ACCOUNT_NOT_FOUND', async () => {
     mockDb({ source: 'missing' })
     const res = await app.inject({ method: 'POST', url: '/accounts/hybrid', payload: ADDITIONAL })
     expect(res.statusCode).toBe(404)
+    expect(res.json()).toMatchObject({ error_code: 'SOURCE_ACCOUNT_NOT_FOUND' })
+    expectMatchesSpec('POST', '/accounts/hybrid', res.json(), '404')
   })
 
-  it('422s an EOA-only source (no passkey to copy)', async () => {
+  it('422s a source with no passkey to copy, with SOURCE_HAS_NO_PASSKEY and an owner-facing sentence', async () => {
     mockDb({ sourcePasskeys: [] })
     const res = await app.inject({ method: 'POST', url: '/accounts/hybrid', payload: ADDITIONAL })
     expect(res.statusCode).toBe(422)
-    expect(res.json().error).toMatch(/no passkey/)
+    expect(res.json()).toEqual({
+      error: 'The source account has no passkey to copy, so it cannot secure an additional account',
+      error_code: 'SOURCE_HAS_NO_PASSKEY',
+    })
+    expect(res.json().error).not.toMatch(/EOA/)
+    expectMatchesSpec('POST', '/accounts/hybrid', res.json(), '422')
   })
 
   it('422s a key_id that is not in the source signer set', async () => {
@@ -419,13 +443,16 @@ describe('POST /accounts/hybrid — create-additional (#4023)', () => {
     })
     expect(res.statusCode).toBe(422)
     expect(res.json().error).toMatch(/not a passkey on the source account/)
+    expect(res.json().error_code).toBe('KEY_NOT_ON_SOURCE')
   })
 
-  it('422s at the soft cap of 10 accounts per user per chain', async () => {
+  it('422s at the soft cap of 10 accounts per user per chain, with ACCOUNT_CAP_REACHED, cap and chain_id', async () => {
     mockDb({ chainCount: '10' })
     const res = await app.inject({ method: 'POST', url: '/accounts/hybrid', payload: ADDITIONAL })
     expect(res.statusCode).toBe(422)
     expect(res.json().error).toMatch(/10 accounts/)
+    expect(res.json()).toMatchObject({ error_code: 'ACCOUNT_CAP_REACHED', cap: 10, chain_id: 84532 })
+    expectMatchesSpec('POST', '/accounts/hybrid', res.json(), '422')
   })
 
   it('400s a create-additional without an explicit chain_id (no bare fallback)', async () => {
@@ -456,14 +483,89 @@ describe('POST /accounts/hybrid — create-additional (#4023)', () => {
     expect(res.statusCode).toBe(400)
   })
 
+  const FIRST = { id: SOURCE_ID, account_address: HYBRID, chain_id: 84532, created_at: '2026-07-10T00:00:00Z' }
+
   it('a retried create returns the FIRST account (idempotency replay)', async () => {
-    mockDb({
-      replay: { id: SOURCE_ID, account_address: HYBRID, created_at: '2026-07-10T00:00:00Z' },
-    })
+    mockDb({ replay: FIRST })
     const res = await app.inject({ method: 'POST', url: '/accounts/hybrid', payload: ADDITIONAL })
     expect(res.statusCode).toBe(201)
-    expect(res.json()).toMatchObject({ id: SOURCE_ID, account_address: HYBRID })
+    expect(res.json()).toMatchObject({ id: SOURCE_ID, account_address: HYBRID, chain_id: 84532 })
+    expectMatchesSpec('POST', '/accounts/hybrid', res.json(), '201')
     expect(mockCompute).not.toHaveBeenCalled()
     expect(mockQuery.mock.calls.some((c) => /INSERT INTO smart_accounts/.test(String(c[0])))).toBe(false)
+  })
+
+  it('reads the replay scoped to the caller', async () => {
+    mockDb({ replay: FIRST })
+    await app.inject({ method: 'POST', url: '/accounts/hybrid', payload: ADDITIONAL })
+    const read = mockQuery.mock.calls.find((c) => /create_idempotency_key = \$2/.test(String(c[0])))!
+    expect(read[1]).toEqual(['user-1', 'create-1'])
+  })
+
+  it('#4024: a retried 10th create whose response was lost replays the account, not a cap refusal', async () => {
+    // The first attempt made the 10th account, so the chain count is now 10.
+    mockDb({ chainCount: '10', replay: FIRST })
+    const res = await app.inject({ method: 'POST', url: '/accounts/hybrid', payload: ADDITIONAL })
+    expect(res.statusCode).toBe(201)
+    expect(res.json()).toMatchObject({ id: SOURCE_ID })
+  })
+
+  it('#4024: the replay runs before the source and key checks', async () => {
+    mockDb({ source: 'missing', sourcePasskeys: [{ key_id: 'cred-1', public_key_x: '0x01', public_key_y: '0x02' }], replay: FIRST })
+    const res = await app.inject({ method: 'POST', url: '/accounts/hybrid', payload: ADDITIONAL })
+    expect(res.statusCode).toBe(201)
+    // The source lookup never ran.
+    expect(mockQuery.mock.calls.some((c) => /account_type = 'delegator_hybrid'/.test(String(c[0])))).toBe(false)
+  })
+
+  it('#4024: a key reused with a different key_id is refused, not replayed', async () => {
+    mockDb({ replay: FIRST }) // the replayed account's one passkey is cred-1
+    const res = await app.inject({
+      method: 'POST', url: '/accounts/hybrid',
+      payload: { ...ADDITIONAL, key_id: 'cred-2' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toMatchObject({ error_code: 'IDEMPOTENCY_KEY_REUSED', id: SOURCE_ID })
+    expect(res.json().error).toMatch(/different key_id/)
+    expectMatchesSpec('POST', '/accounts/hybrid', res.json(), '409')
+  })
+
+  it('#4024: a key reused on a different chain is refused, not replayed with the request chain', async () => {
+    mockDb({ replay: { ...FIRST, chain_id: 8453 } })
+    const res = await app.inject({ method: 'POST', url: '/accounts/hybrid', payload: ADDITIONAL })
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toMatchObject({ error_code: 'IDEMPOTENCY_KEY_REUSED' })
+    expect(res.json().error).toMatch(/different chain_id/)
+  })
+
+  it('#4024: an insert that loses on the idempotency key answers the committed winner, not a bare 409', async () => {
+    mockDb({ raceWinner: FIRST })
+    const res = await app.inject({ method: 'POST', url: '/accounts/hybrid', payload: ADDITIONAL })
+    expect(res.statusCode).toBe(201)
+    expect(res.json()).toMatchObject({ id: SOURCE_ID, account_address: HYBRID, chain_id: 84532 })
+    expectMatchesSpec('POST', '/accounts/hybrid', res.json(), '201')
+    // The re-read ran inside the registration transaction, and no passkey row
+    // was written for the lost insert.
+    expect(mockQuery.mock.calls.some((c) => /INSERT INTO hybrid_account_passkeys/.test(String(c[0])))).toBe(false)
+  })
+
+  it('#4024: a lost insert whose winner pins another chain answers IDEMPOTENCY_KEY_REUSED, not a bare 409', async () => {
+    // (The different-passkey variant needs per-account signer rows, which this
+    // dispatcher cannot tell apart: it is pinned on the real-DB race suite.)
+    mockDb({ raceWinner: { ...FIRST, chain_id: 8453 } })
+    const res = await app.inject({ method: 'POST', url: '/accounts/hybrid', payload: ADDITIONAL })
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toMatchObject({ error_code: 'IDEMPOTENCY_KEY_REUSED', id: SOURCE_ID })
+  })
+
+  it('a signup insert that conflicts keeps its address-race answer (the key re-read is create-additional only)', async () => {
+    // Even with a committed row carrying the key, signup does not replay it.
+    mockDb({ raceWinner: FIRST, raceWinnerOnFirstRead: true })
+    const res = await app.inject({
+      method: 'POST', url: '/accounts/hybrid',
+      payload: { chain_id: 84532, owner_address: OWNER, idempotency_key: 'signup-key' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toEqual({ error: 'Account already registered' })
   })
 })

@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
@@ -17,6 +17,11 @@ vi.mock('@/context/AuthContext', () => ({ useAuth: () => mockUseAuth() }))
 vi.mock('@/hooks/useAccounts', () => ({ useAccounts: () => mockUseAccounts() }))
 vi.mock('@/hooks/useAgents', () => ({ useAgents: () => mockUseAgents() }))
 vi.mock('@/hooks/usePreferences', () => ({ usePreferences: () => mockUsePreferences() }))
+// The New account dialog's own signer read (#4024) — only reached once the
+// dialog is open; its behaviour is NewAccountDialog.test.tsx's.
+vi.mock('@/hooks/useUserSigners', () => ({
+  useUserSigners: () => ({ signers: [], loadError: false, reload: vi.fn() }),
+}))
 const { mockUsePortfolio } = vi.hoisted(() => ({ mockUsePortfolio: vi.fn() }))
 vi.mock('@/hooks/usePortfolio', () => ({
   usePortfolio: (...args: unknown[]) => mockUsePortfolio(...args),
@@ -144,11 +149,34 @@ describe('AccountsOverviewClient — no global active account (#3719)', () => {
  * attach a Safe: a three-mode modal (choose / deploy / import) reached from
  * an "Add account" button in the page header and from the empty state's
  * "Add your first account". Both routes it called now answer 410, so the
- * trigger is gone with the modal. Asserting the ABSENCE of an affordance is
- * weak by nature, so this asserts it in both states the page can be in and
- * on both the accessible name and the modal's own headings — the specific
- * strings a reintroduction would have to render.
+ * trigger is gone with the modal.
+ *
+ * #4024 re-scoped these from "no account entry point" to "no SAFE entry
+ * point". The Accounts screen now has a create action — "New account", which
+ * provisions a passkey-owned delegation-rail account — so a test that asked
+ * whether any add/create control exists would be asserting something false,
+ * and one that only queried `/add account/i` would pass vacuously next to it.
+ * What #1984 closed is the Safe deploy/import flow, so the absences below are
+ * that flow's own strings: its trigger labels and its modal's headings and
+ * actions, the specific text a reintroduction would have to render.
  */
+const SAFE_INFLOW_STRINGS = [
+  'Add your first account',
+  'Import existing account',
+  'Import account',
+  'Create Haven account',
+  'Connect a wallet to deploy',
+  'Create a new Haven account or import one you already use.',
+]
+
+function expectNoSafeInflow() {
+  expect(screen.queryByRole('button', { name: /^add account$/i })).toBeNull()
+  for (const text of SAFE_INFLOW_STRINGS) {
+    expect(screen.queryByText(text), `the retired Safe flow rendered "${text}"`).toBeNull()
+    expect(screen.queryByRole('button', { name: text })).toBeNull()
+  }
+}
+
 describe('AccountsOverviewClient — the Safe inflow is closed (#1984)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -157,7 +185,7 @@ describe('AccountsOverviewClient — the Safe inflow is closed (#1984)', () => {
     mockUseAuth.mockReturnValue({ user: { accounts: [BASE, SEPOLIA] } })
   })
 
-  it('offers no Add-account entry point when accounts exist', () => {
+  it('offers no Safe deploy or import entry point when accounts exist', () => {
     mockUseAccounts.mockReturnValue({
       accounts: [BASE, SEPOLIA],
       loading: false,
@@ -168,23 +196,67 @@ describe('AccountsOverviewClient — the Safe inflow is closed (#1984)', () => {
     // The cards still render — this is a read/manage surface, not a deletion.
     expect(screen.getByRole('link', { name: 'Base account' })).toBeInTheDocument()
 
-    expect(screen.queryByRole('button', { name: /add account/i })).toBeNull()
-    expect(screen.queryByRole('button', { name: /add your first account/i })).toBeNull()
-    expect(screen.queryByText('Import existing account')).toBeNull()
-    expect(screen.queryByText('Create Haven account')).toBeNull()
+    // Non-vacuity (#4024): the page DOES offer a create action now, and the
+    // scan below would see it — it is the delegation-rail New account, not
+    // the Safe flow.
+    expect(screen.getByRole('button', { name: 'New account' })).toBeInTheDocument()
+
+    expectNoSafeInflow()
   })
 
-  it('offers no Add-account entry point from the empty state either', () => {
+  it('offers no Safe deploy or import entry point from the empty state either', () => {
     mockUseAccounts.mockReturnValue({ accounts: [], loading: false })
 
     render(<AccountsOverviewClient />)
 
     expect(screen.getByText('No Haven accounts yet')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /add/i })).toBeNull()
-    expect(screen.queryByText('Import existing account')).toBeNull()
+    expectNoSafeInflow()
   })
 })
 
+/**
+ * #4024: the "New account" header action. It sits in `PageHeader`'s actions
+ * slot (owner decision 2026-10-16, label verbatim) and opens the create
+ * dialog; the dialog's flow is NewAccountDialog.test.tsx's.
+ */
+describe('AccountsOverviewClient — the New account action (#4024)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockUseAgents.mockReturnValue({ agents: [] })
+    mockUsePreferences.mockReturnValue({ currency: 'USD' })
+    mockUsePortfolio.mockReturnValue({ totalUsd: 0, totalEur: 0, totalSek: 0, breakdown: [], loading: false })
+    mockUseAuth.mockReturnValue({ user: { accounts: [BASE, SEPOLIA] } })
+  })
+
+  it('sits in the page header and opens the New account dialog', () => {
+    mockUseAccounts.mockReturnValue({ accounts: [BASE, SEPOLIA], loading: false })
+    render(<AccountsOverviewClient />)
+
+    const header = screen.getByRole('heading', { name: 'Accounts', level: 1 }).closest('header')
+    expect(header).not.toBeNull()
+    const action = within(header as HTMLElement).getByRole('button', { name: 'New account' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+
+    fireEvent.click(action)
+
+    expect(screen.getByRole('dialog', { name: 'New account' })).toBeInTheDocument()
+  })
+
+  it('is offered with a single account too', () => {
+    mockUseAccounts.mockReturnValue({ accounts: [BASE], loading: false })
+    render(<AccountsOverviewClient />)
+    expect(screen.getByRole('button', { name: 'New account' })).toBeInTheDocument()
+  })
+
+  it('is hidden with no accounts: there is no passkey to create from', () => {
+    mockUseAccounts.mockReturnValue({ accounts: [], loading: false })
+    render(<AccountsOverviewClient />)
+
+    // Non-vacuity: the page rendered its empty state.
+    expect(screen.getByText('No Haven accounts yet')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'New account' })).toBeNull()
+  })
+})
 
 /**
  * #2374 — the card's "set as default" star is gone, by owner decision.

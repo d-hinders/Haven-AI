@@ -233,4 +233,41 @@ describe('AuthContext', () => {
       passkeyStorageKey('0x1111111111111111111111111111111111111111', 8453),
     )
   })
+
+  /**
+   * #4024: the New account dialog must tell "the re-read found nothing" from
+   * "the re-read failed". reloadUser reports which; refreshUser keeps its
+   * swallow-everything contract for every other caller.
+   */
+  describe('reloadUser / refreshUser (#4024)', () => {
+    it('reloadUser resolves true and replaces the user when /auth/me answers', async () => {
+      mockApi.get.mockRejectedValue(new Error('no token'))
+      const { result } = renderHook(() => useAuth(), { wrapper })
+      await waitFor(() => expect(result.current.loading).toBe(false))
+
+      mockApi.get.mockResolvedValue({ ...mockUser, name: 'Reloaded' })
+      let ok: boolean | undefined
+      await act(async () => {
+        ok = await result.current.reloadUser()
+      })
+      expect(ok).toBe(true)
+      expect(result.current.user?.name).toBe('Reloaded')
+    })
+
+    it('reloadUser resolves false when the read fails, and refreshUser still swallows it', async () => {
+      mockApi.get.mockRejectedValue(new Error('no token'))
+      const { result } = renderHook(() => useAuth(), { wrapper })
+      await waitFor(() => expect(result.current.loading).toBe(false))
+
+      mockApi.get.mockRejectedValue(new Error('offline'))
+      let ok: boolean | undefined
+      await act(async () => {
+        ok = await result.current.reloadUser()
+      })
+      expect(ok).toBe(false)
+      await act(async () => {
+        await expect(result.current.refreshUser()).resolves.toBeUndefined()
+      })
+    })
+  })
 })

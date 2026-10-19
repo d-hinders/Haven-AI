@@ -198,7 +198,7 @@ export function HowItWorksPage() {
                 titleId="how-budgets"
               >
                 <SiteLede>
-                  An amount and a period per agent, optionally pinned to one recipient. You sign it once, it refills
+                  An amount and a period per agent, optionally pinned to one recipient. You approve it once, it refills
                   itself, and you can stop it at any time.
                 </SiteLede>
               </SiteCopy>

@@ -670,8 +670,9 @@ export async function findAccountByCreateIdempotencyKey(
   userId: string,
   idempotencyKey: string,
   db: Executor = pool,
-): Promise<{ id: string; account_address: string; created_at: string } | null> {
-  const result = await db.query<{ id: string; account_address: string; created_at: string }>(
+): Promise<{ id: string; account_address: string; chain_id: number; created_at: string } | null> {
+  // `chain_id` is what the replay answers (#4024): the STORED row's chain.
+  const result = await db.query<{ id: string; account_address: string; chain_id: number; created_at: string }>(
     FIND_ACCOUNT_BY_CREATE_IDEMPOTENCY_KEY_SQL,
     [userId, idempotencyKey],
   )
@@ -718,8 +719,10 @@ export async function countAccountsForUser(userId: string, db: Executor = pool):
 
 /**
  * The provisioning INSERT. Returns the RETURNING row, or null when the insert
- * lost the (user_id, chain_id, LOWER(account_address)) UNIQUE race — the
- * caller re-reads the winner instead of 500ing on a bare constraint violation.
+ * lost a UNIQUE race — `ON CONFLICT DO NOTHING` has no target, so that is
+ * either (user_id, chain_id, LOWER(account_address)) or (#4024) the
+ * (user_id, create_idempotency_key) index — and the caller re-reads the
+ * winner instead of 500ing on a bare constraint violation.
  */
 export async function insertHybridAccount(
   input: {

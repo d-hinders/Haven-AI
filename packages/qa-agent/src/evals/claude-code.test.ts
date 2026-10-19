@@ -145,13 +145,24 @@ describe('ClaudeCodeAdapter.runTask process handling', () => {
     expect(adapter.sessions[0]?.exitCode).toBeUndefined()
   })
 
-  it('grades a session that exited non-zero but left a stream, and records the exit code', async () => {
-    const template = await fakeClaude(`process.stdout.write(${JSON.stringify(assistantLine + '\n' + resultLine + '\n')}, () => process.exit(1));\n`)
+  it('grades a session that exited non-zero after tool calls (the turn limit), and records the exit code', async () => {
+    const toolUse = JSON.stringify({ type: 'assistant', message: { model: 'claude-sonnet', content: [{ type: 'tool_use', id: 'tu_1', name: 'mcp__haven-eval__haven_get_agent', input: {} }] } })
+    const toolResult = JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu_1', is_error: false, content: [{ type: 'text', text: '{"success":true}' }] }] } })
+    const template = await fakeClaude(`process.stdout.write(${JSON.stringify([toolUse, toolResult, resultLine].join('\n') + '\n')}, () => process.exit(1));\n`)
     const logBase = join(await mkdtemp(join(tmpdir(), 'fake-claude-log-')), 's')
     const adapter = new ClaudeCodeAdapter({ commandTemplate: template, logPath: logBase, timeoutMs: 30_000 })
     const log = await adapter.runTask(resolved, 1)
     expect(log.finalMessage).toBe('done')
     expect(adapter.sessions[0]?.exitCode).toBe(1)
+  })
+
+  it('fails a non-zero exit with no tool call even when claude printed an error result (auth, usage limit)', async () => {
+    const errorResult = JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'Claude AI usage limit reached' })
+    const template = await fakeClaude(`process.stdout.write(${JSON.stringify(errorResult + '\n')}, () => process.exit(1));\n`)
+    const logBase = join(await mkdtemp(join(tmpdir(), 'fake-claude-log-')), 's')
+    const adapter = new ClaudeCodeAdapter({ commandTemplate: template, logPath: logBase, timeoutMs: 30_000 })
+    await expect(adapter.runTask(resolved, 1)).rejects.toThrow(/claude exited 1/)
+    expect(adapter.sessions).toHaveLength(0)
   })
 
   it('still fails a non-zero exit that left nothing to grade', async () => {

@@ -313,6 +313,7 @@ inventory:
 | `AGENT_EVALS_DELEGATE_KEY` | env secret | this lane's delegate private key |
 | `AGENT_EVALS_HAVEN_API_URL` | var (or secret) | the dev backend URL |
 | `AGENT_EVALS_RECIPIENT` / `AGENT_EVALS_AGENT_ACCOUNT` / `AGENT_EVALS_X402_TARGET` | vars | the graders' address/URL fixtures (same roles as the `QA_EVAL_*` env) |
+| `QA_X402_BINDING_SIGNER` | repo var | the public address the signer verifies x402 bindings against, passed as `HAVEN_X402_BINDING_SIGNER`; the job fails before any session when it is unset |
 
 **Token rotation.** The token does not refresh on its own (reportedly about
 one year). It is stored ONLY as the `agent-evals` environment secret above.

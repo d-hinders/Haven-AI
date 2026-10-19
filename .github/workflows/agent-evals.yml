@@ -232,6 +232,7 @@ jobs:
           set -euo pipefail
           if [ "$MODE" = 'subset' ]; then HOSTED_URL='http://127.0.0.1:8788/v1'; else HOSTED_URL="$DEV_HOSTED_MCP_URL"; fi
           if [ -z "$HOSTED_URL" ]; then echo "::error::no hosted MCP URL for mode $MODE — set QA_HOSTED_MCP_URL (full mode)"; exit 1; fi
+          if [ -z "$HAVEN_X402_BINDING_SIGNER" ]; then echo "::error::vars.QA_X402_BINDING_SIGNER is unset — the signer would refuse every x402 signing"; exit 1; fi
           # The API key lands in this config file's Authorization header —
           # RUNNER_TEMP only, never committed, never echoed. The signer path is
           # ABSOLUTE: claude starts stdio servers from its own cwd, which is not

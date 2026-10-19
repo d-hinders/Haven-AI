@@ -136,10 +136,12 @@ export class ClaudeCodeAdapter {
     const { code, stderrTail } = await this.runCommand(command, logPath, taskId, trial)
     const raw = await readFile(logPath, 'utf8')
     const { log, session } = parseClaudeCodeStreamLog(raw, { taskId, trial })
-    // A non-zero exit (the turn limit, for one) still leaves a gradeable
-    // session on disk: grade it and record the code. Only an exit that left
-    // nothing behind (no tool call, no final message) is an adapter failure.
-    if (code !== 0 && log.calls.length === 0 && !log.finalMessage) {
+    // A non-zero exit after the agent worked (the turn limit, for one) still
+    // leaves a gradeable session: grade it and record the code. A non-zero
+    // exit with NO tool call is an infrastructure failure (auth rejected, the
+    // plan's usage limit), even when claude printed an error as its `result`
+    // text, and must not be graded as the agent's behaviour.
+    if (code !== 0 && log.calls.length === 0) {
       throw new ClaudeCodeAdapterError(
         `claude exited ${code} for ${taskId} trial ${trial}: ${stderrTail.slice(-400) || '(no stderr)'}`,
       )

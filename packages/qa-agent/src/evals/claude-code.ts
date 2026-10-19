@@ -143,7 +143,11 @@ export class ClaudeCodeAdapter {
     // text, and must not be graded as the agent's behaviour.
     if (code !== 0 && log.calls.length === 0) {
       throw new ClaudeCodeAdapterError(
-        `claude exited ${code} for ${taskId} trial ${trial}: ${stderrTail.slice(-400) || '(no stderr)'}`,
+        `claude exited ${code} for ${taskId} trial ${trial}: ` +
+          // claude -p reports auth and usage-limit failures as its `result`
+          // text on stdout, not on stderr: quote it, or the cause is lost.
+          `${log.finalMessage ? `result: ${log.finalMessage.slice(0, 400)}; ` : ''}` +
+          `${stderrTail.slice(-400) || '(no stderr)'}`,
       )
     }
     this.sessions.push({ ...session, logPath, taskId, trial, ...(code !== 0 && code !== null ? { exitCode: code } : {}) })

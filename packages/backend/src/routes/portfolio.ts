@@ -3,6 +3,7 @@ import { authMiddleware } from '../middleware/auth.js'
 import { findAccountOwnership } from '../infra/repositories/transaction-history.js'
 import { isSupportedChain } from '../domain/chains.js'
 import { fetchPortfolioForAccount } from '../modules/accounts/index.js'
+import { fetchLastOutgoingAt } from '../modules/transactions/index.js'
 
 /**
  * The spec (`chain_id: integer, minimum: 1`) is the shape check, enforced
@@ -48,7 +49,15 @@ export default async function portfolioRoutes(
       if (!isSupportedChain(chainId)) {
         return reply.code(400).send({ error: `Unsupported chain: ${chainId}` })
       }
-      return fetchPortfolioForAccount(chainId, accountAddress)
+      // The card's "Last payment" rides the read the card already makes
+      // (#4021): an additive wire field, computed beside the portfolio rather
+      // than by a per-card transaction fetch from the browser. Both legs are
+      // owned-account scoped — the ownership check above IS the tenant gate.
+      const [portfolio, lastOutgoingAt] = await Promise.all([
+        fetchPortfolioForAccount(chainId, accountAddress),
+        fetchLastOutgoingAt(ownedAccounts[0].id, chainId, accountAddress, request.log),
+      ])
+      return { ...portfolio, lastOutgoingAt }
     },
   )
 }

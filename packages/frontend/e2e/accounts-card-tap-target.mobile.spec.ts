@@ -134,10 +134,13 @@ test('/accounts: a real tap on the card body opens the account, with no set-defa
   })
 
   const card = page.getByTestId('account-card').filter({ hasText: SECOND_CARD })
-  // Use the token row rather than the footer: at 390px the fixed bottom nav
-  // can overlap the footer after scrolling, which would test that nav instead
-  // of the stretched card link.
-  const bodyText = card.getByText('USDC', { exact: true }).first()
+  // Use the balance figure rather than the footer: at 390px the fixed bottom
+  // nav can overlap the footer after scrolling, which would test that nav
+  // instead of the stretched card link. (#4021 retarget: the USDC token row
+  // this used to tap no longer renders — a single holding gets no rows — so
+  // the headline figure is the body point, and still the only real-engine
+  // proof of the #3550 overlay.)
+  const bodyText = card.getByText('$1,250.00', { exact: true }).first()
   const box = await bodyText.boundingBox()
   if (!box) throw new Error('the account-card body point has no rendered box')
   await page.evaluate(() => {

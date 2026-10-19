@@ -154,9 +154,8 @@ type CardReading = {
   nameHeight: number
   truncated: boolean
   badges: string[]
-  /** Where each badge landed, so "on the caption line" is a measurement. */
+  /** Where each badge landed, so "on the name's line" is a measurement. */
   badgeRects: Record<string, Rect>
-  captionRect: Rect
   nameRect: Rect
   /** null when the card renders no actions — which is itself the assertion for #2236's dead-reservation half. */
   actionsRect: Rect | null
@@ -189,23 +188,13 @@ async function readCard(page: Page, accountName: string): Promise<CardReading> {
       return { x: +b.x.toFixed(1), y: +b.y.toFixed(1), w: +b.width.toFixed(1), h: +b.height.toFixed(1) }
     }
 
-    // Header and caption, anchored so the probe survives the LAYOUT it is
-    // testing. Walking `row.parentElement` and its `nextElementSibling` works
-    // on the current DOM and silently breaks on the pre-#2236 one, where the
-    // title row is a direct child of the card: `header` becomes the card, and
-    // `caption` becomes the NEXT CARD — or `null` with a single account, which
-    // crashed the positive control inside the very mutation run it exists to
-    // validate. A control that cannot survive the mutation is not a control.
-    //
-    // So: the header is whichever direct child of the card contains the name,
-    // and the caption is the direct child that carries the age line. Both hold
-    // on either shape, and neither reads a class string.
+    // Header — the direct child of the card that contains the name. #4021
+    // removed the "Added {timeAgo}" caption line entirely, so there is no
+    // second row to anchor: the badge scan reads the title row alone, which
+    // is where every surviving badge now lives anyway (the #2235 reason the
+    // scan used to span both rows is history).
     const cardChildren = Array.from(card.children)
     const header = cardChildren.find((el) => el.contains(h3))!
-    const caption = cardChildren.find(
-      (el) => el !== header && /Added /.test(el.textContent ?? ''),
-    ) as HTMLElement
-    if (!caption) throw new Error(`the card labelled "${label}" renders no caption line`)
 
     // Badges, laid out AS CHROME rather than merely present in the DOM.
     // `haven-reviewer` defeated a text-only version of this check with its own
@@ -227,11 +216,21 @@ async function readCard(page: Page, accountName: string): Promise<CardReading> {
     // 52.1px (`default`) at BOTH widths, and `sr-only` is 1px — so the
     // threshold sits with ~2x headroom on one side and 24x on the other.
     //
-    // SCANNED ACROSS BOTH ROWS since #2235. `default` moved to the caption, so
-    // a scan pinned to the title row would have read its own success as the
-    // badge disappearing — the deletion this check exists to catch.
+    // Badges, laid out AS CHROME rather than merely present in the DOM.
+    // `haven-reviewer` defeated a text-only version of this check with its own
+    // mutation on #2223: drop `flex-wrap` AND give both badges `sr-only`, and
+    // every test passed — `position: absolute` takes them out of flex flow, so
+    // the `h3` gets the whole row exactly as a real wrap would, while their
+    // text nodes stay queryable. A layout no sighted user gets, invisible to
+    // the very check that exists to say "this was not bought by deleting the
+    // chrome".
+    //
+    // SCANNED ACROSS THE TITLE ROW — the #2235 two-row scan exists to catch
+    // the era when `default` lived on the caption line; #4021 removed that
+    // line and moved the last badge beside the name, so the title row is now
+    // the only place a badge can render without being caught.
     const badgeRects: Record<string, Rect> = {}
-    const badges = [...header.querySelectorAll('span'), ...caption.querySelectorAll('span')]
+    const badges = [...header.querySelectorAll('span')]
       .filter(
         (el) =>
           el.getClientRects().length > 0 &&
@@ -261,7 +260,6 @@ async function readCard(page: Page, accountName: string): Promise<CardReading> {
       truncated: nameLink.scrollWidth > nameLink.clientWidth + 1,
       badges: Array.from(new Set(badges.map(([t]) => t))),
       badgeRects,
-      captionRect: rect(caption),
       nameRect: rect(nameLink),
       actionsRect: actionsEl ? rect(actionsEl) : null,
       actionsOpacity: actionsEl ? Number(getComputedStyle(actionsEl).opacity) : 0,

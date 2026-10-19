@@ -39,7 +39,7 @@ import { ExternalDetailsLink } from '@/components/haven'
 import { BalanceFreshnessIndicator } from '@/components/haven'
 import { ReceivePanel } from '@/components/haven'
 import { useToast } from '@/components/ui/Toast'
-import { getExplorerUrlOrNull, resolveChainOrNull, DEFAULT_CHAIN_ID } from '@/lib/chains'
+import { getExplorerUrlOrNull, DEFAULT_CHAIN_ID } from '@/lib/chains'
 // #3127 (finding 6): the shared formatter — this page's inline copy was the
 // third drift site that let /accounts render `kr13,000.50` while this page
 // rendered `13 000,50 kr` for the same figure.
@@ -53,6 +53,8 @@ import { agentReceivedBudgetLine, hasConfiguredAllowances } from '@/lib/agent-bu
 import { agentStatusPresentation } from '@/lib/payment-status'
 import { isHalfRevoked } from '@/lib/half-revoked'
 import { formatAgentLastActivity } from '@/lib/agent-last-seen'
+import { nonZeroBreakdown } from '@/lib/portfolio-breakdown'
+import { isTestnetChain } from '@/lib/marketplace'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
@@ -164,7 +166,6 @@ export default function AccountDetailClient() {
   // headline and per-token rows read the SEK figures the endpoint prices —
   // never a USD value relabelled "kr".
   const totalFiat = currency === 'EUR' ? totalEur : currency === 'SEK' ? totalSek : totalUsd
-  const chain = resolveChainOrNull(chainId)
   const formattedTotal = formatFiat(totalFiat, currency)
   const balanceUnavailable = Boolean(portfolioError || balancesError)
   // #3295: a token whose balance read failed renders its last-known value
@@ -173,6 +174,10 @@ export default function AccountDetailClient() {
   // stays reserved for the WHOLE-portfolio failure states above; per-token
   // unavailability shows inside the token row instead of erasing the row.
   const degradedFreshness = breakdown.find((item) => item.balanceFreshness)?.balanceFreshness
+  // #4021: the LIST hides zero-raw-balance rows (a filler ETH 0 renders
+  // nowhere), while the headline's freshness marker keeps reading the FULL
+  // breakdown above — hiding an unavailable filler row must not drop it.
+  const visibleBalances = nonZeroBreakdown(breakdown)
   const [renameOpen, setRenameOpen] = useState(false)
   const [removeOpen, setRemoveOpen] = useState(false)
   const [removing, setRemoving] = useState(false)
@@ -295,7 +300,12 @@ export default function AccountDetailClient() {
             {account.is_default && (user?.accounts?.length ?? 0) > 1 ? (
               <StatusBadge tone="brand">Default</StatusBadge>
             ) : null}
-            <StatusBadge>{chain?.name ?? `Chain ${chainId}`}</StatusBadge>
+            {isTestnetChain(chainId) ? (
+              // #4021: no chain name on a primary surface (epic #3801) — the
+              // same "Test network" wording /dashboard's MoneyPanel uses,
+              // testnets only, mainnet renders no network marker at all.
+              <StatusBadge>Test network</StatusBadge>
+            ) : null}
             {accountAddress && (
               <>
                 {/* #1083 gave Send to BOTH rails. #1989 (epic #1440) took it
@@ -408,7 +418,7 @@ export default function AccountDetailClient() {
               className="py-8"
               action={<Button variant="ghost" size="sm" onClick={handleBalancesRefresh}>Try again</Button>}
             />
-          ) : breakdown.length === 0 ? (
+          ) : visibleBalances.length === 0 ? (
             <EmptyState
               title="No token balances yet"
               body="Deposit funds to see tokens in this Haven wallet."
@@ -424,7 +434,7 @@ export default function AccountDetailClient() {
                   Value ({currency})
                 </span>
               </div>
-              {breakdown.map((item) => {
+              {visibleBalances.map((item) => {
                 const fiatValue = currency === 'EUR' ? item.eurValue : currency === 'SEK' ? item.sekValue : item.usdValue
                 return (
                   <div

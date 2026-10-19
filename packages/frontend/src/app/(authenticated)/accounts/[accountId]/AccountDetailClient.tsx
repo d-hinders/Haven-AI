@@ -16,7 +16,7 @@ import { ApiRequestError } from '@/lib/api'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
 import DelegationSendModal from '@/components/DelegationSendModal'
 import AccountSignersCard from '@/components/AccountSignersCard'
-import ReceiveFundsModal from '@/components/ReceiveFundsModal'
+import ReceiveDialog from '@/components/ReceiveDialog'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -423,7 +423,7 @@ export default function AccountDetailClient() {
               title="No token balances yet"
               body="Deposit funds to see tokens in this Haven wallet."
               className="py-8"
-              action={accountAddress ? <Button size="sm" onClick={() => setReceiveOpen(true)}>Deposit address</Button> : null}
+              action={accountAddress ? <Button size="sm" onClick={() => setReceiveOpen(true)}>Receive</Button> : null}
             />
           ) : (
             <>
@@ -691,7 +691,7 @@ export default function AccountDetailClient() {
           onSent={handleSendSuccess}
         />
       )}
-      <ReceiveFundsModal
+      <ReceiveDialog
         open={receiveOpen}
         account={account}
         onClose={() => setReceiveOpen(false)}

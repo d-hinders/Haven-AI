@@ -33,8 +33,8 @@ const baseProps = {
   watchingForDeposit: false,
   requiresOtherDevice: false,
   showSpending: true,
-  onDepositAddress: vi.fn(),
-  onAddFunds: vi.fn(),
+  onReceive: vi.fn(),
+  onSend: vi.fn(),
 }
 
 function agent(id: string, name: string, d30NetUsd: number): DashboardAgentPreview {
@@ -259,34 +259,34 @@ describe('MoneyPanel — the balance figures say what they measure (#3977)', () 
   })
 })
 
-describe('MoneyPanel — exactly one primary "Add funds" (#3902)', () => {
-  const addFunds = () => screen.getByRole('button', { name: 'Add funds' })
+describe('MoneyPanel — exactly one primary "Receive" (#3902, #4094)', () => {
+  const receive = () => screen.getByRole('button', { name: 'Receive' })
 
-  it('renders "Add funds" primary by default', () => {
+  it('renders "Receive" primary by default', () => {
     render(<MoneyPanel {...baseProps} overview={null} />)
 
-    expect(addFunds()).toHaveClass('bg-[var(--v2-brand)]')
-    expect(addFunds()).not.toHaveClass('border-[var(--v2-border-strong)]')
+    expect(receive()).toHaveClass('bg-[var(--v2-brand)]')
+    expect(receive()).not.toHaveClass('border-[var(--v2-border-strong)]')
   })
 
-  it('renders "Add funds" primary when addFundsSecondary is false', () => {
-    render(<MoneyPanel {...baseProps} addFundsSecondary={false} overview={null} />)
+  it('renders "Receive" primary when receiveSecondary is false', () => {
+    render(<MoneyPanel {...baseProps} receiveSecondary={false} overview={null} />)
 
-    expect(addFunds()).toHaveClass('bg-[var(--v2-brand)]')
+    expect(receive()).toHaveClass('bg-[var(--v2-brand)]')
   })
 
-  it('steps "Add funds" down to ghost when addFundsSecondary is true', () => {
-    render(<MoneyPanel {...baseProps} addFundsSecondary overview={null} />)
+  it('steps "Receive" down to ghost when receiveSecondary is true', () => {
+    render(<MoneyPanel {...baseProps} receiveSecondary overview={null} />)
 
-    expect(addFunds()).toHaveClass('border-[var(--v2-border-strong)]')
-    expect(addFunds()).not.toHaveClass('bg-[var(--v2-brand)]')
+    expect(receive()).toHaveClass('border-[var(--v2-border-strong)]')
+    expect(receive()).not.toHaveClass('bg-[var(--v2-brand)]')
   })
 
-  it('keeps "Deposit address" ghost either way', () => {
+  it('keeps "Send" ghost either way', () => {
     const { rerender } = render(<MoneyPanel {...baseProps} overview={null} />)
-    const deposit = () => screen.getByRole('button', { name: 'Deposit address' })
-    expect(deposit()).toHaveClass('border-[var(--v2-border-strong)]')
-    rerender(<MoneyPanel {...baseProps} addFundsSecondary overview={null} />)
-    expect(deposit()).toHaveClass('border-[var(--v2-border-strong)]')
+    const send = () => screen.getByRole('button', { name: 'Send' })
+    expect(send()).toHaveClass('border-[var(--v2-border-strong)]')
+    rerender(<MoneyPanel {...baseProps} receiveSecondary overview={null} />)
+    expect(send()).toHaveClass('border-[var(--v2-border-strong)]')
   })
 })

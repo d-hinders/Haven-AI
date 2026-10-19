@@ -88,7 +88,7 @@ import {
   expectNoHorizontalOverflow,
   measureDialogOverflow,
   mockHavenApi,
-  openReceiveFundsModal,
+  openReceiveDialog,
   seedAuthenticatedSession,
   testSafeAddress,
   unexpectedBrowserErrors,
@@ -103,7 +103,7 @@ test.describe('receive dialog at a mobile viewport', () => {
   test('the receive panel fits inside a 393px viewport', async ({ page }) => {
     const browserErrors = collectBrowserErrors(page)
 
-    const modal = await openReceiveFundsModal(page)
+    const modal = await openReceiveDialog(page)
     await expect(modal).toBeVisible()
     // The content most likely to burst a 393px panel: a full 42-character
     // address. Asserted visible so the measurement below is taken with the

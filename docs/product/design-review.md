@@ -12,8 +12,7 @@ covers:
   - packages/frontend/tailwind.config.js
   - packages/frontend/src/components/ui/**
   - packages/frontend/src/components/haven/**
-  - packages/frontend/src/components/ReceiveFundsModal.tsx
-  - packages/frontend/src/components/AddFundsModal.tsx
+  - packages/frontend/src/components/ReceiveDialog.tsx
   - packages/frontend/src/components/ConnectAgentModal.tsx
   - packages/frontend/src/components/connect-agent/ConnectAgentFlow.tsx
   - packages/frontend/src/components/connect-agent/InlineAgentSetup.tsx

@@ -42,6 +42,8 @@ import type { AttentionListItem } from '@/components/haven/AttentionList'
 import { CodeBlock } from '@/components/ui/CodeBlock'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import ComingSoonModal from '@/components/ComingSoonModal'
+import ReceiveDialog from '@/components/ReceiveDialog'
+import type { SmartAccount } from '@/context/AuthContext'
 import InfoModal, { type InfoPage } from '@/components/InfoModal'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { BackLink } from '@haven_ai/ui/BackLink'
@@ -208,6 +210,20 @@ const modalInfoPages: InfoPage[] = [
 /** Deterministic demo values for the wallet-menu signing-credential states (#1952). */
 const DS_HYBRID_ACCOUNT = '0x8f2a55949038a9610f50fb23b5883af3b4ecb3c3'
 const DS_PASSKEY_KEY_ID = '0x1111111111111111111111111111111111111111111111111111111111111111'
+
+/**
+ * The Receive dialog's demo account (#4094): a Base Sepolia account, so the
+ * opened dialog shows the "Get test USDC" faucet card — the testnet half of
+ * the chain-gated "Other ways to add money" pair (#3478).
+ */
+const DS_RECEIVE_ACCOUNT: SmartAccount = {
+  id: 'ds-receive-account',
+  account_address: '0x8f4F0f6d712C5c5C9Bb02F4a5B5c0D7F462A6f4C',
+  chain_id: 84532,
+  name: 'Demo account',
+  is_default: true,
+  created_at: '2026-10-19T00:00:00Z',
+}
 const NOOP = () => {}
 
 /**
@@ -546,6 +562,7 @@ export default function DesignSystemPage() {
   const [dsFilterPillActive, setDsFilterPillActive] = useState<string | null>(null)
   const [infoModalOpen, setInfoModalOpen] = useState(false)
   const [comingSoonOpen, setComingSoonOpen] = useState(false)
+  const [receiveDialogOpen, setReceiveDialogOpen] = useState(false)
   const [panelOpen, setPanelOpen] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [topModalOpen, setTopModalOpen] = useState(false)
@@ -1929,7 +1946,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="First-run setup"
-        description="While setup is in progress the guide IS the Needs attention card (titled Get started), with the rule items that still apply listed below it. Step 1 completes on any USDC on an account — other tokens never count — and reads as unknown, with no funding action, when the USDC read is unavailable; its action opens Add funds, which carries the test-network faucet. Step 2 completes only on an agent that can pay (active or paused, with a usable budget) and names the newest agent still waiting for setup; it can be done before funding, at secondary weight. Step 3 unlocks on the same rule. Hide for now survives a reload until another step completes. The guide never shows an address. The steps own the card only until the first agent payment; from then on they never return — one You're set up line takes their place until dismissed, and the Needs attention rules speak for anything that changes later."
+        description="While setup is in progress the guide IS the Needs attention card (titled Get started), with the rule items that still apply listed below it. Step 1 completes on any USDC on an account — other tokens never count — and reads as unknown, with no funding action, when the USDC read is unavailable; its action keeps its task wording, Add funds (owner decision on #4094), and opens the one Receive dialog, which carries the test-network faucet. Step 2 completes only on an agent that can pay (active or paused, with a usable budget) and names the newest agent still waiting for setup; it can be done before funding, at secondary weight. Step 3 unlocks on the same rule. Hide for now survives a reload until another step completes. The guide never shows an address. The steps own the card only until the first agent payment; from then on they never return — one You're set up line takes their place until dismissed, and the Needs attention rules speak for anything that changes later."
       >
         <div className="max-w-3xl space-y-4">
           {/* A new account: no USDC yet, nothing connected. */}
@@ -2876,6 +2893,36 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
+        title="Receive dialog"
+        description="The ONE receive dialog (#4094) — every funding entry point opens it: the dashboard money card's Receive, the first-run guide's Add funds step, the low-balance attention item, the accounts overview's Add funds link, and account detail's Receive button. The caller picks the account (the dashboard's account picker when there is more than one). In order: the account card; the Haven wallet address with a QR code, Copy, and an explorer link; ONE network rule — 'Send USDC on <network> only' (one token, never ETH — agents spend USDC, and a receive screen that lists tokens the product never spends invites the wrong deposit); then 'Other ways to add money', gated on the SELECTED account's chain (#3478): 'Get test USDC' on a test network, 'Buy with card' on Base when the Coinbase Onramp app id is configured. An unresolved chain gets no network instruction and no default (#1844): a warning banner and a Refresh page action instead of a guessed network — no address, no QR, no faucet, no onramp."
+      >
+        <Card hover={false} className="p-5">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">One token, one network</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                The network rule sits on the address — the one sentence a person must read before they
+                act on it. One token, one network, no second list to reconcile.
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">A refusal, not a guess</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                Without a resolved chain the dialog names no network and shows nothing network-addressed —
+                funds sent on the wrong network are usually unrecoverable, so the next action is an
+                honest <em>Refresh page</em>, not a default.
+              </p>
+            </div>
+          </div>
+          <div className="mt-5 flex flex-wrap gap-3">
+            <Button variant="ghost" size="sm" onClick={() => setReceiveDialogOpen(true)}>
+              Open the Receive dialog
+            </Button>
+          </div>
+        </Card>
+      </Section>
+
+      <Section
         title="States"
         description="Important Haven screens need stable loading, empty, and error states because AI-generated UX often only covers the happy path."
       >
@@ -3423,6 +3470,13 @@ export default function DesignSystemPage() {
           </DialogActions>
         </div>
       </Modal>
+
+      {/* #4094: the one Receive dialog, opened by its showcase section above. */}
+      <ReceiveDialog
+        open={receiveDialogOpen}
+        account={DS_RECEIVE_ACCOUNT}
+        onClose={() => setReceiveDialogOpen(false)}
+      />
 
       <Modal
         open={modalOpen}

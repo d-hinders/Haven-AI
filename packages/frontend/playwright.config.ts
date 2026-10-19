@@ -344,7 +344,7 @@ export default defineConfig({
       // dev-agent-pages (#3577 — For developers and For agents), more-sheet
       // (#4053 — the phone More sheet, light and dark).
       // Baseline counts are not restated here;
-      // `git ls-files` the `__screenshots__` tree for them. add-funds-modal
+      // `git ls-files` the `__screenshots__` tree for them. receive-dialog
       // seeds `haven.theme='dark'` itself and skips its mobile shots under
       // this project (no mobile dark baseline), so only its desktop clips
       // compare here.
@@ -353,7 +353,7 @@ export default defineConfig({
         '**/analytics.visual.spec.ts',
         '**/marketplace.visual.spec.ts',
         '**/settings-company-details.visual.spec.ts',
-        '**/add-funds-modal.visual.spec.ts',
+        '**/receive-dialog.visual.spec.ts',
         '**/demo.visual.spec.ts',
         '**/releases.visual.spec.ts',
         '**/how-it-works.visual.spec.ts',

@@ -181,15 +181,16 @@ export interface MoneyPanelProps {
    */
   noPaymentsYet?: boolean
   /**
-   * True only while the first-run guide's step 1 ("Add funds") is the active
-   * step (#3902, captain decision 2026-10-12): the guide then carries the one
-   * primary "Add funds" and this card's button steps down to the ghost
-   * variant, so exactly one primary "Add funds" shows. Default false — the
-   * card's "Add funds" is the primary action.
+   * #3902: no other money action is primary while the first-run guide's
+   * step 1 ("Add funds") is the active step (#4094 rename: the card's button
+   * is "Receive"). The guide then carries the one primary funding action and
+   * this card's button steps down to the ghost variant, so exactly one
+   * primary money action shows. Default false — the card's "Receive" is the
+   * primary action.
    */
-  addFundsSecondary?: boolean
-  onDepositAddress: () => void
-  onAddFunds: () => void
+  receiveSecondary?: boolean
+  onReceive: () => void
+  onSend: () => void
 }
 
 export default function MoneyPanel({
@@ -211,9 +212,9 @@ export default function MoneyPanel({
   requiresOtherDevice,
   showSpending = true,
   noPaymentsYet = false,
-  addFundsSecondary = false,
-  onDepositAddress,
-  onAddFunds,
+  receiveSecondary = false,
+  onReceive,
+  onSend,
 }: MoneyPanelProps) {
   // Animate the balance from 0 → totalFiat on first paint after data loads.
   // Subsequent changes (currency switches, polled refresh) snap instantly.
@@ -508,8 +509,11 @@ export default function MoneyPanel({
               </div>
             ) : null}
 
-            {/* #3897: "Add funds" is the primary action, "Deposit address" the
-                secondary (#3807, the mockup). */}
+            {/* #4094: "Receive" is the primary action, "Send" the secondary —
+                the money verbs everywhere, per the owner decision. #3902
+                carries over: while the first-run guide's step 1 is the active
+                step, the guide's "Add funds" is the one primary funding
+                action and this card's "Receive" steps down to ghost. */}
             {hasAccounts ? (
               requiresOtherDevice ? (
                 <PasskeyOtherDeviceNotice className="max-w-sm lg:mt-auto" />
@@ -518,11 +522,11 @@ export default function MoneyPanel({
                 // unavailable) the spare height sits above the actions,
                 // never below them (#3908).
                 <div className="flex flex-wrap gap-3 lg:mt-auto">
-                  <Button onClick={onAddFunds} variant={addFundsSecondary ? 'ghost' : 'primary'}>
-                    Add funds
+                  <Button onClick={onReceive} variant={receiveSecondary ? 'ghost' : 'primary'}>
+                    Receive
                   </Button>
-                  <Button onClick={onDepositAddress} variant="ghost">
-                    Deposit address
+                  <Button onClick={onSend} variant="ghost">
+                    Send
                   </Button>
                 </div>
               )

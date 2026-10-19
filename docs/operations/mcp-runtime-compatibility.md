@@ -82,6 +82,18 @@ covers:
 last-verified: "2026-10-19"
 ---
 
+> **Re-verified unchanged (#4094, 2026-10-19, a `ci.yml` comment names the
+> merged Receive dialog):** the only covered file this diff touches is
+> `.github/workflows/ci.yml`, and the change inside it is comments only: the
+> `frontend_checks` build's explanatory comment about
+> `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID` now says the reader is
+> `ReceiveDialog.tsx` (#4094 merged `AddFundsModal` and `ReceiveFundsModal`
+> into it) instead of the deleted `AddFundsModal.tsx`. No step, job, env
+> value, literal or condition moves — the fixed synthetic onramp literal the
+> comment explains is byte-identical — so no CI surface, channel, dist-tag,
+> release step or consent surface moves. `last-verified` stays 2026-10-19
+> for this note. Nothing else in this document was re-verified.
+
 > **Re-verified (#4079, 2026-10-19, check_funds wording):** `haven_check_funds`
 > answers `covered: false` whenever a live chain read reports LESS than the
 > checked amount, not only an empty account, so its wording now says that:

@@ -10,7 +10,7 @@ import type { SmartAccount } from '@/context/AuthContext'
 
 interface Props {
   open: boolean
-  action: 'receive' | 'add-funds'
+  action: 'receive' | 'send'
   accounts: SmartAccount[]
   onClose: () => void
   onSelect: (accountId: string) => void
@@ -29,14 +29,16 @@ export default function DashboardActionPickerModal({
 
   if (!open) return null
 
-  // 'send' was removed with the legacy Safe send flow (#1989, epic #1440) —
-  // the dashboard no longer offers an owner-send affordance on any rail.
-  // #3807: the receive action's button reads "Deposit address", so the
-  // picker names what the CTA names.
+  // #4094: the money verbs are Send / Receive everywhere. The 'add-funds'
+  // action merged into 'receive' — one Receive dialog now serves both old
+  // funding dialogs — and 'send' is back for the DELEGATION rail's owner-send
+  // (`DelegationSendModal`). The legacy Safe send stays retired (#1989, epic
+  // #1440): that modal and its hook are deleted, and nothing here reopens
+  // that path.
   const title =
     action === 'receive'
-      ? 'Choose account for a deposit address'
-      : 'Choose account to add funds to'
+      ? 'Choose an account to receive on'
+      : 'Choose an account to send from'
 
   return (
     // `v2-safe-overlay` with no gutter of its own (#2730): this overlay has

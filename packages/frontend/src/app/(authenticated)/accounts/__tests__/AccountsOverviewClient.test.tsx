@@ -376,7 +376,7 @@ describe('AccountsOverviewClient — the card has no set-default control (#2374)
  * affordance are gone, the agent icon is the sidebar's `Bot`, the footer
  * carries the account's most recent outgoing transfer, and the network
  * marker is a "Test network" chip on testnets only (driven by the SAME
- * `isTestnetChain` predicate `AddFundsModal` uses — no second predicate).
+ * `isTestnetChain` predicate the Receive dialog uses — no second predicate).
  *
  * Part B: with one account the card renders wide beside a dashed "Create
  * another account" tile that opens the SAME dialog as the header action;
@@ -513,16 +513,18 @@ describe('AccountsOverviewClient — the card cleanup and layout (#4021)', () =>
     expect(within(sepoliaCard).queryByText('Base Sepolia')).toBeNull()
   })
 
-  it('an empty-balance card shows "No funds yet." with an Add funds link that opens the modal', () => {
+  it('an empty-balance card shows "No funds yet." with an Add funds link that opens the Receive dialog', () => {
     render(<AccountsOverviewClient />)
 
     const baseCard = getAccountCard('Base account')
     expect(within(baseCard).getByText('No funds yet.')).toBeInTheDocument()
-    // A link, not a button — the card keeps holding no buttons (#3719).
+    // A link, not a button — the card keeps holding no buttons (#3719). The
+    // LINK keeps its task wording (owner decision on #4094); the dialog it
+    // opens is the one merged Receive dialog.
     const addFunds = within(baseCard).getByRole('link', { name: 'Add funds' })
-    expect(screen.queryByRole('dialog', { name: 'Add funds' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Receive' })).toBeNull()
     fireEvent.click(addFunds)
-    expect(screen.getByRole('dialog', { name: 'Add funds' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Receive' })).toBeInTheDocument()
   })
 
   it('one account renders wide beside the create tile; two or more render no tile', () => {

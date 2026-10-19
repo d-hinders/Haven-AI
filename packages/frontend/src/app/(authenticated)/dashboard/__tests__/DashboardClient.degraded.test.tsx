@@ -72,11 +72,13 @@ vi.mock('@/components/DashboardActionPickerModal', () => ({
   default: () => null,
 }))
 
-vi.mock('@/components/ReceiveFundsModal', () => ({
+vi.mock('@/components/ReceiveDialog', () => ({
   default: () => null,
 }))
 
-vi.mock('@/components/AddFundsModal', () => ({
+// #4094: the dashboard mounts the delegation send only while open; mocked
+// so its wallet hooks are never imported here.
+vi.mock('@/components/DelegationSendModal', () => ({
   default: () => null,
 }))
 
@@ -250,7 +252,7 @@ describe('DashboardClient — degraded balance reads (#3295)', () => {
     // Funding KNOWN + has funds → the funded meta-line renders, never the
     // watching-for-deposit prompt (#3295 keeps its teeth: a failed read with
     // a known balance is funded).
-    expect(screen.getByRole('button', { name: 'Deposit address' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
     expect(screen.queryByText('Watching for incoming deposits…')).not.toBeInTheDocument()
   })
 
@@ -274,7 +276,7 @@ describe('DashboardClient — degraded balance reads (#3295)', () => {
     // for a KNOWN unfunded state), and the neutral action pair renders.
     expect(screen.queryByRole('button', { name: 'Receive funds' })).not.toBeInTheDocument()
     expect(screen.queryByText('Watching for incoming deposits…')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Deposit address' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
   })
 
   it('a clean read renders no indicator and keeps the change line', () => {

@@ -6,8 +6,7 @@ covers:
   - docs/product/design-system.md
   - docs/product/copy-guidelines.md
   - docs/regulatory/casp-risk-guardrails.md
-  - packages/frontend/src/components/ReceiveFundsModal.tsx
-  - packages/frontend/src/components/AddFundsModal.tsx
+  - packages/frontend/src/components/ReceiveDialog.tsx
   - packages/frontend/src/lib/agent-budget.ts
   - packages/frontend/src/lib/agent-list-filters.ts
   - packages/frontend/src/components/ConnectAgentModal.tsx

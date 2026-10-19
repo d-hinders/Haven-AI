@@ -46,9 +46,18 @@ interface MockDbOpts {
   sourcePasskeys?: Array<{ key_id: string; public_key_x: string; public_key_y: string }>
   /** Whether the create idempotency replay read finds a row. */
   replay?: { id: string; account_address: string; chain_id: number; created_at: string } | null
+  /**
+   * #4024 in-flight race: the replay PRE-check finds nothing, the INSERT
+   * conflicts (writes nothing), and the conflict path's re-read by key finds
+   * this committed winner.
+   */
+  raceWinner?: { id: string; account_address: string; chain_id: number; created_at: string }
+  /** The signup shape runs no pre-check, so its FIRST key read is the conflict path's. */
+  raceWinnerOnFirstRead?: boolean
 }
 
 function mockDb(opts: MockDbOpts = {}) {
+  let keyReads = 0
   mockQuery.mockImplementation((sql: string) => {
     const s = String(sql)
     // #4023: the salt counter's atomic allocation. Default counter 1.
@@ -59,6 +68,11 @@ function mockDb(opts: MockDbOpts = {}) {
       return Promise.resolve({ rows: opts.source === 'missing' ? [] : [{ id: SOURCE_ID }] })
     }
     if (/create_idempotency_key = \$2/.test(s)) {
+      keyReads += 1
+      if (opts.raceWinner) {
+        const winnerVisible = opts.raceWinnerOnFirstRead || keyReads > 1
+        return Promise.resolve({ rows: winnerVisible ? [opts.raceWinner] : [] })
+      }
       return Promise.resolve({ rows: opts.replay ? [opts.replay] : [] })
     }
     if (/SELECT id FROM smart_accounts/.test(s)) {
@@ -78,6 +92,9 @@ function mockDb(opts: MockDbOpts = {}) {
       return Promise.resolve({ rows: [{ count: opts.chainCount ?? '0' }] })
     }
     if (/COUNT\(\*\)/.test(s)) return Promise.resolve({ rows: [{ count: opts.count ?? '1' }] })
+    if (/INSERT INTO smart_accounts/.test(s) && opts.raceWinner) {
+      return Promise.resolve({ rows: [] }) // ON CONFLICT DO NOTHING
+    }
     if (/INSERT INTO smart_accounts/.test(s)) {
       // smart_accounts.id is a UUID column, so 'acct-1' described a row the
       // database cannot produce (#1446).
@@ -435,6 +452,7 @@ describe('POST /accounts/hybrid — create-additional (#4023)', () => {
     expect(res.statusCode).toBe(422)
     expect(res.json().error).toMatch(/10 accounts/)
     expect(res.json()).toMatchObject({ error_code: 'ACCOUNT_CAP_REACHED', cap: 10, chain_id: 84532 })
+    expectMatchesSpec('POST', '/accounts/hybrid', res.json(), '422')
   })
 
   it('400s a create-additional without an explicit chain_id (no bare fallback)', async () => {
@@ -518,5 +536,36 @@ describe('POST /accounts/hybrid — create-additional (#4023)', () => {
     expect(res.statusCode).toBe(409)
     expect(res.json()).toMatchObject({ error_code: 'IDEMPOTENCY_KEY_REUSED' })
     expect(res.json().error).toMatch(/different chain_id/)
+  })
+
+  it('#4024: an insert that loses on the idempotency key answers the committed winner, not a bare 409', async () => {
+    mockDb({ raceWinner: FIRST })
+    const res = await app.inject({ method: 'POST', url: '/accounts/hybrid', payload: ADDITIONAL })
+    expect(res.statusCode).toBe(201)
+    expect(res.json()).toMatchObject({ id: SOURCE_ID, account_address: HYBRID, chain_id: 84532 })
+    expectMatchesSpec('POST', '/accounts/hybrid', res.json(), '201')
+    // The re-read ran inside the registration transaction, and no passkey row
+    // was written for the lost insert.
+    expect(mockQuery.mock.calls.some((c) => /INSERT INTO hybrid_account_passkeys/.test(String(c[0])))).toBe(false)
+  })
+
+  it('#4024: a lost insert whose winner pins another chain answers IDEMPOTENCY_KEY_REUSED, not a bare 409', async () => {
+    // (The different-passkey variant needs per-account signer rows, which this
+    // dispatcher cannot tell apart: it is pinned on the real-DB race suite.)
+    mockDb({ raceWinner: { ...FIRST, chain_id: 8453 } })
+    const res = await app.inject({ method: 'POST', url: '/accounts/hybrid', payload: ADDITIONAL })
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toMatchObject({ error_code: 'IDEMPOTENCY_KEY_REUSED', id: SOURCE_ID })
+  })
+
+  it('a signup insert that conflicts keeps its address-race answer (the key re-read is create-additional only)', async () => {
+    // Even with a committed row carrying the key, signup does not replay it.
+    mockDb({ raceWinner: FIRST, raceWinnerOnFirstRead: true })
+    const res = await app.inject({
+      method: 'POST', url: '/accounts/hybrid',
+      payload: { chain_id: 84532, owner_address: OWNER, idempotency_key: 'signup-key' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toEqual({ error: 'Account already registered' })
   })
 })

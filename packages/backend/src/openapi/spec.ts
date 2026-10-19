@@ -5536,6 +5536,9 @@ export const openapiSpec = {
                   },
                   idempotency_key: {
                     type: 'string',
+                    // The column is VARCHAR(128) (migration 114): a longer key
+                    // is a 400 here, not a 500 inside the transaction (#4024).
+                    maxLength: 128,
                     description:
                       '#4023: retried-create dedup (the send_idempotency_key pattern). A retried create returns the FIRST account it created instead of minting a second — checked first, before the source, key and cap checks (#4024), and answered with the stored account\'s chain_id. A key reused with a different chain_id or key_id is refused with 409 IDEMPOTENCY_KEY_REUSED.',
                   },

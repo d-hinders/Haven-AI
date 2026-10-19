@@ -114,6 +114,48 @@ function isString(value: unknown): value is string {
   return Object.prototype.toString.call(value) === '[object String]'
 }
 
+/**
+ * The answer to a create-additional that names an idempotency key some row of
+ * the caller's already carries (#4024). Used twice: by the pre-check before
+ * anything is validated, and by the insert's conflict path when a concurrent
+ * attempt with the same key committed first. A key reused for a DIFFERENT
+ * request is refused, as the send_idempotency_key pattern does
+ * (payments.ts findPaymentReplay): the stored row pins the chain and its one
+ * passkey, so another chain_id or key_id is a 409, never the first account.
+ * The source account is not stored on the new row, so it cannot be pinned.
+ */
+async function answerCreateReplay(
+  replay: { id: string; account_address: string; chain_id: number; created_at: string },
+  request: { chainId: number; keyId: string },
+  executor?: Parameters<typeof listAccountPasskeys>[1],
+): Promise<{ status: 201 | 409; body: Record<string, unknown> }> {
+  const replayKeys = await listAccountPasskeys(replay.id, executor)
+  const sameKey = replayKeys.some((k) => k.key_id.toLowerCase() === request.keyId.toLowerCase())
+  const mismatch = Number(replay.chain_id) !== request.chainId ? 'chain_id' : !sameKey ? 'key_id' : null
+  if (mismatch) {
+    return {
+      status: 409,
+      body: {
+        error: `idempotency_key already belongs to an account with a different ${mismatch}`,
+        error_code: IDEMPOTENCY_KEY_REUSED,
+        id: replay.id,
+      },
+    }
+  }
+  return {
+    status: 201,
+    body: {
+      id: replay.id,
+      account_address: replay.account_address,
+      // The STORED row's chain, not the request's (#4024).
+      chain_id: Number(replay.chain_id),
+      account_type: 'delegator_hybrid',
+      deployed: false,
+      created_at: replay.created_at,
+    },
+  }
+}
+
 export default async function hybridAccountRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
 
@@ -254,34 +296,12 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
       // read is scoped to the caller (`sub`), so a key never replays another
       // user's row; another user's identical key is simply a new create.
       //
-      // A key reused for a DIFFERENT request is refused, as the
-      // send_idempotency_key pattern does (payments.ts findPaymentReplay):
-      // the stored row pins the chain and its one passkey, so a replay with
-      // another chain_id or key_id is a 409, not the first account. The
-      // source account is not stored on the new row, so it cannot be pinned;
-      // the passkey it was copied from is what matters to the new account.
+      // A key reused for a different request is refused (answerCreateReplay).
       if (idempotency_key) {
         const replay = await findAccountByCreateIdempotencyKey(sub, idempotency_key)
         if (replay !== null) {
-          const replayKeys = await listAccountPasskeys(replay.id)
-          const sameKey = replayKeys.some((k) => k.key_id.toLowerCase() === String(key_id).toLowerCase())
-          const mismatch = Number(replay.chain_id) !== chainId ? 'chain_id' : !sameKey ? 'key_id' : null
-          if (mismatch) {
-            return reply.code(409).send({
-              error: `idempotency_key already belongs to an account with a different ${mismatch}`,
-              error_code: IDEMPOTENCY_KEY_REUSED,
-              id: replay.id,
-            })
-          }
-          return reply.code(201).send({
-            id: replay.id,
-            account_address: replay.account_address,
-            // The STORED row's chain, not the request's (#4024).
-            chain_id: Number(replay.chain_id),
-            account_type: 'delegator_hybrid',
-            deployed: false,
-            created_at: replay.created_at,
-          })
+          const answer = await answerCreateReplay(replay, { chainId, keyId: String(key_id) })
+          return reply.code(answer.status).send(answer.body)
         }
       }
 
@@ -394,10 +414,29 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
         tx,
       )
       if (inserted === null) {
-        // The insert lost the unique-address race. The winner is either this
-        // user's own concurrent create (answer it — the idempotency contract)
-        // or another user's row at the same derived address (impossible
-        // without shared keys, but then the 409 is the honest answer).
+        // The insert hit a unique index and wrote nothing. Two can fire.
+        //
+        // (1) UNIQUE(user_id, create_idempotency_key) — the in-flight retry
+        // (#4024): the client timed out while the first create was still in
+        // its transaction and retried with the same key. Both passed the
+        // pre-check (no row yet); this one waited on the counter row, drew
+        // counter N+1, derived a DIFFERENT address, and lost on the key. The
+        // winner has committed, so this statement sees it: answer it exactly
+        // as the pre-check would (the same pin). Throwing a refusal rolls
+        // this transaction back, so the counter bump is not kept.
+        if (isAdditional && idempotency_key) {
+          const keyWinner = await findAccountByCreateIdempotencyKey(sub, idempotency_key, tx)
+          if (keyWinner !== null) {
+            const answer = await answerCreateReplay(keyWinner, { chainId, keyId: String(key_id) }, tx)
+            if (answer.status === 409) throw new RegistrationRefusal(409, answer.body)
+            throw new RegistrationRefusal(201, { __replay: true, ...answer.body })
+          }
+        }
+        // (2) UNIQUE(user_id, chain_id, LOWER(account_address)) — the
+        // unique-address race. The winner is either this user's own
+        // concurrent create (answer it — the idempotency contract) or another
+        // user's row at the same derived address (impossible without shared
+        // keys, but then the 409 is the honest answer).
         const winner = await findHybridAccountByAddressForReplay(sub, accountAddress, chainId, tx)
         if (winner === null) {
           throw new RegistrationRefusal(409, { error: 'Account already registered' })

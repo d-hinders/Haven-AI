@@ -362,8 +362,8 @@ runner image and not a workspace dependency. It then builds `@haven_ai/core`
 before `packages/sdk`, `packages/signer` and `packages/mcp-server`, because
 `npm ci` does not create core's `dist/` and mcp-server imports it. The first
 pilot run (2026-10-19) died on exactly that before any task ran.
-`scripts/ci/agent-evals-workspace-deps.test.mjs` guards both, so bump the
-CLI pin there and in the workflow together.
+A CI guard checks both: the build order, and that an exactly pinned CLI
+install runs before the eval step.
 
 **The workflow** (`.github/workflows/agent-evals.yml`) runs three ways:
 

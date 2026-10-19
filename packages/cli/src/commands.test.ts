@@ -283,7 +283,7 @@ describe('budget grant/revoke (#2539)', () => {
       'POST /agents/a1/delegations/build',
     ])
     expect(out.join('\n')).toContain('https://app.haven.test/agents/a1?grant=')
-    expect(out.join('\n')).toContain('sign')
+    expect(out.join('\n')).toContain('approve')
   })
 
   it('grant --json returns the reconciled build object with the signing link', async () => {

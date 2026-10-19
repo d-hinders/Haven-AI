@@ -966,10 +966,10 @@ async function cmdBudgetGrant(args: ParsedArgs, d: ResolvedDeps): Promise<number
       [
         `Budget of ${args.flags.amount} ${token.symbol} per ${args.flags.period} minutes built for agent ${id}.`,
         args.flags.recipient ? `Recipient pin: ${args.flags.recipient}` : null,
-        'Open this link and sign — the budget goes live the moment you do:',
+        'Open this link and approve — the budget goes live the moment you do:',
         built.signing_url,
         `Delegation: ${built.delegation_hash} (version ${built.version})`,
-        status === 'active' ? 'Signed and active.' : 'Waiting for your signature. Run the same command with --wait to poll until it is active.',
+        status === 'active' ? 'Approved and active.' : 'Waiting for your approval. Run the same command with --wait to poll until it is active.',
       ]
         .filter((line): line is string => line !== null)
         .join('\n'),
@@ -1048,10 +1048,10 @@ async function cmdBudgetRevoke(args: ParsedArgs, d: ResolvedDeps): Promise<numbe
     emit(d, args.flags.json, { agent_id: id, delegation_hash: hash, status, ...prepared }, () =>
       [
         'Revocation prepared — one signature, sponsored (no gas).',
-        'Open this link and sign to stop this budget:',
+        'Open this link and approve to stop this budget:',
         revokeUrl,
         `Delegation: ${hash}`,
-        status === 'revoked' ? 'Revoked.' : 'The budget keeps working until you sign. Run the same command with --wait to poll until it is revoked.',
+        status === 'revoked' ? 'Revoked.' : 'The budget keeps working until you approve. Run the same command with --wait to poll until it is revoked.',
       ]
         .filter((line): line is string => line !== null)
         .join('\n'),

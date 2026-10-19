@@ -343,7 +343,9 @@ upstream repository's secrets. Testnet only (Base Sepolia).
 1. **Fork and enable Actions.** Fork `d-hinders/Haven-AI` (default branch
    `dev` is enough). In the fork's **Actions** tab, enable workflows. Forks of
    a public repository run on free Actions minutes; scheduled workflows stay
-   off in a fork, and any other workflow can be disabled there from its
+   off in a fork. **Sync fork** is a push, so CI and the other push-triggered
+   workflows run there too (publishing and release jobs are pinned to the
+   upstream repository and skip); disable any you do not want from its
    Actions page.
 2. **Create the environment.** Fork → Settings → Environments → New
    environment named exactly **`agent-evals`** (the name the workflow

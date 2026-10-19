@@ -356,12 +356,13 @@ function submitFollowUpHandoff(
       nextTool: null,
       nextToolOmittedReason:
         'the next step is your own HTTP retry of the merchant with the payment_header the signer returned; ' +
-        'after it, report what the merchant answered with haven_report_x402_outcome',
+        'after it, report what the merchant answered with haven_report_x402_outcome, passing that same payment_header',
       reason:
         'Funding confirmed. Retry the ORIGINAL merchant request yourself with ' +
         'the payment_header your local signer returned (haven_sign_x402 builds it with the signature; if you ' +
         'signed with haven_sign, build it now with haven_x402_sign_header) as PAYMENT-SIGNATURE, and X-PAYMENT; then call ' +
-        'haven_report_x402_outcome with payment_id, outcome and merchant_status.',
+        'haven_report_x402_outcome with payment_id, outcome and merchant_status, plus that same payment_header ' +
+        'with any settlement evidence — Haven records the merchant settlement only with it.',
     }
   }
   if (status.rail === 'x402') {
@@ -378,7 +379,7 @@ function submitFollowUpHandoff(
         'haven_prepare_catalog_purchase, call haven_complete_mcp_tool with payment_id and that ' +
         'payment_header. If it came from haven_pay_x402_quote, retry ' +
         'the ORIGINAL merchant request yourself with it (PAYMENT-SIGNATURE, and ' +
-        'X-PAYMENT), then call haven_report_x402_outcome. Never do both.',
+        'X-PAYMENT), then call haven_report_x402_outcome, passing that same payment_header. Never do both.',
     }
   }
   return {

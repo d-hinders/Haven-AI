@@ -55,8 +55,13 @@ const HOSTED = (name: string) => ({
  * #3774 adds ONE: `haven_submit { payment_id }`'s success, which returned a
  * bare `{ status, tx_hash }` — one site, its handoff chosen by
  * `submitFollowUp` (x402 retry, direct done, or a status read).
+ * #4061 adds ONE: `haven_report_settlement_evidence`'s missing-proof-header
+ * arm (`classifySettlementEvidenceReport`) — a report refused for want of
+ * the payment header names the same tool again, hash prefilled. The two
+ * other #4061 arms (the outcome report's and the settle/complete mapping)
+ * ride existing sites through `evidenceHandoff` / `settlementEvidenceHandoff`.
  */
-export const EMISSION_SITE_COUNT = 31
+export const EMISSION_SITE_COUNT = 32
 /**
  * Fixtures for those sites: the held-hash site has two branches, the three
  * null-id sites share one helper, the report-outcome accepted site has two
@@ -73,8 +78,10 @@ export const EMISSION_SITE_COUNT = 31
  * arm: retryable with the hash prefilled, refused with no tool), one each.
  * #3774 adds five (the submit follow-up's MCP-tool completion, plain-HTTP
  * retry, unreadable-flow, direct done, and status-read arms), one each.
+ * #4061 adds two (the missing-proof-header arms: the evidence tool's own new
+ * site, and the outcome report's folded-evidence branch), one each.
  */
-export const EMISSION_FIXTURE_COUNT = 40
+export const EMISSION_FIXTURE_COUNT = 42
 
 export const EMISSION_SITES = [
   { site: 'catalog-purchase.ts prepare erc7710', action: AgentPaymentNextAction.SignAndSubmitPayment, tool: 'haven_sign', args: { payment_id: 'pay_1' }, expect: { ...SIGNER('haven_sign'), next_arguments: { payment_id: 'pay_1' } } },
@@ -120,7 +127,7 @@ export const EMISSION_SITES = [
   // #3774: the erc7710 submit names the Haven step after the agent's own retry — the settlement-evidence report.
   { site: 'state-direct-recovery.ts erc7710 submit: retry, then report settlement evidence', action: AgentPaymentNextAction.RetryOriginalX402Request, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1' } } },
   // #3774: haven_submit { payment_id } success — one site, five arms (submitFollowUp).
-  { site: 'state-direct-recovery.ts submit follow-up: x402 funding confirmed, plain HTTP (own retry, then report)', action: AgentPaymentNextAction.RetryOriginalX402Request, tool: null, reason: 'the next step is your own HTTP retry of the merchant with the payment_header the signer returned; after it, report what the merchant answered with haven_report_x402_outcome', expect: { next_tool_omitted_reason: 'the next step is your own HTTP retry of the merchant with the payment_header the signer returned; after it, report what the merchant answered with haven_report_x402_outcome' } },
+  { site: 'state-direct-recovery.ts submit follow-up: x402 funding confirmed, plain HTTP (own retry, then report)', action: AgentPaymentNextAction.RetryOriginalX402Request, tool: null, reason: 'the next step is your own HTTP retry of the merchant with the payment_header the signer returned; after it, report what the merchant answered with haven_report_x402_outcome, passing that same payment_header', expect: { next_tool_omitted_reason: 'the next step is your own HTTP retry of the merchant with the payment_header the signer returned; after it, report what the merchant answered with haven_report_x402_outcome, passing that same payment_header' } },
   { site: 'state-direct-recovery.ts submit follow-up: x402 funding confirmed, MCP-tool purchase (complete the call)', action: AgentPaymentNextAction.RetryOriginalX402Request, tool: 'haven_complete_mcp_tool', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_complete_mcp_tool'), next_arguments: { payment_id: 'pay_1' } } },
   { site: 'state-direct-recovery.ts submit follow-up: x402 funding confirmed, flow unreadable (both continuations)', action: AgentPaymentNextAction.RetryOriginalX402Request, tool: null, reason: 'Haven could not read whether this payment came from an MCP-tool purchase or a plain-HTTP one, and the two continue with different tools; the reason names both', expect: { next_tool_omitted_reason: 'Haven could not read whether this payment came from an MCP-tool purchase or a plain-HTTP one, and the two continue with different tools; the reason names both' } },
   { site: 'state-direct-recovery.ts submit follow-up: direct payment confirmed (done)', action: AgentPaymentNextAction.None, tool: null, reason: 'the direct payment is confirmed; no Haven tool follows', expect: { next_tool_omitted_reason: 'the direct payment is confirmed; no Haven tool follows' } },
@@ -145,6 +152,11 @@ export const EMISSION_SITES = [
   // report tool with the hash prefilled; the refused one names no tool.
   { site: 'paid-mcp-completion.ts complete eip3009: settlement evidence retryable (hash prefilled)', action: AgentPaymentNextAction.None, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1', settlement_tx_hash: `0x${'a'.repeat(64)}` }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1', settlement_tx_hash: `0x${'a'.repeat(64)}` } } },
   { site: 'paid-mcp-completion.ts complete eip3009: settlement evidence refused (no tool, reason)', action: AgentPaymentNextAction.None, tool: null, reason: 'the merchant settlement hash was refused: it does not match this payment on-chain — do not re-report the same hash', expect: { next_tool_omitted_reason: 'the merchant settlement hash was refused: it does not match this payment on-chain — do not re-report the same hash' } },
+  // #4061: a settlement report refused for want of the proof header (backend
+  // error_code settlement_proof_header_missing) names the evidence tool again,
+  // payment_id + hash prefilled; the agent adds its own payment_header.
+  { site: 'paid-mcp-completion.ts report settlement evidence: proof header missing (re-call adding payment_header)', action: AgentPaymentNextAction.RetryWithExplicitContext, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1', settlement_tx_hash: `0x${'be'.repeat(32)}` }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1', settlement_tx_hash: `0x${'be'.repeat(32)}` } } },
+  { site: 'plain-http-x402.ts report outcome accepted: folded evidence missing the proof header (re-report adding payment_header)', action: AgentPaymentNextAction.None, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1', settlement_tx_hash: `0x${'be'.repeat(32)}` }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1', settlement_tx_hash: `0x${'be'.repeat(32)}` } } },
 ] as const
 
 

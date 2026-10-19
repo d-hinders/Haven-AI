@@ -91,7 +91,14 @@ import {
   quoteWarnings,
   readMaxAmountCap,
 } from './support/cap-price.js'
-import { HostedToolError, egressRefusalBeforeIntent, normalizeError, runTool } from './support/errors.js'
+import {
+  HostedToolError,
+  SETTLEMENT_PROOF_HEADER_MISSING_CODE,
+  egressRefusalBeforeIntent,
+  isMissingProofHeaderRefusal,
+  normalizeError,
+  runTool,
+} from './support/errors.js'
 import {
   buildAgentGuidance,
   catchSettledReplay,
@@ -208,6 +215,8 @@ function reportOutcomeHandoff(
   }
   if (settlementEvidence) return evidenceHandoff(settlementEvidence, paymentId)
   if (offerSettlementEvidence) {
+    // #4061: payment_header is the agent's own value — Haven never saw it —
+    // so it cannot be prefilled; the reason names it.
     return { nextTool: 'haven_report_settlement_evidence', nextArguments: { payment_id: paymentId } }
   }
   return { nextTool: null, nextToolOmittedReason: 'the merchant accepted the paid retry; the purchase is complete and no Haven tool follows' }
@@ -353,6 +362,14 @@ type ReportedSettlementEvidence = {
   readonly outcome: EvidenceReportOutcome['outcome'] | 'not_attempted'
   readonly status_code?: number
   readonly refusal_reason?: string
+  /**
+   * #4061: the typed refusal, when the backend gave one a remedy —
+   * `SETTLEMENT_PROOF_HEADER_MISSING` (backend `error_code`
+   * `settlement_proof_header_missing`): the report carried no payment
+   * header, so the hash was never judged. The handoff and reason branch on
+   * THIS, never on `refusal_reason`'s sentence.
+   */
+  readonly code?: typeof SETTLEMENT_PROOF_HEADER_MISSING_CODE
   readonly note?: string
 }
 
@@ -367,6 +384,15 @@ function evidenceHandoff(
     return { nextTool: null, nextToolOmittedReason: EVIDENCE_RECORDED_OMITTED_REASON }
   }
   if (reported.outcome === 'retryable') {
+    return {
+      nextTool: 'haven_report_settlement_evidence',
+      nextArguments: { payment_id: paymentId, settlement_tx_hash: reported.settlement_tx_hash },
+    }
+  }
+  // #4061: refused for want of the proof header — the hash was never judged,
+  // so the evidence tool follows, the hash prefilled; the agent adds the
+  // payment_header it holds (Haven never saw it, so it cannot be prefilled).
+  if (reported.code === SETTLEMENT_PROOF_HEADER_MISSING_CODE) {
     return {
       nextTool: 'haven_report_settlement_evidence',
       nextArguments: { payment_id: paymentId, settlement_tx_hash: reported.settlement_tx_hash },
@@ -397,11 +423,25 @@ function evidenceReason(reported: ReportedSettlementEvidence): string {
       'transaction is not mined); retry haven_report_settlement_evidence with the same hash.'
     )
   }
+  if (reported.code === SETTLEMENT_PROOF_HEADER_MISSING_CODE) {
+    return MISSING_PROOF_HEADER_REPORT_REASON
+  }
   return (
     'Recorded, but the settlement evidence was refused: the hash does not match this payment ' +
     'on-chain. Do not re-report the same hash — check the PAYMENT-RESPONSE you relayed.'
   )
 }
+
+/**
+ * #4061: the reason when the folded evidence was refused for want of the
+ * proof header. Says what is true — the outcome IS recorded, the hash was not
+ * judged — and names the one fix. Never "the hash does not match".
+ */
+const MISSING_PROOF_HEADER_REPORT_REASON =
+  'Recorded. The merchant\'s answer is recorded, but its settlement is not yet: the report carried ' +
+  'no payment_header, and Haven records an EIP-3009 merchant settlement only with the payment header ' +
+  'you retried the merchant with. The hash was not judged. Call next_tool with next_arguments, adding ' +
+  'payment_header: the exact payment_header you sent the merchant.'
 
 function differsFromRequest(target: X402RetryTarget): { resource_url_differs_from_request?: boolean } {
   return target.resourceUrlDiffersFromRequest === undefined
@@ -718,7 +758,8 @@ async function requestModeReplay(
           'This idempotency_key already has a payment awaiting signature, so nothing was probed or ' +
           'created. Sign locally: call next_tool with next_arguments EXACTLY as given — the signer ' +
           'fetches the stored payment challenge itself. It returns BOTH signature and payment_header. ' +
-          'Relay signature via haven_submit, then retry retry_url yourself with payment_header.',
+          'Relay signature via haven_submit, then retry retry_url yourself with payment_header, and ' +
+          'report the answer with haven_report_x402_outcome, passing that same payment_header.',
         summary,
       }),
     }
@@ -1374,7 +1415,8 @@ export function createPlainHttpX402Handlers(
                   : 'signer fetches payment_required itself; only if it reports the context carried ' +
                     'none, re-call with the payment_required you passed to this tool added VERBATIM. ') +
                 'It returns BOTH signature and payment_header. Relay signature via haven_submit, ' +
-                'then retry retry_url yourself with payment_header. Do NOT call ' +
+                'then retry retry_url yourself with payment_header, and report the answer with ' +
+                'haven_report_x402_outcome, passing that same payment_header. Do NOT call ' +
                 'haven_x402_sign_header: haven_sign_x402 already spent its binding building that ' +
                 'header, so that call can only refuse. The header is signed before funding ' +
                 'confirms, so retry promptly.',
@@ -1582,9 +1624,13 @@ export function createPlainHttpX402Handlers(
         // on-chain mismatch it always did.
         let settlementEvidence: ReportedSettlementEvidence | null = null
         if (evidence && report.outcome === 'accepted') {
+          // #4061: forwarded with the payment header the agent retried
+          // with — the #3925 nonce proof — exactly as the SDK forwards its
+          // own (`paymentProofHeader` + the names derived from it).
           const evidenceOutcome = await haven.reportSettlementEvidence(
             report.paymentId,
             evidence.settlementTxHash,
+            args.payment_header ? { paymentHeader: args.payment_header } : {},
           )
           settlementEvidence = {
             settlement_tx_hash: evidence.settlementTxHash,
@@ -1596,6 +1642,9 @@ export function createPlainHttpX402Handlers(
               : {}),
             ...(evidenceOutcome.outcome === 'refused' && evidenceOutcome.reason
               ? { refusal_reason: evidenceOutcome.reason }
+              : {}),
+            ...(isMissingProofHeaderRefusal(evidenceOutcome)
+              ? { code: SETTLEMENT_PROOF_HEADER_MISSING_CODE }
               : {}),
           }
         } else if (evidence) {
@@ -1687,7 +1736,8 @@ export function createPlainHttpX402Handlers(
                   : offerSettlementEvidence
                     ? "Recorded. If the merchant's response carried a settlement transaction " +
                       '(PAYMENT-RESPONSE.transaction), pass it as settlement_tx_hash to ' +
-                      'haven_report_settlement_evidence so Haven can verify and record it. If it did ' +
+                      'haven_report_settlement_evidence, with payment_header set to the exact header ' +
+                      'you retried the merchant with, so Haven can verify and record it. If it did ' +
                       'not, the purchase is already complete and no further Haven tool is needed.'
                     : 'Recorded. The purchase is complete and no longer reads as undelivered; no further ' +
                       'Haven tool is needed.',

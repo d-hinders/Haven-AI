@@ -67,7 +67,14 @@ import {
 } from '@haven_ai/sdk'
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
-import { HostedToolError, egressRefusalBeforeIntent, paymentWindowExpiredError, runTool } from './support/errors.js'
+import {
+  HostedToolError,
+  SETTLEMENT_PROOF_HEADER_MISSING_CODE,
+  egressRefusalBeforeIntent,
+  isMissingProofHeaderRefusal,
+  paymentWindowExpiredError,
+  runTool,
+} from './support/errors.js'
 import {
   buildAgentGuidance,
   buildPurchaseSummary,
@@ -146,6 +153,18 @@ function settlementEvidenceHandoff(
       },
     }
   }
+  // #4061: refused for want of the proof header — the hash was never judged.
+  // Unreachable while `completeX402MerchantCall` forwards the header it sent,
+  // but mapped so this arm can never call the refusal a mismatch.
+  if (isMissingProofHeaderRefusal(outcome)) {
+    return {
+      nextTool: 'haven_report_settlement_evidence',
+      nextArguments: {
+        payment_id: paymentId,
+        ...(settlementTxHash ? { settlement_tx_hash: settlementTxHash } : {}),
+      },
+    }
+  }
   return {
     nextTool: null,
     nextToolOmittedReason:
@@ -175,6 +194,14 @@ function settlementEvidenceReason(outcome: EvidenceReportOutcome | undefined): s
       'The purchase is complete and the merchant settlement was reported, but Haven could not ' +
       'verify it on-chain just yet (the chain was unreachable or the transaction is not mined); ' +
       'retry haven_report_settlement_evidence with the same hash.'
+    )
+  }
+  if (isMissingProofHeaderRefusal(outcome)) {
+    return (
+      'The purchase itself is complete — report the result to the user via ' +
+      'agent_summary.purchase_summary. Its merchant settlement is not recorded yet: the report ' +
+      'carried no payment header, so the hash was not judged. Call next_tool with next_arguments, ' +
+      'adding payment_header: the payment_header you passed to this call.'
     )
   }
   return (
@@ -981,6 +1008,36 @@ export function classifySettlementEvidenceReport(
       }),
     }
   }
+  // #4061: the missing-proof-header refusal — keyed on the backend's
+  // `error_code`, never the sentence. Since #3925 an EIP-3009 merchant
+  // settlement is recorded only with the payment header the agent sent the
+  // merchant; this report carried none, so the hash was never judged and
+  // the remedy is THIS tool again, the hash prefilled, plus payment_header
+  // (the agent's own value, so it cannot be prefilled). Ahead of the
+  // reason-bearing arm below, which would tell the agent re-reporting cannot
+  // help — false for exactly this refusal.
+  if (isMissingProofHeaderRefusal(outcome)) {
+    return {
+      payment_id: paymentId,
+      settled: false,
+      code: SETTLEMENT_PROOF_HEADER_MISSING_CODE,
+      ...(outcome.outcome === 'refused' && outcome.reason ? { refusal_reason: outcome.reason } : {}),
+      settlement_tx_hash: settlementTxHash,
+      ...buildAgentGuidance({
+        nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+        nextTool: 'haven_report_settlement_evidence',
+        nextArguments: { payment_id: paymentId, settlement_tx_hash: settlementTxHash },
+        safeToContinue: true,
+        reason:
+          'Haven did not record this settlement yet: the report carried no payment_header, and Haven ' +
+          'records an EIP-3009 merchant settlement only with the payment header you retried the ' +
+          'merchant with. The hash was not judged. Call next_tool with next_arguments, adding ' +
+          'payment_header: the exact payment_header you sent the merchant. The payment itself is ' +
+          'unchanged — its funding leg is confirmed.',
+        summary: { payment_id: paymentId, status: observedStatus ?? 'unknown' },
+      }),
+    }
+  }
   // #3529: the reason-bearing refusal. The reason is the backend's own
   // sentence, relayed verbatim — the tool never paraphrases it into a verdict
   // it cannot check (whether the hash was genuinely wrong, or the connected
@@ -1562,9 +1619,13 @@ export function createPaidMcpCompletionHandlers(
             }),
           }
         }
+        // #4061: with the payment header the agent retried the merchant
+        // with — on EIP-3009 the #3925 nonce proof the record needs —
+        // forwarded exactly as the SDK forwards its own.
         const outcome = await haven.reportSettlementEvidence(
           args.payment_id,
           args.settlement_tx_hash,
+          args.payment_header ? { paymentHeader: args.payment_header } : {},
         )
         if (outcome.outcome === 'confirmed') {
           return classifySettlementEvidenceReport(args.payment_id, args.settlement_tx_hash, outcome)

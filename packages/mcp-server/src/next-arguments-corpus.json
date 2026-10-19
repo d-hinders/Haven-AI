@@ -62,6 +62,14 @@
       }
     },
     {
+      "site": "paid-mcp-completion.ts report settlement evidence: proof header missing (re-call adding payment_header)",
+      "tool": "haven_report_settlement_evidence",
+      "arguments": {
+        "payment_id": "pay_1",
+        "settlement_tx_hash": "0xbebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebe"
+      }
+    },
+    {
       "site": "paid-mcp-completion.ts report settlement evidence: reason-bearing refusal",
       "tool": "haven_get_payment_status",
       "arguments": {
@@ -130,6 +138,14 @@
       "tool": "haven_report_settlement_evidence",
       "arguments": {
         "payment_id": "pay_1"
+      }
+    },
+    {
+      "site": "plain-http-x402.ts report outcome accepted: folded evidence missing the proof header (re-report adding payment_header)",
+      "tool": "haven_report_settlement_evidence",
+      "arguments": {
+        "payment_id": "pay_1",
+        "settlement_tx_hash": "0xbebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebe"
       }
     },
     {

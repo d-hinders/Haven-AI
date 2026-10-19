@@ -32,6 +32,28 @@ import { composeDescription, toolDescriptions as sharedDescriptions } from '@hav
 import { DELIVERY_REFERENCE_MAX_LENGTH } from '@haven_ai/core'
 
 /**
+ * #4061: the settlement reports' optional `payment_header` — the base64
+ * payment header the agent sent the merchant on its own paid retry, verbatim.
+ * On the EIP-3009 funding leg it is the nonce proof the backend records a
+ * merchant settlement against (#3925); without it that record is refused.
+ * It is a signed payment authorization, not a credential: it is forwarded
+ * only to Haven, and never shape-checked as a secret (`delivery_reference`'s
+ * credential check reads only `delivery_reference`). Bounded at the backend's
+ * own stored-header cap (`cleanHeaderValue`, 16 KiB) — a real EIP-3009 header
+ * is well under 2 KiB, and a merchant's header limit is about that size too.
+ * The SDK posts the header it holds unbounded; there is no SDK limit to
+ * mirror, so the bound is the backend's.
+ */
+export const SETTLEMENT_PROOF_HEADER_MAX_LENGTH = 16_384
+const settlementProofHeaderArg = z
+  .string()
+  .min(1)
+  .max(
+    SETTLEMENT_PROOF_HEADER_MAX_LENGTH,
+    `payment_header is the base64 payment header you sent the merchant; at most ${SETTLEMENT_PROOF_HEADER_MAX_LENGTH} characters.`,
+  )
+
+/**
  * Hosted MCP tool set — keyless.
  *
  * Every tool here either reads agent state or performs the construct/relay
@@ -581,6 +603,11 @@ export const toolSchemas = {
       .min(1)
       .max(DELIVERY_REFERENCE_MAX_LENGTH, `delivery_reference must be at most ${DELIVERY_REFERENCE_MAX_LENGTH} characters`)
       .optional(),
+    // #4061: the payment header you retried the merchant with (the signer's
+    // payment_header), forwarded with the folded settlement evidence as its
+    // #3925 nonce proof. Read only with settlement evidence on an accepted
+    // outcome; see `settlementProofHeaderArg`.
+    payment_header: settlementProofHeaderArg.optional(),
   },
   haven_report_delivery_quality: {
     // #3770: the delivery-quality report — the agent's evidence-only verdict
@@ -624,6 +651,10 @@ export const toolSchemas = {
         'settlement_tx_hash must be a 0x-prefixed transaction hash: 0x followed by exactly 64 hex characters (case-insensitive).',
       )
       .optional(),
+    // #4061: on an EIP-3009 payment, the payment header you retried the
+    // merchant with — the #3925 nonce proof; see `settlementProofHeaderArg`.
+    // erc7710 needs none (Haven assembled that header).
+    payment_header: settlementProofHeaderArg.optional(),
   },
   haven_get_payment_status: {
     payment_id: z.string().min(1),
@@ -1305,7 +1336,8 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   // haven_sign_x402's inline header, but it is still the AGENT's retry, which is exactly why its
   // outcome has nowhere to go without this call.
   'On the funding-leg (EIP-3009) shape ONLY, report what the merchant answered to your retry with',
-  'haven_report_x402_outcome. On erc7710 use haven_report_settlement_evidence instead.',
+  'haven_report_x402_outcome, passing that same payment_header. On erc7710 use',
+  'haven_report_settlement_evidence instead.',
   // #3617: the owner chose to delete the dead sub_budget_id forwarding rather
   // than declare the argument, so say where a sub-budget pays instead.
   'Sub-budgets (sub_budget_id) pay only through the local MCP\'s haven_pay_x402 tools.',
@@ -1347,7 +1379,7 @@ const RESUME_X402_DESCRIPTION = [
   'it can only refuse.',
   // #2292: same obligation as the first-attempt path — a resumed retry Haven did not make is
   // just as unobservable as the original one.
-  'Then report the outcome with haven_report_x402_outcome.',
+  'Then report the outcome with haven_report_x402_outcome, passing that same payment_header.',
   'Carries no signer_compatibility of its own; an incompatible signer refuses at signing time.',
 ].join(' ')
 
@@ -1374,10 +1406,10 @@ const REPORT_X402_OUTCOME_DESCRIPTION = [
   'merchant_status, optional merchant_body. A rejection surfaces stranded funds on your next',
   'haven_get_payment_status instead of a 15-minute wait. On an accepted outcome you may fold the',
   'settlement evidence into this call: pass the raw base64 PAYMENT-RESPONSE header as',
-  'payment_response and/or the settlement_tx_hash — Haven decodes it (transaction only), verifies',
-  'the hash on-chain BEFORE recording (a hash that does not match the payment on-chain is',
-  'refused), and the purchase is complete with no further tool. A rejected outcome records no',
-  'evidence. Optionally pass delivery_reference — a NON-SECRET pointer to what the merchant',
+  'payment_response and/or the settlement_tx_hash, plus payment_header (the header you retried',
+  'with; required to record the settlement). Haven decodes it (transaction only), verifies the',
+  'hash on-chain BEFORE recording (a hash that does not match the payment on-chain is refused),',
+  'and the purchase is complete with no further tool. A rejected outcome records no evidence. Optionally pass delivery_reference — a NON-SECRET pointer to what the merchant',
   'delivered (product, order id) shown on the owner\'s receipt; code/token/key shapes are refused,',
   'so relay the secret to the owner yourself.',
   'Evidence only, your own payments only: it moves no money. Not for merchants Haven',

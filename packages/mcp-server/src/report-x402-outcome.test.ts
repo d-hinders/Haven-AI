@@ -370,7 +370,9 @@ describe('haven_report_x402_outcome', () => {
       expect(result.data.reason).toBe(
         "Recorded. If the merchant's response carried a settlement transaction " +
           '(PAYMENT-RESPONSE.transaction), pass it as settlement_tx_hash to ' +
-          'haven_report_settlement_evidence so Haven can verify and record it. If it did ' +
+          // #4061: and the proof header the settlement is recorded against.
+          'haven_report_settlement_evidence, with payment_header set to the exact header ' +
+          'you retried the merchant with, so Haven can verify and record it. If it did ' +
           'not, the purchase is already complete and no further Haven tool is needed.',
       )
     })

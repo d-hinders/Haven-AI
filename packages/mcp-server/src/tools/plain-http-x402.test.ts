@@ -163,6 +163,8 @@ describe('haven_pay_x402_quote', () => {
     expect(result.data.reason).toContain('Do NOT call')
     expect(result.data.reason).toContain('haven_x402_sign_header')
     expect(result.data.reason).toContain('payment_header')
+    // #4061: the report after the retry carries the same header.
+    expect(result.data.reason).toContain('haven_report_x402_outcome, passing that same payment_header')
     expect(result.data.payload_hash).toBe('0xfunding')
     expect(result.data.x402.funding_to).toBe('0xDelegate')
     expect(result.data.x402.merchant_to).toBe('0xMerchant')

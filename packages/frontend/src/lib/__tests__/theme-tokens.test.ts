@@ -24,8 +24,8 @@ import { THEME_TOKENS, CONTRAST_PAIRS, contrastTable, type TokenSpec } from '../
  * (`rgb`/`rgba`/`hsl`/`hsla`/`oklch`/`oklab`/`lab`/`lch`/`hwb`/`color`/
  * `color-mix`). Composite values (shadows, gradients, `env()` insets,
  * `calc()`) are NOT colour-valued — a shadow contains rgba() but is not a
- * colour — which is exactly how the 45-token inventory arises: the 26 hex
- * tokens with `-rgb` twins, plus the 19 twin-less whole-value colours
+ * colour — which is exactly how the 47-token inventory arises: the 26 hex
+ * tokens with `-rgb` twins, plus the 21 twin-less whole-value colours
  * (measured with this detector on the #3658 branch).
  */
 
@@ -52,7 +52,9 @@ describe('the three palette blocks of globals.css', () => {
 
   it('every colour-valued token in :root is redeclared in both dark blocks', () => {
     const lightColours = colourValued(blocks.light)
-    // 44 since #3670 removed --v2-chain-gnosis (45 after #3658/#3674).
+    // 44 since #3670 removed --v2-chain-gnosis; 46 since #4063 added the
+    // tab-bar pill pair; 58 since #4066 added the avatar tints. A floor, not
+    // an inventory — the exact census is the THEME_TOKENS test below.
     expect(lightColours.length).toBeGreaterThanOrEqual(44)
     for (const darkName of ['mediaDark', 'explicitDark'] as const) {
       const dark = blocks[darkName]

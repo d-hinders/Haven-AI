@@ -871,6 +871,23 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
       expect(await recordedHash(a.id)).toBeNull()
     })
 
+    it('a whitespace-only header is no header: the same typed missing-header refusal (#4061 review)', async () => {
+      const { agentId, userId } = await seedAgent()
+      const a = await seedFunded({ agentId, userId })
+      settleReceiptFor(a.id)
+
+      const answered = await attachEvidenceHandler(agentId, {
+        paymentId: a.id,
+        rail: 'x402',
+        txHash: SETTLE_A,
+        paymentProofHeader: '   ',
+      })
+
+      expect(answered.statusCode).toBe(409)
+      expect((answered.body as { error_code?: string }).error_code).toBe('settlement_proof_header_missing')
+      expect(await recordedHash(a.id)).toBeNull()
+    })
+
     it('a receipt whose Transfer burns no AuthorizationUsed for the delegate is refused as not an EIP-3009 settlement (case c)', async () => {
       const { agentId, userId } = await seedAgent()
       const a = await seedFunded({ agentId, userId })

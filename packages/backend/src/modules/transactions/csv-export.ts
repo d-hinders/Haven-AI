@@ -154,8 +154,10 @@ export function transactionCsvRow(
 }
 
 /**
- * The `initiator` cell (#4099): the same words the app shows. Empty when the
- * row has no initiator record (inbound rows, bar an agent's delegate sweep). `'human'` is a
+ * The `initiator` cell (#4099): the same words the app shows. Empty only on
+ * an inbound row with no initiator record (every inbound row bar an agent's
+ * delegate sweep); an outbound row with no record, including one whose
+ * enrichment failed, is "Unknown". `'human'` is a
  * recorded owner send; `'unknown'` an outbound row with no agent and no
  * record, which includes every owner send made before the record existed.
  * An agent-attributed row always carries its agent's name (both attribution

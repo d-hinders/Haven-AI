@@ -16,6 +16,13 @@ covers:
 last-verified: "2026-10-06"
 ---
 
+> **Re-verified #3913 (2026-10-19, after the toggle):** only the "Skipped - Not
+> affected" records paragraph changed. It now records that the setting was seen
+> **Enabled** on haven-ops in the dashboard and turned off on 2026-10-15, and
+> gives the measured result (GitHub deployment records, 2026-10-15 to
+> 2026-10-18). Nothing else in this document was re-verified, and
+> `last-verified` is not bumped.
+
 > **Re-verified #3913 (2026-10-13, Vercel skip-setting doc corrections):** the
 > *Deploys from `dev` only* paragraph was reflowed and a new "Skipped - Not
 > affected" records paragraph added, naming the per-project Vercel setting
@@ -150,15 +157,23 @@ records: every haven-ops record on a feature branch since #3682 is "Skipped -
 Not affected" (103 preview records, 8 of the 40 production ones), and not one
 of those SHAs touches an `ops.txt` path. Pushes that do touch a watched path
 get no record at all, so `git.deploymentEnabled` is doing its job; the
-records come from a per-project Vercel setting instead: **"Skip deployments
-when there are no changes to the root directory or its dependencies"**, which
-is on for haven-ops and off for haven-ai-frontend — inferred from GitHub's
-records; nobody has checked the dashboard yet. It is a dashboard setting that
-`vercel.json` cannot carry (expected under Settings → Build and Deployment →
-Root Directory section): its required value on haven-ops is **off**. Owner
-decision 2026-10-13: the operator turns it off and measures; a workflow
-fallback is built only if the records persist. (The frontend side of this is
-in [`dev-environment.md` § PR previews are opt-in](dev-environment.md#pr-previews-are-opt-in).)
+records came from a per-project Vercel setting instead: **"Skip deployments
+when there are no changes to the root directory or its dependencies"**. It is a
+dashboard setting that `vercel.json` cannot carry, under Settings → Build and
+Deployment → Root Directory section, and its required value on haven-ops is
+**off**. The owner found it **Enabled** there and turned it off on 2026-10-15.
+GitHub's deployment records over the next three days (2026-10-15 to 10-18)
+show the result:
+- **Feature branches:** haven-ops records fell from 12–16 a day to **zero**.
+- **`dev` pushes that touch an `ops.txt` path:** all 17 deployed.
+- **The other 25 `dev` pushes:** no GitHub-visible haven-ops record.
+
+So haven-ops went from 15–28 records a day to 4–8, and no workflow fallback is
+needed. GitHub mirrors no "Canceled by Ignored Build Step" record for either
+project, so the Vercel dashboard, not GitHub, is where to see whether those
+pushes left one. If "Skipped - Not affected" records reappear, check this
+setting first. (The frontend side of this is in
+[`dev-environment.md` § PR previews are opt-in](dev-environment.md#pr-previews-are-opt-in).)
 
 **Ignored Build Step.** `packages/ops/vercel.json` runs the shared
 `scripts/vercel/ignore-build.sh` (#3594), passing it `OPS_FORCE_BUILD` and

@@ -34,6 +34,12 @@ covers:
 last-verified: "2026-10-16"
 ---
 
+> **Re-verified #3913 (2026-10-19, after the toggle):** only the sentence in
+> § *PR previews are opt-in* about the haven-ops skip setting changed. It now
+> says the setting was seen **Enabled** in the dashboard and turned off on
+> 2026-10-15, and that the records stopped (measured on #3913). Nothing else
+> in this document was re-verified, and `last-verified` is not bumped.
+
 > **Re-verified #3913 (2026-10-13, Vercel skip-setting doc corrections):** the
 > edits are the "Skipped - Not affected" sentences in *Which pushes rebuild the
 > frontend* and § *PR previews are opt-in* — the frontend has never recorded
@@ -421,9 +427,10 @@ recorded one. Those records belong to haven-ops, and they came from the
 per-project Vercel setting **"Skip deployments when there are no changes to
 the root directory or its dependencies"** — a dashboard setting under
 Settings → Build and Deployment (Root Directory section) that `vercel.json`
-cannot carry — which is on for haven-ops and off for the frontend (inferred
-from GitHub's records; nobody has checked the dashboard yet). Its required
-value on haven-ops is **off** (owner decision 2026-10-13, #3913); see
+cannot carry. The setting is off for the frontend. On haven-ops the owner
+found it **Enabled** and turned it off on 2026-10-15; its required value
+there is **off**. Since then haven-ops has recorded no feature-branch
+deployments (#3913's measurement); see
 [`ops-console.md` § 1](ops-console.md#1-the-vercel-project).
 #3821's Method counted 22–38
 haven-ops deployments a day before #3681 took effect and 3 on 2026-10-08. No

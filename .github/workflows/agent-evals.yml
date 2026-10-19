@@ -166,6 +166,13 @@ jobs:
           cache: npm
       - run: npm ci
 
+      # The `claude` CLI the adapter shells out to. It is not on the runner
+      # image and not a workspace dependency, so without this every task
+      # fails with "claude exited 127" after the owner has approved the run.
+      # Pinned exactly; bump deliberately.
+      - name: Install the Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code@2.1.289 && claude --version
+
       # qa-agent resolves @haven_ai/sdk and the signer as workspace deps →
       # dist must exist. The subset additionally boots the hosted MCP from
       # this checkout, so it is built here too (serial on purpose — tsup
@@ -191,6 +198,7 @@ jobs:
           QA_HAVEN_API_URL: ${{ vars.AGENT_EVALS_HAVEN_API_URL || secrets.AGENT_EVALS_HAVEN_API_URL }}
         run: |
           set -euo pipefail
+          READY=0
           HAVEN_API_URL="$QA_HAVEN_API_URL" PORT=8788 node packages/mcp-server/dist/cli.js > mcp-server.log 2>&1 &
           for i in $(seq 1 30); do curl -s -o /dev/null -X POST 'http://127.0.0.1:8788/v1' -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"ping"}' && READY=1 && break; sleep 1; done
           if [ "$READY" = '1' ]; then echo "hosted MCP (commit $(git rev-parse HEAD)) is listening on :8788 → dev backend"; else echo "::error::PR-checkout hosted MCP did not come up in 30s"; cat mcp-server.log; exit 1; fi
@@ -257,7 +265,7 @@ jobs:
           npm run evals -w packages/qa-agent -- --trials="$TRIALS" $LIMIT_ARG --out=evals-report.json --hosted-mcp-source="$SOURCE" --hosted-mcp-commit="$HOSTED_COMMIT" --hosted-mcp-url="$HOSTED_URL"
 
       - name: Append the results table to the job summary
-        if: hashFiles('evals-report.json.summary.md') != ''
+        if: always() && hashFiles('evals-report.json.summary.md') != ''
         run: cat evals-report.json.summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the full report

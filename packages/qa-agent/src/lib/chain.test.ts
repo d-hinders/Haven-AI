@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ethers } from 'ethers'
-import { describeObserverRpc, proveUsdcTransfer, proveUsdcTransferSince, SEPOLIA_USDC, usdcTransfers, waitForDisabled, waitForReceipt } from './chain.js'
+import { describeObserverRpc, GET_LOGS_MAX_RANGE, proveUsdcTransfer, proveUsdcTransferSince, SEPOLIA_USDC, usdcTransfers, waitForDisabled, waitForReceipt } from './chain.js'
 
 /**
  * The observer-RPC announcement must never print the endpoint (#2511).
@@ -199,6 +199,43 @@ describe('proveUsdcTransferSince (#3505)', () => {
     expect(ok).toEqual({ ok: true, txHash: '0xt' })
     expect(filter?.topics?.[1]).toBe(ethers.zeroPadValue(from, 32))
     expect(filter?.topics?.[2]).toBe(ethers.zeroPadValue(to, 32))
+  })
+
+  // Alchemy's free tier refuses eth_getLogs over 10 blocks (eval pilot,
+  // 2026-10-19): a session spanning ~70 blocks graded every real transfer as
+  // missing. The probe must scan in windows and still find a transfer far
+  // from fromBlock.
+  it('scans in windows of at most GET_LOGS_MAX_RANGE blocks and finds a transfer 60 blocks later', async () => {
+    const ranges: Array<[number, number]> = []
+    const reader = {
+      getBlockNumber: async () => 75,
+      getLogs: async (f: { fromBlock: number; toBlock: number }) => {
+        if (f.toBlock - f.fromBlock + 1 > 10) throw new Error('Under the Free tier plan, you can make eth_getLogs requests with up to a 10 block range')
+        ranges.push([f.fromBlock, f.toBlock])
+        return f.fromBlock <= 65 && 65 <= f.toBlock ? [{ data: ethers.toBeHex(1000n, 32), transactionHash: '0xfar' }] : []
+      },
+    }
+    const ok = await proveUsdcTransferSince({ from, to, amount: 1000n }, { ...fast, provider: reader })
+    expect(ok).toEqual({ ok: true, txHash: '0xfar' })
+    expect(GET_LOGS_MAX_RANGE).toBe(10)
+    expect(ranges.every(([a, b]) => b - a + 1 <= GET_LOGS_MAX_RANGE)).toBe(true)
+    expect(ranges[0]).toEqual([5, 14])
+  })
+
+  it('does not rescan blocks it already scanned on the next poll', async () => {
+    let head = 12
+    const scanned: number[] = []
+    const reader = {
+      getBlockNumber: async () => head,
+      getLogs: async (f: { fromBlock: number; toBlock: number }) => {
+        for (let b = f.fromBlock; b <= f.toBlock; b++) scanned.push(b)
+        head += 3
+        return []
+      },
+    }
+    const r = await proveUsdcTransferSince({ from, to, amount: 1000n }, { fromBlock: 5, timeoutMs: 30, intervalMs: 5, provider: reader })
+    expect(r.ok).toBe(false)
+    expect(new Set(scanned).size).toBe(scanned.length)
   })
 
   it('fails on a wrong amount or no log', async () => {

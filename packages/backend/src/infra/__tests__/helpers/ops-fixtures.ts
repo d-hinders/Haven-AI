@@ -133,7 +133,7 @@ export async function seedOpsFeedback(
 ): Promise<string> {
   const { rows } = await db.query<{ id: string }>(
     `INSERT INTO feedback (user_id, text, created_at, expires_at)
-     VALUES ($1, $2, COALESCE($3::timestamptz, NOW()), COALESCE($4::timestamptz, NOW() + interval '7 days'))
+     VALUES ($1, $2, COALESCE($3::timestamptz, NOW()), COALESCE($4::timestamptz, NOW() + interval '168 hours'))
      RETURNING id`,
     [userId, opts.text ?? 'runs great, found one bug', opts.createdAt ?? null, opts.expiresAt ?? null],
   )

@@ -259,10 +259,9 @@ export function x402RequestModeReplay(log: AgentRunLog): GraderResult {
 
 /**
  * `tool_called` — generic: `options.name` (bare) was called, optionally
- * AFTER a call to `options.after` (bare) and optionally with
- * `options.notBefore` (bare) — e.g. "haven_get_payment_status ran after the
- * refusal". Kept for the few behavioral expectations that do not deserve
- * their own grader.
+ * AFTER the first call to `options.after` (bare) — e.g. "haven_get_allowances
+ * ran after the refused haven_pay". Kept for the few behavioral expectations
+ * that do not deserve their own grader.
  */
 export function toolCalled(log: AgentRunLog, options: { name: string; after?: string }): GraderResult {
   const targets = callsTo(log, options.name)

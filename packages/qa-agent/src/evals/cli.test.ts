@@ -173,8 +173,9 @@ function successLogFor(taskId: string): AgentRunLog {
 function refusalLogFor(taskId: string, errorCode = 'delegation_budget_exceeded'): AgentRunLog {
   if (taskId === 'over-budget-check-status-no-retry') {
     return log(taskId, 1, [
+      // No haven_get_payment_status: a budget pre-check refusal creates no
+      // payment, so there is no payment_id to check (pilot, 2026-10-19).
       call(`${DEV_PREFIX}haven_pay`, { result: { ok: false, errorCode } }),
-      call(`${DEV_PREFIX}haven_get_payment_status`),
       call(`${DEV_PREFIX}haven_get_allowances`),
     ], 'Refused: your period budget is spent — 0.00 USDC remaining, shortfall 1.00. Not retrying.')
   }

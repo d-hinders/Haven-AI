@@ -140,7 +140,8 @@ export async function enrichTransactionsWithAgents(
       // 'human'. An outbound row that stays unattributed is a raw transfer
       // with no matched intent or record — 'unknown', including every owner
       // send made before the record existed (no backfill, no heuristic).
-      // Inbound rows carry no initiator record (undefined).
+      // Inbound rows carry no initiator record (undefined), except an
+      // agent-attributed one — a delegate sweep — which is 'agent' above.
       const attributedAgentId = agent?.id ?? tx.agentId
       return {
         ...tx,

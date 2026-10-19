@@ -141,8 +141,8 @@ export interface Transaction {
    *   matched intent, sweep or owner-send record. Owner sends made before
    *   #4099 have no record and stay here; nothing infers them.
    *
-   * Absent (undefined) for inbound (`direction: 'in'`) rows, which have no
-   * initiator record at all.
+   * Absent (undefined) for inbound (`direction: 'in'`) rows, except an
+   * agent's delegate sweep (`'agent'`).
    */
   initiatedBy?: 'agent' | 'human' | 'unknown'
   /**

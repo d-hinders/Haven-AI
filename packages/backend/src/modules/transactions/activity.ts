@@ -352,7 +352,6 @@ export async function buildActivityGroups(
     resolveOwnAccountName,
   } = params
 
-
   // One instant comparison, no tz: the rolling window `[now − 168h, now)` is
   // the same predicate the route's `spend.d7` SQL applies to `confirmed_at`
   // (`isInsideActivityWindow`), so the header and the card can never

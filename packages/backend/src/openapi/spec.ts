@@ -145,11 +145,11 @@ const transactionBaseProperties = {
   // `owner_transfers` at submit (#4099). `unknown` = outbound raw
   // transfer with no matched intent or owner-send record, including
   // owner sends from before that record existed. Absent for
-  // `direction: in` rows.
+  // `direction: in` rows bar a delegate sweep (`agent`).
   initiatedBy: {
     type: 'string',
     enum: ['agent', 'human', 'unknown'],
-    description: 'Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: an outbound transfer the account owner sent from the dashboard, recorded when it was submitted (#4099). `unknown`: outbound raw transfer with no matched intent or owner-send record — including owner sends made before that record existed. Absent for inbound (`direction: in`) rows.',
+    description: 'Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: an outbound transfer the account owner sent from the dashboard, recorded when it was submitted (#4099). `unknown`: outbound raw transfer with no matched intent or owner-send record — including owner sends made before that record existed. Absent for inbound (`direction: in`) rows, except an agent\'s delegate sweep, which is `agent`.',
   },
   // #1705 (epic #1704). Read from the intent's `machine_metadata`
   // JSONB, which both delegation-rail branches already stamp

@@ -92,11 +92,12 @@ type DialogRefusal =
  * Exactly two things clear it: a 201 on a retry, or detection (an account
  * outside `baselineIds`, on `chainId`, named `name`). Closing the dialog drops
  * it with the rest of the dialog's state. Nothing else does — no refusal of
- * any status, no early return, no edit (the inputs are locked). A refusal on a
- * retry proves nothing about the first attempt: #4023's route validates
- * (source, key, the per-chain cap) BEFORE its idempotency replay — raised on
- * #4044 — so a retry can be refused even when the first attempt's account is
- * the one it would have replayed.
+ * any status, no early return, no edit (the inputs are locked). Since #4024
+ * the backend answers an idempotent replay before its source, key and cap
+ * checks, so a retry of a create that went through gets that account (201).
+ * The rule stays anyway: it costs nothing, and against an older backend (or
+ * any refusal that comes before the replay) a refusal still proves nothing
+ * about the first attempt.
  */
 interface UnknownSubmission {
   key: string

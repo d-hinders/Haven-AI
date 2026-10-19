@@ -136,17 +136,18 @@ export function findCreatedAccount(
 // ── Refusals ──────────────────────────────────────────────────────────────
 //
 // The create-additional refusals are mapped by `error_code` FIRST, never by
-// matching the backend's sentence. These are the codes requested on #4044
-// (#4023's PR); the spec does not carry them yet, so they live here. Without a
-// code, the status decides — and the line that matters is whether the outcome
-// is KNOWN:
+// matching the backend's sentence. The route sends these codes since #4024
+// (documented in the createHybridAccount 404/409/422 descriptions; the spec
+// carries them as prose, not an enum, so the constants live here and in the
+// route). Without a code — an older backend — the status decides, and the
+// line that matters is whether the outcome is KNOWN:
 //
 // - a 4xx is a definite refusal OF THIS REQUEST: the route answered before
 //   (or rolled back) anything it would have written for it. 429 is the
 //   money-path rate limit; every other code-less 4xx is a typed "could not
-//   create" that passes the backend's sentence through as detail. It says
-//   nothing about an EARLIER attempt (the route validates before its replay),
-//   which is why the dialog never lets a refusal clear an unknown outcome.
+//   create" that passes the backend's sentence through as detail. The dialog
+//   still never lets a refusal clear an unknown outcome (see its
+//   UnknownSubmission): the rule costs nothing and holds for any backend.
 // - no status (the request never got an answer) or a 5xx is an UNKNOWN
 //   outcome: the create may have committed and only the response been lost.
 //   The dialog records that submission and repeats it exactly on a retry.

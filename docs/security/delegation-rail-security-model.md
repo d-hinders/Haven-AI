@@ -1471,7 +1471,14 @@ only make a key the user **already** holds on one account the sole signer of a
 new, empty account the user also owns. No key enters a signer set that was not
 already in one of the user's, nothing is funded, and no delegation, agent or
 budget is copied (a new account starts with none, and is never the default, so
-no agent created without an `account_id` falls back to it).
+no agent created without an `account_id` falls back to it). A retried create
+carrying the same `idempotency_key` is answered from the caller's OWN first
+account before any of these checks run (#4024) — so a lost response is never
+re-reported as a cap or source refusal — and a key reused for a different
+chain or passkey is refused (409 `IDEMPOTENCY_KEY_REUSED`), so a replay can
+only ever return what that same request already created. Every refusal on
+this path carries an `error_code` (`SOURCE_ACCOUNT_NOT_FOUND`,
+`SOURCE_HAS_NO_PASSKEY`, `KEY_NOT_ON_SOURCE`, `ACCOUNT_CAP_REACHED`).
 
 **Backups do not carry over.** Only the one named passkey is copied. A backup
 passkey or wallet on the source account is not added to the new one, so the

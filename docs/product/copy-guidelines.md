@@ -764,10 +764,11 @@ any other refresh), an account with the submitted name on that network ends
 it. If the account the details came from can no longer secure a new account,
 "Try again" is disabled and the dialog says so: "Operating can no longer
 secure a new account, so Haven can't try again from here. Check again to see
-whether the account was created anyway." Nothing else removes it: a refusal on a retry, of any kind, shows
-its own message beside it, because the backend checks a retry before it
-would return the first attempt's account (#4044), and a cancelled passkey
-prompt shows nothing at all. "Check again" reports one of three things: the
+whether the account was created anyway." Nothing else removes it: a refusal
+on a retry, of any kind, shows its own message beside it, and a cancelled
+passkey prompt shows nothing at all. (Since #4024 the backend replays a
+retried create before it checks anything else, so a retry of a create that
+went through returns that account; the rule still holds for any refusal.) "Check again" reports one of three things: the
 account, as created; a read that worked and found nothing ("No new account
 named Reserve on Base yet."); or a read that failed ("Couldn't read your
 accounts just now. Check again in a moment."), never confused with the

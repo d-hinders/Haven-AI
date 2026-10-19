@@ -719,8 +719,10 @@ export async function countAccountsForUser(userId: string, db: Executor = pool):
 
 /**
  * The provisioning INSERT. Returns the RETURNING row, or null when the insert
- * lost the (user_id, chain_id, LOWER(account_address)) UNIQUE race — the
- * caller re-reads the winner instead of 500ing on a bare constraint violation.
+ * lost a UNIQUE race — `ON CONFLICT DO NOTHING` has no target, so that is
+ * either (user_id, chain_id, LOWER(account_address)) or (#4024) the
+ * (user_id, create_idempotency_key) index — and the caller re-reads the
+ * winner instead of 500ing on a bare constraint violation.
  */
 export async function insertHybridAccount(
   input: {

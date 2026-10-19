@@ -106,6 +106,10 @@ describeDb('POST /accounts/hybrid — the in-flight retry race (#4024)', () => {
 
     const rows = await db.query(`SELECT id FROM smart_accounts WHERE user_id = $1 AND create_idempotency_key = 'race-1'`, [userId])
     expect(rows.rows).toHaveLength(1)
+    // Both creates derived an address: the retry reached the conflict path
+    // inside its own transaction, not the pre-check replay (which derives
+    // nothing) — otherwise this test would pass without exercising the race.
+    expect(mockCompute).toHaveBeenCalledTimes(2)
     // The retry drew counter 2 and threw it away with its transaction.
     const counter = await db.query<{ last_allocated: string }>(
       `SELECT last_allocated FROM hybrid_deploy_salt_counters WHERE user_id = $1 AND salt_key = $2`,
@@ -132,5 +136,9 @@ describeDb('POST /accounts/hybrid — the in-flight retry race (#4024)', () => {
     expect(lost!.json()).toMatchObject({ error_code: 'IDEMPOTENCY_KEY_REUSED', id: won!.json().id })
     const rows = await db.query(`SELECT id FROM smart_accounts WHERE user_id = $1 AND create_idempotency_key = 'race-2'`, [userId])
     expect(rows.rows).toHaveLength(1)
+    // Both creates derived an address: the retry reached the conflict path
+    // inside its own transaction, not the pre-check replay (which derives
+    // nothing) — otherwise this test would pass without exercising the race.
+    expect(mockCompute).toHaveBeenCalledTimes(2)
   })
 })

@@ -104,12 +104,17 @@ test('claude runs from an empty directory with only the wired MCP servers', () =
 
 // Actions runs `bash -e`, so a failing `claude` ends the login-check step
 // before the judge prints the reason — pilot run #6 (2026-10-19) failed in
-// 3s with no message. The step must turn -e off before running claude.
-test('the login check turns off -e before running claude', () => {
+// 3s with no message. And the `cd` into the empty dir must not move the step,
+// or the judge's relative path never resolves (review of that fix).
+test('the login check turns off -e, isolates the cd, and runs the judge by absolute path', () => {
   const step = lineOf(/^\s*- name: Check the Claude Code login/)
   assert.notEqual(step, -1, 'agent-evals.yml has no login-check step — update this guard')
-  const setE = live.findIndex((line, i) => i > step && /^\s*set \+e\s*$/.test(line))
-  const claude = live.findIndex((line, i) => i > step && /claude -p /.test(line))
+  const end = live.findIndex((line, i) => i > step && /^\s*- (name|uses|run):/.test(line))
+  const body = live.slice(step, end === -1 ? undefined : end)
+  const setE = body.findIndex((line) => /^\s*set \+e\s*$/.test(line))
+  const claude = body.findIndex((line) => /claude -p /.test(line))
   assert.notEqual(claude, -1, 'the login-check step no longer runs claude -p — update this guard')
   assert.ok(setE !== -1 && setE < claude, 'the login-check step runs claude under bash -e, so its failure hides the reason')
+  assert.match(body[claude], /^\s*\( cd "\$RUNNER_TEMP\/claude-cwd" && claude -p .*\) >/, 'claude in the login check is not run in a subshell, so its cd moves the step')
+  assert.ok(body.some((line) => /^\s*node "\$GITHUB_WORKSPACE\/scripts\/ci\/agent-evals-login-check\.mjs"/.test(line)), 'the login-check judge is not run by absolute path')
 })

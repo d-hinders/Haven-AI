@@ -137,8 +137,8 @@ repo — record what you actually entered on the issue when you do them.
    `docs/` and `scripts/` — and without this Vercel uploads the package
    alone. In the same section, turn **Skip deployments when there are no
    changes to the root directory or its dependencies** OFF: left on, it
-   records a "Skipped - Not affected" deployment for every unrelated push
-   (#3913, below).
+   records "Skipped - Not affected" deployments for pushes that change none
+   of the console's inputs (#3913, below).
 5. Leave install/build/headers alone: `packages/ops/vercel.json` already
    carries the repo-expressible settings (install command, build command,
    the Ignored Build Step, HSTS). A dashboard override of a setting the file

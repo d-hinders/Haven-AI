@@ -170,8 +170,13 @@ jobs:
       # dist must exist. The subset additionally boots the hosted MCP from
       # this checkout, so it is built here too (serial on purpose — tsup
       # cleans sdk/dist mid-run).
+      # `@haven_ai/core` first: `npm ci` does not create its `dist/`, and
+      # mcp-server imports it, so its build dies at "Could not resolve
+      # @haven_ai/core" without this line (the first pilot run, 2026-10-19).
+      # Guarded by scripts/ci/agent-evals-workspace-deps.test.mjs.
       - name: Build the workspace packages the lane runs from
         run: |
+          npm run build -w packages/core
           npm run build -w packages/sdk
           npm run build -w packages/signer
           npm run build -w packages/mcp-server

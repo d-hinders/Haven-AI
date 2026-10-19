@@ -10,7 +10,7 @@ covers:
   - docs/operations/dev-environment.md
   - packages/backend/src/index.ts
   - scripts/release-scope.mjs
-last-verified: "2026-09-25"
+last-verified: "2026-10-19"
 ---
 
 # Promoting `dev → main` (production release)
@@ -160,7 +160,15 @@ so this is a rule to point at rather than a question to ask the release runner.
       merge — confirm the version and the intended dist-tag (`alpha` vs `latest`),
       then read the run's **per-package summary table**: a package can fail while
       the others publish (#1159), so green-except-one is a real outcome, not a
-      binary.
+      binary. Since [#3797](https://github.com/d-hinders/Haven-AI/issues/3797) a
+      package whose internal dependency neither published in the same run nor
+      was already on npm is held back, its row reading **FAILED** — not
+      published: dependency … did not publish in this run, rather than going out
+      against a version npm does not have. A package whose internal pin has
+      drifted from the workspace version is held back the same way (published
+      packages pin internal dependencies exactly, `lint:workspace-pins`).
+      Re-running the failed job skips the versions already on npm and publishes
+      the held-back rest.
       Since [#2421](https://github.com/d-hinders/Haven-AI/issues/2421) the same
       workflow also publishes `0.0.0-dev.*` snapshots under a separate `dev`
       dist-tag on pushes to `dev`. That is a different channel and changes
@@ -199,7 +207,7 @@ so this is a rule to point at rather than a question to ask the release runner.
       The per-branch inventory and the `gh api` command that produced it are in
       [`../contributing/autonomous-pr-loop.md`](../contributing/autonomous-pr-loop.md#one-time-github-setup-required)
       step 3.
-- [ ] **Sweep the docs staleness audit** ([#2645](https://github.com/d-hinders/Haven-AI/issues/2645), "Docs staleness audit (weekly)" — one standing issue that `docs-audit.yml` rewrites every Monday). Open it and give every `current`-status doc it ranks one of three dispositions: **fix** it in a follow-up, **file** it, or **accept** it with a reason recorded in this promotion PR. Contract docs cannot reach here — the coupling gate blocks them on the PR that made them stale — so what this sweeps is the *non-contract* drift that is allowed to accumulate on `dev` between promotions, which is exactly the class no per-PR gate is watching. `archived` and `research` docs are not ranked and need no disposition (#2638). An empty or unchanged report is a valid outcome; say so rather than leaving the item silently unticked.
+- [ ] **Sweep the docs staleness audit** (the open "Docs staleness audit (weekly)" issue, [#3645](https://github.com/d-hinders/Haven-AI/issues/3645) at this writing — `docs-audit.yml` rewrites the open one every Monday, and opens a new one when the last was closed). Open it and give every `current`-status doc it ranks one of three dispositions: **fix** it in a follow-up, **file** it, or **accept** it with a reason recorded in this promotion PR. Contract docs cannot reach here — the coupling gate blocks them on the PR that made them stale — so what this sweeps is the *non-contract* drift that is allowed to accumulate on `dev` between promotions, which is exactly the class no per-PR gate is watching. `archived` and `research` docs are not ranked and need no disposition (#2638). An empty or unchanged report is a valid outcome; say so rather than leaving the item silently unticked.
 - [ ] **The request-validation rollout's named residue (`#3223`, epic #3028) is expected here.** `POST /machine-payments/reconciliation-events` is intentionally NOT enforced — the shadow reading did not cover it and CANNOT have: the route is only posted on a genuine merchant rejection after a confirmed payment, and driving it synthetically would write a false record into a payment's ledger (owner decision 2026-09-24 on epic #3028). Do not read its `NOT PROVEN` row in a shadow table, or its entry in `lint-request-schemas-baseline.json` (`routes/machine-payments-reconciliation-events.ts`), as unfinished slice work; it is the standing residue until a real rejection — or a QA scenario that produces one — gives the reading traffic to prove it, at which point its file joins `enforcedModules` and its handler rungs delete like every other flip.
 - [ ] A code-owner approval, from an owner other than the PR author, is present
       if the batch touches an owned path — today only migration files:
@@ -295,12 +303,12 @@ so this is a rule to point at rather than a question to ask the release runner.
       the response to one misbehaving module, per epic decision 6 — while
       `HAVEN_REQUEST_VALIDATION=off` / `shadow` are the GLOBAL switches (a
       listed module does not escape them; a mode change is a restart). The
-      shadow reading did not prove three machine-payment routes
-      (`GET /payments`, `GET /payments/{id}/receipt`,
-      `POST /machine-payments/reconciliation-events`); they are enforced on
-      test evidence per the #3223 owner decision, and a real
-      reconciliation-event refusal in prod is a client to fix, not the gate to
-      loosen.
+      shadow reading could not prove three routes no client calls
+      (`GET /payments`, `GET /payments/{id}/receipt` and the retired
+      `POST /machine-payments/authorize`); they are enforced on test evidence
+      per the #3223 owner decision. `POST /machine-payments/reconciliation-events`
+      is not among them: it stays in shadow, the named residue in the item
+      above (its own route file, deliberately absent from `enforcedModules`).
 
 - [ ] **Prod smoke:** load the prod app (no `DEV` badge), check login + balances,
       and run one small real payment / x402 happy path as a canary.
@@ -345,6 +353,20 @@ deployment holding a confusing name.
   taking the branch alias — and so is the fix. Smoke prod on
   `haven-ai-frontend.vercel.app` regardless.
 
-Separately: `main` has not moved since **2026-06-26**, so production is a long
-way behind `dev`. That is a promotion backlog, not a deploy bug — the pipeline
-below is wired correctly and will deploy whatever you merge.
+Separately: when this section was written (2026-08-06), `main` had not moved
+since **2026-06-26**. That was a promotion backlog, not a deploy bug, and
+promotions have run since: the latest at this doc's last verification is
+#3934, merged to `main` on 2026-10-14.
+
+> **Re-verified 2026-10-19 (weekly docs audit #3645, at dev `cf88627c`):**
+> the whole checklist was re-read. Changed: the npm item names the #3797
+> hold-back; the request-validation item names the right three routes enforced
+> on test evidence (#3223) and keeps reconciliation-events in shadow; the docs
+> audit item points at the open standing issue rather than the closed #2645;
+> and the closing note no longer says `main` has not moved since June.
+> Checked and accurate: the 19 required contexts (15 + 4, read from the live
+> rulesets), `dismiss_stale_reviews_on_push` and the strict up-to-date rule on
+> `main`, the one CODEOWNERS rule, `release:scope`'s exit codes 2 and 1, the
+> RPC probe's defaults (batch 10, burst 20, cap 50), the public RPC defaults,
+> `SWEEP_MIN_USDC`'s `0.01` default, and the `enforce` default. Not checkable
+> from the repo: the npm token's expiry date.

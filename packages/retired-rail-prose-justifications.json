@@ -119,12 +119,6 @@
       "note": "Past-tense narration: '#1083 gave Send to BOTH rails. #1989 (epic #1440) took it' — history, not a present claim."
     }
   },
-  "packages/frontend/src/app/(authenticated)/agents/page.tsx": {
-    "remain-readable": {
-      "category": "archived-agents",
-      "note": "Live user-facing subtitle: historical agent records remain readable. Verified true — archived agents (#1401/#1402) stay under Removed with their history."
-    }
-  },
   "packages/frontend/src/components/AgentPanel.tsx": {
     "stays-readable": {
       "category": "archived-agents",

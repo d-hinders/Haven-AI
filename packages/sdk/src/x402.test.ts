@@ -1378,11 +1378,14 @@ describe('x402 helpers', () => {
     })
     // ...and the merchant's own settlement rides a SECOND post — the
     // transaction the merchant shows, recorded beside the funding hash.
+    // #4061: WITH the header the retry sent — the #3925 nonce proof.
     const settlementInit = fetchMock.mock.calls[5][1] as RequestInit
     expect(JSON.parse(settlementInit.body as string)).toEqual({
       paymentId: 'approval-123',
       rail: 'x402',
       txHash: settlementTxHash,
+      paymentProofHeaderName: 'PAYMENT-SIGNATURE, X-PAYMENT',
+      paymentProofHeader: retryHeaders.get('X-PAYMENT'),
     })
   })
 
@@ -2564,8 +2567,16 @@ describe('#3764 — the local retry reports the merchant settlement beside the f
     // FIRST: the funding report — the positional shape pinned at the #3475
     // funding check above, unchanged.
     expect(posts[0]).toMatchObject({ paymentId: 'pay_3764', rail: 'x402', txHash: FUNDING_TX, resourceUrl: paymentRequired.resource.url, merchantStatus: 200 })
-    // SECOND: the merchant's settlement, the minimal #3475 payload.
-    expect(posts[1]).toEqual({ paymentId: 'pay_3764', rail: 'x402', txHash: SETTLEMENT_TX })
+    // SECOND: the merchant's settlement, the minimal #3475 payload plus
+    // (#4061) the header the retry sent — the funding report's own copy.
+    expect(posts[0].paymentProofHeader).toEqual(expect.any(String))
+    expect(posts[1]).toEqual({
+      paymentId: 'pay_3764',
+      rail: 'x402',
+      txHash: SETTLEMENT_TX,
+      paymentProofHeaderName: posts[0].paymentProofHeaderName,
+      paymentProofHeader: posts[0].paymentProofHeader,
+    })
   })
 
   it('a settlement equal to the funding hash in any letter case makes NO second post', async () => {

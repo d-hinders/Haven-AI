@@ -9,6 +9,7 @@ covers:
   - packages/frontend/playwright.live.config.ts
   - packages/frontend/e2e/**
   - packages/frontend/src/components/ConnectAgentModal.tsx
+  - packages/frontend/src/components/connect-agent/ConnectAgentFlow.tsx
   - packages/connect/src/**
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/routes/machine-payments.ts

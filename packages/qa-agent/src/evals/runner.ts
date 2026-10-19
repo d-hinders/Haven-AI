@@ -72,12 +72,12 @@ export interface TaskReport {
 
 /**
  * Where the hosted MCP leg ran. Recorded by the CLI from its args and echoed
- * into both report halves (#3959: the subset must name the PR head, not dev).
+ * into both report halves (#3959: the subset names the commit it built, not the deployed stack).
  */
 export interface HostedMcpInfo {
   source: 'pr-checkout' | 'dev-deployed'
   url?: string
-  /** The commit the hosted MCP served — the PR head for the subset lane. */
+  /** The commit the hosted MCP served — the dispatched commit for the subset lane. */
   commit?: string
 }
 

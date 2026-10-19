@@ -602,24 +602,31 @@ export async function recordEip3009MerchantSettlement(
 // ── sibling attribution lookup (#3925) ──────────────────────────────────────
 
 /**
- * The ids of this agent's OTHER x402 delegation-rail payments — the rows
- * whose settlements are attributed by a derived nonce, so a burned nonce can
- * name a sibling payment (`deriveX402PaymentNonce(id)`). Used only to refine
- * a check-9 refusal from "the nonce does not match" into "settles another
- * payment"; never to attribute.
+ * The ids of this agent's OTHER x402 delegation-rail payments funded to the
+ * SAME delegate — the rows whose settlements are attributed by a derived
+ * nonce, so a burned nonce can name a sibling payment
+ * (`deriveX402PaymentNonce(id)`). Used only to REFUSE, never to attribute:
+ * to refine a check-9 refusal from "the nonce does not match" into "settles
+ * another payment" (#3925), and to refuse a proof header lifted from a
+ * sibling (#4061). #4061 review: scoped to `to_address = delegate`, because
+ * an `AuthorizationUsed(delegate, nonce)` can only be a sibling's if that
+ * sibling's authorization was the same delegate's — and the scan stays
+ * bounded by one key's payments instead of all of the agent's.
  */
 export async function findSiblingX402DelegationPaymentIds(
   agentId: string,
   excludeIntentId: string,
+  delegateAddress: string,
   db: Executor = pool,
 ): Promise<string[]> {
   const result = await db.query<{ id: string }>(
     `SELECT id FROM payment_intents
       WHERE agent_id = $1
         AND id <> $2
+        AND LOWER(to_address) = LOWER($3)
         AND COALESCE(payment_rail, source) = 'x402'
         AND execution_rail = 'delegation'`,
-    [agentId, excludeIntentId],
+    [agentId, excludeIntentId, delegateAddress],
   )
   return result.rows.map((r) => r.id)
 }

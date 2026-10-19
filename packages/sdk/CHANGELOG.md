@@ -17,6 +17,23 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
+- **EIP-3009 settlement reports carry the payment header again (#4061).** Since
+  #3925 the backend records an agent-reported EIP-3009 merchant settlement only
+  when the report carries the payment header that was sent to the merchant. The
+  SDK posted that header with its funding report but not with its settlement
+  report (#3764), so on a current backend those settlement reports were refused.
+  Both paid-retry paths (`completeX402MerchantCall` and the local retry) now
+  send it. `reportSettlementEvidence(paymentId, settlementTxHash, options)`
+  takes an optional `options.paymentHeader` and forwards it as
+  `paymentProofHeader` with the names `x402PaymentHeaderNamesSent` derives.
+  `EvidenceReportOutcome`'s `refused` arm gains an optional `errorCode`, the
+  backend's `error_code`. Today that is only `settlement_proof_header_missing`:
+  report again with the header. The shared `reportSettlementEvidence`
+  description and the haven-pay skill's plain-HTTP paragraph tell agents to
+  pass `payment_header`. No update needed to keep paying. Until you update,
+  your settlement reports are refused, so receipts show only the funding
+  transaction.
+
 - Doc-only (#4023): `delegate-account.ts`'s salt comment now states precisely
   what the package derives — DELEGATE accounts, always at the literal zero
   salt. Haven's USER accounts gained per-account deploy salts

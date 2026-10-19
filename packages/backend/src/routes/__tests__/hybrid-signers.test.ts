@@ -491,7 +491,9 @@ describe('owner-initiated send (#1083)', () => {
     mockLoadOwner.mockResolvedValue({ accountId: 'account-1', config, singleSignerWaiverAt: null })
   }
 
-  function mockPrepared() {
+  function mockPrepared(
+    submitCall = vi.fn().mockResolvedValue({ txHash: '0x' + 'ff'.repeat(32), userOpHash: '0x' + 'dd'.repeat(32) }),
+  ) {
     mockTreasury.mockResolvedValueOnce({
       treasuryAddress: ACCOUNT,
       prepareCall: vi.fn().mockResolvedValue({
@@ -499,13 +501,22 @@ describe('owner-initiated send (#1083)', () => {
         userOpHash: '0x' + 'ee'.repeat(32),
         signingTypedData: { domain: { name: 'HybridDeleGator' }, types: {}, primaryType: 'PackedUserOperation', message: {} },
       }),
-      submitCall: vi.fn().mockResolvedValue({ txHash: '0x' + 'ff'.repeat(32) }),
+      submitCall,
     })
   }
 
   const prepareUrl = `/accounts/hybrid/${ACCOUNT}/transfers/prepare?chain_id=84532`
   const submitUrl = `/accounts/hybrid/${ACCOUNT}/transfers/submit?chain_id=84532`
   const BODY = { token_address: TOKEN, to: TO, amount_atomic: '250000' }
+
+  async function transferCallData(): Promise<string> {
+    const { encodeFunctionData } = await import('viem')
+    return encodeFunctionData({
+      abi: [{ name: 'transfer', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'to', type: 'address' }, { name: 'value', type: 'uint256' }], outputs: [{ type: 'bool' }] }],
+      functionName: 'transfer',
+      args: [TO as `0x${string}`, 250000n],
+    })
+  }
 
   it('prepares a passkey-signable transfer — device decides the scheme (#1086)', async () => {
     ownedAccount({ ownerAddress: OWNER_EOA, passkeys: [PK1] })
@@ -568,6 +579,104 @@ describe('owner-initiated send (#1083)', () => {
     expect(res.statusCode).toBe(200)
     expect(res.json()).toEqual({ submitted: true, tx_hash: '0x' + 'ff'.repeat(32) })
     expectMatchesSpec('POST', '/accounts/hybrid/{address}/transfers/submit', res.json())
+  })
+
+  // #4099 characterization (passes against the pre-record route too): what
+  // reaches the bundler is the op the owner signed, unchanged, and the
+  // signature verbatim — recording the send must not alter either.
+  it('submit hands submitCall the signed op and signature unchanged', async () => {
+    ownedAccount({ passkeys: [PK1] })
+    mockPrepared()
+    const callData = await transferCallData()
+    const signature = '0x' + 'ab'.repeat(80)
+    const res = await app.inject({
+      method: 'POST', url: submitUrl,
+      payload: { ...BODY, signature, user_operation: { sender: ACCOUNT, nonce: '7n', callData } },
+    })
+    expect(res.statusCode).toBe(200)
+    const treasury = await mockTreasury.mock.results[0].value
+    expect(treasury.submitCall).toHaveBeenCalledTimes(1)
+    const [prepared, signed] = treasury.submitCall.mock.calls[0]
+    expect(prepared.userOperation).toEqual({ sender: ACCOUNT, nonce: 7n, callData })
+    expect(signed).toBe(signature)
+  })
+
+  // #4099: the owner-send record. What Postgres does with it (dedupe,
+  // tenant scoping) is proven on the real-DB harness in
+  // `infra/repositories/__tests__/owner-transfers.test.ts`; here, only that
+  // the route writes it after a landed send and never lets it fail the send.
+  const isRecordInsert = (call: unknown[]) => /INSERT INTO owner_transfers/.test(String(call[0]))
+
+  it('a landed send is recorded as the owner’s, with the account, chain and validated transfer', async () => {
+    ownedAccount({ passkeys: [PK1] })
+    mockPrepared()
+    const res = await app.inject({
+      method: 'POST', url: submitUrl,
+      payload: { ...BODY, signature: '0x' + 'ab'.repeat(80), user_operation: { sender: ACCOUNT, callData: await transferCallData() } },
+    })
+    expect(res.statusCode).toBe(200)
+    const inserts = mockQuery.mock.calls.filter(isRecordInsert)
+    expect(inserts).toHaveLength(1)
+    expect(inserts[0][1]).toEqual([
+      'user-1', 'account-1', 84532, '0x' + 'ff'.repeat(32), '0x' + 'dd'.repeat(32), TOKEN, TO, '250000',
+    ])
+  })
+
+  it('a failed record write still answers the send as submitted', async () => {
+    ownedAccount({ passkeys: [PK1] })
+    mockQuery.mockImplementation((sql: string) => {
+      if (/INSERT INTO owner_transfers/.test(String(sql))) return Promise.reject(new Error('db down'))
+      return /FROM smart_accounts/.test(String(sql))
+        ? Promise.resolve({ rows: [{ '?column?': 1 }] })
+        : Promise.resolve({ rows: [] })
+    })
+    mockPrepared()
+    const res = await app.inject({
+      method: 'POST', url: submitUrl,
+      payload: { ...BODY, signature: '0x' + 'ab'.repeat(80), user_operation: { sender: ACCOUNT, callData: await transferCallData() } },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ submitted: true, tx_hash: '0x' + 'ff'.repeat(32) })
+    expect(mockQuery.mock.calls.filter(isRecordInsert)).toHaveLength(1)
+  })
+
+  it('a stalled record write cannot hold the reply past its deadline (Antonio, review 1)', async () => {
+    const { OWNER_TRANSFER_RECORD_DEADLINE_MS } = await import('../hybrid-accounts.js')
+    ownedAccount({ passkeys: [PK1] })
+    mockQuery.mockImplementation((sql: string) => {
+      // A database that never answers the insert: the transfer has already moved.
+      if (/INSERT INTO owner_transfers/.test(String(sql))) return new Promise(() => {})
+      return /FROM smart_accounts/.test(String(sql))
+        ? Promise.resolve({ rows: [{ '?column?': 1 }] })
+        : Promise.resolve({ rows: [] })
+    })
+    mockPrepared()
+    const started = Date.now()
+    const res = await app.inject({
+      method: 'POST', url: submitUrl,
+      payload: { ...BODY, signature: '0x' + 'ab'.repeat(80), user_operation: { sender: ACCOUNT, callData: await transferCallData() } },
+    })
+    const elapsed = Date.now() - started
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ submitted: true, tx_hash: '0x' + 'ff'.repeat(32) })
+    expect(elapsed).toBeGreaterThanOrEqual(OWNER_TRANSFER_RECORD_DEADLINE_MS - 50)
+    expect(elapsed).toBeLessThan(OWNER_TRANSFER_RECORD_DEADLINE_MS + 1_500)
+  })
+
+  it('nothing is recorded when the send does not land', async () => {
+    ownedAccount({ passkeys: [PK1] })
+    mockPrepared(vi.fn().mockRejectedValue(new Error('treasury UserOp included but reverted')))
+    const failed = await app.inject({
+      method: 'POST', url: submitUrl,
+      payload: { ...BODY, signature: '0x' + 'ab'.repeat(80), user_operation: { sender: ACCOUNT, callData: await transferCallData() } },
+    })
+    expect(failed.statusCode).toBe(502)
+    const mismatched = await app.inject({
+      method: 'POST', url: submitUrl,
+      payload: { ...BODY, signature: '0x' + 'ab'.repeat(80), user_operation: { sender: ACCOUNT, callData: '0xdeadbeef' } },
+    })
+    expect(mismatched.statusCode).toBe(400)
+    expect(mockQuery.mock.calls.filter(isRecordInsert)).toHaveLength(0)
   })
 
   it("404s an account the caller does not own", async () => {

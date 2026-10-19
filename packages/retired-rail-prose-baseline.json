@@ -59,9 +59,6 @@
   "packages/frontend/src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx": {
     "both-rails": 1
   },
-  "packages/frontend/src/app/(authenticated)/agents/page.tsx": {
-    "remain-readable": 1
-  },
   "packages/frontend/src/components/AgentPanel.tsx": {
     "stays-readable": 1
   },

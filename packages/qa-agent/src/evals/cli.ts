@@ -64,7 +64,7 @@ import {
 } from './runner.js'
 import { renderMarkdownSummary } from './summary.js'
 import { compareAgainstBaseline, formatCompareVerdict, parseCompareReport } from './compare.js'
-import { observerProvider, describeObserverRpc } from '../lib/chain.js'
+import { observerProvider, describeObserverRpc, USDC_DECIMALS } from '../lib/chain.js'
 import { HavenApi } from '../lib/haven-api.js'
 import { readOnchainBudget, type BudgetUse } from '../lib/delegation-budget.js'
 import { loadQaConfig } from '../config.js'
@@ -90,6 +90,22 @@ export interface BlockNumberSource {
  * payment object off the dev backend — without it the
  * `payment_status_settled` grader failed every live trial by construction.
  */
+/**
+ * Parse a payment record's human amount (`amount`, e.g. "0.001") into atomic
+ * units at USDC's 6 decimals (#4091). Strict decimal string parsing — no
+ * float. Returns undefined for anything unparsable: the guard then falls
+ * back to waiting for any decrease instead of deducting a wrong size.
+ */
+function parseHumanAmountToAtomic(amount: unknown): bigint | undefined {
+  if (typeof amount !== 'string' || !/^\d+(\.\d+)?$/.test(amount)) return undefined
+  const [whole, frac = ''] = amount.split('.')
+  const frac6 = frac.padEnd(USDC_DECIMALS, '0').slice(0, USDC_DECIMALS)
+  // A human amount with MORE than 6 decimals cannot be a USDC amount —
+  // refuse it rather than silently truncating.
+  if (frac.length > USDC_DECIMALS) return undefined
+  return BigInt(`${whole}${frac6}`)
+}
+
 export function buildGraderContext(deps: { api: HavenApi; provider: BlockNumberSource }): Omit<GraderContext, 'resolved'> {
   return {
     probeTransfer: async (expected) => {
@@ -104,7 +120,11 @@ export function buildGraderContext(deps: { api: HavenApi; provider: BlockNumberS
       if (!res.ok) {
         return { ok: false, error: `HTTP ${res.status} reading payment ${paymentId}: ${res.data.error ?? 'backend rejected the read'}` }
       }
-      return { ok: true, status: res.data.status }
+      // #4091: the record's amount rides along when present — the grader
+      // turns it into the prior trial's actual settled spend. Unparsable or
+      // absent → undefined (the guard falls back to any-decrease).
+      const amountAtomic = parseHumanAmountToAtomic((res.data as { amount?: unknown }).amount)?.toString()
+      return { ok: true, status: res.data.status, ...(amountAtomic !== undefined ? { amountAtomic } : {}) }
     },
   }
 }
@@ -163,18 +183,38 @@ export function createPerTrialResolver(deps: PerTrialResolverDeps): PerTrialReso
 
   const resolve = async (task: EvalTask, trial: number, prior?: PriorTrialOutcome): Promise<ResolvedTask> => {
     const use: BudgetUse = task.tier === 3 ? 'exhausted-ok' : 'floor'
-    // #4071: a task with `settled_amount_unknown` settles the AGENT's purchase
-    // (the catalog price it picked), not the resolved amount — deducting the
-    // resolved amount here waits for a drop that never happened (the
-    // 2026-10-17 run red on four innocent trials). Such a prior trial waits
-    // for ANY decrease instead: the guard's job is that the backend reflects
-    // what settled, not that it matches an amount nobody spent.
-    const priorSpendSizeUnknown =
-      prior?.settled === true && prior.resolved.task.settled_amount_unknown === true
-    const spend =
-      prior?.settled === true && prior.resolved.task.settled_amount_unknown !== true
-        ? prior.resolved.amountAtomic
-        : 0n
+    // #4071/#4091: a settled trial's spend is NOT always the resolved amount.
+    // What the guard deducts is derived from the prior trial's own evidence:
+    //  - a PASSING `transfer_settled` probes an on-chain transfer of exactly
+    //    the resolved amount — there the two are equal by construction;
+    //  - otherwise (the whole x402 family, where the MERCHANT's price is what
+    //    settles) the passing `payment_status_settled` carries the sum of the
+    //    confirmed payments' actual amounts (#4091);
+    //  - when neither evidence exists the spend size is unknown: the guard
+    //    waits for ANY decrease, never for an invented drop (the 2026-10-17
+    //    run red on four innocent trials: resolved 316406, actually 1000).
+    // `settled_amount_unknown` still means "the resolved amount is not the
+    // spend" — with the derivation it is belt-and-suspenders rather than the
+    // mechanism, but its invariant (never with expectTransfer) is unchanged.
+    const transferProved = prior?.record.graders.some((g) => g.name === 'transfer_settled' && g.pass) ?? false
+    let derivedSpend: bigint | undefined
+    if (prior?.settled === true) {
+      if (transferProved) {
+        derivedSpend = prior.resolved.amountAtomic
+      } else {
+        let known = false
+        let total = 0n
+        for (const g of prior.record.graders) {
+          if (g.name === 'payment_status_settled' && g.pass && g.settledSpendAtomic !== undefined) {
+            total += BigInt(g.settledSpendAtomic)
+            known = true
+          }
+        }
+        if (known) derivedSpend = total
+      }
+    }
+    const spend = derivedSpend ?? 0n
+    const priorSpendSizeUnknown = prior?.settled === true && derivedSpend === undefined
     if ((spend > 0n || priorSpendSizeUnknown) && lastRemaining !== undefined) {
       const deadline = Date.now() + timeoutMs
       for (;;) {
@@ -283,7 +323,7 @@ async function main() {
     console.error('--trials must be a positive integer')
     process.exit(2)
   }
-  // The cost pilot / PR subset slice (#3959): the FIRST N tasks in the
+  // The cost pilot / subset slice (#3959): the FIRST N tasks in the
   // canonical (tiered) order — slice tasks first, the budget-draining
   // full-remaining send in tier 2, the exhausted-budget tasks in tier 3 —
   // so a 5-task pilot cannot zero the period budget on task one (#3992 B:
@@ -361,7 +401,7 @@ async function main() {
   }
 
   // Where the hosted MCP leg ran (#3959): the subset names the commit it
-  // built from the PR checkout; a dev-deployed run names the URL and says so.
+  // built from this checkout; a dev-deployed run names the URL and says so.
   const hostedMcpSource = args.find((a) => a.startsWith('--hosted-mcp-source='))?.split('=')[1]
   const hostedMcp: HostedMcpInfo | undefined = hostedMcpSource
     ? {

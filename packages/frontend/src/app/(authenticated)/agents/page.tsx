@@ -6,7 +6,7 @@ export default function AgentsPage() {
     <div className="max-w-5xl">
       <PageHeader
         title="Agents"
-        subtitle="Delegation agents use on-chain rules; historical agent records remain readable."
+        subtitle="Agents pay for things up to a budget you set. You approve each budget yourself, and anything over it is refused on-chain."
       />
 
       <AgentPanel />

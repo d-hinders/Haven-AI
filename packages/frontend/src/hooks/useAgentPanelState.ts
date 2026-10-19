@@ -64,19 +64,78 @@ export function useAgentPanelState() {
   const [showRemovedAgents, setShowRemovedAgents] = useState(false)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
 
+  // #4065: the inline first-agent flow. It shows for a user with no agents —
+  // today's empty-state rule, `agents.length === 0` with archived and revoked
+  // rows counting — once the first list load has resolved, and never over
+  // the list-error, finalizing or timed-out states.
+  //
+  // "Resolved" is the FIRST load, not `!loading`: every non-silent refetch
+  // (a Labels change, `handleAgentEdited`) sets `loading` again, and gating
+  // on it unmounted an unlatched step 1 or 2 into the skeleton and remounted
+  // it empty — the typed name and budget gone (review round 2). Set during
+  // render, so the first resolved render already counts and no frame shows
+  // the skeleton in between. Only a SUCCESSFUL load counts (review round 3):
+  // "Try again" after a failed first load clears `error` while `loading`, and
+  // a failed load counted as loaded flashed the flow during that retry —
+  // even for a user who has agents.
+  const [listLoadedOnce, setListLoadedOnce] = useState(false)
+  if (!loading && !error && !listLoadedOnce) setListLoadedOnce(true)
+  const inlineSetupEligible =
+    listLoadedOnce && agents.length === 0 && !error && !finalizingAgent && !finalizeTimedOut
+
+  // #4065: once a setup STARTS in the inline flow (its create is in flight or
+  // succeeded — `ConnectAgentFlow`'s `onSetupStarted`), this LATCH keeps it mounted until
+  // the user leaves it (every `handleClose` exit: Done, Close). Before that
+  // the flow shows only while eligible, so an idle step 1 never traps a user
+  // whose agent was created elsewhere (another tab, an agent-led link): the
+  // list replaces it on the next poll. Without the latch the flow unmounts
+  // mid-setup: the connector's register inserts a
+  // `pending_approval` agent the 10 s list poll picks up — at the Review and
+  // approve step — and an approval sets `finalizingAgent`. Unmounting there
+  // drops the hook's state, including the `onApproved` →
+  // `pollForNewAgent` chain of a passkey approval still in flight. While
+  // latched nothing else of the agents surface renders (AgentPanel).
+  const [inlineSetupLatched, setInlineSetupLatched] = useState(false)
+  // Bumped on every leave: the panel keys the inline flow by it, so a user
+  // who leaves with the list still empty gets a FRESH flow, starter budget
+  // seeded again. Reusing the instance would not re-seed it — the hook's
+  // seed runs on `open`'s transition, and inline `open` never changes.
+  const [inlineSetupKey, setInlineSetupKey] = useState(0)
+  const latchInlineSetup = useCallback(() => setInlineSetupLatched(true), [])
+  // A first create that FAILED leaves nothing to protect: no setup exists, so
+  // the flow goes back to showing only while eligible (`onSetupAbandoned`).
+  const releaseInlineSetup = useCallback(() => setInlineSetupLatched(false), [])
+  const leaveInlineSetup = useCallback(() => {
+    setInlineSetupLatched(false)
+    setInlineSetupKey((key) => key + 1)
+  }, [])
+
   // First-agent hand-off from onboarding. #2413 dropped the rail guard that
   // stopped a legacy account reopening the create flow from a stale URL
   // parameter — no legacy account renders this panel any more.
+  //
+  // #4065: decided after the first list load, not on mount. With no agents
+  // the user lands on the inline flow (already the first-agent flow, starter
+  // budget included), never on a modal on top of it; with agents — or a list
+  // that failed to load, where inline does not render — the modal opens as
+  // before. No in-repo source produces this link any more; it is kept for
+  // links in the wild.
+  const firstSetupPendingRef = useRef(false)
   useEffect(() => {
     if (typeof window === 'undefined') return
     const params = new URLSearchParams(window.location.search)
     if (params.get('setup') !== 'first') return
     setFirstAgentSetup(true)
-    setConnectAgentOpen(true)
+    firstSetupPendingRef.current = true
     params.delete('setup')
     const query = params.toString()
     window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`)
   }, [])
+  useEffect(() => {
+    if (!firstSetupPendingRef.current || loading) return
+    firstSetupPendingRef.current = false
+    if (!inlineSetupEligible) setConnectAgentOpen(true)
+  }, [loading, inlineSetupEligible])
 
   const newAgentPollRef = useRef<{ cancelled: boolean } | null>(null)
   const lastPollDelegateRef = useRef<string | null>(null)
@@ -229,6 +288,13 @@ export function useAgentPanelState() {
     connectAgentOpen,
     setConnectAgentOpen,
     firstAgentSetup,
+    // #4065: the inline first-agent flow.
+    inlineSetupEligible,
+    inlineSetupLatched,
+    inlineSetupKey,
+    latchInlineSetup,
+    releaseInlineSetup,
+    leaveInlineSetup,
     handleSetupUpdated,
     finalizingAgent,
     finalizeTimedOut,

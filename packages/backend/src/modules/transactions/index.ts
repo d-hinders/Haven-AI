@@ -56,6 +56,7 @@ export {
   localDayBounds,
   localDayKey,
   activityOutcome,
+  ownAccountNameResolver,
   type ActivityFeed,
   type ActivityOutcome,
   type BuildActivityGroupsParams,

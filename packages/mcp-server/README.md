@@ -153,7 +153,8 @@ mcp__haven__haven_pay_x402_quote
   -> mcp__haven__haven_report_x402_outcome
        (pass the merchant's raw PAYMENT-RESPONSE header as payment_response on
         the SAME call when it names a transaction — Haven decodes and verifies
-        the settlement itself, #3727)
+        the settlement itself, #3727 — plus payment_header, the header you
+        retried with: a reported settlement is recorded only with it, #4061)
   (the SDK's own paid retry reports the merchant settlement itself, #3764;
    haven_report_settlement_evidence only when an outcome answer names it)
 ```
@@ -167,9 +168,16 @@ writes the merchant-response evidence row, so a delivered purchase stops
 reading as undelivered and never enters that window. On the eip3009 funding
 leg specifically, an accepted outcome with no settlement recorded yet
 (#3475 follow-up) names `haven_report_settlement_evidence` as the next step,
-`payment_id` prefilled — supply the merchant's `PAYMENT-RESPONSE` there as
-`payment_response` if you hold it (or `settlement_tx_hash`); calling with no
-hash is a well-formed no-op, since the purchase may already be complete.
+`payment_id` prefilled — supply the settlement transaction there as
+`settlement_tx_hash` (the `transaction` field of the merchant's base64
+`PAYMENT-RESPONSE`; that tool takes no `payment_response` — fold the raw
+header into `haven_report_x402_outcome` instead); calling with no hash is a
+well-formed no-op, since the purchase may already be complete.
+Either way pass `payment_header` too (#4061): since #3925 an EIP-3009 merchant
+settlement is recorded only with the header the agent retried the merchant
+with. A report without it answers `SETTLEMENT_PROOF_HEADER_MISSING`, which
+names `haven_report_settlement_evidence` again with the hash prefilled. Add
+`payment_header` to that call; the hash was not judged.
 
 The report is **evidence, not authority**. Haven does not verify the claim —
 verifying it would mean calling the merchant. What bounds it instead: the

@@ -21,7 +21,6 @@ covers:
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/account-reads.ts
   - packages/sdk/src/agent-guidance.ts
-  - packages/frontend/src/lib/agent-onboarding-prompt.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/connector-channel.ts
   - packages/sdk/src/mcp-merchant-transport.ts
@@ -83,6 +82,73 @@ covers:
 last-verified: "2026-10-19"
 ---
 
+> **Re-verified (#4079, 2026-10-19, check_funds wording):** `haven_check_funds`
+> answers `covered: false` whenever a live chain read reports LESS than the
+> checked amount, not only an empty account, so its wording now says that:
+> the `next_step` in `packages/mcp-server/src/tools/state-direct-recovery.ts`
+> ("The account holds less than the checked amount (how much less is not
+> returned) — stop and tell the user the account is short …"), the hosted
+> description in `packages/mcp-server/src/tools/contracts.ts` ("stop and tell
+> the user the account is short", one byte shorter) and the SDK description in
+> `packages/sdk/src/tool-descriptions.ts`. Text only: the `covered`
+> true/false/null contract, the stop instruction, every field, argument and
+> input schema, and the backend route are unchanged; the tools/list contract
+> snapshot moves by that one description string and is regenerated. No
+> Supported Runtime Manifest row, channel, dist-tag or release step moves, so
+> the version-skew contract does not move; an older local MCP or signer is
+> unaffected. Nothing else in this document was re-verified in this pass.
+
+> **Re-verified (#4061, 2026-10-19, `payment_header` on the settlement
+> reports):** this changes the hosted tool contract additively.
+>
+> - **New argument.** `haven_report_x402_outcome` and
+>   `haven_report_settlement_evidence` gain an optional `payment_header`
+>   (string, 1–16,384 chars). It is forwarded only on the eip3009
+>   merchant-settlement report it proves: a hash other than the payment's
+>   funding hash. The evidence tool checks the payment's status first (one
+>   extra read, made only when `payment_header` is passed).
+> - **Descriptions.** The two report tools, `haven_pay_x402_quote`,
+>   `haven_resume_x402_payment`, and the signer's `haven_sign_x402` now say
+>   to pass it.
+> - **Snapshot and fingerprint.** `tools-list.snapshot.json` and the contract
+>   fingerprint move.
+> - **Corpus.** `next-arguments-corpus.json` gains two emissions, each naming
+>   `haven_report_settlement_evidence` with `{ payment_id,
+>   settlement_tx_hash }`.
+> - **Stale-client check.** `check-stale-client-compat.mjs` reports no
+>   reconnect-required change against `origin/main` or `origin/dev`.
+>
+> Interoperation:
+>
+> - **A stale client** loses only the new argument. Its EIP-3009 settlement
+>   reports stay refused, now with the typed
+>   `SETTLEMENT_PROOF_HEADER_MISSING` answer and its re-report handoff,
+>   until it reloads `tools/list`.
+> - **A new hosted server against a backend that predates #3925** (`main`):
+>   the backend accepts `paymentProofHeader` on the evidence route and does
+>   not read it on the eip3009 branch, so it records as before.
+> - **An older hosted server against a current backend:** it keeps the
+>   refusal it already had.
+>
+> No Supported Runtime Manifest row, channel, dist-tag, release step or
+> consent surface moves. `last-verified` is bumped to 2026-10-19 for this
+> note. Nothing else in this document was re-verified.
+
+
+> **Re-verified unchanged (#4065, 2026-10-19, the frontend's onboarding-prompt
+> copy deleted):** `/agents` now renders the connect flow inline for a user
+> with no agents, so the "Set up with your AI agent" card and the frontend's
+> byte-pinned copy of `AGENT_ONBOARDING_PROMPT`
+> (`packages/frontend/src/lib/agent-onboarding-prompt.ts`) had no consumer and
+> were deleted; the path leaves this doc's `covers:`. In the covered
+> `packages/sdk/src/agent-guidance.ts` only a doc comment changes (it no
+> longer claims a frontend copy); the published `AGENT_ONBOARDING_PROMPT`
+> export, every runbook string and every byte-pinned copy that remains are
+> byte-identical. No Supported Runtime Manifest row, channel, dist-tag,
+> release step, tool, argument, input schema, description or consent surface
+> moves, so the version-skew and consent-hash contracts do not move.
+> `last-verified` is not re-stamped: this block is the scope. Nothing else in
+> this document was re-verified.
 
 > **Re-verified unchanged (#4023, 2026-10-16, per-account deploy salt):** this
 > diff touches one covered file,
@@ -1845,6 +1911,24 @@ last-verified: "2026-10-19"
 > on every fiat surface instead of USD totals under a SEK label. No MCP
 > tool, flag, auth step, consent hash, or version-skew contract changes;
 > nothing about the local runtime's capabilities moves.
+
+> **Re-verified (#4099, 2026-10-19 — the CSV `initiator` column's words):**
+> this doc is coupled through `modules/transactions/csv-export.ts`. The
+> server CSV's `initiator` cell now carries the app's words — `You` / the
+> agent's name / `Unknown`, empty on inbound rows except an agent's
+> delegate sweep — instead of the raw
+> `human` / `agent` / `unknown` enum (owner decision, 2026-10-19). Column
+> set and order are unchanged; the VALUES change for anyone reading
+> `GET /transactions/export.csv`, which the dashboard downloads. No local
+> runtime consumes it: `packages/cli`, `packages/mcp`, `packages/mcp-server`
+> and `packages/sdk` neither read `initiatedBy` nor fetch the server CSV
+> (`grep -rn "initiatedBy\|export.csv\|initiator"` over their `src/`,
+> tests excluded, returns nothing at this head), and the CLI's own export
+> builds its file from the JSON feed. On the JSON feed `initiatedBy: 'human'`
+> becomes reachable — a value the spec has always declared — so no schema
+> key, MCP tool, `next_tool` value, consent hash or version-skew contract
+> changes. Scope of this note: the CSV module's `initiator` cell. Nothing
+> else in this document was re-verified.
 
 > **Re-verified unchanged (#3824, 2026-10-09 — serve-time approx amounts +
 > grouped activity):** this doc is coupled through

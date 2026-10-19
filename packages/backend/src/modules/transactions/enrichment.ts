@@ -8,11 +8,33 @@ import {
   findDelegateSweepAgentMatches,
   findPaymentIntentAgentMatches,
 } from '../../infra/repositories/transaction-history.js'
+import { findOwnerTransferMatches } from '../../infra/repositories/owner-transfers.js'
 import { toCanonicalAddress } from './normalize.js'
 import { paymentAgentIdentityKey } from './ordering.js'
 import { convertedTransactionAmount } from './currency.js'
 import { DEFAULT_TRANSACTION_CURRENCY, type TransactionCurrency } from '../../domain/transaction-currency.js'
 import type { EnrichedTransaction } from './types.js'
+
+/**
+ * #4099: an owner send's identity — the row identity plus what was sent.
+ * Addresses compare case-insensitively; the amount is the atomic string both
+ * sides carry (`value` on the row, `amount_raw` on the record).
+ */
+function ownerSendKey(
+  txHash: string,
+  accountId: string,
+  chainId: number,
+  tokenAddress: string,
+  to: string,
+  amountAtomic: string,
+): string {
+  return [
+    paymentAgentIdentityKey(txHash, accountId, chainId),
+    tokenAddress.toLowerCase(),
+    to.toLowerCase(),
+    amountAtomic,
+  ].join('|')
+}
 
 /**
  * `currency` is the user's preference (#3127) — read by the caller (the route,
@@ -114,6 +136,29 @@ export async function enrichTransactionsWithAgents(
       )
     }
 
+    // #4099: owner sends recorded at submit. Keyed on the same (hash,
+    // account, chain) identity, so the sending account's OUTBOUND row is the
+    // one that matches — the receiving side of a transfer between two own
+    // accounts is an inbound row and carries no initiator — AND on what was
+    // sent (token, recipient, amount): one bundler transaction can carry the
+    // owner's UserOp beside an agent's redemption from the same account, and
+    // only the owner's own transfer may read "You". Its own fail-soft: a
+    // failed read leaves those rows 'unknown' (never 'human') without
+    // discarding the agent attribution above.
+    const ownerSends = new Set<string>()
+    try {
+      for (const row of await findOwnerTransferMatches(txHashes, userId, accountIds)) {
+        ownerSends.add(
+          ownerSendKey(row.tx_hash, row.account_id, row.chain_id, row.token_address, row.to_address, row.amount_raw),
+        )
+      }
+    } catch (err) {
+      ownerSends.clear()
+      console.warn(
+        `enrichment: could not read owner-send records; owner sends read as Unknown (${err instanceof Error ? err.message : String(err)})`,
+      )
+    }
+
     return transactions.map((tx) => {
       const agent = agentByTransactionIdentity.get(
         paymentAgentIdentityKey(tx.hash, tx.accountId, tx.chainId),
@@ -121,9 +166,12 @@ export async function enrichTransactionsWithAgents(
       // #2097: the initiator record follows the EFFECTIVE attribution — an
       // agent matched here, or one already on the row (confirmed x402 rows
       // arrive pre-attributed from `mergeX402Transactions`), makes the row
-      // 'agent'. An outbound row that stays unattributed is a raw transfer
-      // with no matched intent — 'unknown'. Inbound rows carry no initiator
-      // record (undefined).
+      // 'agent'. An outbound row with a recorded owner send (#4099) is
+      // 'human'. An outbound row that stays unattributed is a raw transfer
+      // with no matched intent or record — 'unknown', including every owner
+      // send made before the record existed (no backfill, no heuristic).
+      // Inbound rows carry no initiator record (undefined), except an
+      // agent-attributed one — a delegate sweep — which is 'agent' above.
       const attributedAgentId = agent?.id ?? tx.agentId
       return {
         ...tx,
@@ -156,7 +204,11 @@ export async function enrichTransactionsWithAgents(
         initiatedBy: attributedAgentId
           ? 'agent'
           : tx.direction === 'out'
-            ? 'unknown'
+            ? ownerSends.has(
+                ownerSendKey(tx.hash, tx.accountId, tx.chainId, tx.tokenAddress ?? '', tx.to, tx.value),
+              )
+              ? 'human'
+              : 'unknown'
             : undefined,
       }
     })

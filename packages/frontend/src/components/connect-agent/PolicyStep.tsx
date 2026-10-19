@@ -22,7 +22,7 @@ import { InlineErrorNote, WarningCallout } from './SetupNotices'
  * page.
  *
  * #1411: no rhythm of its own — see DetailsStep's note. Root is a Fragment;
- * the shared `flex flex-col gap-5` wrapper in ConnectAgentModal owns the
+ * the shared `flex flex-col gap-5` wrapper in ConnectAgentFlow owns the
  * 20px field-to-field spacing.
  */
 export function PolicyStep({ flow }: { flow: AgentConnectionSetupFlow }) {

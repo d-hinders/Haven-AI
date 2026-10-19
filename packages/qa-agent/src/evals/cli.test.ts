@@ -82,6 +82,26 @@ describe('A1: buildGraderContext wires probePaymentStatus into payment_status_se
     expect(results[0].detail).toContain('not settled')
     expect(results[0].detail).toContain('p-9')
   })
+
+  it('#4091: the probe parses the payment record amount into atomic units (0.001 → 1000)', async () => {
+    const api = {
+      getPayment: vi.fn(async () => ({ ok: true, status: 200, data: { status: 'settled', amount: '0.001' } })),
+    } as unknown as HavenApi
+    const parsed = parseHermesSessionLog(LIVE_SHAPED_JSONL, { taskId: 't', trial: 1 })
+    const results = await applyGraders(parsed, [{ name: 'payment_status_settled' }], buildGraderContext({ api, provider }))
+    expect(results[0].pass).toBe(true)
+    expect(results[0].settledSpendAtomic).toBe('1000')
+  })
+
+  it('#4091: a record without a parsable amount omits the spend — the guard must never guess', async () => {
+    const api = {
+      getPayment: vi.fn(async () => ({ ok: true, status: 200, data: { status: 'settled' } })),
+    } as unknown as HavenApi
+    const parsed = parseHermesSessionLog(LIVE_SHAPED_JSONL, { taskId: 't', trial: 1 })
+    const results = await applyGraders(parsed, [{ name: 'payment_status_settled' }], buildGraderContext({ api, provider }))
+    expect(results[0].pass).toBe(true)
+    expect(results[0].settledSpendAtomic).toBeUndefined()
+  })
 })
 
 // ── A2, false pass: evidence scoped to each trial ──────────────────────────
@@ -173,8 +193,9 @@ function successLogFor(taskId: string): AgentRunLog {
 function refusalLogFor(taskId: string, errorCode = 'delegation_budget_exceeded'): AgentRunLog {
   if (taskId === 'over-budget-check-status-no-retry') {
     return log(taskId, 1, [
+      // No haven_get_payment_status: a budget pre-check refusal creates no
+      // payment, so there is no payment_id to check (pilot, 2026-10-19).
       call(`${DEV_PREFIX}haven_pay`, { result: { ok: false, errorCode } }),
-      call(`${DEV_PREFIX}haven_get_payment_status`),
       call(`${DEV_PREFIX}haven_get_allowances`),
     ], 'Refused: your period budget is spent — 0.00 USDC remaining, shortfall 1.00. Not retrying.')
   }
@@ -412,6 +433,178 @@ describe('A2 #4071: the guard does not deduct a resolved amount nobody spent', (
     expect(trials[1].pass).toBe(false)
     expect(trials[1].detail).toContain('budget consistency timeout')
     expect(trials[1].detail).toContain('never decreased')
+  })
+})
+
+// ── #4091: the flag-less x402 family stops phantom-deducting — the guard ────
+//    derives the expected spend from the prior trial's ACTUAL settled amount.
+
+describe('#4091: the guard deducts the ACTUAL settled spend, flagged or not', () => {
+  // The #4091 bug shape (x402-plain-http-request-mode): a merchant-priced
+  // task with NO settled_amount_unknown flag — resolved 1/4 of the budget,
+  // settled the merchant's real 0.001 price. Under the pre-#4091 guard this
+  // profile timed out red on 3 cascading trials (evals-20261019-postfix).
+  const merchantPricedTask = fixedAmountTask('merchant-priced-purchase', {
+    amount: { rule: 'fraction_of_remaining', fraction: '1/4' },
+    graders: [{ name: 'payment_status_settled' }],
+    expectTransfer: false,
+  })
+  const purchaseLog = (taskId: string, trial: number, paymentIds: string[]): AgentRunLog =>
+    log(
+      taskId,
+      trial,
+      paymentIds.map((paymentId) => call(`${DEV_PREFIX}haven_pay_mcp_tool`, { result: { ok: true, paymentId } })),
+      'Bought the basic VPN product for 0.001 USDC.',
+    )
+
+  it('an UNFLAGGED merchant-priced trial settles the real price and trial 2 resolves — no invented 1/4 drop', async () => {
+    let remaining = 10_000_000n
+    const resolver = createPerTrialResolver({
+      readBudget: async () => ({ remaining }),
+      blockNumber: async () => 1,
+      sleep: async () => {},
+    })
+    const report = await runSuite({
+      tasks: [merchantPricedTask],
+      resolveForTrial: resolver.resolve,
+      adapter: {
+        name: 'fake',
+        runTask: async (resolved, trial) => {
+          // The agent pays the merchant's price, NOT the resolved 1/4 slice
+          // (resolved 2_500_000 here, settled 1000 — the exact #4091 profile).
+          remaining -= 1_000n
+          return purchaseLog(resolved.task.id, trial, [`p-${trial}`])
+        },
+      },
+      trials: 2,
+      graderContext: {
+        probePaymentStatus: async () => ({ ok: true as const, status: 'settled', amountAtomic: '1000' }),
+      },
+    })
+    const trials = report.tasks[0].trials
+    expect(trials[0].pass).toBe(true)
+    expect(trials[1].pass).toBe(true)
+    expect(trials[1].detail ?? '').not.toContain('resolve failure')
+    expect(trials[1].detail ?? '').not.toContain('budget consistency timeout')
+  })
+
+  it('without a readable amount the guard still only waits for ANY decrease — never the resolved slice', async () => {
+    let remaining = 10_000_000n
+    const resolver = createPerTrialResolver({
+      readBudget: async () => ({ remaining }),
+      blockNumber: async () => 1,
+      sleep: async () => {},
+    })
+    const report = await runSuite({
+      tasks: [merchantPricedTask],
+      resolveForTrial: resolver.resolve,
+      adapter: {
+        name: 'fake',
+        runTask: async (resolved, trial) => {
+          remaining -= 1_000n
+          return purchaseLog(resolved.task.id, trial, [`p-${trial}`])
+        },
+      },
+      trials: 2,
+      // An amount-blind probe (an older backend, a result shape without
+      // `amount`): the spend size is unknown, so ANY decrease proves the
+      // read moved past the pre-spend value. Deducting the resolved 1/4 here
+      // is exactly the phantom the class exists to remove.
+      graderContext: { probePaymentStatus: async () => ({ ok: true as const, status: 'settled' }) },
+    })
+    const trials = report.tasks[0].trials
+    expect(trials[0].pass).toBe(true)
+    expect(trials[1].pass).toBe(true)
+    expect(trials[1].detail ?? '').not.toContain('budget consistency timeout')
+  })
+
+  it('several settled payments in one trial deduct their SUM', async () => {
+    let remaining = 10_000_000n
+    const resolver = createPerTrialResolver({
+      readBudget: async () => ({ remaining }),
+      blockNumber: async () => 1,
+      sleep: async () => {},
+    })
+    const report = await runSuite({
+      tasks: [merchantPricedTask],
+      resolveForTrial: resolver.resolve,
+      adapter: {
+        name: 'fake',
+        runTask: async (resolved, trial) => {
+          remaining -= 1_000n // 300 + 700 actually left the budget
+          return purchaseLog(resolved.task.id, trial, [`p-${trial}a`, `p-${trial}b`])
+        },
+      },
+      trials: 2,
+      graderContext: {
+        probePaymentStatus: async (id) => ({
+          ok: true as const,
+          status: 'settled',
+          ...(id.endsWith('a') ? { amountAtomic: '300' } : { amountAtomic: '700' }),
+        }),
+      },
+    })
+    const trials = report.tasks[0].trials
+    expect(trials[0].pass).toBe(true)
+    expect(trials[1].pass).toBe(true)
+    expect(trials[1].detail ?? '').not.toContain('budget consistency timeout')
+  })
+
+  it('the derived spend is ENFORCED: a read that never drops by the actual spend times out naming it', async () => {
+    const resolver = createPerTrialResolver({
+      readBudget: async () => ({ remaining: 10_000_000n }),
+      blockNumber: async () => 1,
+      consistencyTimeoutMs: 30,
+      consistencyPollMs: 5,
+      sleep: async () => {},
+    })
+    const report = await runSuite({
+      tasks: [merchantPricedTask],
+      resolveForTrial: resolver.resolve,
+      adapter: { name: 'fake', runTask: async (resolved, trial) => purchaseLog(resolved.task.id, trial, [`p-${trial}`]) },
+      trials: 2,
+      graderContext: {
+        probePaymentStatus: async () => ({ ok: true as const, status: 'settled', amountAtomic: '1000' }),
+      },
+    })
+    const trials = report.tasks[0].trials
+    expect(trials[0].pass).toBe(true)
+    expect(trials[1].pass).toBe(false)
+    expect(trials[1].detail).toContain('budget consistency timeout')
+    expect(trials[1].detail).toContain('settled spend of 1000')
+  })
+
+  it('#4071: a flagged merchant-priced task keeps working — the flag predates the derivation, the result is the same', async () => {
+    // The file-level invariant lives in tasks.test.ts (settled_amount_unknown
+    // + expectTransfer); here the same shape through the resolver: a flagged
+    // merchant-priced task keeps working — the flag no longer changes what
+    // the guard derives, it only predates the derivation (#4083).
+    const flagged = { ...merchantPricedTask, settled_amount_unknown: true }
+    let remaining = 10_000_000n
+    const resolver = createPerTrialResolver({
+      readBudget: async () => ({ remaining }),
+      blockNumber: async () => 1,
+      sleep: async () => {},
+    })
+    const report = await runSuite({
+      tasks: [flagged],
+      resolveForTrial: resolver.resolve,
+      adapter: {
+        name: 'fake',
+        runTask: async (resolved, trial) => {
+          remaining -= 1_000n
+          return purchaseLog(resolved.task.id, trial, [`p-${trial}`])
+        },
+      },
+      trials: 2,
+      graderContext: {
+        probePaymentStatus: async () => ({ ok: true as const, status: 'settled', amountAtomic: '1000' }),
+      },
+    })
+    const trials = report.tasks[0].trials
+    expect(trials[0].pass).toBe(true)
+    expect(trials[1].pass).toBe(true)
+    expect(trials[1].detail ?? '').not.toContain('budget consistency timeout')
   })
 })
 

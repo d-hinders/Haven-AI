@@ -165,10 +165,19 @@ export interface ResolvedTask {
   startedAtBlock?: number
 }
 
-/** One grader's verdict. Same shape spirit as `scenarios/types.ts`. */
+/**
+ * One grader's verdict. Same shape spirit as `scenarios/types.ts`.
+ *
+ * `settledSpendAtomic` is present ONLY on a passing `payment_status_settled`
+ * whose probe could read every confirmed payment's amount (#4091): the sum
+ * the prior trial actually deducted from the budget — the merchant's real
+ * price, not the task's resolved `amountAtomic`. The consistency guard uses
+ * it to deduct what actually left the budget instead of an invented slice.
+ */
 export interface GraderResult {
   pass: boolean
   detail: string
+  settledSpendAtomic?: string
 }
 
 /**
@@ -185,9 +194,14 @@ export interface GraderContext {
     amountAtomic: bigint
     fromBlock?: number
   }) => Promise<{ ok: true; txHash: string } | { ok: false; error: string }>
-  /** Backend probe: the payment's status for one id. */
+  /**
+   * Backend probe: the payment's status for one id. `amountAtomic` (the
+   * settled payment's amount, USDC's 6 decimals — #4091) is present when the
+   * payment record carried a parsable amount; the consistency guard needs it
+   * to wait for what the trial ACTUALLY spent, not the resolved slice.
+   */
   probePaymentStatus?: (paymentId: string) => Promise<
-    { ok: true; status: string } | { ok: false; error: string }
+    { ok: true; status: string; amountAtomic?: string } | { ok: false; error: string }
   >
 }
 

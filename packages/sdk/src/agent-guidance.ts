@@ -291,8 +291,10 @@ Next: [your agent hit a 402](/402.md) · [everything agent-readable](/llms.txt)
 `
 
 /**
- * The **onboarding prompt** — the whole-onboarding text the dashboard offers a
- * signed-in user to paste to their agent (#2535, epic #2519).
+ * The **onboarding prompt** — the whole-onboarding text a user pastes to their
+ * agent (#2535, epic #2519). The dashboard offered it on `/agents` to a
+ * signed-in user with no agents until #4065 put the connect flow there
+ * instead.
  *
  * ## It is NOT the "setup prompt", and the distinction is load-bearing
  *
@@ -323,11 +325,12 @@ Next: [your agent hit a 402](/402.md) · [everything agent-readable](/llms.txt)
  * containment, so a reworded copy here fails rather than quietly disagreeing
  * with what `buildSetupPrompt` tells the same agent minutes later.
  *
- * The frontend cannot import this: `packages/frontend` has zero `@haven_ai/*`
- * runtime dependencies by design (standalone Vercel deploys). It keeps a copy
- * in `src/lib/agent-onboarding-prompt.ts`, byte-pinned to this string by
- * `src/lib/__tests__/agent-onboarding-prompt.test.ts`, exactly as the runbook
- * and the skill are pinned.
+ * The frontend no longer renders this. It kept a byte-pinned copy for the
+ * `/agents` "Set up with your AI agent" card until #4065 replaced that card
+ * with the inline connect flow (a signed-in user with no agents is already
+ * in the flow that ends by handing the agent a setup prompt). Agents still
+ * reach the onboarding path through `/for-agents.md` and `llms.txt`; this
+ * export stays published.
  *
  * ## The origin placeholder
  *

@@ -15,6 +15,8 @@ covers:
   - packages/frontend/src/app/signup/page.tsx
   - packages/frontend/src/components/onboarding/AgentHandoffNote.tsx
   - packages/frontend/src/components/ConnectAgentModal.tsx
+  - packages/frontend/src/components/connect-agent/ConnectAgentFlow.tsx
+  - packages/frontend/src/components/connect-agent/InlineAgentSetup.tsx
   - packages/frontend/src/components/UsingYourAgentInfo.tsx
   - packages/frontend/src/lib/agent-credential.ts
   - packages/frontend/src/lib/agent-handoff.ts
@@ -26,7 +28,6 @@ covers:
   - packages/frontend/src/lib/transaction-presentation.tsx
   - packages/sdk/src/skill-content.ts
   - packages/sdk/src/agent-guidance.ts
-  - packages/frontend/src/lib/agent-onboarding-prompt.ts
   - packages/frontend/src/lib/agent-skill-steps.ts
   - packages/frontend/src/lib/agent-skill-index.ts
   - scripts/frontend-copy-lint.mjs
@@ -540,7 +541,7 @@ artifact that was already self-consistent.
 | Thing | The term | Never |
 | --- | --- | --- |
 | The text the connect modal hands back for ONE agent, carrying its one-time setup token and the connector command | **setup prompt** | connect prompt, setup text |
-| The whole-onboarding text the dashboard offers a signed-in user with no agents, carrying no token | **onboarding prompt** | setup prompt (a different object — see below), agent prompt |
+| The whole-onboarding text a user pastes to an agent before any agent exists, carrying no token (served to agents by `/for-agents.md` and `llms.txt`; no dashboard screen shows it since #4065) | **onboarding prompt** | setup prompt (a different object — see below), agent prompt |
 | The `npx -y @haven_ai/connect@…` line the agent runs | **connector command** | connect command, setup command, connection command |
 | The agent's API key, `sk_agent_…`, written to `~/.haven` | **agent credential** | `sk_live_…` (a different product's shape and never Haven's), agent key, API token |
 | The agent's signing key, made locally and never sent anywhere | **delegate key** | signing key (ambiguous — the user also signs), private key |
@@ -553,9 +554,27 @@ so the table that exists to stop this class of ambiguity had acquired one. The
 row is now scoped by what makes the two genuinely different rather than by where
 they appear: the **setup prompt** is per-agent, carries a one-time setup token,
 and cannot exist until a setup does; the **onboarding prompt** is static, carries
-no token or credential (asserted by test, not intended), and is shown precisely
-when no agent exists yet. Anything that can be pasted before there is an agent to
-paste it for is the onboarding prompt.
+no token or credential (asserted by test, not intended), and exists precisely
+for the moment before any agent does. Anything that can be pasted before there is
+an agent to paste it for is the onboarding prompt.
+
+**Where each is shown ([#4065](https://github.com/d-hinders/Haven-AI/issues/4065)).**
+The dashboard no longer offers the onboarding prompt. #2535 put it on `/agents`
+for a signed-in user with no agents, as a "Set up with your AI agent" card beside
+the empty state; owner decision 2026-10-16 moved it off, because that user is
+already signed in and the connect flow already ends by handing the agent a setup
+prompt. `/agents` now runs that flow inline for the first agent, under the card
+title **Connect your first agent**, with the modal's own step copy. The
+onboarding prompt stays published for agents — `/for-agents.md`, `llms.txt` and
+the SDK's `AGENT_ONBOARDING_PROMPT` export — so the two terms still name two
+objects; only one of them has a dashboard surface.
+
+The same change gave `/agents` its page subtitle: "Agents pay for things up to a
+budget you set. You approve each budget yourself, and anything over it is refused
+on-chain." It says **approve**, never "sign", for the owner's action, and
+**yourself** rather than "with your passkey" (owner decision 2026-10-19): an
+account can add a wallet as a signer and the approval step has a wallet path, so
+a passkey-only wording would be false for some accounts.
 
 Neither row has an instrument. A literal matcher can catch a banned SPELLING,
 which is why `connect command` and `setup command` are enforceable; it cannot

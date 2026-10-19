@@ -2535,6 +2535,68 @@ describe('#3764 — the merchant settlement evidence maps to next steps (eip3009
     expect(res.data.reason).toContain('do not re-report the same hash')
   })
 
+  // #4061: the missing-proof-header refusal. Unreachable while
+  // completeX402MerchantCall forwards the header it sent, but if the backend
+  // ever answers it here the hosted answer must name the fix, not a mismatch.
+  const MISSING_HEADER = {
+    outcome: 'refused',
+    statusCode: 409,
+    reason: 'The settlement report carries no X-PAYMENT payment header',
+    errorCode: 'settlement_proof_header_missing',
+  }
+
+  it('haven_complete_mcp_tool re-names the report tool, hash prefilled, when the settlement report lacked the proof header (#4061)', async () => {
+    stubFetch({})
+    stubDelivery()
+    const haven = new HavenClient({ apiKey: 'test' as never, baseUrl: 'http://haven.test' })
+    mockDelivery(haven, MISSING_HEADER)
+
+    const res = ok<Record<string, any>>(
+      await createToolHandlers(haven).haven_complete_mcp_tool({
+        payment_id: 'pay_x402',
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: {},
+        payment_header: 'eyJ4IjoxfQ==',
+      }),
+    )
+
+    expect(res.data.next_tool).toBe('mcp__haven__haven_report_settlement_evidence')
+    expect(res.data.next_arguments).toEqual({ payment_id: 'pay_x402', settlement_tx_hash: SETTLEMENT })
+    expect(res.data.reason).toContain('adding payment_header')
+    expect(JSON.stringify(res.data)).not.toMatch(/do not re-report|does not match this payment on-chain/)
+  })
+
+  it("haven_settle_mcp_tool's eip3009 settled arm re-names the report tool when the settlement report lacked the proof header (#4061)", async () => {
+    stubFetch({
+      'POST /payments/pay_7710/sign': { status: 200, body: { payment_id: 'pay_7710', status: 'confirmed', tx_hash: '0x' + 'ee'.repeat(32) } },
+    })
+    const haven = new HavenClient({ apiKey: 'test' as never, baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'submitSignature').mockResolvedValue({
+      status: 'confirmed',
+      txHash: '0x' + 'ee'.repeat(32),
+    } as never)
+    vi.spyOn(haven, 'ensureFundingConfirmed').mockResolvedValue(undefined as never)
+    mockDelivery(haven, MISSING_HEADER)
+
+    const res = ok<Record<string, any>>(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_7710',
+        signature: SIG7710,
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+        payment_header: VALID_PAYMENT_HEADER_REF.v1,
+      }),
+    )
+
+    expect(res.data.settled).toBe(true)
+    expect(res.data.next_tool).toBe('mcp__haven__haven_report_settlement_evidence')
+    expect(res.data.next_arguments).toEqual({ payment_id: 'pay_7710', settlement_tx_hash: SETTLEMENT })
+    expect(res.data.reason).toContain('adding payment_header')
+    expect(JSON.stringify(res.data)).not.toMatch(/do not re-report|does not match this payment on-chain/)
+  })
+
   it('haven_complete_mcp_tool answers the pre-#3764 shape — no guidance block — when the settlement was recorded (or never posted)', async () => {
     stubFetch({})
     stubDelivery()

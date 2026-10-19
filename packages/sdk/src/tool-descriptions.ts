@@ -140,7 +140,7 @@ export const toolDescriptions = {
     selectionGuidance:
       'Use this before attempting a payment when it matters whether the money is really there: allowance answers say what you are PERMITTED to spend, never whether the account HOLDS it. For allowance, budget, spend-limit, remaining-budget, reset-period, or what-can-I-spend questions use the allowance lookup tool instead.',
     behavior:
-      'Returns covered: true (the account holds at least the checked amount), false (a live chain read reports less — the budget is backed by an empty account; stop and tell the user funds are missing), or null (the chain read failed — unverifiable, never treat it as absence; coverageError says why). The account balance itself is deliberately not returned: this is a sufficiency signal, not a balance read. budget_remaining_atomic is the permitted figure from the allowance lookup (the SDK spells it budgetRemainingAtomic), named so it can never be confused with holdings.',
+      'Returns covered: true (the account holds at least the checked amount), false (a live chain read reports the account holds less than the checked amount; stop and tell the user it is short), or null (the chain read failed — unverifiable, never treat it as absence; coverageError says why). The account balance itself is deliberately not returned: this is a sufficiency signal, not a balance read. budget_remaining_atomic is the permitted figure from the allowance lookup (the SDK spells it budgetRemainingAtomic), named so it can never be confused with holdings.',
     nextActionGuidance:
       'On covered=false, do not attempt the payment — tell the user the account is short and let them fund it; on covered=null, retry the check shortly or proceed knowing the payment may fail on-chain.',
   },
@@ -260,8 +260,9 @@ export const toolDescriptions = {
     summary:
       'Report a payment\'s real merchant settlement transaction hash so Haven can verify it on-chain and record it.',
     behavior:
-      'Pass payment_id and, when you hold one, settlement_tx_hash (0x + 64 hex chars) — from PAYMENT-RESPONSE or a prior settlement_tx_hash. Omitting settlement_tx_hash succeeds as a no-op — nothing is checked or recorded, and no network call is made. Haven verifies on-chain before recording a hash; a zero, mismatched, or reverted hash is refused. Your own payments only.',
+      'Pass payment_id and, when you hold one, settlement_tx_hash (0x + 64 hex chars) — from PAYMENT-RESPONSE or a prior settlement_tx_hash. On EIP-3009 also pass payment_header (the header you retried the merchant with) or the report is refused. Omitting settlement_tx_hash succeeds as a no-op — nothing is checked or recorded, and no network call is made. Haven verifies on-chain before recording a hash; a zero, mismatched, or reverted hash is refused. Your own payments only.',
     nextActionGuidance:
+      'code SETTLEMENT_PROOF_HEADER_MISSING: call again adding payment_header. ' +
       'code SETTLEMENT_NOT_RECORDED (refusal_reason present): the payment\'s funding is confirmed and this hash was not accepted for it — do not retry it; refusal_reason carries why, verbatim. ' +
       'code DELIVERED_UNSETTLED: not verified, do not retry — poll haven_get_payment_status. code SETTLEMENT_PENDING (retryable:true): not mined or RPC unreachable — report the same hash again shortly.',
   },

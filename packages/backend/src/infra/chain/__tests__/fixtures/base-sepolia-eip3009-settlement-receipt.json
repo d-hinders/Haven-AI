@@ -1,0 +1,29 @@
+{
+  "_source": "Base Sepolia (chain 84532) eth_getTransactionReceipt for the #4061 live dev settlement (payment 0d8099b4-dc9a-4f17-8358-03fdc9695bfd), captured 2026-10-19. Logs verbatim; blockTimestamp from eth_getBlockByNumber.",
+  "transactionHash": "0x2bad0097776df92a4c5d9be1607e8c39caa602e096cf9883561c46baec1ff43e",
+  "status": 1,
+  "blockNumber": 48311760,
+  "blockTimestamp": 1792391808,
+  "logs": [
+    {
+      "address": "0x036cbd53842c5426634e7929541ec2318f3dcf7e",
+      "topics": [
+        "0x98de503528ee59b575ef0c0a2576a82497bfc029a5685b209e9ec333479b10a5",
+        "0x000000000000000000000000cb9a47e0d4784b0cdf0d3cda0447dbbca3465ba8",
+        "0x0e2679d968658e8a963133464e4206e17f4f65e09f9a7a32aa0e1d124dd2045c"
+      ],
+      "data": "0x",
+      "index": 37
+    },
+    {
+      "address": "0x036cbd53842c5426634e7929541ec2318f3dcf7e",
+      "topics": [
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "0x000000000000000000000000cb9a47e0d4784b0cdf0d3cda0447dbbca3465ba8",
+        "0x000000000000000000000000041597826b16425ef835601abf1628b80b37b195"
+      ],
+      "data": "0x00000000000000000000000000000000000000000000000000000000000003e8",
+      "index": 38
+    }
+  ]
+}

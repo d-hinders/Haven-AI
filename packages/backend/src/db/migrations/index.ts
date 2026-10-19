@@ -114,6 +114,7 @@ import * as agentSupersededBy from './112_agent_superseded_by.js'
 import * as syncDocumentKind from './113_sync_document_kind.js'
 import * as smartAccountDeploySalt from './114_smart_account_deploy_salt.js'
 import * as feedbackExpiresAtFixedWindow from './115_feedback_expires_at_fixed_window.js'
+import * as ownerTransfers from './116_owner_transfers.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -287,4 +288,5 @@ export const migrations: Migration[] = [
   syncDocumentKind,
   smartAccountDeploySalt,
   feedbackExpiresAtFixedWindow,
+  ownerTransfers,
 ]

@@ -221,6 +221,29 @@ and a recording failure is swallowed: metrics can never gate a payment. See
 
 ## 3. Delegation custody semantics (#828's contract)
 
+> **Re-verified #4099 (2026-10-19, the owner-send record):** this diff
+> touches two files in this document's coverage list,
+> `rails/hybrid-transfers.ts` and the submit route that calls it,
+> `routes/hybrid-accounts.ts`. The
+> owner send's discipline in §6 ("Owner send (#1083) rides the same op
+> discipline") is unchanged: the same prepare/submit split, the submitted
+> UserOperation still pinned to the re-derived transfer calldata, the owner
+> still the only signer. `submitTransfer` now also RETURNS the UserOp hash
+> and the transfer it already validated; the route then writes one
+> attribution row to `owner_transfers` (migration 116) after the receipt
+> confirmed the transfer, fail-soft — a failed write is logged and the send
+> still answers success, and a slow one cannot hold the reply past
+> `OWNER_TRANSFER_RECORD_DEADLINE_MS` (500 ms). Nothing on any spend, signing or revocation path
+> reads that row; it only lets the transaction feed say "You" instead of
+> "Unknown". A characterization test, which passes against the pre-change
+> route as well, pins that `submitCall` receives the signed operation
+> unchanged and the signature verbatim
+> (`routes/__tests__/hybrid-signers.test.ts`). Invariants 1–13 are
+> untouched. Scope of this note: the owner-send paragraph of §6 and these
+> two files' changes; nothing else in this document was re-read for it.
+> `last-verified` already reads 2026-10-19 and is left as is. The
+> verification entry is `docs/regulatory/casp-changelog/2026-10-19-4099.md`.
+
 > **Re-verified #4021 (2026-10-19, the account card's "Last payment" field):**
 > this diff touches one file in this document's coverage list,
 > `infra/repositories/dashboard.ts`, and adds no signing step, no gate, no
@@ -3314,6 +3337,45 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > `packages/backend/src/infra/chain/settlement-transfer-verifier.ts`,
 > `modules/x402/eip3009-settlement-evidence.ts`, `modules/mpp/evidence.ts`,
 > `infra/repositories/x402-authorizations.ts`; the rest of this document was
+> not re-read for it, and `last-verified` is not bumped.
+
+> **Re-verified unchanged in authority, narrowed in evidence (#4061,
+> 2026-10-19, the #3925 proof header reaches the backend):** the note above
+> assumed that settlement reports post the X-PAYMENT header. None did. The SDK
+> posted it with its funding report only, and the hosted plain-HTTP report
+> tools had no parameter for it. Now:
+>
+> - `haven_report_x402_outcome` and `haven_report_settlement_evidence` take
+>   `payment_header`, and the SDK's settlement reports post the header their
+>   retry sent;
+> - a header-less report's 409 carries `error_code:
+>   "settlement_proof_header_missing"`;
+> - one further misattribution is refused. Payment B's report could carry
+>   same-agent sibling A's header together with A's settlement. The delegate
+>   is the same, so that passed the signer check, and the burned-nonce check
+>   too, and was recorded on B. `observeEip3009MerchantSettlement` now
+>   refuses a non-derived proof nonce that is a sibling's derived nonce,
+>   before the chain is read.
+>
+> A further gap is closed. Check 9 now pairs the burned nonce with its own
+> transfer: the `Transfer` immediately after its `AuthorizationUsed`, which
+> is FiatToken v2's emit order, pinned against a live Base Sepolia receipt.
+> Before this, a transaction settling two of a delegate's authorizations
+> could lend one nonce the other's transfer. The pairing is FiatToken-specific
+> (`AuthorizationUsed` immediately before its own `Transfer`); a token with
+> another emit order fails closed, refused rather than verified. The hosted tools also forward
+> an agent's header only on the eip3009 settlement branch, which never
+> stores it. And the sibling scan is scoped to the same delegate.
+>
+> The trusted set is unchanged, and the header stays an untrusted input that
+> only names what to verify. No signature, key role, enforcer or custody path
+> moves. The new checks only refuse. Residual: a non-deriving client's random
+> nonce cannot be tied to a sibling, and the burned-nonce check (now paired
+> with its own transfer) still binds it to a header the delegate signed.
+> Scope of this note: `infra/chain/settlement-transfer-verifier.ts`,
+> `modules/x402/eip3009-settlement-evidence.ts`, `modules/mpp/evidence.ts`,
+> `infra/repositories/x402-authorizations.ts`, and the SDK's settlement-report
+> call sites. The rest of this document was
 > not re-read for it, and `last-verified` is not bumped.
 
 > **Re-verified #3967 (2026-10-14, the quote-time budget gate):** the diff

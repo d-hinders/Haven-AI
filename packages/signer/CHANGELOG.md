@@ -15,6 +15,13 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Changed
+
+- `haven_sign_x402`'s description now ends the plain-HTTP flow with the report:
+  after retrying the merchant, call `haven_report_x402_outcome` with the same
+  `payment_header` (#4061). Haven records the merchant settlement only with
+  that header. Text only. No update needed.
+
 ## 0.10.0-alpha.0 — 2026-10-14
 
 ### Changed

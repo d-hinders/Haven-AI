@@ -85,8 +85,13 @@ export type Eip3009SettlementObservation =
   | { outcome: 'recorded' }
   /** Not a funded eip3009 payment, or the hash IS its funding: the caller's gates apply unchanged. */
   | { outcome: 'not_applicable' }
-  /** Refused, nothing written. `retryable` separates "ask again later" from a settled no. */
-  | { outcome: 'unverified'; retryable: boolean; reason: string }
+  /**
+   * Refused, nothing written. `retryable` separates "ask again later" from a
+   * settled no. `errorCode` (#4061) is present only on a refusal a client
+   * must branch on — today the missing proof header, whose remedy is to
+   * re-report WITH the header, unlike every other refusal here.
+   */
+  | { outcome: 'unverified'; retryable: boolean; reason: string; errorCode?: SettlementProofErrorCode }
 
 function metadataOf(intent: Eip3009SettlementIntent): Record<string, unknown> | null {
   const raw = intent.machine_metadata
@@ -128,7 +133,19 @@ export interface Eip3009SettlementNonceProof {
 
 export type Eip3009SettlementProofResult =
   | { ok: true; proof: Eip3009SettlementNonceProof }
-  | { ok: false; reason: string }
+  | { ok: false; reason: string; errorCode?: SettlementProofErrorCode }
+
+/**
+ * #4061: the machine-readable code on the missing-proof-header refusal,
+ * relayed as the evidence 409 body's `error_code`. It is the ONE settlement
+ * refusal whose remedy is to report again — with the payment header the
+ * agent retried the merchant with — so a client (the hosted report tools)
+ * branches on this code, never on the sentence below. Every other refusal
+ * here names a hash or a header that does not belong to this payment, and
+ * re-reporting it re-refuses.
+ */
+export const SETTLEMENT_PROOF_HEADER_MISSING_ERROR_CODE = 'settlement_proof_header_missing'
+export type SettlementProofErrorCode = typeof SETTLEMENT_PROOF_HEADER_MISSING_ERROR_CODE
 
 /** The refusal for a report that carries no header to prove its nonce from. */
 export const MISSING_PROOF_HEADER_REASON =
@@ -172,14 +189,23 @@ function x402TokenEip712Domain(
  * `nonceDerived` is the consistency check (the header nonce equals
  * `deriveX402PaymentNonce(intent.id)`, i.e. the client derives nonces).
  * The header's `to`/`value` are NOT checked here — the chain-side verifier
- * already binds the settlement transfer to the merchant and the exact amount,
- * and the signature covers whatever the delegate actually authorized.
+ * binds the settlement transfer to the merchant and the exact amount, and
+ * since the #4061 review it reads ONLY the transfer paired with this nonce's
+ * `AuthorizationUsed` (the log immediately after it), so the nonce and the
+ * transfer it is held to are the same authorization. The signature covers
+ * whatever the delegate actually authorized.
  */
 export function eip3009SettlementProofFromHeader(
   intent: Eip3009SettlementIntent,
   header: string | null | undefined,
 ): Eip3009SettlementProofResult {
-  if (!header || !header.trim()) return { ok: false, reason: MISSING_PROOF_HEADER_REASON }
+  if (!header || !header.trim()) {
+    return {
+      ok: false,
+      reason: MISSING_PROOF_HEADER_REASON,
+      errorCode: SETTLEMENT_PROOF_HEADER_MISSING_ERROR_CODE,
+    }
+  }
 
   let parsed: unknown
   try {
@@ -280,7 +306,34 @@ export async function observeEip3009MerchantSettlement(
   // The sweep always derives one from the payment id; the agent path derives
   // one from the posted X-PAYMENT header. No proof, no record.
   if (!nonceProof) {
-    return { outcome: 'unverified', retryable: false, reason: MISSING_PROOF_HEADER_REASON }
+    return {
+      outcome: 'unverified',
+      retryable: false,
+      reason: MISSING_PROOF_HEADER_REASON,
+      errorCode: SETTLEMENT_PROOF_HEADER_MISSING_ERROR_CODE,
+    }
+  }
+
+  // #4061: a header LIFTED from a same-agent sibling passes every check
+  // above — same delegate, so the payer and signature are right — and a
+  // transaction that settled the sibling really burned the nonce it names.
+  // That nonce is the SIBLING's derived nonce, which is what gives it away:
+  // a nonce derived from another payment's id was signed for that payment.
+  // Refused before the chain is read. (A non-deriving client's random nonce
+  // cannot be tied to a sibling this way; the burned-nonce check still binds
+  // the record to the header the delegate signed.) Only an agent-reported
+  // proof can be non-derived — the sweep always derives from this payment.
+  if (!nonceProof.nonceDerived) {
+    const siblingIds = await findSiblingX402DelegationPaymentIds(intent.agent_id, intent.id, intent.to_address)
+    if (siblingIds.some((id) => deriveX402PaymentNonce(id).toLowerCase() === nonceProof.nonce)) {
+      return {
+        outcome: 'unverified',
+        retryable: false,
+        reason:
+          'The X-PAYMENT header’s authorization nonce is the derived nonce of another payment of ' +
+          'this agent — the header was signed for that payment, not this one',
+      }
+    }
   }
 
   const merchant = intent.x402_merchant_address ?? intent.merchant_address ?? null
@@ -313,7 +366,7 @@ export async function observeEip3009MerchantSettlement(
     // A burned-but-different nonce that IS another payment's derived nonce
     // names the theft: the report's hash settles a sibling payment.
     if (verification.outcome === 'mismatch' && verification.authorizationUsedNonces) {
-      const siblingIds = await findSiblingX402DelegationPaymentIds(intent.agent_id, intent.id)
+      const siblingIds = await findSiblingX402DelegationPaymentIds(intent.agent_id, intent.id, intent.to_address)
       if (
         siblingIds.some((id) =>
           verification.authorizationUsedNonces!.includes(deriveX402PaymentNonce(id).toLowerCase()),

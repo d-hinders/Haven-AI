@@ -259,7 +259,7 @@ Other flags:
 
 - `--shuffle=<seed>` — deterministic shuffle WITHIN tiers; the seed and the
   executed order are recorded in the report. `--limit` is applied to the
-  canonical order BEFORE the shuffle, so the 5-task PR subset is the same
+  canonical order BEFORE the shuffle, so the 5-task subset is the same
   with or without a shuffle.
 - `--compare-with=<path1>,<path2>,… --new-report=<path>` — the regression-only
   compare (#3992 D): reads the new report plus the earlier ones, compares
@@ -309,7 +309,7 @@ envelope reader, so every grader applies unmodified.
 lane's eval-agent keys are secrets of the protected **`agent-evals` GitHub
 environment** (owner = required reviewer) — NEVER repository secrets, NEVER
 in code, fixtures or artifacts. Every job in `.github/workflows/agent-evals.yml`
-declares that environment, so each run — weekly, PR subset or manual — waits
+declares that environment, so each run waits
 for the owner's approval before any secret reaches a runner. The env
 inventory:
 
@@ -384,10 +384,22 @@ npm run evals -w packages/qa-agent -- --trials=1 --limit=5 \
 
 Every session's `total_cost_usd` (plus wall time and the model the session
 actually ran on) is recorded in `evals-pilot.json.sessions.json` and summed
-into the report (`totalCostUsd`, `model`). Post the per-session numbers on
-#3959 — the pilot sets the cadence. Estimates before the pilot: roughly
-$0.20–0.40 per session on Sonnet, $1–2 on Opus; a 90-session full run on
-Opus would use most of a month's Agent SDK credit (~$100 on Max 5x).
+into the report (`totalCostUsd`, `model`).
+
+**What a run costs the owner.** `total_cost_usd` is Claude Code's client-side
+API-list-price **estimate**, not a charge. With `CLAUDE_CODE_OAUTH_TOKEN`
+(a subscription login) the runs draw from the plan's normal usage limits
+(the 5-hour and weekly windows); the previously announced separate Agent SDK
+credit was paused, and the Max plan's monthly API credit applies only to runs
+authenticated with a Console API key. Nothing is billed beyond the plan
+unless "usage credits" (extra usage) is turned on in claude.ai Settings →
+Usage; that page also shows the plan usage the runs consume. Do not set
+`ANTHROPIC_API_KEY` in this job: it takes precedence over the OAuth token and
+would bill the API instead. Measured on the first pilot (2026-10-19, Sonnet,
+5 tasks × 1 trial): about $0.08 per session estimated, so a full 10 × 3 run
+is roughly $2.40 of estimated usage. Sources: support.claude.com articles
+15036540 (Agent SDK with your plan) and 12429409 (extra usage), and
+code.claude.com/docs/en/costs.
 
 **What the job installs and builds first.** After `npm ci` it installs the
 `claude` CLI, pinned (`@anthropic-ai/claude-code@<exact>`): it is not on the
@@ -398,22 +410,21 @@ pilot run (2026-10-19) died on exactly that before any task ran.
 A CI guard checks both: the build order, and that an exactly pinned CLI
 install runs before the eval step.
 
-**The workflow** (`.github/workflows/agent-evals.yml`) runs three ways:
+**The workflow** (`.github/workflows/agent-evals.yml`) runs **only when the
+owner starts it** with the Run workflow button (owner decision 2026-10-19:
+no schedule and no pull_request trigger, so nothing queues a run that waits
+for the owner's approval). Two choices:
 
-- weekly schedule — the FULL suite against the deployed dev stack;
-- `pull_request` on the trigger paths (`packages/mcp-server/src/server.ts`,
-  `packages/mcp-server/src/tools/**`, the snapshot/corpus JSONs,
-  `packages/sdk/src/skill-content.ts`, `packages/sdk/src/agent-guidance.ts`,
-  `packages/signer/src/tools.ts`, `packages/signer/src/server.ts`,
-  `packages/signer/src/consent.ts`) — the 5-task SUBSET, which builds and
-  boots `packages/mcp-server` FROM THE PR CHECKOUT (it runs locally against
-  `HAVEN_API_URL`, see `packages/mcp-server/src/boot.ts`) pointed at the dev
-  backend, and launches the signer and skill from the workspace, not npm.
-  The subset report names the commit of the hosted MCP it ran against — the
-  PR head, not dev — and states that backend error bodies stay
-  dev-deployed. It is NOT a required check on `dev` or `main`.
-- `workflow_dispatch` — the Run workflow button, choosing full suite or
-  subset; it waits for the same environment approval as every other run.
+- **subset**: 5 tasks. It builds and boots `packages/mcp-server` from the
+  checked-out commit (it runs locally against `HAVEN_API_URL`, see
+  `packages/mcp-server/src/boot.ts`) pointed at the dev backend, and launches
+  the signer and skill from the workspace, not npm. The report names the
+  hosted MCP commit it ran against and states that backend error bodies stay
+  dev-deployed.
+- **full**: every task, against the deployed dev stack.
+
+Either way the run waits for the environment approval. It is NOT a required
+check on `dev` or `main`.
 
 Every run writes a per-task table (pass rate, pass^k, median wall time per
 session) plus total cost, model and hosted MCP provenance to the GitHub job

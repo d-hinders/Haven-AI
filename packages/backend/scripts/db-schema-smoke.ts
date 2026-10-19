@@ -285,6 +285,10 @@ import {
   LIST_SESSION_ACCOUNTS_FOR_USER_SQL,
 } from '../src/infra/repositories/smart-accounts.js'
 import {
+  FIND_OWNER_TRANSFER_MATCHES_SQL,
+  RECORD_OWNER_TRANSFER_SQL,
+} from '../src/infra/repositories/owner-transfers.js'
+import {
   FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL,
   FIND_DELEGATE_SWEEP_AGENT_MATCHES_SQL,
   FIND_MACHINE_PAYMENT_EVIDENCE_DETAIL_SQL,
@@ -950,6 +954,8 @@ const QUERIES: SmokeQuery[] = [
   { name: 'tx-history: account ownership, pinned chain', sql: FIND_ACCOUNT_OWNERSHIP_FOR_CHAIN_SQL },
   { name: 'tx-history: payment_intents agent attribution', sql: FIND_PAYMENT_INTENT_AGENT_MATCHES_SQL },
   { name: 'tx-history: delegate_sweeps agent attribution', sql: FIND_DELEGATE_SWEEP_AGENT_MATCHES_SQL },
+  { name: 'owner-transfers: owner send attribution (#4099)', sql: FIND_OWNER_TRANSFER_MATCHES_SQL },
+  { name: 'owner-transfers: record an owner send (#4099)', sql: RECORD_OWNER_TRANSFER_SQL },
   { name: 'tx-history: confirmed x402 payment_intents funding', sql: FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL },
   { name: 'tx-history: machine-payment evidence detail', sql: FIND_MACHINE_PAYMENT_EVIDENCE_DETAIL_SQL },
   { name: 'catalog-submissions: insert with pending-host dedupe', sql: INSERT_CATALOG_SUBMISSION_SQL },

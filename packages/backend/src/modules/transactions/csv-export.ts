@@ -135,10 +135,10 @@ export function transactionCsvRow(
     tx_hash: tx.hash,
     payment_id: tx.paymentId ?? '',
     agent_name: tx.agentName ?? '',
-    // The raw attribution enum — `human` | `agent` | `unknown`, empty for
-    // inbound and unattributed rows. Never the display string "You", so the
-    // export stays unambiguous for an accountant reading it cold.
-    initiator: tx.initiatedBy ?? '',
+    // #4099 (owner decision, 2026-10-19): the app's words, not the raw
+    // enum — "You", the agent's name, or "Unknown"; empty on inbound rows,
+    // which carry no initiator record.
+    initiator: csvInitiator(tx),
     account_address: tx.accountAddress,
     // #3127: the file reports in fixed SEK (see the route); the user's
     // effective feed currency rides along from the row's own converted
@@ -149,6 +149,26 @@ export function transactionCsvRow(
     // copy of the funding hash (that would defeat the column's whole point)
     // and never a placeholder promising a later record.
     settlement_tx_hash: tx.settlementTxHash ?? '',
+  }
+}
+
+/**
+ * The `initiator` cell (#4099): the same words the app shows. `'human'` is a
+ * recorded owner send; `'unknown'` an outbound row with no agent and no
+ * record, which includes every owner send made before the record existed.
+ * An agent-attributed row always carries its agent's name (both attribution
+ * queries join `agents`); "Agent" is only the guard for a row that does not.
+ */
+export function csvInitiator(tx: EnrichedTransaction): string {
+  switch (tx.initiatedBy) {
+    case 'human':
+      return 'You'
+    case 'agent':
+      return tx.agentName || 'Agent'
+    case 'unknown':
+      return 'Unknown'
+    default:
+      return ''
   }
 }
 

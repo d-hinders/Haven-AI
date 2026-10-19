@@ -8,6 +8,7 @@ import {
   findDelegateSweepAgentMatches,
   findPaymentIntentAgentMatches,
 } from '../../infra/repositories/transaction-history.js'
+import { findOwnerTransferMatches } from '../../infra/repositories/owner-transfers.js'
 import { toCanonicalAddress } from './normalize.js'
 import { paymentAgentIdentityKey } from './ordering.js'
 import { convertedTransactionAmount } from './currency.js'
@@ -114,16 +115,32 @@ export async function enrichTransactionsWithAgents(
       )
     }
 
+    // #4099: owner sends recorded at submit. Keyed on the same (hash,
+    // account, chain) identity, so the sending account's OUTBOUND row is the
+    // one that matches — the receiving side of a transfer between two own
+    // accounts is an inbound row and carries no initiator. Its own fail-soft:
+    // a failed read leaves those rows 'unknown' (never 'human') without
+    // discarding the agent attribution above.
+    const ownerSendIdentities = new Set<string>()
+    try {
+      for (const row of await findOwnerTransferMatches(txHashes, userId, accountIds)) {
+        ownerSendIdentities.add(paymentAgentIdentityKey(row.tx_hash, row.account_id, row.chain_id))
+      }
+    } catch {
+      ownerSendIdentities.clear()
+    }
+
     return transactions.map((tx) => {
-      const agent = agentByTransactionIdentity.get(
-        paymentAgentIdentityKey(tx.hash, tx.accountId, tx.chainId),
-      )
+      const identity = paymentAgentIdentityKey(tx.hash, tx.accountId, tx.chainId)
+      const agent = agentByTransactionIdentity.get(identity)
       // #2097: the initiator record follows the EFFECTIVE attribution — an
       // agent matched here, or one already on the row (confirmed x402 rows
       // arrive pre-attributed from `mergeX402Transactions`), makes the row
-      // 'agent'. An outbound row that stays unattributed is a raw transfer
-      // with no matched intent — 'unknown'. Inbound rows carry no initiator
-      // record (undefined).
+      // 'agent'. An outbound row with a recorded owner send (#4099) is
+      // 'human'. An outbound row that stays unattributed is a raw transfer
+      // with no matched intent or record — 'unknown', including every owner
+      // send made before the record existed (no backfill, no heuristic).
+      // Inbound rows carry no initiator record (undefined).
       const attributedAgentId = agent?.id ?? tx.agentId
       return {
         ...tx,
@@ -156,7 +173,9 @@ export async function enrichTransactionsWithAgents(
         initiatedBy: attributedAgentId
           ? 'agent'
           : tx.direction === 'out'
-            ? 'unknown'
+            ? ownerSendIdentities.has(identity)
+              ? 'human'
+              : 'unknown'
             : undefined,
       }
     })

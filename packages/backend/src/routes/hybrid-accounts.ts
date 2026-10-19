@@ -33,6 +33,7 @@ import {
   type SignerActionBody,
 } from '../rails/hybrid-signer-actions.js'
 import { prepareTransfer, submitTransfer, type TransferBody } from '../rails/hybrid-transfers.js'
+import { recordOwnerTransfer } from '../infra/repositories/owner-transfers.js'
 import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import { loadHybridOwnerConfig } from '../rails/hybrid-account-config.js'
 import { insertHybridAccountPasskey, listAccountPasskeys, passkeyEnrollmentDates } from '../infra/repositories/hybrid-signers.js'
@@ -625,6 +626,30 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     if (!result.ok) {
       const { status, error, details } = result.failure
       return reply.code(status).send(details ? { error, details } : { error })
+    }
+    // #4099: record that the OWNER sent this, so the feed reads it as "You"
+    // rather than an unattributed transfer. Written after the receipt — the
+    // transfer already executed — and fail-soft: a failed write is logged and
+    // the send still answers success. Attribution only; nothing on the
+    // payment path reads the record.
+    if (result.txHash) {
+      try {
+        await recordOwnerTransfer({
+          userId: sub,
+          accountId: resolved.account.accountId,
+          chainId: resolved.account.chainId,
+          txHash: result.txHash,
+          userOpHash: result.userOpHash,
+          tokenAddress: result.transfer.token,
+          toAddress: result.transfer.to,
+          amountRaw: result.transfer.amount.toString(),
+        })
+      } catch (err) {
+        request.log.warn(
+          { err, accountId: resolved.account.accountId, txHash: result.txHash },
+          'owner transfer landed but its record failed; it will read as Unknown',
+        )
+      }
     }
     return { submitted: true, tx_hash: result.txHash }
   })

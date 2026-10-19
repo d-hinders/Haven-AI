@@ -5977,7 +5977,7 @@ export type components = {
             /** @description #3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write. */
             deliveryReference?: string | null;
             /**
-             * @description Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: reserved — nothing populates it today. `unknown`: outbound raw transfer with no matched intent. Absent for inbound (`direction: in`) rows.
+             * @description Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: an outbound transfer the account owner sent from the dashboard, recorded when it was submitted (#4099). `unknown`: outbound raw transfer with no matched intent or owner-send record — including owner sends made before that record existed. Absent for inbound (`direction: in`) rows.
              * @enum {string}
              */
             initiatedBy?: "agent" | "human" | "unknown";
@@ -6076,7 +6076,7 @@ export type components = {
             /** @description #3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write. */
             deliveryReference?: string | null;
             /**
-             * @description Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: reserved — nothing populates it today. `unknown`: outbound raw transfer with no matched intent. Absent for inbound (`direction: in`) rows.
+             * @description Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: an outbound transfer the account owner sent from the dashboard, recorded when it was submitted (#4099). `unknown`: outbound raw transfer with no matched intent or owner-send record — including owner sends made before that record existed. Absent for inbound (`direction: in`) rows.
              * @enum {string}
              */
             initiatedBy?: "agent" | "human" | "unknown";
@@ -6521,7 +6521,7 @@ export type components = {
             x402ResourceUrl: string | null;
             /** @description The newest member’s raw `to` field — the merchant address on outbound payments, the account’s own address on deposits. */
             to: string;
-            /** @description Contact or receipt-merchant name resolved for the counterparty, when one exists; null otherwise (always null on deposits). */
+            /** @description Contact or receipt-merchant name resolved for the counterparty, else the name of the user's own account on the other side of a transfer between two of their accounts (#4099); null otherwise. On deposits it is set only for a transfer from another of the user's own accounts. */
             merchantName: string | null;
             /** @description The activity class, e.g. `delegate_sweep`; null for plain transfers and x402 payments. */
             activityType: string | null;

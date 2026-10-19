@@ -89,7 +89,8 @@ describe('transactionCsvRow', () => {
       tx_hash: '0xabc',
       payment_id: 'pi-1',
       agent_name: 'Buyer',
-      initiator: 'agent',
+      // #4099: the app's words, not the raw enum.
+      initiator: 'Buyer',
       account_address: '0xsafe',
       // #3127: the fixed-reporting-currency statement and the row's own
       // converted currency, appended at the end of the contract.
@@ -116,6 +117,16 @@ describe('transactionCsvRow', () => {
 
     expect(row.tx_hash).toBe('0xabc')
     expect(row.settlement_tx_hash).toBe(`0x${'22'.repeat(32)}`)
+  })
+
+  it("#4099: the initiator column uses the app's words — You, the agent's name, Unknown", () => {
+    expect(transactionCsvRow(tx({ initiatedBy: 'human' }), NEVER_NAMED).initiator).toBe('You')
+    expect(transactionCsvRow(tx({ initiatedBy: 'agent', agentName: 'Buyer' }), NEVER_NAMED).initiator).toBe('Buyer')
+    expect(transactionCsvRow(tx({ initiatedBy: 'unknown' }), NEVER_NAMED).initiator).toBe('Unknown')
+    // No raw enum value ever reaches the file.
+    for (const initiatedBy of ['human', 'agent', 'unknown'] as const) {
+      expect(transactionCsvRow(tx({ initiatedBy, agentName: 'Buyer' }), NEVER_NAMED).initiator).not.toBe(initiatedBy)
+    }
   })
 
   it('takes the counterparty from the sender on an inbound row', () => {

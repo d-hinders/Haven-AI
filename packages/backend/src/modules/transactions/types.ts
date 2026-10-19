@@ -134,11 +134,12 @@ export interface Transaction {
    *   intents, delegate sweeps, and raw explorer / Safe-service transfers
    *   matched to a confirmed intent or sweep during enrichment
    *   (`enrichTransactionsWithAgents`).
-   * - `'human'`: reserved. Nothing populates it today — no
-   *   dashboard-initiated send path exists (the mpp demo and `/send` were
-   *   retired), so no row can currently claim a human initiator.
+   * - `'human'`: an OUTBOUND row matched to an owner send recorded at
+   *   submit (`owner_transfers`, #4099) — the account owner sent it from the
+   *   dashboard (`POST /accounts/hybrid/:address/transfers/submit`).
    * - `'unknown'`: an OUTBOUND raw transfer that stayed unattributed — no
-   *   matched intent or sweep.
+   *   matched intent, sweep or owner-send record. Owner sends made before
+   *   #4099 have no record and stay here; nothing infers them.
    *
    * Absent (undefined) for inbound (`direction: 'in'`) rows, which have no
    * initiator record at all.

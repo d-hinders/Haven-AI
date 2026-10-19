@@ -229,13 +229,16 @@ export function activityOutcome(tx: {
 
 /**
  * The counterparty half of the group key. Inbound rows are deposits: no
- * counterparty beyond the day. Outbound x402 rows name the RESOURCE when one
- * was recorded (the sharpest per-payment counterparty identity — two
- * resources at one merchant are two activity rows), else the merchant
- * address. Every other outbound row groups by the far-side address.
+ * counterparty beyond the day — except a transfer from another of the user's
+ * own accounts (#4099), which keys on that account. Outbound x402 rows name
+ * the RESOURCE when one was recorded (the sharpest per-payment counterparty
+ * identity — two resources at one merchant are two activity rows), else the
+ * merchant address. Every other outbound row groups by the far-side address.
  */
-function counterpartyKey(tx: EnrichedTransaction): string {
-  if (tx.direction === 'in') return 'deposit'
+function counterpartyKey(tx: EnrichedTransaction, ownAccountName: string | null): string {
+  // #4099: an inbound row from another of the user's own accounts is a
+  // named transfer, not a deposit — it groups by that account.
+  if (tx.direction === 'in') return ownAccountName ? `own:${tx.from.toLowerCase()}` : 'deposit'
   if (tx.source === 'x402' && tx.x402ResourceUrl) return tx.x402ResourceUrl
   return tx.to.toLowerCase()
 }
@@ -289,6 +292,28 @@ export interface BuildActivityGroupsParams {
    * the two repository reads). Null/undefined name → the raw address stands.
    */
   resolveMerchantName?: (address: string) => string | null
+  /**
+   * #4099: the name of one of the user's OWN accounts at `address` on
+   * `chainId` (`ownAccountNameResolver`), or null. Names a transfer between
+   * two own accounts on both sides: the sender's row by the receiving
+   * account, the receiver's row by the sending one.
+   */
+  resolveOwnAccountName?: (address: string, chainId: number) => string | null
+}
+
+/**
+ * #4099: own-account name lookup — the export route's rule
+ * (`routes/transactions.ts`): the address is case-insensitive, the chain is
+ * not, because an account exists only on the chain it was created on.
+ */
+export function ownAccountNameResolver(
+  accounts: ReadonlyArray<{ account_address: string; chain_id: number; name: string | null }>,
+): (address: string, chainId: number) => string | null {
+  const names = new Map<string, string>()
+  for (const account of accounts) {
+    if (account.name) names.set(`${account.account_address.toLowerCase()}:${account.chain_id}`, account.name)
+  }
+  return (address, chainId) => names.get(`${address.toLowerCase()}:${chainId}`) ?? null
 }
 
 interface GroupAccumulator {
@@ -320,7 +345,12 @@ export async function buildActivityGroups(
     currency = DEFAULT_TRANSACTION_CURRENCY,
     now = Date.now(),
     resolveMerchantName,
+    resolveOwnAccountName,
   } = params
+
+  /** The own account on the far side of `tx`, when there is one (#4099). */
+  const ownCounterpartyName = (tx: EnrichedTransaction): string | null =>
+    resolveOwnAccountName?.(tx.direction === 'in' ? tx.from : tx.to, tx.chainId) ?? null
 
   // One instant comparison, no tz: the rolling window `[now − 168h, now)` is
   // the same predicate the route's `spend.d7` SQL applies to `confirmed_at`
@@ -336,7 +366,7 @@ export async function buildActivityGroups(
       tx.agentId ?? '',
       tx.chainId,
       tx.tokenAddress?.toLowerCase() ?? 'native',
-      counterpartyKey(tx),
+      counterpartyKey(tx, ownCounterpartyName(tx)),
       day,
       activityOutcome(tx),
       tx.activityType ?? '',
@@ -373,10 +403,13 @@ export async function buildActivityGroups(
         source: sample.source ?? null,
         x402ResourceUrl: sample.x402ResourceUrl ?? null,
         to: sample.to,
+        // Contacts and receipts first, then the user's own accounts (#4099)
+        // — the export's order. Inbound rows are named only when they came
+        // from another own account; every other deposit stays unnamed.
         merchantName:
           sample.direction === 'out'
-            ? (resolveMerchantName?.(sample.to) ?? null)
-            : null,
+            ? (resolveMerchantName?.(sample.to) ?? ownCounterpartyName(sample))
+            : ownCounterpartyName(sample),
         activityType: sample.activityType ?? null,
         direction: sample.direction,
         status: activityOutcome(sample),

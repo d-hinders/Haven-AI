@@ -150,7 +150,16 @@ export async function prepareTransfer(
 export async function submitTransfer(
   account: SignerActionAccount,
   body: TransferBody & { signature?: string; user_operation?: unknown },
-): Promise<{ ok: true; txHash: string | null } | { ok: false; failure: SignerChangeFailure }> {
+): Promise<
+  | {
+      ok: true
+      txHash: string | null
+      userOpHash: string | null
+      /** The validated transfer the signed op carries — for the #4099 record. */
+      transfer: { token: Address; to: Address; amount: bigint }
+    }
+  | { ok: false; failure: SignerChangeFailure }
+> {
   const envelope = validateSignedSubmission(body)
   if (!envelope.ok) return envelope
 
@@ -183,7 +192,15 @@ export async function submitTransfer(
       { userOperation: revived, userOpHash: '0x' as Hex, signingTypedData: null, treasuryAddress: treasury.treasuryAddress },
       body.signature as Hex,
     )
-    return { ok: true, txHash: result.txHash }
+    // #4099: the UserOp hash and the validated transfer ride along for the
+    // owner-send record the route writes; nothing about what was submitted
+    // changes.
+    return {
+      ok: true,
+      txHash: result.txHash,
+      userOpHash: result.userOpHash ?? null,
+      transfer: { token: encoded.token, to: encoded.to, amount: encoded.amount },
+    }
   } catch (err) {
     return { ok: false, failure: { status: 502, error: 'Transfer failed', details: safeDetails(err) } }
   }

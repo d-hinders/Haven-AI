@@ -251,9 +251,14 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
+          # Actions runs bash with -e: without this, claude's non-zero exit
+          # ends the step before the judge can print WHY (pilot run #6).
+          set +e
           mkdir -p "$RUNNER_TEMP/claude-cwd"
-          cd "$RUNNER_TEMP/claude-cwd" && claude -p 'Reply with the single word OK.' --model sonnet --output-format json --max-turns 1 --strict-mcp-config > "$RUNNER_TEMP/claude-login-check.json" 2> "$RUNNER_TEMP/claude-login-check.err"; echo "$?" > "$RUNNER_TEMP/claude-login-check.exit"
-          node scripts/ci/agent-evals-login-check.mjs "$RUNNER_TEMP/claude-login-check.json" "$RUNNER_TEMP/claude-login-check.err" "$RUNNER_TEMP/claude-login-check.exit"
+          # Subshell: the cd must not move the step, or the judge below
+          # resolves against the empty dir and never runs.
+          ( cd "$RUNNER_TEMP/claude-cwd" && claude -p 'Reply with the single word OK.' --model sonnet --output-format json --max-turns 1 --strict-mcp-config ) > "$RUNNER_TEMP/claude-login-check.json" 2> "$RUNNER_TEMP/claude-login-check.err"; echo "$?" > "$RUNNER_TEMP/claude-login-check.exit"
+          node "$GITHUB_WORKSPACE/scripts/ci/agent-evals-login-check.mjs" "$RUNNER_TEMP/claude-login-check.json" "$RUNNER_TEMP/claude-login-check.err" "$RUNNER_TEMP/claude-login-check.exit"
 
       # THE spend step — reached only after the owner approved the
       # environment. The allowlist in QA_EVAL_CLAUDE_CODE_COMMAND IS the

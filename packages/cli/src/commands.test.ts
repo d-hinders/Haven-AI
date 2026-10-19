@@ -283,7 +283,11 @@ describe('budget grant/revoke (#2539)', () => {
       'POST /agents/a1/delegations/build',
     ])
     expect(out.join('\n')).toContain('https://app.haven.test/agents/a1?grant=')
-    expect(out.join('\n')).toContain('sign')
+    // Owner copy rule (copy-guidelines.md): the human approves; nothing in
+    // this block says "sign".
+    const text = out.join('\n')
+    expect(text).toContain('Open this link and approve')
+    expect(text).not.toMatch(/\bsign/i)
   })
 
   it('grant --json returns the reconciled build object with the signing link', async () => {
@@ -382,6 +386,22 @@ describe('budget grant/revoke (#2539)', () => {
     const parsed = JSON.parse(out.join('\n'))
     expect(parsed.status).toBe('pending_revoke')
     expect(parsed.revocation_url).toContain('agents/a1')
+  })
+
+  it('revoke text output says approve, never sign (copy-guidelines.md)', async () => {
+    const api = fakeApi({
+      'GET /agents/a1/delegations': { delegations: [{ delegation_hash: HASH, version: 1, status: 'active' }] },
+      [`POST /agents/a1/delegations/${HASH}/revoke`]: {
+        signature_scheme: 'eip712_userop',
+        revocation_url: 'https://app.haven.test/agents/a1?grant=' + HASH,
+      },
+    })
+    const { deps, out } = harness({ makeApi: () => api })
+    expect(await run(['budget', 'revoke', 'a1', HASH], deps)).toBe(0)
+    const text = out.join('\n')
+    expect(text).toContain('one approval, sponsored (no gas)')
+    expect(text).toContain('Open this link and approve to stop this budget:')
+    expect(text).not.toMatch(/\bsign/i)
   })
 
   it('revoke refuses an already-revoked hash without calling the route', async () => {

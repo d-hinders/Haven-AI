@@ -1726,6 +1726,9 @@ describe('#3774 haven_submit next steps', () => {
     expect(res.data.next_tool_omitted_reason).toContain('haven_report_x402_outcome')
     expect(res.data.reason).toContain('payment_header')
     expect(res.data.reason).toContain('haven_x402_sign_header')
+    // #4061: the report names the header the settlement is recorded against.
+    expect(res.data.next_tool_omitted_reason).toContain('haven_report_x402_outcome, passing that same payment_header')
+    expect(res.data.reason).toContain('plus that same payment_header')
     expect(res.data.reason).not.toContain('haven_complete_mcp_tool')
   })
 
@@ -1757,6 +1760,7 @@ describe('#3774 haven_submit next steps', () => {
     expect(res.data.next_tool_name).toBeUndefined()
     expect(res.data.reason).toContain('haven_complete_mcp_tool')
     expect(res.data.reason).toContain('haven_report_x402_outcome')
+    expect(res.data.reason).toContain('haven_report_x402_outcome, passing that same payment_header')
   })
 
   it('direct payment confirmed: done, no merchant retry', async () => {

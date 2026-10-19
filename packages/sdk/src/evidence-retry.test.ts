@@ -189,3 +189,80 @@ describe('evidence reporting retries a retryable refusal (#2117)', () => {
     expect(sleep).not.toHaveBeenCalled()
   })
 })
+
+// #4061: the settlement report carries the #3925 nonce proof — the payment
+// header the caller sent the merchant — and relays the backend's typed
+// refusal when it is missing.
+describe('the settlement report forwards the proof header and relays its typed refusal (#4061)', () => {
+  const SETTLEMENT_TX = `0x${'cd'.repeat(32)}`
+  // An eip3009-shaped payload (no erc7710 `accepted`), so both names apply.
+  const HEADER = Buffer.from(JSON.stringify({ x402Version: 1, payload: { signature: '0x01' } })).toString('base64')
+
+  it('posts paymentProofHeader with the names the SDK derives from it, exactly as the funding report does', async () => {
+    const post = vi.fn().mockResolvedValue({ ok: true })
+    const { completion } = completionWith(post)
+
+    await expect(
+      completion.reportSettlementEvidence('pay_1', SETTLEMENT_TX, { paymentHeader: HEADER }),
+    ).resolves.toEqual({ outcome: 'confirmed' })
+
+    expect(post).toHaveBeenCalledWith('/machine-payments/evidence', expect.objectContaining({
+      paymentId: 'pay_1',
+      rail: 'x402',
+      txHash: SETTLEMENT_TX,
+      paymentProofHeaderName: 'PAYMENT-SIGNATURE, X-PAYMENT',
+      paymentProofHeader: HEADER,
+    }))
+  })
+
+  it('without a header posts no proof fields (an erc7710 report needs none)', async () => {
+    const post = vi.fn().mockResolvedValue({ ok: true })
+    const { completion } = completionWith(post)
+
+    await completion.reportSettlementEvidence('pay_1', SETTLEMENT_TX)
+    await completion.reportSettlementEvidence('pay_1', SETTLEMENT_TX, { paymentHeader: '   ' })
+
+    // What goes on the wire: `reportEvidence` spells every optional key, so
+    // read the serialized body (undefined keys drop out of JSON).
+    for (const call of post.mock.calls) {
+      const wire = JSON.parse(JSON.stringify(call[1])) as Record<string, unknown>
+      expect(wire).not.toHaveProperty('paymentProofHeader')
+      expect(wire).not.toHaveProperty('paymentProofHeaderName')
+    }
+  })
+
+  it('the one-attempt report forwards the header too', async () => {
+    const post = vi.fn().mockResolvedValue({ ok: true })
+    const { completion } = completionWith(post)
+
+    await completion.reportSettlementEvidenceOnce('pay_1', SETTLEMENT_TX, HEADER)
+
+    expect(post.mock.calls[0][1]).toMatchObject({ paymentProofHeader: HEADER })
+  })
+
+  it('a refusal carrying error_code relays it as errorCode, beside the reason', async () => {
+    const post = vi.fn().mockRejectedValue(
+      new HavenApiError('refused', 409, {
+        error: 'The reported settlement transaction was not recorded for this payment — the payment is unchanged',
+        reason: 'The settlement report carries no X-PAYMENT payment header',
+        error_code: 'settlement_proof_header_missing',
+      }),
+    )
+    const { completion } = completionWith(post)
+
+    await expect(completion.reportSettlementEvidence('pay_1', SETTLEMENT_TX)).resolves.toEqual({
+      outcome: 'refused',
+      statusCode: 409,
+      reason: 'The settlement report carries no X-PAYMENT payment header',
+      errorCode: 'settlement_proof_header_missing',
+    })
+  })
+
+  it('a refusal without error_code carries no errorCode key', async () => {
+    const post = vi.fn().mockRejectedValue(new HavenApiError('refused', 409, { error: 'x', reason: 'y' }))
+    const { completion } = completionWith(post)
+
+    const outcome = await completion.reportSettlementEvidence('pay_1', SETTLEMENT_TX)
+    expect(outcome).not.toHaveProperty('errorCode')
+  })
+})

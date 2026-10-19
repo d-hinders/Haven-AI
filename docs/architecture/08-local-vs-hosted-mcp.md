@@ -377,10 +377,12 @@ The decomposed generic hosted flow remains, in two shapes since
 EIP-3009 bridge
 haven_pay_x402_quote → haven_sign → haven_submit
   → haven_x402_sign_header → merchant retry
-  → haven_report_x402_outcome
+  → haven_report_x402_outcome          (#4061: with the payment_header you retried with
+                                         whenever it carries settlement evidence)
   → haven_report_settlement_evidence   (#3475 follow-up: only on an accepted outcome
                                          with no settlement recorded yet, and only if the
-                                         merchant returned PAYMENT-RESPONSE.transaction)
+                                         merchant returned PAYMENT-RESPONSE.transaction;
+                                         #4061: pass the same payment_header)
 
 erc7710 direct settlement
 haven_pay_x402_quote → haven_sign

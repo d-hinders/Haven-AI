@@ -2049,9 +2049,12 @@ export class HavenClient {
           fundingTxHash &&
           settlementCandidate.toLowerCase() !== fundingTxHash.toLowerCase()
         ) {
+          // #4061: with the header this call sent the merchant — the #3925
+          // nonce proof; without it the backend refuses the record.
           settlementEvidenceOutcome = await this.merchantCompletion.reportSettlementEvidenceOnce(
             evidenceContext.paymentId,
             settlementCandidate,
+            input.paymentHeader,
           )
         }
       }
@@ -2107,12 +2110,19 @@ export class HavenClient {
    * Haven verifies the delegate → merchant transfer on-chain
    * (`observeEip3009MerchantSettlement`) and records it beside the funding
    * hash, so receipts name the merchant's settlement.
+   *
+   * #4061: on eip3009 pass `options.paymentHeader` — the payment header you
+   * sent the merchant on your paid retry. Since #3925 it is the proof the
+   * settlement is recorded against; without it the report is `refused` with
+   * `errorCode: 'settlement_proof_header_missing'`, and repeating it WITH the
+   * header can succeed.
    */
   async reportSettlementEvidence(
     paymentId: string,
     settlementTxHash: string,
+    options: { paymentHeader?: string } = {},
   ): Promise<EvidenceReportOutcome> {
-    return await this.merchantCompletion.reportSettlementEvidence(paymentId, settlementTxHash)
+    return await this.merchantCompletion.reportSettlementEvidence(paymentId, settlementTxHash, options)
   }
 
   /**

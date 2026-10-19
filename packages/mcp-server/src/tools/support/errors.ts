@@ -25,6 +25,7 @@ import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
   type AgentNextStep,
+  type EvidenceReportOutcome,
   type HavenClient,
   type NextStep,
 } from '@haven_ai/sdk'
@@ -177,6 +178,25 @@ function stateErrorNextStep(nextAction: string, paymentId: string | undefined): 
     nextTool: null,
     nextToolOmittedReason: 'the payment is in a state this tool cannot act on; next_action and message say what can',
   })
+}
+
+/**
+ * #4061: the backend's `error_code` on the #3925 refusal of an eip3009
+ * merchant-settlement report that carried no payment header
+ * (`SETTLEMENT_PROOF_HEADER_MISSING_ERROR_CODE` in
+ * `packages/backend/src/modules/x402/eip3009-settlement-evidence.ts`), and
+ * the hosted code both settlement reports map it to. It is the ONE settlement
+ * refusal a repeated report can clear — with `payment_header` — so it is the
+ * one arm that names the evidence tool again rather than "do not re-report".
+ * Both report tools (s2811's haven_report_x402_outcome, s2812's
+ * haven_report_settlement_evidence) branch on the code, never the sentence.
+ */
+const SETTLEMENT_PROOF_HEADER_MISSING_ERROR_CODE = 'settlement_proof_header_missing'
+export const SETTLEMENT_PROOF_HEADER_MISSING_CODE = 'SETTLEMENT_PROOF_HEADER_MISSING'
+
+/** #4061: true when a settlement report was refused for want of the proof header. */
+export function isMissingProofHeaderRefusal(outcome: EvidenceReportOutcome | undefined): boolean {
+  return outcome?.outcome === 'refused' && outcome.errorCode === SETTLEMENT_PROOF_HEADER_MISSING_ERROR_CODE
 }
 
 /** #3416: the backend's `error_code` for a chain this deployment cannot serve a bundler leg on. */

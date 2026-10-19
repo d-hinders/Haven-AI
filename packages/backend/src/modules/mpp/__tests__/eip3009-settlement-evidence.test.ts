@@ -38,7 +38,10 @@ vi.mock('../../accounting/index.js', async (importOriginal) => ({
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import { attachEvidenceHandler, attachMachinePaymentEvidence, listReceipts } from '../evidence.js'
-import { RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL } from '../../../infra/repositories/x402-authorizations.js'
+import {
+  RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL,
+  findSiblingX402DelegationPaymentIds,
+} from '../../../infra/repositories/x402-authorizations.js'
 import { feedSettledPaymentBestEffort } from '../../accounting/index.js'
 import { deriveX402PaymentNonce } from '@haven_ai/sdk/edge'
 
@@ -173,7 +176,12 @@ function goodReceipt(
   return {
     status: 1,
     blockNumber: 42,
-    logs: [transferLog(overrides), ...used.map((nonce) => authorizationUsedLog(DELEGATE, nonce))],
+    // #4061 review: FiatToken v2's real order — each authorization's
+    // `AuthorizationUsed`, then its own `Transfer` (the verifier pairs them).
+    logs:
+      used.length === 0
+        ? [transferLog(overrides)]
+        : used.flatMap((nonce) => [authorizationUsedLog(DELEGATE, nonce), transferLog(overrides)]),
   }
 }
 
@@ -574,6 +582,9 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
       const body = result.body as { error: string; reason: string }
       expect(body.reason).toMatch(/already recorded for another payment/)
       expect(body.error).not.toMatch(/not confirmed/)
+      // #4061: only the missing-header refusal carries a code — a client that
+      // re-reports on the code must never be told to re-report this one.
+      expect(body).not.toHaveProperty('error_code')
     })
 
     // #3529: the hosted tool classifies on the REASON's PRESENCE — a
@@ -691,6 +702,59 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
   })
 
   describe('nonce attribution (#3925)', () => {
+    // #4061 review (should-fix 1): one transaction settling TWO of the
+    // delegate's authorizations. FiatToken emits each authorization's
+    // `AuthorizationUsed` immediately followed by its own `Transfer`
+    // (`_markAuthorizationAsUsed`, then `_transfer`). Here the header's nonce
+    // was burned for a transfer to SOMEONE ELSE; the delegate → merchant
+    // transfer of this payment's amount belongs to the OTHER authorization.
+    it('a nonce burned in a two-authorization tx cannot borrow the other authorization’s transfer', async () => {
+      const { agentId, userId } = await seedAgent()
+      const a = await seedFunded({ agentId, userId })
+      const OTHER_NONCE = `0x${'88'.repeat(32)}`
+      getTransactionReceipt.mockResolvedValue({
+        status: 1,
+        blockNumber: 42,
+        logs: [
+          authorizationUsedLog(DELEGATE, TEST_NONCE),
+          transferLog({ to: OTHER }),
+          authorizationUsedLog(DELEGATE, OTHER_NONCE),
+          transferLog(),
+        ],
+      })
+
+      const answered = await attachEvidenceHandler(agentId, {
+        paymentId: a.id,
+        rail: 'x402',
+        txHash: SETTLE_A,
+        paymentProofHeader: await settlementHeader({ nonce: TEST_NONCE }),
+      })
+
+      expect(answered.statusCode).toBe(409)
+      expect((answered.body as { reason?: string }).reason).toMatch(/that authorization's own Transfer/)
+      expect(await recordedHash(a.id)).toBeNull()
+    })
+
+    it('in the same two-authorization tx, the nonce whose OWN transfer pays this merchant records', async () => {
+      const { agentId, userId } = await seedAgent()
+      const a = await seedFunded({ agentId, userId })
+      const OTHER_NONCE = `0x${'88'.repeat(32)}`
+      getTransactionReceipt.mockResolvedValue({
+        status: 1,
+        blockNumber: 42,
+        logs: [
+          authorizationUsedLog(DELEGATE, OTHER_NONCE),
+          transferLog({ to: OTHER }),
+          authorizationUsedLog(DELEGATE, TEST_NONCE),
+          transferLog(),
+        ],
+      })
+
+      await report(agentId, a.id, SETTLE_A) // default header: TEST_NONCE
+
+      expect(await recordedHash(a.id)).toBe(SETTLE_A)
+    })
+
     it('a hash whose receipt burned A’s nonce is refused against same-shaped B — the sibling accusation, nothing written (red on 641f527d)', async () => {
       const { agentId, userId } = await seedAgent()
       const a = await seedFunded({ agentId, userId })
@@ -710,6 +774,34 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
       expect((answered.body as { reason?: string }).reason).toMatch(/settles another payment/)
       expect(await recordedHash(b.id)).toBeNull()
       expect(await recordedHash(a.id)).toBeNull()
+    })
+
+    // #4061: a header LIFTED from a same-agent sibling. Same delegate, so the
+    // payer and signature checks pass; the nonce it names is A's own derived
+    // nonce, and the transaction (A's settlement) really burned it — so the
+    // burned-nonce check passes too, against B.
+    it('a header lifted from same-shaped sibling A, reported with A’s settlement against B, is refused before the chain is read', async () => {
+      const { agentId, userId } = await seedAgent()
+      const a = await seedFunded({ agentId, userId })
+      const b = await seedFunded({ agentId, userId })
+      getTransactionReceipt.mockResolvedValue(goodReceipt({}, [deriveX402PaymentNonce(a.id)]))
+
+      const answered = await attachEvidenceHandler(agentId, {
+        paymentId: b.id,
+        rail: 'x402',
+        txHash: SETTLE_A,
+        paymentProofHeader: await derivedSettlementHeader(a.id),
+      })
+
+      expect(answered.statusCode).toBe(409)
+      expect((answered.body as { reason?: string }).reason).toMatch(/derived nonce of another payment/)
+      // Not the missing-header code: re-reporting this header re-refuses.
+      expect(answered.body).not.toHaveProperty('error_code')
+      expect(getTransactionReceipt).not.toHaveBeenCalled()
+      expect(await recordedHash(b.id)).toBeNull()
+      // A keeps its own settlement: reported with its own header, it records.
+      await report(agentId, a.id, SETTLE_A, await derivedSettlementHeader(a.id))
+      expect(await recordedHash(a.id)).toBe(SETTLE_A)
     })
 
     it('the same hash against A — the payment whose nonce it burned — is recorded, nonce-bound', async () => {
@@ -776,6 +868,38 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
       expect(answered.statusCode).toBe(409)
       expect((answered.body as { reason?: string }).reason).toMatch(/no X-PAYMENT payment header/)
       expect((answered.body as { reason?: string }).reason).toMatch(/payment header that was sent to the merchant/)
+      // #4061: the refusal carries a machine code, so a client branches on
+      // the code (re-report WITH the header), never on the sentence.
+      expect((answered.body as { error_code?: string }).error_code).toBe('settlement_proof_header_missing')
+      expect(await recordedHash(a.id)).toBeNull()
+    })
+
+    it('the sibling scan reads only payments funded to the same delegate (#4061 review)', async () => {
+      const { agentId, userId } = await seedAgent()
+      const a = await seedFunded({ agentId, userId })
+      const sameKey = await seedFunded({ agentId, userId })
+      const otherKey = await seedFunded({ agentId, userId })
+      await db.query(`UPDATE payment_intents SET to_address = $1 WHERE id = $2`, [OTHER, otherKey.id])
+
+      const siblings = await findSiblingX402DelegationPaymentIds(agentId, a.id, DELEGATE.toLowerCase())
+
+      expect(siblings).toEqual([sameKey.id])
+    })
+
+    it('a whitespace-only header is no header: the same typed missing-header refusal (#4061 review)', async () => {
+      const { agentId, userId } = await seedAgent()
+      const a = await seedFunded({ agentId, userId })
+      settleReceiptFor(a.id)
+
+      const answered = await attachEvidenceHandler(agentId, {
+        paymentId: a.id,
+        rail: 'x402',
+        txHash: SETTLE_A,
+        paymentProofHeader: '   ',
+      })
+
+      expect(answered.statusCode).toBe(409)
+      expect((answered.body as { error_code?: string }).error_code).toBe('settlement_proof_header_missing')
       expect(await recordedHash(a.id)).toBeNull()
     })
 
@@ -802,7 +926,7 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
       getTransactionReceipt.mockResolvedValue({
         status: 1,
         blockNumber: 42,
-        logs: [transferLog(), authorizationUsedLog(DELEGATE, TEST_NONCE, OTHER)],
+        logs: [authorizationUsedLog(DELEGATE, TEST_NONCE, OTHER), transferLog()],
       })
 
       const answered = await attachEvidenceHandler(agentId, {

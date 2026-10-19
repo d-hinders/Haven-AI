@@ -336,7 +336,10 @@ export class MerchantCompletion {
       !isZeroSettlementTxHash(settlementCandidate) &&
       settlementCandidate.toLowerCase() !== receipt.txHash.toLowerCase()
     ) {
-      await this.reportSettlementEvidenceOnce(receipt.paymentId, settlementCandidate)
+      // #4061: WITH the header this retry sent — since #3925 it is the
+      // nonce proof the backend records the settlement against, and a
+      // settlement report without it is refused.
+      await this.reportSettlementEvidenceOnce(receipt.paymentId, settlementCandidate, receipt.paymentHeader)
     }
 
     await this.reportMerchantReceipt(receipt.paymentId, retryResponse)
@@ -749,10 +752,14 @@ export class MerchantCompletion {
         // leg is already confirmed — so it is carried verbatim, and left
         // absent (not empty) when the body has none.
         const reason = refusalReasonFromBody(err)
+        // #4061: the refusal's machine code, when the backend sent one
+        // (`settlement_proof_header_missing`). Absent, not empty, otherwise.
+        const errorCode = refusalErrorCodeFromBody(err)
         return {
           outcome: 'refused',
           statusCode: statusCode ?? 0,
           ...(reason ? { reason } : {}),
+          ...(errorCode ? { errorCode } : {}),
         }
       }
       return { outcome: 'retryable', statusCode }
@@ -790,10 +797,20 @@ export class MerchantCompletion {
    * gate uses, so a caller cannot "fix" a missing hash by reporting the demo
    * merchant's own marker and getting a different verdict than the settle
    * path already gave it.
+   *
+   * #4061: `options.paymentHeader` is the payment header the caller sent to
+   * the merchant on its paid retry. On eip3009 it is REQUIRED for the record
+   * (#3925): its signed authorization proves the nonce the settlement burned
+   * is this payment's, and a report without it is refused with
+   * `errorCode: 'settlement_proof_header_missing'`. It is forwarded exactly
+   * as the funding report forwards it (`paymentProofHeader` plus the names
+   * `x402PaymentHeaderNamesSent` derives from the same payload). erc7710
+   * needs none — Haven assembled that header itself.
    */
   async reportSettlementEvidence(
     paymentId: string,
     settlementTxHash: string,
+    options: { paymentHeader?: string } = {},
   ): Promise<EvidenceReportOutcome> {
     if (isZeroSettlementTxHash(settlementTxHash)) {
       throw new HavenZeroSettlementHashError(paymentId)
@@ -802,6 +819,7 @@ export class MerchantCompletion {
       paymentId,
       rail: 'x402',
       txHash: settlementTxHash,
+      ...settlementProofFields(options.paymentHeader),
     })
   }
 
@@ -818,16 +836,38 @@ export class MerchantCompletion {
    * before this call (well-formed, non-zero, different from the funding hash
    * case-insensitively), so there is no client-side refusal here — the
    * backend verifies on-chain and is the only judge.
+   *
+   * #4061: `paymentHeader` is the header the paid retry sent — the #3925
+   * nonce proof, forwarded as `reportSettlementEvidence` forwards it. Both
+   * callers hold it; without it the backend refuses the record.
    */
   async reportSettlementEvidenceOnce(
     paymentId: string,
     settlementTxHash: string,
+    paymentHeader?: string,
   ): Promise<EvidenceReportOutcome> {
     return this.postEvidenceOnce({
       paymentId,
       rail: 'x402',
       txHash: settlementTxHash,
+      ...settlementProofFields(paymentHeader),
     })
+  }
+}
+
+/**
+ * #4061: the proof-header fields of a settlement report — the SAME pair the
+ * funding report posts (`paymentProofHeader`, and `paymentProofHeaderName`
+ * from `x402PaymentHeaderNamesSent`, the rule the request itself used), or
+ * nothing when the caller holds no header. A blank header is no header.
+ */
+function settlementProofFields(
+  paymentHeader: string | undefined,
+): { paymentProofHeader?: string; paymentProofHeaderName?: string } {
+  if (!paymentHeader || !paymentHeader.trim()) return {}
+  return {
+    paymentProofHeaderName: x402PaymentHeaderNamesSent(paymentHeader),
+    paymentProofHeader: paymentHeader,
   }
 }
 
@@ -857,7 +897,13 @@ export class MerchantCompletion {
 export type EvidenceReportOutcome =
   | { outcome: 'confirmed' }
   | { outcome: 'retryable'; statusCode: number | undefined }
-  | { outcome: 'refused'; statusCode: number; reason?: string }
+  /**
+   * #4061: `errorCode` is the backend body's `error_code`, present only when
+   * it sent one — today only `settlement_proof_header_missing`, the eip3009
+   * refusal of a settlement report that carried no payment header. Branch on
+   * it, never on `reason`.
+   */
+  | { outcome: 'refused'; statusCode: number; reason?: string; errorCode?: string }
 
 /**
  * #3529: read the evidence-report refusal reason the backend relayed
@@ -874,6 +920,15 @@ function refusalReasonFromBody(err: unknown): string | undefined {
   if (body === null || typeof body !== 'object' || Array.isArray(body)) return undefined
   const reason = (body as Record<string, unknown>).reason
   return typeof reason === 'string' && reason.length > 0 ? reason : undefined
+}
+
+/** #4061: the evidence refusal's `error_code`, read the way `refusalReasonFromBody` reads `reason`. */
+function refusalErrorCodeFromBody(err: unknown): string | undefined {
+  if (!(err instanceof HavenApiError)) return undefined
+  const body: unknown = err.body
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) return undefined
+  const code = (body as Record<string, unknown>).error_code
+  return typeof code === 'string' && code.length > 0 ? code : undefined
 }
 
 /**

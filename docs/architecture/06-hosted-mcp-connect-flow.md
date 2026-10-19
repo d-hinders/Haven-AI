@@ -212,7 +212,9 @@ haven_quote_x402 / haven_pay_x402_quote
   → merchant retry or haven_complete_mcp_tool
   → haven_report_x402_outcome          (only when YOU did the retry; pass the merchant's
                                          PAYMENT-RESPONSE as payment_response on the SAME
-                                         call when it names a transaction — #3727)
+                                         call when it names a transaction — #3727 — plus
+                                         payment_header, the header you retried with: the
+                                         reported settlement is recorded only with it, #4061)
   (the SDK's own delivery — hosted complete/settle and the local paid retry —
    reports the merchant settlement itself, #3764; haven_report_settlement_evidence
    only when an outcome answer names it)

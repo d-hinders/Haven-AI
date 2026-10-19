@@ -320,10 +320,13 @@ request, this is the only way it can learn the purchase failed — without it a
 failed purchase reads as complete for fifteen minutes. If the merchant's
 \`PAYMENT-RESPONSE\` header names a \`transaction\`, pass that raw header as
 \`payment_response\` on the SAME \`mcp__haven__haven_report_x402_outcome\`
-call: Haven decodes it, verifies the settlement on-chain, and the receipt then
-shows the merchant's settlement, not only the funding transaction. Call
+call, together with \`payment_header\`: the exact header you retried the
+merchant with. Haven records a reported settlement only with that header,
+which proves the settlement is this payment's. It decodes the response,
+verifies the settlement on-chain, and the receipt then shows the merchant's
+settlement, not only the funding transaction. Call
 \`mcp__haven__haven_report_settlement_evidence\` only when the outcome answer
-names it as the next step. On the **erc7710** scheme (the pay result says
+names it as the next step, and pass the same \`payment_header\` there too. On the **erc7710** scheme (the pay result says
 \`settlement_scheme: "erc7710"\`), sign with \`mcp__haven-signer__haven_sign\`,
 then \`mcp__haven__haven_submit\` with \`settlement_scheme: "erc7710"\`
 returns the \`payment_header\`; retry the merchant yourself with it as

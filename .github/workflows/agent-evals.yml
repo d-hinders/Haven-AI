@@ -225,13 +225,19 @@ jobs:
           QA_HAVEN_API_URL: ${{ vars.AGENT_EVALS_HAVEN_API_URL || secrets.AGENT_EVALS_HAVEN_API_URL }}
           DEV_HOSTED_MCP_URL: ${{ vars.QA_HOSTED_MCP_URL || secrets.QA_HOSTED_MCP_URL }}
           AGENT_EVALS_API_KEY: ${{ secrets.AGENT_EVALS_API_KEY }}
+          # Public address the signer verifies x402 expected-context bindings
+          # against; without it every x402 signing refuses (signer core.ts).
+          HAVEN_X402_BINDING_SIGNER: ${{ vars.QA_X402_BINDING_SIGNER }}
         run: |
           set -euo pipefail
           if [ "$MODE" = 'subset' ]; then HOSTED_URL='http://127.0.0.1:8788/v1'; else HOSTED_URL="$DEV_HOSTED_MCP_URL"; fi
           if [ -z "$HOSTED_URL" ]; then echo "::error::no hosted MCP URL for mode $MODE — set QA_HOSTED_MCP_URL (full mode)"; exit 1; fi
           # The API key lands in this config file's Authorization header —
-          # RUNNER_TEMP only, never committed, never echoed.
-          CRED="$RUNNER_TEMP/haven-eval-agent" HOSTED_URL="$HOSTED_URL" AGENT_EVALS_API_KEY="$AGENT_EVALS_API_KEY" node -e "const fs = require('node:fs'); const cfg = { mcpServers: { 'haven-eval': { type: 'http', url: process.env.HOSTED_URL, headers: { Authorization: 'Bearer ' + process.env.AGENT_EVALS_API_KEY } }, 'haven-signer-eval': { type: 'stdio', command: 'node', args: ['packages/signer/dist/cli.js', '--ack'], env: { HAVEN_CREDENTIALS: process.env.CRED + '/agent.json' } } } }; fs.writeFileSync(process.env.RUNNER_TEMP + '/haven-eval-mcp.json', JSON.stringify(cfg, null, 2), { mode: 0o600 });"
+          # RUNNER_TEMP only, never committed, never echoed. The signer path is
+          # ABSOLUTE: claude starts stdio servers from its own cwd, which is not
+          # the repo root (the eval CLI runs from packages/qa-agent, and claude
+          # itself from an empty dir, below).
+          CRED="$RUNNER_TEMP/haven-eval-agent" HOSTED_URL="$HOSTED_URL" AGENT_EVALS_API_KEY="$AGENT_EVALS_API_KEY" node -e "const fs = require('node:fs'); const cfg = { mcpServers: { 'haven-eval': { type: 'http', url: process.env.HOSTED_URL, headers: { Authorization: 'Bearer ' + process.env.AGENT_EVALS_API_KEY } }, 'haven-signer-eval': { type: 'stdio', command: 'node', args: [process.env.GITHUB_WORKSPACE + '/packages/signer/dist/cli.js', '--ack'], env: { HAVEN_CREDENTIALS: process.env.CRED + '/agent.json', HAVEN_X402_BINDING_SIGNER: process.env.HAVEN_X402_BINDING_SIGNER } } } }; fs.writeFileSync(process.env.RUNNER_TEMP + '/haven-eval-mcp.json', JSON.stringify(cfg, null, 2), { mode: 0o600 });"
           echo "mcp config written for $MODE (hosted: $HOSTED_URL)"
 
       # THE spend step — reached only after the owner approved the
@@ -241,12 +247,16 @@ jobs:
         env:
           QA_EVAL_ADAPTER: claude-code
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # `claude` runs from an EMPTY directory so no CLAUDE.md or project
+          # config from this repo reaches the agent under test, and
+          # --strict-mcp-config loads only the two servers wired here.
           QA_EVAL_CLAUDE_CODE_COMMAND: >-
+            mkdir -p "$RUNNER_TEMP/claude-cwd" && cd "$RUNNER_TEMP/claude-cwd" &&
             claude -p {instruction} --output-format stream-json --verbose
             --model sonnet --max-turns 30
             --allowedTools mcp__haven-eval mcp__haven-signer-eval
-            --disallowedTools Bash,BashOutput,KillShell,Read,Edit,Write,NotebookEdit,Glob,Grep,WebFetch,WebSearch,TodoWrite,Task,SlashCommand,ExitPlanMode
-            --mcp-config "$RUNNER_TEMP/haven-eval-mcp.json"
+            --disallowedTools Bash,BashOutput,KillShell,Read,Edit,Write,NotebookEdit,Glob,Grep,WebFetch,WebSearch,TodoWrite,Task,SlashCommand,ExitPlanMode,Skill,Workflow,ToolSearch,Monitor,CronCreate,CronDelete,CronList,ScheduleWakeup,SendMessage,ListAgents,TaskStop,EnterWorktree,ExitWorktree,PushNotification
+            --mcp-config "$RUNNER_TEMP/haven-eval-mcp.json" --strict-mcp-config
           QA_EVAL_CLAUDE_CODE_SESSION_LOG: ${{ runner.temp }}/claude-sessions
           QA_HAVEN_API_URL: ${{ vars.AGENT_EVALS_HAVEN_API_URL || secrets.AGENT_EVALS_HAVEN_API_URL }}
           QA_EVAL_AGENT_API_KEY: ${{ secrets.AGENT_EVALS_API_KEY }}
@@ -267,7 +277,7 @@ jobs:
         run: |
           set -o pipefail
           if [ "$MODE" = 'subset' ]; then SOURCE=pr-checkout; HOSTED_URL='http://127.0.0.1:8788/v1'; else SOURCE=dev-deployed; HOSTED_URL="$DEV_HOSTED_MCP_URL"; fi
-          npm run evals -w packages/qa-agent -- --trials="$TRIALS" $LIMIT_ARG --out=evals-report.json --hosted-mcp-source="$SOURCE" --hosted-mcp-commit="$HOSTED_COMMIT" --hosted-mcp-url="$HOSTED_URL"
+          npm run evals -w packages/qa-agent -- --trials="$TRIALS" $LIMIT_ARG --out="$GITHUB_WORKSPACE/evals-report.json" --hosted-mcp-source="$SOURCE" --hosted-mcp-commit="$HOSTED_COMMIT" --hosted-mcp-url="$HOSTED_URL"
 
       - name: Append the results table to the job summary
         if: always() && hashFiles('evals-report.json.summary.md') != ''

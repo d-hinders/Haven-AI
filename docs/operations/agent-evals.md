@@ -326,9 +326,21 @@ for any of these.
 visible in the workflow file (`QA_EVAL_CLAUDE_CODE_COMMAND`):
 `--allowedTools mcp__haven-eval mcp__haven-signer-eval` (the hosted + signer
 pair the job wires through `--mcp-config`) and an explicit
-`--disallowedTools` list denying every built-in Bash/file/web tool. Anything
+`--disallowedTools` list denying every built-in Bash/file/web tool and the
+other built-ins (Skill, Workflow, ToolSearch, scheduling, messaging). Anything
 not allowlisted is denied in headless mode; a denied call still appears in
 the stream, which is what the no-retry graders need.
+
+**Isolation of the agent under test.** `claude` runs from an empty directory
+(`$RUNNER_TEMP/claude-cwd`), so no `CLAUDE.md` or project config from this
+repo reaches it, and `--strict-mcp-config` loads only the two wired servers.
+Because of that, the signer server is launched by absolute path
+(`$GITHUB_WORKSPACE/packages/signer/dist/cli.js`) with
+`HAVEN_X402_BINDING_SIGNER` from `vars.QA_X402_BINDING_SIGNER` (without it
+every x402 signing refuses), and the report is written to
+`$GITHUB_WORKSPACE/evals-report.json`, where the summary and upload steps read
+it. A session that exits non-zero but left a stream (the turn limit) is still
+graded, with its exit code recorded.
 
 **Env the lane needs** (set by the workflow; set the same names by hand for
 a local run):

@@ -99,7 +99,7 @@ the boundaries.**
   flagged the missing delegation routes as "a real capability gap" while noting
   it matches the file's own pattern — the gap is normalised.
 - Honest negative result: a live-drift probe (frontend's hand-written `Agent`
-  interface vs the backend's `AgentRow`) found **no** current mismatch. Filed on
+  interface vs the backend's AgentRow) found **no** current mismatch. Filed on
   the precedent and the coverage gap, not on a live outage.
 - Unlock: the spec is already importable in tests (`docs-drift.test.ts` reads
   `openapiSpec.paths`) and Fastify exposes its routing table at boot — the

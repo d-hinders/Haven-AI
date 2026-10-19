@@ -694,6 +694,38 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
   })
 
   describe('nonce attribution (#3925)', () => {
+    // #4061 review (should-fix 1): one transaction settling TWO of the
+    // delegate's authorizations. FiatToken emits each authorization's
+    // `AuthorizationUsed` immediately followed by its own `Transfer`
+    // (`_markAuthorizationAsUsed`, then `_transfer`). Here the header's nonce
+    // was burned for a transfer to SOMEONE ELSE; the delegate → merchant
+    // transfer of this payment's amount belongs to the OTHER authorization.
+    it('a nonce burned in a two-authorization tx cannot borrow the other authorization’s transfer (CHARACTERIZATION, pre-fix: recorded)', async () => {
+      const { agentId, userId } = await seedAgent()
+      const a = await seedFunded({ agentId, userId })
+      const OTHER_NONCE = `0x${'88'.repeat(32)}`
+      getTransactionReceipt.mockResolvedValue({
+        status: 1,
+        blockNumber: 42,
+        logs: [
+          authorizationUsedLog(DELEGATE, TEST_NONCE),
+          transferLog({ to: OTHER }),
+          authorizationUsedLog(DELEGATE, OTHER_NONCE),
+          transferLog(),
+        ],
+      })
+
+      const answered = await attachEvidenceHandler(agentId, {
+        paymentId: a.id,
+        rail: 'x402',
+        txHash: SETTLE_A,
+        paymentProofHeader: await settlementHeader({ nonce: TEST_NONCE }),
+      })
+
+      expect(answered.statusCode).toBe(202)
+      expect(await recordedHash(a.id)).toBe(SETTLE_A)
+    })
+
     it('a hash whose receipt burned A’s nonce is refused against same-shaped B — the sibling accusation, nothing written (red on 641f527d)', async () => {
       const { agentId, userId } = await seedAgent()
       const a = await seedFunded({ agentId, userId })

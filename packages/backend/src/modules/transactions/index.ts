@@ -64,6 +64,22 @@ export {
 } from './activity.js'
 export { fetchConfirmedX402Transactions, mergeX402Transactions } from './x402.js'
 export {
+  counterpartyAddressOf,
+  counterpartyAddressesOf,
+  EMPTY_SEARCH_INDEX,
+  foldForSearch,
+  resolvedCounterpartyNames,
+  transactionMatchesSearch,
+  type TransactionSearchIndex,
+} from './search.js'
+export {
+  parseTransactionWindow,
+  type ParsedTransactionWindow,
+  type TransactionPeriodPreset,
+  type TransactionWindow,
+  type TransactionWindowParams,
+} from './period.js'
+export {
   ingestInboundTransfers,
   matchInboundTransferForAccount,
   findX402PaytoSettlement,

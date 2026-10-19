@@ -188,6 +188,13 @@ function zonedMidnightMs(day: string, tz: string): number {
   return guess
 }
 
+/**
+ * Exported for the Period filter's custom-range bounds (`period.ts`): the
+ * same iterate-the-offset construction, so a calendar date converts to its
+ * zone midnight through DST exactly as `localDayBounds` does (#4095).
+ */
+export { zonedMidnightMs }
+
 export interface LocalDayBounds {
   /** Inclusive ISO start of the local day. */
   startIso: string

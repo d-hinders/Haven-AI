@@ -240,6 +240,28 @@ and a recording failure is swallowed: metrics can never gate a payment. See
 > verification entry for the two `satisfied-by` contract docs this change
 > also touches is `docs/regulatory/casp-changelog/2026-10-19-4021.md`.
 
+> **Re-verified #4095 (2026-10-19, the transactions feed and export gain
+> FilterBar query parameters):** this diff touches one file in this
+> document's coverage list, `routes/transactions.ts` (plus the transactions
+> module beside it), and adds no signing step, no gate, no write and no
+> authority surface. What changed is additive READ-only narrowing: `GET
+> /transactions` and `GET /transactions/export.csv` accept optional
+> `direction`, `chainId`, `search`, `period`, `from`, `to` and `tz` query
+> parameters, applied server-side BEFORE paging — the browser previously
+> filtered direction and network in memory over the loaded page only, so the
+> on-screen list and the exported file could disagree. Every read behind both
+> routes keeps its ownership scope: the account, contact and receipt-name
+> reads the new search resolution adds are the same `listBasicAccountsForUser`
+> / `listContactsForUser` / `listReceiptMerchantNamesForUser` user-scoped
+> queries the routes already used for name resolution, and a malformed or
+> mutually-exclusive filter pair is refused with a structured 400 rather than
+> ignored — an ignored filter would widen what the route reads, which is the
+> failure direction this document's coverage of the file exists to catch. An
+> absent parameter is no filter, so the CLI's calls are unchanged. Scope of
+> this note: the routes' filter handling and the ownership claims above;
+> nothing else in this document was re-read for it, and `last-verified` is
+> not re-stamped (it already reads 2026-10-19): this block is the scope.
+
 > **Re-verified #3930 (2026-10-14, a lost activate response re-reads before it
 > reports):** this diff touches one file in this document's coverage list,
 > `hooks/useDelegationBudget.ts`, and adds no signing step, no gate, no route

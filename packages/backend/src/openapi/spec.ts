@@ -8619,6 +8619,13 @@ export const openapiSpec = {
           { name: 'accountId', in: 'query', schema: uuid, description: 'Filter to one linked account. The retired `safeId` spelling is REFUSED with a 400 naming this parameter (#2914) rather than ignored — an ignored filter would return every row instead of none.' },
           { name: 'agentId', in: 'query', schema: { type: 'string', pattern: AGENT_FILTER_PATTERN }, description: "An agent id, or the literal `user` for payments the account holder made directly (#3030: the handler always refused anything else; the spec now says so)." },
           { name: 'tokenKey', in: 'query', schema: { type: 'string', pattern: TOKEN_KEY_PATTERN, examples: ['8453:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'] }, description: '`<chainId>:<token address>`, or `<chainId>:native`. Whether Haven serves that chain is checked by the handler.' },
+          { name: 'direction', in: 'query', schema: { type: 'string', enum: ['in', 'out'] }, description: '#4095: filter by transfer direction server-side (was a browser-side filter over the loaded page only).' },
+          { name: 'chainId', in: 'query', schema: { type: 'integer', minimum: 1, examples: [8453] }, description: '#4095: filter to one supported network server-side. Whether Haven serves the chain is checked by the handler.' },
+          { name: 'search', in: 'query', schema: { type: 'string', maxLength: 200 }, description: "#4095: free text matched case- and accent-insensitively against what a row shows — the counterparty's resolved name (contact, receipt merchant, or another of the user's accounts), the agent name, and the counterparty address (partial match)." },
+          { name: 'period', in: 'query', schema: { type: 'string', enum: ['7d', '30d', '90d'] }, description: '#4095: a rolling window `[now − N×24h, now)` (owner rule, epic #3801: rolling days, no calendar month). Mutually exclusive with `from`/`to`.' },
+          { name: 'from', in: 'query', schema: { type: 'string', pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' }, description: '#4095: custom-range start calendar date `YYYY-MM-DD`, inclusive of the whole day in `tz`. Sent together with `to`; mutually exclusive with `period`.' },
+          { name: 'to', in: 'query', schema: { type: 'string', pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' }, description: '#4095: custom-range end calendar date `YYYY-MM-DD`, inclusive of the whole day in `tz`. A `from` after `to` is a structured 400.' },
+          { name: 'tz', in: 'query', schema: { type: 'string' }, description: '#4095: IANA zone the custom `from`/`to` days are cut in, validated as `GET /dashboard/overview` validates its `tz` (invalid → 400). Defaults to UTC.' },
           { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, maximum: 9007199254740991, default: 0 }, description: 'Bounded to a safe integer (#3030: the handler used to cap it; ajv reads `1e400` as an integer).' },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 25 } },
           { name: 'fresh', in: 'query', schema: { type: 'string', enum: ['1', 'true'] } },
@@ -8645,7 +8652,9 @@ export const openapiSpec = {
         description:
           'Applies the same filters as `GET /transactions` over the whole ' +
           'result set rather than one page, and adds `direction` and ' +
-          '`chainId`. UTF-8 with a byte-order mark and RFC 4180 quoting. ' +
+          '`chainId` — and, since #4095, the same `search` term and Period ' +
+          'window, so the file and the on-screen list cannot disagree. ' +
+          'UTF-8 with a byte-order mark and RFC 4180 quoting. ' +
           'Bounded at 10 000 rows; above that the request is refused with 413 ' +
           'rather than truncated.',
         security: [{ DashboardJwt: [] }],
@@ -8655,6 +8664,11 @@ export const openapiSpec = {
           { name: 'tokenKey', in: 'query', schema: { type: 'string', pattern: TOKEN_KEY_PATTERN, examples: ['8453:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'] }, description: '`<chainId>:<token address>`, or `<chainId>:native`. Whether Haven serves that chain is checked by the handler.' },
           { name: 'direction', in: 'query', schema: { type: 'string', enum: ['in', 'out'] } },
           { name: 'chainId', in: 'query', schema: { type: 'integer', minimum: 1, examples: [8453] } },
+          { name: 'search', in: 'query', schema: { type: 'string', maxLength: 200 }, description: "#4095: the same search term `GET /transactions` applies, matched against the resolved counterparty names." },
+          { name: 'period', in: 'query', schema: { type: 'string', enum: ['7d', '30d', '90d'] }, description: '#4095: the same rolling window `GET /transactions` applies. Mutually exclusive with `from`/`to`.' },
+          { name: 'from', in: 'query', schema: { type: 'string', pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' }, description: '#4095: custom-range start calendar date `YYYY-MM-DD`, inclusive of the whole day in `tz`.' },
+          { name: 'to', in: 'query', schema: { type: 'string', pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' }, description: '#4095: custom-range end calendar date `YYYY-MM-DD`, inclusive of the whole day in `tz`.' },
+          { name: 'tz', in: 'query', schema: { type: 'string' }, description: '#4095: IANA zone the custom `from`/`to` days are cut in. Defaults to UTC.' },
           { name: 'fresh', in: 'query', schema: { type: 'string', enum: ['1', 'true'] } },
         ],
         responses: {

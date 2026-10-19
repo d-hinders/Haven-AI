@@ -150,6 +150,23 @@ last-verified: "2026-10-19"
 > `last-verified` is not re-stamped: this block is the scope. Nothing else in
 > this document was re-verified.
 
+> **Re-verified unchanged (#4095, 2026-10-19, the transactions feed and export
+> gain FilterBar query parameters):** this diff touches one covered file,
+> `packages/backend/src/routes/transactions.ts` (and the transactions module
+> beside it), with an additive READ-only change: `GET /transactions` and
+> `GET /transactions/export.csv` accept optional `direction`, `chainId`,
+> `search`, `period`, `from`, `to` and `tz` query parameters, applied
+> server-side before paging — the browser previously filtered direction and
+> network in memory over the loaded page only. An absent parameter is no
+> filter, so the CLI's `GET /transactions` calls
+> (`packages/cli/src/commands.ts`, sending none of them) return unchanged
+> results, and no MCP tool, tool argument, input schema, description,
+> expected-context version or consent surface moves. The CSV export's columns
+> and quoting are byte-identical (`modules/transactions/csv-export.ts` is
+> untouched); only WHICH rows the file holds narrows, under the caller's own
+> filters. `last-verified` is not re-stamped: this block is the scope.
+> Nothing else in this document was re-verified.
+
 > **Re-verified unchanged (#4023, 2026-10-16, per-account deploy salt):** this
 > diff touches one covered file,
 > `packages/backend/src/modules/x402/delegation-authorize.ts`, in a six-line

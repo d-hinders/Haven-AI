@@ -350,6 +350,71 @@ describe('A2 mid-run errors', () => {
   })
 })
 
+// ── A2 #4071: a settled_amount_unknown task never has the resolved amount ──
+//    deducted — the guard waits for ANY decrease, not an invented drop.
+
+describe('A2 #4071: the guard does not deduct a resolved amount nobody spent', () => {
+  // The agent-priced purchase: the resolved amount feeds the grader context
+  // only; what settles is the catalog price the agent actually paid.
+  const agentPricedTask = fixedAmountTask('agent-priced-purchase', {
+    graders: [{ name: 'payment_status_settled' }],
+    expectTransfer: false,
+    settled_amount_unknown: true,
+  })
+  const purchasedLog = (taskId: string, trial: number): AgentRunLog =>
+    log(taskId, trial, [call(`${DEV_PREFIX}haven_pay_mcp_tool`, { result: { ok: true, paymentId: `p-${trial}` } })], 'Bought the basic VPN product for 0.001 USDC.')
+
+  it('trial 2 resolves once the read dropped by the ACTUAL (smaller) spend — no invented-drop timeout', async () => {
+    let remaining = 10_000_000n
+    const resolver = createPerTrialResolver({
+      readBudget: async () => ({ remaining }),
+      blockNumber: async () => 1,
+      sleep: async () => {},
+    })
+    const report = await runSuite({
+      tasks: [agentPricedTask],
+      resolveForTrial: resolver.resolve,
+      adapter: {
+        name: 'fake',
+        runTask: async (resolved, trial) => {
+          // The agent buys the 0.001 product, NOT the resolved 1/4 slice —
+          // the exact 2026-10-17 profile (resolved 316406, settled 1000).
+          remaining -= 1_000n
+          return purchasedLog(resolved.task.id, trial)
+        },
+      },
+      trials: 2,
+      graderContext: { probePaymentStatus: async () => ({ ok: true as const, status: 'settled' }) },
+    })
+    const trials = report.tasks[0].trials
+    expect(trials[0].pass).toBe(true)
+    expect(trials[1].pass).toBe(true)
+    expect(trials[1].detail ?? '').not.toContain('resolve failure')
+  })
+
+  it('the guard still times out red when the read never decreases after such a trial', async () => {
+    const resolver = createPerTrialResolver({
+      readBudget: async () => ({ remaining: 10_000_000n }),
+      blockNumber: async () => 1,
+      consistencyTimeoutMs: 30,
+      consistencyPollMs: 5,
+      sleep: async () => {},
+    })
+    const report = await runSuite({
+      tasks: [agentPricedTask],
+      resolveForTrial: resolver.resolve,
+      adapter: { name: 'fake', runTask: async (resolved, trial) => purchasedLog(resolved.task.id, trial) },
+      trials: 2,
+      graderContext: { probePaymentStatus: async () => ({ ok: true as const, status: 'settled' }) },
+    })
+    const trials = report.tasks[0].trials
+    expect(trials[0].pass).toBe(true)
+    expect(trials[1].pass).toBe(false)
+    expect(trials[1].detail).toContain('budget consistency timeout')
+    expect(trials[1].detail).toContain('never decreased')
+  })
+})
+
 // ── A3: ordering tiers, the once-only drainer ──────────────────────────────
 
 describe('A3: the drainer runs after every tier-1 task, before the exhausted-budget task, exactly once', () => {

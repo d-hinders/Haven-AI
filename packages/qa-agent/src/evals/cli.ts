@@ -163,8 +163,19 @@ export function createPerTrialResolver(deps: PerTrialResolverDeps): PerTrialReso
 
   const resolve = async (task: EvalTask, trial: number, prior?: PriorTrialOutcome): Promise<ResolvedTask> => {
     const use: BudgetUse = task.tier === 3 ? 'exhausted-ok' : 'floor'
-    const spend = prior?.settled === true ? prior.resolved.amountAtomic : 0n
-    if (spend > 0n && lastRemaining !== undefined) {
+    // #4071: a task with `settled_amount_unknown` settles the AGENT's purchase
+    // (the catalog price it picked), not the resolved amount — deducting the
+    // resolved amount here waits for a drop that never happened (the
+    // 2026-10-17 run red on four innocent trials). Such a prior trial waits
+    // for ANY decrease instead: the guard's job is that the backend reflects
+    // what settled, not that it matches an amount nobody spent.
+    const priorSpendSizeUnknown =
+      prior?.settled === true && prior.resolved.task.settled_amount_unknown === true
+    const spend =
+      prior?.settled === true && prior.resolved.task.settled_amount_unknown !== true
+        ? prior.resolved.amountAtomic
+        : 0n
+    if ((spend > 0n || priorSpendSizeUnknown) && lastRemaining !== undefined) {
       const deadline = Date.now() + timeoutMs
       for (;;) {
         const remaining = await readRemaining(use)
@@ -180,15 +191,25 @@ export function createPerTrialResolver(deps: PerTrialResolverDeps): PerTrialReso
           lastRemaining = remaining
           break
         }
-        if (remaining <= lastRemaining - spend) {
+        const caughtUp =
+          spend > 0n
+            ? remaining <= lastRemaining - spend
+            : // The spend size is the agent's: any decrease proves the read
+              // moved past the pre-spend value.
+              remaining < lastRemaining
+        if (caughtUp) {
           lastRemaining = remaining
           break
         }
         if (Date.now() > deadline) {
           throw new Error(
-            `budget consistency timeout: the backend still reports ${remaining} after the previous ` +
-              `trial's settled spend of ${spend} (expected ≤ ${lastRemaining - spend}) — the ` +
-              `/allowances read did not catch up within ${timeoutMs}ms`,
+            spend > 0n
+              ? `budget consistency timeout: the backend still reports ${remaining} after the previous ` +
+                  `trial's settled spend of ${spend} (expected ≤ ${lastRemaining - spend}) — the ` +
+                  `/allowances read did not catch up within ${timeoutMs}ms`
+              : `budget consistency timeout: the backend still reports ${remaining} after the previous ` +
+                  `trial's settled purchase (${prior?.taskId}, spend size set by the merchant, not by ` +
+                  `this run) — the /allowances read never decreased within ${timeoutMs}ms`,
           )
         }
         await sleep(pollMs)

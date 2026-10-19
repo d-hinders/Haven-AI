@@ -120,6 +120,17 @@ export function validateTask(raw: unknown, file: string): string | null {
       return `${file}: tier 3 expects an exhausted budget — it cannot also expect a transfer_settled outcome`
     }
   }
+  // #4071: the settled spend is the agent's own purchase, not the resolved
+  // amount — the consistency guard waits for ANY decrease after such a
+  // trial, so the amount must be honest about not being the spend.
+  if (t.settled_amount_unknown !== undefined) {
+    if (typeof t.settled_amount_unknown !== 'boolean') {
+      return `${file}: settled_amount_unknown must be boolean`
+    }
+    if (t.settled_amount_unknown && t.expectTransfer) {
+      return `${file}: settled_amount_unknown=true with expectTransfer — transfer_settled probes a transfer of exactly the resolved amount, which this flag denies is the spend; settle-proof here is payment_status_settled`
+    }
+  }
   // Coherence: a transfer-expecting task must carry a transfer grader, and a
   // task that never expects a transfer must not carry one.
   const hasTransferGrader = (graders as Array<{ name: string }>).some((g) => g.name === 'transfer_settled')

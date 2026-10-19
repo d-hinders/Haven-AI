@@ -378,7 +378,7 @@ upstream repository's secrets. Testnet only (Base Sepolia).
    | `AGENT_EVALS_AGENT_ACCOUNT` | variable | `account_address` from `signer.json` |
    | `QA_X402_BINDING_SIGNER` | variable | `x402_binding_signer` from `signer.json` |
    | `QA_HOSTED_MCP_URL` | variable | `hosted_mcp_url` from `identity.json` (needed for `full` only) |
-   | `AGENT_EVALS_RECIPIENT` / `AGENT_EVALS_X402_TARGET` | variables | the same values as the Hermes lane's `QA_EVAL_RECIPIENT` / `QA_EVAL_X402_TARGET` |
+   | `AGENT_EVALS_RECIPIENT` / `AGENT_EVALS_X402_TARGET` | variables | the shared demo-merchant fixtures: the same values as the upstream `agent-evals` environment. They are public testnet values (an address and a URL) but are recorded only there, so ask the owner (`gh variable list --env agent-evals`) |
 
    `QA_RPC_URL_BASE_SEPOLIA` is optional (the graders fall back to the public
    Base Sepolia RPC). Then delete the throwaway home.

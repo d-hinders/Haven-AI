@@ -491,7 +491,7 @@ describe('owner-initiated send (#1083)', () => {
     mockLoadOwner.mockResolvedValue({ accountId: 'account-1', config, singleSignerWaiverAt: null })
   }
 
-  function mockPrepared() {
+  function mockPrepared(submitCall = vi.fn().mockResolvedValue({ txHash: '0x' + 'ff'.repeat(32) })) {
     mockTreasury.mockResolvedValueOnce({
       treasuryAddress: ACCOUNT,
       prepareCall: vi.fn().mockResolvedValue({
@@ -499,7 +499,7 @@ describe('owner-initiated send (#1083)', () => {
         userOpHash: '0x' + 'ee'.repeat(32),
         signingTypedData: { domain: { name: 'HybridDeleGator' }, types: {}, primaryType: 'PackedUserOperation', message: {} },
       }),
-      submitCall: vi.fn().mockResolvedValue({ txHash: '0x' + 'ff'.repeat(32) }),
+      submitCall,
     })
   }
 
@@ -640,10 +640,7 @@ describe('owner-initiated send (#1083)', () => {
 
   it('nothing is recorded when the send does not land', async () => {
     ownedAccount({ passkeys: [PK1] })
-    mockTreasury.mockResolvedValueOnce({
-      treasuryAddress: ACCOUNT,
-      submitCall: vi.fn().mockRejectedValue(new Error('treasury UserOp included but reverted')),
-    })
+    mockPrepared(vi.fn().mockRejectedValue(new Error('treasury UserOp included but reverted')))
     const failed = await app.inject({
       method: 'POST', url: submitUrl,
       payload: { ...BODY, signature: '0x' + 'ab'.repeat(80), user_operation: { sender: ACCOUNT, callData: await transferCallData() } },

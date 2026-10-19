@@ -168,9 +168,11 @@ writes the merchant-response evidence row, so a delivered purchase stops
 reading as undelivered and never enters that window. On the eip3009 funding
 leg specifically, an accepted outcome with no settlement recorded yet
 (#3475 follow-up) names `haven_report_settlement_evidence` as the next step,
-`payment_id` prefilled — supply the merchant's `PAYMENT-RESPONSE` there as
-`payment_response` if you hold it (or `settlement_tx_hash`); calling with no
-hash is a well-formed no-op, since the purchase may already be complete.
+`payment_id` prefilled — supply the settlement transaction there as
+`settlement_tx_hash` (the `transaction` field of the merchant's base64
+`PAYMENT-RESPONSE`; that tool takes no `payment_response` — fold the raw
+header into `haven_report_x402_outcome` instead); calling with no hash is a
+well-formed no-op, since the purchase may already be complete.
 Either way pass `payment_header` too (#4061): since #3925 an EIP-3009 merchant
 settlement is recorded only with the header the agent retried the merchant
 with. A report without it answers `SETTLEMENT_PROOF_HEADER_MISSING`, which

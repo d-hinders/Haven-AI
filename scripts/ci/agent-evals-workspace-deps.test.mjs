@@ -147,7 +147,9 @@ test('the evals job declares a protected agent-evals environment chosen from a f
   assert.equal(envLines.length, jobs, 'a job in agent-evals.yml does not declare a protected environment')
   for (const line of envLines) assert.match(line, /^\s{4}environment: \$\{\{ inputs\.environment \|\| 'agent-evals' \}\}\s*$/)
   // One run per environment at a time: each holds its own agent and budget.
-  for (const line of live.filter((l) => /^\s{6}group: agent-evals/.test(l))) {
+  const groups = live.filter((l) => /^\s{6}group:/.test(l))
+  assert.equal(groups.length, jobs, 'a job in agent-evals.yml has no concurrency group')
+  for (const line of groups) {
     assert.ok(line.includes('${{ inputs.environment'), 'the concurrency group is not per environment')
   }
   const input = lineOf(/^\s{6}environment:\s*$/)

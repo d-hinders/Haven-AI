@@ -366,9 +366,9 @@ produces the values, the owner enters them.
    budget"). Copy the exact connector command the modal shows (it carries
    the one-time `hv_setup_...` token, `--api <dev backend URL>` and
    `--ack-local-tools`; without `--api` the connector refuses to run) and run
-   it in a throwaway home so their real Claude Code config is untouched:
-   `export HOME="$(mktemp -d)"`, then the command, adding
-   `--runtime claude-code`. It writes `$HOME/.haven/agents/<agent>/`:
+   it in a throwaway home so their real Claude Code config is untouched,
+   in a terminal they close afterwards: `export HOME="$(mktemp -d)"`, then
+   the command, adding `--runtime claude-code`. It writes `$HOME/.haven/agents/<agent>/`:
    `identity.json` holds `api_key` (`sk_agent_...`); `signer.json` holds
    `delegate_key` and `account_address`. **Then approve the agent** back in
    the dashboard (one passkey prompt): a Connect-modal agent starts

@@ -1475,8 +1475,16 @@ no agent created without an `account_id` falls back to it). A retried create
 carrying the same `idempotency_key` is answered from the caller's OWN first
 account before any of these checks run (#4024) — so a lost response is never
 re-reported as a cap or source refusal — and a key reused for a different
-chain or passkey is refused (409 `IDEMPOTENCY_KEY_REUSED`), so a replay can
-only ever return what that same request already created. Every refusal on
+chain or passkey is refused (409 `IDEMPOTENCY_KEY_REUSED`, with the existing
+account's id). So a replay only ever returns one of the caller's OWN accounts
+that carries that key, on the same chain and with that same passkey —
+normally the first attempt of the same create. (The signup shape stores a key
+it is sent too, and never replays it; a create-additional that reused such a
+key with that account's passkey would replay that signup account, which is
+still the caller's own.) The same answer applies when two attempts with one
+key race inside their transactions: the one that loses on the key's unique
+index re-reads the committed winner and answers it (or the 409), and its own
+counter bump rolls back. Every refusal on
 this path carries an `error_code` (`SOURCE_ACCOUNT_NOT_FOUND`,
 `SOURCE_HAS_NO_PASSKEY`, `KEY_NOT_ON_SOURCE`, `ACCOUNT_CAP_REACHED`).
 

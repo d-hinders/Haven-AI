@@ -766,7 +766,12 @@ it. If the account the details came from can no longer secure a new account,
 secure a new account, so Haven can't try again from here. Check again to see
 whether the account was created anyway." Nothing else removes it: a refusal
 on a retry, of any kind, shows its own message beside it, and a cancelled
-passkey prompt shows nothing at all. (Since #4024 the backend replays a
+passkey prompt shows nothing at all. A retry offers only the passkey the
+first try used, because the request is tied to it ("That's a different
+passkey from your first try. Try again with the same one: this request is
+tied to it."); when the backend says the request already made an account,
+the dialog looks for it and otherwise says "Your earlier try already created
+an account with this request. Check again to see it." (Since #4024 the backend replays a
 retried create before it checks anything else, so a retry of a create that
 went through returns that account; the rule still holds for any refusal.) "Check again" reports one of three things: the
 account, as created; a read that worked and found nothing ("No new account

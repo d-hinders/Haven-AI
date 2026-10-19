@@ -770,4 +770,69 @@ describe('NewAccountDialog — the unknown submission', () => {
     const [first, afterReopen] = sentKeys()
     expect(afterReopen).not.toBe(first)
   })
+
+  describe('the record is bound to the passkey it was sent with', () => {
+    const TWO_KEYS = [
+      { kind: 'passkey', key_id: KEY_A, created_at: null, accounts: [approved(MAIN)] },
+      { kind: 'passkey', key_id: KEY_B, created_at: null, accounts: [approved(MAIN)] },
+    ]
+
+    async function reachUnknownWithKeyB() {
+      createAccount.mockRejectedValueOnce(BAD_GATEWAY())
+      assertsWith(CRED_B)
+      setup({ accounts: [MAIN], signers: TWO_KEYS })
+      typeName('Reserve')
+      await submit()
+      expect(unknownShown()).toBe(true)
+      expect(createAccount.mock.calls[0]![0].key_id).toBe(KEY_B)
+    }
+
+    it('a retry offers only the recorded passkey', async () => {
+      await reachUnknownWithKeyB()
+      createAccount.mockResolvedValueOnce(CREATED)
+      await submit()
+      const retryPrompt = mockGetPasskeyAssertion.mock.calls[1]![0] as { allowCredentialIds: string[] }
+      expect(retryPrompt.allowCredentialIds).toEqual([CRED_B])
+      expect(createAccount.mock.calls[1]![0]).toMatchObject({ key_id: KEY_B, idempotency_key: sentKeys()[0] })
+    })
+
+    it('a retry answered with another passkey sends nothing and says so', async () => {
+      await reachUnknownWithKeyB()
+      assertsWith(CRED_A)
+      await submit()
+      expect(createAccount).toHaveBeenCalledTimes(1)
+      expect(unknownShown()).toBe(true)
+      expect(screen.getByText(/That’s a different passkey from your first try/)).toBeInTheDocument()
+    })
+  })
+
+  describe('IDEMPOTENCY_KEY_REUSED on a retry', () => {
+    const REUSED = () =>
+      new ApiRequestError('x', 409, {
+        error: 'idempotency_key already belongs to an account with a different key_id',
+        error_code: 'IDEMPOTENCY_KEY_REUSED',
+        id: 'earlier1',
+      })
+
+    it('re-reads the list and shows the account the server names, by id', async () => {
+      await reachUnknown()
+      nextReadReturns([MAIN, OTHER, account('earlier1', 'Reserve (old)', 84532)])
+      createAccount.mockRejectedValueOnce(REUSED())
+      await submit()
+      expect(refreshAccounts).toHaveBeenCalledTimes(1)
+      const done = await screen.findByTestId('new-account-created')
+      expect(done).toHaveTextContent('Reserve (old) was created on Base Sepolia')
+      expect(screen.getByRole('link', { name: 'Open account' })).toHaveAttribute('href', '/accounts/earlier1')
+    })
+
+    it('says the earlier try created it when the re-read does not show it yet', async () => {
+      await reachUnknown()
+      nextReadReturns([MAIN, OTHER])
+      createAccount.mockRejectedValueOnce(REUSED())
+      await submit()
+      expect(unknownShown()).toBe(true)
+      expect(screen.getByText('Your earlier try already created an account with this request. Check again to see it.')).toBeInTheDocument()
+      expect(screen.queryByText(/Details:/)).toBeNull()
+    })
+  })
 })

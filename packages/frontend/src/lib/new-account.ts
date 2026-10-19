@@ -156,6 +156,8 @@ export const ACCOUNT_CAP_REACHED = 'ACCOUNT_CAP_REACHED'
 export const SOURCE_HAS_NO_PASSKEY = 'SOURCE_HAS_NO_PASSKEY'
 export const KEY_NOT_ON_SOURCE = 'KEY_NOT_ON_SOURCE'
 export const SOURCE_ACCOUNT_NOT_FOUND = 'SOURCE_ACCOUNT_NOT_FOUND'
+/** 409: the idempotency key already belongs to an account made by a different request; `id` names it. */
+export const IDEMPOTENCY_KEY_REUSED = 'IDEMPOTENCY_KEY_REUSED'
 
 export type CreateAccountRefusal =
   /** The per-user per-chain soft cap (#4023: 10). `cap` when the body carries it. */
@@ -163,6 +165,8 @@ export type CreateAccountRefusal =
   | { kind: 'source_has_no_passkey' }
   | { kind: 'key_not_on_source' }
   | { kind: 'source_not_found' }
+  /** The key already created an account (with another chain or passkey); `existingId` is it. */
+  | { kind: 'key_reused'; existingId: string | null }
   | { kind: 'rate_limited' }
   /** A code-less 4xx: a definite refusal. The backend's sentence, bounded, or null. */
   | { kind: 'could_not_create'; detail: string | null }
@@ -193,6 +197,8 @@ export function classifyCreateAccountError(err: unknown): CreateAccountRefusal {
       return { kind: 'key_not_on_source' }
     case SOURCE_ACCOUNT_NOT_FOUND:
       return { kind: 'source_not_found' }
+    case IDEMPOTENCY_KEY_REUSED:
+      return { kind: 'key_reused', existingId: typeof body.id === 'string' ? body.id : null }
   }
 
   if (typeof status !== 'number' || status < 400 || status >= 500) return { kind: 'unknown_outcome' }

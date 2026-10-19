@@ -5,6 +5,7 @@ import { base64UrlEncode } from '@/lib/passkey'
 import type { SmartAccount } from '@/context/AuthContext'
 import {
   ACCOUNT_CAP_REACHED,
+  IDEMPOTENCY_KEY_REUSED,
   KEY_NOT_ON_SOURCE,
   SOURCE_ACCOUNT_NOT_FOUND,
   SOURCE_HAS_NO_PASSKEY,
@@ -132,6 +133,14 @@ describe('classifyCreateAccountError — error_code first, never the sentence', 
     })
     expect(classifyCreateAccountError(refusal(404, { error: 'x', error_code: SOURCE_ACCOUNT_NOT_FOUND }))).toEqual({
       kind: 'source_not_found',
+    })
+    expect(classifyCreateAccountError(refusal(409, { error: 'x', error_code: IDEMPOTENCY_KEY_REUSED, id: 'acct-1' }))).toEqual({
+      kind: 'key_reused',
+      existingId: 'acct-1',
+    })
+    expect(classifyCreateAccountError(refusal(409, { error: 'x', error_code: IDEMPOTENCY_KEY_REUSED }))).toEqual({
+      kind: 'key_reused',
+      existingId: null,
     })
   })
 

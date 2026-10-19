@@ -44,7 +44,7 @@ import { useDeployableChains } from '@/hooks/useDeployableChains'
 import { getChainConfig } from '@/lib/chains'
 import { getPasskeyAssertion, PasskeyUnsupportedError } from '@/lib/passkey'
 import { isPasskeyCancellation } from '@/lib/passkeyErrors'
-import { rememberPasskeyCredentialOnDevice } from '@/lib/signer'
+import { credentialIdFromKeyId, rememberPasskeyCredentialOnDevice } from '@/lib/signer'
 import {
   allowCredentialIdsFor,
   classifyCreateAccountError,
@@ -81,6 +81,8 @@ type DialogRefusal =
   | Exclude<CreateAccountRefusal, { kind: 'unknown_outcome' }>
   | { kind: 'passkey_unsupported' }
   | { kind: 'passkey_failed' }
+  /** A retry answered with a passkey other than the recorded request's. */
+  | { kind: 'other_passkey' }
 
 /**
  * A sent create whose outcome is UNKNOWN (no answer, or a 5xx): the account
@@ -101,9 +103,20 @@ type DialogRefusal =
  */
 interface UnknownSubmission {
   key: string
+  /**
+   * The passkey the recorded request was sent with. The idempotency key is
+   * bound to it on the server (a reused key with another key_id is a 409), so
+   * a retry's prompt offers this passkey only.
+   */
+  keyId: string
   baselineIds: ReadonlySet<string>
   name: string
   chainId: number
+  /**
+   * The account the server says this request already created (from an
+   * IDEMPOTENCY_KEY_REUSED refusal's `id`): detection by id, besides by name.
+   */
+  createdId?: string
 }
 
 /**
@@ -191,7 +204,9 @@ function NewAccountDialogBody({
   // unknown outcome. While an attempt is in flight its own answer decides.
   useEffect(() => {
     if (!unknown || stage !== 'form') return
-    const found = findCreatedAccount(accounts, unknown.baselineIds, unknown.chainId, unknown.name)
+    const found =
+      (unknown.createdId ? accounts.find((a) => a.id === unknown.createdId) : undefined) ??
+      findCreatedAccount(accounts, unknown.baselineIds, unknown.chainId, unknown.name)
     if (!found) return
     // The success state ends the dialog, and the record with it.
     setCreated({ id: found.id, chain_id: found.chain_id, name: found.name })
@@ -234,7 +249,8 @@ function NewAccountDialogBody({
     try {
       const assertion = await getPasskeyAssertion({
         challenge: randomChallenge(),
-        allowCredentialIds: allowCredentialIdsFor(source),
+        // A retry offers only the recorded request's passkey (see keyId).
+        allowCredentialIds: unknown ? [credentialIdFromKeyId(unknown.keyId)] : allowCredentialIdsFor(source),
       })
       credentialId = assertion.credentialId
     } catch (err) {
@@ -257,6 +273,14 @@ function NewAccountDialogBody({
     if (!sourceHoldsKey(source, keyId)) {
       setStage('form')
       setRefusal({ kind: 'key_not_on_source' })
+      return
+    }
+    // The browser was asked for the recorded passkey only; one that answered
+    // with another would send the recorded key with a different key_id, which
+    // the server refuses (IDEMPOTENCY_KEY_REUSED). Say so without sending it.
+    if (unknown && keyId.toLowerCase() !== unknown.keyId.toLowerCase()) {
+      setStage('form')
+      setRefusal({ kind: 'other_passkey' })
       return
     }
     // This device holds the credential: the marker lets later signing on the
@@ -283,12 +307,26 @@ function NewAccountDialogBody({
         // network). Pinning `sourceId` keeps the locked source from following
         // a changed default account.
         setSourceId(source.account.id)
-        setUnknown({ key, baselineIds, name: trimmedName, chainId: selectedChainId })
+        setUnknown((current) => ({
+          key,
+          keyId,
+          baselineIds,
+          name: trimmedName,
+          chainId: selectedChainId,
+          createdId: current?.createdId,
+        }))
         return
       }
       // Any refusal: its own message. A standing unknown outcome stays (see
       // UnknownSubmission for why a refusal proves nothing about it).
       setRefusal(outcome)
+      if (outcome.kind === 'key_reused' && outcome.existingId) {
+        // The server names the account this request already created: detect
+        // it by id, and re-read the list now so it can show up.
+        const existingId = outcome.existingId
+        setUnknown((current) => (current ? { ...current, createdId: existingId } : current))
+        void checkAgain()
+      }
     }
   }
 
@@ -589,5 +627,18 @@ function RefusalMessage({
       )
     case 'passkey_failed':
       return <InlineAlert>Your passkey couldn&rsquo;t be read. Try again.</InlineAlert>
+    case 'other_passkey':
+      return (
+        <InlineAlert>
+          That&rsquo;s a different passkey from your first try. Try again with the same one: this request is tied to
+          it.
+        </InlineAlert>
+      )
+    case 'key_reused':
+      return (
+        <InlineAlert>
+          Your earlier try already created an account with this request. Check again to see it.
+        </InlineAlert>
+      )
   }
 }

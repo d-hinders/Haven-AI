@@ -132,6 +132,19 @@ export interface EvalTask {
    * setup, not an error).
    */
   tier?: 1 | 2 | 3
+  /**
+   * True when the trial's settled spend is the AGENT's purchase — its own
+   * size, decided at run time by what the catalog/merchant prices — and NOT
+   * the resolved `amountAtomic` (#4071). The consistency guard deducts the
+   * resolved amount from the pre-spend read for the trial that follows; for
+   * such a task that deduction invents a drop that never happened (the
+   * 2026-10-17 run: resolved 316406, actually spent 1000) and timed out red
+   * on four innocent trials. The guard instead waits for ANY decrease. A
+   * transfer_settled grader is refused with this flag: it probes a transfer
+   * of exactly the resolved amount, which is precisely the fiction the flag
+   * denies — settle-proof here is `payment_status_settled`.
+   */
+  settled_amount_unknown?: boolean
 }
 
 /** The task after the runner resolved its amount rule + instruction. */

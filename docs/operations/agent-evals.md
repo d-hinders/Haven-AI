@@ -87,11 +87,18 @@ WITHIN tiers only (deterministic per seed, recorded in the report);
 
 **Consistency guard:** before resolving each trial, the resolver waits
 (bounded, 120s default) until the backend budget read reflects the previous
-trial's settled spend — `/allowances` can lag the observer node. A budget
-INCREASE observed between trials is recorded in the report as a refill
-boundary event (`budgetEvents`), which is how a run that crosses the Daily
-period's refill anchor reports itself. On guard timeout the trial is red
-with the named cause.
+trial's settled spend — `/allowances` can lag the observer node. When the
+previous trial's settled spend IS its resolved amount (the direct sends), the
+guard expects that exact drop. When the task is marked
+`settled_amount_unknown` (`x402-catalog-guided-purchase`, #4071 — the agent
+buys whatever the catalog prices, so the spend size is the merchant's, not
+the resolver's), the guard expects ANY decrease instead: deducting the
+resolved amount would invent a drop that never happened and red every later
+trial (the 2026-10-17 run: resolved 316406, actually spent 1000, four
+innocent trials timed out). A budget INCREASE observed between trials is
+recorded in the report as a refill boundary event (`budgetEvents`), which is
+how a run that crosses the Daily period's refill anchor reports itself. On
+guard timeout the trial is red with the named cause.
 
 Size the eval agent's budget as a **Daily** period (see "Funding and the
 nightly budget" below) so the tiered run fits inside one refill.

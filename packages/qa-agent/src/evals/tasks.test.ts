@@ -120,6 +120,23 @@ describe('validateTask — the coherence rules', () => {
     }
     expect(validateTask(t, 'x.json')).toBeNull()
   })
+
+  // #4071: the settled spend is the agent's own purchase — the amount must be
+  // honest about not being the spend, and a transfer probe would contradict it.
+  it('rejects settled_amount_unknown=true with expectTransfer — transfer_settled probes an amount that is not the spend', () => {
+    const t = { ...structuredClone(base), settled_amount_unknown: true }
+    expect(validateTask(t, 'x.json')).toContain('settled_amount_unknown=true with expectTransfer')
+  })
+
+  it('rejects a non-boolean settled_amount_unknown', () => {
+    const t = { ...structuredClone(base), graders: [{ name: 'payment_status_settled' }], expectTransfer: false, settled_amount_unknown: 'yes' }
+    expect(validateTask(t, 'x.json')).toContain('settled_amount_unknown must be boolean')
+  })
+
+  it('accepts a payment_status_settled task with settled_amount_unknown=true', () => {
+    const t = { ...structuredClone(base), graders: [{ name: 'payment_status_settled' }], expectTransfer: false, settled_amount_unknown: true }
+    expect(validateTask(t, 'x.json')).toBeNull()
+  })
 })
 
 describe('validateTask — the ordering tier (#3992 A3: membership comes from the task file)', () => {

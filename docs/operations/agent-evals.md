@@ -24,7 +24,7 @@ covers:
   - packages/connect/src/server-names.ts
   - packages/signer/src/consent.ts
   - packages/signer/src/cli-args.ts
-last-verified: "2026-10-15"
+last-verified: "2026-10-19"
 ---
 
 # Agent Evals — the model-in-the-loop eval suite (epic #3957)
@@ -355,6 +355,15 @@ into the report (`totalCostUsd`, `model`). Post the per-session numbers on
 #3959 — the pilot sets the cadence. Estimates before the pilot: roughly
 $0.20–0.40 per session on Sonnet, $1–2 on Opus; a 90-session full run on
 Opus would use most of a month's Agent SDK credit (~$100 on Max 5x).
+
+**What the job installs and builds first.** After `npm ci` it installs the
+`claude` CLI, pinned (`@anthropic-ai/claude-code@<exact>`): it is not on the
+runner image and not a workspace dependency. It then builds `@haven_ai/core`
+before `packages/sdk`, `packages/signer` and `packages/mcp-server`, because
+`npm ci` does not create core's `dist/` and mcp-server imports it. The first
+pilot run (2026-10-19) died on exactly that before any task ran.
+A CI guard checks both: the build order, and that an exactly pinned CLI
+install runs before the eval step.
 
 **The workflow** (`.github/workflows/agent-evals.yml`) runs three ways:
 

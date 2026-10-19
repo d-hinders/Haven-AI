@@ -52,6 +52,8 @@
     "argue it like everything else."
   ],
   "notGates": {
+    "npm install -g @anthropic-ai/claude-code@2.1.289": "Runner setup in agent-evals.yml, not a check: it puts the pinned `claude` CLI on the runner for the Claude Code eval lane. Nothing a builder runs before pushing; the step order is guarded by scripts/ci/agent-evals-workspace-deps.test.mjs, which IS in the battery.",
+    "claude --version": "Prints the CLI version installed by the step above, for the run log. Not a check.",
     "node scripts/ci/change-classifier.mjs": "CI plumbing, not a check: it writes the `changes` job's surface outputs to $GITHUB_OUTPUT so the other jobs know whether to run. This battery calls classifyChangedFiles() directly for the same answer.",
     "node scripts/ci/qa-freshness.mjs": "Promotion gate for dev -> main, and it reads the QA run history of the DEPLOYED environment. Nothing a builder can run or influence before pushing a feature branch.",
     "node scripts/ci/operator-verify-close-guard.mjs --pr \"${{ github.event.pull_request.number }}\"": "Reads the pull request that does not exist yet at pre-push time. Its own suite (operator-verify-close-guard.test.mjs) is collected by `node --test scripts/ci/*.test.mjs`, which IS in the battery.",

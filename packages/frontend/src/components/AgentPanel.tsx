@@ -2,7 +2,7 @@
 
 import { ChevronRight, CircleAlert, Clock, LoaderCircle, Network, Plus, Tag } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { setupIdFromSearch } from '@/lib/discovery'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
@@ -142,20 +142,13 @@ export default function AgentPanel() {
 
   // #4065: the inline first-agent flow replaces the empty state. It never
   // renders while a `?setup=<id>` resume modal is open, so two flows (and two
-  // status polls) never run at once; once mounted the latch holds it until
-  // the user leaves (`useAgentPanelState`). Every other part of the agents
-  // surface keys its hiding on THIS value, never on `agents.length`, so the
-  // `pending_approval` agent of the setup in progress does not appear under
-  // it as a card.
+  // status polls) never run at once; once a setup exists the latch holds it
+  // until the user leaves (`useAgentPanelState`). Every other part of the
+  // agents surface keys its hiding on THIS value, never on `agents.length`,
+  // so the `pending_approval` agent of the setup in progress does not appear
+  // under it as a card.
   const showInlineSetup =
     panel.inlineSetupLatched || (panel.inlineSetupEligible && !activeResumeSetupId)
-  const { latchInlineSetup, inlineSetupKey } = panel
-  // `inlineSetupKey` re-arms the latch on the remount that follows a leave
-  // while the list is still empty.
-  useEffect(() => {
-    if (showInlineSetup) latchInlineSetup()
-  }, [showInlineSetup, inlineSetupKey, latchInlineSetup])
-
 
   if (!accountAddress) {
   
@@ -244,8 +237,9 @@ export default function AgentPanel() {
         // — it replaces the "No agents yet" empty state and the onboarding
         // prompt card. Keyed so each leave remounts it fresh.
         <InlineAgentSetup
-          key={inlineSetupKey}
+          key={panel.inlineSetupKey}
           onClose={panel.leaveInlineSetup}
+          onSetupStarted={panel.latchInlineSetup}
           accountAddress={accountAddress}
           accountId={panel.defaultAccountId}
           onSetupUpdated={panel.handleSetupUpdated}

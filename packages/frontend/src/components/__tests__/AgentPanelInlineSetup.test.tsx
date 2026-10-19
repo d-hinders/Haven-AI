@@ -321,6 +321,44 @@ describe('AgentPanel inline first-agent flow (#4065)', () => {
 })
 
 describe('the latch: inline stays mounted until the user leaves (#4065)', () => {
+  // Review round 1: the latch is set when a SETUP starts, not when the flow
+  // mounts. An idle step 1 must not trap a user whose agent was created
+  // elsewhere (another tab, an agent-led link) behind a flow with no Cancel.
+  it.each([
+    ['a pristine step 1', () => {}],
+    ['step 1 with a typed name', () => {
+      fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Research agent' } })
+    }],
+    ['step 2, before the create', () => {
+      fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Research agent' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
+    }],
+  ])('does not latch on %s: an agent created elsewhere brings the list back', (_label, interact) => {
+    const { rerender } = render(<AgentPanel />)
+    interact()
+
+    setAgentsList([{ ...PENDING_AGENT, status: 'active' }])
+    rerender(<AgentPanel />)
+
+    expect(inlineFlow()).not.toBeInTheDocument()
+    expect(screen.getByTestId('agent-card')).toHaveTextContent('Research agent')
+    expect(screen.getByRole('button', { name: 'Connect agent' })).toBeInTheDocument()
+    expect(countChip()).toHaveTextContent('1')
+  })
+
+  it('latches once the setup is created, even before the connector registers', async () => {
+    const { rerender } = render(<AgentPanel />)
+    await startSetup()
+
+    // A refetch that fails while the setup waits must not swap the flow for
+    // the "Agents could not load" state.
+    setAgentsList([], { error: 'request failed' })
+    rerender(<AgentPanel />)
+
+    expect(within(inlineFlow()!).getByText('Copy setup prompt')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Agents could not load' })).not.toBeInTheDocument()
+  })
+
   it('survives a pending agent joining the list, an approval in flight, and finalizingAgent', async () => {
     const { rerender } = render(<AgentPanel />)
     await startSetup()
@@ -374,6 +412,39 @@ describe('no nested filled card inline (#4065)', () => {
 
     // "Having trouble connecting?" holds the Local command CopyBlock.
     const label = within(inlineFlow()!).getByText('Local command')
+    expect(cardDepth(label)).toBe(1)
+  })
+
+  it('the server-credential .env CopyBlock sits in the inline Card without a Card of its own', async () => {
+    mockApiPost.mockImplementation(async (path: string) => {
+      if (path === '/agent-connection-setups/resolve') {
+        return {
+          agent: { name: 'Research agent', description: null },
+          haven_wallet: { id: SAFE.id, name: SAFE.name, chain_id: SAFE.chain_id, network: 'Base Sepolia' },
+          agent_budget: [],
+          challenge: { id: 'challenge-1', message: 'Sign to prove control of this delegate address' },
+          hosted_mcp_url: 'https://mcp.haven.example',
+        }
+      }
+      if (path === '/agent-connection-setups/register') {
+        return {
+          setup_id: SETUP.setup_id,
+          agent_id: PENDING_AGENT.id,
+          status: 'connected_local',
+          delegate_address: '0x3333333333333333333333333333333333333333',
+          hosted_mcp_url: 'https://mcp.haven.example',
+        }
+      }
+      return SETUP
+    })
+    render(<AgentPanel />)
+    await startSetup()
+
+    await act(async () => {
+      fireEvent.click(within(inlineFlow()!).getByRole('button', { name: 'Generate credentials' }))
+    })
+
+    const label = await within(inlineFlow()!).findByText('.env block')
     expect(cardDepth(label)).toBe(1)
   })
 })

@@ -1,5 +1,6 @@
 'use client'
 
+import { useId } from 'react'
 import { Card } from '../ui/Card'
 import { ConnectAgentFlow } from './ConnectAgentFlow'
 
@@ -21,32 +22,42 @@ import { ConnectAgentFlow } from './ConnectAgentFlow'
  */
 export function InlineAgentSetup({
   onClose,
+  onSetupStarted,
   accountAddress,
   accountId,
   onSetupUpdated,
 }: {
   /** Every exit the flow can reach — Done, Close — leaves through here. */
   onClose: () => void
+  /** Fires once a setup exists (see `ConnectAgentFlow`'s prop of the same name). */
+  onSetupStarted?: () => void
   accountAddress?: string
   accountId?: string | null
   onSetupUpdated?: (info?: { delegateAddress?: string | null }) => void
 }) {
+  const headingId = useId()
   return (
     <ConnectAgentFlow
       inline
       open
       onClose={onClose}
+      onSetupStarted={onSetupStarted}
       accountAddress={accountAddress}
       accountId={accountId}
       onSetupUpdated={onSetupUpdated}
       starterAllowance
     >
       {({ flow, progress, steps }) => (
-        // A named region: the page's one landmark for the flow, and how tests
-        // and the e2e specs find it.
-        <section aria-label="Connect your first agent" className="max-w-xl">
+        // A region named by its own heading: the page's one landmark for the
+        // flow, and how tests and the e2e specs find it.
+        <section aria-labelledby={headingId} className="max-w-xl">
           <Card hover={false} className="overflow-hidden">
-            <Card.Header as="h2" title="Connect your first agent" description={flow.headerSubtitleText} />
+            <Card.Header
+              as="h2"
+              titleId={headingId}
+              title="Connect your first agent"
+              description={flow.headerSubtitleText}
+            />
             <div className="border-b border-[var(--v2-border)] px-5 py-3">{progress}</div>
             <div className="p-5 text-sm leading-relaxed text-[var(--v2-ink-2)]">{steps}</div>
           </Card>

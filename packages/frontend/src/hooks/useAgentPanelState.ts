@@ -71,9 +71,13 @@ export function useAgentPanelState() {
   const inlineSetupEligible =
     !loading && agents.length === 0 && !error && !finalizingAgent && !finalizeTimedOut
 
-  // #4065: once the inline flow mounts, this LATCH keeps it mounted until the
-  // user leaves it (every `handleClose` exit: Done, Close). Without it the
-  // flow unmounts mid-setup: the connector's register inserts a
+  // #4065: once a setup STARTS in the inline flow (its create succeeded —
+  // `ConnectAgentFlow`'s `onSetupStarted`), this LATCH keeps it mounted until
+  // the user leaves it (every `handleClose` exit: Done, Close). Before that
+  // the flow shows only while eligible, so an idle step 1 never traps a user
+  // whose agent was created elsewhere (another tab, an agent-led link): the
+  // list replaces it on the next poll. Without the latch the flow unmounts
+  // mid-setup: the connector's register inserts a
   // `pending_approval` agent the 10 s list poll picks up — at the Review and
   // approve step — and an approval sets `finalizingAgent`. Unmounting there
   // drops the hook's state, including the `onApproved` →

@@ -53,6 +53,15 @@ export interface ConnectAgentFlowProps extends UseAgentConnectionSetupOptions {
    *   inside the inline `Card` would be a nested filled card.
    */
   inline?: boolean
+  /**
+   * #4065: fires whenever a setup exists (the create succeeded, so the user
+   * is mid-flow). The `/agents` panel latches the inline flow on it: from
+   * here a `pending_approval` agent can join the list and an approval can be
+   * in flight, and neither may unmount the flow. Before it — a pristine
+   * step 1 or 2 — nothing is lost, so an agent created elsewhere may still
+   * replace the inline flow with the list.
+   */
+  onSetupStarted?: () => void
   children: (parts: ConnectAgentFlowParts) => ReactNode
 }
 
@@ -66,11 +75,21 @@ export interface ConnectAgentFlowProps extends UseAgentConnectionSetupOptions {
  * All state and orchestration live in `useAgentConnectionSetup` (#989); each
  * step's markup lives in this directory.
  */
-export function ConnectAgentFlow({ inline = false, children, ...options }: ConnectAgentFlowProps) {
+export function ConnectAgentFlow({
+  inline = false,
+  onSetupStarted,
+  children,
+  ...options
+}: ConnectAgentFlowProps) {
   const flow = useAgentConnectionSetup({
     ...options,
     escapeToClose: inline ? false : options.escapeToClose,
   })
+
+  const setupStarted = flow.setup != null
+  useEffect(() => {
+    if (setupStarted) onSetupStarted?.()
+  }, [setupStarted, onSetupStarted])
 
   // #3687: the modal opens with the caret in *Agent name* (fine pointer only).
   // Read once: a changing `initialFocusRef` would re-run Modal's focus-on-open

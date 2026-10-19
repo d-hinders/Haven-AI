@@ -190,8 +190,9 @@ a notice.
 Two containers, one flow (#4065). `ConnectAgentFlow` owns the hook, the step
 dispatch, the step-change focus rule and the stepper; the containers own chrome
 only, so they cannot drift:
-- **Modal** (`ConnectAgentModal`) — every entry once the user has an agent: the
-  dashboard, `/agents` "Connect agent", and a `/agents?setup=<id>` resume link.
+- **Modal** (`ConnectAgentModal`) — every entry except `/agents` with zero
+  agents: the dashboard (with or without agents), `/agents` "Connect agent", and
+  a `/agents?setup=<id>` resume link.
   Title "Connect agent", the X, backdrop and Escape close it, focus starts in
   *Agent name* on a fine pointer.
 - **Inline first agent** (`InlineAgentSetup`) — `/agents` for a user with no
@@ -500,16 +501,22 @@ of an empty state (see Connect And Approve Agent for the inline container).
 - It appears once the first list load resolves, never while loading, and never
   over the "Agents could not load" retry state, the "Finalizing your agent…"
   placeholder or the taking-longer state.
-- Once it shows, it stays mounted until the user leaves it, whatever the list
-  says meanwhile: the connector's register adds a `pending_approval` agent the
-  list poll picks up mid-setup, and an approval sets the finalizing state.
-  Unmounting there would drop the flow (and an approval in flight).
+- Once a setup is created in it, it stays mounted until the user leaves it,
+  whatever the list says meanwhile: the connector's register adds a
+  `pending_approval` agent the list poll picks up mid-setup, and an approval
+  sets the finalizing state. Unmounting there would drop the flow (and an
+  approval in flight). Before a setup exists (steps 1 and 2) it shows only while
+  the list is empty, so an agent created elsewhere — another tab, an agent-led
+  link — replaces it with the list on the next poll.
 - While it shows, nothing else of the list surface renders: no count chip, no
   header "Connect agent", no organization tree, no toolbar, no cards, no
   placeholders. Labels and Organizations stay in the header.
-- Leaving it shows the list when an agent now exists; with the list still empty
+- Leaving it shows the list when an agent now exists. With the list still empty
   (a setup cancelled or expired before the connector registered) a fresh flow
-  replaces it, starter budget seeded again.
+  replaces it, starter budget seeded again — except right after an approval:
+  Done before the post-approval poll has found the new agent shows the
+  "Finalizing your agent…" placeholder (or, if the poll runs out, the
+  taking-longer state), and the list once the agent appears.
 - `?setup=first` lands on the inline flow when there are no agents and opens the
   modal otherwise, decided after the first list load. A `?setup=<id>` resume
   link always opens the modal, and the inline flow does not render under it.

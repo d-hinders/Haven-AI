@@ -134,7 +134,9 @@ function CardSection({
  * band's corners clip to the card radius). For a standalone header on a card
  * without `overflow-hidden`, add `rounded-t-[10px]` via className.
  *
- * Slots: `title` (rendered in a heading — `as` picks the level), optional
+ * Slots: `title` (rendered in a heading — `as` picks the level; `titleId`
+ * gives that heading an id, so a landmark can name itself with
+ * `aria-labelledby` instead of repeating the title), optional
  * `description`, optional `actions` (right-aligned). For bespoke content
  * (badges, balances, skeletons) pass `children` instead of the slots.
  *
@@ -144,6 +146,7 @@ function CardSection({
  */
 function CardHeader({
   title,
+  titleId,
   as: Heading = 'h3',
   description,
   actions,
@@ -152,6 +155,7 @@ function CardHeader({
   children,
 }: {
   title?: ReactNode
+  titleId?: string
   as?: 'h2' | 'h3'
   description?: ReactNode
   actions?: ReactNode
@@ -169,7 +173,7 @@ function CardHeader({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             {title !== undefined ? (
-              <Heading className="text-sm font-semibold text-[var(--v2-ink)]">{title}</Heading>
+              <Heading id={titleId} className="text-sm font-semibold text-[var(--v2-ink)]">{title}</Heading>
             ) : null}
             {description !== undefined ? (
               <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{description}</p>

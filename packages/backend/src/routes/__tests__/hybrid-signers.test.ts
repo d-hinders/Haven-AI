@@ -640,6 +640,29 @@ describe('owner-initiated send (#1083)', () => {
     expect(mockQuery.mock.calls.filter(isRecordInsert)).toHaveLength(1)
   })
 
+  it('a stalled record write cannot hold the reply past its deadline (Antonio, review 1)', async () => {
+    const { OWNER_TRANSFER_RECORD_DEADLINE_MS } = await import('../hybrid-accounts.js')
+    ownedAccount({ passkeys: [PK1] })
+    mockQuery.mockImplementation((sql: string) => {
+      // A database that never answers the insert: the transfer has already moved.
+      if (/INSERT INTO owner_transfers/.test(String(sql))) return new Promise(() => {})
+      return /FROM smart_accounts/.test(String(sql))
+        ? Promise.resolve({ rows: [{ '?column?': 1 }] })
+        : Promise.resolve({ rows: [] })
+    })
+    mockPrepared()
+    const started = Date.now()
+    const res = await app.inject({
+      method: 'POST', url: submitUrl,
+      payload: { ...BODY, signature: '0x' + 'ab'.repeat(80), user_operation: { sender: ACCOUNT, callData: await transferCallData() } },
+    })
+    const elapsed = Date.now() - started
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ submitted: true, tx_hash: '0x' + 'ff'.repeat(32) })
+    expect(elapsed).toBeGreaterThanOrEqual(OWNER_TRANSFER_RECORD_DEADLINE_MS - 50)
+    expect(elapsed).toBeLessThan(OWNER_TRANSFER_RECORD_DEADLINE_MS + 1_500)
+  })
+
   it('nothing is recorded when the send does not land', async () => {
     ownedAccount({ passkeys: [PK1] })
     mockPrepared(vi.fn().mockRejectedValue(new Error('treasury UserOp included but reverted')))

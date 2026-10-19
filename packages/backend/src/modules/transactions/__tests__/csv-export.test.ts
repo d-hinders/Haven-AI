@@ -123,6 +123,10 @@ describe('transactionCsvRow', () => {
     expect(transactionCsvRow(tx({ initiatedBy: 'human' }), NEVER_NAMED).initiator).toBe('You')
     expect(transactionCsvRow(tx({ initiatedBy: 'agent', agentName: 'Buyer' }), NEVER_NAMED).initiator).toBe('Buyer')
     expect(transactionCsvRow(tx({ initiatedBy: 'unknown' }), NEVER_NAMED).initiator).toBe('Unknown')
+    // No record at all (the enrichment step failed and returned rows
+    // unclassified): outbound is still "Unknown", inbound stays empty.
+    expect(transactionCsvRow(tx({ initiatedBy: undefined }), NEVER_NAMED).initiator).toBe('Unknown')
+    expect(transactionCsvRow(tx({ initiatedBy: undefined, direction: 'in' }), NEVER_NAMED).initiator).toBe('')
     // No raw enum value ever reaches the file.
     for (const initiatedBy of ['human', 'agent', 'unknown'] as const) {
       expect(transactionCsvRow(tx({ initiatedBy, agentName: 'Buyer' }), NEVER_NAMED).initiator).not.toBe(initiatedBy)

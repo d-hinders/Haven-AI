@@ -15,13 +15,14 @@ import type { PoolClient } from 'pg'
  * confirmed it (`submitTransfer` waits for the receipt, so the tx hash is
  * known and the transfer did execute). Enrichment matches an explorer row
  * to a row here by (tx hash, account, chain) — the same identity
- * `paymentAgentIdentityKey` uses for intents and sweeps — and stamps
- * `initiatedBy: 'human'`.
+ * `paymentAgentIdentityKey` uses for intents and sweeps — plus what was
+ * sent (token, recipient, amount), and stamps `initiatedBy: 'human'`.
  *
  * Attribution only. Nothing on the payment path reads this table, the row
- * is written after the transfer executed, and a failed write never fails
- * the send (the route logs and answers success): it can change what the
- * feed CALLS a transfer, never whether or what one moves.
+ * is written after the transfer executed, and a failed or slow write never
+ * fails the send nor holds its reply past a short deadline (the route logs
+ * and answers success): it can change what the feed CALLS a transfer, never
+ * whether or what one moves.
  *
  * Owner decision (2026-10-19): no backfill. A send made before this table
  * existed has no row and stays "Unknown"; no heuristic may claim it.
@@ -50,10 +51,12 @@ export async function up(client: PoolClient): Promise<void> {
       created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `)
-  // The dedupe identity and the enrichment lookup — see the header.
+  // The dedupe identity and the enrichment lookup — see the header. Led by
+  // tx_hash because the enrichment read constrains it (and account_id) but
+  // not chain_id.
   await client.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_owner_transfers_identity
-      ON owner_transfers (chain_id, tx_hash, account_id)
+      ON owner_transfers (tx_hash, account_id, chain_id)
   `)
   await client.query(`
     CREATE INDEX IF NOT EXISTS idx_owner_transfers_user

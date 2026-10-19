@@ -133,7 +133,16 @@ describeDb('owner_transfers record (#4099)', () => {
     await record(theirs, shared)
 
     const matches = await findOwnerTransferMatches([shared.toLowerCase()], mine.userId, [mine.accountId, theirs.accountId])
-    expect(matches).toEqual([{ tx_hash: shared.toLowerCase(), account_id: mine.accountId, chain_id: CHAIN }])
+    expect(matches).toEqual([
+      {
+        tx_hash: shared.toLowerCase(),
+        account_id: mine.accountId,
+        chain_id: CHAIN,
+        token_address: USDC.toLowerCase(),
+        to_address: `0x${'b'.repeat(40)}`,
+        amount_raw: '1000000',
+      },
+    ])
 
     // Scoped by account id too: the user's own row on an account not asked for is not returned.
     expect(await findOwnerTransferMatches([shared.toLowerCase()], mine.userId, [theirs.accountId])).toEqual([])
@@ -159,11 +168,16 @@ describeDb('owner_transfers record (#4099)', () => {
       feedRow(sender, hash(6), 'out'),
       // The receiving side of the recorded own-account transfer.
       feedRow(reserve, hash(5), 'in'),
+      // Another outbound transfer in the SAME tx from the same account — an
+      // agent redemption bundled beside the owner's UserOp. Not what the
+      // owner sent, so not "You".
+      { ...feedRow(sender, hash(5), 'out'), to: `0x${'d'.repeat(40)}`, value: '2500000' },
     ])
-    expect(enriched.map((tx) => [tx.accountId, tx.hash, tx.initiatedBy])).toEqual([
-      [sender.accountId, hash(5), 'human'],
-      [sender.accountId, hash(6), 'unknown'],
-      [reserve.accountId, hash(5), undefined],
+    expect(enriched.map((tx) => [tx.accountId, tx.hash, tx.to, tx.initiatedBy])).toEqual([
+      [sender.accountId, hash(5), `0x${'b'.repeat(40)}`, 'human'],
+      [sender.accountId, hash(6), `0x${'b'.repeat(40)}`, 'unknown'],
+      [reserve.accountId, hash(5), reserve.address, undefined],
+      [sender.accountId, hash(5), `0x${'d'.repeat(40)}`, 'unknown'],
     ])
   })
 })

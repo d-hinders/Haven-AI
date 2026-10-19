@@ -232,7 +232,8 @@ and a recording failure is swallowed: metrics can never gate a payment. See
 > and the transfer it already validated; the route then writes one
 > attribution row to `owner_transfers` (migration 116) after the receipt
 > confirmed the transfer, fail-soft — a failed write is logged and the send
-> still answers success. Nothing on any spend, signing or revocation path
+> still answers success, and a slow one cannot hold the reply past
+> `OWNER_TRANSFER_RECORD_DEADLINE_MS` (500 ms). Nothing on any spend, signing or revocation path
 > reads that row; it only lets the transaction feed say "You" instead of
 > "Unknown". A characterization test, which passes against the pre-change
 > route as well, pins that `submitCall` receives the signed operation

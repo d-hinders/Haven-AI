@@ -310,7 +310,14 @@ describe('owner sends read as the owner’s (#4099)', () => {
 
   /** The owner's send to their own second account, as the explorer lists it on the sender. */
   const ownerSend = () => withSafe({ ...RAW_TWIN, hash: '0xowner', from: '0xsafe', to: '0xreserve' })
-  const OWNER_ROW: OwnerTransferMatchRow = { tx_hash: '0xowner', account_id: 'safe-1', chain_id: 8453 }
+  const OWNER_ROW: OwnerTransferMatchRow = {
+    tx_hash: '0xowner',
+    account_id: 'safe-1',
+    chain_id: 8453,
+    token_address: '0xUSDC',
+    to_address: '0xRESERVE',
+    amount_raw: '1000000',
+  }
 
   it('a recorded owner send is initiatedBy=human, not unknown', async () => {
     mockModules({ ownerRows: [OWNER_ROW] })
@@ -349,8 +356,37 @@ describe('owner sends read as the owner’s (#4099)', () => {
     expect(row.initiatedBy).toBeUndefined()
   })
 
+  it('only the owner’s own transfer in a shared tx reads human — a bundled agent spend stays unknown (Antonio, review 2)', async () => {
+    // One bundler transaction, two outbound transfers from the same account:
+    // the owner's send to the reserve, and an agent redemption to a merchant
+    // with no matched intent. Same hash, same account, same chain.
+    mockModules({ ownerRows: [OWNER_ROW] })
+    const { mergeSortDedupeAndEnrich } = await import('../orchestration.js')
+    const agentSpend = withSafe({ ...RAW_TWIN, hash: '0xowner', from: '0xsafe', to: '0xmerchant', value: '2500000' })
+    const result = await mergeSortDedupeAndEnrich('user-1', [USER_SAFE], [ownerSend(), agentSpend])
+    const byTo = new Map(result.map((tx) => [tx.to, tx.initiatedBy]))
+    expect(byTo.get('0xreserve')).toBe('human')
+    expect(byTo.get('0xmerchant')).toBe('unknown')
+  })
+
+  it('a record whose token, recipient or amount differs from the row does not match', async () => {
+    for (const mismatch of [
+      { token_address: '0xother' },
+      { to_address: '0xelsewhere' },
+      { amount_raw: '999999' },
+    ]) {
+      mockModules({ ownerRows: [{ ...OWNER_ROW, ...mismatch }] })
+      const { mergeSortDedupeAndEnrich } = await import('../orchestration.js')
+      const [row] = await mergeSortDedupeAndEnrich('user-1', [USER_SAFE], [ownerSend()])
+      expect(row.initiatedBy).toBe('unknown')
+    }
+  })
+
   it('agent attribution wins over an owner record on the same row', async () => {
-    mockModules({ piRows: [PI_ROW], ownerRows: [{ ...OWNER_ROW, tx_hash: '0xmatched' }] })
+    mockModules({
+      piRows: [PI_ROW],
+      ownerRows: [{ ...OWNER_ROW, tx_hash: '0xmatched', to_address: '0xmerchant' }],
+    })
     const { mergeSortDedupeAndEnrich } = await import('../orchestration.js')
     const [row] = await mergeSortDedupeAndEnrich('user-1', [USER_SAFE], [withSafe({ ...RAW_TWIN, hash: '0xmatched' })])
     expect(row).toMatchObject({ agentId: 'agent-2', initiatedBy: 'agent' })

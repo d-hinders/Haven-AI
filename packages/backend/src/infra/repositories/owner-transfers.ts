@@ -64,11 +64,18 @@ export interface OwnerTransferMatchRow {
   tx_hash: string
   account_id: string
   chain_id: number
+  /** What the owner sent — enrichment matches the row on these too (#4099 review). */
+  token_address: string
+  to_address: string
+  amount_raw: string
 }
 
 export const FIND_OWNER_TRANSFER_MATCHES_SQL = `SELECT ot.tx_hash,
               ot.account_id,
-              ot.chain_id
+              ot.chain_id,
+              ot.token_address,
+              ot.to_address,
+              ot.amount_raw
        FROM owner_transfers ot
        WHERE ot.tx_hash = ANY($1)
          AND ot.user_id = $2

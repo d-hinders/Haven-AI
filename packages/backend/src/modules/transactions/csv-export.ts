@@ -170,7 +170,10 @@ export function csvInitiator(tx: EnrichedTransaction): string {
     case 'unknown':
       return 'Unknown'
     default:
-      return ''
+      // No record at all: an inbound row, or an outbound one whose enrichment
+      // failed (the step returns rows unclassified). An outbound row with no
+      // record is still not known to be the owner's — "Unknown", never "".
+      return tx.direction === 'out' ? 'Unknown' : ''
   }
 }
 

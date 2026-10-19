@@ -271,7 +271,7 @@ export default function TransactionsClient() {
         />
 
         <EmptyState
-          title="No accounts linked yet"
+          title="No accounts yet"
           body="Add a Haven account before we can show transaction history."
           action={<Button href="/onboarding">Add account</Button>}
         />

@@ -221,6 +221,25 @@ and a recording failure is swallowed: metrics can never gate a payment. See
 
 ## 3. Delegation custody semantics (#828's contract)
 
+> **Re-verified #4021 (2026-10-19, the account card's "Last payment" field):**
+> this diff touches one file in this document's coverage list,
+> `infra/repositories/dashboard.ts`, and adds no signing step, no gate, no
+> route and no authority surface. What changed is one additive READ beside
+> the file's reads — `findLastOutgoingIntentAt`, a `MAX(confirmed_at)` over
+> confirmed payment intents joined to ONE account via `agents.account_id`,
+> the caller's own account id from the route's existing ownership check —
+> consumed by a new presentation module that answers "when did this account
+> last send anything" for the `/accounts` card footer. No write, no new
+> column, no scope widening; the chain leg re-shapes rows the transactions
+> feed already served, and the wire field is an ISO timestamp on the
+> portfolio read the route already served. Invariants 1–13 are untouched:
+> the file gains a read, not a key, a signer or a spend path. Scope of this
+> note: the `dashboard.ts` paragraphs of §6 and §8 and the additive-read
+> claims above; nothing else in this document was re-read for it, and
+> `last-verified` is bumped to 2026-10-19 for exactly this scope. The
+> verification entry for the two `satisfied-by` contract docs this change
+> also touches is `docs/regulatory/casp-changelog/2026-10-19-4021.md`.
+
 > **Re-verified #3930 (2026-10-14, a lost activate response re-reads before it
 > reports):** this diff touches one file in this document's coverage list,
 > `hooks/useDelegationBudget.ts`, and adds no signing step, no gate, no route

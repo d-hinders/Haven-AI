@@ -1454,19 +1454,33 @@ assertion dressed up as a layout one — it did, once. Pin the geometry (the two
 and the icon square's 6 + 14 + 6) and express the sideways rule as a relationship
 (`hit width − painted width ≈ 0` for an `inset-x-0` overlay) instead.
 
-`e2e/accounts-card-tap-target.mobile.spec.ts` pins all of it, and `/accounts` has no
-committed pixel baseline at any width — so, as with #2038, the blocking visual gate could
-not have seen any of this. Since #3719 that spec pins the **absence** of both controls
-(the star, #2374, and `Set active`), page-wide and against both spellings a reintroduction
-could take, with the card's own name link as its non-vacuity check; its geometry checks
-left with the control.
+`e2e/accounts-card-tap-target.mobile.spec.ts` pins all of it. Since #3719 that spec pins the
+**absence** of both controls (the star, #2374, and `Set active`), page-wide and against both
+spellings a reintroduction could take, with the card's own name link as its non-vacuity
+check; its geometry checks left with the control. Its body tap point is the headline
+balance figure — the #4021 card no longer renders a token row for a single-holding account
+to tap. `/accounts` DOES carry committed pixel baselines now (the #4021 correction of the
+sentence this one replaced): `accounts-mobile` (the one-account layout plus the create
+tile), `accounts-multi` (the two-or-more grid, priced distinctly per #2225),
+`currency-sek-accounts-{desktop,mobile}` and `balance-freshness-accounts-overview-desktop`.
 
-**Current account-card interaction (#3550).** The card container is not itself a link or
-tab stop. Its account-name `Link` owns a stretched pseudo-element that covers the card;
-clicking the card body therefore navigates to that account. Since #3719 the card holds no
-other control. If an action ever returns to it, it must be a sibling above the overlay with
-its own vertical 44px hit-area expansion and no propagation guards — the historical
-`preventDefault()` behaviour above must not be reintroduced.
+**Current account-card interaction (#3550, #4021).** The card container is not itself a link
+or tab stop. Its account-name `Link` owns a stretched pseudo-element that covers the card;
+clicking the card body therefore navigates to that account. #4021 slimmed the card to name,
+balance and one line about agents (`Bot` + "Last payment {relative}" / "No payments yet"),
+removed the "Added {timeAgo}" caption and the faint "Open →" affordance (hover and focus
+already signal the card is clickable), hid token rows for a single non-zero holding (a row
+would only repeat the headline; two or more holdings get one row each, and a token whose
+RAW `balance` is zero — not its fiat value — renders nowhere, while the freshness marker
+keeps reading the FULL breakdown, #3295), and replaced the chain-name pill with a "Test
+network" chip beside the name on testnets only (via the shared `isTestnetChain`; mainnet
+renders no network marker). One action DID return to the card under #4021, on the
+empty-balance state only: an **Add funds** link that opens `AddFundsModal` — the exact
+sibling-above-the-overlay shape this section has always demanded: `relative z-[content]`,
+its own `min-h-[44px]` vertical hit area, no propagation guards, and a LINK rather than a
+button so the card still holds no buttons. A second holding area — the "Create another
+account" tile beside the one-account card — is NOT on the card at all; it is a page-level
+dashed button that opens the same dialog as the header's "New account" action.
 
 **Prove it rendered, not in the class string.** A pseudo-element overlay has several
 silent no-op failure modes (a clipping ancestor, a positioning context resolving

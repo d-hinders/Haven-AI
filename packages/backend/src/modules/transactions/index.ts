@@ -41,6 +41,7 @@ export {
 export { toCanonicalAddress } from './normalize.js'
 export { compareTransactions, enrichedTransactionIdentityKey } from './ordering.js'
 export { fetchAccountTransactions } from './aggregate.js'
+export { fetchLastOutgoingAt } from './last-outgoing.js'
 export { enrichTransactionsWithAgents } from './enrichment.js'
 export { enrichTransactionsWithAccounting } from './accounting.js'
 export { serveTimeAmount } from './serve-time.js'

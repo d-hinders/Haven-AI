@@ -10,6 +10,13 @@ interface UsePortfolioReturn {
   totalEur: number
   totalSek: number
   breakdown: PortfolioBreakdown[]
+  /**
+   * #4021 — the account's most recent outgoing transfer (agent payment or
+   * owner send), ISO-8601; null when it has never sent anything. The card
+   * footer's "Last payment {relative}" reads this; `?? null` keeps an absent
+   * key from reading as "loading" or crashing a render.
+   */
+  lastOutgoingAt: string | null
   loading: boolean
   error: string | null
   refetch: () => void
@@ -27,6 +34,7 @@ export function usePortfolio(
   const [totalEur, setTotalEur] = useState(0)
   const [totalSek, setTotalSek] = useState(0)
   const [breakdown, setBreakdown] = useState<PortfolioBreakdown[]>([])
+  const [lastOutgoingAt, setLastOutgoingAt] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const generationRef = useRef(0)
@@ -39,6 +47,7 @@ export function usePortfolio(
       setTotalEur(0)
       setTotalSek(0)
       setBreakdown([])
+      setLastOutgoingAt(null)
       setError(null)
       setLoading(false)
       return
@@ -63,6 +72,9 @@ export function usePortfolio(
         setTotalSek(data.totalSek ?? 0)
         // `?? []` — an absent key must degrade, not crash the route (#3093).
         setBreakdown(data.breakdown ?? [])
+        // `?? null` — an absent key (an older backend) means "never sent",
+        // not a crash; the footer's copy rules handle null (#4021).
+        setLastOutgoingAt(data.lastOutgoingAt ?? null)
         if (silent) setError(null)
       }
     } catch (err) {
@@ -99,5 +111,5 @@ export function usePortfolio(
     void fetchPortfolio(true)
   })
 
-  return { totalUsd, totalEur, totalSek, breakdown, loading, error, refetch: fetchPortfolio }
+  return { totalUsd, totalEur, totalSek, breakdown, lastOutgoingAt, loading, error, refetch: fetchPortfolio }
 }

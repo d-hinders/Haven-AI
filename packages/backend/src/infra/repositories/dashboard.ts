@@ -660,6 +660,41 @@ export async function listAgentLastPayments(
 }
 
 /**
+ * The newest CONFIRMED payment intent booked against ONE account (#4021).
+ *
+ * This is deliberately NOT a twin of `AGENT_LAST_PAYMENT_SQL` promoted to
+ * account scope and used alone: agent intents are only HALF of what the
+ * account card's "Last payment" counts — the owner ruling is any outgoing
+ * transfer, INCLUDING owner sends, which never touch `payment_intents` (they
+ * are broadcast straight from the owner's signer; no backend row records
+ * them). The chain-history probe in `modules/transactions/last-outgoing.ts`
+ * covers owner sends and on-chain legs; THIS read is the belt-and-braces leg
+ * for a confirmed intent whose transfer never surfaced in the explorer rows
+ * (the x402-synthesized row case). `last-outgoing.ts` takes the MAX of both.
+ *
+ * `agents.account_id` is a plain column, not an FK (migration 084) — the JOIN
+ * is still tenant-safe: the caller passes the account id from an ownership
+ * check that already ran under the caller's user.
+ */
+export const LAST_OUTGOING_INTENT_SQL = `SELECT MAX(pi.confirmed_at) AS last_outgoing_at
+  FROM payment_intents pi
+  JOIN agents a ON a.id = pi.agent_id
+  WHERE a.account_id = $1
+    AND pi.status = 'confirmed'`
+
+/** `accountId` is REQUIRED — scope it from the caller's ownership check, never from the wire. */
+export async function findLastOutgoingIntentAt(
+  accountId: string,
+  db: Executor = pool,
+): Promise<Date | null> {
+  const result = await db.query<{ last_outgoing_at: Date | null }>(LAST_OUTGOING_INTENT_SQL, [
+    accountId,
+  ])
+  const raw = result.rows[0]?.last_outgoing_at
+  return raw ? new Date(raw) : null
+}
+
+/**
  * Refusal ROW counts per bucket, per agent, for both windows (#3803) — rows,
  * not distinct reasons (the `aggregateRefusalsForUserByAgent().refusals`
  * trap the issue names). Buckets: `budget` = delegation_budget_exceeded +

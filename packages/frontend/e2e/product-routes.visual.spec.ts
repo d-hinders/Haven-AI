@@ -31,7 +31,7 @@
  *   /agents           549  1 (chain RPC)   none            rejected
  *   /transactions     320  0               "3mo ago"       ADDED, clock frozen
  *   /contacts         179  0               none            deferred
- *   /accounts         104  0               "Added 4mo ago" rejected
+ *   /accounts         104  0               "Last payment 4mo ago"  ADDED, clock frozen
  *
  * `/dashboard` is the post-login landing screen and the densest composition of
  * shared primitives in the product; `/transactions` is the money-history screen
@@ -73,8 +73,13 @@
  * and the warning STANDS for any harness serving more than one account; it is
  * unobservable in THIS gate because `mockHavenApi` seeds exactly ONE Safe
  * (`testSafe`), so no two accounts here can render identical-looking balances.
- * Re-derive this paragraph before a second fixture account is seeded or an
- * address-keyed fixture fix lands in either file. #2817's capture also keeps
+ * RE-DERIVED under #4021: the `accounts-multi` capture seeds a second fixture
+ * account through `serveTwoAccounts`, which answers `/portfolio/` for THAT
+ * account's ADDRESS with its own envelope — distinct balances, row count and
+ * last-payment footer — so the two cards cannot photograph alike, which is
+ * the re-derivation this paragraph asked for. The prefix-keyed handlers on
+ * `dev` are unchanged; the overlay is scoped to the one address it owns.
+ * #2817's capture also keeps
  * clear of the `/agents` flake class: `/accounts` makes no on-chain call —
  * its portfolio and balances come from the shared fixture.
  *
@@ -148,6 +153,7 @@ import {
   mockHavenApi,
   seedAuthenticatedSession,
   serveAgentDetailResponses,
+  serveTwoAccounts,
 } from './fixtures/haven-api'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports, shared with
@@ -343,6 +349,14 @@ type ProductRoute = {
    * shared fixture falls through on. The agent id is `agent-research`.
    */
   serveDetailResponses?: boolean
+  /**
+   * Route-specific fixture overlay, run after `mockHavenApi` (later-registered
+   * routes win) and before `seedAuthenticatedSession` — for a capture whose
+   * served state differs from the shared fixture's (#4021: the
+   * two-or-more-account grid, priced distinctly per #2225). Keep overlays
+   * scoped to their own reads; everything else must fall through.
+   */
+  serve?: (page: Page) => Promise<void>
 }
 
 const ROUTES: ProductRoute[] = [
@@ -453,19 +467,41 @@ const ROUTES: ProductRoute[] = [
    * header paragraph this row superseded.
    *
    * `frozenRelativeTime` is pinned for the same reason as `/transactions`:
-   * the card caption renders `Added {timeAgo(safe.created_at)}` off the
-   * fixture's fixed `2026-05-01` timestamp, which buckets to `4mo ago` at
-   * `FROZEN_NOW` — assert the literal the frozen clock must produce, not a
-   * pixel that drifts on a calendar boundary.
+   * the card footer renders `Last payment {timeAgo(...)}` off the fixture's
+   * `lastOutgoingAt` (#4021, pinned to `testSafe.created_at`), which buckets
+   * to `4mo ago` at `FROZEN_NOW` — assert the literal the frozen clock must
+   * produce, not a pixel that drifts on a calendar boundary. (#4021 replaced
+   * the old `Added 4mo ago` caption pin; the "Added" line itself is gone.)
    */
   {
     path: '/accounts',
     slug: 'accounts',
     viewports: ['mobile'],
-    /** Measured at 390 on this harness: 104 characters. */
+    /** Measured at 390 on this harness: 104 characters; re-measured under the #4021 card. */
     minChars: 100,
     anchor: (page: Page) => page.getByRole('heading', { name: 'Accounts', exact: true }),
-    frozenRelativeTime: 'Added 4mo ago',
+    frozenRelativeTime: 'Last payment 4mo ago',
+  },
+
+  /**
+   * #4021: the TWO-OR-MORE-ACCOUNT grid — the layout that exists once
+   * multi-account creation has landed, the one the old three-column grid
+   * never showed with more than one card in it. Served by `serveTwoAccounts`,
+   * which prices the two accounts DIFFERENTLY (#2225): distinct balances, row
+   * counts and last-payment footers, so the baseline cannot pass with one
+   * card painted twice. The header action and the grid render from the same
+   * fixture as production; no chain call is made. Desktop-only: the mobile
+   * composition is the one-account `accounts-mobile` capture's sibling, and
+   * every extra axis here is a re-bless tax without a defect pointing at it.
+   */
+  {
+    path: '/accounts',
+    slug: 'accounts-multi',
+    viewports: ['desktop'],
+    minChars: 120,
+    anchor: (page: Page) => page.getByRole('heading', { name: 'Accounts', exact: true }),
+    frozenRelativeTime: 'Last payment 17d ago',
+    serve: serveTwoAccounts,
   },
 ]
 
@@ -504,6 +540,9 @@ test.describe('product-route visual regression', () => {
         await mockHavenApi(page)
         if (route.serveDetailResponses) {
           await serveAgentDetailResponses(page, 'agent-research')
+        }
+        if (route.serve) {
+          await route.serve(page)
         }
         await seedAuthenticatedSession(page)
 

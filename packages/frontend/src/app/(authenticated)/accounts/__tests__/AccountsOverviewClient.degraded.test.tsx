@@ -94,8 +94,19 @@ describe('AccountsOverviewClient — degraded balance reads (#3295)', () => {
           sekValue: 12636,
           balanceFreshness: { status: 'stale', asOf: STALE_AS_OF },
         },
-        { symbol: 'ETH', balance: '0', formatted: '0.00', usdValue: 34.56, eurValue: 31, sekValue: 364.5 },
+        // #4021: the filler ETH row no longer pretends a zero raw balance is
+        // worth 34.56 — a zero-balance token hides, and the stale marker on
+        // the USDC row is what carries the total's indicator.
+        {
+          symbol: 'ETH',
+          balance: '0',
+          formatted: '0.00',
+          usdValue: 0,
+          eurValue: 0,
+          sekValue: 0,
+        },
       ],
+      lastOutgoingAt: null,
       loading: false,
     })
     render(<AccountsOverviewClient />)
@@ -105,6 +116,8 @@ describe('AccountsOverviewClient — degraded balance reads (#3295)', () => {
     expect(within(activeCard).getByText('$1,234.56')).toBeInTheDocument()
     expect(within(activeCard).getByText(/as of /)).toBeInTheDocument()
     expect(within(activeCard).queryByText('Unavailable')).not.toBeInTheDocument()
+    // The filler row itself is hidden (#4021) — the zero raw balance rules.
+    expect(within(activeCard).queryByText('ETH')).not.toBeInTheDocument()
   })
 
   it('an unread token shows "Unavailable" beside the card total rather than a fake zero', () => {
@@ -139,8 +152,11 @@ describe('AccountsOverviewClient — degraded balance reads (#3295)', () => {
       totalSek: 5200,
       breakdown: [
         { symbol: 'USDC', balance: '400000000', formatted: '400.00', usdValue: 400, eurValue: 368, sekValue: 4160 },
-        { symbol: 'ETH', balance: '0', formatted: '0.00', usdValue: 100, eurValue: 92, sekValue: 1040 },
+        // #4021: the filler token carries no fiat value — a zero raw balance
+        // is zero, not an unpriced holding.
+        { symbol: 'ETH', balance: '0', formatted: '0.00', usdValue: 0, eurValue: 0, sekValue: 0 },
       ],
+      lastOutgoingAt: null,
       loading: false,
     })
     render(<AccountsOverviewClient />)

@@ -13349,6 +13349,12 @@ export const openapiSpec = {
           totalEur: { type: 'number' },
           totalSek: { type: 'number' },
           breakdown: { type: 'array', items: { $ref: '#/components/schemas/PortfolioBreakdown' } },
+          lastOutgoingAt: {
+            type: 'string',
+            format: 'date-time',
+            nullable: true,
+            description: '#4021 — the account\'s most recent OUTGOING transfer of any kind (agent payment or owner send; incoming transfers excluded), as the account card\'s "Last payment {relative}" footer reads it. Null when the account has never sent anything (or the probe could not see one — a failed chain read is not cached and is not reported as "no payments"). Absent from the dashboard aggregate, which prices balances only.',
+          },
         },
         additionalProperties: false,
       },

@@ -151,7 +151,11 @@ describe('AccountDetailClient — degraded balance reads (#3295)', () => {
           sekValue: 12636,
           balanceFreshness: { status: 'stale', asOf: STALE_AS_OF },
         },
-        { symbol: 'ETH', balance: '0', formatted: '0.00', usdValue: 34.56, eurValue: 31, sekValue: 364.5 },
+        // #4021: the fresh second holding has a NON-ZERO raw balance (an
+        // unpriced one — fiat 0), so it still renders and proves the fresh
+        // row carries no marker. The old fixture paired ETH balance '0' with
+        // a non-zero fiat value; a zero raw balance now renders nowhere.
+        { symbol: 'ETH', balance: '20000000000000000', formatted: '0.02', usdValue: 0, eurValue: 0, sekValue: 0 },
       ],
       loading: false,
       error: null,
@@ -169,11 +173,11 @@ describe('AccountDetailClient — degraded balance reads (#3295)', () => {
     const row = screen.getByText('1200.00').closest('div.grid') as HTMLElement
     expect(within(row).getByText(/as of /)).toBeInTheDocument()
     // The fresh token row carries none.
-    const ethRow = screen.getByText('0.00').closest('div.grid') as HTMLElement
+    const ethRow = screen.getByText('0.02').closest('div.grid') as HTMLElement
     expect(within(ethRow).queryByText(/as of /)).not.toBeInTheDocument()
   })
 
-  it('an unread token shows "Unavailable" in its row, not a bare zero', () => {
+  it('an unread token renders no row, and the total still carries the "Unavailable" marker (#4021, #3295)', () => {
     mockUsePortfolio.mockReturnValue({
       totalUsd: 0,
       totalEur: 0,
@@ -195,10 +199,14 @@ describe('AccountDetailClient — degraded balance reads (#3295)', () => {
     })
     render(<AccountDetailClient />)
 
-    const row = screen.getByText('0.00').closest('div.grid') as HTMLElement
-    expect(within(row).getByText('Unavailable')).toBeInTheDocument()
+    // #4021: the filler row is hidden — a zero RAW balance renders nowhere,
+    // on this page exactly as on the overview card.
+    expect(screen.queryByText('0.00')).not.toBeInTheDocument()
+    // But the headline's freshness marker reads the FULL breakdown (#3295):
+    // hiding the row must not drop the "Unavailable" the total owes.
+    expect(screen.getByText('Unavailable')).toBeInTheDocument()
     // No fake timestamp for a token that has never been read.
-    expect(within(row).queryByText(/as of /)).not.toBeInTheDocument()
+    expect(screen.queryByText(/as of /)).not.toBeInTheDocument()
   })
 
   it('a clean read renders no indicator anywhere', () => {
@@ -208,7 +216,9 @@ describe('AccountDetailClient — degraded balance reads (#3295)', () => {
       totalSek: 5200,
       breakdown: [
         { symbol: 'USDC', balance: '400000000', formatted: '400.00', usdValue: 400, eurValue: 368, sekValue: 4160 },
-        { symbol: 'ETH', balance: '0', formatted: '0.00', usdValue: 100, eurValue: 92, sekValue: 1040 },
+        // #4021: the filler token carries no fiat value — a zero raw balance
+        // is zero, not an unpriced holding, and its row renders nowhere.
+        { symbol: 'ETH', balance: '0', formatted: '0.00', usdValue: 0, eurValue: 0, sekValue: 0 },
       ],
       loading: false,
       error: null,

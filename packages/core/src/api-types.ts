@@ -6218,6 +6218,11 @@ export type components = {
             totalEur: number;
             totalSek?: number;
             breakdown: components["schemas"]["PortfolioBreakdown"][];
+            /**
+             * Format: date-time
+             * @description #4021 — the account's most recent OUTGOING transfer of any kind (agent payment or owner send; incoming transfers excluded), as the account card's "Last payment {relative}" footer reads it. Null when the account has never sent anything (or the probe could not see one — a failed chain read is not cached and is not reported as "no payments"). Absent from the dashboard aggregate, which prices balances only.
+             */
+            lastOutgoingAt?: string | null;
         };
         TransactionFilterOptionsResponse: {
             accounts: {

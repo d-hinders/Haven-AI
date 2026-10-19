@@ -2,9 +2,10 @@ import Fastify, { FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { mockQuery, mockFetchPortfolioForAccount } = vi.hoisted(() => ({
+const { mockQuery, mockFetchPortfolioForAccount, mockFetchLastOutgoingAt } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   mockFetchPortfolioForAccount: vi.fn(),
+  mockFetchLastOutgoingAt: vi.fn(),
 }))
 
 vi.mock('../../db.js', () => ({
@@ -15,6 +16,13 @@ vi.mock('../../db.js', () => ({
 
 vi.mock('../../modules/accounts/index.js', () => ({
   fetchPortfolioForAccount: (...args: unknown[]) => mockFetchPortfolioForAccount(...args),
+}))
+
+// #4021: the card's "Last payment" rides THIS route. Mocked at the module
+// boundary so the route tests never touch the chain-history probe — the
+// probe's own behaviour is last-outgoing.test.ts's.
+vi.mock('../../modules/transactions/index.js', () => ({
+  fetchLastOutgoingAt: (...args: unknown[]) => mockFetchLastOutgoingAt(...args),
 }))
 
 import portfolioRoutes from '../portfolio.js'
@@ -48,6 +56,8 @@ describe('portfolio routes', () => {
     mockQuery.mockReset()
     mockFetchPortfolioForAccount.mockReset()
     mockFetchPortfolioForAccount.mockResolvedValue(PORTFOLIO)
+    mockFetchLastOutgoingAt.mockReset()
+    mockFetchLastOutgoingAt.mockResolvedValue(null)
   })
 
   function signToken(payload: { sub: string; email: string }): string {
@@ -70,7 +80,31 @@ describe('portfolio routes', () => {
       ['user-1', SAFE_ADDRESS, 8453],
     )
     expect(mockFetchPortfolioForAccount).toHaveBeenCalledWith(8453, SAFE_ADDRESS)
-    expect(response.json()).toEqual(PORTFOLIO)
+    // #4021: the additive field is part of EVERY 200 — null when the account
+    // has never sent anything (the probe's own behaviour is mocked here).
+    expect(mockFetchLastOutgoingAt).toHaveBeenCalledWith('safe-base', 8453, SAFE_ADDRESS, expect.anything())
+    expect(response.json()).toEqual({ ...PORTFOLIO, lastOutgoingAt: null })
+  })
+
+  it('serves the account card\'s last outgoing transfer beside the portfolio (#4021)', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    // mockResolvedValue, not mockResolvedValueOnce — the db-mock ratchet is a
+    // shrink-only baseline on positional chains, and this lookup is the only
+    // query this request makes.
+    mockQuery.mockResolvedValue({ rows: [{ id: 'safe-base', chain_id: 8453 }] })
+    mockFetchLastOutgoingAt.mockResolvedValue('2026-10-01T12:00:00.000Z')
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/portfolio/${SAFE_ADDRESS}?chain_id=8453`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = response.json()
+    expect(body.lastOutgoingAt).toBe('2026-10-01T12:00:00.000Z')
+    // Everything the portfolio itself serves is untouched — additive, read-only.
+    expect(body).toMatchObject(PORTFOLIO)
   })
 
   it('keeps the legacy address-only lookup when no chain is requested', async () => {

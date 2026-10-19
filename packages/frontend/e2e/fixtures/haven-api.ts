@@ -1150,6 +1150,11 @@ export async function mockHavenApi(page: Page) {
             sekValue: 13450,
           },
         ],
+        // #4021: the card footer's "Last payment {relative}". Pinned to
+        // `testSafe.created_at` so the frozen clock produces the same
+        // "4mo ago" the old caption did — a capture must not drift on a
+        // calendar boundary.
+        lastOutgoingAt: '2026-05-01T10:00:00.000Z',
       })
       return
     }
@@ -1467,6 +1472,66 @@ export async function serveAddFundsAccount(page: Page, chainId?: number) {
     const path = new URL(request.url()).pathname.replace(/^\/api/, '')
     if (request.method() === 'GET' && path === '/auth/me') {
       await fulfillJson(route, { ...testUser, accounts: [account] })
+      return
+    }
+    await route.fallback()
+  })
+}
+
+/**
+ * Overlay `/auth/me` with TWO accounts and price them DIFFERENTLY (#4021) —
+ * the two-or-more-account grid baseline, and the #2225 rule that every
+ * account row carries distinct data so a baseline cannot pass with the same
+ * card painted twice. The second account derives from `testSafe` (one-field
+ * splices, never a mutation of the shared object), its address is its own,
+ * and `/portfolio/` for THAT address answers its own envelope; every other
+ * read falls through to the shared fixture. Register AFTER `mockHavenApi`
+ * (later routes win).
+ */
+export async function serveTwoAccounts(page: Page) {
+  const second = {
+    ...testSafe,
+    id: 'safe-second',
+    account_address: '0x4444444444444444444444444444444444444444',
+    name: 'Imported Safe',
+    is_default: false,
+    created_at: '2026-04-20T10:00:00.000Z',
+  }
+  const secondAddress = second.account_address.toLowerCase()
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+    if (request.method() === 'GET' && path === '/auth/me') {
+      await fulfillJson(route, { ...testUser, accounts: [testSafe, second] })
+      return
+    }
+    if (request.method() === 'GET' && path.toLowerCase() === `/portfolio/${secondAddress}`) {
+      await fulfillJson(route, {
+        totalUsd: 480,
+        totalEur: 438,
+        totalSek: 5165,
+        breakdown: [
+          {
+            symbol: 'USDC',
+            balance: '300000000',
+            formatted: '300.00',
+            usdValue: 300,
+            eurValue: 274,
+            sekValue: 3230,
+          },
+          {
+            symbol: 'ETH',
+            balance: '60000000000000000',
+            formatted: '0.06',
+            usdValue: 180,
+            eurValue: 164,
+            sekValue: 1935,
+          },
+        ],
+        // Distinct from the first account's: the grid baseline must show two
+        // different footers, not one card twice.
+        lastOutgoingAt: '2026-08-15T10:00:00.000Z',
+      })
       return
     }
     await route.fallback()

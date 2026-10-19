@@ -384,10 +384,22 @@ npm run evals -w packages/qa-agent -- --trials=1 --limit=5 \
 
 Every session's `total_cost_usd` (plus wall time and the model the session
 actually ran on) is recorded in `evals-pilot.json.sessions.json` and summed
-into the report (`totalCostUsd`, `model`). Post the per-session numbers on
-#3959 — the pilot sets the cadence. Estimates before the pilot: roughly
-$0.20–0.40 per session on Sonnet, $1–2 on Opus; a 90-session full run on
-Opus would use most of a month's Agent SDK credit (~$100 on Max 5x).
+into the report (`totalCostUsd`, `model`).
+
+**What a run costs the owner.** `total_cost_usd` is Claude Code's client-side
+API-list-price **estimate**, not a charge. With `CLAUDE_CODE_OAUTH_TOKEN`
+(a subscription login) the runs draw from the plan's normal usage limits
+(the 5-hour and weekly windows); the previously announced separate Agent SDK
+credit was paused, and the Max plan's monthly API credit applies only to runs
+authenticated with a Console API key. Nothing is billed beyond the plan
+unless "usage credits" (extra usage) is turned on in claude.ai Settings →
+Usage; that page also shows the plan usage the runs consume. Do not set
+`ANTHROPIC_API_KEY` in this job: it takes precedence over the OAuth token and
+would bill the API instead. Measured on the first pilot (2026-10-19, Sonnet,
+5 tasks × 1 trial): about $0.08 per session estimated, so a full 10 × 3 run
+is roughly $2.40 of estimated usage. Sources: support.claude.com articles
+15036540 (Agent SDK with your plan) and 12429409 (extra usage), and
+code.claude.com/docs/en/costs.
 
 **What the job installs and builds first.** After `npm ci` it installs the
 `claude` CLI, pinned (`@anthropic-ai/claude-code@<exact>`): it is not on the

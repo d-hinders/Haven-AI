@@ -231,7 +231,24 @@ export class MerchantCompletion {
     const toolResult = retryResponse.ok ? await this.merchantTransport.readToolResult(retryResponse) : undefined
     const inBandChallenge = toolResult ? extractMcpPaymentRequired(toolResult) : undefined
     const metaSettlement = toolResult ? mcpSettlementFromToolResult(toolResult) : undefined
-    const inBandRejection = inBandChallenge !== undefined || metaSettlement?.success === false
+    // #4062: the settlement receipt is read BEFORE the rejection decision —
+    // a PAYMENT-RESPONSE header, or the _meta settlement's own transaction,
+    // is the only thing that keeps a tool-error answer from being a rejection
+    // after funding. A plain `isError: true` tool result (no challenge, no
+    // receipt) means the merchant neither delivered nor settled: the funding
+    // leg already moved the USDC, so it is stranded on the delegate and this
+    // must be the rejection-after-funding reconciliation event, never a
+    // success. A tool error beside a reported hash is different — the money
+    // moved, so the errored result below is delivered as evidence.
+    const headerReceipt = retryResponse.headers.get('PAYMENT-RESPONSE')
+    const receiptSettlement = parseMerchantSettlement(headerReceipt ?? null)
+    const reportedSettlementTxHash =
+      receiptSettlement.settlementTxHash ??
+      (typeof metaSettlement?.transaction === 'string' ? metaSettlement.transaction : undefined)
+    const plainToolErrorAfterFunding =
+      toolResult?.isError === true && inBandChallenge === undefined && !reportedSettlementTxHash
+    const inBandRejection =
+      inBandChallenge !== undefined || metaSettlement?.success === false || plainToolErrorAfterFunding
     if (!retryResponse.ok || inBandRejection) {
       const merchant = await captureMerchantResponse(retryResponse)
       await this.recordRetryRejected({
@@ -247,7 +264,10 @@ export class MerchantCompletion {
       })
 
       throw new HavenApiError(
-        'x402 retry failed after Haven funded the delegate wallet; reconciliation may be required.',
+        'x402 retry failed after Haven funded the delegate wallet; reconciliation may be required. ' +
+          // #4062: an answering merchant may still redeem its authorization
+          // after refusing — verify-then-sweep, never a blind sweep.
+          'The merchant may still settle late: check the payment status before sweeping the delegate.',
         inBandRejection ? X402_RETRY_REJECTED_STATUS : merchant.merchant_status,
         {
           marker: 'x402_retry_rejected_after_funding',
@@ -262,15 +282,20 @@ export class MerchantCompletion {
     }
 
     // #3155 review S1: the `_meta` settlement is the receipt when there is no
-    // header, re-encoded so the one existing decoder reads both forms.
-    const headerReceipt = retryResponse.headers.get('PAYMENT-RESPONSE')
+    // header, re-encoded so the one existing decoder reads both forms. The
+    // PAYMENT-RESPONSE header itself was read before the rejection gate above
+    // (#4062) — reused here, never re-read.
     const protocolReceiptHeader = headerReceipt ?? (metaSettlement ? encodeMcpSettlementReceipt(metaSettlement) : undefined)
     const protocolReceiptHeaderName = headerReceipt
       ? 'PAYMENT-RESPONSE'
       : metaSettlement
         ? `_meta.${MCP_X402_PAYMENT_RESPONSE_META_KEY}`
         : undefined
-    const merchantSettlement = parseMerchantSettlement(protocolReceiptHeader ?? null)
+    // The same settlement the gate saw: the header's parse, falling back to
+    // the _meta transaction when the header carried none.
+    const merchantSettlement = {
+      settlementTxHash: reportedSettlementTxHash ?? null,
+    }
     if (receipt.merchant && merchantSettlement.settlementTxHash) {
       receipt.merchant.settlementTxHash = merchantSettlement.settlementTxHash
       // #3638: an unknown chain has no explorer link — keep `null`, never `''`.

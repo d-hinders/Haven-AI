@@ -856,6 +856,67 @@ describe('#3155 review r6 — the POST-payment read is not gated on the request 
   })
 })
 
+// ── #4062: a plain tool error after funding is a rejection, never a success ──
+//
+// A merchant that answers its PAID call with `isError: true` but neither a
+// payment-required challenge nor a settlement receipt has neither delivered
+// nor settled: the funding leg already moved the USDC, which is now stranded
+// on the delegate. This is the Soundside `create_text` prod failure — the
+// same two in-band signals #3118 recognises, plus the plain tool error, with
+// the settlement receipt as the one thing that keeps an errored result a
+// delivered one.
+
+describe('#4062 — a plain `isError` tool error on the paid answer is a rejection after funding', () => {
+  const plainUrl = 'https://api.merchant.example/paid-data'
+  function plainRoutes(paidAnswer: () => Response): Route {
+    return (url, init) => {
+      if (url === `${backendUrl}/x402`) return fundingPendingSignature(plainUrl)
+      if (url === `${backendUrl}/payments/pay_123/sign`) return fundingConfirmed()
+      if (url !== plainUrl) return undefined
+      const headers = new Headers(init?.headers)
+      if (headers.get('PAYMENT-SIGNATURE') || headers.get('X-PAYMENT')) return paidAnswer()
+      return json(paymentRequiredFor(plainUrl), { status: 402 })
+    }
+  }
+
+  it('a plain isError tool result (no challenge, no receipt) is the post-funding rejection: 402, reconciliation event, no evidence', async () => {
+    const fetchMock = mockFetch(
+      plainRoutes(() =>
+        json(rpcResult(2, {
+          isError: true,
+          content: [{ type: 'text', text: "Text generation failed : 'NoneType' object has no attribute 'parts'" }],
+        })),
+      ),
+    )
+    await expect(newClient().fetch(plainUrl)).rejects.toMatchObject({
+      statusCode: 402,
+      body: expect.objectContaining({ marker: 'x402_retry_rejected_after_funding', payment_id: 'pay_123', merchant_status: 200 }),
+    })
+    expect(backendCalls(fetchMock, '/machine-payments/reconciliation-events')).toHaveLength(1)
+    expect(backendCalls(fetchMock, '/machine-payments/evidence')).toHaveLength(0)
+  })
+
+  it('a tool error beside a settlement receipt is delivered — the money moved', async () => {
+    const fetchMock = mockFetch(
+      plainRoutes(() =>
+        json(rpcResult(2, {
+          isError: true,
+          content: [{ type: 'text', text: 'partial' }],
+          _meta: { [MCP_X402_PAYMENT_RESPONSE_META_KEY]: { success: true, transaction: `0x${'cd'.repeat(32)}` } },
+        })),
+      ),
+    )
+    const response = await newClient().fetch(plainUrl)
+    expect(response.status).toBe(200)
+    // The errored result still reaches the caller — but as a delivered result
+    // beside a recorded settlement, never as a stranded-funds rejection.
+    await expect(response.json()).resolves.toMatchObject({ result: { isError: true } })
+    // Funding anchor + the merchant's own settlement report; no reconciliation.
+    expect(backendCalls(fetchMock, '/machine-payments/evidence')).toHaveLength(2)
+    expect(backendCalls(fetchMock, '/machine-payments/reconciliation-events')).toHaveLength(0)
+  })
+})
+
 // ── Client: local fetch() ─────────────────────────────────────────
 
 describe('#3118 native MCP profile — fetch()', () => {

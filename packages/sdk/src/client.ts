@@ -1921,10 +1921,24 @@ export class HavenClient {
         : undefined
     const protocolReceiptHeader = headerReceipt ?? (metaSettlement ? encodeMcpSettlementReceipt(metaSettlement) : undefined)
     const settlement = parseMerchantSettlement(protocolReceiptHeader ?? null)
+    // #4062: a PLAIN tool error — `isError: true` with NEITHER a
+    // payment-required challenge NOR a settlement receipt — is also a refusal.
+    // A merchant that answers its paid call with a failed tool result has not
+    // delivered, and absent a receipt has not settled either: the funding leg
+    // already moved the USDC, so it is stranded on the delegate and must reach
+    // the agent as MERCHANT_REJECTED_AFTER_FUNDING, never `settled: true`.
+    // A tool error BESIDE a verified settlement hash is the opposite case: the
+    // money moved, so the errored result is delivered as evidence, not refused.
     // A JSON-RPC `error` envelope (no `result`) after payment stays `ok` on the
     // HTTP status: it carries no settlement statement, and the two protocol
     // signals above are the only ones that mean "nothing settled" (#3155 S4).
-    const merchantAccepted = surfaced.ok && inBandChallenge === undefined && metaSettlement?.success !== false
+    const plainToolErrorAfterFunding =
+      toolResult?.isError === true && inBandChallenge === undefined && !settlement.settlementTxHash
+    const merchantAccepted =
+      surfaced.ok &&
+      inBandChallenge === undefined &&
+      metaSettlement?.success !== false &&
+      !plainToolErrorAfterFunding
 
     // #2970: declared here (not inside the `else` below) so it survives to
     // the `return` — `undefined` on the refusal branch and whenever there was

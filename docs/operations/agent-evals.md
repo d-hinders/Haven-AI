@@ -24,7 +24,7 @@ covers:
   - packages/connect/src/server-names.ts
   - packages/signer/src/consent.ts
   - packages/signer/src/cli-args.ts
-last-verified: "2026-10-15"
+last-verified: "2026-10-19"
 ---
 
 # Agent Evals — the model-in-the-loop eval suite (epic #3957)
@@ -201,8 +201,10 @@ npm run evals -w packages/qa-agent -- --trials=3 --out=evals-report.json
 
 Env the run needs (all dev/testnet):
 
-- `QA_API_URL` — the shared dev backend (from the standard `QA_*` contract,
+- `QA_HAVEN_API_URL` — the shared dev backend (from the standard `QA_*` contract,
   `packages/qa-agent/src/config.ts`).
+- `QA_PAYMENT_TO` — required by the same `QA_*` contract (`loadQaConfig()`);
+  set it to the same address as `QA_EVAL_RECIPIENT`.
 - `QA_EVAL_AGENT_API_KEY` — the eval agent's `sk_agent_...` key (item 1 above).
 - `QA_EVAL_RECIPIENT` — the Base Sepolia ADDRESS the direct-send transfer
   graders expect the money to reach (rendered into `{recipient}`). Address
@@ -311,6 +313,7 @@ inventory:
 | `AGENT_EVALS_DELEGATE_KEY` | env secret | this lane's delegate private key |
 | `AGENT_EVALS_HAVEN_API_URL` | var (or secret) | the dev backend URL |
 | `AGENT_EVALS_RECIPIENT` / `AGENT_EVALS_AGENT_ACCOUNT` / `AGENT_EVALS_X402_TARGET` | vars | the graders' address/URL fixtures (same roles as the `QA_EVAL_*` env) |
+| `QA_X402_BINDING_SIGNER` | repo var | the public address the signer verifies x402 bindings against, passed as `HAVEN_X402_BINDING_SIGNER`; the job fails before any session when it is unset |
 
 **Token rotation.** The token does not refresh on its own (reportedly about
 one year). It is stored ONLY as the `agent-evals` environment secret above.
@@ -324,9 +327,32 @@ for any of these.
 visible in the workflow file (`QA_EVAL_CLAUDE_CODE_COMMAND`):
 `--allowedTools mcp__haven-eval mcp__haven-signer-eval` (the hosted + signer
 pair the job wires through `--mcp-config`) and an explicit
-`--disallowedTools` list denying every built-in Bash/file/web tool. Anything
+`--disallowedTools` list denying every built-in Bash/file/web tool and the
+other built-ins (Skill, Workflow, ToolSearch, scheduling, messaging). Anything
 not allowlisted is denied in headless mode; a denied call still appears in
 the stream, which is what the no-retry graders need.
+
+**Isolation of the agent under test.** `claude` runs from an empty directory
+(`$RUNNER_TEMP/claude-cwd`), so no `CLAUDE.md` or project config from this
+repo reaches it, and `--strict-mcp-config` loads only the two wired servers.
+Because of that, the signer server is launched by absolute path
+(`$GITHUB_WORKSPACE/packages/signer/dist/cli.js`) with
+`HAVEN_X402_BINDING_SIGNER` from `vars.QA_X402_BINDING_SIGNER` (without it
+every x402 signing refuses), and the report is written to
+`$GITHUB_WORKSPACE/evals-report.json`, where the summary and upload steps read
+it. A session that exits non-zero but left a stream (the turn limit) is still
+graded, with its exit code recorded.
+
+**Login check first.** Before the eval slice the job runs one `claude -p`
+turn on the eval's model with no MCP servers, and fails with Claude's own
+reason (an invalid or expired token, the plan's usage limit, model access)
+when it does not work, instead of every task failing as "claude exited 1". An
+adapter failure quotes the session's `result` text for the same reason. The
+raw session streams are deliberately not uploaded: this repository is public,
+so artifacts are downloadable by anyone, and the streams carry full tool
+results. To fix a failed login, generate a new token with
+`claude setup-token` and replace the `CLAUDE_CODE_OAUTH_TOKEN` environment
+secret (see Token rotation above).
 
 **Env the lane needs** (set by the workflow; set the same names by hand for
 a local run):
@@ -355,6 +381,15 @@ into the report (`totalCostUsd`, `model`). Post the per-session numbers on
 #3959 — the pilot sets the cadence. Estimates before the pilot: roughly
 $0.20–0.40 per session on Sonnet, $1–2 on Opus; a 90-session full run on
 Opus would use most of a month's Agent SDK credit (~$100 on Max 5x).
+
+**What the job installs and builds first.** After `npm ci` it installs the
+`claude` CLI, pinned (`@anthropic-ai/claude-code@<exact>`): it is not on the
+runner image and not a workspace dependency. It then builds `@haven_ai/core`
+before `packages/sdk`, `packages/signer` and `packages/mcp-server`, because
+`npm ci` does not create core's `dist/` and mcp-server imports it. The first
+pilot run (2026-10-19) died on exactly that before any task ran.
+A CI guard checks both: the build order, and that an exactly pinned CLI
+install runs before the eval step.
 
 **The workflow** (`.github/workflows/agent-evals.yml`) runs three ways:
 

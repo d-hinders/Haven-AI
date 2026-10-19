@@ -857,6 +857,13 @@ export async function deliverMerchantPayment(
       message:
         `Merchant rejected the payment after funding (${merchantHttp}). ` +
         `The delegate wallet may hold stranded funds — reconcile with haven_sweep_delegate. ` +
+        // #4062 (scope 3): an answering merchant still holds a single-use
+        // EIP-3009 authorization for the payment window and may redeem it
+        // AFTER refusing — the same verify-then-sweep rule
+        // MERCHANT_UNRESPONSIVE_AFTER_FUNDING uses. Never a blind sweep.
+        `The merchant may still redeem its settlement authorization within the payment ` +
+        `window: check haven_get_payment_status before sweeping, and sweep only if it ` +
+        `shows no settlement. ` +
         `Merchant response: ${JSON.stringify(redactMerchantCredentials(result.body)).slice(0, 500)}`,
       statusCode: merchantStatus,
       paymentId: args.payment_id,

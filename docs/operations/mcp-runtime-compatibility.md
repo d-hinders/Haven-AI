@@ -3986,6 +3986,26 @@ runtime compatibility.
 > `paid-mcp-completion.ts`, and inherits everything else from
 > `@haven_ai/sdk`. Nothing else in this document was re-verified in this
 > pass.
+>
+> **Re-verified #4062 (2026-10-19 — a plain tool error after funding is a
+> rejection):** the EIP-3009 settle/complete legs now treat a PLAIN
+> `isError: true` tool result — neither a payment-required challenge nor a
+> settlement receipt — as `ok: false`, exactly like the two in-band signals
+> above: the hosted refusal is thrown as MERCHANT_REJECTED_AFTER_FUNDING
+> (402 for the HTTP-200 answer, the message now naming verify-then-sweep —
+> check `haven_get_payment_status` before `haven_sweep_delegate`), and the
+> local paid retry throws the same 402 `x402_retry_rejected_after_funding`
+> marker after recording `merchant_retry_rejected_after_payment`, so
+> `haven_get_payment_status` shows the stranded delegate balance instead of
+> `next_action: none`. A tool error beside a settlement hash stays
+> delivered; a JSON-RPC `error` envelope (no `result`) stays `ok` (#3155
+> S4, unchanged). No tool added, renamed or re-shaped; no argument, schema,
+> strict/permissive split, tool-NAME set, version-skew or consent-hash
+> contract moves — the refusal shape is the existing
+> MERCHANT_REJECTED_AFTER_FUNDING envelope, reached through the same
+> `deliverMerchantPayment` choke point. Scope of this note: the acceptance
+> gate in `client.ts`/`merchant-completion.ts` and the refusal message;
+> `last-verified` is bumped to 2026-10-19 for exactly this coverage.
 
 > **Re-verified #3030 (2026-09-21, request validation slice 2):** the two
 > covered files this diff touches, `routes/transactions.ts` and

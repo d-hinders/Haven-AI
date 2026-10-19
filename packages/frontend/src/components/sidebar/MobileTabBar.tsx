@@ -17,12 +17,18 @@ import type { NavItem } from './Sidebar'
  * `rounded-full` with a border and the popover shadow, and capped at `max-w-md`
  * and centred so a 1000px tablet does not get 200px cells. It is still the
  * `fixed` `<nav data-mobile-tab-bar>` itself, not a wrapper around an inner
- * pill: specs select `nav.fixed[data-mobile-tab-bar]`. SOLID `--v2-bg`, with
- * NO `backdrop-filter`: the owner chose near-solid over glass, and a blur is
- * out because the installed-iOS stale-frame class `SafeAreaBand` documents
- * cannot be tested by any CI engine. Without a blur, even 95% opacity let page
- * text ghost through behind the labels (measured at 390px on `/agents`), so
- * the pill is opaque and the shadow alone lifts it.
+ * pill: specs select `nav.fixed[data-mobile-tab-bar]`. The pill paints from
+ * its own token pair (#4063): light it is SOLID `--v2-tab-bar-bg` — exactly
+ * `--v2-bg` — with a `--v2-tab-bar-border` edge, because the popover shadow
+ * alone lifts it there. Dark redeclares both: `--v2-surface-2` fill and the
+ * `--v2-border-strong` edge, because the dark shadow is black on near-black
+ * and plain `--v2-border` measured only 1.41:1 against `--v2-bg` (the edge is
+ * 1.79:1, the fill 1.19:1). With NO `backdrop-filter`: the owner chose
+ * near-solid over glass, and a blur is out because the installed-iOS
+ * stale-frame class `SafeAreaBand` documents cannot be tested by any CI
+ * engine. Without a blur, even 95% opacity let page text ghost through behind
+ * the labels (measured at 390px on `/agents`), so the pill stays opaque — a
+ * translucent fill would ghost page text behind the labels again.
  *
  * ## "More" is the fifth cell, and only opens (#4053, #4058)
  *
@@ -145,7 +151,7 @@ export function MobileTabBar({
       // #2819's capture surfaced the warning.
       {...(presentational ? { inert: true } : {})}
       data-mobile-tab-bar=""
-      className={`grid max-w-md grid-cols-5 rounded-full border border-[var(--v2-border)] bg-[var(--v2-bg)] px-0.5 py-1 shadow-popover ${
+      className={`grid max-w-md grid-cols-5 rounded-full border border-[var(--v2-tab-bar-border)] bg-[var(--v2-tab-bar-bg)] px-0.5 py-1 shadow-popover ${
         presentational
           ? 'relative mx-auto w-full'
           : 'lg:hidden fixed left-[max(0.75rem,var(--v2-safe-left))] right-[max(0.75rem,var(--v2-safe-right))] bottom-[var(--v2-tab-bar-bottom)] mx-auto z-[var(--v2-z-tab-bar)]'
@@ -170,11 +176,14 @@ export function MobileTabBar({
                 The outline is NOT decoration. Brand ink alone would be a WCAG
                 1.4.1 regression: `--v2-brand` against `--v2-ink-3` is 1.18:1,
                 a hue difference with no luminance difference, and the fill
-                alone is 1.12:1 (light) / 1.30:1 (dark) against the pill. The
-                outline is the non-colour cue — 6.29:1 / 8.65:1 against
-                `--v2-bg` — exactly as the rail was. Both text states still
-                clear AA at 12px on their own (light: active 5.62 on the brand-soft
-                fill, inactive 5.32 on `--v2-bg`).
+                alone is 1.12:1 (light) / 1.10:1 (dark) against the pill's own
+                surface (#4063 — the dark pill is `--v2-surface-2`). The
+                outline is the non-colour cue — 6.29:1 (light) / 8.65:1 (dark)
+                against `--v2-bg`, and 7.27:1 (dark) against the lifted pill
+                fill — exactly as the rail was. Both text states still clear
+                AA at 12px on their own (light: active 5.62 on the brand-soft
+                fill, inactive 5.32 on `--v2-bg`; dark: active 6.63 on the
+                brand-soft fill, inactive 5.52 on the pill fill).
 
                 An outline and not `ring-inset`: an inset ring leaks
                 `--tw-ring-inset` into the focus ring (#4056's review), and

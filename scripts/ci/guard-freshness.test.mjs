@@ -553,9 +553,20 @@ test('qa-dev.yml runs the money job only on the gate verdict, with the concurren
   assert.match(QA_DEV_YML.slice(jobsAt), /group:\s*qa-dev-money-flow\s*\n\s*cancel-in-progress:\s*false/)
 })
 
-test('qa-dev.yml records deployment provenance in the failure issue (#2271)', () => {
-  assert.match(QA_DEV_YML, /TRIGGER="deployment_status — Railway deployment \$\{DEPLOYMENT_ID\} of \$\{DEPLOYMENT_SHA\} to '\$\{DEPLOYMENT_ENV\}', created by \$\{DEPLOYMENT_CREATOR\}"/)
-  assert.match(QA_DEV_YML, /TRIGGER="workflow_dispatch — started by \$\{GITHUB_ACTOR\}"/)
+test('qa-dev.yml records deployment provenance in the failure issue (#2271)', async () => {
+  // Since #4069 the trigger line is built by qa-failure-issue.mjs (shared by the
+  // failure and green steps) from DEPLOYMENT_* the money-flow job sets.
+  // The money-flow job's own block (the gate job sets the same names for itself).
+  const moneyFlow = /^ {2}money-flow:\n([\s\S]*?)(?=^ {2}[a-z][a-z0-9-]*:\n|(?![\s\S]))/m.exec(QA_DEV_YML)?.[1] ?? ''
+  for (const [name, expr] of [['ID', 'id'], ['SHA', 'sha'], ['ENV', 'environment'], ['CREATOR', 'creator.login']]) {
+    assert.match(moneyFlow, new RegExp(`^\\s*DEPLOYMENT_${name}: \\$\\{\\{ github\\.event\\.deployment\\.${expr.replace('.', '\\.')} \\}\\}\\s*$`, 'm'), name)
+  }
+  const { triggerLine } = await import('./qa-failure-issue.mjs')
+  assert.equal(
+    triggerLine({ GITHUB_EVENT_NAME: 'deployment_status', DEPLOYMENT_ID: '1', DEPLOYMENT_SHA: 'abc', DEPLOYMENT_ENV: 'Haven AI / dev', DEPLOYMENT_CREATOR: 'railway' }),
+    "deployment_status — Railway deployment 1 of abc to 'Haven AI / dev', created by railway",
+  )
+  assert.equal(triggerLine({ GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_ACTOR: 'octo' }), 'workflow_dispatch — started by octo')
 })
 
 test('guard-freshness.yml can read the Deployments API the provenance check needs', () => {

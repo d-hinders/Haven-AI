@@ -27,8 +27,8 @@
  * TRIAL, not an exit. The runner itself still reads no budget and no chain
  * (runner.ts's contract); everything live is injected here.
  *
- * The run needs: QA_API_URL, the eval agent's API key (QA_EVAL_AGENT_API_KEY
- * by convention — the runbook names the exact env), the recipient
+ * The run needs: QA_HAVEN_API_URL and QA_PAYMENT_TO (loadQaConfig()), the
+ * eval agent's API key (QA_EVAL_AGENT_API_KEY by convention — the runbook names the exact env), the recipient
  * (QA_EVAL_RECIPIENT), the agent account (QA_EVAL_AGENT_ACCOUNT) and — for
  * the chain probe — QA_RPC_URL_BASE_SEPOLIA is inherited from `lib/chain.ts`.
  * The x402 URL tasks additionally read QA_EVAL_X402_TARGET (the `{target}`

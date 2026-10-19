@@ -1480,7 +1480,16 @@ standing one (the closed lookup is title-bound and will not reopen a dated one).
 #3337 the issue records a **failure class and its signature**, per run and per failing
 leg, read from the run's attempt logs — triage it by class via
 [Classify the failure](#classify-the-failure), open a [`bug-reports/`](../bug-reports/)
-report for a real regression, and close the `qa-failure` issue once green.
+report for a real regression. **The issue closes itself** (#4069): the
+money-flow job's *Close the standing qa-failure issue on green* step, after
+*Coverage completeness*, runs `qa-failure-issue.mjs --green` on a full-coverage
+green and closes the open standing issue (bot-authored, exact title — a human
+issue carrying the label is never closed) with one comment naming the run; a
+failed lookup writes nothing. Only a run that tested dev counts: a
+`workflow_dispatch` with a `haven_api_url` override, or one from a branch other
+than `dev`, never closes it, while a scheduled or post-deploy green — or a plain
+dispatch on `dev` — does. A failed close is a workflow warning, so an issue-API
+error never turns a green run red. Do not close it by hand; the next failure reopens it.
 
 ### The dev → main freshness gate
 

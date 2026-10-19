@@ -14,7 +14,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { ISSUE_TITLE, LABEL, CLASSES, buildBody, buildComment, classifyLog, md, readFinalAttempt, upsertStandingIssue } from './qa-failure-issue.mjs'
+import { ISSUE_TITLE, LABEL, CLASSES, buildBody, buildComment, classifyLog, closeStandingIssue, md, readFinalAttempt, triggerLine, upsertStandingIssue } from './qa-failure-issue.mjs'
+import { BOT_AUTHOR } from './standing-issue-upsert.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./qa-failure-issue.mjs', import.meta.url))
 
@@ -34,6 +35,12 @@ const fs = require('node:fs')
 const args = process.argv.slice(2)
 fs.appendFileSync(process.env.GH_LOG, JSON.stringify(args) + '\\n')
 const scenario = JSON.parse(process.env.GH_SCENARIO || '{}')
+if (args[0] === 'issue' && args[1] === 'list' && args.includes('--author')) {
+  // The --green lookup (#4069): answers scenario.green verbatim, or fails.
+  if (scenario.listFails) { process.stderr.write('HTTP 502\\n'); process.exit(1) }
+  process.stdout.write(typeof scenario.green === 'string' ? scenario.green : JSON.stringify(scenario.green ?? []))
+  process.exit(0)
+}
 if (args[0] === 'issue' && args[1] === 'list') {
   const state = args[args.indexOf('--state') + 1]
   const n = state === 'open' ? scenario.open : scenario.closed
@@ -51,7 +58,14 @@ process.exit(0)
   return stub
 }
 
-function run(scenario, env = {}, logs = []) {
+/** process.env without the Actions vars `triggerLine`/`runUrlFromEnv` read, so CI runs stay hermetic. */
+function baseEnv() {
+  const e = { ...process.env }
+  for (const k of Object.keys(e)) if (k.startsWith('GITHUB_') || k.startsWith('DEPLOYMENT_')) delete e[k]
+  return e
+}
+
+function run(scenario, env = {}, logs = [], extraArgs = null) {
   const dir = mkdtempSync(join(tmpdir(), 'qa-failure-issue-'))
   makeStub(dir)
   const log = join(dir, 'gh.log')
@@ -60,10 +74,11 @@ function run(scenario, env = {}, logs = []) {
     writeFileSync(f, text)
     return f
   })
-  const result = spawnSync(process.execPath, [SCRIPT, ...files, join(dir, 'qa-run.attempt-*.log')], {
+  const argv = extraArgs ?? [...files, join(dir, 'qa-run.attempt-*.log')]
+  const result = spawnSync(process.execPath, [SCRIPT, ...argv], {
     encoding: 'utf8',
     env: {
-      ...process.env,
+      ...baseEnv(),
       PATH: `${dir}:${process.env.PATH}`,
       GH_LOG: log,
       GH_SCENARIO: JSON.stringify(scenario),
@@ -164,6 +179,103 @@ describe('qa-failure-issue: one standing issue', () => {
     assert.match(body, /\*\*Run:\*\* U/)
     assert.match(body, /\*\*When:\*\* W/)
     assert.match(body, /one standing/)
+  })
+})
+
+// ── Close on green (#4069) ───────────────────────────────────────────────────
+const standing = (number, over = {}) => ({ number, title: ISSUE_TITLE, author: { login: BOT_AUTHOR }, state: 'OPEN', ...over })
+const writes = (calls) => calls.filter((c) => !(c[0] === 'issue' && c[1] === 'list'))
+
+describe('qa-failure-issue: --green closes the standing issue (#4069)', () => {
+  test('an open standing issue is closed as completed, with one comment naming the run and trigger', () => {
+    const { result, calls } = run({ green: [standing(2769)] }, {}, [], ['--green'])
+    assert.equal(result.status, 0, result.stderr)
+    const list = sub(calls, 'issue', 'list')
+    assert.equal(list.length, 1)
+    for (const [flag, value] of [['--label', LABEL], ['--state', 'open'], ['--author', BOT_AUTHOR]]) {
+      assert.equal(list[0][list[0].indexOf(flag) + 1], value, flag)
+    }
+    const closes = sub(calls, 'issue', 'close')
+    assert.equal(closes.length, 1)
+    assert.equal(closes[0][2], '2769')
+    assert.equal(closes[0][closes[0].indexOf('--reason') + 1], 'completed')
+    const comment = closes[0][closes[0].indexOf('--comment') + 1]
+    assert.match(comment, /https:\/\/github\.com\/d-hinders\/Haven-AI\/actions\/runs\/1/)
+    assert.match(comment, /workflow_dispatch — started by tester/)
+    assert.match(comment, /closed on green; the next failure reopens it/i)
+    // The close is the only write: no edit, no reopen, no create, no label, no separate comment.
+    assert.deepEqual(writes(calls).map((c) => c.slice(0, 2).join(' ')), ['issue close'])
+    assert.match(result.stdout, /"action":"closed","numbers":\[2769\]/)
+  })
+
+  test('none open → no writes at all', () => {
+    const { result, calls } = run({ green: [] }, {}, [], ['--green'])
+    assert.equal(result.status, 0, result.stderr)
+    assert.deepEqual(writes(calls), [])
+    assert.match(result.stdout, /"action":"none"/)
+  })
+
+  test('a failed lookup exits non-zero before any write', () => {
+    const { result, calls } = run({ listFails: true }, {}, [], ['--green'])
+    assert.notEqual(result.status, 0)
+    assert.equal(sub(calls, 'issue', 'list').length, 1, 'the lookup was reached')
+    assert.deepEqual(writes(calls), [])
+  })
+
+  test('an unreadable lookup (not JSON, not an array) throws before any write', () => {
+    for (const green of ['<html>rate limited</html>', '{"number":2769}']) {
+      const { result, calls } = run({ green }, {}, [], ['--green'])
+      assert.notEqual(result.status, 0, green)
+      assert.deepEqual(writes(calls), [], green)
+    }
+  })
+
+  test('a closed issue, a human issue with the label, or a different title is never touched', () => {
+    const others = [
+      standing(2769, { state: 'CLOSED' }),
+      standing(4100, { author: { login: 'd-hinders' } }),
+      standing(4101, { title: `${ISSUE_TITLE} (manual)` }),
+    ]
+    const { result, calls } = run({ green: others }, {}, [], ['--green'])
+    assert.equal(result.status, 0, result.stderr)
+    assert.deepEqual(writes(calls), [])
+    // In-process too: only the bot's exact-title open issue is closed.
+    const seen = []
+    const gh = (args) => {
+      seen.push(args)
+      return args[1] === 'list' ? JSON.stringify([...others, standing(2769)]) : ''
+    }
+    assert.deepEqual(closeStandingIssue({ gh, trigger: 't', runUrl: 'u', when: 'w', log: () => {} }), { action: 'closed', numbers: [2769] })
+    assert.deepEqual(seen.filter((a) => a[1] === 'close').map((a) => a[2]), ['2769'])
+  })
+
+  test('the trigger line and run URL are derived from the Actions env when not set explicitly', () => {
+    const env = {
+      TRIGGER: '', RUN_URL: '',
+      GITHUB_EVENT_NAME: 'deployment_status', GITHUB_SERVER_URL: 'https://github.com',
+      GITHUB_REPOSITORY: 'd-hinders/Haven-AI', GITHUB_RUN_ID: '42',
+      DEPLOYMENT_ID: '7', DEPLOYMENT_SHA: 'abc123', DEPLOYMENT_ENV: 'Haven AI / dev', DEPLOYMENT_CREATOR: 'railway-app[bot]',
+    }
+    const { result, calls } = run({ green: [standing(2769)] }, env, [], ['--green'])
+    assert.equal(result.status, 0, result.stderr)
+    const close = sub(calls, 'issue', 'close')[0]
+    const comment = close[close.indexOf('--comment') + 1]
+    assert.match(comment, /deployment_status — Railway deployment 7 of abc123 to 'Haven AI \/ dev', created by railway-app\[bot\]/)
+    assert.match(comment, /actions\/runs\/42/)
+    assert.equal(triggerLine({ GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_ACTOR: 'a' }), 'workflow_dispatch — started by a')
+    assert.equal(triggerLine({ GITHUB_EVENT_NAME: 'schedule' }), 'schedule')
+  })
+
+  test('qa-dev.yml closes only on a full-coverage green of dev, after Coverage completeness, without reddening the job', () => {
+    const wf = readFileSync(fileURLToPath(new URL('../../.github/workflows/qa-dev.yml', import.meta.url)), 'utf8')
+    const coverage = wf.indexOf('- name: Coverage completeness')
+    const green = wf.indexOf('- name: Close the standing qa-failure issue on green')
+    assert.ok(coverage !== -1 && green > coverage, 'the green step runs after Coverage completeness')
+    const step = wf.slice(green, wf.indexOf('- name:', green + 1))
+    assert.match(step, /if: success\(\) && github\.event\.inputs\.haven_api_url == '' && \(github\.event_name != 'workflow_dispatch' \|\| github\.ref == 'refs\/heads\/dev'\)/)
+    // A failed close warns and leaves the job green; the job has no continue-on-error (#3368).
+    assert.match(step, /node scripts\/ci\/qa-failure-issue\.mjs --green \\\n\s*\|\| echo "::warning::/)
+    assert.doesNotMatch(step, /continue-on-error/)
   })
 })
 

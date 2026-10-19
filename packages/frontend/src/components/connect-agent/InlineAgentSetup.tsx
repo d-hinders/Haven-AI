@@ -23,6 +23,7 @@ import { ConnectAgentFlow } from './ConnectAgentFlow'
 export function InlineAgentSetup({
   onClose,
   onSetupStarted,
+  onSetupAbandoned,
   accountAddress,
   accountId,
   onSetupUpdated,
@@ -31,6 +32,8 @@ export function InlineAgentSetup({
   onClose: () => void
   /** Fires once a setup exists (see `ConnectAgentFlow`'s prop of the same name). */
   onSetupStarted?: () => void
+  /** A first create failed; see `ConnectAgentFlow`'s prop of the same name. */
+  onSetupAbandoned?: () => void
   accountAddress?: string
   accountId?: string | null
   onSetupUpdated?: (info?: { delegateAddress?: string | null }) => void
@@ -42,6 +45,7 @@ export function InlineAgentSetup({
       open
       onClose={onClose}
       onSetupStarted={onSetupStarted}
+      onSetupAbandoned={onSetupAbandoned}
       accountAddress={accountAddress}
       accountId={accountId}
       onSetupUpdated={onSetupUpdated}

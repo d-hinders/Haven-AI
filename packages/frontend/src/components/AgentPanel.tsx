@@ -240,6 +240,7 @@ export default function AgentPanel() {
           key={panel.inlineSetupKey}
           onClose={panel.leaveInlineSetup}
           onSetupStarted={panel.latchInlineSetup}
+          onSetupAbandoned={panel.releaseInlineSetup}
           accountAddress={accountAddress}
           accountId={panel.defaultAccountId}
           onSetupUpdated={panel.handleSetupUpdated}

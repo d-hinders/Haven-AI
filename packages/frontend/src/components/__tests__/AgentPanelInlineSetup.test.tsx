@@ -301,6 +301,19 @@ describe('AgentPanel inline first-agent flow (#4065)', () => {
     expect(screen.getByPlaceholderText('Amount')).toHaveValue('10')
   })
 
+  it('a failed first load never counts as loaded: "Try again" shows the skeleton, not the flow', () => {
+    setAgentsList([], { error: 'request failed' })
+    const { rerender } = render(<AgentPanel />)
+    expect(screen.getByRole('heading', { name: 'Agents could not load' })).toBeInTheDocument()
+
+    // The retry clears `error` and sets `loading` again.
+    setAgentsList([], { loading: true })
+    rerender(<AgentPanel />)
+
+    expect(inlineFlow()).not.toBeInTheDocument()
+    expect(screen.getByRole('status', { name: 'Loading agents' })).toBeInTheDocument()
+  })
+
   it('does not render while the first list load is in flight', () => {
     setAgentsList([], { loading: true })
     render(<AgentPanel />)
@@ -377,6 +390,41 @@ describe('the latch: inline stays mounted until the user leaves (#4065)', () => 
     rerender(<AgentPanel />)
 
     expect(within(inlineFlow()!).getByRole('button', { name: 'Creating setup...' })).toBeDisabled()
+    expect(screen.queryByTestId('agent-card')).not.toBeInTheDocument()
+  })
+
+  it('a failed first create releases the latch: an agent appearing then brings the list back', async () => {
+    mockApiPost.mockRejectedValue(new Error('We could not create the setup.'))
+    const { rerender } = render(<AgentPanel />)
+    fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Research agent' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Create setup prompt' }))
+    })
+
+    setAgentsList([{ ...PENDING_AGENT, status: 'active' }])
+    rerender(<AgentPanel />)
+
+    expect(inlineFlow()).not.toBeInTheDocument()
+    expect(screen.getByTestId('agent-card')).toHaveTextContent('Research agent')
+  })
+
+  it('a failed RE-create after "Create a new setup" keeps the latch: the flow already held a setup', async () => {
+    const { rerender } = render(<AgentPanel />)
+    await startSetup()
+    statusState.data = status('expired')
+    setAgentsList([{ ...PENDING_AGENT, status: 'revoked' }])
+    rerender(<AgentPanel />)
+    fireEvent.click(within(inlineFlow()!).getByRole('button', { name: 'Create a new setup' }))
+    statusState.data = null
+
+    mockApiPost.mockRejectedValue(new Error('We could not create the setup.'))
+    await act(async () => {
+      fireEvent.click(within(inlineFlow()!).getByRole('button', { name: 'Create setup prompt' }))
+    })
+    rerender(<AgentPanel />)
+
+    expect(within(inlineFlow()!).getByText('We could not create the setup.')).toBeInTheDocument()
     expect(screen.queryByTestId('agent-card')).not.toBeInTheDocument()
   })
 

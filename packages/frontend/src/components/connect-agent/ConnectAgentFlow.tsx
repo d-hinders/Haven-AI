@@ -62,6 +62,14 @@ export interface ConnectAgentFlowProps extends UseAgentConnectionSetupOptions {
    * replace the inline flow with the list.
    */
   onSetupStarted?: () => void
+  /**
+   * #4065 review round 3: fires when a create FAILS before this flow has ever
+   * held a setup — nothing is in progress, so the latch `onSetupStarted` set
+   * for the in-flight POST can be released. Once a setup has existed it never
+   * fires: "Create a new setup" after an expiry clears `setup` and must keep
+   * the latch.
+   */
+  onSetupAbandoned?: () => void
   children: (parts: ConnectAgentFlowParts) => ReactNode
 }
 
@@ -78,6 +86,7 @@ export interface ConnectAgentFlowProps extends UseAgentConnectionSetupOptions {
 export function ConnectAgentFlow({
   inline = false,
   onSetupStarted,
+  onSetupAbandoned,
   children,
   ...options
 }: ConnectAgentFlowProps) {
@@ -92,6 +101,16 @@ export function ConnectAgentFlow({
   useEffect(() => {
     if (setupStarted) onSetupStarted?.()
   }, [setupStarted, onSetupStarted])
+
+  const hadSetupRef = useRef(false)
+  const wasCreatingRef = useRef(false)
+  useEffect(() => {
+    if (flow.setup) hadSetupRef.current = true
+    if (wasCreatingRef.current && !flow.creating && !flow.setup && !hadSetupRef.current) {
+      onSetupAbandoned?.()
+    }
+    wasCreatingRef.current = flow.creating
+  }, [flow.creating, flow.setup, onSetupAbandoned])
 
   // #3687: the modal opens with the caret in *Agent name* (fine pointer only).
   // Read once: a changing `initialFocusRef` would re-run Modal's focus-on-open

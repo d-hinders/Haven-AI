@@ -74,9 +74,12 @@ export function useAgentPanelState() {
   // on it unmounted an unlatched step 1 or 2 into the skeleton and remounted
   // it empty — the typed name and budget gone (review round 2). Set during
   // render, so the first resolved render already counts and no frame shows
-  // the skeleton in between.
+  // the skeleton in between. Only a SUCCESSFUL load counts (review round 3):
+  // "Try again" after a failed first load clears `error` while `loading`, and
+  // a failed load counted as loaded flashed the flow during that retry —
+  // even for a user who has agents.
   const [listLoadedOnce, setListLoadedOnce] = useState(false)
-  if (!loading && !listLoadedOnce) setListLoadedOnce(true)
+  if (!loading && !error && !listLoadedOnce) setListLoadedOnce(true)
   const inlineSetupEligible =
     listLoadedOnce && agents.length === 0 && !error && !finalizingAgent && !finalizeTimedOut
 
@@ -99,6 +102,9 @@ export function useAgentPanelState() {
   // seed runs on `open`'s transition, and inline `open` never changes.
   const [inlineSetupKey, setInlineSetupKey] = useState(0)
   const latchInlineSetup = useCallback(() => setInlineSetupLatched(true), [])
+  // A first create that FAILED leaves nothing to protect: no setup exists, so
+  // the flow goes back to showing only while eligible (`onSetupAbandoned`).
+  const releaseInlineSetup = useCallback(() => setInlineSetupLatched(false), [])
   const leaveInlineSetup = useCallback(() => {
     setInlineSetupLatched(false)
     setInlineSetupKey((key) => key + 1)
@@ -287,6 +293,7 @@ export function useAgentPanelState() {
     inlineSetupLatched,
     inlineSetupKey,
     latchInlineSetup,
+    releaseInlineSetup,
     leaveInlineSetup,
     handleSetupUpdated,
     finalizingAgent,

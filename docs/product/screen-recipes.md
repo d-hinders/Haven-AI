@@ -498,12 +498,16 @@ Structure:
 First agent (#4065): a user with no agents — archived and revoked rows count as
 agents, so this is `agents.length === 0` — gets the connect flow inline instead
 of an empty state (see Connect And Approve Agent for the inline container).
-- It appears once the first list load resolves (a page load or reload shows
-  the loading skeleton first, then the flow), and never over the "Agents could
-  not load" retry state, the "Finalizing your agent…" placeholder or the
-  taking-longer state. A later refresh of the list (after a Labels change, say)
-  does not count as loading again: the flow stays, with what the user typed.
-- Once a setup is being created in it, it stays mounted until the user leaves it,
+- It appears once the first list load SUCCEEDS (a page load or reload shows
+  the loading skeleton first, then the flow; a failed first load shows "Agents
+  could not load", and its "Try again" shows the skeleton again, never the
+  flow), and never over the "Agents could not load" retry state, the
+  "Finalizing your agent…" placeholder or the taking-longer state. A later
+  refresh of the list that succeeds (after a Labels change, say) does not count
+  as loading again: the flow stays, with what the user typed. One that fails
+  drops a flow with no setup yet into "Agents could not load".
+- Once a setup is being created in it, it stays mounted (a first create that
+  fails releases it again, since nothing is in progress) until the user leaves it,
   whatever the list says meanwhile: the connector's register adds a
   `pending_approval` agent the list poll picks up mid-setup, and an approval
   sets the finalizing state. Unmounting there would drop the flow (and an

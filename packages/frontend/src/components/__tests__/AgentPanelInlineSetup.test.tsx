@@ -346,6 +346,40 @@ describe('the latch: inline stays mounted until the user leaves (#4065)', () => 
     expect(countChip()).toHaveTextContent('1')
   })
 
+  it('a non-silent list refresh keeps an unlatched step 2 as typed — no skeleton, no remount', () => {
+    const { rerender } = render(<AgentPanel />)
+    fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Research agent' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
+    fireEvent.change(screen.getByPlaceholderText('Amount'), { target: { value: '25' } })
+
+    // A Labels change refetches non-silently: `loading` goes true, then false.
+    setAgentsList([], { loading: true })
+    rerender(<AgentPanel />)
+    expect(screen.queryByRole('status', { name: 'Loading agents' })).not.toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Amount')).toHaveValue('25')
+
+    setAgentsList([])
+    rerender(<AgentPanel />)
+    expect(inlineFlow()).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Amount')).toHaveValue('25')
+  })
+
+  it('latches while the create is in flight: an agent appearing then does not orphan the setup', async () => {
+    mockApiPost.mockReturnValue(new Promise(() => {}))
+    const { rerender } = render(<AgentPanel />)
+    fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Research agent' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Create setup prompt' }))
+    })
+
+    setAgentsList([{ ...PENDING_AGENT, status: 'active' }])
+    rerender(<AgentPanel />)
+
+    expect(within(inlineFlow()!).getByRole('button', { name: 'Creating setup...' })).toBeDisabled()
+    expect(screen.queryByTestId('agent-card')).not.toBeInTheDocument()
+  })
+
   it('latches once the setup is created, even before the connector registers', async () => {
     const { rerender } = render(<AgentPanel />)
     await startSetup()

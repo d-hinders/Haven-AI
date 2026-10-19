@@ -54,8 +54,8 @@ export interface ConnectAgentFlowProps extends UseAgentConnectionSetupOptions {
    */
   inline?: boolean
   /**
-   * #4065: fires whenever a setup exists (the create succeeded, so the user
-   * is mid-flow). The `/agents` panel latches the inline flow on it: from
+   * #4065: fires whenever a setup exists or is being created (the user is
+   * mid-flow). The `/agents` panel latches the inline flow on it: from
    * here a `pending_approval` agent can join the list and an approval can be
    * in flight, and neither may unmount the flow. Before it — a pristine
    * step 1 or 2 — nothing is lost, so an agent created elsewhere may still
@@ -86,7 +86,9 @@ export function ConnectAgentFlow({
     escapeToClose: inline ? false : options.escapeToClose,
   })
 
-  const setupStarted = flow.setup != null
+  // In flight counts too: an agent appearing while the create POST is out
+  // would otherwise unmount the flow and orphan the setup it is creating.
+  const setupStarted = flow.creating || flow.setup != null
   useEffect(() => {
     if (setupStarted) onSetupStarted?.()
   }, [setupStarted, onSetupStarted])

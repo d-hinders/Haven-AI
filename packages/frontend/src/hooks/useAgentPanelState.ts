@@ -68,11 +68,20 @@ export function useAgentPanelState() {
   // today's empty-state rule, `agents.length === 0` with archived and revoked
   // rows counting — once the first list load has resolved, and never over
   // the list-error, finalizing or timed-out states.
+  //
+  // "Resolved" is the FIRST load, not `!loading`: every non-silent refetch
+  // (a Labels change, `handleAgentEdited`) sets `loading` again, and gating
+  // on it unmounted an unlatched step 1 or 2 into the skeleton and remounted
+  // it empty — the typed name and budget gone (review round 2). Set during
+  // render, so the first resolved render already counts and no frame shows
+  // the skeleton in between.
+  const [listLoadedOnce, setListLoadedOnce] = useState(false)
+  if (!loading && !listLoadedOnce) setListLoadedOnce(true)
   const inlineSetupEligible =
-    !loading && agents.length === 0 && !error && !finalizingAgent && !finalizeTimedOut
+    listLoadedOnce && agents.length === 0 && !error && !finalizingAgent && !finalizeTimedOut
 
-  // #4065: once a setup STARTS in the inline flow (its create succeeded —
-  // `ConnectAgentFlow`'s `onSetupStarted`), this LATCH keeps it mounted until
+  // #4065: once a setup STARTS in the inline flow (its create is in flight or
+  // succeeded — `ConnectAgentFlow`'s `onSetupStarted`), this LATCH keeps it mounted until
   // the user leaves it (every `handleClose` exit: Done, Close). Before that
   // the flow shows only while eligible, so an idle step 1 never traps a user
   // whose agent was created elsewhere (another tab, an agent-led link): the

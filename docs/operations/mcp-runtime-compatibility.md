@@ -83,6 +83,22 @@ covers:
 last-verified: "2026-10-19"
 ---
 
+> **Re-verified (#4079, 2026-10-19, check_funds wording):** `haven_check_funds`
+> answers `covered: false` whenever a live chain read reports LESS than the
+> checked amount, not only an empty account, so its wording now says that:
+> the `next_step` in `packages/mcp-server/src/tools/state-direct-recovery.ts`
+> ("The account holds less than the checked amount (how much less is not
+> returned) — stop and tell the user the account is short …"), the hosted
+> description in `packages/mcp-server/src/tools/contracts.ts` ("stop and tell
+> the user the account is short", one byte shorter) and the SDK description in
+> `packages/sdk/src/tool-descriptions.ts`. Text only: the `covered`
+> true/false/null contract, the stop instruction, every field, argument and
+> input schema, and the backend route are unchanged; the tools/list contract
+> snapshot moves by that one description string and is regenerated. No
+> Supported Runtime Manifest row, channel, dist-tag or release step moves, so
+> the version-skew contract does not move; an older local MCP or signer is
+> unaffected. Nothing else in this document was re-verified in this pass.
+
 > **Re-verified (#4061, 2026-10-19, `payment_header` on the settlement
 > reports):** this changes the hosted tool contract additively.
 >

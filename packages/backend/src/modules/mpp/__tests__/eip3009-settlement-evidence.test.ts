@@ -715,6 +715,27 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
       expect(await recordedHash(a.id)).toBeNull()
     })
 
+    // #4061: a header LIFTED from a same-agent sibling. Same delegate, so the
+    // payer and signature checks pass; the nonce it names is A's own derived
+    // nonce, and the transaction (A's settlement) really burned it — so the
+    // burned-nonce check passes too, against B.
+    it('a header lifted from same-shaped sibling A, reported with A’s settlement against B (CHARACTERIZATION, pre-fix: recorded)', async () => {
+      const { agentId, userId } = await seedAgent()
+      const a = await seedFunded({ agentId, userId })
+      const b = await seedFunded({ agentId, userId })
+      getTransactionReceipt.mockResolvedValue(goodReceipt({}, [deriveX402PaymentNonce(a.id)]))
+
+      const answered = await attachEvidenceHandler(agentId, {
+        paymentId: b.id,
+        rail: 'x402',
+        txHash: SETTLE_A,
+        paymentProofHeader: await derivedSettlementHeader(a.id),
+      })
+
+      expect(answered.statusCode).toBe(202)
+      expect(await recordedHash(b.id)).toBe(SETTLE_A)
+    })
+
     it('the same hash against A — the payment whose nonce it burned — is recorded, nonce-bound', async () => {
       const { agentId, userId } = await seedAgent()
       const a = await seedFunded({ agentId, userId })

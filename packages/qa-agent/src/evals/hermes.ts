@@ -166,32 +166,86 @@ function deepFind(obj: unknown, key: string): unknown {
   return undefined
 }
 
-/** Extract the refusal envelope fields a hosted MCP tool result carries. */
+/**
+ * The hosted MCP failure envelope names the condition with a SCREAMING_SNAKE
+ * `code` (#4070: `DELEGATION_BUDGET_EXCEEDED`), while the backend's HTTP body
+ * and the graders' pinned evidence use snake_case (`delegation_budget_exceeded`).
+ * Canonicalize the former into the latter so the evidence field the graders
+ * match actually exists on the recorded log — `error_code` bodies are already
+ * canonical and pass through unchanged.
+ */
+export function canonicalErrorCode(code: string): string {
+  return code
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .toLowerCase()
+}
+
+/**
+ * An MCP client records a failed tool result as `{"error": "<json>"}` — the
+ * refusal envelope rides inside as a STRING (the raw shape #4070 recorded in
+ * the eval profile's state.db). Unwrap it before reading fields; a plain
+ * prose `error` value does not parse and is left alone.
+ */
+function unwrapErrorShell(parsed: unknown): unknown {
+  let current = parsed
+  for (let hops = 0; hops < 3; hops += 1) {
+    if (typeof current !== 'object' || current === null) return current
+    const shell = (current as Record<string, unknown>).error
+    if (typeof shell !== 'string') return current
+    const inner = parseMaybeJson(shell)
+    if (inner === undefined || typeof inner !== 'object' || inner === null) return current
+    current = inner
+  }
+  return current
+}
+
+/**
+ * Extract the refusal envelope fields a hosted MCP tool result carries.
+ *
+ * Reads the backend's `error_code` and, on a failure envelope that predates
+ * that field name, the hosted `code` (#4070: the typed 403 relays as
+ * `code: "DELEGATION_BUDGET_EXCEEDED"` with NO `error_code` — the adapter
+ * accepts the backend's actual shape rather than demanding a second spelling
+ * of the same code on the wire). A `code` on a SUCCESS envelope is not a
+ * refusal and is never promoted. The `{"error": "<json>"}` shell an MCP
+ * client wraps around a failed result is unwrapped first.
+ */
 export function resultFieldsFromText(text: string): { errorCode?: string; nextTool?: string; nextToolServerRole?: ServerRole; ok?: boolean; paymentId?: string } {
   const parsed = parseMaybeJson(text)
   if (parsed !== undefined) {
-    const errorCode = deepFind(parsed, 'error_code')
-    const nextTool = deepFind(parsed, 'next_tool_name')
-    const role = deepFind(parsed, 'next_tool_server_role')
-    const success = deepFind(parsed, 'success')
-    const paymentId = deepFind(parsed, 'payment_id')
-    return {
-      ...(typeof errorCode === 'string' ? { errorCode } : {}),
-      ...(typeof nextTool === 'string' ? { nextTool: bareToolName(nextTool) } : {}),
-      ...(role === 'hosted' || role === 'signer' ? { nextToolServerRole: role } : {}),
-      ...(success === false ? { ok: false } : success === true ? { ok: true } : {}),
-      // #3992 A1: a payment id that only appears in the RESULT (the create
-      // call's own response, not the next call's arguments) still reaches
-      // `payment_status_settled`.
-      ...(typeof paymentId === 'string' ? { paymentId } : {}),
+    const envelope = unwrapErrorShell(parsed)
+    if (envelope !== undefined && typeof envelope === 'object' && envelope !== null) {
+      const success = deepFind(envelope, 'success')
+      const rawCode = deepFind(envelope, 'code')
+      const errorCode =
+        deepFind(envelope, 'error_code') ??
+        (success === false && typeof rawCode === 'string' ? canonicalErrorCode(rawCode) : undefined)
+      const nextTool = deepFind(envelope, 'next_tool_name')
+      const role = deepFind(envelope, 'next_tool_server_role')
+      const paymentId = deepFind(envelope, 'payment_id')
+      return {
+        ...(typeof errorCode === 'string' ? { errorCode } : {}),
+        ...(typeof nextTool === 'string' ? { nextTool: bareToolName(nextTool) } : {}),
+        ...(role === 'hosted' || role === 'signer' ? { nextToolServerRole: role } : {}),
+        ...(success === false ? { ok: false } : success === true ? { ok: true } : {}),
+        // #3992 A1: a payment id that only appears in the RESULT (the create
+        // call's own response, not the next call's arguments) still reaches
+        // `payment_status_settled`.
+        ...(typeof paymentId === 'string' ? { paymentId } : {}),
+      }
     }
   }
-  // Best-effort regex fallback for prose-wrapped envelopes.
-  const errorCode = /"error_code"\s*:\s*"([A-Za-z0-9_]+)"/.exec(text)?.[1]
+  // Best-effort regex fallback for prose-wrapped envelopes. The generic
+  // `code` spelling is only trusted on a payload that also says it failed —
+  // a `code` on a success body means something else entirely.
+  const errorCode =
+    /"error_code"\s*:\s*"([A-Za-z0-9_]+)"/.exec(text)?.[1] ??
+    (/"success"\s*:\s*false/.test(text) ? /"code"\s*:\s*"([A-Za-z0-9_]+)"/.exec(text)?.[1] : undefined)
   const nextTool = /"next_tool_name"\s*:\s*"([A-Za-z0-9_]+)"/.exec(text)?.[1]
   const paymentId = /"payment_id"\s*:\s*"([^"]+)"/.exec(text)?.[1]
   return {
-    ...(errorCode !== undefined ? { errorCode } : {}),
+    ...(errorCode !== undefined ? { errorCode: canonicalErrorCode(errorCode) } : {}),
     ...(nextTool !== undefined ? { nextTool: bareToolName(nextTool) } : {}),
     ...(paymentId !== undefined ? { paymentId } : {}),
   }

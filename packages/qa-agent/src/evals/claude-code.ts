@@ -57,6 +57,8 @@ export interface ClaudeCodeSessionMeta {
   numTurns?: number
   /** The log file the session stream was captured to (kept for the pilot's evidence). */
   logPath?: string
+  /** `claude`'s exit code when it was not 0 (e.g. the turn limit), with the session still graded. */
+  exitCode?: number
 }
 
 /** One session's cost record, keyed to the task/trial that produced it. */
@@ -131,21 +133,45 @@ export class ClaudeCodeAdapter {
     const base = this.cfg.logPath ?? (await mkdtemp(join(tmpdir(), 'qa-eval-claude-')))
     const logPath = `${base}.${taskId}.trial${trial}.jsonl`
     const command = buildClaudeCodeCommand(this.cfg, resolved.instruction)
-    await this.runCommand(command, logPath, taskId, trial)
+    const { code, stderrTail } = await this.runCommand(command, logPath, taskId, trial)
     const raw = await readFile(logPath, 'utf8')
     const { log, session } = parseClaudeCodeStreamLog(raw, { taskId, trial })
-    this.sessions.push({ ...session, logPath, taskId, trial })
+    // A non-zero exit after the agent worked (the turn limit, for one) still
+    // leaves a gradeable session: grade it and record the code. A non-zero
+    // exit with NO tool call is an infrastructure failure (auth rejected, the
+    // plan's usage limit), even when claude printed an error as its `result`
+    // text, and must not be graded as the agent's behaviour.
+    if (code !== 0 && log.calls.length === 0) {
+      throw new ClaudeCodeAdapterError(
+        `claude exited ${code} for ${taskId} trial ${trial}: ${stderrTail.slice(-400) || '(no stderr)'}`,
+      )
+    }
+    this.sessions.push({ ...session, logPath, taskId, trial, ...(code !== 0 && code !== null ? { exitCode: code } : {}) })
     return log
   }
 
-  private runCommand(command: string, logPath: string, taskId: string, trial: number): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
+  /**
+   * Run one session, resolving only when the process has closed AND the
+   * captured stdout has been flushed to `logPath`: the final `result` line
+   * (the one carrying `total_cost_usd`) is the last thing written, so reading
+   * the file on `close` alone can lose it.
+   */
+  private runCommand(
+    command: string,
+    logPath: string,
+    taskId: string,
+    trial: number,
+  ): Promise<{ code: number | null; stderrTail: string }> {
+    return new Promise((resolve, reject) => {
       let settled = false
+      let exitCode: number | null | undefined
+      let flushed = false
       const done = (err?: Error) => {
         if (settled) return
+        if (!err && (exitCode === undefined || !flushed)) return
         settled = true
         clearTimeout(timer)
-        err ? reject(err) : resolve()
+        err ? reject(err) : resolve({ code: exitCode ?? null, stderrTail })
       }
       // The token travels ONLY in the inherited env — never in the command
       // string, never logged. An error report quotes the template, which is
@@ -159,15 +185,18 @@ export class ClaudeCodeAdapter {
       child.stderr?.on('data', (chunk: Buffer) => {
         stderrTail = `${stderrTail}${chunk}`.slice(-2000)
       })
-      child.stdout?.pipe(createWriteStream(logPath))
+      const out = createWriteStream(logPath)
+      out.on('finish', () => {
+        flushed = true
+        done()
+      })
+      out.on('error', (err) => done(new ClaudeCodeAdapterError(`could not write the session log: ${err.message}`)))
+      if (child.stdout) child.stdout.pipe(out)
+      else out.end()
       child.on('error', (err) => done(new ClaudeCodeAdapterError(`could not launch claude: ${err.message}`)))
       child.on('close', (code) => {
-        if (code === 0) return done()
-        done(
-          new ClaudeCodeAdapterError(
-            `claude exited ${code} for ${taskId} trial ${trial}: ${stderrTail.slice(-400) || '(no stderr)'}`,
-          ),
-        )
+        exitCode = code
+        done()
       })
     })
   }

@@ -154,7 +154,7 @@ mcp__haven__haven_pay_x402_quote
        (pass the merchant's raw PAYMENT-RESPONSE header as payment_response on
         the SAME call when it names a transaction — Haven decodes and verifies
         the settlement itself, #3727 — plus payment_header, the header you
-        retried with: the settlement is recorded only with it, #4061)
+        retried with: a reported settlement is recorded only with it, #4061)
   (the SDK's own paid retry reports the merchant settlement itself, #3764;
    haven_report_settlement_evidence only when an outcome answer names it)
 ```

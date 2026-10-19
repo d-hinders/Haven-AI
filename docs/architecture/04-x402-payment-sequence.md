@@ -1244,9 +1244,10 @@ predicate permanently rather than until the window elapses.
 > seven; the standalone `haven_report_settlement_evidence` stays for agents
 > that call it and for the paid-MCP/erc7710 handoffs that already name it.
 >
-> **The proof header rides the report (#4061, passage only).** Since #3925 an
-> EIP-3009 merchant settlement is recorded only with the payment header the
-> agent sent the merchant. Haven never sees that header on this path, so both
+> **The proof header rides the report (#4061, passage only).** Since #3925 a
+> REPORTED EIP-3009 merchant settlement is recorded only with the payment
+> header the agent sent the merchant (the passive sweep still records a
+> derived-nonce settlement with no report). Haven never sees that header on this path, so both
 > report tools take an optional `payment_header`: the exact header the agent
 > retried with. It is forwarded as `paymentProofHeader` plus the names
 > `x402PaymentHeaderNamesSent` derives, the funding report's pair. A report

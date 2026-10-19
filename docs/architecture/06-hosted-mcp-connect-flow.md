@@ -214,7 +214,7 @@ haven_quote_x402 / haven_pay_x402_quote
                                          PAYMENT-RESPONSE as payment_response on the SAME
                                          call when it names a transaction — #3727 — plus
                                          payment_header, the header you retried with: the
-                                         settlement is recorded only with it, #4061)
+                                         reported settlement is recorded only with it, #4061)
   (the SDK's own delivery — hosted complete/settle and the local paid retry —
    reports the merchant settlement itself, #3764; haven_report_settlement_evidence
    only when an outcome answer names it)

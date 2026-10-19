@@ -433,7 +433,7 @@ const SIGN_X402_DESCRIPTION = [
   'retry the original merchant URL YOURSELF, setting EVERY header the result names in',
   'retry_headers to payment_header — Haven never sends that merchant the paid request. Then',
   'report the answer with mcp__haven__haven_report_x402_outcome, passing that same payment_header:',
-  'Haven records the merchant settlement only with it.',
+  'a reported settlement is recorded only with it.',
 ].join(' ')
 
 const SIGN_SWEEP_DELEGATE_DESCRIPTION = [

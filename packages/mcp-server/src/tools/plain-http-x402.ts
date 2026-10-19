@@ -439,7 +439,7 @@ function evidenceReason(reported: ReportedSettlementEvidence): string {
  */
 const MISSING_PROOF_HEADER_REPORT_REASON =
   'Recorded. The merchant\'s answer is recorded, but its settlement is not yet: the report carried ' +
-  'no payment_header, and Haven records an EIP-3009 merchant settlement only with the payment header ' +
+  'no payment_header, and Haven records a reported EIP-3009 merchant settlement only with the payment header ' +
   'you retried the merchant with. The hash was not judged. Call next_tool with next_arguments, adding ' +
   'payment_header: the exact payment_header you sent the merchant.'
 
@@ -1627,10 +1627,22 @@ export function createPlainHttpX402Handlers(
           // #4061: forwarded with the payment header the agent retried
           // with — the #3925 nonce proof — exactly as the SDK forwards its
           // own (`paymentProofHeader` + the names derived from it).
+          // #4061 review: ONLY where it is that proof — a hash other than the
+          // payment's own funding anchor (`report.txHash`). A report of the
+          // anchor itself (an erc7710 settlement once confirmed) goes through
+          // the evidence attach path, which would store the agent's header
+          // over the recorded one; a different hash on any non-eip3009
+          // payment is refused before attach, so it cannot store it either.
+          const proofHeader =
+            args.payment_header &&
+            report.txHash &&
+            report.txHash.toLowerCase() !== evidence.settlementTxHash.toLowerCase()
+              ? args.payment_header
+              : undefined
           const evidenceOutcome = await haven.reportSettlementEvidence(
             report.paymentId,
             evidence.settlementTxHash,
-            args.payment_header ? { paymentHeader: args.payment_header } : {},
+            proofHeader ? { paymentHeader: proofHeader } : {},
           )
           settlementEvidence = {
             settlement_tx_hash: evidence.settlementTxHash,

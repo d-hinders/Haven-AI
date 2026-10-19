@@ -37,10 +37,15 @@ import { DELIVERY_REFERENCE_MAX_LENGTH } from '@haven_ai/core'
  * On the EIP-3009 funding leg it is the nonce proof the backend records a
  * merchant settlement against (#3925); without it that record is refused.
  * It is a signed payment authorization, not a credential: it is forwarded
- * only to Haven, and never shape-checked as a secret (`delivery_reference`'s
+ * only to Haven, and only on the report it proves — an eip3009 payment's
+ * merchant settlement, i.e. a hash other than the funding hash — where the
+ * backend reads it and never stores it (on any other shape it would reach
+ * the evidence attach path and overwrite the stored header, so it is
+ * dropped). It is never shape-checked as a secret (`delivery_reference`'s
  * credential check reads only `delivery_reference`). Bounded at the backend's
- * own stored-header cap (`cleanHeaderValue`, 16 KiB) — a real EIP-3009 header
- * is well under 2 KiB, and a merchant's header limit is about that size too.
+ * own stored-header cap (`cleanHeaderValue`, 16 KiB). A live EIP-3009 header is
+ * about 4.5 KB — the merchant's `extensions` are echoed into it — so the cap
+ * leaves headroom without admitting an unbounded value.
  * The SDK posts the header it holds unbounded; there is no SDK limit to
  * mirror, so the bound is the backend's.
  */
@@ -1407,9 +1412,10 @@ const REPORT_X402_OUTCOME_DESCRIPTION = [
   'haven_get_payment_status instead of a 15-minute wait. On an accepted outcome you may fold the',
   'settlement evidence into this call: pass the raw base64 PAYMENT-RESPONSE header as',
   'payment_response and/or the settlement_tx_hash, plus payment_header (the header you retried',
-  'with; required to record the settlement). Haven decodes it (transaction only), verifies the',
-  'hash on-chain BEFORE recording (a hash that does not match the payment on-chain is refused),',
-  'and the purchase is complete with no further tool. A rejected outcome records no evidence. Optionally pass delivery_reference — a NON-SECRET pointer to what the merchant',
+  'with; a reported settlement is recorded only with it). Haven reads only the transaction from',
+  'payment_response, verifies the hash on-chain BEFORE recording (a mismatch is refused), and the',
+  'purchase is complete with no further tool. A rejected outcome records no evidence.',
+  'Optionally pass delivery_reference — a NON-SECRET pointer to what the merchant',
   'delivered (product, order id) shown on the owner\'s receipt; code/token/key shapes are refused,',
   'so relay the secret to the owner yourself.',
   'Evidence only, your own payments only: it moves no money. Not for merchants Haven',

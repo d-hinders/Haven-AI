@@ -260,7 +260,7 @@ export const toolDescriptions = {
     summary:
       'Report a payment\'s real merchant settlement transaction hash so Haven can verify it on-chain and record it.',
     behavior:
-      'Pass payment_id and, when you hold one, settlement_tx_hash (0x + 64 hex chars) — from PAYMENT-RESPONSE or a prior settlement_tx_hash. On EIP-3009 also pass payment_header (the header you retried the merchant with) or nothing is recorded. Omitting settlement_tx_hash succeeds as a no-op — nothing is checked or recorded, and no network call is made. Haven verifies on-chain before recording a hash; a zero, mismatched, or reverted hash is refused. Your own payments only.',
+      'Pass payment_id and, when you hold one, settlement_tx_hash (0x + 64 hex chars) — from PAYMENT-RESPONSE or a prior settlement_tx_hash. On EIP-3009 also pass payment_header (the header you retried the merchant with) or the report is refused. Omitting settlement_tx_hash succeeds as a no-op — nothing is checked or recorded, and no network call is made. Haven verifies on-chain before recording a hash; a zero, mismatched, or reverted hash is refused. Your own payments only.',
     nextActionGuidance:
       'code SETTLEMENT_PROOF_HEADER_MISSING: call again adding payment_header. ' +
       'code SETTLEMENT_NOT_RECORDED (refusal_reason present): the payment\'s funding is confirmed and this hash was not accepted for it — do not retry it; refusal_reason carries why, verbatim. ' +

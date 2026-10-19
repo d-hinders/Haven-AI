@@ -1030,7 +1030,7 @@ export function classifySettlementEvidenceReport(
         safeToContinue: true,
         reason:
           'Haven did not record this settlement yet: the report carried no payment_header, and Haven ' +
-          'records an EIP-3009 merchant settlement only with the payment header you retried the ' +
+          'records a reported EIP-3009 merchant settlement only with the payment header you retried the ' +
           'merchant with. The hash was not judged. Call next_tool with next_arguments, adding ' +
           'payment_header: the exact payment_header you sent the merchant. The payment itself is ' +
           'unchanged — its funding leg is confirmed.',
@@ -1088,6 +1088,32 @@ export function classifySettlementEvidenceReport(
       summary: { payment_id: paymentId, status: observedStatus ?? 'unknown' },
     }),
   }
+}
+
+/**
+ * #4061 review (nit 3): the agent's `payment_header`, when — and only when —
+ * the report is the eip3009 merchant-settlement report it proves: the payment
+ * is eip3009, funded, and the reported hash is not its funding hash. Any
+ * other shape answers `undefined` (nothing forwarded), so the header can
+ * never reach the evidence attach path and overwrite a stored one. A failed
+ * status read also answers `undefined`.
+ */
+async function settlementProofHeaderFor(
+  haven: HavenClient,
+  paymentId: string,
+  settlementTxHash: string,
+  paymentHeader: string,
+): Promise<string | undefined> {
+  let status: Awaited<ReturnType<HavenClient['getPaymentStatus']>>
+  try {
+    status = await haven.getPaymentStatus(paymentId)
+  } catch {
+    return undefined
+  }
+  const funding = status.txHash
+  return status.settlementScheme === 'eip3009' && !!funding && funding.toLowerCase() !== settlementTxHash.toLowerCase()
+    ? paymentHeader
+    : undefined
 }
 
 /**
@@ -1621,11 +1647,21 @@ export function createPaidMcpCompletionHandlers(
         }
         // #4061: with the payment header the agent retried the merchant
         // with — on EIP-3009 the #3925 nonce proof the record needs —
-        // forwarded exactly as the SDK forwards its own.
+        // forwarded exactly as the SDK forwards its own. ONLY where it is
+        // that proof: a funded eip3009 payment reported with a hash other
+        // than its funding hash (the backend's merchant-settlement branch,
+        // which reads the header and never stores it). Anywhere else — an
+        // erc7710 settlement, or the funding hash itself — the report goes
+        // through the attach path, which would store the header over the one
+        // Haven or the SDK recorded; an agent-chosen value never gets there.
+        // Unknown status (the read failed) forwards nothing, same reason.
+        const proofHeader = args.payment_header
+          ? await settlementProofHeaderFor(haven, args.payment_id, args.settlement_tx_hash, args.payment_header)
+          : undefined
         const outcome = await haven.reportSettlementEvidence(
           args.payment_id,
           args.settlement_tx_hash,
-          args.payment_header ? { paymentHeader: args.payment_header } : {},
+          proofHeader ? { paymentHeader: proofHeader } : {},
         )
         if (outcome.outcome === 'confirmed') {
           return classifySettlementEvidenceReport(args.payment_id, args.settlement_tx_hash, outcome)

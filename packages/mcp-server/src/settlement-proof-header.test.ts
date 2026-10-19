@@ -116,6 +116,9 @@ function stubSettlementAnswer(
   settlementAnswer:
     | { status: number; body: unknown }
     | ((body: Record<string, unknown> | undefined) => { status: number; body: unknown }),
+  // #4061 review: the payment's status as the backend reports it (default: a
+  // funded eip3009 payment); `null` makes the status read fail.
+  status: Record<string, unknown> | null = statusBody(),
 ) {
   vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
     const method = (init.method ?? 'GET').toUpperCase()
@@ -143,7 +146,7 @@ function stubSettlementAnswer(
       }
       return respond(202, { evidence: { id: 'ev_1' } })
     }
-    if (path.endsWith('/status')) return respond(200, statusBody())
+    if (path.endsWith('/status')) return status ? respond(200, status) : respond(503, { error: 'down' })
     return respond(404, { error: 'unexpected route' })
   })
 }
@@ -397,5 +400,59 @@ describe('#4061 every plain-HTTP report instruction names payment_header', () =>
     expect(toolDescriptions.haven_report_x402_outcome).toContain('payment_header')
     expect(toolDescriptions.haven_report_settlement_evidence).toContain('payment_header')
     expect(toolDescriptions.haven_report_settlement_evidence).toContain('SETTLEMENT_PROOF_HEADER_MISSING')
+  })
+})
+
+describe('#4061 review: payment_header is forwarded only on the report it proves', () => {
+  // Anywhere but the eip3009 merchant-settlement branch, the header would
+  // reach the evidence attach path, whose COALESCE overwrites the header Haven
+  // or the SDK stored. So it is dropped there.
+  const proofPosts = () =>
+    recordedCalls().filter((c) => c.url.endsWith('/machine-payments/evidence') && c.body?.paymentProofHeader)
+
+  it('haven_report_settlement_evidence: an erc7710 payment never gets the header', async () => {
+    stubSettlementAnswer(BACKEND_RULE, statusBody({ settlement_scheme: 'erc7710', status: 'submitted', tx_hash: null }))
+    await handlers().haven_report_settlement_evidence({
+      payment_id: 'pay_x402',
+      settlement_tx_hash: MERCHANT_TX,
+      payment_header: PAYMENT_HEADER,
+    })
+    expect(settlementPost()).toBeDefined()
+    expect(proofPosts()).toHaveLength(0)
+  })
+
+  it('haven_report_settlement_evidence: a report of the FUNDING hash never gets the header', async () => {
+    stubSettlementAnswer(BACKEND_RULE)
+    await handlers().haven_report_settlement_evidence({
+      payment_id: 'pay_x402',
+      settlement_tx_hash: FUNDING_TX,
+      payment_header: PAYMENT_HEADER,
+    })
+    expect(recordedCalls().some((c) => c.url.endsWith('/machine-payments/evidence'))).toBe(true)
+    expect(proofPosts()).toHaveLength(0)
+  })
+
+  it('haven_report_settlement_evidence: an unreadable status forwards nothing', async () => {
+    stubSettlementAnswer(BACKEND_RULE, null)
+    await handlers().haven_report_settlement_evidence({
+      payment_id: 'pay_x402',
+      settlement_tx_hash: MERCHANT_TX,
+      payment_header: PAYMENT_HEADER,
+    })
+    expect(settlementPost()).toBeDefined()
+    expect(proofPosts()).toHaveLength(0)
+  })
+
+  it('haven_report_x402_outcome: folded evidence naming the funding anchor never gets the header', async () => {
+    stubSettlementAnswer(BACKEND_RULE)
+    await handlers().haven_report_x402_outcome({
+      payment_id: 'pay_x402',
+      outcome: 'accepted',
+      merchant_status: 200,
+      settlement_tx_hash: FUNDING_TX,
+      payment_header: PAYMENT_HEADER,
+    })
+    expect(recordedCalls().filter((c) => c.url.endsWith('/machine-payments/evidence')).length).toBeGreaterThan(1)
+    expect(proofPosts()).toHaveLength(0)
   })
 })

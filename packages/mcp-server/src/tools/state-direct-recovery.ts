@@ -362,7 +362,7 @@ function submitFollowUpHandoff(
         'the payment_header your local signer returned (haven_sign_x402 builds it with the signature; if you ' +
         'signed with haven_sign, build it now with haven_x402_sign_header) as PAYMENT-SIGNATURE, and X-PAYMENT; then call ' +
         'haven_report_x402_outcome with payment_id, outcome and merchant_status, plus that same payment_header ' +
-        'with any settlement evidence — Haven records the merchant settlement only with it.',
+        'with any settlement evidence — a reported settlement is recorded only with it.',
     }
   }
   if (status.rail === 'x402') {

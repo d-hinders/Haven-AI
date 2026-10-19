@@ -97,7 +97,7 @@ export const HOSTED_INSTRUCTIONS = [
   'signer and scheme-specific guidance. EIP-3009 (funding leg): haven_sign_x402,',
   'then haven_submit, then retry the merchant yourself with the returned',
   'payment_header (both header names, below), then haven_report_x402_outcome',
-  'with that same payment_header (Haven records the settlement only with it).',
+  'with that same payment_header (a reported settlement is recorded only with it).',
   'erc7710: haven_sign, then haven_submit with settlement_scheme "erc7710", then',
   'retry the merchant yourself with the payment_header haven_submit returns',
   '(PAYMENT-SIGNATURE only), then record the merchant\'s settlement with',

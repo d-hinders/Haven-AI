@@ -670,8 +670,9 @@ export async function findAccountByCreateIdempotencyKey(
   userId: string,
   idempotencyKey: string,
   db: Executor = pool,
-): Promise<{ id: string; account_address: string; created_at: string } | null> {
-  const result = await db.query<{ id: string; account_address: string; created_at: string }>(
+): Promise<{ id: string; account_address: string; chain_id: number; created_at: string } | null> {
+  // `chain_id` is what the replay answers (#4024): the STORED row's chain.
+  const result = await db.query<{ id: string; account_address: string; chain_id: number; created_at: string }>(
     FIND_ACCOUNT_BY_CREATE_IDEMPOTENCY_KEY_SQL,
     [userId, idempotencyKey],
   )

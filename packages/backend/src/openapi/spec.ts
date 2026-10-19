@@ -5537,7 +5537,7 @@ export const openapiSpec = {
                   idempotency_key: {
                     type: 'string',
                     description:
-                      '#4023: retried-create dedup (the send_idempotency_key pattern). A retried create returns the FIRST account it created instead of minting a second.',
+                      '#4023: retried-create dedup (the send_idempotency_key pattern). A retried create returns the FIRST account it created instead of minting a second — checked first, before the source, key and cap checks (#4024), and answered with the stored account\'s chain_id. A key reused with a different chain_id or key_id is refused with 409 IDEMPOTENCY_KEY_REUSED.',
                   },
                   single_signer_waiver: {
                     type: 'object',
@@ -5573,12 +5573,20 @@ export const openapiSpec = {
           },
           '400': { ...errorResponse, description: 'Bad owner configuration, a chain the delegation rail does not serve, or a mixed/ambiguous request shape.' },
           '401': errorResponse,
-          '404': { ...errorResponse, description: 'Create-additional: the named source_account_id is not an account the caller owns.' },
-          '409': { ...errorResponse, description: 'This account is already registered for the caller.' },
+          '404': {
+            ...errorResponse,
+            description:
+              'Create-additional: the named source_account_id is not an account the caller owns. error_code SOURCE_ACCOUNT_NOT_FOUND (#4024).',
+          },
+          '409': {
+            ...errorResponse,
+            description:
+              'This account is already registered for the caller. Also (#4024) a create-additional idempotency_key that already belongs to an account with a different chain_id or key_id: error_code IDEMPOTENCY_KEY_REUSED, with the existing account id.',
+          },
           '422': {
             ...errorResponse,
             description:
-              'Create-additional: the source account has no passkey to copy, the key_id is not one of its passkeys, or the per-user per-chain soft cap (10) is reached.',
+              'Create-additional (#4024 codes): the source account has no passkey to copy (error_code SOURCE_HAS_NO_PASSKEY); the key_id is not one of its passkeys (KEY_NOT_ON_SOURCE); or the per-user per-chain soft cap is reached (ACCOUNT_CAP_REACHED, with `cap` — 10 — and the request `chain_id`). An idempotent replay is answered BEFORE any of these checks, so a retried create whose first attempt succeeded gets that account (201), never one of these refusals.',
           },
           '502': { ...errorResponse, description: 'The account address could not be derived.' },
         },

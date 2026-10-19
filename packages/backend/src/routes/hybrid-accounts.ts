@@ -53,6 +53,17 @@ import { boundedErrorDetails } from '../modules/payments/index.js'
 /** Soft cap (#4023): accounts per user per chain. A 11th create answers 422. */
 const MAX_ACCOUNTS_PER_USER_PER_CHAIN = 10
 
+/**
+ * The create-additional refusal codes (#4024). Clients branch on these, never
+ * on the sentence — the New account dialog maps each one
+ * (`packages/frontend/src/lib/new-account.ts` carries the same constants).
+ */
+const SOURCE_ACCOUNT_NOT_FOUND = 'SOURCE_ACCOUNT_NOT_FOUND'
+const SOURCE_HAS_NO_PASSKEY = 'SOURCE_HAS_NO_PASSKEY'
+const KEY_NOT_ON_SOURCE = 'KEY_NOT_ON_SOURCE'
+const ACCOUNT_CAP_REACHED = 'ACCOUNT_CAP_REACHED'
+const IDEMPOTENCY_KEY_REUSED = 'IDEMPOTENCY_KEY_REUSED'
+
 interface CreateHybridBody {
   chain_id?: number
   name?: string
@@ -230,27 +241,68 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     const recordWaiver =
       waiverAcknowledged && isValueBearingChain(chainId) && signerCount < 2
 
-    // ── Create-additional: resolve the owner passkey from the SOURCE row ──
-    // The server copies the ONE named passkey's coordinates from the source
-    // account's stored signer set — never from the request. A source with no
-    // passkey (EOA-only) and a key_id outside its signer set are both typed
-    // refusals: there is no owner config to derive here.
+    // ── Create-additional ──────────────────────────────────────────────────
     let ownerPasskeys: PasskeySigner[]
     let saltKey: string
     if (isAdditional) {
+      // Idempotent replay FIRST (#1207's rule, account-shaped; #4024): before
+      // the source, key and cap are checked, and before anything is derived
+      // or written, a retried create answers the FIRST account. The order is
+      // the point. Until #4024 the cap ran first, so a retried 10th create
+      // whose response was lost got "cap reached" instead of the account it
+      // had already made — and a client could not tell the two apart. The
+      // read is scoped to the caller (`sub`), so a key never replays another
+      // user's row; another user's identical key is simply a new create.
+      //
+      // A key reused for a DIFFERENT request is refused, as the
+      // send_idempotency_key pattern does (payments.ts findPaymentReplay):
+      // the stored row pins the chain and its one passkey, so a replay with
+      // another chain_id or key_id is a 409, not the first account. The
+      // source account is not stored on the new row, so it cannot be pinned;
+      // the passkey it was copied from is what matters to the new account.
+      if (idempotency_key) {
+        const replay = await findAccountByCreateIdempotencyKey(sub, idempotency_key)
+        if (replay !== null) {
+          const replayKeys = await listAccountPasskeys(replay.id)
+          const sameKey = replayKeys.some((k) => k.key_id.toLowerCase() === String(key_id).toLowerCase())
+          const mismatch = Number(replay.chain_id) !== chainId ? 'chain_id' : !sameKey ? 'key_id' : null
+          if (mismatch) {
+            return reply.code(409).send({
+              error: `idempotency_key already belongs to an account with a different ${mismatch}`,
+              error_code: IDEMPOTENCY_KEY_REUSED,
+              id: replay.id,
+            })
+          }
+          return reply.code(201).send({
+            id: replay.id,
+            account_address: replay.account_address,
+            // The STORED row's chain, not the request's (#4024).
+            chain_id: Number(replay.chain_id),
+            account_type: 'delegator_hybrid',
+            deployed: false,
+            created_at: replay.created_at,
+          })
+        }
+      }
+
+      // Resolve the owner passkey from the SOURCE row: the server copies the
+      // ONE named passkey's coordinates from the source account's stored
+      // signer set — never from the request. Each refusal carries an
+      // error_code (#4024).
       const source = await findDelegatorHybridAccountForUser(sub, source_account_id as string)
       if (source === null) {
-        return reply.code(404).send({ error: 'Source account not found' })
+        return reply.code(404).send({ error: 'Source account not found', error_code: SOURCE_ACCOUNT_NOT_FOUND })
       }
       const sourceSigners = await listAccountPasskeys(source.id)
       if (sourceSigners.length === 0) {
         return reply.code(422).send({
-          error: 'The source account has no passkey to copy — EOA-only accounts cannot create an additional account',
+          error: 'The source account has no passkey to copy, so it cannot secure an additional account',
+          error_code: SOURCE_HAS_NO_PASSKEY,
         })
       }
       const named = sourceSigners.find((s) => s.key_id.toLowerCase() === String(key_id).toLowerCase())
       if (!named) {
-        return reply.code(422).send({ error: 'key_id is not a passkey on the source account' })
+        return reply.code(422).send({ error: 'key_id is not a passkey on the source account', error_code: KEY_NOT_ON_SOURCE })
       }
       ownerPasskeys = [{ keyId: named.key_id, x: BigInt(named.public_key_x), y: BigInt(named.public_key_y) }]
       saltKey = named.key_id
@@ -261,23 +313,10 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
       if (cap >= BigInt(MAX_ACCOUNTS_PER_USER_PER_CHAIN)) {
         return reply.code(422).send({
           error: `This user already has ${MAX_ACCOUNTS_PER_USER_PER_CHAIN} accounts on chain ${chainId}`,
+          error_code: ACCOUNT_CAP_REACHED,
+          cap: MAX_ACCOUNTS_PER_USER_PER_CHAIN,
+          chain_id: chainId,
         })
-      }
-
-      // Idempotent replay (#1207's rule, account-shaped): before anything is
-      // derived or written, a retried create answers the FIRST account.
-      if (idempotency_key) {
-        const replay = await findAccountByCreateIdempotencyKey(sub, idempotency_key)
-        if (replay !== null) {
-          return reply.code(201).send({
-            id: replay.id,
-            account_address: replay.account_address,
-            chain_id: chainId,
-            account_type: 'delegator_hybrid',
-            deployed: false,
-            created_at: replay.created_at,
-          })
-        }
       }
     } else {
       ownerPasskeys = parsedPasskeys

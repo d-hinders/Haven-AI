@@ -344,11 +344,13 @@ it. A session that exits non-zero but left a stream (the turn limit) is still
 graded, with its exit code recorded.
 
 **Login check first.** Before the eval slice the job runs one `claude -p`
-turn with no MCP servers and no tools, and fails with Claude's own reason
-(an invalid or expired token, the plan's usage limit) when it does not work,
-instead of every task failing as "claude exited 1". An adapter failure quotes
-the session's `result` text for the same reason, and the raw session streams
-are uploaded with the report. To fix a failed login, generate a new token with
+turn on the eval's model with no MCP servers, and fails with Claude's own
+reason (an invalid or expired token, the plan's usage limit, model access)
+when it does not work, instead of every task failing as "claude exited 1". An
+adapter failure quotes the session's `result` text for the same reason. The
+raw session streams are deliberately not uploaded: this repository is public,
+so artifacts are downloadable by anyone, and the streams carry full tool
+results. To fix a failed login, generate a new token with
 `claude setup-token` and replace the `CLAUDE_CODE_OAUTH_TOKEN` environment
 secret (see Token rotation above).
 

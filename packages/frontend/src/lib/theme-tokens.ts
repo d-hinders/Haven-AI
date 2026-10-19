@@ -16,7 +16,7 @@
  *     plain node) and the same test cross-checks the two paths against each
  *     other, so neither can drift alone.
  *
- * Scope note: exactly the 45 colour-valued tokens — the 26 with `-rgb`
+ * Scope note: exactly the 47 colour-valued tokens — the 26 with `-rgb`
  * channel twins are listed by their hex form (the channel form is pinned to
  * the hex by `design-token-alpha.test.ts`); `--v2-safe-*` (env() lengths),
  * the shadows/gradients and every non-colour token are out of scope here.
@@ -46,6 +46,11 @@ export const THEME_TOKENS: TokenSpec[] = [
   { name: 'border', light: '#e6ebf1', dark: '#2b3140' },
   { name: 'border-strong', light: '#d6dbe3', dark: '#3a4152' },
   { name: 'border-anchor', light: 'rgba(79, 70, 229, 0.10)', dark: 'rgba(165, 172, 255, 0.16)' },
+  // The floating tab-bar pill (#4063): dark lifts the pill onto a distinct
+  // opaque surface with the strong border, because the dark popover shadow is
+  // black on near-black. Light aliases `--v2-bg` / `--v2-border` exactly.
+  { name: 'tab-bar-bg', light: '#ffffff', dark: '#20252f' },
+  { name: 'tab-bar-border', light: '#e6ebf1', dark: '#3a4152' },
   // Brand — lightened/desaturated for dark; #4f46e5 fails AA on a dark ground.
   { name: 'brand', light: '#4f46e5', dark: '#a5acff' },
   { name: 'brand-strong', light: '#4338ca', dark: '#b7bcff' },

@@ -34,6 +34,17 @@
   --v2-border: #e6ebf1;
   --v2-border-strong: #d6dbe3;
 
+  /* The floating tab-bar pill (#4063). Light keeps the page ground and the
+     plain border — there the popover shadow lifts the pill, so the values
+     alias `--v2-bg` / `--v2-border` exactly. Both dark blocks below redeclare
+     the pair: a distinct OPAQUE surface (`--v2-surface-2`) and the strong
+     border, because the dark popover shadow is black on near-black and
+     `--v2-border` measures only 1.41:1 against `--v2-bg` there (the edge
+     becomes 1.79:1, the fill 1.19:1). Still hex so `THEME_TOKENS` and
+     `scripts/contrast-check.mjs` can measure it. */
+  --v2-tab-bar-bg: #ffffff;
+  --v2-tab-bar-border: #e6ebf1;
+
   --v2-brand: #4f46e5;
   --v2-brand-strong: #4338ca;
   --v2-brand-soft: #eef2ff;
@@ -396,6 +407,14 @@
     --v2-border-strong: #3a4152;
     --v2-border-strong-rgb: 58 65 82;
 
+    /* The floating tab-bar pill (#4063): an opaque surface distinct from the
+       page ground and a strong edge, because the dark popover shadow is black
+       on near-black and `--v2-border` is only 1.41:1 here. Edge 1.79:1 and
+       fill 1.19:1 against `--v2-bg`. Byte-identical with the explicit-dark
+       block — the theme-tokens unit test holds the two sets equal. */
+    --v2-tab-bar-bg: #20252f;
+    --v2-tab-bar-border: #3a4152;
+
     --v2-brand: #a5acff;
     --v2-brand-rgb: 165 172 255;
     --v2-brand-strong: #b7bcff;
@@ -515,6 +534,14 @@
   --v2-border-rgb: 43 49 64;
   --v2-border-strong: #3a4152;
   --v2-border-strong-rgb: 58 65 82;
+
+  /* The floating tab-bar pill (#4063): an opaque surface distinct from the
+     page ground and a strong edge, because the dark popover shadow is black
+     on near-black and `--v2-border` is only 1.41:1 here. Edge 1.79:1 and
+     fill 1.19:1 against `--v2-bg`. Byte-identical with the media-gated dark
+     block — the theme-tokens unit test holds the two sets equal. */
+  --v2-tab-bar-bg: #20252f;
+  --v2-tab-bar-border: #3a4152;
 
   --v2-brand: #a5acff;
   --v2-brand-rgb: 165 172 255;

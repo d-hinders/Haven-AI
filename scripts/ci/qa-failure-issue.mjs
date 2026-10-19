@@ -20,18 +20,30 @@
 //     the same issue instead of opening `failed (<date+1>)`;
 //   - neither → create it, once, under the fixed title.
 //
+// And the half the upsert lacked (#4069): `--green` CLOSES it. The money-flow
+// job calls it only on a full-coverage green run, so the issue no longer waits
+// for an owner to close it by hand (16 hand closes of #2769 before this). The
+// close is a write the upsert never had to guard, so it selects the way
+// `qa-balance-issue.mjs` does — bot author + exact title, never a human issue
+// that merely carries the label — and fails closed: an unreadable lookup
+// throws before any write.
+//
 // `gh` is called through an injectable runner so the test can drive this exact
 // entry point with a recording stub on PATH and assert which calls were REACHED
 // (ship-next § Implement step 5: presence in source is not reachability). The
 // default runner is the real `gh`, which the workflow has via GH_TOKEN.
 //
-// Usage (from the workflow's failure step):
-//   TRIGGER='...' RUN_URL='...' node scripts/ci/qa-failure-issue.mjs qa-run.attempt-*.log
+// Usage (from the workflow's failure and green steps):
+//   node scripts/ci/qa-failure-issue.mjs qa-run.attempt-*.log   # failure: upsert
+//   node scripts/ci/qa-failure-issue.mjs --green                 # full-coverage green: close
+// TRIGGER and RUN_URL are built from the Actions env (`triggerLine`, `runUrlFromEnv`)
+// unless set explicitly, so the two steps share one trigger construction.
 
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { byAttempt, scrubFull } from './qa-retry.mjs'
+import { BOT_AUTHOR } from './standing-issue-upsert.mjs'
 
 export const LABEL = 'qa-failure'
 export const LABEL_COLOR = 'b60205'
@@ -322,7 +334,8 @@ export function buildBody({ trigger, runUrl, when, classification = null }) {
     'failure*. A recurring `provider` class is a finding for the provider; `rate_limit` is the',
     'harness out-running Haven\'s own x402 cap (space out hand dispatches), never a product',
     'defect; an `unclassified` one needs reading, and a real regression gets its own bug report under',
-    '`docs/bug-reports/`. Close this issue once a run is green; the next failure reopens it.',
+    '`docs/bug-reports/`. This issue closes itself on the next full-coverage green run (#4069);',
+    'the next failure reopens it.',
   ].join('\n')
 }
 
@@ -333,6 +346,29 @@ export function buildComment({ trigger, runUrl, when, classification = null }) {
   // earlier attempts' classes are recorded here too.
   const earlier = (classification?.earlier ?? []).map((e) => `attempt ${e.attempt} \`${e.runClass}\``)
   return `\`qa-dev\` failure at ${when} (trigger: \`${trigger}\`), class \`${cls}\`${legs}${earlier.length ? `; earlier: ${earlier.join(', ')}` : ''} — ${runUrl}`
+}
+
+/**
+ * The trigger line (#2271): a deployment_status run names the Railway
+ * deployment (id, creator, deployed SHA) — GitHub-authored provenance a curl
+ * cannot produce; a workflow_dispatch names the actor who started it. Built
+ * here, from the job's env, so the failure and green steps share it.
+ */
+export function triggerLine(env = process.env) {
+  switch (env.GITHUB_EVENT_NAME) {
+    case 'deployment_status':
+      return `deployment_status — Railway deployment ${env.DEPLOYMENT_ID ?? ''} of ${env.DEPLOYMENT_SHA ?? ''} to '${env.DEPLOYMENT_ENV ?? ''}', created by ${env.DEPLOYMENT_CREATOR ?? ''}`
+    case 'workflow_dispatch':
+      return `workflow_dispatch — started by ${env.GITHUB_ACTOR ?? ''}`
+    default:
+      return env.GITHUB_EVENT_NAME || ''
+  }
+}
+
+/** This run's URL, from the Actions env; '' outside Actions. */
+export function runUrlFromEnv(env = process.env) {
+  const { GITHUB_SERVER_URL: server, GITHUB_REPOSITORY: repo, GITHUB_RUN_ID: id } = env
+  return server && repo && id ? `${server}/${repo}/actions/runs/${id}` : ''
 }
 
 const defaultGh = (args) => execFileSync('gh', args, { encoding: 'utf8' })
@@ -393,17 +429,74 @@ export function upsertStandingIssue({ gh = defaultGh, trigger, runUrl, when, cla
   return { action: 'created', number: null }
 }
 
+function parseList(json) {
+  let parsed
+  try {
+    parsed = JSON.parse(json)
+  } catch {
+    throw new Error(`unparseable \`gh issue list\` output: ${String(json).slice(0, 200)}`)
+  }
+  if (!Array.isArray(parsed)) throw new Error(`\`gh issue list\` returned ${typeof parsed}, expected a JSON array`)
+  return parsed
+}
+
+export function buildCloseComment({ trigger, runUrl, when }) {
+  return `\`qa-dev\` full-coverage green at ${when} (trigger: \`${trigger}\`) — ${runUrl}\n\nClosed on green; the next failure reopens it.`
+}
+
+/**
+ * Close the standing issue on a full-coverage green run (#4069). Only an OPEN
+ * issue by the bot with the exact title is closed — a human issue carrying the
+ * label is left alone, and a closed one is not touched. A failed or unreadable
+ * lookup throws before any write (fail closed).
+ *
+ * @returns {{ action: 'closed', numbers: number[] } | { action: 'none' }}
+ */
+export function closeStandingIssue({ gh = defaultGh, trigger, runUrl, when, log = console.log }) {
+  const list = parseList(
+    gh([
+      'issue', 'list', '--label', LABEL, '--state', 'open', '--author', BOT_AUTHOR, '--limit', '50',
+      '--json', 'number,title,author,state',
+    ]),
+  )
+  const numbers = list
+    .filter(
+      (i) =>
+        i?.author?.login === BOT_AUTHOR &&
+        i?.title === ISSUE_TITLE &&
+        String(i?.state).toUpperCase() === 'OPEN' &&
+        Number.isInteger(i?.number),
+    )
+    .map((i) => i.number)
+    .sort((a, b) => a - b)
+  if (numbers.length === 0) {
+    log('Green run; no open standing qa-failure issue — nothing to do')
+    return { action: 'none' }
+  }
+  const comment = buildCloseComment({ trigger, runUrl, when })
+  for (const n of numbers) {
+    gh(['issue', 'close', String(n), '--reason', 'completed', '--comment', comment])
+    log(`Closed the standing qa-failure issue #${n} on green`)
+  }
+  return { action: 'closed', numbers }
+}
+
 function main() {
-  const trigger = process.env.TRIGGER
-  const runUrl = process.env.RUN_URL
-  if (!trigger || !runUrl) {
-    console.error('qa-failure-issue: TRIGGER and RUN_URL must be set')
+  const trigger = process.env.TRIGGER || triggerLine()
+  const url = process.env.RUN_URL || runUrlFromEnv()
+  if (!trigger || !url) {
+    console.error('qa-failure-issue: TRIGGER and RUN_URL must be set (or derivable from the Actions env)')
     process.exit(2)
   }
   const when = process.env.WHEN || new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC')
+  const args = process.argv.slice(2)
+  if (args.includes('--green')) {
+    console.log(JSON.stringify(closeStandingIssue({ trigger, runUrl: url, when })))
+    return
+  }
   // Attempt logs as arguments (the workflow passes qa-run.attempt-*.log).
-  const classification = readFinalAttempt(process.argv.slice(2))
-  const result = upsertStandingIssue({ trigger, runUrl, when, classification })
+  const classification = readFinalAttempt(args)
+  const result = upsertStandingIssue({ trigger, runUrl: url, when, classification })
   console.log(JSON.stringify(result))
 }
 

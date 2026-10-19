@@ -173,7 +173,12 @@ function goodReceipt(
   return {
     status: 1,
     blockNumber: 42,
-    logs: [transferLog(overrides), ...used.map((nonce) => authorizationUsedLog(DELEGATE, nonce))],
+    // #4061 review: FiatToken v2's real order — each authorization's
+    // `AuthorizationUsed`, then its own `Transfer` (the verifier pairs them).
+    logs:
+      used.length === 0
+        ? [transferLog(overrides)]
+        : used.flatMap((nonce) => [authorizationUsedLog(DELEGATE, nonce), transferLog(overrides)]),
   }
 }
 
@@ -700,7 +705,7 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
     // (`_markAuthorizationAsUsed`, then `_transfer`). Here the header's nonce
     // was burned for a transfer to SOMEONE ELSE; the delegate → merchant
     // transfer of this payment's amount belongs to the OTHER authorization.
-    it('a nonce burned in a two-authorization tx cannot borrow the other authorization’s transfer (CHARACTERIZATION, pre-fix: recorded)', async () => {
+    it('a nonce burned in a two-authorization tx cannot borrow the other authorization’s transfer', async () => {
       const { agentId, userId } = await seedAgent()
       const a = await seedFunded({ agentId, userId })
       const OTHER_NONCE = `0x${'88'.repeat(32)}`
@@ -722,7 +727,28 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
         paymentProofHeader: await settlementHeader({ nonce: TEST_NONCE }),
       })
 
-      expect(answered.statusCode).toBe(202)
+      expect(answered.statusCode).toBe(409)
+      expect((answered.body as { reason?: string }).reason).toMatch(/that authorization's own Transfer/)
+      expect(await recordedHash(a.id)).toBeNull()
+    })
+
+    it('in the same two-authorization tx, the nonce whose OWN transfer pays this merchant records', async () => {
+      const { agentId, userId } = await seedAgent()
+      const a = await seedFunded({ agentId, userId })
+      const OTHER_NONCE = `0x${'88'.repeat(32)}`
+      getTransactionReceipt.mockResolvedValue({
+        status: 1,
+        blockNumber: 42,
+        logs: [
+          authorizationUsedLog(DELEGATE, OTHER_NONCE),
+          transferLog({ to: OTHER }),
+          authorizationUsedLog(DELEGATE, TEST_NONCE),
+          transferLog(),
+        ],
+      })
+
+      await report(agentId, a.id, SETTLE_A) // default header: TEST_NONCE
+
       expect(await recordedHash(a.id)).toBe(SETTLE_A)
     })
 
@@ -868,7 +894,7 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
       getTransactionReceipt.mockResolvedValue({
         status: 1,
         blockNumber: 42,
-        logs: [transferLog(), authorizationUsedLog(DELEGATE, TEST_NONCE, OTHER)],
+        logs: [authorizationUsedLog(DELEGATE, TEST_NONCE, OTHER), transferLog()],
       })
 
       const answered = await attachEvidenceHandler(agentId, {

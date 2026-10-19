@@ -189,8 +189,11 @@ function x402TokenEip712Domain(
  * `nonceDerived` is the consistency check (the header nonce equals
  * `deriveX402PaymentNonce(intent.id)`, i.e. the client derives nonces).
  * The header's `to`/`value` are NOT checked here — the chain-side verifier
- * already binds the settlement transfer to the merchant and the exact amount,
- * and the signature covers whatever the delegate actually authorized.
+ * binds the settlement transfer to the merchant and the exact amount, and
+ * since the #4061 review it reads ONLY the transfer paired with this nonce's
+ * `AuthorizationUsed` (the log immediately after it), so the nonce and the
+ * transfer it is held to are the same authorization. The signature covers
+ * whatever the delegate actually authorized.
  */
 export function eip3009SettlementProofFromHeader(
   intent: Eip3009SettlementIntent,

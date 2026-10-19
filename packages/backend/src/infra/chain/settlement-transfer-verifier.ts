@@ -86,7 +86,11 @@
  * part of the verdict. Runs BEFORE the transfer scan, for the same reason
  * check 8 does — the chain's attribution key outranks transfer shape:
  *
- * - `(authorizer, nonce)` present → verified with `nonceBound: true`.
+ * - `(authorizer, nonce)` present → `nonceBound: true`, and (#4061 review)
+ *   checks 3–6 then read ONLY that authorization's own `Transfer` — the log
+ *   immediately after its `AuthorizationUsed` (FiatToken v2 emits the pair in
+ *   that order). A transaction settling several of the delegate's
+ *   authorizations cannot lend one nonce another's transfer.
  * - The token burned other nonce(s) for this authorizer → `mismatch` with
  *   `authorizationUsedNonces`, so the caller can tell a mere wrong-nonce
  *   report from one that settles ANOTHER payment's derived nonce.
@@ -183,6 +187,38 @@ function redeemedDelegationHashes(
     if (hash) hashes.push(hash)
   }
   return hashes.length > 0 ? hashes : null
+}
+
+/**
+ * #4061 review: the Transfer an `AuthorizationUsed` at `logs[i]` belongs to —
+ * the NEXT log, a `Transfer` from the same token contract (its `from`/`to`/
+ * `value` are then held to checks 3–6 like any candidate). FiatToken v2 emits exactly that pair, in that order, for every
+ * `transferWithAuthorization` / `receiveWithAuthorization`. When the receipt
+ * carries log indices, the two must also be consecutive by index. `null` when
+ * the next log is anything else: the authorization's transfer is then not
+ * identifiable, and nothing else in the receipt may stand in for it.
+ */
+function pairedTransferLog(
+  logs: readonly ethers.Log[],
+  i: number,
+  tokenLower: string,
+): ethers.Log | null {
+  const used = logs[i]
+  const next = logs[i + 1]
+  if (!used || !next || next.address.toLowerCase() !== tokenLower) return null
+  const usedIndex = (used as { index?: unknown }).index
+  const nextIndex = (next as { index?: unknown }).index
+  if (typeof usedIndex === 'number' && typeof nextIndex === 'number' && nextIndex !== usedIndex + 1) {
+    return null
+  }
+  let parsed: ethers.LogDescription | null = null
+  try {
+    parsed = ERC20_TRANSFER_IFACE.parseLog({ topics: [...next.topics], data: next.data })
+  } catch {
+    return null
+  }
+  if (parsed?.name !== 'Transfer') return null
+  return next
 }
 
 export interface ExpectedSettlementTransfer {
@@ -344,13 +380,28 @@ export async function verifySettlementTransferTx(
   // (c) no `AuthorizationUsed` from the token for this authorizer at all →
   //     not an EIP-3009 settlement (USDC's transferWithAuthorization /
   //     receiveWithAuthorization always emit it).
+  //
+  // #4061 review: the burned nonce is PAIRED with its own transfer. FiatToken
+  // v2's `_transferWithAuthorization` / `_receiveWithAuthorization` call
+  // `_markAuthorizationAsUsed` (emits `AuthorizationUsed`) and then
+  // `_transfer` (emits `Transfer`), so an authorization's Transfer is the log
+  // IMMEDIATELY AFTER its AuthorizationUsed, from the same token contract
+  // (pinned against a live Base Sepolia settlement receipt in
+  // `settlement-transfer-verifier.test.ts`). Checking the two independently
+  // let a transaction that settled TWO of the delegate's authorizations pass
+  // a nonce whose own transfer went elsewhere, by matching the OTHER
+  // authorization's transfer. With an expected authorization, only its paired
+  // Transfer may satisfy checks 3–6 below.
   let nonceBound = false
+  let pairedTransfer: ethers.Log | null = null
   if (expected.expectedAuthorizationUsed) {
     const tokenLower = expected.tokenAddress.toLowerCase()
     const authorizerLower = expected.expectedAuthorizationUsed.authorizer.toLowerCase()
     const nonceLower = expected.expectedAuthorizationUsed.nonce.toLowerCase()
     const burned: string[] = []
-    for (const log of receipt.logs) {
+    const logs = receipt.logs
+    for (let i = 0; i < logs.length; i += 1) {
+      const log = logs[i]!
       if (log.address.toLowerCase() !== tokenLower) continue
       let parsed: ethers.LogDescription | null = null
       try {
@@ -363,9 +414,18 @@ export async function verifySettlementTransferTx(
       const burnedNonce = (parsed.args.nonce as string).toLowerCase()
       if (burnedNonce === nonceLower) {
         nonceBound = true
+        pairedTransfer = pairedTransferLog(logs, i, tokenLower)
         break
       }
       burned.push(burnedNonce)
+    }
+    if (nonceBound && !pairedTransfer) {
+      return {
+        outcome: 'mismatch',
+        reason:
+          `Transaction ${txHash} burned the reported authorization's nonce, but the log after it is ` +
+          `not a ${expected.tokenAddress} Transfer — that authorization's transfer cannot be identified`,
+      }
     }
     if (!nonceBound) {
       return burned.length > 0
@@ -397,7 +457,10 @@ export async function verifySettlementTransferTx(
     return { outcome: 'mismatch', reason: 'The payment intent has no usable atomic amount' }
   }
 
-  for (const log of receipt.logs) {
+  // #4061 review: with check 9 in force, only the burned authorization's OWN
+  // Transfer is a candidate — never another log that happens to match shape.
+  const candidates = pairedTransfer ? [pairedTransfer] : receipt.logs
+  for (const log of candidates) {
     if (log.address.toLowerCase() !== token) continue
     let parsed: ethers.LogDescription | null = null
     try {
@@ -410,6 +473,15 @@ export async function verifySettlementTransferTx(
     if ((parsed.args.to as string).toLowerCase() !== to) continue
     if ((parsed.args.value as bigint) !== amount) continue
     return { outcome: 'verified', delegationBound, nonceBound }
+  }
+
+  if (pairedTransfer) {
+    return {
+      outcome: 'mismatch',
+      reason:
+        `Transaction ${txHash} burned the reported authorization, but that authorization's own ` +
+        `Transfer is not ${expected.amountRaw} from ${expected.fromAddress} to ${expected.toAddress}`,
+    }
   }
 
   return {

@@ -10,26 +10,22 @@ name: Agent evals — Claude Code lane
 #     (AGENT_EVALS_* — NEVER the QA_DELEGATION_* secrets, which drive the
 #     qa-freshness promotion gate) live ONLY as secrets of the protected
 #     `agent-evals` GitHub environment, with the owner as required reviewer.
-#     The evals job below declares `environment: agent-evals`, so every run —
-#     weekly, PR-subset or manual — waits for the owner's approval before any
-#     secret exists on the runner.
+#     The evals job below declares `environment: agent-evals`, so every run
+#     waits for the owner's approval before any secret exists on the runner.
 #   - Never put a token in the command template, a log line, or an artifact.
 #     The token travels only as an env var inherited by `claude`.
 #   - Not a required check on `dev` or `main` (no push trigger; not wired
 #     into dev-gate.yml) — and deliberately so: a spend-incurring suite must
 #     never block a promotion.
 #
-# Modes:
-#   - workflow_dispatch (Run workflow button): choose `subset` (the 5-task
-#     cost-pilot slice) or `full`. Waits for the environment approval like
-#     every other run.
-#   - schedule: weekly FULL run against the deployed dev stack.
-#   - pull_request (paths below): the SUBSET, which builds and boots
-#     `packages/mcp-server` from the PR checkout and points it at the dev
-#     backend — evaluating a PR against the dev hosted URL would measure
-#     `dev` and say nothing about the change (the same race qa-dev.yml's
-#     header names). Error bodies produced by `packages/backend` stay
-#     dev-deployed whatever this job checks out; the report says so.
+# Trigger: MANUAL ONLY (owner decision 2026-10-19). The owner starts a run
+# with the Run workflow button when they want one; no schedule and no PR
+# trigger, so nothing else queues a run that waits for the
+# owner's approval. Choose `subset` (5 tasks; boots `packages/mcp-server`
+# from this checkout against the dev backend) or `full` (all tasks, against
+# the deployed dev stack). Error bodies produced by `packages/backend` stay
+# dev-deployed either way; the report says so. Guarded by
+# scripts/ci/agent-evals-workspace-deps.test.mjs.
 #
 # `claude -p` is limited to the Haven MCP tools ONLY, in the open, in
 # QA_EVAL_CLAUDE_CODE_COMMAND below: `--allowedTools` names the two Haven
@@ -52,75 +48,13 @@ on:
         description: 'Trials per task (cost pilot: 1)'
         type: string
         default: '1'
-  schedule:
-    # Weekly, Monday 04:23 UTC. Odd minute to dodge the top-of-hour
-    # Actions scheduling surge (same rationale as qa-dev.yml).
-    - cron: '23 4 * * 1'
-  pull_request:
-    paths:
-      # The subset trigger paths (#3959 scope 4): what `claude -p` actually
-      # sees through the MCP pair.
-      - 'packages/mcp-server/src/server.ts'
-      - 'packages/mcp-server/src/tools/**'
-      - 'packages/mcp-server/src/tools-list.snapshot.json'
-      - 'packages/mcp-server/src/next-arguments-corpus.json'
-      - 'packages/sdk/src/skill-content.ts'
-      - 'packages/sdk/src/agent-guidance.ts'
-      - 'packages/signer/src/tools.ts'
-      - 'packages/signer/src/server.ts'
-      - 'packages/signer/src/consent.ts'
 
 permissions:
   contents: read
 
 jobs:
-  # Same changes job as ci.yml: the preflight battery routes gates by the
-  # surfaces a job declares through `needs.changes.outputs.* == 'true'`, and
-  # an ungated package build would join every diff's battery, docs-only
-  # included. The surfaces here are the packages this lane builds and runs.
-  changes:
-    name: Detect changed surfaces
-    runs-on: ubuntu-latest
-    outputs:
-      code: ${{ steps.filter.outputs.code }}
-      frontend: ${{ steps.filter.outputs.frontend }}
-      ui: ${{ steps.filter.outputs.ui }}
-      ops: ${{ steps.filter.outputs.ops }}
-      backend: ${{ steps.filter.outputs.backend }}
-      sdk: ${{ steps.filter.outputs.sdk }}
-      connect: ${{ steps.filter.outputs.connect }}
-      mcp: ${{ steps.filter.outputs.mcp }}
-      mcp_server: ${{ steps.filter.outputs.mcp_server }}
-      signer: ${{ steps.filter.outputs.signer }}
-      cli: ${{ steps.filter.outputs.cli }}
-      demo_merchant: ${{ steps.filter.outputs.demo_merchant }}
-      core: ${{ steps.filter.outputs.core }}
-      qa_agent: ${{ steps.filter.outputs.qa_agent }}
-      full: ${{ steps.filter.outputs.full }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: '.nvmrc'
-      - name: Classify changed files
-        id: filter
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: node scripts/ci/change-classifier.mjs
-
   claude-code-evals:
     name: Agent evals — Claude Code
-    needs: changes
-    # Fork PRs can never receive environment secrets — GitHub withholds them
-    # on forked head repos. Skip instead of red-failing after approval. The
-    # surface gate mirrors the workflow's own pull_request paths: the lane is
-    # about what `claude -p` sees through the MCP pair (mcp_server, sdk,
-    # signer) plus the harness itself (qa_agent).
-    if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.mcp_server == 'true' || needs.changes.outputs.sdk == 'true' || needs.changes.outputs.signer == 'true' || needs.changes.outputs.qa_agent == 'true'))
     runs-on: ubuntu-latest
     # THE gate (#3959, owner decision 2026-10-15): this protected environment
     # holds the subscription token + eval-agent keys and requires the owner's
@@ -134,31 +68,24 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
-        with:
-          # The subset tests the PR's OWN text: on pull_request, github.sha is
-          # the merge commit — build the hosted MCP from the PR head instead.
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
       - name: Decide the slice
         id: slice
         env:
-          EVENT_NAME: ${{ github.event_name }}
           INPUT_SUITE: ${{ github.event.inputs.suite || 'subset' }}
           INPUT_TRIALS: ${{ github.event.inputs.trials || '1' }}
         run: |
           set -euo pipefail
-          MODE=subset
-          TRIALS=1
+          MODE="$INPUT_SUITE"
+          TRIALS="$INPUT_TRIALS"
           LIMIT_ARG=''
-          if [ "$EVENT_NAME" = 'workflow_dispatch' ]; then MODE="$INPUT_SUITE"; TRIALS="$INPUT_TRIALS"; fi
-          if [ "$EVENT_NAME" = 'schedule' ]; then MODE=full; fi
           if [ "$MODE" = 'subset' ]; then LIMIT_ARG='--limit=5'; fi
           HOSTED_COMMIT="$(git rev-parse HEAD)"
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "trials=$TRIALS" >> "$GITHUB_OUTPUT"
           echo "limit_arg=$LIMIT_ARG" >> "$GITHUB_OUTPUT"
           echo "head_sha=$HOSTED_COMMIT" >> "$GITHUB_OUTPUT"
-          echo "::notice::agent-evals mode=$MODE trials=$TRIALS $LIMIT_ARG; hosted MCP: $([ "$MODE" = 'subset' ] && echo "commit $HOSTED_COMMIT (the PR head, not dev)" || echo 'the deployed dev stack')"
+          echo "::notice::agent-evals mode=$MODE trials=$TRIALS $LIMIT_ARG; hosted MCP: $([ "$MODE" = 'subset' ] && echo "commit $HOSTED_COMMIT (this checkout)" || echo 'the deployed dev stack')"
 
       - uses: actions/setup-node@v4
         with:

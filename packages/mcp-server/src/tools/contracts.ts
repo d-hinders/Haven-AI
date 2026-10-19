@@ -1491,7 +1491,7 @@ const GET_TASK_BUDGET_DESCRIPTION = [
 const CHECK_FUNDS_DESCRIPTION = [
   sharedDescriptions.checkFunds.summary + '.',
   'Pass the token address or allowance symbol and ONE amount spelling: max_amount_human (whole tokens, preferred) or max_amount (atomic).',
-  'Returns covered: true (holds at least the amount), false (a live chain read reports less — stop and tell the user the funds are missing), or null (the read failed — unverifiable, never absence; coverage_error says why).',
+  'Returns covered: true (holds at least the amount), false (a live chain read reports less — stop and tell the user the account is short), or null (the read failed — unverifiable, never absence; coverage_error says why).',
   'The balance itself is deliberately not returned — a sufficiency signal, not a balance read; budget_remaining_atomic is the PERMITTED figure (haven_get_allowances).',
   'Read-only: grants no authority, moves nothing; both retired rails answer 410.',
 ].join(' ')

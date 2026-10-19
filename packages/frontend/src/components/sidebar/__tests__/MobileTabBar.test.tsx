@@ -157,6 +157,41 @@ describe('MobileTabBar — active cell carries the selection idiom (#2818, #4058
 })
 
 /**
+ * The pill's own surface and edge tokens, pinned on the RENDERED nav (#4063).
+ *
+ * Before #4063 no test asserted what the pill itself paints: the dark mode
+ * read flat because the bar was `bg-[var(--v2-bg)]` on a `--v2-bg` page with
+ * only a 1.41:1 `--v2-border` edge (the dark popover shadow is black on
+ * near-black). The fix moved the bar to its own token pair —
+ * `--v2-tab-bar-bg` / `--v2-tab-bar-border`, aliased to the page ground and
+ * plain border in light and redeclared to `--v2-surface-2` /
+ * `--v2-border-strong` in both dark blocks — and this pin goes red if the
+ * nav silently reverts to the page tokens. Asserted on the element, not the
+ * source: a source grep finds the token in a comment just as happily.
+ */
+describe('MobileTabBar — the pill paints from the tab-bar token pair (#4063)', () => {
+  const renderBar = () =>
+    render(<MobileTabBar items={baseNavItems} presentational activeHref="/agents" />)
+
+  it('carries the tab-bar surface and edge classes', () => {
+    const { container } = renderBar()
+    const bar = container.querySelector('[data-mobile-tab-bar]')!
+    const classes = bar.className.split(/\s+/)
+    expect(classes).toContain('bg-[var(--v2-tab-bar-bg)]')
+    expect(classes).toContain('border-[var(--v2-tab-bar-border)]')
+  })
+
+  it('no longer paints the page ground and border directly', () => {
+    // The control for the pin above: the pre-#4063 classes made the dark pill
+    // disappear into the page. Their absence is the regression guard.
+    const { container } = renderBar()
+    const bar = container.querySelector('[data-mobile-tab-bar]')!
+    expect(bar.className).not.toContain('bg-[var(--v2-bg)]')
+    expect(bar.className).not.toContain('border-[var(--v2-border)]')
+  })
+})
+
+/**
  * The bar is still five cells and the theme row is not in it (#2928).
  *
  * The phone theme control lives in the More SHEET this bar's fifth cell opens

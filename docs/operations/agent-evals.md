@@ -259,7 +259,7 @@ Other flags:
 
 - `--shuffle=<seed>` — deterministic shuffle WITHIN tiers; the seed and the
   executed order are recorded in the report. `--limit` is applied to the
-  canonical order BEFORE the shuffle, so the 5-task PR subset is the same
+  canonical order BEFORE the shuffle, so the 5-task subset is the same
   with or without a shuffle.
 - `--compare-with=<path1>,<path2>,… --new-report=<path>` — the regression-only
   compare (#3992 D): reads the new report plus the earlier ones, compares
@@ -309,7 +309,7 @@ envelope reader, so every grader applies unmodified.
 lane's eval-agent keys are secrets of the protected **`agent-evals` GitHub
 environment** (owner = required reviewer) — NEVER repository secrets, NEVER
 in code, fixtures or artifacts. Every job in `.github/workflows/agent-evals.yml`
-declares that environment, so each run — weekly, PR subset or manual — waits
+declares that environment, so each run waits
 for the owner's approval before any secret reaches a runner. The env
 inventory:
 
@@ -398,22 +398,21 @@ pilot run (2026-10-19) died on exactly that before any task ran.
 A CI guard checks both: the build order, and that an exactly pinned CLI
 install runs before the eval step.
 
-**The workflow** (`.github/workflows/agent-evals.yml`) runs three ways:
+**The workflow** (`.github/workflows/agent-evals.yml`) runs **only when the
+owner starts it** with the Run workflow button (owner decision 2026-10-19:
+no schedule and no pull_request trigger, so nothing queues a run that waits
+for the owner's approval). Two choices:
 
-- weekly schedule — the FULL suite against the deployed dev stack;
-- `pull_request` on the trigger paths (`packages/mcp-server/src/server.ts`,
-  `packages/mcp-server/src/tools/**`, the snapshot/corpus JSONs,
-  `packages/sdk/src/skill-content.ts`, `packages/sdk/src/agent-guidance.ts`,
-  `packages/signer/src/tools.ts`, `packages/signer/src/server.ts`,
-  `packages/signer/src/consent.ts`) — the 5-task SUBSET, which builds and
-  boots `packages/mcp-server` FROM THE PR CHECKOUT (it runs locally against
-  `HAVEN_API_URL`, see `packages/mcp-server/src/boot.ts`) pointed at the dev
-  backend, and launches the signer and skill from the workspace, not npm.
-  The subset report names the commit of the hosted MCP it ran against — the
-  PR head, not dev — and states that backend error bodies stay
-  dev-deployed. It is NOT a required check on `dev` or `main`.
-- `workflow_dispatch` — the Run workflow button, choosing full suite or
-  subset; it waits for the same environment approval as every other run.
+- **subset**: 5 tasks. It builds and boots `packages/mcp-server` from the
+  checked-out commit (it runs locally against `HAVEN_API_URL`, see
+  `packages/mcp-server/src/boot.ts`) pointed at the dev backend, and launches
+  the signer and skill from the workspace, not npm. The report names the
+  hosted MCP commit it ran against and states that backend error bodies stay
+  dev-deployed.
+- **full**: every task, against the deployed dev stack.
+
+Either way the run waits for the environment approval. It is NOT a required
+check on `dev` or `main`.
 
 Every run writes a per-task table (pass rate, pass^k, median wall time per
 session) plus total cost, model and hosted MCP provenance to the GitHub job

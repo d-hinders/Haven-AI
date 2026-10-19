@@ -118,3 +118,19 @@ test('the login check turns off -e, isolates the cd, and runs the judge by absol
   assert.match(body[claude], /^\s*\( cd "\$RUNNER_TEMP\/claude-cwd" && claude -p .*\) >/, 'claude in the login check is not run in a subshell, so its cd moves the step')
   assert.ok(body.some((line) => /^\s*node "\$GITHUB_WORKSPACE\/scripts\/ci\/agent-evals-login-check\.mjs"/.test(line)), 'the login-check judge is not run by absolute path')
 })
+
+// Owner decision 2026-10-19: the evals run only when the owner starts them.
+// A schedule or pull_request trigger queued runs that sat waiting for the
+// owner's environment approval and blocked the owner's own runs behind them.
+test('agent-evals is triggered by workflow_dispatch only', () => {
+  const on = live.findIndex((line) => /^on:\s*$/.test(line))
+  assert.notEqual(on, -1, 'agent-evals.yml has no top-level `on:` block — update this guard')
+  const end = live.findIndex((line, i) => i > on && /^\S/.test(line))
+  const block = live.slice(on + 1, end === -1 ? undefined : end).filter((line) => line.trim() !== '')
+  // Trigger keys sit at the block's first indentation level, quoted or not.
+  const indent = block.length ? block[0].match(/^\s*/)[0].length : 0
+  const triggers = block
+    .filter((line) => line.match(/^\s*/)[0].length === indent)
+    .map((line) => line.trim().match(/^['"]?([a-z_]+)['"]?:/)?.[1] ?? line.trim())
+  assert.deepEqual(triggers, ['workflow_dispatch'])
+})

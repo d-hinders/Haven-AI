@@ -283,7 +283,7 @@ async function main() {
     console.error('--trials must be a positive integer')
     process.exit(2)
   }
-  // The cost pilot / PR subset slice (#3959): the FIRST N tasks in the
+  // The cost pilot / subset slice (#3959): the FIRST N tasks in the
   // canonical (tiered) order — slice tasks first, the budget-draining
   // full-remaining send in tier 2, the exhausted-budget tasks in tier 3 —
   // so a 5-task pilot cannot zero the period budget on task one (#3992 B:
@@ -361,7 +361,7 @@ async function main() {
   }
 
   // Where the hosted MCP leg ran (#3959): the subset names the commit it
-  // built from the PR checkout; a dev-deployed run names the URL and says so.
+  // built from this checkout; a dev-deployed run names the URL and says so.
   const hostedMcpSource = args.find((a) => a.startsWith('--hosted-mcp-source='))?.split('=')[1]
   const hostedMcp: HostedMcpInfo | undefined = hostedMcpSource
     ? {

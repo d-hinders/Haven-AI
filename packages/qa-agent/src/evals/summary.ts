@@ -57,7 +57,7 @@ export function renderMarkdownSummary(report: EvalReport): string {
   if (report.hostedMcp) {
     const where =
       report.hostedMcp.source === 'pr-checkout'
-        ? `built from this checkout${report.hostedMcp.commit ? ` @ \`${report.hostedMcp.commit}\`` : ''} (the PR head, not dev)`
+        ? `built from this checkout${report.hostedMcp.commit ? ` @ \`${report.hostedMcp.commit}\`` : ''} (the dispatched commit, not the deployed dev stack)`
         : 'the deployed dev stack'
     lines.push(`**Hosted MCP:** ${where}${report.hostedMcp.url ? ` — ${report.hostedMcp.url}` : ''}`)
     lines.push('')

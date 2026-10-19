@@ -991,13 +991,13 @@ async function cmdBudgetGrant(args: ParsedArgs, d: ResolvedDeps): Promise<number
     }
     if (mine?.status === 'revoked' || mine?.status === 'replaced') {
       throw new HavenCliError(
-        `Delegation ${built.delegation_hash} is now ${mine.status} without being signed.`,
+        `Delegation ${built.delegation_hash} is now ${mine.status} without being approved.`,
         EXIT.refused,
       )
     }
   }
   throw new HavenCliError(
-    `Timed out waiting for delegation ${built.delegation_hash} to go active (${BUDGET_WAIT_TIMEOUT_S / 60} minutes). The signing link stays valid until it expires — sign it, or rerun with --wait.`,
+    `Timed out waiting for delegation ${built.delegation_hash} to go active (${BUDGET_WAIT_TIMEOUT_S / 60} minutes). The approval link stays valid until it expires — approve it, or rerun with --wait.`,
     EXIT.failed,
   )
 }
@@ -1047,7 +1047,7 @@ async function cmdBudgetRevoke(args: ParsedArgs, d: ResolvedDeps): Promise<numbe
   const emitRevoke = (status: DelegationRow['status'] | 'pending_revoke') =>
     emit(d, args.flags.json, { agent_id: id, delegation_hash: hash, status, ...prepared }, () =>
       [
-        'Revocation prepared — one signature, sponsored (no gas).',
+        'Revocation prepared — one approval, sponsored (no gas).',
         'Open this link and approve to stop this budget:',
         revokeUrl,
         `Delegation: ${hash}`,
@@ -1071,7 +1071,7 @@ async function cmdBudgetRevoke(args: ParsedArgs, d: ResolvedDeps): Promise<numbe
     }
   }
   throw new HavenCliError(
-    `Timed out waiting for delegation ${hash} to be revoked (${BUDGET_WAIT_TIMEOUT_S / 60} minutes). The link stays valid — sign it, or rerun with --wait.`,
+    `Timed out waiting for delegation ${hash} to be revoked (${BUDGET_WAIT_TIMEOUT_S / 60} minutes). The link stays valid — approve it, or rerun with --wait.`,
     EXIT.failed,
   )
 }

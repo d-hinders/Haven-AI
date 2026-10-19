@@ -5932,12 +5932,15 @@ to call next in structured fields, and those fields are typed end to end
 > **Re-verified unchanged (2026-10-19 — the CLI's budget grant/revoke output
 > says "approve", not "sign").** The diff touches two covered files,
 > `packages/cli/src/commands.ts` and `packages/cli/src/commands.test.ts`: the
-> human-readable lines `haven budget grant` and `haven budget revoke` print
-> now read "Open this link and approve …", "Waiting for your approval …",
-> "Approved and active." and "The budget keeps working until you approve …"
-> (owner copy rule, `docs/product/copy-guidelines.md`). Wording only: the
-> printed link, the `--json` object, exit codes, `--wait` polling, the routes
-> called and every request and response shape are unchanged, and the CLI
-> still never signs. No tool, schema key, `next_tool` value, expected-context
-> version or signer contract changes. Scope of this note: those printed
-> lines. Nothing else in this document was re-verified.
+> human-readable lines `haven budget grant` and
+> `haven budget revoke` print now read "Open this link and approve …",
+> "Waiting for your approval …", "Approved and active.", "Revocation prepared —
+> one approval, sponsored (no gas)." and "The budget keeps working until you
+> approve …"; and their `--wait` timeout and refusal messages say "approve"
+> (owner copy rule,
+> `docs/product/copy-guidelines.md`). Wording only: the printed link, the
+> `--json` object, exit codes, `--wait` polling, the routes called and every
+> request and response shape are unchanged, and the CLI still never signs. No
+> tool, schema key, `next_tool` value, expected-context version or signer
+> contract changes. Scope of this note: those printed lines. Nothing else in
+> this document was re-verified.

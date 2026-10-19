@@ -17,10 +17,13 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
-- The budget grant and stop commands now say "approve" instead of "sign" in
-  what they print: "Open this link and approve", "Waiting for your approval",
-  "Approved and active", "The budget keeps working until you approve". Wording
-  only; the link, the passkey step and `--wait` are unchanged. No update needed.
+- `haven budget grant` and `haven budget revoke` now say "approve" instead of
+  "sign" in what they print: "Open this link and approve", "Waiting for your
+  approval", "Approved and active", "one approval, sponsored", "The budget
+  keeps working until you approve", and the `--wait` timeout and refusal
+  messages; `haven --help` reads "the human approves in the dashboard".
+  Wording only; the link, the `--json` output, exit codes and `--wait` are
+  unchanged. No update needed.
 - Waiting for a budget grant now reads the backend's `is_live` flag (#3922),
   so an expired `active` row no longer counts as the grant landing. It falls
   back to the row's status against an older backend. The revoke refusal is

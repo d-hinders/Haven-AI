@@ -14,8 +14,9 @@ signs — across the app and recorded it in `docs/product/copy-guidelines.md`.
   of the passkey prompt, not a claim).
 - **CLI** (`packages/cli/src/commands.ts`): `haven budget grant` and `haven
   budget revoke` print "Open this link and approve …", "Waiting for your
-  approval …", "Approved and active." and "The budget keeps working until you
-  approve …".
+  approval …", "Approved and active.", "one approval, sponsored (no gas)" and
+  "The budget keeps working until you approve …"; their `--wait` timeout and
+  refusal messages and `haven --help` say "approve" too.
 
 ## Why the perimeter is unaffected
 
@@ -28,6 +29,7 @@ The non-custody statements on the same pages ("not their wallet, and not a key
 to their funds", "Haven constructs and relays the payments") are untouched,
 and the agent-readable runbook (`public/for-agents.md`, bundled by the CLI
 and SDK) is not changed by this diff. Tests: the how-it-works page test and
-the CLI `budget grant` test pin the new wording.
+the CLI `budget grant` and `budget revoke` text-output tests pin the new
+wording and assert no "sign" is left in either printed block.
 
 Perimeter unchanged.

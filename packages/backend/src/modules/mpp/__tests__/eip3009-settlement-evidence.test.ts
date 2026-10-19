@@ -38,7 +38,10 @@ vi.mock('../../accounting/index.js', async (importOriginal) => ({
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import { attachEvidenceHandler, attachMachinePaymentEvidence, listReceipts } from '../evidence.js'
-import { RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL } from '../../../infra/repositories/x402-authorizations.js'
+import {
+  RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL,
+  findSiblingX402DelegationPaymentIds,
+} from '../../../infra/repositories/x402-authorizations.js'
 import { feedSettledPaymentBestEffort } from '../../accounting/index.js'
 import { deriveX402PaymentNonce } from '@haven_ai/sdk/edge'
 
@@ -869,6 +872,18 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
       // the code (re-report WITH the header), never on the sentence.
       expect((answered.body as { error_code?: string }).error_code).toBe('settlement_proof_header_missing')
       expect(await recordedHash(a.id)).toBeNull()
+    })
+
+    it('the sibling scan reads only payments funded to the same delegate (#4061 review)', async () => {
+      const { agentId, userId } = await seedAgent()
+      const a = await seedFunded({ agentId, userId })
+      const sameKey = await seedFunded({ agentId, userId })
+      const otherKey = await seedFunded({ agentId, userId })
+      await db.query(`UPDATE payment_intents SET to_address = $1 WHERE id = $2`, [OTHER, otherKey.id])
+
+      const siblings = await findSiblingX402DelegationPaymentIds(agentId, a.id, DELEGATE.toLowerCase())
+
+      expect(siblings).toEqual([sameKey.id])
     })
 
     it('a whitespace-only header is no header: the same typed missing-header refusal (#4061 review)', async () => {

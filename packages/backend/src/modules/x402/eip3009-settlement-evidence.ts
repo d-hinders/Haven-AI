@@ -324,7 +324,7 @@ export async function observeEip3009MerchantSettlement(
   // the record to the header the delegate signed.) Only an agent-reported
   // proof can be non-derived — the sweep always derives from this payment.
   if (!nonceProof.nonceDerived) {
-    const siblingIds = await findSiblingX402DelegationPaymentIds(intent.agent_id, intent.id)
+    const siblingIds = await findSiblingX402DelegationPaymentIds(intent.agent_id, intent.id, intent.to_address)
     if (siblingIds.some((id) => deriveX402PaymentNonce(id).toLowerCase() === nonceProof.nonce)) {
       return {
         outcome: 'unverified',
@@ -366,7 +366,7 @@ export async function observeEip3009MerchantSettlement(
     // A burned-but-different nonce that IS another payment's derived nonce
     // names the theft: the report's hash settles a sibling payment.
     if (verification.outcome === 'mismatch' && verification.authorizationUsedNonces) {
-      const siblingIds = await findSiblingX402DelegationPaymentIds(intent.agent_id, intent.id)
+      const siblingIds = await findSiblingX402DelegationPaymentIds(intent.agent_id, intent.id, intent.to_address)
       if (
         siblingIds.some((id) =>
           verification.authorizationUsedNonces!.includes(deriveX402PaymentNonce(id).toLowerCase()),

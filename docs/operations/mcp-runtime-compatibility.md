@@ -88,7 +88,10 @@ last-verified: "2026-10-19"
 >
 > - **New argument.** `haven_report_x402_outcome` and
 >   `haven_report_settlement_evidence` gain an optional `payment_header`
->   (string, 1–16,384 chars).
+>   (string, 1–16,384 chars). It is forwarded only on the eip3009
+>   merchant-settlement report it proves: a hash other than the payment's
+>   funding hash. The evidence tool checks the payment's status first (one
+>   extra read, made only when `payment_header` is passed).
 > - **Descriptions.** The two report tools, `haven_pay_x402_quote`,
 >   `haven_resume_x402_payment`, and the signer's `haven_sign_x402` now say
 >   to pass it.

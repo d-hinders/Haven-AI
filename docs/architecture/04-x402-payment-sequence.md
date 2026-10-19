@@ -1637,7 +1637,20 @@ report repeated with the header can clear. A proof whose nonce is NOT this
 payment's derived nonce but IS a sibling payment's is refused before the
 chain is read. That is the shape of a header lifted from a same-agent
 sibling: it has the same delegate, so it passes the signer check, and the
-sibling's settlement burned exactly that nonce.
+sibling's settlement burned exactly that nonce. The sibling scan covers only
+payments funded to the same delegate.
+
+Also since #4061, check 9 PAIRS the burned nonce with its own transfer.
+FiatToken v2 emits an authorization's `AuthorizationUsed` and then its
+`Transfer`, consecutively, from the token; the live Base Sepolia receipt
+fixture in `infra/chain/__tests__/` pins that order. With an expected
+authorization, only that paired Transfer may satisfy checks 3–6. Before, a
+transaction that settled two of a delegate's authorizations could lend one
+nonce the other authorization's delegate → merchant transfer. The hosted
+tools forward an agent's `payment_header` only on that eip3009 settlement
+branch: a funded eip3009 payment, reported with a hash other than its funding
+hash. That branch reads the header and never stores it; anywhere else the
+header would reach the evidence attach path.
 
 **Naming the two hashes (#2998).** `tx_hash` on a receipt (`GET
 /machine-payments/receipts`, `HavenPaymentReceipt.txHash`) means something

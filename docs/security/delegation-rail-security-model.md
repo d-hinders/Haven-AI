@@ -3315,13 +3315,23 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 >   refuses a non-derived proof nonce that is a sibling's derived nonce,
 >   before the chain is read.
 >
+> A further gap is closed. Check 9 now pairs the burned nonce with its own
+> transfer: the `Transfer` immediately after its `AuthorizationUsed`, which
+> is FiatToken v2's emit order, pinned against a live Base Sepolia receipt.
+> Before this, a transaction settling two of a delegate's authorizations
+> could lend one nonce the other's transfer. The hosted tools also forward
+> an agent's header only on the eip3009 settlement branch, which never
+> stores it. And the sibling scan is scoped to the same delegate.
+>
 > The trusted set is unchanged, and the header stays an untrusted input that
 > only names what to verify. No signature, key role, enforcer or custody path
-> moves. The new check only refuses. Residual: a non-deriving client's random
-> nonce cannot be tied to a sibling, and the burned-nonce check still binds it
-> to a header the delegate signed. Scope of this note:
+> moves. The new checks only refuse. Residual: a non-deriving client's random
+> nonce cannot be tied to a sibling, and the burned-nonce check (now paired
+> with its own transfer) still binds it to a header the delegate signed.
+> Scope of this note: `infra/chain/settlement-transfer-verifier.ts`,
 > `modules/x402/eip3009-settlement-evidence.ts`, `modules/mpp/evidence.ts`,
-> and the SDK's settlement-report call sites. The rest of this document was
+> `infra/repositories/x402-authorizations.ts`, and the SDK's settlement-report
+> call sites. The rest of this document was
 > not re-read for it, and `last-verified` is not bumped.
 
 > **Re-verified #3967 (2026-10-14, the quote-time budget gate):** the diff

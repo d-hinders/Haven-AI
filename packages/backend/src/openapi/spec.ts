@@ -8325,7 +8325,7 @@ export const openapiSpec = {
         operationId: 'attachMachinePaymentEvidence',
         summary: 'Attach merchant proof evidence for a settled machine payment.',
         description:
-          'Records proof-loop evidence for a settled x402 or MPP payment owned by the authenticated agent. This does not authorize or execute payment. On most schemes the payment is already confirmed and this only attaches merchant/protocol evidence. On erc7710 direct settlement the merchant redeems the delegation chain and Haven submits nothing, so this call is also what COMPLETES the payment: it verifies the reported txHash on-chain against the intent (token, payer, merchant, exact amount, and the settlement window) and confirms the intent before recording evidence. On eip3009, a funded payment reported with a txHash other than its own funding transaction is the merchant\'s settlement: it is verified on-chain as a delegate → merchant transfer of the exact amount, mined after funding confirmed, and recorded on the payment (receipts then show it as settlement_tx_hash); the funding hash and the proof status do not change. It fails closed — 409 when the transaction does not settle this payment, cannot be attributed to it unambiguously, or is already recorded (on eip3009 the body carries a reason), 503 when the chain could not be read or the transaction is not mined yet; neither confirms or records anything.',
+          'Records proof-loop evidence for a settled x402 or MPP payment owned by the authenticated agent. This does not authorize or execute payment. On most schemes the payment is already confirmed and this only attaches merchant/protocol evidence. On erc7710 direct settlement the merchant redeems the delegation chain and Haven submits nothing, so this call is also what COMPLETES the payment: it verifies the reported txHash on-chain against the intent (token, payer, merchant, exact amount, and the settlement window) and confirms the intent before recording evidence. On eip3009, a funded payment reported with a txHash other than its own funding transaction is the merchant\'s settlement: it is verified on-chain as a delegate → merchant transfer of the exact amount, mined after funding confirmed, and recorded on the payment (receipts then show it as settlement_tx_hash); the funding hash and the proof status do not change. That eip3009 settlement report must carry paymentProofHeader, the payment header sent to the merchant (#3925): its signed authorization proves the nonce the settlement burned is this payment\'s. A report without it is refused 409 with error_code "settlement_proof_header_missing" (#4061), the one refusal that a report repeated with the header can clear. It fails closed — 409 when the transaction does not settle this payment, cannot be attributed to it unambiguously, or is already recorded (on eip3009 the body carries a reason), 503 when the chain could not be read or the transaction is not mined yet; neither confirms or records anything.',
         security: [{ AgentApiKey: [] }],
         requestBody: {
           required: true,
@@ -13024,6 +13024,9 @@ export const openapiSpec = {
           challengePayload: { type: 'object', additionalProperties: true },
           selectedPayment: { type: 'object', additionalProperties: true },
           paymentProofHeaderName: { type: 'string' },
+          // #3925/#4061: on an eip3009 merchant-settlement report this is the
+          // nonce proof, and it is required there (409
+          // `settlement_proof_header_missing` without it).
           paymentProofHeader: { type: 'string' },
           protocolReceiptHeaderName: { type: 'string' },
           protocolReceiptHeader: { type: 'string' },

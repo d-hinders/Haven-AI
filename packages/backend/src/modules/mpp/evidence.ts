@@ -42,6 +42,7 @@ import {
   isFundedEip3009Payment,
   observeEip3009MerchantSettlement,
   eip3009SettlementProofFromHeader,
+  type SettlementProofErrorCode,
 } from '../x402/eip3009-settlement-evidence.js'
 import { withParties } from '../../openapi/party-model.js'
 import { toCanonicalAddress } from '../transactions/index.js'
@@ -62,6 +63,11 @@ export class SettlementReportRefusal extends Error {
     marker: 'settlement_unobservable' | 'settlement_unverified',
     readonly scheme: 'eip3009',
     readonly reason: string,
+    /**
+     * #4061: the refusal's machine code, when it has one — relayed as the
+     * body's `error_code` so a client branches on it, not on `reason`.
+     */
+    readonly errorCode?: SettlementProofErrorCode,
   ) {
     super(marker)
     this.name = 'SettlementReportRefusal'
@@ -569,10 +575,13 @@ export async function attachMachinePaymentEvidence(
     // attribution the record is bound to. A report without a header (an older
     // client, or one after the retry path) is refused rather than attributed
     // by transfer shape; the passive sweep still attributes derived-nonce
-    // payments without any report.
+    // payments without any report. #4061: that refusal carries
+    // `error_code: settlement_proof_header_missing` — the one refusal whose
+    // remedy is to report again, WITH the header (the hosted report tools
+    // take it as `payment_header`).
     const proof = eip3009SettlementProofFromHeader(payment, input.paymentProofHeader ?? null)
     if (!proof.ok) {
-      throw new SettlementReportRefusal('settlement_unverified', 'eip3009', proof.reason)
+      throw new SettlementReportRefusal('settlement_unverified', 'eip3009', proof.reason, proof.errorCode)
     }
     const settled = await observeEip3009MerchantSettlement(payment, input.txHash, undefined, proof.proof)
     if (settled.outcome === 'unverified') {
@@ -583,6 +592,7 @@ export async function attachMachinePaymentEvidence(
         settled.retryable ? 'settlement_unobservable' : 'settlement_unverified',
         'eip3009',
         settled.reason,
+        settled.errorCode,
       )
     }
     // The settlement write has landed (or, for the defensively-handled
@@ -995,6 +1005,9 @@ export async function attachEvidenceHandler(
             'The reported settlement transaction was not recorded for this payment — ' +
             'the payment is unchanged',
           reason: refusal.reason,
+          // #4061: present only when the refusal has a code (the missing
+          // proof header) — absent, not null, on every other refusal.
+          ...(refusal.errorCode ? { error_code: refusal.errorCode } : {}),
         },
       }
     }

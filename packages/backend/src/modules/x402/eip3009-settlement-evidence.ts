@@ -85,8 +85,13 @@ export type Eip3009SettlementObservation =
   | { outcome: 'recorded' }
   /** Not a funded eip3009 payment, or the hash IS its funding: the caller's gates apply unchanged. */
   | { outcome: 'not_applicable' }
-  /** Refused, nothing written. `retryable` separates "ask again later" from a settled no. */
-  | { outcome: 'unverified'; retryable: boolean; reason: string }
+  /**
+   * Refused, nothing written. `retryable` separates "ask again later" from a
+   * settled no. `errorCode` (#4061) is present only on a refusal a client
+   * must branch on — today the missing proof header, whose remedy is to
+   * re-report WITH the header, unlike every other refusal here.
+   */
+  | { outcome: 'unverified'; retryable: boolean; reason: string; errorCode?: SettlementProofErrorCode }
 
 function metadataOf(intent: Eip3009SettlementIntent): Record<string, unknown> | null {
   const raw = intent.machine_metadata
@@ -128,7 +133,19 @@ export interface Eip3009SettlementNonceProof {
 
 export type Eip3009SettlementProofResult =
   | { ok: true; proof: Eip3009SettlementNonceProof }
-  | { ok: false; reason: string }
+  | { ok: false; reason: string; errorCode?: SettlementProofErrorCode }
+
+/**
+ * #4061: the machine-readable code on the missing-proof-header refusal,
+ * relayed as the evidence 409 body's `error_code`. It is the ONE settlement
+ * refusal whose remedy is to report again — with the payment header the
+ * agent retried the merchant with — so a client (the hosted report tools)
+ * branches on this code, never on the sentence below. Every other refusal
+ * here names a hash or a header that does not belong to this payment, and
+ * re-reporting it re-refuses.
+ */
+export const SETTLEMENT_PROOF_HEADER_MISSING_ERROR_CODE = 'settlement_proof_header_missing'
+export type SettlementProofErrorCode = typeof SETTLEMENT_PROOF_HEADER_MISSING_ERROR_CODE
 
 /** The refusal for a report that carries no header to prove its nonce from. */
 export const MISSING_PROOF_HEADER_REASON =
@@ -179,7 +196,13 @@ export function eip3009SettlementProofFromHeader(
   intent: Eip3009SettlementIntent,
   header: string | null | undefined,
 ): Eip3009SettlementProofResult {
-  if (!header || !header.trim()) return { ok: false, reason: MISSING_PROOF_HEADER_REASON }
+  if (!header || !header.trim()) {
+    return {
+      ok: false,
+      reason: MISSING_PROOF_HEADER_REASON,
+      errorCode: SETTLEMENT_PROOF_HEADER_MISSING_ERROR_CODE,
+    }
+  }
 
   let parsed: unknown
   try {
@@ -280,7 +303,12 @@ export async function observeEip3009MerchantSettlement(
   // The sweep always derives one from the payment id; the agent path derives
   // one from the posted X-PAYMENT header. No proof, no record.
   if (!nonceProof) {
-    return { outcome: 'unverified', retryable: false, reason: MISSING_PROOF_HEADER_REASON }
+    return {
+      outcome: 'unverified',
+      retryable: false,
+      reason: MISSING_PROOF_HEADER_REASON,
+      errorCode: SETTLEMENT_PROOF_HEADER_MISSING_ERROR_CODE,
+    }
   }
 
   const merchant = intent.x402_merchant_address ?? intent.merchant_address ?? null

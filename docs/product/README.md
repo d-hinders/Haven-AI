@@ -15,6 +15,8 @@ covers:
   - packages/frontend/src/components/ReceiveFundsModal.tsx
   - packages/frontend/src/components/AddFundsModal.tsx
   - packages/frontend/src/components/ConnectAgentModal.tsx
+  - packages/frontend/src/components/connect-agent/ConnectAgentFlow.tsx
+  - packages/frontend/src/components/connect-agent/InlineAgentSetup.tsx
   - packages/frontend/src/components/EditAgentModal.tsx
   - packages/frontend/src/components/DelegationBudgetCard.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
@@ -100,6 +102,13 @@ holds back its low-balance and zero-USDC items. When every account is also
 known to hold no USDC, the page is a focused view: the money card and this card
 only, with Agents and Activity hidden, and the money card's Add funds steps
 down beside Deposit address so step 1's is the one primary Add funds.
+
+On `/agents`, a user with no agents gets the connect flow itself, inline, in
+place of an empty state (#4065): the card "Connect your first agent" with the
+same steps as the connect dialog. While it shows, the page hides what would be
+empty or competing — the count chip, the header Connect agent, the toolbar and
+the list — so the one setup action is the screen. See
+[screen-recipes.md](./screen-recipes.md) § Agent List.
 
 ---
 

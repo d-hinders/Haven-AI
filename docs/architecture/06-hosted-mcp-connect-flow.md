@@ -6,6 +6,7 @@ covers:
   - packages/connect/**
   - packages/signer/**
   - packages/frontend/src/components/ConnectAgentModal.tsx
+  - packages/frontend/src/components/connect-agent/ConnectAgentFlow.tsx
   - packages/frontend/src/hooks/useAgentConnectionSetup.ts
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/routes/machine-payments.ts
@@ -71,6 +72,13 @@ all since #2413, so this flow is unreachable for one rather than being refused:
 `ConnectAgentModal` no longer carries a retired-rail branch, and the notice
 component it showed is deleted. Existing legacy Safe
 permissions require action by the Safe owner outside Haven.
+
+The flow has two containers around one component (#4065): `ConnectAgentFlow`
+calls `useAgentConnectionSetup` and dispatches the steps; `ConnectAgentModal`
+frames it as a dialog, and `/agents` frames it inline in a card for a user
+with no agents. The steps, the setup payload and the budget approval are the
+same in both; the inline container only drops what dismisses a dialog (the
+step-1 Cancel and the Escape binding).
 
 1. The user chooses the Haven wallet, agent rules, and agent budget.
 2. Haven creates a pending setup and returns a setup token and connector

@@ -59,45 +59,34 @@ test.describe('agent panel empty states and card banners', () => {
     await seedAuthenticatedSession(page)
   })
 
-  test('agent panel empty state — no agents yet', async ({ page }) => {
-    await seedAgents(page, [])
-    await page.goto('/agents')
-    await settle(page)
-
-    const empty = page.getByRole('heading', { name: 'No agents yet' }).locator('xpath=..')
-    await expect(empty).toHaveCount(1)
-    await expect(empty).toContainText('Set agent rules, then add your Haven credential')
-    await expect(empty.getByRole('button', { name: 'Connect agent' })).toHaveCount(1)
-    await expect(empty).toHaveScreenshot('agentpanel-empty-no-agents-desktop.png', SNAPSHOT_OPTIONS)
-  })
-
   /**
-   * #2535: the clip above is scoped to the EmptyState's own box, so the "or"
-   * divider and the onboarding-prompt card that #2535 renders BELOW it sit
-   * entirely outside it — the gate would stay green through any regression to
-   * either. Found by `haven-design-reviewer` as a coverage gap the PR itself
-   * introduced, and closed here rather than left for a later reader to discover.
+   * #4065: a user with no agents gets the connect flow INLINE, replacing the
+   * "No agents yet" empty state and the #2535 onboarding-prompt card (and the
+   * two baselines that pinned them).
    *
-   * Scoped to the card, not the page: `/agents` is documented as unfit for
-   * whole-page capture in `product-routes.visual.spec.ts` (a real `readContract`
-   * against a chain the harness does not have makes it flaky), and that
-   * reasoning applies to this route however much of it is captured.
+   * Scoped to the inline card, not the page: `/agents` is documented as unfit
+   * for whole-page capture in `product-routes.visual.spec.ts` (a real
+   * `readContract` against a chain the harness does not have makes it flaky),
+   * and that reasoning applies to this route however much of it is captured.
    */
-  test('agent panel empty state — the agent-onboarding prompt card', async ({ page }) => {
+  test('agent panel empty state — the inline first-agent flow', async ({ page }) => {
     await seedAgents(page, [])
     await page.goto('/agents')
     await settle(page)
 
-    const card = page
-      .getByRole('heading', { name: 'Set up with your AI agent' })
-      .locator('xpath=ancestor::*[contains(@class, "rounded-[10px]")][1]')
-    await expect(card).toHaveCount(1)
-    // Assert the composition the design review cleared, so a regression that
-    // preserves the screenshot's shape still fails on the facts that matter.
-    await expect(card).toContainText('Prompt for your agent')
-    await expect(card.getByRole('button', { name: 'Copy' })).toHaveCount(1)
-    await expect(card.getByRole('link', { name: 'Read the agent guide' })).toHaveCount(1)
-    await expect(card).toHaveScreenshot('agentpanel-empty-onboarding-prompt-desktop.png', SNAPSHOT_OPTIONS)
+    const flow = page.getByRole('region', { name: 'Connect your first agent' })
+    await expect(flow).toHaveCount(1)
+    // Assert the composition the owner approved (2026-10-19), so a regression
+    // that preserves the screenshot's shape still fails on the facts that
+    // matter: the card title, the shared stepper on Name, step 1 with no
+    // Cancel, and none of the surface the flow replaces.
+    await expect(flow.getByRole('heading', { name: 'Connect your first agent' })).toHaveCount(1)
+    await expect(flow.locator('[aria-current="step"]')).toContainText('Name')
+    await expect(flow.getByRole('button', { name: 'Set agent budget' })).toHaveCount(1)
+    await expect(flow.getByRole('button', { name: 'Cancel' })).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: 'No agents yet' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Connect agent' })).toHaveCount(0)
+    await expect(flow).toHaveScreenshot('agentpanel-inline-first-agent-desktop.png', SNAPSHOT_OPTIONS)
   })
 
   for (const seeded of [

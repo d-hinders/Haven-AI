@@ -21,7 +21,6 @@ covers:
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/account-reads.ts
   - packages/sdk/src/agent-guidance.ts
-  - packages/frontend/src/lib/agent-onboarding-prompt.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/connector-channel.ts
   - packages/sdk/src/mcp-merchant-transport.ts
@@ -119,6 +118,21 @@ last-verified: "2026-10-19"
 > consent surface moves. `last-verified` is bumped to 2026-10-19 for this
 > note. Nothing else in this document was re-verified.
 
+
+> **Re-verified unchanged (#4065, 2026-10-19, the frontend's onboarding-prompt
+> copy deleted):** `/agents` now renders the connect flow inline for a user
+> with no agents, so the "Set up with your AI agent" card and the frontend's
+> byte-pinned copy of `AGENT_ONBOARDING_PROMPT`
+> (`packages/frontend/src/lib/agent-onboarding-prompt.ts`) had no consumer and
+> were deleted; the path leaves this doc's `covers:`. In the covered
+> `packages/sdk/src/agent-guidance.ts` only a doc comment changes (it no
+> longer claims a frontend copy); the published `AGENT_ONBOARDING_PROMPT`
+> export, every runbook string and every byte-pinned copy that remains are
+> byte-identical. No Supported Runtime Manifest row, channel, dist-tag,
+> release step, tool, argument, input schema, description or consent surface
+> moves, so the version-skew and consent-hash contracts do not move.
+> `last-verified` is not re-stamped: this block is the scope. Nothing else in
+> this document was re-verified.
 
 > **Re-verified unchanged (#4023, 2026-10-16, per-account deploy salt):** this
 > diff touches one covered file,

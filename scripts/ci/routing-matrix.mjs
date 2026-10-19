@@ -329,14 +329,14 @@ export const ROUTING_MATRIX = [
     kind: CONTRACT,
     why:
       'The canonical agent runbook (#2727). Other packages hold pinned derivations of it so they ' +
-      'stay installable alone — the CLI a full-text copy, the frontend a full-text copy PLUS two ' +
-      'partial ones (agent-onboarding-prompt.ts, agent-skill-bundle.ts) — and each is byte-pinned ' +
+      'stay installable alone — the CLI a full-text copy, the frontend a full-text copy PLUS a ' +
+      'partial one (agent-skill-bundle.ts; #4065 deleted agent-onboarding-prompt.ts) — and each is byte-pinned ' +
       'by a test in its own job. Before this row, an SDK-only change reached neither cli nor ' +
       'frontend, so none of those tests ran: #2713 edited this file and left the CLI copy stale, ' +
       'and dev did not even go red — cli_checks was skipped, so the stale copy was carried until ' +
       'an unrelated backend PR (#2719) regenerated it. lint:runbook-parity covers the two ' +
       'full-text copies from every job that owns the source; the ' +
-      'partial ones are not readable back, so frontend is ROUTED rather than checked. That is the ' +
+      'partial one is not readable back, so frontend is ROUTED rather than checked. That is the ' +
       'reason both jobs are here, and why removing either silently uncovers a pin test.',
   },
   {

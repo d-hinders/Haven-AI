@@ -101,3 +101,15 @@ test('claude runs from an empty directory with only the wired MCP servers', () =
   assert.ok(/cd "\$RUNNER_TEMP\/claude-cwd" &&/.test(cmd), 'claude does not run from an empty directory, so the repo CLAUDE.md reaches the agent under test')
   assert.ok(cmd.includes('--strict-mcp-config'), 'claude is not limited to the MCP servers the workflow wires (--strict-mcp-config)')
 })
+
+// Actions runs `bash -e`, so a failing `claude` ends the login-check step
+// before the judge prints the reason — pilot run #6 (2026-10-19) failed in
+// 3s with no message. The step must turn -e off before running claude.
+test('the login check turns off -e before running claude', () => {
+  const step = lineOf(/^\s*- name: Check the Claude Code login/)
+  assert.notEqual(step, -1, 'agent-evals.yml has no login-check step — update this guard')
+  const setE = live.findIndex((line, i) => i > step && /^\s*set \+e\s*$/.test(line))
+  const claude = live.findIndex((line, i) => i > step && /claude -p /.test(line))
+  assert.notEqual(claude, -1, 'the login-check step no longer runs claude -p — update this guard')
+  assert.ok(setE !== -1 && setE < claude, 'the login-check step runs claude under bash -e, so its failure hides the reason')
+})

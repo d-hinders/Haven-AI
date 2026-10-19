@@ -251,6 +251,9 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
+          # Actions runs bash with -e: without this, claude's non-zero exit
+          # ends the step before the judge can print WHY (pilot run #6).
+          set +e
           mkdir -p "$RUNNER_TEMP/claude-cwd"
           cd "$RUNNER_TEMP/claude-cwd" && claude -p 'Reply with the single word OK.' --model sonnet --output-format json --max-turns 1 --strict-mcp-config > "$RUNNER_TEMP/claude-login-check.json" 2> "$RUNNER_TEMP/claude-login-check.err"; echo "$?" > "$RUNNER_TEMP/claude-login-check.exit"
           node scripts/ci/agent-evals-login-check.mjs "$RUNNER_TEMP/claude-login-check.json" "$RUNNER_TEMP/claude-login-check.err" "$RUNNER_TEMP/claude-login-check.exit"

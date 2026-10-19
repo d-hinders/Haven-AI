@@ -76,7 +76,7 @@ covers:
   - packages/backend/src/modules/ops/**
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
-last-verified: "2026-10-16"
+last-verified: "2026-10-19"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -3333,6 +3333,26 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > of this note: those reads and the additive `Agent.receivedSubBudgets`
 > wire field. Nothing else in this document was re-verified;
 > `last-verified` already reads 2026-10-15.
+
+> **Re-verified #4062 (2026-10-19 — a plain tool error after funding is a
+> rejection, never `settled: true`).** The diff touches one file in this
+> document's coverage list, `packages/sdk/src/client.ts`, and none of its
+> authority, custody or signing surfaces. `completeX402MerchantCall`'s
+> `merchantAccepted` gate now treats a PLAIN `isError: true` tool result —
+> neither a #3118 payment-required challenge nor a settlement receipt
+> (`PAYMENT-RESPONSE` header or `_meta` transaction) — as a rejection after
+> funding: `ok: false`, the reconciliation event is recorded, and the hosted
+> refusal maps to MERCHANT_REJECTED_AFTER_FUNDING with verify-then-sweep
+> guidance. A tool error BESIDE a settlement hash stays accepted (the money
+> moved); a JSON-RPC `error` envelope stays `ok` (#3155 S4 scope, unchanged).
+> No signature is produced or consumed, nothing becomes signable, no spend
+> decision moves: the change reclassifies a false SUCCESS into the refusal it
+> already was on every other merchant answer, which narrows what the agent is
+> told, not what anyone may spend. The local-path twin in
+> `merchant-completion.ts` is outside this document's coverage list. Scope of
+> this note: that acceptance gate. Nothing else in this document was
+> re-verified; `last-verified` is bumped to 2026-10-19 for exactly this
+> coverage.
 
 > **Re-verified #4026 (2026-10-16 — own-account recipients in the owner send
 > flow).** The diff touches one file in this document's coverage list,

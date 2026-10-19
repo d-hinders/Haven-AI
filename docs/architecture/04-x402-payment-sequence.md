@@ -729,8 +729,17 @@ Since #3118 a rejection may arrive under HTTP 200: a native-profile merchant
 answers the paid `tools/call` with an `isError: true` payment-required result
 or a `_meta["x402/payment-response"]` of `success: false`, and
 `completeX402MerchantCall` reports `ok: false` for both — the hosted message
-then names HTTP 200, which is the status the merchant really returned. The
-hosted quote (`haven_pay_mcp_tool`, `haven_quote_mcp_tool`) accepts the
+then names HTTP 200, which is the status the merchant really returned. Since
+#4062 a PLAIN tool error — `isError: true` with neither a challenge nor a
+settlement receipt — is the same rejection: a merchant that answers its paid
+call with a failed tool result has not delivered, and absent a receipt has not
+settled either, so the funding leg's USDC is stranded on the delegate. A tool
+error beside a settlement receipt is the opposite case: the money moved, so
+the errored result is delivered as evidence. The refusal message names the
+verify-then-sweep rule — check `haven_get_payment_status` before
+`haven_sweep_delegate`, because a merchant that answered may still redeem its
+authorization within the payment window. The hosted quote
+(`haven_pay_mcp_tool`, `haven_quote_mcp_tool`) accepts the
 profile's tool-result challenge through the same `quoteMcpX402` path, and the
 settle leg delivers the payment in both the header and `params._meta`.
 Since #3170 the demo merchant explains an erc7710 redemption that reverts at

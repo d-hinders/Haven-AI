@@ -1239,7 +1239,7 @@ const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
     'Merchant-issued credentials in the returned `result` (JWTs, *_token/*_link/session fields) are withheld unless include_merchant_credentials=true — if you receive one, use it with the merchant it came from and never echo or log it. ' +
     'Optionally pass delivery_reference — a NON-SECRET pointer to what the merchant delivered (product, order id) shown on the owner\'s receipt; a credential-shaped value is refused before the call, so relay the secret to the owner yourself. ' +
     'On a settled x402 payment the allowance block reports the canonical names remainingAtomic / remainingDisplay / resetPeriodMin / tokenSymbol / tokenAddress (the SAME names and values haven_get_agent reports) beside the deprecated snake_case spellings (remaining_atomic, remaining_display, token_symbol, token_address, reset_period), kept for a deprecation window. ' +
-    'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true) when funding expired first; MERCHANT_REJECTED_AFTER_FUNDING on eip3009 means stranded delegate funds — recover with haven_sweep_delegate. erc7710 settles via haven_settle_mcp_tool.',
+    'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true) when funding expired first; MERCHANT_REJECTED_AFTER_FUNDING on eip3009 means stranded delegate funds — verify with haven_get_payment_status before haven_sweep_delegate (the merchant may still settle late). erc7710 settles via haven_settle_mcp_tool.',
   nextActionGuidance:
     'On success no further Haven tool is needed — return the merchant result to the user. If the delivered output was unusable or only partially usable, say so with haven_report_delivery_quality (evidence only; it moves no money).',
 })
@@ -1253,7 +1253,7 @@ const SETTLE_MCP_TOOL_DESCRIPTION = composeDescription({
     'Optionally pass delivery_reference — a NON-SECRET pointer to what the merchant delivered (product, order id) shown on the owner\'s receipt; a credential-shaped value is refused before funding, so relay the secret to the owner yourself. ' +
     'On a settled x402 payment the allowance block reports the canonical names remainingAtomic / remainingDisplay / resetPeriodMin / tokenSymbol / tokenAddress (the SAME names and values haven_get_agent reports) beside the deprecated snake_case spellings (remaining_atomic, remaining_display, token_symbol, token_address, reset_period), kept for a deprecation window. ' +
     'settled:true only after on-chain verification, never a merchant 2xx; unverified: settled:false, SETTLEMENT_UNCONFIRMED, null settlement_tx_hash. ' +
-    'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true); MERCHANT_REJECTED_AFTER_FUNDING on eip3009 — stranded funds, recover with haven_sweep_delegate; erc7710: nothing to sweep — check haven_get_payment_status after the window; re-quote only if unsettled.',
+    'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true); MERCHANT_REJECTED_AFTER_FUNDING on eip3009 — stranded funds: verify with haven_get_payment_status before haven_sweep_delegate (the merchant may still settle late); erc7710: nothing to sweep — check haven_get_payment_status after the window; re-quote only if unsettled.',
   nextActionGuidance:
     'On success no further Haven tool is needed — return the merchant result to the user. If the delivered output was unusable or only partially usable, say so with haven_report_delivery_quality (evidence only; it moves no money).',
 })

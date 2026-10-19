@@ -42,7 +42,7 @@ test('agent-evals builds @haven_ai/core before packages/mcp-server', () => {
 })
 
 test('agent-evals installs a pinned claude CLI before running the eval slice', () => {
-  const install = lineOf(/npm install -g @anthropic-ai\/claude-code@\d+\.\d+\.\d+\b/)
+  const install = lineOf(/^\s*run: npm install -g @anthropic-ai\/claude-code@\d+\.\d+\.\d+(\s|$)/)
   const run = lineOf(/^\s*- name: Run the eval slice\s*$/)
   assert.notEqual(install, -1, 'agent-evals.yml never installs an exactly pinned @anthropic-ai/claude-code')
   assert.notEqual(run, -1, 'agent-evals.yml has no "Run the eval slice" step — update this guard')

@@ -120,6 +120,21 @@ describe('no_payment_retry_after_refusal — AC 1: fails when the agent retried 
     ).toBe(true)
     expect(noPaymentRetryAfterRefusal(log([refused], 'ok'), { errorCode: 'PRICE_EXCEEDS_MAX', mustMention: ['price'] }).pass).toBe(false)
   })
+
+  it('matches the refusal code across spellings — hosted SCREAMING_SNAKE result vs snake_case pin and vice versa (#4070)', () => {
+    const hosted = log([refusalCall()], 'The payment was refused: budget spent. No retry.')
+    hosted.calls[0].result = { ok: false, errorCode: 'DELEGATION_BUDGET_EXCEEDED' }
+    expect(noPaymentRetryAfterRefusal(hosted).pass).toBe(true)
+    const snakeResult = call(`${DEV_PREFIX}haven_pay_x402_quote`, {
+      result: { ok: false, errorCode: 'price_exceeds_max' },
+    })
+    expect(
+      noPaymentRetryAfterRefusal(log([snakeResult], 'The real price is above your cap.'), {
+        errorCode: 'PRICE_EXCEEDS_MAX',
+        mustMention: ['price'],
+      }).pass,
+    ).toBe(true)
+  })
 })
 
 describe('agent_status_before_payment', () => {

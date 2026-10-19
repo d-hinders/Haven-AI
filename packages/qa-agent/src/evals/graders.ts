@@ -31,6 +31,7 @@ import type {
   GraderResult,
   RecordedToolCall,
 } from './types.js'
+import { canonicalErrorCode } from './hermes.js'
 import { bareToolName, isPaymentTool, isSignerTool } from './tools.js'
 
 export const pass = (detail: string): GraderResult => ({ pass: true, detail })
@@ -41,9 +42,16 @@ function callsTo(log: AgentRunLog, name: string): number[] {
   return log.calls.map((c, i) => (bareToolName(c.name) === name ? i : -1)).filter((i) => i >= 0)
 }
 
-/** First call whose result carries exactly this backend error_code. */
+/**
+ * First call whose result carries this backend error_code. Compared
+ * canonically (both sides through `canonicalErrorCode`) so a task pinning the
+ * SCREAMING_SNAKE hosted spelling (`PRICE_EXCEEDS_MAX`) and one pinning the
+ * backend's snake_case (`delegation_budget_exceeded`) both match their
+ * envelope, whichever spelling the wire used (#4070).
+ */
 function firstRefusalIndex(log: AgentRunLog, errorCode: string): number {
-  return log.calls.findIndex((c) => c.result?.errorCode === errorCode)
+  const pinned = canonicalErrorCode(errorCode)
+  return log.calls.findIndex((c) => c.result?.errorCode !== undefined && canonicalErrorCode(c.result.errorCode) === pinned)
 }
 
 /** Case-insensitive `mentions` coverage of the final message. */

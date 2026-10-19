@@ -1,5 +1,6 @@
 // The agent-evals workflow must build `@haven_ai/core` before the workspace
-// package that imports it, and must install the `claude` CLI it runs.
+// package that imports it, must install the `claude` CLI it runs, and must
+// give the eval step every env var `loadQaConfig()` requires.
 //
 // `npm ci` does not create core's `dist/`. The Claude Code lane's first real
 // run (2026-10-19, the #3959 cost pilot) died in its build step with
@@ -47,4 +48,31 @@ test('agent-evals installs a pinned claude CLI before running the eval slice', (
   assert.notEqual(install, -1, 'agent-evals.yml never installs an exactly pinned @anthropic-ai/claude-code')
   assert.notEqual(run, -1, 'agent-evals.yml has no "Run the eval slice" step — update this guard')
   assert.ok(install < run, 'the claude CLI is installed after the eval slice runs')
+})
+
+// `loadQaConfig()` (packages/qa-agent/src/config.ts) throws before the first
+// agent session when either of these is missing — the second pilot run
+// (2026-10-19) stopped on QA_PAYMENT_TO. Keep this list in step with its
+// `required` object.
+const QA_CONFIG_REQUIRED = ['QA_HAVEN_API_URL', 'QA_PAYMENT_TO']
+
+test('the eval step sets every env var loadQaConfig requires', () => {
+  const run = lineOf(/^\s*- name: Run the eval slice\s*$/)
+  assert.notEqual(run, -1, 'agent-evals.yml has no "Run the eval slice" step — update this guard')
+  const nextStep = live.findIndex((line, i) => i > run && /^\s*- (name|uses|run):/.test(line))
+  const step = live.slice(run, nextStep === -1 ? undefined : nextStep)
+  for (const name of QA_CONFIG_REQUIRED) {
+    assert.ok(
+      step.some((line) => new RegExp(`^\\s*${name}:\\s*\\S`).test(line)),
+      `"Run the eval slice" does not set ${name}, which loadQaConfig() requires`,
+    )
+  }
+})
+
+test('the guard required list matches loadQaConfig()', () => {
+  const config = readFileSync(path.join(ROOT, 'packages/qa-agent/src/config.ts'), 'utf8')
+  const block = config.match(/const required = \{([\s\S]*?)\} as const/)
+  assert.ok(block, 'could not find `const required = { ... } as const` in packages/qa-agent/src/config.ts — update this guard')
+  const names = [...block[1].matchAll(/'(QA_[A-Z0-9_]+)'/g)].map((m) => m[1]).sort()
+  assert.deepEqual(names, [...QA_CONFIG_REQUIRED].sort())
 })

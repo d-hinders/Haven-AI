@@ -251,6 +251,11 @@ jobs:
           QA_HAVEN_API_URL: ${{ vars.AGENT_EVALS_HAVEN_API_URL || secrets.AGENT_EVALS_HAVEN_API_URL }}
           QA_EVAL_AGENT_API_KEY: ${{ secrets.AGENT_EVALS_API_KEY }}
           QA_EVAL_RECIPIENT: ${{ vars.AGENT_EVALS_RECIPIENT }}
+          # loadQaConfig() (packages/qa-agent/src/config.ts) requires QA_PAYMENT_TO
+          # as well as QA_HAVEN_API_URL; it plays the same role as the eval recipient
+          # (the demo-merchant settlement wallet). Absent, the CLI exits before the
+          # first session (the second pilot run, 2026-10-19).
+          QA_PAYMENT_TO: ${{ vars.AGENT_EVALS_RECIPIENT }}
           QA_EVAL_AGENT_ACCOUNT: ${{ vars.AGENT_EVALS_AGENT_ACCOUNT }}
           QA_EVAL_X402_TARGET: ${{ vars.AGENT_EVALS_X402_TARGET }}
           QA_RPC_URL_BASE_SEPOLIA: ${{ secrets.QA_RPC_URL_BASE_SEPOLIA }}

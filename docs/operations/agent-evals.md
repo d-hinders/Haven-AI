@@ -201,8 +201,10 @@ npm run evals -w packages/qa-agent -- --trials=3 --out=evals-report.json
 
 Env the run needs (all dev/testnet):
 
-- `QA_API_URL` — the shared dev backend (from the standard `QA_*` contract,
+- `QA_HAVEN_API_URL` — the shared dev backend (from the standard `QA_*` contract,
   `packages/qa-agent/src/config.ts`).
+- `QA_PAYMENT_TO` — required by the same `QA_*` contract (`loadQaConfig()`);
+  set it to the same address as `QA_EVAL_RECIPIENT`.
 - `QA_EVAL_AGENT_API_KEY` — the eval agent's `sk_agent_...` key (item 1 above).
 - `QA_EVAL_RECIPIENT` — the Base Sepolia ADDRESS the direct-send transfer
   graders expect the money to reach (rendered into `{recipient}`). Address

@@ -17,7 +17,8 @@ last-verified: "2026-10-06"
 ---
 
 > **Re-verified #3913 (2026-10-19, after the toggle):** only the "Skipped - Not
-> affected" records paragraph changed. It now records that the setting was seen
+> affected" records paragraph and step 4 of § 1 changed; step 4 now names
+> the setting's required value. The paragraph now records that the setting was seen
 > **Enabled** on haven-ops in the dashboard and turned off on 2026-10-15, and
 > gives the measured result (GitHub deployment records, 2026-10-15 to
 > 2026-10-18). Nothing else in this document was re-verified, and
@@ -30,7 +31,8 @@ last-verified: "2026-10-06"
 > dependencies" and its required value **off** on haven-ops. The setting's
 > on/off state per project and the record counts (103 preview, 8 of 40
 > production) come from #3913's GitHub deployment-records census — an
-> inference; nobody has checked the dashboard yet. Nothing else in this
+> inference; nobody has checked the dashboard yet (superseded by the 2026-10-19
+> note above: the dashboard was checked). Nothing else in this
 > document was re-verified, and `last-verified` is not bumped.
 
 > **Re-verified #3821 (2026-10-09):** only the *Deploys from `dev` only*
@@ -133,7 +135,10 @@ repo — record what you actually entered on the issue when you do them.
 4. Turn **Include files outside the root directory** ON. The build reads the
    repo outside `packages/ops` — the #3511 doc-health generator walks
    `docs/` and `scripts/` — and without this Vercel uploads the package
-   alone.
+   alone. In the same section, turn **Skip deployments when there are no
+   changes to the root directory or its dependencies** OFF: left on, it
+   records a "Skipped - Not affected" deployment for every unrelated push
+   (#3913, below).
 5. Leave install/build/headers alone: `packages/ops/vercel.json` already
    carries the repo-expressible settings (install command, build command,
    the Ignored Build Step, HSTS). A dashboard override of a setting the file
@@ -168,8 +173,8 @@ show the result:
 - **`dev` pushes that touch an `ops.txt` path:** all 17 deployed.
 - **The other 25 `dev` pushes:** no GitHub-visible haven-ops record.
 
-So haven-ops went from 15–28 records a day to 4–8, and no workflow fallback is
-needed. GitHub mirrors no "Canceled by Ignored Build Step" record for either
+So haven-ops went from 15–28 GitHub-visible records a day to 5 and 4 on the
+two full days after the toggle, and no workflow fallback is needed. GitHub mirrors no "Canceled by Ignored Build Step" record for either
 project, so the Vercel dashboard, not GitHub, is where to see whether those
 pushes left one. If "Skipped - Not affected" records reappear, check this
 setting first. (The frontend side of this is in

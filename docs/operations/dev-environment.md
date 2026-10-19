@@ -47,7 +47,7 @@ last-verified: "2026-10-16"
 > such a deployment, the records belong to haven-ops, and they came from the
 > per-project Vercel setting named in the diff with required value **off**
 > (per #3913's GitHub deployment-records census; inferred, dashboard
-> unchecked). Nothing else in this document was re-verified, and
+> unchecked; superseded for haven-ops by the 2026-10-19 note above). Nothing else in this document was re-verified, and
 > `last-verified` is not bumped.
 
 > **Re-verified #3825 (2026-10-09, `GET /user/signers`):** this diff touched

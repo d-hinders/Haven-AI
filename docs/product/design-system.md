@@ -30,6 +30,10 @@ covers:
   - packages/frontend/src/components/marketing/**
   - packages/frontend/src/components/sidebar/**
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
+  - packages/frontend/src/components/haven/AgentRow.tsx
+  - packages/frontend/src/app/(authenticated)/dashboard/AgentsSection.tsx
+  - packages/frontend/src/components/ui/Tabs.tsx
+  - packages/ui/src/Tabs.tsx
   - packages/frontend/src/components/haven/BudgetMeter.tsx
   - packages/frontend/src/components/haven/ApprovalRequiredBanner.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
@@ -1489,6 +1493,71 @@ elsewhere, another element winning the band), and none of them exist in jsdom �
 has no layout, no stacking contexts and no hit-testing. Measure the hit rectangle by
 walking `elementFromPoint` outward from the centre in a real engine; `getBoundingClientRect`
 returns the border box and reports 32×32 even when the overlay works perfectly.
+
+### Tabs ([#4096](https://github.com/d-hinders/Haven-AI/issues/4096))
+
+`ui/Tabs` — in `@haven_ai/ui` since #4096 (moved with the shared primitives in #3508),
+re-exported through the `components/ui/Tabs.tsx` shim — is the switch between views of
+one surface. Before #4096 the app had no tabs at all; the first consumer is the account
+page's Overview / Agents / Activity sections (epic
+[#4093](https://github.com/d-hinders/Haven-AI/issues/4093)), shown on `/design-system`
+with a count and a warning dot.
+
+- **Controlled, URL-blind.** `value` / `onChange` — the caller owns the selection, and
+  the primitive re-renders nothing on its own. `packages/ui` is also consumed by the ops
+  console, so the primitive knows nothing about URLs; the page owns its `?tab=` param.
+- **Semantics: the WAI-ARIA tabs pattern.** `role="tablist"` of real buttons with
+  `aria-selected`, named by the list's `aria-label` so a screen reader names the surface
+  first. Roving tabindex: only the selected tab is in the Tab order, so Tab leaves the
+  list; the arrow keys move selection WITH focus (automatic activation — this primitive
+  has no lazy panels to defer), wrapping at both ends; Home and End jump.
+- **The underline.** The selected tab carries a 2px brand underline that overlaps the
+  list's 1px border by 1px (`-mb-px`), so the two read as one continuous rule rather
+  than a floating dash. Unselected tabs are ink-3, brand ink when selected.
+- **Hit area.** Every tab paints 36px and extends its hit area to 44px vertically —
+  never sideways, the tabs abut — the same transparent-pseudo-element mechanism as
+  `SegmentedControl` ([#4056](https://github.com/d-hinders/Haven-AI/issues/4056)); the
+  § Tap targets rules above apply.
+- **Adornments.** An optional muted `count` rides beside the label — visible text that
+  reads with the tab's accessible name — and an optional amber `warningDot` marks a view
+  that needs the user: decorative to the eye, named to the ear through its screen-reader
+  text.
+
+### Agent row — shared `AgentRow` / `AgentBudget` ([#4096](https://github.com/d-hinders/Haven-AI/issues/4096))
+
+The dashboard's agent row, lifted out of `AgentsSection` into
+`haven/AgentRow.tsx` so the account page's Agents tab draws agents exactly as the
+dashboard does: the BudgetMeter with its caption, the labelled "Last paid" time on the
+caption line ([#3989](https://github.com/d-hinders/Haven-AI/issues/3989)), the badge
+(`agentBadge`: Needs setup / Paused / N% used), and the received-sub-budget or "No
+budget" line ([#3803](https://github.com/d-hinders/Haven-AI/issues/3803)).
+
+The props deliberately stay the dashboard-overview wire shapes (`DashboardAgent`,
+`DashboardBudgetRemaining`, the #3803 spot rates, and the user's display currency
+through `CURRENCY_KEY`) rather than a narrowed summary: the account page reads the SAME
+dashboard overview — it lists all agents — and passes its slices straight through, so
+both surfaces draw the identical row and a second projection of the wire never exists
+for the caption pipeline to re-derive. `AgentBudget` is exported beside the row for a
+caller that wants the budget block without the row chrome; the dashboard's Agents
+section imports the shared component and renders unchanged.
+
+### Activity ledger — day-grouped `TransactionActivityRow` ([#4096](https://github.com/d-hinders/Haven-AI/issues/4096))
+
+`TransactionActivityRow` gains a **ledger mode** for full transaction history, without a
+second component. The dashboard's preview MERGES same agent, same merchant, same day
+into one "×N" row; a full ledger needs one row per transaction, and gets it:
+
+- `onOpen` (optional): when provided, the whole row is a button — click or Enter/Space
+  calls it — so the ledger's rows open the shared `TransactionDetailPanel` from the row
+  itself. Omitted (the dashboard's merged preview), the row is inert: the whole list is
+  one link and rows carry no interaction of their own.
+- `transactionDayGroups` / `transactionDayKey` / `transactionDayLabel` bucket a feed
+  into local calendar-day groups — "Today", "Yesterday", then short dates ("17 May") —
+  keeping the caller's order (a newest-first feed yields newest day first) and merging
+  nothing.
+- `TransactionActivityDayHeader` renders the quiet band above each bucket, the same
+  heading style the dashboard's activity list draws above its merged rows; a `partial`
+  flag marks a bucket whose day is cut by a window boundary ([#3975](https://github.com/d-hinders/Haven-AI/issues/3975)).
 
 ### Cards (`Card`)
 

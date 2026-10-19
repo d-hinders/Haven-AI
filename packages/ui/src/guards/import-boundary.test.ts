@@ -124,6 +124,9 @@ describe('the @haven_ai/ui import boundary (#3508)', () => {
       'StatTile.tsx',
       'StatusBadge.tsx',
       'Table.tsx',
+      // #4096: the account page's view switcher — the first tab shape the
+      // design system owns; the ops console consumes the same primitive.
+      'Tabs.tsx',
       'Tooltip.tsx',
     ].sort()
     const actual = readdirSync(SRC)

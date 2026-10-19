@@ -20,6 +20,7 @@
     "./PageHeader": "./src/PageHeader.tsx",
     "./Row": "./src/Row.tsx",
     "./SegmentedControl": "./src/SegmentedControl.tsx",
+    "./Tabs": "./src/Tabs.tsx",
     "./Skeleton": "./src/Skeleton.tsx",
     "./StatTile": "./src/StatTile.tsx",
     "./StatusBadge": "./src/StatusBadge.tsx",

@@ -26,6 +26,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Select } from '@/components/ui/Select'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
+import { Tabs } from '@/components/ui/Tabs'
 import { ThemeToggle } from '@/components/ui/ThemeToggle'
 import { Textarea } from '@/components/ui/Textarea'
 import { Table, tableColumnClass, tableHideFromClass } from '@/components/ui/Table'
@@ -55,11 +56,16 @@ import { useToast } from '@/components/ui/Toast'
 import { THEME_TOKENS, contrastTable } from '@/lib/theme-tokens'
 import { formatAnalyticsTick } from '@/lib/analytics-format'
 import { budgetCaption, type BudgetCaptionRow } from '@/lib/budget-caption'
+import type { DashboardBudgetRemaining, DashboardOverview } from '@/lib/dashboard-attention'
+import { timeAgo } from '@/lib/format'
+import type { DashboardAgentPreview } from '@/types/dashboard'
 import DashboardOnboardingGuide, { SetupCompleteLine } from '@/components/DashboardOnboardingGuide'
 
 import { WalletPopover } from '@/components/WalletButton'
 import {
+  AgentBudget,
   AgentBudgetCard,
+  AgentRow,
   Address,
   AgentRulesSummary,
   Amount,
@@ -68,7 +74,9 @@ import {
   DirectionMark,
   ExternalDetailsLink,
   RiskExplainer,
+  TransactionActivityDayHeader,
   TransactionActivityRow,
+  transactionDayGroups,
   TransactionMovement,
   WalletIdentityBlock,
   LabelChip,
@@ -467,6 +475,94 @@ const DS_METER_ROW: BudgetCaptionRow = {
 // Untouched: zero used on the same period — the caption still names the refill.
 const DS_METER_UNTOUCHED_ROW: BudgetCaptionRow = { ...DS_METER_ROW, usedAtomic: '0' }
 
+// ── #4096: the shared agent row and the activity ledger's fixtures ──────────
+
+// The agent row's clock and budget dates are RELATIVE TO NOW, unlike the
+// frozen meter instants above: the row reads the LIVE clock (the dashboard
+// passes `Date.now()`), so the fixture anchors its period end 22h out and the
+// caption renders "refills in 22h" on every machine.
+const DS_AGENT_NOW = Date.now()
+const DS_AGENT_TOKEN = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+// 300 USDC per week, 120 used (40%), period end 22h from now.
+const DS_AGENT: DashboardAgentPreview = {
+  id: '11111111-1111-4111-8111-111111111111',
+  name: 'Research agent',
+  status: 'active',
+  accountId: 'acct-1',
+  accountName: 'Main account',
+  accountChainId: 8453,
+  allowances: [],
+  budgets: [
+    {
+      id: 'budget-1',
+      delegationHash: `0x${'11'.repeat(32)}`,
+      chainId: 8453,
+      tokenAddress: DS_AGENT_TOKEN,
+      tokenSymbol: 'USDC',
+      decimals: 6,
+      budgetAtomic: '300000000',
+      periodSeconds: 604_800,
+      startDate: new Date(DS_AGENT_NOW - 2 * 86_400_000).toISOString(),
+      expiresAt: new Date(DS_AGENT_NOW + 160 * 86_400_000).toISOString(),
+      periodEnd: new Date(DS_AGENT_NOW + 22 * 3_600_000).toISOString(),
+    },
+  ],
+  receivedSubBudgets: [],
+  stats: {
+    d7: { gross: { usd: 12, eur: 0, sek: 0 }, net: { usd: 12, eur: 0, sek: 0 }, approx: false, payments: 1, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+    d30: { gross: { usd: 120, eur: 0, sek: 0 }, net: { usd: 120, eur: 0, sek: 0 }, approx: false, payments: 6, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+    lastPaymentAt: new Date(DS_AGENT_NOW - 6 * 3_600_000).toISOString(),
+    lastCounterparty: { source: 'api.vendor.com', x402ResourceUrl: null, to: null, merchantName: null },
+  },
+}
+// The chain read that matches the budget above — 180 USDC remaining, so the
+// meter paints 40% and the caption names the 22h refill.
+const DS_AGENT_BUDGET_REMAINING: DashboardBudgetRemaining = {
+  budgets: [
+    {
+      agent_id: DS_AGENT.id,
+      chain_id: 8453,
+      delegation_hash: `0x${'11'.repeat(32)}`,
+      token_address: DS_AGENT_TOKEN,
+      token_symbol: 'USDC',
+      token_decimals: 6,
+      budget_atomic: '300000000',
+      read_at: new Date(DS_AGENT_NOW - 3_600_000).toISOString(),
+      period_end: new Date(DS_AGENT_NOW + 22 * 3_600_000).toISOString(),
+      remaining_atomic: '180000000',
+      remaining_from_chain: true,
+      used_atomic: '120000000',
+      sub_budget_spend: [],
+    },
+  ],
+}
+const DS_AGENT_SPOT_RATES: DashboardOverview['spotRates'] = { USDC: 1 }
+// A second agent with NO budget and no payments — the "No budget" + "No
+// payments yet" arms of the row, exactly as the dashboard draws them.
+const DS_AGENT_NO_BUDGET: DashboardAgentPreview = {
+  ...DS_AGENT,
+  id: '22222222-2222-4222-8222-222222222222',
+  name: 'Watchtower',
+  budgets: [],
+  stats: {
+    d7: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+    d30: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+    lastPaymentAt: null,
+    lastCounterparty: null,
+  },
+}
+
+// The ledger showcase's rows — timestamps RELATIVE TO NOW so the day helpers
+// bucket them under live "Today" / "Yesterday" headings, exactly as the
+// account page's ledger will. Same agent, same merchant, same day: the
+// dashboard's preview MERGES these into one "×2" row; the ledger keeps one
+// row per transaction.
+const DS_LEDGER_ROWS = [
+  { id: 'l1', at: new Date(Date.now() - 5 * 60_000).toISOString(), title: 'api.vendor.com', description: 'Research assistant', value: '12.00' },
+  { id: 'l2', at: new Date(Date.now() - 3 * 3_600_000).toISOString(), title: 'storage.provider.io', description: 'Data agent', value: '4.50' },
+  { id: 'l3', at: new Date(Date.now() - 26 * 3_600_000).toISOString(), title: 'api.vendor.com', description: 'Research assistant', value: '36.00' },
+]
+
 function Section({
   title,
   description,
@@ -554,6 +650,11 @@ export default function DesignSystemPage() {
   const [sampleAmount, setSampleAmount] = useState('')
   const [dsBudgetAmount, setDsBudgetAmount] = useState('')
   const [segmented, setSegmented] = useState<'light' | 'dark' | 'system'>('system')
+  // #4096: the Tabs showcase is a controlled primitive (the caller owns the
+  // value), and a ledger row's click stands in for the account page opening
+  // TransactionDetailPanel — the section names which row "opened".
+  const [dsTab, setDsTab] = useState<'overview' | 'agents' | 'activity'>('agents')
+  const [dsLedgerOpened, setDsLedgerOpened] = useState<string | null>(null)
   const { toast } = useToast()
 
   return (
@@ -1150,6 +1251,49 @@ export default function DesignSystemPage() {
               the track in both themes — and every option&rsquo;s hit area is 44px tall while it
               paints 32px (#4056, the same mechanism as Button). Never hand-roll a second control
               of this shape.
+            </p>
+          </Card>
+
+          {/* #4096: the Tabs primitive — the first tab shape the design system
+              owns, shown controlled exactly as the account page drives it. */}
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Tabs</h3>
+            <div className="mt-4">
+              <Tabs
+                ariaLabel="Account"
+                value={dsTab}
+                onChange={setDsTab}
+                tabs={[
+                  { value: 'overview', label: 'Overview' },
+                  { value: 'agents', label: 'Agents', count: 2 },
+                  { value: 'activity', label: 'Activity', warningDot: true },
+                ]}
+              />
+              <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
+                Selected: {dsTab} — the caller owns the value; the primitive re-renders nothing on
+                its own.
+              </p>
+            </div>
+            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              The switch between views of one surface
+              (<code className="rounded bg-[var(--v2-surface)] px-1">ui/Tabs</code>, in{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">@haven_ai/ui</code> since #4096).
+              Semantics follow the WAI-ARIA tabs pattern:
+              <code className="rounded bg-[var(--v2-surface)] px-1">role=&quot;tablist&quot;</code> of
+              real buttons with <code className="rounded bg-[var(--v2-surface)] px-1">aria-selected</code>;
+              a roving tabindex leaves only the selected tab in the Tab order, so Tab leaves the
+              list, and the arrow keys move selection WITH focus, wrapping at both ends (Home and
+              End jump). The primitive is CONTROLLED — <code className="rounded bg-[var(--v2-surface)] px-1">value</code> /{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">onChange</code> — and knows
+              nothing about URLs: the ops console consumes the same package, so the page owns its{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">?tab=</code> param. The selected
+              tab carries a 2px brand underline that overlaps the list&rsquo;s 1px border, reading as
+              one continuous rule; every tab&rsquo;s hit area extends to 44px vertically (the same
+              transparent-pseudo-element mechanism as SegmentedControl) while it paints 36px. An
+              optional muted <code className="rounded bg-[var(--v2-surface)] px-1">count</code> rides
+              beside the label, and an optional amber warning dot marks a view that needs the user —
+              decorative to the eye, named to the ear through its screen-reader text. The account
+              page&rsquo;s Overview / Agents / Activity sections (#4093) are the first consumer.
             </p>
           </Card>
 
@@ -2381,6 +2525,41 @@ export default function DesignSystemPage() {
         </div>
       </Section>
 
+      {/* #4096: the ledger mode — one row per transaction under day headers,
+          where the dashboard preview above merges same agent / merchant / day
+          into a "×N" row. */}
+      <Section
+        title="Activity ledger (day-grouped)"
+        description="TransactionActivityRow's ledger mode (#4096, epic #4093): one row per transaction, grouped under TransactionActivityDayHeader bands (“Today”, “Yesterday”, then short dates) — the un-merged counterpart of the dashboard's merged preview, which folds same agent / same merchant / same day into one ×N row. A ledger row with onOpen becomes a button: click or Enter/Space opens the shared TransactionDetailPanel, exactly as the account page's Activity tab will."
+      >
+        <div className="max-w-xl">
+          <Card hover={false} className="overflow-hidden">
+            {transactionDayGroups(DS_LEDGER_ROWS, (row) => row.at).map((group) => (
+              <div key={group.dayKey}>
+                <TransactionActivityDayHeader label={group.label} />
+                {group.items.map((row) => (
+                  <TransactionActivityRow
+                    key={row.id}
+                    direction="out"
+                    title={row.title}
+                    description={row.description}
+                    value={row.value}
+                    asset="USDC"
+                    timestamp={timeAgo(row.at)}
+                    onOpen={() => setDsLedgerOpened(row.title)}
+                  />
+                ))}
+              </div>
+            ))}
+          </Card>
+          <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
+            {dsLedgerOpened
+              ? `Opened "${dsLedgerOpened}" — the account page opens the shared TransactionDetailPanel from this row.`
+              : 'Click a row (or press Enter) — the account page opens the shared TransactionDetailPanel from the row.'}
+          </p>
+        </div>
+      </Section>
+
       <Section
         title="Transaction history"
         description="Tables render through the Table primitive: Table.Head (collapses when narrow, optional sticky), Table.HeaderCell (srLabel for icon columns, revealAt for container-keyed collapse), Table.SortableHeaderCell (aria-sort + focus-ring button + chevron), Table.Body (one row-border rule). Cell content stays plain <td>. Compact TransactionActivityRow remains for dashboard, account, and agent previews."
@@ -3339,6 +3518,46 @@ export default function DesignSystemPage() {
             <BudgetMeter usedPercent={0} label="USDC budget used" caption={dsMeterCaption(DS_METER_UNTOUCHED_ROW)} />
             <p className="mt-2 text-xs text-[var(--v2-ink-3)]">Untouched — clamped at 0.</p>
           </div>
+        </div>
+      </Section>
+
+      {/* #4096: the shared agent row — lifted out of the dashboard's
+          AgentsSection, drawn here with the dashboard wire shapes the
+          account page will pass from the same overview. */}
+      <Section
+        title="Agent row (shared)"
+        description="The dashboard's agent row (#4096, epic #4093), lifted out of AgentsSection into haven/AgentRow: the BudgetMeter with its caption, the labelled “Last paid” time on the caption line (#3989), the badge (agentBadge: Needs setup / Paused / N% used), and the received-sub-budget or “No budget” line (#3803). Its props are the dashboard wire shapes (DashboardAgent, DashboardBudgetRemaining, spotRates, and the user's display CURRENCY mapped through CURRENCY_KEY) — the account page reads the SAME overview (it lists all agents) and passes its slices straight through, so both surfaces draw the identical row. AgentBudget is exported beside it for a caller that wants the budget block without the row chrome."
+      >
+        <div className="max-w-xl space-y-4">
+          <Card hover={false} className="overflow-hidden">
+            <Card.Header title="Agents" />
+            <AgentRow
+              agent={DS_AGENT}
+              budgetRemaining={DS_AGENT_BUDGET_REMAINING}
+              attentionItems={[]}
+              spotRates={DS_AGENT_SPOT_RATES}
+              currency="USD"
+              accountNames={{}}
+              accountCount={1}
+              nowMs={DS_AGENT_NOW}
+            />
+            <AgentRow
+              agent={DS_AGENT_NO_BUDGET}
+              budgetRemaining={DS_AGENT_BUDGET_REMAINING}
+              attentionItems={[]}
+              spotRates={DS_AGENT_SPOT_RATES}
+              currency="USD"
+              accountNames={{}}
+              accountCount={1}
+              nowMs={DS_AGENT_NOW}
+            />
+          </Card>
+          <p className="text-xs text-[var(--v2-ink-3)]">
+            Above: a live budget with a chain read — the meter, the refill caption, and the labelled
+            “Last paid” time right-aligned on the caption line — and a no-budget agent (“No budget” +
+            “No payments yet”). The dashboard renders the same rows unchanged: its Agents section
+            imports this component since #4096.
+          </p>
         </div>
       </Section>
 

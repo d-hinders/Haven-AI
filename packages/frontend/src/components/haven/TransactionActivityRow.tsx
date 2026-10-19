@@ -29,6 +29,7 @@ export function TransactionActivityRow({
   density = 'comfortable',
   countLabel,
   fiat,
+  onOpen,
 }: {
   title: string
   description?: ReactNode
@@ -72,6 +73,16 @@ export function TransactionActivityRow({
    * the wrong conclusion here.
    */
   density?: Density
+  /**
+   * Ledger mode (#4096, epic #4093): when provided, the whole row is a
+   * button — click or Enter/Space calls it — so a full ledger (one row per
+   * transaction, grouped under day headers) can open the shared
+   * `TransactionDetailPanel` from the row itself, the way the transactions
+   * table's title button opens it. Omitted (default) in the merged
+   * dashboard preview, where the whole list is one link and rows carry no
+   * interaction of their own.
+   */
+  onOpen?: () => void
 }) {
   const isCompact = density === 'compact'
   // Compact density pins the row to 72px so the dashboard's agents and
@@ -99,8 +110,29 @@ export function TransactionActivityRow({
   const containerPadding = isCompact
     ? 'gap-3 px-4 py-3 sm:px-5 sm:py-0 sm:h-[72px]'
     : 'gap-3 px-4 py-4 sm:px-5'
+  // Ledger mode (#4096): the row itself is the control — a div carrying
+  // button semantics, not a nested <button>, because `details` and `action`
+  // may contain links (an explorer anchor) and a button must not nest
+  // interactive elements. Enter and Space activate, per the button role.
+  const interactiveProps = onOpen
+    ? {
+        role: 'button' as const,
+        tabIndex: 0,
+        'aria-haspopup': 'dialog' as const,
+        onClick: () => onOpen(),
+        onKeyDown: (event: React.KeyboardEvent) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            onOpen()
+          }
+        },
+      }
+    : {}
   return (
-    <div className={`grid transition-colors hover:bg-[var(--v2-surface-hover)] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${containerPadding}`}>
+    <div
+      {...interactiveProps}
+      className={`grid transition-colors hover:bg-[var(--v2-surface-hover)] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${containerPadding}${onOpen ? ' cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80' : ''}`}
+    >
       {/* `items-start` below `sm`, centred at `sm` and up (#1833 review).
           Centring the mark against the WHOLE text block reads correctly while
           that block is one or two lines, and wrongly once it wraps to three or
@@ -189,5 +221,101 @@ export function ExternalDetailsLink({ href, label = 'Open externally' }: { href:
     >
       <Icon icon={ExternalLink} className="h-3.5 w-3.5" />
     </a>
+  )
+}
+
+// ── Ledger mode: day grouping (#4096, epic #4093) ───────────────────────────
+
+/**
+ * Local calendar day of an ISO instant, `YYYY-MM-DD` (en-CA's ISO format) —
+ * the same key the dashboard's ActivitySection buckets its groups by.
+ */
+export function transactionDayKey(iso: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(iso))
+}
+
+/**
+ * Heading for a day bucket: "Today", "Yesterday", else the short date
+ * ("17 May"). Derived from the DAY KEY, not re-derived from a raw instant,
+ * so a row rendered under "Today" IS from today — the label and the bucket
+ * cannot drift apart the way a label recomputed from the timestamp could
+ * across midnight (the #3810 rule, now shared).
+ */
+export function transactionDayLabel(dayKey: string): string {
+  const today = new Date()
+  const localDay = (date: Date) =>
+    new Intl.DateTimeFormat('en-CA', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(date)
+  if (dayKey === localDay(today)) return 'Today'
+  const yesterday = new Date(today)
+  yesterday.setDate(today.getDate() - 1)
+  if (dayKey === localDay(yesterday)) return 'Yesterday'
+  const [year, month, day] = dayKey.split('-').map(Number)
+  const date = new Date(year, month - 1, day)
+  return new Intl.DateTimeFormat('en-GB', { month: 'short', day: 'numeric' }).format(date)
+}
+
+export interface TransactionDayGroup<T> {
+  /** The bucket's local-day key (`YYYY-MM-DD`). */
+  dayKey: string
+  /** The rendered heading ("Today", "Yesterday", "17 May"). */
+  label: string
+  /** The items in this day, in the order the caller supplied them. */
+  items: T[]
+}
+
+/**
+ * Bucket a ledger's transactions into day groups, one row per transaction
+ * under each header (#4096) — the un-merged counterpart of the dashboard's
+ * ActivitySection grouping, which folds same-agent/same-merchant/same-day
+ * into one "×N" row. Days come out in the order first seen (the feed is
+ * newest-first, so that is newest day first); within a day the caller's
+ * order stands. `timestampOf` keeps the helper generic: the ledger mode
+ * serves whatever the caller's rows are (AggregatedTransaction on the
+ * account page), and the helper never needs their shape.
+ */
+export function transactionDayGroups<T>(
+  items: readonly T[],
+  timestampOf: (item: T) => string,
+): Array<TransactionDayGroup<T>> {
+  const buckets = new Map<string, T[]>()
+  for (const item of items) {
+    const key = transactionDayKey(timestampOf(item))
+    const bucket = buckets.get(key)
+    if (bucket) bucket.push(item)
+    else buckets.set(key, [item])
+  }
+  return Array.from(buckets.entries(), ([dayKey, groupItems]) => ({
+    dayKey,
+    label: transactionDayLabel(dayKey),
+    items: groupItems,
+  }))
+}
+
+/**
+ * A ledger's day-group heading — the same quiet band the dashboard's
+ * activity list draws above its merged rows (`px-4 pt-3 pb-1 … sm:px-5`),
+ * so the account page's ledger and the dashboard's preview read as one
+ * system. `partial` marks a bucket whose day is cut by a window boundary
+ * (the #3975 analytics rule) as "(partial)".
+ */
+export function TransactionActivityDayHeader({
+  label,
+  partial = false,
+}: {
+  label: string
+  partial?: boolean
+}) {
+  return (
+    <p className="px-4 pt-3 pb-1 text-xs font-medium text-[var(--v2-ink-3)] sm:px-5">
+      {partial ? `${label} (partial)` : label}
+    </p>
   )
 }

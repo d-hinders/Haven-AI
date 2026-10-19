@@ -343,6 +343,7 @@ describe('over-budget-check-status-no-retry — graded on what the agent can act
       task.graders,
       {},
     )
+    expect(results.map((g) => g.name)).toEqual(['no_payment_retry_after_refusal', 'tool_called'])
     expect(results.map((g) => `${g.name}:${g.pass}`)).toEqual(results.map((g) => `${g.name}:true`))
     expect(task.instruction).not.toMatch(/payment status/i)
   })

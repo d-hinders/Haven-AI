@@ -141,9 +141,15 @@ test('agent-evals is triggered by workflow_dispatch only', () => {
 // input, whose options are all agent-evals environments: a free-text input or
 // a dropped `environment:` line would let a run reach secrets nobody approved.
 test('the evals job declares a protected agent-evals environment chosen from a fixed list', () => {
-  const envLine = live.find((line) => /^\s{4}environment:/.test(line))
-  assert.ok(envLine, 'the evals job no longer declares a protected environment')
-  assert.match(envLine, /^\s{4}environment: \$\{\{ inputs\.environment \|\| 'agent-evals' \}\}\s*$/)
+  const jobs = live.filter((line) => /^\s{4}runs-on:/.test(line)).length
+  const envLines = live.filter((line) => /^\s{4}environment:/.test(line))
+  assert.ok(jobs > 0, 'agent-evals.yml has no job — update this guard')
+  assert.equal(envLines.length, jobs, 'a job in agent-evals.yml does not declare a protected environment')
+  for (const line of envLines) assert.match(line, /^\s{4}environment: \$\{\{ inputs\.environment \|\| 'agent-evals' \}\}\s*$/)
+  // One run per environment at a time: each holds its own agent and budget.
+  for (const line of live.filter((l) => /^\s{6}group: agent-evals/.test(l))) {
+    assert.ok(line.includes('${{ inputs.environment'), 'the concurrency group is not per environment')
+  }
   const input = lineOf(/^\s{6}environment:\s*$/)
   assert.notEqual(input, -1, 'workflow_dispatch has no `environment` input — update this guard')
   const end = live.findIndex((line, i) => i > input && /^\s{0,6}\S/.test(line))

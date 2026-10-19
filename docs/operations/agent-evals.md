@@ -321,7 +321,7 @@ token. The inventory, identical in every environment:
 |---|---|---|
 | `CLAUDE_CODE_OAUTH_TOKEN` | env secret | that person's subscription token (`claude setup-token`) |
 | `AGENT_EVALS_API_KEY` | env secret | that person's eval agent `sk_agent_...` key (its OWN agent, not the Hermes lane's, not another environment's, and never `QA_DELEGATION_*`) |
-| `AGENT_EVALS_DELEGATE_KEY` | env secret | this lane's delegate private key |
+| `AGENT_EVALS_DELEGATE_KEY` | env secret | that person's eval agent's delegate private key |
 | `AGENT_EVALS_HAVEN_API_URL` | var (or secret) | the dev backend URL |
 | `AGENT_EVALS_RECIPIENT` / `AGENT_EVALS_AGENT_ACCOUNT` / `AGENT_EVALS_X402_TARGET` | vars | the graders' address/URL fixtures (same roles as the `QA_EVAL_*` env) |
 | `QA_X402_BINDING_SIGNER` | repo var | the public address the signer verifies x402 bindings against, passed as `HAVEN_X402_BINDING_SIGNER`; the job fails before any session when it is unset |
@@ -348,9 +348,14 @@ produces the values, the owner enters them.
    option (`agent-evals-antonio`). Protection: **Required reviewers** = the
    person (and only them); leave **Prevent self-review** OFF, since they
    approve their own runs; give it the same deployment-branch rule as
-   `agent-evals`. Order matters: GitHub auto-creates a missing environment
-   with NO protection on first use. Such a run carries no eval secrets and
-   stops at the credentials step, but do not rely on that.
+   `agent-evals`, and turn **Allow administrators to bypass** OFF so nobody
+   else (the owner included) can approve a run on their plan. Order matters:
+   GitHub auto-creates a missing environment with NO protection on first
+   use. Also confirm `gh secret list` (repository level) shows none of
+   `CLAUDE_CODE_OAUTH_TOKEN` / `AGENT_EVALS_*`: GitHub falls back from a
+   missing environment secret to a repository secret of the same name, so a
+   repo-level copy would let an unset environment spend someone else's plan
+   or agent. With none, an unset environment stops at the credentials step.
 2. **Person: a Claude token.** On their own machine, logged in to their own
    Pro/Max plan, run `claude setup-token` and keep the printed token for
    step 5. Never an `ANTHROPIC_API_KEY`: it would bill the API.
@@ -358,11 +363,17 @@ produces the values, the owner enters them.
    mainnet). Sign up on the dev dashboard with their own passkey; that
    provisions their smart account. Create an agent from the Connect modal
    and give it a **Daily** budget (3 USDC, see "Funding and the nightly
-   budget"). Copy the one-time `hv_setup_...` token and run the connector in
-   a throwaway home so their real Claude Code config is untouched:
-   `HOME="$(mktemp -d)" npx @haven_ai/connect@dev --runtime claude-code --setup hv_setup_...`.
-   It writes `$HOME/.haven/agents/<slug>/`: `identity.json` holds `api_key`
-   (`sk_agent_...`), `signer.json` holds `delegate_key`.
+   budget"). Copy the exact connector command the modal shows (it carries
+   the one-time `hv_setup_...` token, `--api <dev backend URL>` and
+   `--ack-local-tools`; without `--api` the connector refuses to run) and run
+   it in a throwaway home so their real Claude Code config is untouched:
+   `export HOME="$(mktemp -d)"`, then the command, adding
+   `--runtime claude-code`. It writes `$HOME/.haven/agents/<agent>/`:
+   `identity.json` holds `api_key` (`sk_agent_...`); `signer.json` holds
+   `delegate_key` and `account_address`. **Then approve the agent** back in
+   the dashboard (one passkey prompt): a Connect-modal agent starts
+   `pending_approval` and has no budget delegation until then, so every
+   payment task would fail.
 4. **Person: fund it.** Circle faucet test USDC on Base Sepolia to the smart
    account address (no ETH needed: payments are paymaster-sponsored).
    `qa-balances.yml` tops up only the owner's two eval accounts, so this one
@@ -370,7 +381,7 @@ produces the values, the owner enters them.
 5. **Hand the values to the owner over a one-time encrypted channel** (a
    password-manager share that expires, or pasted live on a call), never
    chat, email, an issue or a PR: the Claude token, `api_key`,
-   `delegate_key`, and the smart account address. Then delete the throwaway
+   `delegate_key`, and `account_address` (public). Then delete the throwaway
    home.
 6. **Owner: enter them** (the `gh` form; the Settings page works too):
 

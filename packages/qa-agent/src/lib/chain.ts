@@ -216,7 +216,11 @@ export async function proveUsdcTransferSince(
     if (head !== undefined) {
       try {
         let start = Math.max(fromBlock, next - GET_LOGS_TIP_RESCAN)
-        while (start <= head && Date.now() < deadline) {
+        let first = true
+        // At least one window per poll, even past the deadline: a call must
+        // never fail without reading the chain at all.
+        while (start <= head && (first || Date.now() < deadline)) {
+          first = false
           const end = Math.min(start + GET_LOGS_MAX_RANGE - 1, head)
           const logs = await provider.getLogs({
             address: SEPOLIA_USDC,
@@ -230,9 +234,10 @@ export async function proveUsdcTransferSince(
           next = Math.max(next, end + 1)
           start = end + 1
         }
+        const scanned = next > head ? `scanned to block ${head}` : `scanned to block ${next - 1} of head ${head} (deadline)`
         last = near.size
-          ? `${near.size} Transfer(s) from that payer to that payee, none of exactly ${expected.amount}`
-          : 'no Transfer from that payer to that payee'
+          ? `${near.size} Transfer(s) from that payer to that payee, none of exactly ${expected.amount}; ${scanned}`
+          : `no Transfer from that payer to that payee; ${scanned}`
       } catch (err) {
         last = `getLogs failed: ${(err as Error)?.message ?? err}`
       }

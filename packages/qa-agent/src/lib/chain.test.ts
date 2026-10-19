@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ethers } from 'ethers'
-import { describeObserverRpc, proveUsdcTransfer, proveUsdcTransferSince, SEPOLIA_USDC, usdcTransfers, waitForDisabled, waitForReceipt } from './chain.js'
+import { describeObserverRpc, GET_LOGS_MAX_RANGE, GET_LOGS_TIP_RESCAN, proveUsdcTransfer, proveUsdcTransferSince, SEPOLIA_USDC, usdcTransfers, waitForDisabled, waitForReceipt } from './chain.js'
 
 /**
  * The observer-RPC announcement must never print the endpoint (#2511).
@@ -199,6 +199,74 @@ describe('proveUsdcTransferSince (#3505)', () => {
     expect(ok).toEqual({ ok: true, txHash: '0xt' })
     expect(filter?.topics?.[1]).toBe(ethers.zeroPadValue(from, 32))
     expect(filter?.topics?.[2]).toBe(ethers.zeroPadValue(to, 32))
+  })
+
+  // Alchemy's free tier refuses eth_getLogs over 10 blocks (eval pilot,
+  // 2026-10-19): a session spanning ~70 blocks graded every real transfer as
+  // missing. The probe must scan in windows and still find a transfer far
+  // from fromBlock.
+  it('scans in windows of at most GET_LOGS_MAX_RANGE blocks and finds a transfer 60 blocks later', async () => {
+    const ranges: Array<[number, number]> = []
+    const reader = {
+      getBlockNumber: async () => 75,
+      getLogs: async (f: { fromBlock: number; toBlock: number }) => {
+        if (f.toBlock - f.fromBlock + 1 > 10) throw new Error('Under the Free tier plan, you can make eth_getLogs requests with up to a 10 block range')
+        ranges.push([f.fromBlock, f.toBlock])
+        return f.fromBlock <= 65 && 65 <= f.toBlock ? [{ data: ethers.toBeHex(1000n, 32), transactionHash: '0xfar' }] : []
+      },
+    }
+    const ok = await proveUsdcTransferSince({ from, to, amount: 1000n }, { ...fast, provider: reader })
+    expect(ok).toEqual({ ok: true, txHash: '0xfar' })
+    expect(GET_LOGS_MAX_RANGE).toBe(10)
+    expect(ranges.every(([a, b]) => b - a + 1 <= GET_LOGS_MAX_RANGE)).toBe(true)
+    expect(ranges[0]).toEqual([5, 14])
+  })
+
+  it('covers every block with no gap when a window fails, and finds the transfer on the next poll', async () => {
+    const scanned = new Set<number>()
+    let failedOnce = false
+    const reader = {
+      getBlockNumber: async () => 40,
+      getLogs: async (f: { fromBlock: number; toBlock: number }) => {
+        // The second window (15..24) fails once — the transfer sits inside it.
+        if (f.fromBlock === 15 && !failedOnce) {
+          failedOnce = true
+          throw new Error('rate limited')
+        }
+        for (let b = f.fromBlock; b <= f.toBlock; b++) scanned.add(b)
+        return f.fromBlock <= 20 && 20 <= f.toBlock ? [{ data: ethers.toBeHex(1000n, 32), transactionHash: '0xmid' }] : []
+      },
+    }
+    const ok = await proveUsdcTransferSince({ from, to, amount: 1000n }, { fromBlock: 5, timeoutMs: 200, intervalMs: 5, provider: reader })
+    expect(ok).toEqual({ ok: true, txHash: '0xmid' })
+    expect(failedOnce).toBe(true)
+    for (let b = 5; b <= 14; b++) expect(scanned.has(b)).toBe(true)
+  })
+
+  it('re-reads the last GET_LOGS_TIP_RESCAN blocks on the next poll, so a log indexed late at the tip is still found', async () => {
+    let head = 10
+    let polls = 0
+    const reader = {
+      getBlockNumber: async () => head,
+      getLogs: async (f: { fromBlock: number; toBlock: number }) => {
+        polls++
+        // Block 10 was the tip on poll 1 and its log was not indexed yet;
+        // by poll 2 the tip has moved and the log is visible.
+        if (f.fromBlock <= 10 && 10 <= f.toBlock && polls > 1) return [{ data: ethers.toBeHex(1000n, 32), transactionHash: '0xlate' }]
+        head = 12
+        return []
+      },
+    }
+    const ok = await proveUsdcTransferSince({ from, to, amount: 1000n }, { fromBlock: 5, timeoutMs: 200, intervalMs: 5, provider: reader })
+    expect(GET_LOGS_TIP_RESCAN).toBeGreaterThan(0)
+    expect(ok).toEqual({ ok: true, txHash: '0xlate' })
+  })
+
+  it('reports a getBlockNumber failure as such, not as getLogs', async () => {
+    const reader = { getBlockNumber: async () => { throw new Error('observer down') }, getLogs: async () => [] }
+    const r = await proveUsdcTransferSince({ from, to, amount: 1000n }, { ...fast, provider: reader })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toMatch(/getBlockNumber failed: observer down/)
   })
 
   it('fails on a wrong amount or no log', async () => {

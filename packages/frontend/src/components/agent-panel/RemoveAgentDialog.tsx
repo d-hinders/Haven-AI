@@ -124,8 +124,8 @@ export function RemoveAgentDialog({
         setError(
           result.reason === 'cancelled'
             ? finish
-              ? 'The signature was cancelled — this agent’s budget is still active.'
-              : 'The signature was cancelled — the agent was not removed and can still spend within its budget.'
+              ? 'The approval was cancelled — this agent’s budget is still active.'
+              : 'The approval was cancelled — the agent was not removed and can still spend within its budget.'
             : result.reason === 'too_many'
               ? null // the state line below carries the actionable version
               : finish
@@ -198,7 +198,7 @@ export function RemoveAgentDialog({
                     ? 'Checking which budgets it still holds…'
                     : budgetAlreadyEnded
                       ? 'No budget is left to end.'
-                      : 'You sign once and every budget it still holds ends — no matter how many.'}
+                      : 'You approve once and every budget it still holds ends — no matter how many.'}
                 </li>
                 <li>
                   <span className="font-medium text-[var(--v2-ink)]">Its history stays.</span> Nothing
@@ -215,7 +215,7 @@ export function RemoveAgentDialog({
                   {budgetsLoading
                     ? 'Checking which budgets it still holds…'
                     : needsSignature
-                      ? 'You sign once and every budget it holds ends — no matter how many.'
+                      ? 'You approve once and every budget it holds ends — no matter how many.'
                       : cannotEndBudgetHere && isHalfRevoked(agent)
                         ? 'Haven cannot end its budget from here — it may still be active on the account it was removed from.'
                         : 'Its spending authority is already ended.'}
@@ -284,7 +284,7 @@ export function RemoveAgentDialog({
               the user pressing the same button forever. */}
           {phase === 'too_many' && (
             <InlineAlert>
-              This agent holds too many budgets to stop in one signature. Stop them individually
+              This agent holds too many budgets to stop in one approval. Stop them individually
               on the{' '}
               <Link
                 href={`/agents/${agent.id}`}

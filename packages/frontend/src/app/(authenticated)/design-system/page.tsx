@@ -1,6 +1,6 @@
 'use client'
 
-import { ArrowDown, ArrowUp, Bot, Check, Circle, EllipsisVertical, Info, OctagonAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Bot, Check, Circle, CirclePause, EllipsisVertical, Info, OctagonAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
 import { MobileTabBar } from '@/components/sidebar/MobileTabBar'
 import { baseNavItems } from '@/components/sidebar/Sidebar'
 import { Icon } from '@/components/ui/Icon'
@@ -19,6 +19,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterPill } from '@/components/ui/FilterPill'
 import { Monogram } from '@/components/ui/Monogram'
 import { MerchantCard } from '@/components/marketplace/MerchantCard'
+import { ComingSoonMerchants } from '@/components/marketplace/ComingSoonMerchants'
 import { Input, MaxButton, PasteButton } from '@/components/ui/Input'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Modal } from '@/components/ui/Modal'
@@ -30,6 +31,7 @@ import { Textarea } from '@/components/ui/Textarea'
 import { Table, tableColumnClass, tableHideFromClass } from '@/components/ui/Table'
 import { SidePanel } from '@/components/ui/SidePanel'
 import { StepProgress } from '@/components/ui/StepProgress'
+import { DialogActions } from '@/components/ui/DialogActions'
 import { SeriesSwatch, StackedBarChart } from '@/components/ui/StackedBarChart'
 import type { StackedBarDay } from '@/components/ui/StackedBarChart'
 import { AreaChart } from '@/components/ui/AreaChart'
@@ -303,7 +305,12 @@ const DS_SPARKLINE_SUMMARY =
 /**
  * The AttentionList sample's items — one per tone, one of them without a badge
  * label, and one (the failure) without the dismiss, so the reserved slot and
- * the one trailing column are on show.
+ * the one trailing column are on show. The badge-less item carries an action:
+ * the product's only badge-less kind (`haven-paused`) has neither badge nor
+ * action and is not dismissible, so a badge-less dismiss-only row would render
+ * a shape no product kind has — a lone × on its own line below `sm` (#4033).
+ * The `haven-paused`-shaped row shows that shape: nothing visible to align,
+ * so it renders no trailing slot at all and its tone word rides in the body.
  */
 const DS_ATTENTION_ITEMS: AttentionListItem[] = [
   {
@@ -334,6 +341,11 @@ const DS_ATTENTION_ITEMS: AttentionListItem[] = [
     subtitle: 'The spending summary for the week ending Sunday is ready to read.',
     tone: 'brand',
     icon: Sparkles,
+    action: (
+      <Button size="sm" variant="ghost">
+        Read summary
+      </Button>
+    ),
   },
   {
     id: 'payment-failed',
@@ -350,6 +362,21 @@ const DS_ATTENTION_ITEMS: AttentionListItem[] = [
         View activity
       </Button>
     ),
+  },
+  {
+    // The `haven-paused` shape (#4033): no badge, no action, not dismissible —
+    // nothing visible to align, so the row renders no trailing slot and the
+    // sr-only tone word rides in the body. Equal space above and below the
+    // body at every width.
+    id: 'haven-paused',
+    title: 'Haven paused sponsored payments',
+    subtitle: "Your budgets are untouched. Haven's own cap stopped a payment.",
+    tone: 'neutral',
+    icon: CirclePause,
+    // As in the product: `haven-paused` is not in DISMISSIBLE_ATTENTION_KINDS,
+    // so the default-true dismissible would hang a fourth × on the list —
+    // and this row's whole point is having nothing visible to align.
+    dismissible: false,
   },
 ]
 
@@ -491,6 +518,8 @@ export default function DesignSystemPage() {
   const [comingSoonOpen, setComingSoonOpen] = useState(false)
   const [panelOpen, setPanelOpen] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [topModalOpen, setTopModalOpen] = useState(false)
+  const [topModalTall, setTopModalTall] = useState(false)
   const [checkboxOn, setCheckboxOn] = useState(true)
   const [sampleAmount, setSampleAmount] = useState('')
   const [dsBudgetAmount, setDsBudgetAmount] = useState('')
@@ -1086,7 +1115,11 @@ export default function DesignSystemPage() {
               <code className="rounded bg-[var(--v2-surface)] px-1">aria-checked</code> options, because the
               choices are mutually exclusive. The group carries <code className="rounded bg-[var(--v2-surface)] px-1">aria-label</code>{' '}
               so a screen reader names the question first; options are real buttons, so keyboard
-              works without extra wiring. Never hand-roll a second control of this shape.
+              works without extra wiring. The selected option uses the app&rsquo;s active idiom —
+              brand ink on brand-soft inside an inset brand outline, a boundary of at least 3:1 against
+              the track in both themes — and every option&rsquo;s hit area is 44px tall while it
+              paints 32px (#4056, the same mechanism as Button). Never hand-roll a second control
+              of this shape.
             </p>
           </Card>
 
@@ -1138,37 +1171,31 @@ export default function DesignSystemPage() {
 
           <Card hover={false} className="p-5">
             <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Theme toggle</h3>
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <ThemeToggle />
-              <span className="text-xs text-[var(--v2-ink-3)]">
-                The icon button, as the top bar's right cluster renders it — one click
-                flips the palette, light to dark and back, and the accessible name says
-                what the click will do, not only what the icon is.
-              </span>
-            </div>
             <div className="mt-3 rounded-lg border border-[var(--v2-border)] p-2">
-              <ThemeToggle variant="row" />
-              <span className="sr-only">The row variant shown outside the sheet it lives in</span>
+              <ThemeToggle />
+              <span className="sr-only">The row shown outside the sidebar footer it lives in</span>
             </div>
             <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
               The one-gesture theme control, the quick half
               (<code className="rounded bg-[var(--v2-surface)] px-1">ui/ThemeToggle</code>,
-              from the top bar and the mobile sheet's control block — Settings keeps its
-              three explicit choices on its own screen). The glyph answers what you are
+              shown here outside the desktop rail&rsquo;s footer it lives in —
+              Settings and, below lg, the More sheet keep the three explicit choices). The glyph
+              answers what you are
               (<code className="rounded bg-[var(--v2-surface)] px-1">Sun</code> in light,{' '}
               <code className="rounded bg-[var(--v2-surface)] px-1">Moon</code> in dark;
-              the quick toggle has no system step — that choice lives in Settings); the
+              the quick toggle has no system step — that choice lives in Settings and the
+              phone More sheet); the
               name answers where you are going
               (&quot;Theme: dark. Switch to light&quot;), because a control whose label is only
-              its current state cannot be predicted. The icon is a plain clickable
-              button with no hover or focus tooltip (#2953): the icon alone is the
-              affordance, and the accessible name carries the whole message for screen
-              readers. The swap cross-fades under{' '}
+              its current state cannot be predicted. The swap cross-fades under{' '}
               <code className="rounded bg-[var(--v2-surface)] px-1">prefers-reduced-motion:
-              no-preference</code> and snaps otherwise, and the row variant's visible
-              label is a prefix of the name, so the label sits in the name. Never hand-roll
-              a second control of this shape; both surfaces here are the primitive's
-              variants, and the two call sites decide which one renders.
+              no-preference</code> and snaps otherwise, and the visible label is a prefix
+              of the name, so the label sits in the name. There is one rendering since
+              #4029: the icon variant that lived in the top bar's right cluster was
+              deleted with the bar, so the rail footer&rsquo;s row is the desktop&rsquo;s only
+              theme control (below lg the More sheet carries the three-way one, #4053)
+              and the primitive takes no variant prop at all. Never hand-roll a second
+              control of this shape.
             </p>
           </Card>
 
@@ -1356,12 +1383,12 @@ export default function DesignSystemPage() {
               {[
                 ['--v2-z-content', '10', 'In-flow overlaps: badges, gradient washes'],
                 ['--v2-z-sticky', '20', 'Sticky table headers'],
-                ['--v2-z-chrome', '100', 'TopBar — the app shell’s own bar'],
-                ['--v2-z-tab-bar', '105', 'The bottom tab bar (#2731) — the shell’s other bar'],
+                ['--v2-z-chrome', '100', 'App chrome — no consumer; the anchor the nav tiers are ordered against'],
+                ['--v2-z-tab-bar', '105', 'The bottom tab bar (#2731) — the shell’s only bar'],
                 ['--v2-z-chrome-popover', '110', 'Popovers anchored in the chrome (notifications, wallet, user menu)'],
-                ['--v2-z-nav-scrim', '130', 'Mobile drawer scrim'],
-                ['--v2-z-nav-drawer', '140', 'Mobile drawer itself'],
-                ['--v2-z-nav-toggle', '150', 'The Open / Close sidebar toggle'],
+                ['--v2-z-nav-scrim', '130', 'The phone More sheet’s scrim'],
+                ['--v2-z-nav-drawer', '140', 'The phone More sheet itself'],
+                ['--v2-z-nav-toggle', '150', 'No consumer since More moved into the tab bar — ordering anchor'],
                 ['--v2-z-modal', '200', 'Modal, SidePanel'],
                 ['--v2-z-tooltip', '210', 'Tooltip'],
                 ['--v2-z-panel', '250', 'AgentPanel'],
@@ -1384,14 +1411,13 @@ export default function DesignSystemPage() {
             The rule the numbers encode
           </h3>
           <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-            The mobile navigation overlay outranks the app chrome it slides over, and modals
-            outrank the navigation. That direction is not arbitrary. The drawer is{' '}
-            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">inset-y-0</code>, so its
-            own logo band shares the top 56px with the bar; its scrim exists to dim everything
-            behind it, and “everything” includes the bar. Let the bar win and the drawer is
-            decapitated, the scrim dims all but the top strip, and the toggle — which sits inside
-            that strip by design, in the gap the bar reserves for it — cannot be tapped at all.
-            Modals sit above both, because a dialog opened from a nav link has to cover the drawer.
+            The mobile navigation overlay outranks the app chrome, and modals outrank the
+            navigation. That direction is not arbitrary: let the chrome win and the navigation is
+            covered and its control cannot be tapped at all — #1749, a header and a toggle given
+            numbers independently. The open More sheet covers the floating tab bar by rank: its
+            scrim and card out-rank the bar, the scrim shades to the viewport bottom, and the
+            sheet closes itself with its own ✕ (#4058). Modals sit above both, because a dialog
+            opened from a nav link has to cover the sheet.
           </p>
           <p className="mt-3 text-sm leading-relaxed text-[var(--v2-ink-2)]">
             Adding a layer means picking the tier it belongs to, not picking a number. If none of
@@ -1411,15 +1437,20 @@ export default function DesignSystemPage() {
             Safe areas — <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">SafeAreaBand</code>
           </h3>
           <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-            The strip behind the iOS status bar is its own element, never padding inside the bar.{' '}
+            The strip behind the iOS status bar is its own element, never padding inside a
+            bar.{' '}
             <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">ui/SafeAreaBand</code> renders
             it: unblurred, and opaque by default, sized by{' '}
-            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">--v2-safe-top</code>, and a
-            sibling above the blurred bar. It has no rendered sample here because it is a zero-height
+            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">--v2-safe-top</code>. The
+            authenticated shell renders it directly above the scroll region (#4029 — there
+            is no top bar for it to sit inside any more), and the marketing
+            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">Header</code> takes it
+            with <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">bg-transparent</code>.
+            It has no rendered sample here because it is a zero-height
             box at every viewport this page can show — the inset is 0 without a notch. Keep{' '}
             <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">backdrop-filter</code> off
             anything that spans a safe-area band: blur is for content scrolling under a bar, and
-            nothing scrolls under the status bar. Opaque is the default, not the rule: a bar
+            nothing scrolls under the status bar. Opaque is the default, not the rule: a surface
             whose own background is translucent by design passes{' '}
             <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">bg-transparent</code> so its
             colour shows through — an exception to <em>opaque</em>, never to <em>unfiltered</em>.
@@ -1429,9 +1460,9 @@ export default function DesignSystemPage() {
 
       <Section
         title="Bottom tab bar — primary navigation below lg"
-        description="Below `lg` the drawer stops being the primary navigation: four tabs (Dashboard, Agents, Transactions, Accounts) plus More, which opens the drawer for everything else. The drawer is not deleted, it becomes secondary. Tabs are selected from the sidebar's own list BY ROUTE, never by index — the bar's order differs from the drawer's, so a positional read would reorder it the next time an entry is inserted. Active state follows the route including detail pages, so /agents/agent-research lights Agents."
+        description="Below `lg` the primary navigation: a floating pill of four tabs (Dashboard, Agents, Activity — the bar's label for /transactions — and Accounts) plus More, which opens a floating card with everything the tabs do not carry. The active tab is brand ink on a rounded brand-soft indicator with a 1px inset brand outline, the same idiom as a selected SegmentedControl option. Tabs are selected from the sidebar's own list BY ROUTE, never by index — the bar's order differs from the rail's, so a positional read would reorder it the next time an entry is inserted. Active state follows the route including detail pages, so /agents/agent-research lights Agents."
       >
-        <Card hover={false} className="max-w-sm overflow-hidden">
+        <Card hover={false} className="max-w-sm p-4">
           {/*
             The REAL component, in `presentational` mode — not a hand-rolled
             copy of it. The showcase's mirror of `TransactionsTable` taught this
@@ -1449,21 +1480,21 @@ export default function DesignSystemPage() {
           <MobileTabBar items={baseNavItems} presentational activeHref="/agents" />
         </Card>
         <p className="mt-3 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-          Three surfaces reserve the bar&rsquo;s height from the{' '}
+          The pill floats{' '}
+          <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">--v2-tab-bar-bottom</code>{' '}
+          above the bottom edge — 12px, or the home-indicator inset on a notched phone — and is{' '}
           <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">--v2-tab-bar-h</code>{' '}
-          token, and only one of them is the bar: <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">&lt;main&gt;</code>{' '}
-          adds it to its bottom padding so the last row does not sit under the bar, and the toast
-          container lifts by it so the payoff notification is not hidden behind the navigation
-          everyone is looking at. The safe-area inset is added at each site rather than folded into
-          the token: the bar pads itself with it, the others clear the bar and the inset together.
+          tall. Two other surfaces clear it with the same sum:{' '}
+          <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">&lt;main&gt;</code> adds it
+          to its bottom padding so the last row does not sit under the pill, and the toast container
+          lifts by it so the payoff notification is not hidden behind the navigation everyone is
+          looking at.
         </p>
         <p className="mt-3 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-          <strong>More is not a cell of this bar.</strong> It is a sibling of it, on the
-          nav-toggle tier rather than the tab-bar tier, because one control both opens the drawer
-          and closes it while painted over the drawer — and a child cannot climb out of its
-          parent&rsquo;s stacking context. It keeps the accessible name{' '}
-          <em>Open sidebar</em>, which is load-bearing: the screenshot harness waits on that name
-          from 25 call sites.
+          <strong>More is the fifth cell, and only opens.</strong> The card it opens floats over
+          the bar with a scrim to the bottom edge, so the sheet carries its own ✕. The cell is
+          always <em>Open sidebar</em> and the ✕ is <em>Close sidebar</em> — names that are
+          load-bearing: the capture harness and the e2e fixtures click them.
         </p>
       </Section>
 
@@ -1725,12 +1756,28 @@ export default function DesignSystemPage() {
 
       <Section
         title="StepProgress"
-        description="Thin step indicator for multi-step flows (connect agent, onboarding). 0-indexed currentStep; pass totalSteps as currentStep to render everything completed."
+        description="Full-width step indicator for multi-step flows (connect agent, replace signing key): discs at the ends, connectors stretch between them, an optional short label under each disc. 0-indexed currentStep; pass totalSteps as currentStep to render everything completed."
       >
         <Card hover={false} className="max-w-sm space-y-4 p-5">
-          <StepProgress totalSteps={3} currentStep={0} />
-          <StepProgress totalSteps={3} currentStep={1} />
-          <StepProgress totalSteps={3} currentStep={3} />
+          <StepProgress totalSteps={3} currentStep={0} labels={['Name', 'Budget', 'Connect']} />
+          <StepProgress totalSteps={3} currentStep={1} labels={['Name', 'Budget', 'Connect']} />
+          <StepProgress totalSteps={3} currentStep={3} labels={['Name', 'Budget', 'Connect']} />
+          {/* `halted`: the flow stopped on Connect (expired / cancelled / failed). */}
+          <StepProgress totalSteps={3} currentStep={2} labels={['Name', 'Budget', 'Connect']} halted />
+        </Card>
+      </Section>
+
+      <Section
+        title="DialogActions"
+        description="A dialog screen's action pair: secondary then primary, equal halves on the body edges at 40px. Below sm (640px) the pair stacks, primary on top, both full width — resize to see it. A screen with a single action uses one full-width primary instead."
+      >
+        <Card hover={false} className="max-w-xl p-5" data-testid="ds-dialog-actions">
+          <DialogActions>
+            <Button variant="ghost" className="flex-1">
+              Back
+            </Button>
+            <Button className="flex-1">Create setup prompt</Button>
+          </DialogActions>
         </Card>
       </Section>
 
@@ -2780,6 +2827,17 @@ export default function DesignSystemPage() {
               </p>
             </div>
             <div>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Placement</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                Centred by default. A flow whose screens change height in one dialog passes{' '}
+                <code className="rounded bg-[var(--v2-surface)] px-1">placement=&quot;top&quot;</code> so the header holds
+                still and the body grows downward.
+              </p>
+              <Button variant="ghost" size="sm" className="mt-2" onClick={() => setTopModalOpen(true)}>
+                Open top-anchored modal
+              </Button>
+            </div>
+            <div>
               <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Close behavior</h3>
               <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
                 Backdrop, Escape, and the optional close button dismiss ordinary dialogs. Disable only the affordances an active execution step must protect.
@@ -2906,7 +2964,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="AttentionList"
-        description="The list of things that need your eye (#3805), built from Row, StatusBadge and Icon. The rows are static — the action and the dismiss live in trailing, never on the row itself, so an action is never nested inside another control. The tone always rides text as well as colour (Row's leading icon is aria-hidden): a StatusBadge label, or an sr-only tone word when the item has no badge. Budget reached is neutral — the budget did its job; danger is for real failures only. Dismiss is labelled Dismiss: {title} and calls onDismiss(id); the list holds no dismissal state, and after a dismiss focus moves to the next item, or to the list heading when the list empties. The title and subtitle each line-clamp to two lines at every width; the icon (and, from sm up, the trailing controls) are centred vertically in the row, with Row's symmetric padding; the trailing controls form one column — a row with a badge or action but no dismiss keeps an empty slot in its place whenever another row has one, and actions share a 7rem minimum width (a wider label grows past it); below sm the trailing slot wraps under the body. fullBleed is for a list that is the card's body, as on the dashboard: rows run edge to edge with hairline dividers and the card's 20px side inset, and this sample renders it so the centring and clamp measurements cover the dashboard's shape. Zero items renders nothing — the caller shows the empty state."
+        description="The list of things that need your eye (#3805), built from Row, StatusBadge and Icon. The rows are static — the action and the dismiss live in trailing, never on the row itself, so an action is never nested inside another control. The tone always rides text as well as colour (Row's leading icon is aria-hidden): a StatusBadge label, or an sr-only tone word when the item has no badge. Budget reached is neutral — the budget did its job; danger is for real failures only. Dismiss is labelled Dismiss: {title} and calls onDismiss(id); the list holds no dismissal state, and after a dismiss focus moves to the next item, or to the list heading when the list empties. The title and subtitle each line-clamp to two lines at every width; the icon (and, from sm up, the trailing controls) are centred vertically in the row, with Row's symmetric padding; the trailing controls form one column — a row with a badge or action but no dismiss keeps an empty slot in its place whenever another row has one, and actions share a 7rem minimum width (a wider label grows past it); below sm the trailing slot wraps under the body — except on a row with nothing visible to align (no badge, no action, not dismissible), which renders no trailing slot at all and carries its sr-only tone word in the body instead (#4033). fullBleed is for a list that is the card's body, as on the dashboard: rows run edge to edge with hairline dividers and the card's 20px side inset, and this sample renders it so the centring and clamp measurements cover the dashboard's shape. Zero items renders nothing — the caller shows the empty state."
       >
         <div data-testid="ds-attention-list">
           <Card hover={false} className="overflow-hidden">
@@ -2996,8 +3054,8 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
-        title="Signing credential (wallet menu)"
-        description="Which passkey is about to sign, as the wallet menu states it. Two states, because they are two different facts: a credential this device's marker matched, and the passkeys[0] fallback used when no enrolled passkey carries this device's marker. The fallback is deliberate and load-bearing — see delegation-rail-security-model.md §6 — and until #1952 the menu rendered NOTHING in that case, going silent in exactly the case where the credential was chosen by array position."
+        title="Approving credential (wallet menu)"
+        description="Which passkey you are about to approve with, as the wallet menu states it. Two states, because they are two different facts: a credential this device's marker matched, and the passkeys[0] fallback used when no enrolled passkey carries this device's marker. The fallback is deliberate and load-bearing — see delegation-rail-security-model.md §6 — and until #1952 the menu rendered NOTHING in that case, going silent in exactly the case where the credential was chosen by array position."
       >
         {/*
           Rendered with props forced, as every gallery state is. Since #3825
@@ -3127,7 +3185,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Merchant card (marketplace)"
-        description="The /marketplace grid's card (#3079, epic #3077; footer and markers per #3980): monogram or logo, name, the category as plain ink-3 text (not a chip — the network chips keep their surface-2 pills), description clamped to two lines, network chips, and a bottom-pinned footer: 'From <price> USDC' on the ONE frontend price format (#4008) — the backend's two-decimal rule, trailing zeros trimmed to at least two decimals ('0.10', '1.00'; '0.001' stays) — with the offer count after it when there is more than one, the count alone when no counted offer prices in USDC, and nothing at all on a coming-soon card, which renders muted with 'Coming soon' in the badge slot. Verified is a quiet check after the name — title = the meaning, sr-only 'Verified' — following verified_payable, the wire's own proof (#3078)."
+        description="The /marketplace grid's card (#3079, epic #3077; footer and markers per #3980): monogram or logo, name, the category as plain ink-3 text (not a chip — the network chips keep their surface-2 pills), description clamped to two lines, network chips, and a bottom-pinned footer: 'From <price> USDC' on the ONE frontend price format (#4008) — the backend's two-decimal rule, trailing zeros trimmed to at least two decimals ('0.10', '1.00'; '0.001' stays) — the price in ink and semibold, the offer count after it in ink-3 when there is more than one (#4052), the count alone when no counted offer prices in USDC. A test merchant carries a neutral 'Test' StatusBadge in the badge slot — the full 'payments are real, goods are demo' note is the merchant page's (#4052). Only payable merchants get a card: coming-soon ones list below the grid (next entry). Verified is a quiet check after the name — title = the meaning, sr-only 'Verified' — following verified_payable, the wire's own proof (#3078)."
       >
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <MerchantCard
@@ -3166,8 +3224,16 @@ export default function DesignSystemPage() {
               lowest_price_atomic: '50000',
             }}
           />
-          <MerchantCard
-            merchant={{
+        </div>
+      </Section>
+
+      <Section
+        title="Coming-soon merchants (marketplace)"
+        description="The /marketplace section below the card grid (#4052): merchants not payable yet, as one Card — a Card.Header band titled 'Coming soon' (h2), then a Card.Section divided list of linked Rows (Monogram, name, one-line description, an ink-3 chevron trailing — the row's one affordance; a trailing category read as stray on a full-width row). Rows sit on the header's px-5 inset; the toneless leading box is sized to the 36px Monogram via leadingClassName. Renders nothing when the list is empty, so no heading stands over nothing."
+      >
+        <ComingSoonMerchants
+          merchants={[
+            {
               id: 'ds-merchant-coming-soon',
               slug: 'ds-merchant-coming-soon',
               name: 'Berget AI',
@@ -3182,9 +3248,25 @@ export default function DesignSystemPage() {
               networks: [],
               verified_payable: false,
               lowest_price_atomic: null,
-            }}
-          />
-        </div>
+            },
+            {
+              id: 'ds-merchant-coming-soon-2',
+              slug: 'ds-merchant-coming-soon-2',
+              name: 'Redpine',
+              description: 'Retrieval and search APIs, metered per query.',
+              website: null,
+              logo_url: null,
+              category: 'search',
+              country: null,
+              listing_status: 'coming_soon',
+              is_test_merchant: false,
+              offer_count: 0,
+              networks: [],
+              verified_payable: false,
+              lowest_price_atomic: null,
+            },
+          ]}
+        />
       </Section>
 
       <Section
@@ -3278,13 +3360,49 @@ export default function DesignSystemPage() {
       </Section>
 
       <Modal
+        open={topModalOpen}
+        onClose={() => {
+          setTopModalOpen(false)
+          setTopModalTall(false)
+        }}
+        title="Top-anchored modal"
+        subtitle="Change the body height — the header stays where it is."
+        showCloseButton
+        width="xl"
+        placement="top"
+      >
+        <div className="flex flex-col gap-5">
+          <p>
+            {topModalTall
+              ? 'A taller screen. In a centred dialog the title would have moved up by half the difference; here only the bottom edge moves.'
+              : 'A short screen.'}
+          </p>
+          {topModalTall && (
+            <div className="space-y-3">
+              <p>The budget refills at the end of each period. Nothing carries over.</p>
+              <p>The agent can spend up to the budget you set, from this Haven wallet only.</p>
+              <p>It cannot move funds anywhere else, and it never holds a key of its own.</p>
+            </div>
+          )}
+          <DialogActions>
+            <Button variant="ghost" className="flex-1" onClick={() => setTopModalOpen(false)}>
+              Close
+            </Button>
+            <Button className="flex-1" onClick={() => setTopModalTall((tall) => !tall)}>
+              {topModalTall ? 'Show short screen' : 'Show tall screen'}
+            </Button>
+          </DialogActions>
+        </div>
+      </Modal>
+
+      <Modal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         title="Set agent budget"
         subtitle="Set the budget this agent may spend."
         showCloseButton
         width="lg"
-        headerAccessory={<StepProgress totalSteps={3} currentStep={1} />}
+        headerAccessory={<StepProgress totalSteps={3} currentStep={1} labels={['Name', 'Budget', 'Connect']} />}
         footer={
           <>
             <Button variant="ghost" onClick={() => setModalOpen(false)}>

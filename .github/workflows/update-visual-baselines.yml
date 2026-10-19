@@ -53,7 +53,9 @@ on:
       # decides what FAILS; it must not permanently decide what can be REFRESHED.
       #
       # So the unsafe mode stays reachable and stops being the default, and the
-      # audit step below watches it.
+      # audit step below watches it. (The stale band that motivated #1760 was
+      # the top bar's 56px strip; the bar itself is gone since #4029, and the
+      # un-refreshability lesson is why the audit stays.)
       mode:
         description: 'changed = rewrite only baselines that FAIL comparison (default). all = rewrite on any byte difference; needs `expected`, and blesses renders nobody compared.'
         type: choice

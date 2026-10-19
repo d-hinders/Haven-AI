@@ -242,40 +242,63 @@
      authenticated route.
 
      The rule the numbers encode, in one sentence: the mobile navigation
-     overlay outranks the app chrome it slides over. That direction is not
-     arbitrary. The drawer is `inset-y-0`, so its own logo band occupies the
-     same 56px as TopBar; its scrim exists to dim everything behind it, and
-     "everything" includes the bar. Let the bar win and the drawer is
-     decapitated, the scrim dims all but the top strip, and the toggle — which
-     is positioned INSIDE that strip by design, in the gap TopBar reserves for
-     it — is unreachable. Modals and toasts in turn outrank the navigation,
-     because a dialog opened from a nav link must cover the drawer.
+     overlay outranks the app chrome it opens over. That direction is not
+     arbitrary: let the chrome win and the navigation is covered and its
+     control cannot be tapped (#1749). The phone overlay is the More sheet
+     (#4053), which since #4058 floats OVER the tab bar with a full-height
+     scrim: the bar is covered by rank while the sheet is open, and the sheet
+     carries its own close control. Modals and toasts in turn
+     outrank the navigation, because a dialog opened from a nav link must
+     cover the sheet.
 
      Tiers are spaced by 10 so a genuinely new layer has room to land between
      two without renumbering the scale. */
   --v2-z-content: 10; /* in-flow overlaps: badges, gradient washes */
   --v2-z-sticky: 20; /* sticky table headers */
-  --v2-z-chrome: 100; /* TopBar — the app shell's own bar */
-  /* The bottom tab bar (#2730, used by #2731) — the shell's OTHER bar, and the
+  /* The app chrome tier. It has no consumer: the top bar that owned it was
+     deleted (#4029, epic #4027), and the non-production warning line that
+     briefly inherited it was removed the day after. The tier stays as the
+     anchor the nav, tab-bar and popover tiers are ordered against — the same
+     reason `--v2-z-nav-scrim` survives without a consumer. */
+  --v2-z-chrome: 100;
+  /* The bottom tab bar (#2730, used by #2731) — the shell's only bar, and the
      one tier the scale's spacing-by-10 was left room for. Between chrome and
-     chrome-popover deliberately: a popover anchored in the top bar can extend
-     down over the bar's band on a phone and must not be clipped by it, while
-     the drawer and its scrim (130/140) have to cover the bar so "More" is not
-     painted over by the navigation it opened. */
+     chrome-popover deliberately: a popover can extend down over the bar's
+     band on a phone and must not be clipped by it. Its fifth cell is More
+     (#4053), which opens a sheet that, since #4058, floats over the bar: the
+     scrim (130) and the sheet (140) out-rank it on purpose, and the sheet's
+     own ✕ closes it. */
   --v2-z-tab-bar: 105;
 
-  /* The bottom tab bar's height (#2731), as a token because three places need
-     the same number and two of them are not the bar: `<main>`'s scroll region
-     reserves it so the last row does not sit under the bar, and the toast
-     container lifts by it so the payoff notification is not hidden behind the
-     thing everyone is looking at. The safe-area inset is NOT folded in here —
-     it is added at each site, because the bar pads itself with it while the
-     others clear the bar and the inset together. */
-  --v2-tab-bar-h: 3.5rem;
-  --v2-z-chrome-popover: 110; /* popovers anchored in the chrome (notifications, wallet) */
-  --v2-z-nav-scrim: 130; /* mobile drawer scrim — dims the chrome, hence > chrome */
-  --v2-z-nav-drawer: 140; /* mobile drawer itself */
-  --v2-z-nav-toggle: 150; /* the Open/Close toggle — above its own drawer, so one control does both */
+  /* The floating tab bar's geometry (#2731, floating since #4058), as tokens
+     because the places that need the numbers are mostly not the bar:
+     `<main>`'s scroll region reserves `h + bottom` so the last row clears the
+     pill, and the toast container lifts by the same sum so the payoff
+     notification is not hidden behind the thing everyone is looking at.
+
+     `--v2-tab-bar-h` is the pill's OUTER height: 52px cells, `py-1` (4px)
+     above and below them and the 1px border — 62px. `--v2-tab-bar-bottom` is the gap
+     between the pill and the viewport bottom: 12px in a browser tab, and the
+     home-indicator inset itself on a notched phone, where adding a gap ON TOP
+     of the inset would float the pill visibly high. */
+  --v2-tab-bar-h: 3.875rem;
+  --v2-tab-bar-bottom: max(0.75rem, var(--v2-safe-bottom));
+
+  /* The sticky table-header compensation (#4029): `Table`'s `STICKY_HEAD` /
+     `STICKY_CELL` pin with `top-[var(--v2-sticky-head)]`, the NEGATIVE of the
+     scroll container's top padding (the value is stored negative), so a pinned
+     header sits flush against the top of the scrollport. The default is
+     -1.5rem — the 24px `py-6` the ops shell uses. The authenticated app's
+     shell overrides it on its frame
+     (`max-lg:[--v2-sticky-head:-1rem] lg:[--v2-sticky-head:-2rem]`) to track
+     its own `<main>` padding, 16px below `lg` and 32px at and above. A shell
+     with a different top padding overrides the variable rather than the
+     primitive gaining a responsive class. */
+  --v2-sticky-head: -1.5rem;
+  --v2-z-chrome-popover: 110; /* popovers anchored in the chrome (notifications, wallet, user menu) */
+  --v2-z-nav-scrim: 130; /* the phone More sheet's scrim (#4053) — dims the page above the tab bar */
+  --v2-z-nav-drawer: 140; /* the phone More sheet itself (#4053) */
+  --v2-z-nav-toggle: 150; /* no consumer since #4053 moved More into the tab bar; kept as an ordering anchor */
   --v2-z-modal: 200; /* Modal, SidePanel */
   --v2-z-tooltip: 210;
   --v2-z-panel: 250; /* AgentPanel */

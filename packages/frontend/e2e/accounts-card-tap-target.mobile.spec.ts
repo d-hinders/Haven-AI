@@ -79,8 +79,9 @@ async function openAccountsWithBothCards(page: Page) {
   await page.goto('/accounts')
   await page.waitForSelector('[data-testid="account-card"] h3 a', { timeout: 60_000 })
   /*
-    Below `lg` the nav drawer overlays the grid and would own every
-    `elementFromPoint` reading underneath it (#1749). The established call, and
+    Below `lg` an open More sheet would cover the grid and own every
+    `elementFromPoint` reading underneath it (#1749, #4053; the sheet starts
+    closed, so the helper is a presence check). The established call, and
     the same one `accounts-name-measure.spec.ts` and
     `tooltip-reachability.spec.ts` make before their own hit-dependent reads.
   */

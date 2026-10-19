@@ -30,7 +30,7 @@ export function canFinishRevoking(agent: Agent): boolean {
 /** Shared copy: every surface says the same thing about the same state. */
 export const HALF_REVOKED_TITLE = 'Revoked in Haven — its budget is still active on‑chain'
 export const HALF_REVOKED_BODY =
-  'Haven stopped this agent’s credential, but its budget has not been ended on-chain yet. Sign once to end it.'
+  'Haven stopped this agent’s credential, but its budget has not been ended on-chain yet. Approve once to end it.'
 export const HALF_REVOKED_UNLINKED_BODY =
   'Its budget may still be active on the account it was removed from, and Haven cannot end it from here.'
 export const FINISH_REVOKING_LABEL = 'Finish revoking'

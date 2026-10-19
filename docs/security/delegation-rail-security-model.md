@@ -1608,7 +1608,12 @@ making it unrecoverable.
   way to finish. It is per slot: it does not bound open-plus-pinned or
   shared-payTo authority. Grants left enabled by replaces before #3933 stay
   enabled until the owner stops them; the agent page flags any `replaced`,
-  unexpired row with that finish action.
+  unexpired row with that finish action. The owner-facing copy follows the
+  rule (#3971): an `unconfirmed` grant no longer warns that a retry adds a
+  second budget — the retry re-reads the attempt, and build/activate refuse
+  a second live budget in the slot — and the fund-merchant warning counts
+  the Stop signatures the edit will ask for (a re-keyed pair is two). Copy
+  only; no request, signature or authority path changes.
 
 Two honest limits of the mechanism (review-noted): the signer count is
 **DB-sourced** — an owner can change the signer set directly on-chain without
@@ -3150,6 +3155,27 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > nothing else in this document was re-read for it, and `last-verified` is not
 > bumped.
 >
+> **Re-verified unchanged (#4049, 2026-10-16, owner money actions say
+> "approve", not "sign"):** this diff is copy only. It touches four covered
+> files: `components/AccountSignersCard.tsx` and
+> `components/DelegationSendModal.tsx` (a cancelled-prompt toast now reads
+> "Approval was cancelled."), `components/DelegationBudgetCard.tsx` (helper,
+> toast and notice wording; pending sub-budget rows now name the actor,
+> "waiting for the sharing agent to sign it"), and
+> `hooks/useDelegationBudget.ts` (one JSDoc sentence). `pickSigningPath`,
+> `ready`, every signing step, the Stop/Edit/Remove gates and the signer-set
+> removal gate are untouched; no signature is added, removed or reordered. The
+> owner still authorises every money action with their own passkey or wallet —
+> "approve" names that act, it does not move it to Haven, and the re-key
+> refusal banner still says Haven can never give that approval for the owner.
+> The dated #3812 note in §3 quotes the button names of its day ("Sign new
+> budget", "Sign transfer"); they now read "Approve new budget" and "Approve
+> transfer", and that note is left as recorded. No new spender, no authority
+> grant, no custody change. Scope of this re-read: the four files above and
+> the sections that quote UI copy for them (§3's #3812 note, this run of
+> notes); nothing else in this document was re-read for it, and
+> `last-verified` is not bumped.
+>
 > **Re-verified (#3825, 2026-10-09, Settings → Signers; wallet pill leaves the
 > top bar):** the covered files this diff touches are
 > `domain/user-signers.ts` (new: the signer aggregation behind
@@ -3292,3 +3318,22 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > of this note: those reads and the additive `Agent.receivedSubBudgets`
 > wire field. Nothing else in this document was re-verified;
 > `last-verified` already reads 2026-10-15.
+
+> **Re-verified #4026 (2026-10-16 — own-account recipients in the owner send
+> flow).** The diff touches one file in this document's coverage list,
+> `packages/frontend/src/components/DelegationSendModal.tsx`: the send flow
+> now offers the user's OTHER registered accounts on the SENDING account's
+> chain as one-tap recipients (by name, deduped by address), prefilling the
+> same `recipient` state the manual address input already fed. No new
+> authority, signature, or fetch path: the send still goes through the
+> unchanged `useDelegationSend` prepare/submit against
+> `transfers/prepare|submit`, and `encodeTransfer`'s recipient rule is
+> unchanged — any valid non-zero address, "bounded by nothing but the
+> owner's signature" — so an own-account target was always permitted; the
+> UI merely stops requiring the user to paste an address they already own.
+> The chain filter is client-side presentation (a cross-chain own account is
+> simply not offered); it adds no restriction the backend enforces, which is
+> consistent with the owner-send model above. Nothing that decides who
+> signs, what may be spent, or when revocation bites changed. Scope of this
+> note: the send-flow recipient selection and the unchanged hook it feeds;
+> `last-verified` is bumped to 2026-10-16 for exactly this coverage.

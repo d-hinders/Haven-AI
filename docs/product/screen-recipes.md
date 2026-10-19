@@ -40,7 +40,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-10-12"
+last-verified: "2026-10-17"
 ---
 
 # Haven Screen Recipes
@@ -185,9 +185,10 @@ one setup prompt for every environment. Legacy Safe accounts are not rendered at
 all since #2413, so this flow is unreachable for one rather than being refused by
 a notice.
 
-Structure (step 3 of the modal is one numbered list — copy → paste → approve —
-that is both the instructions and the progress, #3832; see design-system.md §
-Numbered step list):
+Structure (the header band — Name / Budget / Connect — stays on step 3 with
+Connect active, and step 3 is one unnumbered status checklist — copy → paste →
+approve — that is both the instructions and the progress within that step,
+#3832; see design-system.md § Step status checklist):
 1. Create and copy a single setup prompt — identical for every environment. The
    copy action is the screen's one full-width primary (until the
    server-credential path issues credentials, when "Continue to wallet
@@ -350,9 +351,14 @@ one to pay (#3079, epic #3077). Renamed from Catalog; `/catalog` permanently
 redirects to `/marketplace`.
 
 Structure:
-1. Grid of merchant cards: monogram or logo, name, category chip, two-line
-   description, network chips, and a footer that reads an offer count, "Coming
-   soon" or the Haven test-merchant label.
+1. Grid of payable merchant cards: monogram or logo, name, category as plain
+   text, two-line description, network chips, and a footer that leads with the
+   price ("From <price> USDC", ink) and the offer count after it when there
+   is more than one. A test
+   merchant carries a neutral "Test" badge; its full note is on the merchant
+   page. Coming-soon merchants are not cards: they list below the grid as
+   linked rows in one "Coming soon" card, which renders only when it has rows
+   (#4052).
 2. Filters above the grid, in two rows: search (leading icon, filling the
    row) with a network dropdown beside it (only offered when more than one
    chain is listed, starting on the user's own network); then category pills

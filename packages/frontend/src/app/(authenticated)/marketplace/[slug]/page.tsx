@@ -15,7 +15,7 @@ import { OffersTable } from '@/components/marketplace/OffersTable'
 import FundMerchantModal, { eligibleFundingAgents } from '@/components/marketplace/FundMerchantModal'
 import { MerchantBudgetsList } from '@/components/marketplace/MerchantBudgetsList'
 import { useAgents } from '@/hooks/useAgents'
-import { offersOnUserNetwork, openBudgetCoversOffers } from '@/lib/marketplace'
+import { isActiveAgent, offersOnUserNetwork, openBudgetCoversOffers } from '@/lib/marketplace'
 import { useAuth } from '@/context/AuthContext'
 import { resolveDefaultAccount } from '@/lib/default-account'
 import { useBudgetRemaining } from '@/hooks/useBudgetRemaining'
@@ -23,7 +23,7 @@ import { useMerchant } from '@/hooks/useCatalog'
 import { useMerchantBudgets } from '@/hooks/useMerchantBudgets'
 
 /**
- * The way back on a phone, where Marketplace lives in the More drawer —
+ * The way back on a phone, where Marketplace lives in the More sheet —
  * rendered by EVERY branch of the page (loading, error, merchant-less,
  * success). The app's one back link, `BackLink` (#4028): above the title,
  * named by the parent alone. The merchant page has no `PageHeader` (its
@@ -146,7 +146,7 @@ export default function MerchantPage() {
   // agent it could name is ACTIVE — `eligibleFundingAgents` admits paused and
   // pending agents (the modal's own shape), and the panel must not point a
   // paused agent at an action it cannot complete.
-  const hasActiveEligibleAgent = eligibleFundingAgents(agents, funding).some((a) => a.status === 'active')
+  const hasActiveEligibleAgent = eligibleFundingAgents(agents, funding).some(isActiveAgent)
   // #4015 owner decision (a), 2026-10-16 — "No need to push for merchant
   // specific budgets here.": the header hides the action when an active
   // agent's OPEN budget already pays every offer on the user's network

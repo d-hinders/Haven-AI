@@ -566,7 +566,7 @@ const SCENARIOS: Scenario[] = [
  * request defers to the shared fixture with `route.fallback()`, the same
  * idiom `settings-accounting.visual.spec.ts` and `focus-visible.visual.spec.ts`
  * use. The shared fixture's own `/agents` and `/auth/*` handlers stay in
- * force, which is what keeps the shell (TopBar, sidebar, user menu) rendering
+ * force, which is what keeps the shell (sidebar, user card) rendering
  * its committed content instead of erroring into a half-painted capture.
  *
  * The route glob is the fixture's api-prefix pattern (`**` + the api path +

@@ -160,8 +160,8 @@ type Reading = {
  *    band guard with `measures 269px against a 253px row` even with the font
  *    long settled — reproduced locally, at ONE worker, on a cold dev-server
  *    cache. The rendered `<aside>` is the mount's own signal: unique to the
- *    Sidebar in this codebase, attached at every viewport (off-canvas fixed
- *    below `lg`), and committed in the same frame that gives `<main>` its
+ *    Sidebar in this codebase, attached at every viewport (`hidden` below
+ *    `lg`, #4053), and committed in the same frame that gives `<main>` its
  *    final width.
  *
  * The wait rides INSIDE the measurement primitives rather than beside the
@@ -278,7 +278,7 @@ async function openAgents(page: Page, firstName: string) {
   await page.getByRole('heading', { name: firstName, exact: true }).waitFor({ timeout: 60_000 })
 }
 
-/** Below `lg` the nav drawer overlays the grid (#1749); the shared helper is a no-op at 1280. */
+/** Below `lg` the shared helper closes the More sheet if it is open (#1749, #4053); it is a no-op at 1280. */
 async function atWidth(page: Page, width: number) {
   await page.setViewportSize({ width, height: 900 })
   await dismissMobileSidebar(page)

@@ -4,6 +4,8 @@ status: current
 covers:
   - packages/frontend/src/app/globals.css
   - packages/frontend/src/components/connect-agent/ConnectSteps.tsx
+  - packages/frontend/src/components/ui/DialogActions.tsx
+  - packages/frontend/src/components/connect-agent/ConnectStepShell.tsx
   - packages/frontend/src/context/ThemeContext.tsx
   - packages/frontend/src/lib/theme-bootstrap.ts
   - packages/frontend/src/lib/theme-tokens.ts
@@ -27,7 +29,6 @@ covers:
   - packages/frontend/src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx
   - packages/frontend/src/components/marketing/**
   - packages/frontend/src/components/sidebar/**
-  - packages/frontend/src/components/TopBar.tsx
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
   - packages/frontend/src/components/haven/BudgetMeter.tsx
   - packages/frontend/src/components/haven/ApprovalRequiredBanner.tsx
@@ -98,10 +99,20 @@ covers:
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
-last-verified: "2026-10-14"
+last-verified: 2026-10-17
 ---
 
 # Haven Design System
+
+> Re-verified 2026-10-17 for #4058: § z-index scale (the rule paragraph and the
+> nav-tier paragraph), § Safe areas (the phone-navigation paragraph), the
+> navigation bullets (floating tab bar, active idiom, More cell, More sheet) and
+> § Tap targets' "both states" bullet.
+> This note covers those passages only.
+
+> Re-verified 2026-10-17 for #4056: § Tap targets' `SegmentedControl` passage
+> (44px hit area, inset brand outline on the selected option). This note covers
+> that passage only.
 
 > Re-verified 2026-09-03 for #2468: the investor-briefing route, its tap-target
 > borrower, and its marketing exemption were retired; the surviving focus-ring
@@ -236,8 +247,10 @@ The third is the one that matters for how you read this section. It carries no
 `var()` at all — the colour is a perfectly ordinary `white` — and it shipped on a
 marketing surface that design-lint exempts. Every guard written before it matched
 a *shape*, so each new occurrence arrived wearing a shape the previous guard
-could not see. `TopBar`'s dead background was found only because a mutation
-during unrelated work went green when both renders came out byte-identical.
+could not see. The top bar's dead background (a `bg-[var(--v2-bg)]/85` quoted in
+its own source comment until the bar was deleted, #4029) was found only because
+a mutation during unrelated work went green when both renders came out
+byte-identical.
 
 So the check that binds is not a spelling rule. `src/__tests__/compiled-colour-utilities.test.ts`
 reads every opacity-modified colour utility out of the product source, compiles
@@ -443,16 +456,16 @@ the wrapper *is* the dim layer. Named by shape rather than by component on
 purpose — a list of file names here is a claim `covers:` has to reach, and the
 gate is right to ask for one fewer of those, not one more.)
 
-The drawer reaches the same strip by the third route: it is `inset-y-0` and,
-below `lg`, `w-full`, with the notch reserved in its own `max-lg:pt-*`. Since
-[#2820](https://github.com/d-hinders/Haven-AI/issues/2820) deleted the nav
-scrim, that drawer is what covers the band when the navigation is open, and it
-covers it **opaquely** with `--v2-surface` where a backdrop covers it dim. Both
-facts are asserted in `e2e/safe-area-insets.mobile.spec.ts`, and the opaque one
-is load-bearing: a translucent value there would mean a dim layer had returned
-to the strip under another name, which is the state
-[#2819](https://github.com/d-hinders/Haven-AI/issues/2819) is trying to get out
-of.
+The phone navigation deliberately does **not** reach that strip. Since
+[#4053](https://github.com/d-hinders/Haven-AI/issues/4053) the More menu is a
+sheet — a floating card since #4058, whose scrim runs to the viewport bottom —
+and its scrim's TOP stops at `--v2-safe-top` — unlike a modal
+backdrop — so with the sheet open the status-bar band is still the shell's
+opaque `SafeAreaBand`. That is the line [#2820](https://github.com/d-hinders/Haven-AI/issues/2820)
+drew for the full-screen drawer (cover the band opaquely, never dimly), kept
+by covering it not at all: a translucent layer in that strip is the state
+[#2819](https://github.com/d-hinders/Haven-AI/issues/2819) saw stick on a
+device. Both facts are asserted in `e2e/safe-area-insets.mobile.spec.ts`.
 
 That also leaves a modal backdrop as the only `.v2-modal-backdrop` reaching the
 safe area on the demo path, which is what #2819's remaining device test turns
@@ -485,7 +498,9 @@ that band was seen keeping the nav scrim's grey after the drawer closed. **The
 mechanism is unconfirmed** — the symptom needs a standalone shell with non-zero
 insets and no engine in CI has one — so the rule removes the class of failure
 rather than resting on a diagnosis. Use `ui/SafeAreaBand`: a strip as a sibling
-*above* the bar, never padding inside it.
+*above* whatever carries a blur, never padding inside it. (Since #4029 the
+authenticated shell renders the band itself, directly above the scroll region —
+there is no bar for it to sit inside.)
 
 The **filter** half is absolute; the **opacity** half is a default. Blur is for
 content scrolling under a bar, and nothing scrolls under the status bar, so the
@@ -504,29 +519,31 @@ Every stacking layer has a named token. **Reach for a token, never a fresh numbe
 ```css
 --v2-z-content:        10;   /* in-flow overlaps: badges, gradient washes */
 --v2-z-sticky:         20;   /* sticky table headers */
---v2-z-chrome:        100;   /* TopBar */
+--v2-z-chrome:        100;   /* app chrome — no consumer; the ordering anchor */
 --v2-z-tab-bar:       105;   /* reserved for the bottom tab bar (#2730, used by #2731) */
 --v2-z-chrome-popover: 110;  /* popovers anchored in the chrome */
---v2-z-nav-scrim:     130;   /* mobile navigation tier (consumer retired by #2820, ordering kept) */
---v2-z-nav-drawer:    140;   /* mobile drawer */
---v2-z-nav-toggle:    150;   /* the Open / Close sidebar toggle */
+--v2-z-nav-scrim:     130;   /* the phone More sheet's scrim (#4053) */
+--v2-z-nav-drawer:    140;   /* the phone More sheet (#4053) */
+--v2-z-nav-toggle:    150;   /* no consumer since #4053; ordering kept */
 --v2-z-modal:         200;   /* Modal, SidePanel */
 --v2-z-tooltip:       210;
 --v2-z-panel:         250;   /* AgentPanel */
 --v2-z-toast:        9999;   /* Toast, skip-to-content link */
 ```
 
-The rule the numbers encode: **the mobile navigation overlay outranks the app chrome it opens over, and modals outrank the navigation.** The drawer is `inset-y-0`, so its own logo band shares the top 56px with the bar. Let the bar win and the drawer is decapitated, and the toggle (which sits *inside* that band by design, in the gap the bar reserves for it) cannot be tapped at all. That was #1749: a `z-[100]` header and a `z-[60]` toggle chosen independently in different files left mobile primary navigation unopenable on every authenticated route.
+The rule the numbers encode: **the mobile navigation overlay outranks the app chrome it opens over, and modals outrank the navigation.** Let the chrome win and the navigation is covered and its control cannot be tapped at all. That was #1749: a `z-[100]` header and a `z-[60]` toggle chosen independently in different files left mobile primary navigation unopenable on every authenticated route. The More sheet ([#4053](https://github.com/d-hinders/Haven-AI/issues/4053)) covers the floating tab bar **by rank** since [#4058](https://github.com/d-hinders/Haven-AI/issues/4058): its scrim (130) and the card (140) out-rank the bar (105), the scrim shades to the viewport bottom, and the sheet carries its own ✕ — so nothing has to stay tappable beneath it. (From #4053 to #4058 the bar was kept reachable by geometry instead: the sheet and scrim ended at the bar's top edge, which cut through a floating pill.)
 
-`--v2-z-nav-scrim` has no consumer since #2820 — the drawer is full width below `lg`, so the slide-over scrim it used to carry was deleted — and the tier stays anyway. The scale's job is ordering, not inventory: removing the tier would renumber the ascent the tests pin and retire a landing place the day a second navigation overlay returns. Nothing new may take the tier back without a consumer that needs it.
+`--v2-z-chrome` has no consumer. The top bar that owned it was deleted (#4029, epic #4027), and the non-production warning line that briefly inherited it was removed the next day — on a phone it read as a rendering bug. The tier stays at 100 so the ordering the tests pin is unchanged; it is kept as the anchor the nav, tab-bar and popover tiers are ordered against, the same reason `--v2-z-nav-scrim` survives without a consumer.
 
-Tiers are spaced by 10 so a new layer lands between two without renumbering — `--v2-z-tab-bar` is that mechanism's first use, at 105, in the gap 100 left. It sits under `--v2-z-chrome-popover` because a popover anchored in the top bar can hang down across the bar's band on a phone, and under the nav tiers because the drawer the bar opens has to cover it. Adding a layer means picking the tier it belongs to; if none fits, add one to the scale first. A raw `z-[…]` in a shell component is the failure this scale prevents — `src/__tests__/z-index-scale.test.ts` fails on one, and on any inversion of the order above.
+`--v2-z-nav-scrim` has a consumer again since #4053 — the More sheet's scrim — after #2820 had left it empty for the full-width drawer. `--v2-z-nav-toggle` is now the empty one: More became a cell of the tab bar (#4053), and since #4058 the sheet that covers the bar closes itself with its own ✕, so no control has to float above an overlay. The tier stays anyway. The scale's job is ordering, not inventory: removing it would renumber the ascent the tests pin. Nothing new may take it without a consumer that needs it — `z-index-scale.test.ts` fails if the shell files use it.
+
+Tiers are spaced by 10 so a new layer lands between two without renumbering — `--v2-z-tab-bar` is that mechanism's first use, at 105, in the gap 100 left. It sits under `--v2-z-chrome-popover` because a popover anchored in the chrome can hang down across the tab bar's band on a phone, and under the nav tiers so nothing in the bar can paint over a navigation overlay. Adding a layer means picking the tier it belongs to; if none fits, add one to the scale first. A raw `z-[…]` in a shell component is the failure this scale prevents — `src/__tests__/z-index-scale.test.ts` fails on one, and on any inversion of the order above.
 
 That test reads source, so it cannot see stacking contexts or hit-testing. `e2e/mobile-nav-layering.mobile.spec.ts` is the half that can: it drives a real engine at four widths below `lg` and asserts `document.elementFromPoint` at the toggle's centre returns the toggle.
 
 **One dim treatment for every overlay: `v2-modal-backdrop`** ([#1818](https://github.com/d-hinders/Haven-AI/issues/1818)). `Modal` and `SidePanel` use it. It is a solid `--v2-modal-backdrop` fill and it deliberately carries **no `backdrop-filter`** — the reason is written at its definition in `globals.css`: a full-viewport blur makes the compositor hold a GPU snapshot of the whole page and re-blur it on every paint, which on tall pages ballooned VRAM and made the overlay feel sluggish.
 
-The mobile nav scrim used this token too, until #2820 deleted the scrim outright: with the drawer full width below `lg` there is nothing left to dim, and an element that exists only to be deleted is not a consumer to keep. The paragraph below survives because it is still the best record of WHY the token carries no blur — and because the failure it describes (an opacity modifier that compiles to nothing, making a `backdrop-filter` free by accident) is a trap waiting for the next overlay author, wherever that overlay lives.
+The mobile nav scrim used this token, until #2820 deleted the scrim with the full-width drawer; #4053's More sheet brought a scrim back on the same class, stopped below the status-bar band (§ *Safe areas*). The paragraph below survives because it is still the best record of WHY the token carries no blur — and because the failure it describes (an opacity modifier that compiles to nothing, making a `backdrop-filter` free by accident) is a trap waiting for the next overlay author, wherever that overlay lives.
 
 The nav scrim was the exception until #1818, and instructively so: it read `bg-[var(--v2-ink)]/40 backdrop-blur-sm`, but the opacity modifier on a bare `var()` compiled to nothing (see § "Opacity on a token colour"), so the scrim painted no background — and a `backdrop-filter` with nothing behind it to composite costs nothing. **The blur was free only by accident.** Fixing the fill would have made it real, on a `fixed inset-0` element, which is precisely the shape the rule above exists to prevent. So the fix reused the shared token rather than reviving a second convention.
 
@@ -574,19 +591,21 @@ Marketing pages may still use larger hero type:
 
 The authenticated app uses one stable product shell:
 
-- Sidebar: 240px desktop rail, full-screen mobile sheet below `lg` (#2820), white surface, subtle active tint, and a 2px brand accent bar on the active route.
-- **Below `lg` the drawer is SECONDARY navigation** ([#2731](https://github.com/d-hinders/Haven-AI/issues/2731)). Primary is a five-slot bottom tab bar — Dashboard, Agents, Transactions, Accounts, and More, which opens the drawer for everything else. Four properties are worth knowing before touching it:
-  - **Tabs are selected from `baseNavItems` by ROUTE, never by index.** The bar's order differs from the drawer's, so a positional read reorders the bar the next time an entry is inserted.
-  - **Active state prefix-matches on a `/` boundary**, so `/agents/agent-research` lights Agents — the screen the demo spends its time on — while `/accounts` cannot light for a hypothetical `/accounts-archive`.
-  - **One active idiom across the bar and the drawer it opens** ([#2818](https://github.com/d-hinders/Haven-AI/issues/2818)): active is brand ink plus a 2px brand rail — on the drawer the rail runs down the row's left edge, on the tab bar across the cell's top edge — and the drawer additionally tints the row, which the bar does not, because a fill in a 56px cell reads as a pressed button. The rail carries the accessibility weight rather than decorating: measured against `--v2-bg`, `--v2-ink` is 16.24:1 and `--v2-ink-3` 5.32:1 (the pre-#2818 active/inactive pair, ~3:1 in contrast with each other), while `--v2-brand` is 6.29:1 and `--v2-brand` against `--v2-ink-3` only **1.18:1** — hue with no luminance, so brand ink *alone* would fail WCAG 1.4.1 in greyscale and for a colour-blind user. Both text states clear AA at 12px; the rail is `aria-hidden` and `aria-current="page"` remains the programmatic cue.
-  - **"More" is a sibling of the bar, not a cell in it.** The bar sits on the `--v2-z-tab-bar` tier so the drawer covers it; the control sits on the higher `--v2-z-nav-toggle` tier so one button both opens the drawer and closes it while painted over it. A child cannot climb out of its parent's stacking context, so the bar lays out five columns, fills four, and the button takes the fifth by geometry. It keeps the accessible name *Open sidebar*, which the screenshot harness waits on from 25 call sites.
-- **The drawer is FULL WIDTH below `lg`** ([#2820](https://github.com/d-hinders/Haven-AI/issues/2820)). A tab bar's More is a full-height sheet in the iOS idiom, not a 240px slide-over — so below the breakpoint the drawer takes `w-full`, carries **no scrim** (there is nothing left to dim), drops its `border-r` (a full-width column has no edge against the page), and distributes the space its old dead middle band wasted between the nav groups (`max-lg` auto margins between groups, which resolve to zero when the nav runs out of room, so short and landscape viewports scroll instead of clipping). Its surface shows through the Close control while open — the toggle paints `--v2-bg` only while the drawer is closed — and the drawer's footer reserves the toggle's fifth-of-a-screen column on the right (`max-lg:pr-[calc(20%+var(--v2-safe-right))]`), so the fixed control never sits over the user card's kebab. At `lg` and above none of this exists: the rail is the same 240px static column it has always been.
-- **`--v2-tab-bar-h` is reserved by three surfaces and only one of them is the bar**: `<main>` adds it to its bottom padding so the last row does not sit under the bar, and the toast container lifts by it so a notification is not hidden behind the navigation. The safe-area inset is added at each site rather than folded into the token — the bar pads itself with it, the others clear the bar *and* the inset. Note the toast offset carries on the `sm:` variant as well: `sm:bottom-…` overrides the base, so an offset applied only to the base is silently lost between 640px and 1023px, the band where the bar still renders.
+- Sidebar: 240px desktop rail at `lg` and above, white surface, subtle active tint, and a 2px brand accent bar on the active route. Below `lg` the rail is `hidden` (still in the DOM — the visual specs wait on its `User menu` kebab as a "shell has mounted" signal).
+- **Below `lg`, navigation is the floating tab bar plus the More sheet** ([#2731](https://github.com/d-hinders/Haven-AI/issues/2731), [#4053](https://github.com/d-hinders/Haven-AI/issues/4053), [#4058](https://github.com/d-hinders/Haven-AI/issues/4058)). Primary is a five-cell pill — Dashboard, Agents, Activity (the bar's label for `/transactions`; the rail and the page keep "Transactions"), Accounts, and More, which opens a floating card holding everything else. Properties worth knowing before touching it:
+  - **A floating pill** (#4058): `rounded-full`, a 1px `--v2-border` edge and `shadow-popover`, inset `max(12px, inset)` from the sides, `--v2-tab-bar-bottom` (`max(12px, inset)`) above the bottom edge, capped at `max-w-md` and centred. It is **solid** `--v2-bg` with no `backdrop-filter`: the owner chose near-solid over glass, and at 95% opacity page text ghosted through behind the labels. `--v2-tab-bar-h` is its outer height (62px). It stays the `fixed` `<nav data-mobile-tab-bar>` itself — specs select it that way. Each cell is a full rectangle for hit-testing (Chromium hit-tests `border-radius`, so a rounded cell has dead corners); the active shape is painted by an inner `[data-tab-indicator]` span — `rounded-2xl`, not a full capsule, because a capsule crossed the letters of "Dashboard" at 390px.
+  - **Tabs are selected from `baseNavItems` by ROUTE, never by index.** The bar's order differs from the rail's, so a positional read reorders the bar the next time an entry is inserted.
+  - **One active idiom** ([#2818](https://github.com/d-hinders/Haven-AI/issues/2818), [#4058](https://github.com/d-hinders/Haven-AI/issues/4058)): the active cell is brand ink on a rounded `--v2-brand-soft` indicator bounded by a 1px inset brand **outline** — `SegmentedControl`'s selected option ([#4056](https://github.com/d-hinders/Haven-AI/issues/4056)) — replacing the 2px top rail a floating pill has nowhere to hang; rail and sheet rows keep their brand tint. The outline carries the accessibility weight rather than decorating: measured against `--v2-bg`, `--v2-brand` is 6.29:1 (light) / 8.65:1 (dark), while the fill alone is 1.12 / 1.30 and `--v2-brand` against `--v2-ink-3` only **1.18:1** (light) / 1.32 (dark) — hue with no luminance, so brand ink *alone* would fail WCAG 1.4.1 in greyscale and for a colour-blind user. An outline, not `ring-inset`, so every cell's focus ring stays the outset `ring-2`. `aria-current="page"` remains the programmatic cue.
+  - **More is a cell of the bar, and only opens** (#4053, #4058). Until #4053 it was a sibling painted over the bar on `--v2-z-nav-toggle`, because #2820's full-screen drawer covered the bar. Since #4058 its name is the constant *Open sidebar* (with `aria-expanded`) and its label always "More": the sheet covers the cell, and *Close sidebar* belongs to the sheet's ✕ alone — two buttons with that name would break the harness under Playwright's strict mode.
+- **The More sheet** (#4053, `components/sidebar/MoreSheet.tsx`) replaced #2820's full-screen drawer — the desktop rail stretched to the screen. Since #4058 it is a floating card over the floating bar.
+  - **Geometry:** a card `max(8px, inset)` in from the sides and the bottom, `rounded-3xl`, capped at `max-w-lg` and centred; it covers the tab bar. Sized to its content up to a max height, scrolling inside beyond that. Its scrim dims everything from below the status-bar band (§ *Safe areas*) to the viewport **bottom**, edge to edge — no scrim edge across the pill, no undimmed strip.
+  - **Content:** a drag handle; the logo band (wordmark — not a link here — and the environment badge) beside the sheet's ✕ (44px, *Close sidebar*); the account row (name, email, links to `/profile`); one compact list of only the destinations the tab bar lacks, derived from `TAB_ROUTES` (Analytics, Accounting when shown, Marketplace, Contacts, Settings); the theme control as a three-way `SegmentedControl`; and a visible **Log out** row — no kebab.
+  - **Behaviour:** a modal `role="dialog"` (`aria-modal`, #4058): while it is open the tab bar and `<main>` are `inert` and Tab cycles inside the card. Closes on the ✕, scrim tap, Escape, a downward swipe on the handle (`SWIPE_DISMISS_PX`), a destination tap and any route change; focus moves in on open and back to More on a dismissal — not on a destination tap or route change, which is why `useFocusTrap` (restore on every close) is not reused. It exists in the DOM only while open, and `data-state="open"` marks the end of its enter animation (`.v2-sheet-enter`, motion-gated) — the e2e helpers key on both.
 - Sidebar nav: 36px row height, 16px icon box, 13px medium label. (The Approvals item and its live actionable-count badge were the nav's only dynamic entry; both are deleted with the Safe rail, [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) — every nav item is static now.)
 - Brand: the wordmark may use `.v2-brand-gradient-text`; do not repeat the gradient elsewhere in nav.
 - User menu: two-line user card with a kebab menu using popover shadow; destructive menu items use danger styling.
-- Top bar: a 56px blurred white bar with an unblurred status-bar band above it — the `<header>` is the whole chrome band and grows by `--v2-safe-top`, the blurred bar inside it stays 56px (§ *Safe areas*). The band is not breakpoint-gated: the inset is 0 on anything without a notch, so it collapses on its own rather than needing `max-lg:`. Since #4028 the bar carries no back link: detail pages show theirs in the page, above the title (`PageHeader`'s `back`, or `BackLink`). Page-level CTAs go in the `PageHeader` actions, not the bar's unused `actionSlot`.
-- Main content: scrolls inside the shell, with `p-6 lg:p-8` — below `lg` its bottom, left and right also take the safe-area insets (§ *Safe areas*) — and a skip link targeting `main#main-content`.
+- **No top bar** ([#4029](https://github.com/d-hinders/Haven-AI/issues/4029), epic #4027): the authenticated chrome above the scroll region is the `SafeAreaBand` — the opaque status-bar strip — and nothing else; the 2px non-production warning line #4029 added was removed the next day, because on a phone, with no label in view, it read as a rendering bug. There is no `banner` landmark; `nav` and `main` remain. Page-level CTAs go in the `PageHeader` actions, and detail pages carry their own back link above the title (#4028). The environment badge lives beside the wordmark in the logo band (rail and More sheet), with a gap between them — the app's only environment marker. Each width shows exactly one theme control: the rail footer's two-state flip at `lg` and above, the More sheet's three-way choice below it (#4053, superseding #2953 for the phone).
+- Main content: scrolls inside the shell, with `p-6 pt-4 lg:p-8` — 16px of top padding below `lg` (#4029), 24px elsewhere, 32px at `lg` — below `lg` its bottom, left and right also take the safe-area insets (§ *Safe areas*) — and a skip link targeting `main#main-content`. Sticky table headers compensate through the `--v2-sticky-head` variable the shell sets (`-1rem` below `lg`, `-2rem` at `lg`; the token's `-1.5rem` default is ops' `py-6`).
 
 ### PageHeader
 
@@ -793,7 +812,11 @@ instead of staggering by the dismiss's width. Actions also share a 7rem
 minimum width (room for "Finish setup" and "View activity"), so badges beside
 actions up to that width end on one edge too; a wider label ("View
 transactions") grows past it and its badge sits further left.
-Below `sm` the trailing slot also wraps under the body. `fullBleed` is for
+Below `sm` the trailing slot also wraps under the body — except on a row
+with nothing visible to align (no badge, no action, not dismissible), which
+renders no trailing slot at all: the wrapper would be a 0px flex line that
+still takes the row gap, so its `sr-only` tone word moves into the body
+instead (#4033). `fullBleed` is for
 a list that **is** the card's body, as on the dashboard (#3902): rows run
 edge to edge with hairline dividers and take the card's 20px side inset
 instead of `Row`'s 16px; only the horizontal padding changes, so the row
@@ -1021,7 +1044,7 @@ its *text* colour on hover (`ink-2` → `ink`), pinned by
 That difference has a shipped consequence, and it is the rule to take from it: **tertiary
 needs surrounding structure to be legible as pressable.** It works inside a dialog's action
 row or at the end of a card, where position tells you it is a control. It fails in running
-content — `connect-agent/SetupStates.tsx:208` records the case where a tertiary button
+content — `connect-agent/SetupStates.tsx:214` records the case where a tertiary button
 "rendered as stray bold text in the middle of a checklist rather than a control", and was
 changed to ghost for the border alone while keeping secondary weight. Reach for ghost when
 the control has to announce itself; tertiary when its context already has.
@@ -1200,6 +1223,16 @@ Consequences worth knowing:
   controls, adjacent targets meet but never overlap. Tighter than that and two buttons
   fight over the same pixels — this is the one new constraint the mechanism introduces.
 - Choosing `size` therefore stays a **density** decision, not an ergonomics one.
+- **`SegmentedControl` carries the same mechanism** ([#4056](https://github.com/d-hinders/Haven-AI/issues/4056)).
+  Each option paints 32px and extends its hit area to 44px vertically (never sideways —
+  the options abut). The overhang is 6px per edge from the option, 1px past the track, so
+  the 8px rule above applies to whatever is stacked above or below the control. Its
+  selected option is brand ink on `--v2-brand-soft` inside a 1px inset brand outline
+  (`-outline-offset-1`, not `ring-inset`, which would leak into the focus ring and
+  leave the selected option's focus a 1px thickening; focus stays the outset
+  `ring-2`): the outline is the component boundary, 5.95:1 (light) / 7.99:1 (dark) against the
+  `--v2-surface` track, where the old `--v2-surface-2` thumb measured 1.06:1 / 1.10:1 and
+  read as sunken in light.
 
 **The rule outlives the primitive ([#1766](https://github.com/d-hinders/Haven-AI/issues/1766)).**
 A control that is not a `Button` inherits none of the above automatically, and the
@@ -1215,13 +1248,16 @@ on the entry point to primary navigation. It borrows the same mechanism (transpa
   reaches, in **both** states the control has. For the toggle, closed: right box edge
   x=54, nearest interactive control (`NetworkSwitcher`, since removed by
   [#3719](https://github.com/d-hinders/Haven-AI/issues/3719)) at x=68, 14px of clearance.
-  Open: the target floats over the drawer's own logo band, which it already did at 32px
-  — what is asserted there is that the logo link is still reachable at its centre, not
-  that nothing overlaps. Both are pinned in `e2e/mobile-nav-tap-target.mobile.spec.ts`.
+  Open (until #4053): the target floated over the drawer's own logo band — what was
+  asserted there was that the logo link stayed reachable at its centre. Since #4053 More is
+  a tab-bar cell, and since #4058 the sheet floats over the bar: the open-state test asserts
+  the sheet's account row and its ✕ (*Close sidebar*) are each reachable, and that the More
+  cell is covered by the sheet or its scrim. Both are pinned in
+  `e2e/mobile-nav-tap-target.mobile.spec.ts`.
 - **The clearance is only as real as the space the neighbour is standing in
   ([#1767](https://github.com/d-hinders/Haven-AI/issues/1767)).** The 14px above was
-  measured at 768px and assumed to hold on a phone. It did not. `TopBar` reserves the
-  toggle's room with a `w-8` spacer, and `w-8` on a flex item still carries
+  measured at 768px and assumed to hold on a phone. It did not. The then-top bar
+  reserved the toggle's room with a `w-8` spacer, and `w-8` on a flex item still carries
   `flex-shrink: 1` — in a row that does not fit, it is the first thing given away. The
   spacer collapsed to **width 0** below about 700px, `NetworkSwitcher` slid left to
   x=36, and the painted toggle sat on top of it with 18px of the chip's own tap area
@@ -1237,13 +1273,14 @@ on the entry point to primary navigation. It borrows the same mechanism (transpa
   control, not to be concentric with it.
 - **Do not add `relative` to an already-positioned element.** `Button` needs it because
   it is static. A `fixed` or `absolute` control is already a positioning context, and
-  adding `relative` un-fixes it — on the toggle that shifts the whole app shell 32px
-  and drops the control back under `TopBar`, which was #1749. Do not take this on the
+  adding `relative` un-fixes it — on the toggle that shifts the whole app shell 32px,
+  the #1749 defect class. Do not take this on the
   prose's word: it is a claim about which of two same-property utilities the cascade
   keeps, so it is pinned by a test rather than by this paragraph —
-  `e2e/mobile-nav-tap-target.mobile.spec.ts` asserts `header.left === 0` as an absolute
-  anchor, and that assertion exists **because** the mutation passed three other mobile
-  specs first.
+  `e2e/mobile-nav-tap-target.mobile.spec.ts` asserts `frameLeft === 0` (the app
+  frame's left edge; it was the top bar header's until #4029 deleted the bar) as an
+  absolute anchor, and that assertion exists **because** the mutation passed three
+  other mobile specs first.
 
 **The second borrower, and what makes a control need the mechanism
 ([#1803](https://github.com/d-hinders/Haven-AI/issues/1803)).** `WalletButton` collapses
@@ -1251,13 +1288,14 @@ to a 40px icon/avatar square below `sm` — the label is not rendered there — 
 the same `::after` extension for the same reason the toggle did: 40px painted is 4px
 short, and an icon-only square grows in both axes. Two rules generalise from it:
 
-- **In an over-subscribed bar, drop a label rather than squeeze every control.** `TopBar`
-  does not fit three labelled controls at 320px and never did. #1767 removed the
+- **In an over-subscribed row, drop a label rather than squeeze every control.** The
+  chrome row this once shared does not fit three labelled controls at 320px and never
+  did. #1767 removed the
   overlapping by making the account chip (removed with the global active account in #3719)
   the only compressible item, which paid for the
   whole deficit out of one label — the account name rendered **17px** wide, orderly and
-  unreadable — and the brand CTA wrapped to two lines, painting taller than the 56px
-  band. Collapsing the widest control's label returns 48.64px to the row and takes the
+  unreadable — and the brand CTA wrapped to two lines. Collapsing the widest control's
+  label returns 48.64px to the row and takes the
   account name to 66px. Squeezing distributes a deficit; dropping decides what the width
   is for. The decision of WHAT to drop is a product one — it was escalated and taken by
   the owner, not by the layout.
@@ -1268,20 +1306,19 @@ short, and an icon-only square grows in both axes. Two rules generalise from it:
   applies no CSS, so a unit test that queries by role and name keeps passing on text the
   real browser never renders — `WalletButton.test.tsx` asserts the attribute rather than
   the name. (`e2e/mobile-nav-tap-target.mobile.spec.ts` measured the rendered label width
-  and the name together until #3825 took the pill out of the top bar; the spec now
-  asserts the bar's right cluster holds no control at all.)
+  and the name together until #3825 took the pill out of the top bar.)
 
 A collapsed control also takes its neighbour's radius (`rounded-xl` here, the
-notification bell's), because two adjacent 40px squares in one 56px band read as a row
+notification bell's), because two adjacent 40px squares in one band read as a row
 only if they are the same shape.
 
-**Since [#3825](https://github.com/d-hinders/Haven-AI/issues/3825) the top bar carries
-no wallet pill.** Most users sign with a passkey, and a signer with a raw address on every
+**Since [#3825](https://github.com/d-hinders/Haven-AI/issues/3825) no global chrome
+carries a wallet pill** — and the top bar that used to host it is gone entirely
+(#4029). Most users sign with a passkey, and a signer with a raw address on every
 screen is the wrong level of detail; signers have their own home in Settings → Signers,
 and every signing flow offers its own in-flow connect (#3812). `WalletButton` still
 renders in the connect flow's approval step, so the collapse rules above still describe
-it; the over-subscribed-bar argument is history. Below `lg` the bar's right cluster is
-now empty — the theme toggle lives in the More sheet there.
+it; the over-subscribed-bar argument is history.
 
 **The former investor-briefing borrower was retired with the page in #2468.** The
 remaining borrowers and their guards are the live tap-target examples; do not infer a
@@ -1543,6 +1580,23 @@ no information a screen reader user needs, and hit-testing must pass straight
 through it so a control at the bottom of a scrolled body stays clickable. See
 also the `role="dialog"` bullet in § 6.
 
+**Placement: centred, or `placement="top"`.** The panel centres vertically by
+default. A dialog that walks through several screens of different heights
+passes `placement="top"`: the panel hangs from a fixed line — `sm:mt-16` below
+the wrapper's own `max(1rem, safe-top)` padding, so `4rem` + `1rem` on a
+desktop, and just the safe-area padding below `sm` — and grows **downward
+only**, so the title holds one y on every screen. The `headerAccessory` below
+it moves only by the subtitle's own height: below `sm` a long subtitle wraps to
+a second line (the Connect flow's budget and waiting screens), which drops the
+band about 19px there.
+The ceiling subtracts the extra offset for the reason it subtracts the padding
+(#2730): otherwise the footer is what overflows. The Connect agent modal is the
+one caller. Centred, its title moved between y 130 and y 294 across the flow at
+1280×900 and between 43 and 255 at 375×812; anchored it holds one y at each
+width. A one-screen dialog keeps the default — a centred dialog that never
+changes height never moves. The wrapper exposes the choice as
+`data-modal-placement`.
+
 **Actions belong in the `footer` prop.** `ConfirmDialog`, `AccountSignersCard`,
 `ReplaceSigningKeyModal` and `contacts/page.tsx` do this. Do not add new dialogs
 that render an action row as the last children *inside* the scroll body.
@@ -1587,17 +1641,73 @@ button placed there is no longer a descendant of a `<form>` in the body.
 resolves rather than that the attribute string matches — a stale id compares
 equal and still submits nothing.
 
+### Dialog actions (`ui/DialogActions`)
+
+The one footer rule for a multi-screen dialog: **the screen's main action pair
+sits full width at the bottom, at `Button`'s default `md` (40px), on the body's
+edges — secondary left, primary right, equal halves.** A screen with a single
+action gets one full-width primary. Below `sm` the pair **stacks**, primary on
+top, both full width: two 140px halves at 375px wrapped "Set agent budget" and
+"Create a new setup" onto two lines. `DialogActions` owns only that layout
+(`flex-col-reverse` → `sm:flex-row`); its children are `Button`s with `flex-1`,
+secondary first in the markup, so the desktop Tab order matches the screen.
+Below `sm` the stack is visually reversed, so Tab reaches the lower secondary
+before the upper primary — accepted, since reordering the markup would break
+the desktop order instead and a phone is rarely tabbed.
+
+In the Connect agent modal it carries every pair — Cancel / Set agent budget,
+Back / Create setup prompt, Cancel / Approve budget (through
+the budget-grant control's own action row) and Close / Create a new setup on
+the expired, cancelled and failed screens. Where those screens draw them inside
+the scroll body rather than in Modal's `footer`, that is the flow's existing
+shape (each screen owns its actions and their state), not a pattern for a new
+dialog. Three placements in that flow are decided rather than incidental:
+
+- **Approve.** The pair lives inside the checklist's last row, so it is pulled
+  out over the marker column (`ROW_FOOTER_OUTDENT_CLASS` in `ConnectSteps`)
+  to the body edges instead of the text column.
+- **Waiting for the agent.** The forward action is the in-row "Copy setup
+  prompt" primary — #3832's one allowed exception to the rule, kept, at 40px
+  like everything else — and after that the screen advances on its own. Its
+  only footer action is the exit, so "Cancel setup" is a full-width **ghost**
+  — the same weight as every other secondary in the flow's pairs. Ghost is
+  not a quieter tier, and after the copy it is the largest control on screen;
+  that is accepted because the forward action has already happened by then
+  and the screen advances on its own, so nothing is left for the exit to
+  compete with (#1391's concern). Before the copy, the filled "Copy setup
+  prompt" leads. The expiry line sits on its own line above it.
+- **Done.** One full-width primary, "Done"; the in-list "Download the skill" is
+  a 40px ghost, not a 44px one-off (Button's own hit area keeps the 44px tap
+  target).
+
 ### Wizard progress (`StepProgress`)
 
 `ui/StepProgress` is the numbered disc band a multi-step modal carries in its
 header (`Modal`'s `headerAccessory`): one disc per step, the current one
 brand-soft with a brand ring, finished ones success-soft with a tick, the rest
-a `--v2-border` ring, joined by 1px lines. It says **where the user is in a
-wizard**, and nothing else: a step's own instructions live in its body. Call
-sites: the Connect agent modal (steps 1-2) and `ReplaceSigningKeyModal`; its `/design-system` specimen is the "StepProgress"
-section, after SidePanel.
+a `--v2-border` ring, joined by 1px lines that **stretch to fill the band**, so
+the track spans the same edges as the content below it. Each disc may carry a
+short `labels` entry beneath it (a word or two — "Name", "Budget"), `--v2-ink`
+and medium on the active step, `--v2-ink-3` otherwise. It says **where the user
+is in a wizard**, and nothing else: a step's own instructions live in its body.
+It renders as an `<ol>`: `aria-current="step"` on the active item, an `sr-only`
+"Step N of M" prefix before the label, the disc glyph and connectors
+`aria-hidden`. The tick is lucide `Check` at `h-3.5 w-3.5`, stroke 2 — the
+same mark, size and stroke as `ConnectSteps`' done disc, so the band and the
+step-3 checklist draw one check when they share a screen (it was a text "✓",
+which rendered visibly different beside it).
 
-### Numbered step list (`ConnectSteps`, #3832)
+**`halted`** marks a flow that stopped on `currentStep` — the Connect agent
+modal's expired, cancelled and failed screens. That step renders with the
+pending ring and numeral instead of the brand "in progress" ring, loses
+`aria-current`, and its `sr-only` prefix says "stopped"; earlier steps stay
+done, because they were. Neutral, not an error tone: a cancel is the user's own
+choice, and the screen's status badge already carries the tone of what
+happened. Call sites: the Connect agent modal (every step: Name / Budget /
+Connect) and `ReplaceSigningKeyModal` (Reason / New key / Review / Approve);
+its `/design-system` specimen is the "StepProgress" section, after SidePanel.
+
+### Step status checklist (`ConnectSteps`, #3832)
 
 A vertical list in which **each row is both an instruction and its status**:
 a disc, a section-tier heading, and the row's own body (a control, a line of
@@ -1605,33 +1715,63 @@ copy, or a whole sub-flow) beneath it. Use it when one screen walks the user
 through a short sequence they act on in order and the screen itself observes
 the progress — today, step 3 of the Connect agent modal (copy → paste →
 approve), where the old Waiting → Connected → Approved ticker said where the
-user was without saying what to do. Use `StepProgress` instead when the steps
-are separate screens of a wizard.
+user was without saying what to do.
 
-Done, active and pending reuse `StepProgress`'s disc treatments, so the wizard
-band and the list read as one progress language rather than two; working adds
-the brand spinner:
+**It reports progress within a step and never counts.** `StepProgress` counts
+the wizard's steps; this list says how far the current step has got. So its
+discs carry no numerals — a numbered column under a numbered band reads as a
+second stepper. The discs share `StepProgress`'s size (`h-7 w-7 sm:h-8 sm:w-8`)
+and tokens, so the two read as one progress language, a counter above and a
+status column below, and every state fills the same disc, so the marker column
+is a straight edge:
 
 | State | Disc | Heading |
 |---|---|---|
 | done | `--v2-success-soft` fill, `border-success/30`, lucide `Check` | `--v2-ink-3` |
-| active | `--v2-brand-soft` fill, `--v2-brand` ring and numeral | `--v2-ink` |
-| working | lucide `Loader2` in `--v2-brand`, `motion-safe:animate-spin` | `--v2-ink` |
-| pending | `--v2-border` ring, `--v2-ink-3` numeral | `--v2-ink-2` |
+| active | `--v2-brand-soft` fill, `--v2-brand` ring, a `--v2-brand` dot | `--v2-ink` |
+| working | `--v2-brand-soft` fill, lucide `Loader2` in `--v2-brand`, `motion-safe:animate-spin` | `--v2-ink` |
+| pending | empty `--v2-border` ring | `--v2-ink-2` |
+
+The disc is `aria-hidden`; the row heading is the accessible content, with an
+`sr-only` "Done: " / "In progress: " / "Not started: " prefix. The active row —
+the one the user acts on — carries `aria-current="step"`; a working row is
+Haven's to finish, so it is not current.
 
 Rules:
-- **One progress signal per surface** (#1418). A screen that renders this list
-  renders no ticker, badge or wizard band saying the same thing — the Connect
-  agent modal hides its `StepProgress` on step 3 for exactly this reason.
+- **One counter per flow** (owner review, 2026-10-16, superseding #1418's
+  "one progress signal per surface"). A wizard that uses this list inside a
+  step keeps its `StepProgress` band on that step too — the Connect agent modal
+  shows Name / Budget / Connect on every step, Connect active on step 3. Hiding
+  the band there swapped one progress model for another mid-flow. Two
+  `aria-current="step"` items on step 3 are intended: one for the wizard step,
+  one for the row within it. What the rule still forbids is a third signal — a
+  ticker or badge restating either.
+- **A row heading says what is happening now.** A working row names the work
+  in flight, not the gate it leads to: while the connector finishes local
+  setup, row 3 reads "Preparing the approval", and becomes "Review and approve"
+  once the approval opens.
 - **Name a gate once per viewport** (#1684). When the modal subtitle names the
-  action, the row heading says it in other words ("Review and sign" under
-  "Approve the agent budget").
+  action, the row heading says what the row asks for rather than repeating the
+  subtitle. One exception: the approve row reads "Review and approve" under
+  "Approve the agent budget": owner decision 2026-10-16 that this step says
+  "approve", not "sign" (copy-guidelines.md prefers "approve actions"), which
+  outranks avoiding a shared verb.
 - A row's done state comes from state that only moves forward (the
   connect flow's `promptCopied`, latched per setup and keyed by `setup_id`, so
   "Create a new setup" starts uncopied), never from a value a later action can
   overwrite.
 - Live status inside a row goes in an `aria-live="polite"` region with a
   reserved height, so a status change swaps words without moving the rows below.
+- The frame around it (`ConnectStepShell`) **sizes to its content** and
+  top-aligns it: no reserved floor, no centring. Between sub-states it eases
+  its height from the old content to the new (200ms, none under
+  `prefers-reduced-motion: reduce`), which is how #1377's no-jump intent is
+  kept for the body now that a short sub-state no longer sits in a 340px band.
+  The dialog itself is still vertically centred by `Modal`, so a height change
+  also slides its header and band; the ease turns that into motion rather than
+  a jump, but it is not a still header.
+- Once the step is finished (budget approved) the band reads all-done
+  (`currentStep={totalSteps}`), not Connect in progress over a success screen.
 
 It is local to `components/connect-agent/` because it has one call site; a
 second call site is the trigger to promote it to `components/ui/` with a
@@ -1826,7 +1966,7 @@ the client only names the bucket.
 
 A collapsing table like this one has to **fit** at mobile widths, not scroll: the `overflow-x-auto` wrapper the `Table` primitive recommends for dense admin tables is mutually exclusive with `Table.Head sticky`, because `overflow-x: auto` forces the computed `overflow-y` to `auto` and the wrapper then becomes the sticky scroll ancestor. When such a table overflows, the cause is usually a `truncate`d cell — `truncate` is `white-space: nowrap`, and an auto-layout column can never be narrower than its min-content, so the untruncated text widens the table instead of ellipsising. Put `max-w-0` on the one flexible cell. Both findings, with their measured numbers, live in `components/ui/Table.tsx`'s docstring ([#1772](https://github.com/d-hinders/Haven-AI/issues/1772)).
 
-**Column collapse is keyed on the table's CONTAINER, not on the viewport, and it still takes more than one stage.** Two things step at `lg` and both take width: the sidebar goes `fixed` to `lg:static` at `w-[240px]` — border-box, so its 1px `border-r` is *inside* the 240 (`main` measures 784px at a 1024px viewport) — and the authenticated layout's `main` steps `p-6` to `lg:p-8`, 16px more across the pair. **240 + 16 = 256px** handed back in a single breakpoint, so the content available to a table is a **sawtooth** in viewport width, not a ramp. Attributing it to the sidebar alone is wrong and invites a reader who checks `Sidebar.tsx`, finds 240px, and discards the whole claim. Measured in real Chromium on `/design-system`, `/transactions`, `/accounts/:id` and `/agents/:id` — the same numbers on all four, because they share the shell:
+**Column collapse is keyed on the table's CONTAINER, not on the viewport, and it still takes more than one stage.** Two things step at `lg` and both take width: the sidebar rail goes from `hidden` to an in-flow column at `w-[240px]` (#4053; before that, a `fixed` drawer going `lg:static`) — border-box, so its 1px `border-r` is *inside* the 240 (`main` measures 784px at a 1024px viewport) — and the authenticated layout's `main` steps `p-6` to `lg:p-8`, 16px more across the pair. **240 + 16 = 256px** handed back in a single breakpoint, so the content available to a table is a **sawtooth** in viewport width, not a ramp. Attributing it to the sidebar alone is wrong and invites a reader who checks `Sidebar.tsx`, finds 240px, and discards the whole claim. Measured in real Chromium on `/design-system`, `/transactions`, `/accounts/:id` and `/agents/:id` — the same numbers on all four, because they share the shell:
 
 | viewport | 390 | 767 | 768 | 900 | 1023 | 1024 | 1279 | 1280 |
 |---|---|---|---|---|---|---|---|---|
@@ -2246,7 +2386,7 @@ element-scoped capture clips the very thing it photographs (#1873).
 | UI primitives | `packages/frontend/src/components/ui/Button.tsx`, `Card.tsx`, `CodeBlock.tsx`, `InlineAlert.tsx`, `Input.tsx`, `Modal.tsx`, `PageHeader.tsx`, `Skeleton.tsx`, `Toast.tsx`, `Tooltip.tsx` |
 | Marketing components | `packages/frontend/src/components/marketing/site/**` (the public site), `marketing/Section.tsx`, `BrandBandButton.tsx`, `TrailingArrow.tsx` |
 | Marketing pages | `packages/frontend/src/app/page.tsx`, `app/how-it-works/page.tsx`, `app/how-it-works/protocols/page.tsx`, `app/developers/page.tsx`, `app/for-agents/page.tsx` |
-| Authenticated shell | `packages/frontend/src/components/sidebar/Sidebar.tsx`, `packages/frontend/src/components/TopBar.tsx`, authenticated routes under `packages/frontend/src/app/(authenticated)` |
+| Authenticated shell | `packages/frontend/src/components/AuthenticatedShell.tsx`, `packages/frontend/src/components/sidebar/Sidebar.tsx`, authenticated routes under `packages/frontend/src/app/(authenticated)` |
 | Live product reference | `packages/frontend/src/app/(authenticated)/design-system/page.tsx` |
 | App entity cards | `packages/frontend/src/components/ui/entityCardStyles.ts` shared by Accounts and Agents; linked cards use a stretched semantic name link with sibling controls above its overlay |
 | App modals | `packages/frontend/src/components/ui/Modal.tsx` plus Send, Receive, Add funds, and agent modals in `packages/frontend/src/components` |

@@ -80,6 +80,7 @@ vi.mock('@/hooks/useEscapeToClose', () => ({
 }))
 
 import {
+  headerSubtitle,
   installIsReadyForApproval,
   railBudgetRules,
   resolveConnectStepView,
@@ -597,5 +598,15 @@ describe('manual credential prompt leak guidance (#3722)', () => {
 
   it('never offers pause or revoke as the leak remedy', () => {
     expect(prompt).not.toMatch(/pause or revoke/i)
+  })
+})
+
+describe('headerSubtitle on terminal states', () => {
+  it('gives expired, cancelled and failed setups their own line, never the in-progress one', () => {
+    const inProgress = headerSubtitle('connect', 'waiting_for_connector')
+    for (const status of ['expired', 'cancelled', 'failed']) {
+      expect(headerSubtitle('connect', status)).not.toBe(inProgress)
+    }
+    expect(headerSubtitle('connect', 'failed')).toBe('This setup could not finish')
   })
 })

@@ -926,7 +926,7 @@ Use wording like:
 
 - Haven helps you configure agent spending limits on your account.
 - Agents can request payments within user-approved on-chain limits.
-- Payments are signed by your agent's key and constrained by the budget you signed; an EIP-3009 x402 merchant payment is separately signed by the same agent-held key from its available balance and bound to the exact payment context.
+- Payments are signed by your agent's key and constrained by the budget you approved; an EIP-3009 x402 merchant payment is separately signed by the same agent-held key from its available balance and bound to the exact payment context.
 - Haven relays policy-limited account operations.
 - Haven cannot move funds outside the limits you approve.
 - You can revoke agent access yourself, on-chain, without Haven.

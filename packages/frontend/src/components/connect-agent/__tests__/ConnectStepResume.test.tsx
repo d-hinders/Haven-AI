@@ -191,7 +191,7 @@ describe('ConnectStep resumed from a hand-off link (#2522)', () => {
 })
 
 /**
- * #3832: the numbered step list across the sub-states ConnectStep owns (the
+ * #3832: the status checklist across the sub-states ConnectStep owns (the
  * waiting screen's own rows are covered in ConnectStepShell.test.tsx).
  */
 describe('ConnectStep step list (#3832)', () => {
@@ -214,7 +214,7 @@ describe('ConnectStep step list (#3832)', () => {
     expect(rows(container)).toEqual([
       { state: 'done', title: 'Prompt received by your agent' },
       { state: 'done', title: 'Agent connected' },
-      { state: 'active', title: 'Review and sign' },
+      { state: 'active', title: 'Review and approve' },
     ])
     const third = container.querySelectorAll('ol[aria-label="Connection steps"] > li')[2]
     expect(third.textContent).toContain(`approval for agent-1 on ${STATUS.setup_id}`)
@@ -230,7 +230,13 @@ describe('ConnectStep step list (#3832)', () => {
       statusLoading: true,
     })
     const { container, rerender } = render(<ConnectStep flow={flow} />)
-    expect(rows(container).map((r) => r.state)).toEqual(['done', 'done', 'working'])
+    // The in-flight row says what is happening — the approval being
+    // prepared — not "Approve the budget" over a "finishing local setup" line.
+    expect(rows(container)).toEqual([
+      { state: 'done', title: 'Prompt received by your agent' },
+      { state: 'done', title: 'Agent connected' },
+      { state: 'working', title: 'Preparing the approval' },
+    ])
     const first = container.innerHTML
     rerender(<ConnectStep flow={{ ...flow, statusLoading: false } as AgentConnectionSetupFlow} />)
     expect(container.innerHTML).toBe(first)
@@ -288,7 +294,7 @@ describe('ConnectStep step list (#3832)', () => {
       )
       expect(container).not.toBeEmptyDOMElement()
       expect(container.querySelector('ol[aria-label="Connection steps"]')).toBeNull()
-      expect(container.querySelector('.min-h-\\[340px\\]')).not.toBeNull()
+      expect(container.querySelector('.v2-animate-step-rise')).not.toBeNull()
     },
   )
 })

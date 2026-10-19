@@ -90,20 +90,23 @@ function AddressAvatar({ address }: { address: string }) {
  * Below `sm`, every state of this control collapses to a 40px square: the icon
  * or the address avatar, and no label (#1803, owner decision 2026-08-23).
  *
- * `TopBar` is over-subscribed at 320px and always was. #1767 stopped the
- * controls OVERLAPPING by making the account chip the only compressible item,
- * which paid for the whole deficit out of one label: measured on `/dashboard`
- * under Pixel 5 emulation, the account name rendered **17px** wide — present,
- * orderly, unreadable. This control is the widest thing in the bar (88.64px as
- * "Connect wallet" at 320, 119.33px at 390) and the biggest single saving
- * available, so it is what gets dropped. Measured with the collapse applied:
- * the account name goes 17px -> **66px** at 320 and 57px -> 68px at 390, which
- * is within 2px of never truncating at all in the screenshot fixture.
+ * The chrome row this control once shared was over-subscribed at 320px and
+ * always was. #1767 stopped the controls OVERLAPPING by making the account
+ * chip (removed with the global active account in #3719) the only
+ * compressible item, which paid for the whole deficit out of one label:
+ * measured on `/dashboard` under Pixel 5 emulation, the account name rendered
+ * **17px** wide — present, orderly, unreadable. This control is the widest
+ * thing in the row (88.64px as "Connect wallet" at 320, 119.33px at 390) and
+ * the biggest single saving available, so it is what gets dropped. Measured
+ * with the collapse applied: the account name goes 17px -> **66px** at 320 and
+ * 57px -> 68px at 390, which is within 2px of never truncating at all in the
+ * screenshot fixture.
  *
  * Dropped, not squeezed, and PRESENTATION rather than capability: the control
- * stays in the bar and stays reachable, only its label goes. At 320 the label
+ * stays in the row and stays reachable, only its label goes. At 320 the label
  * was not readable in the first place — the brand pill wrapped to two lines
- * ("Connect" / "wallet") and painted taller than the 56px band.
+ * ("Connect" / "wallet"). (Where the row itself lived — the deleted top bar —
+ * is #4029's history; the collapse rule outlives the surface.)
  *
  * Same rule #1767 applied one control over, where the chain segment is dropped
  * below `sm` and carried by the coloured dot plus the trigger's `aria-label`.
@@ -159,7 +162,7 @@ interface PopoverProps {
    *
    * #1952: `onThisDevice` is NOT decoration. It separates two different facts
    * that used to share one rendering — and, worse, used to share it with
-   * "nothing at all". "Signing with X" (this device's marker picked X) and
+   * "nothing at all". "Approving with X" (this device's marker picked X) and
    * "no passkey is registered here, so X is what will be offered" are not the
    * same statement to a user about to authorise a spend, so they do not get
    * the same words.
@@ -541,11 +544,11 @@ export function WalletPopover({
             // only the eyebrow string, and the design pass measured that the
             // distinction then rested on incidental text wrap: at `w-72` minus
             // `p-4` the content box is 256px, so a 54-character `text-xs` eyebrow
-            // happened to run to two lines while "Signing with" did not. That is
+            // happened to run to two lines while "Approving with" did not. That is
             // a coincidence of string length, and it also pushed the bold
             // credential name — the fact that matters most — into the middle of
             // two muted paragraphs. The rule and the icon are independent of copy
-            // length, and keeping the "Signing with" eyebrow identical in both
+            // length, and keeping the "Approving with" eyebrow identical in both
             // states preserves the hierarchy the name sits in.
             <div
               className={
@@ -560,7 +563,7 @@ export function WalletPopover({
                   No passkey enrolled on this device
                 </p>
               )}
-              <p className="text-xs text-[var(--v2-ink-muted)]">Signing with</p>
+              <p className="text-xs text-[var(--v2-ink-muted)]">Approving with</p>
               <p className="text-sm font-medium text-[var(--v2-ink)]">{signingWith.label}</p>
               <p className="truncate font-mono text-xs text-[var(--v2-ink-muted)]">
                 {truncateAddress(signingWith.keyId)}
@@ -644,10 +647,11 @@ function getAccountChainName(chainId?: number): string | undefined {
 }
 
 /**
- * Single Haven-styled wallet entry point for the TopBar. Replaces RainbowKit's
- * default ConnectButton: no separate chain icon, one pill that opens a Haven
- * popover when connected. Falls back to RainbowKit's connect/account modals
- * for the heavy lifting (connector picker, account modal).
+ * Single Haven-styled wallet entry point for the app's account surfaces.
+ * Replaces RainbowKit's default ConnectButton: no separate chain icon, one
+ * pill that opens a Haven popover when connected. Falls back to RainbowKit's
+ * connect/account modals for the heavy lifting (connector picker, account
+ * modal). (It lived in the top bar until #3825/#4029 retired that surface.)
  */
 export default function WalletButton({
   accountId,

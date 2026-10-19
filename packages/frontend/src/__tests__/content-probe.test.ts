@@ -110,11 +110,11 @@ describe('readContentProbe', () => {
   })
 
   it('ignores a busy element OUTSIDE the content root', () => {
-    // The shell is allowed to be busy — a TopBar chip refreshing is not the
-    // route failing to paint, and counting it would make the guard fire on
-    // every route at once.
+    // The shell is allowed to be busy — a chrome element refreshing (the
+    // sidebar's feed badge, say) is not the route failing to paint, and
+    // counting it would make the guard fire on every route at once.
     render(`
-      <header aria-busy="true">TopBar</header>
+      <div aria-busy="true" data-app-frame="">Chrome</div>
       <main id="main-content"><p>Agents</p></main>
     `)
 

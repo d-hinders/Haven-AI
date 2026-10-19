@@ -1,8 +1,8 @@
 /**
- * The opaque strip that sits behind the iOS status bar, above a page's top bar
- * (#2819).
+ * The opaque strip that sits behind the iOS status bar (#2819), now rendered
+ * directly by the authenticated shell above the scroll region (#4029).
  *
- * ## Why this exists rather than `pt-[var(--v2-safe-top)]` on the bar itself
+ * ## Why this exists rather than `pt-[var(--v2-safe-top)]` on a bar itself
  *
  * #2730 gave every top bar its safe-area clearance as padding on the bar, which
  * is the obvious shape and was wrong in one specific way: those bars carry
@@ -26,15 +26,17 @@
  *
  * ## Using it
  *
- * Put it as the first child of the bar's outermost element, with the blurred
- * bar as its sibling — never inside the blurred element, which is the shape it
- * exists to replace:
+ * Put it as the first child of whatever chrome sits above the scroll region,
+ * outside anything that carries a `backdrop-filter` — which is the shape it
+ * exists to replace. The authenticated shell renders it directly above its
+ * scroll region; the marketing `Header` passes `bg-transparent` so its dark
+ * section shows through:
  *
  * ```tsx
- * <header className="relative z-[var(--v2-z-chrome)]">
+ * <div className="relative …">   {/* the shell's frame *}
  *   <SafeAreaBand />
- *   <div className="h-14 border-b bg-bg/85 backdrop-blur-md">…</div>
- * </header>
+ *   <main …>…</main>
+ * </div>
  * ```
  *
  * `--v2-safe-top` is 0 on anything without a notch, so this collapses to a

@@ -337,7 +337,7 @@ export function buildHandoff(input: HandoffInput): HandoffArtifacts {
     `${revokeUrl}`,
     ``,
     `To stop all spending now, use Stop budget on the agent's budget, or Remove`,
-    `agent… to end every live budget with one signature and retire the agent.`,
+    `agent… to end every live budget with one approval and retire the agent.`,
     `Pausing the agent only blocks payments through Haven; its budget stays live`,
     `on-chain. The signing key in this file also controls any funds already in`,
     `the agent wallet, and ending the budget does not recover them. This handoff`,

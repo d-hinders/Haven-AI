@@ -360,7 +360,7 @@ describe('hybridPasskeyToSignWith (#1933)', () => {
     // ceremony proceed at all: the authenticator does its own credential
     // lookup, so a user on a wiped/fresh profile can still sign. Without it
     // the selector returns undefined and every such user hits a hard
-    // "no passkey to sign with" failure. Deleting the `?? passkeys[0]` in
+    // "no passkey to approve with" failure. Deleting the `?? passkeys[0]` in
     // `signer.ts` must make THIS assertion red.
     expect(hybridPasskeyOnDevice(SET)).toBeNull()
     expect(hybridPasskeyToSignWith(SET)?.key_id).toBe(FIRST)

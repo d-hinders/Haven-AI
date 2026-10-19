@@ -49,8 +49,7 @@ import type { AnalyticsAgentRow } from '@/types/analytics'
  * omitted from the screen you are actually on.
  *
  * The gate is `hidden lg:block` against `lg:hidden` on the two containers
- * (the same viewport-keyed split the theme row carries in the More sheet,
- * #2928). They are complements by construction: the same `lg:` prefix, one
+ * (the viewport-keyed split the theme row used to carry before #4029). They are complements by construction: the same `lg:` prefix, one
  * with `hidden`, one without, so exactly one is displayed at any width and
  * `AgentsTable.test.tsx` pins both halves of that.
  *

@@ -1857,72 +1857,27 @@ export async function dismissMobileSidebar(page: Page) {
   if (!viewport || viewport.width >= 1024) return
 
   /**
-   * #2902: decide from GEOMETRY, not from the toggle's accessible name.
+   * #4053: the phone More menu is a bottom sheet that exists in the DOM only
+   * while it is open (`[data-more-sheet]`), and it opens only on a tap — every
+   * mount starts closed, and widening past `lg` closes it. So "is it open" is
+   * a presence check with nothing to settle: no geometry, no animation, no
+   * viewport-derived label to race (the #2902 failure mode of the drawer
+   * this replaced, whose open/closed state was a function of the viewport).
    *
-   * The helper used to ask `getByRole('button', { name: 'Close sidebar' })
-   * .isVisible()` and click only on true. That probe waits for nothing —
-   * `isVisible()` returns immediately (its `timeout` option is ignored,
-   * per Playwright's own types) — so it is a single instantaneous read of a
-   * label that is a FUNCTION OF THE VIEWPORT: Sidebar's `matchMedia` sync
-   * effect (Sidebar.tsx) sets `collapsed` on mount and on every breakpoint
-   * crossing, and the name derives from it (`Open sidebar` when collapsed,
-   * `Close sidebar` when not). Resize 1280 -> 390 mid-test — the shape
-   * `agent-card-name-measure` is built on — and the name flips a tick after
-   * the resize lands. Under CI load the probe could read the pre-commit DOM
-   * (`Close sidebar` still present, drawer already sliding closed), return
-   * true, and then `click()` re-resolved the role+name locator against a tree
-   * that would never contain that name again: a locator matching NOTHING polls
-   * until the TEST timeout kills it. `test.slow()` triples that spec's 60 s,
-   * so one lost race was 180 s per attempt on #2900/#2889 — attempt AND retry,
-   * because once the name is gone the failure is deterministic.
-   *
-   * The drawer's position IS the state, and it is the same fact
-   * `waitForDrawerOpen` (above) already trusts for the OPEN direction:
-   * `getBoundingClientRect()` reports the border box AFTER transforms, so
-   * open-below-`lg` reads `left === 0` (`translate-x-0`) and closed reads
-   * `left === -width` (`-translate-x-full`). The off-canvas drawer is
-   * `position: fixed`, so the box reads without reflowing anything.
+   * Closed: nothing to dismiss — and nothing is clicked, so a closed sheet
+   * can never be toggled OPEN by this helper.
    */
-  const drawer = page.locator('aside').first()
-  const drawerLeft = async (): Promise<number | null> => {
-    const box = await drawer.boundingBox()
-    return box && box.width > 0 ? Math.round(box.x) : null
-  }
+  const sheet = page.locator('[data-more-sheet]')
+  if ((await sheet.count()) === 0) return
 
-  // Settle before deciding: the drawer animates on `transition-transform
-  // duration-200` (and the resize also triggers Sidebar's matchMedia sync),
-  // so a single read can land mid-motion. Two consecutive equal reads ~300 ms
-  // apart mean the position has stopped changing; bounded at 10 s.
-  let left = await drawerLeft()
-  let stableFor = 0
-  const deadline = Date.now() + 10_000
-  while (stableFor < 300 && Date.now() < deadline) {
-    await page.waitForTimeout(150)
-    const next = await drawerLeft()
-    if (next === left) stableFor += 150
-    else stableFor = 0
-    left = next
-  }
-
-  // Settled closed (or no drawer box at all): nothing to dismiss. This also
-  // kills the old shape's second latent race — a stale probe reading
-  // `Close sidebar` off a closed drawer would have CLICKED THE DRAWER OPEN
-  // and then hung on the `Open sidebar` wait below.
-  if (left === null || left !== 0) return
-
-  // Settled OPEN: dismiss it. The plain click is kept deliberately — no
-  // `{ force: true }` (#1749). It used to be required, and that was the
-  // undiagnosed symptom: `force` skips the actionability check, and the check
-  // this helper was failing is the hit-test — TopBar's `z-[100]` covered the
-  // toggle's `z-[60]`, so the real user gesture was impossible on every
-  // authenticated route below `lg`. Keeping the plain click makes this helper
-  // the regression canary: if the layering breaks again, mobile e2e tests
-  // fail here with "intercepts pointer events" instead of quietly forcing
-  // their way through. Bounded at 10 s rather than the test timeout (#2902):
-  // a genuine failure reports in seconds, not minutes.
-  const closeButton = page.getByRole('button', { name: 'Close sidebar' })
-  await closeButton.click({ timeout: 10_000 })
-  await page.getByRole('button', { name: 'Open sidebar' }).waitFor({ state: 'visible', timeout: 10_000 })
+  // Open: dismiss it with the real control — since #4058 the sheet's own ✕,
+  // which carries `Close sidebar` (the sheet covers the bar, and the More
+  // cell is only ever `Open sidebar`). A plain click — no `{ force: true }`
+  // (#1749) — keeps this helper a regression canary for the sheet's way out
+  // being covered: mobile e2e fails here with "intercepts pointer events".
+  // Bounded at 10 s.
+  await page.getByRole('button', { name: 'Close sidebar' }).click({ timeout: 10_000 })
+  await sheet.waitFor({ state: 'detached', timeout: 10_000 })
 }
 
 /**
@@ -1944,42 +1899,19 @@ export async function dismissMobileSidebar(page: Page) {
  * viewports without a branch.
  */
 /**
- * Waits for the mobile drawer to finish sliding OPEN.
+ * Waits for the phone More sheet (#4053) to finish opening.
  *
- * The name says `Open` because that is the only thing it waits for: the
- * predicate is the open position, so calling it after a dismiss would hang for
- * the full timeout rather than confirming the drawer left.
+ * The sheet slides up on a 200ms enter animation, and a moving element is
+ * "visible" to Playwright from its first frame, so geometry read on
+ * visibility lands on a part-way sheet. The sheet says when it has arrived:
+ * `data-state="open"` is set on its own `animationend` (or on the next frame
+ * under reduced motion, with a timeout backstop), and `opening` before that.
  *
- * A visible control is not this signal. `<aside>` animates on
- * `transition-transform duration-200`, and a transforming element still has a
- * non-empty box, so Playwright calls it visible from the first frame. Geometry
- * read on that signal lands on a part-way drawer. Two specs found this
- * independently — #1749's false layering failure "hit three of four widths on
- * this spec's first run", and a #2819 mutation that should have moved the
- * drawer over a sample point measured its right edge at 178px on a 390px
- * viewport instead.
- *
- * `getBoundingClientRect()` reports the border box AFTER transforms, so
- * `left` interpolates from `-width` to 0 rather than jumping — which is why
- * `left === 0` is the arrival, and why a frame-to-frame stability check is the
- * wrong shape: its first poll can land before the transition starts, when the
- * closed position is trivially stable.
- *
- * At or above `lg` the drawer is `lg:static` at the shell's left edge, so this
- * resolves on the first poll whatever the drawer is doing. Below `lg` is where
- * it means something.
+ * The name says `Open` because that is all it waits for — call it after a tap
+ * on More, never to confirm a dismissal.
  */
 export async function waitForDrawerOpen(page: Page) {
-  await page.waitForFunction(
-    () => {
-      const aside = document.querySelector('aside')
-      if (!aside) return false
-      const rect = aside.getBoundingClientRect()
-      return Math.round(rect.left) === 0 && rect.width > 0
-    },
-    undefined,
-    { timeout: 10_000 },
-  )
+  await page.locator('[data-more-sheet][data-state="open"]').waitFor({ state: 'visible', timeout: 10_000 })
 }
 
 export async function openReceiveFundsModal(page: Page) {
@@ -2097,9 +2029,9 @@ export async function openReceiveFundsModal(page: Page) {
  *
  * These three are deliberately NOT asserted here, and that is the design rather
  * than an omission. This helper has three classes of caller with three
- * different CORRECT answers: below `lg` the drawer is `fixed`, so `<main>`
- * spans the full viewport (`0 → innerWidth`); on desktop the drawer is
- * `lg:static` and legitimately occupies the first 240px, so `contentLeft` is
+ * different CORRECT answers: below `lg` the rail is hidden (#4053), so
+ * `<main>` spans the full viewport (`0 → innerWidth`); on desktop the rail is
+ * an in-flow column and legitimately occupies the first 240px, so `contentLeft` is
  * 240; and `/login` is outside the shell entirely and has no content region at
  * all. A single anchor baked in here would have to be loose enough to hold for
  * all three, which is another way of saying it would hold for the defect too.

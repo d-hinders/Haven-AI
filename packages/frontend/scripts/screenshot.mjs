@@ -2958,19 +2958,18 @@ async function newFixtureContext(browser, vp, scenario, { signedOut = false, col
   return context
 }
 
-// The sidebar covers the page below `lg`; the e2e suite dismisses it the same
-// way before driving mobile UI.
+// The phone More sheet (#4053) covers the page — and since #4058 the floating
+// tab bar too — while it is open, and closes on its own ✕ (`Close sidebar`);
+// the e2e suite dismisses it the same way before driving mobile UI. It
+// exists in the DOM only while open, so presence is the whole check — the
+// e2e twin in `e2e/fixtures/haven-api.ts` explains why nothing needs settling.
 async function dismissMobileSidebar(page, vp) {
   if (vp.width >= 1024) return
-  const close = page.getByRole('button', { name: 'Close sidebar' })
-  if (await close.isVisible({ timeout: 1_000 }).catch(() => false)) {
-    // No `{ force: true }` (#1749) — see the note on the e2e twin in
-    // `e2e/fixtures/haven-api.ts`. The forced click was this bug's only
-    // footprint in the repo: the capture tooling had been routing around an
-    // unreachable navigation toggle for months without anyone naming it.
-    await close.click()
-    await page.getByRole('button', { name: 'Open sidebar' }).waitFor({ state: 'visible' })
-  }
+  const sheet = page.locator('[data-more-sheet]')
+  if ((await sheet.count()) === 0) return
+  // No `{ force: true }` (#1749) — see the note on the e2e twin.
+  await page.getByRole('button', { name: 'Close sidebar' }).click()
+  await sheet.waitFor({ state: 'detached' })
 }
 
 /**
@@ -3821,7 +3820,7 @@ export const SCENARIOS = {
       const settle = async (navigate) => {
         await navigate()
         await page.evaluate(() => document.fonts.ready)
-        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await page.locator('button[aria-label="User menu"]').waitFor({ state: 'attached', timeout: 15_000 })
         await dismissMobileSidebar(page, vp)
         await heading.waitFor({ timeout: 15_000 })
         // The rows, not the heading: the card shows a skeleton until BOTH
@@ -3924,7 +3923,7 @@ export const SCENARIOS = {
         setSettingsAccountingStage(stage)
         await page.goto(`${BASE_URL}/settings`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
         await page.evaluate(() => document.fonts.ready)
-        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await page.locator('button[aria-label="User menu"]').waitFor({ state: 'attached', timeout: 15_000 })
         await dismissMobileSidebar(page, vp)
         await heading.waitFor({ timeout: 15_000 })
         await card.getByTestId(testId).waitFor({ timeout: 15_000 })
@@ -3990,7 +3989,7 @@ export const SCENARIOS = {
       const settle = async () => {
         await page.goto(`${BASE_URL}/accounting`, { waitUntil: 'networkidle', timeout: 60_000 })
         await page.evaluate(() => document.fonts.ready)
-        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await page.locator('button[aria-label="User menu"]').waitFor({ state: 'attached', timeout: 15_000 })
         await dismissMobileSidebar(page, vp)
       }
       const openStage = async (stage) => {
@@ -4085,8 +4084,8 @@ export const SCENARIOS = {
       await refuseFeedControls('coming-soon')
       await shoot(main, 'coming-soon')
       // The sidebar reads the same answer: the Accounting entry stays, with
-      // its muted "Soon" pill. Desktop only — below `lg` the drawer is
-      // off-canvas and contributes nothing to a capture.
+      // its muted "Soon" pill. Desktop only — below `lg` the rail is
+      // hidden and contributes nothing to a capture (#4053).
       if (vp.width >= 1024) {
         const entry = page.locator('nav[aria-label="All sections"] a[href="/accounting"]')
         // Visible "Soon" on the rail; the full phrase is the accessible name.
@@ -4236,6 +4235,52 @@ export const SCENARIOS = {
    * Nothing else in `FIXTURE_AGENTS` is touched: `agent-research` already
    * carries a recorded name, which is why it is not overridden here.
    */
+  'send-own-accounts': {
+    description:
+      'The owner send modal with a SECOND Haven account on the SENDING chain (#4026): the same-chain account is offered as a one-tap recipient by name, and an own account on a different chain is NOT offered. The shared fixture has one account, so both the offer and its negative are unreachable from a route capture.',
+    api(apiPath) {
+      // Two extra registrations: 'Savings' rides the SAME chain as the
+      // fixture account (84532) — it is the one-tap recipient — and
+      // 'Ethereum account' rides 11155111, the never-offered control. The
+      // signers read falls through to the shared fixture (one passkey), so
+      // the modal renders its ready state, not the owner-wallet blocker.
+      const sameChain = {
+        ...FIXTURE_ACCOUNT,
+        id: 'safe-savings',
+        name: 'Savings',
+        account_address: '0x2222222222222222222222222222222222222222',
+        is_default: false,
+      }
+      const otherChain = {
+        ...FIXTURE_ACCOUNT,
+        id: 'safe-ethereum',
+        name: 'Ethereum account',
+        account_address: '0x3333333333333333333333333333333333333333',
+        chain_id: 11155111,
+        is_default: false,
+      }
+      if (apiPath === '/auth/me') {
+        return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT }, sameChain, otherChain] }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/accounts/${FIXTURE_ACCOUNT.id}`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 60_000,
+      })
+      await dismissMobileSidebar(page, vp)
+      const dialog = page.getByRole('dialog', { name: 'Send' })
+      // Positive control: the same-chain own account is offered BY NAME.
+      await page.getByRole('button', { name: 'Send', exact: true }).click()
+      await dialog.getByRole('button', { name: 'Send to Savings' }).waitFor({ timeout: 20_000 })
+      // Negative control: the cross-chain own account must never appear.
+      if (await dialog.getByText('Ethereum account').count()) {
+        throw new Error('send-own-accounts: the cross-chain own account is offered — the #4026 chain filter regressed')
+      }
+      await shoot(dialog, 'modal')
+    },
+  },
   'mcp-name-all-recorded': {
     description:
       'The /agents list with every agent reporting an MCP server name — the hoisted "not recorded" explanation must be ABSENT (#2043)',
@@ -4309,7 +4354,7 @@ export const SCENARIOS = {
       await revokedCard.getByRole('button', { name: 'Finish revoking Legacy research agent' }).click()
       const finishDialog = page.getByRole('dialog', { name: 'Finish revoking Legacy research agent?' })
       await finishDialog.waitFor({ timeout: 20_000 })
-      await finishDialog.getByText(/You sign once and every budget it still holds ends/).waitFor({ timeout: 20_000 })
+      await finishDialog.getByText(/You approve once and every budget it still holds ends/).waitFor({ timeout: 20_000 })
       await shoot(finishDialog, 'finish-dialog')
       await finishDialog.getByRole('button', { name: 'Cancel' }).click()
       await finishDialog.waitFor({ state: 'detached', timeout: 20_000 })
@@ -4671,7 +4716,7 @@ export const SCENARIOS = {
       const settle = async (url) => {
         await page.goto(url, { waitUntil: 'networkidle', timeout: 30_000 })
         await page.evaluate(() => document.fonts.ready)
-        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await page.locator('button[aria-label="User menu"]').waitFor({ state: 'attached', timeout: 15_000 })
         await dismissMobileSidebar(page, vp)
       }
 
@@ -4792,7 +4837,7 @@ export const SCENARIOS = {
         // The sidebar's own ARIA contract — the handle the visual specs use for
         // this widget. Its presence is the proof the chunk mounted and `<main>`
         // has settled to its final width.
-        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await page.locator('button[aria-label="User menu"]').waitFor({ state: 'attached', timeout: 15_000 })
         await dismissMobileSidebar(page, vp)
         await heading.waitFor({ timeout: 15_000 })
       }
@@ -5376,7 +5421,7 @@ export const SCENARIOS = {
 
 
       await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
-      // #3832: the connect step is a numbered list whose row 1 is the copy
+      // #3832: the connect step is a status checklist whose row 1 is the copy
       // action. Captured BEFORE the copy (the ready frame), then with the
       // prompt disclosure open, then copied, at each stage.
       const copyPrompt = dialog.getByRole('button', { name: 'Copy setup prompt' })
@@ -6344,7 +6389,7 @@ export const SCENARIOS = {
       const settle = async (navigate) => {
         await navigate()
         await page.evaluate(() => document.fonts.ready)
-        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await page.locator('button[aria-label="User menu"]').waitFor({ state: 'attached', timeout: 15_000 })
         await dismissMobileSidebar(page, vp)
         await heading.waitFor({ timeout: 15_000 })
       }

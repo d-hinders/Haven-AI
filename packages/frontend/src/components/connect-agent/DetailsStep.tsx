@@ -4,6 +4,7 @@ import type { Ref } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { type AgentConnectionSetupFlow } from '@/hooks/useAgentConnectionSetup'
 import { Button } from '../ui/Button'
+import { DialogActions } from '../ui/DialogActions'
 import { Checkbox } from '../ui/Checkbox'
 import { Icon } from '../ui/Icon'
 import { Input } from '../ui/Input'
@@ -88,7 +89,7 @@ export function DetailsStep({
           label="Run everything on this machine instead of Haven's hosted tools. Only Claude Code, Codex, and Cowork support it — elsewhere, setup stops and you restart without it."
         />
       </details>
-      <div className="flex gap-3">
+      <DialogActions>
         {/* handleClose is safe here without a confirm: its only guard
             (manualCredentialNeedsSave) is a step-4 concern unreachable from
             step 1, so Cancel behaves exactly like backdrop/X/Escape. */}
@@ -102,7 +103,7 @@ export function DetailsStep({
         >
           Set agent budget
         </Button>
-      </div>
+      </DialogActions>
     </>
   )
 }

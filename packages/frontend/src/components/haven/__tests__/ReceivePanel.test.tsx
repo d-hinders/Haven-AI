@@ -210,7 +210,11 @@ describe('ReceivePanel (#3333)', () => {
       vi.mocked(api.post).mockResolvedValue(PREPARED as never)
       render(<ReceivePanel accountAddress={ADDRESS} chainId={8453} />)
       fireEvent.click(screen.getByRole('button', { name: 'Prepare transfer' }))
-      await waitFor(() => expect(screen.getByRole('button', { name: 'Sign transfer' })).toBeTruthy())
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Approve transfer' })).toBeTruthy())
+      // Owner money actions say approve, not sign (copy-guidelines.md).
+      expect(screen.getByText(/Ready to approve:/)).toBeTruthy()
+      expect(screen.getByText(/You approve it from this account\./)).toBeTruthy()
+      expect(screen.queryByText(/Ready to sign|You sign with/)).toBeNull()
     }
 
     it('an owner-only account with no wallet here is offered the connect, and Sign waits', async () => {
@@ -218,8 +222,8 @@ describe('ReceivePanel (#3333)', () => {
         Promise.resolve({ account_address: ADDRESS, chain_id: 8453, owner_address: '0x' + 'ee'.repeat(20), passkeys: [] }),
       )
       await waitFor(() => expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeTruthy())
-      expect(screen.getByText(/Connect your account owner wallet to sign this transfer/)).toBeTruthy()
-      expect((screen.getByRole('button', { name: 'Sign transfer' }) as HTMLButtonElement).disabled).toBe(true)
+      expect(screen.getByText(/Connect your account owner wallet to approve this transfer/)).toBeTruthy()
+      expect((screen.getByRole('button', { name: 'Approve transfer' }) as HTMLButtonElement).disabled).toBe(true)
     })
 
     it('a passkey account is offered no connect', async () => {
@@ -232,9 +236,9 @@ describe('ReceivePanel (#3333)', () => {
         }),
       )
       expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
-      expect((screen.getByRole('button', { name: 'Sign transfer' }) as HTMLButtonElement).disabled).toBe(false)
+      expect((screen.getByRole('button', { name: 'Approve transfer' }) as HTMLButtonElement).disabled).toBe(false)
       // #3825: the passkey is not marked on this device, so the ceremony may
-      // hand off — the #1097 line says so before Sign transfer.
+      // hand off — the #1097 line says so before Approve transfer.
       await waitFor(() => expect(screen.getByText(/passkey may be on another device/)).toBeTruthy())
     })
 
@@ -250,7 +254,7 @@ describe('ReceivePanel (#3333)', () => {
             passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
           }),
         )
-        expect((screen.getByRole('button', { name: 'Sign transfer' }) as HTMLButtonElement).disabled).toBe(false)
+        expect((screen.getByRole('button', { name: 'Approve transfer' }) as HTMLButtonElement).disabled).toBe(false)
         await new Promise((r) => setTimeout(r, 0))
         expect(screen.queryByText(/passkey may be on another device/)).toBeNull()
       } finally {

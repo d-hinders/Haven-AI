@@ -181,7 +181,7 @@ export default function DemoPage() {
               <StepCard
                 number={4}
                 title="Approve its budget with your passkey"
-                whyItMatters="This signature — not a Haven approval — is what gives the agent any spending authority at all."
+                whyItMatters="Your approval — not Haven’s — is what gives the agent any spending authority at all."
               >
                 <p>
                   Approve it with your passkey. Nothing can be spent until you do. Leave the budget as set —
@@ -200,7 +200,7 @@ export default function DemoPage() {
               <StepCard
                 number={6}
                 title="Buy a joke"
-                whyItMatters="Proves your agent can pay 0.001 USDC with no Haven approval step, inside the budget you signed."
+                whyItMatters="Proves your agent can pay 0.001 USDC with no Haven approval step, inside the budget you approved."
                 accent
               >
                 <p>
@@ -238,7 +238,7 @@ export default function DemoPage() {
               <Card elevation="anchor" className="p-6" hover={false}>
                 <h3 className="text-[17px] font-semibold text-[var(--v2-ink)]">What you just saw</h3>
                 <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-                  Your agent paid for something small, from a budget you signed and it could not exceed, and Haven
+                  Your agent paid for something small, from a budget you approved and it could not exceed, and Haven
                   refused a payment over that budget before it could move any money — enforced on-chain, agent-native
                   from the first step.
                 </p>

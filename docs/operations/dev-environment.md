@@ -31,7 +31,7 @@ covers:
   - packages/frontend/vercel.json
   - packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts
   - scripts/vercel/**
-last-verified: "2026-10-15"
+last-verified: "2026-10-16"
 ---
 
 > **Re-verified #3913 (2026-10-13, Vercel skip-setting doc corrections):** the
@@ -169,6 +169,18 @@ last-verified: "2026-10-15"
 > serves the chain-100 explorer history read. The "Testnet RPCs by default"
 > bullet drops its Chiado line. Nothing else in this document was re-verified,
 > and `last-verified` is not bumped.
+
+> **Re-verified #4053 (2026-10-17):** `playwright.config.ts`'s dark-project
+> `testMatch` gains `more-sheet.visual.spec.ts` — the phone More sheet joins
+> the pixel gate in light and dark with the same seed-before-navigation dark
+> convention the other specs use (its spec reads `testInfo.project.name`;
+> unlike most specs it does keep a MOBILE dark baseline, because the sheet only
+> exists below `lg`). `webServer.env` and every other project are untouched,
+> so the Playwright build surfaces this document describes are unchanged; the
+> `DEV` badge section above still holds (the badge now sits off the wordmark
+> with a gap, in the rail and in the sheet). No environment variable changes
+> name, meaning, surface, or where it is set. Nothing else in this file's
+> coverage was touched; this note is the only edit.
 
 > **Re-verified #3577 (2026-10-02):** `playwright.config.ts`'s dark-project
 > `testMatch` gains `dev-agent-pages.visual.spec.ts` — For developers and For
@@ -1150,11 +1162,14 @@ Payments*.
 
 ### The `DEV` badge
 
-`NEXT_PUBLIC_HAVEN_ENV=dev` makes the frontend render a `DEV` chip in the app
-`TopBar` (`components/EnvBadge.tsx`), in the warning tone, so a dev deploy is
-never mistaken for production. `NEXT_PUBLIC_*` is build-time inlined, so the dev
-Vercel deploy bakes the value in; **production leaves the var unset**, which
-renders nothing.
+`NEXT_PUBLIC_HAVEN_ENV=dev` makes the frontend render a `DEV` chip beside the
+"Haven" wordmark in the sidebar's logo band (`components/EnvBadge.tsx`), in the
+warning tone, so a dev deploy is never mistaken for production. (It lived in
+the app `TopBar` until #4029 removed the bar. The 2px warning line #4029 added
+along the top of the app was removed the next day: on a phone it read as a
+rendering bug.) `NEXT_PUBLIC_*` is
+build-time inlined, so the dev Vercel deploy bakes the value in; **production
+leaves the var unset**, which renders nothing.
 
 "Unset means production" is read in ONE place, `packages/frontend/src/lib/env.ts`
 (#2709): the chip, the `?apiBaseUrl` override gate and the capability manifest's

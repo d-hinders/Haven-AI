@@ -384,7 +384,7 @@ async function openAgents(page: Page) {
   await page.getByRole('heading', { name: 'Research agent', exact: true }).waitFor({ timeout: 60_000 })
 }
 
-/** Below `lg` the nav drawer overlays the grid (#1749); the helper is a no-op at 1280. */
+/** Below `lg` the helper closes the More sheet if it is open (#1749, #4053); it is a no-op at 1280. */
 async function atWidth(page: Page, width: number) {
   await page.setViewportSize({ width, height: 900 })
   await dismissMobileSidebar(page)

@@ -331,7 +331,7 @@ function ReceiveHandoff({ accountAddress, chainId, prepared, onDone, onCancel }:
       onDone()
       return done
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Signing was cancelled or failed')
+      toast.error(err instanceof Error ? err.message : 'Approval was cancelled or failed')
       return null
     } finally {
       setSignBusy(false)
@@ -341,25 +341,25 @@ function ReceiveHandoff({ accountAddress, chainId, prepared, onDone, onCancel }:
   return (
     <div className="mt-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
       <p className="text-sm font-semibold text-[var(--v2-ink)]">
-        Ready to sign: {prepared.submit.amount_atomic} atomic units to{' '}
+        Ready to approve: {prepared.submit.amount_atomic} atomic units to{' '}
         <Address value={prepared.submit.to} truncate />
       </p>
       <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-        You sign with this account&apos;s own signer. The transfer can only go to the saved address.
+        You approve it from this account. The transfer can only go to the saved address.
       </p>
       {passkeyElsewhere ? <PasskeyElsewhereHint className="mt-3" /> : null}
       {needsOwnerWallet ? (
         // #3812: the header was the only place to connect a wallet before.
         <div className="mt-3 space-y-2">
           <p className="text-xs text-[var(--v2-ink-3)]">
-            Connect your account owner wallet to sign this transfer.
+            Connect your account owner wallet to approve this transfer.
           </p>
           <WalletConnectAction />
         </div>
       ) : null}
       <div className="mt-3 flex flex-wrap gap-2">
         <Button size="sm" onClick={signAndSubmit} disabled={signBusy || needsOwnerWallet}>
-          {signBusy ? 'Waiting for signature...' : 'Sign transfer'}
+          {signBusy ? 'Waiting for your approval…' : 'Approve transfer'}
         </Button>
         <Button variant="ghost" size="sm" onClick={onCancel} disabled={signBusy}>
           Cancel

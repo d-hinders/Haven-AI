@@ -328,3 +328,35 @@ describe('Modal scroll continuation cue', () => {
     expect(marker.className).not.toMatch(/\bh-(8|10|12|16)\b/)
   })
 })
+
+describe('Modal placement', () => {
+  it('centres the panel by default, so existing dialogs are unchanged', () => {
+    render(
+      <Modal open onClose={() => {}} title="Example modal" panelTestId="panel">
+        <p>Body</p>
+      </Modal>,
+    )
+    const wrapper = screen.getByRole('dialog')
+    expect(wrapper).toHaveAttribute('data-modal-placement', 'center')
+    expect(wrapper).toHaveClass('items-center')
+    expect(screen.getByTestId('panel').className).not.toContain('sm:mt-16')
+  })
+
+  it('anchors the panel to a fixed top line, with a ceiling that subtracts the offset', () => {
+    render(
+      <Modal open onClose={() => {}} title="Example modal" panelTestId="panel" placement="top" maxHeight="tight">
+        <p>Body</p>
+      </Modal>,
+    )
+    const wrapper = screen.getByRole('dialog')
+    expect(wrapper).toHaveAttribute('data-modal-placement', 'top')
+    expect(wrapper).toHaveClass('items-start')
+    expect(wrapper).not.toHaveClass('items-center')
+    const panel = screen.getByTestId('panel')
+    expect(panel).toHaveClass('sm:mt-16')
+    // Without the subtraction the footer is pushed below the fold (#2730).
+    expect(panel.className).toContain(
+      'sm:max-h-[calc(100vh-max(12px,var(--v2-safe-top))-max(12px,var(--v2-safe-bottom))-4rem)]',
+    )
+  })
+})

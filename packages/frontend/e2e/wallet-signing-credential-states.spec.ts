@@ -18,7 +18,7 @@
  * So the structural facts are asserted here as booleans, which need no baseline
  * and carry none of the platform-metrics caveat the captures do:
  * EXACTLY ONE fallback marker, EXACTLY ONE explanatory line, and EXACTLY TWO
- * "Signing with" eyebrows. The counts are what make this a discrimination
+ * "Approving with" eyebrows. The counts are what make this a discrimination
  * rather than a presence check — `toHaveCount(1)` on the marker fails if both
  * demos become the fallback, and `toHaveCount(2)` on the eyebrow fails if
  * either demo stops rendering at all.
@@ -51,7 +51,7 @@ test('the wallet menu shows the marker-matched and fallback credentials as diffe
   await page.goto('/design-system')
   await page.evaluate(() => document.fonts.ready)
 
-  const heading = page.getByRole('heading', { name: 'Signing credential (wallet menu)' })
+  const heading = page.getByRole('heading', { name: 'Approving credential (wallet menu)' })
   await expect(heading).toHaveCount(1)
   await heading.scrollIntoViewIfNeeded()
 
@@ -61,7 +61,7 @@ test('the wallet menu shows the marker-matched and fallback credentials as diffe
   // distinction has to live in the marker rather than in the eyebrow's length.
   await expect(page.getByText('No passkey enrolled on this device')).toHaveCount(1)
   await expect(page.getByText('Your browser may ask you to choose a different one.')).toHaveCount(1)
-  await expect(page.getByText('Signing with')).toHaveCount(2)
+  await expect(page.getByText('Approving with')).toHaveCount(2)
 
   // The marker is a DESIGNED treatment, not a longer sentence: the design pass
   // measured that an eyebrow-only distinction rested on incidental text wrap at

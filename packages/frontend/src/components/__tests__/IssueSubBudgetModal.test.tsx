@@ -59,6 +59,16 @@ describe('IssueSubBudgetModal (#3506)', () => {
     expect(options).toEqual(['Choose an agent', 'Scout', 'Resting'])
   })
 
+  it('says the sharing agent signs, so the owner gets no passkey prompt', () => {
+    // The sharing agent's key signs the sub-delegation; the owner neither signs
+    // nor approves here (copy-guidelines.md, "The owner approves; only an
+    // agent's key signs"). "No approval needed" would misdescribe a modal
+    // whose whole point is the owner deciding to issue it.
+    renderModal()
+    expect(screen.getByText(/Atlas signs it with its own key — no passkey prompt for you\./)).toBeTruthy()
+    expect(screen.queryByText(/No approval needed/)).toBeNull()
+  })
+
   it('validates before calling the API', async () => {
     renderModal()
     fireEvent.click(screen.getByText('Issue sub-budget', { selector: 'button' }))

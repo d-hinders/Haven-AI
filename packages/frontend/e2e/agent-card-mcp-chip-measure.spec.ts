@@ -276,7 +276,7 @@ async function openAgents(page: Page, agents: { name: string }[] = AGENTS) {
     .waitFor({ timeout: 60_000 })
 }
 
-/** Below `lg` the nav drawer overlays the grid (#1749); the helper is a no-op at 768. */
+/** Below `lg` the helper closes the More sheet if it is open (#1749, #4053). */
 async function atWidth(page: Page, width: number) {
   await page.setViewportSize({ width, height: 900 })
   await dismissMobileSidebar(page)

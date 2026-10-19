@@ -370,13 +370,13 @@ describe('DelegationBudgetCard (#833)', () => {
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'Stop this budget?' })).toBeNull())
   })
 
-  it('a cancelled signature toasts "Signature was cancelled." and closes the confirm', async () => {
+  it('a cancelled signature toasts "Approval was cancelled." and closes the confirm', async () => {
     mockGet.mockReturnValue([budget()])
     mockRevoke.mockResolvedValue({ ok: false, reason: 'cancelled' })
     render(<DelegationBudgetCard {...PROPS} />)
     fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Stop budget 5 USDC per day' })))
     fireEvent.click(screen.getByRole('button', { name: 'Stop budget' }))
-    await waitFor(() => expect(mockToast.info).toHaveBeenCalledWith('Signature was cancelled.'))
+    await waitFor(() => expect(mockToast.info).toHaveBeenCalledWith('Approval was cancelled.'))
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'Stop this budget?' })).toBeNull())
     expect(mockToast.success).not.toHaveBeenCalled()
   })
@@ -1024,7 +1024,7 @@ describe('DelegationBudgetCard — occupied slot and replaced-but-enabled budget
     render(<DelegationBudgetCard {...PROPS} />)
     await openFormAndType('10', PINNED)
     // The hint says what happens on-chain before anything is signed.
-    expect(screen.getByText(/so you edit it: you sign the new budget, then sign to stop the old one\. The review step shows how many signatures that takes\./)).toBeTruthy()
+    expect(screen.getByText(/so you edit it: you approve the new budget, then approve once more to stop the old one\. The review step shows how many approvals that takes\./)).toBeTruthy()
     expect(screen.getByText(/Stopping it ends any open task budget or sub-budget taken from it/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Edit existing budget' }))
     const dialog = await screen.findByRole('dialog', { name: 'Edit budget' })
@@ -1041,7 +1041,7 @@ describe('DelegationBudgetCard — occupied slot and replaced-but-enabled budget
     mockGrant.mockResolvedValue({ ok: true })
     render(<DelegationBudgetCard {...PROPS} />)
     await openFormAndType('10', OTHER)
-    expect(screen.getByText('One signature. Refills every period automatically.')).toBeTruthy()
+    expect(screen.getByText('One approval. Refills every period automatically.')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Set budget' }))
     await waitFor(() => expect(mockGrant).toHaveBeenCalled())
     expect(screen.queryByRole('dialog', { name: 'Edit budget' })).toBeNull()
@@ -1085,7 +1085,7 @@ describe('DelegationBudgetCard — occupied slot and replaced-but-enabled budget
     render(<DelegationBudgetCard {...PROPS} />)
     await openFormAndType('10', OTHER)
     fireEvent.click(screen.getByRole('button', { name: 'Set budget' }))
-    await waitFor(() => expect(screen.getByText(/already has a live budget for this token and recipient\. Nothing was signed/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/already has a live budget for this token and recipient\. Nothing was approved/)).toBeTruthy())
     expect(screen.queryByText(/Haven could not set the budget/)).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Reload budgets' }))
     expect(mockReload).toHaveBeenCalled()
@@ -1186,11 +1186,11 @@ describe('DelegationBudgetCard sub-budget "ends" follows is_live (#3922)', () =>
     expect(document.body.textContent).toMatch(/up to 2 USDC · ended/)
   })
 
-  it('a pending, unexpired grant still shows when it ends, beside "waiting for signature"', () => {
+  it('a pending, unexpired grant still shows when it ends, beside "waiting for the sharing agent to sign it"', () => {
     mockGet.mockReturnValue([budget()])
     mockTrees.mockReturnValue(tree(sub({ status: 'pending', is_live: false })))
     render(<DelegationBudgetCard {...PROPS} />)
-    expect(document.body.textContent).toMatch(/up to 2 USDC · ends .*waiting for signature/)
+    expect(document.body.textContent).toMatch(/up to 2 USDC · ends .*waiting for the sharing agent to sign it/)
   })
 })
 

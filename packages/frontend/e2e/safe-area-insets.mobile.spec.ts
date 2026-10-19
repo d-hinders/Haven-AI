@@ -50,9 +50,14 @@ const INSET_BOTTOM = 34
  * now have to clear as well as the inset. Written as a NUMBER rather than read
  * from the token deliberately: reading `--v2-tab-bar-h` here would make the
  * assertion agree with the CSS by construction, and this file exists to catch
- * the CSS being wrong.
+ * the CSS being wrong. 62 since #4058: the floating pill's 52px cells, its
+ * `py-1` and its 1px border.
+ *
+ * The pill floats `max(12px, inset)` above the bottom edge. At this file's
+ * INSET_BOTTOM (34) that is the inset itself, so every "bar + inset" sum
+ * below is also "bar + its float gap" — and the shell test pins the gap.
  */
-const TAB_BAR_H = 56
+const TAB_BAR_H = 62
 
 /**
  * A dim layer that actually dims: any colour, at an alpha that reads as a
@@ -116,15 +121,21 @@ async function applyInsets(page: Page) {
 /**
  * Controls inside the app CHROME that intersect a reserved band.
  *
- * Scoped to the chrome — the top bar, the drawer, the fixed toggle, an open
- * dialog — and deliberately NOT to the scroll region, because a control passing
- * through the bottom 34px mid-scroll is what a scroll region does, not a
- * defect. What the scroll region owes the home indicator is that its content
- * can be scrolled CLEAR of it, and that is asserted separately below, at the
- * one scroll position where it is a real claim: the end.
+ * Scoped to the chrome — the rail (`aside`, which matches nothing below `lg`
+ * where it is hidden), the More cell (`[aria-label="Open sidebar"]`; the four
+ * tab links are not scanned) and any open dialog, the More sheet included —
+ * and
+ * deliberately NOT to the scroll region, because a control passing through the
+ * bottom 34px mid-scroll is what a scroll region does, not a defect. What the
+ * scroll region owes the home indicator is that its content can be scrolled
+ * CLEAR of it, and that is asserted separately below, at the one scroll
+ * position where it is a real claim: the end. There is no bare `header` here
+ * since #4029: the top bar is gone, and the only `<header>` left on a route is
+ * `ui/PageHeader`'s, INSIDE the scroll region — scanning it would flag
+ * ordinary scrolled content as chrome offenders.
  *
- * Elements outside the viewport are skipped rather than counted: the closed
- * drawer is translated off the left edge, and everything below the fold is
+ * Elements outside the viewport are skipped rather than counted: the hidden
+ * rail has no box (#4053), and everything below the fold is
  * simply not on screen. Skipping them is why the first version of this helper
  * was wrong — it reported a transaction row at y=1591 as sitting under a home
  * indicator 750px above it.
@@ -133,7 +144,7 @@ async function chromeControlsInBands(page: Page, top: number, bottom: number) {
   return page.evaluate(
     ({ top, bottom }) => {
       const roots = Array.from(
-        document.querySelectorAll<HTMLElement>('header, aside, [role="dialog"], [aria-label="Open sidebar"]'),
+        document.querySelectorAll<HTMLElement>('aside, [role="dialog"], [aria-label="Open sidebar"]'),
       )
       const nodes = new Set<HTMLElement>()
       for (const root of roots) {
@@ -149,7 +160,7 @@ async function chromeControlsInBands(page: Page, top: number, bottom: number) {
         // a 1px clipped box holding screen-reader text.
         if (rect.width <= 1 || rect.height <= 1) continue
         if (getComputedStyle(el).visibility === 'hidden') continue
-        // Not on screen at all — the closed drawer lives at negative x.
+        // Not on screen at all (off either edge).
         if (rect.right <= 0 || rect.left >= window.innerWidth) continue
         if (rect.bottom <= 0 || rect.top >= window.innerHeight) continue
         const label =
@@ -206,28 +217,25 @@ async function controlsUnderIndicatorAtScrollEnd(page: Page, bottom: number) {
 
 async function shellGeometry(page: Page) {
   return page.evaluate(() => {
-    // `<header>` is the whole chrome band since #2819; the blurred 56px bar is
-    // its `[data-app-bar]` child and the status-bar strip its `[data-safe-area-band]`.
-    // `[data-app-chrome]`, not `querySelector('header')`: `ui/PageHeader` also
-    // renders a `<header>`, so the bare tag is the ambiguity #1820 argued against.
-    const chrome = document.querySelector('[data-app-chrome]') as HTMLElement | null
-    const bar = document.querySelector('[data-app-bar]') as HTMLElement | null
+    // The status-bar strip is `[data-safe-area-band]`, rendered by the shell
+    // directly above the scroll region since #4029 — there is no top bar
+    // (`[data-app-bar]`/`[data-app-chrome]` are gone) for it to be a child
+    // of, and a bare `querySelector('header')` would now find `PageHeader`'s
+    // header INSIDE the scroll region, which is exactly the silent re-point
+    // this helper refuses. Measuring the BAND directly is the point: the
+    // user-facing property is that the shell reserves the inset in an opaque,
+    // unblurred strip, whatever renders it.
     const band = document.querySelector('[data-safe-area-band]') as HTMLElement | null
     const main = document.getElementById('main-content')
     const toggle = document.querySelector('[aria-label="Open sidebar"]') as HTMLElement | null
     return {
-      // #2819 split the status-bar band OUT of the blurred header, so the
-      // inset is now the band's height rather than the header's padding. The
-      // user-facing property is unchanged and asserted the same way: the chrome
-      // as a whole reserves 56px + the inset, and no control sits in the band.
+      // The inset the band actually consumes — the property under test.
       bandHeight: band ? Math.round(band.getBoundingClientRect().height) : null,
       bandBackdropFilter: band ? getComputedStyle(band).backdropFilter : null,
       bandBackground: band ? getComputedStyle(band).backgroundColor : null,
-      chromeHeight: chrome ? Math.round(chrome.getBoundingClientRect().height) : null,
-      chromeBackdropFilter: chrome ? getComputedStyle(chrome).backdropFilter : null,
-      headerHeight: bar ? Math.round(bar.getBoundingClientRect().height) : null,
-      headerBackdropFilter: bar ? getComputedStyle(bar).backdropFilter : null,
-      headerLeft: chrome ? Math.round(chrome.getBoundingClientRect().left) : null,
+      // Viewport-anchored: the band spans the frame edge to edge, so the
+      // reserved strip cannot be pushed sideways by a bad landscape inset rule.
+      bandLeft: band ? Math.round(band.getBoundingClientRect().left) : null,
       mainPaddingBottom: main ? getComputedStyle(main).paddingBottom : null,
       mainOverscroll: main ? getComputedStyle(main).overscrollBehaviorY : null,
       // By attribute, not `parentElement.parentElement`: a wrapper inserted
@@ -237,6 +245,11 @@ async function shellGeometry(page: Page) {
         return frame ? getComputedStyle(frame).overscrollBehaviorY : null
       })(),
       toggleTop: toggle ? Math.round(toggle.getBoundingClientRect().top) : null,
+      // The floating pill's distance from the bottom edge (#4058).
+      barBottomGap: (() => {
+        const bar = document.querySelector('nav[data-mobile-tab-bar]')
+        return bar ? Math.round(window.innerHeight - bar.getBoundingClientRect().bottom) : null
+      })(),
       viewportHeight: window.innerHeight,
     }
   })
@@ -277,17 +290,20 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
         shell.mainPaddingBottom,
         'the scroll region pads its own 24px PLUS the tab bar PLUS the home indicator — all three, not two of them',
       ).toBe(`${24 + TAB_BAR_H + INSET_BOTTOM}px`)
+      // The floating pill sits exactly ON the home-indicator inset (#4058):
+      // `max(12px, inset)`, not 12px stacked on top of it, which would float
+      // it visibly high on a notched phone.
+      expect(shell.barBottomGap, 'the pill floats on the inset, not above it').toBe(INSET_BOTTOM)
 
-      // The chrome as a whole still grows by the inset rather than squashing the
-      // bar's contents into the same 56px — the status bar sits over the app's
-      // own background, not over its controls.
-      expect(shell.chromeHeight, 'the chrome grows by the top inset').toBe(56 + INSET_TOP)
-      expect(shell.headerHeight, 'the bar itself stays 56px').toBe(56)
+      // The chrome as a whole is GONE (#4029): the band IS the top chrome now,
+      // so its own height is the reservation — the inset, opaque, in an
+      // element of its own. Nothing else above `<main>` grows by the inset
+      // any more.
+      expect(shell.bandHeight, 'the safe-area band must consume --v2-safe-top').toBe(INSET_TOP)
 
       // THE FIX (#2819). The band is opaque and carries no backdrop-filter, so
       // no composited blur layer spans the status bar and nothing there can
-      // retain a stale frame of an overlay that has unmounted. The bar keeps
-      // its blur — content scrolls under it, which is what the blur is for.
+      // retain a stale frame of an overlay that has unmounted.
       expect(
         shell.bandBackdropFilter,
         'the status-bar band must not be a backdrop-filter layer',
@@ -299,22 +315,13 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
         shell.bandBackground,
         'the status-bar band must be opaque, not a translucent blur of what is beneath',
       ).toMatch(/^rgb\([^)]+\)$/)
-      // `toContain('blur(')` with a non-zero radius, not `not.toBe('none')`,
-      // which `blur(0px)` would satisfy while blurring nothing.
-      expect(shell.headerBackdropFilter, 'the bar itself keeps its blur').toMatch(
-        /blur\((?!0px\))[^)]+\)/,
-      )
-      // And the blur is on the BAR, not on the element spanning the status bar.
-      expect(
-        shell.chromeBackdropFilter,
-        'the chrome band as a whole must not be a backdrop-filter layer',
-      ).toBe('none')
-      // Viewport-anchored (#1779): a relative check cannot see the whole shell
+      // Viewport-anchored (#1779): a relative check cannot see the whole strip
       // move sideways, which is what a bad landscape inset rule would do.
-      expect(shell.headerLeft).toBe(0)
+      expect(shell.bandLeft).toBe(0)
 
-      // The drawer toggle is `fixed`, so it carries its own offset and would
-      // otherwise sit under the status bar with the bar's padding around it.
+      // The toggle is `fixed` with its own offsets, so it would sit in the
+      // reserved bands however the chrome above the page is built — the
+      // assertion survives the top bar's removal (#4029) unchanged.
       expect(shell.toggleTop, 'the sidebar toggle clears the status bar').toBeGreaterThanOrEqual(
         INSET_TOP,
       )
@@ -373,40 +380,55 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     })
   }
 
-  test('the open drawer clears both bands, footer row included', async ({ page }) => {
+  test('the open More sheet floats above the home indicator, over the bar, below the status band (#4058)', async ({ page }) => {
     await page.goto('/dashboard')
     await page.getByRole('button', { name: 'Open sidebar' }).click()
     await applyInsets(page)
-    await expect(page.getByRole('button', { name: 'User menu' })).toBeVisible()
-    // Without this the drawer can still be at `translateX(-100%)`, where its
-    // `rect.right` is exactly 0 — and `chromeControlsInBands` skips anything
-    // with `rect.right <= 0`. Every drawer control would be skipped and the
-    // `offenders` assertion below would pass having examined none of them, on
-    // the one test in this file whose whole subject is the open drawer.
+    // Settled, not merely visible: mid-slide the sheet's box is still moving,
+    // and every bottom edge below would be read off a part-way sheet.
     await waitForDrawerOpen(page)
 
-    const drawer = await page.evaluate(() => {
-      const aside = document.querySelector('aside') as HTMLElement
-      const kebab = document.querySelector('[aria-label="User menu"]') as HTMLElement
-      const profile = document.querySelector('a[aria-label^="Open profile"]') as HTMLElement
+    const sheet = await page.evaluate(() => {
+      const el = document.querySelector('[data-more-sheet]') as HTMLElement
+      const scrim = document.querySelector('[data-more-sheet-scrim]') as HTMLElement
+      const bar = document.querySelector('nav[data-mobile-tab-bar]') as HTMLElement
+      const profile = el.querySelector('a[href="/profile"]') as HTMLElement
+      const logOut = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Log out')!
+      const r = el.getBoundingClientRect()
+      const b = bar.getBoundingClientRect()
+      const s = scrim.getBoundingClientRect()
       return {
-        paddingTop: getComputedStyle(aside).paddingTop,
-        paddingBottom: getComputedStyle(aside).paddingBottom,
-        kebabBottom: Math.round(kebab.getBoundingClientRect().bottom),
+        top: Math.round(r.top),
+        bottom: Math.round(r.bottom),
+        barBottom: Math.round(b.bottom),
+        barBottomGap: Math.round(window.innerHeight - b.bottom),
+        scrimTop: Math.round(s.top),
+        scrimBottom: Math.round(s.bottom),
         profileBottom: Math.round(profile.getBoundingClientRect().bottom),
+        logOutBottom: Math.round(logOut.getBoundingClientRect().bottom),
         viewportHeight: window.innerHeight,
       }
     })
 
-    expect(drawer.paddingTop).toBe(`${INSET_TOP}px`)
-    expect(drawer.paddingBottom).toBe(`${INSET_BOTTOM}px`)
-    // The two controls #2586 already had to rescue once, now measured against
-    // the home indicator rather than against each other.
-    expect(drawer.kebabBottom).toBeLessThanOrEqual(drawer.viewportHeight - INSET_BOTTOM)
-    expect(drawer.profileBottom).toBeLessThanOrEqual(drawer.viewportHeight - INSET_BOTTOM)
+    // Control: the bar consumes the injected inset (it floats ON it), so a
+    // home indicator exists in this run.
+    expect(sheet.barBottomGap).toBe(INSET_BOTTOM)
+    // The card floats on the inset too — `max(8px, inset)` — so it ends above
+    // the home indicator, and over the bar rather than at its top edge (#4053's
+    // geometry, replaced by #4058).
+    expect(sheet.bottom).toBe(sheet.viewportHeight - INSET_BOTTOM)
+    expect(sheet.bottom).toBeGreaterThanOrEqual(sheet.barBottom)
+    // ...and never climbs into the status-bar band.
+    expect(sheet.top).toBeGreaterThanOrEqual(INSET_TOP)
+    // The scrim shades from below the status band to the very bottom edge.
+    expect(sheet.scrimTop).toBe(INSET_TOP)
+    expect(sheet.scrimBottom).toBe(sheet.viewportHeight)
+    // Its first and last rows sit above the home indicator.
+    expect(sheet.profileBottom).toBeLessThanOrEqual(sheet.viewportHeight - INSET_BOTTOM)
+    expect(sheet.logOutBottom).toBeLessThanOrEqual(sheet.viewportHeight - INSET_BOTTOM)
 
     const offenders = await chromeControlsInBands(page, INSET_TOP, INSET_BOTTOM)
-    expect(offenders, 'the open drawer puts no control in a reserved band').toEqual([])
+    expect(offenders, 'the open sheet puts no control in a reserved band').toEqual([])
   })
 
   /**
@@ -490,10 +512,11 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     })
 
     // CONTROL: the region consumes the inset rather than its old flat 1rem.
-    // #2731 added the tab bar to this offset, and all three terms ADD. An
+    // #2731 added the tab bar to this offset, and all three terms ADD. (Since
+    // #4058 the bar floats on `max(12px, inset)`, which is the inset here.) An
     // earlier revision of this line read `max(16, inset) + bar`, which is what
-    // the CSS said at the time and was wrong in the same way: the bar already
-    // pads itself with the inset, so folding the inset into a `max()` with the
+    // the CSS said at the time and was wrong in the same way: the (then
+    // edge-to-edge) bar padded itself with the inset, so folding the inset into a `max()` with the
     // gutter collapsed the gap between toast and bar to ZERO at inset 34 —
     // both edges landed on 90px. Three owners, three terms.
     expect(toast.bottom, 'the toast region must clear the tab bar AND --v2-safe-bottom').toBe(
@@ -578,11 +601,13 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
    * white: invisible rather than fixed, and back the next time a coloured
    * overlay covers that strip.
    *
-   * So two surfaces still reach the band, and this pins what each one puts
-   * there:
+   * #4053 replaced the drawer with a bottom sheet whose scrim STOPS at the
+   * inset, so the navigation no longer reaches the band at all. This pins
+   * what is there instead:
    *
-   * - the drawer, which after #2820 covers it OPAQUELY. A dim value here would
-   *   mean the scrim came back by another name.
+   * - with the More sheet open, the shell's own OPAQUE band — nothing of the
+   *   sheet or its scrim. A dim value here would mean the nav scrim came back
+   *   into the strip.
    * - a modal backdrop, which is now the only `.v2-modal-backdrop` over the
    *   safe area on the demo path — and therefore the whole of the operator's
    *   discriminating test. Opening and closing Receive uses that class with no
@@ -606,7 +631,7 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
    * still cannot see is #2819 itself — a stale composited layer is invisible
    * to every DOM query. This locks the premise; the phone answers the issue.
    */
-  test('the drawer and a modal backdrop each cover the status-bar band (#2819)', async ({
+  test('the status band stays opaque under the More sheet, and a modal backdrop covers it (#2819)', async ({
     page,
   }) => {
     const coverage = async (selector: string) =>
@@ -655,27 +680,33 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     await page.goto('/dashboard')
     await page.getByRole('button', { name: 'Open sidebar' }).click()
     await applyInsets(page)
-    await expect(page.getByRole('button', { name: 'User menu' })).toBeVisible()
     await waitForDrawerOpen(page)
 
-    // Control, before any geometry is judged: the drawer consumes the injected
-    // inset, so the run really is one where a notch exists.
-    const drawerPaddingTop = await page.evaluate(
-      () => getComputedStyle(document.querySelector('aside') as HTMLElement).paddingTop,
+    // With the More sheet open (#4053), the status-bar band is still the
+    // shell's OPAQUE band — the sheet's scrim stops at the inset rather than
+    // dimming the strip, because a translucent layer in that strip is exactly
+    // what #2819 saw stick on a device. This replaces #2820's "the drawer
+    // covers the band opaquely": the navigation now covers it not at all.
+    const scrimTop = await page.evaluate(
+      () => Math.round((document.querySelector('[data-more-sheet-scrim]') as HTMLElement).getBoundingClientRect().top),
     )
-    expect(drawerPaddingTop).toBe(`${INSET_TOP}px`)
-
-    const drawer = await coverage('aside')
-    expect(drawer.occludedBy, 'nothing should sit over the drawer at the sample point').toEqual([])
-    expect(drawer.top, 'the drawer starts at the top of the viewport, not below the notch').toBe(0)
-    expect(drawer.bottom, 'and reaches the home indicator').toBe(drawer.viewportHeight)
-    expect(drawer.coversTopBand, 'the drawer is what covers the status-bar band').toBe(true)
-    // #2820's substitution, asserted rather than assumed: what covers the band
-    // is now the drawer's own OPAQUE surface. A translucent value here would
-    // mean a dim layer had returned to the strip under another name, which is
-    // the state #2819 is trying to get out of.
-    expect(drawer.background, 'the drawer covers the band opaquely').toMatch(OPAQUE_FILL)
-    expect(drawer.composedOpacity, 'and is not faded out of existence').toBe(1)
+    expect(scrimTop, 'the scrim starts below the status-bar band').toBe(INSET_TOP)
+    const band = await page.evaluate(() => {
+      const sampleX = window.innerWidth - 20
+      const top = document.elementFromPoint(sampleX, 8) as HTMLElement | null
+      let composedOpacity = 1
+      for (let el: Element | null = top; el; el = el.parentElement) {
+        composedOpacity *= Number(getComputedStyle(el).opacity)
+      }
+      return {
+        insideSheetOrScrim: !!top?.closest('[data-more-sheet], [data-more-sheet-scrim]'),
+        background: top ? getComputedStyle(top).backgroundColor : null,
+        composedOpacity,
+      }
+    })
+    expect(band.insideSheetOrScrim, 'nothing of the sheet is in the status-bar band').toBe(false)
+    expect(band.background, 'the band is covered opaquely').toMatch(OPAQUE_FILL)
+    expect(band.composedOpacity).toBe(1)
 
     // `openReceiveFundsModal` navigates, which destroys the document and the
     // style tag injected above. The second `applyInsets` is REQUIRED, not
@@ -699,7 +730,7 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     expect(modal.coversTopBand, 'the backdrop covers the band with no navigation involved').toBe(
       true,
     )
-    // Dim, where the drawer is opaque. This is the surface the operator's
+    // Dim, where #2820's drawer was opaque. This is the surface the operator's
     // discriminating test actually exercises, so what it puts on the strip is
     // the whole of what that test asks about.
     expect(modal.background, 'and it covers the band with a DIM layer').toMatch(DIM_FILL)

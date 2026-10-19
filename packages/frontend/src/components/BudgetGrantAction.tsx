@@ -26,6 +26,7 @@
 import { useState, type ReactNode } from 'react'
 import type { GrantInput, GrantResult } from '@/hooks/useDelegationBudget'
 import { Button } from './ui/Button'
+import { DialogActions } from './ui/DialogActions'
 
 interface Props {
   /** `grant` from the caller's `useDelegationBudget` instance. */
@@ -47,6 +48,12 @@ interface Props {
    * form on a page wants.
    */
   leadingAction?: ReactNode
+  /**
+   * Extra classes for the action row when `leadingAction` is set — the
+   * connect modal pulls it out to the dialog body's edges from inside an
+   * indented checklist row.
+   */
+  actionsClassName?: string
   /**
    * Rendered right AFTER the grant button in the page-form row — the Cancel
    * of a form that opened in place (#3695). Unlike `leadingAction` it keeps
@@ -101,6 +108,7 @@ export default function BudgetGrantAction({
   busyLabel,
   helper,
   leadingAction,
+  actionsClassName = '',
   trailingAction,
   notReadyHint,
   notReadyAction,
@@ -142,8 +150,7 @@ export default function BudgetGrantAction({
     // here rather than teaching this shared control a word it cannot yet
     // display. `unconfirmed` (#3930) does NOT fold: the activation may have
     // committed, so the generic "nothing changed — try again" failure sentence
-    // would invite a retry that mints a second enabled grant — it gets its own
-    // branch below.
+    // would be false — it gets its own branch below.
     setOutcome(result.reason === 'too_many' || result.reason === 'refused' ? 'failed' : result.reason)
   }
 
@@ -168,7 +175,7 @@ export default function BudgetGrantAction({
       */}
       {outcome === 'cancelled' && (
         <p className="mb-3 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-          No signature yet — nothing changed. You can try again when you are ready.
+          No approval yet — nothing changed. You can try again when you are ready.
         </p>
       )}
 
@@ -185,12 +192,16 @@ export default function BudgetGrantAction({
         what happened. The grant may already be in place, so this is NOT the
         generic failure: the sentence never says "nothing changed", never names
         Haven as the approver, and sends the owner to check the agent's budgets
-        BEFORE trying again — a second grant would add a second budget.
+        BEFORE trying again. #3971: it no longer warns that a retry adds a
+        second budget — since #3933 the backend refuses a second live budget in
+        the same (token, recipient) slot, and the retry re-reads the attempt
+        first.
       */}
       {outcome === 'unconfirmed' && (
         <p className="mb-3 rounded-[10px] border border-danger/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-xs text-[var(--v2-danger)]">
-          The budget could not be confirmed. Check the agent&apos;s budgets before trying again — it
-          may already be in place, and a second grant would add a second budget.
+          The budget could not be confirmed — it may already be in place. Check the agent&apos;s
+          budgets before trying again; a retry never adds a second budget for the same token and
+          recipient.
         </p>
       )}
 
@@ -204,32 +215,39 @@ export default function BudgetGrantAction({
       )}
 
       {/* #2733: the page form's row squeezed the "Set budget" pill at 390px
-          until its label wrapped onto two lines. BELOW `sm` (and only when
-          there is no leadingAction — the modal footer keeps its inline row)
-          the row stacks: button on its own line at full width, helper under
+          until its label wrapped onto two lines. BELOW `sm` the page-form
+          row stacks: button on its own line at full width, helper under
           it; from `sm` up it is the same side-by-side row as before. Layout
           only: the button, its disabled predicate and the helper text are
-          unchanged. */}
-      <div
-        className={
-          leadingAction
-            ? 'flex items-center gap-3'
-            : 'flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3'
-        }
-      >
-        {leadingAction}
-        <Button
-          onClick={handleClick}
-          disabled={busy || !ready || !input || outcome === 'slot_occupied'}
-          className={leadingAction ? 'flex-1' : 'sm:w-auto'}
-        >
-          {busy ? busyLabel : label}
-        </Button>
-        {!leadingAction ? trailingAction : null}
-        {helper && !leadingAction && (
-          <span className="text-xs text-[var(--v2-ink-muted)] sm:ml-auto">{helper}</span>
-        )}
-      </div>
+          unchanged.
+
+          With a leadingAction the row is a dialog footer, so it is the shared
+          DialogActions: equal halves from `sm` up, stacked primary-on-top
+          below it. */}
+      {leadingAction ? (
+        <DialogActions className={actionsClassName}>
+          {leadingAction}
+          <Button
+            onClick={handleClick}
+            disabled={busy || !ready || !input || outcome === 'slot_occupied'}
+            className="flex-1"
+          >
+            {busy ? busyLabel : label}
+          </Button>
+        </DialogActions>
+      ) : (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+          <Button
+            onClick={handleClick}
+            disabled={busy || !ready || !input || outcome === 'slot_occupied'}
+            className="sm:w-auto"
+          >
+            {busy ? busyLabel : label}
+          </Button>
+          {trailingAction}
+          {helper && <span className="text-xs text-[var(--v2-ink-muted)] sm:ml-auto">{helper}</span>}
+        </div>
+      )}
     </div>
   )
 }

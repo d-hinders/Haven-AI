@@ -241,6 +241,18 @@ jobs:
           CRED="$RUNNER_TEMP/haven-eval-agent" HOSTED_URL="$HOSTED_URL" AGENT_EVALS_API_KEY="$AGENT_EVALS_API_KEY" node -e "const fs = require('node:fs'); const cfg = { mcpServers: { 'haven-eval': { type: 'http', url: process.env.HOSTED_URL, headers: { Authorization: 'Bearer ' + process.env.AGENT_EVALS_API_KEY } }, 'haven-signer-eval': { type: 'stdio', command: 'node', args: [process.env.GITHUB_WORKSPACE + '/packages/signer/dist/cli.js', '--ack'], env: { HAVEN_CREDENTIALS: process.env.CRED + '/agent.json', HAVEN_X402_BINDING_SIGNER: process.env.HAVEN_X402_BINDING_SIGNER } } } }; fs.writeFileSync(process.env.RUNNER_TEMP + '/haven-eval-mcp.json', JSON.stringify(cfg, null, 2), { mode: 0o600 });"
           echo "mcp config written for $MODE (hosted: $HOSTED_URL)"
 
+      # One turn, no MCP servers, no tools: proves the subscription token works
+      # and, when it does not, prints claude's own reason (auth, usage limit)
+      # instead of five identical "claude exited 1" trials (pilot run #5,
+      # 2026-10-19). Prints only the result fields, never the token.
+      - name: Check the Claude Code login (one turn, no tools)
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/claude-cwd"
+          cd "$RUNNER_TEMP/claude-cwd" && claude -p 'Reply with the single word OK.' --output-format json --max-turns 1 --strict-mcp-config > "$RUNNER_TEMP/claude-login-check.json" 2> "$RUNNER_TEMP/claude-login-check.err" || true
+          node scripts/ci/agent-evals-login-check.mjs "$RUNNER_TEMP/claude-login-check.json" "$RUNNER_TEMP/claude-login-check.err"
+
       # THE spend step — reached only after the owner approved the
       # environment. The allowlist in QA_EVAL_CLAUDE_CODE_COMMAND IS the
       # "Haven MCP tools only" guarantee, visible right here.
@@ -294,4 +306,6 @@ jobs:
             evals-report.json.summary.md
             evals-report.json.summary.txt
             evals-report.json.sessions.json
+            ${{ runner.temp }}/claude-sessions*.jsonl
+            ${{ runner.temp }}/claude-login-check.json
           if-no-files-found: warn

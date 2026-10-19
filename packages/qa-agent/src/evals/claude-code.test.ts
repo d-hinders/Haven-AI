@@ -161,7 +161,7 @@ describe('ClaudeCodeAdapter.runTask process handling', () => {
     const template = await fakeClaude(`process.stdout.write(${JSON.stringify(errorResult + '\n')}, () => process.exit(1));\n`)
     const logBase = join(await mkdtemp(join(tmpdir(), 'fake-claude-log-')), 's')
     const adapter = new ClaudeCodeAdapter({ commandTemplate: template, logPath: logBase, timeoutMs: 30_000 })
-    await expect(adapter.runTask(resolved, 1)).rejects.toThrow(/claude exited 1/)
+    await expect(adapter.runTask(resolved, 1)).rejects.toThrow(/claude exited 1 .*result: Claude AI usage limit reached/)
     expect(adapter.sessions).toHaveLength(0)
   })
 

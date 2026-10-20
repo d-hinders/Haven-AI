@@ -12,8 +12,9 @@
  *
  * Group key — agent + token + counterparty + user-local day + outcome +
  * activityType, with the sending account inside the counterparty half on
- * outbound rows (#4117). Two deliberate extensions to #3824's stated key, both
- * stated here so the PR can carry them:
+ * outbound rows (#4117, at `counterpartyKey`). Two further deliberate
+ * extensions to #3824's stated key, both stated here so the PR can carry
+ * them:
  *
  * - **token** (`chainId` + `tokenAddress`, with symbol/decimals): a group
  *   serves ONE `sumAtomic` in ONE `tokenSymbol` at ONE `decimals` — summing
@@ -456,7 +457,10 @@ export async function buildActivityGroups(
       }
 
       // #4117: the outbound key carries the sending account, so every member
-      // left the same one and the sample names it.
+      // left the same one and the sample names it. A contact saved for that
+      // account is what the first lookup is for — the route prefetches
+      // receipt names for outbound `to` addresses only, so a receipt name
+      // applies here only incidentally.
       if (sample.direction === 'out') {
         const fromAccountName =
           resolveMerchantName?.(sample.accountAddress) ?? (sample.accountName || null)

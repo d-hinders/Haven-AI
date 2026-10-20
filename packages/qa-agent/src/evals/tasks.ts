@@ -116,6 +116,9 @@ export function validateTask(raw: unknown, file: string): string | null {
     if (!Array.isArray(requires) || !requires.some((r) => typeof r === 'string' && r.startsWith('EXHAUSTED'))) {
       return `${file}: tier 3 must declare its exhausted-budget precondition in "requires" (an EXHAUSTED-… entry) — the tier exists for tasks whose setup IS a spent budget`
     }
+    if (exhaustedThresholdAtomic(t as unknown as EvalTask) === undefined) {
+      return `${file}: tier 3's EXHAUSTED requires entry must read EXHAUSTED-period-budget-below-<X>-USDC — the resolver verifies that bound at run time, and a label it cannot parse would switch the check off`
+    }
     if (t.expectTransfer) {
       return `${file}: tier 3 expects an exhausted budget — it cannot also expect a transfer_settled outcome`
     }
@@ -311,3 +314,17 @@ export const TOOL_COUNTS = {
   signer: SIGNER_TOOLS.length,
   payment: PAYMENT_TOOLS.length,
 } as const
+
+/**
+ * The threshold a tier-3 task's `EXHAUSTED-period-budget-below-<X>-USDC`
+ * precondition names, in atomic USDC (6 decimals). Undefined when the task
+ * declares no such bound.
+ */
+export function exhaustedThresholdAtomic(task: EvalTask): bigint | undefined {
+  if (task.tier !== 3) return undefined
+  for (const r of task.requires) {
+    const m = /^EXHAUSTED-period-budget-below-(\d+)(?:\.(\d{1,6}))?-USDC$/.exec(r)
+    if (m) return BigInt(m[1]!) * 1_000_000n + BigInt((m[2] ?? '').padEnd(6, '0') || '0')
+  }
+  return undefined
+}

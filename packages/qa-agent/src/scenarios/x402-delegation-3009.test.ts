@@ -20,14 +20,21 @@ const MERCHANT = '0x' + 'cc'.repeat(20)
 const MERCHANT_URL = 'https://demo-merchant.example'
 const MCP_URL = `${MERCHANT_URL}/mcp`
 
-const { mockFetch, mockListReceipts, mockGetAgent, mockBalanceOf } = vi.hoisted(() => ({
+const MERCHANT_TX = '0x' + 'f2'.repeat(32)
+
+const { mockFetch, mockListReceipts, mockGetAgent, mockBalanceOf, mockStatus, mockGetReceipt } = vi.hoisted(() => ({
   mockFetch: vi.fn(),
   mockListReceipts: vi.fn(),
   mockGetAgent: vi.fn(),
   mockBalanceOf: vi.fn(),
+  mockStatus: vi.fn(),
+  mockGetReceipt: vi.fn(),
 }))
 
-vi.mock('@haven_ai/sdk', () => ({
+vi.mock('@haven_ai/sdk', async (importOriginal) => ({
+  // The REAL parseMerchantSettlement (#4119): the leg decodes PAYMENT-RESPONSE
+  // with the SDK's own public decoder, so a stub here would test nothing.
+  ...(await importOriginal<typeof import('@haven_ai/sdk')>()),
   HavenClient: class {
     fetch = mockFetch
   },
@@ -36,6 +43,7 @@ vi.mock('../lib/haven-api.js', () => ({
   HavenApi: class {
     listReceipts = mockListReceipts
     getAgent = mockGetAgent
+    getMachinePaymentStatus = mockStatus
   },
 }))
 vi.mock('ethers', async (importOriginal) => {
@@ -47,7 +55,9 @@ vi.mock('ethers', async (importOriginal) => {
     ...actual,
     ethers: {
       ...actual.ethers,
-      JsonRpcProvider: class {},
+      JsonRpcProvider: class {
+        getTransactionReceipt = mockGetReceipt
+      },
       Contract: class {
         balanceOf = mockBalanceOf
       },
@@ -58,17 +68,34 @@ vi.mock('ethers', async (importOriginal) => {
 const { x402Delegation3009, TIMING, classifyDelegateResidual } = await import(
   './x402-delegation-3009.js'
 )
+const { ATTRIBUTION_WINDOW_MS } = await import('../lib/settlement-record.js')
 
 // Real values here would make each no-evidence-row case sit out a 20s wait.
 TIMING.evidenceWaitMs = 60
 TIMING.pollIntervalMs = 20
 TIMING.deliveryWaitMs = 60
+TIMING.receiptWaitMs = 60
+
+/** The merchant's base64-JSON PAYMENT-RESPONSE header naming its settlement transaction. */
+const paymentResponse = (transaction: string) =>
+  Buffer.from(JSON.stringify({ success: true, transaction, network: 'eip155:84532' })).toString('base64')
 
 /** A merchant response that succeeds — so only the evidence assertions can fail. */
-const okMerchantResponse = () => ({
+const okMerchantResponse = (
+  headers: Record<string, string> = { 'PAYMENT-RESPONSE': paymentResponse(MERCHANT_TX) },
+  body: unknown = { content: [{ text: 'VPN basic purchased' }] },
+) => ({
   ok: true,
   status: 200,
-  text: async () => JSON.stringify({ content: [{ text: 'VPN basic purchased' }] }),
+  headers: new Headers(headers),
+  text: async () => JSON.stringify(body),
+})
+
+/** `GET /machine-payments/:id/status`, with or without the #4119 record flag. */
+const status = (recorded: boolean) => ({
+  ok: true,
+  status: 200,
+  data: { payment_id: 'pay_new', phase: 'settled', ...(recorded ? { merchant_settlement_recorded: true } : {}) },
 })
 
 const TREASURY = '0x' + 'a1'.repeat(20)
@@ -81,6 +108,7 @@ const receipt = (over: Record<string, unknown> = {}) => ({
   merchant_address: MERCHANT,
   amount_human: '0.001',
   tx_hash: '0x' + 'ab'.repeat(32),
+  settlement_tx_hash: MERCHANT_TX,
   ...over,
 })
 
@@ -122,6 +150,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockFetch.mockResolvedValue(okMerchantResponse())
   mockGetAgent.mockResolvedValue({ ok: true, data: { account_address: TREASURY } })
+  mockStatus.mockResolvedValue(status(true))
+  mockGetReceipt.mockResolvedValue({ status: 1, blockNumber: 45_212_857 })
   settled([receipt()])
   balances()
 })
@@ -399,5 +429,111 @@ describe('delivery is a different question from dust (#2444)', () => {
     const r = await x402Delegation3009.run(ctx())
     expect(r.pass).toBe(true)
     expect(r.detail).toMatch(/0 residual/)
+  })
+})
+
+/** Drive a run on a fake clock so the REAL 45 s attribution window is exercised. */
+async function onFakeClock<T>(run: () => Promise<T>): Promise<T> {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+  try {
+    let done = false
+    const pending = run().finally(() => {
+      done = true
+    })
+    for (let step = 0; step < 2_000 && !done; step++) await vi.advanceTimersByTimeAsync(250)
+    if (!done) throw new Error('the run did not settle within 500 s of fake time')
+    return await pending
+  } finally {
+    vi.useRealTimers()
+  }
+}
+
+/** Record when `client.fetch` was called — the leg's #4119 anchor is taken just before it. */
+function fetchAt(): () => number {
+  let at = Number.NaN
+  mockFetch.mockImplementation(async () => {
+    at = Date.now()
+    return okMerchantResponse()
+  })
+  return () => at
+}
+
+describe('Haven recorded the merchant settlement (#4119)', () => {
+  it('passes, and the PASS line shows the recorded hash', async () => {
+    const r = await x402Delegation3009.run(ctx())
+    expect(r.pass).toBe(true)
+    expect(r.detail).toContain(`merchant settlement recorded: ${MERCHANT_TX}`)
+    expect(r.detail).toMatch(/from PAYMENT-RESPONSE/)
+    expect(mockStatus).toHaveBeenCalledWith('pay_new')
+  })
+
+  it('FAILS when the status never carries merchant_settlement_recorded, naming the payment', async () => {
+    mockStatus.mockResolvedValue(status(false))
+    const r = await onFakeClock(() => x402Delegation3009.run(ctx()))
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/did not record the merchant settlement of payment pay_new/)
+    expect(r.detail).not.toMatch(/TypeError|is not a function/)
+  })
+
+  it('FAILS on a late record: absent until after anchor + 45 s, present afterwards', async () => {
+    const at = fetchAt()
+    mockStatus.mockImplementation(async () => status(Date.now() > at() + ATTRIBUTION_WINDOW_MS))
+    const r = await onFakeClock(() => x402Delegation3009.run(ctx()))
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/pay_new/)
+  })
+
+  it('PASSES a record first seen inside the window — the read is polled, not raced', async () => {
+    const at = fetchAt()
+    mockStatus.mockImplementation(async () => status(Date.now() > at() + 10_000))
+    const r = await onFakeClock(() => x402Delegation3009.run(ctx()))
+    expect(r.pass).toBe(true)
+  })
+
+  it('FAILS when Haven recorded a DIFFERENT hash, beside a true flag', async () => {
+    settled([receipt({ settlement_tx_hash: '0x' + 'e9'.repeat(32) })])
+    const r = await x402Delegation3009.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/attributed another transaction to this payment/)
+  })
+
+  it('stays green on a case-only hash difference', async () => {
+    settled([receipt({ settlement_tx_hash: MERCHANT_TX.toUpperCase().replace('0X', '0x') })])
+    const r = await x402Delegation3009.run(ctx())
+    expect(r.pass).toBe(true)
+  })
+
+  it('falls back to the tool result _meta when PAYMENT-RESPONSE carries no transaction', async () => {
+    mockFetch.mockResolvedValue(
+      okMerchantResponse(
+        {},
+        { content: [{ text: 'ok' }], _meta: { 'x402/payment-response': { success: true, transaction: MERCHANT_TX } } },
+      ),
+    )
+    const r = await x402Delegation3009.run(ctx())
+    expect(r.pass).toBe(true)
+    expect(r.detail).toMatch(/from _meta/)
+    expect(mockGetReceipt).toHaveBeenCalledWith(MERCHANT_TX)
+  })
+
+  it('FAILS when the merchant names no settlement transaction at all', async () => {
+    mockFetch.mockResolvedValue(okMerchantResponse({}))
+    const r = await x402Delegation3009.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/named no settlement transaction/)
+  })
+
+  it('FAILS when the merchant settlement REVERTED on-chain', async () => {
+    mockGetReceipt.mockResolvedValue({ status: 0, blockNumber: 1 })
+    const r = await x402Delegation3009.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/REVERTED on-chain/)
+  })
+
+  it('FAILS when the merchant settlement hash never lands', async () => {
+    mockGetReceipt.mockResolvedValue(null)
+    const r = await x402Delegation3009.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/no receipt within/)
   })
 })

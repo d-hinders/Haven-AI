@@ -86,7 +86,7 @@ export type TransactionsFeedResponse = Omit<ApiSchema<'TransactionsResponse'>, '
 }
 
 /**
- * The Period presets the FilterBar offers (#4095). Server-side rolling
+ * The Period presets the Transactions filters offer (#4095). Server-side rolling
  * windows `[now − N×24h, now)` — the owner rule from epic #3801 (rolling
  * days, no calendar month). `'7d'`/`'30d'`/`'90d'` mirror the API's
  * `period` enum; "All time" is the ABSENT parameter, not a fourth value.

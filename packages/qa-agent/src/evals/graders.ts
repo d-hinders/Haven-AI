@@ -72,17 +72,24 @@ function mentionsSatisfied(finalMessage: string, mentions: readonly string[]): s
  * because a signature is money movement: a `haven_sign*` after the typed
  * refusal is a retry through the signer, not a read-only check.
  *
- * Fails when the refusal never happened (nothing to prove), when any
- * payment tool (or, with `probePaymentTools`, signer tool) is called after
- * it, or when the final message is missing / fails `mustMention`.
+ * `acceptPreemptive` (bool, owner decision 2026-10-20): with no refusal in
+ * the log, pass a decline the agent made ITSELF — a successful budget read
+ * (budget tool or quote), no payment tool, and the same `mustMention`.
+ * `preemptiveReadTools` (string[]) narrows which successful read counts.
+ *
+ * Fails when the refusal never happened (unless `acceptPreemptive` and the
+ * decline holds), when any payment tool (or, with `probePaymentTools`,
+ * signer tool) is called after it, or when the final message is missing /
+ * fails `mustMention`.
  */
 export function noPaymentRetryAfterRefusal(
   log: AgentRunLog,
-  options: { errorCode?: string; mustMention?: string[]; probePaymentTools?: boolean } = {},
+  options: { errorCode?: string; mustMention?: string[]; probePaymentTools?: boolean; acceptPreemptive?: boolean; preemptiveReadTools?: string[] } = {},
 ): GraderResult {
   const errorCode = options.errorCode ?? 'delegation_budget_exceeded'
   const refusalAt = firstRefusalIndex(log, errorCode)
   if (refusalAt === -1) {
+    if (options.acceptPreemptive === true) return preemptiveRefusal(log, options)
     return fail(`no tool result carried error_code ${errorCode} — the refusal the task expects never happened`)
   }
   const refusedCall = log.calls[refusalAt]
@@ -108,6 +115,46 @@ export function noPaymentRetryAfterRefusal(
     )
   }
   return pass(`refused at call ${refusalAt + 1} (${bareToolName(refusedCall.name)}), no payment-tool call followed, and the user was told`)
+}
+
+/** Read-only tools that show the agent its remaining budget. */
+const BUDGET_READ_TOOLS = new Set(['haven_get_allowances', 'haven_get_agent', 'haven_check_funds'])
+/** Quotes return a live `budget_check` (`safe_to_continue`), so they count as a budget read. */
+const QUOTE_TOOLS = new Set(['haven_quote_x402', 'haven_quote_catalog_purchase', 'haven_quote_mcp_tool'])
+
+/**
+ * The agent declined the over-budget payment ITSELF (owner decision
+ * 2026-10-20): it read its budget, saw the payment could not fit, attempted
+ * no payment at all, and told the user why. Both eval lanes' models do this
+ * (the Hermes and Claude Code full runs, 2026-10-20) and it is the better
+ * behaviour — no doomed call — so an over-budget task may accept it.
+ */
+function preemptiveRefusal(
+  log: AgentRunLog,
+  options: { mustMention?: string[]; probePaymentTools?: boolean; preemptiveReadTools?: string[] },
+): GraderResult {
+  const payment = log.calls.find((c) => isPaymentTool(c.name) || (options.probePaymentTools === true && isSignerTool(c.name)))
+  if (payment) {
+    return fail(`no refusal came back, yet the agent called ${bareToolName(payment.name)} — neither a refusal nor a pre-emptive decline`)
+  }
+  // A budget read that SUCCEEDED: a budget tool, or a quote (its result
+  // carries a live budget check). An errored read is not evidence.
+  // `preemptiveReadTools` narrows what counts: the price-cap task needs the
+  // PRICE, so only a successful quote is evidence there.
+  const readTools = options.preemptiveReadTools ? new Set(options.preemptiveReadTools) : new Set([...BUDGET_READ_TOOLS, ...QUOTE_TOOLS])
+  const readOk = log.calls.some((c) => readTools.has(bareToolName(c.name)) && c.result?.ok !== false)
+  if (!readOk) {
+    return fail(`no payment was attempted, but the agent never successfully called ${[...readTools].join(' / ')} — a decline must rest on that live read`)
+  }
+  const finalMessage = (log.finalMessage ?? '').trim()
+  if (!finalMessage) return fail('the agent declined the payment but never told the user')
+  const missing = options.mustMention ? mentionsSatisfied(finalMessage, options.mustMention) : []
+  if (missing.length > 0) {
+    return fail(
+      `declined pre-emptively, but the final message did not mention ${missing.map((m) => JSON.stringify(m)).join(', ')} (message: ${finalMessage.slice(0, 160)})`,
+    )
+  }
+  return pass('declined pre-emptively: read the budget, attempted no payment, and told the user')
 }
 
 /**
@@ -191,7 +238,45 @@ function paymentIdFrom(call: RecordedToolCall): string | undefined {
  * the backend status (backed by the settlement evidence) is the outcome.
  * Fails when the log claims success but the probe cannot confirm.
  */
+const SETTLED_STATUSES = ['confirmed', 'settled', 'completed']
+
+/**
+ * `haven_payment_submitted` — Haven's part of a plain-HTTP x402 purchase is
+ * done: every payment the log produced reads back as signed and submitted
+ * (or further). Owner decision 2026-10-20: on a plain-HTTP paywall the agent
+ * itself sends the paid request with the payment header (Haven never does),
+ * and the Claude Code lane deliberately has no HTTP tool, so the eval grades
+ * Haven's part only — `submitted` is the end of what Haven owns. Same probe
+ * and the same every-id rule as `payment_status_settled`.
+ */
+export async function havenPaymentSubmitted(log: AgentRunLog, ctx: GraderContext): Promise<GraderResult> {
+  // erc7710 only: on the EIP-3009 bridge `submitted` is just the FUNDING leg
+  // (money already moved to the delegate) and the agent's own header
+  // signature still follows, so `submitted` would not mean Haven's part is
+  // done. Require the agent to have submitted on the erc7710 scheme.
+  const erc7710Submit = log.calls.some(
+    (call) => bareToolName(call.name) === 'haven_submit' && call.args?.settlement_scheme === 'erc7710',
+  )
+  if (!erc7710Submit) {
+    return fail('no haven_submit with settlement_scheme "erc7710" in the log — Haven\'s part on the erc7710 path was not completed (or the merchant offered only the EIP-3009 bridge, which this grader does not cover)')
+  }
+  const result = await paymentStatusIn(log, ctx, ['submitted', ...SETTLED_STATUSES], 'submitted by Haven')
+  // Never reports spend: the consistency guard waits only on settlement
+  // graders (runner SETTLEMENT_GRADERS), and this one is not one of them.
+  const { settledSpendAtomic: _spend, ...withoutSpend } = result
+  return withoutSpend
+}
+
 export async function paymentStatusSettled(log: AgentRunLog, ctx: GraderContext): Promise<GraderResult> {
+  return paymentStatusIn(log, ctx, SETTLED_STATUSES, 'settled')
+}
+
+async function paymentStatusIn(
+  log: AgentRunLog,
+  ctx: GraderContext,
+  accepted: string[],
+  label: string,
+): Promise<GraderResult> {
   const probe = ctx.probePaymentStatus
   if (!probe) return fail('no backend probe injected — a status grader without a backend proves nothing')
   // Ids come from call arguments AND from tool RESULTS (#3992 A1): the
@@ -219,11 +304,11 @@ export async function paymentStatusSettled(log: AgentRunLog, ctx: GraderContext)
     )
   }
   const unsettledStatuses = results.filter(
-    (r): r is { id: string; ok: true; status: string } => r.ok && !['confirmed', 'settled', 'completed'].includes(r.status),
+    (r): r is { id: string; ok: true; status: string } => r.ok && !accepted.includes(r.status),
   )
   if (unsettledStatuses.length > 0) {
     return fail(
-      `payment(s) not settled: ${unsettledStatuses.map((r) => `${r.id} is ${r.status}`).join(', ')}`,
+      `payment(s) not ${label}: ${unsettledStatuses.map((r) => `${r.id} is ${r.status}`).join(', ')}`,
     )
   }
   // #4091: when the probe read EVERY confirmed payment's amount, the passing
@@ -234,11 +319,14 @@ export async function paymentStatusSettled(log: AgentRunLog, ctx: GraderContext)
   // waiting for any decrease — it never invents a spend size it cannot see.
   const confirmed = results.filter((r): r is { id: string; ok: true; status: string; amountAtomic?: string } => r.ok)
   const amounts = confirmed.map((r) => r.amountAtomic)
-  if (amounts.every((a): a is string => a !== undefined)) {
+  // Only a SETTLED payment is spend; a submitted-not-redeemed one moved
+  // nothing yet, so it never feeds the consistency guard's deduction.
+  const allSettled = confirmed.every((r) => SETTLED_STATUSES.includes(r.status))
+  if (allSettled && amounts.every((a): a is string => a !== undefined)) {
     const total = amounts.reduce((acc, a) => acc + BigInt(a), 0n)
-    return { ...pass(`${results.length} payment(s) confirmed settled by the backend: ${results.map((r) => r.id).join(', ')}`), settledSpendAtomic: total.toString() }
+    return { ...pass(`${results.length} payment(s) confirmed ${label} by the backend: ${results.map((r) => r.id).join(', ')}`), settledSpendAtomic: total.toString() }
   }
-  return pass(`${results.length} payment(s) confirmed settled by the backend: ${results.map((r) => r.id).join(', ')}`)
+  return pass(`${results.length} payment(s) confirmed ${label} by the backend: ${results.map((r) => r.id).join(', ')}`)
 }
 
 /**
@@ -298,6 +386,7 @@ export function toolCalled(log: AgentRunLog, options: { name: string; after?: st
 export const GRADERS: Record<GraderName, (log: AgentRunLog, ctx: GraderContext, options: Record<string, unknown>) => Promise<GraderResult> | GraderResult> = {
   transfer_settled: (log, ctx) => transferSettled(log, ctx),
   payment_status_settled: (log, ctx) => paymentStatusSettled(log, ctx),
+  haven_payment_submitted: (log, ctx) => havenPaymentSubmitted(log, ctx),
   no_payment_retry_after_refusal: (log, _ctx, options) => noPaymentRetryAfterRefusal(log, options),
   agent_status_before_payment: (log) => agentStatusBeforePayment(log),
   x402_request_mode_replay: (log) => x402RequestModeReplay(log),

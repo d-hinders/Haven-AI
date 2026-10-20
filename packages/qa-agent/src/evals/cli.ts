@@ -53,6 +53,7 @@ import {
   loadTasks,
   resolveTask,
   selectTaskSequence,
+  exhaustedThresholdAtomic,
 } from './tasks.js'
 import {
   renderSummary,
@@ -259,6 +260,18 @@ export function createPerTrialResolver(deps: PerTrialResolverDeps): PerTrialReso
     }
     const startedAtBlock = await deps.blockNumber()
     const remaining = lastRemaining
+    // A tier-3 task's setup IS an exhausted budget: verify it at run time
+    // instead of trusting the tier order. If the drainer did not actually
+    // drain (it failed, its spend has not landed, or a Daily refill came
+    // mid-run), the trial is red with a named cause — otherwise an agent
+    // declining a purchase that would have fit could pass, and a correct
+    // agent that paid would fail.
+    const exhaustedBelow = exhaustedThresholdAtomic(task)
+    if (exhaustedBelow !== undefined && remaining !== undefined && remaining >= exhaustedBelow) {
+      throw new Error(
+        `tier-3 precondition not met: remaining budget ${remaining} atomic is not below ${exhaustedBelow} (${task.requires.find((r) => r.startsWith('EXHAUSTED'))}) — the budget was not exhausted when this task ran`,
+      )
+    }
     const r = await resolveTask(task, {
       budget: async () => ({ remaining }),
       recipient: deps.recipient,

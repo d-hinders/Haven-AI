@@ -124,3 +124,31 @@ describe('renderMarkdownSummary', () => {
     expect(md).toContain('**Model:**')
   })
 })
+
+// The first full run (2026-10-20) failed 3 tasks with no way to see what the
+// agent did: session streams are not uploaded (public repo). The report now
+// carries a names-and-codes-only tool trace per failed trial.
+describe('failed-trial tool trace in the markdown summary', () => {
+  it('lists each failed trial with its tool trace', () => {
+    const r = report()
+    r.tasks[1]!.trials[0]!.trace = ['haven_get_agent', 'haven_send ✗ delegation_budget_exceeded', 'haven_get_allowances']
+    const md = renderMarkdownSummary(r)
+    expect(md).toContain('**Failed trials**')
+    expect(md).toContain('`direct-send-partial-budget` trial 1: no transfer')
+    expect(md).toContain('`haven_send ✗ delegation_budget_exceeded`')
+  })
+
+  it('omits the section when every trial passed', () => {
+    const r = report()
+    r.tasks = [r.tasks[0]!]
+    expect(renderMarkdownSummary(r)).not.toContain('Failed trials')
+  })
+})
+
+describe('failed-trial trace: empty trace renders explicitly', () => {
+  it('prints (no tool calls) for a failed trial whose session made none', () => {
+    const r = report()
+    r.tasks[1]!.trials[0]!.trace = []
+    expect(renderMarkdownSummary(r)).toContain('(no tool calls)')
+  })
+})

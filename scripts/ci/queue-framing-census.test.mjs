@@ -125,6 +125,9 @@ const GUARDED_FILES = [
   'packages/mcp-server/src/tools/paid-mcp-completion.ts',
   // #3329 — the task-budget capability module (open / close, signer hand-off prose)
   'packages/mcp-server/src/tools/task-budgets.ts',
+  // #4107 — the advisory token-safety check: its refusal copy (the
+  // check-unavailable envelope) is agent-visible prose.
+  'packages/mcp-server/src/tools/token-safety.ts',
   'packages/mcp-server/src/tools/support/cap-price.ts',
   // #3769 — the catalog argument-resolution support: holds the fixed-SKU and
   // schema-violation refusal prose (agent-facing payment-refusal strings),

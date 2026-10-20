@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ethers } from 'ethers'
-import { describeObserverRpc, GET_LOGS_MAX_RANGE, GET_LOGS_TIP_RESCAN, proveUsdcTransfer, proveUsdcTransferSince, SEPOLIA_USDC, usdcTransfers, waitForDisabled, waitForReceipt } from './chain.js'
+import { describeObserverRpc, GET_LOGS_MAX_RANGE, GET_LOGS_TIP_RESCAN, proveUsdcTransfer, redactUrls, proveUsdcTransferSince, SEPOLIA_USDC, usdcTransfers, waitForDisabled, waitForReceipt } from './chain.js'
 
 /**
  * The observer-RPC announcement must never print the endpoint (#2511).
@@ -276,5 +276,27 @@ describe('proveUsdcTransferSince (#3505)', () => {
     expect(wrong.ok).toBe(false)
     const none = await proveUsdcTransferSince({ from, to, amount: 1000n }, { ...fast, provider: provider([]) })
     expect(none.ok).toBe(false)
+  })
+})
+
+// ethers v6 errors can carry the request URL; the observer URL embeds the
+// provider API key, and grader details land in the PUBLIC eval report.
+describe('redactUrls — RPC errors never carry the observer URL into a report', () => {
+  it('strips http(s) and ws(s) URLs, keeping the rest of the message', () => {
+    const msg = 'could not coalesce error (info={ "requestUrl": "https://base-sepolia.g.alchemy.com/v2/SECRETKEY123" }, ws=wss://x.example/v2/K)'
+    const out = redactUrls(msg)
+    expect(out).not.toMatch(/SECRETKEY123|\/v2\/K/)
+    expect(out).toContain('could not coalesce error')
+    expect(out).toContain('<url redacted>')
+  })
+
+  it('applies to a failing getLogs read in proveUsdcTransferSince', async () => {
+    const reader = {
+      getBlockNumber: async () => 5,
+      getLogs: async () => { throw new Error('bad request (requestUrl="https://base-sepolia.g.alchemy.com/v2/SECRETKEY123")') },
+    }
+    const r = await proveUsdcTransferSince({ from: '0x' + '11'.repeat(20), to: '0x' + '22'.repeat(20), amount: 1n }, { fromBlock: 5, timeoutMs: 20, intervalMs: 5, provider: reader })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).not.toContain('SECRETKEY123')
   })
 })

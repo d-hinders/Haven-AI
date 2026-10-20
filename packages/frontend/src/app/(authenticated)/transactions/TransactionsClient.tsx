@@ -197,7 +197,7 @@ export default function TransactionsClient() {
   // #4111: every filter dimension lives in the URL through the list-controls
   // codec — a shared link (or a refresh) lands on the same filtered feed the
   // sender saw (#4095), and back/forward re-seeds it.
-  const [listState, setListState] = useListUrlState(transactionsUrlSchema, { filtering: 'server' })
+  const [listState, setListState, { searchEpoch, bumpSearchEpoch }] = useListUrlState(transactionsUrlSchema, { filtering: 'server' })
   const filters = useMemo(() => listStateToFilters(listState), [listState])
 
   // Two links are repaired once, on arrival. One from before #4111 names the
@@ -282,10 +282,11 @@ export default function TransactionsClient() {
         { value: 'user', label: 'User (manual)' },
         ...sortedAgents.map((agent) => ({
           value: agent.id,
-          label:
-            agent.status === 'active'
-              ? agent.name
-              : `${agent.name} (${agentStatusPresentation(agent.status).label})`,
+          label: agent.name,
+          // The status is the option's `meta` slot (#4150), not part of the
+          // label: the menu row, phone-sheet row and chip always show it,
+          // even where the name alone loses its tail to truncation.
+          ...(agent.status === 'active' ? {} : { meta: agentStatusPresentation(agent.status).label }),
         })),
       ],
     },
@@ -363,6 +364,9 @@ export default function TransactionsClient() {
   // Clear filters returns to the page default, the same state the toolbar's
   // own Clear filters reaches.
   const handleClearFilters = () => {
+    // Bump the clear generation (#4150): a draft typed less than 300 ms ago
+    // must not commit after the clear when q was already empty.
+    bumpSearchEpoch()
     handleListChange(clearedListState(listState, transactionsUrlSchema))
   }
 
@@ -494,6 +498,7 @@ export default function TransactionsClient() {
         period={{ allowCustom: true }}
         searchDescription="by name, agent or address"
         count={count}
+        searchEpoch={searchEpoch}
         actions={
           <Button
             variant="ghost"
@@ -501,7 +506,6 @@ export default function TransactionsClient() {
             onClick={() => void handleExportCsv()}
             disabled={!canExport || exporting}
             aria-busy={exporting}
-            className="min-h-11 w-full sm:min-h-0 sm:w-auto"
           >
             {exporting ? 'Preparing…' : 'Export CSV'}
           </Button>

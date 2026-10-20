@@ -2079,7 +2079,12 @@ never repeated inside a parent card.
 
 1. **Search**, then the **actions slot**: actions on the *filtered list*, such
    as Export CSV. Page actions (Connect agent, Add contact) stay in the page
-   header.
+   header. The slot is content-width on every breakpoint: below `sm` it wraps
+   to its own row after search and Filters rather than stretching full-width
+   (#4150 — the approved phone board draws no action row). The pattern owns
+   the action's sizing: pages pass a bare `Button` (no width/height classes),
+   the button paints at its own size, and its 44px phone target comes from
+   `Button`'s tap-target overlay.
 2. **Facets**, then **Sort** and **Period** on the right. A pill facet gets its
    own row.
 3. **Status row**: one removable chip per active filter, **Clear filters**, and
@@ -2115,6 +2120,14 @@ this layout in a narrow container on a wide screen.
   items.
 - A facet with **one possible value is hidden**. If it carries a value anyway
   (from a URL), its chip still shows, because the chip is the only way out.
+- A facet option may carry **`meta`** (#4150): a short suffix such as an
+  agent's status ("Revoked") that must never be lost to truncation. The menu
+  row, the phone-sheet row and the status-row chip draw it as its own slot —
+  non-truncating, so the status shows even where the label loses its tail.
+  The **trigger summary excludes it** (`facetValueLabel` reads labels only);
+  the **chip includes it** (the chip spells the filter out in full). A page
+  moves a status out of its option label and into `meta`; the label is then
+  the plain name.
 - **`allLabel`** names a single-select facet's "no filter" row (#4113). A
   string renames it ("Shown" in place of "All"). `null` drops it,
   for a facet whose every value is a real choice: Agents' **Archived: Hidden /
@@ -2151,7 +2164,13 @@ facets (#4116).
 - **Search.** On a server-filtered list a request, and the URL write, follow a
   300 ms pause in typing. A browser-filtered list re-renders on every keystroke,
   and only its URL write waits. Enter searches at once; Escape in the field
-  clears it.
+  clears it. A too-long placeholder ends in an ellipsis (`text-ellipsis` on the
+  input) — the copy itself is never shortened (#4150). A clear issued OUTSIDE
+  the toolbar — the page's no-match `ListNoMatch` Clear filters — bumps the
+  clear generation the page owns (`useListUrlState`'s `bumpSearchEpoch`,
+  passed to the toolbar as `searchEpoch`), so a draft typed inside the 300 ms
+  window before the click never commits after it, even when `q` was already
+  empty (#4150).
 - **Keyboard and ARIA.** Each trigger is a menu button (`aria-haspopup="menu"`,
   `aria-expanded`, `aria-controls` while open). Enter, Space or Arrow Down open
   it on the checked row; Arrow Up opens it on the last. Arrows move with wrap,
@@ -2164,6 +2183,11 @@ facets (#4116).
   shifted back inside an 8 px margin, and its width is capped to the viewport
   (`e2e/list-controls.spec.ts` proves it at 375 px).
 - **Tap targets.** Triggers, menu rows and sheet rows are 44 px below `sm`.
+  The status-row chips' remove controls paint small (24 px) and reach 44 px
+  through the same vertical `::after` overlay `Button` uses — the drawn status
+  row does not change (#4150). A trigger whose SELECTED label is longer than
+  the facet row truncates inside it (`max-w-full` on the trigger) instead of
+  stretching it.
 
 #### URL state
 

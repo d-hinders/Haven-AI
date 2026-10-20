@@ -57,6 +57,21 @@ async function expectMenuInsideViewport(page: Page, trigger: Locator, label: str
   return panel
 }
 
+/** The hit area, not the painted box (#4150) — see transactions-list-controls.spec.ts. */
+async function expectHitTarget(page: Page, target: Locator, label: string) {
+  const box = await target.boundingBox()
+  expect(box, `${label} has a box`).not.toBeNull()
+  const overlay = await target.evaluate((el) => {
+    const style = getComputedStyle(el, '::after')
+    return { height: parseFloat(style.height), content: style.content }
+  })
+  expect(overlay.content, `${label} draws a tap-target overlay`).not.toBe('none')
+  expect(overlay.height, `${label}: overlay is ${overlay.height}px tall, under 44px`).toBeGreaterThanOrEqual(44)
+  const point = { x: box!.x + box!.width / 2, y: box!.y - 2 }
+  const hit = await target.evaluate((el, pt) => (document.elementFromPoint(pt.x, pt.y) as HTMLElement | null)?.closest('button') === el, point)
+  expect(hit, `${label}: the 44px overlay does not answer a tap at its own edge`).toBe(true)
+}
+
 test.describe('list controls — layout', () => {
   test('no menu extends past a 375px viewport', async ({ page }) => {
     await open(page, 375, 812)
@@ -93,7 +108,11 @@ test.describe('list controls — layout', () => {
     expect(box!.x + box!.width).toBeLessThanOrEqual(375)
 
     const paused = sheet.getByRole('checkbox', { name: /Paused/ })
-    const row = sheet.locator('label').filter({ hasText: 'Paused' })
+    // Scoped through the checkbox: a `hasText: 'Paused'` label filter would
+    // also match the Initiator row whose META slot reads "Paused" (#4150).
+    // The `has` locator must be page-rooted — a `sheet`-rooted one would be
+    // re-rooted INSIDE the label and never match.
+    const row = sheet.locator('label').filter({ has: page.getByRole('checkbox', { name: /Paused/ }) })
     expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(44)
     await evidence(page, 'phone-sheet-375')
 
@@ -105,6 +124,58 @@ test.describe('list controls — layout', () => {
     await sheet.getByRole('button', { name: 'Show 4 agents' }).click()
     await expect(sheet).toBeHidden()
     await expect(phone.getByRole('button', { name: 'Filters (1)' })).toBeFocused()
+  })
+
+  test('long labels reveal their tail: the meta slot in the sheet and the chip, no hover (#4150)', async ({ page }) => {
+    await open(page, 375, 812)
+    const phone = page.getByTestId('ds-list-controls-phone')
+    await phone.scrollIntoViewIfNeeded()
+    await phone.getByRole('button', { name: 'Filters (1)' }).click()
+    const sheet = page.getByRole('dialog', { name: 'Filters' })
+    await expect(sheet).toBeVisible()
+
+    // The long Initiator row: the label wraps (line-clamped), the meta slot
+    // shows the status in full — nothing reveals by hover.
+    const row = sheet.locator('label').filter({ hasText: 'Lovable Dev preview deployment helper' })
+    await row.scrollIntoViewIfNeeded()
+    const status = row.getByText('Revoked')
+    await expect(status).toBeVisible()
+    expect(await status.evaluate((el) => el.scrollWidth > 0 && el.scrollWidth <= el.clientWidth), 'the meta slot is clipped').toBe(true)
+    const label = row.getByText('Lovable Dev preview deployment helper')
+    expect(await label.evaluate((el) => getComputedStyle(el).webkitLineClamp)).toBe('2')
+    await evidence(page, 'meta-sheet-375')
+
+    // Selecting it puts the full label + status on the status-row chip.
+    await row.getByRole('radio').check()
+    await sheet.getByRole('button', { name: /^Show / }).click()
+    await expect(sheet).toBeHidden()
+    const chipLabel = phone.getByText('Initiator: Lovable Dev preview deployment helper (Revoked)')
+    await expect(chipLabel).toBeVisible()
+
+    // The chip's remove control: painted 24px, a live 44px hit area.
+    const remove = phone.getByRole('button', { name: 'Remove Initiator: Lovable Dev preview deployment helper (Revoked)' })
+    await expect(remove).toBeVisible()
+    const box = await remove.boundingBox()
+    expect(box!.height, 'the remove control is painted 24px').toBeLessThanOrEqual(28)
+    await expectHitTarget(page, remove, 'Chip remove')
+  })
+
+  test('the search placeholder ellipsizes and the phone actions slot hugs its content (#4150)', async ({ page }) => {
+    await open(page, 375, 812)
+    const phone = page.getByTestId('ds-list-controls-phone')
+    const search = phone.getByRole('searchbox', { name: 'Search agents' })
+    await expect(search).toBeVisible()
+    expect(await search.evaluate((el) => getComputedStyle(el).textOverflow), 'placeholder does not ellipsize').toBe('ellipsis')
+
+    // The server-filtered example's Export CSV: its own row on phone,
+    // content-width — the pattern owns the sizing, not the page.
+    const server = page.getByTestId('ds-list-controls-server')
+    const exportCsv = server.getByRole('button', { name: 'Export CSV' })
+    await exportCsv.scrollIntoViewIfNeeded()
+    await expect(exportCsv).toBeVisible()
+    const exportBox = await exportCsv.boundingBox()
+    expect(exportBox!.width, 'Export CSV is full-width on phone').toBeLessThan(150)
+    await expectHitTarget(page, exportCsv, 'Export CSV')
   })
 
   test('desktop menus stay inside the viewport and states render', async ({ page }) => {

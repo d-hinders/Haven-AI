@@ -594,7 +594,10 @@ const DS_LIST_AGENTS = [
   { id: 'a2', name: 'Atlas', status: 'active', budget: 'recurring', seen: 1 },
   { id: 'a3', name: 'Demo agent', status: 'paused', budget: 'none', seen: 5 },
   { id: 'a4', name: 'Lovable Dev', status: 'active', budget: 'one_time', seen: 2 },
-  { id: 'a5', name: 'Research assistant', status: 'revoked', budget: 'none', seen: 4 },
+  // `a5`'s long name + revoked status is the meta-slot fixture (#4150): the
+  // Initiator row shows the status even where the name loses its tail, and
+  // the sheet row wraps.
+  { id: 'a5', name: 'Lovable Dev preview deployment helper', status: 'revoked', budget: 'none', seen: 4 },
 ]
 
 const DS_LIST_SORT = {
@@ -628,20 +631,36 @@ function dsListFacets(rows: typeof DS_LIST_AGENTS): ListFacet[] {
         { value: 'none', label: 'No budget' },
       ],
     },
+    // The meta slot (#4150): a non-active agent's status rides in `meta`,
+    // the way Transactions moves its agent status out of the label.
+    {
+      id: 'initiator',
+      label: 'Initiator',
+      options: [
+        { value: 'user', label: 'User (manual)' },
+        ...rows.map((r) => ({
+          value: r.id,
+          label: r.name,
+          ...(r.status === 'active' ? {} : { meta: r.status[0].toUpperCase() + r.status.slice(1) }),
+        })),
+      ],
+    },
     // One account: a single possible value, so the facet is hidden.
     { id: 'account', label: 'Account', options: [{ value: 'acc-1', label: 'My account' }] },
   ]
 }
 
-const DS_LIST_EMPTY: ListState = { q: '', facets: { status: [], budget: [], account: [] }, sort: 'name' }
+const DS_LIST_EMPTY: ListState = { q: '', facets: { status: [], budget: [], initiator: [], account: [] }, sort: 'name' }
 
 function dsApplyListState(state: ListState) {
   const q = state.q.trim().toLowerCase()
+  const initiator = state.facets.initiator ?? []
   return DS_LIST_AGENTS.filter(
     (r) =>
       (!q || r.name.toLowerCase().includes(q)) &&
       (state.facets.status.length === 0 || state.facets.status.includes(r.status)) &&
-      (state.facets.budget.length === 0 || state.facets.budget.includes(r.budget)),
+      (state.facets.budget.length === 0 || state.facets.budget.includes(r.budget)) &&
+      (initiator.length === 0 || initiator.includes(r.id)),
   ).sort((a, b) => (state.sort === 'seen' ? a.seen - b.seen : a.name.localeCompare(b.name)))
 }
 
@@ -651,13 +670,20 @@ function ListControlsExample({
   layout,
   loading = false,
   testId,
+  actions,
 }: {
   initial?: ListState
   layout?: 'responsive' | 'phone'
   loading?: boolean
   testId: string
+  /** Showcase only: the phone instance draws the actions slot's phone row. */
+  actions?: ReactNode
 }) {
   const [state, setState] = useState<ListState>(initial)
+  // The clear generation (#4150): the no-match Clear filters bumps it so a
+  // pending search draft never commits after the clear.
+  const [searchEpoch, setSearchEpoch] = useState(0)
+  const bumpSearchEpoch = () => setSearchEpoch((n) => n + 1)
   const rows = dsApplyListState(state)
   const facets = dsListFacets(DS_LIST_AGENTS)
   return (
@@ -670,12 +696,20 @@ function ListControlsExample({
         facets={facets}
         sort={DS_LIST_SORT}
         searchDescription="By name or delegate address"
+        searchEpoch={searchEpoch}
+        actions={actions}
         count={loading ? null : { shown: rows.length, total: DS_LIST_AGENTS.length }}
         layout={layout}
       />
       {/* ListNoMatch sits where the rows were — in place of the list card, not inside it. */}
       {!loading && rows.length === 0 ? (
-        <ListNoMatch noun={DS_LIST_NOUN} onClear={() => setState(clearedListState(state, { facets }))} />
+        <ListNoMatch
+          noun={DS_LIST_NOUN}
+          onClear={() => {
+            bumpSearchEpoch()
+            setState(clearedListState(state, { facets }))
+          }}
+        />
       ) : (
         <Card hover={false} className="overflow-hidden">
           <div className="divide-y divide-[var(--v2-border)]" aria-busy={loading || undefined}>
@@ -702,6 +736,16 @@ function ListControlsExample({
         </Card>
       )}
     </div>
+  )
+}
+
+/** The phone actions slot's drawing (#4150): a bare ghost `sm` Export CSV, no sizing classes. */
+function ExportCsvDrawing() {
+  const { toast } = useToast()
+  return (
+    <Button variant="ghost" size="sm" onClick={() => toast.info('Exports the filtered list')}>
+      Export CSV
+    </Button>
   )
 }
 
@@ -2856,12 +2900,13 @@ export default function DesignSystemPage() {
           <ListControlsState label="Loading — the count is a placeholder until the list answers.">
             <ListControlsExample testId="ds-list-controls-loading" loading />
           </ListControlsState>
-          <ListControlsState label="Phone — below 640px (forced here with layout=&quot;phone&quot;) the facets collapse into “Filters (n)”. The bottom sheet applies each tap live; its footer only closes and names the applied count.">
+          <ListControlsState label="Phone — below 640px (forced here with layout=&quot;phone&quot;) the facets collapse into “Filters (n)”. The bottom sheet applies each tap live; its footer only closes and names the applied count. The actions slot keeps its own row after search and Filters, hugging its content (#4150) — Export CSV here is a drawing, not a wired export.">
             <div className="max-w-[375px]">
               <ListControlsExample
                 testId="ds-list-controls-phone"
                 layout="phone"
                 initial={{ ...DS_LIST_EMPTY, facets: { ...DS_LIST_EMPTY.facets, status: ['active'] } }}
+                actions={<ExportCsvDrawing />}
               />
             </div>
           </ListControlsState>

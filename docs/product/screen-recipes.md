@@ -747,7 +747,8 @@ Structure:
    and the CSV are the same set: search, then the Account, Initiator, Token,
    Direction and Network facets (each hidden while it has a single option)
    and Period (Last 7 / 30 / 90 days, All time, or a custom range), with
-   Export CSV in the actions slot. The status row carries a removable chip
+   Export CSV in the actions slot (content-width on phone — its own row
+   after search and Filters, #4150). The status row carries a removable chip
    per active filter, Clear filters, and the standard count — "{n}
    transactions", or "{shown} of {total} transactions" filtered, both server
    figures. The URL keeps the keys it had before #4111 except search,

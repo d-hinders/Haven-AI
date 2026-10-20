@@ -181,6 +181,53 @@ describe('ListToolbar — search', () => {
     expect(field).toHaveValue('')
   })
 
+  it('the no-match Clear filters cancels a pending draft even when q was already empty (#4150)', () => {
+    vi.useFakeTimers()
+    // The page-shaped harness: ListNoMatch is a SIBLING the page renders, its
+    // clear path bumping the clear generation the page owns, exactly as
+    // TransactionsClient and the design-system example wire it.
+    function Server() {
+      const [state, setState] = useState<ListState>({ ...EMPTY, facets: { ...EMPTY.facets, status: ['active'] } })
+      const [searchEpoch, setSearchEpoch] = useState(0)
+      return (
+        <>
+          <ListToolbar
+            noun={noun}
+            state={state}
+            onChange={setState}
+            filtering="server"
+            facets={FACETS}
+            count={{ shown: 0, total: 3 }}
+            searchEpoch={searchEpoch}
+          />
+          <div data-testid="no-match">
+            <ListNoMatch
+              noun={noun}
+              onClear={() => {
+                setSearchEpoch((n) => n + 1)
+                setState({ ...EMPTY })
+              }}
+            />
+          </div>
+          <output data-testid="state">{JSON.stringify(state)}</output>
+        </>
+      )
+    }
+    render(<Server />)
+    const field = screen.getByRole('searchbox', { name: 'Search agents' })
+    // q empty and a facet set — the no-match state. The draft typed now would
+    // commit 300 ms later (the committed q equals the cleared value, so the
+    // field's value watch alone cannot cancel it); the clear must not let it.
+    fireEvent.change(field, { target: { value: 'f' } })
+    fireEvent.click(within(screen.getByTestId('no-match')).getByRole('button', { name: 'Clear filters' }))
+    act(() => vi.advanceTimersByTime(1000))
+    const state = JSON.parse(screen.getByTestId('state').textContent!) as ListState
+    // The draft never commits and the field is empty.
+    expect(state.q).toBe('')
+    expect(state.facets.status).toEqual([])
+    expect(field).toHaveValue('')
+  })
+
   it('carries the search description for screen readers', () => {
     render(<ListToolbar noun={noun} state={EMPTY} onChange={() => {}} filtering="browser" count={null} searchDescription="By name or address" />)
     expect(screen.getByRole('searchbox', { name: 'Search agents' })).toHaveAccessibleDescription('By name or address')
@@ -523,6 +570,77 @@ describe('ListToolbar — phone sheet', () => {
     fireEvent.change(within(sheet).getByLabelText('To'), { target: { value: '2026-09-30' } })
     await user.click(within(sheet).getByRole('button', { name: 'Apply range' }))
     expect(onChange).toHaveBeenLastCalledWith({ ...EMPTY, period: { from: '2026-09-01', to: '2026-09-30' } })
+  })
+})
+
+describe('ListToolbar — long labels and the meta slot (#4150)', () => {
+  const LONG = 'Lovable Dev preview deployment helper'
+  const META_FACETS: ListFacet[] = [
+    {
+      id: 'agentId',
+      label: 'Initiator',
+      options: [
+        { value: 'a1', label: LONG, meta: 'Revoked' },
+        { value: 'a2', label: 'Atlas' },
+      ],
+    },
+  ]
+  const META_EMPTY: ListState = { q: '', facets: { agentId: [] }, period: {} }
+  const META_FILTERED: ListState = { ...META_EMPTY, facets: { agentId: ['a1'] } }
+
+  function renderFiltered(extra?: Partial<ListToolbarProps>) {
+    return render(
+      <ListToolbar noun={noun} state={META_FILTERED} onChange={() => {}} filtering="browser" facets={META_FACETS} count={{ shown: 1, total: 2 }} {...extra} />,
+    )
+  }
+
+  it('the trigger summary excludes the meta; the chip spells the filter out in full and wraps', () => {
+    renderFiltered()
+    // The compact trigger: label only.
+    expect(screen.getByRole('button', { name: `Initiator: ${LONG}` })).toBeInTheDocument()
+    // The chip: the VISIBLE text carries the status suffix, not just an
+    // accessible name, and it line-clamps instead of losing its tail.
+    const chip = screen.getByText(`Initiator: ${LONG} (Revoked)`)
+    expect(chip).toHaveClass('line-clamp-2')
+    expect(chip).toHaveAttribute('title', `Initiator: ${LONG} (Revoked)`)
+    expect(screen.getByRole('button', { name: `Remove Initiator: ${LONG} (Revoked)` })).toBeInTheDocument()
+  })
+
+  it('the chip remove button carries the 44px hit-area overlay', () => {
+    renderFiltered()
+    const remove = screen.getByRole('button', { name: /^Remove Initiator:/ })
+    expect(remove.className).toContain('after:h-11')
+  })
+
+  it('the desktop menu row shows the meta and titles the label for pointer reveal', async () => {
+    const user = userEvent.setup()
+    renderFiltered()
+    await user.click(screen.getByRole('button', { name: `Initiator: ${LONG}` }))
+    const row = screen.getByRole('menuitemradio', { name: new RegExp(LONG) })
+    expect(within(row).getByText('Revoked')).toBeInTheDocument()
+    expect(within(row).getByText(LONG)).toHaveAttribute('title', LONG)
+  })
+
+  it('the phone sheet row wraps and always shows the meta — no hover on touch', async () => {
+    const user = userEvent.setup()
+    renderFiltered({ layout: 'phone' })
+    await user.click(screen.getByRole('button', { name: 'Filters (1)' }))
+    const sheet = screen.getByRole('dialog', { name: 'Filters' })
+    const row = within(sheet).getByRole('radio', { name: new RegExp(LONG) })
+    const label = row.closest('label')!
+    expect(within(label).getByText(LONG)).toHaveClass('line-clamp-2')
+    expect(within(label).getByText('Revoked')).toBeInTheDocument()
+  })
+
+  it('the search input ellipsizes its placeholder when it does not fit', () => {
+    renderFiltered()
+    expect(screen.getByRole('searchbox', { name: 'Search agents' })).toHaveClass('text-ellipsis')
+  })
+
+  it('the actions slot hugs its content — the pattern owns action sizing', () => {
+    render(<BrowserList extra={{ actions: <button type="button">Export CSV</button> }} />)
+    const slot = screen.getByRole('button', { name: 'Export CSV' }).closest('div')
+    expect(slot).not.toHaveClass('w-full')
   })
 })
 

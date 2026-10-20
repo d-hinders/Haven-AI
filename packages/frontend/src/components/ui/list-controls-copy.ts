@@ -59,14 +59,25 @@ export const filtersButtonLabel = (active: number): string => (active > 0 ? `Fil
 /**
  * A facet's value as the trigger and its chip read it: "All", one option's
  * label, two labels joined, or "3 selected".
+ *
+ * An option may carry a `meta` status suffix (#4150). Whether it is included
+ * is the caller's choice, stated here: the **trigger summary excludes it**
+ * (the compact summary — the menu row, the phone-sheet row and the chip draw
+ * it as its own slot), and the **status-row chip passes `includeMeta`**,
+ * because the chip is where a filter is spelled out in full.
  */
 export function facetValueLabel(
   values: readonly string[],
-  options: readonly { value: string; label: string }[],
+  options: readonly { value: string; label: string; meta?: string }[],
   allLabel: string = allOptionLabel,
+  includeMeta = false,
 ): string {
   if (values.length === 0) return allLabel
-  const labels = values.map((v) => options.find((o) => o.value === v)?.label)
+  const labels = values.map((v) => {
+    const option = options.find((o) => o.value === v)
+    if (!option) return undefined
+    return includeMeta && option.meta ? `${option.label} (${option.meta})` : option.label
+  })
   // A value the options cannot name (a URL filter whose options have not
   // loaded) still reads as a filter — never as "All", which would label a
   // filtered list unfiltered.

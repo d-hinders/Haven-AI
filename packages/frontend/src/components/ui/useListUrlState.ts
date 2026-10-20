@@ -18,6 +18,19 @@ export interface UseListUrlStateOptions {
   filtering: 'server' | 'browser'
 }
 
+export interface UseListUrlStateApi {
+  /**
+   * A clear generation (#4150): the page bumps it when a clear path OUTSIDE
+   * the toolbar runs — the no-match `ListNoMatch` Clear filters — and passes
+   * the value to `ListToolbar`'s `searchEpoch`, so the search field drops a
+   * pending draft even when `q` was already empty and nothing the field
+   * watches changed. The toolbar's own epoch cannot reach a page-rendered
+   * sibling; this one can, because the page owns the state.
+   */
+  searchEpoch: number
+  bumpSearchEpoch: () => void
+}
+
 /**
  * A list's control state, mirrored to the URL through the list-controls codec
  * (`list-url-codec.ts`). The page owns it and hands `state` / `setState` to
@@ -34,12 +47,15 @@ export interface UseListUrlStateOptions {
 export function useListUrlState(
   schema: ListUrlSchema,
   { filtering }: UseListUrlStateOptions,
-): [ListState, (next: ListState) => void] {
+): [ListState, (next: ListState) => void, UseListUrlStateApi] {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const search = searchParams?.toString() ?? ''
 
   const [state, setStateRaw] = useState<ListState>(() => parseListState(new URLSearchParams(search), schema))
+  // The clear generation (#4150). See `UseListUrlStateApi`.
+  const [searchEpoch, setSearchEpoch] = useState(0)
+  const bumpSearchEpoch = useCallback(() => setSearchEpoch((n) => n + 1), [])
 
   // The latest state, readable from the debounced URL write.
   const stateRef = useRef(state)
@@ -111,5 +127,5 @@ export function useListUrlState(
     [filtering, write],
   )
 
-  return [state, setState]
+  return [state, setState, { searchEpoch, bumpSearchEpoch }]
 }

@@ -39,7 +39,9 @@ export const listFocusRing =
  */
 export function listTriggerClasses(active: boolean): string {
   return [
-    'inline-flex min-h-11 items-center gap-1.5 whitespace-nowrap rounded-md border px-3 py-2 text-sm transition-colors sm:min-h-[38px]',
+    // `min-w-0 max-w-full`: a long selected label truncates inside the facet
+    // row instead of stretching the trigger past it (#4150).
+    'inline-flex min-h-11 min-w-0 max-w-full items-center gap-1.5 whitespace-nowrap rounded-md border px-3 py-2 text-sm transition-colors sm:min-h-[38px]',
     listFocusRing,
     active
       ? 'border-brand/30 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'

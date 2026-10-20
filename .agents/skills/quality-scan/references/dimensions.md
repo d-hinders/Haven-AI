@@ -83,8 +83,9 @@ npx vitest run <test-file> 2>&1 | grep -E 'Tests |Test Files'
 cp "$SCRATCH/backup" <prod-file> && git diff --quiet -- <prod-file> && echo restored
 ```
 
-Clean: every mutation turns its file red. A survivor is reported with one of
-the three diagnoses the repo already uses — *weak test* (asserts something
+Clean: every mutation fails the guard's own assertion (a compile or SQL red
+does not count; see Budget). A survivor is reported with one of the three
+diagnoses the repo already uses — *weak test* (asserts something
 the mutation does not touch), *dead code* (the mutated line is unreachable),
 or *not load-bearing at the tested condition* (the guard holds elsewhere) —
 never as a bare count. On `893d74f6`: 9 candidate files; the control mutation
@@ -94,9 +95,9 @@ never as a bare count. On `893d74f6`: 9 candidate files; the control mutation
 **Budget: 5 census mutations plus up to 2 targeted probes.** A probe is one
 of two kinds, the two that found the 2026-10-19 run's weak guards: the
 *second copy* of a guard a census mutation caught (M5, `client.ts:1936`,
-green in its own package and caught only across a package boundary → C3),
-and a *count-only pin*, one that asserts only a length or count (M7, which
-survived → C4). That run's M6 (`evals/graders.ts`, outside the census,
+green in its own package and caught only across a package boundary → C3; M5
+was also that run's fifth census target), and a *count-only pin*, one that
+asserts only a length or count (M7, which survived → C4). That run's M6 (`evals/graders.ts`, outside the census,
 caught) fits neither kind and is out of budget; there is no third kind,
 because M6 was caught and yielded no finding. A red counts only when the
 guard's own assertion fails. A compile or SQL error is the mutation's red,

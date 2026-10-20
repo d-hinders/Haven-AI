@@ -128,34 +128,40 @@ Report at most five concrete opportunities. For each, state:
   the criterion's grep with its count, the mutation recipe built once, and
   `classifyChangedFiles` routing and the money-path verdict for the files the
   remedy adds or changes (below); one that cannot run yet is *unrun*, with
-  the reason. Prose ("M7 red after the change") is not an entry: three of the
-  2026-10-19 scan's four issues (#4118, #4121, and #4120 through its sibling
-  #4122) drew a blocking spec-review correction one of these would have shown.
+  the reason. Prose ("M7 red after the change") is not an entry. Of the four
+  candidates the 2026-10-19 scan filed (six issues in all), #4118 and #4121
+  drew a Blocking spec-review correction (1 on each) that the criterion grep
+  and the routing one-liner would have shown; #4119's and #4120's Blocking
+  corrections (4 and 1) were not of that kind.
 - **Verification still needed:** what can only run after the change — the
   focused test, mutation, comparison or review that would establish the
   benefit and preserve existing behavior.
 
 ```bash
-# routing (the CI surfaces these files turn on), then the money-path verdict over globs + controlGlobs (the control must print money-path)
+# routing (the CI surfaces these files turn on), then the money-path verdict over globs + controlGlobs (the positive control `sweep.ts` must print money-path)
 node -e 'import("./scripts/ci/change-classifier.mjs").then(m=>{const r=m.classifyChangedFiles(process.argv.slice(1));console.log(Object.keys(r).filter(k=>r[k]===true).join(" ")||"(none)")})' <file>...
 node -e 'import("./scripts/ci/qa-freshness.mjs").then(q=>{const g=[...q.loadMoneyPathGlobs(),...q.loadMoneyPathControlGlobs()];for(const f of process.argv.slice(1))console.log(f,g.some(x=>q.matchesGlob(f,x))?"money-path":"off")})' packages/backend/src/rails/sweep.ts <file>...
 ```
 
 **Copy identifiers and figures from command output, then resolve each
 identifier** as a whole token whose boundary also excludes `-`, beside a
-control known to resolve. `-F` and `-w -F` are not whole-token checks: at `777b71137`, `-F`
-matches `02-hosted-mcp-signer` and `-w -F` (which counts `-` as a boundary)
-matches `hosted-mcp-signer`, both inside the real `x402-hosted-mcp-signer`.
+control known to resolve. `-F` and `-w -F` are not whole-token checks: at
+`777b71137`, `-F` matches `02-hosted-mcp-signer` and `-w -F` (which counts
+`-` as a boundary) matches `hosted-mcp-signer`, both inside the real
+`x402-hosted-mcp-signer`.
 
 ```bash
 for t in x402-hosted-mcp-signer 02-hosted-mcp-signer hosted-mcp-signer; do  # control first
-  echo "$t $(git grep -l -P "(?<![\w-])\Q$t\E(?![\w-])" <sha> | wc -l)"; done  # → 25, 0, 0 files
+  echo "$t $(git grep -l -P "(?<![\w-])\Q$t\E(?![\w-])" <sha> -- ':!.agents/skills/quality-scan/' | wc -l)"; done  # at 777b71137 → 25, 0, 0 files
 ```
 
-Review correction `3d40fffa` (PR #4104) fixed that invented name and four
-more slips, now rules: grep the bare token, never one quote form of it; write
-a numstat as `+A/−D`; give every denominator its unit ("8 of 31 census test
-files"); attribute a census to whoever ran it.
+Exclude this skill and any draft that quotes the token you resolve: it would
+resolve in its own quotation (unexcluded, once this text landed: 26, 1, 1).
+
+Among review correction `3d40fffa`'s eight (PR #4104) were that invented
+name and four slips that are now rules: grep the bare token, never one quote
+form of it; write a numstat as `+A/−D`; give every denominator its unit ("8
+of 31 census test files"); attribute a census to whoever ran it.
 
 For both levels, exclude cosmetic preferences, lint-only nits, speculative
 abstractions, dependency bumps alone and generic “add tests” suggestions.

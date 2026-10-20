@@ -638,7 +638,7 @@ describe('AgentDetailClient last-activity metadata', () => {
     const review = screen.getByRole('button', { name: 'Review the payment' })
     // `Button`'s ghost variant — a surface fill and a hairline, the same
     // variant the one other Button inside an ApprovalRequiredBanner uses
-    // (`ReceiveFundsModal`'s "Refresh page"). (#2927: the fill reads the bg
+    // (`ReceiveDialog`'s "Refresh page"). (#2927: the fill reads the bg
     // token, so the resting chrome renders in both themes.)
     expect(review.className).toContain('bg-[var(--v2-bg)]')
     expect(review.className).toContain('border-[var(--v2-border-strong)]')

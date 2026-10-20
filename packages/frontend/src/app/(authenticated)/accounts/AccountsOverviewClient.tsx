@@ -19,7 +19,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
-import AddFundsModal from '@/components/AddFundsModal'
+import ReceiveDialog from '@/components/ReceiveDialog'
 import NewAccountDialog from '@/components/NewAccountDialog'
 
 // The Safe-rail INFLOW IS CLOSED (#1984, epic #1440). `AddSafeModal` lived
@@ -69,7 +69,7 @@ function AccountCard({
     lastOutgoingAt,
     loading: portfolioLoading,
   } = usePortfolio(account.account_address, { chainId: account.chain_id })
-  const [addFundsOpen, setAddFundsOpen] = useState(false)
+  const [receiveOpen, setReceiveOpen] = useState(false)
   // #3295: the freshest — actually, the oldest — degraded marker among the
   // card's tokens. Any stale/unavailable token means the card's total is
   // computed partly from last-known values, so the whole total gets the
@@ -192,18 +192,25 @@ function AccountCard({
                 href="#get-funds"
                 onClick={(event) => {
                   event.preventDefault()
-                  setAddFundsOpen(true)
+                  setReceiveOpen(true)
                 }}
                 className="relative z-[var(--v2-z-content)] -mx-1 flex min-h-[44px] items-center px-1 text-xs font-medium text-[var(--v2-brand)] hover:underline focus-visible:outline-none focus-visible:underline"
               >
                 Add funds
               </a>
             )}
-            <AddFundsModal
-              open={addFundsOpen}
-              onClose={() => setAddFundsOpen(false)}
-              accountAddress={account.account_address}
-              chainId={account.chain_id ?? DEFAULT_CHAIN_ID}
+            {/*
+              #4094: the one Receive dialog. The link stays "Add funds" — it
+              names a task, not a button (owner decision 2026-10-19, same
+              rule the first-run guide and the attention items follow) — and
+              the chain id passes through UNFALLBACKED (#1844): an account
+              that arrived without a chain gets the dialog's refusal, not a
+              silent default to Base mainnet.
+            */}
+            <ReceiveDialog
+              open={receiveOpen}
+              onClose={() => setReceiveOpen(false)}
+              account={account}
             />
           </>
         ) : (

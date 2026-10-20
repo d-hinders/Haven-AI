@@ -1447,11 +1447,12 @@ export async function serveSekUser(page: Page) {
 }
 
 /**
- * Overlay `/auth/me` (and only it) with the Add-funds account (#3483).
+ * Overlay `/auth/me` (and only it) with the re-chained account (#3483, #4094).
  *
- * The Add funds modal's layout is a function of the SELECTED ACCOUNT's chain
- * (`AddFundsModal.tsx` #3478: faucet on a testnet account, onramp on a
- * mainnet one), but the shared `testSafe` is pinned to 8453 for every other
+ * The Receive dialog's layout is a function of the SELECTED ACCOUNT's chain
+ * (`ReceiveDialog.tsx`, the #3478 gate carried over: faucet on a testnet
+ * account, onramp on a mainnet one), but the shared `testSafe` is pinned to
+ * 8453 for every other
  * spec and baseline — so a spec that needs a different chain overlays
  * `/auth/me` with a one-field-splice of it rather than mutating the shared
  * object. The dashboard reads only `/auth/me` for the account list
@@ -1979,18 +1980,18 @@ export async function waitForDrawerOpen(page: Page) {
   await page.locator('[data-more-sheet][data-state="open"]').waitFor({ state: 'visible', timeout: 10_000 })
 }
 
-export async function openReceiveFundsModal(page: Page) {
+export async function openReceiveDialog(page: Page) {
   await page.goto('/dashboard')
   await dismissMobileSidebar(page)
-  // #3807: the hero CTA reads "Deposit address" everywhere (funded and
-  // unfunded alike), as do the onboarding checklist and the account-detail
-  // button. Pin to the first exact match in DOM order.
+  // #4094: the money card's actions are "Receive" (primary) and "Send"; both
+  // funding verbs — the old "Add funds" and "Deposit address" — merged into
+  // the one Receive dialog. Pin to the first exact match in DOM order.
   await page
-    .getByRole('button', { name: /^Deposit address$/ })
+    .getByRole('button', { name: /^Receive$/ })
     .first()
     .click()
 
-  const modal = page.getByRole('dialog', { name: 'Deposit address' })
+  const modal = page.getByRole('dialog', { name: 'Receive' })
   await modal.waitFor({ state: 'visible' })
   return modal
 }

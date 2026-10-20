@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -98,16 +98,43 @@ vi.mock('@/components/ConnectAgentModal', () => ({
   default: () => null,
 }))
 
+// #4094: the picker mock prints its action and account count and offers a
+// one-click pick, so the dashboard's ASK-FIRST wiring (multi-account) is
+// assertable here without importing the real picker.
 vi.mock('@/components/DashboardActionPickerModal', () => ({
-  default: () => null,
+  default: ({
+    open,
+    action,
+    accounts,
+    onSelect,
+  }: {
+    open: boolean
+    action: 'receive' | 'send'
+    accounts: { id: string; name: string }[]
+    onSelect: (accountId: string) => void
+  }) =>
+    open ? (
+      <div data-testid="action-picker">
+        <span>{`picker-${action}-${accounts.length}`}</span>
+        <button onClick={() => onSelect(accounts[0].id)}>Pick {accounts[0].name}</button>
+      </div>
+    ) : null,
 }))
 
-vi.mock('@/components/ReceiveFundsModal', () => ({
-  default: () => null,
+// The one Receive dialog (#4094): a marker, so the wiring tests can tell
+// "opened for the chosen account" from "not mounted".
+vi.mock('@/components/ReceiveDialog', () => ({
+  default: ({ open, account }: { open: boolean; account: { name?: string } | null }) =>
+    open ? <div data-testid="receive-dialog">{account?.name ?? ''}</div> : null,
 }))
 
-vi.mock('@/components/AddFundsModal', () => ({
-  default: () => null,
+// The dashboard's Send is the delegation rail's owner-send (#4094): a marker
+// carrying the account it would sign for, so the tests can pin WHICH account
+// reaches the rail — and that none does without a resolved chain (#1844).
+vi.mock('@/components/DelegationSendModal', () => ({
+  default: ({ accountAddress, chainId }: { accountAddress?: string; chainId?: number }) => (
+    <div data-testid="delegation-send-modal">{`${accountAddress ?? ''}|${chainId ?? ''}`}</div>
+  ),
 }))
 
 vi.mock('@/components/PasskeyOtherDeviceNotice', () => ({
@@ -321,8 +348,9 @@ describe('DashboardClient', () => {
     expect(screen.getByText('$1,234.56')).toBeInTheDocument()
     // #3807: the four KPI tiles are gone; the money panel renders the
     // templated 7-day summary and the 30-day spending block in their place.
-    expect(screen.getByRole('button', { name: 'Deposit address' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Add funds' })).toBeInTheDocument()
+    // #4094: the money card's actions are Send / Receive.
+    expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
     // #3902 (changed on purpose): the mockup's muted label, still the heading.
     expect(screen.getByRole('heading', { level: 2, name: 'Agent spending, last 30 days' })).toBeInTheDocument()
     expect(screen.getByText('Payments')).toBeInTheDocument()
@@ -330,7 +358,7 @@ describe('DashboardClient', () => {
     expect(screen.getByText('Stopped by budget')).toBeInTheDocument()
   })
 
-  it('makes "Add funds" the primary action, ahead of "Deposit address" (#3897)', () => {
+  it('makes "Receive" the primary action, ahead of "Send" (#3897, #4094)', () => {
     mockBaseState([], { onboardingProgress: { hasFirstAgentPayment: true } })
     render(<DashboardClient />)
 
@@ -338,10 +366,10 @@ describe('DashboardClient', () => {
     const actions = within(balance)
       .getAllByRole('button')
       .map((button) => button.textContent)
-    expect(actions).toEqual(['Add funds', 'Deposit address'])
+    expect(actions).toEqual(['Receive', 'Send'])
     // Primary is the brand fill; the secondary is the ghost outline.
-    expect(within(balance).getByRole('button', { name: 'Add funds' }).className).toContain('bg-[var(--v2-brand)]')
-    expect(within(balance).getByRole('button', { name: 'Deposit address' }).className).not.toContain(
+    expect(within(balance).getByRole('button', { name: 'Receive' }).className).toContain('bg-[var(--v2-brand)]')
+    expect(within(balance).getByRole('button', { name: 'Send' }).className).not.toContain(
       'bg-[var(--v2-brand)]',
     )
   })
@@ -453,14 +481,17 @@ describe('DashboardClient', () => {
   })
 
   /**
-   * #1989 (epic #1440): the dashboard's two legacy-Safe spend/approval
-   * affordances are GONE — the hero's Send button (it opened `SendModal`, which
-   * is deleted with the rail) and the "Needs attention" approvals row with its
+   * #1989 (epic #1440) → #4094: the dashboard's LEGACY-Safe spend/approval
+   * affordances are GONE — the old hero Send opened `SendModal`, which is
+   * deleted with the rail, and the "Needs attention" approvals row with its
    * "Open approvals" link (`/approvals` no longer routes and
    * `POST /approvals/:id/approve` answers 410 since #1986).
    *
-   * This replaces `uses singular copy for one agent payment that needs action`,
-   * whose entire subject was the deleted row.
+   * #4094 REWRITES the Send half rather than deleting it: Send is back on the
+   * money card as the DELEGATION rail's owner-send (`DelegationSendModal`),
+   * so the assertion flips from absence to PRESENCE — while the retired-rail
+   * absences from #1987 keep their teeth below, on the same funded fixture
+   * that used to guard them.
    *
    * #2459 — fixture decision, DELETED not kept: this test used to drive a
    * legacy account (the retired `account_type` value, renamed to
@@ -473,17 +504,17 @@ describe('DashboardClient', () => {
    * defensive branch left for a legacy input to exercise, so keeping one
    * would pin an unreachable state; the test is converted to the worst case
    * that still exists: the same funded account, with pending approvals, on
-   * the live rail. On `dev` before #2413 every assertion below failed, which
-   * is what keeps this from guarding the empty set — put either affordance
-   * back and it goes red here.
+   * the live rail. On `dev` before #2413 every absence below failed, which
+   * is what keeps this from guarding the empty set — put either retired
+   * affordance back and it goes red here.
    */
-  it('offers neither a Send affordance nor an approvals route, even for a funded account with pending approvals', () => {
+  it('offers the delegation Send but neither an approvals row nor an approvals route, even for a funded account with pending approvals', () => {
     mockUseAuth.mockReturnValue({
       user: {
         id: 'user-1',
         name: 'Ada',
         email: 'ada@example.com',
-        wallet_address: '0x5555555555555555555555555555555555555555',
+        wallet_address: '0x5555555555555555555555555555555555555555555',
         accounts: [SAFE],
       },
     })
@@ -516,12 +547,16 @@ describe('DashboardClient', () => {
     render(<DashboardClient />)
 
     // Positive control FIRST: the dashboard really rendered its funded hero.
-    // Without this the four absences below would all be satisfied by a blank
+    // Without this the absences below would all be satisfied by a blank
     // screen — the failure mode #1987 paid for.
     expect(screen.getByText('$1,234.56')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Deposit address' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
 
-    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
+    // #4094: the money card's Send is the delegation rail's owner-send —
+    // PRESENT, where the pre-#4094 guard asserted the legacy Send's absence.
+    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
+
+    // …and the retired-rail absences (#1987) still hold.
     expect(screen.queryByText('1 agent payment needs your action')).toBeNull()
     expect(screen.queryByRole('link', { name: /Open approvals/i })).toBeNull()
     expect(
@@ -719,9 +754,9 @@ describe('DashboardClient', () => {
 
     expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
     expect(screen.getByText('usdc-null')).toBeInTheDocument()
-    // The hero's own actions are unaffected.
-    expect(screen.getByRole('button', { name: 'Deposit address' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Add funds' })).toBeInTheDocument()
+    // The money card's own actions are unaffected.
+    expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
   })
 
   it('ETH or other-token dust does not complete step 1 — only USDC on the account does (#3818)', () => {
@@ -837,25 +872,25 @@ describe('DashboardClient', () => {
     expect(within(spending).queryByText('Payments')).not.toBeInTheDocument()
   })
 
-  it('shows exactly one primary "Add funds" while step 1 is the active step: the money card\'s steps back (#3902)', () => {
+  it('shows exactly one primary money action while step 1 is the active step: the money card\'s "Receive" steps back (#3902, #4094)', () => {
     mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: '0', funded: false }] })
     render(<DashboardClient />)
     expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
     // Step 1's own "Add funds" is the guide's primary (DashboardOnboardingGuide.test);
-    // the money card's renders ghost beside it.
+    // the money card's "Receive" renders ghost beside it.
     const balance = screen.getByRole('region', { name: 'Balance' })
-    const addFunds = within(balance).getByRole('button', { name: 'Add funds' })
-    expect(addFunds.className).not.toContain('bg-[var(--v2-brand)]')
-    expect(addFunds.className).toContain('border-[var(--v2-border-strong)]')
+    const receive = within(balance).getByRole('button', { name: 'Receive' })
+    expect(receive.className).not.toContain('bg-[var(--v2-brand)]')
+    expect(receive.className).toContain('border-[var(--v2-border-strong)]')
   })
 
-  it('makes the money card\'s "Add funds" primary again once step 1 is done or the guide is hidden (#3902)', () => {
+  it('makes the money card\'s "Receive" primary again once step 1 is done or the guide is hidden (#3902, #4094)', () => {
     // Funded: step 1 is done, so the guide (still showing) no longer asks for funds.
     mockBaseState([], { accounts: [FUNDED_ACCOUNT] })
     const funded = render(<DashboardClient />)
     expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
     expect(
-      within(screen.getByRole('region', { name: 'Balance' })).getByRole('button', { name: 'Add funds' }).className,
+      within(screen.getByRole('region', { name: 'Balance' })).getByRole('button', { name: 'Receive' }).className,
     ).toContain('bg-[var(--v2-brand)]')
     funded.unmount()
 
@@ -865,8 +900,114 @@ describe('DashboardClient', () => {
     render(<DashboardClient />)
     expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
     expect(
-      within(screen.getByRole('region', { name: 'Balance' })).getByRole('button', { name: 'Add funds' }).className,
+      within(screen.getByRole('region', { name: 'Balance' })).getByRole('button', { name: 'Receive' }).className,
     ).toContain('bg-[var(--v2-brand)]')
+  })
+
+  /**
+   * #4094: the money card's Send / Receive wiring — which dialog each verb
+   * opens, and through which path. Single vs multi-account is the axis:
+   * with ONE account both verbs open their dialog directly (the picker is a
+   * multi-account affordance only, per the issue's dialog spec); with TWO
+   * the account is asked for first, and the chosen account is the one the
+   * dialog serves.
+   *
+   * The dialogs are mocked with markers (see the mock block): the picker
+   * prints its action and account count, the Receive dialog its account
+   * name, and the delegation send the account it would sign for.
+   */
+  describe('money card Send / Receive wiring (#4094)', () => {
+    it('with one account, Receive opens the Receive dialog for that account directly — no picker', () => {
+      mockBaseState([], { onboardingProgress: { hasFirstAgentPayment: true } })
+      render(<DashboardClient />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Receive' }))
+
+      expect(screen.getByTestId('receive-dialog')).toBeInTheDocument()
+      expect(screen.getByTestId('receive-dialog')).toHaveTextContent('Main account')
+      // Single account: the picker never enters it.
+      expect(screen.queryByTestId('action-picker')).not.toBeInTheDocument()
+    })
+
+    it('with one account, Send opens the delegation rail for that account directly — no picker', () => {
+      mockBaseState([], { onboardingProgress: { hasFirstAgentPayment: true } })
+      render(<DashboardClient />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+      const send = screen.getByTestId('delegation-send-modal')
+      expect(send).toBeInTheDocument()
+      expect(send).toHaveTextContent(`${SAFE.account_address}|${SAFE.chain_id}`)
+      expect(screen.queryByTestId('action-picker')).not.toBeInTheDocument()
+    })
+
+    it('with more than one account, Receive asks through the picker, then serves the chosen account', () => {
+      mockBaseState([], { onboardingProgress: { hasFirstAgentPayment: true } })
+      const SECOND = { ...SAFE, id: 'safe-2', name: 'Second account', account_address: '0x2222222222222222222222222222222222222222', chain_id: 84532, is_default: false }
+      mockUseAuth.mockReturnValue({
+        user: { id: 'user-1', name: 'Ada', email: 'ada@example.com', wallet_address: '0x5555555555555555555555555555555555555555', accounts: [SAFE, SECOND] },
+      })
+      render(<DashboardClient />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Receive' }))
+
+      // The picker asks first; neither dialog is open yet.
+      const picker = screen.getByTestId('action-picker')
+      expect(picker).toHaveTextContent('picker-receive-2')
+      expect(screen.queryByTestId('receive-dialog')).not.toBeInTheDocument()
+
+      fireEvent.click(within(picker).getByRole('button', { name: 'Pick Main account' }))
+
+      expect(screen.queryByTestId('action-picker')).not.toBeInTheDocument()
+      expect(screen.getByTestId('receive-dialog')).toHaveTextContent('Main account')
+    })
+
+    it('with more than one account, Send asks through the picker, then opens the delegation rail for the chosen account', () => {
+      mockBaseState([], { onboardingProgress: { hasFirstAgentPayment: true } })
+      const SECOND = { ...SAFE, id: 'safe-2', name: 'Second account', account_address: '0x2222222222222222222222222222222222222222', chain_id: 84532, is_default: false }
+      mockUseAuth.mockReturnValue({
+        user: { id: 'user-1', name: 'Ada', email: 'ada@example.com', wallet_address: '0x555555555555555555555555555555555555555555555555555555555555555555555', accounts: [SAFE, SECOND] },
+      })
+      render(<DashboardClient />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+      const picker = screen.getByTestId('action-picker')
+      expect(picker).toHaveTextContent('picker-send-2')
+      expect(screen.queryByTestId('delegation-send-modal')).not.toBeInTheDocument()
+
+      fireEvent.click(within(picker).getByRole('button', { name: 'Pick Main account' }))
+
+      expect(screen.queryByTestId('action-picker')).not.toBeInTheDocument()
+      const send = screen.getByTestId('delegation-send-modal')
+      expect(send).toHaveTextContent(`${SAFE.account_address}|${SAFE.chain_id}`)
+    })
+
+    it('mounts no Send modal for an account without a resolved chain (#1844)', () => {
+      // A chain the wire cannot name is never defaulted into a signing
+      // surface: the delegation rail mounts only for an account with BOTH
+      // an address and a chain — the same #1844 rule the Receive dialog
+      // renders its refusal under.
+      mockBaseState([], { onboardingProgress: { hasFirstAgentPayment: true } })
+      mockUseAuth.mockReturnValue({
+        user: {
+          id: 'user-1',
+          name: 'Ada',
+          email: 'ada@example.com',
+          wallet_address: '0x5555555555555555555555555555555555555555555',
+          accounts: [{ ...SAFE, chain_id: undefined as unknown as number }],
+        },
+      })
+      render(<DashboardClient />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+      expect(screen.queryByTestId('delegation-send-modal')).not.toBeInTheDocument()
+      // The Send button itself still renders — hidden, not disabled (#1079)
+      // never applied here: nothing dead-ends, the account is simply not
+      // signable until its chain resolves.
+      expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
+    })
   })
 
   it('puts "Hide for now" and the progress in the card header, beside "Get started" (#3897)', () => {

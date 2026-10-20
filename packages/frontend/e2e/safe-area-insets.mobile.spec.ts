@@ -31,7 +31,7 @@ import { expect, test, type Page } from '@playwright/test'
 import {
   mockHavenApi,
   seedAuthenticatedSession,
-  openReceiveFundsModal,
+  openReceiveDialog,
   waitForDrawerOpen,
 } from './fixtures/haven-api'
 
@@ -485,7 +485,7 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
    * appears after most write actions, so its dismiss button is the control most
    * likely to land in the home indicator's band.
    *
-   * Driven from the Receive-funds modal's "Copy address", which raises a real
+   * Driven from the Receive dialog's "Copy address", which raises a real
    * toast on `/dashboard`. The obvious trigger — `/design-system`'s "Show
    * toast" button — was measured and rejected: that route is ~1,575 elements
    * and compiling it in `next dev` starved every other test in this project,
@@ -493,7 +493,7 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
    * anything about safe areas.
    */
   test('a toast clears the home indicator', async ({ page }) => {
-    await openReceiveFundsModal(page)
+    await openReceiveDialog(page)
     await applyInsets(page)
     await page.getByRole('button', { name: 'Copy address' }).click()
     await expect(page.getByText('Address copied').last()).toBeVisible()
@@ -536,7 +536,8 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
   })
 
   /**
-   * `ReceiveFundsModal` is one of the overlays that build their own
+   * `ReceiveFundsModal` (the receive dialog's pre-#4094 shape) is one of the
+   * overlays that build their own
    * `fixed inset-0` wrapper rather than going through `ui/Modal` — so this is
    * the bespoke-wrapper path, and `ui/Modal`'s own path is covered by the inset
    * case in `modal-action-row-reachability.spec.ts`, which opens a real
@@ -550,7 +551,7 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
   test('an open bespoke overlay keeps its panel and its actions out of both bands', async ({
     page,
   }) => {
-    await openReceiveFundsModal(page)
+    await openReceiveDialog(page)
     await applyInsets(page)
 
     const dialog = await page.evaluate(() => {
@@ -708,11 +709,11 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     expect(band.background, 'the band is covered opaquely').toMatch(OPAQUE_FILL)
     expect(band.composedOpacity).toBe(1)
 
-    // `openReceiveFundsModal` navigates, which destroys the document and the
+    // `openReceiveDialog` navigates, which destroys the document and the
     // style tag injected above. The second `applyInsets` is REQUIRED, not
     // redundant — without it every inset below resolves to 0. (The control that
     // follows would catch its removal, which is the point of the control.)
-    await openReceiveFundsModal(page)
+    await openReceiveDialog(page)
     await applyInsets(page)
 
     // The same control on the other surface: the overlay reserves the notch in

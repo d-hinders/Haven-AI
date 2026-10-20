@@ -64,7 +64,7 @@ vi.mock('@/components/DelegationSendModal', () => ({
   default: () => null,
 }))
 
-vi.mock('@/components/ReceiveFundsModal', () => ({
+vi.mock('@/components/ReceiveDialog', () => ({
   default: () => null,
 }))
 

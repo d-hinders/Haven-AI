@@ -97,10 +97,10 @@ describe('/demo page', () => {
     // container's text rather than one leaf node.
     expect(pageText).toMatch(/under Network when onboarding/)
 
-    // Step 2: Base Sepolia named explicitly, pointing at the Add funds
-    // modal's own faucet card (#3478) AND a direct fallback link, now with
-    // an external-link affordance (design review round 4, nit 7).
-    expect(screen.getByText(/Get test funds/)).toBeInTheDocument()
+    // Step 2: Base Sepolia named explicitly, pointing at the Receive
+    // dialog's own faucet card (#3478, #4094) AND a direct fallback link,
+    // now with an external-link affordance (design review round 4, nit 7).
+    expect(screen.getByText(/Get test USDC/)).toBeInTheDocument()
     expect(screen.getByText(/Open Circle's faucet/)).toBeInTheDocument()
     expect(screen.getAllByText(/Base Sepolia/).length).toBeGreaterThan(0)
     const faucetLink = screen.getByRole('link', { name: /faucet\.circle\.com/ })

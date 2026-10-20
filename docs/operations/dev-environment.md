@@ -10,7 +10,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - scripts/ci/qa-freshness.mjs
   - .env.dev.example
-  - packages/frontend/src/components/AddFundsModal.tsx
+  - packages/frontend/src/components/ReceiveDialog.tsx
   - packages/frontend/src/components/EnvBadge.tsx
   - packages/frontend/src/lib/env.ts
   - packages/backend/src/config.ts
@@ -1207,8 +1207,8 @@ counts as production: to see `/demo` locally, start the server with
 
 ### `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID` in the Playwright builds (#3483)
 
-The Add funds modal reads `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID` at build time
-(`packages/frontend/src/components/AddFundsModal.tsx`), so the app a visual
+The Receive dialog reads `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID` at build time
+(`packages/frontend/src/components/ReceiveDialog.tsx`), so the app a visual
 spec's server serves shows the "Buy with card" onramp card only when the BUILD
 that produced it carried the id. Every CI surface that builds or serves the app
 for Playwright therefore sets it: `ci.yml`'s frontend_checks build (whose

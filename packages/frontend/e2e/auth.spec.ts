@@ -66,15 +66,14 @@ test.describe('authentication flows', () => {
     await dismissMobileSidebar(page)
 
     await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
-    // #3897: the money card's label reads "Balance" (was "Total balance").
     await expect(page.getByRole('region', { name: 'Balance' })).toBeVisible()
-    // #1989: the dashboard hero's Send button is gone — it opened `SendModal`,
-    // deleted with the Safe rail. `canSend` is now constantly false, so the
-    // affordance is HIDDEN rather than disabled (#1079's pattern). The
-    // deposit-address action (#3807's rename of Receive) is the positive
-    // control: the money panel still renders its action row.
-    await expect(page.getByRole('button', { name: 'Send' })).toHaveCount(0)
-    await expect(page.getByRole('button', { name: 'Deposit address' })).toBeVisible()
+    // #4094: the money verbs are Send / Receive. The dashboard's Send is the
+    // DELEGATION rail's owner-send (it used to be absent with the retired
+    // Safe rail, #1989) — its presence here is the positive control for the
+    // #1987 rewrite in DashboardClient.test.tsx. "Receive" opens the one
+    // merged Receive dialog; the retired-rail absences below still hold.
+    await expect(page.getByRole('button', { name: 'Send' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Receive' })).toBeVisible()
     expect(await expectNoHorizontalOverflow(page)).toMatchObject({
       hasOverflow: false,
       contentRegionFound: true,

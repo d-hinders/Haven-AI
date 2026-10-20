@@ -63,7 +63,7 @@ vi.mock('@/components/transactions/TransactionsTable', () => ({
   default: () => <div>Transactions table</div>,
 }))
 
-vi.mock('@/components/ReceiveFundsModal', () => ({
+vi.mock('@/components/ReceiveDialog', () => ({
   default: () => null,
 }))
 
@@ -452,7 +452,10 @@ describe('AccountDetailClient', () => {
     render(<AccountDetailClient />)
 
     expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
+    // TWO Receive buttons (#4094): the header's quick action and the
+    // empty-state's funding action (the pre-rename "Deposit address").
+    const receiveButtons = screen.getAllByRole('button', { name: 'Receive' })
+    expect(receiveButtons).toHaveLength(2)
     expect(screen.getByTestId('account-signers-card')).toBeInTheDocument()
   })
 

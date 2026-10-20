@@ -95,11 +95,10 @@ covers:
   - packages/frontend/src/components/ErrorBoundary.tsx
   - packages/frontend/src/components/NetworkPill.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
-  - packages/frontend/src/components/ReceiveFundsModal.tsx
+  - packages/frontend/src/components/ReceiveDialog.tsx
   - packages/frontend/src/components/agent-panel/McpServerName.tsx
   - packages/frontend/src/components/haven/Address.tsx
   - packages/frontend/src/app/(authenticated)/dashboard/DashboardClient.tsx
-  - packages/frontend/src/components/AddFundsModal.tsx
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
@@ -936,10 +935,10 @@ one merchant and describing budget stops neutrally), then ONE money card
 surface — with the balance on the left (the figure, the "since yesterday"
 line, the § AreaChart sparkline fed from `spend.balance_by_day` — a missing
 day is skipped, never zero; under 3 measured days the flat placeholder
-draws — and the two actions, "Add funds" primary and "Deposit address"
-secondary; "Add funds" steps down to ghost through `addFundsSecondary` while
-the first-run guide's step 1 is the active step, so exactly one primary
-"Add funds" shows, #3902) and the 30-day spending on the right as a
+draws — and the two actions, "Receive" primary and "Send" secondary (#4094 — the
+money verbs everywhere, per the owner decision; "Receive" steps down to ghost
+through `receiveSecondary` while the first-run guide's step 1 is the active
+step, so exactly one primary money action shows, #3902) and the 30-day spending on the right as a
 `Card.Section divided`, stacked below `lg`. The spending half (#3902) is a
 muted "Agent spending, last 30 days" label — still the section's heading —
 with the 30-day total large and left-aligned beneath it, the per-agent split
@@ -1020,10 +1019,11 @@ rather than repeated per entry:
   differently again.
 - **`trailingIcon`** renders a 14px lucide `ArrowRight` after the label, at the base
   `gap-1.5`. It is available on **every** variant and on **both** elements. In
-  `AddFundsModal.tsx`, the only `onClick` call sites are the modal's two,
-  `:144` (Buy with card) and `:187` (Show receive address); every other call
-  site, including the faucet link added by #3478 (`:258`, Open Circle's
-  faucet), is the `href`/`<a>` form. **It does not animate.**
+  `ReceiveDialog.tsx` (since #4094) the `onClick` call sites are the dialog's own
+  controls — Copy address, the QR toggle, Buy with card, and the refusal state's
+  Refresh page; the link-style affordances, including the faucet card's Open
+  Circle's faucet and the explorer link, are the `href`/`<a>` form. **It does
+  not animate.**
   (Through #1829 this section claimed the icon "slides 2px on hover via wrapper
   `group-hover:gap-2`". It never did: `Button` sets no `group` class and no call site wraps
   one. `group-hover:gap-2` is real, but it belongs to three hand-rolled marketing link
@@ -1480,7 +1480,9 @@ RAW `balance` is zero — not its fiat value — renders nowhere, while the fres
 keeps reading the FULL breakdown, #3295), and replaced the chain-name pill with a "Test
 network" chip beside the name on testnets only (via the shared `isTestnetChain`; mainnet
 renders no network marker). One action DID return to the card under #4021, on the
-empty-balance state only: an **Add funds** link that opens `AddFundsModal` — the exact
+empty-balance state only: an **Add funds** link — the task wording stays (owner
+decision on #4094: wording that names a task, not a button, keeps its words) —
+that opens the Receive dialog, the exact
 sibling-above-the-overlay shape this section has always demanded: `relative z-[content]`,
 its own `min-h-[44px]` vertical hit area, no propagation guards, and a LINK rather than a
 button so the card still holds no buttons. A second holding area — the "Create another
@@ -1624,6 +1626,41 @@ its label node, so a picker row reads exactly like the chip the agent will
 carry. A label is the user's own ad-hoc word ("prod", "finance") — it never
 borrows status language, and it never encodes authority. Recorded on `/design-system` → *Agent label chips*.
 
+### The Receive dialog (`ReceiveDialog.tsx`, #4094)
+
+One dialog serves every funding entry point — the dashboard money card's
+**Receive**, the first-run guide's Add funds step, the low-balance attention
+item, the accounts overview's Add funds link, and account detail's Receive
+button (the old `AddFundsModal` and `ReceiveFundsModal` are deleted). The
+caller picks the account: the dashboard's account picker when there is more
+than one account, the page's own account everywhere else. In
+order, top to bottom:
+
+1. The account card — name, "Default" chip on the default account, the
+   resolved chain's name, and an "On-chain receive" chip.
+2. The address card — the full address (the shared `Address` primitive,
+   untruncated), **Copy address**, a **Show QR code** toggle, and a
+   **View on explorer** link. The QR box is fixed-white in both themes
+   (`.v2-light-surface`, #2929): a scanner reads module contrast, never a
+   themed background.
+3. The "Before you send" list, whose first line is the ONE network rule —
+   *Send USDC on `<network>` only.* One token, one network (#4094); ETH is
+   never listed — agents spend USDC, and the old receive screen's
+   registry-token list invited the wrong deposit.
+4. "Other ways to add money", each card gated on the SELECTED account's
+   chain (#3478), never the deployment default: **Get test USDC** (Circle's
+   faucet) on a test network, **Buy with card** (Coinbase Onramp) on Base —
+   the onramp only when the build carried
+   `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID`, and never on a testnet.
+
+**An unresolved chain gets no network instruction and no default (#1844):**
+the rule, the address card, the QR, the explorer link and both "other ways"
+cards all stay gone, and an `ApprovalRequiredBanner` warning ("Network not
+confirmed") with a **Refresh page** action renders instead — funds sent on
+the wrong network are usually unrecoverable, so the dialog refuses to guess.
+A resolved chain with no address yet gets the same honest retry without the
+network warning. Showcased on `/design-system` → *Receive dialog*.
+
 ### Modal (`ui/Modal`)
 
 Every dialog in the app is this one shell — eleven direct importers, three of
@@ -1644,7 +1681,8 @@ Two consequences, both of which have already cost real time:
 
 - **A test that reads scroll geometry off `getByRole('dialog')` cannot fail** —
   it is measuring the wrapper. Use `[data-modal-body]`. Note that
-  `ReceiveFundsModal` is a bespoke dialog, *not* built on this primitive, and it
+  `ReceiveDialog` (the merged receive dialog since #4094) is a bespoke dialog,
+  *not* built on this primitive, and it
   puts `role="dialog"` on its scrolling panel — so the two are not
   interchangeable and a helper written against one is wrong for the other.
 - **The `footer` prop renders OUTSIDE the scroll box**, as a flex sibling. It is

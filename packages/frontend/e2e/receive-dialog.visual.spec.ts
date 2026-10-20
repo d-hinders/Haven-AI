@@ -1,32 +1,32 @@
 /**
- * Visual regression for the Add funds modal's chain-dependent variants
- * (#3483).
+ * Visual regression for the Receive dialog's chain-dependent variants
+ * (#4094, gate introduced by #3483).
  *
- * Since #3478 slice 2 (PR #3482) the modal's layout is a function of the
- * SELECTED ACCOUNT's chain, not of the deployment: a testnet account (84532)
- * shows the "Get test funds" faucet card and no "Buy with card" onramp; a
- * mainnet account (8453) shows the onramp — but only when the build carried
+ * Since #3478 slice 2 (PR #3482) the funding dialog's layout is a function of
+ * the SELECTED ACCOUNT's chain, not of the deployment — and since #4094 that
+ * dialog is `ReceiveDialog`, the merged replacement for the old "Add funds"
+ * and "Deposit address" pair. A testnet account (84532) shows the "Get test
+ * USDC" faucet card and no "Buy with card" onramp; a mainnet account (8453)
+ * shows the onramp — but only when the build carried
  * `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID` (read at BUILD time,
- * `AddFundsModal.tsx`, so `process.env` here means the bundle constant) — and
+ * `ReceiveDialog.tsx`, so `process.env` here means the bundle constant) — and
  * no faucet. An account that arrives without a `chain_id` still gets the
  * #1844 refusal, naming no network. The unit tests pin only whether each
- * element is present; no pixel baseline covered any variant, so the #3482
- * design reviews asked for one.
+ * element is present; pixel baselines keep the variants from drifting.
  *
  * Three ELEMENT-SCOPED clips (the dialog, the same scoping
  * `edit-budget-modal.visual.spec.ts` uses for the Edit budget modal — the
  * panel is opaque and the same size regardless of the page behind it, so the
  * dashboard's own state cannot leak into a clip):
  *
- *   - `add-funds-testnet`      — the shared account re-chained to 84532 with
- *     the onramp id CONFIGURED: faucet shown, onramp hidden. Configured is
- *     the point — it proves the onramp is hidden because the CHAIN is
+ *   - `receive-dialog-testnet`      — the shared account re-chained to 84532
+ *     with the onramp id CONFIGURED: faucet shown, onramp hidden. Configured
+ *     is the point — it proves the onramp is hidden because the CHAIN is
  *     testnet, not because the build lacked the id (the trivial way to pass).
- *   - `add-funds-mainnet`      — 8453 with the onramp configured: onramp
+ *   - `receive-dialog-mainnet`      — 8453 with the onramp configured: onramp
  *     shown, no faucet.
- *   - `add-funds-unresolved-chain` — the account WITHOUT `chain_id`: the
- *     refusal copy, no network named, neither card. The existing scenario
- *     from `scripts/screenshot.mjs` (~4729), added per #3483's optional item.
+ *   - `receive-dialog-unresolved-chain` — the account WITHOUT `chain_id`:
+ *     the refusal copy, no network named, neither card.
  *
  * Each is captured at desktop and 390 mobile in light, and at desktop in
  * dark (no mobile dark baseline exists for this spec — the convention
@@ -41,7 +41,7 @@
  * consistent. The dashboard hero renders its actions for these fixture
  * shapes (the operation gate resolves `ready` — the shared signer-set
  * handler answers a non-empty passkey set — and `no_signer` would render
- * them too; only `passkey_on_other_device` removes them), so "Add funds" is
+ * them too; only `passkey_on_other_device` removes them), so "Receive" is
  * clickable in every scenario here.
  *
  * Baselines are Linux-rendered by the *Update visual baselines* dispatch —
@@ -52,9 +52,11 @@
  * fixed synthetic literal chosen over a secret because the id is never
  * rendered — only its PRESENCE gates the card — so a fixed value keeps the
  * baselines deterministic across rotations. Dispatch with
- * `expected=` naming the nine new clips (the file's own listing below);
- * the PR carries a `baseline-change:` line per clip (added baselines need
- * the declaration only — `scripts/ci/baseline-verdict-gate.mjs`).
+ * `expected=` naming the nine clips (the file's own listing below);
+ * the PR carries a `baseline-change:` line per clip
+ * (`scripts/ci/baseline-verdict-gate.mjs`). #4094 renamed all nine from the
+ * `add-funds-*` stems — same scenarios, new dialog — so the renamed files
+ * ship regenerated and listed, not blessed.
  *
  * The dialog carries no wall-clock text, but the page behind renders
  * relative timestamps, so the clock is frozen anyway — a moving backdrop
@@ -109,10 +111,10 @@ const FROZEN_NOW = new Date('2026-09-01T12:00:00.000Z')
  * here rather than a silently-reblessed baseline. The faucet/onramp sentence
  * strings are asserted verbatim where the variant question is about them.
  */
-const DIALOG_NAME = 'Add funds'
-const FAUCET_HEADING = 'Get test funds'
+const DIALOG_NAME = 'Receive'
+const FAUCET_HEADING = 'Get test USDC'
 const ONRAMP_BUTTON = 'Buy with card'
-const UNRESOLVED_SENTENCE = "We can't confirm which network this account uses, so we can't tell you where to send USDC."
+const UNRESOLVED_SENTENCE = "We can't confirm which network this account uses, so we can't show you its address or QR code."
 
 type Variant = {
   /** Baseline file stem: `<stem>-<viewport>[-dark].png`. */
@@ -125,33 +127,33 @@ type Variant = {
 
 const VARIANTS: readonly Variant[] = [
   {
-    stem: 'add-funds-testnet',
+    stem: 'receive-dialog-testnet',
     chainId: 84532,
     async assert(dialog) {
       // The faucet card, naming the account's own chain — Base Sepolia.
       await expect(dialog.getByText(FAUCET_HEADING)).toHaveCount(1)
       await expect(
-        dialog.getByText('Send USDC to your account address on Base Sepolia.'),
+        dialog.getByText('Send USDC on Base Sepolia only.'),
       ).toHaveCount(1)
       // The variant's point: the onramp is hidden DESPITE the configured id.
       await expect(dialog.getByRole('button', { name: ONRAMP_BUTTON })).toHaveCount(0)
     },
   },
   {
-    stem: 'add-funds-mainnet',
+    stem: 'receive-dialog-mainnet',
     chainId: 8453,
     async assert(dialog) {
       await expect(dialog.getByRole('button', { name: ONRAMP_BUTTON })).toHaveCount(1)
-      await expect(dialog.getByText('Send USDC to your account address on Base.')).toHaveCount(1)
+      await expect(dialog.getByText('Send USDC on Base only.')).toHaveCount(1)
       // And the faucet is gone with the testnet — not stacked under the onramp.
       await expect(dialog.getByText(FAUCET_HEADING)).toHaveCount(0)
     },
   },
   {
-    stem: 'add-funds-unresolved-chain',
+    stem: 'receive-dialog-unresolved-chain',
     chainId: undefined,
     async assert(dialog) {
-      // The #1844 refusal, verbatim — the modal names no network.
+      // The #1844 refusal, verbatim — the dialog names no network.
       await expect(dialog.getByText(UNRESOLVED_SENTENCE)).toHaveCount(1)
       await expect(dialog.getByRole('button', { name: ONRAMP_BUTTON })).toHaveCount(0)
       await expect(dialog.getByText(FAUCET_HEADING)).toHaveCount(0)
@@ -159,7 +161,7 @@ const VARIANTS: readonly Variant[] = [
   },
 ]
 
-test.describe('add funds modal visual regression (#3483)', () => {
+test.describe('receive dialog visual regression (#4094, gate #3483)', () => {
   test.skip(!VISUAL_SPECS_ENABLED, VISUAL_SKIP_REASON)
 
   const schemeOf = (testInfo: { project: { name: string } }): 'light' | 'dark' =>
@@ -186,7 +188,7 @@ test.describe('add funds modal visual regression (#3483)', () => {
         // `settings-company-details.visual.spec.ts` applies. Skipped rather
         // than filtered out so the loop stays the single honest source of
         // what runs under light.
-        test.skip(scheme === 'dark' && vp!.name !== 'desktop', 'no mobile dark baseline for the add-funds visual spec')
+        test.skip(scheme === 'dark' && vp!.name !== 'desktop', 'no mobile dark baseline for the receive-dialog visual spec')
 
         // BEFORE `goto`: the page reads `Date.now()` during its first render.
         await page.clock.setFixedTime(FROZEN_NOW)
@@ -196,12 +198,12 @@ test.describe('add funds modal visual regression (#3483)', () => {
         await page.goto('/dashboard')
         await dismissMobileSidebar(page)
 
-        // Open the modal from the hero. `.first()` — the wallet button never
+        // Open the dialog from the hero. `.first()` — the wallet button never
         // carries this label, but the locator stays defensive the way
-        // `scripts/screenshot.mjs`'s own add-funds scenarios are.
-        const addFunds = page.getByRole('button', { name: 'Add funds', exact: true }).first()
-        await expect(addFunds).toBeVisible({ timeout: ANCHOR_TIMEOUT_MS })
-        await addFunds.click()
+        // `scripts/screenshot.mjs`'s own receive scenarios are.
+        const receive = page.getByRole('button', { name: 'Receive', exact: true }).first()
+        await expect(receive).toBeVisible({ timeout: ANCHOR_TIMEOUT_MS })
+        await receive.click()
 
         const dialog = page.getByRole('dialog', { name: DIALOG_NAME })
         await expect(dialog).toHaveCount(1)

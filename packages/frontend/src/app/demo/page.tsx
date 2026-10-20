@@ -146,9 +146,9 @@ export default function DemoPage() {
                 whyItMatters="This test USDC comes from Circle straight to your account — Haven isn't part of that transfer and never holds it."
               >
                 <p>
-                  From your dashboard, choose <strong>Add funds</strong>. Copy the{' '}
-                  <strong>Account address (Base Sepolia)</strong> shown there, then use the{' '}
-                  <strong>Get test funds</strong> card below it — &ldquo;Get free Base Sepolia USDC from Circle's
+                  From your dashboard, choose <strong>Receive</strong>. Copy the{' '}
+                  <strong>Haven wallet address</strong> shown there, then use the{' '}
+                  <strong>Get test USDC</strong> card — &ldquo;Get free Base Sepolia USDC from Circle's
                   faucet&rdquo; — and click <strong>Open Circle's faucet</strong>. Pick USDC and Base Sepolia there,
                   then paste in the address you copied.
                 </p>

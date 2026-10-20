@@ -95,7 +95,7 @@ describe('readContentProbe', () => {
   })
 
   it('does NOT count aria-busy="false" — the signal working is not a match', () => {
-    // `/accounts` binds `aria-busy={portfolioLoading}` and `ReceiveFundsModal`
+    // `/accounts` binds `aria-busy={portfolioLoading}` and `ReceiveDialog`
     // binds `aria-busy={!qrDataUrl}`. A probe that matched the ATTRIBUTE rather
     // than the value would refuse both of those surfaces forever, on every run,
     // once they had finished loading.

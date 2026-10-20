@@ -18,8 +18,10 @@
  * - **The spending figures are #3803's NET definition** (`spend.d30.net`) —
  *   the same booked-or-repriced, sweep-netted numbers the analytics page
  *   shows, so the two surfaces cannot disagree. `≈` marks a window whose
- *   NULL-booked rows were priced at today's rate (owner decision 1): a
- *   re-priced total is never shown as booked.
+ *   NULL-booked rows were priced at today's rate (owner decision 1) where the
+ *   conversion changes the number — the server's per-currency
+ *   `approxByCurrency` (#4165), so re-priced USDC in USD carries none — and a
+ *   bucket it could not price says so in words (`unpricedByCurrency`).
  * - **The sparkline is #3805's**, fed from `spend.balance_by_day`: a day with
  *   no snapshot is skipped, never zero, and the line connects across it
  *   (#3897) in a dense 30-day window; fewer than 3 measured days renders the

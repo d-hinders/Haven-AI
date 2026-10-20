@@ -28,7 +28,9 @@
  * Haven holds — the budget's own token where a budget is set, the user's
  * currency everywhere else (owner decision 2026-10-09). `≈` marks a figure
  * converted at today's rate rather than booked: it goes before the sign, and
- * it is the only new element the mode adds.
+ * it is the only new element the mode adds. The component never decides it:
+ * callers pass `approx` from the one rule, `shouldMarkApprox` in
+ * `@haven_ai/core` (#4165) — never on a list row, never for USDC in USD.
  *
  * Unknown is its own state: `null` (or a non-finite value) renders an em
  * dash in secondary ink — never `0,00 kr`, which would state a valuation
@@ -75,7 +77,7 @@ interface CurrencyAmountProps {
   amount: number | null
   /** The currency the value is already in, e.g. `convertedCurrency`. Never read from preferences inside the component. */
   currency: AmountCurrency
-  /** Marks a figure converted at today's rate rather than booked: `≈` before the sign. */
+  /** `≈` before the sign — pass `shouldMarkApprox`'s answer, never a raw provenance flag (#4165). */
   approx?: boolean
   direction?: AmountDirection
   failed?: boolean

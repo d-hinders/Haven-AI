@@ -1214,6 +1214,7 @@ describe('DashboardClient', () => {
         gross: { usd: 74, eur: 67.34, sek: 796.4 },
         net: { usd: 48.1, eur: 43.77, sek: 517.66 },
         approx: true,
+        approxByCurrency: undefined as { usd: boolean; eur: boolean; sek: boolean } | undefined,
         payments: 21,
         distinctMerchants: 5,
         budgetStops: 3,

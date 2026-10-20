@@ -181,6 +181,7 @@ Dark surfaces step **lighter** with elevation (`bg` < `surface` < `surface-2` < 
 |---|---|---|---|
 | `--v2-border` | `#e6ebf1` | `#2b3140` | Default hairline (cards, dividers) |
 | `--v2-border-strong` | `#d6dbe3` | `#3a4152` | Hover, ghost button borders, flow arrows, the local-hint marker's left rule (§ 3) |
+| `--v2-border-subtle` | `#edf0f4` | `#232834` | The inset hairline between rows of one day in a ledger ([#4165](https://github.com/d-hinders/Haven-AI/issues/4165)) — quieter than `--v2-border`, which keeps separating the day groups |
 
 ### Brand
 
@@ -734,16 +735,20 @@ or malformed read can never push the fill past its track or the ARIA value
 outside its own declared range — and a `label`; an optional `caption` slot
 carries the meter's line. That caption is the shared budget-caption helper's
 output (`lib/budget-caption.ts`, #3806): token amounts at two decimals
-("1.25 of 5.00 USDC used this period") — or ONE leading "≈" in fiat when the
-caller supplies a rate — followed by the earlier of the refill and the
+("1.25 of 5.00 USDC used this period") — or fiat when the caller supplies a
+rate, with at most ONE leading "≈", and only where the one rule
+(`shouldMarkApprox`, § Amount: currency mode) says the conversion changes the
+number: USDC shown in USD carries none — followed by the earlier of the refill and the
 expiry, phrased under 24 h relative ("refills in 45m"), under 7 days as
 weekday and 24-hour time ("refills Thu 14:02"), otherwise day and month
 ("refills 14 Nov"). The states that replace the bar: a failed or stale read
 shows "Usage this period couldn't be read" (never a 0 % bar, never a
 "snapshot" claim), an expired budget its own line, and a future `start_date`
-shows when the budget starts. The dashboard's agent rows ask for the compact
-`style: 'row'` wording (#3908), as the mockup draws a row: the period word in
-place of "used this period" ("≈$0.40 of $1.00 · per day · refills in 5h"),
+shows when the budget starts. The shared agent row (`AgentRow` — the dashboard's
+Agents card and the account page's Agents tab) asks for the compact
+`style: 'row'` wording (#3908), and passes **no rate** (#4165, owner decision
+2026-10-20: budgets read in USDC wherever one is set): the period word in
+place of "used this period" ("1.20 of 3.00 USDC · per day · refills in 5h"),
 with an extra-budget count riding in the same line ("· +1 budget"); every
 other surface keeps the full wording. In token mode the row joins the cap and
 its symbol with a no-break space (#3910), so "3.00 USDC" never splits. The
@@ -803,7 +808,7 @@ the formatter's output, NBSPs included.
 **Under a cent (#3897, owner decision 2026-10-12):** a non-zero figure with
 `|value| < 0.005`, which would round to `0.00`, renders `<$0.01` (`<0,01 kr`,
 `<0,01 €`); the sign still comes from the caller (`-<$0.01` in activity,
-`≈<$0.01 of $1.00` in a budget caption). Zero stays `$0.00`. The rule lives
+`≈<0,01 kr of 10,00 kr` in a SEK budget caption). Zero stays `$0.00`. The rule lives
 in `formatFiatDisplay`, not `formatFiat`, which also drives the balance
 count-up, the "since yesterday" line and /accounts and keeps plain rounding.
 `Amount`'s currency mode, the budget caption's fiat mode and the dashboard
@@ -811,18 +816,40 @@ summary use it; the summary goes further and reads a week under a cent as a
 payment count rather than any figure. The sign comes only
 from `direction` (a negative magnitude cannot double-sign it); `symbol` is
 not allowed in this mode. `≈` (with `title="Converted at today's rate"`) goes
-before the sign: `≈ -9,09 kr`. Since #3950 the transactions list rows
-(`TransactionsTable` — `/transactions`, the agent page and the account page)
-call this mode WITHOUT the mark and render the figure inside a
-`whitespace-nowrap` cell, so a money figure never wraps or truncates — the
-auto-layout column widens to the figure's min-content instead. The mark
-stays where it explains something: the detail panel (why the two figures
-differ) and the dashboard's activity row. Since #4097 the account page renders
-its feed through the `TransactionActivityRow` ledger, not `TransactionsTable`
-(that table's callers are `/transactions` and the agent page). Unknown — `null` or a non-finite
-value —
-renders `—` in `--v2-ink-3`, never `0,00 kr`: existing callers turned unknown
-into zero, and this mode must not.
+before the sign: `≈ -9,09 kr`.
+
+**The "≈" rule — one helper (#4165, owner decision 2026-10-20: "it is over
+complicating things").** `Amount` gets only a currency, not the token, so it
+does not decide the mark: every caller passes `approx` from ONE rule,
+`shouldMarkApprox` in `@haven_ai/core` (`approx-mark.ts`), which the backend's
+dashboard spend windows ask too. "≈" means a figure was converted at today's
+rate AND the conversion changed the number:
+
+- **A list row never carries it** (#3950) — the transactions table, the
+  account page's ledger and the dashboard's activity rows alike. Rows render
+  the figure plain inside a `whitespace-nowrap` cell, so a money figure never
+  wraps or truncates.
+- **A booked figure never carries it** — book-time `convertedAmount` is the
+  value struck when the payment happened.
+- **A token shown in the currency it is pegged to never carries it** — USDC in
+  USD is dollars. The peg is a registry fact (`CoreTokenConfig.pegged` in
+  `packages/core/src/chains.ts`), never a guess from the symbol.
+- Otherwise — a re-priced figure in another display currency (kr, €), or a
+  token that floats — **totals and the detail panel** carry it: the account
+  summary card, the Activity tab's result line, the dashboard's 30-day spend
+  (the server applies the rule per currency, `approxByCurrency`), budget
+  captions in fiat, and `TransactionDetailPanel`.
+
+**"≈" means converted, never "couldn't price".** A total that leaves rows out
+because they have no price in the display currency says so in words — "Some
+amounts couldn’t be valued and aren’t included." (`UNPRICED_TOTALS_NOTE`,
+`lib/money-flow-tally.ts`) — and a total with nothing priceable renders `—`,
+never `≈ $0.00`. (The account page renders its feed through the
+`TransactionActivityRow` ledger since #4097, not `TransactionsTable`, whose
+callers are `/transactions` and the agent page.)
+
+Unknown — `null` or a non-finite value — renders `—` in `--v2-ink-3`, never
+`0,00 kr`: existing callers turned unknown into zero, and this mode must not.
 
 A currency figure is a **valuation of a token amount**, not a fiat balance
 Haven holds — the budget's own token where a budget is set, the user's
@@ -970,8 +997,12 @@ the runway and budget-room facts were measured and hold
 (`attentionEmptyState`, #3902); otherwise a neutral line
 that claims nothing, and nothing at all while the budget reads load. That total — and the per-agent split below it —
 renders through § Amount: currency mode with `approx` from the
-wire's `spend` windows, so a total that includes rows priced at today's
-rate carries the `≈` and a booked total does not. The four KPI tiles and
+wire's per-currency `spend.d30.approxByCurrency` (#4165) — the server applies
+the one "≈" rule, so a total re-priced at today's rate carries the `≈` only
+where the conversion changes the number (never USDC in USD), and a booked
+total never does. A bucket the server could not price
+(`unpricedByCurrency`) carries the unpriced line instead, and `—` when
+nothing in it was priced. The four KPI tiles and
 their `metrics.*` wire fields are gone with this panel: agent counts live
 in the agents section (#3809), the spend total is the analytics page's own
 #3803 net figure, and "Successful transactions" counted receives, so it
@@ -1575,6 +1606,13 @@ into one "×N" row; a full ledger needs one row per transaction, and gets it:
 - `TransactionActivityDayHeader` renders the quiet band above each bucket, the same
   heading style the dashboard's activity list draws above its merged rows; a `partial`
   flag marks a bucket whose day is cut by a window boundary ([#3975](https://github.com/d-hinders/Haven-AI/issues/3975)).
+- **Row dividers ([#4165](https://github.com/d-hinders/Haven-AI/issues/4165), owner
+  decision 2026-10-20):** rows of the SAME day are separated by an inset hairline —
+  `insetDivider` on every row after a day's first draws a 1px `--v2-border-subtle` line
+  along the row's top edge, starting at the text column (padding + direction mark +
+  gap) and ending at the row's padding. Day groups keep their full-width `--v2-border`
+  separation (`divide-y` on the list), so a day still reads stronger than a row. Both
+  ledgers draw it: the account page's Activity tab and the dashboard's Activity card.
 
 ### Cards (`Card`)
 
@@ -2292,8 +2330,8 @@ which is what the characterization tests in
 the grouped dashboard shape: `countLabel` renders the muted ×N beside the
 title (×N+ when the count is a floor over a truncated window — a count is
 never presented as exact when it is not), and `fiat` switches the amount to
-`Amount`'s currency mode (book-time plain, serve-time `≈`, unknown valuation
-an em dash). Rows group under user-local day headings ("Today" /
+`Amount`'s currency mode (plain — a row never carries `≈`, #4165 — and an
+unknown valuation an em dash). Rows group under user-local day headings ("Today" /
 "Yesterday" / a short date); the server buckets the groups per day (#3824),
 the client only names the bucket.
 

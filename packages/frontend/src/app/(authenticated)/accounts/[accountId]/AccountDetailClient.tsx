@@ -555,13 +555,13 @@ export default function AccountDetailClient() {
                 <div>
                   <p className="text-xs text-[var(--v2-ink-3)]">Money in</p>
                   <p className="mt-0.5">
-                    <Amount amount={moneyFlow.moneyIn} currency={currency} approx={moneyFlow.approx} />
+                    <Amount amount={moneyFlow.moneyIn} currency={currency} approx={moneyFlow.approxIn} />
                   </p>
                 </div>
                 <div>
                   <p className="text-xs text-[var(--v2-ink-3)]">Money out</p>
                   <p className="mt-0.5">
-                    <Amount amount={moneyFlow.moneyOut} currency={currency} approx={moneyFlow.approx} />
+                    <Amount amount={moneyFlow.moneyOut} currency={currency} approx={moneyFlow.approxOut} />
                   </p>
                 </div>
                 {/* #4165: rows the totals could not value are said in words,

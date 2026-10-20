@@ -19,8 +19,8 @@
  * them without changing a number it reports.
  *
  * A row is priced and summed by `lib/money-flow-tally.ts` (#4165), the one
- * tally this hook shares with the Activity tab's result line: `approx` is
- * the "≈" rule's answer for a total, `unpriced` says some rows could not be
+ * tally this hook shares with the Activity tab's result line: `approxIn` /
+ * `approxOut` are the "≈" rule's answer for each total, `unpriced` says some rows could not be
  * valued, and a direction with nothing priceable totals `null` ("—"). FAILED
  * rows are excluded: a failed payment moved no money.
  *
@@ -48,8 +48,9 @@ export interface AccountMoneyFlow {
   /** null when the window had inbound rows and none could be valued ("—"). */
   moneyIn: number | null
   moneyOut: number | null
-  /** The "≈" decision for the totals (`shouldMarkApprox`, kind `total`). */
-  approx: boolean
+  /** The "≈" decision per total (`shouldMarkApprox`, kind `total`), set only by that direction's rows. */
+  approxIn: boolean
+  approxOut: boolean
   /** Some in-window rows could not be valued; the caller says so in words. */
   unpriced: boolean
   loading: boolean

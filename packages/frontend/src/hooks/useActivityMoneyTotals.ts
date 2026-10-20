@@ -50,8 +50,9 @@ export interface ActivityMoneyTotals {
   /** null when the set had inbound rows and none could be valued ("—"). */
   moneyIn: number | null
   moneyOut: number | null
-  /** The "≈" decision for the totals (`shouldMarkApprox`, kind `total`). */
-  approx: boolean
+  /** The "≈" decision per total (`shouldMarkApprox`, kind `total`), set only by that direction's rows. */
+  approxIn: boolean
+  approxOut: boolean
   /**
    * Some rows in the filtered set could not be valued in the display
    * currency (no price, or priced in another currency); the caller says so

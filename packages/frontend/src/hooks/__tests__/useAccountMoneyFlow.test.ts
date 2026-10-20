@@ -81,7 +81,7 @@ describe('useAccountMoneyFlow (#4097)', () => {
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.moneyIn).toBe(10)
     expect(result.current.moneyOut).toBe(4)
-    expect(result.current.approx).toBe(false)
+    expect(result.current.approxIn).toBe(false)
     expect(result.current.partial).toBe(false)
     expect(mockApiGet).toHaveBeenCalledTimes(1)
   })
@@ -109,7 +109,7 @@ describe('useAccountMoneyFlow (#4097)', () => {
     const { result } = renderHook(() => useAccountMoneyFlow('safe-1', 'USD'))
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.moneyIn).toBe(15)
-    expect(result.current.approx).toBe(false)
+    expect(result.current.approxIn).toBe(false)
     expect(result.current.unpriced).toBe(false)
   })
 
@@ -123,7 +123,7 @@ describe('useAccountMoneyFlow (#4097)', () => {
     const { result } = renderHook(() => useAccountMoneyFlow('safe-1', 'SEK'))
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.moneyIn).toBeCloseTo(161.4)
-    expect(result.current.approx).toBe(true)
+    expect(result.current.approxIn).toBe(true)
   })
 
   it('a row with no usable price contributes nothing and says so — unpriced, not ≈ (#4165)', async () => {
@@ -136,7 +136,7 @@ describe('useAccountMoneyFlow (#4097)', () => {
     const { result } = renderHook(() => useAccountMoneyFlow('safe-1', 'USD'))
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.moneyIn).toBe(10)
-    expect(result.current.approx).toBe(false)
+    expect(result.current.approxIn).toBe(false)
     expect(result.current.unpriced).toBe(true)
   })
 

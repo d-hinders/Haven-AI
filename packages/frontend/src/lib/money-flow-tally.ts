@@ -12,7 +12,7 @@
  *
  * Two signals, kept apart since #4165:
  *
- * - **`approx` is "converted"**, the one rule's answer for a total
+ * - **`approxIn` / `approxOut` are "converted"**, the one rule's answer for each total
  *   (`shouldMarkApprox` in `@haven_ai/core`): a summed row priced at today's
  *   rate where the conversion changes the number. USDC in USD never marks it.
  * - **`unpriced` is "couldn't be valued"**: a row with no usable price in the
@@ -33,11 +33,12 @@ export interface FlowTally {
   pricedOut: number
   unpricedIn: number
   unpricedOut: number
-  approx: boolean
+  approxIn: boolean
+  approxOut: boolean
 }
 
 export function emptyFlowTally(): FlowTally {
-  return { moneyIn: 0, moneyOut: 0, pricedIn: 0, pricedOut: 0, unpricedIn: 0, unpricedOut: 0, approx: false }
+  return { moneyIn: 0, moneyOut: 0, pricedIn: 0, pricedOut: 0, unpricedIn: 0, unpricedOut: 0, approxIn: false, approxOut: false }
 }
 
 /** One row's figure in the display currency, or null when it has none. */
@@ -85,7 +86,10 @@ export function tallyRow(tx: AggregatedTransaction, currency: AmountCurrency, ta
       kind: 'total',
     })
   ) {
-    tally.approx = true
+    // Per direction: a direction that converted nothing (an empty "Money in"
+    // beside re-priced outflows) must not read "≈ 0,00 kr".
+    if (inbound) tally.approxIn = true
+    else tally.approxOut = true
   }
 }
 
@@ -93,8 +97,9 @@ export interface FlowFigures {
   /** null when the direction had rows and none of them could be valued. */
   moneyIn: number | null
   moneyOut: number | null
-  /** The "≈" decision for both totals. */
-  approx: boolean
+  /** The "≈" decision per total — set only when THAT direction summed a converted row. */
+  approxIn: boolean
+  approxOut: boolean
   /** True when at least one row could not be valued and is not in a sum. */
   unpriced: boolean
 }
@@ -103,7 +108,8 @@ export function flowFigures(tally: FlowTally): FlowFigures {
   return {
     moneyIn: tally.unpricedIn > 0 && tally.pricedIn === 0 ? null : tally.moneyIn,
     moneyOut: tally.unpricedOut > 0 && tally.pricedOut === 0 ? null : tally.moneyOut,
-    approx: tally.approx,
+    approxIn: tally.approxIn,
+    approxOut: tally.approxOut,
     unpriced: tally.unpricedIn + tally.unpricedOut > 0,
   }
 }

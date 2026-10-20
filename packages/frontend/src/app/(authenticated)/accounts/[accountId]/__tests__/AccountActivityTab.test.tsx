@@ -144,7 +144,8 @@ const DEFAULT_FEED = {
 const DEFAULT_TOTALS = {
   moneyIn: 10 as number | null,
   moneyOut: 4 as number | null,
-  approx: false,
+  approxIn: false,
+  approxOut: false,
   unpriced: false,
   loading: false,
   error: null,

@@ -468,9 +468,9 @@ export default function AccountActivityTab({
         <>
           <p className="mt-3 text-sm text-[var(--v2-ink-2)]">
             Money in{' '}
-            <Amount amount={moneyTotals.moneyIn} currency={currency} approx={moneyTotals.approx} /> ·
+            <Amount amount={moneyTotals.moneyIn} currency={currency} approx={moneyTotals.approxIn} /> ·
             Money out{' '}
-            <Amount amount={moneyTotals.moneyOut} currency={currency} approx={moneyTotals.approx} />
+            <Amount amount={moneyTotals.moneyOut} currency={currency} approx={moneyTotals.approxOut} />
           </p>
           {/* #4165: rows the totals could not value are said in words, never
               folded into a "≈" — the mark means converted, nothing else. */}

@@ -39,10 +39,10 @@ If a `/design-system` route exists, inspect it before editing UX.
 Follow the [`/design-system` Patterns](../../product/design-system.md#patterns)
 in this order: if a Pattern exists, use it; if none fits, extend the design
 system first in a separate, owner-approved slice, then use it from the page.
-The line between this and the absorption rule below: a composition
-`/design-system` does not show yet is a **new pattern** (earlier slice, owner
-approval); extracting a shape the product already ships twice is absorption
-(same PR).
+The line between this and the absorption rule below: extracting a shape the
+product already ships, on the diff that writes its second copy, is absorption
+(same PR); a composition with no shipped instance and no `/design-system`
+entry is a **new pattern** (earlier slice, owner approval).
 
 Inspect `packages/frontend/src/components/ui` (primitives) and `packages/frontend/src/components/haven` (domain components) before adding UI. Prefer composition; do **not** invent new card styles, spacing, shadows, radius, or typography unless the existing system genuinely can't express the need. Use the v2 tokens in `packages/ui/src/tokens.css` (imported into the app before `globals.css`; shared `@haven_ai/ui` package since #3508) and the Tailwind aliases from the frontend config, which consumes the `@haven_ai/ui` preset.
 

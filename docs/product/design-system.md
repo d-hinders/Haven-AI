@@ -627,10 +627,11 @@ Marketing pages may still use larger hero type:
 **The Patterns catalog (#4109).** This section and the compositions shown on
 `/design-system` are the documented Patterns that `CLAUDE.md`, `AGENTS.md`, the
 frontend playbook and the design reviewer point to. List controls join it with
-#4110. A composition neither shows yet is a **new pattern**: extend the design
-system first, in its own owner-approved slice, before a page uses it.
-Absorbing a shape that already ships twice into a primitive is not a new
-pattern; that extraction stays in the same PR (Pattern Absorption, #901).
+#4110. A composition with no shipped instance and no entry here is a **new
+pattern**: extend the design system first, in its own owner-approved slice,
+before a page uses it. Extracting a shape the product already ships, on the
+diff that writes its second copy, is not a new pattern; that extraction stays
+in the same PR (Pattern Absorption, #901).
 
 ### Authenticated shell
 

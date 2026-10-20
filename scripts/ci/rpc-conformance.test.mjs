@@ -42,6 +42,9 @@ const sign = async (chainId) => `0x02f8${String(chainId)}deadbeef`
  *   maxLogsRange    refuse eth_getLogs over more than N blocks with Alchemy's
  *                   free-tier -32600 wording (#4012, PR #4086)
  *   logRequests     an array: every eth_getLogs filter object is pushed onto it
+ *   headError       a single (non-batch) eth_blockNumber call errors — the logs
+ *                   check's own head read (the burst's calls fail with it)
+ *   logsResult      answer eth_getLogs with this HTTP-200 result instead of []
  */
 function fakeEndpoint(mode = {}) {
   let inFlight = 0
@@ -73,6 +76,7 @@ function fakeEndpoint(mode = {}) {
       if (c.method === 'eth_getLogs') {
         const [filter] = c.params
         mode.logRequests?.push(filter)
+        if ('logsResult' in mode) return { jsonrpc: '2.0', id: c.id, result: mode.logsResult }
         const block = /^0x[0-9a-f]+$/
         if (!block.test(filter?.fromBlock) || !block.test(filter?.toBlock)) return err(c.id, -32602, 'invalid block number')
         const from = Number.parseInt(filter.fromBlock, 16)
@@ -96,6 +100,7 @@ function fakeEndpoint(mode = {}) {
     if (Array.isArray(body) && mode.batchAsObject) return reply(200, err(null, -32600, 'batch requests are not supported'))
     if (!Array.isArray(body) && body.method === 'eth_sendRawTransaction' && mode.rawStatus) return reply(mode.rawStatus, one(body))
     if (!Array.isArray(body) && body.method === 'eth_chainId' && mode.chainStatus) return reply(mode.chainStatus, one(body))
+    if (!Array.isArray(body) && body.method === 'eth_blockNumber' && mode.headError) return reply(200, err(body.id, -32603, 'internal error'))
     if (Array.isArray(body)) {
       if (mode.maxBatch && body.length > mode.maxBatch) {
         return reply(200, body.map((c) => err(c.id, 31, `Batch of more than ${mode.maxBatch} requests are not allowed on free plan`)))
@@ -124,11 +129,11 @@ describe('rpc-conformance (#3336)', () => {
     const logRequests = []
     const { results } = await run({ logRequests })
     assert.deepEqual(results.map((r) => [r.name, r.ok]), [
-      ['chain id', true], [`batch of ${DEFAULT_BATCH}`, true], ['pending tag', true], ['logs 500', true], ['send raw tx', true], ['burst of 20', true],
+      ['chain id', true], [`batch of ${DEFAULT_BATCH}`, true], ['pending tag', true], [`logs ${DEFAULT_LOGS_RANGE}`, true], ['send raw tx', true], ['burst of 20', true],
     ])
     assert.match(results[0].detail, /chain 84532/)
     // Exactly R blocks ending at the head, address-filtered like the sweepers' queries.
-    assert.deepEqual(logRequests, [{ address: '0x0000000000000000000000000000000000000001', fromBlock: `0x${(0x1000000 - 499).toString(16)}`, toBlock: '0x1000000' }])
+    assert.deepEqual(logRequests, [{ address: '0x0000000000000000000000000000000000000001', fromBlock: `0x${(0x1000000 - (DEFAULT_LOGS_RANGE - 1)).toString(16)}`, toBlock: '0x1000000' }])
   })
 
   test('logs: an endpoint serving 10 blocks (Alchemy\'s free tier) fails, with the cap in the detail', async () => {
@@ -143,6 +148,20 @@ describe('rpc-conformance (#3336)', () => {
     assert.equal(blind.byName('logs').ok, false)
     assert.match(blind.byName('logs').detail, /up to a 10 block range/)
     assert.equal((await run({ noChainId: true })).byName('logs').ok, true)
+  })
+
+  test('logs: no head, an unreadable head, or a non-array result fails', async () => {
+    const noHead = (await run({ headError: true })).byName('logs')
+    assert.equal(noHead.ok, false)
+    assert.match(noHead.detail, /no head/)
+    const unreadable = (await run({ head: '0xzz' })).byName('logs')
+    assert.equal(unreadable.ok, false)
+    assert.match(unreadable.detail, /unreadable head/)
+    for (const logsResult of [null, {}, '0x']) {
+      const notArray = (await run({ logsResult })).byName('logs')
+      assert.equal(notArray.ok, false, JSON.stringify(logsResult))
+      assert.match(notArray.detail, /result is not an array/)
+    }
   })
 
   test('logs: a head below R clamps fromBlock at 0, never negative', async () => {
@@ -164,6 +183,9 @@ describe('rpc-conformance (#3336)', () => {
     assert.match(byName('batch').detail, /Batch of more than 3/)
     // …and a batch within the limit passes: the check measures the limit, not batching as such.
     assert.equal((await run({ maxBatch: 3 }, { batch: 3 })).byName('batch').ok, true)
+    // The logs check reads its own head: a failed batch does not take it down.
+    assert.equal(byName('logs').ok, true)
+    assert.equal((await run({ batchAsObject: true })).byName('logs').ok, true)
   })
 
   test('pending tag: dRPC\'s "No label flashblocks" fails', async () => {
@@ -298,6 +320,6 @@ describe('rpc-conformance logs range pin (#4118)', () => {
       return Number(m[1].replaceAll('_', ''))
     })
     assert.equal(values.length, SOURCES.length)
-    assert.equal(DEFAULT_LOGS_RANGE, Math.max(...values), `the sweepers ask for ${values.join(' and ')} blocks per call`)
+    assert.equal(DEFAULT_LOGS_RANGE, Math.max(...values), `the sweepers ask for ${values.join(' and ')} blocks per call: set DEFAULT_LOGS_RANGE in scripts/ci/rpc-conformance.mjs to their maximum, and update the "500" in the runbooks (dev-environment.md, promoting-dev-to-main.md, agent-qa.md)`)
   })
 })

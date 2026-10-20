@@ -646,7 +646,7 @@ Isolation rules that are non-negotiable for a payments product:
   | Variable | Where | Provider | Burst of 20 | `--logs-range` |
   |---|---|---|---|---|
   | `RPC_URL_BASE_SEPOLIA` (primary) | `@haven/backend` / dev | Alchemy, the dev app | 20/20 answered, all 5 checks pass (2026-10-01, after the swap; probed before that day's key rotation, same app) | 500, the default (the sweepers' batch). Not yet probed with the `eth_getLogs` line; expected ✗ on the free tier's 10-block cap (#4118) |
-  | `RPC_URL_BASE_SEPOLIA_FALLBACK` | `@haven/backend` / dev | Infura, free Core plan | **fails**: 20/20 then 14/20 rate-limited (2026-09-29), 20/20 (2026-09-30) | 500, the default. Not yet probed with the `eth_getLogs` line |
+  | `RPC_URL_BASE_SEPOLIA_FALLBACK` | `@haven/backend` / dev | Infura, free Core plan | **fails**: 20/20 then 14/20 rate-limited (2026-09-29), 20/20 (2026-09-30) | Informational, not a gate: no `eth_getLogs` reader uses the fallback (it carries the viem failover reads and the relayer's raw-send rebroadcast; the log scanners stay on the primary, see *RPC failover* below), so its logs line is covered by the fallback exception below. Re-probe at the default 500 only if it is ever promoted to primary |
   | `QA_RPC_URL_BASE_SEPOLIA` (the QA observer) | GitHub Actions secret | Alchemy, a separate QA-observer app | not probed | **10**: the harness reads 10-block windows (`GET_LOGS_MAX_RANGE`, PR #4086) and never asks for more |
 
   **Two owner-accepted exceptions to the probe rule above** (2026-10-01):

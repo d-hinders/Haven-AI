@@ -296,7 +296,14 @@ so this is a rule to point at rather than a question to ask the release runner.
       (#4012). Prod's primary is an app on the same Alchemy account; whether it
       carries the same cap has not been measured, so this line may fail
       there until the plan serves 500 blocks or the owner records an accepted
-      exception beside the one above. The burst deliberately
+      exception in the
+      [owner-accepted exceptions to the probe rule](./dev-environment.md#configuration)
+      (dev-environment.md → *Two Base Sepolia RPCs*). On a `*_FALLBACK`
+      variable the logs line is informational, not a gate: no `eth_getLogs`
+      reader uses the fallback (the viem failover reads and the relayer's
+      raw-send rebroadcast do; the log scanners stay on `RPC_URL_BASE*`), so it
+      is covered by the fallback exception above. Re-probe a fallback at the
+      default 500 only if it is ever promoted to primary. The burst deliberately
       spends up to 20 requests of the key's per-second budget: against a key the
       live mainnet relayer already uses, run it off-peak or with a smaller
       `--burst`. A failing line means the endpoint cannot carry Haven's traffic —

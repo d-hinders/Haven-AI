@@ -163,8 +163,10 @@ export async function probe({ url, chain, batch = DEFAULT_BATCH, burst = DEFAULT
     if (!Number.isSafeInteger(head) || head < 0) return record(logs, false, `unreadable head ${JSON.stringify(h.body.result)}`)
     const from = Math.max(0, head - logsRange + 1)
     const r = await post(url, call(1, 'eth_getLogs', [{ address: PROBE_ADDRESS, fromBlock: hex(from), toBlock: hex(head) }]), fetchImpl)
-    if (r.status !== 200 || !Array.isArray(r.body?.result)) return record(logs, false, `eth_getLogs over ${head - from + 1} blocks refused: HTTP ${r.status}: ${errText(r.body?.error ?? r.body)}`)
-    record(logs, true, `eth_getLogs over ${head - from + 1} blocks answered (${from}..${head})`)
+    const span = head - from + 1
+    if (r.status === 200 && !r.body?.error && !Array.isArray(r.body?.result)) return record(logs, false, `eth_getLogs over ${span} blocks: result is not an array: ${JSON.stringify('result' in Object(r.body) ? r.body.result : r.body)}`)
+    if (r.status !== 200 || !Array.isArray(r.body?.result)) return record(logs, false, `eth_getLogs over ${span} blocks refused: HTTP ${r.status}: ${errText(r.body?.error ?? r.body)}`)
+    record(logs, true, `eth_getLogs over ${span} blocks answered (${from}..${head})`)
   })
 
   await guard('send raw tx', async () => {

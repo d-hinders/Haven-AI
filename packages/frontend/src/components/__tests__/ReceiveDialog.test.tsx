@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SmartAccount } from '@/context/AuthContext'
 
@@ -90,17 +90,19 @@ describe('ReceiveDialog', () => {
   // deployment's default. A gate that read the env var instead would fail this
   // test: it would show a faucet for this Base-mainnet account and hide its
   // onramp.
-  it('shows the address with one network rule and the onramp on a Base mainnet account (8453)', () => {
+  it('shows the address with an inline QR, one network rule and the onramp on a Base mainnet account (8453)', async () => {
     render(<ReceiveDialog open account={SAFE} onClose={vi.fn()} />)
 
     expect(screen.getByRole('heading', { name: 'Receive' })).toBeInTheDocument()
-    expect(screen.getByText('Based')).toBeInTheDocument()
-    // ONE token, ONE network (#4094): the rule names USDC and the chain, and
-    // ETH is not listed anywhere — agents spend USDC, and the old receive
-    // screen's registry-token list invited the wrong deposit.
-    expect(screen.getByText('Send USDC on Base only.')).toBeInTheDocument()
+    // ONE token, ONE network (#4094), the mockup's sentence (#4167): the rule
+    // names USDC and the chain and what happens after the send, and ETH is
+    // not listed anywhere — agents spend USDC, and the old receive screen's
+    // registry-token list invited the wrong deposit. Stated EXACTLY once.
+    expect(screen.getByText('Send USDC on Base only. It arrives in about a minute and shows in Activity.')).toBeInTheDocument()
     const dialog = screen.getByRole('dialog')
     expect(dialog.textContent).not.toMatch(/\bETH\b/)
+    expect(dialog.textContent).not.toMatch(/Before you send/)
+    expect(screen.getAllByText(/Send USDC on .* only\./)).toHaveLength(1)
     expect(screen.getByText(SAFE.account_address)).toBeInTheDocument()
 
     expect(screen.getByRole('button', { name: /Buy with card/ })).toBeInTheDocument()
@@ -112,10 +114,15 @@ describe('ReceiveDialog', () => {
 
     // The positive control for the unresolved negatives below: the address
     // affordances really are built, so their absence in the unresolved tests
-    // is suppression, not "never rendered".
+    // is suppression, not "never rendered". The QR is INLINE (#4167) — an
+    // image with the account-and-network alt, no toggle — and so is the Copy
+    // button; the explorer link lives on the account page.
     expect(screen.getByRole('button', { name: 'Copy address' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Show QR code' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'View on explorer' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Show QR code' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'View on explorer' })).toBeNull()
+    await waitFor(() => {
+      expect(screen.getByAltText('QR code for Based on Base')).toBeInTheDocument()
+    })
   })
 
   // The resolved TESTNET path: the faucet is offered and the onramp is hidden
@@ -132,7 +139,7 @@ describe('ReceiveDialog', () => {
       />,
     )
 
-    expect(screen.getByText('Send USDC on Base Sepolia only.')).toBeInTheDocument()
+    expect(screen.getByText('Send USDC on Base Sepolia only. It arrives in about a minute and shows in Activity.')).toBeInTheDocument()
 
     // Onramp entirely absent — not just disabled — on a testnet account.
     expect(screen.queryByRole('button', { name: /Buy with card/ })).toBeNull()
@@ -166,13 +173,13 @@ describe('ReceiveDialog', () => {
   it('shows the onramp and no faucet link on a Gnosis account (100, a mainnet)', () => {
     render(<ReceiveDialog open account={{ ...SAFE, chain_id: 100 }} onClose={vi.fn()} />)
 
-    expect(screen.getByText('Send USDC on Gnosis Chain only.')).toBeInTheDocument()
+    expect(screen.getByText('Send USDC on Gnosis Chain only. It arrives in about a minute and shows in Activity.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Buy with card/ })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /Open Circle's faucet/i })).toBeNull()
     expect(screen.queryByText(/faucet\.circle\.com/i)).toBeNull()
   })
 
-  it('copies the receive address and can reveal a QR code', async () => {
+  it('copies the receive address with the QR already inline (#4167)', async () => {
     render(<ReceiveDialog open account={SAFE} onClose={vi.fn()} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy address' }))
@@ -180,11 +187,41 @@ describe('ReceiveDialog', () => {
     expect(writeText).toHaveBeenCalledWith(SAFE.account_address)
     expect(screen.getByRole('button', { name: 'Address copied' })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show QR code' }))
-
+    // No toggle to flip: the QR is generated the moment the dialog opens.
     await waitFor(() => {
       expect(screen.getByAltText('QR code for Based on Base')).toBeInTheDocument()
     })
+  })
+
+  it('renders no account card with one account and a picker with several (#4167)', async () => {
+    const sepolia: SmartAccount = {
+      ...SAFE,
+      id: 'sepolia-id',
+      name: 'Test account',
+      chain_id: 84532,
+      is_default: false,
+    }
+    const single = render(<ReceiveDialog open account={SAFE} onClose={vi.fn()} />)
+    expect(screen.queryByRole('combobox', { name: 'Account' })).not.toBeInTheDocument()
+    single.unmount()
+
+    render(<ReceiveDialog open account={SAFE} accounts={[SAFE, sepolia]} onClose={vi.fn()} />)
+    const picker = screen.getByRole('combobox', { name: 'Account' })
+    expect(within(picker).getByRole('option', { name: 'Based' })).toBeInTheDocument()
+    expect(within(picker).getByRole('option', { name: 'Test account' })).toBeInTheDocument()
+
+    // Switching accounts re-points everything the dialog derives from the
+    // account: the network rule names the newly selected chain, and the
+    // faucet card appears for the testnet account the picker moved to —
+    // the #3478 gate following the SELECTION, not the first account.
+    fireEvent.change(picker, { target: { value: 'sepolia-id' } })
+
+    expect(await screen.findByText('Send USDC on Base Sepolia only. It arrives in about a minute and shows in Activity.')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByAltText('QR code for Test account on Base Sepolia')).toBeInTheDocument()
+    })
+    expect(await screen.findByText('Get test USDC')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Buy with card/ })).toBeNull()
   })
 
   /**
@@ -225,19 +262,23 @@ describe('ReceiveDialog', () => {
       const words = textNodesJoined(dialog)
       expect(words).not.toMatch(/\bBase\b/)
       expect(words).not.toMatch(/\bSepolia\b/)
-      // …and the fixture name is still there, proving the anchor is doing work
-      // rather than the string being empty: "Based" must NOT trip `\bBase\b`.
-      expect(words).toMatch(/\bBased\b/)
+      // …and the scan sees real words, proving it is doing work rather than
+      // matching an empty string. #4167: with one account there is no account
+      // card, so the old "Based"-vs-`\bBase\b` near-miss anchor is no longer
+      // rendered — the refusal copy is the anchor now, and the negatives
+      // still catch any reintroduced default-chain leak (A7 re-checks it).
 
-      // A4 — no address, in any of the ways this screen offers one.
+      // A4 — no address, in any of the ways this screen offers one. #4167:
+      // the affordances are the Copy button and the INLINE QR image (alt
+      // "QR code for …") — there is no toggle and no explorer link anymore.
       expect(screen.queryByText(SAFE.account_address)).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: 'Copy address' })).not.toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: 'Show QR code' })).not.toBeInTheDocument()
+      expect(screen.queryByAltText('QR code for Based on Base')).not.toBeInTheDocument()
       expect(screen.queryByRole('link', { name: 'View on explorer' })).not.toBeInTheDocument()
 
       // A5 — no network rule, no token named, and neither "other ways" card:
       // a faucet link and a card purchase are both network-addressed offers.
-      expect(screen.queryByText('Before you send')).not.toBeInTheDocument()
+      expect(screen.queryByText('Send USDC on Base only. It arrives in about a minute and shows in Activity.')).not.toBeInTheDocument()
       expect(screen.queryByText(/USDC/)).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: /Buy with card/ })).toBeNull()
       expect(screen.queryByRole('link', { name: /Open Circle's faucet/i })).toBeNull()
@@ -246,9 +287,13 @@ describe('ReceiveDialog', () => {
       expect(screen.getByText(/can't confirm which network this account uses/)).toBeInTheDocument()
       expect(screen.getByRole('button', { name: 'Refresh page' })).toBeInTheDocument()
 
-      // A7 — the account is still identified. Deliberate: the refusal has to be
-      // about something, and the name is true on every chain.
-      expect(screen.getByText('Based')).toBeInTheDocument()
+      // A7 — the scan sees rendered words, not an empty tree. #4167: with one
+      // account there is no account card, so the fixture name ("Based", the
+      // old near-miss anchor for the `\bBase\b` scan) is no longer on screen;
+      // the anchor is the refusal copy itself, and A3's negatives still catch
+      // any reintroduced default-chain leak.
+      const anchorWords = textNodesJoined(screen.getByRole('dialog'))
+      expect(anchorWords).toMatch(/\bconfirm\b/)
     })
   })
 

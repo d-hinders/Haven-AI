@@ -6083,12 +6083,12 @@ export const SCENARIOS = {
       // shooting it under the resolved filename — which is the whole point of
       // having two scenarios.
       await dialog
-        .getByText('Send USDC on Base Sepolia only.')
+        .getByText('Send USDC on Base Sepolia only. It arrives in about a minute and shows in Activity.')
         .waitFor({ timeout: 20_000 })
       // The QR is half of what this screen refuses in the other state, so the
       // resolved capture has to actually show one for the pair to be evidence
-      // about the QR at all.
-      await dialog.getByRole('button', { name: 'Show QR code' }).click()
+      // about the QR at all. #4167: it is INLINE — generated when the dialog
+      // opens, nothing to click.
       await dialog.getByAltText(/^QR code for /).waitFor({ timeout: 20_000 })
       await shoot(dialog, 'resolved')
     },

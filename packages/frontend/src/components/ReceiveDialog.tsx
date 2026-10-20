@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import { Check, Clipboard, CreditCard, Droplet, X } from 'lucide-react'
-import { getExplorerUrl, resolveChainOrNull } from '@/lib/chains'
+import { resolveChainOrNull } from '@/lib/chains'
 import { truncate } from '@/lib/format'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import type { SmartAccount } from '@/context/AuthContext'
@@ -12,16 +12,11 @@ import { isTestnetChain } from '@/lib/marketplace'
 import { Button } from '@/components/ui/Button'
 import { Address, ApprovalRequiredBanner } from '@/components/haven'
 import { Card } from '@/components/ui/Card'
+import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useToast } from '@/components/ui/Toast'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { Icon } from '@/components/ui/Icon'
-
-interface Props {
-  open: boolean
-  account: SmartAccount | null
-  onClose: () => void
-}
 
 const ONRAMP_APP_ID = process.env.NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID
 
@@ -37,16 +32,22 @@ function buildOnrampUrl(accountAddress: string, chainShortName: string): string 
 }
 
 /**
- * The ONE receive dialog (#4094): `ReceiveFundsModal` ("Deposit address") and
- * `AddFundsModal` ("Add funds") asked for the same thing two ways and then
- * disagreed on tokens — the former listed every registry token for the chain
- * (ETH and USDC), the latter said USDC. This replaces both: the account is
- * chosen by the caller (the dashboard's picker when there is more than one
- * account, the page's own account elsewhere), and the dialog shows the
- * address with QR and Copy, ONE network rule naming one token ("Send USDC on
- * <network> only"), and the other ways to add money — "Get test USDC" on a
- * test network, "Buy with card" on Base when the Coinbase Onramp app id is
- * configured.
+ * The ONE receive dialog (#4094, cleaned to mockup note 9 by #4167):
+ * `ReceiveFundsModal` ("Deposit address") and `AddFundsModal` ("Add funds")
+ * asked for the same thing two ways and then disagreed on tokens — the former
+ * listed every registry token for the chain (ETH and USDC), the latter said
+ * USDC. This replaces both: the dialog shows the address with an INLINE QR
+ * and Copy, ONE network rule naming one token ("Send USDC on <network> only.
+ * It arrives in about a minute and shows in Activity."), and the other ways
+ * to add money — "Get test USDC" on a test network, "Buy with card" on Base
+ * when the Coinbase Onramp app id is configured. The old Deposit-address
+ * chrome — the "On-chain receive" chip, the "Show QR code" toggle, the
+ * "View on explorer" button (the account page's Account details keeps an
+ * explorer link) and the "Before you send" box — is gone (#4167). The account
+ * is chosen by the caller (the dashboard's picker when there is more than one
+ * account, the page's own account elsewhere): the dialog renders an account
+ * card ONLY when the caller hands it several `accounts` — as a picker, so a
+ * wrong pre-pick is one switch away — and no account card at all with one.
  *
  * `resolveChainOrNull` answers #1844's question, introduced by #1844 and
  * lifted into `lib/chains.ts` by #1852 when both funding dialogs needed the
@@ -67,33 +68,58 @@ function buildOnrampUrl(accountAddress: string, chainShortName: string): string 
  * calls `getFaucetUrl`, which itself throws on one), so this never needs a
  * try/catch to stay safe.
  */
-export default function ReceiveDialog({ open, account, onClose }: Props) {
+export interface ReceiveDialogProps {
+  open: boolean
+  account: SmartAccount | null
+  /**
+   * #4167: every account the caller can offer. More than one turns the
+   * account card into a picker; absent or a single entry renders no account
+   * card at all — with one account there is nothing to pick.
+   */
+  accounts?: SmartAccount[]
+  onClose: () => void
+}
+
+export default function ReceiveDialog({ open, account, accounts, onClose }: ReceiveDialogProps) {
   const { toast } = useToast()
   const panelRef = useRef<HTMLDivElement>(null)
   useFocusTrap(panelRef, open)
   const [copied, setCopied] = useState(false)
-  const [showQr, setShowQr] = useState(false)
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
+  // The picker's selection, when the caller handed us several accounts.
+  // `null` until the user picks; the effective account then falls back to the
+  // caller's `account` prop.
+  const [pickerId, setPickerId] = useState<string | null>(null)
 
   useEscapeToClose(open, onClose)
 
+  const showPicker = Boolean(open && accounts && accounts.length > 1)
+  const selectedAccount =
+    showPicker && pickerId != null
+      ? (accounts ?? []).find((candidate) => candidate.id === pickerId) ?? account
+      : account
+
   useEffect(() => {
     if (!open) {
-      setShowQr(false)
+      setPickerId(null)
       setQrDataUrl(null)
       setCopied(false)
     }
   }, [open])
 
-  // #1852 note, carried over: no chain guard here, deliberately. The QR is
-  // suppressed in the unresolved state by its toggle not being rendered at
-  // all (asserted), and a second guard on the generator would be unreachable
-  // from the UI and so unprovable by mutation.
+  // #1852 note, carried over with an edit: no chain guard here, deliberately.
+  // The QR is suppressed in the unresolved state by the `chainConfig` branch
+  // below not rendering it at all (asserted), and a second guard on the
+  // generator would be unreachable from the UI and so unprovable by mutation.
+  // #4167: the QR is INLINE, generated the moment the dialog opens — the
+  // visual specs wait for the image, never the skeleton — and regenerates
+  // when the picker switches accounts.
   useEffect(() => {
-    if (!open || !showQr || !account?.account_address) return
+    if (!open || !selectedAccount?.account_address) return
 
+    setQrDataUrl(null)
     let cancelled = false
-    QRCode.toDataURL(account.account_address, {
+    QRCode.toDataURL(selectedAccount.account_address, {
       margin: 1,
       width: 220,
       color: { dark: '#1A2140', light: '#FFFFFF' }, // QR encoder needs literal hex for module colours — design-lint-disable-line
@@ -108,16 +134,19 @@ export default function ReceiveDialog({ open, account, onClose }: Props) {
     return () => {
       cancelled = true
     }
-  }, [open, showQr, account?.account_address])
+  }, [open, selectedAccount?.account_address])
 
-  if (!open || !account) return null
+  if (!open || !selectedAccount) return null
 
-  const accountAddress = account.account_address
-  const chainConfig = resolveChainOrNull(account.chain_id)
-  // The one network rule (#4094): a single token, a single network. ETH is
+  const accountAddress = selectedAccount.account_address
+  const chainConfig = resolveChainOrNull(selectedAccount.chain_id)
+  // The one network rule (#4094; #4167 carries the mockup's sentence): a
+  // single token, a single network, and what happens after the send. ETH is
   // not listed — agents spend USDC, and a receive screen that lists tokens
   // the product never spends invites the wrong deposit.
-  const networkRule = chainConfig ? `Send USDC on ${chainConfig.name} only.` : null
+  const networkRule = chainConfig
+    ? `Send USDC on ${chainConfig.name} only. It arrives in about a minute and shows in Activity.`
+    : null
 
   const depositInstructionsAvailable = Boolean(accountAddress && chainConfig)
 
@@ -180,26 +209,38 @@ export default function ReceiveDialog({ open, account, onClose }: Props) {
         </div>
 
         <div className="space-y-5 p-6">
-          <Card hover={false} className="p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <p className="truncate text-sm font-semibold text-[var(--v2-ink)]">{account.name}</p>
-                  {account.is_default && (
-                    <span className="rounded-full bg-[var(--v2-brand-soft)] px-1.5 py-0.5 text-xs font-medium text-[var(--v2-brand)]">
-                      Default
-                    </span>
-                  )}
-                </div>
-                {chainConfig && (
-                  <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{chainConfig.name}</p>
-                )}
-              </div>
-              <span className="rounded-full bg-[var(--v2-surface-2)] px-2 py-1 text-xs font-medium text-[var(--v2-ink-2)]">
-                On-chain receive
-              </span>
-            </div>
-          </Card>
+          {/*
+            #4167: the account card is the PICKER, and only when there is
+            something to pick between. With one account — or a caller that
+            offers none to switch (the account page's own account) — no
+            account card renders at all: the dialog is about that account by
+            construction, and the QR's alt text still names it.
+          */}
+          {showPicker ? (
+            <Card hover={false} className="p-4">
+              <label
+                htmlFor="receive-account-picker"
+                className="text-xs font-medium text-[var(--v2-ink-3)]"
+              >
+                Account
+              </label>
+              <Select
+                id="receive-account-picker"
+                aria-label="Account"
+                value={selectedAccount.id}
+                onChange={(event) => setPickerId(event.target.value)}
+              >
+                {(accounts ?? []).map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.name}
+                  </option>
+                ))}
+              </Select>
+              {chainConfig && (
+                <p className="mt-1.5 text-xs text-[var(--v2-ink-3)]">{chainConfig.name}</p>
+              )}
+            </Card>
+          ) : null}
 
           {/*
             #1852 (carried over): everything below the account card is
@@ -228,60 +269,50 @@ export default function ReceiveDialog({ open, account, onClose }: Props) {
                   <Button onClick={copyAddress} size="sm">
                     {copied ? 'Address copied' : 'Copy address'}
                   </Button>
-                  <Button variant="ghost" size="sm" onClick={() => setShowQr((value) => !value)}>
-                    {showQr ? 'Hide QR code' : 'Show QR code'}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    href={getExplorerUrl(account.chain_id, 'address', accountAddress)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    View on explorer
-                  </Button>
                 </div>
               </div>
-
-              {showQr && (
-                // Never-invert container (#2929): the QR is authored against
-                // white and a scanner reads its module contrast — the box stays
-                // fixed-white in both themes via `.v2-light-surface`
-                // (globals.css), which also opts native fallback paints inside
-                // out of the dark scheme.
-                <div className="v2-light-surface rounded-[10px] border p-4">
-                  <div role="status" aria-busy={!qrDataUrl} aria-live="polite" className="flex flex-col items-center">
-                    {qrDataUrl ? (
-                      <img
-                        src={qrDataUrl}
-                        alt={`QR code for ${account.name} on ${chainConfig.name}`}
-                        className="h-[220px] w-[220px] rounded-lg border border-[var(--v2-border)]"
-                      />
-                    ) : (
-                      <Skeleton className="h-[220px] w-[220px] rounded-lg" />
-                    )}
-                    <p className="mt-3 text-center text-xs text-[var(--v2-ink-3)]">
-                      QR code for {truncate(accountAddress)}
-                    </p>
-                  </div>
-                </div>
-              )}
 
               {/*
-                #4094: the ONE network rule, stated ONCE. It sits directly
-                under the address card — the one sentence a person must read
-                before they act on it — as the first item of the "Before you
-                send" card, not in a second place elsewhere in the dialog.
+                #4167: the QR is INLINE — no toggle, always visible when the
+                address is. Generated the moment the dialog opens (and on a
+                picker switch), so the visual specs wait for the image, never
+                the skeleton.
+                Never-invert container (#2929): the QR is authored against
+                white and a scanner reads its module contrast — the box stays
+                fixed-white in both themes via `.v2-light-surface`
+                (globals.css), which also opts native fallback paints inside
+                out of the dark scheme.
               */}
-              <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
-                <p className="text-xs font-medium text-[var(--v2-ink-3)]">
-                  Before you send
-                </p>
-                <ul className="mt-3 space-y-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                  <li>{networkRule}</li>
-                  <li>Funds arrive after the on-chain transfer is confirmed.</li>
-                </ul>
+              <div className="v2-light-surface rounded-[10px] border p-4">
+                <div role="status" aria-busy={!qrDataUrl} aria-live="polite" className="flex flex-col items-center">
+                  {qrDataUrl ? (
+                    <img
+                      src={qrDataUrl}
+                      alt={`QR code for ${selectedAccount.name} on ${chainConfig.name}`}
+                      className="h-[220px] w-[220px] rounded-lg border border-[var(--v2-border)]"
+                    />
+                  ) : (
+                    <Skeleton className="h-[220px] w-[220px] rounded-lg" />
+                  )}
+                  <p className="mt-3 text-center text-xs text-[var(--v2-ink-3)]">
+                    QR code for {truncate(accountAddress)}
+                  </p>
+                </div>
               </div>
+
+              {/*
+                #4094, mockup note 9 (#4167): the ONE network rule, stated
+                ONCE, as ONE line. It sits directly under the address and QR —
+                the one sentence a person must read before they act on it —
+                and replaces the old "Before you send" box: the checklist
+                dressed a loss-of-funds risk in the visual weight of a
+                reminder, and the one rule says everything the box's two lines
+                did. The explorer link lives in the account page's Account
+                details, not here.
+              */}
+              {networkRule && (
+                <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">{networkRule}</p>
+              )}
 
               {(isTestnet || onrampAvailable) && (
                 <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">

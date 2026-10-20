@@ -978,10 +978,15 @@ one merchant and describing budget stops neutrally), then ONE money card
 surface — with the balance on the left (the figure, the "since yesterday"
 line, the § AreaChart sparkline fed from `spend.balance_by_day` — a missing
 day is skipped, never zero; under 3 measured days the flat placeholder
-draws — and the two actions, "Receive" primary and "Send" secondary (#4094 — the
-money verbs everywhere, per the owner decision; "Receive" steps down to ghost
-through `receiveSecondary` while the first-run guide's step 1 is the active
-step, so exactly one primary money action shows, #3902) and the 30-day spending on the right as a
+draws — and the two actions, following #4167's ONE primary-button rule (owner
+decision 2026-10-20): **Send** primary once the account (or, with several
+accounts, any account) holds USDC (`usdcFunded`), **Receive** primary with
+Send **disabled** when the account is known empty, and Send stays primary and
+enabled while the balance is loading or failed to read — never flipping on a
+load-shaped condition (the account page's rule,
+`AccountDetailClient.tsx`). "Receive" also steps down to ghost through
+`receiveSecondary` while the first-run guide's step 1 is the active step, so
+exactly one primary money action shows, #3902) and the 30-day spending on the right as a
 `Card.Section divided`, stacked below `lg`. The spending half (#3902) is a
 muted "Agent spending, last 30 days" label — still the section's heading —
 with the 30-day total large and left-aligned beneath it, the per-agent split
@@ -1682,7 +1687,7 @@ its label node, so a picker row reads exactly like the chip the agent will
 carry. A label is the user's own ad-hoc word ("prod", "finance") — it never
 borrows status language, and it never encodes authority. Recorded on `/design-system` → *Agent label chips*.
 
-### The Receive dialog (`ReceiveDialog.tsx`, #4094)
+### The Receive dialog (`ReceiveDialog.tsx`, #4094, mockup note 9 via #4167)
 
 One dialog serves every funding entry point — the dashboard money card's
 **Receive**, the first-run guide's Add funds step, the low-balance attention
@@ -1692,17 +1697,23 @@ caller picks the account: the dashboard's account picker when there is more
 than one account, the page's own account everywhere else. In
 order, top to bottom:
 
-1. The account card — name, "Default" chip on the default account, the
-   resolved chain's name, and an "On-chain receive" chip.
+1. The account card — ONLY with several accounts, where it is a **picker**
+   (the shared `Select`, plus the resolved chain's name); with one account
+   there is no account card at all (#4167). The old "On-chain receive" chip
+   is gone.
 2. The address card — the full address (the shared `Address` primitive,
-   untruncated), **Copy address**, a **Show QR code** toggle, and a
-   **View on explorer** link. The QR box is fixed-white in both themes
-   (`.v2-light-surface`, #2929): a scanner reads module contrast, never a
-   themed background.
-3. The "Before you send" list, whose first line is the ONE network rule —
-   *Send USDC on `<network>` only.* One token, one network (#4094); ETH is
-   never listed — agents spend USDC, and the old receive screen's
-   registry-token list invited the wrong deposit.
+   untruncated) and **Copy address** — and, directly below it, the **inline
+   QR** (#4167): always visible whenever the address is, generated the
+   moment the dialog opens, in the fixed-white `.v2-light-surface` box
+   (#2929 — a scanner reads module contrast, never a themed background).
+   There is no "Show QR code" toggle and no "View on explorer" button; the
+   explorer link lives in the account page's Account details.
+3. The ONE network rule, one line (#4167): *Send USDC on `<network>` only.
+   It arrives in about a minute and shows in Activity.* One token, one
+   network (#4094); ETH is never listed — agents spend USDC, and the old
+   receive screen's registry-token list invited the wrong deposit. The old
+   "Before you send" box is gone: a loss-of-funds risk must not wear the
+   visual weight of a checklist.
 4. "Other ways to add money", each card gated on the SELECTED account's
    chain (#3478), never the deployment default: **Get test USDC** (Circle's
    faucet) on a test network, **Buy with card** (Coinbase Onramp) on Base —

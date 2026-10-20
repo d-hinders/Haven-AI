@@ -1,10 +1,10 @@
 'use client'
 
-import { ArrowDown, ArrowUp, Bot, Check, Circle, CirclePause, EllipsisVertical, Info, OctagonAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Bot, Check, Circle, CirclePause, CreditCard, EllipsisVertical, Info, OctagonAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
 import { MobileTabBar } from '@/components/sidebar/MobileTabBar'
 import { baseNavItems } from '@/components/sidebar/Sidebar'
 import { Icon } from '@/components/ui/Icon'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -46,6 +46,7 @@ import { NoticeRow } from '@/components/haven/NoticeRow'
 import type { AttentionListItem } from '@/components/haven/AttentionList'
 import { CodeBlock } from '@/components/ui/CodeBlock'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import QRCode from 'qrcode'
 import ComingSoonModal from '@/components/ComingSoonModal'
 import ReceiveDialog from '@/components/ReceiveDialog'
 import type { SmartAccount } from '@/context/AuthContext'
@@ -63,7 +64,7 @@ import { THEME_TOKENS, contrastTable } from '@/lib/theme-tokens'
 import { formatAnalyticsTick } from '@/lib/analytics-format'
 import { budgetCaption, type BudgetCaptionRow } from '@/lib/budget-caption'
 import type { DashboardBudgetRemaining, DashboardOverview } from '@/lib/dashboard-attention'
-import { timeAgo } from '@/lib/format'
+import { timeAgo, truncate } from '@/lib/format'
 import type { DashboardAgentPreview } from '@/types/dashboard'
 import DashboardOnboardingGuide, { SetupCompleteLine } from '@/components/DashboardOnboardingGuide'
 
@@ -959,6 +960,27 @@ export default function DesignSystemPage() {
   const [infoModalOpen, setInfoModalOpen] = useState(false)
   const [comingSoonOpen, setComingSoonOpen] = useState(false)
   const [receiveDialogOpen, setReceiveDialogOpen] = useState(false)
+  // #4167: the Receive example's inline QR, generated the same way the dialog
+  // generates its own (`ReceiveDialog.tsx`) — the showcase documents the real
+  // pattern, not a stand-in box.
+  const [dsReceiveQr, setDsReceiveQr] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    QRCode.toDataURL(sampleAddress, {
+      margin: 1,
+      width: 220,
+      color: { dark: '#1A2140', light: '#FFFFFF' }, // QR encoder needs literal hex for module colours — design-lint-disable-line
+    })
+      .then((url) => {
+        if (!cancelled) setDsReceiveQr(url)
+      })
+      .catch(() => {
+        if (!cancelled) setDsReceiveQr(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
   const [panelOpen, setPanelOpen] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [topModalOpen, setTopModalOpen] = useState(false)
@@ -2733,45 +2755,56 @@ export default function DesignSystemPage() {
 
       <Section
         title="Receive funds"
-        description="Manual funding surfaces must make the Haven wallet, network, supported tokens, and copy action obvious before the user sends anything on-chain."
+        description="The one Receive dialog: the address with an inline QR and Copy, one network rule, and the other ways to add money — nothing else asks to be read before the user sends."
       >
         <Card hover={false} className="max-w-xl p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-[var(--v2-ink)]">Operating wallet</p>
-              <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Base</p>
-            </div>
-            <StatusBadge>On-chain receive</StatusBadge>
-          </div>
-          <div className="mt-5 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
+          <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
             <p className="text-xs font-medium text-[var(--v2-ink-3)]">Haven wallet address</p>
             <p className="mt-2 break-all font-mono text-sm text-[var(--v2-ink)]">{sampleAddress}</p>
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <Button size="sm">Copy address</Button>
-              <Button variant="ghost" size="sm">Show QR code</Button>
-              <Button variant="ghost" size="sm" href="#" target="_blank" rel="noopener noreferrer">
-                View on explorer
-              </Button>
             </div>
           </div>
+          {/* #2929: the QR is authored against white and a scanner reads its
+              module contrast — the box stays fixed-white in both themes via
+              `.v2-light-surface` (globals.css), as the dialog's does. */}
+          <div className="v2-light-surface mt-4 rounded-[10px] border p-4">
+            <div className="flex flex-col items-center">
+              {dsReceiveQr ? (
+                <img
+                  src={dsReceiveQr}
+                  alt="QR code for Operating wallet on Base"
+                  className="h-[220px] w-[220px] rounded-lg border border-[var(--v2-border)]"
+                />
+              ) : (
+                <div className="h-[220px] w-[220px] animate-pulse rounded-lg bg-[var(--v2-surface-2)]" />
+              )}
+              <p className="mt-3 text-center text-xs text-[var(--v2-ink-3)]">
+                QR code for {truncate(sampleAddress)}
+              </p>
+            </div>
+          </div>
+          {/* #4094 mockup note 9 (#4167): ONE network rule, one line. */}
+          <p className="mt-4 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+            Send USDC on Base only. It arrives in about a minute and shows in Activity.
+          </p>
           <div className="mt-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
-            <p className="text-xs font-medium text-[var(--v2-ink-3)]">Supported on Base</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {['ETH', 'USDC'].map((token) => (
-                <span
-                  key={token}
-                  className="rounded-full border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2.5 py-1 text-xs font-medium text-[var(--v2-ink-2)]"
-                >
-                  {token}
-                </span>
-              ))}
+            <p className="text-sm font-semibold text-[var(--v2-ink)]">Other ways to add money</p>
+            <div className="mt-3 flex items-start gap-3">
+              <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)]">
+                <Icon icon={CreditCard} className="h-4 w-4 text-[var(--v2-ink-2)]" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-[var(--v2-ink)]">Buy with card</p>
+                <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
+                  Purchase USDC directly to your account via Coinbase. KYC is handled by Coinbase;
+                  Haven never holds your funds.
+                </p>
+              </div>
             </div>
-          </div>
-          <div className="mt-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
-            <p className="text-sm font-semibold text-[var(--v2-ink)]">Before you send</p>
-            <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-              Use the Base network, send only supported tokens, and wait for the on-chain transfer to confirm.
-            </p>
+            <Button className="mt-3 w-full" trailingIcon>
+              Buy with card
+            </Button>
           </div>
         </Card>
       </Section>

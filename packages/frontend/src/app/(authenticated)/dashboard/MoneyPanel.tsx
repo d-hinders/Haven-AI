@@ -184,12 +184,22 @@ export interface MoneyPanelProps {
    */
   noPaymentsYet?: boolean
   /**
+   * #4167 — the ONE primary-button rule (owner decision 2026-10-20): the
+   * dashboard follows the account page. `true` once the account (or, with
+   * several accounts, any account) holds USDC — Send primary; `false` (KNOWN
+   * empty) — Receive primary and Send disabled; `null` (the balance is
+   * loading or failed to read) — Send stays primary and enabled rather than
+   * flipping mid-load, the account page's rule (`AccountDetailClient.tsx`).
+   * Undefined reads as null. The default account's aggregate `hasFunds` is a
+   * different signal — agents spend USDC, so the rule keys on USDC.
+   */
+  usdcFunded?: boolean | null
+  /**
    * #3902: no other money action is primary while the first-run guide's
    * step 1 ("Add funds") is the active step (#4094 rename: the card's button
    * is "Receive"). The guide then carries the one primary funding action and
    * this card's button steps down to the ghost variant, so exactly one
-   * primary money action shows. Default false — the card's "Receive" is the
-   * primary action.
+   * primary money action shows. Default false — the card's own rule decides.
    */
   receiveSecondary?: boolean
   onReceive: () => void
@@ -216,6 +226,7 @@ export default function MoneyPanel({
   showSpending = true,
   noPaymentsYet = false,
   receiveSecondary = false,
+  usdcFunded = null,
   onReceive,
   onSend,
 }: MoneyPanelProps) {
@@ -223,6 +234,12 @@ export default function MoneyPanel({
   // Subsequent changes (currency switches, polled refresh) snap instantly.
   // Respects prefers-reduced-motion via the hook.
   const animatedTotal = useCountUp(totalFiat, { enabled: !loading && !unavailable })
+
+  // #4167's primary-button rule: Send primary once funded (and while the
+  // state is unknown — null never reads as empty); Receive primary and Send
+  // disabled only when the emptiness is KNOWN.
+  const sendPrimary = usdcFunded !== false
+  const sendDisabled = usdcFunded === false
 
   const spend = overview?.spend ?? null
   const isTestNetwork = spend?.scope === 'testnet'
@@ -528,11 +545,13 @@ export default function MoneyPanel({
               </div>
             ) : null}
 
-            {/* #4094: "Receive" is the primary action, "Send" the secondary —
-                the money verbs everywhere, per the owner decision. #3902
-                carries over: while the first-run guide's step 1 is the active
-                step, the guide's "Add funds" is the one primary funding
-                action and this card's "Receive" steps down to ghost. */}
+            {/* #4094: the money verbs everywhere, per the owner decision —
+                and #4167's one primary-button rule: Send primary once funded
+                (and while the funding state is unknown), Receive primary with
+                Send disabled when known empty. #3902 carries over: while the
+                first-run guide's step 1 is the active step, the guide's
+                "Add funds" is the one primary funding action and this card's
+                "Receive" steps down to ghost. */}
             {hasAccounts ? (
               requiresOtherDevice ? (
                 <PasskeyOtherDeviceNotice className="max-w-sm lg:mt-auto" />
@@ -541,10 +560,13 @@ export default function MoneyPanel({
                 // unavailable) the spare height sits above the actions,
                 // never below them (#3908).
                 <div className="flex flex-wrap gap-3 lg:mt-auto">
-                  <Button onClick={onReceive} variant={receiveSecondary ? 'ghost' : 'primary'}>
+                  <Button
+                    onClick={onReceive}
+                    variant={sendPrimary || receiveSecondary ? 'ghost' : 'primary'}
+                  >
                     Receive
                   </Button>
-                  <Button onClick={onSend} variant="ghost">
+                  <Button onClick={onSend} variant={sendPrimary ? 'primary' : 'ghost'} disabled={sendDisabled}>
                     Send
                   </Button>
                 </div>

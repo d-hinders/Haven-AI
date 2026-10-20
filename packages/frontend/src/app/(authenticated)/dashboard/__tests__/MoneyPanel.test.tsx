@@ -328,34 +328,42 @@ describe('MoneyPanel — the balance figures say what they measure (#3977)', () 
   })
 })
 
-describe('MoneyPanel — exactly one primary "Receive" (#3902, #4094)', () => {
+describe('MoneyPanel — the ONE primary-button rule (#4167)', () => {
   const receive = () => screen.getByRole('button', { name: 'Receive' })
+  const send = () => screen.getByRole('button', { name: 'Send' })
 
-  it('renders "Receive" primary by default', () => {
+  it('keeps "Send" primary and enabled while the funding state is unknown', () => {
+    // `usdcFunded` null (loading, or the read failed): never read as empty —
+    // the card does not flip on a load-shaped condition.
     render(<MoneyPanel {...baseProps} overview={null} />)
 
-    expect(receive()).toHaveClass('bg-[var(--v2-brand)]')
-    expect(receive()).not.toHaveClass('border-[var(--v2-border-strong)]')
-  })
-
-  it('renders "Receive" primary when receiveSecondary is false', () => {
-    render(<MoneyPanel {...baseProps} receiveSecondary={false} overview={null} />)
-
-    expect(receive()).toHaveClass('bg-[var(--v2-brand)]')
-  })
-
-  it('steps "Receive" down to ghost when receiveSecondary is true', () => {
-    render(<MoneyPanel {...baseProps} receiveSecondary overview={null} />)
-
-    expect(receive()).toHaveClass('border-[var(--v2-border-strong)]')
+    expect(send()).toHaveClass('bg-[var(--v2-brand)]')
+    expect(send()).toBeEnabled()
     expect(receive()).not.toHaveClass('bg-[var(--v2-brand)]')
   })
 
-  it('keeps "Send" ghost either way', () => {
-    const { rerender } = render(<MoneyPanel {...baseProps} overview={null} />)
-    const send = () => screen.getByRole('button', { name: 'Send' })
-    expect(send()).toHaveClass('border-[var(--v2-border-strong)]')
-    rerender(<MoneyPanel {...baseProps} receiveSecondary overview={null} />)
-    expect(send()).toHaveClass('border-[var(--v2-border-strong)]')
+  it('makes "Send" primary once the account holds USDC', () => {
+    render(<MoneyPanel {...baseProps} usdcFunded overview={null} />)
+
+    expect(send()).toHaveClass('bg-[var(--v2-brand)]')
+    expect(send()).toBeEnabled()
+    expect(receive()).not.toHaveClass('bg-[var(--v2-brand)]')
+    expect(receive()).toHaveClass('border-[var(--v2-border-strong)]')
+  })
+
+  it('makes "Receive" primary and disables "Send" when the account is known empty', () => {
+    render(<MoneyPanel {...baseProps} usdcFunded={false} overview={null} />)
+
+    expect(receive()).toHaveClass('bg-[var(--v2-brand)]')
+    expect(send()).toBeDisabled()
+    expect(send()).not.toHaveClass('bg-[var(--v2-brand)]')
+  })
+
+  it('steps "Receive" down to ghost while the first-run guide owns the primary (#3902, #4167)', () => {
+    render(<MoneyPanel {...baseProps} usdcFunded={false} receiveSecondary overview={null} />)
+
+    expect(receive()).toHaveClass('border-[var(--v2-border-strong)]')
+    expect(receive()).not.toHaveClass('bg-[var(--v2-brand)]')
+    expect(send()).toBeDisabled()
   })
 })

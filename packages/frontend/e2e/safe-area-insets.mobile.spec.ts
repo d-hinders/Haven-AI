@@ -158,6 +158,22 @@ async function chromeControlsInBands(page: Page, top: number, bottom: number) {
           nodes.add(el)
         }
       }
+      // True when el's box lies outside the visible box of its nearest
+      // actually-scrolling `overflow-y` ancestor — i.e. the control is clipped
+      // below the fold (or scrolled past above it) and is not a hit target
+      // until the user scrolls. Ancestors that merely DECLARE auto/scroll but
+      // do not overflow do not clip and are walked past.
+      const clippedByScroller = (el: HTMLElement): boolean => {
+        const r = el.getBoundingClientRect()
+        for (let a = el.parentElement; a; a = a.parentElement) {
+          const s = getComputedStyle(a)
+          if (!/(auto|scroll)/.test(s.overflowY)) continue
+          if (a.scrollHeight <= a.clientHeight + 1) continue
+          const box = a.getBoundingClientRect()
+          return r.bottom > box.bottom - 0.5 || r.top < box.top + 0.5
+        }
+        return false
+      }
       const offenders: Array<{ label: string; top: number; bottom: number }> = []
       for (const el of nodes) {
         const rect = el.getBoundingClientRect()
@@ -168,6 +184,18 @@ async function chromeControlsInBands(page: Page, top: number, bottom: number) {
         // Not on screen at all (off either edge).
         if (rect.right <= 0 || rect.left >= window.innerWidth) continue
         if (rect.bottom <= 0 || rect.top >= window.innerHeight) continue
+        // Clipped by a scrollable ancestor — same forgiveness the viewport
+        // checks above already grant the page scroll. The Receive dialog's
+        // body outgrew the 390x844 viewport when #4167 merged the funding
+        // verbs into it (inline QR + the onramp card), so its LAST control
+        // rests below the fold until the user scrolls, and its layout rect
+        // then intersects the home-indicator band exactly like the mid-scroll
+        // transaction row the docstring above refuses to count. A control the
+        // user cannot see or tap cannot be read as a swipe; what the band is
+        // owed is that the content CAN be scrolled clear, and the scroll-end
+        // assertion in the overlay test below proves that at the one position
+        // where it is a real claim.
+        if (clippedByScroller(el)) continue
         const label =
           el.getAttribute('aria-label') ||
           (el.textContent ?? '').trim().slice(0, 40) ||
@@ -503,18 +531,39 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     await page.getByRole('button', { name: 'Copy address' }).click()
     await expect(page.getByText('Address copied').last()).toBeVisible()
 
+    // Resolve the toast region THROUGH its dismiss control, not with a bare
+    // `[role="status"][aria-live="polite"]` query. Since the Receive dialog
+    // began rendering its QR region (`<div role="status" aria-busy={…}
+    // aria-live="polite">`, ReceiveDialog.tsx) as soon as it opens, a bare
+    // status query matches that region first — it precedes the toast portal in
+    // DOM order, sits in normal flow, and reads `bottom: auto`. The dismiss
+    // button exists only inside the Toast's polite region, so `closest()` is
+    // unambiguous by construction; the `carriesToast` guard below then fails
+    // loudly instead of silently measuring some other status region if the
+    // DOM ever shifts under this test again.
     const toast = await page.evaluate(() => {
-      const region = document.querySelector('[role="status"][aria-live="polite"]') as HTMLElement
-      const dismiss = region.querySelector(
+      const dismiss = document.querySelector(
         '[aria-label="Dismiss notification"]',
       ) as HTMLElement | null
+      const region = dismiss?.closest('[role="status"][aria-live="polite"]') as HTMLElement | null
+      const carriesToast = region?.textContent?.includes('Address copied') ?? false
       return {
-        bottom: getComputedStyle(region).bottom,
-        regionBottom: Math.round(region.getBoundingClientRect().bottom),
+        bottom: region ? getComputedStyle(region).bottom : null,
+        regionBottom: region ? Math.round(region.getBoundingClientRect().bottom) : null,
         dismissBottom: dismiss ? Math.round(dismiss.getBoundingClientRect().bottom) : null,
         viewportHeight: window.innerHeight,
+        carriesToast,
       }
     })
+
+    // GUARD: the resolved region is the toast's own — it exists and carries
+    // the raised toast's text. If either drops, the query has started matching
+    // something else (e.g. the dialog's QR status region) and the geometry
+    // assertions below would be meaningless.
+    expect(toast.regionBottom, 'the toast region resolved via its dismiss control').not.toBeNull()
+    expect(toast.carriesToast, 'the resolved region is the toast carrying "Address copied"').toBe(
+      true,
+    )
 
     // CONTROL: the region consumes the inset rather than its old flat 1rem.
     // #2731 added the tab bar to this offset, and all three terms ADD. (Since
@@ -589,6 +638,24 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
 
     const offenders = await chromeControlsInBands(page, INSET_TOP, INSET_BOTTOM)
     expect(offenders, 'an open overlay puts no control in a reserved band').toEqual([])
+
+    // And the guarantee the fold-skip in `chromeControlsInBands` rests on,
+    // asserted rather than assumed: scrolled to its END — the only position
+    // where "can be brought clear" is a real claim, same reasoning as the
+    // scroll-region test below — the dialog still puts no control in either
+    // band. #4167's Receive dialog outgrew the 390x844 viewport (inline QR +
+    // onramp card), so its last control rests below the fold unscrolled; if a
+    // future change removes the body's scroll or its bottom padding, THIS line
+    // fails instead of the static scan above, with the difference saying why.
+    await page.evaluate(() => {
+      const panel = document.querySelector('[role="dialog"]') as HTMLElement | null
+      if (panel) panel.scrollTop = panel.scrollHeight
+    })
+    const offendersAtScrollEnd = await chromeControlsInBands(page, INSET_TOP, INSET_BOTTOM)
+    expect(
+      offendersAtScrollEnd,
+      'the dialog scrolled to its end still puts no control in a reserved band',
+    ).toEqual([])
   })
   /**
    * What covers the status-bar band, now that the scrim is gone (#2819, #2820).

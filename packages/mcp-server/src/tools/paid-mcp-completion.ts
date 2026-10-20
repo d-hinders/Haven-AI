@@ -178,6 +178,11 @@ function settlementEvidenceHandoff(
  * since #1308, the retryable one tells the agent the chain was not readable
  * YET (mirror of #3727's `evidenceReason`), and the refused one says the hash
  * is wrong, not that the purchase failed.
+ *
+ * #4123: the retryable arm names payment_header — an EIP-3009 settlement
+ * report without it is refused before its hash is judged, so "the same hash"
+ * alone costs a wasted round trip. Prose only: next_arguments stay as they
+ * are (the stale-client gate checks them against main's report schema).
  */
 function settlementEvidenceReason(outcome: EvidenceReportOutcome | undefined): string {
   if (!outcome || outcome.outcome === 'confirmed') {
@@ -192,8 +197,9 @@ function settlementEvidenceReason(outcome: EvidenceReportOutcome | undefined): s
   if (outcome.outcome === 'retryable') {
     return (
       'The purchase is complete and the merchant settlement was reported, but Haven could not ' +
-      'verify it on-chain just yet (the chain was unreachable or the transaction is not mined); ' +
-      'retry haven_report_settlement_evidence with the same hash.'
+      'verify it on-chain just yet (the chain was unreachable or the transaction is not mined). ' +
+      'Call next_tool (haven_report_settlement_evidence) shortly with next_arguments, adding ' +
+      'payment_header: the exact payment_header you passed to this call.'
     )
   }
   if (isMissingProofHeaderRefusal(outcome)) {
@@ -964,7 +970,9 @@ export function classifyErc7710Settlement(
  *
  * `confirmed` -> settled: true. `retryable` -> SETTLEMENT_PENDING (the chain
  * could not be read yet, or the transaction is not mined — worth reporting
- * again). Everything else (`refused`, at any status code — a 409 mismatch, a
+ * again; #4123: on EIP-3009 with payment_header, which the reason names —
+ * an erc7710 report reaches this arm too, so the instruction is scoped to
+ * EIP-3009). Everything else (`refused`, at any status code — a 409 mismatch, a
  * 404 for a payment this agent does not own, a validation error) ->
  * DELIVERED_UNSETTLED: a settled no, never a write. `next_tool` is always
  * `haven_get_payment_status` on the two unsettled branches, exactly as the
@@ -1087,7 +1095,9 @@ export function classifySettlementEvidenceReport(
       safeToContinue: true,
       reason: pending
         ? 'Haven could not yet verify this transaction on-chain — the RPC was unreachable, or ' +
-          'the transaction is not mined yet. Report the same hash again shortly, or poll next_tool.'
+          'the transaction is not mined yet. Report it again shortly with ' +
+          'haven_report_settlement_evidence and the same hash — on an EIP-3009 payment adding ' +
+          'payment_header: the exact payment_header you sent the merchant — or poll next_tool.'
         : 'Haven did not record this settlement hash for this payment. Either the transaction does ' +
           'not match this payment on-chain, or the payment could not be found for this agent, or ' +
           'the connected backend does not yet take this kind of settlement report. Reporting it ' +

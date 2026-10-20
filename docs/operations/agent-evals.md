@@ -24,7 +24,7 @@ covers:
   - packages/connect/src/server-names.ts
   - packages/signer/src/consent.ts
   - packages/signer/src/cli-args.ts
-last-verified: "2026-10-19"
+last-verified: "2026-10-20"
 ---
 
 # Agent Evals — the model-in-the-loop eval suite (epic #3957)
@@ -46,7 +46,7 @@ backend**. No payment code is changed by this suite; the graders only READ.
 |---|---|---|
 | Task format | `packages/qa-agent/src/evals/types.ts` | One JSON file per task: the instruction, the setup it needs, the budget-aware amount rule, and the graders to apply. JSON, never Markdown. |
 | Graders | `packages/qa-agent/src/evals/graders.ts` | Read the recorded tool-call log + injected chain/backend probes. No model, no live agent. |
-| Tool lists | `packages/qa-agent/src/evals/tools.ts` | The 29 hosted tools, the 5 signer tools, and the explicit 9-tool payment list. Graders match BARE tool names + `next_tool_server_role`, never the server-prefixed name. |
+| Tool lists | `packages/qa-agent/src/evals/tools.ts` | The 29 hosted tools, split into the explicit 9-tool payment list and the 20 non-payment tools, and the 5 signer tools. `tools.test.ts` holds them equal to their upstream sources (#4121): the keys of the hosted tools/list snapshot (`tools-list.snapshot.json` in the mcp-server package) and of the signer's `toolSchemas`. A hosted tool in neither half fails as unclassified. Graders match BARE tool names + `next_tool_server_role`, never the server-prefixed name. |
 | Starter tasks | `packages/qa-agent/src/evals/tasks/*.json` | 10 tasks across direct-payment / x402-paywall / over-budget, each citing its source. |
 | Hermes adapter | `packages/qa-agent/src/evals/hermes.ts` | Runs one task through Hermes, collects the tool-call log, parses it into the grader model. |
 | Runner | `packages/qa-agent/src/evals/runner.ts` + `cli.ts` | k trials per task, applies graders, writes JSON report + readable summary with per-task pass rate, pass^k and wall time per session. Resolution is PER TRIAL (#3992 A2): the CLI injects a resolver that reads the budget + observer block immediately before each trial. |
@@ -284,7 +284,12 @@ wall time per session. The CLI exits non-zero if any task failed any trial.
 - "No further call from the payment-tool list" = the explicit 9-tool hosted
   list in `tools.ts`, matched through `bareToolName()` so a log recorded
   with `mcp__haven-<slug>-dev__haven_pay` graders identically to a bare
-  log. Unknown tool names fail CLOSED (they match nothing).
+  log. Unknown tool names match nothing, and that is NOT a safe default:
+  a payment tool missing from the list is a retry this grader cannot see,
+  so the trial passes falsely. The lists are therefore tested against
+  their upstream sources (the hosted `tools-list.snapshot.json` and the
+  signer's `toolSchemas`, #4121), and a snapshot-only change routes the
+  `qa_agent` CI job so that test runs.
 - A transfer is proven by the observer node's USDC `Transfer` LOG with the
   exact amount and recipient — a log that claims success with no matching
   transfer FAILS. This asymmetry is the point (it is what a "success"

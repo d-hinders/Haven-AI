@@ -2175,6 +2175,19 @@ describe('hosted haven_report_settlement_evidence (#2972)', () => {
       expect(res.data.settled).toBe(false)
       expect(res.data.code).toBe('SETTLEMENT_PENDING')
       expect(res.data.retryable).toBe(true)
+      // #4123: the handoff is unchanged — the status poll …
+      expect(res.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
+      expect(res.data.next_arguments).toEqual({ payment_id: 'pay_7710' })
+      // … and the re-report instruction names the header an EIP-3009 report
+      // is refused without. Limited to EIP-3009: an erc7710 report reaches
+      // this arm too (the backend's erc7710 seam 503s), and records no header.
+      // The whole reason, so the instruction's polarity is pinned too.
+      expect(res.data.reason).toBe(
+        'Haven could not yet verify this transaction on-chain — the RPC was unreachable, or ' +
+          'the transaction is not mined yet. Report it again shortly with ' +
+          'haven_report_settlement_evidence and the same hash — on an EIP-3009 payment adding ' +
+          'payment_header: the exact payment_header you sent the merchant — or poll next_tool.',
+      )
     },
     // reportEvidence retries a 503 three times with real 1s/2s/4s backoff
     // before giving up — real wall-clock headroom, same as the settle-gate
@@ -2462,6 +2475,15 @@ describe('#3764 — the merchant settlement evidence maps to next steps (eip3009
   const SETTLEMENT = '0x' + 'cd'.repeat(32)
   const SIG7710 = '0x' + '22'.repeat(65)
   const GOODS = { jsonrpc: '2.0', id: 'x', result: { content: [{ type: 'text', text: 'goods' }] } }
+  // #4123: the retryable arm's whole reason, pinned with toBe so the
+  // instruction's polarity (add the header, with next_arguments) is pinned,
+  // not just its words — in the wording family of the missing-header arm
+  // beside it (these tools sent the merchant the header the agent passed).
+  const RETRYABLE_REASON =
+    'The purchase is complete and the merchant settlement was reported, but Haven could not ' +
+    'verify it on-chain just yet (the chain was unreachable or the transaction is not mined). ' +
+    'Call next_tool (haven_report_settlement_evidence) shortly with next_arguments, adding ' +
+    'payment_header: the exact payment_header you passed to this call.'
 
   function stubDelivery() {
     // The eip3009 arms fund first; the delivery wait is not what these tests
@@ -2509,6 +2531,9 @@ describe('#3764 — the merchant settlement evidence maps to next steps (eip3009
     expect(res.data.next_tool).toBe('mcp__haven__haven_report_settlement_evidence')
     expect(res.data.next_arguments).toEqual({ payment_id: 'pay_x402', settlement_tx_hash: SETTLEMENT })
     expect(res.data.reason).toContain('not mined')
+    // #4123: a retry without the header is refused before the hash is judged,
+    // so the retry instruction names it — the instruction, not just the word.
+    expect(res.data.reason).toBe(RETRYABLE_REASON)
     // The purchase answer itself is unchanged beside the guidance.
     expect(res.data.settled).toBeUndefined()
     expect(res.data.settlement_tx_hash).toBe(SETTLEMENT)
@@ -2647,6 +2672,8 @@ describe('#3764 — the merchant settlement evidence maps to next steps (eip3009
     expect(res.data.next_tool).toBe('mcp__haven__haven_report_settlement_evidence')
     expect(res.data.next_arguments).toEqual({ payment_id: 'pay_7710', settlement_tx_hash: SETTLEMENT })
     expect(res.data.reason).toContain('not mined')
+    // #4123: the same retry instruction as the complete arm.
+    expect(res.data.reason).toBe(RETRYABLE_REASON)
   })
 
   it("haven_settle_mcp_tool's eip3009 settled arm names NO tool when the settlement hash was refused", async () => {

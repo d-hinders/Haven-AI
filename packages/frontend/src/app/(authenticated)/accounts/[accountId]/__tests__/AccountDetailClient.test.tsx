@@ -89,7 +89,7 @@ vi.mock('@/hooks/useAccountMoneyFlow', () => ({
   useAccountMoneyFlow: () => mockUseAccountMoneyFlow(),
 }))
 
-vi.mock('@/components/ReceiveFundsModal', () => ({
+vi.mock('@/components/ReceiveDialog', () => ({
   default: () => null,
 }))
 

@@ -1149,4 +1149,61 @@ test.describe('driven focus-state visual regression', () => {
     ).toBe(0)
     expect(overflow.card, `the archived card overflowed at ${mobile.width}px`).toBe(0)
   })
+
+  // ── List controls triggers (#4110) ───────────────────────────────────────
+  //
+  // The ListToolbar's menu-button triggers, the Filters button and a
+  // standalone PeriodPicker, on `/design-system`'s List controls section.
+  // The page is far too tall to Tab from the top within `tabToTarget`'s
+  // budget, so each drive STARTS on the control just before the target —
+  // the toolbar's search field, a text input, which matches :focus-visible
+  // whatever the modality — and then reaches the target by a real Tab.
+  // `.focus()` is never used on the target itself (see the header).
+  //
+  // Each capture is a PADDED CLIP around the trigger, never the element
+  // itself: the ring is `ring-2` + `ring-offset-2`, painted outside the
+  // element's box, so an element-clipped capture crops away the very pixels
+  // it pins (the #4110 design review counted 62 ring pixels left against a
+  // 50-pixel tolerance), and a containing row is no better when the trigger
+  // sits flush with the row's edge.
+  const RING_CLIP_PADDING = 10
+  const listTriggers = [
+    { slug: 'facet', section: 'ds-list-controls-default', from: 'searchbox', target: /^Status:/ },
+    { slug: 'filters', section: 'ds-list-controls-phone', from: 'searchbox', target: /^Filters/ },
+    { slug: 'period', section: 'ds-list-controls-primitives', from: /^Network:/, target: /^Period:/ },
+  ] as const
+
+  for (const trigger of listTriggers) {
+    test(`list controls — ${trigger.slug} trigger focus indicator`, async ({ page }) => {
+      await gotoDesktop(page, '/design-system')
+      const section = page.getByTestId(trigger.section)
+      await section.scrollIntoViewIfNeeded()
+      const start =
+        trigger.from === 'searchbox' ? section.getByRole('searchbox') : section.getByRole('button', { name: trigger.from })
+      await start.focus()
+      if (trigger.from !== 'searchbox') {
+        // A button focused by script takes no ring; one Shift+Tab / Tab pair
+        // puts the document back in keyboard modality on the same control.
+        await page.keyboard.press('Shift+Tab')
+        await page.keyboard.press('Tab')
+      }
+      const target = section.getByRole('button', { name: trigger.target })
+      await expect(target).toHaveCount(1)
+      await tabToTarget(page, target, `List controls · ${trigger.slug}`, 4)
+      await expectFocusedAndIndicated(page, target, `List controls · ${trigger.slug}`)
+      await expect(target).toHaveAttribute('aria-haspopup', /menu|dialog/)
+      await expect(target).toHaveAttribute('aria-expanded', 'false')
+      const box = await target.boundingBox()
+      if (!box) throw new Error(`List controls · ${trigger.slug}: the focused trigger has no box`)
+      await expect(page).toHaveScreenshot(`focus-list-controls-${trigger.slug}-desktop.png`, {
+        ...SNAPSHOT_OPTIONS,
+        clip: {
+          x: box.x - RING_CLIP_PADDING,
+          y: box.y - RING_CLIP_PADDING,
+          width: box.width + 2 * RING_CLIP_PADDING,
+          height: box.height + 2 * RING_CLIP_PADDING,
+        },
+      })
+    })
+  }
 })

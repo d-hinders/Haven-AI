@@ -71,7 +71,7 @@ import type { AggregatedTransaction } from '@/types/transactions'
 import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
 import DelegationSendModal from '@/components/DelegationSendModal'
 import AccountSignersCard from '@/components/AccountSignersCard'
-import ReceiveFundsModal from '@/components/ReceiveFundsModal'
+import ReceiveDialog from '@/components/ReceiveDialog'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -872,7 +872,7 @@ export default function AccountDetailClient() {
           onSent={handleSendSuccess}
         />
       )}
-      <ReceiveFundsModal
+      <ReceiveDialog
         open={receiveOpen}
         account={account}
         onClose={() => setReceiveOpen(false)}

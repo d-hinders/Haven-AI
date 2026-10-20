@@ -10,7 +10,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - scripts/ci/qa-freshness.mjs
   - .env.dev.example
-  - packages/frontend/src/components/AddFundsModal.tsx
+  - packages/frontend/src/components/ReceiveDialog.tsx
   - packages/frontend/src/components/EnvBadge.tsx
   - packages/frontend/src/lib/env.ts
   - packages/backend/src/config.ts
@@ -33,6 +33,15 @@ covers:
   - scripts/vercel/**
 last-verified: "2026-10-16"
 ---
+
+> **Re-verified #4118 (2026-10-20, `eth_getLogs` probe line):** this diff
+> touched one file in this document's coverage list,
+> `scripts/ci/rpc-conformance.mjs`, which gains a sixth check (`eth_getLogs`
+> over the last 500 blocks) and the `--logs-range` flag. The edits are the
+> probe step in § *Two Base Sepolia RPCs* (the new line, why 500, the QA
+> observer's `--logs-range 10`) and the provider table's new `--logs-range`
+> column. Nothing else in this document was re-verified, and `last-verified`
+> is not bumped.
 
 > **Re-verified #3913 (2026-10-19, after the toggle):** only the sentence in
 > § *PR previews are opt-in* about the haven-ops skip setting changed. It now
@@ -603,20 +612,42 @@ Isolation rules that are non-negotiable for a payments product:
   `node scripts/ci/rpc-conformance.mjs --url "$CANDIDATE_URL" --chain 84532`
   (#3336) — a required step.** Every line must be ✓: the chain id, a JSON-RPC batch of 10 (the harness's
   ethers providers batch up to 100 calls per ~10 ms), the `pending` block tag,
-  `eth_sendRawTransaction` accepted as a method (a zero-balance throwaway key,
-  refused for funds, never mined) and a burst of 20 without a 429. dRPC's free
+  `eth_getLogs` over the last 500 blocks (#4118), `eth_sendRawTransaction`
+  accepted as a method (a zero-balance throwaway key, refused for funds, never
+  mined) and a burst of 20 without a 429. dRPC's free
   plan (the dev primary 2026-09-24 → 2026-09-28) failed the batch and the
   `pending` tag; the shared public node can fail the burst — it is what a
   dedicated endpoint replaces. The probe measures per-second behaviour, never
-  monthly quota: a 5/5 endpoint can still run out of compute units mid-month.
+  monthly quota: an endpoint that passes every line can still run out of
+  compute units mid-month.
+
+  The `eth_getLogs` line asks for 500 blocks because that is the widest batch
+  the backend's settlement sweepers ask for (`EIP3009_LOG_BATCH_BLOCKS`,
+  `SWEEP_LOG_BATCH_BLOCKS`; the probe's self-test pins it to them). Alchemy's
+  free tier serves 10 blocks per call: the probe passed it 5/5 before this
+  line existed, and then both sweepers were refused on every tick (#4012) and
+  the QA observer graded real payments as missing (PR #4086). At 10 blocks the
+  settlement sweep scans nothing on that chain
+  ([accounting-feed.md](./accounting-feed.md)), so this line fails dev's
+  primary while it stays on that plan — the step working, not a probe bug.
+  The query is address-filtered and its result empty, so it measures the
+  range cap only, not a result-count cap. A narrower `--logs-range` is for a
+  variable whose reader asks for less, and it is justified in that variable's
+  row of the table below. **The QA observer `QA_RPC_URL_BASE_SEPOLIA` is
+  probed with `--logs-range 10`**: since PR #4086 the harness reads 10-block
+  windows (`GET_LOGS_MAX_RANGE`), so 500 would measure nothing the observer does.
+
+  ```sh
+  node scripts/ci/rpc-conformance.mjs --url "$CANDIDATE_URL" --chain 84532 --logs-range 10   # QA_RPC_URL_BASE_SEPOLIA only
+  ```
 
   **The dev arrangement since 2026-10-01 (#3489, #3456):**
 
-  | Variable | Where | Provider | Burst of 20 |
-  |---|---|---|---|
-  | `RPC_URL_BASE_SEPOLIA` (primary) | `@haven/backend` / dev | Alchemy, the dev app | 20/20 answered, all 5 checks pass (2026-10-01, after the swap; probed before that day's key rotation, same app) |
-  | `RPC_URL_BASE_SEPOLIA_FALLBACK` | `@haven/backend` / dev | Infura, free Core plan | **fails**: 20/20 then 14/20 rate-limited (2026-09-29), 20/20 (2026-09-30) |
-  | `QA_RPC_URL_BASE_SEPOLIA` (the QA observer) | GitHub Actions secret | Alchemy, a separate QA-observer app | not probed |
+  | Variable | Where | Provider | Burst of 20 | `--logs-range` |
+  |---|---|---|---|---|
+  | `RPC_URL_BASE_SEPOLIA` (primary) | `@haven/backend` / dev | Alchemy, the dev app | 20/20 answered, all 5 checks pass (2026-10-01, after the swap; probed before that day's key rotation, same app) | 500, the default (the sweepers' batch). Not yet probed with the `eth_getLogs` line; expected ✗ on the free tier's 10-block cap (#4118) |
+  | `RPC_URL_BASE_SEPOLIA_FALLBACK` | `@haven/backend` / dev | Infura, free Core plan | **fails**: 20/20 then 14/20 rate-limited (2026-09-29), 20/20 (2026-09-30) | Informational, not a gate: no `eth_getLogs` reader uses the fallback (it carries the viem failover reads and the relayer's raw-send rebroadcast; the log scanners stay on the primary, see *RPC failover* below), so its logs line is covered by the fallback exception below. Re-probe at the default 500 only if it is ever promoted to primary |
+  | `QA_RPC_URL_BASE_SEPOLIA` (the QA observer) | GitHub Actions secret | Alchemy, a separate QA-observer app | not probed | **10**: the harness reads 10-block windows (`GET_LOGS_MAX_RANGE`, PR #4086) and never asks for more |
 
   **Two owner-accepted exceptions to the probe rule above** (2026-10-01):
   - **The fallback fails the burst.** Infura's free plan is kept as a
@@ -1207,8 +1238,8 @@ counts as production: to see `/demo` locally, start the server with
 
 ### `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID` in the Playwright builds (#3483)
 
-The Add funds modal reads `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID` at build time
-(`packages/frontend/src/components/AddFundsModal.tsx`), so the app a visual
+The Receive dialog reads `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID` at build time
+(`packages/frontend/src/components/ReceiveDialog.tsx`), so the app a visual
 spec's server serves shows the "Buy with card" onramp card only when the BUILD
 that produced it carried the id. Every CI surface that builds or serves the app
 for Playwright therefore sets it: `ci.yml`'s frontend_checks build (whose

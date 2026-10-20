@@ -5,7 +5,7 @@ import {
   expectNoHorizontalOverflow,
   measureDialogOverflow,
   mockHavenApi,
-  openReceiveFundsModal,
+  openReceiveDialog,
   seedAuthenticatedSession,
   testSafeAddress,
   unexpectedBrowserErrors,
@@ -24,7 +24,7 @@ test.describe('dashboard browser UX', () => {
     // screen is not viewport-dependent, so a second copy would only let the
     // two drift. The MEASUREMENT below stays written out here; see the
     // helper's JSDoc for why that split is deliberate.
-    const modal = await openReceiveFundsModal(page)
+    const modal = await openReceiveDialog(page)
     await expect(modal).toBeVisible()
     await expect(modal.getByText('Operations')).toBeVisible()
     await expect(modal.getByText('Base', { exact: true })).toBeVisible()

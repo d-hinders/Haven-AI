@@ -3,8 +3,8 @@
  *
  * At `lg` the balance half and the spending half share one grid row, so they
  * are the same height, and the spending half is the taller one. Before #3908
- * the balance half ended in an empty band under "Add funds" / "Deposit
- * address". The sparkline now grows into that height, so the actions sit
+ * the balance half ended in an empty band under the money card's actions.
+ * The sparkline now grows into that height, so the actions sit
  * level with the spending half's bottom row. Measured in rendered CSS px —
  * the visual gate is advisory on `dev`, so a baseline alone would not hold it.
  */
@@ -20,7 +20,7 @@ test('the balance half has no empty band under its actions at 1280', async ({ pa
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto('/dashboard')
   const balance = page.getByRole('region', { name: 'Balance' })
-  await expect(balance.getByRole('button', { name: 'Add funds' })).toBeVisible()
+  await expect(balance.getByRole('button', { name: 'Receive' })).toBeVisible()
   await expect(page.getByRole('region', { name: 'Spending' }).getByText('Stopped by budget')).toBeVisible()
   const bottoms = await page.evaluate(() => {
     const balanceEl = document.querySelector('section[aria-label="Balance"]')
@@ -56,7 +56,7 @@ test('the balance half has no empty band under its actions at 1280', async ({ pa
 test('below lg the stacked card keeps the sparkline at its fixed 40px (900)', async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 900 })
   await page.goto('/dashboard')
-  await expect(page.getByRole('region', { name: 'Balance' }).getByRole('button', { name: 'Add funds' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Balance' }).getByRole('button', { name: 'Receive' })).toBeVisible()
   const height = await page.evaluate(
     () => document.querySelector('[data-testid="money-card-sparkline"] svg')?.getBoundingClientRect().height ?? null,
   )

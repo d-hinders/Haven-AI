@@ -9,6 +9,20 @@ import type {
   TransactionsFeedResponse,
 } from '@/types/transactions'
 
+/**
+ * The user's IANA zone — the server cuts custom `from`/`to` calendar days in
+ * it (#4095). Resolved per request rather than captured once, so a zone
+ * change mid-session is honoured; `UTC` is the fallback the API itself
+ * defaults to.
+ */
+export function browserTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  } catch {
+    return 'UTC'
+  }
+}
+
 interface UseTransactionsFeedReturn {
   transactions: AggregatedTransaction[]
   total: number
@@ -38,6 +52,21 @@ function toQueryString(
   if (filters.accountId) params.set('accountId', filters.accountId)
   if (filters.agentId) params.set('agentId', filters.agentId)
   if (filters.tokenKey) params.set('tokenKey', filters.tokenKey)
+  // #4095: every FilterBar dimension rides the request now — the browser
+  // filtered direction and network over the loaded page only, so the list,
+  // its count and the CSV export could disagree. The server applies all of
+  // them before paging.
+  if (filters.direction) params.set('direction', filters.direction)
+  if (filters.chainId !== undefined) params.set('chainId', String(filters.chainId))
+  const search = filters.search?.trim()
+  if (search) params.set('search', search)
+  if (filters.period) {
+    params.set('period', filters.period)
+  } else if (filters.from && filters.to) {
+    params.set('from', filters.from)
+    params.set('to', filters.to)
+    params.set('tz', browserTimeZone())
+  }
   params.set('offset', String(offset))
   params.set('limit', String(limit))
   if (fresh) params.set('fresh', '1')
@@ -185,7 +214,22 @@ export function useTransactionsFeed(
     setLoadingInitial(true)
     setError(null)
     void fetchPage(0, false, false)
-  }, [fetchPage, filters.accountId, filters.agentId, filters.tokenKey])
+    // #4095: every filter dimension now changes the request, so every one
+    // must reset the feed — the old three-field list missed direction (the
+    // URL carried it while the hook filtered nothing) and would have missed
+    // the four new dimensions the same way.
+  }, [
+    fetchPage,
+    filters.accountId,
+    filters.agentId,
+    filters.tokenKey,
+    filters.direction,
+    filters.chainId,
+    filters.search,
+    filters.period,
+    filters.from,
+    filters.to,
+  ])
 
   const loadMore = useCallback(async () => {
     if (loadingInitial || loadingMore || refreshing || !hasMore) return

@@ -2019,7 +2019,8 @@ The step that clears it: set `RPC_URL_BASE_SEPOLIA` on the dev backend to a
 dedicated provider endpoint and let it redeploy — after the candidate passes
 `node scripts/ci/rpc-conformance.mjs --url "$CANDIDATE_URL" --chain 84532` (#3336; required,
 see dev-environment.md → *Two Base Sepolia RPCs*), which checks the batch limit,
-the `pending` tag, `eth_sendRawTransaction` and a bounded burst. That is an owner action on the
+the `pending` tag, an `eth_getLogs` block range (500 blocks, #4118),
+`eth_sendRawTransaction` and a bounded burst. That is an owner action on the
 Railway environment, not a code change — until it is done, an outage of the
 public endpoint shows up in qa-dev as if it were a defect.
 
@@ -2029,7 +2030,11 @@ moves the observer node the scenarios assert through. Keep the two variables on
 DIFFERENT endpoints: the harness deliberately reads a second node, so an
 on-chain assertion is never verified against the very node the backend wrote
 through — pointing both at the same URL would reduce every on-chain proof to a
-check that the backend agrees with itself.
+check that the backend agrees with itself. Before `QA_RPC_URL_BASE_SEPOLIA`
+points at a new endpoint, run the same probe with `--logs-range 10`
+(`node scripts/ci/rpc-conformance.mjs --url "$CANDIDATE_URL" --chain 84532 --logs-range 10`):
+the observer reads 10-block `eth_getLogs` windows (`GET_LOGS_MAX_RANGE` in
+`chain.ts`, PR #4086), so the default 500 would measure nothing it does.
 
 ## Related documentation
 

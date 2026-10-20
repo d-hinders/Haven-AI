@@ -12,8 +12,7 @@ covers:
   - packages/frontend/tailwind.config.js
   - packages/frontend/src/components/ui/**
   - packages/frontend/src/components/haven/**
-  - packages/frontend/src/components/ReceiveFundsModal.tsx
-  - packages/frontend/src/components/AddFundsModal.tsx
+  - packages/frontend/src/components/ReceiveDialog.tsx
   - packages/frontend/src/components/ConnectAgentModal.tsx
   - packages/frontend/src/components/connect-agent/ConnectAgentFlow.tsx
   - packages/frontend/src/components/connect-agent/InlineAgentSetup.tsx
@@ -118,6 +117,13 @@ Any remaining matches should be deliberate technical disclosure, developer copy,
 
 ## Final Verification
 
+- Compare the rendered screen with the documented
+  [Patterns](design-system.md#patterns): a page that rebuilds one instead of
+  using it is a `should-fix`. A composition with no shipped instance and no
+  `/design-system` entry is a **new pattern** that needs its own earlier,
+  owner-approved design-system slice (#4109); extracting a shape the product
+  already ships, on the diff that writes its second copy, is absorption and
+  stays in the same PR.
 - Inspect `/design-system` when adding or changing shared UI patterns — and be
   clear what that buys. The page is a rendering of a component's APPEARANCE, not
   a test of its behaviour, and a showcase copy held permanently open (today only

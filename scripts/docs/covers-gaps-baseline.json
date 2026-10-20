@@ -100,7 +100,7 @@
     "packages/frontend/src/components/ErrorBoundary.tsx",
     "packages/frontend/src/components/InfoModal.tsx",
     "packages/frontend/src/components/ProtectedRoute.tsx",
-    "packages/frontend/src/components/ReceiveFundsModal.tsx",
+    "packages/frontend/src/components/ReceiveDialog.tsx",
     "packages/frontend/src/components/agent-panel/AgentCard.tsx",
     "packages/frontend/src/components/agent-panel/ReplaceSigningKeyModal.tsx",
     "packages/frontend/src/components/connect-agent/CopyBlock.tsx",

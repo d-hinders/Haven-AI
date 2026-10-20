@@ -301,7 +301,11 @@ export async function resolveTask(
   }
 }
 
-/** Counts the tests pin, so a copied list fails loudly instead of silently. */
+/**
+ * The list sizes, as a readable count. They catch no drift on their own: they
+ * are computed from the lists in `tools.ts`, so they move with them. The drift
+ * check is the set equality against the upstream sources in `tools.test.ts`.
+ */
 export const TOOL_COUNTS = {
   hosted: HOSTED_TOOLS.length,
   signer: SIGNER_TOOLS.length,

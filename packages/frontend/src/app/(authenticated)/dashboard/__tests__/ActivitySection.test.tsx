@@ -164,19 +164,70 @@ describe('ActivitySection (#3810)', () => {
     expect(screen.getByText('Acme Ltd')).toBeInTheDocument()
   })
 
-  it('shows the agent as the subtitle with one account, and drops "From My account"', () => {
-    renderSection({ activity: [group()], accountCount: 1 })
+  it('#4099: a transfer in from another own account is titled "From <account>", not "Deposit"', () => {
+    const inbound = { direction: 'in' as const, agentId: null, agentName: null, source: null, x402ResourceUrl: null }
+    renderSection({
+      accountCount: 2,
+      activity: [
+        group({ ...inbound, merchantName: 'Savings' }),
+        group({ ...inbound, merchantName: null, latestAt: new Date(Date.now() - 60_000).toISOString() }),
+      ],
+    })
 
-    expect(screen.getByText('Research assistant')).toBeInTheDocument()
-    expect(screen.queryByText('From My account')).not.toBeInTheDocument()
+    expect(screen.getByText('From Savings')).toBeInTheDocument()
+    expect(screen.queryByText('Savings', { exact: true })).not.toBeInTheDocument()
+    // Every other deposit keeps the generic word.
+    expect(screen.getByText('Deposit')).toBeInTheDocument()
+    expect(screen.queryByText(MERCHANT)).not.toBeInTheDocument()
   })
 
-  it('adds "From My account" only when there is more than one account', () => {
+  it('shows the agent as the subtitle with one account, and drops the "From <account>" half', () => {
+    renderSection({ activity: [group({ fromAccountName: 'Savings' })], accountCount: 1 })
+
+    expect(
+      screen.getByText((_, element) => element?.textContent === 'Research assistant'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/From/)).not.toBeInTheDocument()
+  })
+
+  it('adds "From <account>" with the account the money left, only when there is more than one account (#4117)', () => {
+    renderSection({ activity: [group({ fromAccountName: 'Savings' })], accountCount: 2 })
+
+    expect(
+      screen.getByText((_, element) => element?.textContent === 'Research assistant · From Savings'),
+    ).toBeInTheDocument()
+  })
+
+  it('names the sending account on a send between two own accounts, never a fixed sender label (#4117)', () => {
+    // Savings → the default "My account": the title is the receiving account,
+    // the subtitle the one the money left.
+    renderSection({
+      activity: [
+        group({
+          agentId: null,
+          agentName: null,
+          source: null,
+          x402ResourceUrl: null,
+          merchantName: 'My account',
+          fromAccountName: 'Savings',
+        }),
+      ],
+      accountCount: 2,
+    })
+
+    expect(screen.getByText('My account')).toBeInTheDocument()
+    // Exact: the subtitle is the sender alone, so no other "From …" can ride it.
+    expect(screen.getByText((_, element) => element?.textContent === 'From Savings')).toBeInTheDocument()
+    expect(screen.getAllByText(/^From /)).toHaveLength(1)
+  })
+
+  it('drops the "From" half when no sending-account name came back (an older backend)', () => {
     renderSection({ activity: [group()], accountCount: 2 })
 
     expect(
-      screen.getByText((_, element) => element?.textContent === 'Research assistant · From My account'),
+      screen.getByText((_, element) => element?.textContent === 'Research assistant'),
     ).toBeInTheDocument()
+    expect(screen.queryByText(/From/)).not.toBeInTheDocument()
   })
 
   it('groups rows under a shared day heading', () => {

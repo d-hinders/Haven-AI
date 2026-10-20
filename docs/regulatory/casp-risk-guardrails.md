@@ -72,7 +72,7 @@ covers:
   - packages/backend/src/infra/repositories/agent-rekeys.ts
   - packages/frontend/src/app/(authenticated)/accounting/**
   - packages/frontend/src/app/(authenticated)/reporting/**
-  - packages/frontend/src/components/AddFundsModal.tsx
+  - packages/frontend/src/components/ReceiveDialog.tsx
   - packages/frontend/src/components/UsingYourAgentInfo.tsx
   - packages/sdk/src/**
   - packages/cli/src/**
@@ -1025,18 +1025,24 @@ runtime list now, and `money-path.test.mjs` fails when a package-wide entry
 here is on neither list unless it is named **doc-only with its reason**:
 `packages/cli/src/**`, `packages/connect/src/**` and `packages/mcp/src/**` are
 client packages the deployed harness never runs, and `packages/sdk/src/**` is
-doc-only apart from the six files on the runtime list because they are spend
-authority — `signer.ts` (the signing schemes), `userop-binding.ts` (the #3271
-binding check), and the signing-surface guard #3283 moved in from the signer
-(`delegate-account.ts`, `direct-payment-guard.ts`, `redemption-guard.ts`,
-`settlement-child.ts`). The harness does build and drive the SDK; the rest of
-it is transport. Since #3173 `packages/sdk/src/edge-signing.ts` is
-spend authority by the same reasoning — it is the viem-based implementation
-of `addressFromKey` / `signHash` / `verifySignature` the shipped signer
-actually calls, pinned byte-equivalent to `signer.ts` — and is deliberately
-NOT yet on the runtime list: adding it is the same owner decision as any
-widening here, deferred and recorded in PR #3185. They stay on this perimeter — the CASP question
-still applies to what they ship — without a QA-freshness obligation. Widening
+doc-only apart from the nine files on the runtime list. Eight are there because
+they are spend authority — `signer.ts` (the signing schemes), `userop-binding.ts`
+(the #3271 binding check), the signing-surface guard #3283 moved in from the
+signer (`delegate-account.ts`, `direct-payment-guard.ts`, `redemption-guard.ts`,
+`settlement-child.ts`), and the signer's checks on task and sub-budget children
+(`task-budget-guards.ts`, `sub-budget-guards.ts`, #3661). The ninth,
+`merchant-completion.ts` (#4122), decides after the funding leg has moved USDC
+whether the merchant accepted or the payment is a rejection after funding, and
+reports the settlement hash Haven records. The harness does build and drive the
+SDK; the rest of it is transport, and `client.ts`, which only wires those files
+in, is pinned off the list by name (#3283, #4122). Since #3173
+`packages/sdk/src/edge-signing.ts` is spend authority by the same reasoning —
+it is the viem-based implementation of `addressFromKey` / `signHash` /
+`verifySignature` the shipped signer actually calls, pinned byte-equivalent to
+`signer.ts` — and is deliberately NOT yet on the runtime list: adding it is the
+same owner decision as any widening here, deferred and recorded in PR #3185.
+They stay on this perimeter — the CASP question still applies to what they
+ship — without a QA-freshness obligation. Widening
 one of them is an owner decision, not a drift fix. The check is scoped to
 package-wide entries; sub-package wildcards such as
 `packages/backend/src/modules/accounting/**` are knowingly outside it.
@@ -1063,20 +1069,21 @@ not at all. The `EXEMPT` map's own comments in
 `scripts/ci/money-path.test.mjs` carry the same two bare counts and drift the
 same way.
 
-**The floor is measured, and the number moves (#2300, #3098, #3283, #3649, #3661).**
-Measured at `cdb91d86` with #3649 and #3661 applied, the pin asserts **48 of
-the 65 globs**: the 50 runtime `globs` minus the two `EXEMPT` entries above,
-and none of the 15 `controlGlobs`. #3098 added `packages/demo-merchant-mcp/src/**`,
+**The floor is measured, and the number moves (#2300, #3098, #3283, #3649, #3661, #4122).**
+Measured at `82540f71b` with #4122 applied, the pin asserts **49 of the 66
+globs**: the 51 runtime `globs` minus the two `EXEMPT` entries above, and none
+of the 15 `controlGlobs`. #3098 added `packages/demo-merchant-mcp/src/**`,
 #3283 (PR #3286) the four `packages/sdk/src/` signing-guard files and
 `userop-binding.ts`, #3649 `packages/backend/src/modules/budget-scope/**`
 (the #2099 period pre-check, moved out of `modules/x402/` by #3616/#3617),
-and #3661 the task-budget and sub-budget families (`modules/task-budgets/**`,
+#3661 the task-budget and sub-budget families (`modules/task-budgets/**`,
 `modules/sub-budgets/**`, `routes/task-budgets.ts`, `routes/sub-budgets.ts`,
 `routes/agent-sub-budgets.ts`, and the SDK's `task-budget-guards.ts` and
-`sub-budget-guards.ts`); all were already covered here — budget-scope since
-#3648, the budget families since #3659, the SDK guards by
-`packages/sdk/src/**` — so the pin was satisfied on arrival each time. #3661
-also added three `modules/payments/` files, `direct-sign-context.ts`,
+`sub-budget-guards.ts`), and #4122 `packages/sdk/src/merchant-completion.ts`
+(the SDK's post-funding merchant-answer decision); all were already covered
+here — budget-scope since #3648, the budget families since #3659, the SDK
+files by `packages/sdk/src/**` — so the pin was satisfied on arrival each
+time. #3661 also added three `modules/payments/` files, `direct-sign-context.ts`,
 `submission-reconciler.ts` and `agent-payment-status.ts`, which were NOT
 covered: they joined `covers:` in the same PR, so edits to them now owe a
 shard (`agent-payment-status.ts` already did, through
@@ -1324,8 +1331,9 @@ not be added without widening that list first. The binding above is a **floor,
 not a ceiling** — it says adding a file *to the money-path list* without adding
 it here re-opens the hole; it never said this list may contain nothing else.
 Empirically it already contains a great deal else: `connect/**`, `mcp/**`,
-most of `sdk/**` (the money-path list names six `sdk/src/` files, the signing
-schemes and the signing-surface guard), `routes/passkeys.ts`,
+most of `sdk/**` (the money-path list names nine `sdk/src/` files: the signing
+schemes, the signing-surface guard, the budget guards and the post-funding
+merchant-answer decision), `routes/passkeys.ts`,
 `routes/catalog.ts`, `routes/accounting-feed.ts`, `routes/accounting.ts` and
 `config.ts` — none of them on that list. `signer/**`, `mcp-server/**` and
 `demo-merchant-mcp/**` were in the same position when #1826 was decided and

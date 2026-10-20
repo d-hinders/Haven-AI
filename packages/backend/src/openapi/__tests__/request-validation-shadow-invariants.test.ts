@@ -183,6 +183,10 @@ const COERCION_TARGETS: Record<string, string> = {
   'GET /receive/{accountAddress} query:chain_id': 'integer',
   'GET /transactions query:limit': 'integer',
   'GET /transactions query:offset': 'integer',
+  // #4095: the list route takes the network dimension server-side now —
+  // `chainId` reaches the handler as the coerced number and flows through
+  // `parseChainId`/`filterEnrichedTransactions`, same as the export's.
+  'GET /transactions query:chainId': 'integer',
   'GET /transactions/export.csv query:chainId': 'integer',
   'GET /transactions/{accountAddress} query:chain_id': 'integer',
   'GET /transactions/{accountAddress} query:limit': 'integer',

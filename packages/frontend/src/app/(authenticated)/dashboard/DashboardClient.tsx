@@ -15,8 +15,8 @@ import DashboardOnboardingGuide, { SetupCompleteLine } from '@/components/Dashbo
 import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
 import ConnectAgentModal from '@/components/ConnectAgentModal'
 import DashboardActionPickerModal from '@/components/DashboardActionPickerModal'
-import ReceiveFundsModal from '@/components/ReceiveFundsModal'
-import AddFundsModal from '@/components/AddFundsModal'
+import ReceiveDialog from '@/components/ReceiveDialog'
+import DelegationSendModal from '@/components/DelegationSendModal'
 import { Button } from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
 import MoneyPanel from './MoneyPanel'
@@ -157,19 +157,21 @@ export default function DashboardClient() {
   const defaultAccount = useMemo(() => resolveDefaultAccount(accounts), [accounts])
   const hasDelegationAccounts = accounts.length > 0
 
-  // Owner-initiated send from the DASHBOARD is gone (#1989, epic #1440). It was
-  // a legacy-Safe transaction signed through `SendModal`, and that rail is
-  // retired — the modal and its `useSendTransaction` hook are deleted. The
-  // delegation rail's owner-send lives on the account detail page
-  // (`DelegationSendModal`) and is untouched. #1079's "hidden, not disabled"
-  // mechanism is reused: no Send affordance renders anywhere on the dashboard
-  // and nothing dead-ends. The money panel (#3807) offers "Deposit address"
-  // and "Add funds" only.
+  // #4094: the dashboard's money verbs are Send / Receive. The owner-send is
+  // the DELEGATION rail's (`DelegationSendModal`), reached through the account
+  // picker when there is more than one account; the LEGACY Safe send stays
+  // retired (#1989, epic #1440) — it was a Safe transaction signed through
+  // `SendModal`, and that rail and its hook are deleted. The retired-rail
+  // guard from #1987 still holds in rewritten form: the delegation Send is
+  // present, and no approvals route renders. The old two-dialog funding pair
+  // ("Add funds" + "Deposit address") merged into one Receive dialog.
+  // #1079's "hidden, not disabled" mechanism applies to what is gone, not to
+  // what is here: nothing dead-ends.
 
   const [connectAgentOpen, setConnectAgentOpen] = useState(false)
-  const [pickerAction, setPickerAction] = useState<'receive' | 'add-funds' | null>(null)
+  const [pickerAction, setPickerAction] = useState<'receive' | 'send' | null>(null)
   const [receiveOpen, setReceiveOpen] = useState(false)
-  const [addFundsOpen, setAddFundsOpen] = useState(false)
+  const [sendOpen, setSendOpen] = useState(false)
   const [agentUsageOpen, setAgentUsageOpen] = useState(false)
   // Set true the first time the user opens Receive in this session. Combined
   // with !hasFunds it drives the hero's "Watching for incoming deposits…"
@@ -421,11 +423,11 @@ export default function DashboardClient() {
     setConnectAgentOpen(true)
   }
 
-  function openHeroAction(action: 'receive' | 'add-funds') {
-    if (accounts.length === 0) {
-      if (action === 'add-funds') setAddFundsOpen(true)
-      return
-    }
+  function openHeroAction(action: 'receive' | 'send') {
+    // No accounts: the money card renders "Create Haven account" instead of
+    // these buttons, so this is unreachable from the UI; do nothing rather
+    // than open a dialog about nothing.
+    if (accounts.length === 0) return
 
     if (accounts.length > 1) {
       setPickerAction(action)
@@ -437,13 +439,16 @@ export default function DashboardClient() {
       setHasOpenedReceive(true)
       setReceiveOpen(true)
     }
-    if (action === 'add-funds') setAddFundsOpen(true)
+    if (action === 'send') setSendOpen(true)
   }
 
   function handleActionAccountSelected(accountId: string) {
     setActionAccountId(accountId)
-    if (pickerAction === 'receive') setReceiveOpen(true)
-    if (pickerAction === 'add-funds') setAddFundsOpen(true)
+    if (pickerAction === 'receive') {
+      setHasOpenedReceive(true)
+      setReceiveOpen(true)
+    }
+    if (pickerAction === 'send') setSendOpen(true)
     setPickerAction(null)
   }
 
@@ -474,7 +479,8 @@ export default function DashboardClient() {
 
   function openAddFundsForAccount(accountId: string) {
     setActionAccountId(accountId)
-    setAddFundsOpen(true)
+    setHasOpenedReceive(true)
+    setReceiveOpen(true)
   }
 
   function handleDismissAttention(item: AttentionRuleItem) {
@@ -514,11 +520,12 @@ export default function DashboardClient() {
       watchingForDeposit={fundingStateKnown && !hasFunds && hasOpenedReceive}
       requiresOtherDevice={requiresOtherDevice}
       noPaymentsYet={firstAgentPaymentKnown && !hasFirstAgentPayment}
-      onDepositAddress={() => openHeroAction('receive')}
-      onAddFunds={() => openHeroAction('add-funds')}
-      // #3902: one primary "Add funds" — while the guide's step 1 is the
-      // active step, its button is the primary one and this one steps back.
-      addFundsSecondary={isFocusedView}
+      onReceive={() => openHeroAction('receive')}
+      onSend={() => openHeroAction('send')}
+      // #3902: one primary funding action — while the guide's step 1 is the
+      // active step, its "Add funds" is the primary one and the card's
+      // "Receive" steps back.
+      receiveSecondary={isFocusedView}
     />
   )
 
@@ -548,7 +555,7 @@ export default function DashboardClient() {
             pendingAgent={stepTwoAgent}
             hasFirstAgentPayment={hasFirstAgentPayment}
             funding={fundingForOnboarding}
-            onAddFunds={() => openHeroAction('add-funds')}
+            onAddFunds={() => openHeroAction('receive')}
             onAddAgent={openConnectAgent}
             onShowAgentUsage={() => setAgentUsageOpen(true)}
           />
@@ -630,22 +637,28 @@ export default function DashboardClient() {
       />
 
 
-      <ReceiveFundsModal
+      <ReceiveDialog
         open={receiveOpen}
         account={selectedActionAccount}
         onClose={() => setReceiveOpen(false)}
       />
 
-      <AddFundsModal
-        open={addFundsOpen}
-        onClose={() => setAddFundsOpen(false)}
-        accountAddress={selectedActionAccount?.account_address}
-        chainId={selectedActionAccount?.chain_id}
-        onReceive={() => {
-          setHasOpenedReceive(true)
-          setReceiveOpen(true)
-        }}
-      />
+      {/*
+        Mount the send modal only while open so its wallet hooks
+        (useDelegationSend backs wagmi wallet-client subscriptions) don't run
+        in the background on every dashboard view — the same pattern the
+        account detail page uses. Needs an account with a resolved chain: the
+        delegation send signs on a network.
+      */}
+      {sendOpen && selectedActionAccount?.account_address && selectedActionAccount.chain_id != null && (
+        <DelegationSendModal
+          open
+          onClose={() => setSendOpen(false)}
+          accountAddress={selectedActionAccount.account_address}
+          chainId={selectedActionAccount.chain_id}
+          onSent={refreshDashboardData}
+        />
+      )}
 
       <UsingYourAgentInfo
         open={agentUsageOpen}

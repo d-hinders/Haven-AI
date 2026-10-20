@@ -723,7 +723,7 @@ export default function AgentDetailClient({ agentId }: Props) {
             {/* #2203: was a hand-rolled `<a className="px-2.5 py-1 text-xs">` —
                 a ~24 CSS px control on the money-recovery path, and the ONLY CTA
                 inside an `ApprovalRequiredBanner` in the product app that was not
-                already a `Button` (the others: `ReceiveFundsModal.tsx` "Refresh
+                already a `Button` (the others: `ReceiveDialog.tsx` "Refresh
                 page"). Routed through the primitive so it inherits #1726's 44px
                 tap-target overlay rather than restating the rule. Brand fill
                 rather than the old solid `--v2-warning`, matching the recovery
@@ -747,7 +747,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                   fill it read as prose rather than as a control
                   (`haven-design-reviewer` on this change, off the 1280 and 390
                   captures). `ghost` is also the variant the ONE other `Button`
-                  inside an `ApprovalRequiredBanner` uses — `ReceiveFundsModal`'s
+                  inside an `ApprovalRequiredBanner` uses — `ReceiveDialog`'s
                   "Refresh page". It stays a `Button` rather than becoming an
                   inline link so it keeps #1726's 44px hit area: a second
                   control in this banner at 24px would be the defect #2203 was

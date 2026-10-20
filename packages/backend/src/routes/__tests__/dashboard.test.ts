@@ -4,6 +4,7 @@ import fastifyJwt from '@fastify/jwt'
 // #2392: the spec's own schema decides whether the overview matches what the
 // dashboard's generated wire types promise — see the #1090 block below.
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
+import type { DashboardActivityGroup } from '../../modules/transactions/activity.js'
 // The double below replaces only the FETCHING half of the accounts barrel;
 // the route also reads the pure freshness combiner from it (#3295), which
 // stays real so the marker math this file pins is the production math.
@@ -32,6 +33,9 @@ const { mockQuery, portfolioMocks, transactionMocks } = vi.hoisted(() => ({
     activityWindowStartIso: vi.fn(
       (nowMs: number) => new Date(nowMs - 7 * 24 * 60 * 60 * 1000).toISOString(),
     ),
+    // #4099: the route hands the feed an own-account name lookup built from
+    // its account list.
+    ownAccountNameResolver: vi.fn((_accounts: unknown[]) => (_address: string, _chainId: number): string | null => null),
     // #3944: the route reads the feed BUILDER — rows plus the two
     // empty-state facts — not the bare group list any more.
     buildActivityFeed: vi.fn(async () => ({
@@ -407,6 +411,14 @@ describe('dashboard routes', () => {
       .calls as unknown as Array<[{ transactions: { chainId: number }[] }]>
     const feed = feedCalls.at(-1)?.[0].transactions
     expect(feed?.map((item) => item.chainId).sort()).toEqual([100, 8453])
+    // #4099: the own-account lookup is built from the route's account list
+    // and is the one the feed receives.
+    const resolverCall = transactionMocks.ownAccountNameResolver.mock.calls.at(-1)?.[0] as
+      | Array<{ account_address: string }>
+      | undefined
+    expect(resolverCall?.map((a) => a.account_address)).toContain(SAFE.account_address)
+    const lastFeed = feedCalls.at(-1)?.[0] as unknown as { resolveOwnAccountName?: unknown }
+    expect(lastFeed.resolveOwnAccountName).toBe(transactionMocks.ownAccountNameResolver.mock.results.at(-1)?.value)
   })
 
   // #3944: the overview carries the two empty-state facts the Activity
@@ -433,7 +445,30 @@ describe('dashboard routes', () => {
       throw new Error(`Unexpected query: ${sql}`)
     })
     transactionMocks.buildActivityFeed.mockResolvedValue({
-      groups: [],
+      // #4117: one outbound group carrying the optional `fromAccountName`, so
+      // the shape gate below sees the field (the schema is
+      // additionalProperties: false — a field the spec lacks fails it).
+      groups: [
+        {
+          count: 1,
+          sumAtomic: '1000000',
+          tokenSymbol: 'USDC',
+          decimals: 6,
+          latestAt: '2026-10-14T07:12:00.000Z',
+          agentId: null,
+          agentName: null,
+          source: null,
+          x402ResourceUrl: null,
+          to: '0x2222222222222222222222222222222222222222',
+          merchantName: 'My account',
+          fromAccountName: 'Savings',
+          activityType: null,
+          direction: 'out',
+          status: 'confirmed',
+          approxAmount: '10.7600',
+          approxCurrency: 'SEK',
+        } satisfies DashboardActivityGroup as never,
+      ],
       hasOlderActivity: true,
       windowDays: 7,
       windowStartIso: '2026-10-08T07:12:00.000Z',
@@ -449,6 +484,7 @@ describe('dashboard routes', () => {
     const olderBody = older.json()
     expect(olderBody.hasOlderActivity).toBe(true)
     expect(olderBody.activityWindowDays).toBe(7)
+    expect(olderBody.activity[0].fromAccountName).toBe('Savings')
     // #3975: the rolling window's start instant rides the wire — the same
     // boundary the spend SQL received (pinned below) and the instant the
     // Activity card's partial-day heading reads. The route emits it from its

@@ -95,11 +95,10 @@ covers:
   - packages/frontend/src/components/ErrorBoundary.tsx
   - packages/frontend/src/components/NetworkPill.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
-  - packages/frontend/src/components/ReceiveFundsModal.tsx
+  - packages/frontend/src/components/ReceiveDialog.tsx
   - packages/frontend/src/components/agent-panel/McpServerName.tsx
   - packages/frontend/src/components/haven/Address.tsx
   - packages/frontend/src/app/(authenticated)/dashboard/DashboardClient.tsx
-  - packages/frontend/src/components/AddFundsModal.tsx
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
@@ -621,7 +620,18 @@ Marketing pages may still use larger hero type:
 
 ---
 
+<a id="patterns"></a>
+
 ## 3. Component patterns
+
+**The Patterns catalog (#4109).** This section and the compositions shown on
+`/design-system` are the documented Patterns that `CLAUDE.md`, `AGENTS.md`, the
+frontend playbook and the design reviewer point to. List controls join it with
+#4110. A composition with no shipped instance and no entry here is a **new
+pattern**: extend the design system first, in its own owner-approved slice,
+before a page uses it. Extracting a shape the product already ships, on the
+diff that writes its second copy, is not a new pattern; that extraction stays
+in the same PR (Pattern Absorption, #901).
 
 ### Authenticated shell
 
@@ -938,10 +948,10 @@ one merchant and describing budget stops neutrally), then ONE money card
 surface — with the balance on the left (the figure, the "since yesterday"
 line, the § AreaChart sparkline fed from `spend.balance_by_day` — a missing
 day is skipped, never zero; under 3 measured days the flat placeholder
-draws — and the two actions, "Add funds" primary and "Deposit address"
-secondary; "Add funds" steps down to ghost through `addFundsSecondary` while
-the first-run guide's step 1 is the active step, so exactly one primary
-"Add funds" shows, #3902) and the 30-day spending on the right as a
+draws — and the two actions, "Receive" primary and "Send" secondary (#4094 — the
+money verbs everywhere, per the owner decision; "Receive" steps down to ghost
+through `receiveSecondary` while the first-run guide's step 1 is the active
+step, so exactly one primary money action shows, #3902) and the 30-day spending on the right as a
 `Card.Section divided`, stacked below `lg`. The spending half (#3902) is a
 muted "Agent spending, last 30 days" label — still the section's heading —
 with the 30-day total large and left-aligned beneath it, the per-agent split
@@ -1022,10 +1032,11 @@ rather than repeated per entry:
   differently again.
 - **`trailingIcon`** renders a 14px lucide `ArrowRight` after the label, at the base
   `gap-1.5`. It is available on **every** variant and on **both** elements. In
-  `AddFundsModal.tsx`, the only `onClick` call sites are the modal's two,
-  `:144` (Buy with card) and `:187` (Show receive address); every other call
-  site, including the faucet link added by #3478 (`:258`, Open Circle's
-  faucet), is the `href`/`<a>` form. **It does not animate.**
+  `ReceiveDialog.tsx` (since #4094) the `onClick` call sites are the dialog's own
+  controls — Copy address, the QR toggle, Buy with card, and the refusal state's
+  Refresh page; the link-style affordances, including the faucet card's Open
+  Circle's faucet and the explorer link, are the `href`/`<a>` form. **It does
+  not animate.**
   (Through #1829 this section claimed the icon "slides 2px on hover via wrapper
   `group-hover:gap-2`". It never did: `Button` sets no `group` class and no call site wraps
   one. `group-hover:gap-2` is real, but it belongs to three hand-rolled marketing link
@@ -1482,7 +1493,9 @@ RAW `balance` is zero — not its fiat value — renders nowhere, while the fres
 keeps reading the FULL breakdown, #3295), and replaced the chain-name pill with a "Test
 network" chip beside the name on testnets only (via the shared `isTestnetChain`; mainnet
 renders no network marker). One action DID return to the card under #4021, on the
-empty-balance state only: an **Add funds** link that opens `AddFundsModal` — the exact
+empty-balance state only: an **Add funds** link — the task wording stays (owner
+decision on #4094: wording that names a task, not a button, keeps its words) —
+that opens the Receive dialog, the exact
 sibling-above-the-overlay shape this section has always demanded: `relative z-[content]`,
 its own `min-h-[44px]` vertical hit area, no propagation guards, and a LINK rather than a
 button so the card still holds no buttons. A second holding area — the "Create another
@@ -1626,6 +1639,41 @@ its label node, so a picker row reads exactly like the chip the agent will
 carry. A label is the user's own ad-hoc word ("prod", "finance") — it never
 borrows status language, and it never encodes authority. Recorded on `/design-system` → *Agent label chips*.
 
+### The Receive dialog (`ReceiveDialog.tsx`, #4094)
+
+One dialog serves every funding entry point — the dashboard money card's
+**Receive**, the first-run guide's Add funds step, the low-balance attention
+item, the accounts overview's Add funds link, and account detail's Receive
+button (the old `AddFundsModal` and `ReceiveFundsModal` are deleted). The
+caller picks the account: the dashboard's account picker when there is more
+than one account, the page's own account everywhere else. In
+order, top to bottom:
+
+1. The account card — name, "Default" chip on the default account, the
+   resolved chain's name, and an "On-chain receive" chip.
+2. The address card — the full address (the shared `Address` primitive,
+   untruncated), **Copy address**, a **Show QR code** toggle, and a
+   **View on explorer** link. The QR box is fixed-white in both themes
+   (`.v2-light-surface`, #2929): a scanner reads module contrast, never a
+   themed background.
+3. The "Before you send" list, whose first line is the ONE network rule —
+   *Send USDC on `<network>` only.* One token, one network (#4094); ETH is
+   never listed — agents spend USDC, and the old receive screen's
+   registry-token list invited the wrong deposit.
+4. "Other ways to add money", each card gated on the SELECTED account's
+   chain (#3478), never the deployment default: **Get test USDC** (Circle's
+   faucet) on a test network, **Buy with card** (Coinbase Onramp) on Base —
+   the onramp only when the build carried
+   `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID`, and never on a testnet.
+
+**An unresolved chain gets no network instruction and no default (#1844):**
+the rule, the address card, the QR, the explorer link and both "other ways"
+cards all stay gone, and an `ApprovalRequiredBanner` warning ("Network not
+confirmed") with a **Refresh page** action renders instead — funds sent on
+the wrong network are usually unrecoverable, so the dialog refuses to guess.
+A resolved chain with no address yet gets the same honest retry without the
+network warning. Showcased on `/design-system` → *Receive dialog*.
+
 ### Modal (`ui/Modal`)
 
 Every dialog in the app is this one shell — eleven direct importers, three of
@@ -1646,7 +1694,8 @@ Two consequences, both of which have already cost real time:
 
 - **A test that reads scroll geometry off `getByRole('dialog')` cannot fail** —
   it is measuring the wrapper. Use `[data-modal-body]`. Note that
-  `ReceiveFundsModal` is a bespoke dialog, *not* built on this primitive, and it
+  `ReceiveDialog` (the merged receive dialog since #4094) is a bespoke dialog,
+  *not* built on this primitive, and it
   puts `role="dialog"` on its scrolling panel — so the two are not
   interchangeable and a helper written against one is wrong for the other.
 - **The `footer` prop renders OUTSIDE the scroll box**, as a flex sibling. It is
@@ -1997,12 +2046,154 @@ A standalone trigger takes the same `focus-visible` ring as every other focusabl
 
 **Width.** The bubble wraps inside `max-w-[min(20rem,calc(100vw-1rem))]` and is clamped back inside the viewport with an 8px gutter after layout. It was `whitespace-nowrap` with no cap until #2038: a 169-character label rendered 988px wide on a 320px screen. No pixel gate could see it, because a tooltip that is not open is in no screenshot.
 
+### List controls — `ListToolbar`, `FacetMenu`, `PeriodPicker` ([#4110](https://github.com/d-hinders/Haven-AI/issues/4110))
+
+One pattern for search, filters, sort, period, count and no-match on every
+list in the app (epic [#4108](https://github.com/d-hinders/Haven-AI/issues/4108)).
+A page declares **what** it filters; the toolbar owns **how** it looks and
+behaves. A page that needs a control or a string the pattern lacks extends the
+pattern here first; it never hand-builds one. The internal ops console
+(`packages/ops`) is exempt, and `FilterPill` stays in `packages/ui` for it.
+
+All of it lives in `packages/frontend/src/components/ui/`:
+
+| Module | What it is |
+|---|---|
+| `ListToolbar.tsx` | The toolbar, the phone sheet, and `ListNoMatch` |
+| `FacetMenu.tsx` | One facet as a chip menu or as pills; `RadioMark` / `CheckboxMark` |
+| `PeriodPicker.tsx` | The one Period control, for the toolbar and the Analytics header |
+| `list-url-codec.ts` | Pure parse/serialize of `ListState` to and from the URL |
+| `useListUrlState.ts` | The hook a page owns: state mirrored to the URL |
+| `list-controls-copy.ts` | Every string the pattern shows |
+| `list-menu.ts` | The shared menu-button keyboard contract and viewport clamp |
+
+`/design-system` → **List controls** shows every state: default, filtered, no
+match, loading, phone, server-filtered, and the two primitives on their own.
+
+#### Anatomy
+
+One card (`rounded-[10px]`, `p-4`, `shadow-card`) directly above the list,
+never repeated inside a parent card.
+
+1. **Search**, then the **actions slot**: actions on the *filtered list*, such
+   as Export CSV. Page actions (Connect agent, Add contact) stay in the page
+   header.
+2. **Facets**, then **Sort** and **Period** on the right. A pill facet gets its
+   own row.
+3. **Status row**: one removable chip per active filter, **Clear filters**, and
+   the count on the right. Sort is a view choice, not a filter: it gets no chip
+   and Clear filters keeps it.
+
+**Active means "differs from the page's default".** One rule decides the
+trigger's tint, the chip, the count on **Filters (n)** (the active filters the
+sheet holds), and whether the count
+reads "{shown} of {total}". A page whose default is not All (Marketplace's
+network, Analytics' 30 days) opens untinted and unfiltered. Removing a chip
+returns that filter to the default; **Clear filters** returns the whole list to
+its default view. Choosing All on a facet whose default is something else is a
+filter in its own right ("Network: All").
+
+Below `sm` (640 px) the facet row collapses into a **Filters (n)** button that
+opens a bottom sheet: every facet, Sort and Period as native radio and checkbox
+rows, 44 px tall. **Filters in the sheet apply live, as on desktop.** The footer
+button only closes the sheet and names the applied result ("Show 12
+transactions"). There is no preview count of unapplied choices, so a
+server-filtered list makes no extra request per tap. `layout="phone"` forces
+this layout in a narrow container on a wide screen.
+
+#### Facets
+
+- **Single-select** is the default: `menuitemradio` rows, "All" first. Choosing
+  one applies it and closes the menu.
+- **Multi-select** where a facet needs it: `menuitemcheckbox` rows with counts.
+  The menu stays open while you tick; the trigger reads "Status: Active,
+  Paused", or "Status: 3 selected" past two.
+- **Pills** only for a short category list (Marketplace): a group of
+  `aria-pressed` toggle buttons drawn with `FilterPill`. Pills are not menu
+  items.
+- A facet with **one possible value is hidden**. If it carries a value anyway
+  (from a URL), its chip still shows, because the chip is the only way out.
+- A **Sort chip** appears only on lists without sortable column headers. Tables
+  that sort by header (`TransactionsTable`) keep header sort.
+
+#### Period
+
+`PeriodPicker` offers rolling presets, Last 7 / 30 / 90 days, as
+`[now − N×24h, now)`: the rule the backend applies in
+`modules/transactions/period.ts`. Values stay `7d` / `30d` / `90d`. Props choose
+which presets show, whether **All time** shows (it is the absent filter, not a
+fourth value), and whether a **Custom range** is allowed. Analytics uses
+presets only, with no All time.
+
+#### Behaviour
+
+- **Where filtering runs.** Each page declares `filtering`. The browser is
+  allowed only for small, unpaged lists with no export (Agents, Marketplace,
+  Contacts). A list that pages or exports filters on the server, so its count,
+  rows and CSV are the same set.
+- **Search.** On a server-filtered list a request, and the URL write, follow a
+  300 ms pause in typing. A browser-filtered list re-renders on every keystroke,
+  and only its URL write waits. Enter searches at once; Escape in the field
+  clears it.
+- **Keyboard and ARIA.** Each trigger is a menu button (`aria-haspopup="menu"`,
+  `aria-expanded`, `aria-controls` while open). Enter, Space or Arrow Down open
+  it on the checked row; Arrow Up opens it on the last. Arrows move with wrap,
+  Home and End jump, Escape closes with focus back on the trigger, and Tab
+  leaves the menu. The system focus ring applies (`focus-visible.visual.spec.ts`
+  covers the triggers). Menu roles supersede the Agents list's toggle-button
+  facets: its listbox objection was that `role="option"` forbids an interactive
+  control inside an option, and a menu item *is* the control.
+- **Menus never extend past the viewport.** An opened panel is measured and
+  shifted back inside an 8 px margin, and its width is capped to the viewport
+  (`e2e/list-controls.spec.ts` proves it at 375 px).
+- **Tap targets.** Triggers, menu rows and sheet rows are 44 px below `sm`.
+
+#### URL state
+
+`useListUrlState(schema, { filtering })` mirrors `ListState` to the URL with
+`replaceState`, so there is no history entry per change, and back/forward
+re-seeds it. The codec's rules:
+
+- keys: `q`, one key per facet id, `sort`, `period` (`7d`/`30d`/`90d`), and
+  `from` / `to` for a custom range. The network facet is `chainId` on every
+  page;
+- **no key means the page's default** (not always All: Marketplace defaults to
+  the user's chain); an explicit `all` means All;
+- multi-select values are comma-joined, the `lib/agent-list-filters.ts`
+  encoding, so existing links keep parsing;
+- params it does not own (Agents' `setup`, a page's tab key) are never
+  touched;
+- a legacy key is read as an alias and never written (Transactions' `search`
+  reads as `q`).
+
+The codec is **separate from any API param builder**. A page maps `ListState`
+to its request itself, so renaming a URL key never changes what reaches the
+backend.
+
+#### Copy
+
+| Slot | Copy |
+|---|---|
+| Search placeholder | "Search {things}". What it matches goes in `searchDescription`, read to screen readers, not in the placeholder |
+| Facet trigger | "{Label}: {value}", "All" when unset |
+| Count | "{n} {things}" unfiltered; "{shown} of {total} {things}" filtered; "Showing the first {n} {things}" when the server capped the read |
+| No match | "No {things} match these filters" / "Try a different search, or clear filters to see everything." + Clear filters |
+| Period | "Last 7 days", "Last 30 days", "Last 90 days", "All time", "Custom range" |
+| Clear | "Clear filters" |
+| Search chip | the term in curly quotes, “savings” |
+| Phone | "Filters" with a count badge; its accessible name is "Filters (n)". Footer "Show {n} {things}" |
+
+On a server-paged list both count numbers come from the server: a count never
+mixes loaded rows with a server total. The count is a polite live region.
+`ListNoMatch` sits where the rows were and never replaces the toolbar. A list
+with *nothing yet* keeps its own empty state ("No contacts yet").
+
 ### Transaction tables
 
 Use `components/transactions/TransactionsTable.tsx` for full transaction history routes. It is a semantic sortable table:
 
 - Desktop columns: direction icon, Activity, Initiator, From/To, Date, Amount, external link.
-- **Initiator semantics (#2097):** the Initiator column reads the transaction record's explicit `initiatedBy` — the agent identity for agent-initiated rows, `You` only for `initiatedBy === 'human'` (no dashboard-send path sets it today), and an explicit unknown (`Unknown`) for un-attributed outbound rows; it never defaults to `You`. The detail panel's Initiator row shares the same helper (`transactionInitiator`).
+- **Initiator semantics (#2097):** the Initiator column reads the transaction record's explicit `initiatedBy` — the agent identity for agent-initiated rows, `You` only for `initiatedBy === 'human'` (set for an owner send recorded at submit since #4099; earlier owner sends stay `Unknown`), and an explicit unknown (`Unknown`) for un-attributed outbound rows; it never defaults to `You`. The detail panel's Initiator row shares the same helper (`transactionInitiator`).
 - Sticky header on desktop.
 - **A row click is convenience only; the title button is the accessible path
   (#3554).** On a selectable table the `<tr>` keeps its native `row` role and an
@@ -2068,10 +2259,12 @@ card-nested history.
 `counterpartyLabel` in `lib/transaction-presentation.tsx` with the opt-in
 `noAddress` mode, so a raw address never titles a row there: the merchant's
 site for x402, the receipt/contact name the backend resolved, "Deposit" for
-inbound, "New recipient" when nothing resolves, "Agent payment" when an x402
+inbound — or "From <account>" for money that came from another of the user's
+own accounts (#4099) — "New recipient" when nothing resolves, "Agent payment" when an x402
 row carries no resource URL, and "Returned from <agent>" for sweeps. The
-subtitle is the agent's name; "From My account" appears only when the user
-has more than one account. A confirmed row carries no status badge — its
+subtitle is the agent's name; on a send it adds "From <account>", the account
+the money left (#4117), only when the user has more than one account and a
+name came back. A confirmed row carries no status badge — its
 direction is already the amount's sign and tone; only "Pending" and "Failed"
 name a state (#3897). The shared screens (`TransactionsTable`,
 `TransactionDetailPanel`) pass no mode and keep the truncated address until

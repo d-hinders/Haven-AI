@@ -6042,10 +6042,10 @@ export const SCENARIOS = {
       await shoot(comingSoonDialog, 'coming-soon-modal')
     },
   },
-  'add-funds': {
-    description: 'Add funds modal with a RESOLVED chain — the normal path (#1844)',
+  'receive-dialog': {
+    description: 'Receive dialog with a RESOLVED chain — the normal path (#4094, gate #1844)',
     // Route capture cannot see this: it is a dialog behind the dashboard hero's
-    // "Add funds" button. The chain data is the shared fixture's, untouched —
+    // "Receive" button. The chain data is the shared fixture's, untouched —
     // its safe carries chain_id 84532, which is the whole point of the
     // "resolved" capture.
     //
@@ -6053,13 +6053,13 @@ export const SCENARIOS = {
     // than about this issue: the shared fixture's safe is a `delegator_hybrid`
     // whose hydrated signer set holds a passkey that is not on this device, so
     // the hero renders `PasskeyOtherDeviceNotice` INSTEAD of the action buttons
-    // and "Add funds" is unclickable. Measured, not assumed — the first run of
+    // and "Receive" is unclickable. Measured, not assumed — the first run of
     // this scenario timed out waiting for the button while the unresolved
     // counterpart found it, because a missing chain_id happens to route the
     // gate down a different branch. Putting the account on the Safe rail
     // (`account_type: 'legacy_safe'`) leaves it with no stored passkey, i.e.
     // `no_signer`, which is a hero that offers its actions. Nothing about the
-    // modal under capture changes.
+    // dialog under capture changes.
     //
     // #2202: this used to DROP `account_type` rather than set it. `railOf`
     // read the two identically at the time (it is deleted since #2413, and
@@ -6076,22 +6076,27 @@ export const SCENARIOS = {
       await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
 
-      await page.getByRole('button', { name: 'Add funds', exact: true }).first().click()
+      await page.getByRole('button', { name: 'Receive', exact: true }).first().click()
       const dialog = page.getByRole('dialog')
-      // Confirmed by the RESOLVED sentence, not by a bare timeout. A run that
+      // Confirmed by the RESOLVED rule, not by a bare timeout. A run that
       // somehow lands on the unknown-network state fails here rather than
       // shooting it under the resolved filename — which is the whole point of
       // having two scenarios.
       await dialog
-        .getByText('Send USDC to your account address on Base Sepolia.')
+        .getByText('Send USDC on Base Sepolia only.')
         .waitFor({ timeout: 20_000 })
+      // The QR is half of what this screen refuses in the other state, so the
+      // resolved capture has to actually show one for the pair to be evidence
+      // about the QR at all.
+      await dialog.getByRole('button', { name: 'Show QR code' }).click()
+      await dialog.getByAltText(/^QR code for /).waitFor({ timeout: 20_000 })
       await shoot(dialog, 'resolved')
     },
   },
-  'add-funds-unresolved-chain': {
+  'receive-dialog-unresolved-chain': {
     description:
-      'Add funds modal with an UNRESOLVED chain — names no network, offers no onramp (#1844)',
-    // A separate scenario rather than a second state of `add-funds`: the two
+      'Receive dialog with an UNRESOLVED chain — names no network, shows no address or QR (#4094, gate #1844)',
+    // A separate scenario rather than a second state of `receive-dialog`: the two
     // need opposite pins on the SAME endpoints for their whole run, and one run
     // cannot hold both (same reason `connect-agent-approved` is split out).
     //
@@ -6105,7 +6110,7 @@ export const SCENARIOS = {
     // capture is therefore evidence of the real fallback path, not of a
     // hand-edited render.
     //
-    // It carries the same rail override as `add-funds` for the same
+    // It carries the same rail override as `receive-dialog` for the same
     // reachability reason, so the two captures differ by EXACTLY one field —
     // `chain_id` — and the pair is therefore evidence about the chain and
     // nothing else.
@@ -6127,80 +6132,10 @@ export const SCENARIOS = {
       await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
 
-      await page.getByRole('button', { name: 'Add funds', exact: true }).first().click()
+      await page.getByRole('button', { name: 'Receive', exact: true }).first().click()
       const dialog = page.getByRole('dialog')
       await dialog
         .getByText(/We can't confirm which network this account uses/)
-        .waitFor({ timeout: 20_000 })
-      await shoot(dialog, 'unresolved')
-    },
-  },
-  'receive-funds': {
-    description: 'Receive funds modal with a RESOLVED chain — the normal path (#1852)',
-    // The resolved half of the #1852 pair. Same construction as `add-funds`
-    // above and for the same reasons: the chain data is the shared fixture's
-    // (84532), and the ONE override is the rail marker (`account_type: 'legacy_safe'`,
-    // #2202 — see `add-funds` for why it is SET rather than dropped) so the
-    // hero renders its action buttons instead of `PasskeyOtherDeviceNotice`.
-    api(apiPath) {
-      if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
-      return undefined
-    },
-    async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
-      await dismissMobileSidebar(page, vp)
-
-      // The hero's deposit action is named "Deposit address" everywhere since
-      // #3807 (the funded/unfunded distinction moved to the meta-line under
-      // the sparkline, not the button label).
-      await page.getByRole('button', { name: /^Deposit address$/ }).first().click()
-      const dialog = page.getByRole('dialog')
-      // Confirmed by the RESOLVED sentence rather than by a bare timeout, so a
-      // run that lands on the refusal fails here instead of being shot under
-      // the resolved filename.
-      await dialog
-        .getByText('Send supported tokens to this Haven wallet on Base Sepolia.')
-        .waitFor({ timeout: 20_000 })
-      // The QR is half of what this screen refuses in the other state, so the
-      // resolved capture has to actually show one for the pair to be evidence
-      // about the QR at all.
-      await dialog.getByRole('button', { name: 'Show QR code' }).click()
-      await dialog.getByAltText(/^QR code for /).waitFor({ timeout: 20_000 })
-      await shoot(dialog, 'resolved')
-    },
-  },
-  'receive-funds-unresolved-chain': {
-    description:
-      'Receive funds modal with an UNRESOLVED chain — names no network, shows no address or QR (#1852)',
-    // Separate scenario rather than a second state of `receive-funds`, for the
-    // same reason as the add-funds pair: the two need opposite pins on the SAME
-    // endpoints for their whole run.
-    //
-    // The state is not reachable through the UI today (`chain_id` is
-    // non-nullable in `SmartAccount`, and the hero only offers Receive when an
-    // account exists). What IS reachable is the wire condition: a safe that
-    // arrives WITHOUT `chain_id`. That is what this serves — at the API
-    // boundary, with no component code mutated — so the capture evidences the
-    // real refusal path rather than a hand-edited render.
-    //
-    // Same rail override as its twin, so the two differ by EXACTLY one field.
-    api(apiPath) {
-      // #2202: the rail is NAMED here too, exactly as its resolved twin names
-      // it — the pair is only evidence about `chain_id` if `chain_id` is the
-      // one thing that differs, and `screenshot-fixture.test.ts` pins that.
-      const safeWithoutChain = { ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }
-      delete safeWithoutChain.chain_id
-      if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [safeWithoutChain] }
-      return undefined
-    },
-    async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
-      await dismissMobileSidebar(page, vp)
-
-      await page.getByRole('button', { name: /^Deposit address$/ }).first().click()
-      const dialog = page.getByRole('dialog')
-      await dialog
-        .getByText(/can't confirm which network this account uses/)
         .waitFor({ timeout: 20_000 })
       await shoot(dialog, 'unresolved')
     },
@@ -6227,7 +6162,7 @@ export const SCENARIOS = {
     //    untouched, so steps 1 and 2 are genuinely complete and step 3 is
     //    genuinely the active one.
     // 2. `account_type: 'legacy_safe'` on the account. Same override, same reason, as
-    //    the `add-funds` scenario above: the shared fixture's
+    //    the `receive-dialog` scenario above: the shared fixture's
     //    `delegator_hybrid` hydrates a signer set whose passkey is not on this
     //    device, so `requiresOtherDevice` is true — and that flag gates
     //    `showOnboardingGuide` itself (`DashboardClient.tsx:853-857`), so the
@@ -6749,6 +6684,60 @@ export const SCENARIOS = {
       await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
       await page.getByText('No items to review right now.').waitFor({ timeout: 30_000 })
+      await shoot(page.locator('main').first(), 'page')
+    },
+  },
+  'dashboard-own-account-transfer': {
+    description:
+      '#4099: a transfer between two of the user\'s own accounts on the dashboard\'s Activity card — the send reads "Savings" (the receiving account), the money arriving reads "From Savings" (the sending account, not "Deposit"; owner decision 2026-10-20), and an outside deposit on the same day still reads "Deposit". #4117: every send\'s subtitle names the account the money left ("From Operating wallet"), never a fixed "From My account". The shared fixture has one account and no inbound row, so none of this is reachable from a route capture.',
+    api(apiPath) {
+      const savings = {
+        ...FIXTURE_ACCOUNT,
+        id: 'safe-savings',
+        name: 'Savings',
+        account_address: '0x2222222222222222222222222222222222222222',
+        is_default: false,
+      }
+      if (apiPath === '/auth/me') {
+        return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT }, savings] }
+      }
+      if (apiPath === '/dashboard/overview') {
+        const [base] = FIXTURE_OVERVIEW.activity
+        const at = (secondsBefore) => new Date(Date.parse(base.latestAt) - secondsBefore * 1000).toISOString()
+        // Single, exact payments: the fixture group's floored count would read "×3+" on rows that are one transfer each.
+        const plainTransfer = { ...base, count: 1, countIsFloor: undefined, agentId: null, agentName: null, source: null, x402ResourceUrl: null }
+        return {
+          ...FIXTURE_OVERVIEW,
+          activity: [
+            // The money arriving in Operating wallet from Savings: named by the sender.
+            { ...plainTransfer, direction: 'in', to: FIXTURE_ACCOUNT.account_address, merchantName: 'Savings', sumAtomic: '50000000', approxAmount: '538.0000', latestAt: at(60) },
+            // Operating wallet's own send to Savings: named by the receiver.
+            { ...plainTransfer, direction: 'out', to: savings.account_address, merchantName: 'Savings', fromAccountName: FIXTURE_ACCOUNT.name, sumAtomic: '20000000', approxAmount: '215.2000', latestAt: at(120) },
+            // An outside deposit the same day: still the generic word.
+            { ...plainTransfer, direction: 'in', to: FIXTURE_ACCOUNT.account_address, merchantName: null, sumAtomic: '10000000', approxAmount: '107.6000', latestAt: at(180) },
+            // The agent's x402 payment, sent from the same account (#4117).
+            { ...base, fromAccountName: FIXTURE_ACCOUNT.name },
+          ],
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.addInitScript((userId) => {
+        window.localStorage.setItem(`haven-onboarding-complete-dismissed:${userId}`, '1')
+      }, FIXTURE_USER.id)
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      // Positive controls: the money arriving reads "From Savings", the send "Savings".
+      await page.getByText('From Savings', { exact: true }).first().waitFor({ timeout: 30_000 })
+      await page.getByText('Savings', { exact: true }).first().waitFor({ timeout: 10_000 })
+      // #4117: the send's subtitle names the account the money left.
+      await page.getByText(`From ${FIXTURE_ACCOUNT.name}`, { exact: true }).first().waitFor({ timeout: 10_000 })
+      if (await page.getByText('From My account', { exact: false }).count()) {
+        throw new Error('#4117: a fixed "From My account" subtitle rendered')
+      }
+      // Negative control: the outside deposit keeps "Deposit".
+      await page.getByText('Deposit', { exact: true }).first().waitFor({ timeout: 10_000 })
       await shoot(page.locator('main').first(), 'page')
     },
   },

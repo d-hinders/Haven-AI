@@ -9,7 +9,7 @@ covers:
   - scripts/ci/vocabulary-map.json
   - scripts/ci/vocabulary-divergence.mjs
   - packages/sdk/src/payment-mappers.ts
-last-verified: "2026-09-30"
+last-verified: "2026-10-19"
 ---
 
 # CLI `--json` conventions
@@ -28,7 +28,7 @@ decision instead of the inconsistency.
 | **`wallets balances`** | camelCase — the one command that re-maps |
 | a **prepared-action** result (grant, revoke) | CLI-chosen snake keys spread over the backend's object |
 | **`activity export`** | the body inside an `{ "ok": true, … }` wrapper under `--json` — snake_case headers for csv, a verifikat file for sie |
-| **any failure** | `{ "ok": false, "error": { "code", "message", "hint"? } }` — a command may add its own typed fields beside these (`feedback submit`'s secret-check refusal adds `layer`/`reason`, #3597) |
+| **any failure** | `{ "ok": false, "error": { "code", "message", "hint"? } }` — a command may add its own typed fields beside these (`feedback submit`'s secret-check refusal adds `layer`/`reason`, #3597; see Failures for the others) |
 | the **on-disk credential file** | `account_address`, possibly still `safe_address` on an old install |
 
 ## Why the split stays
@@ -65,7 +65,11 @@ be audited rather than re-litigated.
 **non-exhaustive subset the CLI happens to read**. The emitted JSON carries
 every key the backend sends, including several that appear in no interface —
 `paymentProofStatus`, `x402MerchantAddress`, `amountSek`, `settlementScheme`,
-`initiatedBy` among them.
+`initiatedBy` among them. Five more reached the `Transaction` schema since the
+last full read, none of them in `interface Txn`: `fundingTxHash` and
+`settlementTxHash` on x402 rows (#3763), `deliveryReference` (#3778), and
+`approxAmount` / `approxCurrency`, the amount at today's rate for a row with no
+book-time fiat (#3824).
 
 So: to know what `activity list --json` can contain, read the `Transaction`
 schema, not `interface Txn`. Scripting against the interface will miss fields
@@ -111,6 +115,12 @@ Result commands emit `{ "ok": true, … }` with snake_case identifiers:
 { "ok": true, "signed_out": true }
 ```
 
+`agents revoke --keep-budget` (#3729) adds `live_delegations` — an array of
+`{ delegation_hash, status }` — to the revoke envelope when on-chain budgets
+are still live. `feedback submit` (#3597) builds only the bare `ok` and spreads
+the backend's `POST /feedback` response over it, so its JSON also carries that
+response's snake `id`, `created_at` and `expires_at`.
+
 **The auth envelopes mix conventions inside one object** — `expires_at` beside
 `apiBaseUrl`:
 
@@ -121,6 +131,17 @@ Result commands emit `{ "ok": true, … }` with snake_case identifiers:
 Three code paths emit that literal, all of them under `haven login` — the bare
 form, the device flow it falls back to without `--email`, and `--poll`. If you
 are destructuring it, you need both conventions.
+
+While the device flow is still waiting, two of those paths emit a pure-snake
+pending object with **no `ok` key**, and exit 3: the device flow once its 30 s
+`--json` wait runs out, and `--poll` on a code not yet approved.
+
+```json
+{ "status": "pending", "device_code": "…", "retry_after": <seconds> }
+```
+
+`retry_after` is the server's poll interval on the device-flow path; `--poll`
+sends a fixed 5, or 10 after a `slow_down`.
 
 `haven login --no-wait` returns a **different** envelope, pure snake:
 
@@ -229,7 +250,7 @@ entry there that *is* enforced, and the section says so.)
 Three things make that claim hold rather than merely sound right:
 
 - The census keys on the **literal**, not on a `{ "ok": true` prefix. Seven of
-  the seventeen emitters carry no `ok` key at all — `wallets balances`,
+  the eighteen emitters carry no `ok` key at all — `wallets balances`,
   `whoami`, both prepared-action emits, `agents connect --run` and the two
   `activity export` branches — so a prefix-keyed census could not see them, and
   it could not see a literal wrapped across lines either, which is how the
@@ -265,7 +286,11 @@ Every command that fails returns the same shape, whatever it was doing:
 branching on `ok` before anything else. A command MAY add its own typed
 fields beside `code`/`message`/`hint` when a free-text hint is not enough to
 branch on — `feedback submit`'s secret-check refusal adds `layer` (which of
-the four checks refused) and `reason` (#3597); `output.ts`'s `failure()`
+the four checks refused) and `reason` (#3597); `agents revoke`'s refusal while
+a budget is still live adds `live_delegations` (#3729); and `budget grant` into
+a token/recipient slot a live budget already holds adds `error_code:
+"BUDGET_SLOT_OCCUPIED"` and `existing_delegation_hash` (#3933). The three
+refusals exit 4. `output.ts`'s `failure()`
 spreads them BEFORE the shared fields, so a command's own fields can never
 shadow `code`, `message` or `hint`.
 
@@ -293,3 +318,17 @@ that the shared fields always win (`output.ts`'s `failure()` spreads a
 command's `extra` BEFORE `code`/`message`/`hint`, not after). No other
 envelope in this document changed. `last-verified` is not bumped: this is a
 scoped addition, not a re-read of the whole document.
+
+Re-verified 2026-10-19 (weekly docs audit #3645, at dev `cf88627c`).
+`npm run lint:vocabulary` is green with 31 receipt fields, 40 transaction
+fields, 11 declared concepts, 0 open and 18 CLI envelope emitters. Changed:
+the census counts eighteen emitters (`cmdFeedbackSubmit`, #3597); the revoke
+envelope's `live_delegations` (#3729) and `feedback submit`'s envelope are
+documented; the device flow's ok-less pending object (exit 3) is documented;
+the five `Transaction` fields added since (#3763, #3778, #3824) are named;
+and the failure section lists the two further typed refusals (#3729, #3933).
+Run here: `haven guide --json` (the `{ ok, format, content }` envelope) and
+`whoami --json` / `activity list --json` signed out (the failure shape, exit
+3). Re-read in code and unchanged: the `wallets balances` re-map, the auth
+literals, the grant/revoke key sets, the CSV header row, and the doctor's
+`safe_address` fallback.

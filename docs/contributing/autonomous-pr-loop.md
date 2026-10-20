@@ -12,7 +12,7 @@ covers:
   - .agents/skills/new-task/SKILL.md
   - .claude/commands/ship-next.md
   - .claude/commands/new-task.md
-last-verified: "2026-10-10"
+last-verified: "2026-10-20"
 ---
 
 # Autonomous PR loop
@@ -34,7 +34,7 @@ and only comes back to you for a real decision, a blocking review finding, a
 live work overlap, or stuck CI.
 
 Pieces:
-- **`new-task`** ([canonical skill](../../.agents/skills/new-task/SKILL.md)) — **capture**: turns a one-line description into a well-formed backlog issue (Scope + Acceptance + Surface + Money-path), backlog-only by default, and the default route for **every** issue an agent files — never a bare `gh issue create`. Code claims in a filed body are measured commands at a named commit, and **every** filed issue — single task or epic — gets one independent spec-review pass plus a verdict comment before it is queued, shipped or announced — the skill's [§ *Issue review*](../../.agents/skills/new-task/SKILL.md#issue-review).
+- **`new-task`** ([canonical skill](../../.agents/skills/new-task/SKILL.md)) — **capture**: turns a one-line description into a well-formed backlog issue (Scope + Acceptance + Surface + Money-path, plus a Design system brief for `area:frontend`), backlog-only by default, and the default route for **every** issue an agent files — never a bare `gh issue create`. Code claims in a filed body are measured commands at a named commit, and **every** filed issue — single task or epic — gets one independent spec-review pass plus a verdict comment before it is queued, shipped or announced — the skill's [§ *Issue review*](../../.agents/skills/new-task/SKILL.md#issue-review).
 - **`ship-next`** ([canonical skill](../../.agents/skills/ship-next/SKILL.md)) — **execute**: does **one** PR end-to-end, then stops. `ship-next "<task>"` is `new-task` + ship in one go.
 - **Client adapters** — Claude Code exposes thin `/new-task` and `/ship-next` wrappers; `/loop /ship-next` re-invokes one item at a time. Other clients invoke the canonical skills through their supported skill and delegation mechanisms.
 - **haven-reviewer** — the per-PR quality gate.
@@ -107,7 +107,8 @@ it open (#2276).
 
 You don't have to hand-write those issues. **Capture is its own step:**
 [`new-task "<description>"`](../../.agents/skills/new-task/SKILL.md) turns a one-line
-task into a well-formed issue (Scope + Acceptance + Surface + Money-path), asking
+task into a well-formed issue (Scope + Acceptance + Surface + Money-path, plus
+a Design system brief for `area:frontend`), asking
 a clarifying question or two when needed. It's **backlog-only by default** — it
 applies `area:*` labels but *not* `code-quality`, so capturing a task doesn't
 queue it for the loop. In practice, most issues are picked up by a partner or

@@ -3334,7 +3334,7 @@ export type paths = {
         };
         /**
          * Download the filtered transaction list as a CSV file.
-         * @description Applies the same filters as `GET /transactions` over the whole result set rather than one page, and adds `direction` and `chainId`. UTF-8 with a byte-order mark and RFC 4180 quoting. Bounded at 10 000 rows; above that the request is refused with 413 rather than truncated.
+         * @description Applies the same filters as `GET /transactions` over the whole result set rather than one page, and adds `direction` and `chainId` — and, since #4095, the same `search` term and Period window, so the file and the on-screen list cannot disagree. UTF-8 with a byte-order mark and RFC 4180 quoting. Bounded at 10 000 rows; above that the request is refused with 413 rather than truncated.
          */
         get: operations["exportTransactionsCsv"];
         put?: never;
@@ -5977,7 +5977,7 @@ export type components = {
             /** @description #3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write. */
             deliveryReference?: string | null;
             /**
-             * @description Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: reserved — nothing populates it today. `unknown`: outbound raw transfer with no matched intent. Absent for inbound (`direction: in`) rows.
+             * @description Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: an outbound transfer the account owner sent from the dashboard, recorded when it was submitted (#4099). `unknown`: outbound raw transfer with no matched intent or owner-send record — including owner sends made before that record existed. Absent for inbound (`direction: in`) rows, except an agent's delegate sweep, which is `agent`.
              * @enum {string}
              */
             initiatedBy?: "agent" | "human" | "unknown";
@@ -6076,7 +6076,7 @@ export type components = {
             /** @description #3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write. */
             deliveryReference?: string | null;
             /**
-             * @description Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: reserved — nothing populates it today. `unknown`: outbound raw transfer with no matched intent. Absent for inbound (`direction: in`) rows.
+             * @description Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: an outbound transfer the account owner sent from the dashboard, recorded when it was submitted (#4099). `unknown`: outbound raw transfer with no matched intent or owner-send record — including owner sends made before that record existed. Absent for inbound (`direction: in`) rows, except an agent's delegate sweep, which is `agent`.
              * @enum {string}
              */
             initiatedBy?: "agent" | "human" | "unknown";
@@ -6521,8 +6521,10 @@ export type components = {
             x402ResourceUrl: string | null;
             /** @description The newest member’s raw `to` field — the merchant address on outbound payments, the account’s own address on deposits. */
             to: string;
-            /** @description Contact or receipt-merchant name resolved for the counterparty, when one exists; null otherwise (always null on deposits). */
+            /** @description Contact or receipt-merchant name resolved for the counterparty, else the name of the user's own account on the other side of a transfer between two of their accounts (#4099); null otherwise. On a deposit it is set only for a transfer from another of the user's own accounts, and that deposit is its own group. */
             merchantName: string | null;
+            /** @description Outbound groups only (#4117): the label of the user's own account the money left — a contact name saved for it first, else the account's own name. Every member of the group left that one account. Absent on deposits and when no name resolves. */
+            fromAccountName?: string;
             /** @description The activity class, e.g. `delegate_sweep`; null for plain transfers and x402 payments. */
             activityType: string | null;
             /** @enum {string} */
@@ -22037,6 +22039,20 @@ export interface operations {
                 agentId?: string;
                 /** @description `<chainId>:<token address>`, or `<chainId>:native`. Whether Haven serves that chain is checked by the handler. */
                 tokenKey?: string;
+                /** @description #4095: filter by transfer direction server-side (was a browser-side filter over the loaded page only). */
+                direction?: "in" | "out";
+                /** @description #4095: filter to one supported network server-side. Whether Haven serves the chain is checked by the handler. */
+                chainId?: number;
+                /** @description #4095: free text matched case- and accent-insensitively against what a row shows — the counterparty's resolved name (contact, receipt merchant, or another of the user's accounts), the agent name, and the counterparty address (partial match). */
+                search?: string;
+                /** @description #4095: a rolling window `[now − N×24h, now)` (owner rule, epic #3801: rolling days, no calendar month). Mutually exclusive with `from`/`to`. */
+                period?: "7d" | "30d" | "90d";
+                /** @description #4095: custom-range start calendar date `YYYY-MM-DD`, inclusive of the whole day in `tz`. Sent together with `to`; mutually exclusive with `period`. */
+                from?: string;
+                /** @description #4095: custom-range end calendar date `YYYY-MM-DD`, inclusive of the whole day in `tz`. A `from` after `to` is a structured 400. */
+                to?: string;
+                /** @description #4095: IANA zone the custom `from`/`to` days are cut in, validated as `GET /dashboard/overview` validates its `tz` (invalid → 400). Defaults to UTC. */
+                tz?: string;
                 /** @description Bounded to a safe integer (#3030: the handler used to cap it; ajv reads `1e400` as an integer). */
                 offset?: number;
                 limit?: number;
@@ -22100,6 +22116,16 @@ export interface operations {
                 tokenKey?: string;
                 direction?: "in" | "out";
                 chainId?: number;
+                /** @description #4095: the same search term `GET /transactions` applies, matched against the resolved counterparty names. */
+                search?: string;
+                /** @description #4095: the same rolling window `GET /transactions` applies. Mutually exclusive with `from`/`to`. */
+                period?: "7d" | "30d" | "90d";
+                /** @description #4095: custom-range start calendar date `YYYY-MM-DD`, inclusive of the whole day in `tz`. */
+                from?: string;
+                /** @description #4095: custom-range end calendar date `YYYY-MM-DD`, inclusive of the whole day in `tz`. */
+                to?: string;
+                /** @description #4095: IANA zone the custom `from`/`to` days are cut in. Defaults to UTC. */
+                tz?: string;
                 fresh?: "1" | "true";
             };
             header?: never;

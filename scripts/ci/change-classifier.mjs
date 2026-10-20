@@ -292,6 +292,16 @@ export const SURFACE_RULES = Object.freeze([
   { patterns: ['packages/sdk/*'], surfaces: ['code', 'sdk'] },
   { patterns: ['packages/connect/*'], surfaces: ['code', 'connect'] },
   { patterns: ['packages/mcp/*'], surfaces: ['code', 'mcp'] },
+  {
+    // The hosted tools/list snapshot (#4121). qa-agent's eval graders keep a
+    // copy of its tool names, and tools.test.ts holds that copy equal to this
+    // file. qa-agent does not depend on mcp-server, so the dependency table
+    // cannot route it: a snapshot-only change would never run the test that
+    // exists to catch it. A file arm, above the generic packages/mcp-server/*
+    // arm (first match wins), names both jobs.
+    patterns: ['packages/mcp-server/src/tools-list.snapshot.json'],
+    surfaces: ['code', 'mcp_server', 'qa_agent'],
+  },
   { patterns: ['packages/mcp-server/*'], surfaces: ['code', 'mcp_server'] },
   { patterns: ['packages/signer/*'], surfaces: ['code', 'signer'] },
   { patterns: ['packages/cli/*'], surfaces: ['code', 'cli'] },

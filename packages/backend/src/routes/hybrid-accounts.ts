@@ -33,6 +33,18 @@ import {
   type SignerActionBody,
 } from '../rails/hybrid-signer-actions.js'
 import { prepareTransfer, submitTransfer, type TransferBody } from '../rails/hybrid-transfers.js'
+import { recordOwnerTransfer } from '../infra/repositories/owner-transfers.js'
+
+/**
+ * #4099: how long the owner-send reply may wait on its attribution record.
+ * The transfer has already executed when the record is written, and the pool
+ * has no statement timeout, so an unbounded await would let a stalled
+ * database hold a success reply — and a client that times out may send again.
+ * Past the deadline the reply goes out; the write may still land. Same shape
+ * as `SHARED_STORE_DEADLINE_MS`, with more room because a missed record reads
+ * "Unknown" for good.
+ */
+export const OWNER_TRANSFER_RECORD_DEADLINE_MS = 500
 import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import { loadHybridOwnerConfig } from '../rails/hybrid-account-config.js'
 import { insertHybridAccountPasskey, listAccountPasskeys, passkeyEnrollmentDates } from '../infra/repositories/hybrid-signers.js'
@@ -625,6 +637,47 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     if (!result.ok) {
       const { status, error, details } = result.failure
       return reply.code(status).send(details ? { error, details } : { error })
+    }
+    // #4099: record that the OWNER sent this, so the feed reads it as "You"
+    // rather than an unattributed transfer. Written after the receipt — the
+    // transfer already executed — and fail-soft: a failed or slow write is
+    // logged and the send still answers success, at most
+    // OWNER_TRANSFER_RECORD_DEADLINE_MS later. Attribution only; nothing on
+    // the payment path reads the record.
+    if (result.txHash) {
+      const accountId = resolved.account.accountId
+      const txHash = result.txHash
+      const write = recordOwnerTransfer({
+        userId: sub,
+        accountId,
+        chainId: resolved.account.chainId,
+        txHash,
+        userOpHash: result.userOpHash,
+        tokenAddress: result.transfer.token,
+        toAddress: result.transfer.to,
+        amountRaw: result.transfer.amount.toString(),
+      }).then(
+        () => 'recorded' as const,
+        (err: unknown) => {
+          request.log.warn(
+            { err, accountId, txHash },
+            'owner transfer landed but its record failed; it will read as Unknown',
+          )
+          return 'failed' as const
+        },
+      )
+      let timer: NodeJS.Timeout | undefined
+      const deadline = new Promise<'timed_out'>((resolve) => {
+        timer = setTimeout(() => resolve('timed_out'), OWNER_TRANSFER_RECORD_DEADLINE_MS)
+      })
+      const outcome = await Promise.race([write, deadline])
+      clearTimeout(timer)
+      if (outcome === 'timed_out') {
+        request.log.warn(
+          { accountId, txHash, deadlineMs: OWNER_TRANSFER_RECORD_DEADLINE_MS },
+          'owner transfer record still pending at the deadline; answering without it',
+        )
+      }
     }
     return { submitted: true, tx_hash: result.txHash }
   })

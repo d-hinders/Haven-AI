@@ -6,8 +6,7 @@ covers:
   - docs/product/design-system.md
   - docs/product/copy-guidelines.md
   - docs/regulatory/casp-risk-guardrails.md
-  - packages/frontend/src/components/ReceiveFundsModal.tsx
-  - packages/frontend/src/components/AddFundsModal.tsx
+  - packages/frontend/src/components/ReceiveDialog.tsx
   - packages/frontend/src/lib/agent-budget.ts
   - packages/frontend/src/lib/agent-list-filters.ts
   - packages/frontend/src/components/ConnectAgentModal.tsx
@@ -386,7 +385,9 @@ Structure:
    row) with a network dropdown beside it (only offered when more than one
    chain is listed, starting on the user's own network); then category pills
    with "Verified only" and "Show test merchants" beside them. Test content
-   has one control — the checkbox — and no category pill.
+   has one control — the checkbox — and no category pill. These move onto the
+   [List controls](design-system.md#list-controls--listtoolbar-facetmenu-periodpicker-4110) pattern with #4114 (category stays a pill facet; the network
+   facet's default stays the user's chain), gaining URL state.
 3. Merchant page: header (monogram/logo, name, category, website, networks,
    Verified — with the funding action, when shown, below the text until
    `xl` and on its right-hand side from there),
@@ -494,6 +495,10 @@ Structure:
 3. The card grid, filtered and sorted by the toolbar.
 4. Zero-result state inside the list area (`No agents match these filters`) owning the reset action — the bar's own reset steps back so the screen offers one — and the toolbar stays visible so the user can see what they filtered on. The `not recorded` MCP note above the list follows the filtered set: a filter that hides the only unrecorded card hides the note.
 5. Removed agents stay behind their own toggle and are never in the filtered set.
+
+The toolbar above moves onto the
+[List controls](design-system.md#list-controls--listtoolbar-facetmenu-periodpicker-4110) pattern with #4113, which replaces the toggle-button facets with menu
+facets and the sort select with a Sort chip. New list controls use the pattern.
 
 First agent (#4065): a user with no agents — archived and revoked rows count as
 agents, so this is `agents.length === 0` — gets the connect flow inline instead
@@ -658,8 +663,11 @@ Activity card also carries deposits, sweeps, failed and pending rows.
 preview renders `GET /dashboard/overview`'s `activity` groups — one row per
 group under user-local day headings, at most eight rows over the rolling
 last seven days. The title is the counterparty through `counterpartyLabel`'s
-no-address mode (merchant site, receipt name, "Deposit", "New recipient" —
-never a truncated address); the subtitle is the agent's name; a group of N
+no-address mode (merchant site, receipt name, "Deposit" or — for a transfer
+from another of the user's own accounts — "From <account>" (#4099), "New
+recipient" — never a truncated address); the subtitle is the agent's name, plus
+"From <account>" — the account the money left — on a send when the user has
+more than one account and a name came back (#4117); a group of N
 renders "×N" ("×N+" when the count is a floor). The 5-row `transactions`
 preview is removed from the wire (#3858) — no dashboard surface reads it.
 
@@ -707,7 +715,14 @@ Use for full lists of payments and account activity.
 
 Structure:
 1. Page header with concise description.
-2. Filter controls for account, status, type, and time where useful.
+2. Filter controls, all applied on the server (#4095), so the rows, the
+   count and the CSV are the same set: search (committed after a pause in
+   typing, Enter at once), Account (shown disabled when there is only one
+   account), Initiator, Token, Direction,
+   and Period (Last 7 / 30 / 90 days, All time, or a custom range), with
+   Export CSV in the same bar. Active filters show as removable chips. This
+   bar moves onto the [List controls](design-system.md#list-controls--listtoolbar-facetmenu-periodpicker-4110) pattern with #4111 (and, once the account
+   page's planned Activity tab ships, #4130); build new list filters on that pattern, not on this bar.
 3. The full-page `TransactionsTable` variant for `/transactions`; card/compact
    variants are valid for scoped histories on account and agent detail.
 4. Empty state inside the table that preserves the current filters.
@@ -730,7 +745,9 @@ Money and risk clarity:
 - **List rows show no addresses (#3810, #3811).** The counterparty half of
   every row — `From -> To` line included — renders through
   `counterpartyLabel`'s no-address mode: the merchant's hostname, the source
-  title, a resolved name, "Deposit", or "New recipient". A raw address never
+  title, a resolved name, "Deposit" (every deposit here — "From <account>" for
+  a transfer from another own account is the dashboard Activity card's alone,
+  #4099), or "New recipient". A raw address never
   ellipsises into a list row; the detail drawer is where the full address
   lives.
 - Use external links for details, but do not make hashes the primary labels.

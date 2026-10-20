@@ -24,6 +24,8 @@ import { compareEnrichedTransactions, enrichedTransactionIdentityKey } from './o
 import { enrichTransactionsWithAgents } from './enrichment.js'
 import { enrichTransactionsWithAccounting } from './accounting.js'
 import { fetchConfirmedX402Transactions, mergeX402Transactions } from './x402.js'
+import { EMPTY_SEARCH_INDEX, foldForSearch, transactionMatchesSearch, type TransactionSearchIndex } from './search.js'
+import type { TransactionWindow } from './period.js'
 import type { EnrichedTransaction, ParsedTokenFilter, Transaction, SmartAccountRow } from './types.js'
 
 // ── GET / (paginated, filterable feed across every owned account) ─────────────
@@ -147,9 +149,26 @@ export interface TransactionFilterOptions {
    * runs over the whole result set, so it has to apply them here or the file
    * would not match the list it was taken from. Both are optional and the
    * `GET /` feed passes neither, so its behaviour is unchanged.
+   *
+   * #4095: the feed takes them too now — the browser-side filter over the
+   * loaded page is gone, so list, count, totals and CSV all agree.
    */
   direction?: 'in' | 'out'
   chainId?: number
+  /**
+   * #4095: free-text search over what a row shows (counterparty resolved
+   * name, agent name, counterparty address). Applied against the name index
+   * below — which the route builds BEFORE calling this, because the names
+   * are what the filter matches on. Absent/blank means no filter.
+   */
+  search?: string
+  /** Name sources for `search`; an absent index still matches agent names and addresses. */
+  searchIndex?: TransactionSearchIndex
+  /**
+   * #4095: the Period window, half-open `[startMs, endMs)` over the row's
+   * `timestamp` (unix seconds → ms). Absent means no date filter.
+   */
+  window?: TransactionWindow
 }
 
 /** The agentId (including the synthetic `user`) and tokenKey filters applied to the GET / feed. */
@@ -157,9 +176,24 @@ export function filterEnrichedTransactions(
   transactions: EnrichedTransaction[],
   options: TransactionFilterOptions,
 ): EnrichedTransaction[] {
+  const foldedSearch = options.search !== undefined ? foldForSearch(options.search.trim()) : ''
+  const searchIndex = options.searchIndex ?? EMPTY_SEARCH_INDEX
   return transactions.filter((tx) => {
     if (options.direction && tx.direction !== options.direction) return false
     if (options.chainId !== undefined && tx.chainId !== options.chainId) return false
+
+    if (options.window) {
+      const timestampMs = tx.timestamp * 1000
+      // Half-open: the window start is INCLUSIVE, its end EXCLUSIVE — the
+      // same `[now − N×24h, now)` shape `isInsideActivityWindow` applies.
+      if (timestampMs < options.window.startMs || timestampMs >= options.window.endMs) {
+        return false
+      }
+    }
+
+    if (foldedSearch !== '' && !transactionMatchesSearch(tx, searchIndex, foldedSearch)) {
+      return false
+    }
 
     if (options.agentId === 'user') {
       return tx.direction === 'out' && !tx.agentId

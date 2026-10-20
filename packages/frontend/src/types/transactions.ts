@@ -12,9 +12,11 @@ import type { StatusTone } from '@/components/ui/StatusBadge'
 
 /**
  * Who initiated a transaction (#2097). `'agent'` = agent-initiated (always
- * carries `agentName` too); `'human'` = user/dashboard-initiated (reserved —
- * nothing sets it today); `'unknown'` = outbound raw transfer with no agent
- * attribution. Direction `'in'` rows carry no `initiatedBy`.
+ * carries `agentName` too); `'human'` = an owner send from the dashboard,
+ * recorded at submit (#4099; earlier owner sends stay `'unknown'`);
+ * `'unknown'` = outbound raw transfer with no agent attribution or owner
+ * record. Direction `'in'` rows carry no `initiatedBy`, bar an agent's
+ * delegate sweep (`'agent'`).
  *
  * Declared here as a frontend-only extension because the OpenAPI field lands
  * in the same PR (#2097): the generated wire type in `@haven_ai/core`
@@ -39,9 +41,10 @@ export type Transaction = ApiSchema<'TransactionBase'> & {
 export interface AggregatedTransaction extends ApiSchema<'Transaction'> {
   /**
    * Who initiated the payment (#2097). `'agent'` → agent-initiated (always
-   * accompanied by `agentName`); `'human'` → user/dashboard-initiated
-   * (reserved — nothing sets it today); `'unknown'` → outbound raw transfer
-   * with no agent attribution. Direction `'in'` rows carry no `initiatedBy`.
+   * accompanied by `agentName`); `'human'` → an owner send from the
+   * dashboard, recorded at submit (#4099); `'unknown'` → outbound raw
+   * transfer with no agent attribution or owner record. Direction `'in'`
+   * rows carry no `initiatedBy`, bar an agent's delegate sweep.
    * Rendering contract: "You" / "Payment sent by you" is RESERVED for
    * `'human'`; a missing value renders as explicit "Unknown" — never "You".
    * Frontend-only extension of the wire schema (see `Transaction`) — the
@@ -82,16 +85,52 @@ export type TransactionsFeedResponse = Omit<ApiSchema<'TransactionsResponse'>, '
   transactions: AggregatedTransaction[]
 }
 
-/** Client-side only — not a wire shape. */
+/**
+ * The Period presets the FilterBar offers (#4095). Server-side rolling
+ * windows `[now − N×24h, now)` — the owner rule from epic #3801 (rolling
+ * days, no calendar month). `'7d'`/`'30d'`/`'90d'` mirror the API's
+ * `period` enum; "All time" is the ABSENT parameter, not a fourth value.
+ */
+export type TransactionPeriodPreset = '7d' | '30d' | '90d'
+
+/**
+ * Client-side only — not a wire shape. Every dimension here rides the
+ * `GET /transactions` request since #4095, so the loaded rows, the count,
+ * the totals and the CSV export are the same set by construction.
+ */
 export interface TransactionFilterState {
   accountId?: string
   agentId?: string
   tokenKey?: string
   /**
-   * Direction filter — incoming or outgoing only. Applied client-side over
-   * the fetched transactions; the API doesn't yet support this dimension.
+   * Direction filter — incoming or outgoing only. Server-side since #4095:
+   * the browser filtered the loaded page in memory, which could disagree
+   * with the export over the whole result set.
    */
   direction?: 'in' | 'out'
+  /**
+   * Network filter — one chain id, or every chain (absent). Server-side
+   * since #4095 (`chainId` on the list request), same motivation as
+   * `direction`.
+   */
+  chainId?: number
+  /**
+   * Free-text search over what a row shows — the counterparty's resolved
+   * name (contact, receipt merchant, or another of the user's own
+   * accounts), the agent name, and the counterparty address. Resolved and
+   * matched on the SERVER (#4095); the browser never had the whole result
+   * set, so it could never search it honestly.
+   */
+  search?: string
+  /** Rolling Period preset; exclusive with a custom `from`/`to` range. */
+  period?: TransactionPeriodPreset
+  /**
+   * Custom-range start, `YYYY-MM-DD`, inclusive of the whole calendar day
+   * in the user's zone. Sent together with `to`; exclusive with `period`.
+   */
+  from?: string
+  /** Custom-range end, `YYYY-MM-DD` — inclusive of its whole zone day. */
+  to?: string
 }
 
 export type TransactionFilterOptionsResponse = ApiSchema<'TransactionFilterOptionsResponse'>

@@ -4,10 +4,10 @@
  * A task file is JSON — never Markdown (#3958's obligation list) — one file
  * per task under `src/evals/tasks/`. Loading validates the file against the
  * `EvalTask` shape AND its own internal coherence (graders exist in the
- * registry, over-budget tasks actually go over, transfer-expecting tasks
- * name a transfer grader): a task file that parses but means nothing would
- * otherwise pass silently and fail only on the partner's machine, three
- * hours into a nightly run.
+ * registry and carry only the option keys they read, over-budget tasks
+ * actually go over, transfer-expecting tasks name a transfer grader): a
+ * task file that parses but means nothing would otherwise pass silently and
+ * fail only on the partner's machine, three hours into a nightly run.
  *
  * Resolution is the budget-aware half (#3958 § 4, re-scoped per-trial by
  * #3992 A2): the amount comes from a LIVE read of the remaining period
@@ -26,9 +26,10 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { GRADERS } from './graders.js'
-import { HOSTED_TOOLS, PAYMENT_TOOLS, SIGNER_TOOLS } from './tools.js'
-import type { EvalTask, ResolvedTask } from './types.js'
+import { GRADER_OPTION_KEYS, GRADERS } from './graders.js'
+import { canonicalErrorCode } from './hermes.js'
+import { ALL_TOOL_NAMES, HOSTED_TOOLS, PAYMENT_TOOLS, SIGNER_TOOLS } from './tools.js'
+import type { EvalTask, GraderName, ResolvedTask } from './types.js'
 
 const TASKS_DIR = join(fileURLToPath(import.meta.url), '..', 'tasks')
 
@@ -63,6 +64,69 @@ export function fractionOfRemaining(remaining: bigint, fraction: string): bigint
   return (remaining * num) / den
 }
 
+/**
+ * One grader's options (#4136). Every grader's option keys are closed
+ * (`GRADER_OPTION_KEYS`): a grader ignores a key it does not read, so a
+ * misspelt key is a check that silently does not run — a false pass. For
+ * `tool_called` the loader also checks what the grader cannot: `name` and
+ * `after` are known tool names, `after` and `afterRefusal` never go
+ * together, and `afterRefusal` names the same refusal as the task's
+ * `no_payment_retry_after_refusal` (its `errorCode`, default
+ * `delegation_budget_exceeded`) — two graders anchored on different refusals
+ * would grade two different runs.
+ */
+function validateGraderOptions(
+  grader: { name: GraderName; options?: unknown },
+  graders: ReadonlyArray<{ name: string; options?: unknown }>,
+  file: string,
+): string | null {
+  const { name, options } = grader
+  if (options === undefined) {
+    return name === 'tool_called' ? `${file}: tool_called needs options.name — the tool it grades` : null
+  }
+  if (typeof options !== 'object' || options === null || Array.isArray(options)) {
+    return `${file}: ${name} options must be an object`
+  }
+  const allowed = GRADER_OPTION_KEYS[name]
+  const unknown = Object.keys(options).filter((k) => !allowed.includes(k))
+  if (unknown.length > 0) {
+    return (
+      `${file}: ${name} has unknown option key(s) ${unknown.map((k) => JSON.stringify(k)).join(', ')} — ` +
+      `it reads only ${allowed.length > 0 ? allowed.map((k) => JSON.stringify(k)).join(', ') : 'no options'}; ` +
+      `an ignored key is a check that silently does not run`
+    )
+  }
+  if (name !== 'tool_called') return null
+  const o = options as Record<string, unknown>
+  const isToolName = (v: unknown): boolean => typeof v === 'string' && ALL_TOOL_NAMES.includes(v)
+  if (!isToolName(o.name)) {
+    return `${file}: tool_called options.name must be a known bare tool name (tools.ts ALL_TOOL_NAMES), got ${JSON.stringify(o.name)}`
+  }
+  if (o.after !== undefined && !isToolName(o.after)) {
+    return `${file}: tool_called options.after must be a known bare tool name (tools.ts ALL_TOOL_NAMES), got ${JSON.stringify(o.after)}`
+  }
+  if (o.after !== undefined && o.afterRefusal !== undefined) {
+    return `${file}: tool_called takes after OR afterRefusal, not both — one anchors on a tool call, the other on a refusal`
+  }
+  if (o.afterRefusal !== undefined) {
+    if (typeof o.afterRefusal !== 'string' || o.afterRefusal.length === 0) {
+      return `${file}: tool_called options.afterRefusal must be the refusal's error-code string (e.g. "delegation_budget_exceeded")`
+    }
+    const refusalGrader = graders.find((g) => g.name === 'no_payment_retry_after_refusal')
+    if (refusalGrader) {
+      const pinned = (refusalGrader.options as { errorCode?: unknown } | undefined)?.errorCode
+      const expected = typeof pinned === 'string' ? pinned : 'delegation_budget_exceeded'
+      if (canonicalErrorCode(o.afterRefusal) !== canonicalErrorCode(expected)) {
+        return (
+          `${file}: tool_called afterRefusal "${o.afterRefusal}" differs from no_payment_retry_after_refusal's errorCode ` +
+          `"${expected}" — both graders must anchor on the same refusal`
+        )
+      }
+    }
+  }
+  return null
+}
+
 /** Structural + coherence validation. Returns the error string, or null. */
 export function validateTask(raw: unknown, file: string): string | null {
   if (typeof raw !== 'object' || raw === null) return `${file}: not a JSON object`
@@ -91,6 +155,8 @@ export function validateTask(raw: unknown, file: string): string | null {
   for (const g of graders) {
     if (typeof g?.name !== 'string') return `${file}: every grader needs a string name`
     if (!(g.name in GRADERS)) return `${file}: unknown grader "${g.name}" — the registry is closed; extend graders.ts deliberately`
+    const optionsError = validateGraderOptions(g as { name: GraderName; options?: unknown }, graders as Array<{ name: string; options?: unknown }>, file)
+    if (optionsError) return optionsError
   }
   const source = t.source as Record<string, unknown> | undefined
   if (typeof source?.kind !== 'string' || !['bug-report', 'scenario', 'issue'].includes(source.kind as string)) {

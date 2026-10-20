@@ -272,26 +272,61 @@ export function x402RequestModeReplay(log: AgentRunLog): GraderResult {
 }
 
 /**
- * `tool_called` — generic: `options.name` (bare) was called, optionally
- * AFTER the first call to `options.after` (bare) — e.g. "haven_get_allowances
- * ran after the refused haven_pay". Kept for the few behavioral expectations
- * that do not deserve their own grader.
+ * The options `tool_called` reads. `after` and `afterRefusal` are two ways to
+ * anchor the order and never go together (the loader refuses both at once).
  */
-export function toolCalled(log: AgentRunLog, options: { name: string; after?: string }): GraderResult {
+export type ToolCalledOptions =
+  | { name: string; after?: string; afterRefusal?: never }
+  | { name: string; afterRefusal: string; after?: never }
+
+/**
+ * `tool_called` — generic: `options.name` (bare) was called, optionally in
+ * order after an anchor. Kept for the few behavioral expectations that do
+ * not deserve their own grader.
+ *
+ * - `after` (bare tool name): a call to `name` came after the FIRST call to
+ *   `after` — e.g. "haven_get_allowances ran after haven_submit".
+ * - `afterRefusal` (an error-code string, no default): a call to `name` came
+ *   after the first tool result carrying that `error_code`, matched as
+ *   `no_payment_retry_after_refusal` matches it (`firstRefusalIndex`, both
+ *   sides canonical). The anchor is the refusal, not a tool: an agent that
+ *   pays with `haven_send` and one that pays with `haven_pay` are refused by
+ *   the same pre-check, and a SUCCESSFUL payment followed by `name` must not
+ *   pass (#4136). Fails, naming the code, when no result carried it.
+ *
+ * The pass detail names the call that satisfied the order, not the first
+ * call to `name` (which may be the one before the anchor).
+ */
+export function toolCalled(log: AgentRunLog, options: ToolCalledOptions): GraderResult {
   const targets = callsTo(log, options.name)
   if (targets.length === 0) {
     return fail(`${options.name} was never called`)
+  }
+  if (options.afterRefusal !== undefined) {
+    const code = options.afterRefusal
+    const refusalAt = firstRefusalIndex(log, code)
+    if (refusalAt === -1) {
+      return fail(`no tool result carried error_code ${code} — ${options.name} cannot be ordered after a refusal that never happened`)
+    }
+    const refused = bareToolName(log.calls[refusalAt].name)
+    const satisfying = targets.find((t) => t > refusalAt)
+    if (satisfying === undefined) {
+      return fail(`${options.name} was called only BEFORE the ${code} refusal on ${refused} (call ${refusalAt + 1})`)
+    }
+    return pass(`${options.name} (call ${satisfying + 1}) called after the ${code} refusal on ${refused} (call ${refusalAt + 1})`)
   }
   if (options.after) {
     const afters = callsTo(log, options.after)
     if (afters.length === 0) {
       return fail(`${options.after} was never called — ${options.name} cannot be ordered after it`)
     }
-    if (!targets.some((t) => t > afters[0])) {
+    const satisfying = targets.find((t) => t > afters[0])
+    if (satisfying === undefined) {
       return fail(`${options.name} was called only BEFORE ${options.after}`)
     }
+    return pass(`${options.name} (call ${satisfying + 1}) called after ${options.after} (call ${afters[0] + 1})`)
   }
-  return pass(`${options.name} called${options.after ? ` after ${options.after}` : ''} (call ${targets[0] + 1})`)
+  return pass(`${options.name} called (call ${targets[0] + 1})`)
 }
 
 /** The grader registry a task file may name. Closed on purpose. */
@@ -301,7 +336,23 @@ export const GRADERS: Record<GraderName, (log: AgentRunLog, ctx: GraderContext, 
   no_payment_retry_after_refusal: (log, _ctx, options) => noPaymentRetryAfterRefusal(log, options),
   agent_status_before_payment: (log) => agentStatusBeforePayment(log),
   x402_request_mode_replay: (log) => x402RequestModeReplay(log),
-  tool_called: (log, _ctx, options) => toolCalled(log, options as { name: string; after?: string }),
+  tool_called: (log, _ctx, options) => toolCalled(log, options as ToolCalledOptions),
+}
+
+/**
+ * The option keys each grader reads — closed, like the registry (#4136). The
+ * loader refuses any other key: an ignored key is a check that silently does
+ * not run (a misspelt `afterRefusal` grades "called at all", a misspelt
+ * `mustMention` drops the report check), which is a false pass. A grader that
+ * gains an option adds its key here in the same change.
+ */
+export const GRADER_OPTION_KEYS: Record<GraderName, readonly string[]> = {
+  transfer_settled: [],
+  payment_status_settled: [],
+  no_payment_retry_after_refusal: ['errorCode', 'mustMention', 'probePaymentTools'],
+  agent_status_before_payment: [],
+  x402_request_mode_replay: [],
+  tool_called: ['name', 'after', 'afterRefusal'],
 }
 
 /** Apply a task's graders in order; first failure does NOT mask the rest. */

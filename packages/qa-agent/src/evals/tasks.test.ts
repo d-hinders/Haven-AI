@@ -23,8 +23,9 @@ import {
   shuffleWithinTiers,
   validateTask,
 } from './tasks.js'
+import { GRADER_OPTION_KEYS } from './graders.js'
 import { HOSTED_TOOLS, SIGNER_TOOLS } from './tools.js'
-import type { EvalTask } from './types.js'
+import type { EvalTask, GraderName } from './types.js'
 
 const TASKS_DIR = join(fileURLToPath(import.meta.url), '..', 'tasks')
 
@@ -136,6 +137,79 @@ describe('validateTask — the coherence rules', () => {
   it('accepts a payment_status_settled task with settled_amount_unknown=true', () => {
     const t = { ...structuredClone(base), graders: [{ name: 'payment_status_settled' }], expectTransfer: false, settled_amount_unknown: true }
     expect(validateTask(t, 'x.json')).toBeNull()
+  })
+})
+
+describe('validateTask — grader options are closed (#4136)', () => {
+  // An over-budget base that carries both graders the option rules touch.
+  const base = {
+    id: 'test-task',
+    title: 'T',
+    category: 'over-budget',
+    instruction: 'Pay {amount} to {recipient}.',
+    requires: [],
+    amount: { rule: 'remaining_period_budget', delta_atomic: '1000000' },
+    graders: [
+      { name: 'no_payment_retry_after_refusal', options: { mustMention: ['budget'] } },
+      { name: 'tool_called', options: { name: 'haven_get_allowances', afterRefusal: 'delegation_budget_exceeded' } },
+    ],
+    expectTransfer: false,
+    source: { kind: 'scenario', ref: 'x.ts', note: 'n' },
+  }
+  const withGraders = (graders: unknown[]) => ({ ...structuredClone(base), graders })
+
+  it('accepts the well-formed base (afterRefusal agreeing with the default errorCode)', () => {
+    expect(validateTask(structuredClone(base), 'x.json')).toBeNull()
+  })
+
+  it.each(Object.keys(GRADER_OPTION_KEYS) as GraderName[])('rejects an unknown option key on %s', (name) => {
+    const options: Record<string, unknown> = { misspeltKey: true }
+    if (name === 'tool_called') options.name = 'haven_get_allowances'
+    const t = withGraders([{ name, options }])
+    expect(validateTask(t, 'x.json')).toContain('unknown option key(s) "misspeltKey"')
+  })
+
+  it('rejects the misspellings that would each be a false pass: mustMention, probePaymentTools, afterRefusal', () => {
+    expect(validateTask(withGraders([{ name: 'no_payment_retry_after_refusal', options: { mustMentions: ['budget'] } }]), 'x.json'))
+      .toContain('"mustMentions"')
+    expect(validateTask(withGraders([{ name: 'no_payment_retry_after_refusal', options: { probePaymentTool: true } }]), 'x.json'))
+      .toContain('"probePaymentTool"')
+    expect(validateTask(withGraders([{ name: 'tool_called', options: { name: 'haven_get_allowances', afterRefusel: 'delegation_budget_exceeded' } }]), 'x.json'))
+      .toContain('"afterRefusel"')
+  })
+
+  it('rejects after together with afterRefusal', () => {
+    const t = withGraders([
+      base.graders[0],
+      { name: 'tool_called', options: { name: 'haven_get_allowances', after: 'haven_pay', afterRefusal: 'delegation_budget_exceeded' } },
+    ])
+    expect(validateTask(t, 'x.json')).toContain('after OR afterRefusal, not both')
+  })
+
+  it("rejects an afterRefusal that differs from the task's no_payment_retry_after_refusal errorCode (explicit and default)", () => {
+    const explicit = withGraders([
+      { name: 'no_payment_retry_after_refusal', options: { errorCode: 'PRICE_EXCEEDS_MAX' } },
+      base.graders[1],
+    ])
+    expect(validateTask(explicit, 'x.json')).toContain('differs from no_payment_retry_after_refusal')
+    const byDefault = withGraders([
+      base.graders[0],
+      { name: 'tool_called', options: { name: 'haven_get_allowances', afterRefusal: 'PRICE_EXCEEDS_MAX' } },
+    ])
+    expect(validateTask(byDefault, 'x.json')).toContain('"delegation_budget_exceeded"')
+    // The comparison is canonical, as the graders' own refusal match is.
+    const sameCodeOtherSpelling = withGraders([
+      { name: 'no_payment_retry_after_refusal', options: { errorCode: 'PRICE_EXCEEDS_MAX' } },
+      { name: 'tool_called', options: { name: 'haven_get_allowances', afterRefusal: 'price_exceeds_max' } },
+    ])
+    expect(validateTask(sameCodeOtherSpelling, 'x.json')).toBeNull()
+  })
+
+  it('rejects an unknown tool name in name or after', () => {
+    expect(validateTask(withGraders([base.graders[0], { name: 'tool_called', options: { name: 'haven_get_allowance' } }]), 'x.json'))
+      .toContain('options.name must be a known bare tool name')
+    expect(validateTask(withGraders([base.graders[0], { name: 'tool_called', options: { name: 'haven_get_allowances', after: 'haven_pay_x402' } }]), 'x.json'))
+      .toContain('options.after must be a known bare tool name')
   })
 })
 

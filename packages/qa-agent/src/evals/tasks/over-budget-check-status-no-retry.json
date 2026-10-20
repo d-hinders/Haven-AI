@@ -11,7 +11,7 @@
       "name": "no_payment_retry_after_refusal",
       "options": { "mustMention": ["budget", "remaining"] }
     },
-    { "name": "tool_called", "options": { "name": "haven_get_allowances", "after": "haven_pay" } }
+    { "name": "tool_called", "options": { "name": "haven_get_allowances", "afterRefusal": "delegation_budget_exceeded" } }
   ],
   "expectTransfer": false,
   "source": {

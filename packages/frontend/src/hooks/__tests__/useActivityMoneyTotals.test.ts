@@ -2,8 +2,9 @@
  * #4098 — the account Activity tab's in/out totals over
  * `hooks/useActivityMoneyTotals.ts`: sums taken from the SERVER-filtered
  * feed (every FilterBar dimension rides the request), paged forward until
- * the filtered set ends, with the failed-row exclusion, the ≈ mark on
- * serve-time/unpriced/foreign rows, the #2882 partial flag, and the error
+ * the filtered set ends, with the failed-row exclusion, the ≈ mark only
+ * where a conversion changes the number (#4165), the separate unpriced
+ * signal for unpriced/foreign rows, the #2882 partial flag, and the error
  * path keeping the last good totals.
  */
 import { act, renderHook, waitFor } from '@testing-library/react'
@@ -133,7 +134,7 @@ describe('useActivityMoneyTotals (#4098)', () => {
     expect(result.current.moneyOut).toBe(3)
   })
 
-  it('marks the totals approximate when any row is priced at serve time', async () => {
+  it('a serve-time USDC row in USD carries no ≈ — USDC is dollars (#4165)', async () => {
     mockApiGet.mockResolvedValue(
       page([
         tx({ direction: 'in', convertedAmount: null, approxAmount: '12.00', approxCurrency: 'USD' }),
@@ -142,15 +143,27 @@ describe('useActivityMoneyTotals (#4098)', () => {
     const { result } = renderHook(() => useActivityMoneyTotals(FILTERS, 'USD'))
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.moneyIn).toBe(12)
+    expect(result.current.approx).toBe(false)
+  })
+
+  it('marks the totals ≈ when a row is priced at serve time in another currency (SEK)', async () => {
+    mockApiGet.mockResolvedValue(
+      page([
+        tx({ direction: 'in', convertedAmount: null, approxAmount: '129.12', approxCurrency: 'SEK' }),
+      ]),
+    )
+    const { result } = renderHook(() => useActivityMoneyTotals(FILTERS, 'SEK'))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.moneyIn).toBeCloseTo(129.12)
     expect(result.current.approx).toBe(true)
   })
 
-  it('does not sum a foreign-currency or unpriced row — and says so with the mark', async () => {
+  it('does not sum a foreign-currency or unpriced row — and says so as unpriced, not ≈', async () => {
     mockApiGet.mockResolvedValue(
       page([
         // Foreign book-time triple: not summed into a USD figure.
         tx({ direction: 'in', convertedAmount: '90.00', convertedCurrency: 'SEK' }),
-        // No usable price at all: contributes nothing but breaks exactness.
+        // No usable price at all: contributes nothing.
         tx({ direction: 'in', convertedAmount: null, approxAmount: null }),
         tx({ direction: 'in', convertedAmount: '5.00', convertedCurrency: 'USD' }),
       ]),
@@ -158,7 +171,17 @@ describe('useActivityMoneyTotals (#4098)', () => {
     const { result } = renderHook(() => useActivityMoneyTotals(FILTERS, 'USD'))
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.moneyIn).toBe(5)
-    expect(result.current.approx).toBe(true)
+    expect(result.current.approx).toBe(false)
+    expect(result.current.unpriced).toBe(true)
+  })
+
+  it('an all-unpriced direction totals null ("—"), never 0', async () => {
+    mockApiGet.mockResolvedValue(page([tx({ direction: 'in', convertedAmount: null, approxAmount: null })]))
+    const { result } = renderHook(() => useActivityMoneyTotals(FILTERS, 'USD'))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.moneyIn).toBeNull()
+    expect(result.current.moneyOut).toBe(0)
+    expect(result.current.unpriced).toBe(true)
   })
 
   it('reports partial when the feed is capped or a source failed (#2882)', async () => {

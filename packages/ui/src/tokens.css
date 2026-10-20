@@ -33,6 +33,10 @@
 
   --v2-border: #e6ebf1;
   --v2-border-strong: #d6dbe3;
+  /* The lighter hairline between rows of ONE day in a ledger (#4165, owner
+     decision 2026-10-20 on #4093): inset to the text column, quieter than
+     the full-width `--v2-border` that still separates day groups. */
+  --v2-border-subtle: #edf0f4;
 
   /* The floating tab-bar pill (#4063). Light keeps the page ground and the
      plain border — there the popover shadow lifts the pill, so the values
@@ -433,6 +437,7 @@
     --v2-border-rgb: 43 49 64;
     --v2-border-strong: #3a4152;
     --v2-border-strong-rgb: 58 65 82;
+    --v2-border-subtle: #232834;
 
     /* The floating tab-bar pill (#4063): an opaque surface distinct from the
        page ground and a strong edge, because the dark popover shadow is black
@@ -580,6 +585,7 @@
   --v2-border-rgb: 43 49 64;
   --v2-border-strong: #3a4152;
   --v2-border-strong-rgb: 58 65 82;
+  --v2-border-subtle: #232834;
 
   /* The floating tab-bar pill (#4063): an opaque surface distinct from the
      page ground and a strong edge, because the dark popover shadow is black

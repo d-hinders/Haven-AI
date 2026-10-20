@@ -18,15 +18,11 @@
  * the Activity tab on those filters, this hook can move its window read to
  * them without changing a number it reports.
  *
- * A row's fiat figure is the feed's own conversion (#3127): book-time
- * `convertedAmount` struck in the user's preferred currency, or a
- * serve-time `approxAmount` (#3824) when no book-time price was captured.
- * The per-direction total carries `approx` when ANY summed row was priced
- * at serve time or could not be priced at all — the same honesty mark the
- * dashboard's spending figure carries (#3803), never a guessed total.
- *
- * FAILED rows are excluded from both totals: a failed payment moved no
- * money, and "Money out" claims what left the account.
+ * A row is priced and summed by `lib/money-flow-tally.ts` (#4165), the one
+ * tally this hook shares with the Activity tab's result line: `approx` is
+ * the "≈" rule's answer for a total, `unpriced` says some rows could not be
+ * valued, and a direction with nothing priceable totals `null` ("—"). FAILED
+ * rows are excluded: a failed payment moved no money.
  *
  * ## Partial data
  *
@@ -40,6 +36,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 import type { AggregatedTransaction, TransactionsFeedResponse } from '@/types/transactions'
 import type { DisplayCurrency } from '@/lib/account-holdings'
+import { emptyFlowTally, flowFigures, tallyRow, type FlowTally } from '@/lib/money-flow-tally'
 
 /** The rolling window's length, in days (the owner's #3801 rule). */
 export const MONEY_FLOW_WINDOW_DAYS = 30
@@ -48,13 +45,13 @@ const PAGE_LIMIT = 100
 const WINDOW_SECONDS = MONEY_FLOW_WINDOW_DAYS * 24 * 60 * 60
 
 export interface AccountMoneyFlow {
-  moneyIn: number
-  moneyOut: number
-  /**
-   * True when at least one in-window row was priced at serve time (or had no
-   * usable price) — the totals then carry the `≈` mark, never a bare figure.
-   */
+  /** null when the window had inbound rows and none could be valued ("—"). */
+  moneyIn: number | null
+  moneyOut: number | null
+  /** The "≈" decision for the totals (`shouldMarkApprox`, kind `total`). */
   approx: boolean
+  /** Some in-window rows could not be valued; the caller says so in words. */
+  unpriced: boolean
   loading: boolean
   error: string | null
   /**
@@ -68,35 +65,17 @@ export interface AccountMoneyFlow {
 }
 
 interface FlowTotals {
-  moneyIn: number
-  moneyOut: number
-  approx: boolean
+  tally: FlowTally
   partial: boolean
 }
 
-/** One row's contribution to a direction total, priced like the feed prices it. */
-function rowFiat(
-  tx: AggregatedTransaction,
-  currency: DisplayCurrency,
-): { amount: number; approx: boolean } | null {
-  // Book-time first (#3127): the figure struck at settlement in the user's
-  // currency. A foreign-currency or missing triple is not silently summed.
-  if (tx.convertedAmount != null && tx.convertedCurrency === currency) {
-    const amount = Number(tx.convertedAmount)
-    if (Number.isFinite(amount)) return { amount, approx: false }
-  }
-  // Serve-time (#3824): today's rate, marked.
-  if (tx.approxAmount != null && (tx.approxCurrency ?? currency) === currency) {
-    const amount = Number(tx.approxAmount)
-    if (Number.isFinite(amount)) return { amount, approx: true }
-  }
-  // No usable price: the row exists in the window but adds no claimed figure.
-  return null
+function emptyTotals(): FlowTotals {
+  return { tally: emptyFlowTally(), partial: false }
 }
 
 /**
- * Sum one page's in-window rows into the running totals. Rows strictly older
- * than the window are skipped but still observed by the caller's stop rule.
+ * Tally one page's in-window rows. Rows strictly older than the window are
+ * skipped but still observed by the caller's stop rule.
  */
 function sumPage(
   rows: readonly AggregatedTransaction[],
@@ -106,16 +85,7 @@ function sumPage(
 ): void {
   for (const tx of rows) {
     if (tx.timestamp < windowStartSec) continue
-    // A failed payment moved no money; the totals claim what actually moved.
-    if (tx.isError) continue
-    const fiat = rowFiat(tx, currency)
-    if (!fiat) {
-      totals.approx = true
-      continue
-    }
-    if (fiat.approx) totals.approx = true
-    if (tx.direction === 'in') totals.moneyIn += fiat.amount
-    else if (tx.direction === 'out') totals.moneyOut += fiat.amount
+    tallyRow(tx, currency, totals.tally)
   }
 }
 
@@ -123,14 +93,14 @@ export function useAccountMoneyFlow(
   accountId: string | undefined,
   currency: DisplayCurrency,
 ): AccountMoneyFlow {
-  const [totals, setTotals] = useState<FlowTotals>({ moneyIn: 0, moneyOut: 0, approx: false, partial: false })
+  const [totals, setTotals] = useState<FlowTotals>(emptyTotals)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const requestIdRef = useRef(0)
 
   const fetchWindow = useCallback(async () => {
     if (!accountId) {
-      setTotals({ moneyIn: 0, moneyOut: 0, approx: false, partial: false })
+      setTotals(emptyTotals())
       setLoading(false)
       setError(null)
       return
@@ -142,7 +112,7 @@ export function useAccountMoneyFlow(
     // the LAST 30 days of whatever now is, including the row a send just
     // added (the send path calls `refresh` on success).
     const windowStartSec = Math.floor(Date.now() / 1000) - WINDOW_SECONDS
-    const next: FlowTotals = { moneyIn: 0, moneyOut: 0, approx: false, partial: false }
+    const next = emptyTotals()
     try {
       let offset = 0
       // Page until the feed ends, a page tells us the window is fully
@@ -181,9 +151,7 @@ export function useAccountMoneyFlow(
   }, [fetchWindow])
 
   return {
-    moneyIn: totals.moneyIn,
-    moneyOut: totals.moneyOut,
-    approx: totals.approx,
+    ...flowFigures(totals.tally),
     loading,
     error,
     partial: totals.partial,

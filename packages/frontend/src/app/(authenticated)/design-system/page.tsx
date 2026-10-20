@@ -556,7 +556,6 @@ const DS_AGENT_BUDGET_REMAINING: DashboardBudgetRemaining = {
     },
   ],
 }
-const DS_AGENT_SPOT_RATES: DashboardOverview['spotRates'] = { USDC: 1 }
 // A second agent with NO budget and no payments — the "No budget" + "No
 // payments yet" arms of the row, exactly as the dashboard draws them.
 const DS_AGENT_NO_BUDGET: DashboardAgentPreview = {
@@ -3873,7 +3872,7 @@ export default function DesignSystemPage() {
           account page will pass from the same overview. */}
       <Section
         title="Agent row (shared)"
-        description="The dashboard's agent row (#4096, epic #4093), lifted out of AgentsSection into haven/AgentRow: the BudgetMeter with its caption, the labelled “Last paid” time on the caption line (#3989), the badge (agentBadge: Needs setup / Paused / N% used), and the received-sub-budget or “No budget” line (#3803). Its props are the dashboard wire shapes (DashboardAgent, DashboardBudgetRemaining, spotRates, and the user's display CURRENCY mapped through CURRENCY_KEY) — the account page reads the SAME overview (it lists all agents) and passes its slices straight through, so both surfaces draw the identical row. AgentBudget is exported beside it for a caller that wants the budget block without the row chrome."
+        description="The dashboard's agent row (#4096, epic #4093), lifted out of AgentsSection into haven/AgentRow: the BudgetMeter with its caption, the labelled “Last paid” time on the caption line (#3989), the badge (agentBadge: Needs setup / Paused / N% used), and the received-sub-budget or “No budget” line (#3803). Its props are the dashboard wire shapes (DashboardAgent, DashboardBudgetRemaining) and the budget caption reads in the budget's own token, “1.20 of 3.00 USDC” (#4165: no rate, no “≈”) — the account page reads the SAME overview (it lists all agents) and passes its slices straight through, so both surfaces draw the identical row. AgentBudget is exported beside it for a caller that wants the budget block without the row chrome."
       >
         <div className="max-w-xl space-y-4">
           <Card hover={false} className="overflow-hidden">
@@ -3882,8 +3881,6 @@ export default function DesignSystemPage() {
               agent={DS_AGENT}
               budgetRemaining={DS_AGENT_BUDGET_REMAINING}
               attentionItems={[]}
-              spotRates={DS_AGENT_SPOT_RATES}
-              currency="USD"
               accountNames={{}}
               accountCount={1}
               nowMs={DS_AGENT_NOW}
@@ -3892,8 +3889,6 @@ export default function DesignSystemPage() {
               agent={DS_AGENT_NO_BUDGET}
               budgetRemaining={DS_AGENT_BUDGET_REMAINING}
               attentionItems={[]}
-              spotRates={DS_AGENT_SPOT_RATES}
-              currency="USD"
               accountNames={{}}
               accountCount={1}
               nowMs={DS_AGENT_NOW}

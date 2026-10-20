@@ -6334,8 +6334,20 @@ export type components = {
                 eur: number;
                 sek: number;
             };
-            /** @description Owner decision 1: true when any row's booked fiat was NULL and was priced at today's rate — the client marks the figure ≈ so a re-priced total is never shown as booked. */
+            /** @description Owner decision 1: true when any row's booked fiat was NULL and was priced (or needed pricing) at today's rate. Provenance only since #4165 — the display mark is `approxByCurrency`. */
             approx: boolean;
+            /** @description #4165 — the "≈" DECISION per display currency, from the one rule (`shouldMarkApprox` in @haven_ai/core): true when a row was priced at today’s rate AND the conversion changes the number in that currency. USDC re-priced into USD is dollars and never sets `usd`. The client marks the figure in its display currency from this, not from `approx`. Always sent since #4165; optional so a client reading an older backend falls back to `approx`. */
+            approxByCurrency?: {
+                usd: boolean;
+                eur: boolean;
+                sek: boolean;
+            };
+            /** @description #4165 — true when a row needed today’s rate in that currency and none was available, so it is NOT in the gross/net figure. The client says so in words rather than with a "≈". */
+            unpricedByCurrency?: {
+                usd: boolean;
+                eur: boolean;
+                sek: boolean;
+            };
             /** @description Confirmed payment rows in the window — activity, never netted. */
             payments: number;
             /** @description DISTINCT merchants over the window — merchant = the x402 resource host, else the recipient address. A user-level figure, never a sum of per-agent counts. */
@@ -6357,6 +6369,18 @@ export type components = {
             };
             /** @description Owner decision 1: true when any row's booked fiat was NULL and was priced at today's rate. */
             approx: boolean;
+            /** @description #4165 — the "≈" DECISION per display currency, from the one rule (`shouldMarkApprox` in @haven_ai/core): true when a row was priced at today’s rate AND the conversion changes the number in that currency. USDC re-priced into USD is dollars and never sets `usd`. The client marks the figure in its display currency from this, not from `approx`. Always sent since #4165; optional so a client reading an older backend falls back to `approx`. */
+            approxByCurrency?: {
+                usd: boolean;
+                eur: boolean;
+                sek: boolean;
+            };
+            /** @description #4165 — true when a row needed today’s rate in that currency and none was available, so it is NOT in the gross/net figure. The client says so in words rather than with a "≈". */
+            unpricedByCurrency?: {
+                usd: boolean;
+                eur: boolean;
+                sek: boolean;
+            };
             /** @description Confirmed payment rows in the window — activity, never netted. */
             payments: number;
             refusals: components["schemas"]["DashboardRefusalBuckets"];

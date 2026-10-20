@@ -203,17 +203,25 @@ describe('states', () => {
     })
   })
 
-  it('currency mode: one leading ≈, the caller’s rate; an unknown rate falls back to token mode', () => {
+  it('currency mode: USDC in USD is dollars — no ≈ (#4165)', () => {
     const caption = budgetCaption(row(), { nowMs: ANCHOR_NOW, timeZone: 'UTC', rate: { currency: 'USD', perToken: 1 } })
     expect(caption.kind).toBe('meter')
     if (caption.kind !== 'meter') return
-    expect(caption.caption).toBe('≈$1.25 of $5.00 used this period · refills in 3h')
+    expect(caption.caption).toBe('$1.25 of $5.00 used this period · refills in 3h')
+  })
+
+  it('currency mode in another currency: one leading ≈, the caller’s rate', () => {
+    const caption = budgetCaption(row(), { nowMs: ANCHOR_NOW, timeZone: 'UTC', rate: { currency: 'SEK', perToken: 10 } })
+    expect(caption.kind).toBe('meter')
+    if (caption.kind !== 'meter') return
+    expect(caption.caption).toBe('≈12,50\u00A0kr of 50,00\u00A0kr used this period · refills in 3h')
     expect(caption.caption.match(/≈/g)).toHaveLength(1)
   })
 
-  it('a used amount under a cent reads "≈<$0.01", never "≈$0.00" (#3897)', () => {
+  it('a used amount under a cent reads "<$0.01", never "$0.00" (#3897)', () => {
     // 3 atomic units of USDC (0.000003) at $1 — the "≈$0.00 of $0.00" class
-    // reported on dev, which the display helper now renders honestly.
+    // reported on dev, which the display helper now renders honestly. USDC in
+    // USD carries no ≈ since #4165.
     const caption = budgetCaption(row({ usedAtomic: '3', budgetAtomic: '4000' }), {
       nowMs: ANCHOR_NOW,
       timeZone: 'UTC',
@@ -221,20 +229,21 @@ describe('states', () => {
     })
     expect(caption.kind).toBe('meter')
     if (caption.kind !== 'meter') return
-    expect(caption.caption).toBe('≈<$0.01 of <$0.01 used this period · refills in 3h')
+    expect(caption.caption).toBe('<$0.01 of <$0.01 used this period · refills in 3h')
   })
 })
 
 describe("the dashboard row's compact wording (#3908)", () => {
   it('is opt-in: the same row reads in full by default and compact only with style "row"', () => {
-    const opts = { nowMs: ANCHOR_NOW, timeZone: 'UTC', rate: { currency: 'USD' as const, perToken: 1 } }
+    // Token mode, as the shared agent row renders it since #4165 (no rate).
+    const opts = { nowMs: ANCHOR_NOW, timeZone: 'UTC' }
     const full = budgetCaption(row(), opts)
     const compact = budgetCaption(row(), { ...opts, style: 'row' })
     if (full.kind !== 'meter' || compact.kind !== 'meter') throw new Error('expected meters')
-    // Every surface but the dashboard row keeps the full wording.
-    expect(full.caption).toBe('≈$1.25 of $5.00 used this period · refills in 3h')
-    // One leading ≈ still covers the line: the cap is a spot-rate estimate too.
-    expect(compact.caption).toBe('≈$1.25 of $5.00 · per day · refills in 3h')
+    // Every surface but the agent row keeps the full wording.
+    expect(full.caption).toBe('1.25 of 5.00 USDC used this period · refills in 3h')
+    // The row joins the cap and its symbol with a no-break space (#3910).
+    expect(compact.caption).toBe('1.25 of 5.00\u00a0USDC · per day · refills in 3h')
   })
 
   it('names an odd period in token mode', () => {

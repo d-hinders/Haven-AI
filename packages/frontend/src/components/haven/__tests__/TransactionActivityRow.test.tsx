@@ -64,6 +64,30 @@ describe('TransactionActivityRow ledger mode', () => {
   })
 })
 
+describe('TransactionActivityRow same-day divider (#4165)', () => {
+  it('draws no divider by default', () => {
+    const { container } = renderRow()
+    expect(container.querySelector('[data-inset-divider]')).toBeNull()
+  })
+
+  it('draws the inset hairline in --v2-border-subtle, starting at the text column', () => {
+    const { container } = renderRow({ insetDivider: true, density: 'compact' })
+    const row = container.querySelector('[data-inset-divider]')!
+    expect(row.className).toContain('before:bg-[var(--v2-border-subtle)]')
+    // Compact: 16/20px padding + the 32px mark + the 12px gap.
+    expect(row.className).toContain('before:left-[60px]')
+    expect(row.className).toContain('sm:before:left-[64px]')
+  })
+
+  it('insets past the larger mark at comfortable density', () => {
+    const { container } = renderRow({ insetDivider: true })
+    const row = container.querySelector('[data-inset-divider]')!
+    // Comfortable: 16/20px padding + the 36px mark + the 12px gap.
+    expect(row.className).toContain('before:left-[64px]')
+    expect(row.className).toContain('sm:before:left-[68px]')
+  })
+})
+
 describe('transactionDayGroups', () => {
   const today = new Date()
   const iso = (date: Date) => date.toISOString()

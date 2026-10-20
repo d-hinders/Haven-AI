@@ -179,11 +179,13 @@ describe('AgentsSection (#3809)', () => {
 
     const meter = screen.getByRole('progressbar')
     expect(meter).toHaveAttribute('aria-valuenow', '95')
-    // #3908: the compact row caption — one leading ≈, the period word in place
-    // of "used this period", the extra-budget count inside the caption line
-    // and never inside the progressbar's accessible name.
+    // #3908: the compact row caption — the period word in place of "used
+    // this period", the extra-budget count inside the caption line and never
+    // inside the progressbar's accessible name. #4165: in the budget's own
+    // token, USDC, with no "≈" (owner decision 2026-10-20).
     const caption = meter.parentElement!.querySelector('p')!
-    expect(caption.textContent).toMatch(/^≈\$0\.95 of \$1\.00 · per week · (refills|expires) .+ · \+1 budget$/)
+    expect(caption.textContent).toMatch(/^0\.95 of 1\.00\u00a0USDC · per week · (refills|expires) .+ · \+1 budget$/)
+    expect(caption.textContent).not.toMatch(/≈/)
     expect(container.textContent).not.toMatch(/used this period/)
     expect(meter).toHaveAccessibleName('USDC budget used')
     // The caption wraps at a "·", or inside the amounts segment only: every
@@ -195,6 +197,19 @@ describe('AgentsSection (#3809)', () => {
     // would overflow a 390px row); every later segment is unbreakable.
     expect(segments[0]).not.toHaveClass('whitespace-nowrap')
     for (const segment of segments.slice(1)) expect(segment).toHaveClass('whitespace-nowrap')
+  })
+
+  it('reads the budget in USDC for a SEK user too — never converted, never "≈" (#4165)', () => {
+    const agent = makeAgent({ budgets: [makeBudget()] })
+    const budgetRemaining = { budgets: [makeRead({ used_atomic: '100000000' })] }
+    render(
+      <AgentsSection
+        {...baseProps({ overview: makeOverview({ agents: [agent] }), budgetRemaining, currency: 'SEK' })}
+      />,
+    )
+    const caption = screen.getByRole('progressbar').parentElement!.querySelector('p')!
+    expect(caption.textContent).toMatch(/USDC/)
+    expect(caption.textContent).not.toMatch(/≈|kr/)
   })
 
   it("keeps the paused agent's live meter and uses the shared pause wording", () => {

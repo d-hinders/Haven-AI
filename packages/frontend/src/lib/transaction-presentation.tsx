@@ -1,5 +1,6 @@
 import { TransactionMovement } from '@/components/haven'
 import type { AmountCurrency } from '@/components/haven/Amount'
+import { shouldMarkApprox, type ApproxMarkKind } from '@haven_ai/core'
 import type { StatusTone } from '@/components/ui/StatusBadge'
 import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { truncate } from '@/lib/format'
@@ -229,13 +230,16 @@ export function activityCounterparty(item: PaymentActivityItem): CounterpartyFie
 }
 
 /**
- * The fiat figure a transaction row renders in the user's currency (#3805,
+ * The fiat figure a transaction renders in the user's currency (#3805,
  * #3824), as `<Amount>`'s currency mode wants it: book-time `convertedAmount`,
- * or the serve-time `approxAmount` with `approx: true` — one or the other,
- * never both on the wire. The flag is a provenance bit for callers; since
- * #3950 the list rows do NOT render the `≈` mark on it (only the detail
- * panel does). A row with neither prices to `amount: null`, which
- * `<Amount>` renders as an em dash: an unknown valuation is never 0.
+ * or the serve-time `approxAmount` — one or the other, never both on the
+ * wire. A row with neither prices to `amount: null`, which `<Amount>` renders
+ * as an em dash: an unknown valuation is never 0.
+ *
+ * `approx` is the "≈" DECISION for where the figure renders (`kind`), taken
+ * by the one rule in `@haven_ai/core`'s `shouldMarkApprox` (#4165): never on
+ * a list row (#3950), never on a booked figure, never for USDC shown in USD;
+ * otherwise on the detail panel. Callers pass it straight to `<Amount>`.
  *
  * The backend strikes both amounts in the user's `currency_preference`, so
  * the currency arrives ON the row; nothing here reads preferences. The
@@ -243,16 +247,27 @@ export function activityCounterparty(item: PaymentActivityItem): CounterpartyFie
  * (`DEFAULT_TRANSACTION_CURRENCY`), reached only if a producer ever omits the
  * currency beside a present amount.
  */
-export function transactionFiat(tx: Pick<
-  AggregatedTransaction,
-  'convertedAmount' | 'convertedCurrency' | 'approxAmount' | 'approxCurrency'
->): { amount: number | null; currency: AmountCurrency; approx: boolean } {
+export function transactionFiat(
+  tx: Pick<AggregatedTransaction, 'convertedAmount' | 'convertedCurrency' | 'approxAmount' | 'approxCurrency'> &
+    Partial<Pick<AggregatedTransaction, 'chainId' | 'tokenSymbol' | 'asset'>>,
+  kind: ApproxMarkKind,
+): { amount: number | null; currency: AmountCurrency; approx: boolean } {
   if (tx.convertedAmount != null && tx.convertedCurrency) {
     return { amount: Number(tx.convertedAmount), currency: tx.convertedCurrency, approx: false }
   }
+  const currency = tx.approxCurrency ?? 'SEK'
+  const amount = tx.approxAmount != null ? Number(tx.approxAmount) : null
   return {
-    amount: tx.approxAmount != null ? Number(tx.approxAmount) : null,
-    currency: tx.approxCurrency ?? 'SEK',
-    approx: true,
+    amount,
+    currency,
+    approx:
+      amount != null &&
+      shouldMarkApprox({
+        repriced: true,
+        chainId: tx.chainId,
+        tokenSymbol: tx.tokenSymbol ?? tx.asset,
+        displayCurrency: currency,
+        kind,
+      }),
   }
 }

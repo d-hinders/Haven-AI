@@ -90,10 +90,37 @@ describe('ActivitySection (#3810)', () => {
     expect(screen.getByText('×40+')).toBeInTheDocument()
   })
 
-  it('shows "≈" when the group is a serve-time approximation', () => {
+  it('a list row carries no "≈", even for a serve-time SEK approximation (#3950, #4165)', () => {
     renderSection({ activity: [group()] })
 
-    expect(screen.getByText('≈')).toBeInTheDocument()
+    expect(screen.queryByText(/≈/)).not.toBeInTheDocument()
+    // The serve-time figure still renders, plain, in its own currency — the
+    // mark belongs to totals and the detail panel, never to a row.
+    expect(
+      screen.getAllByText((_, element) =>
+        (element?.textContent ?? '').replace(/\u00a0/g, ' ').replace(/^[-+]/, '') === '134,50 kr',
+      ).length,
+    ).toBeGreaterThan(0)
+  })
+
+  it('separates same-day rows with the inset hairline; a day\u2019s first row has none (#4165)', () => {
+    // Local noon, so a run near midnight cannot split "today" in two.
+    const today = new Date()
+    today.setHours(12, 0, 0, 0)
+    const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000)
+    const { container } = renderSection({
+      activity: [
+        group({ latestAt: today.toISOString() }),
+        group({ latestAt: new Date(today.getTime() - 1000).toISOString(), agentId: 'agent-2' }),
+        group({ latestAt: yesterday.toISOString(), agentId: 'agent-3' }),
+      ],
+    })
+    const dividers = Array.from(container.querySelectorAll('[data-inset-divider]'))
+    // Today has two rows (one hairline between them); yesterday has one (none).
+    expect(dividers).toHaveLength(1)
+    expect(dividers[0].className).toContain('before:bg-[var(--v2-border-subtle)]')
+    // Day groups keep their full-width separation.
+    expect(container.querySelector('.divide-y.divide-\\[var\\(--v2-border\\)\\]')).not.toBeNull()
   })
 
   it('shows no "≈" when every member carried book-time fiat', () => {

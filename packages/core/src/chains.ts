@@ -27,6 +27,15 @@ export interface CoreTokenConfig {
   /** Token contract address; null = the chain-native token. */
   address: string | null
   coingeckoId: string
+  /**
+   * The fiat currency the token is pegged to 1:1 (#4165), when it is one.
+   * A FACT about the token, read by `shouldMarkApprox` (`approx-mark.ts`):
+   * showing a USD-pegged token in USD changes no number, so the figure
+   * reads as dollars with no "≈". Absent for anything that floats (ETH,
+   * xDAI) and for a token whose peg is not asserted here (EURe) — absent
+   * is the conservative answer, it keeps the mark.
+   */
+  pegged?: 'USD'
 }
 
 /**
@@ -111,7 +120,7 @@ const GNOSIS: CoreChainConfig = {
   tokens: [
     { symbol: 'xDAI', decimals: 18, address: null, coingeckoId: 'xdai' },
     { symbol: 'EURe', decimals: 18, address: '0xcB444e90D8198415266c6a2724b7900fb12FC56E', coingeckoId: 'monerium-eur-money' },
-    { symbol: 'USDC.e', decimals: 6, address: '0x2a22f9c3b484c3629090FeED35F17Ff8F88f76F0', coingeckoId: 'usd-coin' },
+    { symbol: 'USDC.e', decimals: 6, address: '0x2a22f9c3b484c3629090FeED35F17Ff8F88f76F0', coingeckoId: 'usd-coin', pegged: 'USD' },
   ],
 }
 
@@ -129,7 +138,7 @@ const BASE: CoreChainConfig = {
   },
   tokens: [
     { symbol: 'ETH', decimals: 18, address: null, coingeckoId: 'ethereum' },
-    { symbol: 'USDC', decimals: 6, address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', coingeckoId: 'usd-coin' },
+    { symbol: 'USDC', decimals: 6, address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', coingeckoId: 'usd-coin', pegged: 'USD' },
   ],
 }
 
@@ -151,7 +160,7 @@ const BASE_SEPOLIA: CoreChainConfig = {
   tokens: [
     { symbol: 'ETH', decimals: 18, address: null, coingeckoId: 'ethereum' },
     // Circle's canonical Base Sepolia testnet USDC.
-    { symbol: 'USDC', decimals: 6, address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', coingeckoId: 'usd-coin' },
+    { symbol: 'USDC', decimals: 6, address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', coingeckoId: 'usd-coin', pegged: 'USD' },
   ],
   // Testnet-only (#2534): the Circle-faucet page for Base Sepolia USDC. A
   // human opens this; nothing in Haven ever does.
@@ -240,6 +249,16 @@ export function isRegisteredChain(chainId: number): boolean {
 /** Token data for a symbol on a chain, or undefined. */
 export function resolveToken(chainId: number, symbol: string): CoreTokenConfig | undefined {
   return getChainData(chainId).tokens.find((t) => t.symbol === symbol)
+}
+
+/**
+ * The fiat currency a token is pegged to (#4165), or null — for a token the
+ * registry does not mark, a token it does not know, or a chain it does not
+ * know (history can carry any of these; none of them may throw here).
+ */
+export function tokenPeg(chainId: number | null | undefined, symbol: string | null | undefined): 'USD' | null {
+  if (chainId == null || symbol == null || !isRegisteredChain(chainId)) return null
+  return resolveToken(chainId, symbol)?.pegged ?? null
 }
 
 /**

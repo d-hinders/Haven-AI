@@ -65,6 +65,7 @@ import { useBudgetRemaining } from '@/hooks/useBudgetRemaining'
 import { useAttentionDismissals } from '@/hooks/useAttentionDismissals'
 import { useAccountSigners } from '@/hooks/useAccountSigners'
 import { useAccountMoneyFlow } from '@/hooks/useAccountMoneyFlow'
+import { UNPRICED_TOTALS_NOTE } from '@/lib/money-flow-tally'
 import { ApiRequestError } from '@/lib/api'
 import AccountActivityTab from './AccountActivityTab'
 import DelegationSendModal from '@/components/DelegationSendModal'
@@ -563,6 +564,11 @@ export default function AccountDetailClient() {
                     <Amount amount={moneyFlow.moneyOut} currency={currency} approx={moneyFlow.approx} />
                   </p>
                 </div>
+                {/* #4165: rows the totals could not value are said in words,
+                    never folded into a "≈" — the mark means converted. */}
+                {moneyFlow.unpriced ? (
+                  <p className="text-xs text-[var(--v2-ink-3)]">{UNPRICED_TOTALS_NOTE}</p>
+                ) : null}
                 {/* #2882: the feed is capped at the explorer window, so the
                     figures may not cover the full 30 days — the partial-data
                     qualifier instead of a completeness claim. */}
@@ -660,8 +666,6 @@ export default function AccountDetailClient() {
                       agent={agent}
                       budgetRemaining={budgetRemaining ?? null}
                       attentionItems={attentionItems}
-                      spotRates={overview?.spotRates}
-                      currency={currency}
                       accountNames={accountNames}
                       accountCount={user?.accounts?.length ?? 0}
                       nowMs={Date.now()}

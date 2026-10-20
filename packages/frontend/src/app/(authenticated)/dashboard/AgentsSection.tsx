@@ -13,8 +13,8 @@
  *
  * Each row's meter is `BudgetMeter` captioned through `lib/budget-caption.ts`
  * (#3806): the primary of the agent's budgets — the one closest to running
- * out, per `selectPrimaryBudgets` — in the user's currency via #3803's
- * `spotRates`, plus a "+N budgets" count OUTSIDE the meter's ARIA name. A
+ * out, per `selectPrimaryBudgets` — in the budget's own token ("1.20 of 3.00
+ * USDC", #4165), plus a "+N budgets" count OUTSIDE the meter's ARIA name. A
  * budget with no known read renders an em dash, never a 0% bar; an agent
  * whose only authority is an open received sub-budget reads "Spends from
  * <parent>'s budget", never "No budget" (#3803). A paused agent keeps its
@@ -259,8 +259,6 @@ export function AgentsSection({
               agent={agent}
               budgetRemaining={budgetRemaining}
               attentionItems={attentionItems}
-              spotRates={overview?.spotRates}
-              currency={currency}
               accountNames={accountNames}
               accountCount={totalAccounts(overview)}
               nowMs={effectiveNowMs}

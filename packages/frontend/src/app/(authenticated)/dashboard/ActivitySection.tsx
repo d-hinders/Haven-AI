@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useMemo } from 'react'
-import type { ApiSchema } from '@haven_ai/core'
+import { shouldMarkApprox, type ApiSchema } from '@haven_ai/core'
 import { ArrowLeftRight } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { Button } from '@/components/ui/Button'
@@ -229,7 +229,7 @@ function ActivityRows({
             const groupKey = `${group.latestAt}-${group.to}-${group.tokenSymbol}-${index}`
             return (
               <Link key={groupKey} href="/transactions" className="block">
-                <ActivityRow group={group} accountCount={accountCount} />
+                <ActivityRow group={group} accountCount={accountCount} insetDivider={index > 0} />
               </Link>
             )
           })}
@@ -242,9 +242,12 @@ function ActivityRows({
 function ActivityRow({
   group,
   accountCount,
+  insetDivider,
 }: {
   group: ActivityGroup
   accountCount: number
+  /** #4165: the same-day inset hairline, on every row after a day's first. */
+  insetDivider: boolean
 }) {
   // The group carries the counterparty fields of its NEWEST member (#3824)
   // plus the name the backend resolved for that counterparty. No chain-scoped
@@ -282,22 +285,30 @@ function ActivityRow({
   }
   const description = subtitleParts.length > 0 ? subtitleParts.join(' · ') : undefined
 
-  // Amounts are #3805's currency mode: book-time `convertedAmount` plain,
-  // serve-time `approxAmount` with "≈" — and an unknown valuation renders
-  // the em dash, never 0. A group serves one or the other, never both
-  // (#3824).
-  const fiat =
+  // Amounts are #3805's currency mode: book-time `convertedAmount` or
+  // serve-time `approxAmount`, and an unknown valuation renders the em dash,
+  // never 0. A group serves one or the other, never both (#3824). The "≈"
+  // is the one rule's answer for a list row (#4165, `shouldMarkApprox`):
+  // never — the row stays plain on every surface (#3950).
+  const valuation =
     group.convertedAmount != null && group.convertedCurrency
-      ? {
-          amount: Number(group.convertedAmount),
-          currency: group.convertedCurrency,
-          approx: false,
-        }
+      ? { amount: Number(group.convertedAmount), currency: group.convertedCurrency, repriced: false }
       : {
           amount: group.approxAmount != null ? Number(group.approxAmount) : null,
           currency: group.approxCurrency ?? 'USD',
-          approx: true,
+          repriced: true,
         }
+  const fiat = {
+    amount: valuation.amount,
+    currency: valuation.currency,
+    approx: shouldMarkApprox({
+      repriced: valuation.repriced,
+      chainId: null,
+      tokenSymbol: group.tokenSymbol,
+      displayCurrency: valuation.currency,
+      kind: 'row',
+    }),
+  }
 
   return (
     <TransactionActivityRow
@@ -312,6 +323,7 @@ function ActivityRow({
       timestamp={timeAgo(group.latestAt)}
       direction={group.direction}
       density="compact"
+      insetDivider={insetDivider}
     />
   )
 }

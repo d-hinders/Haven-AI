@@ -46,6 +46,9 @@ export const THEME_TOKENS: TokenSpec[] = [
   // Borders — lighter than the surface they divide.
   { name: 'border', light: '#e6ebf1', dark: '#2b3140' },
   { name: 'border-strong', light: '#d6dbe3', dark: '#3a4152' },
+  // #4165: the inset hairline between same-day ledger rows — quieter than
+  // `border`, which keeps the full-width separation between day groups.
+  { name: 'border-subtle', light: '#edf0f4', dark: '#232834' },
   { name: 'border-anchor', light: 'rgba(79, 70, 229, 0.10)', dark: 'rgba(165, 172, 255, 0.16)' },
   // The floating tab-bar pill (#4063): dark lifts the pill onto a distinct
   // opaque surface with the strong border, because the dark popover shadow is

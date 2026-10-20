@@ -22,7 +22,10 @@
           "price",
           "0.001"
         ],
-        "acceptPreemptive": true
+        "acceptPreemptive": true,
+        "preemptiveReadTools": [
+          "haven_quote_x402"
+        ]
       }
     }
   ],

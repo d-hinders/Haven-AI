@@ -53,6 +53,7 @@ import {
   loadTasks,
   resolveTask,
   selectTaskSequence,
+  exhaustedThresholdAtomic,
 } from './tasks.js'
 import {
   renderSummary,
@@ -168,20 +169,6 @@ export interface PerTrialResolver {
  * 3. the amount from the budget read of THIS moment (tier-3 tasks read with
  *    `exhausted-ok`: their precondition IS a spent budget).
  */
-/**
- * The threshold a tier-3 task's `EXHAUSTED-period-budget-below-<X>-USDC`
- * precondition names, in atomic USDC (6 decimals). Undefined when the task
- * declares no such bound.
- */
-export function exhaustedThresholdAtomic(task: EvalTask): bigint | undefined {
-  if (task.tier !== 3) return undefined
-  for (const r of task.requires) {
-    const m = /^EXHAUSTED-period-budget-below-(\d+)(?:\.(\d{1,6}))?-USDC$/.exec(r)
-    if (m) return BigInt(m[1]!) * 1_000_000n + BigInt((m[2] ?? '').padEnd(6, '0') || '0')
-  }
-  return undefined
-}
-
 export function createPerTrialResolver(deps: PerTrialResolverDeps): PerTrialResolver {
   const timeoutMs = deps.consistencyTimeoutMs ?? 120_000
   const pollMs = deps.consistencyPollMs ?? 2_000

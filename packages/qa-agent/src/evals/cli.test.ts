@@ -662,7 +662,7 @@ describe('A3: the drainer runs after every tier-1 task, before the exhausted-bud
 // trusted from the tier order (review of the pre-emptive decline change).
 describe('tier-3 precondition is checked at resolve time', () => {
   it('reads the threshold from the EXHAUSTED requires label', async () => {
-    const { exhaustedThresholdAtomic } = await import('./cli.js')
+    const { exhaustedThresholdAtomic } = await import('./tasks.js')
     expect(exhaustedThresholdAtomic({ tier: 3, requires: ['EXHAUSTED-period-budget-below-0.001-USDC'] } as never)).toBe(1000n)
     expect(exhaustedThresholdAtomic({ tier: 1, requires: ['EXHAUSTED-period-budget-below-0.001-USDC'] } as never)).toBeUndefined()
   })

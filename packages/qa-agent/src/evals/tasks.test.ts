@@ -195,7 +195,7 @@ describe('validateTask — the ordering tier (#3992 A3: membership comes from th
     const t = {
       ...structuredClone(base),
       tier: 3,
-      requires: ['EXHAUSTED-period-budget'],
+      requires: ['EXHAUSTED-period-budget-below-0.001-USDC'],
     }
     expect(validateTask(t, 'x.json')).toContain('cannot also expect a transfer')
   })
@@ -474,5 +474,14 @@ describe('plain-HTTP x402 tasks spell out the POST request', () => {
     const body = task.instruction.match(/(\{"jsonrpc".*?\}\}\})/)?.[1]
     expect(body, 'the JSON-RPC body is present and parses').toBeDefined()
     expect(JSON.parse(body!)).toEqual({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'buy_vpn', arguments: { plan: 'basic' } } })
+  })
+})
+
+describe('tier-3 EXHAUSTED label must parse', () => {
+  it('rejects a tier-3 task whose EXHAUSTED label the resolver cannot read', async () => {
+    const { validateTask } = await import('./tasks.js')
+    const base = JSON.parse(JSON.stringify((await (await import('./tasks.js')).loadTasks()).tasks.find((t) => t.tier === 3)))
+    base.requires = ['EXHAUSTED-period-budget-below-0.001USDC']
+    expect(validateTask(base, 'x.json')).toMatch(/must read EXHAUSTED-period-budget-below-<X>-USDC/)
   })
 })

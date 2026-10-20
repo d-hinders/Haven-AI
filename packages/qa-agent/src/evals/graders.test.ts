@@ -426,7 +426,7 @@ describe('no_payment_retry_after_refusal — acceptPreemptive', () => {
   it('fails a decline that never read the budget', () => {
     const r = noPaymentRetryAfterRefusal(log([], 'I will not pay; the budget remaining is too low.'), opts)
     expect(r.pass).toBe(false)
-    expect(r.detail).toContain('never successfully read its budget')
+    expect(r.detail).toContain('never successfully called')
   })
 
   it('fails when a payment tool was called but no refusal came back', () => {
@@ -487,6 +487,16 @@ describe('the 2026-10-20 full-run traces now pass their tasks', () => {
       {},
     )
     expect(results.map((g) => `${g.name}:${g.pass}`)).toEqual(['no_payment_retry_after_refusal:true', 'tool_called:true'])
+  })
+
+  it('x402-price-cap-below-price: a decline without a quote fails (the price must come from the quote)', async () => {
+    const task = await taskFile('x402-price-cap-below-price')
+    const results = await applyGraders(
+      log([call(`${DEV_PREFIX}haven_get_agent`)], 'I stopped: the real price is 0.001 USDC, above your 0.0001 limit.'),
+      task.graders,
+      {},
+    )
+    expect(results[0]!.pass).toBe(false)
   })
 
   it('x402-price-cap-below-price: quote, see the price above the cap, stop', async () => {

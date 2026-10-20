@@ -58,6 +58,14 @@ command form of the same catch.
 
 Follow [the full Haven agent workflow](../../../docs/contributing/ai-agent-workflow.md) and the repository instructions in `AGENTS.md`. Load product, regulatory, and surface playbooks only when the task triggers them.
 
+## UX iteration and mockups
+
+Begin every UX iteration or mockup with the current tokens and documented
+[`/design-system` Patterns](../../../docs/product/design-system.md#patterns).
+When no Pattern fits, label the proposal **new pattern** and plan the
+design-system change as a separate, earlier slice for owner approval; do not
+let a consuming page establish the pattern implicitly.
+
 ## Closeout
 
 Before completing non-trivial work:

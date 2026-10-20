@@ -23,8 +23,9 @@ label is for the standalone queue. See docs/contributing/autonomous-pr-loop.md.
 
 ## Sub-issues (the queue, in order)
 
-<!-- Create each as its own issue (well-scoped: scope + acceptance + files +
-money-path), then add it as a sub-issue of this one. List them here for
+<!-- Create each as its own issue using the loop-task shape (scope, acceptance,
+files, surface, money-path, plus the Design system brief for
+area:frontend), then add it as a sub-issue of this one. List them here for
 visibility. -->
 
 - [ ] #
@@ -42,6 +43,18 @@ docs/contributing/ship-playbooks/README.md. -->
 - [ ] `area:mcp`
 - [ ] `area:docs`
 - [ ] `money-path`
+
+## Design system
+
+<!-- Required when any slice is area:frontend: name the existing
+/design-system Patterns the epic uses; list every component changed and its
+other usages; identify any proposed NEW PATTERN and the separate, earlier
+design-system slice that obtains owner approval. Otherwise write
+"Not applicable — no frontend surface". -->
+
+- Patterns used:
+- Components changed and other usages:
+- New pattern:
 
 ## Promotion checklist
 

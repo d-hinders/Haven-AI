@@ -45,6 +45,11 @@ machine's observation, not an agent's judgement.
    - **Files**: best-effort ownership.
    - **Surface**: checked surface labels.
    - **Money-path?**: explicit Yes or No.
+   - **Design system** for every `area:frontend` issue: the existing
+     [`/design-system` Patterns](../../../docs/product/design-system.md#patterns)
+     it will use, components it will change plus their other usages, and any
+     proposed **new pattern**. Write `Not applicable — no frontend surface`
+     for other issues.
 
    Take the template's **body shape and its sizing rule** — "keep it small and
    self-contained, one PR's worth of work"; anything larger is an epic, below.
@@ -310,6 +315,11 @@ text so two sessions dispatch the same review:
 >    wire field, a live payment path, or a migration ordering.
 > 5. **Gaps** — list what the scope does not say that a builder would have to
 >    decide, and answer any question the issue poses where the code answers it.
+> 6. **Design system** — for `area:frontend`, compare the issue's `## Design
+>    system` section with `/design-system` and the existing component usages.
+>    Flag a missing matching Pattern, an incomplete caller list, or an
+>    unlabeled new pattern that lacks a separate design-system-first slice and
+>    owner approval.
 >
 > Findings by severity (blocking / should-fix / nit); no edits; no issues filed.
 

@@ -64,8 +64,8 @@ sibling. So name the surface precisely enough to be matched on: the file or
 tool at fault, not just the theme. (#2968 duplicated the 2026-09-13 scan's F2
 30 hours after it was recorded.)
 
-Two conventions make an entry re-measurable by a future run (the ledger header
-also records a third — disposition upkeep — owned by
+Three conventions make an entry re-measurable by a future run (the ledger header
+also records a fourth — disposition upkeep — owned by
 [ship-next](../ship-next/SKILL.md)'s closeout, not by this skill):
 
 - **Measurement blocks.** Every evidence number is written as
@@ -124,8 +124,38 @@ Report at most five concrete opportunities. For each, state:
   reduces, not just how it would make the code look.
 - **Approximate scope:** likely files/boundaries and whether it fits one PR
   or needs multiple PRs; do not manufacture an epic for a small improvement.
-- **Verification still needed:** the focused test, mutation, comparison or
-  review that would establish the benefit and preserve existing behavior.
+- **Verified at scan:** commands run at the scan SHA, each with its output —
+  the criterion's grep with its count, the mutation recipe built once, and
+  `classifyChangedFiles` routing and the money-path verdict for the files the
+  remedy adds or changes (below); one that cannot run yet is *unrun*, with
+  the reason. Prose ("M7 red after the change") is not an entry: three of the
+  2026-10-19 scan's four issues (#4118, #4121, and #4120 through its sibling
+  #4122) drew a blocking spec-review correction one of these would have shown.
+- **Verification still needed:** what can only run after the change — the
+  focused test, mutation, comparison or review that would establish the
+  benefit and preserve existing behavior.
+
+```bash
+# routing (the CI surfaces these files turn on), then the money-path verdict over globs + controlGlobs (the control must print money-path)
+node -e 'import("./scripts/ci/change-classifier.mjs").then(m=>{const r=m.classifyChangedFiles(process.argv.slice(1));console.log(Object.keys(r).filter(k=>r[k]===true).join(" ")||"(none)")})' <file>...
+node -e 'import("./scripts/ci/qa-freshness.mjs").then(q=>{const g=[...q.loadMoneyPathGlobs(),...q.loadMoneyPathControlGlobs()];for(const f of process.argv.slice(1))console.log(f,g.some(x=>q.matchesGlob(f,x))?"money-path":"off")})' packages/backend/src/rails/sweep.ts <file>...
+```
+
+**Copy identifiers and figures from command output, then resolve each
+identifier** as a whole token whose boundary also excludes `-`, beside a
+control known to resolve. `-F` and `-w -F` are not whole-token checks: at `777b71137`, `-F`
+matches `02-hosted-mcp-signer` and `-w -F` (which counts `-` as a boundary)
+matches `hosted-mcp-signer`, both inside the real `x402-hosted-mcp-signer`.
+
+```bash
+for t in x402-hosted-mcp-signer 02-hosted-mcp-signer hosted-mcp-signer; do  # control first
+  echo "$t $(git grep -l -P "(?<![\w-])\Q$t\E(?![\w-])" <sha> | wc -l)"; done  # → 25, 0, 0 files
+```
+
+Review correction `3d40fffa` (PR #4104) fixed that invented name and four
+more slips, now rules: grep the bare token, never one quote form of it; write
+a numstat as `+A/−D`; give every denominator its unit ("8 of 31 census test
+files"); attribute a census to whoever ran it.
 
 For both levels, exclude cosmetic preferences, lint-only nits, speculative
 abstractions, dependency bumps alone and generic “add tests” suggestions.
@@ -151,7 +181,11 @@ If tracking cannot be checked, disclose that limit and mark novelty unverified.
    the `money-flow` **job** level, never the run conclusion: most qa-dev runs
    are gate-skipped `deployment_status` runs that still conclude `success`
    (#3348). The harness's in-step retry never moves `run_attempt`, so count
-   it from the job log's `money-flow QA passed on attempt 2/2` line. Runtime-UX stays
+   it from the job log's `money-flow QA passed on attempt 2/2` line. The two
+   attempts can fail differently: classify each from its own
+   `• <leg> … PASS|FAIL` lines, never from the job as a whole (`gh api repos/{owner}/{repo}/actions/jobs/<job>/logs | grep -nE 'money-flow attempt [12]/2|• .* … (PASS|FAIL)'`).
+   In job `116876251507` attempt 1/2 failed only `x402-catalog-guided-purchase`;
+   attempt 2/2 failed four legs, `x402-hosted-mcp-signer` among them. Runtime-UX stays
    out of scope: that class surfaces through external testing (epic #1585's
    origin), not repo scanning. Then take the numbered **wave dimensions** — the
    classes the 600-issue wave was measured to consist of — each as its
@@ -227,18 +261,11 @@ If tracking cannot be checked, disclose that limit and mark novelty unverified.
    correcting it in place does not touch the append-only rule — and present
    the findings at the reviewed SHA, a corrected figure stated as corrected.
    **It costs the owner time, and that is the trade:** on 2026-09-21 the owner
-   acted on its decision at 14:24:21Z (the first filing), at least 26 minutes
-   56 seconds before the report's last reviewed commit (`702fe38e`,
-   14:51:17Z, bound in the third review round) — on a report carrying a `covers:` figure of 21 against
-   a true 7 (caught only because `new-task` re-measured before filing), an
-   in-scope residue count of 10 against a true 16, and a claim about the tree
-   read off a stale runtime. Then **stop for the human decision**, and record
-   it in a **separate** ledger pull request: appending it to the reviewed one
-   voids the verdict for the file it binds. That run appended its decision to
-   the scan's own pull request (#3212, `958ac624`), and its review started at
-   that commit — after the decision; #3218 shows the separate shape, used for the same entry's later
-   `shipped` disposition. On
-   explicit approval to file, append the decision and hand off to
+   acted on a report before its review had finished, while it still carried
+   two wrong figures and a claim read off a stale runtime. Then **stop for the
+   human decision**, and record it in a **separate** ledger pull request:
+   appending it to the reviewed one voids the verdict for the file it binds.
+   On explicit approval to file, append the decision and hand off to
    [new-task](../new-task/SKILL.md), preserving its filing checks and backlog
    default. Do not file an unverified defect as though it were reproduced.
    Use a standalone task for one-PR work and **Epics** for multi-PR work.
@@ -280,9 +307,14 @@ A real report must replace the fixture revision and results with its own evidenc
   requires editing and reviewing both implementations. Candidate: extract the
   shared pure calculation, keeping caller-specific retry decisions local.
   Scope: the two callers and a helper, one PR. Benefit: eliminate the second
-  policy edit. Verification still needed: run both callers' characterization
-  tests with the extraction and check that their differing stop conditions
-  remain unchanged. This qualifies on observed contributor burden; it does
+  policy edit. Verified at scan:
+  `git grep -l 'retryDelay' example-A -- fixture/ | wc -l` → 2, the count
+  the criterion will use; routing for the callers and the new helper →
+  `code backend`; money-path matcher → `off` for all three, control
+  `money-path`; mutation recipe *unrun*, because the helper it would mutate
+  does not exist yet. Verification still needed: run both callers'
+  characterization tests with the extraction and check that their differing
+  stop conditions remain unchanged. This qualifies on observed contributor burden; it does
   not claim an unobserved production defect.
 - **Rejected cosmetic suggestion:** “rename the helper because the new name
   reads better.” No failure mechanism or contributor burden is demonstrated;

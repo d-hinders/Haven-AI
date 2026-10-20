@@ -2841,3 +2841,18 @@ effective (narrower) limits, and the dashboard shows the parent→child tree.
 > would refuse. Scope of this note: that one route. Nothing else in this
 > document was re-verified; `last-verified` is bumped to 2026-10-15 for
 > exactly this coverage.
+
+> **Re-verification (#4119, qa-dev asserts the merchant settlement was
+> recorded, 2026-10-20):** this diff touches
+> `packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts` to ADD an
+> assertion after `haven_settle_mcp_tool` returns, through a new helper the
+> four qa-dev EIP-3009 legs share: the payment status must
+> carry `merchant_settlement_recorded`, the receipt's `settlement_tx_hash`
+> must equal the settle's, and the settle's eip3009 evidence guidance is
+> followed — a `haven_report_settlement_evidence` follow-up carries the
+> leg's own `payment_header`, and any refusal fails the leg. It READS the
+> existing status flag, receipt field and hosted guidance only; no backend,
+> hosted or SDK behaviour, signing decision or payment step changes, and the
+> leg's quote, signing and settle calls are byte-identical. Scope of this
+> note: that harness assertion. Nothing else in this document was
+> re-verified; `last-verified` is not re-stamped.

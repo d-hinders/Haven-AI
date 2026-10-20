@@ -106,6 +106,16 @@ const NUL = '\u0000'
  */
 function tokenNamesGlob(token, glob) {
   const needle = token.replace(/\/$/, '')
+  // A token whose segments after the first are ALL wildcards names nothing
+  // (#4122). `src/**` — the tail of a `packages/mcp-server/src/**` entry —
+  // became `(?:^|/)src/[^/]*[^/]*$` on the token-wildcard branch below, which
+  // matches every `packages/<pkg>/src/<file>`. Six of the eight SDK globs were
+  // "named" by it alone, and so was a file that does not exist, so leaving an
+  // SDK file out of the Merge Gate could never go red. A token must carry a
+  // literal segment past its first to name anything: `rails/delegation-*.ts`
+  // still does, `src/**` and `x/*` do not.
+  const segments = needle.split('/')
+  if (segments.length > 1 && segments.slice(1).every((s) => /^\*+$/.test(s))) return false
   const stripped = glob.replace(/\/\*\*$/, '')
   // Anchor every match at a path boundary. A bare `endsWith` would let a token
   // satisfy any glob merely ENDING in those characters, so two canonical globs
@@ -208,6 +218,29 @@ describe('money-path list stays in one piece', () => {
         'that prose, not this JSON, so a perimeter missing from it is a perimeter ' +
         'the human half of the union cannot apply (#1892).',
     )
+  })
+
+  test('a wildcard-only token names nothing; a token with a literal segment still does (#4122)', () => {
+    // The Merge Gate parity test above could not fail for an SDK file. The
+    // prose token `src/**` (the tail of the mcp-server and demo-merchant
+    // entries) matched every `packages/<pkg>/src/<file>` on the token-wildcard
+    // branch, so six of the eight SDK globs were "named" by it alone, and so
+    // were packages/sdk/src/client.ts and a file that does not exist.
+    // Mutation: drop the wildcard-only early return in tokenNamesGlob and the
+    // first three assertions fail.
+    assert.equal(tokenNamesGlob('src/**', 'packages/sdk/src/client.ts'), false)
+    assert.equal(tokenNamesGlob('src/**', 'packages/sdk/src/does-not-exist.ts'), false)
+    assert.equal(tokenNamesGlob('x/*', 'packages/backend/src/x/a.ts'), false)
+    assert.equal(tokenNamesGlob('rails/delegation-*.ts', 'packages/backend/src/rails/delegation-*.ts'), true)
+    assert.equal(tokenNamesGlob('packages/mcp-server/src/**', 'packages/mcp-server/src/**'), true)
+    assert.equal(tokenNamesGlob('mcp-server/src/**', 'packages/mcp-server/src/**'), true)
+
+    // The same through a fixture Merge Gate list: a package entry whose prose
+    // says "scoped to `src/**`" must not name an SDK file it never mentions.
+    const fixture = '- `packages/mcp-server/src/**` (the hosted MCP surface. Scoped to `src/**`);\n'
+    const tokens = listedTokens(fixture)
+    assert.deepEqual(tokens, ['packages/mcp-server/src/**', 'src/**'])
+    assert.equal(tokens.some((t) => tokenNamesGlob(t, 'packages/sdk/src/merchant-completion.ts')), false)
   })
 
   test('the two lists are disjoint — a glob belongs to exactly one', () => {

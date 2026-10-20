@@ -994,8 +994,9 @@ perimeter question, and the absence is invisible: the check is green because
 nothing was analysed, not because the analysis passed.
 
 The list is therefore maintained against one reference: the money-path file
-list in
-[`ship-next`'s Merge Gate](../../.agents/skills/ship-next/SKILL.md). If a path
+list, annotated in
+[`ship-next`'s perimeter reference](../../.agents/skills/ship-next/references/money-path-perimeter.md)
+and held equal to `.github/money-path-globs.json` (#4177). If a path
 is money-path enough to route the [`money.md`](../contributing/ship-playbooks/money.md)
 playbook, it is money-path enough to owe a perimeter shard. **Adding a file to
 that list without adding it here re-opens this hole.**

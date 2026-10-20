@@ -71,11 +71,16 @@ import { fileURLToPath } from 'node:url'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const read = (p) => readFileSync(path.join(ROOT, p), 'utf8')
 
-/** The four places the money-path list legitimately lives (#1030, #1899). */
+/**
+ * The four places the money-path list legitimately lives (#1030, #1899). The
+ * annotated copy moved out of ship-next's Merge Gate section into its own
+ * reference file (#4177), so the skill's SKILL.md is ordinary prose again: a copy pasted
+ * back into it is scored like any other document.
+ */
 export const KNOWN_COPIES = Object.freeze([
   '.github/money-path-globs.json',
   '.github/labeler.yml',
-  '.agents/skills/ship-next/SKILL.md',
+  '.agents/skills/ship-next/references/money-path-perimeter.md',
   'docs/regulatory/casp-risk-guardrails.md',
 ])
 

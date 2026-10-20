@@ -325,11 +325,12 @@ Run the **repository's own required checks** locally before pushing, for fast fe
 - **The `node --test` suites are the part a vitest sweep never touches, which is
   why the battery above comes first.** Several read source by content —
   `scripts/lint-request-schemas.test.mjs` pins the real `enforcedModules` list,
-  `scripts/ci/money-path.test.mjs` requires every path in this skill's Merge Gate
-  to be on the perimeter — and PR #3221 went red on each in turn (runs
-  `35743765136` at `162f916a`, `35748951778` at `9bd70181`) after a local sweep
-  that ran vitest and a hand-picked lint list. `node scripts/ci/preflight.mjs
-  --list` selects `npm run lint:request-schemas:test` at the first commit and
+  `scripts/ci/money-path.test.mjs` holds this skill's
+  `references/money-path-perimeter.md` equal to the perimeter — and PR #3221
+  went red on each in turn (runs `35743765136` at `162f916a`, `35748951778` at
+  `9bd70181`) after a local sweep that ran vitest and a hand-picked lint list.
+  `node scripts/ci/preflight.mjs --list` selects
+  `npm run lint:request-schemas:test` at the first commit and
   `node --test scripts/ci/*.test.mjs` at the second: the battery would have
   caught both. Two traps when running any of them by hand: without `npm ci`
   six cases fail for missing packages (`dependency-cruiser`, `tsx`), which is the
@@ -766,172 +767,17 @@ label **or** the diff touches a file on the perimeter.
 **The perimeter's single source of truth is
 [`.github/money-path-globs.json`](../../../.github/money-path-globs.json)** (#1030) —
 the same file that drives the `money-path` labeler and the `qa-freshness` promotion
-gate. The annotated list below exists for the *why* behind each group, and
-`scripts/ci/money-path.test.mjs` now pins it to that JSON **in both directions**: a
-path here that the JSON lacks fails CI, and a path in the JSON that is missing here
-fails CI too. Read the JSON when you need the authoritative answer; read this when
-you need the reasoning. Never edit one without the other — CI will not let you.
-
-- `routes/payments.ts`, `routes/x402.ts`, and
-  `routes/machine-payments.ts` — all three are live route files. (#996/#997 moved
-  their *logic* into the modules below and left thin validation/auth shells, which
-  this line described for a year as the files having "dissolved". They had not;
-  both are registered in `index.ts` today. A parenthetical that reads as an
-  exclusion is worse than an omission, because nobody re-checks it — #1892.);
-- `modules/x402/`, `modules/mpp/`, `domain/payment-token.ts`,
-  `domain/machine-payment-lifecycle.ts`, or
-  `infra/chain/relayer-reads.ts` (#1987 deleted the off-chain coverage-arithmetic
-  module and the allowance-nonce coordinator with the AllowanceModule rail, so
-  both are gone from this list — a glob naming a file that no longer exists
-  guards nothing, and the "no phantom globs" assertion in
-  `scripts/ci/money-path.test.mjs` fails CI on it. The reads-only survivor
-  STAYS on this list: it was rails/allowance-module.ts until #2850 renamed
-  that file to `infra/chain/relayer-reads.ts` — the AllowanceModule filename
-  was the last false claim the retired rail left behind);
-- `modules/budget-scope/` (#3649 — the #2099 fail-open period pre-check, the
-  task cap and the typed refusal. The pre-check lived inline in
-  `modules/x402/delegation-authorize.ts` until #3616 created this module and
-  #3617 deleted the inline copy; both x402 authorize legs and POST /payments
-  now decide through it. The move took the decision off the perimeter —
-  #1892's accident of location again: where the comparison lives is not what
-  makes it a spend decision);
-- `modules/task-budgets/`, `modules/sub-budgets/`, `routes/task-budgets.ts`,
-  `routes/sub-budgets.ts` and `routes/agent-sub-budgets.ts` (#3661 — they build
-  the task child and the sub-budget children, including the A→B grant that
-  hands spend authority to another agent, and run the pre-sign cap and
-  narrowing refusals; `agent-sub-budgets.ts` is where the owner issues a
-  sub-budget, the `agent-connection-setups.ts` reason. Not
-  `agent-task-budgets.ts`: GET only);
-- `modules/payments/direct-sign-context.ts` (the bytes the local signer signs
-  for a direct payment, #3271), `modules/payments/submission-reconciler.ts`
-  (the terminal state of a submitted payment whose UserOp may have landed,
-  #3564) and `modules/payments/agent-payment-status.ts` (its
-  `isFundedX402AwaitingMerchantLeg` decides whether x402 sign-context re-signs
-  a confirmed payment — a wrong clause can pay a merchant twice) — file-level
-  on purpose: the rest of that module is the refusal record, receipts and
-  prepare-failure reporting, pinned as off-list in
-  `scripts/ci/money-path.test.mjs` (#3661);
-- `rails/execution-rail.ts` (the rail seam);
-- `rails/delegation-*.ts`, `rails/hybrid-provisioning.ts`,
-  `rails/hybrid-account-config.ts`, `rails/hybrid-signer-actions.ts`,
-  `rails/hybrid-transfers.ts`, `routes/agent-delegations.ts`,
-  `routes/agent-connection-setups.ts`, or
-  `routes/agent-rekey.ts` and `modules/agents/rekey-*.ts`
-  (the delegation rail — including re-key, which revokes and re-issues an agent's
-  on-chain spend authority. It was missing here, in the JSON and in the labeler
-  from #1698 until #1892, while `infra/repositories/` already covered its storage
-  layer: a PR touching the re-key repository was labelled and one touching only the
-  route was not, so the list read as though it knew about re-key. `routes/agent-connection-setups.ts`
-  is the third member of that family, added by #2264 on the identical rationale:
-  its budget-approval route verifies the signed delegation against the setup and
-  flips setup and agent to `active`, so it is where an owner's approval becomes an
-  agent's on-chain spend authority — and since #1984 made connect the only
-  onboarding path, the retirement moved that job INTO this list's blind spot);
-- `rails/sweep.ts`, `infra/relayer*.ts`, `infra/delegate-*.ts`, `infra/outbound-*.ts`,
-  `infra/chain/`, `infra/repositories/`, or `modules/accounts/mainnet-gate.ts` (funds
-  recovery, gas payment, the durable outbound-tx queue and its bump worker, the relayer
-  spend guard/monitor, the delegate exposure monitor, the contract-call and persistence
-  layers, and the mainnet authority floor — the relayer/mainnet trio added by #1045
-  after review found them missing while they literally move or gate money; the outbound
-  globs added after epic #1554 shipped files that broadcast and replace real
-  transactions without appearing here; `infra/delegate-*.ts` added by #1892's own
-  review, which found the delegate balance monitor unlisted while its equally
-  read-only sibling `infra/relayer-balance-monitor.ts` was matched by prefix accident —
-  the two even share an alert channel);
-- `packages/backend/src/openapi/request-validation.ts` (#3029, epic #3028 — the
-  request-validation plugin. Runtime, not control: it sits IN FRONT OF every
-  payment route, so a green money-flow QA run exercises it on every leg from
-  the day it lands. It refuses on the modules the backend's own
-  `enforcedModules` install option names and shadow-logs everywhere else —
-  read that list in the source, never a count here; it is a shape VALIDATOR —
-  it reads the request against the spec, refuses or logs, and never
-  authorizes or constructs spend intent. It does REWRITE values where the
-  spec declares a type and ajv coerces: #3082 found a shadow-mode body
-  reaching handlers with `null` turned into `''`, which refused every open
-  budget. Shadow bodies are restored since then and the divergence is
-  counted; querystring/params coercion, and enforce-mode bodies, still
-  rewrite by design);
-- `routes/hybrid-accounts.ts` (user-signed execution and account provisioning;
-  the approval queue's route file was deleted with its table by #2055, so its
-  glob left the perimeter rather than being repointed — the code is dead, not
-  moved; the owner-signed relayed execution route left the same way in #2847,
-  deleted with the last of the Safe rail's live behaviour);
-- `packages/sdk/src/signer.ts` and `packages/signer/` (signing schemes are spend
-  authority — the SDK entry point was listed; the edge-signer package that
-  actually holds the delegate key material was on no list at all, and is the
-  stronger case of the two — #1896);
-- `packages/sdk/src/delegate-account.ts`, `packages/sdk/src/direct-payment-guard.ts`,
-  `packages/sdk/src/redemption-guard.ts`, `packages/sdk/src/settlement-child.ts`
-  and `packages/sdk/src/userop-binding.ts` (the delegate key's signing-surface
-  guard, moved out of `packages/signer/` into the SDK by #3283, and the #3271
-  binding check both packages import — their location is not what makes them
-  spend authority); `packages/sdk/src/task-budget-guards.ts` and
-  `packages/sdk/src/sub-budget-guards.ts` join them on the same rule (#3661 — the
-  signer's own checks on task and sub-budget children before it signs; both
-  arrived after #3283); `packages/sdk/src/merchant-completion.ts` joins them as
-  runtime (#4122 — `MerchantCompletion.retryRequest` decides, after the funding
-  leg has moved USDC, whether the merchant accepted or the payment is a rejection
-  after funding, and reports the settlement hash Haven records; three commits
-  changed it with no perimeter file beside them); `packages/sdk/src/merchant-answer.ts`
-  joins them as runtime too (#4120 — the ONE post-funding merchant-answer
-  decision shared by the hosted `completeX402MerchantCall` and the local
-  `MerchantCompletion.retryRequest`: after the funding leg has moved USDC it
-  decides accepted vs `MERCHANT_REJECTED_AFTER_FUNDING` and which settlement
-  hash Haven records; the decision moved OUT of the listed
-  `merchant-completion.ts` into this module in the same PR, and the move would
-  otherwise have taken it off the perimeter — the #3283 accident-of-location
-  rule). The SDK client stays off
-  deliberately (#3283): it only wires these guards in, and listing it would put
-  every SDK transport change on the runtime list. Each SDK file is written here
-  as its full path, because the parity test in `scripts/ci/money-path.test.mjs`
-  matches a token against the end of a glob as literal text: a bare file name
-  names nothing, a wildcard inside a token is not a pattern (a package-wide
-  spelling names no file under it), and a token that is only wildcards after
-  its first segment names nothing (#4122);
-- `packages/core/src/machine-payment-lifecycle.ts` (the machine-payment domain
-  actually lives here since #987 — the `domain/machine-payment-lifecycle.ts` line
-  above guards the backend re-export shim, not the code — #1905);
-- `middleware/agentAuth.ts`;
-- `packages/mcp-server/src/**` (the hosted MCP tool surface — #2300. `tools.ts`
-  decides *whether* a funding userop is relayed and *in what order*, and four
-  money defects lived in it with no money-path label by the file half: #2282's
-  funding-before-merchant-context relay, #2312's silently stripped `tx_hash`,
-  #2348's stripped `idempotencyKey` that made a retry a second spend, and
-  #2051's merchant-steerable cap bypass. Runtime `globs`, not control: the
-  hosted MCP deploys from `dev` and the money-flow harness drives it through
-  `QA_HOSTED_MCP_URL`, so a green run really does cover it — the argument the
-  frontend decision surfaces could not make. Scoped to
-  `packages/mcp-server/src/**` on a measured 3-of-113-commits delta for the
-  package's README/Dockerfile/config files — the command and window are in the
-  JSON note);
-- `packages/demo-merchant-mcp/src/**` (the demo merchant's settlement surface —
-  #3098. `x402.ts` verifies the buyer's authorization and submits it on-chain,
-  and the prod instance runs on Base mainnet; the CASP guardrails doc had
-  covered the package since #650 while the classifier never had, and two
-  settlement-semantics changes shipped through that gap — #2969/PR #2977
-  unlabelled, #2979/PR #2982 labelled only because it also touched
-  `mcp-server/src/**`. Runtime `globs`, not control: it deploys from `dev` on
-  Railway and the money-flow harness pays it through `QA_DEMO_MERCHANT_URL`.
-  Scoped to `packages/demo-merchant-mcp/src/**` like the hosted MCP entry);
-- `db/migrations/`;
-- the safeguard's own control surface — `scripts/release-bump.mjs`,
-  `scripts/release-version-order.mjs` (the forward-only version rule #2580 lifted
-  out of it — a rule that decides which version may reach npm belongs on the same
-  footing as the script that applies it),
-  `scripts/ci/qa-freshness.mjs`, `scripts/ci/money-path.test.mjs`,
-  `scripts/ci/money-path-restatement-scan.mjs`, `.github/CODEOWNERS`,
-  `.github/money-path-globs.json`, `.github/workflows/publish.yml`,
-  `.github/workflows/dev-gate.yml`, `.github/workflows/qa-dev.yml`,
-  `packages/frontend/src/lib/signer.ts`, `packages/frontend/src/hooks/useAgentRekey.ts`,
-  `scripts/docs/coupling-gate.mjs`, `scripts/docs/validate-frontmatter.mjs` and
-  `.github/workflows/docs-coupling.yml`. These are
-  `controlGlobs` in the JSON: labelled money-path so a PR weakening the gate gets
-  this playbook and a human, but excluded from the freshness re-run, because
-  re-running the money-flow harness proves nothing about a CI config change —
-  and the two frontend paths are the same call: the harness exercises the
-  deployed backend, not the client, so a QA re-run would prove nothing about a
-  change to which signer signs a spend-authority action, but a human should read
-  it — #1903.
+gate. The *why* behind each group lives in
+[`references/money-path-perimeter.md`](references/money-path-perimeter.md), one
+path per line, and `scripts/ci/money-path.test.mjs` holds that file **equal** to the
+JSON: its runtime section to `globs`, its control section to `controlGlobs`, in both
+directions (#4177). Read the JSON when you need the authoritative answer; read the
+reference when you need the reasoning. Never edit one without the other — CI will
+not let you. This section does not restate the list, and since #4177 this file is
+not one of the list's known homes (`KNOWN_COPIES` in
+`scripts/ci/money-path-restatement-scan.mjs`): a full copy pasted back here lifts
+the prose ceiling past a planted copy, and the #1904 test in `money-path.test.mjs`
+goes red. A partial copy does not, which is that test's finding.
 
 The label matters because money-sensitive changes do not always touch listed files
 (a new signing scheme, a new rail); the file list matters because a diff can be

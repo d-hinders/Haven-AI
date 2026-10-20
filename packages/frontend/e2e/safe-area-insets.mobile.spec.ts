@@ -96,13 +96,18 @@ const VIEWPORT = { width: 390, height: 844 }
  * did not until #3165 put the list toolbar (search,
  * two facets, sort, count line) above the fixture's cards, which is exactly
  * the "day the fixture grows" case below — promoted to carrying the
- * geometry rather than left proving less than the table claims. So all
- * three routes carry the geometry and all three carry the padding readback.
+ * geometry rather than left proving less than the table claims.
+ * `/transactions` stopped overflowing with #4111: its list toolbar collapses
+ * the facet row behind one Filters button below `sm`, and the page fits
+ * 390x844 again with the same two rows. So `/dashboard` and `/agents` carry
+ * the geometry, and `/transactions` carries the not-overflowing half of the
+ * readback — the day its fixture grows past the viewport, this row goes red
+ * and is promoted back.
  */
 const ROUTES = [
   { path: '/dashboard', overflows: true },
   { path: '/agents', overflows: true },
-  { path: '/transactions', overflows: true },
+  { path: '/transactions', overflows: false },
 ] as const
 
 /**

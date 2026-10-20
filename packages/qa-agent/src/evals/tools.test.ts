@@ -90,6 +90,19 @@ describe('the list sizes (a readable count; the drift check is above)', () => {
 
   it('counts 9 payment tools, all hosted', () => {
     expect(PAYMENT_TOOLS).toHaveLength(9)
+    // The exact members, so moving a tool across the partition (or swapping
+    // one for another) needs a deliberate edit here as well as in tools.ts.
+    expect([...PAYMENT_TOOLS].sort()).toEqual([
+      'haven_complete_mcp_tool',
+      'haven_pay',
+      'haven_pay_mcp_tool',
+      'haven_pay_x402_quote',
+      'haven_prepare_catalog_purchase',
+      'haven_send',
+      'haven_settle_mcp_tool',
+      'haven_submit',
+      'haven_sweep_delegate',
+    ])
     for (const t of PAYMENT_TOOLS) expect(HOSTED_TOOLS).toContain(t)
     // Read-only tools must never count as payments.
     expect(PAYMENT_TOOLS).not.toContain('haven_quote_x402')
@@ -123,7 +136,7 @@ describe('bareToolName — graders match bare names, never server-prefixed ones'
     expect(bareToolName('mcp__haven-x-dev__haven_sign_siwx')).toBe('haven_sign_siwx')
   })
 
-  it('returns unknown names unchanged — graders must not true on a name they cannot read', () => {
+  it('returns unknown names unchanged (they match no list)', () => {
     expect(bareToolName('some_other_tool')).toBe('some_other_tool')
   })
 

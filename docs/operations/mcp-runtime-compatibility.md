@@ -85,10 +85,12 @@ last-verified: "2026-10-20"
 > **Re-verified unchanged (#4121, 2026-10-20, a `ci.yml` comment counts the
 > qa-agent test files that import the built signer):** the only covered file
 > this diff touches is `.github/workflows/ci.yml`, and the change inside it is
-> comments only: the `qa_agent_checks` comment above `Run QA agent unit tests`
-> now says 3 files cannot resolve `@haven_ai/signer` without its `dist/`
-> (`src/evals/tools.test.ts` joined the two hosted-signer scenarios), where it
-> said 2. No step, job, env value, literal or condition moves. The covered
+> comments only: the two `qa_agent_checks` comments above the sibling builds
+> and `Run QA agent unit tests` now say that the suite's globalSetup asserts
+> the signer `dist` fresh as well as the SDK's, and that 3 test files cannot
+> resolve `@haven_ai/signer` without it (`src/evals/tools.test.ts` joined the
+> two hosted-signer scenario tests, which `vi.mock` it), where they said 2.
+> No step, job, env value, literal or condition moves. The covered
 > `tools-list.snapshot.json` and the signer's `toolSchemas` are READ by that
 > new qa-agent test, never edited, so no tool, argument, input schema,
 > description, channel, dist-tag, release step or consent surface moves. The

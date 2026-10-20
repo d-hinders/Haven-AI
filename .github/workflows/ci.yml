@@ -414,12 +414,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # The unit tests import the SDK (asserted fresh by the suite's own
-      # globalSetup, #1188) and run the real @haven_ai/signer in two scenario
-      # files — vitest resolves both through packages/*/dist, which npm ci
-      # does not create. Same reason mcp-server's test script chains sibling
-      # builds and qa-dev.yml builds both explicitly. core is needed by the
-      # sdk build's dts pass.
+      # The unit tests import the SDK and @haven_ai/signer, and vitest
+      # resolves both through packages/*/dist, which npm ci does not create.
+      # The suite's own globalSetup asserts both dists fresh (#1188; the
+      # signer since #4121). Three test files resolve @haven_ai/signer:
+      # src/evals/tools.test.ts imports the real toolSchemas to compare the
+      # graders' signer tool list with it, and the two hosted-signer scenario
+      # tests vi.mock it (vitest still resolves a mocked package's entry).
+      # Same reason mcp-server's test script chains sibling builds and
+      # qa-dev.yml builds both explicitly. core is needed by the sdk build's
+      # dts pass.
       - name: Build SDK dependency
         run: npm run build -w packages/sdk
 
@@ -431,11 +435,9 @@ jobs:
       # Measured on a clean tree (2026-09-15, dev 9a6ee132): 24 files / 344
       # tests pass with NO env, secrets, network or database — nothing reads
       # QA_*, DATABASE_URL or a chain endpoint, so no HAVEN_SKIP_DB_TESTS is
-      # needed. vitest fails fast without the sibling dists above (3 files
-      # cannot resolve @haven_ai/signer, measured 2026-10-20: the two hosted
-      # signer scenarios and, since #4121, src/evals/tools.test.ts, which
-      # compares the graders' signer tool list with the built toolSchemas),
-      # which is why the builds precede it.
+      # needed. vitest fails fast without the sibling dists above (the 3
+      # files named there cannot resolve @haven_ai/signer, measured
+      # 2026-10-20), which is why the builds precede it.
       - name: Run QA agent unit tests
         run: npm run test -w packages/qa-agent
 

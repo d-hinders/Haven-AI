@@ -126,6 +126,16 @@ describe('useAccountMoneyFlow (#4097)', () => {
     expect(result.current.approxIn).toBe(true)
   })
 
+  it('marks only the direction that converted — an empty Money in never reads "≈ 0,00 kr"', async () => {
+    mockApiGet.mockResolvedValue(
+      page([tx({ direction: 'out', convertedAmount: null, approxAmount: '145.26', approxCurrency: 'SEK', timestamp: NOW_SEC - DAY })]),
+    )
+    const { result } = renderHook(() => useAccountMoneyFlow('safe-1', 'SEK'))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.approxIn).toBe(false)
+    expect(result.current.approxOut).toBe(true)
+  })
+
   it('a row with no usable price contributes nothing and says so — unpriced, not ≈ (#4165)', async () => {
     mockApiGet.mockResolvedValue(
       page([

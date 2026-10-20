@@ -282,10 +282,28 @@ so this is a rule to point at rather than a question to ask the release runner.
       ```
 
       Every line must be ✓: the chain id, a JSON-RPC batch of 10, the `pending`
-      block tag, `eth_sendRawTransaction` accepted as a method, and a burst of 20
-      without a 429. At the defaults it makes 32 read calls (1 + a batch of 10 +
-      1 + a burst of 20) plus one transaction signed by a fresh zero-balance key,
-      which the node refuses for funds and can never mine. The burst deliberately
+      block tag, `eth_getLogs` over the last 500 blocks (#4118),
+      `eth_sendRawTransaction` accepted as a method, and a burst of 20 without a
+      429. At the defaults it makes 34 read calls (1 + a batch of 10 + 1 + 2 for
+      the `eth_getLogs` line, its own head and the query, + a burst of 20) plus
+      one transaction signed by a fresh zero-balance key, which the node refuses
+      for funds and can never mine. The 500 is the widest batch the backend's
+      settlement sweepers ask for, pinned to their constants by the probe's
+      self-test; a narrower `--logs-range` is justified only in that variable's
+      row of the provider table in
+      [dev-environment.md](./dev-environment.md) → *Two Base Sepolia RPCs*.
+      Alchemy's free tier serves 10 blocks per call, which broke both sweepers
+      (#4012). Prod's primary is an app on the same Alchemy account; whether it
+      carries the same cap has not been measured, so this line may fail
+      there until the plan serves 500 blocks or the owner records an accepted
+      exception in the
+      [owner-accepted exceptions to the probe rule](./dev-environment.md#configuration)
+      (dev-environment.md → *Two Base Sepolia RPCs*). On a `*_FALLBACK`
+      variable the logs line is informational, not a gate: no `eth_getLogs`
+      reader uses the fallback (the viem failover reads and the relayer's
+      raw-send rebroadcast do; the log scanners stay on `RPC_URL_BASE*`), so it
+      is covered by the fallback exception above. Re-probe a fallback at the
+      default 500 only if it is ever promoted to primary. The burst deliberately
       spends up to 20 requests of the key's per-second budget: against a key the
       live mainnet relayer already uses, run it off-peak or with a smaller
       `--burst`. A failing line means the endpoint cannot carry Haven's traffic —

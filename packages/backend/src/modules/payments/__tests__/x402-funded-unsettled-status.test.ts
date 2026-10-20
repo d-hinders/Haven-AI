@@ -35,6 +35,12 @@ import {
 } from '../agent-payment-status.js'
 import { findIntentStatusRow } from '../../../infra/repositories/payment-intents.js'
 import { type AgentContext } from '../../../middleware/agentAuth.js'
+// Static, not `await import()` inside the spec-validation test (#4134, the
+// #4126 pattern): this module pulls in `openapi/spec.ts` (~757 KB) and ajv,
+// which a dynamic import cold-loaded inside that one test's 5 s timeout —
+// ~1.3 s against ~0.1 s for its siblings. Loaded here, the cost lands in
+// collection, which no test timeout bounds.
+import { responseSchema, matchSpec } from '../../../openapi/response-shape.js'
 
 let seq = 0
 
@@ -395,7 +401,6 @@ describeDb('#3475 follow-up — settlement_scheme / merchant_settlement_recorded
   })
 
   it('the live response validates against the spec\'s declared AgentPaymentStatus schema', async () => {
-    const { responseSchema, matchSpec } = await import('../../../openapi/response-shape.js')
     const { agent, paymentId } = await seedConfirmedX402({
       settlementScheme: 'eip3009',
       confirmedMinutesAgo: 60,

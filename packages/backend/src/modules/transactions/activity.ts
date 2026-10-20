@@ -39,7 +39,9 @@
  *   4. else → `'confirmed'`.
  *
  * Deposits (inbound rows) have no meaningful agent/merchant counterparty, so
- * they group per local day under the counterparty key `'deposit'`.
+ * they group per local day under the counterparty key `'deposit'` — except a
+ * transfer from another of the user's own accounts, keyed `own:<from>` and
+ * named by that account (#4099).
  *
  * When the explorer window that produced the feed was truncated, EVERY group
  * carries `countIsFloor: true` — the count is a floor over an unknown total,
@@ -363,9 +365,17 @@ export async function buildActivityGroups(
     resolveOwnAccountName,
   } = params
 
-  /** The sending own account's name on an inbound row, when there is one (#4099). */
-  const ownSenderName = (tx: EnrichedTransaction): string | null =>
-    tx.direction === 'in' ? (resolveOwnAccountName?.(tx.from, tx.chainId) ?? null) : null
+  /**
+   * The sending own account's label on an inbound row, when the sender is one
+   * of the user's own accounts (#4099) — a contact name the user saved for it
+   * first, the account's own name otherwise, the same order the send side
+   * uses. Null for every other inbound row: those stay unnamed deposits.
+   */
+  const ownSenderName = (tx: EnrichedTransaction): string | null => {
+    if (tx.direction !== 'in') return null
+    const ownName = resolveOwnAccountName?.(tx.from, tx.chainId) ?? null
+    return ownName === null ? null : (resolveMerchantName?.(tx.from) ?? ownName)
+  }
 
   // One instant comparison, no tz: the rolling window `[now − 168h, now)` is
   // the same predicate the route's `spend.d7` SQL applies to `confirmed_at`

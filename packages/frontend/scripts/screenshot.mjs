@@ -6689,7 +6689,7 @@ export const SCENARIOS = {
   },
   'dashboard-own-account-transfer': {
     description:
-      '#4099: a transfer between two of the user\'s own accounts on the dashboard\'s Activity card — the send reads "Savings" (the receiving account), the money arriving reads "Savings" too (the sending account, not "Deposit"), and an outside deposit on the same day still reads "Deposit". The shared fixture has one account and no inbound row, so none of the three is reachable from a route capture.',
+      '#4099: a transfer between two of the user\'s own accounts on the dashboard\'s Activity card — the send reads "Savings" (the receiving account), the money arriving reads "From Savings" (the sending account, not "Deposit"; owner decision 2026-10-20), and an outside deposit on the same day still reads "Deposit". The shared fixture has one account and no inbound row, so none of the three is reachable from a route capture.',
     api(apiPath) {
       const savings = {
         ...FIXTURE_ACCOUNT,
@@ -6727,11 +6727,9 @@ export const SCENARIOS = {
       }, FIXTURE_USER.id)
       await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
-      // Positive control: both own-account rows read the other account's name.
-      await page.getByText('Savings', { exact: true }).first().waitFor({ timeout: 30_000 })
-      if ((await page.getByText('Savings', { exact: true }).count()) < 2) {
-        throw new Error('dashboard-own-account-transfer: expected both sides of the own-account transfer to read "Savings"')
-      }
+      // Positive controls: the money arriving reads "From Savings", the send "Savings".
+      await page.getByText('From Savings', { exact: true }).first().waitFor({ timeout: 30_000 })
+      await page.getByText('Savings', { exact: true }).first().waitFor({ timeout: 10_000 })
       // Negative control: the outside deposit keeps "Deposit".
       await page.getByText('Deposit', { exact: true }).first().waitFor({ timeout: 10_000 })
       await shoot(page.locator('main').first(), 'page')

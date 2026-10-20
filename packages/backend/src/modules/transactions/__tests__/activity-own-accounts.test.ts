@@ -108,6 +108,31 @@ describe('own-account transfers in the activity feed (#4099)', () => {
     ])
   })
 
+  it('the receiving side prefers a contact name for the sending own account, like the send side', async () => {
+    const result = await groups(
+      [row({ direction: 'in', from: RESERVE, to: MY_ACCOUNT })],
+      (address) => (address.toLowerCase() === RESERVE.toLowerCase() ? 'Savings (contact)' : null),
+    )
+    expect(result[0].merchantName).toBe('Savings (contact)')
+  })
+
+  it('a contact name alone never names a deposit — only an own-account sender is named', async () => {
+    const result = await groups(
+      [row({ direction: 'in', from: STRANGER, to: MY_ACCOUNT })],
+      (address) => (address.toLowerCase() === STRANGER ? 'Some contact' : null),
+    )
+    expect(result[0]).toMatchObject({ merchantName: null })
+  })
+
+  it('an inbound row from an own account\'s address on another chain stays an unnamed deposit', async () => {
+    const result = await groups([
+      row({ direction: 'in', from: STRANGER, to: MY_ACCOUNT, chainId: 8453 }),
+      row({ direction: 'in', from: RESERVE, to: MY_ACCOUNT, chainId: 8453 }),
+    ])
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({ count: 2, merchantName: null })
+  })
+
   it('a contact name wins over the own-account name; a stranger stays unresolved', async () => {
     const result = await groups(
       [row({ to: RESERVE }), row({ to: STRANGER })],

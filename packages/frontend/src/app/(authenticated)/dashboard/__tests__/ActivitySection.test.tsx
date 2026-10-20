@@ -164,17 +164,18 @@ describe('ActivitySection (#3810)', () => {
     expect(screen.getByText('Acme Ltd')).toBeInTheDocument()
   })
 
-  it('#4099: a transfer in from another own account is titled by that account, not "Deposit"', () => {
+  it('#4099: a transfer in from another own account is titled "From <account>", not "Deposit"', () => {
     const inbound = { direction: 'in' as const, agentId: null, agentName: null, source: null, x402ResourceUrl: null }
     renderSection({
       accountCount: 2,
       activity: [
-        group({ ...inbound, merchantName: 'My account' }),
+        group({ ...inbound, merchantName: 'Savings' }),
         group({ ...inbound, merchantName: null, latestAt: new Date(Date.now() - 60_000).toISOString() }),
       ],
     })
 
-    expect(screen.getByText('My account')).toBeInTheDocument()
+    expect(screen.getByText('From Savings')).toBeInTheDocument()
+    expect(screen.queryByText('Savings', { exact: true })).not.toBeInTheDocument()
     // Every other deposit keeps the generic word.
     expect(screen.getByText('Deposit')).toBeInTheDocument()
     expect(screen.queryByText(MERCHANT)).not.toBeInTheDocument()

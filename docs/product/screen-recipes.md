@@ -658,7 +658,7 @@ preview renders `GET /dashboard/overview`'s `activity` groups — one row per
 group under user-local day headings, at most eight rows over the rolling
 last seven days. The title is the counterparty through `counterpartyLabel`'s
 no-address mode (merchant site, receipt name, "Deposit" or — for a transfer
-from another of the user's own accounts — that account's name (#4099), "New
+from another of the user's own accounts — "From <account>" (#4099), "New
 recipient" — never a truncated address); the subtitle is the agent's name; a group of N
 renders "×N" ("×N+" when the count is a floor). The 5-row `transactions`
 preview is removed from the wire (#3858) — no dashboard surface reads it.
@@ -730,8 +730,9 @@ Money and risk clarity:
 - **List rows show no addresses (#3810, #3811).** The counterparty half of
   every row — `From -> To` line included — renders through
   `counterpartyLabel`'s no-address mode: the merchant's hostname, the source
-  title, a resolved name (on a deposit, only another of the user's own
-  accounts, #4099), "Deposit", or "New recipient". A raw address never
+  title, a resolved name, "Deposit" (every deposit here — "From <account>" for
+  a transfer from another own account is the dashboard Activity card's alone,
+  #4099), or "New recipient". A raw address never
   ellipsises into a list row; the detail drawer is where the full address
   lives.
 - Use external links for details, but do not make hashes the primary labels.

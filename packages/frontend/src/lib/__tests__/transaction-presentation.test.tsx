@@ -247,12 +247,14 @@ describe('counterpartyLabel no-address mode (#3810)', () => {
     expect(label).not.toContain('…')
   })
 
-  it('#4099: an inbound row reads the server-resolved sender — a transfer from an own account', () => {
+  it('#4099: an inbound row reads "From <sender>" when the server resolved one — a transfer from an own account', () => {
     const named = counterpartyLabel(tx({ direction: 'in', from: UNKNOWN }), undefined, undefined, {
       noAddress: true,
       resolvedName: 'Reserve',
     })
-    expect(named).toBe('Reserve')
+    // "From …", never the bare name: a bare account name reads as the
+    // account that RECEIVED the money (owner decision, 2026-10-20).
+    expect(named).toBe('From Reserve')
 
     // No name from the server — every other deposit — is still "Deposit".
     for (const resolvedName of [null, undefined]) {

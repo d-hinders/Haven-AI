@@ -1,22 +1,38 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import { AlertTriangle, Search } from 'lucide-react'
+import { useEffect, useMemo } from 'react'
+import { AlertTriangle } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import { FilterPill } from '@/components/ui/FilterPill'
-import { Checkbox } from '@/components/ui/Checkbox'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { Input } from '@/components/ui/Input'
-import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Button } from '@/components/ui/Button'
+import { ListNoMatch, ListToolbar } from '@/components/ui/ListToolbar'
+import type { ListFacet } from '@/components/ui/FacetMenu'
+import type { ListCount, ListNoun } from '@/components/ui/list-controls-copy'
+import { clearedListState, sameValues, type ListState, type ListUrlSchema } from '@/components/ui/list-url-codec'
+import { useListUrlState } from '@/components/ui/useListUrlState'
 import { categoryLabel, chainName, listsTestnet, networkToChainId } from '@/lib/marketplace'
 import { MerchantCard } from './MerchantCard'
 import { ComingSoonMerchants } from './ComingSoonMerchants'
 import type { Merchant } from '@/hooks/useCatalog'
 
-/** The fixture category (`088_merchants.ts`) — test content has its own checkbox, so no pill. */
+/** The fixture category (`088_merchants.ts`) — test content has its own control, so no pill. */
 const TEST_FIXTURE_CATEGORY = 'test-fixture'
+
+const merchantNoun: ListNoun = { one: 'merchant', other: 'merchants' }
+
+/**
+ * The Verified and Test-merchant facets enumerate EVERY state as an option —
+ * there is no separate "All" row (`allLabel: null`), because the initial
+ * state is not All: it is the page default the codec holds ("no key means
+ * the page's default"), and the rows read exactly "Any / Verified only" and
+ * "Shown / Hidden" (#4114). The facet's `defaultValue` names that initial
+ * state, so the trigger, the chip and Clear filters all agree with the URL.
+ */
+const VERIFIED_ANY = 'any'
+const VERIFIED_ONLY = 'verified'
+const TEST_SHOWN = 'shown'
+const TEST_HIDDEN = 'hidden'
 
 export function MerchantGrid({
   merchants,
@@ -24,7 +40,6 @@ export function MerchantGrid({
   error,
   onSubmit,
   onRetry,
-  initialCategory = null,
   defaultChainId = null,
 }: {
   merchants: Merchant[]
@@ -34,26 +49,18 @@ export function MerchantGrid({
   onSubmit: () => void
   /** Re-fetches after a failed load; the error state offers it as the way forward. */
   onRetry?: () => void
-  /** A deep-linked category (`/catalog?category=ai` redirects here with its query intact). */
-  initialCategory?: string | null
   /**
-   * The chain of the user's default account (#3979) — the network filter's
-   * starting value when that chain is one the listed merchants serve. `null`
-   * (no account, or still loading) starts on "All networks".
+   * The chain of the user's default account (#3979) — the network facet's
+   * default when that chain is one the listed merchants serve AND there is
+   * more than one listed chain. `null` (no account, or still loading) leaves
+   * the default at All networks. The default stays OUT of the URL (no
+   * `chainId` key) until the user picks something; an explicit
+   * `chainId=all` means All networks and survives the default's arrival.
    */
   defaultChainId?: number | null
 }) {
-  // #3979: the test-fixture category has no pill — "Show test merchants" is
-  // the one control for test content — so a deep link to it would be an
-  // active filter nobody can see or clear. It opens as "All" instead.
-  const [category, setCategory] = useState<string | null>(
-    initialCategory === TEST_FIXTURE_CATEGORY ? null : initialCategory,
-  )
-  const [search, setSearch] = useState('')
-  const [verifiedOnly, setVerifiedOnly] = useState(false)
-
-  // The chains any listed merchant serves — the network dropdown only offers
-  // a real choice when there is more than one (epic scope item 2).
+  // The chains any listed merchant serves — the network facet only offers a
+  // real choice when there is more than one (epic scope item 2).
   const chainIds = useMemo(
     () =>
       Array.from(
@@ -67,39 +74,78 @@ export function MerchantGrid({
   )
   const showNetworkFilter = chainIds.length > 1
 
-  // #3979: the network filter starts on the user's own network. Derived at
-  // read time like `showTestMerchants` below, never captured into state:
-  // the merchants and the signed-in user both arrive after mount, and a
-  // `useState(default)` would freeze "All networks" on the empty first render.
-  // A choice — including "All networks" — overrides it from then on.
-  const [chainChoice, setChainChoice] = useState<number | 'all' | null>(null)
-  const defaultChainFilter: number | 'all' =
-    showNetworkFilter && defaultChainId !== null && chainIds.includes(defaultChainId)
-      ? defaultChainId
-      : 'all'
-  const chainFilter = chainChoice ?? defaultChainFilter
-
   // Default "Show test merchants" ON when any LISTED network is a testnet —
   // read off the served data (chain facts from core, not a hard-coded id),
-  // never `NEXT_PUBLIC_HAVEN_ENV` (decision 10).
+  // never `NEXT_PUBLIC_HAVEN_ENV` (decision 10). Derived, never captured:
+  // the grid mounts before the merchants arrive.
   const testMerchantsDefaultOn = useMemo(() => listsTestnet(merchants), [merchants])
-  // The user's explicit choice, or none: the default is DERIVED at read time
-  // from the served data, not captured into state at mount — the grid mounts
-  // before the merchants arrive, and a `useState(default)` froze `false` on
-  // the empty list (the baseline harness saw the demo store hidden with a
-  // testnet listed). Toggling records a choice; until then the data decides.
-  const [testMerchantsChoice, setTestMerchantsChoice] = useState<boolean | null>(null)
-  const showTestMerchants = testMerchantsChoice ?? testMerchantsDefaultOn
-  const setShowTestMerchants = setTestMerchantsChoice
+
+  // The URL-parse guard for `category` is built from ALL merchants' categories
+  // (not the pill pool below): the parse must not consume a category whose
+  // pill the network facet currently hides — #4008's reset below owns that
+  // case. `test-fixture` is not a pill (#3979), so a deep link to it drops
+  // on read and the grid opens as "All".
+  const allCategories = useMemo(
+    () => Array.from(new Set(merchants.map((m) => m.category))).filter((c) => c !== TEST_FIXTURE_CATEGORY),
+    [merchants],
+  )
+
+  // #3979: the network filter starts on the user's own network. Derived into
+  // the codec schema's `defaultValue`, so it updates when the user and the
+  // merchants arrive — never captured into state, which would freeze
+  // "All networks" on the empty first render.
+  const networkDefault = useMemo(
+    () =>
+      showNetworkFilter && defaultChainId !== null && chainIds.includes(defaultChainId)
+        ? [String(defaultChainId)]
+        : [],
+    [showNetworkFilter, defaultChainId, chainIds],
+  )
+
+  /**
+   * The codec schema (#4114): every filter dimension lives in the URL. Its
+   * identity must be stable across filter CHANGES (a re-parse would drop a
+   * pending search commit), so it depends only on the data the defaults and
+   * parse guards are read from — never on the current selection.
+   */
+  const schema = useMemo<ListUrlSchema>(
+    () => ({
+      search: {},
+      facets: [
+        // The key the old `?category=` deep links already used — the
+        // `/catalog?category=ai` redirects keep working (#4114).
+        { id: 'category', values: allCategories },
+        { id: 'chainId', values: chainIds.map(String), defaultValue: networkDefault },
+        { id: 'verified', values: [VERIFIED_ANY, VERIFIED_ONLY], defaultValue: [VERIFIED_ANY] },
+        {
+          id: 'test',
+          values: [TEST_SHOWN, TEST_HIDDEN],
+          defaultValue: [testMerchantsDefaultOn ? TEST_SHOWN : TEST_HIDDEN],
+        },
+      ],
+    }),
+    [allCategories, chainIds, networkDefault, testMerchantsDefaultOn],
+  )
+
+  const [listState, setListState] = useListUrlState(schema, { filtering: 'browser' })
+
+  // The live filter values, read off the URL-backed state. An absent network
+  // key IS the default (the codec filled it in); `all` arrives as an empty
+  // selection.
+  const chainChoice = listState.facets.chainId?.[0]
+  const chainFilter: number | 'all' = chainChoice ? Number(chainChoice) : 'all'
+  const testChoice = listState.facets.test?.[0]
+  const showTestMerchants =
+    testChoice === TEST_HIDDEN ? false : testChoice === TEST_SHOWN ? true : testMerchantsDefaultOn
+  const verifiedOnly = listState.facets.verified?.[0] === VERIFIED_ONLY
 
   // #4008: the pill list is built from the merchants that pass the NETWORK
-  // filter and the "Show test merchants" toggle — but NOT the category,
+  // filter and the "Show test merchants" facet — but NOT the category,
   // search or verified filters — so pills never vanish while you are using
   // them. On dev, "Media" and "Search" matched only Base merchants, so under
-  // the Base Sepolia default clicking one emptied the grid with "No
-  // merchants match this filter". A merchant that lists no network survives
-  // any network filter (the rule `visible` applies below), so its category
-  // counts too.
+  // the Base Sepolia default clicking one emptied the grid. A merchant that
+  // lists no network survives any network filter (the rule `visible` applies
+  // below), so its category counts too.
   const pillPool = useMemo(
     () =>
       merchants.filter((m) => {
@@ -126,15 +172,23 @@ export function MerchantGrid({
 
   // #4008: a selected category that no longer has a pill resets to "All",
   // derived at read time — the same rule #3979 applied to `test-fixture`
-  // (`:45-47`): no filter is ever active without a visible pill. This also
-  // catches a deep link such as `?category=media` under the Base Sepolia
-  // default. The state keeps the raw choice, so a pill that comes back (the
-  // network filter widens) re-activates the selection instead of silently
-  // forgetting it.
-  const activeCategory = category !== null && categories.includes(category) ? category : null
+  // (`:45-47`): no filter is ever active without a visible pill. With the
+  // URL as the state (#4114) the reset is WRITTEN, not just read: a facet
+  // value the toolbar would raise a chip over must not sit in the state —
+  // the chip is computed from it and would claim a filter that is not
+  // applied. The old grid kept the raw choice in memory for a pill's
+  // return; the codec cannot hold a value the toolbar does not show, so the
+  // deep link is consumed instead (a fresh deep link re-selects).
+  const rawCategory = listState.facets.category?.[0] ?? null
+  const activeCategory = rawCategory !== null && categories.includes(rawCategory) ? rawCategory : null
+  const categoryHasNoPill = rawCategory !== null && activeCategory === null
+  useEffect(() => {
+    if (!categoryHasNoPill) return
+    setListState({ ...listState, facets: { ...listState.facets, category: [] } })
+  }, [categoryHasNoPill, listState, setListState])
 
   const visible = useMemo(() => {
-    const q = search.trim().toLowerCase()
+    const q = listState.q.trim().toLowerCase()
     const filtered = merchants.filter((m) => {
       if (activeCategory && m.category !== activeCategory) return false
       if (verifiedOnly && !m.verified_payable) return false
@@ -160,7 +214,7 @@ export function MerchantGrid({
         a.name.localeCompare(b.name) ||
         a.id.localeCompare(b.id),
     )
-  }, [merchants, activeCategory, verifiedOnly, showTestMerchants, chainFilter, search])
+  }, [merchants, activeCategory, verifiedOnly, showTestMerchants, chainFilter, listState.q])
 
   // #3980 sorted payable merchants first — `coming_soon` sorts before `live`
   // in `GET /merchants` (alphabetically), so the cards you cannot pay headed
@@ -171,31 +225,73 @@ export function MerchantGrid({
   const payable = visible.filter((m) => m.listing_status !== 'coming_soon')
   const comingSoon = visible.filter((m) => m.listing_status === 'coming_soon')
 
+  // The facets the toolbar renders. Same ids, values and defaults as the
+  // codec schema (one source of truth for chips and Clear filters), plus the
+  // rendering data. Options are memoised on the pill pool, NOT on the
+  // selection, so the objects stay stable while the user filters (#4008).
+  const facets = useMemo<ListFacet[]>(
+    () => [
+      {
+        id: 'category',
+        label: 'Category',
+        rendering: 'pills',
+        values: allCategories,
+        options: categories.map((c) => ({ value: c, label: categoryLabel(c) })),
+      },
+      {
+        id: 'chainId',
+        label: 'Network',
+        values: chainIds.map(String),
+        defaultValue: networkDefault,
+        options: chainIds.map((id) => ({ value: String(id), label: chainName(id) })),
+      },
+      {
+        id: 'verified',
+        label: 'Verified',
+        values: [VERIFIED_ANY, VERIFIED_ONLY],
+        defaultValue: [VERIFIED_ANY],
+        options: [
+          { value: VERIFIED_ANY, label: 'Any' },
+          { value: VERIFIED_ONLY, label: 'Verified only' },
+        ],
+      },
+      {
+        id: 'test',
+        label: 'Test merchants',
+        values: [TEST_SHOWN, TEST_HIDDEN],
+        defaultValue: [testMerchantsDefaultOn ? TEST_SHOWN : TEST_HIDDEN],
+        options: [
+          { value: TEST_SHOWN, label: 'Shown' },
+          { value: TEST_HIDDEN, label: 'Hidden' },
+        ],
+      },
+    ],
+    [categories, allCategories, chainIds, networkDefault, testMerchantsDefaultOn],
+  )
+
+  // "Filtered" is the toolbar's own rule — differs from the page default —
+  // so the count cannot disagree with the chips.
   const filtered =
-    activeCategory !== null || search.trim() !== '' || verifiedOnly || chainFilter !== 'all'
-  const clearFilters = () => {
-    setCategory(null)
-    setSearch('')
-    setVerifiedOnly(false)
-    setChainChoice('all')
-  }
+    listState.q.trim() !== '' ||
+    facets.some((f) => !sameValues(listState.facets[f.id] ?? [], f.defaultValue ?? []))
+
+  // The standard count (#4110). At the defaults the label reads the rendered
+  // set ("50 merchants"); filtered, "{shown} of {total}" against every
+  // listed merchant — a figure the shown set can never exceed.
+  const count: ListCount = filtered
+    ? { shown: visible.length, total: merchants.length }
+    : { shown: visible.length, total: visible.length }
 
   if (loading) {
     // The filter chrome's height is reserved so the cards do not jump when it
-    // appears: the search/network row, then the pills/checkboxes row (#3979).
-    // `aria-busy` + `role="status"`: the skeletons are `aria-hidden`, so
-    // without this the capture harness's content floor certified a
-    // header-only page as finished; it refuses content still marked busy.
+    // appears: the ListToolbar card (#4114) stands where the old two-row
+    // chrome did. `aria-busy` + `role="status"`: the skeletons are
+    // `aria-hidden`, so without this the capture harness's content floor
+    // certified a header-only page as finished; it refuses content still
+    // marked busy.
     return (
       <div role="status" aria-busy="true" aria-label="Loading merchants">
-        <Skeleton className="mb-3 h-9 w-full rounded-lg" />
-        {/* #3979 deferred nit: the second row is two SHORT blocks (pills
-            left, checkboxes right) on every width, not one long bar — a
-            phone-width bar under-reserved the row it stands for. */}
-        <div className="mb-4 flex items-center justify-between gap-x-4 gap-y-2">
-          <Skeleton className="h-7 w-48 max-w-[45%] rounded-full" />
-          <Skeleton className="h-7 w-36 max-w-[40%] rounded-full" />
-        </div>
+        <Skeleton className="mb-4 h-[150px] w-full rounded-[10px]" />
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {[0, 1, 2].map((i) => (
             <Skeleton key={i} className="h-40 rounded-xl" />
@@ -225,7 +321,7 @@ export function MerchantGrid({
 
   const emptyMarketplace = merchants.length === 0
   if (emptyMarketplace) {
-    // No filter row over nothing: the one next step is the submit modal.
+    // No toolbar over nothing: the one next step is the submit modal.
     return (
       <EmptyState
         title="No merchants listed yet"
@@ -241,83 +337,30 @@ export function MerchantGrid({
 
   return (
     <div>
-      {/* #3979: one toolbar row in the Contacts shape — a search field with a
-          leading icon that fills the row, the network dropdown beside it. */}
-      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="flex-1">
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search merchants"
-            aria-label="Search merchants"
-            leftIcon={<Icon icon={Search} className="h-4 w-4" />}
-          />
-        </div>
-        {showNetworkFilter && (
-          <Select
-            aria-label="Filter marketplace by network"
-            value={chainFilter === 'all' ? 'all' : String(chainFilter)}
-            onChange={(e) => setChainChoice(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-            className="sm:max-w-[200px]"
-          >
-            <option value="all">All networks</option>
-            {chainIds.map((id) => (
-              <option key={id} value={String(id)}>
-                {chainName(id)}
-              </option>
-            ))}
-          </Select>
-        )}
-      </div>
-
-      {/* Second row: what kind of merchant (pills) on the left, which ones
-          (checkboxes) on the right; the checkboxes wrap beneath on a phone.
-          #3979 deferred nit: the 44px tap boxes add their height below `sm`,
-          so the row's bottom margin is trimmed there — the gap under the
-          checkboxes no longer doubles the reserved space. */}
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 sm:mb-4">
-        {categories.length > 1 ? (
-          <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by category">
-            <FilterPill active={activeCategory === null} onClick={() => setCategory(null)}>
-              All
-            </FilterPill>
-            {categories.map((c) => (
-              <FilterPill key={c} active={activeCategory === c} onClick={() => setCategory(c)}>
-                {categoryLabel(c)}
-              </FilterPill>
-            ))}
-          </div>
-        ) : null}
-        <div className="flex flex-wrap items-center gap-4 text-xs font-medium text-[var(--v2-ink-2)]">
-          {/* `min-h-11` below `sm`: the label IS the tap target, so a 44px row on a phone. */}
-          <Checkbox
-            label="Verified only"
-            className="min-h-11 sm:min-h-0"
-            checked={verifiedOnly}
-            onChange={(e) => setVerifiedOnly(e.target.checked)}
-          />
-          <Checkbox
-            label="Show test merchants"
-            className="min-h-11 sm:min-h-0"
-            checked={showTestMerchants}
-            onChange={(e) => setShowTestMerchants(e.target.checked)}
-          />
-        </div>
-      </div>
+      {/* #4114: the list-controls toolbar. Browser filtering — the merchant
+          list is small, unpaged and has no export. The search commits per
+          keystroke; only its URL write waits for a pause. */}
+      <ListToolbar
+        noun={merchantNoun}
+        state={listState}
+        onChange={setListState}
+        filtering="browser"
+        facets={facets}
+        searchDescription="by name or description"
+        count={count}
+      />
 
       {visible.length === 0 ? (
-        <EmptyState
-          size="compact"
-          tone="neutral"
-          title="No merchants match this filter"
-          action={
-            filtered ? (
-              <Button variant="ghost" size="sm" onClick={clearFilters}>
-                Clear filters
-              </Button>
-            ) : undefined
-          }
-        />
+        // The standard no-match state (#4110): it sits where the rows were —
+        // in place of the grid, not inside it — and leaves the toolbar up, so
+        // the cause stays editable. It covers BOTH groups (#4052): the
+        // section and the cards go together.
+        <div className="mt-3" data-testid="marketplace-no-match">
+          <ListNoMatch
+            noun={merchantNoun}
+            onClear={() => setListState(clearedListState(listState, schema))}
+          />
+        </div>
       ) : (
         // #4052: either group may be empty on its own (a search for one
         // coming-soon merchant leaves no cards); the empty state above is

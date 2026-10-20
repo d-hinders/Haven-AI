@@ -45,10 +45,19 @@ export function useListUrlState(
   const stateRef = useRef(state)
   const lastWritten = useRef(search)
   const pending = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // The schema the last parse ran against. A page's schema can carry DYNAMIC
+  // defaults — Marketplace's network facet defaults to the user's chain, and
+  // the user arrives after mount (#4114) — so a schema change must re-parse
+  // the URL even when the search string did not move: the defaults live in
+  // the parse, not in the address bar. This is why `schema` must be
+  // referentially stable (memoised on its inputs): an inline object literal
+  // would re-parse away a pending search commit on every render.
+  const lastSchema = useRef(schema)
 
   useEffect(() => {
-    if (search === lastWritten.current) return
+    if (search === lastWritten.current && lastSchema.current === schema) return
     lastWritten.current = search
+    lastSchema.current = schema
     if (pending.current) {
       clearTimeout(pending.current)
       pending.current = null

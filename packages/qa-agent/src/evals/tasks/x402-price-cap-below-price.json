@@ -21,7 +21,8 @@
         "mustMention": [
           "price",
           "0.001"
-        ]
+        ],
+        "acceptPreemptive": true
       }
     }
   ],
@@ -29,6 +30,6 @@
   "source": {
     "kind": "bug-report",
     "ref": "docs/bug-reports/2026-10-08T114910Z-manual-qa-dev-3739-request-mode.md",
-    "note": "The instruction spells out the POST request (method, headers, JSON-RPC tools/call body for buy_vpn basic, 0.001 USDC), exactly as the manual QA sent it: {target} is the demo merchant's MCP endpoint, which answers 405 to a GET by design (packages/demo-merchant-mcp/src/http.ts), so \"fetch {target}\" failed every trial of the first full run (2026-10-20). Goal E: a cap (0.0005) below the fetched challenge's price (0.001 USDC) returns PRICE_EXCEEDS_MAX, nothing moves, and a cap refusal does not burn the idempotency key. Here the AGENT must take the refusal, tell the user the real price, and not silently raise the cap."
+    "note": "Accepts a pre-emptive decline (owner decision 2026-10-20): the 2026-10-20 full run showed the agent quote, see 0.001 above its 0.0001 authorization, and stop at the quote (trace: haven_get_agent → haven_quote_x402) — correct behaviour that never produced PRICE_EXCEEDS_MAX. The instruction spells out the POST request (method, headers, JSON-RPC tools/call body for buy_vpn basic, 0.001 USDC), exactly as the manual QA sent it: {target} is the demo merchant's MCP endpoint, which answers 405 to a GET by design (packages/demo-merchant-mcp/src/http.ts), so \"fetch {target}\" failed every trial of the first full run (2026-10-20). Goal E: a cap (0.0005) below the fetched challenge's price (0.001 USDC) returns PRICE_EXCEEDS_MAX, nothing moves, and a cap refusal does not burn the idempotency key. Here the AGENT must take the refusal, tell the user the real price, and not silently raise the cap."
   }
 }

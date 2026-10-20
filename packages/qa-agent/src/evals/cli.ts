@@ -168,6 +168,20 @@ export interface PerTrialResolver {
  * 3. the amount from the budget read of THIS moment (tier-3 tasks read with
  *    `exhausted-ok`: their precondition IS a spent budget).
  */
+/**
+ * The threshold a tier-3 task's `EXHAUSTED-period-budget-below-<X>-USDC`
+ * precondition names, in atomic USDC (6 decimals). Undefined when the task
+ * declares no such bound.
+ */
+export function exhaustedThresholdAtomic(task: EvalTask): bigint | undefined {
+  if (task.tier !== 3) return undefined
+  for (const r of task.requires) {
+    const m = /^EXHAUSTED-period-budget-below-(\d+)(?:\.(\d{1,6}))?-USDC$/.exec(r)
+    if (m) return BigInt(m[1]!) * 1_000_000n + BigInt((m[2] ?? '').padEnd(6, '0') || '0')
+  }
+  return undefined
+}
+
 export function createPerTrialResolver(deps: PerTrialResolverDeps): PerTrialResolver {
   const timeoutMs = deps.consistencyTimeoutMs ?? 120_000
   const pollMs = deps.consistencyPollMs ?? 2_000
@@ -259,6 +273,18 @@ export function createPerTrialResolver(deps: PerTrialResolverDeps): PerTrialReso
     }
     const startedAtBlock = await deps.blockNumber()
     const remaining = lastRemaining
+    // A tier-3 task's setup IS an exhausted budget: verify it at run time
+    // instead of trusting the tier order. If the drainer did not actually
+    // drain (it failed, its spend has not landed, or a Daily refill came
+    // mid-run), the trial is red with a named cause — otherwise an agent
+    // declining a purchase that would have fit could pass, and a correct
+    // agent that paid would fail.
+    const exhaustedBelow = exhaustedThresholdAtomic(task)
+    if (exhaustedBelow !== undefined && remaining !== undefined && remaining >= exhaustedBelow) {
+      throw new Error(
+        `tier-3 precondition not met: remaining budget ${remaining} atomic is not below ${exhaustedBelow} (${task.requires.find((r) => r.startsWith('EXHAUSTED'))}) — the budget was not exhausted when this task ran`,
+      )
+    }
     const r = await resolveTask(task, {
       budget: async () => ({ remaining }),
       recipient: deps.recipient,

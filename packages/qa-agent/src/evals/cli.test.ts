@@ -657,3 +657,26 @@ describe('A3: the drainer runs after every tier-1 task, before the exhausted-bud
     expect(renderSummary(report)).toContain('k=1 (drains budget)')
   })
 })
+
+// A tier-3 task's exhausted-budget precondition is verified when it runs, not
+// trusted from the tier order (review of the pre-emptive decline change).
+describe('tier-3 precondition is checked at resolve time', () => {
+  it('reads the threshold from the EXHAUSTED requires label', async () => {
+    const { exhaustedThresholdAtomic } = await import('./cli.js')
+    expect(exhaustedThresholdAtomic({ tier: 3, requires: ['EXHAUSTED-period-budget-below-0.001-USDC'] } as never)).toBe(1000n)
+    expect(exhaustedThresholdAtomic({ tier: 1, requires: ['EXHAUSTED-period-budget-below-0.001-USDC'] } as never)).toBeUndefined()
+  })
+
+  it('a tier-3 trial with budget still above the threshold is a red trial with a named cause', async () => {
+    const { tasks } = await (await import('./tasks.js')).loadTasks()
+    const tier3 = tasks.find((t) => t.tier === 3)!
+    const resolver = createPerTrialResolver({
+      readBudget: async () => ({ remaining: 300_000n }),
+      blockNumber: async () => 1,
+      recipient: '0x' + '22'.repeat(20),
+      x402Target: 'https://merchant.example/mcp',
+      agentAccount: '0x' + '11'.repeat(20),
+    } as never)
+    await expect(resolver.resolve(tier3, 1)).rejects.toThrow(/tier-3 precondition not met: remaining budget 300000/)
+  })
+})

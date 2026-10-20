@@ -74,10 +74,13 @@ function labelerMoneyPathGlobs() {
  * concrete file a pattern covers (`infra/relayer-balance-monitor.ts`) stood in for
  * a glob. With one exact path per line the sections are compared for EQUALITY.
  *
- * `## ` headings switch the section; `### ` group headings do not. Every
- * `-`/`*`/`+` list item must be an entry: a list item that names a path and then
- * explains it is a near miss, reported as `malformed` so the test fails on it
- * instead of skipping a line a human reads as perimeter.
+ * `## ` headings switch the section; `### ` group headings do not. Every list
+ * item (`-`, `*`, `+`, `1.` or `1)`, indented or inside a `>` blockquote) must be
+ * an entry: a list item that names a path and then explains it is a near miss,
+ * reported as `malformed` so the test fails on it instead of skipping a line a
+ * human reads as perimeter. Code fences are not special: an entry inside one
+ * counts and a `## ` line inside one switches the section, so a fence can only
+ * add a finding, never hide one.
  */
 const PERIMETER_DOC = '.agents/skills/ship-next/references/money-path-perimeter.md'
 const RUNTIME_HEADING = '## Runtime perimeter: `globs`'
@@ -94,16 +97,37 @@ function perimeterEntries(text) {
     }
     const entry = line.match(/^- `([^`\s]+)`$/)
     if (entry) (section ? out[section] : out.outside).push(entry[1])
-    else if (/^\s*[-*+]\s/.test(line)) out.malformed.push(`${i + 1}: ${line}`)
+    else if (/^\s*(?:>\s*)*(?:[-*+]|\d+[.)])\s/.test(line)) out.malformed.push(`${i + 1}: ${line}`)
   }
   return out
 }
+
+/** A path listed more than once in one section, sorted. */
+const duplicates = (list) => [...new Set(list.filter((p, i) => list.indexOf(p) !== i))].sort()
 
 /** Set difference both ways, sorted, for a failure message that names the paths. */
 const setDiff = (listed, canonical) => ({
   missing: canonical.filter((g) => !listed.includes(g)).sort(),
   extra: listed.filter((p) => !canonical.includes(p)).sort(),
 })
+
+/**
+ * Everything the two live tests below assert, computed once so the fixture test
+ * can drive the same code. Per group, never the union: qa-freshness reads
+ * `globs` alone, so a runtime path under the control heading is wrong even when
+ * the union is unchanged.
+ */
+function perimeterFindings(text, globs, controlGlobs) {
+  const parsed = perimeterEntries(text)
+  return {
+    headings: parsed.headings,
+    malformed: parsed.malformed,
+    outside: parsed.outside,
+    duplicates: { runtime: duplicates(parsed.runtime), control: duplicates(parsed.control) },
+    runtime: setDiff(parsed.runtime, globs),
+    control: setDiff(parsed.control, controlGlobs),
+  }
+}
 
 describe('money-path list stays in one piece', () => {
   test('labeler.yml matches the UNION of globs + controlGlobs', () => {
@@ -122,7 +146,7 @@ describe('money-path list stays in one piece', () => {
   })
 
   test('the perimeter reference parses: both sections once, every list item an entry, nothing outside a section', () => {
-    const parsed = perimeterEntries(read(PERIMETER_DOC))
+    const parsed = perimeterFindings(read(PERIMETER_DOC), loadMoneyPathGlobs(), loadMoneyPathControlGlobs())
     assert.deepEqual(parsed.headings, { runtime: 1, control: 1 }, `${PERIMETER_DOC} must carry each section heading exactly once`)
     assert.deepEqual(
       parsed.malformed,
@@ -131,9 +155,7 @@ describe('money-path list stays in one piece', () => {
         'move the explanation into the prose above the entries (#4177).',
     )
     assert.deepEqual(parsed.outside, [], `${PERIMETER_DOC} has entries outside the runtime and control sections`)
-    for (const k of ['runtime', 'control']) {
-      assert.equal(new Set(parsed[k]).size, parsed[k].length, `${PERIMETER_DOC}: a ${k} path is listed twice`)
-    }
+    assert.deepEqual(parsed.duplicates, { runtime: [], control: [] }, `${PERIMETER_DOC}: a path is listed twice`)
   })
 
   test('the perimeter reference lists exactly `globs` and exactly `controlGlobs` (#1030, #1892, #4177)', () => {
@@ -148,16 +170,16 @@ describe('money-path list stays in one piece', () => {
     // suffix matcher and is an `extra` here. Per group, because qa-freshness
     // reads `globs` alone: a runtime path listed under control is wrong even
     // though the labeler's union would not notice.
-    const parsed = perimeterEntries(read(PERIMETER_DOC))
+    const parsed = perimeterFindings(read(PERIMETER_DOC), loadMoneyPathGlobs(), loadMoneyPathControlGlobs())
     assert.deepEqual(
-      setDiff(parsed.runtime, loadMoneyPathGlobs()),
+      parsed.runtime,
       { missing: [], extra: [] },
       `${PERIMETER_DOC}'s runtime section and \`globs\` in .github/money-path-globs.json disagree. ` +
         'Write each glob exactly as the JSON does, one per line. An extra path that IS money-path ' +
         'belongs in the JSON and labeler.yml first; a missing one is a perimeter the reader cannot see (#1892).',
     )
     assert.deepEqual(
-      setDiff(parsed.control, loadMoneyPathControlGlobs()),
+      parsed.control,
       { missing: [], extra: [] },
       `${PERIMETER_DOC}'s control section and \`controlGlobs\` in .github/money-path-globs.json disagree. ` +
         'Write each glob exactly as the JSON does, one per line, in the section its JSON list names.',
@@ -179,6 +201,8 @@ describe('money-path list stays in one piece', () => {
       '- `packages/backend/src/routes/payments.ts` (a near miss: an entry with an explanation)',
       '  - `packages/backend/src/indented.ts`',
       '* `packages/backend/src/star.ts`',
+      '1. `packages/backend/src/ordered.ts`',
+      '> - `packages/backend/src/quoted.ts`',
       CONTROL_HEADING,
       '- `scripts/ci/qa-freshness.mjs`',
       '## Another section',
@@ -192,8 +216,54 @@ describe('money-path list stays in one piece', () => {
       '8: - `packages/backend/src/routes/payments.ts` (a near miss: an entry with an explanation)',
       '9:   - `packages/backend/src/indented.ts`',
       '10: * `packages/backend/src/star.ts`',
+      '11: 1. `packages/backend/src/ordered.ts`',
+      '12: > - `packages/backend/src/quoted.ts`',
     ])
     assert.deepEqual(parsed.headings, { runtime: 1, control: 1 })
+  })
+
+  test('the perimeter comparison is per group, and a duplicate is reported (#4177)', () => {
+    // Fixture controls for perimeterFindings. Mutations: compare each section
+    // with the union of both lists and the moved-path case goes green; drop the
+    // duplicates computation and the doubled entry goes unreported.
+    const globs = ['packages/a/runtime.ts', 'packages/a/moved.ts']
+    const controlGlobs = ['scripts/control.mjs']
+    const moved = [
+      RUNTIME_HEADING,
+      '- `packages/a/runtime.ts`',
+      CONTROL_HEADING,
+      '- `scripts/control.mjs`',
+      '- `packages/a/moved.ts`',
+    ].join('\n')
+    const m = perimeterFindings(moved, globs, controlGlobs)
+    assert.deepEqual(m.runtime, { missing: ['packages/a/moved.ts'], extra: [] })
+    assert.deepEqual(m.control, { missing: [], extra: ['packages/a/moved.ts'] })
+
+    const doubled = [
+      RUNTIME_HEADING,
+      '- `packages/a/runtime.ts`',
+      '- `packages/a/moved.ts`',
+      '- `packages/a/runtime.ts`',
+      CONTROL_HEADING,
+      '- `scripts/control.mjs`',
+    ].join('\n')
+    const d = perimeterFindings(doubled, globs, controlGlobs)
+    assert.deepEqual(d.runtime, { missing: [], extra: [] }, 'set equality alone cannot see a duplicate')
+    assert.deepEqual(d.duplicates, { runtime: ['packages/a/runtime.ts'], control: [] })
+  })
+
+  test('the ship-next Merge Gate section points at the perimeter reference (#4177)', () => {
+    // The list left the Merge Gate; the pointer is what sends a reader to it.
+    // Mutation: delete the pointer link and this fails.
+    const skill = read('.agents/skills/ship-next/SKILL.md')
+    const start = skill.indexOf('\n## Merge Gate\n')
+    assert.notEqual(start, -1, 'SKILL.md has no Merge Gate section')
+    const next = skill.indexOf('\n## ', start + 1)
+    const gate = skill.slice(start, next === -1 ? undefined : next)
+    assert.ok(
+      gate.includes('](references/money-path-perimeter.md)'),
+      'the Merge Gate section of ship-next/SKILL.md no longer links references/money-path-perimeter.md',
+    )
   })
 
   test('the two lists are disjoint — a glob belongs to exactly one', () => {
@@ -686,26 +756,18 @@ describe('money-path list stays in one piece', () => {
     )
   })
 
-  test('every KNOWN_COPIES entry is a real copy — an exemption must exempt something (#1904, #4177)', () => {
-    // The #1904 test above scores everything OUTSIDE KNOWN_COPIES, so a full
-    // copy pasted into a known home is never scored. Before #4177 the ship-next
-    // SKILL.md was a known home because the annotated list lived in its Merge
-    // Gate; with the list moved to references/money-path-perimeter.md it scores
-    // like ordinary prose, and leaving it in KNOWN_COPIES would hide exactly the
-    // re-paste the move is meant to make visible. A known home that no longer
-    // outscores ordinary prose is the stale-exclusion shape (the DOC_ONLY rule
-    // above, #3098). Mutation: add .agents/skills/ship-next/SKILL.md back to
-    // KNOWN_COPIES and this fails by name.
-    const m = perimeterMatchers(allGlobs())
-    const ceiling = proseCeiling(m)
-    const notCopies = KNOWN_COPIES.filter((f) => scoreCount(read(f), m) <= ceiling)
-    assert.deepEqual(
-      notCopies,
-      [],
-      `KNOWN_COPIES names files that score at or below the prose ceiling of ${ceiling}, so they ` +
-        'are exempt from the scan without being a copy. Drop them from KNOWN_COPIES in ' +
-        'scripts/ci/money-path-restatement-scan.mjs. If the ceiling rose instead, run ' +
-        '`node scripts/ci/money-path-restatement-scan.mjs` and read the top of the ranking.',
+  test('KNOWN_COPIES names the perimeter reference and not SKILL.md (#1904, #4177)', () => {
+    // The #1904 test above scores everything OUTSIDE KNOWN_COPIES. The annotated
+    // list moved out of ship-next's Merge Gate section into
+    // references/money-path-perimeter.md, so the reference is a known home and
+    // SKILL.md is ordinary prose: a full copy pasted back into SKILL.md must be
+    // scored, and leaving SKILL.md in KNOWN_COPIES would hide it. Mutations:
+    // drop the reference from KNOWN_COPIES, or add SKILL.md, and this fails.
+    assert.ok(KNOWN_COPIES.includes(PERIMETER_DOC), `KNOWN_COPIES must name ${PERIMETER_DOC}`)
+    assert.ok(
+      !KNOWN_COPIES.includes('.agents/skills/ship-next/SKILL.md'),
+      'KNOWN_COPIES must not name .agents/skills/ship-next/SKILL.md: the list no longer lives there, ' +
+        'and a known home is never scored, so a copy pasted back would be invisible',
     )
   })
 

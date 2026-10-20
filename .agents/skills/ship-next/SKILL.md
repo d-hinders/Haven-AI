@@ -326,10 +326,11 @@ Run the **repository's own required checks** locally before pushing, for fast fe
   why the battery above comes first.** Several read source by content —
   `scripts/lint-request-schemas.test.mjs` pins the real `enforcedModules` list,
   `scripts/ci/money-path.test.mjs` holds this skill's
-  `references/money-path-perimeter.md` equal to the perimeter — and PR #3221 went red on each in turn (runs
-  `35743765136` at `162f916a`, `35748951778` at `9bd70181`) after a local sweep
-  that ran vitest and a hand-picked lint list. `node scripts/ci/preflight.mjs
-  --list` selects `npm run lint:request-schemas:test` at the first commit and
+  `references/money-path-perimeter.md` equal to the perimeter — and PR #3221
+  went red on each in turn (runs `35743765136` at `162f916a`, `35748951778` at
+  `9bd70181`) after a local sweep that ran vitest and a hand-picked lint list.
+  `node scripts/ci/preflight.mjs --list` selects
+  `npm run lint:request-schemas:test` at the first commit and
   `node --test scripts/ci/*.test.mjs` at the second: the battery would have
   caught both. Two traps when running any of them by hand: without `npm ci`
   six cases fail for missing packages (`dependency-cruiser`, `tsx`), which is the

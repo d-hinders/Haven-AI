@@ -11,10 +11,15 @@ this file is its annotated twin, and `scripts/ci/money-path.test.mjs` holds the 
 Only a line of exactly the form ``- `<path>` `` counts as a perimeter entry: a
 hyphen, one space, one backticked repo-root path, nothing after it. A backticked
 path anywhere else (in a sentence, a heading or a parenthetical) is prose and is
-not read. Every hyphen, star or plus list item in this file must be such an entry:
-a list item that names a path and then explains it is a near miss, and the test
-fails on it rather than skipping it, because a skipped near miss reads to a human
-as perimeter while the machinery never sees it.
+not read. Every list item in this file must be such an entry, whatever its
+marker (hyphen, star, plus, `1.` or `1)`), indent or `>` blockquote: a list item
+that names a path and then explains it is a near miss, and the test fails on it
+rather than skipping it, because a skipped near miss reads to a human as perimeter
+while the machinery never sees it.
+
+Code fences are not special. An entry inside a fence still counts, and a `## `
+line inside a fence still switches the section. That fails closed: a fence can add
+a finding, never hide one. So do not put example entries in a fence here.
 
 Entries under the runtime heading must equal `globs` and entries under the control
 heading must equal `controlGlobs`, as sets, in both directions. A missing path, an

@@ -17,6 +17,22 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
+- **Hosted paid calls now accept a merchant answer whose `PAYMENT-RESPONSE`
+  header carries no transaction beside a `_meta` settlement that has one
+  (#4120).** The post-funding merchant-answer decision is now one shared
+  module (`merchant-answer.ts`) behind both `completeX402MerchantCall` and the
+  local retry, and it uses the local hash rule on both paths: the header's
+  transaction when it carries one, otherwise the
+  `_meta["x402/payment-response"]` transaction. Hosted callers therefore get,
+  on that input, what local callers always got: an `isError` answer beside a
+  `_meta` settlement is delivered as evidence instead of
+  `MERCHANT_REJECTED_AFTER_FUNDING`; without `isError` the result carries the
+  `_meta` settlement hash, the merchant's settlement is reported to Haven
+  (#3764), and an erc7710 completion anchors its evidence on it. Nothing here
+  requires a client update to keep paying. A 200 `text/plain` `isError` answer
+  is still rejected on the hosted path and accepted on the local path
+  (unchanged, per caller).
+
 - **EIP-3009 settlement reports carry the payment header again (#4061).** Since
   #3925 the backend records an agent-reported EIP-3009 merchant settlement only
   when the report carries the payment header that was sent to the merchant. The

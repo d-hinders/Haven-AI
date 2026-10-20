@@ -120,10 +120,7 @@ import {
   throwPaymentStateError,
 } from './payment-state.js'
 import {
-  MCP_X402_PAYMENT_RESPONSE_META_KEY,
   McpMerchantTransport,
-  encodeMcpSettlementReceipt,
-  extractMcpPaymentRequired,
   mcpSettlementFromToolResult,
   mcpToolResultOf,
 } from './mcp-merchant-transport.js'
@@ -150,7 +147,8 @@ import {
 import { X402FundingLeg, sameX402TaskBudget, type FundingLegExpectation } from './x402-funding-leg.js'
 import { X402Erc7710 } from './x402-erc7710.js'
 import { toolError, toolX402PaymentRequired, x402ToolReceipt } from './tool-adapter.js'
-import { MerchantCompletion, isZeroSettlementTxHash, isWellFormedSettlementTxHash, parseMerchantSettlement } from './merchant-completion.js'
+import { MerchantCompletion, isZeroSettlementTxHash, isWellFormedSettlementTxHash } from './merchant-completion.js'
+import { decidePostFundingMerchantAnswer } from './merchant-answer.js'
 import type { EvidenceReportOutcome, X402MerchantOutcome, X402MerchantOutcomeReport } from './merchant-completion.js'
 
 const DEFAULT_POLLING_INTERVAL = 3_000
@@ -1904,41 +1902,23 @@ export class HavenClient {
 
     // #3118: a profile merchant reports settlement in
     // `result._meta["x402/payment-response"]` and a refusal as an
-    // `isError: true` tool result — both under HTTP 200. The header form is
-    // read first and stays authoritative when present; the `_meta` form is
-    // re-encoded as base64 JSON so the evidence report's receipt payload is
-    // parsed by the one existing decoder, and its `success: false` (or an
-    // in-band payment-required result) is a merchant REJECTION, never a
-    // success: the tool's content was withheld and nothing settled.
+    // `isError: true` tool result — both under HTTP 200. #4120: the verdict,
+    // the settlement hash and the protocol receipt are the ONE shared
+    // post-funding merchant-answer decision (`merchant-answer.ts`) — the
+    // hosted copy no longer keeps its own predicate. What stays per caller is
+    // the PARSING of the tool result (#4120 D2, undecided): `surfaceResult`
+    // plus `JSON.parse` below reads every body, where the local path gates on
+    // JSON/SSE content types.
     const toolResult = mcpToolResultOf(body)
-    const inBandChallenge = toolResult ? extractMcpPaymentRequired(toolResult) : undefined
     const metaSettlement = toolResult ? mcpSettlementFromToolResult(toolResult) : undefined
     const headerReceipt = surfaced.headers.get('PAYMENT-RESPONSE') ?? undefined
-    const protocolReceiptHeaderName = headerReceipt
-      ? 'PAYMENT-RESPONSE'
-      : metaSettlement
-        ? `_meta.${MCP_X402_PAYMENT_RESPONSE_META_KEY}`
-        : undefined
-    const protocolReceiptHeader = headerReceipt ?? (metaSettlement ? encodeMcpSettlementReceipt(metaSettlement) : undefined)
-    const settlement = parseMerchantSettlement(protocolReceiptHeader ?? null)
-    // #4062: a PLAIN tool error — `isError: true` with NEITHER a
-    // payment-required challenge NOR a settlement receipt — is also a refusal.
-    // A merchant that answers its paid call with a failed tool result has not
-    // delivered, and absent a receipt has not settled either: the funding leg
-    // already moved the USDC, so it is stranded on the delegate and must reach
-    // the agent as MERCHANT_REJECTED_AFTER_FUNDING, never `settled: true`.
-    // A tool error BESIDE a verified settlement hash is the opposite case: the
-    // money moved, so the errored result is delivered as evidence, not refused.
-    // A JSON-RPC `error` envelope (no `result`) after payment stays `ok` on the
-    // HTTP status: it carries no settlement statement, and the two protocol
-    // signals above are the only ones that mean "nothing settled" (#3155 S4).
-    const plainToolErrorAfterFunding =
-      toolResult?.isError === true && inBandChallenge === undefined && !settlement.settlementTxHash
-    const merchantAccepted =
-      surfaced.ok &&
-      inBandChallenge === undefined &&
-      metaSettlement?.success !== false &&
-      !plainToolErrorAfterFunding
+    const answer = decidePostFundingMerchantAnswer({
+      toolResult,
+      httpOk: surfaced.ok,
+      paymentResponseHeader: headerReceipt,
+      metaSettlement,
+    })
+    const merchantAccepted = answer.accepted
 
     // #2970: declared here (not inside the `else` below) so it survives to
     // the `return` — `undefined` on the refusal branch and whenever there was
@@ -1991,7 +1971,7 @@ export class HavenClient {
       // backend verifies the erc7710 hash on-chain before it confirms anything
       // (#2092), so reporting it is a claim, not an authority.
       const rawEvidenceTxHash = input.noFundingLeg
-        ? (settlement.settlementTxHash ?? undefined)
+        ? (answer.settlementTxHash ?? undefined)
         : (fundingTxHash ?? undefined)
       // #2970: a zero hash is never a real transaction (see
       // `isZeroSettlementTxHash`) — reporting it can only ever come back
@@ -2015,8 +1995,8 @@ export class HavenClient {
           merchantStatus: surfaced.status,
           paymentProofHeaderName: x402PaymentHeaderNamesSent(input.paymentHeader),
           paymentProofHeader: input.paymentHeader,
-          protocolReceiptHeaderName,
-          protocolReceiptHeader,
+          protocolReceiptHeaderName: answer.protocolReceiptHeaderName,
+          protocolReceiptHeader: answer.protocolReceiptHeader,
           // #3778: the delivery pointer rides the accepted arm's evidence
           // report — a rejection delivered nothing to point at.
           ...(input.deliveryReference ? { deliveryReference: input.deliveryReference } : {}),
@@ -2041,7 +2021,7 @@ export class HavenClient {
       // above still holds). ONE attempt, no backoff (D2); the outcome rides
       // the result for the hosted tools to map (D1).
       if (!input.noFundingLeg) {
-        const settlementCandidate = settlement.settlementTxHash
+        const settlementCandidate = answer.settlementTxHash
         if (
           settlementCandidate &&
           isWellFormedSettlementTxHash(settlementCandidate) &&
@@ -2068,7 +2048,7 @@ export class HavenClient {
       ok: merchantAccepted,
       body,
       // #3155 review S3: a transaction beside a rejection is not a settlement.
-      settlementTxHash: merchantAccepted ? (settlement.settlementTxHash ?? undefined) : undefined,
+      settlementTxHash: merchantAccepted ? (answer.settlementTxHash ?? undefined) : undefined,
       evidenceOutcome,
       settlementEvidenceOutcome,
     }

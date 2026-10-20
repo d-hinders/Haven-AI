@@ -348,75 +348,75 @@ describe('#4120 characterization — hosted completeX402MerchantCall', () => {
 
   // ── D1: a header WITHOUT a transaction beside a _meta settlement WITH one ──
 
-  it('D1, with isError: a transaction-less header beside a _meta settlement is REJECTED today (the intended flip)', async () => {
+  it('D1, with isError: a transaction-less header beside a _meta settlement is ACCEPTED — the money moved (owner decision 1)', async () => {
     const { fetchMock, result } = hosted(() =>
       json(rpcResult(2, { isError: true, content: [{ type: 'text', text: 'partial' }], _meta: { [MCP_X402_PAYMENT_RESPONSE_META_KEY]: metaSettlement } }), { headers: { 'PAYMENT-RESPONSE': btoa(JSON.stringify({})) } }),
     )
     const res = await result
-    expect(res.ok).toBe(false)
-    expect(res.settlementTxHash).toBeUndefined()
-    expect(backendCalls(fetchMock, '/machine-payments/evidence')).toHaveLength(0)
-    expect(backendCalls(fetchMock, '/machine-payments/reconciliation-events')).toHaveLength(1)
+    expect(res.ok).toBe(true)
+    expect(res.settlementTxHash).toBe(metaTx)
+    expect(evidenceTxHashes(fetchMock)).toEqual([fundingTxHash, metaTx])
+    expect(backendCalls(fetchMock, '/machine-payments/reconciliation-events')).toHaveLength(0)
   })
 
-  it('D1, without isError: a transaction-less header beside a _meta settlement accepts with NO settlement hash and no second report today', async () => {
+  it('D1, without isError: the _meta transaction is the settlement hash and the second report is posted (owner decision 1)', async () => {
     const { fetchMock, result } = hosted(() =>
       json(rpcResult(2, { content: [{ type: 'text', text: 'paid answer' }], _meta: { [MCP_X402_PAYMENT_RESPONSE_META_KEY]: metaSettlement } }), { headers: { 'PAYMENT-RESPONSE': btoa(JSON.stringify({})) } }),
     )
     const res = await result
     expect(res.ok).toBe(true)
-    expect(res.settlementTxHash).toBeUndefined()
-    // Only the funding report; no #3764 second report, no reconciliation.
-    expect(evidenceTxHashes(fetchMock)).toEqual([fundingTxHash])
+    expect(res.settlementTxHash).toBe(metaTx)
+    // Funding report + the #3764 second report on the _meta transaction.
+    expect(evidenceTxHashes(fetchMock)).toEqual([fundingTxHash, metaTx])
     expect(backendCalls(fetchMock, '/machine-payments/reconciliation-events')).toHaveLength(0)
   })
 
-  it('D1, empty header with isError: rejected today (the intended flip)', async () => {
+  it('D1, empty header with isError: accepted on the _meta transaction (owner decision 1)', async () => {
     const { fetchMock, result } = hosted(() =>
       json(rpcResult(2, { isError: true, content: [{ type: 'text', text: 'partial' }], _meta: { [MCP_X402_PAYMENT_RESPONSE_META_KEY]: metaSettlement } }), { headers: { 'PAYMENT-RESPONSE': '' } }),
     )
     const res = await result
-    expect(res.ok).toBe(false)
-    expect(res.settlementTxHash).toBeUndefined()
-    expect(backendCalls(fetchMock, '/machine-payments/evidence')).toHaveLength(0)
-    expect(backendCalls(fetchMock, '/machine-payments/reconciliation-events')).toHaveLength(1)
+    expect(res.ok).toBe(true)
+    expect(res.settlementTxHash).toBe(metaTx)
+    expect(evidenceTxHashes(fetchMock)).toEqual([fundingTxHash, metaTx])
+    expect(backendCalls(fetchMock, '/machine-payments/reconciliation-events')).toHaveLength(0)
   })
 
-  it('D1, empty header without isError: accepted with NO settlement hash today', async () => {
+  it('D1, empty header without isError: the _meta transaction is the settlement hash (owner decision 1)', async () => {
     const { fetchMock, result } = hosted(() =>
       json(rpcResult(2, { content: [{ type: 'text', text: 'paid answer' }], _meta: { [MCP_X402_PAYMENT_RESPONSE_META_KEY]: metaSettlement } }), { headers: { 'PAYMENT-RESPONSE': '' } }),
     )
     const res = await result
     expect(res.ok).toBe(true)
-    expect(res.settlementTxHash).toBeUndefined()
+    expect(res.settlementTxHash).toBe(metaTx)
     // The empty header is falsy: the receipt name falls to the _meta form while
     // the raw header value rides the report as-is.
     const funding = bodyOf(backendCalls(fetchMock, '/machine-payments/evidence')[0])
     expect(funding.protocolReceiptHeaderName).toBe(`_meta.${MCP_X402_PAYMENT_RESPONSE_META_KEY}`)
     expect(funding.protocolReceiptHeader).toBe('')
-    expect(evidenceTxHashes(fetchMock)).toEqual([fundingTxHash])
+    expect(evidenceTxHashes(fetchMock)).toEqual([fundingTxHash, metaTx])
   })
 
-  it('D1, erc7710 (noFundingLeg) without isError: accepted but NOTHING is anchored today (the intended flip)', async () => {
+  it('D1, erc7710 (noFundingLeg) without isError: the evidence anchors on the _meta transaction (owner decision 1)', async () => {
     const { fetchMock, result } = hosted(
       () => json(rpcResult(2, { content: [{ type: 'text', text: 'paid answer' }], _meta: { [MCP_X402_PAYMENT_RESPONSE_META_KEY]: metaSettlement } }), { headers: { 'PAYMENT-RESPONSE': btoa(JSON.stringify({})) } }),
       { noFundingLeg: true },
     )
     const res = await result
     expect(res.ok).toBe(true)
-    expect(res.settlementTxHash).toBeUndefined()
-    expect(backendCalls(fetchMock, '/machine-payments/evidence')).toHaveLength(0)
+    expect(res.settlementTxHash).toBe(metaTx)
+    expect(evidenceTxHashes(fetchMock)).toEqual([metaTx])
   })
 
-  it('D1, erc7710 (noFundingLeg) with isError: rejected with nothing recorded today (the intended flip)', async () => {
+  it('D1, erc7710 (noFundingLeg) with isError: accepted and anchored on the _meta transaction (owner decision 1)', async () => {
     const { fetchMock, result } = hosted(
       () => json(rpcResult(2, { isError: true, content: [{ type: 'text', text: 'partial' }], _meta: { [MCP_X402_PAYMENT_RESPONSE_META_KEY]: metaSettlement } }), { headers: { 'PAYMENT-RESPONSE': btoa(JSON.stringify({})) } }),
       { noFundingLeg: true },
     )
     const res = await result
-    expect(res.ok).toBe(false)
-    expect(backendCalls(fetchMock, '/machine-payments/evidence')).toHaveLength(0)
-    // No funding leg — no reconciliation row either (owner decision 2026-08-17).
+    expect(res.ok).toBe(true)
+    expect(res.settlementTxHash).toBe(metaTx)
+    expect(evidenceTxHashes(fetchMock)).toEqual([metaTx])
     expect(backendCalls(fetchMock, '/machine-payments/reconciliation-events')).toHaveLength(0)
   })
 

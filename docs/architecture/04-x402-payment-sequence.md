@@ -26,6 +26,7 @@ covers:
   - packages/sdk/src/x402-protocol.ts
   - packages/sdk/src/x402-funding-leg.ts
   - packages/sdk/src/x402-erc7710.ts
+  - packages/sdk/src/merchant-answer.ts
   - packages/sdk/src/merchant-completion.ts
   - packages/sdk/src/mcp-merchant-transport.ts
   - packages/sdk/src/payment-state.ts
@@ -140,6 +141,14 @@ Source of truth:
   finish through the same door. Every write here is best-effort and swallows:
   the resource is already paid for, and bookkeeping that threw would turn a
   completed payment into a reported failure.
+- [`packages/sdk/src/merchant-answer.ts`](../../packages/sdk/src/merchant-answer.ts) —
+  the ONE post-funding merchant-answer decision (#4120): accepted or
+  rejected-after-funding, the settlement hash and the protocol receipt, shared
+  by `completeX402MerchantCall` (hosted) and `MerchantCompletion.retryRequest`
+  (local). The hash rule is the local rule on both paths — the header's
+  transaction when it carries one, otherwise the `_meta` settlement's. Tool-
+  result PARSING stays per caller (the #3155 D2 divergence is deliberate).
+  Pure: no network, no state.
 - [`packages/sdk/src/payment-state.ts`](../../packages/sdk/src/payment-state.ts) — shared payment-state/status-error normalization.
 - [`packages/backend/src/routes/x402.ts`](../../packages/backend/src/routes/x402.ts) — auth
   wiring, rate-limit config, and response serialization only. Since
@@ -735,7 +744,14 @@ settlement receipt — is the same rejection: a merchant that answers its paid
 call with a failed tool result has not delivered, and absent a receipt has not
 settled either, so the funding leg's USDC is stranded on the delegate. A tool
 error beside a settlement receipt is the opposite case: the money moved, so
-the errored result is delivered as evidence. The refusal message names the
+the errored result is delivered as evidence. Since #4120 that verdict, the
+settlement hash and the receipt live in one shared decision
+(`merchant-answer.ts`) both paths call, and the hash rule is the LOCAL rule on
+both paths: a `PAYMENT-RESPONSE` header with no transaction (or an empty
+header) falls back to the `_meta` settlement's transaction, so a hosted
+`isError` answer beside a `_meta` settlement is accepted (evidence, not
+`MERCHANT_REJECTED_AFTER_FUNDING`) and an erc7710 completion anchors its
+evidence on the `_meta` transaction. The refusal message names the
 verify-then-sweep rule — check `haven_get_payment_status` before
 `haven_sweep_delegate`, because a merchant that answered may still redeem its
 authorization within the payment window. The hosted quote

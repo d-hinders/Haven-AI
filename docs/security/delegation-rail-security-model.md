@@ -76,7 +76,7 @@ covers:
   - packages/backend/src/modules/ops/**
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
-last-verified: "2026-10-19"
+last-verified: "2026-10-20"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -3456,6 +3456,29 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > this note: that acceptance gate. Nothing else in this document was
 > re-verified; `last-verified` is bumped to 2026-10-19 for exactly this
 > coverage.
+
+> **Re-verified #4120 (2026-10-20 — one shared post-funding merchant-answer
+> decision; the hosted hash rule becomes the local rule).** The diff touches
+> two files in this document's coverage list, `packages/sdk/src/client.ts` and
+> `packages/sdk/src/merchant-completion.ts`, plus the new
+> `packages/sdk/src/merchant-answer.ts` that now holds the decision both call,
+> and none of its authority, custody or signing surfaces. On the D1 input — a
+> `PAYMENT-RESPONSE` header with no transaction (or an empty header) beside a
+> `_meta` settlement that has one — the HOSTED path now behaves as the local
+> path always has: an `isError` answer beside a `_meta` settlement is accepted
+> (delivered as evidence, not `MERCHANT_REJECTED_AFTER_FUNDING`); without
+> `isError` the result carries the `_meta` settlement hash, the #3764 second
+> report is posted with it, and an erc7710 (`noFundingLeg`) completion anchors
+> its evidence on it. A header WITH a transaction still wins over a different
+> `_meta` transaction on both paths. The 200 `text/plain` `isError` divergence
+> stays per caller (hosted parses and rejects; local never reads and accepts).
+> No signature is produced or consumed, nothing becomes signable, no spend
+> decision moves: the flipped cases classify a merchant answer to a call the
+> funding leg already paid for, and the backend still verifies every reported
+> hash on-chain before recording it — a wrong or hostile hash is a refused
+> report, not a recorded settlement. Scope of this note: the shared acceptance
+> gate. Nothing else in this document was re-verified; `last-verified` is
+> bumped to 2026-10-20 for exactly this coverage.
 
 > **Re-verified #4026 (2026-10-16 — own-account recipients in the owner send
 > flow).** The diff touches one file in this document's coverage list,

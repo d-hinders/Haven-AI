@@ -362,7 +362,17 @@ when it does not work, instead of every task failing as "claude exited 1". An
 adapter failure quotes the session's `result` text for the same reason. The
 raw session streams are deliberately not uploaded: this repository is public,
 so artifacts are downloadable by anyone, and the streams carry full tool
-results. To fix a failed login, generate a new token with
+results.
+
+**What the report does show for a failure.** The job summary lists every
+failed trial with a **tool trace**: the session's tool calls in order, as bare
+tool names, a `✗` for a failed call and the machine `error_code`. No
+arguments, results or final message, capped at 40 calls. The JSON report
+carries the same `trace` for every trial. The trace is sanitised, not trusted:
+an unknown tool name that is not a plain identifier prints as `(unknown tool)`
+and a code that is not lower-snake-case prints as `(unrecognised code)`. RPC
+error text in grader details has URLs stripped, because the observer URL
+embeds the provider key. To fix a failed login, generate a new token with
 `claude setup-token` and replace the `CLAUDE_CODE_OAUTH_TOKEN` environment
 secret (see Token rotation above).
 

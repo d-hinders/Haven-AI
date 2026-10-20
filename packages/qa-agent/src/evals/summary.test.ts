@@ -144,3 +144,11 @@ describe('failed-trial tool trace in the markdown summary', () => {
     expect(renderMarkdownSummary(r)).not.toContain('Failed trials')
   })
 })
+
+describe('failed-trial trace: empty trace renders explicitly', () => {
+  it('prints (no tool calls) for a failed trial whose session made none', () => {
+    const r = report()
+    r.tasks[1]!.trials[0]!.trace = []
+    expect(renderMarkdownSummary(r)).toContain('(no tool calls)')
+  })
+})

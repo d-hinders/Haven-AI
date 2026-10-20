@@ -19,7 +19,7 @@
  */
 
 import { applyGraders } from './graders.js'
-import { bareToolName } from './tools.js'
+import { ALL_TOOL_NAMES, bareToolName } from './tools.js'
 import type { AgentRunLog, EvalTask, GraderContext, GraderResult, ResolvedTask } from './types.js'
 
 /** One adapter lane. Hermes today; #3959 adds Claude Code. */
@@ -64,12 +64,36 @@ export interface TrialRecord {
 /** Calls beyond this many are summarised, so one runaway session cannot flood the report. */
 export const TRACE_MAX_CALLS = 40
 
+const KNOWN_TOOLS = new Set<string>(ALL_TOOL_NAMES)
+/** A plain identifier: what a built-in tool name (e.g. `Bash`) looks like. */
+const SAFE_NAME = /^[A-Za-z][A-Za-z0-9_]{0,39}$/
+/** A machine error code: lower snake case, bounded. */
+const SAFE_CODE = /^[a-z0-9_]{1,64}$/
+
+/**
+ * Enforced, not conventional: the report is public and both fields can carry
+ * text a model or a merchant chose (an unknown tool name passes through
+ * `bareToolName` unchanged; `errorCode` is the first `error_code` found
+ * anywhere in a tool result). Known Haven tools print as-is; any other name
+ * only if it is a plain identifier; codes only if they look like a machine
+ * code. Everything else becomes a fixed placeholder.
+ */
+function safeToolName(recorded: string): string {
+  const bare = bareToolName(recorded)
+  if (KNOWN_TOOLS.has(bare)) return bare
+  return SAFE_NAME.test(bare) ? bare : '(unknown tool)'
+}
+function safeErrorCode(code: string): string {
+  const canonical = code.trim().toLowerCase()
+  return SAFE_CODE.test(canonical) ? canonical : '(unrecognised code)'
+}
+
 /** The public-safe tool trace of one session (see {@link TrialRecord.trace}). */
 export function toolTrace(log: AgentRunLog): string[] {
   const steps = log.calls.map((call) => {
     const failed = call.result?.ok === false ? ' ✗' : ''
-    const code = call.result?.errorCode ? ` ${call.result.errorCode}` : ''
-    return `${bareToolName(call.name)}${failed}${code}`
+    const code = call.result?.errorCode ? ` ${safeErrorCode(call.result.errorCode)}` : ''
+    return `${safeToolName(call.name)}${failed}${code}`
   })
   if (steps.length <= TRACE_MAX_CALLS) return steps
   return [...steps.slice(0, TRACE_MAX_CALLS), `… ${steps.length - TRACE_MAX_CALLS} more call(s)`]

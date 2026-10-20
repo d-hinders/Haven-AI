@@ -107,6 +107,31 @@ function parseHumanAmountToAtomic(amount: unknown): bigint | undefined {
   return BigInt(`${whole}${frac6}`)
 }
 
+/**
+ * The run-start budget check. A full run ends by draining the period budget
+ * (the tier-2 drainer), so a second run in the same period starts on an empty
+ * budget and every task fails at resolve — 28 identical red trials that say
+ * nothing about the agent (2026-10-20, run 39428253905). When the selected
+ * tasks need a funded budget and the read says it is exhausted, stop before
+ * any agent session with one message that says what to do.
+ *
+ * Returns undefined when the run may go ahead.
+ */
+export function budgetPreflightMessage(
+  tasks: Array<Pick<EvalTask, 'tier'>>,
+  read: { remaining: bigint } | { error: string },
+): string | undefined {
+  const needsFunds = tasks.some((t) => (t.tier ?? 1) !== 3)
+  if (!needsFunds || !('error' in read)) return undefined
+  if (!/exhausted/i.test(read.error)) return undefined
+  return (
+    'The eval agent\'s period budget is already spent, so no task that pays can run. ' +
+    'A full run drains it on purpose (the "spend everything" task), so a second run in the same period finds it empty. ' +
+    'Wait for the next period refill, or edit the eval agent\'s budget on the dev dashboard (same amount and period) to start a new period now, then run again. ' +
+    `Budget read: ${read.error}`
+  )
+}
+
 export function buildGraderContext(deps: { api: HavenApi; provider: BlockNumberSource }): Omit<GraderContext, 'resolved'> {
   return {
     probeTransfer: async (expected) => {
@@ -381,6 +406,16 @@ async function main() {
   const budgetSource: BudgetSourceFor = async (use) => {
     const read = await readOnchainBudget(api, 'USDC', use)
     return 'error' in read ? read : { remaining: read.remaining }
+  }
+
+  // Run-start budget check: stop with one clear message instead of a run of
+  // identical resolve failures when the period budget is already spent.
+  const preflight = budgetPreflightMessage(selected, await budgetSource('floor'))
+  if (preflight) {
+    console.log(`::error::${preflight}`)
+    await writeFile(resolve(`${outPath}.summary.md`), `## Agent evals: not run\n\n${preflight}\n`)
+    await writeFile(resolve(`${outPath}.summary.txt`), `Agent evals: not run. ${preflight}\n`)
+    process.exit(3)
   }
 
   const provider = observerProvider()

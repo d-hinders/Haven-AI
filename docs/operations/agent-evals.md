@@ -199,6 +199,16 @@ unattended start.
   summary halves), so a refill mid-run is visible instead of silently
   inflating a slice.
 
+- **One full run per budget period.** A full run ends by draining the period
+  budget (the `direct-send-full-remaining` task does that on purpose), so a
+  second full run in the same period finds it empty. The CLI checks this at
+  run start: when paying tasks are selected and the budget read says it is
+  exhausted, it stops before any agent session (exit 3) and writes one
+  message to the job summary. To run again in the same period, edit the eval
+  agent's budget on the dev dashboard (same amount and period). That issues a
+  new delegation whose period starts now; the agent and its keys stay the
+  same.
+
 ## Running the suite
 
 ```

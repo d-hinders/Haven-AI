@@ -8,7 +8,7 @@
  * a page-local copy would drift from this one the first time either changed.
  *
  * The props are the dashboard-overview wire shapes (`DashboardOverview['agents'][number]`,
- * `DashboardBudgetRemaining`, the #3803 spot rates) rather than narrowed
+ * `DashboardBudgetRemaining`) rather than narrowed
  * summaries: the account page reads the SAME dashboard overview (it lists
  * all agents, so it filters by `agent.accountId`) and passes its slices
  * straight through. Narrowing the props would have invented a second
@@ -33,7 +33,6 @@ import {
   budgetCaption,
   selectPrimaryBudgets,
   type BudgetCaptionRow,
-  type BudgetRate,
 } from '@/lib/budget-caption'
 import { timeAgo } from '@/lib/format'
 import { AGENT_PAUSED_SHORT } from '@/lib/agent-pause-copy'
@@ -126,15 +125,11 @@ function toCaptionRow(
 export function AgentBudget({
   agent,
   budgetRemaining,
-  spotRates,
-  currency,
   nowMs,
   trailing,
 }: {
   agent: DashboardAgent
   budgetRemaining: DashboardBudgetRemaining | null
-  spotRates: DashboardOverview['spotRates'] | undefined
-  currency: DashboardCurrency
   nowMs: number
   /** The row's "Last paid …" node, right-aligned on the caption line (#3989). */
   trailing?: ReactNode
@@ -162,12 +157,12 @@ export function AgentBudget({
     )
   }
 
-  const perToken = spotRates?.[selected.primary.symbol]
-  const rate: BudgetRate | null =
-    typeof perToken === 'number' && perToken > 0 ? { currency, perToken } : null
   // #3908: the compact row wording, as the mockup draws it — the period word
   // in place of "used this period"; every other surface keeps the full one.
-  const caption = budgetCaption(selected.primary, { nowMs, rate, style: 'row' })
+  // No rate (#4165, owner decision 2026-10-20 on #4093): a budget reads in
+  // its own token wherever one is set — "1.20 of 3.00 USDC" — matching the
+  // account page's "3.00 USDC per day", never a converted "≈$1.20 of $3.00".
+  const caption = budgetCaption(selected.primary, { nowMs, style: 'row' })
 
   if (caption.kind !== 'meter') {
     // Unknown remaining, a failed read, a read past its period — an em dash,
@@ -218,8 +213,6 @@ export function AgentRow({
   agent,
   budgetRemaining,
   attentionItems,
-  spotRates,
-  currency,
   accountNames,
   accountCount,
   nowMs,
@@ -227,8 +220,6 @@ export function AgentRow({
   agent: DashboardAgent
   budgetRemaining: DashboardBudgetRemaining | null
   attentionItems: AttentionRuleItem[]
-  spotRates: DashboardOverview['spotRates'] | undefined
-  currency: DashboardCurrency
   accountNames: Record<string, string>
   accountCount: number
   nowMs: number
@@ -283,8 +274,6 @@ export function AgentRow({
         <AgentBudget
           agent={agent}
           budgetRemaining={budgetRemaining}
-          spotRates={spotRates}
-          currency={currency}
           nowMs={nowMs}
           trailing={lastPayment}
         />

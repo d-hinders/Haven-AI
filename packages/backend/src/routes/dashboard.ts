@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
-import { getChainData } from '@haven_ai/core'
+import { getChainData, shouldMarkApprox } from '@haven_ai/core'
 import {
   countFailedIntents7d,
   findPortfolioSnapshots,
@@ -46,7 +46,7 @@ import {
 // ── #3803: the 7/30-day spend block ──────────────────────────────────────────
 
 /** One window's figures. Fiat buckets are USD/EUR/SEK booked-or-netted sums. */
-interface SpendWindowFigures {
+export interface SpendWindowFigures {
   grossUsd: number
   netUsd: number
   grossEur: number
@@ -55,10 +55,24 @@ interface SpendWindowFigures {
   netSek: number
   /** True when any row's booked fiat was NULL and got priced at today's rate (owner decision 1). */
   approx: boolean
+  /**
+   * #4165: the "≈" decision per fiat bucket — `shouldMarkApprox`, the one
+   * rule: a re-priced row whose conversion changes the number in that
+   * currency. USDC re-priced into USD is dollars and never sets `usd`.
+   */
+  approxByCurrency: FiatFlags
+  /** #4165: a row needed today's rate in that bucket and had none — it is not in the sum. */
+  unpricedByCurrency: FiatFlags
   payments: number
 }
 
-function emptySpendWindow(): SpendWindowFigures {
+interface FiatFlags {
+  usd: boolean
+  eur: boolean
+  sek: boolean
+}
+
+export function emptySpendWindow(): SpendWindowFigures {
   return {
     grossUsd: 0,
     netUsd: 0,
@@ -67,15 +81,23 @@ function emptySpendWindow(): SpendWindowFigures {
     grossSek: 0,
     netSek: 0,
     approx: false,
+    approxByCurrency: { usd: false, eur: false, sek: false },
+    unpricedByCurrency: { usd: false, eur: false, sek: false },
     payments: 0,
   }
 }
 
 /** A token's spot rates in the three fiat buckets; `null` bucket = no usable quote. */
-interface TokenRates {
+export interface TokenRates {
   usd: number | null
   eur: number | null
   sek: number | null
+}
+
+/** A spend group's token, as the "≈" rule needs it, and its spot rates. */
+export interface GroupPricing {
+  symbol: string | null
+  rates: TokenRates | null
 }
 
 function emptyRefusalBuckets(): { budget: number; scope: number; failed: number; haven: number } {
@@ -85,14 +107,17 @@ function emptyRefusalBuckets(): { budget: number; scope: number; failed: number;
 /**
  * Folds a spend GROUP into a window accumulator. `fb*` is the token amount of
  * rows whose booked fiat was NULL — priced at TODAY's rate here (owner
- * decision 1) and added to the same bucket, with `approx` marking the total
- * so the client never presents a re-priced figure as booked.
+ * decision 1) and added to the same bucket. `approx` records that a
+ * re-pricing happened; the display mark is `approxByCurrency`, which the one
+ * rule sets only where the conversion changes the number (#4165), and a
+ * bucket with no rate sets `unpricedByCurrency` instead of adding anything.
+ * Exported for its unit test (`dashboard-spend-window.test.ts`): a pure fold.
  */
-function accumulateGroup(
+export function accumulateGroup(
   target: SpendWindowFigures,
   group: DashboardSpendGroupRow,
   suffix: '7' | '30',
-  rates: Map<string, TokenRates | null>,
+  pricing: Map<string, GroupPricing>,
 ): void {
   target.grossUsd += Number(group[`gross_usd_${suffix}`] ?? '0')
   target.netUsd += Number(group[`net_usd_${suffix}`] ?? '0')
@@ -106,29 +131,36 @@ function accumulateGroup(
   // reads any `x.get(` followed by a quoted string as a Fastify registration,
   // and a backtick here fabricated a `GET /dashboard${chain}:${token}` route
   // in `route-modules.generated.ts` (#3803 round-2).
-  const rate = rates.get(group.chain_key + ':' + group.token_key) ?? null
-  const fbUsd = Number(group[`fb_usd_${suffix}`] ?? '0')
-  const fbEur = Number(group[`fb_eur_${suffix}`] ?? '0')
-  const fbSek = Number(group[`fb_sek_${suffix}`] ?? '0')
-  if (fbUsd > 0) {
+  const groupPricing = pricing.get(group.chain_key + ':' + group.token_key)
+  const rate = groupPricing?.rates ?? null
+  const buckets = [
+    { key: 'usd', currency: 'USD', grossKey: 'grossUsd', netKey: 'netUsd' },
+    { key: 'eur', currency: 'EUR', grossKey: 'grossEur', netKey: 'netEur' },
+    { key: 'sek', currency: 'SEK', grossKey: 'grossSek', netKey: 'netSek' },
+  ] as const
+  for (const bucket of buckets) {
+    const fallback = Number(group[`fb_${bucket.key}_${suffix}`] ?? '0')
+    if (fallback <= 0) continue
     target.approx = true
-    if (rate?.usd != null) {
-      target.grossUsd += fbUsd * rate.usd
-      target.netUsd += fbUsd * rate.usd
+    const perToken = rate?.[bucket.key] ?? null
+    if (perToken == null) {
+      // #4165: no rate means no figure — the row is left out of the sum and
+      // the bucket says so, never a "≈" standing in for "couldn't price".
+      target.unpricedByCurrency[bucket.key] = true
+      continue
     }
-  }
-  if (fbEur > 0) {
-    target.approx = true
-    if (rate?.eur != null) {
-      target.grossEur += fbEur * rate.eur
-      target.netEur += fbEur * rate.eur
-    }
-  }
-  if (fbSek > 0) {
-    target.approx = true
-    if (rate?.sek != null) {
-      target.grossSek += fbSek * rate.sek
-      target.netSek += fbSek * rate.sek
+    target[bucket.grossKey] += fallback * perToken
+    target[bucket.netKey] += fallback * perToken
+    if (
+      shouldMarkApprox({
+        repriced: true,
+        chainId: group.chain_key,
+        tokenSymbol: groupPricing?.symbol ?? null,
+        displayCurrency: bucket.currency,
+        kind: 'total',
+      })
+    ) {
+      target.approxByCurrency[bucket.key] = true
     }
   }
 }
@@ -300,10 +332,13 @@ export default async function dashboardRoutes(
         rateBySymbol.set(symbol, null)
       }
     }
-    const rates = new Map<string, TokenRates | null>()
+    const rates = new Map<string, GroupPricing>()
     for (const group of spendGroups) {
-      const symbol = chainToken(group.chain_key, group.token_key)?.symbol
-      rates.set(`${group.chain_key}:${group.token_key}`, symbol ? (rateBySymbol.get(symbol) ?? null) : null)
+      const symbol = chainToken(group.chain_key, group.token_key)?.symbol ?? null
+      rates.set(`${group.chain_key}:${group.token_key}`, {
+        symbol,
+        rates: symbol ? (rateBySymbol.get(symbol) ?? null) : null,
+      })
     }
     // spotRates: the BUDGET tokens only — the caption-currency rates the
     // client has no other way to get.
@@ -413,6 +448,8 @@ export default async function dashboardRoutes(
       gross: { usd: figures.grossUsd, eur: figures.grossEur, sek: figures.grossSek },
       net: { usd: figures.netUsd, eur: figures.netEur, sek: figures.netSek },
       approx: figures.approx,
+      approxByCurrency: figures.approxByCurrency,
+      unpricedByCurrency: figures.unpricedByCurrency,
       payments: figures.payments,
     })
 
@@ -718,6 +755,8 @@ export default async function dashboardRoutes(
           gross: { usd: d7.grossUsd, eur: d7.grossEur, sek: d7.grossSek },
           net: { usd: d7.netUsd, eur: d7.netEur, sek: d7.netSek },
           approx: d7.approx,
+          approxByCurrency: d7.approxByCurrency,
+          unpricedByCurrency: d7.unpricedByCurrency,
           payments: d7.payments,
           distinctMerchants: Number(merchants.distinct_merchants_7),
           budgetStops: budgetStops7,
@@ -726,6 +765,8 @@ export default async function dashboardRoutes(
           gross: { usd: d30.grossUsd, eur: d30.grossEur, sek: d30.grossSek },
           net: { usd: d30.netUsd, eur: d30.netEur, sek: d30.netSek },
           approx: d30.approx,
+          approxByCurrency: d30.approxByCurrency,
+          unpricedByCurrency: d30.unpricedByCurrency,
           payments: d30.payments,
           distinctMerchants: Number(merchants.distinct_merchants_30),
           budgetStops: budgetStops30,

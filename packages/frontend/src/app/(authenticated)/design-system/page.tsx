@@ -113,6 +113,7 @@ const TOKEN_USE: Record<string, string> = {
   'ink-on-brand': 'Text on brand fills.',
   border: 'Hairline borders.',
   'border-strong': 'Emphasised borders and control outlines.',
+  'border-subtle': 'Inset hairline between same-day ledger rows (#4165); day groups keep border.',
   'border-anchor': 'Anchor-card brand-tinted hairline.',
   brand: 'Primary actions, links, brand identity.',
   'brand-strong': 'Brand hover / pressed fill.',
@@ -556,7 +557,6 @@ const DS_AGENT_BUDGET_REMAINING: DashboardBudgetRemaining = {
     },
   ],
 }
-const DS_AGENT_SPOT_RATES: DashboardOverview['spotRates'] = { USDC: 1 }
 // A second agent with NO budget and no payments — the "No budget" + "No
 // payments yet" arms of the row, exactly as the dashboard draws them.
 const DS_AGENT_NO_BUDGET: DashboardAgentPreview = {
@@ -2746,7 +2746,7 @@ export default function DesignSystemPage() {
 
           {/* #3810: the grouped dashboard row — `countLabel` renders the muted
                 ×N beside the title, and `fiat` switches the amount to Amount's
-                currency mode (≈ marks a serve-time valuation). The dashboard's
+                currency mode (a row never carries ≈, #3950/#4165). The dashboard's
                 merchant-first activity list is this shape. The testid anchors
                 the design-system clip (#3064 pattern); `Card` does not spread
                 extra props, so the div carries it. */}
@@ -2764,7 +2764,8 @@ export default function DesignSystemPage() {
             />
             {/* #3810: the grouped dashboard row — `countLabel` renders the
                 muted ×N beside the title, and `fiat` switches the amount to
-                Amount's currency mode (≈ marks a serve-time valuation). The
+                Amount's currency mode, plain: a list row never carries ≈ —
+                the mark is for totals and the detail panel (#4165). The
                 dashboard's merchant-first activity list is this shape, and a
                 confirmed row there carries no badge (#3897) — only pending
                 and failed name their state. */}
@@ -2774,7 +2775,7 @@ export default function DesignSystemPage() {
               description="Research assistant"
               value="36.00"
               countLabel="×3"
-              fiat={{ amount: 134.5, currency: 'SEK', approx: true }}
+              fiat={{ amount: 134.5, currency: 'SEK' }}
             />
             <TransactionActivityRow
               direction="out"
@@ -2805,27 +2806,30 @@ export default function DesignSystemPage() {
           into a "×N" row. */}
       <Section
         title="Activity ledger (day-grouped)"
-        description="TransactionActivityRow's ledger mode (#4096, epic #4093): one row per transaction, grouped under TransactionActivityDayHeader bands (“Today”, “Yesterday”, then short dates) — the un-merged counterpart of the dashboard's merged preview, which folds same agent / same merchant / same day into one ×N row. A ledger row with onOpen becomes a button: click or Enter/Space opens the shared TransactionDetailPanel, exactly as the account page's Activity tab will."
+        description="TransactionActivityRow's ledger mode (#4096, epic #4093): one row per transaction, grouped under TransactionActivityDayHeader bands (“Today”, “Yesterday”, then short dates). Day groups are separated by a full-width --v2-border hairline; rows within one day by an inset --v2-border-subtle hairline that starts at the text column (insetDivider on every row after a day's first, #4165) — the un-merged counterpart of the dashboard's merged preview, which folds same agent / same merchant / same day into one ×N row. A ledger row with onOpen becomes a button: click or Enter/Space opens the shared TransactionDetailPanel, exactly as the account page's Activity tab will."
       >
         <div className="max-w-xl">
           <Card hover={false} className="overflow-hidden">
-            {transactionDayGroups(DS_LEDGER_ROWS, (row) => row.at).map((group) => (
-              <div key={group.dayKey}>
-                <TransactionActivityDayHeader label={group.label} />
-                {group.items.map((row) => (
-                  <TransactionActivityRow
-                    key={row.id}
-                    direction="out"
-                    title={row.title}
-                    description={row.description}
-                    value={row.value}
-                    asset="USDC"
-                    timestamp={timeAgo(row.at)}
-                    onOpen={() => setDsLedgerOpened(row.title)}
-                  />
-                ))}
-              </div>
-            ))}
+            <div className="divide-y divide-[var(--v2-border)]">
+              {transactionDayGroups(DS_LEDGER_ROWS, (row) => row.at).map((group) => (
+                <div key={group.dayKey}>
+                  <TransactionActivityDayHeader label={group.label} />
+                  {group.items.map((row, index) => (
+                    <TransactionActivityRow
+                      key={row.id}
+                      insetDivider={index > 0}
+                      direction="out"
+                      title={row.title}
+                      description={row.description}
+                      value={row.value}
+                      asset="USDC"
+                      timestamp={timeAgo(row.at)}
+                      onOpen={() => setDsLedgerOpened(row.title)}
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
           </Card>
           <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
             {dsLedgerOpened
@@ -3498,7 +3502,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Amount: currency mode"
-        description="The other half of the Amount contract (#3805): for a figure that is already a fiat valuation server-side, pass the unsigned magnitude (amount) and the currency it is in — never a symbol string, never a conversion done here. It formats through formatFiatDisplay — formatFiat's output, plus <$0.01 for a non-zero figure under a cent (zero stays $0.00, #3897) — the one formatter, so a SEK figure reads the same on every screen; the sign comes only from direction, and a negative magnitude can never double-sign it. ≈ marks a figure converted at today's rate rather than booked, and it goes before the sign. Unknown — null, or a non-finite value — renders an em dash in secondary ink, never 0,00 kr: an unknown valuation is not a zero. A currency figure is a valuation of a token amount, not a fiat balance Haven holds."
+        description="The other half of the Amount contract (#3805): for a figure that is already a fiat valuation server-side, pass the unsigned magnitude (amount) and the currency it is in — never a symbol string, never a conversion done here. It formats through formatFiatDisplay — formatFiat's output, plus <$0.01 for a non-zero figure under a cent (zero stays $0.00, #3897) — the one formatter, so a SEK figure reads the same on every screen; the sign comes only from direction, and a negative magnitude can never double-sign it. ≈ marks a figure converted at today's rate where the conversion changes the number, and it goes before the sign; the caller decides it with the one rule, shouldMarkApprox (@haven_ai/core, #4165) — never on a list row, never on a booked figure, never for USDC shown in USD, otherwise on totals and the detail panel. Unknown — null, or a non-finite value — renders an em dash in secondary ink, never 0,00 kr: an unknown valuation is not a zero. A currency figure is a valuation of a token amount, not a fiat balance Haven holds."
       >
         {/* The testid rides a plain wrapper: `Card` forwards no extra props,
             and the visual spec clips this sample by it. */}
@@ -3508,7 +3512,7 @@ export default function DesignSystemPage() {
               <p><Amount amount={9.09} currency="SEK" direction="out" /> <span className="text-xs text-[var(--v2-ink-3)]">— SEK valuation, signed by direction</span></p>
               <p><Amount amount={0.96} currency="USD" direction="in" /> <span className="text-xs text-[var(--v2-ink-3)]">— incoming: the quiet success green</span></p>
               <p><Amount amount={0.88} currency="EUR" /> <span className="text-xs text-[var(--v2-ink-3)]">— signless figure (budgets, balances)</span></p>
-              <p><Amount amount={9.09} currency="SEK" direction="out" approx /> <span className="text-xs text-[var(--v2-ink-3)]">— approx: converted at today&apos;s rate, ≈ before the sign</span></p>
+              <p><Amount amount={9.09} currency="SEK" direction="out" approx /> <span className="text-xs text-[var(--v2-ink-3)]">— approx: a SEK total converted at today&apos;s rate, ≈ before the sign (never on a row, never USDC in USD)</span></p>
               <p><Amount amount={null} currency="SEK" direction="out" /> <span className="text-xs text-[var(--v2-ink-3)]">— unknown renders an em dash, never 0,00 kr</span></p>
               <p><Amount amount={0} currency="SEK" /> <span className="text-xs text-[var(--v2-ink-3)]">— zero is a real valuation and renders as one</span></p>
             </div>
@@ -3873,7 +3877,7 @@ export default function DesignSystemPage() {
           account page will pass from the same overview. */}
       <Section
         title="Agent row (shared)"
-        description="The dashboard's agent row (#4096, epic #4093), lifted out of AgentsSection into haven/AgentRow: the BudgetMeter with its caption, the labelled “Last paid” time on the caption line (#3989), the badge (agentBadge: Needs setup / Paused / N% used), and the received-sub-budget or “No budget” line (#3803). Its props are the dashboard wire shapes (DashboardAgent, DashboardBudgetRemaining, spotRates, and the user's display CURRENCY mapped through CURRENCY_KEY) — the account page reads the SAME overview (it lists all agents) and passes its slices straight through, so both surfaces draw the identical row. AgentBudget is exported beside it for a caller that wants the budget block without the row chrome."
+        description="The dashboard's agent row (#4096, epic #4093), lifted out of AgentsSection into haven/AgentRow: the BudgetMeter with its caption, the labelled “Last paid” time on the caption line (#3989), the badge (agentBadge: Needs setup / Paused / N% used), and the received-sub-budget or “No budget” line (#3803). Its props are the dashboard wire shapes (DashboardAgent, DashboardBudgetRemaining) and the budget caption reads in the budget's own token, “1.20 of 3.00 USDC” (#4165: no rate, no “≈”) — the account page reads the SAME overview (it lists all agents) and passes its slices straight through, so both surfaces draw the identical row. AgentBudget is exported beside it for a caller that wants the budget block without the row chrome."
       >
         <div className="max-w-xl space-y-4">
           <Card hover={false} className="overflow-hidden">
@@ -3882,8 +3886,6 @@ export default function DesignSystemPage() {
               agent={DS_AGENT}
               budgetRemaining={DS_AGENT_BUDGET_REMAINING}
               attentionItems={[]}
-              spotRates={DS_AGENT_SPOT_RATES}
-              currency="USD"
               accountNames={{}}
               accountCount={1}
               nowMs={DS_AGENT_NOW}
@@ -3892,8 +3894,6 @@ export default function DesignSystemPage() {
               agent={DS_AGENT_NO_BUDGET}
               budgetRemaining={DS_AGENT_BUDGET_REMAINING}
               attentionItems={[]}
-              spotRates={DS_AGENT_SPOT_RATES}
-              currency="USD"
               accountNames={{}}
               accountCount={1}
               nowMs={DS_AGENT_NOW}

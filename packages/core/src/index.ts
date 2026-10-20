@@ -43,10 +43,16 @@ export {
   isRegisteredChain,
   minimumUsefulTokens,
   resolveToken,
+  tokenPeg,
   buildExplorerUrl,
   type CoreChainConfig,
   type CoreTokenConfig,
 } from './chains.js'
+
+// The one "≈" rule (#4165): whether a converted money figure carries the
+// approximate mark — the frontend's rows, totals and detail panel and the
+// backend's dashboard spend windows all ask it, so no surface re-derives it.
+export { shouldMarkApprox, type ApproxMarkInput, type ApproxMarkKind } from './approx-mark.js'
 
 // The shared period-boundary arithmetic (#3806) — the ONE definition the
 // backend's reads and the frontend's budget captions both compute refills

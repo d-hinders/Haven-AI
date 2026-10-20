@@ -664,8 +664,8 @@ Structure:
 
 Money and risk clarity:
 - Each row shows the user's currency (through `<Amount>`'s currency mode —
-  the converted figure rendered plain, no `≈` mark (#3950), an em dash when
-  unpriced), direction/status, and whether it ran automatically or was
+  the converted figure rendered plain — a list row never carries `≈` (#3950,
+  #4165) — and an em dash when unpriced), direction/status, and whether it ran automatically or was
   declined by the agent rules. List
   rows show no addresses: the counterparty renders through
   `counterpartyLabel`'s no-address mode, the same helper the transactions
@@ -763,18 +763,22 @@ Structure:
 Money and risk clarity:
 - **List rows show the user's currency, never the token (#3805, #3811).** The
   amount renders through `<Amount>`'s currency mode via the shared
-  `transactionFiat` helper: the converted figure — book-time
+  `transactionFiat(tx, 'row')` helper: the converted figure — book-time
   `convertedAmount` or serve-time `approxAmount` alike — with NO `≈` mark
   (#3950, owner decision 2026-10-14: the mark's breakable space was the only
   break opportunity the otherwise-NBSP figure had, so approx-valued rows
-  wrapped onto two lines), and an unknown valuation as an em dash — never 0.
+  wrapped onto two lines; #4165 made it the one rule's answer for every
+  row), and an unknown valuation as an em dash — never 0.
   The `md`+ amount column is `whitespace-nowrap`: a money figure never
   truncates (that hides digits) and never wraps — the auto-layout table
   widens the column to the figure's min-content and the Activity column
   (`max-w-0`) absorbs the difference. The token amount appears only where a
-  budget is set and in the detail drawer; the `≈` provenance mark lives
-  beside it in the drawer, where it explains why the two figures differ
-  (owner decisions, #3811 and #3950).
+  budget is set and in the detail drawer; the `≈` mark lives beside it in
+  the drawer, where it explains why the two figures differ — and only where
+  the conversion changes the number: a re-priced figure in kr or €, or a
+  floating token, never USDC shown in USD (owner decisions, #3811, #3950 and
+  #4165; the rule is `shouldMarkApprox`, see `design-system.md` § Amount:
+  currency mode).
 - **List rows show no addresses (#3810, #3811).** The counterparty half of
   every row — `From -> To` line included — renders through
   `counterpartyLabel`'s no-address mode: the merchant's hostname, the source

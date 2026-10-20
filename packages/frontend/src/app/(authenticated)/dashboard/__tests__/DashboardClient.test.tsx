@@ -1214,6 +1214,7 @@ describe('DashboardClient', () => {
         gross: { usd: 74, eur: 67.34, sek: 796.4 },
         net: { usd: 48.1, eur: 43.77, sek: 517.66 },
         approx: true,
+        approxByCurrency: undefined as { usd: boolean; eur: boolean; sek: boolean } | undefined,
         payments: 21,
         distinctMerchants: 5,
         budgetStops: 3,
@@ -1286,18 +1287,33 @@ describe('DashboardClient', () => {
       expect(screen.getByText('Test network')).toBeInTheDocument()
     })
 
-    it('marks a re-priced 30-day total with ≈ and never presents it as booked', () => {
-      mockOverviewWithSpend(baseSpend)
+    it('a re-priced USDC total in USD carries no ≈ — USDC is dollars (#4165)', () => {
+      mockOverviewWithSpend({
+        ...baseSpend,
+        d30: { ...baseSpend.d30, approxByCurrency: { usd: false, eur: true, sek: true } },
+      })
       render(<DashboardClient />)
 
-      // d30.approx is true in the fixture, and the Amount primitive's
-      // title carries the reason (owner decision 1). The title sits on the
-      // inner ≈ mark; the figure is its sibling inside the Amount root, so
-      // read the enclosing span's text.
+      // The server's per-currency decision says the USD figure is exact.
+      expect(screen.queryByTitle("Converted at today's rate")).not.toBeInTheDocument()
+    })
+
+    it('marks a re-priced 30-day total with ≈ in SEK and never presents it as booked', () => {
+      mockUsePreferences.mockReturnValue({ currency: 'SEK' })
+      mockOverviewWithSpend({
+        ...baseSpend,
+        d30: { ...baseSpend.d30, approxByCurrency: { usd: false, eur: true, sek: true } },
+      })
+      render(<DashboardClient />)
+
+      // `approxByCurrency.sek` is true in the fixture, and the Amount
+      // primitive's title carries the reason (owner decision 1). The title
+      // sits on the inner ≈ mark; the figure is its sibling inside the Amount
+      // root, so read the enclosing span's text.
       const marks = screen.getAllByTitle("Converted at today's rate")
       expect(marks.length).toBeGreaterThan(0)
-      const amounts = marks.map((mark) => mark.parentElement?.textContent ?? '')
-      expect(amounts.join(' ')).toContain('48.10')
+      const amounts = marks.map((mark) => (mark.parentElement?.textContent ?? '').replace(/\u00a0/g, ' '))
+      expect(amounts.join(' ')).toContain('517,66')
     })
   })
 

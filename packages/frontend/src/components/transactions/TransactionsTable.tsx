@@ -363,7 +363,7 @@ export default function TransactionsTable({
             const initiator = transactionInitiator(tx)
             const lifecycleBadge = machinePaymentLifecyclePresentation(tx)
             const statusBadge = transactionStatus(tx) ?? lifecycleBadge ?? tx.statusBadge
-            const fiat = transactionFiat(tx)
+            const fiat = transactionFiat(tx, 'row')
 
             const selectable = Boolean(onSelect)
 

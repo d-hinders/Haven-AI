@@ -272,7 +272,9 @@ describe('AccountDetailClient', () => {
     mockUseAccountMoneyFlow.mockReturnValue({
       moneyIn: 120,
       moneyOut: 45,
-      approx: false,
+      approxIn: false,
+      approxOut: false,
+      unpriced: false,
       loading: false,
       error: null,
       partial: false,

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import type { TransactionsFeedResponse } from '@/types/transactions'
 
@@ -9,8 +9,8 @@ interface Options {
   filtered: boolean
   /** The feed's own server `total` for the scope it fetched. */
   feedTotal: number
-  /** Changes with the filters; the figure is re-read when it does. */
-  retryKey: string
+  /** The feed is loading a new scope; its `total` is not an answer yet. */
+  feedLoading: boolean
 }
 
 /**
@@ -20,14 +20,14 @@ interface Options {
  * numbers are server figures, never loaded rows against a server total.
  *
  * Unfiltered, the feed's own `total` IS that number, and nothing extra is
- * fetched. Filtered, one `limit=1` read with no filters asks for it. It is
- * read again whenever the filtered feed's total moves — the feed polls, so a
- * new payment that matches the filter must move the denominator too, or the
- * count reads "26 of 25" — and on every filter change. Re-reads after the
- * first pass `fresh=1`, the cache bypass the feed's own poll uses. The last
- * known figure stays up while a re-read is in flight. (The feed's total is
- * never reused for it: for one render after a filter change it still
- * describes the previous scope.)
+ * fetched. Filtered, one `limit=1` read with no filters asks for it, each
+ * time the filtered feed settles on a total: once per filter change, and
+ * again when a poll moves the total — a new payment that matches the filter
+ * must move the denominator too, or the count reads "26 of 25". Nothing is
+ * read while the feed is loading, so the reset to 0 between scopes costs no
+ * request. The read is an ordinary cached one: the server caches per
+ * account, before filtering, and the feed's own poll is what refreshes that
+ * cache. The last known figure stays up while a read is in flight.
  *
  * `null` means unknown: before the first answer, after a failed read, and
  * when the read reports a partial failure (its total would be short). The
@@ -36,22 +36,19 @@ interface Options {
 export function useUnfilteredTransactionTotal({
   filtered,
   feedTotal,
-  retryKey,
+  feedLoading,
 }: Options): number | null {
   const [fetchedTotal, setFetchedTotal] = useState<number | null>(null)
-  const hasRead = useRef(false)
 
   useEffect(() => {
     if (!filtered) {
-      hasRead.current = false
       setFetchedTotal(null)
       return
     }
+    if (feedLoading) return
     let cancelled = false
-    const query = hasRead.current ? 'offset=0&limit=1&fresh=1' : 'offset=0&limit=1'
-    hasRead.current = true
     api
-      .get<TransactionsFeedResponse>(`/transactions?${query}`)
+      .get<TransactionsFeedResponse>('/transactions?offset=0&limit=1')
       .then((data) => {
         if (cancelled) return
         setFetchedTotal(data.partialFailure ? null : (data.total ?? 0))
@@ -62,7 +59,7 @@ export function useUnfilteredTransactionTotal({
     return () => {
       cancelled = true
     }
-  }, [filtered, feedTotal, retryKey])
+  }, [filtered, feedTotal, feedLoading])
 
   return filtered ? fetchedTotal : feedTotal
 }

@@ -248,7 +248,7 @@ export default function TransactionsClient() {
   const unfilteredTotal = useUnfilteredTransactionTotal({
     filtered: hasActiveFilters,
     feedTotal: total,
-    retryKey: JSON.stringify(filters),
+    feedLoading: loadingInitial,
   })
 
   // Every network by default; the Network facet narrows to one (#620). There

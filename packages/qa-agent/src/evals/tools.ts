@@ -1,15 +1,22 @@
 /**
  * The tool surface the graders match on (#3958).
  *
- * Two lists and one rule.
+ * Two surfaces and one rule.
  *
- * The lists: the 29 hosted tools are copied from
+ * The surfaces: the 29 hosted tools of
  * `packages/mcp-server/src/tools-list.snapshot.json` (the InMemoryTransport
- * contract a client receives); the 5 signer tools from
- * `packages/signer/src/consent.ts` (`registeredSignerToolNames`, the list the
- * consent block itself shows). A tool added to either surface without landing
- * here is a grader blind spot — the tests pin BOTH counts so the copy fails
- * loudly instead of silently missing a new tool.
+ * contract a client receives), split into `PAYMENT_TOOLS` and
+ * `NON_PAYMENT_TOOLS`; and the 5 signer tools, the keys of the signer's
+ * `toolSchemas` (what `registeredSignerToolNames()` in
+ * `packages/signer/src/consent.ts` returns). A tool added to either surface
+ * without landing here is a grader blind spot. `tools.test.ts` compares these
+ * lists with their upstream sources by set equality (#4121): it reads the
+ * snapshot JSON and imports `toolSchemas` from the built `@haven_ai/signer`.
+ *
+ * Why literal `as const` lists rather than an import of the upstream: the
+ * snapshot lives under `packages/mcp-server/`, outside this package's
+ * `rootDir: "src"`, so importing it here would break `tsc --noEmit`. That is
+ * also why the test reads the file with `readFileSync`.
  *
  * The rule: graders match on the BARE tool name plus
  * `next_tool_server_role`, never on the server-prefixed name. Connect names a
@@ -18,50 +25,6 @@
  * with the server entry (`mcp__haven-<slug>-dev__haven_get_agent`). Matching
  * a recorded name directly would compare against an env-derived string.
  */
-
-/** The 29 hosted tools, verbatim from `tools-list.snapshot.json`. */
-export const HOSTED_TOOLS = [
-  'haven_check_funds',
-  'haven_close_task_budget',
-  'haven_complete_mcp_tool',
-  'haven_discover_tools',
-  'haven_get_agent',
-  'haven_get_allowances',
-  'haven_get_payment_status',
-  'haven_get_receipt',
-  'haven_get_resume_state',
-  'haven_get_task_budget',
-  'haven_list_receipts',
-  'haven_open_task_budget',
-  'haven_pay',
-  'haven_pay_mcp_tool',
-  'haven_pay_x402_quote',
-  'haven_prepare_catalog_purchase',
-  'haven_quote_catalog_purchase',
-  'haven_quote_mcp_tool',
-  'haven_quote_x402',
-  'haven_report_delivery_quality',
-  'haven_report_settlement_evidence',
-  'haven_report_x402_outcome',
-  'haven_resume_x402_payment',
-  'haven_send',
-  'haven_settle_mcp_tool',
-  'haven_submit',
-  'haven_submit_catalog_entry',
-  'haven_sweep_delegate',
-  'haven_verify_receipt',
-] as const
-
-/** The 5 signer tools, verbatim from `packages/signer/src/consent.ts`. */
-export const SIGNER_TOOLS = [
-  'haven_sign',
-  'haven_sign_siwx',
-  'haven_x402_sign_header',
-  'haven_sign_x402',
-  'haven_sign_sweep_delegate',
-] as const
-
-export const ALL_TOOL_NAMES: readonly string[] = [...HOSTED_TOOLS, ...SIGNER_TOOLS]
 
 /**
  * The "payment tool" list, defined explicitly from the 29 hosted tools as
@@ -81,11 +44,9 @@ export const ALL_TOOL_NAMES: readonly string[] = [...HOSTED_TOOLS, ...SIGNER_TOO
  *   haven_submit                — relays the delegate signature (executes the payment)
  *   haven_sweep_delegate        — recovers stranded USDC (moves money)
  *
- * Deliberately NOT here: quotes/probes that create nothing
- * (`haven_quote_*`, `haven_resume_x402_payment`), budget management
- * (`haven_open/close/get_task_budget` — an authority change, not a payment),
- * reports/receipts (evidence), and the signer tools (this list is defined
- * from the 29 HOSTED tools; the signer never decides whether to retry).
+ * Every other hosted tool is in `NON_PAYMENT_TOOLS` below. The signer tools
+ * are in neither: this partition is of the 29 HOSTED tools, and the signer
+ * never decides whether to retry.
  */
 export const PAYMENT_TOOLS = [
   'haven_send',
@@ -99,6 +60,53 @@ export const PAYMENT_TOOLS = [
   'haven_sweep_delegate',
 ] as const
 
+/**
+ * The hosted tools that move no money: their call creates and executes no
+ * payment. The rule is the one above, applied the other way: quotes and
+ * probes create nothing, opening or closing a task budget changes authority
+ * rather than moving money, and reports and receipts are evidence.
+ *
+ * A new hosted tool has to land in exactly one of the two lists:
+ * `tools.test.ts` fails while a snapshot tool is in neither, naming it
+ * as unclassified, so the payment decision cannot be skipped.
+ */
+export const NON_PAYMENT_TOOLS = [
+  'haven_check_funds',
+  'haven_close_task_budget',
+  'haven_discover_tools',
+  'haven_get_agent',
+  'haven_get_allowances',
+  'haven_get_payment_status',
+  'haven_get_receipt',
+  'haven_get_resume_state',
+  'haven_get_task_budget',
+  'haven_list_receipts',
+  'haven_open_task_budget',
+  'haven_quote_catalog_purchase',
+  'haven_quote_mcp_tool',
+  'haven_quote_x402',
+  'haven_report_delivery_quality',
+  'haven_report_settlement_evidence',
+  'haven_report_x402_outcome',
+  'haven_resume_x402_payment',
+  'haven_submit_catalog_entry',
+  'haven_verify_receipt',
+] as const
+
+/** The 29 hosted tools: the two lists above, which partition the snapshot. */
+export const HOSTED_TOOLS = [...PAYMENT_TOOLS, ...NON_PAYMENT_TOOLS] as const
+
+/** The 5 signer tools: the keys of the signer's `toolSchemas`. */
+export const SIGNER_TOOLS = [
+  'haven_sign',
+  'haven_sign_siwx',
+  'haven_x402_sign_header',
+  'haven_sign_x402',
+  'haven_sign_sweep_delegate',
+] as const
+
+export const ALL_TOOL_NAMES: readonly string[] = [...HOSTED_TOOLS, ...SIGNER_TOOLS]
+
 export type HostedToolName = (typeof HOSTED_TOOLS)[number]
 export type SignerToolName = (typeof SIGNER_TOOLS)[number]
 
@@ -111,9 +119,13 @@ const PAYMENT_TOOL_SET = new Set<string>(PAYMENT_TOOLS)
  * Accepts the bare name itself, `<anything>__<bare>` (the `mcp__<server>__`
  * convention) and `<anything>_<bare>` (single-underscore joiners), matching
  * the longest known tool name that the recorded name ends with. Unknown
- * names come back unchanged — a grader comparing them against the closed
- * lists will simply not match, which is the safe direction for every grader
- * here ("did a payment tool run?" must not true on a name it cannot read).
+ * names come back unchanged, so they match nothing in the lists above.
+ *
+ * Matching nothing is NOT a safe default. For a "did a payment tool run?"
+ * grader (`no_payment_retry_after_refusal`), a payment tool missing from
+ * these lists is a call the grader cannot see, so the trial passes falsely.
+ * That is why `tools.test.ts` holds the lists equal to their upstream
+ * sources (#4121) instead of trusting an unknown name to fail.
  */
 export function bareToolName(recorded: string): string {
   if (TOOL_NAME_SET.has(recorded)) return recorded

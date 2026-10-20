@@ -233,7 +233,7 @@ describe('resolveTask — amounts are budget-aware (#3958 § 4)', () => {
   })
 })
 
-describe('the tool lists the loader re-checks', () => {
+describe('the hosted and signer tool lists', () => {
   it('hosted + signer names never overlap', () => {
     for (const h of HOSTED_TOOLS) expect(SIGNER_TOOLS).not.toContain(h)
   })

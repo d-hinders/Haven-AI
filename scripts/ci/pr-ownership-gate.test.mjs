@@ -216,6 +216,36 @@ describe('collect through an injected gh', () => {
   })
 })
 
+describe('the gate\'s candidate set is unchanged by the Refs-merge release (#4176)', () => {
+  // `collect` reads `fetchCandidates` from release-on-merge.mjs. #4176 added a
+  // SEPARATE `Refs` candidate read there; if it leaked into `fetchCandidates`,
+  // every PR that `Refs` somebody else's issue — the escape this gate itself
+  // recommends — would start failing here.
+  const calls = []
+  const gh = async (args) => {
+    calls.push(args)
+    if (args[0] === 'api' && args[1] === 'graphql') {
+      const q = args.find((a) => a.startsWith('query=')) ?? ''
+      if (/closingIssuesReferences/.test(q)) return JSON.stringify({ title: 'docs: x (Refs #3015)', closingIssuesReferences: { nodes: [] } })
+      if (/commits\(/.test(q)) return JSON.stringify({ nodes: [{ commit: { oid: 'a', message: 'docs: x\n\nRefs #3015' } }], pageInfo: { hasNextPage: false } })
+      return JSON.stringify({ title: 'docs: x (Refs #3015)', body: 'Refs #3015' })
+    }
+    if (args[0] === 'api' && args.includes('--paginate')) return JSON.stringify([[{ user: { login: 'AntonioSaaranen', type: 'User' }, author_association: 'COLLABORATOR', body: '🔒 CLAIM #3015 — branch `fix/3015-x`', created_at: new Date(NOW - 60_000).toISOString() }]])
+    if (args[0] === 'api' && /issues\/\d+$/.test(args[1])) return JSON.stringify({ state: 'open', closed_at: null, assignees: [{ login: 'AntonioSaaranen' }] })
+    return ''
+  }
+
+  test('a PR that only `Refs` an issue somebody else holds has no candidate, and passes', async () => {
+    const { issues } = await collect({ gh, repo: 'o/r', prNumber: 3022, author: 'd-hinders', nowMs: NOW })
+    assert.deepEqual(issues, [])
+    assert.equal(evaluate({ pr, issues, nowMs: NOW }).verdict, 'pass')
+    // Only the two closing-candidate queries ran: no body read, no issue read.
+    const queries = calls.filter((a) => a[1] === 'graphql').map((a) => (a.find((x) => x.startsWith('query=')) ?? '').match(/closingIssuesReferences|commits\(|title body/)?.[0])
+    assert.deepEqual(queries, ['closingIssuesReferences', 'commits('])
+    assert.ok(!calls.some((a) => /issues\/3015/.test(a.join(' '))))
+  })
+})
+
 describe('CLI end to end with a stub gh on PATH', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'pr-ownership-gate-'))
   const recent = new Date(Date.now() - 25 * 60_000).toISOString()

@@ -27,7 +27,14 @@ name: Release the claim on merge
 # branch releases nothing at all — GitHub closes nothing there — so a
 # `dev → main` promotion (thirty `Closes #` commit lines) never spams the channel.
 # Idempotent whenever the thread can be read; an unreadable read fails open to
-# one duplicate line, never to a missed release.
+# one duplicate line, never to a missed release. One comment per thread per
+# run: the channel lines of both releases go out as one comment.
+#
+# `closingIssuesReferences(first:50)` truncates body-linked references at
+# fifty; the title and commit scan still sees the rest. An issue linked only
+# from the body past the fiftieth is closed by GitHub but not released here,
+# and `claim-release-on-close.yml` defers it as merge-closed — so it is
+# released by neither (stated, not guarded; no PR here links fifty issues).
 #
 # ## Why a bot release
 #
@@ -46,8 +53,15 @@ name: Release the claim on merge
 #
 # - A PR closed WITHOUT merging releases nothing: the work did not land and
 #   the claim is still live (tested; the merged filter is the whole safety).
-# - `Refs #N` (operator-verify mode) is neither a keyword nor a linked
-#   reference, so an issue held open for a human step keeps its claim.
+# - An issue the PR only references with `Refs #N` (operator-verify mode) is
+#   not closed and not released as above. Since #4176 (owner decision,
+#   2026-10-20) the same run releases the PR AUTHOR's claim on it instead: one
+#   `🔓 RELEASE #N — claim of `author` — PR #P merged …` line on the issue, the
+#   same line on the channel when the channel holds the author's claim, and an
+#   unassign of the author only. The issue stays open; other sessions' claims
+#   and assignees are untouched; nothing is posted when the author holds no
+#   unreleased claim of it. A close that no merge caused is released by
+#   `claim-release-on-close.yml`.
 # - It never touches the channel's assignees, never closes or labels anything, and
 #   never fails the build: a failed read or a refused write is logged, exit 0.
 #

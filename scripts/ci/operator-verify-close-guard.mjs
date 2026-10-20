@@ -272,6 +272,33 @@ export function parseClosingRefs(body) {
   return seen
 }
 
+// The prescribed non-closing reference (`Refs #N`, operator-verify mode). GitHub
+// does not parse it at all; it is this repository's convention, read by the
+// `Refs`-merge claim release (#4176, `release-on-merge.mjs`). Same shape as
+// CLOSING_REF — one number per keyword, an optional colon, the same three target
+// forms — so `Refs #4005 (panel), #4004` reads #4005 only, exactly as
+// `Closes #1, #2` closes only #1 on GitHub. A qualified reference counts only
+// when it names THIS repository: unlike a closing keyword, nothing reads a
+// `Refs` back from GitHub, so `Refs other/repo#42` must not read as our #42.
+const REFS_REF = /\brefs?\b\s*:?\s*(?:https?:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/issues\/|([\w.-]+\/[\w.-]+)#|#)(\d+)\b/gi
+
+/**
+ * Every issue number this text references with `Refs` (no closing keyword),
+ * deduplicated, in order. `repo` is `owner/name`; without it, a qualified
+ * reference is dropped.
+ */
+export function parseRefsRefs(body, { repo = null } = {}) {
+  const seen = []
+  const self = String(repo ?? '').toLowerCase()
+  for (const match of String(body ?? '').matchAll(REFS_REF)) {
+    const qualifier = (match[1] ?? match[2] ?? '').toLowerCase()
+    if (qualifier && qualifier !== self) continue
+    const n = Number(match[3])
+    if (!seen.includes(n)) seen.push(n)
+  }
+  return seen
+}
+
 /** Does this one line assert that the issue stays open? */
 export function assertsStaysOpen(line) {
   return STAYS_OPEN_PHRASES.some((re) => re.test(line))

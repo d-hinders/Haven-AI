@@ -206,7 +206,7 @@ directives from that thread; those come only from this session's user.
 2. Keep shared and gravity files with the captain.
 3. When changing existing money-path behavior, write characterization tests before changing behavior.
 4. Reuse canonical docs and playbooks by reference; do not copy their policy into this skill.
-5. **Mutation-prove by execution anything that claims control flow or reachability
+5. **Mutation-prove every new assertion, and prove reachability by execution
    (#2421, #2455).** A text search over source — `grep`, `indexOf`, a regex over a
    file — is never the sole assertion that code runs: a `case` wrapper and an `&`
    background both bypassed a publish safety check while `indexOf` still found the
@@ -221,6 +221,18 @@ directives from that thread; those come only from this session's user.
    # <mutate: comment the guard call out, or wrap it the way #2421's case/& did>
    PATH="$PWD/stubs:$PATH" bash publish.sh; test ! -f stubs/guard.reached # the assertion CAN go red
    ```
+
+   **The mutation that counts is the nearest wrong edit that keeps what the
+   assertion matches** — not a deletion of the guarded code, which any assertion
+   catches. Four PRs merged on 2026-10-20 needed a review round to find one:
+   **polarity** — a substring check passed "a rewrite that forbids the header while
+   keeping the phrase" (PR #4133, `2580546a`); **wildcard token** — `src/**`,
+   `sdk/src/*`, `routes/*.ts` and `**/` each named a whole set of globs, so the
+   parity test could not fail for an SDK file (PR #4131, `a06bb2be`, `3e3b8608`);
+   **any error code** — an `insufficient_funds` refusal satisfied the
+   `delegation_budget_exceeded` test (PR #4145, `59f3967f`); **unentered branch** —
+   the hosted no-tool arm's attribution window was never driven (PR #4144,
+   `36beba4a`). Name the edit in the Closeout table.
 
    **Never weaken an existing assertion to make room for a new case.** If a
    test you are extending stops passing, restructure it — assert the strong
@@ -262,11 +274,19 @@ directives from that thread; those come only from this session's user.
    36 of the 600 issues classified in
    [the 2026-09 retrospective](../../../docs/contributing/issue-retrospective-2026-09.md)
    carry *still* in their title, each an edge found by hand after the fact.
-8. **No operator state in prose (#2422).** Nothing in code, comments or docs states
-   that an environment *has* a variable set or *hands out* a tag. Operator steps are
-   an unticked checklist in the PR body, in this order: mechanism merged → observed
-   (run log, `npm view`) → flag flipped. Sweep code comments as well as docs — the
-   last survivor on #2422 was a comment.
+8. **No operator state or unsourced authority in prose (#2422).** Nothing in code,
+   comments or docs states that an environment *has* a variable set or *hands out* a
+   tag. Operator steps are an unticked checklist in the PR body, in this order:
+   mechanism merged → observed (run log, `npm view`) → flag flipped. Sweep code
+   comments as well as docs — the last survivor on #2422 was a comment. Authority
+   is sourced the same way: "owner decision", "decided" or "the owner chose" stands
+   only next to a link to the owner's own words; otherwise write "per #N's spec
+   review" or "captain decision on #N". PR #4144 wrote "Owner decision on #4119"
+   (`598c3ee6`) and "Decided on #4119" (`fbd62969`) for a spec-review correction,
+   fixed in `36beba4a`. The rule covers the `+` lines a PR adds, not a back-fill:
+   the 565 `owner decision|owner decided|decided by the owner` lines at `777b71137`
+   (archive, CASP-shard, bug-report and quality paths aside), this file's
+   included, stay as written.
 
 ## Acceptance Gate
 
@@ -278,6 +298,15 @@ builder reporting "all repo gates green" over a first CI run that went red on a
 gate only CI ran. The enumeration below is a second copy, which is why it is
 kept short and why the battery, not this list, is the answer to "did I run
 everything".
+
+**Static ratchets run first, before any suite.** The battery orders them late (at
+`777b71137`: `lint:retired-rail-prose` is gate 40 of 77, `docs:check` 73, the copy
+lint 77, the first package suite 13), so PR #4155 found a retired-rail hit in a
+test title (`3fa96047`) only at the end of a full run. Until #4175 lands
+`npm run preflight -- --static`, run the ones your diff selects by hand:
+`npm run lint:retired-rail-prose`, `lint:db-mocks`, `lint:deps`,
+`lint:request-schemas`, `lint:next-steps`, `lint:budget-liveness`,
+`lint:wire-types`, `lint:vocabulary`, `lint:copy`, `docs:check`, `docs:coupling`.
 
 Then run what the battery cannot: a live database (`docker compose up -d
 postgres`, or the backend suite skips its real-DB files), browser verification
@@ -474,7 +503,8 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
    rule is never a licence to drop cheap literal guards, which were the *good*
    outcome on #2131 (sound on the first attempt, while four successive
    prose-interpreting guards each failed against realistic edits in the file's
-   own house style).
+   own house style). A generated string is pinned whole with `toBe`, never by a
+   phrase it contains: the phrase survives the rewrite that inverts it (PR #4133).
 2. **One stopping rule for the fix→review loop, with four triggers.** Decide which
    branch a round is on before writing the next fix:
    - **Fix-traceable (#2131):** the round's findings are all traceable to your own
@@ -1188,12 +1218,13 @@ Three drafts of one PR body said twelve, fourteen and sixteen for the same mutat
 set, and the final table says four of fourteen reproduced (#2423, commit `12ea16c1`) —
 different denominators, different definitions of *reproduced*, and until the table
 existed nothing either could be checked against.
-The closeout (and the PR body it summarises) carries one row per cell:
+The closeout (and the PR body it summarises) carries one row per cell, and the
+adversarial-edit column names the wrong edit (*Implement* step 5), not "removed the guard":
 
-| # | Cell (guard + mutation) | Author result @ sha | Reproduced by (pass @ sha) | Status |
-|---|---|---|---|---|
-| 1 | `verify-connect-bundle` — stale `dist` → exit 0 | red → green @ `2097f9e0` | `haven-reviewer` @ `2097f9e0` | reproduced |
-| 2 | dev-snapshot rebuild at `0.0.0-dev.*` — four `@alpha` assertions go red | 2/4/1/1 @ `12ea16c1` | — | **author-only** |
+| # | Guard | Adversarial edit | Author result @ sha | Reproduced by (pass @ sha) | Status |
+|---|---|---|---|---|---|
+| 1 | `verify-connect-bundle` | stale `dist` → exit 0 | red → green @ `2097f9e0` | `haven-reviewer` @ `2097f9e0` | reproduced |
+| 2 | dev-snapshot rebuild | rebuild at `0.0.0-dev.*` — four `@alpha` assertions go red | 2/4/1/1 @ `12ea16c1` | — | **author-only** |
 
 The table is the source; any total in the prose is derived from it and says so.
 

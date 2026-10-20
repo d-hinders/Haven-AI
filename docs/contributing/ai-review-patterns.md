@@ -202,6 +202,25 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 - Flag a PR whose Local Checks quote a gate's success message when the gate's default range could not have included the change — a committed-only range run before the commit, a `paths`-filtered job on a non-matching PR, a check run in the wrong worktree.
 - Run the **CI-equivalent** form, not the convenient one. `node scripts/docs/coupling-gate.mjs` is advisory and always exits 0; `npm run docs:coupling` is what CI runs. A local invocation that cannot fail is not evidence that CI will pass (#1076 → #1077).
 
+## Assertions A Wrong Edit Still Satisfies
+
+A deletion of the guarded code is the mutation every assertion catches. The one
+that counts is the **nearest wrong edit that keeps what the assertion matches**
+(ship-next *Implement* step 5). Four PRs merged on 2026-10-20 only after a review
+round found it:
+
+- **Polarity.** A substring assertion passes a rewrite that forbids what the text
+  told the agent to do, because the phrase survives. Pin generated agent-facing
+  text whole with `toBe` (PR #4133, `2580546a`).
+- **Wildcard token.** A matcher that lets `src/**`, `sdk/src/*` or `**/` name
+  whole sets of globs cannot fail for any file in them (PR #4131, `a06bb2be`,
+  `3e3b8608`).
+- **Any error code.** A refusal assertion that any code satisfies passes an
+  `insufficient_funds` refusal where `delegation_budget_exceeded` was meant. Pin
+  the anchor to its code (PR #4145, `59f3967f`).
+- **Unentered branch.** A new arm no test drives is green by absence (PR #4144,
+  `36beba4a`, the hosted no-tool attribution window).
+
 ## Instrument Self-Reference And Staleness
 
 A gate that could not fail is one failure mode; an instrument that runs

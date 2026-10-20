@@ -18,6 +18,10 @@
  *   6. raw-svg           — an inline <svg> instead of Icon + a lucide glyph
  *   7. address-truncation — a hand-rolled `${a.slice(0,6)}…${a.slice(-4)}`
  *                          instead of <Address> (or lib/format truncate)
+ *   8. hand-built-list-control — a search field, a hand-rolled Filters
+ *                          trigger or a direct <FilterPill> outside the
+ *                          ListToolbar family (#4129; baseline-carried ONLY —
+ *                          `design-lint-disable-line` does not silence it)
  * Each structural rule exempts its own primitive's home file (Table.tsx,
  * Card.tsx, Address.tsx) so the canonical implementation is never self-flagged.
  *
@@ -179,6 +183,57 @@ export const RULES = [
     // them separately also double-counted every real occurrence.
     regex: /\.slice\(\s*0,\s*6\s*\)[^\n]*\.slice\(\s*-4\s*\)/g,
     exempt: (file) => isMarketingSurface(file) || file.includes('components/haven/Address.tsx'),
+  },
+  // ── List-control rule (#4129) — keeps every list page on the ListToolbar
+  // family ─────────────────────────────────────────────────────────────────
+  // design-system.md § List controls: a page extends the pattern first and
+  // "never hand-builds one". The gate flags a hand-built list control, not
+  // one missing import, so the signals are the tells a hand-built copy
+  // carries:
+  //
+  //   - a SEARCH FIELD — `type="search"`, or a string-literal placeholder
+  //     containing the word "search" (`placeholder={`Search ${noun}`}`
+  //     included). `aria-haspopup` was measured and rejected as the signal
+  //     (#4129): it appears 0 times in the hand-built toolbars and DOES
+  //     appear in Sidebar, WalletButton, DropdownMenu and
+  //     TransactionActivityRow — it fires exactly on the wrong side.
+  //     `aria-expanded` is rejected the same way: it is the generic
+  //     disclosure signal those unrelated menus share (DropdownMenu.Trigger,
+  //     Sidebar's nav menu, AgentOrganizationTree's expand).
+  //   - a hand-rolled FILTERS TRIGGER — the `SlidersHorizontal` glyph, which
+  //     outside the family only a hand-built Filters button imports
+  //     (ListToolbar owns the real one).
+  //   - a direct `<FilterPill` USE — pills render inside FacetMenu; a bare
+  //     pill row is the pre-#4110 shape (MerchantGrid measured on dev).
+  //
+  // All three fired on every hand-built copy measured at #4108 review time
+  // (FilterBar, AgentListToolbar, MerchantGrid, the pre-#4159 Contacts page)
+  // and none on the four unrelated menus. Exemptions: the family's own
+  // files, the `FilterPill` re-export shim, `packages/ui/src` (FilterPill's
+  // definition), `packages/ops/src` (exempt by owner decision 2026-10-20),
+  // the /design-system demos, and marketing surfaces like every rule.
+  //
+  // `ignoreEscapes` is load-bearing: `design-lint-disable-line` does NOT
+  // silence this rule. A copy page could otherwise mute the one guard that
+  // exists to catch it with a comment; the baseline — a hand edit in a
+  // reviewed commit — is the only way to carry this debt.
+  {
+    id: 'hand-built-list-control',
+    describe:
+      'hand-built list control — use the ListToolbar family (design-system.md → Patterns → List controls)',
+    regex: /\btype=["']search["']|placeholder=\{?["'`][^"'`]*\bsearch\b|<FilterPill[\s/>]|\bSlidersHorizontal\b/gi,
+    ignoreEscapes: true,
+    exempt: (file) =>
+      isMarketingSurface(file) ||
+      file.includes('src/app/(authenticated)/design-system/') ||
+      file.includes('ui/src/') ||
+      file.includes('ops/src/') ||
+      [
+        'components/ui/ListToolbar.tsx',
+        'components/ui/FacetMenu.tsx',
+        'components/ui/PeriodPicker.tsx',
+        'components/ui/FilterPill.tsx',
+      ].some((f) => file.endsWith(f)),
   },
   // ── Element rule (#1858) — the one § 5 invariant that had no gate ────────
   // `Icon.tsx` enforces its other two conventions by construction:
@@ -421,8 +476,11 @@ export function scanSource(relFile, source) {
     if (rule.element) continue
     if (rule.exempt(relFile)) continue
     lines.forEach((raw, i) => {
-      // Escape on the offending line or the line above (shared semantics).
-      if (isEscaped(lines, i, 'design-lint-disable-line')) return
+      // Escape on the offending line or the line above (shared semantics) —
+      // except where a rule opts out (`ignoreEscapes`): the list-control rule
+      // (#4129) is silenced by the baseline alone, never by an inline marker
+      // a hand-built copy could plant next to itself.
+      if (!rule.ignoreEscapes && isEscaped(lines, i, 'design-lint-disable-line')) return
       // Strip line-comment content — issue refs (#857) and colour names in
       // comments are prose, not styles. Block-comment bodies starting with *
       // are skipped the same way. The `//` must not be preceded by `:` —

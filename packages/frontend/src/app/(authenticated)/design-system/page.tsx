@@ -779,7 +779,7 @@ function FacetPrimitivesExample() {
         value={category}
         onChange={setCategory}
       />
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2" data-testid="ds-list-controls-primitives-row">
         <FacetMenu
           facet={{
             id: 'chainId',

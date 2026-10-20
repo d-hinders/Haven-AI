@@ -226,13 +226,11 @@ describe('PeriodPicker', () => {
     expect(screen.getAllByRole('menuitemradio').map((r) => r.textContent)).toEqual(['Last 7 days', 'Last 30 days', 'Last 90 days'])
   })
 
-  it('without All time, the default does not tint; a change does', async () => {
-    const user = userEvent.setup()
+  it('without All time, the default does not tint; a change does', () => {
     render(<PeriodPicker value={{ preset: '30d' }} onChange={() => {}} allowAllTime={false} defaultValue={{ preset: '30d' }} />)
     expect(screen.getByRole('button', { name: 'Period: Last 30 days' })).toHaveAttribute('data-active', 'false')
     render(<PeriodPicker value={{ preset: '7d' }} onChange={() => {}} allowAllTime={false} defaultValue={{ preset: '30d' }} />)
     expect(screen.getByRole('button', { name: 'Period: Last 7 days' })).toHaveAttribute('data-active', 'true')
-    await user.click(screen.getByRole('button', { name: 'Period: Last 7 days' }))
   })
 
   it('re-clamps the panel when the wider custom-range form replaces the list (#4110 review)', async () => {

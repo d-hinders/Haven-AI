@@ -181,7 +181,10 @@ export function ListToolbar({
       clear: () => setFacet(facet.id, [...defaults]),
     })
   }
-  const periodDefault = period?.defaultValue ?? {}
+  // Without All time and with no declared default, the current value is its
+  // own default — the PeriodPicker rule — so the period never raises a chip
+  // that could only clear to a value this list does not offer.
+  const periodDefault = period?.defaultValue ?? (allowAllTime ? {} : (state.period ?? {}))
   if (period && !samePeriod(state.period, periodDefault)) {
     active.push({
       key: 'period',
@@ -201,7 +204,7 @@ export function ListToolbar({
       data-testid="list-toolbar"
       className="flex flex-col gap-3 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-3 shadow-card sm:p-4"
     >
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2" data-testid="list-toolbar-top">
         <ListSearchField
           noun={noun}
           value={state.q}

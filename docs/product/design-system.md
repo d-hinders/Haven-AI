@@ -2083,7 +2083,8 @@ never repeated inside a parent card.
    and Clear filters keeps it.
 
 **Active means "differs from the page's default".** One rule decides the
-trigger's tint, the chip, the count on **Filters (n)**, and whether the count
+trigger's tint, the chip, the count on **Filters (n)** (the active filters the
+sheet holds), and whether the count
 reads "{shown} of {total}". A page whose default is not All (Marketplace's
 network, Analytics' 30 days) opens untinted and unfiltered. Removing a chip
 returns that filter to the default; **Clear filters** returns the whole list to

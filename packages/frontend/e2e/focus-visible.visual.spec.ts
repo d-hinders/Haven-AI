@@ -1159,10 +1159,17 @@ test.describe('driven focus-state visual regression', () => {
   // the toolbar's search field, a text input, which matches :focus-visible
   // whatever the modality — and then reaches the target by a real Tab.
   // `.focus()` is never used on the target itself (see the header).
+  //
+  // Each capture is the ROW holding the trigger, never the trigger itself:
+  // the ring is `ring-2` + `ring-offset-2`, painted outside the element's
+  // box, so an element-clipped capture crops away the very pixels it pins
+  // (the #4110 design review counted 62 ring pixels left against a
+  // 50-pixel tolerance). Every other capture in this file has room around
+  // its control for the same reason.
   const listTriggers = [
-    { slug: 'facet', section: 'ds-list-controls-default', from: 'searchbox', target: /^Status:/, width: 1280 },
-    { slug: 'filters', section: 'ds-list-controls-phone', from: 'searchbox', target: /^Filters/, width: 1280 },
-    { slug: 'period', section: 'ds-list-controls-primitives', from: /^Network:/, target: /^Period:/, width: 1280 },
+    { slug: 'facet', section: 'ds-list-controls-default', row: 'list-toolbar-facets', from: 'searchbox', target: /^Status:/ },
+    { slug: 'filters', section: 'ds-list-controls-phone', row: 'list-toolbar-top', from: 'searchbox', target: /^Filters/ },
+    { slug: 'period', section: 'ds-list-controls-primitives', row: 'ds-list-controls-primitives-row', from: /^Network:/, target: /^Period:/ },
   ] as const
 
   for (const trigger of listTriggers) {
@@ -1185,7 +1192,9 @@ test.describe('driven focus-state visual regression', () => {
       await expectFocusedAndIndicated(page, target, `List controls · ${trigger.slug}`)
       await expect(target).toHaveAttribute('aria-haspopup', /menu|dialog/)
       await expect(target).toHaveAttribute('aria-expanded', 'false')
-      await expect(target).toHaveScreenshot(`focus-list-controls-${trigger.slug}-desktop.png`, SNAPSHOT_OPTIONS)
+      const row = section.getByTestId(trigger.row)
+      await expect(row).toHaveCount(1)
+      await expect(row).toHaveScreenshot(`focus-list-controls-${trigger.slug}-desktop.png`, SNAPSHOT_OPTIONS)
     })
   }
 })

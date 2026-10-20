@@ -328,6 +328,24 @@ describe('ListToolbar — page defaults', () => {
   })
 })
 
+describe('ListToolbar — period without All time', () => {
+  it('with no declared default, the current period raises no chip and the count stays unfiltered', () => {
+    render(
+      <ListToolbar
+        noun={noun}
+        state={{ q: '', facets: {}, period: { preset: '30d' } }}
+        onChange={() => {}}
+        filtering="server"
+        period={{ allowAllTime: false }}
+        count={{ shown: 3, total: 3 }}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: /^Remove Period/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('3 agents')
+    expect(screen.getByRole('button', { name: 'Period: Last 30 days' })).toHaveAttribute('data-active', 'false')
+  })
+})
+
 describe('ListToolbar — phone sheet', () => {
   it('"Filters (n)" opens a dialog whose taps apply live; the footer names the applied count and only closes', async () => {
     const user = userEvent.setup()

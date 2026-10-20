@@ -1282,7 +1282,9 @@ Consequences worth knowing:
   leave the selected option's focus a 1px thickening; focus stays the outset
   `ring-2`): the outline is the component boundary, 5.95:1 (light) / 7.99:1 (dark) against the
   `--v2-surface` track, where the old `--v2-surface-2` thumb measured 1.06:1 / 1.10:1 and
-  read as sunken in light.
+  read as sunken in light. It is a **settings-type** control — theme, appearance, any
+  persisted preference — never a list or period filter: filtering is the list controls'
+  job, and the period is `PeriodPicker`'s (#4116).
 
 **The rule outlives the primitive ([#1766](https://github.com/d-hinders/Haven-AI/issues/1766)).**
 A control that is not a `Button` inherits none of the above automatically, and the
@@ -2130,7 +2132,15 @@ this layout in a narrow container on a wide screen.
 `modules/transactions/period.ts`. Values stay `7d` / `30d` / `90d`. Props choose
 which presets show, whether **All time** shows (it is the absent filter, not a
 fourth value), and whether a **Custom range** is allowed. Analytics uses
-presets only, with no All time.
+presets only, with no All time. Analytics has no `ListToolbar`, so it mirrors
+its choice onto `?period=` itself — read ahead of storage in the initialiser
+and written back with a `replaceState` (`lib/analytics-range.ts`, #4116) —
+where the lists get the same key from `useListUrlState`.
+
+`SegmentedControl` is not this: it stays in the system for settings-type
+choices (theme, appearance) and is **not used for list or period filtering**
+— the one period control is `PeriodPicker`, the one filter controls are the
+facets (#4116).
 
 #### Behaviour
 

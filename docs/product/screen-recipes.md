@@ -23,8 +23,8 @@ covers:
   - packages/frontend/src/components/ui/Skeleton.tsx
   - packages/ui/src/StatTile.tsx
   - packages/frontend/src/components/analytics/AgentsTable.tsx
+  - packages/frontend/src/components/ui/PeriodPicker.tsx
   - packages/frontend/src/components/analytics/EmptyStates.tsx
-  - packages/frontend/src/components/analytics/RangeControl.tsx
   - packages/frontend/src/hooks/useAccountingFeed.ts
   - packages/frontend/src/components/settings/CompanyDetailsCard.tsx
   - packages/frontend/src/app/(authenticated)/transactions/TransactionsClient.tsx
@@ -847,16 +847,22 @@ the other secondary routes.
 
 Structure:
 1. PageHeader with title *Analytics* and the subtitle "What your agents did
-   with your money.", plus the window caption beside the range control. The
+   with your money.", plus the window caption beside the period picker. The
    caption comes from the response's own resolved window, not from the control,
    so a request answered for a different window than the one asked for is what
    the reader is told.
-2. One `SegmentedControl` for the window (7d / 30d / 90d, default 30d),
-   persisted per device under `haven.analytics.range` — the same device-local
-   rule the theme key follows — and read in the initialiser, never in an
-   effect, so the first request already carries the stored choice. The display
-   currency is read from the Settings currency preference, the one owner of
-   that value; the page never re-asks it.
+2. One `PeriodPicker` — the list-controls period control (#4110) — for the
+   window (7d / 30d / 90d, default 30d), presets only: Last 7 / 30 / 90 days,
+   no All time and no custom range, because the endpoint takes a rolling
+   `range`, not dates. The choice is read in the initialiser, never in an
+   effect, so the first request already carries it: a `?period=` on the URL
+   wins (a shared link opens on the window it names), else the device's stored
+   `haven.analytics.range` — the same device-local rule the theme key follows —
+   and a value the endpoint would answer 400 to falls back to the default on
+   either surface. Picking writes the stored key and mirrors `?period=` with a
+   `replaceState`, no history entry per change (#4116). The display currency
+   is read from the Settings currency preference, the one owner of that value;
+   the page never re-asks it.
 3. Four `StatTile` figures, one request behind all four: *Spent* with its
    basis ("based on N payments", plus how many submissions awaiting their
    settlement evidence are not counted), *Refused* with the attempts behind

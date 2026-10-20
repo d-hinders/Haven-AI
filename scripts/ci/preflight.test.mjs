@@ -50,6 +50,21 @@ import {
   literalHead,
   GATE_OUTPUT_MAX_BUFFER,
   runGate,
+  GATE_RULE_TABLE,
+  GATE_CLASSES,
+  gateClass,
+  TIMEOUT_SHAPES,
+  NEVER_LOAD_SHAPES,
+  isTimeoutShaped,
+  timeoutEvidence,
+  npmSwallowedFlags,
+  isHighLoad,
+  readMachineLoad,
+  runBattery,
+  summarize,
+  parseArgs,
+  usage,
+  EXIT,
 } from './preflight.mjs'
 import { classifyChangedFiles } from './change-classifier.mjs'
 
@@ -68,6 +83,14 @@ describe('the drift check', () => {
         'Unclassified:\n' +
         unclassified.map((c) => `  ${JSON.stringify(c)}`).join('\n'),
     )
+    // And every gate among them has a class (#4175): static or suite, from the
+    // rule that matched it or from a `gateClasses` row. A gate with no class
+    // would sort after every static gate and be dropped by `--static`, which is
+    // a silent reclassification as suite.
+    const unclassed = commands
+      .filter((c) => classifyCommand(c, map) === 'gate')
+      .filter((c) => !GATE_CLASSES.includes(gateClass(c, map)))
+    assert.deepEqual(unclassed, [], `gates with no static/suite class:\n${unclassed.join('\n')}`)
   })
 
   test('no notGates entry is stale', () => {
@@ -1058,10 +1081,11 @@ describe('the real-DB skip detector', () => {
 })
 
 describe('the gate map file', () => {
-  test('is valid JSON with the two expected keys', () => {
+  test('is valid JSON with the expected keys', () => {
     const raw = JSON.parse(readFileSync(new URL('./preflight-gates.json', import.meta.url), 'utf8'))
     assert.ok(Array.isArray(raw.$comment))
     assert.equal(typeof raw.notGates, 'object')
+    assert.equal(typeof raw.gateClasses, 'object')
   })
 })
 
@@ -1086,5 +1110,691 @@ describe('the gate output buffer (#3954)', () => {
     // The measured floor is the backend suite's ~1.47 MB of stdout. Anything
     // at or below that would leave the original defect standing.
     assert.ok(GATE_OUTPUT_MAX_BUFFER >= 10 * 1024 * 1024)
+  })
+})
+
+// ── #4175: static/suite classes, static-first order, --static, flag refusal,
+//    and the load-aware re-run ────────────────────────────────────────────────
+
+const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..')
+
+/**
+ * Run preflight.mjs as the builder does, in a child process. The npm configs
+ * `npmSwallowedFlags` reads are dropped unless a test sets them, so a suite
+ * started as `npm test --all` does not change what these children do.
+ */
+const preflightCli = (args, extraEnv = {}) => {
+  const env = { ...process.env }
+  for (const k of ['all', 'list', 'static', 'base', 'verify_ruleset']) delete env[`npm_config_${k}`]
+  return spawnSync(process.execPath, ['scripts/ci/preflight.mjs', ...args], {
+    cwd: REPO,
+    encoding: 'utf8',
+    env: { ...env, ...extraEnv },
+  })
+}
+
+/** The `--list` output as [command, class] pairs, in printed order. */
+const listedClasses = (stdout) => {
+  const lines = stdout.split('\n')
+  const rows = []
+  for (let i = 0; i < lines.length; i += 1) {
+    const m = /^ {2}(\S.*)$/.exec(lines[i])
+    if (!m) continue
+    const kind = /^ {6}(static|suite) · /.exec(lines[i + 1] ?? '')
+    rows.push([m[1], kind ? kind[1] : null])
+  }
+  return rows
+}
+
+/**
+ * Real `node --test` output, captured the way the battery captures it: through
+ * `runGate`, from a fixture file in a scratch directory.
+ */
+const liveNodeTest = (body) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'preflight-live-'))
+  try {
+    const file = path.join(dir, 'fixture.test.mjs')
+    writeFileSync(file, `import { test } from 'node:test'\nimport assert from 'node:assert/strict'\n${body}\n`)
+    // `env -u NODE_TEST_CONTEXT`: this suite runs under `node --test`, and a
+    // child that inherits the variable skips its files ("run() is being called
+    // recursively") and exits 0 — a green that is about nothing.
+    return runGate({ command: `env -u NODE_TEST_CONTEXT node --test "${file}"`, jobs: ['fixture'] })
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+describe('static and suite classes (#4175)', () => {
+  const scriptsOf = (pkgDir) =>
+    JSON.parse(readFileSync(path.join(REPO, pkgDir, 'package.json'), 'utf8')).scripts ?? {}
+
+  /**
+   * Every shell piece a gate ends up running, following `npm run` aliases into
+   * the package that owns them, with the directory npm runs each piece in.
+   */
+  const resolvePieces = (command, cwd = '.', seen = new Set()) => {
+    const m = /^npm run ([\w:-]+)(?: -w (packages\/[\w-]+))?$/.exec(command.trim())
+    if (!m) return [{ piece: command.trim(), cwd }]
+    const [, name, ws] = m
+    const dir = ws ?? cwd
+    if (seen.has(`${dir}:${name}`)) return []
+    seen.add(`${dir}:${name}`)
+    const body = scriptsOf(dir)[name]
+    assert.ok(body, `no script ${name} in ${dir}/package.json`)
+    return body.split('&&').flatMap((piece) => resolvePieces(piece, dir, seen))
+  }
+
+  // A test runner, a compiler or a build: what `static` promises a gate is not.
+  const RUNNER = /\bnode --test\b|\bvitest\b|\bjest\b|\bplaywright\b|\btsc\b|\bnext build\b/
+  // A child-process call — not a regex's `.exec(` — and up to 200 characters of
+  // its arguments, where a spawned runner's name would be.
+  const SPAWN_CALL = /(?<![.\w])(?:spawn|spawnSync|exec|execSync|execFile|execFileSync|fork)\s*\(([\s\S]{0,200})/g
+  const SPAWNED_RUNNER = /['"`](?:[\w./-]*\/)?(?:npx\s+)?(?:vitest|jest|playwright|tsc)\b|['"`]--test['"`]|\bnode --test\b/
+  const fileRunsASuite = (src) =>
+    /from ['"](?:node:test|vitest)['"]/.test(src) ||
+    [...src.matchAll(SPAWN_CALL)].some((m) => SPAWNED_RUNNER.test(m[1]))
+  const runsASuite = ({ piece, cwd }) => {
+    if (RUNNER.test(piece)) return true
+    // `node x.mjs` / `tsx x.ts` over a file that is itself a test file, or that
+    // spawns a runner.
+    const file = /^(?:node|tsx) ([\w./-]+\.(?:mjs|js|ts))(?:\s|$)/.exec(piece)?.[1]
+    if (!file) return false
+    return fileRunsASuite(readFileSync(path.join(REPO, cwd, file), 'utf8'))
+  }
+
+  test('lint:network-pins is a suite, though its name says lint', () => {
+    assert.equal(gateClass('npm run lint:network-pins', map), 'suite')
+    assert.equal(buildPlan().find((g) => g.command === 'npm run lint:network-pins')?.kind, 'suite')
+    // The `gateClasses` row is what makes it one: the rule alone says static.
+    assert.equal(gateClass('npm run lint:network-pins', { notGates: {} }), 'static')
+  })
+
+  test('no static gate runs a test suite, a compiler or a build', () => {
+    // The guard that makes the class honest without a hand list: every static
+    // gate's script body is resolved and read. A new `lint:foo` that is
+    // `node --test …` reddens here until a `gateClasses` row says suite.
+    const wrong = buildPlan()
+      .filter((g) => g.kind === 'static')
+      .filter((g) => resolvePieces(g.command).some(runsASuite))
+      .map((g) => g.command)
+    assert.deepEqual(wrong, [], `static gates that run a suite:\n${wrong.join('\n')}`)
+  })
+
+  test('the resolver can say yes', () => {
+    // Without these the check above is green about nothing.
+    assert.equal(resolvePieces('npm run lint:network-pins').some(runsASuite), true)
+    assert.equal(resolvePieces('npm run lint:deps:test').some(runsASuite), true)
+    assert.equal(runsASuite({ piece: 'node scripts/network-map-pins.test.mjs', cwd: '.' }), true)
+    // And follows an alias into a workspace: root `check:route-modules` is
+    // `npm run check:route-modules -w packages/backend`, which is `tsx …`.
+    assert.deepEqual(resolvePieces('npm run check:route-modules'), [
+      { piece: 'tsx scripts/generate-route-modules.ts --check', cwd: 'packages/backend' },
+    ])
+  })
+
+  test('a wrapper that spawns a runner is seen; a regex .exec( or a comment is not', () => {
+    for (const src of [
+      "import { spawnSync } from 'node:child_process'\nspawnSync('npx', ['vitest', 'run'], { stdio: 'inherit' })",
+      "execSync('vitest run --reporter=dot')",
+      "spawnSync(process.execPath, ['--test', 'scripts/x.test.mjs'])",
+      "execFileSync('node_modules/.bin/tsc', ['--noEmit'])",
+      "execSync('node --test scripts/*.test.mjs')",
+    ]) {
+      assert.equal(fileRunsASuite(src), true, src)
+    }
+    for (const src of [
+      "// scans for vi.mock in vitest files\nconst m = /vitest/.exec(line)",
+      "execFileSync('git', ['ls-files', '*.test.ts'])",
+      "const files = glob('**/*.test.ts') // run by vitest in CI",
+    ]) {
+      assert.equal(fileRunsASuite(src), false, src)
+    }
+  })
+
+  test('a lint self-test is a suite: the :test rule sits above the lint rule', () => {
+    for (const c of ['npm run lint:deps:test', 'npm run lint:wire-types:test', 'npm run visual:baselines:test']) {
+      assert.equal(gateClass(c, map), 'suite', c)
+    }
+    for (const c of ['npm run lint:deps', 'npm run visual:baselines', 'npm run docs:check']) {
+      assert.equal(gateClass(c, map), 'static', c)
+    }
+  })
+
+  test('every rule and every gateClasses row names a known class, with a reason', () => {
+    for (const r of GATE_RULE_TABLE) assert.ok(GATE_CLASSES.includes(r.kind), r.rule.source)
+    for (const [command, row] of Object.entries(map.gateClasses)) {
+      assert.ok(GATE_CLASSES.includes(row.class), `${command}: class ${row.class}`)
+      assert.ok(row.reason.trim().length >= 40, `${command}: needs a real reason`)
+    }
+  })
+
+  test('no gateClasses row is stale or redundant', () => {
+    const plan = new Set(buildPlan().map((g) => g.command))
+    for (const [command, row] of Object.entries(map.gateClasses)) {
+      assert.ok(plan.has(command), `gateClasses row for a command no plan entry runs: ${command}`)
+      assert.notEqual(gateClass(command, { notGates: {} }), row.class, `redundant row: ${command}`)
+    }
+  })
+})
+
+describe('static-first order and --static (#4175)', () => {
+  test('buildPlan puts static entries first and keeps the derived order in each group', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'preflight-order-'))
+    try {
+      writeFileSync(
+        path.join(dir, 'x.yml'),
+        [
+          'on:',
+          '  pull_request:',
+          'jobs:',
+          '  j:',
+          '    name: J',
+          '    steps:',
+          '      - run: npm run test -w packages/aaa',
+          '      - run: npm run lint:first',
+          '      - run: npm run build -w packages/aaa',
+          '      - run: npm run lint:second',
+          '      - run: npm run lint:third:test',
+          '',
+        ].join('\n'),
+      )
+      assert.deepEqual(
+        buildPlan({ dir }).map((g) => [g.command, g.kind]),
+        [
+          ['npm run lint:first', 'static'],
+          ['npm run lint:second', 'static'],
+          ['npm run test -w packages/aaa', 'suite'],
+          ['npm run build -w packages/aaa', 'suite'],
+          ['npm run lint:third:test', 'suite'],
+        ],
+      )
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('--all --list prints every static entry before the first suite entry', () => {
+    const child = preflightCli(['--all', '--list'])
+    assert.equal(child.status, 0, child.stderr)
+    const rows = listedClasses(child.stdout)
+    assert.equal(rows.length, buildPlan().length)
+    assert.ok(rows.every(([, kind]) => kind !== null), 'a listed entry carries no class')
+    const firstSuite = rows.findIndex(([, kind]) => kind === 'suite')
+    const lastStatic = rows.findLastIndex(([, kind]) => kind === 'static')
+    assert.ok(lastStatic >= 0 && firstSuite >= 0, 'both groups must be non-empty for this to mean anything')
+    assert.ok(lastStatic < firstSuite, `static entry at ${lastStatic} after the first suite at ${firstSuite}`)
+  })
+
+  test('--static --list prints only static entries, under --all and under --base', () => {
+    const staticCount = buildPlan().filter((g) => g.kind === 'static').length
+    assert.ok(staticCount > 0)
+    for (const args of [
+      ['--static', '--all', '--list'],
+      ['--list', '--static', '--base=HEAD'],
+    ]) {
+      const child = preflightCli(args)
+      assert.equal(child.status, 0, `${args.join(' ')}: ${child.stderr}`)
+      const rows = listedClasses(child.stdout)
+      assert.deepEqual(
+        rows.filter(([, kind]) => kind !== 'static'),
+        [],
+        `${args.join(' ')} listed a non-static entry`,
+      )
+      if (args.includes('--all')) assert.equal(rows.length, staticCount)
+      assert.match(child.stdout, /selected \(static only\)/)
+    }
+  })
+
+  test('usage() lists --static and every exit code', () => {
+    const text = usage()
+    assert.match(text, /^ {2}--static {10}run only the static ratchets/m)
+    for (const code of Object.values(EXIT)) assert.match(text, new RegExp(`^exit ${code} `, 'm'))
+    assert.match(text, /Not a pass, and not\n {8}a reason to re-run until green/)
+    assert.match(text, /If it is not plainly load, file an issue and link it\n {8}next to the printed list/)
+    assert.match(text, /^Pass flags after `--`/m)
+  })
+})
+
+describe('argument parsing (#4175)', () => {
+  test('known flags parse, --base= takes its ref', () => {
+    assert.deepEqual(parseArgs(['--all', '--static', '--list', '--verify-ruleset', '--base=abc123']), {
+      opts: { all: true, list: true, static: true, verifyRuleset: true, help: false, base: 'abc123' },
+    })
+    assert.equal(parseArgs([]).opts.base, 'origin/dev')
+    assert.equal(parseArgs(['-h']).opts.help, true)
+  })
+
+  test('an unknown flag, a positional or an empty --base= is refused', () => {
+    assert.deepEqual(parseArgs(['--statc', '--list']), { error: 'unknown argument: --statc' })
+    assert.deepEqual(parseArgs(['--list', 'extra']), { error: 'unknown argument: extra' })
+    assert.deepEqual(parseArgs(['--base']), { error: 'unknown argument: --base' })
+    assert.match(parseArgs(['--base=']).error, /needs a ref/)
+    // Prototype keys are not flags.
+    assert.deepEqual(parseArgs(['constructor']), { error: 'unknown argument: constructor' })
+  })
+
+  test('npmSwallowedFlags names the flags npm kept for itself', () => {
+    assert.deepEqual(npmSwallowedFlags({}), [])
+    assert.deepEqual(npmSwallowedFlags({ npm_config_user_agent: 'npm/10' }), [])
+    assert.deepEqual(
+      npmSwallowedFlags({ npm_config_static: 'true', npm_config_base: 'abc', npm_config_verify_ruleset: 'true' }),
+      ['--static', '--base=abc', '--verify-ruleset'],
+    )
+  })
+
+  test('`npm run preflight --static` (no --) is refused, not run as the full battery', () => {
+    // npm exports npm_config_static=true and passes no argument (measured with
+    // `npm run env --static`). With no argument the battery would run the
+    // default plan, suites and all.
+    const child = preflightCli([], { npm_config_static: 'true' })
+    assert.equal(child.status, EXIT.USAGE)
+    assert.equal(child.stdout, '', 'a refused run printed a plan')
+    assert.ok(
+      child.stderr.startsWith(
+        'preflight: npm kept --static for itself and did not pass it on.\n' +
+          'preflight: put flags after `--`: npm run preflight -- --static\n',
+      ),
+      child.stderr,
+    )
+  })
+
+  test('--statc --list exits 2 with the usage text and runs nothing', () => {
+    // It used to run the default plan and exit 0 (measured on #4175).
+    const child = preflightCli(['--statc', '--list'])
+    assert.equal(child.status, EXIT.USAGE)
+    assert.equal(EXIT.USAGE, 2)
+    assert.equal(child.stdout, '', 'a refused run printed a plan')
+    assert.ok(child.stderr.startsWith('preflight: unknown argument: --statc\n\n'), child.stderr)
+    assert.ok(child.stderr.includes(usage()), 'the refusal does not carry the usage text')
+  })
+})
+
+// The runners' own words, as the battery's pipes capture them. vitest's are
+// copied from `@vitest/runner` 3.2.4 `dist/chunk-hooks.js` (makeTimeoutError)
+// and `vitest` 3.2.4 `dist/chunks/rpc.*.js` (onTimeoutError), because vitest is
+// not installed where this suite runs; `node --test`'s are produced live below.
+const VITEST_TEST_TIMEOUT =
+  ' FAIL  src/infra/__tests__/reconcile.test.ts > reconcile > settles once\n' +
+  'Error: Test timed out in 5000ms.\n' +
+  'If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".'
+const VITEST_HOOK_TIMEOUT =
+  ' FAIL  src/infra/__tests__/reconcile.test.ts > reconcile\n' +
+  'Error: Hook timed out in 10000ms.\n' +
+  'If this is a long-running hook, pass a timeout value as the last argument or configure it globally with "hookTimeout".'
+const VITEST_RPC_TIMEOUT = 'Error: [vitest-worker]: Timeout calling "onTaskUpdate"'
+const VITEST_ASSERTION =
+  ' FAIL  src/routes/x.test.ts > x > answers\nAssertionError: expected 500 to be 200 // Object.is equality'
+
+describe('timeout shapes (#4175)', () => {
+  const red = (output, extra = {}) => ({ ok: false, status: 1, signal: null, output, ...extra })
+
+  test('vitest test, hook and onTaskUpdate timeouts are timeout-shaped', () => {
+    for (const output of [VITEST_TEST_TIMEOUT, VITEST_HOOK_TIMEOUT, VITEST_RPC_TIMEOUT]) {
+      assert.equal(isTimeoutShaped(red(output)), true, output)
+    }
+  })
+
+  test('a node --test timeout, produced live, is timeout-shaped', () => {
+    const live = liveNodeTest("test('slow', { timeout: 20 }, () => new Promise((r) => setTimeout(r, 300)))")
+    assert.equal(live.ok, false, live.output)
+    assert.match(live.output, /'test timed out after 20ms'/)
+    assert.equal(isTimeoutShaped(live), true)
+  })
+
+  test('a node --test runner cancelled by SIGTERM, produced live, is timeout-shaped', () => {
+    // The file's test sends SIGTERM to the runner (its parent), which is what an
+    // outer timeout does to a gate.
+    const live = liveNodeTest(
+      "test('runner killed', () => { process.kill(process.ppid, 'SIGTERM'); return new Promise((r) => setTimeout(r, 1500)) })",
+    )
+    assert.equal(live.ok, false, live.output)
+    assert.match(live.output, /^Interrupted while running:$/m)
+    assert.equal(isTimeoutShaped(live), true)
+  })
+
+  test("a gate whose shell is ended by SIGTERM, produced live, is timeout-shaped", () => {
+    const live = runGate({ command: 'kill -TERM $$', jobs: ['fixture'] })
+    assert.equal(live.status, null)
+    assert.equal(live.signal, 'SIGTERM')
+    assert.equal(isTimeoutShaped(live), true)
+    assert.equal(isTimeoutShaped({ ...live, signal: 'SIGKILL' }), false, 'only SIGTERM is timeout-shaped')
+  })
+
+  test('spawnSync killing a gate past maxBuffer, produced live, is not timeout-shaped', () => {
+    const live = runGate(
+      { command: `node -e "process.stdout.write('x'.repeat(4096))"`, jobs: ['fixture'] },
+      { maxBuffer: 1024 },
+    )
+    assert.equal(live.error, 'ENOBUFS')
+    assert.equal(live.signal, 'SIGTERM', 'spawnSync no longer kills with SIGTERM: the guard may be moot')
+    assert.equal(live.ok, false)
+    assert.equal(isTimeoutShaped(live), false)
+  })
+
+  test('timeoutEvidence keeps the naming line and the timeout line, bounded', () => {
+    const live = liveNodeTest("test('slow', { timeout: 20 }, () => new Promise((r) => setTimeout(r, 300)))")
+    const ev = timeoutEvidence(live.output)
+    assert.match(ev.at(-1), /^ {2}'test timed out after 20ms'$/)
+    assert.match(ev.at(-2), /^✖ slow \(/)
+    assert.deepEqual(timeoutEvidence(''), ['(no output)'])
+    assert.deepEqual(timeoutEvidence('a\nb\nc\nd\ne\nf\ng'), ['c', 'd', 'e', 'f', 'g'], 'tail fallback')
+    const many = Array.from({ length: 20 }, (_, i) => ` FAIL  t${i}\nError: Test timed out in 5000ms.`).join('\n')
+    assert.equal(timeoutEvidence(many).length, 8)
+    assert.equal(timeoutEvidence(`Error: Test timed out in 5000ms. ${'y'.repeat(500)}`)[0].length, 201)
+  })
+
+  test('a node --test assertion failure, produced live, is not timeout-shaped', () => {
+    const live = liveNodeTest("test('eq', () => { assert.equal(1, 2) })")
+    assert.equal(live.ok, false)
+    assert.match(live.output, /AssertionError \[ERR_ASSERTION\]/)
+    assert.equal(isTimeoutShaped(live), false)
+  })
+
+  test('a timeout beside an assertion failure, a missing dist or a missing module is not', () => {
+    for (const other of [
+      VITEST_ASSERTION,
+      "Error: ENOENT: no such file or directory, open '/repo/packages/sdk/dist/index.js'",
+      "Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/repo/packages/sdk/dist/index.js'",
+      'Error: Failed to resolve entry for package "@haven_ai/sdk".',
+    ]) {
+      assert.equal(isTimeoutShaped(red(`${VITEST_TEST_TIMEOUT}\n${other}`)), false, other)
+    }
+  })
+
+  test('a red that names no timeout is not timeout-shaped', () => {
+    for (const output of [
+      'Error: boom',
+      VITEST_ASSERTION,
+      // A vitest RPC timeout on module loading is not a timed test.
+      'Error: [vitest-worker]: Timeout calling "fetch" with "["/src/x.ts","web"]"',
+      // Words, not the runner's shape.
+      'request timed out while connecting to 127.0.0.1:5432',
+      '',
+    ]) {
+      assert.equal(isTimeoutShaped(red(output)), false, JSON.stringify(output))
+    }
+    assert.equal(isTimeoutShaped({ ok: true, status: 0, signal: null, output: VITEST_TEST_TIMEOUT }), false)
+  })
+
+  test('every shape is exercised by a fixture above', () => {
+    const fixtures = [VITEST_TEST_TIMEOUT, VITEST_HOOK_TIMEOUT, VITEST_RPC_TIMEOUT, "'test timed out after 20ms'", '\nInterrupted while running:\n']
+    for (const r of TIMEOUT_SHAPES) assert.ok(fixtures.some((f) => r.test(f)), `no fixture for ${r.source}`)
+    assert.ok(NEVER_LOAD_SHAPES.length > 0)
+  })
+})
+
+describe('load reading (#4175)', () => {
+  test('high means strictly above the CPU count', () => {
+    assert.equal(isHighLoad({ load: 8.01, cpus: 8 }), true)
+    assert.equal(isHighLoad({ load: 8, cpus: 8 }), false)
+    assert.equal(isHighLoad({ load: 3, cpus: 8 }), false)
+  })
+
+  test('a zero reading on either side never reads as high (Windows, empty os.cpus())', () => {
+    assert.equal(isHighLoad({ load: 0, cpus: 8 }), false)
+    assert.equal(isHighLoad({ load: 0, cpus: 0 }), false)
+    assert.equal(isHighLoad({ load: 5, cpus: 0 }), false)
+  })
+
+  test('readMachineLoad reads the 1-minute average and the CPU count', () => {
+    const sample = readMachineLoad()
+    assert.equal(typeof sample.load, 'number')
+    assert.ok(Number.isInteger(sample.cpus) && sample.cpus >= 0)
+  })
+})
+
+describe('the load-aware re-run (#4175)', () => {
+  /**
+   * Drive `runBattery` with a scripted runner, a modelled machine and a clock.
+   * Each command maps to the attempts it will make, in order. An attempt can
+   * move the machine's load at its start (`loadDuring`, the gate's own
+   * workers) or at its end (`loadAfter`, what the next reading sees).
+   */
+  const drive = (script, { load = 12, cpus = 8 } = {}) => {
+    const machine = { load, cpus }
+    const calls = []
+    const samples = []
+    let clock = 0
+    const outcome = runBattery(
+      Object.keys(script).map((command) => ({ command, jobs: [`${command} job`] })),
+      {
+        run: (gate) => {
+          calls.push(gate.command)
+          const step = script[gate.command].shift()
+          assert.ok(step, `runner called more often than scripted for ${gate.command}`)
+          if (step.loadDuring !== undefined) machine.load = step.loadDuring
+          const result = {
+            ...gate,
+            ok: step.ok,
+            status: step.ok ? 0 : step.signal ? null : 1,
+            signal: step.signal ?? null,
+            error: step.error ?? null,
+            output: step.output ?? '',
+          }
+          if (step.loadAfter !== undefined) machine.load = step.loadAfter
+          return result
+        },
+        readLoad: () => {
+          samples.push(machine.load)
+          return { ...machine }
+        },
+        now: () => (clock += 500),
+      },
+    )
+    return { outcome, calls, samples, summary: summarize(outcome) }
+  }
+
+  test('a timeout-shaped red above the CPU count, green alone: its own group, exit 3', () => {
+    const { outcome, calls, samples, summary } = drive({
+      'npm run test -w packages/x': [{ ok: false, output: VITEST_TEST_TIMEOUT, loadAfter: 3 }, { ok: true }],
+    })
+    assert.equal(outcome.code, EXIT.RED_UNDER_LOAD)
+    assert.equal(EXIT.RED_UNDER_LOAD, 3)
+    assert.deepEqual(calls, ['npm run test -w packages/x', 'npm run test -w packages/x'])
+    assert.deepEqual(samples, [12, 3])
+    assert.deepEqual(outcome.greenAlone.map((r) => r.command), ['npm run test -w packages/x'])
+    assert.deepEqual([outcome.red, outcome.redAlone], [[], []])
+    assert.ok(
+      summary.err.includes(
+        '!   npm run test -w packages/x  red under load 12.00 on 8 CPU(s), green alone at load 3.00 on 8 CPU(s)',
+      ),
+      summary.err.join('\n'),
+    )
+    assert.ok(summary.err.some((l) => l.includes('red under load, green alone (exit 3, not a pass)')))
+    // The first run's evidence stays beside the gate: the line naming the
+    // test, then the timeout line, from the run the re-run superseded.
+    const at = summary.err.indexOf(
+      '!   npm run test -w packages/x  red under load 12.00 on 8 CPU(s), green alone at load 3.00 on 8 CPU(s)',
+    )
+    assert.deepEqual(summary.err.slice(at + 1), [
+      '!        FAIL  src/infra/__tests__/reconcile.test.ts > reconcile > settles once',
+      '!       Error: Test timed out in 5000ms.',
+    ])
+    // And says to investigate, not just to quote. Pinned whole: a phrase list
+    // let "Investigate before you quote it" go back to "Quote this list".
+    assert.equal(
+      summary.err.find((l) => l.includes('(exit 3, not a pass)')),
+      '\n! 1 gate(s) red under load, green alone (exit 3, not a pass).\n' +
+        '! Each was timeout-shaped and red with the load above the CPU count before it\n' +
+        '! started, then green re-run by itself. Investigate before you quote it: open\n' +
+        '! the timed-out test and look for work inside the timed body that is slow only\n' +
+        '! under contention. #4126 and #4134 were real defects of this shape (a cold\n' +
+        '! import inside a timed test). If it is not plainly load, file an issue and\n' +
+        '! link it next to this list in the PR body. Do not re-run until green.',
+    )
+    assert.deepEqual(summary.out, [], 'a load-red run printed a green line')
+    // The injected clock reached the result.
+    assert.equal(outcome.results[0].seconds, '0.5')
+  })
+
+  test('the same gate red again alone is red, exit 1', () => {
+    const { outcome, calls, summary } = drive({
+      'npm run test -w packages/x': [
+        { ok: false, output: VITEST_TEST_TIMEOUT, loadAfter: 4 },
+        { ok: false, output: VITEST_HOOK_TIMEOUT },
+      ],
+    })
+    assert.equal(outcome.code, EXIT.RED)
+    assert.equal(calls.length, 2)
+    assert.deepEqual(outcome.redAlone.map((r) => r.command), ['npm run test -w packages/x'])
+    assert.deepEqual(outcome.greenAlone, [])
+    assert.ok(
+      summary.err.includes(
+        '── npm run test -w packages/x  → reddens: npm run test -w packages/x job\n' +
+          '   red under load 12.00 on 8 CPU(s), red alone at load 4.00 on 8 CPU(s)',
+      ),
+      summary.err.join('\n'),
+    )
+    // The tail printed is the re-run's.
+    assert.ok(summary.err.some((l) => l.includes('Hook timed out in 10000ms.')))
+  })
+
+  test('an assertion failure at high load is not re-run', () => {
+    const { outcome, calls } = drive({ 'npm run test -w packages/x': [{ ok: false, output: VITEST_ASSERTION }] }, {
+      load: 40,
+    })
+    assert.deepEqual(calls, ['npm run test -w packages/x'])
+    assert.equal(outcome.code, EXIT.RED)
+    assert.deepEqual(outcome.red.map((r) => r.command), ['npm run test -w packages/x'])
+  })
+
+  test('a timeout-shaped red at load equal to the CPU count is not re-run', () => {
+    const { outcome, calls } = drive({ 'npm run test -w packages/x': [{ ok: false, output: VITEST_TEST_TIMEOUT }] }, {
+      load: 8,
+    })
+    assert.deepEqual(calls, ['npm run test -w packages/x'])
+    assert.equal(outcome.code, EXIT.RED)
+    assert.deepEqual(outcome.red.map((r) => r.command), ['npm run test -w packages/x'])
+  })
+
+  test("load is read BEFORE the gate starts, so the gate's own workers do not count", () => {
+    // The machine is quiet (2 on 8 CPUs) until the gate's own pool lifts the
+    // 1-minute average to 20, and the average is still 20 when it ends. A
+    // reading taken at the end would call that other agents' load.
+    const { outcome, calls, samples } = drive(
+      { 'npm run test -w packages/x': [{ ok: false, output: VITEST_TEST_TIMEOUT, loadDuring: 20 }] },
+      { load: 2 },
+    )
+    assert.deepEqual(samples, [2])
+    assert.deepEqual(calls, ['npm run test -w packages/x'])
+    assert.equal(outcome.code, EXIT.RED)
+  })
+
+  test('each queued gate is re-run exactly once, after the last selected gate', () => {
+    const { calls, samples, outcome } = drive({
+      'npm run lint:a': [{ ok: true, loadAfter: 13 }],
+      'npm run test -w packages/b': [{ ok: false, output: VITEST_RPC_TIMEOUT, loadAfter: 14 }, { ok: true, loadAfter: 6 }],
+      'npm run test -w packages/c': [{ ok: true, loadAfter: 15 }],
+      'npm run test -w packages/d': [{ ok: false, output: VITEST_HOOK_TIMEOUT, loadAfter: 5 }, { ok: true, loadAfter: 7 }],
+    })
+    assert.deepEqual(calls, [
+      'npm run lint:a',
+      'npm run test -w packages/b',
+      'npm run test -w packages/c',
+      'npm run test -w packages/d',
+      'npm run test -w packages/b',
+      'npm run test -w packages/d',
+    ])
+    // One reading before every attempt, re-runs included.
+    assert.deepEqual(samples, [12, 13, 14, 15, 5, 6])
+    assert.deepEqual(
+      outcome.greenAlone.map((r) => [r.command, r.load, r.rerun.load]),
+      [
+        ['npm run test -w packages/b', 13, 5],
+        ['npm run test -w packages/d', 15, 6],
+      ],
+    )
+    assert.equal(outcome.code, EXIT.RED_UNDER_LOAD)
+  })
+
+  test('never exit 0 while a green-alone group exists, and a plain red still wins', () => {
+    const onlyLoad = drive({
+      'npm run lint:a': [{ ok: true }],
+      'npm run test -w packages/b': [{ ok: false, output: VITEST_TEST_TIMEOUT }, { ok: true }],
+    })
+    assert.equal(onlyLoad.outcome.code, EXIT.RED_UNDER_LOAD)
+    assert.notEqual(onlyLoad.outcome.code, EXIT.GREEN)
+
+    const mixed = drive({
+      'npm run lint:a': [{ ok: false, output: 'lint:a: 1 new violation' }],
+      'npm run test -w packages/b': [{ ok: false, output: VITEST_TEST_TIMEOUT }, { ok: true }],
+    })
+    assert.equal(mixed.outcome.code, EXIT.RED)
+    // The forgiven gate is still listed beside the red one, never folded away.
+    assert.ok(
+      mixed.summary.err.some((l) => l.startsWith('!   npm run test -w packages/b  red under load 12.00')),
+      mixed.summary.err.join('\n'),
+    )
+  })
+
+  test('all green is exit 0 and prints the green line', () => {
+    const { outcome, calls, summary } = drive({ 'npm run lint:a': [{ ok: true }], 'npm run lint:b': [{ ok: true }] })
+    assert.equal(outcome.code, EXIT.GREEN)
+    assert.equal(calls.length, 2)
+    assert.deepEqual(summary.out, ['\n✓ 2 gate(s) green.'])
+    assert.deepEqual(summary.err, [])
+  })
+
+  test('a red run suppresses the DB-skip notice; exit 3 still prints it', () => {
+    const BANNER = 'REAL-DB SUITES SKIPPED (no database)'
+    const red = drive({
+      'npm run lint:a': [{ ok: false, output: 'lint:a: 1 new violation' }],
+      'npm run test -w packages/backend': [{ ok: true, output: BANNER }],
+    })
+    assert.equal(red.outcome.code, EXIT.RED)
+    assert.deepEqual(red.outcome.skippedDb.map((r) => r.command), ['npm run test -w packages/backend'])
+    const all = [...red.summary.out, ...red.summary.err].join('\n')
+    assert.equal(/real-DB suites SKIPPED/.test(all), false, 'the skip notice printed on a red run')
+
+    const loadRed = drive({
+      'npm run lint:a': [{ ok: false, output: VITEST_TEST_TIMEOUT }, { ok: true }],
+      'npm run test -w packages/backend': [{ ok: true, output: BANNER }],
+    })
+    assert.equal(loadRed.outcome.code, EXIT.RED_UNDER_LOAD)
+    assert.ok(loadRed.summary.err.includes('!   npm run test -w packages/backend'))
+  })
+
+  test('an all-green --static run says no suite ran', () => {
+    const { outcome } = drive({ 'npm run lint:a': [{ ok: true }], 'npm run lint:b': [{ ok: true }] })
+    assert.deepEqual(summarize(outcome, { staticOnly: true }).out, [
+      '\n✓ 2 static gate(s) green (static only: no suite ran).',
+    ])
+  })
+
+  test('a gate killed for output past maxBuffer (ENOBUFS) is red, not re-run, and says why', () => {
+    const { outcome, calls, summary } = drive(
+      { 'npm run test -w packages/backend': [{ ok: false, signal: 'SIGTERM', error: 'ENOBUFS', output: 'x' }] },
+      { load: 40 },
+    )
+    assert.deepEqual(calls, ['npm run test -w packages/backend'])
+    assert.equal(outcome.code, EXIT.RED)
+    assert.ok(
+      summary.err.includes(
+        '   ENOBUFS: its output passed GATE_OUTPUT_MAX_BUFFER and spawnSync killed it with\n' +
+          '   SIGTERM. Not a timeout and not re-run: the gate may well be green (#3954).',
+      ),
+      summary.err.join('\n'),
+    )
+  })
+
+  test("the DB-skip marker is read from the re-run's output for a re-run gate", () => {
+    const BANNER = 'REAL-DB SUITES SKIPPED (no database)'
+    // The timed-out first run printed the banner; the green re-run did not.
+    const cleared = drive({
+      'npm run test -w packages/backend': [{ ok: false, output: `${BANNER}\n${VITEST_TEST_TIMEOUT}` }, { ok: true, output: 'ok' }],
+    })
+    assert.deepEqual(cleared.outcome.skippedDb, [])
+
+    // The first run did not; the green re-run skipped the database.
+    const skipped = drive({
+      'npm run test -w packages/backend': [{ ok: false, output: VITEST_TEST_TIMEOUT }, { ok: true, output: BANNER }],
+    })
+    assert.deepEqual(skipped.outcome.skippedDb.map((r) => r.command), ['npm run test -w packages/backend'])
+    assert.ok(skipped.summary.err.includes('!   npm run test -w packages/backend'), 'the skip is not reported')
+
+    // A gate that was not re-run is read from its one output.
+    const plain = drive({ 'npm run test -w packages/backend': [{ ok: true, output: BANNER }] })
+    assert.deepEqual(plain.outcome.skippedDb.map((r) => r.command), ['npm run test -w packages/backend'])
+    assert.ok(plain.summary.out.includes('!   npm run test -w packages/backend'))
   })
 })

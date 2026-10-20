@@ -103,7 +103,17 @@ Run the battery, not a list you assembled from memory:
 npm run preflight          # the gates your diff can redden
 npm run preflight -- --list  # what it would run, and which CI job owns each
 npm run preflight:all      # every gate, regardless of diff
+npm run preflight -- --static  # only the static ratchets your diff selects, then stop
 ```
+
+Static ratchets run first. `--static` runs only the static ratchets your diff
+selects (`--static --all` runs all of them), then stops. A timeout-shaped red, with
+the load average above the CPU count before the gate started, is re-run alone at the
+end. When those are the only reds and each is green alone, preflight exits 3: not
+green, and not a reason to re-run until green. Open the timed-out test and look for
+work in the timed body that is slow only under contention (#4126 and #4134 were real
+defects of this shape). If it is not plainly load, file an issue and link it next to
+the list you quote in the PR body. An unknown flag exits 2; pass flags after `--`.
 
 **`npm run quality` is not this.** It chains `typecheck && test:unit && build`.
 That covers most of the 32 per-package gates the battery knows (every

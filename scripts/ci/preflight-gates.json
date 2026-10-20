@@ -49,8 +49,20 @@
     "gate does not belong there in the first place: a builder's battery cannot",
     "discover it. It has no escape hatch in this map on purpose; the remedy its",
     "failure names is to move the command into a workflow, where a row here can",
-    "argue it like everything else."
+    "argue it like everything else.",
+    "",
+    "`gateClasses` corrects the static/suite CLASS a gate rule gives a command",
+    "(#4175). Static gates run first and alone under `--static`; a class comes from",
+    "the rule in preflight.mjs's GATE_RULE_TABLE unless a row here overrides it.",
+    "Each row carries its reason. preflight.test.mjs fails on a row no plan entry",
+    "uses, and on a static `npm run` gate whose script body runs a test runner."
   ],
+  "gateClasses": {
+    "npm run lint:network-pins": {
+      "class": "suite",
+      "reason": "A `lint:` name over a test suite: the script is `node --test scripts/network-map-pins.test.mjs` (package.json), so the `lint:` rule's static class is wrong for it."
+    }
+  },
   "notGates": {
     "node scripts/ci/change-classifier.mjs": "CI plumbing, not a check: it writes the `changes` job's surface outputs to $GITHUB_OUTPUT so the other jobs know whether to run. This battery calls classifyChangedFiles() directly for the same answer.",
     "node scripts/ci/qa-freshness.mjs": "Promotion gate for dev -> main, and it reads the QA run history of the DEPLOYED environment. Nothing a builder can run or influence before pushing a feature branch.",

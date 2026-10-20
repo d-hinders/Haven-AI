@@ -155,7 +155,17 @@ not, and cannot be.
 npm run preflight            # the gates this diff can redden
 npm run preflight -- --list  # the plan, without running it
 npm run preflight:all        # every gate
+npm run preflight -- --static  # only the static ratchets your diff selects, then stop
 ```
+
+Static ratchets run first. `--static` runs only the static ratchets your diff
+selects (`--static --all` runs all of them), then stops. A timeout-shaped red, with
+the load average above the CPU count before the gate started, is re-run alone at the
+end. When those are the only reds and each is green alone, preflight exits 3: not
+green, and not a reason to re-run until green. Open the timed-out test and look for
+work in the timed body that is slow only under contention (#4126 and #4134 were real
+defects of this shape). If it is not plainly load, file an issue and link it next to
+the list you quote in the PR body. An unknown flag exits 2; pass flags after `--`.
 
 The table below is the **smallest reliable set for fast iteration** — what to
 re-run in a tight loop while you are still changing code. It is deliberately

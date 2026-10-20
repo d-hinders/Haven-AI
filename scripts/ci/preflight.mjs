@@ -34,6 +34,10 @@
 //   node scripts/ci/preflight.mjs --all        # every gate, regardless of diff
 //   node scripts/ci/preflight.mjs --list       # print the plan, run nothing
 //   node scripts/ci/preflight.mjs --base=<ref> # diff against something else
+//   node scripts/ci/preflight.mjs --static     # only the static ratchets, then stop
+//
+// Static entries run first (#4175), and a red that is timeout-shaped while the
+// machine was loaded is re-run alone at the end: see `runBattery`.
 //
 // Dependency-free (no YAML parser), like everything in this directory, so it
 // runs from a bare checkout and its self-test runs in `ci_config_checks`.
@@ -54,6 +58,7 @@
 
 import { readFileSync, readdirSync } from 'node:fs'
 import { execFileSync, spawnSync } from 'node:child_process'
+import { cpus, loadavg } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { classifyChangedFiles } from './change-classifier.mjs'
@@ -460,31 +465,63 @@ export function loadGateMap(mapPath = GATE_MAP_PATH) {
  *
  * Anything these rules do not recognise falls through to the map, and the
  * sibling test fails when it is in neither.
+ *
+ * Each rule also carries the gate's CLASS (#4175), so a new workflow command
+ * gets a class the same way it gets gate status, with no second list:
+ *
+ * - `static`: a ratchet or lint that reads the tree and runs no test suite, no
+ *   compiler and no build. Seconds each, and they run first.
+ * - `suite`: everything else — `node --test`, `test -w`, a lint's `:test`
+ *   self-test, `typecheck -w`, `build -w`.
+ *
+ * The npm script NAME is not the test: `lint:network-pins` is
+ * `node --test scripts/network-map-pins.test.mjs`. A command whose rule gives
+ * the wrong class is corrected in `preflight-gates.json` → `gateClasses`, and
+ * `preflight.test.mjs` resolves every static gate down to the files it runs
+ * and fails when a piece names a test runner, compiler or build, when a file
+ * imports `node:test` or vitest, or when a file's child-process call names one
+ * (`spawnSync('npx', ['vitest', …])`). A runner reached any other way — a name
+ * built at runtime, a further script the file runs — is not seen.
+ *
+ * Order matters for the class only: it is the class of the FIRST rule that
+ * matches, which is why each `:test` rule sits above its general rule.
  */
-export const GATE_RULES = Object.freeze([
-  /^npm run lint:[a-z:-]+$/,
-  /^npm run check:[a-z:-]+$/,
-  /^npm run docs:check$/,
-  /^npm run typecheck -w packages\/[a-z-]+$/,
-  /^npm run test -w packages\/[a-z-]+$/,
+export const GATE_RULE_TABLE = Object.freeze([
+  // A lint's own self-test (`lint:deps:test` → `node --test …`).
+  Object.freeze({ rule: /^npm run lint:[a-z:-]+:test$/, kind: 'suite' }),
+  Object.freeze({ rule: /^npm run lint:[a-z:-]+$/, kind: 'static' }),
+  Object.freeze({ rule: /^npm run check:[a-z:-]+$/, kind: 'static' }),
+  Object.freeze({ rule: /^npm run docs:check$/, kind: 'static' }),
+  Object.freeze({ rule: /^npm run typecheck -w packages\/[a-z-]+$/, kind: 'suite' }),
+  Object.freeze({ rule: /^npm run test -w packages\/[a-z-]+$/, kind: 'suite' }),
   // A targeted single-file run (`-- src/openapi/spec.test.ts`), which CI does
   // ahead of the full suite for fast feedback. A gate in its own right.
-  /^npm run test -w packages\/[a-z-]+ -- [\w./-]+$/,
-  /^npm run build -w packages\/[a-z-]+$/,
-  /^npm run design:lint -w packages\/frontend$/,
-  /^npm run visual:baselines(:test)?$/,
+  Object.freeze({ rule: /^npm run test -w packages\/[a-z-]+ -- [\w./-]+$/, kind: 'suite' }),
+  Object.freeze({ rule: /^npm run build -w packages\/[a-z-]+$/, kind: 'suite' }),
+  Object.freeze({ rule: /^npm run design:lint -w packages\/frontend$/, kind: 'static' }),
+  Object.freeze({ rule: /^npm run visual:baselines:test$/, kind: 'suite' }),
+  // The inventory reads the committed PNGs; it compares nothing.
+  Object.freeze({ rule: /^npm run visual:baselines$/, kind: 'static' }),
   // No `$` or backtick: an interpolated path (`node --test scripts/$WHICH.test.mjs`)
   // would otherwise classify as a gate and the battery would RUN it with the
   // variable unexpanded — worse than dropping it, because it fails for a reason
   // that has nothing to do with the diff. Excluded here, it falls through to
   // GATE_SHAPED_ANYWHERE and lands in the drift check instead.
-  /^node --test [^|><&;$`]+$/,
-  /^node scripts\/docs\/coupling-gate\.mjs --strict --out=\/dev\/null$/,
-  /^node scripts\/docs\/[a-z-]+\.mjs$/,
-  /^node scripts\/frontend-copy-lint\.mjs$/,
-  /^node scripts\/workspace-pin-lint\.mjs$/,
-  /^node packages\/frontend\/scripts\/design-system-coupling\.mjs --strict --out=\/dev\/null$/,
+  Object.freeze({ rule: /^node --test [^|><&;$`]+$/, kind: 'suite' }),
+  Object.freeze({ rule: /^node scripts\/docs\/coupling-gate\.mjs --strict --out=\/dev\/null$/, kind: 'static' }),
+  Object.freeze({ rule: /^node scripts\/docs\/[a-z-]+\.mjs$/, kind: 'static' }),
+  Object.freeze({ rule: /^node scripts\/frontend-copy-lint\.mjs$/, kind: 'static' }),
+  Object.freeze({ rule: /^node scripts\/workspace-pin-lint\.mjs$/, kind: 'static' }),
+  Object.freeze({
+    rule: /^node packages\/frontend\/scripts\/design-system-coupling\.mjs --strict --out=\/dev\/null$/,
+    kind: 'static',
+  }),
 ])
+
+export const GATE_CLASSES = Object.freeze(['static', 'suite'])
+
+/** The patterns alone, for every caller that only asks "is this a gate". */
+export const GATE_RULES = Object.freeze(GATE_RULE_TABLE.map((r) => r.rule))
 
 /**
  * Commands that are NOT gates by shape.
@@ -625,12 +662,29 @@ export function classifyCommand(command, map) {
 }
 
 /**
+ * `static` or `suite` for a gate, or `null` for a command that is not one.
+ *
+ * The map's `gateClasses` row wins, then the class of the first GATE_RULE_TABLE
+ * rule that matches — the same precedence `classifyCommand` gives `notGates`.
+ */
+export function gateClass(command, map) {
+  const rows = map.gateClasses ?? {}
+  if (Object.hasOwn(rows, command)) return rows[command].class
+  return GATE_RULE_TABLE.find((r) => r.rule.test(command))?.kind ?? null
+}
+
+/**
  * The battery's plan: one entry per distinct LOCAL command, with every CI job
  * that runs it and the union of the surfaces those jobs gate on.
  *
  * Deduplicated because `lint:next-steps` appears in four jobs and a builder
  * needs to run it once — but the four jobs are all named in the plan, so the
  * output still says which contexts a failure would redden.
+ *
+ * Static entries come first, each group in the order the workflow files give
+ * it (#4175). Workflow order interleaves them: `lint:retired-rail-prose` was
+ * entry 40 of 77 under `--all`, after the SDK, CLI and core suites, so PR #4155
+ * found its retired-rail hit only at the end of a full battery.
  */
 export function buildPlan({ dir = WORKFLOW_DIR, mapPath = GATE_MAP_PATH } = {}) {
   const map = loadGateMap(mapPath)
@@ -640,6 +694,7 @@ export function buildPlan({ dir = WORKFLOW_DIR, mapPath = GATE_MAP_PATH } = {}) 
     if (classifyCommand(entry.command, map) !== 'gate') continue
     const existing = plan.get(entry.command) ?? {
       command: entry.command,
+      kind: gateClass(entry.command, map),
       jobs: [],
       surfaces: [],
       alwaysRuns: false,
@@ -651,7 +706,8 @@ export function buildPlan({ dir = WORKFLOW_DIR, mapPath = GATE_MAP_PATH } = {}) 
     else for (const s of entry.surfaceGate) if (!existing.surfaces.includes(s)) existing.surfaces.push(s)
     plan.set(entry.command, existing)
   }
-  return [...plan.values()]
+  const entries = [...plan.values()]
+  return [...entries.filter((g) => g.kind === 'static'), ...entries.filter((g) => g.kind !== 'static')]
 }
 
 /** Which surfaces the working tree's diff touches, by CI's own classifier. */
@@ -729,77 +785,275 @@ export function selectGates(plan, surfaces) {
  * must be given a generous `maxBuffer` (GATE_OUTPUT_MAX_BUFFER), not the
  * 1 MiB default that killed a verbose backend suite mid-run (#3954).
  */
-export function runGate(gate) {
-  const started = Date.now()
+export function runGate(gate, { maxBuffer = GATE_OUTPUT_MAX_BUFFER } = {}) {
   const result = spawnSync(gate.command, {
     cwd: ROOT,
     shell: true,
     stdio: ['ignore', 'pipe', 'pipe'],
     encoding: 'utf8',
-    maxBuffer: GATE_OUTPUT_MAX_BUFFER,
+    maxBuffer,
   })
   return {
     ...gate,
     ok: result.status === 0,
     status: result.status,
-    seconds: ((Date.now() - started) / 1000).toFixed(1),
+    // Set when the gate was ENDED by a signal instead of exiting (`status` is
+    // then null). SIGTERM counts as timeout-shaped: see `isTimeoutShaped`.
+    signal: result.signal ?? null,
+    // `ENOBUFS` when the output passed `maxBuffer`: spawnSync then kills the
+    // gate with SIGTERM itself, which must not read as a timeout.
+    error: result.error?.code ?? null,
     output: `${result.stdout ?? ''}${result.stderr ?? ''}`.trimEnd(),
   }
 }
 
-function usage() {
-  return [
-    'usage: node scripts/ci/preflight.mjs [--all] [--list] [--base=<ref>] [--verify-ruleset]',
-    '',
-    '  --all             run every gate, not just the ones your diff can redden',
-    '  --list            print the plan and exit 0 without running anything',
-    '  --base=<ref>      diff against <ref> instead of origin/dev',
-    '  --verify-ruleset  additionally compare against the live branch ruleset (needs gh)',
-  ].join('\n')
+/**
+ * Exit codes. `RED_UNDER_LOAD` is the only red that a re-run alone turned green
+ * (#4175). It is NOT a pass, and it is non-zero on purpose: #4126 and #4134
+ * were real defects (a cold import inside a timed test body) that showed only
+ * under load, so a forgiven red must stay visible. The summary prints the list
+ * for the PR body. Per captain decision on #4171's spec review.
+ */
+export const EXIT = Object.freeze({ GREEN: 0, RED: 1, USAGE: 2, RED_UNDER_LOAD: 3 })
+
+/**
+ * Output that means a test ran out of time, pinned from the runners' own text.
+ *
+ * - vitest (`@vitest/runner` 3.2.4, `chunk-hooks.js`): `Test timed out in
+ *   5000ms.` for a test, `Hook timed out in 10000ms.` for a hook;
+ * - vitest's worker RPC (`vitest/dist/chunks/rpc.*.js`): `[vitest-worker]:
+ *   Timeout calling "onTaskUpdate"`. Only `onTaskUpdate`: a `fetch` or
+ *   `transform` RPC timeout is module loading, not a timed test;
+ * - `node --test` (Node 24), a per-test `{ timeout }` or `--test-timeout`:
+ *   `'test timed out after 120000ms'`;
+ * - `node --test`, the runner cancelled by SIGTERM: it prints `Interrupted
+ *   while running:` on a line of its own, lists the files in flight and exits 1;
+ * - the gate's own shell ended by SIGTERM (`runGate`'s `signal`), which prints
+ *   nothing at all.
+ *
+ * `preflight.test.mjs` produces the `node --test` and shell shapes LIVE through
+ * `runGate`, so a Node release that rewords one reddens the suite rather than
+ * silently disabling the re-run. vitest is not installed where that suite runs
+ * (`ci_config_checks` has no workspace install), so its strings are pinned as
+ * fixtures copied from the installed dist, with the version above.
+ *
+ * Not a shape: `signal: 'SIGTERM'` in a file's failure details. Only the TAP
+ * reporter prints it; the default (spec) reporter that the battery's pipes get
+ * on Node 24 prints a bare `'test failed'` for that file, which says nothing.
+ */
+export const TIMEOUT_SHAPES = Object.freeze([
+  /\bTest timed out in \d+ms\b/,
+  /\bHook timed out in \d+ms\b/,
+  /Timeout calling "onTaskUpdate"/,
+  /\btest timed out after \d+ms\b/,
+  /^Interrupted while running:$/m,
+])
+
+/**
+ * Output that makes a red a red whatever the load, even beside a timeout.
+ *
+ * An assertion failure (`AssertionError` is how both `node:assert` and vitest's
+ * `expect` report one), a module that does not resolve, and a missing file —
+ * which is what an unbuilt `dist` looks like. A state or ordering failure
+ * reports through one of these too. A gate whose output carries any of them is
+ * never re-run, so none of them is ever attributed to load.
+ *
+ * What stays out: a plain `Error` or `TypeError` thrown NEXT TO a timeout (an
+ * `afterAll` that tears down what a timed-out `beforeAll` never built is the
+ * common one). Such a gate can be re-run, and if it is green alone it lands in
+ * the "red under load, green alone" group with exit 3, never in a pass.
+ */
+export const NEVER_LOAD_SHAPES = Object.freeze([
+  /\bAssertionError\b/,
+  /\bERR_ASSERTION\b/,
+  /\bERR_MODULE_NOT_FOUND\b/,
+  /\bCannot find (?:module|package)\b/,
+  /\bFailed to (?:resolve|load)\b/,
+  /\bENOENT\b/,
+])
+
+/** A red whose output says it ran out of time, and says nothing else. */
+export function isTimeoutShaped(result) {
+  if (result.ok) return false
+  // spawnSync's own SIGTERM for output past `maxBuffer` (#3954's shape).
+  if (result.error === 'ENOBUFS') return false
+  const output = result.output ?? ''
+  if (NEVER_LOAD_SHAPES.some((r) => r.test(output))) return false
+  return result.signal === 'SIGTERM' || TIMEOUT_SHAPES.some((r) => r.test(output))
 }
 
-async function main(argv) {
-  if (argv.includes('--help') || argv.includes('-h')) {
-    console.log(usage())
-    return 0
-  }
-  const all = argv.includes('--all')
-  const listOnly = argv.includes('--list')
-  const baseArg = argv.find((a) => a.startsWith('--base='))
-  const base = baseArg ? baseArg.slice('--base='.length) : 'origin/dev'
+/**
+ * The 1-minute load average and the CPU count, read immediately BEFORE a gate
+ * starts.
+ *
+ * Before, not after: a reading at the end of a gate mostly measures that gate's
+ * own workers. The reading before still carries the decaying tail of the
+ * PREVIOUS gate, which is this battery's own load, not another agent's. That
+ * tail RARELY exceeds the CPU count by itself: a runner's default pool is
+ * smaller than the machine (vitest and `node --test` both size theirs below the
+ * CPU count), but the load average counts runnable threads, not pool slots, so
+ * a pool whose workers each run several busy threads can push it over. The
+ * cost of that mistake is bounded: a re-run that is green alone exits 3
+ * instead of 1, never 0, so a red is never turned into a pass.
+ *
+ * Platform: `os.loadavg()` is `[0, 0, 0]` on Windows, and `os.cpus()` can be
+ * empty in some containers. `isHighLoad` treats a zero on either side as "not
+ * high", so neither platform ever triggers a re-run.
+ */
+export function readMachineLoad() {
+  return { load: loadavg()[0], cpus: cpus().length }
+}
 
-  const plan = buildPlan()
-  let selected = plan
-  let surfaces = null
-  if (!all) {
-    surfaces = changedSurfaces(base)
-    selected = selectGates(plan, surfaces)
-  }
+/**
+ * Load strictly above the CPU count. At or below it, a red is just red.
+ *
+ * `count > 0` is the zero guard: with no CPU count every reading would exceed
+ * it. A zero LOAD (Windows) can never exceed a positive count.
+ */
+export function isHighLoad({ load, cpus: count }) {
+  return count > 0 && load > count
+}
 
-  if (argv.includes('--verify-ruleset')) reportRulesetComparison(plan)
-
-  console.log(`preflight: ${plan.length} gate(s) known, ${selected.length} selected`)
-  if (surfaces) console.log(`preflight: surfaces touched vs ${base}: ${surfaces.join(', ') || '(none)'}`)
-  console.log('')
-
-  if (listOnly) {
-    for (const g of selected) {
-      const where = g.alwaysRuns ? 'always' : g.surfaces.join('/')
-      console.log(`  ${g.command}`)
-      console.log(`      ${where} — ${g.jobs.join(', ')}`)
-    }
-    return 0
+/**
+ * Run the selected gates in order, then re-run the load-shaped reds alone.
+ *
+ * Exported, with the runner, the load reader and the clock injected, so
+ * `preflight.test.mjs` drives it with no real gate and no real load.
+ *
+ * A gate is queued for a re-run only when it is red, its output is
+ * timeout-shaped (`isTimeoutShaped`), AND the load read before it started was
+ * above the CPU count (`isHighLoad`). After the LAST selected gate, each queued
+ * gate runs once more, by itself, with the load read again before it starts.
+ * "Alone" means alone in this battery: other agents on the machine still run,
+ * which is why the second reading is kept and printed.
+ *
+ * The groups:
+ * - `red`: red, not queued;
+ * - `redAlone`: queued, red again on the re-run. Red;
+ * - `greenAlone`: queued, green on the re-run. Exit `EXIT.RED_UNDER_LOAD`.
+ *
+ * The real-DB skip marker (`DB_SKIP_MARKER`) is read from the run whose verdict
+ * counts: the RE-RUN's output for a re-run gate, the original output for every
+ * other gate. A green-alone gate whose re-run skipped the database is flagged;
+ * one whose first, timed-out run printed the banner but whose re-run did not is
+ * not.
+ */
+export function runBattery(
+  gates,
+  { run = runGate, readLoad = readMachineLoad, now = Date.now, onStart = () => {}, onResult = () => {} } = {},
+) {
+  const attempt = (gate, phase) => {
+    onStart(gate, phase)
+    const sample = readLoad()
+    const started = now()
+    const result = run(gate)
+    const seconds = ((now() - started) / 1000).toFixed(1)
+    const attempted = { ...result, phase, seconds, load: sample.load, cpus: sample.cpus }
+    onResult(attempted)
+    return attempted
   }
 
   const results = []
-  for (const gate of selected) {
-    // TTY only: `\r` does not overwrite in a pipe, so a redirected run would
-    // carry a duplicate half-line for every gate.
-    if (process.stdout.isTTY) process.stdout.write(`  … ${gate.command}\r`)
-    const result = runGate(gate)
-    results.push(result)
-    const mark = result.ok ? '✓' : '✗'
-    console.log(`  ${mark} ${gate.command}  (${result.seconds}s)`)
+  for (const gate of gates) {
+    const first = attempt(gate, 'first')
+    const queued = !first.ok && isTimeoutShaped(first) && isHighLoad(first)
+    results.push({ gate, ...first, queued, rerun: null })
+  }
+  for (const entry of results) {
+    if (entry.queued) entry.rerun = attempt(entry.gate, 'rerun')
+  }
+
+  const red = results.filter((r) => !r.ok && !r.queued)
+  const redAlone = results.filter((r) => r.queued && !r.rerun.ok)
+  const greenAlone = results.filter((r) => r.queued && r.rerun.ok)
+  const skippedDb = results.filter((r) => DB_SKIP_MARKER.test((r.rerun ?? r).output ?? ''))
+  let code = EXIT.GREEN
+  if (red.length > 0 || redAlone.length > 0) code = EXIT.RED
+  else if (greenAlone.length > 0) code = EXIT.RED_UNDER_LOAD
+  return { code, results, red, redAlone, greenAlone, skippedDb }
+}
+
+const describeLoad = (attempted) => `${attempted.load.toFixed(2)} on ${attempted.cpus} CPU(s)`
+
+const NAMES_A_TEST = /\bFAIL\b|^\s*not ok\b|^\s*✖/
+
+/**
+ * The first run's own evidence for a green-alone gate: each line that matches
+ * a TIMEOUT_SHAPE, preceded by the nearest `FAIL` / `not ok` / `✖` line above
+ * it, which names the test. With no such line (a shell ended by SIGTERM prints
+ * nothing) it falls back to the last few lines. Bounded either way, so the
+ * re-run's green does not erase what the timed-out run said.
+ */
+export function timeoutEvidence(output, { maxLines = 8, tailLines = 5, maxWidth = 200 } = {}) {
+  const lines = (output ?? '').split('\n')
+  const perLine = TIMEOUT_SHAPES.map((r) => new RegExp(r.source, r.flags.replace('m', '')))
+  const picked = []
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!perLine.some((r) => r.test(lines[i]))) continue
+    let j = i - 1
+    while (j >= 0 && !NAMES_A_TEST.test(lines[j])) j -= 1
+    if (j >= 0 && !picked.includes(j)) picked.push(j)
+    if (!picked.includes(i)) picked.push(i)
+  }
+  const chosen = picked.length > 0 ? picked.map((i) => lines[i]) : lines.filter((l) => l.trim() !== '').slice(-tailLines)
+  if (chosen.length === 0) return ['(no output)']
+  return chosen.slice(0, maxLines).map((l) => (l.length > maxWidth ? `${l.slice(0, maxWidth)}…` : l))
+}
+
+/**
+ * The end-of-run summary as `{ out, err }` line arrays, so the test reads the
+ * text the builder reads.
+ */
+export function summarize({ code, results, red, redAlone, greenAlone, skippedDb }, { staticOnly = false } = {}) {
+  const out = []
+  const err = []
+  const tail = (output) => (output ?? '').split('\n').slice(-25).join('\n')
+
+  if (red.length > 0 || redAlone.length > 0) {
+    err.push(`\n✗ ${red.length + redAlone.length} of ${results.length} gate(s) red:\n`)
+    for (const f of red) {
+      err.push(`── ${f.command}  → reddens: ${f.jobs.join(', ')}`)
+      if (f.error === 'ENOBUFS') {
+        err.push(
+          '   ENOBUFS: its output passed GATE_OUTPUT_MAX_BUFFER and spawnSync killed it with\n' +
+            '   SIGTERM. Not a timeout and not re-run: the gate may well be green (#3954).',
+        )
+      } else if (f.error) {
+        err.push(`   spawn error: ${f.error}`)
+      }
+      err.push(tail(f.output))
+      err.push('')
+    }
+    for (const f of redAlone) {
+      err.push(
+        `── ${f.command}  → reddens: ${f.jobs.join(', ')}\n` +
+          `   red under load ${describeLoad(f)}, red alone at load ${describeLoad(f.rerun)}`,
+      )
+      err.push(tail(f.rerun.output))
+      err.push('')
+    }
+  } else if (greenAlone.length === 0) {
+    out.push(
+      staticOnly
+        ? `\n✓ ${results.length} static gate(s) green (static only: no suite ran).`
+        : `\n✓ ${results.length} gate(s) green.`,
+    )
+  }
+
+  if (greenAlone.length > 0) {
+    err.push(
+      `\n! ${greenAlone.length} gate(s) red under load, green alone (exit ${EXIT.RED_UNDER_LOAD}, not a pass).\n` +
+        '! Each was timeout-shaped and red with the load above the CPU count before it\n' +
+        '! started, then green re-run by itself. Investigate before you quote it: open\n' +
+        '! the timed-out test and look for work inside the timed body that is slow only\n' +
+        '! under contention. #4126 and #4134 were real defects of this shape (a cold\n' +
+        '! import inside a timed test). If it is not plainly load, file an issue and\n' +
+        '! link it next to this list in the PR body. Do not re-run until green.',
+    )
+    for (const g of greenAlone) {
+      err.push(`!   ${g.command}  red under load ${describeLoad(g)}, green alone at load ${describeLoad(g.rerun)}`)
+      for (const line of timeoutEvidence(g.output)) err.push(`!       ${line}`)
+    }
   }
 
   // A green run that skipped the data layer must not read as an unqualified
@@ -817,31 +1071,160 @@ async function main(argv) {
   // is the only thing that knows what happened, and `runGate` captures stdout
   // and stderr together — the harness prints this marker on stderr, and the
   // end-of-run banner shouts it in caps, so the match is case-insensitive to
-  // catch whichever arrives.
-  const skippedDb = results.filter((r) => DB_SKIP_MARKER.test(r.output))
+  // catch whichever arrives. `runBattery` picks WHICH output: the re-run's for
+  // a re-run gate.
+  if (code !== EXIT.RED && skippedDb.length > 0) {
+    const lines = [
+      `\n! ${skippedDb.length} gate(s) reported "real-DB suites SKIPPED" — no database\n` +
+        '! was reachable and HAVEN_SKIP_DB_TESTS accepted a narrowed run. Those\n' +
+        '! real-DB files did not execute; CI has a database and will run them.\n' +
+        '! `docker compose up -d postgres`, then re-run, before calling this green.',
+      ...skippedDb.map((r) => `!   ${r.command}`),
+    ]
+    ;(code === EXIT.GREEN ? out : err).push(...lines)
+  }
+  return { out, err }
+}
 
-  const failed = results.filter((r) => !r.ok)
-  if (failed.length === 0) {
-    console.log(`\n✓ ${results.length} gate(s) green.`)
-    if (skippedDb.length > 0) {
-      console.log(
-        `\n! ${skippedDb.length} gate(s) reported "real-DB suites SKIPPED" — no database\n` +
-          '! was reachable and HAVEN_SKIP_DB_TESTS accepted a narrowed run. Those\n' +
-          '! real-DB files did not execute; CI has a database and will run them.\n' +
-          '! `docker compose up -d postgres`, then re-run, before calling this green.',
-      )
-      for (const r of skippedDb) console.log(`!   ${r.command}`)
+const FLAGS = Object.freeze({
+  '--all': 'all',
+  '--list': 'list',
+  '--static': 'static',
+  '--verify-ruleset': 'verifyRuleset',
+  '--help': 'help',
+  '-h': 'help',
+})
+
+/**
+ * Parse argv, refusing anything it does not know.
+ *
+ * Refusing, not ignoring: `--statc --list` used to run the default plan and
+ * exit 0, so a typo of a narrowing flag ran a different battery from the one
+ * the builder asked for and said nothing. Returns `{ opts }` or `{ error }`.
+ */
+export function parseArgs(argv) {
+  const opts = { all: false, list: false, static: false, verifyRuleset: false, help: false, base: 'origin/dev' }
+  for (const arg of argv) {
+    if (Object.hasOwn(FLAGS, arg)) {
+      opts[FLAGS[arg]] = true
+    } else if (arg.startsWith('--base=')) {
+      const ref = arg.slice('--base='.length)
+      if (ref === '') return { error: '--base= needs a ref, e.g. --base=origin/dev' }
+      opts.base = ref
+    } else {
+      return { error: `unknown argument: ${arg}` }
     }
-    return 0
+  }
+  return { opts }
+}
+
+export function usage() {
+  return [
+    'usage: node scripts/ci/preflight.mjs [--all] [--static] [--list] [--base=<ref>] [--verify-ruleset]',
+    '',
+    '  --all             run every gate, not just the ones your diff can redden',
+    '  --static          run only the static ratchets the diff selects (with --all: every one), then stop',
+    '  --list            print the plan and exit 0 without running anything',
+    '  --base=<ref>      diff against <ref> instead of origin/dev',
+    '  --verify-ruleset  additionally compare against the live branch ruleset (needs gh)',
+    '',
+    'Static gates run first. A red that is timeout-shaped while the load average is',
+    'above the CPU count is re-run alone after the last gate.',
+    '',
+    `exit ${EXIT.GREEN}  every gate green`,
+    `exit ${EXIT.RED}  a gate is red`,
+    `exit ${EXIT.USAGE}  a usage error: an unknown argument, or --base= with no ref`,
+    `exit ${EXIT.RED_UNDER_LOAD}  the only reds were red under load and green alone. Not a pass, and not`,
+    '        a reason to re-run until green: open the timed-out test and look for work in',
+    '        the timed body that is slow only under contention (#4126 and #4134 were real',
+    '        defects of this shape). If it is not plainly load, file an issue and link it',
+    '        next to the printed list you quote in the PR body.',
+    '',
+    'Pass flags after `--` (`npm run preflight -- --static`). Without it npm keeps',
+    'the flag for itself and preflight refuses to run (exit 2).',
+  ].join('\n')
+}
+
+/**
+ * Preflight flags npm kept for itself.
+ *
+ * `npm run preflight --static`, without `--`, does not pass `--static` on: npm
+ * reads it as its own config and exports `npm_config_static=true`, and the
+ * battery would run the FULL plan. Measured with `npm run env --static`.
+ */
+export function npmSwallowedFlags(env) {
+  return ['all', 'list', 'static', 'base', 'verify_ruleset']
+    .filter((name) => env[`npm_config_${name}`] !== undefined)
+    .map((name) => (name === 'base' ? `--base=${env.npm_config_base}` : `--${name.replace('_', '-')}`))
+}
+
+async function main(argv) {
+  const swallowed = npmSwallowedFlags(process.env)
+  if (swallowed.length > 0) {
+    console.error(
+      `preflight: npm kept ${swallowed.join(', ')} for itself and did not pass it on.\n` +
+        `preflight: put flags after \`--\`: npm run preflight -- ${swallowed.join(' ')}\n\n${usage()}`,
+    )
+    return EXIT.USAGE
+  }
+  const parsed = parseArgs(argv)
+  if (parsed.error) {
+    console.error(`preflight: ${parsed.error}\n\n${usage()}`)
+    return EXIT.USAGE
+  }
+  const { opts } = parsed
+  if (opts.help) {
+    console.log(usage())
+    return EXIT.GREEN
   }
 
-  console.error(`\n✗ ${failed.length} of ${results.length} gate(s) red:\n`)
-  for (const f of failed) {
-    console.error(`── ${f.command}  → reddens: ${f.jobs.join(', ')}`)
-    console.error(f.output.split('\n').slice(-25).join('\n'))
-    console.error('')
+  const plan = buildPlan()
+  let selected = plan
+  let surfaces = null
+  if (!opts.all) {
+    surfaces = changedSurfaces(opts.base)
+    selected = selectGates(plan, surfaces)
   }
-  return 1
+  if (opts.static) selected = selected.filter((g) => g.kind === 'static')
+
+  if (opts.verifyRuleset) reportRulesetComparison(plan)
+
+  console.log(
+    `preflight: ${plan.length} gate(s) known, ${selected.length} selected${opts.static ? ' (static only)' : ''}`,
+  )
+  if (surfaces) console.log(`preflight: surfaces touched vs ${opts.base}: ${surfaces.join(', ') || '(none)'}`)
+  console.log('')
+
+  if (opts.list) {
+    for (const g of selected) {
+      const where = g.alwaysRuns ? 'always' : g.surfaces.join('/')
+      console.log(`  ${g.command}`)
+      console.log(`      ${g.kind} · ${where} — ${g.jobs.join(', ')}`)
+    }
+    return EXIT.GREEN
+  }
+
+  let announcedRerun = false
+  const outcome = runBattery(selected, {
+    onStart: (gate, phase) => {
+      if (phase === 'rerun' && !announcedRerun) {
+        announcedRerun = true
+        console.log('\npreflight: re-running the load-shaped reds alone:')
+      }
+      // TTY only: `\r` does not overwrite in a pipe, so a redirected run would
+      // carry a duplicate half-line for every gate.
+      if (process.stdout.isTTY) process.stdout.write(`  … ${gate.command}\r`)
+    },
+    onResult: (r) => {
+      const mark = r.ok ? '✓' : '✗'
+      const alone = r.phase === 'rerun' ? ', alone' : ''
+      console.log(`  ${mark} ${r.command}  (${r.seconds}s, load ${describeLoad(r)}${alone})`)
+    },
+  })
+  const { out, err } = summarize(outcome, { staticOnly: opts.static })
+  for (const line of out) console.log(line)
+  for (const line of err) console.error(line)
+  return outcome.code
 }
 
 /**

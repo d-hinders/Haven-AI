@@ -152,7 +152,11 @@ describe('useAccountMoneyFlow (#4097)', () => {
     mockApiGet.mockResolvedValue(
       page([tx({ direction: 'in', convertedAmount: '10.00', timestamp: NOW_SEC - DAY })], {
         truncated: true,
-        hasMore: true,
+        // hasMore must be false: the only row is inside the 30-day window, so
+        // hasMore: true here would make the hook page forever against an
+        // identical response (worker heap OOM — the round-2 CI failure on
+        // #4142). truncated: true alone flags the totals partial (#2882).
+        hasMore: false,
         total: 500,
       }),
     )

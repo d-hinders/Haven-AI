@@ -1035,13 +1035,14 @@ signer (`delegate-account.ts`, `direct-payment-guard.ts`, `redemption-guard.ts`,
 whether the merchant accepted or the payment is a rejection after funding, and
 reports the settlement hash Haven records. The harness does build and drive the
 SDK; the rest of it is transport, and `client.ts`, which only wires those files
-in, is pinned off the list by name (#3283, #4122). Since #3173 `packages/sdk/src/edge-signing.ts` is
-spend authority by the same reasoning — it is the viem-based implementation
-of `addressFromKey` / `signHash` / `verifySignature` the shipped signer
-actually calls, pinned byte-equivalent to `signer.ts` — and is deliberately
-NOT yet on the runtime list: adding it is the same owner decision as any
-widening here, deferred and recorded in PR #3185. They stay on this perimeter — the CASP question
-still applies to what they ship — without a QA-freshness obligation. Widening
+in, is pinned off the list by name (#3283, #4122). Since #3173
+`packages/sdk/src/edge-signing.ts` is spend authority by the same reasoning —
+it is the viem-based implementation of `addressFromKey` / `signHash` /
+`verifySignature` the shipped signer actually calls, pinned byte-equivalent to
+`signer.ts` — and is deliberately NOT yet on the runtime list: adding it is the
+same owner decision as any widening here, deferred and recorded in PR #3185.
+They stay on this perimeter — the CASP question still applies to what they
+ship — without a QA-freshness obligation. Widening
 one of them is an owner decision, not a drift fix. The check is scoped to
 package-wide entries; sub-package wildcards such as
 `packages/backend/src/modules/accounting/**` are knowingly outside it.
@@ -1075,14 +1076,14 @@ of the 15 `controlGlobs`. #3098 added `packages/demo-merchant-mcp/src/**`,
 #3283 (PR #3286) the four `packages/sdk/src/` signing-guard files and
 `userop-binding.ts`, #3649 `packages/backend/src/modules/budget-scope/**`
 (the #2099 period pre-check, moved out of `modules/x402/` by #3616/#3617),
-and #3661 the task-budget and sub-budget families (`modules/task-budgets/**`,
+#3661 the task-budget and sub-budget families (`modules/task-budgets/**`,
 `modules/sub-budgets/**`, `routes/task-budgets.ts`, `routes/sub-budgets.ts`,
 `routes/agent-sub-budgets.ts`, and the SDK's `task-budget-guards.ts` and
 `sub-budget-guards.ts`), and #4122 `packages/sdk/src/merchant-completion.ts`
 (the SDK's post-funding merchant-answer decision); all were already covered
 here — budget-scope since #3648, the budget families since #3659, the SDK
-files by `packages/sdk/src/**` — so the pin was satisfied on arrival each time. #3661
-also added three `modules/payments/` files, `direct-sign-context.ts`,
+files by `packages/sdk/src/**` — so the pin was satisfied on arrival each
+time. #3661 also added three `modules/payments/` files, `direct-sign-context.ts`,
 `submission-reconciler.ts` and `agent-payment-status.ts`, which were NOT
 covered: they joined `covers:` in the same PR, so edits to them now owe a
 shard (`agent-payment-status.ts` already did, through

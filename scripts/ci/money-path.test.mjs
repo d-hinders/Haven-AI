@@ -101,21 +101,25 @@ const NUL = '\u0000'
 
 /**
  * Does a backend-relative prose token name this repo-root-relative glob?
- * Suffix match, with `*` treated as a single path segment's wildcard so
- * `rails/delegation-*.ts` covers `packages/backend/src/rails/delegation-*.ts`.
+ * Suffix match at a path boundary: `rails/delegation-*.ts` names
+ * `packages/backend/src/rails/delegation-*.ts` because the glob ENDS in that
+ * token. A wildcard inside a token is not a pattern (#4122) — it is compared as
+ * the literal text, so `packages/sdk/src/**` names that one glob string and no
+ * file under it.
  */
 function tokenNamesGlob(token, glob) {
   const needle = token.replace(/\/$/, '')
   // A token whose segments after the first are ALL wildcards names nothing
-  // (#4122). `src/**` — the tail of a `packages/mcp-server/src/**` entry —
-  // became `(?:^|/)src/[^/]*[^/]*$` on the token-wildcard branch below, which
-  // matches every `packages/<pkg>/src/<file>`. Six of the eight SDK globs were
+  // (#4122), and neither does a token that is a wildcard alone (`*/`, `**/`
+  // once the trailing slash is stripped). `src/**` — the tail of a
+  // `packages/mcp-server/src/**` entry — used to be read as a pattern and
+  // matched every `packages/<pkg>/src/<file>`. Six of the eight SDK globs were
   // "named" by it alone, and so was a file that does not exist, so leaving an
-  // SDK file out of the Merge Gate could never go red. A token must carry a
-  // literal segment past its first to name anything: `rails/delegation-*.ts`
-  // still does, `src/**` and `x/*` do not.
+  // SDK file out of the Merge Gate could never go red. Without this return
+  // `src/**` would still name the two `.../src/**` package globs by suffix.
   const segments = needle.split('/')
-  if (segments.length > 1 && segments.slice(1).every((s) => /^\*+$/.test(s))) return false
+  const tail = segments.length > 1 ? segments.slice(1) : segments
+  if (tail.every((s) => /^\*+$/.test(s))) return false
   const stripped = glob.replace(/\/\*\*$/, '')
   // Anchor every match at a path boundary. A bare `endsWith` would let a token
   // satisfy any glob merely ENDING in those characters, so two canonical globs
@@ -125,12 +129,11 @@ function tokenNamesGlob(token, glob) {
   const boundedEnd = (haystack) => haystack === needle || haystack.endsWith(`/${needle}`)
   if (boundedEnd(stripped) || boundedEnd(glob)) return true
 
-  // Wildcards on the TOKEN side: prose says `rails/delegation-*.ts`, the
-  // canonical glob is the same pattern under packages/backend/src/.
-  if (needle.includes('*')) {
-    const pattern = needle.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*')
-    if (new RegExp(`(?:^|/)${pattern}$`).test(stripped)) return true
-  }
+  // No wildcards on the TOKEN side (#4122). A branch here read a token's `*`
+  // as a pattern, so `packages/sdk/src/**` or `sdk/src/*` named all nine SDK
+  // globs, `src/*.ts` and `routes/*.ts` ten each, and the prose could blind
+  // the reverse direction with one sentence. Every pattern the Merge Gate
+  // writes is matched by the boundary-anchored suffix test above.
 
   // Wildcards on the GLOB side: prose may name a concrete file that only a
   // pattern covers — `infra/relayer-balance-monitor.ts` is matched solely by
@@ -188,7 +191,10 @@ describe('money-path list stays in one piece', () => {
       [],
       'SKILL.md names money-path files absent from .github/money-path-globs.json. ' +
         'Add them to the JSON and to labeler.yml — prose that the machinery does not ' +
-        'know about is the exact drift #1030 closed.',
+        'know about is the exact drift #1030 closed. If a listed token is only ' +
+        'wildcards after its first segment (`src/**`, `signer/**`) or a wildcard ' +
+        'alone, it names nothing by design (#4122): write the full path instead, ' +
+        'do not add it to the JSON.',
     )
   })
 
@@ -220,17 +226,27 @@ describe('money-path list stays in one piece', () => {
     )
   })
 
-  test('a wildcard-only token names nothing; a token with a literal segment still does (#4122)', () => {
+  test('a wildcard in a token is not a pattern, and a wildcard-only token names nothing (#4122)', () => {
     // The Merge Gate parity test above could not fail for an SDK file. The
     // prose token `src/**` (the tail of the mcp-server and demo-merchant
-    // entries) matched every `packages/<pkg>/src/<file>` on the token-wildcard
-    // branch, so six of the eight SDK globs were "named" by it alone, and so
+    // entries) matched every `packages/<pkg>/src/<file>` on a token-wildcard
+    // branch (now deleted), so six of the eight SDK globs were "named" by it alone, and so
     // were packages/sdk/src/client.ts and a file that does not exist.
-    // Mutation: drop the wildcard-only early return in tokenNamesGlob and the
-    // first three assertions fail.
+    // Mutations: re-add a token-side pattern branch to tokenNamesGlob and the
+    // `packages/sdk/src/**` assertion fails; drop the wildcard-only early
+    // return and the `src/**`-against-a-package-glob and `**/` assertions fail.
     assert.equal(tokenNamesGlob('src/**', 'packages/sdk/src/client.ts'), false)
     assert.equal(tokenNamesGlob('src/**', 'packages/sdk/src/does-not-exist.ts'), false)
+    assert.equal(tokenNamesGlob('src/**', 'packages/mcp-server/src/**'), false)
     assert.equal(tokenNamesGlob('x/*', 'packages/backend/src/x/a.ts'), false)
+    // A wildcard inside a longer token is not a pattern either.
+    assert.equal(tokenNamesGlob('packages/sdk/src/**', 'packages/sdk/src/client.ts'), false)
+    assert.equal(tokenNamesGlob('sdk/src/*', 'packages/sdk/src/client.ts'), false)
+    assert.equal(tokenNamesGlob('src/*.ts', 'packages/sdk/src/client.ts'), false)
+    assert.equal(tokenNamesGlob('routes/*.ts', 'packages/backend/src/routes/x402.ts'), false)
+    assert.equal(tokenNamesGlob('*/', 'packages/sdk/src/client.ts'), false)
+    assert.equal(tokenNamesGlob('**/', 'packages/sdk/src/client.ts'), false)
+    assert.equal(tokenNamesGlob('**/', 'packages/signer/**'), false)
     assert.equal(tokenNamesGlob('rails/delegation-*.ts', 'packages/backend/src/rails/delegation-*.ts'), true)
     assert.equal(tokenNamesGlob('packages/mcp-server/src/**', 'packages/mcp-server/src/**'), true)
     assert.equal(tokenNamesGlob('mcp-server/src/**', 'packages/mcp-server/src/**'), true)

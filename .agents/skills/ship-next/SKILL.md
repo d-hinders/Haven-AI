@@ -848,8 +848,10 @@ you need the reasoning. Never edit one without the other — CI will not let you
   deliberately (#3283): it only wires these guards in, and listing it would put
   every SDK transport change on the runtime list. Each SDK file is written here
   as its full path, because the parity test in `scripts/ci/money-path.test.mjs`
-  matches full tokens only — a bare file name or a wildcard-only tail names
-  nothing (#4122);
+  matches a token against the end of a glob as literal text: a bare file name
+  names nothing, a wildcard inside a token is not a pattern (a package-wide
+  spelling names no file under it), and a token that is only wildcards after
+  its first segment names nothing (#4122);
 - `packages/core/src/machine-payment-lifecycle.ts` (the machine-payment domain
   actually lives here since #987 — the `domain/machine-payment-lifecycle.ts` line
   above guards the backend re-export shim, not the code — #1905);
@@ -862,9 +864,10 @@ you need the reasoning. Never edit one without the other — CI will not let you
   #2051's merchant-steerable cap bypass. Runtime `globs`, not control: the
   hosted MCP deploys from `dev` and the money-flow harness drives it through
   `QA_HOSTED_MCP_URL`, so a green run really does cover it — the argument the
-  frontend decision surfaces could not make. Scoped to `packages/mcp-server/src/**` on a measured
-  3-of-113-commits delta for the package's README/Dockerfile/config files —
-  the command and window are in the JSON note);
+  frontend decision surfaces could not make. Scoped to
+  `packages/mcp-server/src/**` on a measured 3-of-113-commits delta for the
+  package's README/Dockerfile/config files — the command and window are in the
+  JSON note);
 - `packages/demo-merchant-mcp/src/**` (the demo merchant's settlement surface —
   #3098. `x402.ts` verifies the buyer's authorization and submits it on-chain,
   and the prod instance runs on Base mainnet; the CASP guardrails doc had

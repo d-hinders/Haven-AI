@@ -19,6 +19,7 @@
  */
 
 import { applyGraders } from './graders.js'
+import { bareToolName } from './tools.js'
 import type { AgentRunLog, EvalTask, GraderContext, GraderResult, ResolvedTask } from './types.js'
 
 /** One adapter lane. Hermes today; #3959 adds Claude Code. */
@@ -50,6 +51,28 @@ export interface TrialRecord {
    * its own, never the run's first block.
    */
   startBlock?: number
+  /**
+   * The session's tool calls in order: bare tool name, `✗` when the call
+   * failed, and the machine `error_code` if one came back. Names and codes
+   * only — no arguments, no results, no final message — because the report
+   * is a public artifact (this repo is public) and session streams carry
+   * full tool results. Absent when the adapter produced no log.
+   */
+  trace?: string[]
+}
+
+/** Calls beyond this many are summarised, so one runaway session cannot flood the report. */
+export const TRACE_MAX_CALLS = 40
+
+/** The public-safe tool trace of one session (see {@link TrialRecord.trace}). */
+export function toolTrace(log: AgentRunLog): string[] {
+  const steps = log.calls.map((call) => {
+    const failed = call.result?.ok === false ? ' ✗' : ''
+    const code = call.result?.errorCode ? ` ${call.result.errorCode}` : ''
+    return `${bareToolName(call.name)}${failed}${code}`
+  })
+  if (steps.length <= TRACE_MAX_CALLS) return steps
+  return [...steps.slice(0, TRACE_MAX_CALLS), `… ${steps.length - TRACE_MAX_CALLS} more call(s)`]
 }
 
 export interface TaskReport {
@@ -233,6 +256,7 @@ export async function runTaskTrials(
       detail: firstFail?.detail ?? '',
       resolvedAmountAtomic: resolved.amountAtomic.toString(),
       startBlock: resolved.startedAtBlock,
+      trace: toolTrace(log),
     }
     records.push(record)
     state.prior = { taskId: task.id, trial, resolved, record, settled: recordSettled(record) }
@@ -302,6 +326,7 @@ export function renderSummary(report: EvalReport): string {
     for (const trial of t.trials) {
       if (!trial.pass) {
         lines.push(`        trial ${trial.trial} (${trial.wallMs}ms): ${trial.detail}`)
+        if (trial.trace) lines.push(`          tools: ${trial.trace.length ? trial.trace.join(' → ') : '(no tool calls)'}`)
       }
     }
   }

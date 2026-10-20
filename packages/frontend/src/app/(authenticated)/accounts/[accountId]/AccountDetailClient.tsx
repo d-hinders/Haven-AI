@@ -55,7 +55,6 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth, type SmartAccount } from '@/context/AuthContext'
 import { useBalances } from '@/hooks/useBalances'
-import { useTransactionsFeed } from '@/hooks/useTransactionsFeed'
 import { usePortfolio } from '@/hooks/usePortfolio'
 import { usePreferences } from '@/hooks/usePreferences'
 import { useContacts } from '@/hooks/useContacts'
@@ -67,8 +66,7 @@ import { useAttentionDismissals } from '@/hooks/useAttentionDismissals'
 import { useAccountSigners } from '@/hooks/useAccountSigners'
 import { useAccountMoneyFlow } from '@/hooks/useAccountMoneyFlow'
 import { ApiRequestError } from '@/lib/api'
-import type { AggregatedTransaction } from '@/types/transactions'
-import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
+import AccountActivityTab from './AccountActivityTab'
 import DelegationSendModal from '@/components/DelegationSendModal'
 import AccountSignersCard from '@/components/AccountSignersCard'
 import ReceiveDialog from '@/components/ReceiveDialog'
@@ -97,16 +95,7 @@ import {
   Amount,
   BalanceFreshnessIndicator,
   ExternalDetailsLink,
-  TransactionActivityRow,
-  TransactionActivityDayHeader,
-  transactionDayGroups,
 } from '@/components/haven'
-import {
-  transactionFiat,
-  transactionMovement,
-  transactionStatus,
-  transactionTitle,
-} from '@/lib/transaction-presentation'
 import { getExplorerUrlOrNull, resolveChainOrNull, DEFAULT_CHAIN_ID } from '@/lib/chains'
 // #3127 (finding 6): the shared formatter — this page's inline copy was the
 // third drift site that let /accounts render `kr13,000.50` while this page
@@ -250,20 +239,10 @@ export default function AccountDetailClient() {
   // ── Last 30 days (#4097) ─────────────────────────────────────────────────
   const moneyFlow = useAccountMoneyFlow(accountId, currency)
 
-  // ── The Activity tab's feed (#4098 owns the tab's final shape; until then
-  // it renders the account's existing feed through the shared ledger row).
-  const {
-    transactions,
-    loadingInitial: txLoading,
-    loadingMore: txLoadingMore,
-    error: txError,
-    total,
-    hasMore,
-    truncated,
-    loadMore,
-    refresh: refetchTx,
-  } = useTransactionsFeed({ accountId }, 25)
-  const [selectedTx, setSelectedTx] = useState<AggregatedTransaction | null>(null)
+  // ── The Activity tab's feed (#4098): the tab owns its own ledger, so the
+  // page carries only a refresh beat — bumped after a send or receive so the
+  // tab's feed and totals re-read instead of waiting for the next poll.
+  const [ledgerRefreshKey, setLedgerRefreshKey] = useState(0)
   const [renameOpen, setRenameOpen] = useState(false)
   const [removeOpen, setRemoveOpen] = useState(false)
   const [removing, setRemoving] = useState(false)
@@ -276,7 +255,7 @@ export default function AccountDetailClient() {
   const handleSendSuccess = () => {
     refetchBalances()
     refetchPortfolio()
-    void refetchTx()
+    setLedgerRefreshKey((key) => key + 1)
     // The send's own row enters the rolling 30-day window the moment it
     // confirms, so the Money out figure refreshes with the same beat.
     void moneyFlow.refresh()
@@ -606,107 +585,18 @@ export default function AccountDetailClient() {
         ariaLabel="Account"
       />
 
-      {/* ── Activity tab (#4098 owns its final shape; until then the account's
-          existing feed, rendered through the shared ledger row). */}
+      {/* ── Activity tab (#4098): the account's full ledger — FilterBar with
+          the Account chip hidden, the server's filtered count and in/out
+          totals, day-grouped rows, paging and the detail panel. */}
       {activeTab === 'activity' ? (
-        <div>
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <div className="flex items-center gap-3">
-                <h2 className="text-base font-semibold text-[var(--v2-ink)]">Activity</h2>
-                {!txLoading && total > 0 ? (
-                  <Button
-                    href={`/transactions?accountId=${encodeURIComponent(accountId)}`}
-                    variant="tertiary"
-                    size="sm"
-                    trailingIcon
-                  >
-                    View all
-                  </Button>
-                ) : null}
-              </div>
-              <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
-                {txLoading
-                  ? 'Loading activity...'
-                  : truncated
-                    ? // #2882: `total` is what the explorers returned, not what
-                      // the wallet holds — the flat count must not claim more
-                      // when the feed is capped.
-                      `${total} recent transaction${total !== 1 ? 's' : ''} for this Haven wallet`
-                    : `${total} transaction${total !== 1 ? 's' : ''} for this Haven wallet`}
-              </p>
-            </div>
-            {!txLoading && transactions.length > 0 ? (
-              <p className="text-xs text-[var(--v2-ink-3)]">
-                Showing <span className="v2-tabular">{transactions.length}</span> of <span className="v2-tabular">{total}</span>
-                {truncated ? ' loaded' : null}
-              </p>
-            ) : null}
-          </div>
-          <Card hover={false}>
-            {txLoading ? (
-              <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-label="Loading activity">
-                {[0, 1, 2].map((item) => (
-                  <div key={item} className="flex items-center gap-3 px-5 py-3.5">
-                    <div className="h-9 w-9 rounded-[10px] bg-[var(--v2-surface-2)] animate-pulse" />
-                    <div className="min-w-0 flex-1">
-                      <div className="h-3.5 w-40 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                      <div className="mt-1.5 h-2.5 w-48 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : txError ? (
-              <div className="p-6">
-                <EmptyState
-                  title="Activity could not load"
-                  body={txError}
-                  className="py-8"
-                  action={<Button variant="ghost" size="sm" onClick={() => void refetchTx()}>Try again</Button>}
-                />
-              </div>
-            ) : transactions.length === 0 ? (
-              <div className="p-6">
-                <EmptyState
-                  title="No activity yet"
-                  body="Inbound and outbound payments for this Haven wallet will appear here."
-                  className="py-8"
-                  action={
-                    <Button href={`/transactions?accountId=${encodeURIComponent(accountId)}`} variant="ghost" size="sm">
-                      Open transactions
-                    </Button>
-                  }
-                />
-              </div>
-            ) : (
-              <div className="divide-y divide-[var(--v2-border)] v2-animate-fade-in">
-                {transactionDayGroups(transactions, (tx) => new Date(tx.timestamp * 1000).toISOString()).map((day) => (
-                  <div key={day.dayKey}>
-                    {/* The window the account page paginates has no boundary
-                        that cuts a day; #4098 owns the partial-day rule. */}
-                    <TransactionActivityDayHeader label={day.label} />
-                    {day.items.map((tx, index) => (
-                      <ActivityLedgerRow
-                        key={`${tx.accountId}:${tx.hash}:${tx.type}:${index}`}
-                        tx={tx}
-                        resolveAddress={resolveAddress}
-                        accountNamesByAddress={accountNamesByAddress}
-                        onOpen={() => setSelectedTx(tx)}
-                      />
-                    ))}
-                  </div>
-                ))}
-                {hasMore ? (
-                  <div className="flex justify-center px-5 py-4">
-                    <Button variant="ghost" size="sm" onClick={() => void loadMore()} disabled={txLoadingMore}>
-                      {txLoadingMore ? 'Loading…' : 'Load more'}
-                    </Button>
-                  </div>
-                ) : null}
-              </div>
-            )}
-          </Card>
-        </div>
+        <AccountActivityTab
+          accountId={accountId}
+          currency={currency}
+          resolveAddress={resolveAddress}
+          accountNamesByAddress={accountNamesByAddress}
+          onReceive={() => setReceiveOpen(true)}
+          refreshKey={ledgerRefreshKey}
+        />
       ) : null}
 
       {/* ── Agents tab: the budget snapshot line, the shared agent rows, the
@@ -904,46 +794,7 @@ export default function AccountDetailClient() {
         confirmLabel={removeError?.retryable ? 'Try again' : 'Remove account'}
         loading={removing}
       />
-      <TransactionDetailPanel
-        transaction={selectedTx}
-        open={selectedTx !== null}
-        onClose={() => setSelectedTx(null)}
-        resolveAddress={resolveAddress}
-        accountNamesByAddress={accountNamesByAddress}
-      />
     </div>
-  )
-}
-
-/** One feed row in the Activity tab's ledger (#4096's ledger mode). */
-function ActivityLedgerRow({
-  tx,
-  resolveAddress,
-  accountNamesByAddress,
-  onOpen,
-}: {
-  tx: AggregatedTransaction
-  resolveAddress: (address: string) => string | null
-  accountNamesByAddress: Map<string, string>
-  onOpen: () => void
-}) {
-  const badge = transactionStatus(tx) ?? tx.statusBadge
-  const fiat = transactionFiat(tx)
-  return (
-    <TransactionActivityRow
-      title={transactionTitle(tx)}
-      description={transactionMovement(tx, resolveAddress, accountNamesByAddress, { noAddress: true })}
-      value={tx.valueFormatted}
-      asset={tx.tokenSymbol}
-      failed={tx.isError}
-      status={badge?.label}
-      statusTone={badge?.tone}
-      timestamp={timeAgo(tx.timestamp * 1000)}
-      direction={tx.direction}
-      fiat={{ amount: fiat.amount, currency: fiat.currency, approx: fiat.approx }}
-      density="compact"
-      onOpen={onOpen}
-    />
   )
 }
 

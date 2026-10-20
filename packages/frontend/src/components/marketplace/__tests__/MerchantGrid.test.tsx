@@ -1,9 +1,24 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MerchantGrid } from '../MerchantGrid'
 import { verifiedMeaning } from '@/lib/marketplace'
 import { TEST_MERCHANT_NOTE } from '../MerchantHeader'
 import type { Merchant } from '@/hooks/useCatalog'
+
+// The grid owns its list state through `useListUrlState` (#4114), which reads
+// next/navigation. The mock reads the LIVE location, like Next's router does
+// after a `replaceState` write: a test seeds a deep link with
+// `seedUrl(...)` before render, and simulates Back by seeding a new URL and
+// re-rendering — the hook re-parses whenever the search changes.
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/marketplace',
+  useSearchParams: () => new URLSearchParams(window.location.search),
+}))
+
+/** Points the (mocked) address bar at a marketplace URL before a render. */
+function seedUrl(query: string) {
+  window.history.replaceState(null, '', `/marketplace${query ? `?${query}` : ''}`)
+}
 
 function merchant(overrides: Partial<Merchant> = {}): Merchant {
   return {
@@ -58,6 +73,32 @@ function expectFooter(card: HTMLElement, price: string, count: string | null) {
     expect(line.textContent).toBe(`From ${price} USDC · ${count}`)
   }
 }
+
+/** Opens a single-select facet menu and chooses one of its radio rows. */
+function chooseFacet(triggerName: RegExp, option: string) {
+  fireEvent.click(screen.getByRole('button', { name: triggerName }))
+  fireEvent.click(screen.getByRole('menuitemradio', { name: option }))
+}
+
+/** The category pill row (a `FacetMenu` pill facet, #4114). */
+const categoryGroup = () => screen.getByRole('group', { name: 'Category' })
+
+/** The URL the grid last wrote through `replaceState` (#4114). */
+function lastWrittenUrl(): string {
+  const call = vi.mocked(window.history.replaceState).mock.lastCall
+  return (call?.[2] as string) ?? ''
+}
+
+beforeEach(() => {
+  seedUrl('')
+  vi.useFakeTimers()
+  vi.spyOn(window.history, 'replaceState')
+})
+
+afterEach(() => {
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+})
 
 describe('MerchantGrid', () => {
   it('renders empty and error states', () => {
@@ -153,8 +194,6 @@ describe('MerchantGrid', () => {
     // Nothing comparable on a merchant you cannot pay: no price, no count.
     expect(within(row).queryByText(/offer/)).toBeNull()
     expect(within(row).queryByText(/From /)).toBeNull()
-    // No payable merchant is listed, yet the section is not an empty grid.
-    expect(screen.queryByText('No merchants match this filter')).toBeNull()
   })
 
   it('#4052: renders no "Coming soon" section when no coming-soon merchant is visible', () => {
@@ -181,11 +220,11 @@ describe('MerchantGrid', () => {
     fireEvent.change(search, { target: { value: 'Soon' } })
     expect(screen.queryByTestId('merchant-card-merchant-one')).toBeNull()
     expect(screen.getByTestId('merchant-row-soon')).toBeDefined()
-    expect(screen.queryByText('No merchants match this filter')).toBeNull()
+    expect(screen.queryByText('No merchants match these filters')).toBeNull()
     // Neither matches: now, and only now, the empty state.
     fireEvent.change(search, { target: { value: 'nothing at all' } })
     expect(screen.queryByTestId('marketplace-coming-soon')).toBeNull()
-    expect(screen.getByText('No merchants match this filter')).toBeDefined()
+    expect(screen.getByText('No merchants match these filters')).toBeDefined()
   })
 
   it('#4052: a category filter reaches the section — a pill with no coming-soon merchant hides it', () => {
@@ -200,12 +239,11 @@ describe('MerchantGrid', () => {
         onSubmit={vi.fn()}
       />,
     )
-    const pills = screen.getByRole('group', { name: 'Filter by category' })
     expect(screen.getByTestId('merchant-row-soon')).toBeDefined()
-    fireEvent.click(within(pills).getByRole('button', { name: 'API' }))
+    fireEvent.click(within(categoryGroup()).getByRole('button', { name: 'API' }))
     expect(screen.queryByTestId('marketplace-coming-soon')).toBeNull()
     expect(screen.getByTestId('merchant-card-merchant-one')).toBeDefined()
-    fireEvent.click(within(pills).getByRole('button', { name: 'AI' }))
+    fireEvent.click(within(categoryGroup()).getByRole('button', { name: 'AI' }))
     expect(screen.getByTestId('merchant-row-soon')).toBeDefined()
     expect(screen.queryByTestId('merchant-card-merchant-one')).toBeNull()
   })
@@ -257,14 +295,15 @@ describe('MerchantGrid', () => {
     unmount()
   })
 
-  it('#4052: marks a test merchant with a neutral "Test" badge (not the full note), hidden behind the toggle by default when no listed network is a testnet', () => {
+  it('#4052: marks a test merchant with a neutral "Test" badge, hidden behind the Test merchants facet by default when no listed network is a testnet', () => {
     const merchants = [
       merchant({ id: 't', slug: 'test-one', is_test_merchant: true, networks: ['eip155:8453'] }),
     ]
     render(<MerchantGrid merchants={merchants} loading={false} error={null} onSubmit={vi.fn()} />)
-    // Mainnet-only data: the toggle defaults OFF, so the card starts hidden.
+    // Mainnet-only data: the facet defaults to Hidden, so the card starts hidden.
     expect(screen.queryByTestId('merchant-card-test-one')).toBeNull()
-    fireEvent.click(screen.getByLabelText('Show test merchants'))
+    expect(screen.getByRole('button', { name: 'Test merchants: Hidden' })).toBeDefined()
+    chooseFacet(/^Test merchants: /, 'Shown')
     const card = screen.getByTestId('merchant-card-test-one')
     const badge = within(card).getByText('Test', { exact: true })
     expect(badge.className).toContain('rounded-full')
@@ -277,36 +316,38 @@ describe('MerchantGrid', () => {
     unmount()
   })
 
-  it('derives the "Show test merchants" default from data that arrives AFTER mount — the grid mounts on an empty list', () => {
+  it('derives the "Test merchants" default from data that arrives AFTER mount — the grid mounts on an empty list', () => {
     // The baseline harness saw the demo store hidden with a testnet listed:
-    // a `useState(default)` captured `false` on the empty first render.
-    // The real mount order: loading over an empty list, then the data.
+    // a captured default would have frozen on the empty first render. The
+    // real mount order: loading over an empty list, then the data.
+    const withTestData = () => [
+      merchant({ networks: ['eip155:84532'] }),
+      merchant({ id: 'm-test', slug: 'haven-demo-store', name: 'Haven Demo Store', is_test_merchant: true, networks: ['eip155:84532'] }),
+    ]
     const { rerender } = render(<MerchantGrid merchants={[]} loading={true} error={null} onSubmit={() => {}} />)
-    expect(screen.queryByLabelText('Show test merchants')).toBeNull()
-    // The loading shell is marked busy: the skeletons are aria-hidden, and
-    // the capture harness's content floor must not certify this frame.
     expect(screen.getByRole('status').getAttribute('aria-busy')).toBe('true')
-    rerender(<MerchantGrid merchants={[merchant({ networks: ['eip155:84532'] }), merchant({ id: 'm-test', slug: 'haven-demo-store', name: 'Haven Demo Store', is_test_merchant: true, networks: ['eip155:84532'] })]} loading={false} error={null} onSubmit={() => {}} />)
-    expect(screen.getByLabelText('Show test merchants')).toBeChecked()
-    // A user's click still wins over the derived default afterwards.
-    fireEvent.click(screen.getByLabelText('Show test merchants'))
-    expect(screen.getByLabelText('Show test merchants')).not.toBeChecked()
-    rerender(<MerchantGrid merchants={[merchant({ networks: ['eip155:84532'] }), merchant({ id: 'm-test', slug: 'haven-demo-store', name: 'Haven Demo Store', is_test_merchant: true, networks: ['eip155:84532'] })]} loading={false} error={null} onSubmit={() => {}} />)
-    expect(screen.getByLabelText('Show test merchants')).not.toBeChecked()
+    rerender(<MerchantGrid merchants={withTestData()} loading={false} error={null} onSubmit={() => {}} />)
+    expect(screen.getByRole('button', { name: 'Test merchants: Shown' })).toBeDefined()
+    expect(screen.getByTestId('merchant-card-haven-demo-store')).toBeDefined()
+    // A user's choice still wins over the derived default afterwards.
+    chooseFacet(/^Test merchants: /, 'Hidden')
+    expect(screen.getByRole('button', { name: 'Test merchants: Hidden' })).toBeDefined()
+    rerender(<MerchantGrid merchants={withTestData()} loading={false} error={null} onSubmit={() => {}} />)
+    expect(screen.getByRole('button', { name: 'Test merchants: Hidden' })).toBeDefined()
   })
 
-  it('defaults "Show test merchants" on when any listed network is a testnet', () => {
+  it('defaults "Test merchants" to Shown when any listed network is a testnet', () => {
     const merchants = [
       merchant({ id: 't', slug: 'test-one', is_test_merchant: true, networks: ['eip155:84532'] }),
     ]
     render(<MerchantGrid merchants={merchants} loading={false} error={null} onSubmit={vi.fn()} />)
-    expect(screen.getByLabelText('Show test merchants')).toBeChecked()
+    expect(screen.getByRole('button', { name: 'Test merchants: Shown' })).toBeDefined()
     expect(screen.getByTestId('merchant-card-test-one')).toBeDefined()
   })
 
-  it('defaults on when ONLY SOME listed merchants are on a testnet (kills a some->every mutant)', () => {
-    // One mainnet-only merchant and one testnet merchant: `.some` says ON,
-    // `.every` would say OFF — the two disagree only on a mixed set like this.
+  it('defaults to Shown when ONLY SOME listed merchants are on a testnet (kills a some->every mutant)', () => {
+    // One mainnet-only merchant and one testnet merchant: `.some` says Shown,
+    // `.every` would say Hidden — the two disagree only on a mixed set like this.
     const merchants = [
       merchant({ id: 'mainnet', slug: 'mainnet-one', networks: ['eip155:8453'] }),
       merchant({
@@ -317,15 +358,15 @@ describe('MerchantGrid', () => {
       }),
     ]
     render(<MerchantGrid merchants={merchants} loading={false} error={null} onSubmit={vi.fn()} />)
-    expect(screen.getByLabelText('Show test merchants')).toBeChecked()
+    expect(screen.getByRole('button', { name: 'Test merchants: Shown' })).toBeDefined()
     expect(screen.getByTestId('merchant-card-test-one')).toBeDefined()
   })
 
-  it('shows the network dropdown only when more than one chain is listed', () => {
+  it('offers the Network facet only when more than one chain is listed', () => {
     const { rerender } = render(
       <MerchantGrid merchants={[merchant()]} loading={false} error={null} onSubmit={vi.fn()} />,
     )
-    expect(screen.queryByLabelText('Filter marketplace by network')).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Network: / })).toBeNull()
 
     rerender(
       <MerchantGrid
@@ -338,10 +379,10 @@ describe('MerchantGrid', () => {
         onSubmit={vi.fn()}
       />,
     )
-    expect(screen.getByLabelText('Filter marketplace by network')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Network: All' })).toBeDefined()
   })
 
-  it('filters by category, search, and verified only', () => {
+  it('filters by category, search, and Verified only', () => {
     const merchants = [
       merchant({ id: 'a', slug: 'media-merchant', name: 'Media Co', category: 'media' }),
       merchant({
@@ -354,57 +395,80 @@ describe('MerchantGrid', () => {
     ]
     render(<MerchantGrid merchants={merchants} loading={false} error={null} onSubmit={vi.fn()} />)
 
-    const categoryGroup = screen.getByRole('group', { name: 'Filter by category' })
-    fireEvent.click(within(categoryGroup).getByRole('button', { name: 'Data' }))
+    fireEvent.click(within(categoryGroup()).getByRole('button', { name: 'Data' }))
     expect(screen.queryByText('Media Co')).toBeNull()
     expect(screen.getByText('Data Co')).toBeDefined()
 
-    fireEvent.click(within(categoryGroup).getByRole('button', { name: 'All' }))
-    fireEvent.click(screen.getByLabelText('Verified only'))
+    fireEvent.click(within(categoryGroup()).getByRole('button', { name: 'All' }))
+    chooseFacet(/^Verified: /, 'Verified only')
     expect(screen.queryByText('Media Co')).toBeNull()
     expect(screen.getByText('Data Co')).toBeDefined()
 
-    fireEvent.click(screen.getByLabelText('Verified only'))
+    chooseFacet(/^Verified: /, 'Any')
     fireEvent.change(screen.getByLabelText('Search merchants'), { target: { value: 'media' } })
     expect(screen.getByText('Media Co')).toBeDefined()
     expect(screen.queryByText('Data Co')).toBeNull()
   })
 
-  describe('#4008: the pills respect the network filter and the test toggle, not the category or search filters', () => {
+  it('the Verified and Test facets enumerate every state — no default "All" row renders in either menu', () => {
+    render(<MerchantGrid merchants={[merchant()]} loading={false} error={null} onSubmit={vi.fn()} />)
+
+    // chooseFacet can't catch a stray "All" row (it matches a unique name), so
+    // open each menu and pin that FacetMenu's default "All" row is absent —
+    // the facets carry `allLabel: null` (#4113 view-choice shape).
+    chooseFacet(/^Verified: /, 'Any')
+    fireEvent.click(screen.getByRole('button', { name: /^Verified: / }))
+    expect(screen.queryByRole('menuitemradio', { name: 'All' })).toBeNull()
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Verified only' }))
+
+    fireEvent.click(screen.getByRole('button', { name: /^Test merchants: / }))
+    expect(screen.queryByRole('menuitemradio', { name: 'All' })).toBeNull()
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Shown' }))
+  })
+
+  it('renders the ListToolbar with the search field (leading icon) inside it', () => {
+    render(<MerchantGrid merchants={[merchant()]} loading={false} error={null} onSubmit={vi.fn()} />)
+    const toolbar = screen.getByTestId('list-toolbar')
+    const search = within(toolbar).getByLabelText('Search merchants')
+    expect(search.className).toContain('pl-9')
+    // The leading icon lives in the search field's own relative wrapper.
+    expect(search.closest('div.relative')?.querySelector('svg')).not.toBeNull()
+  })
+
+  describe('#4008: the pills respect the network facet and the Test merchants facet, not the category or search filters', () => {
     // Two categories survive a Base Sepolia filter (so the pill group renders
     // — these tests must not pass vacuously), and "media" exists ONLY on
     // Base: on dev the Media pill showed under the Base Sepolia default and
-    // clicking it emptied the grid with "No merchants match this filter".
+    // clicking it emptied the grid.
     const pool = [
       merchant({ id: 'a', slug: 'api-one', name: 'API Co', category: 'api', networks: ['eip155:84532'] }),
       merchant({ id: 'd', slug: 'data-one', name: 'Data Co', category: 'data', networks: ['eip155:84532'] }),
       merchant({ id: 'm', slug: 'media-one', name: 'Media Co', category: 'media', networks: ['eip155:8453'] }),
     ]
-    const group = () => screen.getByRole('group', { name: 'Filter by category' })
-    const select = () => screen.getByLabelText('Filter marketplace by network') as HTMLSelectElement
 
-    it('shows no pill for a category the network filter has', () => {
+    it('shows no pill for a category the network facet hides', () => {
       render(<MerchantGrid merchants={pool} loading={false} error={null} onSubmit={vi.fn()} defaultChainId={84532} />)
-      expect(select().value).toBe('84532')
-      expect(within(group()).getByRole('button', { name: 'All' }).getAttribute('aria-pressed')).toBe('true')
-      expect(within(group()).getByRole('button', { name: 'API' })).toBeDefined()
-      expect(within(group()).getByRole('button', { name: 'Data' })).toBeDefined()
-      expect(within(group()).queryByRole('button', { name: 'Media' })).toBeNull()
+      expect(screen.getByRole('button', { name: 'Network: Base Sepolia' })).toBeDefined()
+      expect(within(categoryGroup()).getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true')
+      expect(within(categoryGroup()).getByRole('button', { name: 'API' })).toBeDefined()
+      expect(within(categoryGroup()).getByRole('button', { name: 'Data' })).toBeDefined()
+      expect(within(categoryGroup()).queryByRole('button', { name: 'Media' })).toBeNull()
       // And the grid itself is not emptied by the absent pill's category.
       expect(screen.getByText('API Co')).toBeDefined()
       expect(screen.getByText('Data Co')).toBeDefined()
     })
 
-    it('brings the pill back when the network filter widens to All networks', () => {
+    it('brings the pill back when the network facet widens to All networks', () => {
       render(<MerchantGrid merchants={pool} loading={false} error={null} onSubmit={vi.fn()} defaultChainId={84532} />)
-      fireEvent.change(select(), { target: { value: 'all' } })
-      expect(within(group()).getByRole('button', { name: 'Media' })).toBeDefined()
+      chooseFacet(/^Network: /, 'All')
+      expect(within(categoryGroup()).getByRole('button', { name: 'Media' })).toBeDefined()
     })
 
     it('resets a deep-linked category that has no pill to All, derived at read time', () => {
       // `?category=media` under the Base Sepolia default: no Media pill can
       // be visible, so the filter opens as "All" — no filter is ever active
       // without a visible pill, the rule #3979 applied to `test-fixture`.
+      seedUrl('category=media')
       render(
         <MerchantGrid
           merchants={pool}
@@ -412,13 +476,12 @@ describe('MerchantGrid', () => {
           error={null}
           onSubmit={vi.fn()}
           defaultChainId={84532}
-          initialCategory="media"
         />,
       )
-      expect(within(group()).getByRole('button', { name: 'All' }).getAttribute('aria-pressed')).toBe('true')
+      expect(within(categoryGroup()).getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true')
       expect(screen.getByText('API Co')).toBeDefined()
       expect(screen.getByText('Data Co')).toBeDefined()
-      // Media Co is hidden by the NETWORK filter, not by a dead category
+      // Media Co is hidden by the NETWORK facet, not by a dead category
       // filter nothing on screen could clear.
       expect(screen.queryByText('Media Co')).toBeNull()
       expect(screen.queryByRole('button', { name: 'Clear filters' })).toBeNull()
@@ -429,11 +492,11 @@ describe('MerchantGrid', () => {
       // never vanish while you are using them.
       render(<MerchantGrid merchants={pool} loading={false} error={null} onSubmit={vi.fn()} />)
       fireEvent.change(screen.getByLabelText('Search merchants'), { target: { value: 'zzz-no-hit' } })
-      expect(screen.getByText('No merchants match this filter')).toBeDefined()
-      expect(within(group()).getByRole('button', { name: 'Media' })).toBeDefined()
+      expect(screen.getByText('No merchants match these filters')).toBeDefined()
+      expect(within(categoryGroup()).getByRole('button', { name: 'Media' })).toBeDefined()
     })
 
-    it('respects the test toggle: a category carried only by a test merchant loses its pill when the toggle is off', () => {
+    it('respects the Test merchants facet: a category carried only by a test merchant loses its pill when test merchants are hidden', () => {
       const withTest = [
         merchant({ id: 'a', slug: 'api-one', name: 'API Co', category: 'api', networks: ['eip155:8453'] }),
         merchant({
@@ -446,17 +509,16 @@ describe('MerchantGrid', () => {
         }),
       ]
       render(<MerchantGrid merchants={withTest} loading={false} error={null} onSubmit={vi.fn()} />)
-      // Mainnet-only data: the toggle defaults OFF, so the pill group does
+      // Mainnet-only data: the facet defaults to Hidden, so the pill group does
       // not even render — 'media' would be its second category, and the row
       // only renders at two or more.
-      expect(screen.queryByRole('group', { name: 'Filter by category' })).toBeNull()
-      fireEvent.click(screen.getByLabelText('Show test merchants'))
-      const group = screen.getByRole('group', { name: 'Filter by category' })
-      expect(within(group).getByRole('button', { name: 'Media' })).toBeDefined()
+      expect(screen.queryByRole('group', { name: 'Category' })).toBeNull()
+      chooseFacet(/^Test merchants: /, 'Shown')
+      expect(within(categoryGroup()).getByRole('button', { name: 'Media' })).toBeDefined()
     })
   })
 
-  it('offers a retry on a failed load, and hides the filter row over an empty marketplace', () => {
+  it('offers a retry on a failed load, and hides the toolbar over an empty marketplace', () => {
     const onRetry = vi.fn()
     const { unmount } = render(
       <MerchantGrid merchants={[]} loading={false} error="boom" onSubmit={vi.fn()} onRetry={onRetry} />,
@@ -467,34 +529,46 @@ describe('MerchantGrid', () => {
 
     render(<MerchantGrid merchants={[]} loading={false} error={null} onSubmit={vi.fn()} />)
     expect(screen.queryByLabelText('Search merchants')).toBeNull()
-    expect(screen.queryByLabelText('Verified only')).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Verified: / })).toBeNull()
     expect(screen.getByRole('button', { name: 'List your service' })).toBeDefined()
   })
 
-  it('offers "Clear filters" when a filter hides every merchant, and it restores the grid', () => {
-    render(<MerchantGrid merchants={[merchant()]} loading={false} error={null} onSubmit={vi.fn()} />)
+  it('offers "Clear filters" when a filter hides every merchant, and it returns to the page defaults', () => {
+    render(
+      <MerchantGrid
+        merchants={[
+          merchant({ id: 'b', slug: 'base-only', name: 'Base Co', networks: ['eip155:8453'] }),
+          merchant({ id: 's', slug: 'sep-only', name: 'Sepolia Co', networks: ['eip155:84532'] }),
+        ]}
+        loading={false}
+        error={null}
+        onSubmit={vi.fn()}
+        defaultChainId={8453}
+      />,
+    )
     fireEvent.change(screen.getByLabelText('Search merchants'), { target: { value: 'nothing here' } })
-    expect(screen.getByText('No merchants match this filter')).toBeDefined()
-    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
-    expect(screen.getByText('Merchant One')).toBeDefined()
+    expect(screen.getByText('No merchants match these filters')).toBeDefined()
+    fireEvent.click(within(screen.getByTestId('marketplace-no-match')).getByRole('button', { name: 'Clear filters' }))
+    expect(screen.getByText('Base Co')).toBeDefined()
     expect((screen.getByLabelText('Search merchants') as HTMLInputElement).value).toBe('')
+    // The default view is the user's own network (#4110), not All.
+    expect(screen.getByRole('button', { name: 'Network: Base' })).toBeDefined()
   })
 
   it('honours a deep-linked category and labels acronym categories as acronyms', () => {
+    seedUrl('category=ai')
     render(
       <MerchantGrid
         merchants={[merchant({ id: 'a', slug: 'a', name: 'A Co', category: 'api' }), merchant({ id: 'b', slug: 'b', name: 'B Co', category: 'ai' })]}
         loading={false}
         error={null}
         onSubmit={vi.fn()}
-        initialCategory="ai"
       />,
     )
     expect(screen.getByText('B Co')).toBeDefined()
     expect(screen.queryByText('A Co')).toBeNull()
-    const group = screen.getByRole('group', { name: 'Filter by category' })
-    expect(within(group).getByRole('button', { name: 'AI' }).getAttribute('aria-pressed')).toBe('true')
-    expect(within(group).getByRole('button', { name: 'API' })).toBeDefined()
+    expect(within(categoryGroup()).getByRole('button', { name: 'AI' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(categoryGroup()).getByRole('button', { name: 'API' })).toBeDefined()
   })
 
   it('opens the submit modal from the empty marketplace', () => {
@@ -517,38 +591,19 @@ describe('MerchantGrid', () => {
     expect(onSubmit).toHaveBeenCalledTimes(1)
   })
 
-  it('puts the search field and the network dropdown on one row, the search with a leading icon', () => {
-    render(
-      <MerchantGrid
-        merchants={[
-          merchant({ id: 'a', slug: 'a', networks: ['eip155:8453'] }),
-          merchant({ id: 'b', slug: 'b', networks: ['eip155:84532'] }),
-        ]}
-        loading={false}
-        error={null}
-        onSubmit={vi.fn()}
-      />,
-    )
-    const search = screen.getByLabelText('Search merchants')
-    const field = search.closest('div.relative') as HTMLElement
-    expect(search.className).toContain('pl-9')
-    expect(field.querySelector('svg')).not.toBeNull()
-    expect(within(field.parentElement!.parentElement!).getByLabelText('Filter marketplace by network')).toBeDefined()
-  })
-
-  describe('default network (#3979)', () => {
+  describe('default network (#3979, now through the URL codec #4114)', () => {
     const twoChains = [
       merchant({ id: 'base', slug: 'base-only', name: 'Base Co', networks: ['eip155:8453'] }),
       merchant({ id: 'sep', slug: 'sepolia-only', name: 'Sepolia Co', networks: ['eip155:84532'] }),
       merchant({ id: 'soon', slug: 'coming-soon', name: 'Soon Co', listing_status: 'coming_soon', networks: [] }),
     ]
-    const select = () => screen.getByLabelText('Filter marketplace by network') as HTMLSelectElement
+    const networkTrigger = () => screen.getByRole('button', { name: /^Network: / })
 
     it("opens on the user's network and keeps network-less merchants visible", () => {
       render(
         <MerchantGrid merchants={twoChains} loading={false} error={null} onSubmit={vi.fn()} defaultChainId={84532} />,
       )
-      expect(select().value).toBe('84532')
+      expect(networkTrigger()).toHaveTextContent('Network: Base Sepolia')
       expect(screen.getByText('Sepolia Co')).toBeDefined()
       expect(screen.queryByText('Base Co')).toBeNull()
       // Coming soon (and ingestion-only) merchants list no network: no filter hides them.
@@ -562,11 +617,11 @@ describe('MerchantGrid', () => {
       rerender(
         <MerchantGrid merchants={twoChains} loading={false} error={null} onSubmit={vi.fn()} defaultChainId={null} />,
       )
-      expect(select().value).toBe('all')
+      expect(networkTrigger()).toHaveTextContent('Network: All')
       rerender(
         <MerchantGrid merchants={twoChains} loading={false} error={null} onSubmit={vi.fn()} defaultChainId={84532} />,
       )
-      expect(select().value).toBe('84532')
+      expect(networkTrigger()).toHaveTextContent('Network: Base Sepolia')
       expect(screen.queryByText('Base Co')).toBeNull()
     })
 
@@ -574,24 +629,24 @@ describe('MerchantGrid', () => {
       render(
         <MerchantGrid merchants={twoChains} loading={false} error={null} onSubmit={vi.fn()} defaultChainId={1} />,
       )
-      expect(select().value).toBe('all')
+      expect(networkTrigger()).toHaveTextContent('Network: All')
       expect(screen.getByText('Base Co')).toBeDefined()
       expect(screen.getByText('Sepolia Co')).toBeDefined()
     })
 
-    it('lets a choice override the default, and Clear filters goes to All networks', () => {
+    it('lets a choice override the default, and Clear filters returns to the default', () => {
       render(
         <MerchantGrid merchants={twoChains} loading={false} error={null} onSubmit={vi.fn()} defaultChainId={84532} />,
       )
-      fireEvent.change(select(), { target: { value: 'all' } })
+      chooseFacet(/^Network: /, 'All')
       expect(screen.getByText('Base Co')).toBeDefined()
 
-      fireEvent.change(select(), { target: { value: '84532' } })
+      chooseFacet(/^Network: /, 'Base Sepolia')
       fireEvent.change(screen.getByLabelText('Search merchants'), { target: { value: 'base' } })
-      expect(screen.getByText('No merchants match this filter')).toBeDefined()
-      fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
-      expect(select().value).toBe('all')
-      expect(screen.getByText('Base Co')).toBeDefined()
+      expect(screen.getByText('No merchants match these filters')).toBeDefined()
+      fireEvent.click(within(screen.getByTestId('marketplace-no-match')).getByRole('button', { name: 'Clear filters' }))
+      expect(networkTrigger()).toHaveTextContent('Network: Base Sepolia')
+      expect(screen.getByText('Sepolia Co')).toBeDefined()
     })
   })
 
@@ -609,29 +664,72 @@ describe('MerchantGrid', () => {
       }),
     ]
 
-    it('renders no Test-fixture pill; the checkbox alone shows and hides test merchants', () => {
+    it('renders no Test-fixture pill; the Test merchants facet alone shows and hides test merchants', () => {
       render(<MerchantGrid merchants={withFixture} loading={false} error={null} onSubmit={vi.fn()} />)
-      const group = screen.getByRole('group', { name: 'Filter by category' })
-      expect(within(group).queryByRole('button', { name: /test/i })).toBeNull()
-      expect(within(group).getByRole('button', { name: 'Data' })).toBeDefined()
+      expect(within(categoryGroup()).queryByRole('button', { name: /test/i })).toBeNull()
+      expect(within(categoryGroup()).getByRole('button', { name: 'Data' })).toBeDefined()
       expect(screen.getByText('Minifetch')).toBeDefined()
-      fireEvent.click(screen.getByLabelText('Show test merchants'))
+      chooseFacet(/^Test merchants: /, 'Hidden')
       expect(screen.queryByText('Minifetch')).toBeNull()
     })
 
     it('opens a ?category=test-fixture deep link as All, so no filter is active without a pill', () => {
-      render(
-        <MerchantGrid
-          merchants={withFixture}
-          loading={false}
-          error={null}
-          onSubmit={vi.fn()}
-          initialCategory="test-fixture"
-        />,
-      )
-      const group = screen.getByRole('group', { name: 'Filter by category' })
-      expect(within(group).getByRole('button', { name: 'All' }).getAttribute('aria-pressed')).toBe('true')
+      seedUrl('category=test-fixture')
+      render(<MerchantGrid merchants={withFixture} loading={false} error={null} onSubmit={vi.fn()} />)
+      expect(within(categoryGroup()).getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true')
       expect(screen.getByText('API Co')).toBeDefined()
+    })
+  })
+
+  describe('URL state (#4114)', () => {
+    const twoChains = [
+      merchant({ id: 'base', slug: 'base-only', name: 'Base Co', category: 'api', networks: ['eip155:8453'] }),
+      merchant({ id: 'sep', slug: 'sepolia-only', name: 'Sepolia Co', category: 'data', networks: ['eip155:84532'] }),
+    ]
+
+    it('writes an explicit choice to the URL at once, keeping foreign params', () => {
+      seedUrl('utm_source=newsletter')
+      render(<MerchantGrid merchants={twoChains} loading={false} error={null} onSubmit={vi.fn()} defaultChainId={84532} />)
+      chooseFacet(/^Network: /, 'All')
+      // An explicit All differs from the page default, so it is written.
+      expect(lastWrittenUrl()).toBe('/marketplace?utm_source=newsletter&chainId=all')
+    })
+
+    it('a choice equal to the page default keeps the key absent', () => {
+      seedUrl('chainId=all')
+      render(<MerchantGrid merchants={twoChains} loading={false} error={null} onSubmit={vi.fn()} defaultChainId={84532} />)
+      chooseFacet(/^Network: /, 'Base Sepolia')
+      expect(lastWrittenUrl()).toBe('/marketplace')
+    })
+
+    it('round-trips the search through the URL after the debounce, then Back restores an earlier state', () => {
+      const { rerender } = render(
+        <MerchantGrid merchants={twoChains} loading={false} error={null} onSubmit={vi.fn()} />,
+      )
+      const search = screen.getByLabelText('Search merchants')
+      fireEvent.change(search, { target: { value: 'sepolia' } })
+      // Browser filtering: the rows re-render at once, the URL write waits.
+      expect(screen.getByText('Sepolia Co')).toBeDefined()
+      expect(screen.queryByText('Base Co')).toBeNull()
+      expect(lastWrittenUrl()).toBe('')
+      vi.advanceTimersByTime(300)
+      expect(lastWrittenUrl()).toBe('/marketplace?q=sepolia')
+
+      // Back: the address bar changes under the grid, which re-seeds.
+      seedUrl('chainId=8453')
+      rerender(<MerchantGrid merchants={twoChains} loading={false} error={null} onSubmit={vi.fn()} />)
+      expect((screen.getByLabelText('Search merchants') as HTMLInputElement).value).toBe('')
+      expect(screen.getByText('Base Co')).toBeDefined()
+      expect(screen.queryByText('Sepolia Co')).toBeNull()
+    })
+
+    it('drops a category no listed merchant carries, and reads the legacy /catalog key', () => {
+      // `?category=ai` keeps working (the /catalog redirect preserves its
+      // query); a category the served merchants never had is a stale link.
+      seedUrl('category=videogames')
+      render(<MerchantGrid merchants={twoChains} loading={false} error={null} onSubmit={vi.fn()} />)
+      expect(within(categoryGroup()).getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true')
+      expect(screen.getByText('Base Co')).toBeDefined()
     })
   })
 })

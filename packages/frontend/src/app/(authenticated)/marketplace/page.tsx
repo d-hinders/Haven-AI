@@ -1,7 +1,6 @@
 'use client'
 
 import { Suspense, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { MerchantGrid } from '@/components/marketplace/MerchantGrid'
 import CatalogSubmitModal from '@/components/CatalogSubmitModal'
@@ -11,17 +10,17 @@ import { resolveDefaultAccount } from '@/lib/default-account'
 
 /**
  * The grid half of `/marketplace` (#3079, epic #3077). Rendered inside
- * `Suspense` because `useSearchParams` needs a boundary under static
- * rendering: the old `/catalog?category=ai` links redirect here with their
- * query intact (`next.config.ts`), and the grid honours it rather than
- * dropping the filter. The page header sits above the boundary so the
+ * `Suspense` because the grid's list-controls URL state reads
+ * `useSearchParams` (`useListUrlState`, #4114) and needs a boundary under
+ * static rendering: the old `/catalog?category=ai` links redirect here with
+ * their query intact (`next.config.ts`), and the codec honours it rather
+ * than dropping the filter. The page header sits above the boundary so the
  * static shell paints something.
  */
 function MarketplaceContent() {
   const { merchants, loading, error, refetch } = useMerchants()
   const [submitOpen, setSubmitOpen] = useState(false)
-  const initialCategory = useSearchParams()?.get('category') ?? null
-  // #3979: the grid's network filter starts on the user's own network.
+  // #3979: the grid's network facet starts on the user's own network.
   const { user } = useAuth()
   const defaultChainId = resolveDefaultAccount(user?.accounts)?.chain_id ?? null
 
@@ -33,7 +32,6 @@ function MarketplaceContent() {
         error={error}
         onSubmit={() => setSubmitOpen(true)}
         onRetry={() => void refetch()}
-        initialCategory={initialCategory}
         defaultChainId={defaultChainId}
       />
 

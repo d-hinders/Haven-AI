@@ -382,13 +382,16 @@ Structure:
    page. Coming-soon merchants are not cards: they list below the grid as
    linked rows in one "Coming soon" card, which renders only when it has rows
    (#4052).
-2. Filters above the grid, in two rows: search (leading icon, filling the
-   row) with a network dropdown beside it (only offered when more than one
-   chain is listed, starting on the user's own network); then category pills
-   with "Verified only" and "Show test merchants" beside them. Test content
-   has one control — the checkbox — and no category pill. These move onto the
-   [List controls](design-system.md#list-controls--listtoolbar-facetmenu-periodpicker-4110) pattern with #4114 (category stays a pill facet; the network
-   facet's default stays the user's chain), gaining URL state.
+2. The [List controls](design-system.md#list-controls--listtoolbar-facetmenu-periodpicker-4110)
+   toolbar above the grid (#4114): search over name and description, the
+   Network facet (offered when more than one chain is listed, opening on the
+   user's own network), Verified ("Any" / "Verified only") and Test merchants
+   ("Shown" / "Hidden") as single-select facets, and Category as the pill
+   facet. Every control writes the URL — filters survive Back, a refresh and
+   a shared link, and the `/catalog?category=…` redirects keep working. The
+   standard count, chips, Clear filters and no-match copy apply. Test content
+   has one control — the Test merchants facet — and no category pill; its
+   default (shown or hidden) follows whether a listed network is a testnet.
 3. Merchant page: header (monogram/logo, name, category, website, networks,
    Verified — with the funding action, when shown, below the text until
    `xl` and on its right-hand side from there),

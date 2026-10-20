@@ -113,7 +113,19 @@ const SCENARIOS: Scenario[] = [
       await expect(
         page.getByText('Paid APIs and tools your agents can use. Copy a prompt and give it to an agent.', { exact: true }),
       ).toHaveCount(1)
-      await expect(page.getByLabel('Filter marketplace by network')).toHaveValue('84532')
+      // #4114: the list-controls toolbar — the network facet opens on the
+      // seeded account's chain and test merchants show (a listed testnet).
+      // The menu facets live in the ≥sm row; below it they are behind the
+      // phone's "Filters" button.
+      await expect(page.getByTestId('list-toolbar')).toHaveCount(1)
+      await expect(page.getByRole('group', { name: 'Category' })).toBeVisible()
+      await expect(page.getByTestId('list-toolbar-count')).toContainText('merchants')
+      if ((page.viewportSize()?.width ?? 0) >= 640) {
+        await expect(page.getByRole('button', { name: 'Network: Base Sepolia' })).toBeVisible()
+        await expect(page.getByRole('button', { name: 'Test merchants: Shown' })).toBeVisible()
+      } else {
+        await expect(page.getByRole('button', { name: 'Filters', exact: true })).toBeVisible()
+      }
       // Listing a service is a note for sellers below the cards, not a toolbar button.
       await expect(grid.getByRole('button', { name: 'List your service' })).toHaveCount(1)
       await expect(
@@ -152,10 +164,9 @@ const SCENARIOS: Scenario[] = [
       await expect(
         grid.getByTestId(`merchant-card-${havenDemoStore.slug}`).getByText('Test', { exact: true }),
       ).toHaveCount(1)
-      // "Show test merchants" defaults ON: the grid lists both chains
+      // The Test merchants facet defaults to Shown: the grid lists both chains
       // (decision 11) and one of them is Sepolia, so the test merchant card
-      // is visible without any interaction.
-      await expect(page.getByLabel('Show test merchants')).toBeChecked()
+      // is visible without any interaction (#4114 — already asserted above).
       // #4034: checked last, once the cards and notes are proven on screen —
       // run first, it passed against the loading skeleton and saw only the header.
       await expect(page.getByText(/instruction/i)).toHaveCount(0)

@@ -17,6 +17,7 @@ covers:
   - packages/frontend/src/app/(authenticated)/marketplace/page.tsx
   - packages/frontend/src/app/(authenticated)/marketplace/[slug]/page.tsx
   - packages/frontend/src/components/marketplace/MerchantGrid.tsx
+  - packages/frontend/src/components/ui/FacetMenu.tsx
   - packages/frontend/src/components/marketplace/MerchantCard.tsx
   - packages/frontend/src/components/marketplace/ComingSoonMerchants.tsx
   - packages/frontend/src/components/marketplace/MerchantHeader.tsx
@@ -553,36 +554,43 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   the card link's accessible name stays the merchant's) — the merchant page
   still spells the meaning out in visible text. A test merchant carries a
   neutral "Test" badge in the card's badge slot; the full test-merchant note
-  ("payments are real … demo content") is the merchant page's (#4052). Filters, in
-  two rows (#3979): first a search over name and description (leading icon,
-  filling the row, as on Contacts) with the network dropdown beside it, shown
-  only when the listed chains are more than one; then category pills
-  (`components/ui/FilterPill.tsx`, moved out of `CatalogPanel.tsx`) on the
-  left and the "Verified only" and "Show test merchants" checkboxes on the
-  right (the row's bottom margin trimmed below `sm`, where the 44px tap
-  boxes add their height). The network dropdown starts on the chain of the user's default
-  account (`resolveDefaultAccount`) when the listed merchants serve it, else
-  "All networks"; it is derived at read time, so it holds once the user and
-  the merchants load, and any choice overrides it. A merchant that lists no
+  ("payments are real … demo content") is the merchant page's (#4052).
+  Filters are the list-controls toolbar (#4114, epic #4108 — the pattern's
+  own anatomy: search, facets, chips, count): the browser-filtered mode —
+  the merchant list is small, unpaged and has no export, so rows re-render
+  per keystroke and only the URL write waits for a pause. The facets:
+  **Category** is the pill facet (a `FacetMenu` pills row — `FilterPill`
+  renders only inside `FacetMenu` now); **Network**, **Verified**
+  ("Any" / "Verified only") and **Test merchants** ("Shown" / "Hidden") are
+  single-select menus. Every control writes the URL through the codec
+  (`useListUrlState`), so a shared link, a refresh and Back all land on the
+  same grid; `category` keeps the key the old deep links used, so a
+  `/catalog?category=ai` redirect keeps working. The defaults survive the
+  move: with no `chainId` key the network facet opens on the chain of the
+  user's default account (`resolveDefaultAccount`) when the listed merchants
+  serve it AND there is more than one listed chain, else All networks — the
+  default is the codec's `defaultValue`, derived from data that arrives after
+  mount, never captured; an explicit `chainId=all` means All networks. With
+  no `test` key, test merchants show when any of the merchants' listed
+  networks is a testnet (core's faucet field, `isTestnetChain`, not a
+  hard-coded id), read off the served data rather than
+  `NEXT_PUBLIC_HAVEN_ENV` (epic decision 10). A merchant that lists no
   network — coming soon, or every offer self-submitted — stays visible under
-  any network filter. "Show test merchants" is the one control for test
-  content: the `test-fixture` category gets no pill, and a
-  `?category=test-fixture` deep link opens as "All". The pills are built
-  from the merchants that pass the NETWORK filter and the "Show test
-  merchants" toggle — not the category or search filters (#4008) — so pills
-  never vanish while you use them, and a selected category that has no pill
-  under the current network filter resets to "All", derived at read time: a
-  deep link such as `?category=media` under the Base Sepolia default opens
-  as "All", the same no-filter-without-a-pill rule. The checkbox defaults
-  **on** when any of the merchants' listed networks is a testnet (core's
-  faucet field, `isTestnetChain`, not a hard-coded id), read off the served
-  data rather than `NEXT_PUBLIC_HAVEN_ENV` (epic decision 10). Any other
-  `/catalog?category=…` deep link keeps its category — unless the current
-  network filter leaves it no pill, in which case it opens as "All" (#4008).
-  A failed load offers
-  "Try again"; a filter that hides everything offers "Clear filters" (which
-  returns the network to "All networks"); an empty marketplace shows no
-  filter row, only the submit entry point. Below a populated grid, a note for
+  any network filter. Test content has one control: the `test-fixture`
+  category gets no pill, and a `?category=test-fixture` deep link opens as
+  "All". The pills are built from the merchants that pass the NETWORK facet
+  and the Test merchants facet — not the category or search filters (#4008)
+  — so pills never vanish while you use them; a category whose pill the
+  network facet currently hides is not an active filter — a deep link such
+  as `?category=media` under the Base Sepolia default opens as "All" with no
+  chip over it (#4008), the same no-filter-without-a-pill rule. The count is
+  the standard one (rendered merchants at the defaults; "n of all listed"
+  once a chip is up), the no-match copy is `ListNoMatch`'s ("No merchants
+  match these filters" — plural, per the pattern), and a filter that hides
+  everything offers "Clear filters", which returns the whole list to the
+  page defaults (the user's own network, not All). A failed load offers
+  "Try again"; an empty marketplace shows no toolbar, only the submit entry
+  point. Below a populated grid, a note for
   sellers ("Sell an API or MCP tool?") opens the submit modal — listing a
   service is not a toolbar action.
 - **Merchant page** (`app/(authenticated)/marketplace/[slug]/page.tsx`,

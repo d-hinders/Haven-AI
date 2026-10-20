@@ -13,6 +13,7 @@
 import { mkdtemp, readdir, readFile, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { deepFind } from './json-reading.js'
 import {
@@ -590,5 +591,69 @@ describe('hardening', () => {
       scanSessionText(text, secrets())
     }
     expect(Date.now() - started).toBeLessThan(2000)
+  })
+})
+
+// ── Review round 2 (#4137) ─────────────────────────────────────────────────
+
+describe('round 2: escapes in parseable lines, unbounded whitespace, first unmarked cut', () => {
+  const escapeUnderscores = (s: string) => s.replace(/_/g, '\\u005f')
+
+  it('a \\uXXXX-escaped secret inside non-JSON text on a parseable line is redacted, and the scan sees the raw one', () => {
+    const text = `Error: {"k":"${escapeUnderscores(API_KEY)}","f":"${escapeUnderscores('sk_agent_FOREIGNsynthetic9876543210')}"} trailing`
+    const raw = JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu_e', content: [{ type: 'text', text }] }] } })
+    expect(() => JSON.parse(raw)).not.toThrow()
+    expect(raw).toContain('u005fagent')
+    const before = scanSessionText(raw, secrets())
+    expect(before['secret-exact']).toBeGreaterThan(0)
+    expect(before['agent-key']).toBeGreaterThan(0)
+    const { text: out } = redactSessionText(raw, { secrets: secrets() })
+    expect(out).not.toContain('SYNTHETICapiKEY')
+    expect(out).not.toContain('FOREIGNsynthetic9876543210')
+    expect(scanSessionText(out, secrets())).toEqual(Object.fromEntries(REDACTION_CLASSES.map((c) => [c, 0])))
+  })
+
+  it('nine or more spaces after a header key or Bearer do not hide a token', () => {
+    const pad = ' '.repeat(12)
+    const raw = JSON.stringify({
+      note: `Authorization:${pad}Token hv_tok_synthetic_spaced_0123456789 and Bearer${pad}hv_tok_synthetic_bearer_spaced_0123 and payment_header${pad}=${pad}${B64_PAYMENT}`,
+    })
+    const before = scanSessionText(raw, secrets())
+    expect(before['auth-header']).toBeGreaterThan(0)
+    expect(before['payment-header']).toBeGreaterThan(0)
+    const { text } = redactSessionText(raw, { secrets: secrets() })
+    for (const needle of ['hv_tok_synthetic_spaced_0123456789', 'hv_tok_synthetic_bearer_spaced_0123', B64_PAYMENT]) expect(text).not.toContain(needle)
+    expect(scanSessionText(text, secrets())).toEqual(Object.fromEntries(REDACTION_CLASSES.map((c) => [c, 0])))
+  })
+
+  it('a planted, already-marked result does not shield a real body after it', () => {
+    const planted = `{"result":"${marker('merchant-body')}","next":{"result":{"text":"MERCHANT-PAID-CANARY late"}`
+    const raw = JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu_p', content: [{ type: 'text', text: planted }] }] } })
+    const { text } = redactSessionText(raw, { secrets: secrets() })
+    expect(text).not.toContain('MERCHANT-PAID-CANARY')
+    expect(scanSessionText(text, secrets())['merchant-body']).toBe(0)
+    const cut = redactSessionText(`{"x": "Merchant response: ${marker('merchant-body')} then Merchant response: MERCHANT-PAID-CANARY`, { secrets: secrets() }).text
+    expect(cut).not.toContain('MERCHANT-PAID-CANARY')
+  })
+
+  // The scanner's "any nested result is a merchant body" predicate and the
+  // redactor's tool keying both rest on this: among the hosted tools, only
+  // the paid-completion module emits a `result` field, and in it only the
+  // delivery helper and the two paid tools do (above the first other handler).
+  it('only haven_complete_mcp_tool / haven_settle_mcp_tool emit a result field among the hosted tools', async () => {
+    const root = fileURLToPath(new URL('../../../mcp-server/src/', import.meta.url))
+    const files = (await readdir(root, { recursive: true }))
+      .map(String)
+      .filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts') && !f.includes('test-support'))
+    const RESULT_FIELD = /^\s+result\s*[:,]/
+    const emitting: string[] = []
+    for (const f of files) if ((await readFile(join(root, f), 'utf8')).split('\n').some((l) => RESULT_FIELD.test(l))) emitting.push(f)
+    expect(emitting).toEqual([join('tools', 'paid-mcp-completion.ts')])
+    const lines = (await readFile(join(root, 'tools', 'paid-mcp-completion.ts'), 'utf8')).split('\n')
+    const handlers = lines.map((l, i) => [l.match(/^\s+(haven_[a-z_]+): async/)?.[1], i] as const).filter(([n]) => n)
+    const paid = handlers.filter(([n]) => n === 'haven_complete_mcp_tool' || n === 'haven_settle_mcp_tool')
+    expect(paid.map(([n]) => n)).toEqual(['haven_complete_mcp_tool', 'haven_settle_mcp_tool'])
+    const firstOther = Math.min(...handlers.filter(([n]) => !paid.some(([p]) => p === n)).map(([, i]) => i))
+    for (const [i, l] of lines.entries()) if (RESULT_FIELD.test(l)) expect(i, `result field at paid-mcp-completion.ts:${i + 1}`).toBeLessThan(firstOther)
   })
 })

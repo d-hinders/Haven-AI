@@ -234,11 +234,33 @@ test('every upload path is on the allowlist, and none names the raw claude-sessi
 const SECRET_REF = /\bsecrets\s*(?:\.\s*([A-Za-z0-9_]+)|\[\s*['"]([A-Za-z0-9_]+)['"]\s*\])/gi
 const secretRefs = (text) => [...text.matchAll(SECRET_REF)].map((m) => (m[1] ?? m[2]).toUpperCase())
 
-test('no step references the secrets object as a whole', () => {
+test('no step references the secrets object as a whole, or by a computed index', () => {
   for (const line of live) {
     for (const expr of line.matchAll(/\$\{\{([\s\S]*?)\}\}/g)) {
       assert.ok(!/\bsecrets\b(?!\s*[.[])/i.test(expr[1]), `a whole-object secrets reference: ${line.trim()}`)
+      // `secrets[format(...)]` names a secret the inventory cannot read.
+      assert.ok(!/\bsecrets\s*\[(?!\s*['"][A-Za-z0-9_]+['"]\s*\])/i.test(expr[1]), `a secrets index that is not a quoted literal: ${line.trim()}`)
     }
+  }
+})
+
+// The raw streams' path may appear in exactly two places: where the eval
+// step tells the adapter to write them, and where the redactor reads them.
+// Anything else (a `cat … >> evals-report.json.summary.txt`, a copy into an
+// allowlisted report file) would launder raw streams past the upload
+// allowlist. Residual, not caught here: a path assembled at runtime from
+// pieces (a variable holding "claude-" + "sessions"), and a composite
+// action that uploads on its own.
+test('claude-sessions is named only by the eval step log base and the redactor input', () => {
+  const run = stepNamed(/Run the eval slice/)
+  assert.ok(run && redact, 'the eval or redact step is gone — update this guard')
+  const allowed = [
+    ...run.filter((line) => /^\s+QA_EVAL_CLAUDE_CODE_SESSION_LOG: \$\{\{ runner\.temp \}\}\/claude-sessions\s*$/.test(line)),
+    ...redact.filter((line) => /^\s+--in-prefix="\$RUNNER_TEMP\/claude-sessions"\s*$/.test(line)),
+  ]
+  assert.equal(allowed.length, 2, 'expected exactly the log-base env line and the redactor --in-prefix line')
+  for (const line of live) {
+    if (/claude-sessions/i.test(line)) assert.ok(allowed.includes(line), `claude-sessions is named outside the two allowed lines: ${line.trim()}`)
   }
 })
 

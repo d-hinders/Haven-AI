@@ -416,8 +416,9 @@ packages/qa-agent`) and uploads the result as
   which are kept). The step prints how many secrets it loaded, by name.
 - It redacts into a staging directory, prints a per-class count of what it
   found in the raw input (numbers only, the positive control), then rescans
-  the staged copy with a separate detector for every class. The scanner shares
-  no code path with the redaction rules: it builds its exact-value detectors
+  the staged copy with a separate detector for every class (separate
+  detectors; shared parsing helpers such as the JSON reader and the
+  `\uXXXX` decoder). The scanner builds its exact-value detectors
   from the raw secret values itself (a lowercased substring search over the
   decoded strings and their JSON-escaped forms, its own URL splitter, and a
   base64 decode of every base64-looking run), and it treats ANY nested
@@ -434,11 +435,14 @@ packages/qa-agent`) and uploads the result as
   `::error::` with each class and its count (never a value), and the job
   fails. The report artifact has already uploaded.
 - A line that fails `JSON.parse` (a stream cut off by a timeout's SIGKILL)
-  has its `\uXXXX` escapes decoded, then takes the string rules; it is never
-  copied raw.
+  takes the string rules; it is never copied raw. Every string, parsed or
+  not, has its `\uXXXX` escapes decoded before the rules, and the scan reads
+  each string both as it is and decoded.
 
 Each redaction replaces the whole value, prefix included, with
-`[REDACTED:<class>]`:
+`[REDACTED:<class>]`. Key names are compared lowercased with `_` and `-`
+removed, so `paymentHeader`, `PAYMENT-SIGNATURE` and `delegationSignature`
+all match:
 
 | Class | What goes |
 |---|---|
@@ -446,7 +450,7 @@ Each redaction replaces the whole value, prefix included, with
 | `rpc-key` | the key-bearing parts of a URL-shaped secret: path segments, query keys and values, and the fragment, of 12+ characters and without a colon (the `secretSegments` rule), plus the basic-auth password (and a 12+ username). Public network slugs (`base-sepolia` and the like) are skipped. The host stays, so the URL keeps its shape |
 | `agent-key` | any `sk_agent_…` key, this agent's or another's |
 | `anthropic-key` | any `sk-ant-…` value |
-| `auth-header` | `Authorization` values and `Bearer …` anywhere. Key names everywhere are compared lowercased with `_` and `-` removed, so `paymentHeader`, `PAYMENT-SIGNATURE` and `delegationSignature` all match |
+| `auth-header` | `Authorization` values and `Bearer …` anywhere |
 | `payment-header` | `payment_header`, `PAYMENT-SIGNATURE`, `X-PAYMENT` values |
 | `siwx-header` | `sign_in_with_x_header`, `SIGN-IN-WITH-X` values |
 | `signature` | string values of any key ending in `signature`, and any `0x` + 130-hex (65-byte) signature anywhere |
@@ -469,7 +473,11 @@ everything from its first nested `result`, `merchant_body` or
 forms above and the pattern classes; it cannot prove a secret is absent in a
 form it does not know: percent-encoded or hex-encoded, split across lines or
 strings, reversed or otherwise transformed, or a mixed-case rendering of the
-delegate key inside base64. The agent under test cannot produce such forms on
+delegate key inside base64. For a URL-shaped secret it also cannot see a key
+in the host (`https://<key>.rpc.example`), or a key segment under 12
+characters when the URL has another 12+ segment (the URL is then not
+redacted whole). A `\uXXXX` escape of a quote or a backslash is left
+encoded, and an escape nested deeper than 8 backslashes is not read. The agent under test cannot produce such forms on
 its own (it has no Bash, file or web tool, only the two Haven servers), so
 they could only come from a server's own output.
 

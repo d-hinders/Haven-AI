@@ -17,8 +17,9 @@
  *     envelope inside a `tool_result` text block, is parsed, redacted and
  *     re-serialized in place); a line that does NOT parse (a stream truncated
  *     by SIGKILL) goes through the string rules. No line is ever copied raw.
- *  3. SCAN the staged output with a SEPARATE detector per rule class. The
- *     scanner shares no code path with the redactor's rules: it builds its
+ *  3. SCAN the staged output with a SEPARATE detector per rule class
+ *     (separate detectors; shared parsing helpers such as `parseMaybeJson`
+ *     and the `\uXXXX` decoder). The scanner builds its
  *     exact-value detectors from the raw secret values itself (a lowercased
  *     substring search over decoded strings and their JSON-escaped forms, its
  *     own URL splitter, a base64 DECODE of every base64-looking run), and it
@@ -317,12 +318,12 @@ const Q = `(?:\\\\{0,8}["'])?`
 const VALUE = `[^\\s"'\\\\,;}\\]]+`
 const textKeyRule = (cls: RedactionClass, key: string, valuePrefix = '') => ({
   cls,
-  re: new RegExp(`(${key}${Q}\\s{0,8}[:=]\\s{0,8}${Q})(?!\\[REDACTED:)${valuePrefix}${VALUE}`, 'gi'),
+  re: new RegExp(`(${key}${Q}\\s*[:=]\\s*${Q})(?!\\[REDACTED:)${valuePrefix}${VALUE}`, 'gi'),
 })
 const TEXT_KEY_RULES: Array<{ cls: RedactionClass; re: RegExp }> = [
   textKeyRule('payment-header', '\\b(?:payment[_-]?header|payment[_-]?signature|x[_-]?payment)'),
   textKeyRule('siwx-header', '\\bsign[_-]?in[_-]?with[_-]?x(?:[_-]?header)?'),
-  textKeyRule('auth-header', '\\b(?:proxy[_-]?)?authorization', '(?![A-Za-z]{1,32}\\s{1,8}\\[REDACTED:)(?:[A-Za-z][A-Za-z0-9-]{0,31}\\s{1,8})?'),
+  textKeyRule('auth-header', '\\b(?:proxy[_-]?)?authorization', '(?![A-Za-z]{1,32}\\s+\\[REDACTED:)(?:[A-Za-z][A-Za-z0-9-]{0,31}\\s+)?'),
   // No prefix before `signature`: any key that ENDS in it, matched linearly.
   textKeyRule('signature', 'signature', '(?!null\\b)'),
 ]
@@ -330,7 +331,7 @@ const TEXT_KEY_RULES: Array<{ cls: RedactionClass; re: RegExp }> = [
 /** The pattern rules, in application order. */
 const PATTERN_RULES: Array<{ cls: RedactionClass; re: RegExp }> = [
   // `Bearer <token>` anywhere, the scheme word included.
-  { cls: 'auth-header', re: /\bBearer\s{1,8}[A-Za-z0-9._~+/=-]+/gi },
+  { cls: 'auth-header', re: /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi },
   { cls: 'anthropic-key', re: /sk-ant-[A-Za-z0-9_-]*/g },
   { cls: 'agent-key', re: /sk_agent_[A-Za-z0-9_-]*/g },
   // A base64(url) blob of JSON (x402 headers, JWTs), with any `.`-joined
@@ -341,9 +342,11 @@ const PATTERN_RULES: Array<{ cls: RedactionClass; re: RegExp }> = [
 ]
 
 /** A merchant body echoed in a refusal message (`paid-mcp-completion.ts`, MERCHANT_REJECTED_AFTER_FUNDING). */
-const MERCHANT_RESPONSE_LABEL = /Merchant response:\s{0,8}/i
+const MERCHANT_RESPONSE_LABEL = /Merchant response:\s*/gi
+/** A `merchant_body` key at up to 8 escape levels (group 1: the backslashes). */
+const MERCHANT_BODY_KEY_TEXT = /(\\{0,8})"merchant[_-]?body\1"\s*:\s*/gi
 /** A `result` key at up to 8 escape levels (group 1: the backslashes). */
-const RESULT_KEY = /(\\{0,8})"result\1"\s{0,8}:\s{0,8}/g
+const RESULT_KEY = /(\\{0,8})"result\1"\s*:\s*/g
 
 export interface RedactOptions {
   secrets: LoadedSecrets
@@ -375,7 +378,9 @@ class Redactor {
 
   /** The string rules: secrets, then the text key rules, then the patterns. */
   strings(text: string, resultLine = false): string {
-    let out = text
+    // Every string, parsed leaf or not: an escaped `sk\u005fagent_…` inside
+    // non-JSON text (`Error: {"k":"…"} trailing`) is seen decoded.
+    let out = decodeUnicodeEscapes(text)
     for (const needle of this.opts.secrets.needles) out = this.replace(out, needle.cls, needle.re)
     out = this.replace(out, 'auth-header', PATTERN_RULES[0].re)
     out = this.merchantBodyText(out, resultLine)
@@ -394,23 +399,29 @@ class Redactor {
   private merchantBodyText(text: string, resultLine: boolean): string {
     if (!this.on('merchant-body')) return text
     const cuts: Array<{ at: number; tail: string }> = []
+    const M = marker('merchant-body')
+    // The FIRST UNMARKED carrier of each kind: an already-marked one earlier
+    // in the text must not shield a real body after it.
     for (const m of text.matchAll(RESULT_KEY)) {
       if (resultLine && m[1] === '') continue
       const q = m[1]
       const at = m.index + m[0].length
-      if (!text.startsWith(`${q}"${marker('merchant-body')}`, at)) cuts.push({ at, tail: `${q}"${marker('merchant-body')}${q}"` })
+      if (text.startsWith(`${q}"${M}`, at)) continue
+      cuts.push({ at, tail: `${q}"${M}${q}"` })
       break
     }
-    const body = /(\\{0,8})"merchant[_-]?body\1"\s{0,8}:\s{0,8}/i.exec(text)
-    if (body) {
-      const q = body[1]
-      const at = body.index + body[0].length
-      if (!text.startsWith(`${q}"${marker('merchant-body')}`, at)) cuts.push({ at, tail: `${q}"${marker('merchant-body')}${q}"` })
+    for (const m of text.matchAll(MERCHANT_BODY_KEY_TEXT)) {
+      const q = m[1]
+      const at = m.index + m[0].length
+      if (text.startsWith(`${q}"${M}`, at)) continue
+      cuts.push({ at, tail: `${q}"${M}${q}"` })
+      break
     }
-    const label = MERCHANT_RESPONSE_LABEL.exec(text)
-    if (label) {
-      const at = label.index + label[0].length
-      if (!text.startsWith(marker('merchant-body'), at)) cuts.push({ at, tail: marker('merchant-body') })
+    for (const m of text.matchAll(MERCHANT_RESPONSE_LABEL)) {
+      const at = m.index + m[0].length
+      if (text.startsWith(M, at)) continue
+      cuts.push({ at, tail: M })
+      break
     }
     if (cuts.length === 0) return text
     const first = cuts.reduce((a, b) => (b.at < a.at ? b : a))
@@ -498,7 +509,7 @@ class Redactor {
       parsed = JSON.parse(line)
     } catch {
       // Not JSON (a stream cut off by SIGKILL): string rules, never raw.
-      return this.strings(decodeUnicodeEscapes(line), /^\{"type":"result"/.test(line))
+      return this.strings(line, /^\{"type":"result"/.test(line))
     }
     const paid = this.trackTools(parsed)
     return JSON.stringify(this.value(parsed, paid))
@@ -526,20 +537,20 @@ export function redactSessionText(raw: string, opts: RedactOptions): { text: str
 const D_Q = `\\\\{0,8}["']?`
 const detectKey = (cls: RedactionClass, key: string, extra = '') => ({
   cls,
-  re: new RegExp(`${key}${D_Q}\\s{0,8}[:=]\\s{0,8}${D_Q}(?!\\[REDACTED:)${extra}[A-Za-z0-9{[]`, 'gi'),
+  re: new RegExp(`${key}${D_Q}\\s*[:=]\\s*${D_Q}(?!\\[REDACTED:)${extra}[A-Za-z0-9{[]`, 'gi'),
 })
 const DETECT_TEXT: Array<{ cls: RedactionClass; re: RegExp }> = [
   { cls: 'agent-key', re: /sk_agent_/g },
   { cls: 'anthropic-key', re: /sk-ant-/g },
-  { cls: 'auth-header', re: /\bBearer\s{1,8}[A-Za-z0-9]/gi },
-  detectKey('auth-header', '\\bauthorization', '(?![A-Za-z]{1,32}\\s{1,8}\\[REDACTED:)'),
+  { cls: 'auth-header', re: /\bBearer\s+[A-Za-z0-9]/gi },
+  detectKey('auth-header', '\\bauthorization', '(?![A-Za-z]{1,32}\\s+\\[REDACTED:)'),
   detectKey('payment-header', '\\b(?:payment[_-]?header|payment[_-]?signature|x[_-]?payment)'),
   detectKey('siwx-header', '\\bsign[_-]?in[_-]?with[_-]?x(?:[_-]?header)?'),
   { cls: 'signature', re: /0x[0-9a-fA-F]{130}/g },
   detectKey('signature', 'signature', '(?!null\\b)'),
   { cls: 'b64-json', re: /eyJ[A-Za-z0-9_-]{20,}/g },
-  { cls: 'merchant-body', re: /merchant[_-]?body\\{0,8}"\s{0,8}:(?!\s{0,8}\\{0,8}"\[REDACTED:)(?!\s{0,8}null\b)/gi },
-  { cls: 'merchant-body', re: /Merchant response:(?!\s{0,8}\[REDACTED:merchant-body\])\s{0,8}\S/gi },
+  { cls: 'merchant-body', re: /merchant[_-]?body\\{0,8}"\s*:(?!\s*\\{0,8}"\[REDACTED:)(?!\s*null\b)/gi },
+  { cls: 'merchant-body', re: /Merchant response:(?!\s*\[REDACTED:merchant-body\])\s*\S/gi },
 ]
 
 /** The scanner's own exact-value probe, built from the raw values. */
@@ -627,7 +638,14 @@ class Scanner {
     this.counts[cls] += n
   }
 
+  /** Every string is scanned as it is AND with its `\\uXXXX` escapes decoded. */
   text(text: string, resultLine = false) {
+    this.textOnce(text, resultLine)
+    const decoded = decodeUnicodeEscapes(text)
+    if (decoded !== text) this.textOnce(decoded, resultLine)
+  }
+
+  private textOnce(text: string, resultLine: boolean) {
     const lower = text.toLowerCase()
     const runs = decodedRuns(text)
     for (const probe of this.probes) {
@@ -640,10 +658,10 @@ class Scanner {
       const n = text.match(rule.re)?.length ?? 0
       if (n) this.hit(rule.cls, n)
     }
-    for (const m of text.matchAll(/(\\{0,8})"result\1"\s{0,8}:/g)) {
+    for (const m of text.matchAll(/(\\{0,8})"result\1"\s*:/g)) {
       if (resultLine && m[1] === '') continue
       let at = m.index + m[0].length
-      for (let i = 0; i < 8 && /\s/.test(text[at] ?? ''); i++) at++
+      while (/\s/.test(text[at] ?? '')) at++
       if (!text.startsWith(`${m[1]}"${marker('merchant-body')}`, at)) this.hit('merchant-body')
     }
   }
@@ -699,10 +717,7 @@ class Scanner {
     try {
       parsed = JSON.parse(line)
     } catch {
-      const resultLine = /^\{"type":"result"/.test(line)
-      this.text(line, resultLine)
-      const decoded = decodeUnicodeEscapes(line)
-      if (decoded !== line) this.text(decoded, resultLine)
+      this.text(line, /^\{"type":"result"/.test(line))
       return
     }
     this.value(parsed, true)

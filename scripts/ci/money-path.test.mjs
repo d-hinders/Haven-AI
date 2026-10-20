@@ -507,6 +507,44 @@ describe('money-path list stays in one piece', () => {
     }
   })
 
+  test('the SDK merchant-answer decision is RUNTIME money-path — a change to it gates promotion (#4122)', () => {
+    // MerchantCompletion.retryRequest decides, after the funding leg has moved
+    // USDC, whether the merchant accepted or the payment is a rejection after
+    // funding, and reports the settlement hash Haven records. It matched no
+    // glob: of the 17 commits that touched it since the facade refactor
+    // 399b1c00f, three touched no perimeter file and went unlabelled
+    // (4e52d4b35, fefd9dc45, 98e1c9cc8). Runtime, not control: qa-dev's
+    // x402-delegation-3009 and x402-delegation-3009-grace-resume legs drive
+    // retryRequest through client.fetch / resumeX402Payment. The labeler and
+    // SKILL.md pins read the UNION of both lists, so without this test the
+    // glob could drift into controlGlobs silently. Mutation: move the glob to
+    // controlGlobs (or drop it) and this fails by name.
+    const f = 'packages/sdk/src/merchant-completion.ts'
+    assert.ok(trackedFiles().includes(f), `${f} no longer exists — repoint this pin`)
+    assert.ok(
+      moneyPathFiles([f], loadMoneyPathGlobs()).length === 1,
+      `${f} must be matched by a RUNTIME money-path glob — it decides a funded payment's ` +
+        'merchant outcome, and the money-flow harness exercises it (#4122)',
+    )
+  })
+
+  test('the SDK client stays off the money-path list — it only wires the guards in (#3283, #4122)', () => {
+    // A deliberate decision, recorded by #3283 and re-taken by the owner on
+    // #4120 (2026-10-20): client.ts calls the listed guards and
+    // merchant-completion.ts, and listing it would put every SDK transport
+    // change on the runtime list. If it starts deciding spend itself, list the
+    // deciding code as its own file; do not delete this pin to list client.ts.
+    // Mutation: add packages/sdk/src/client.ts to `globs` and this fails.
+    const f = 'packages/sdk/src/client.ts'
+    assert.ok(trackedFiles().includes(f), `${f} no longer exists — drop this pin`)
+    const all = [...loadMoneyPathGlobs(), ...loadMoneyPathControlGlobs()]
+    assert.equal(
+      moneyPathFiles([f], all).length,
+      0,
+      `a money-path glob now matches ${f}, which #3283 and #4122 deliberately left off the list`,
+    )
+  })
+
   test('the deliberately off-list neighbours stay off — scope a glob down, do not widen to the module (#3661)', () => {
     // #3661 chose FILE-level globs for modules/payments/: the rest of the
     // module is the refusal record (which by design cannot change the
@@ -562,15 +600,16 @@ describe('money-path list stays in one piece', () => {
       // binding check (userop-binding) and the signing-surface guard moved in
       // by #3283 (delegate-account, direct-payment-guard, redemption-guard,
       // settlement-child), joined by the task/sub-budget guards (#3661), are
-      // spend authority, and those files ARE on the runtime list; the rest is
-      // transport.
+      // spend authority, and merchant-completion (#4122) decides a funded
+      // payment's merchant outcome; those nine files ARE on the runtime list.
+      // The rest is transport — client.ts among it, pinned off above.
       // The doc covers all four because the CASP perimeter question (does
       // Haven hold or move funds?) still applies to what they ship. Widening
       // any of these to `globs` is an owner decision: every SDK/connector/CLI/
       // local-runtime PR would then owe a covering QA run.
       // A DOC_ONLY entry whose files are ALL on the list is stale and fails
       // below — an exclusion must exclude something.
-      ['packages/sdk/src/**', 'client library; only signer.ts, userop-binding.ts, the #3283 signing guard and the #3661 budget guards are on the runtime list — see #3098'],
+      ['packages/sdk/src/**', 'client library; only signer.ts, userop-binding.ts, the #3283 signing guard, the #3661 budget guards and merchant-completion.ts (#4122) are on the runtime list — see #3098'],
       ['packages/cli/src/**', 'client CLI; not deployed by Haven — see #3098'],
       ['packages/connect/src/**', 'the dashboard\'s connector, runs on the user\'s machine — see #3098'],
       ['packages/mcp/src/**', 'the local MCP runtime, runs in the agent\'s process — see #3098'],

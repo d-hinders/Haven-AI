@@ -840,7 +840,13 @@ you need the reasoning. Never edit one without the other — CI will not let you
   spend authority); `packages/sdk/src/task-budget-guards.ts` and
   `packages/sdk/src/sub-budget-guards.ts` join them on the same rule (#3661 — the
   signer's own checks on task and sub-budget children before it signs; both
-  arrived after #3283). Each SDK file is written here
+  arrived after #3283); `packages/sdk/src/merchant-completion.ts` joins them as
+  runtime (#4122 — `MerchantCompletion.retryRequest` decides, after the funding
+  leg has moved USDC, whether the merchant accepted or the payment is a rejection
+  after funding, and reports the settlement hash Haven records; three commits
+  changed it with no perimeter file beside them). The SDK client stays off
+  deliberately (#3283): it only wires these guards in, and listing it would put
+  every SDK transport change on the runtime list. Each SDK file is written here
   as its full path, because the parity test in `scripts/ci/money-path.test.mjs`
   matches full tokens only — a bare file name or a wildcard-only tail names
   nothing (#4122);

@@ -6521,7 +6521,7 @@ export type components = {
             x402ResourceUrl: string | null;
             /** @description The newest member’s raw `to` field — the merchant address on outbound payments, the account’s own address on deposits. */
             to: string;
-            /** @description Contact or receipt-merchant name resolved for the counterparty, else the name of the user's own account a transfer went to (#4099); null otherwise (always null on deposits). */
+            /** @description Contact or receipt-merchant name resolved for the counterparty, else the name of the user's own account on the other side of a transfer between two of their accounts (#4099); null otherwise. On a deposit it is set only for a transfer from another of the user's own accounts, and that deposit is its own group. */
             merchantName: string | null;
             /** @description The activity class, e.g. `delegate_sweep`; null for plain transfers and x402 payments. */
             activityType: string | null;

@@ -2100,7 +2100,8 @@ Use `TransactionActivityRow` for compact dashboard, account detail, or agent det
 `counterpartyLabel` in `lib/transaction-presentation.tsx` with the opt-in
 `noAddress` mode, so a raw address never titles a row there: the merchant's
 site for x402, the receipt/contact name the backend resolved, "Deposit" for
-inbound, "New recipient" when nothing resolves, "Agent payment" when an x402
+inbound — or "From <account>" for money that came from another of the user's
+own accounts (#4099) — "New recipient" when nothing resolves, "Agent payment" when an x402
 row carries no resource URL, and "Returned from <agent>" for sweeps. The
 subtitle is the agent's name; "From My account" appears only when the user
 has more than one account. A confirmed row carries no status badge — its

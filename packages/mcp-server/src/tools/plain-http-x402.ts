@@ -410,6 +410,10 @@ function evidenceHandoff(
   return { nextTool: 'haven_get_payment_status', nextArguments: { payment_id: paymentId } }
 }
 
+// #4123: the retryable arm names payment_header (an EIP-3009 settlement
+// report is refused without it before its hash is judged). An erc7710
+// report never reaches this arm (`erc7710OutcomeRefusal`), so it is said
+// unconditionally; next_arguments stay unchanged.
 function evidenceReason(reported: ReportedSettlementEvidence): string {
   if (reported.recorded) {
     return (
@@ -420,7 +424,8 @@ function evidenceReason(reported: ReportedSettlementEvidence): string {
   if (reported.outcome === 'retryable') {
     return (
       'Recorded. The settlement hash could not be verified yet (the chain read failed, or the ' +
-      'transaction is not mined); retry haven_report_settlement_evidence with the same hash.'
+      'transaction is not mined). Call next_tool (haven_report_settlement_evidence) again shortly ' +
+      'with next_arguments, adding payment_header: the exact payment_header you sent the merchant.'
     )
   }
   if (reported.code === SETTLEMENT_PROOF_HEADER_MISSING_CODE) {

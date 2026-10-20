@@ -728,6 +728,72 @@ describe('haven_report_x402_outcome', () => {
       }
     })
 
+    // #4123: the retryable arm with the payment_header passed — the state the
+    // backend can actually answer 503 in (a header-less EIP-3009 settlement
+    // report is refused for want of the header before its hash is judged).
+    // The case above stays header-less on purpose: against a backend that
+    // predates the header requirement it is reachable, and the pair pins that
+    // the handoff does not depend on the header.
+    it('a retryable verification with payment_header passed forwards it, keeps the handoff, and says to add it again', async () => {
+      const PAYMENT_HEADER = encodeBase64Json({ x402Version: 1, scheme: 'exact', payload: { signature: '0x' + '5a'.repeat(65) } })
+      vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+        const method = (init.method ?? 'GET').toUpperCase()
+        const path = new URL(url).pathname
+        const body = init.body ? JSON.parse(init.body as string) : undefined
+        recordedCalls().push({ url, method, body, headers: (init.headers ?? {}) as Record<string, string> })
+        const respond = (status: number, payload: unknown) => {
+          const res = {
+            ok: status >= 200 && status < 300,
+            status,
+            headers: new Headers(),
+            json: async () => payload,
+            text: async () => JSON.stringify(payload),
+          }
+          return { ...res, clone: () => res }
+        }
+        // The outcome's own funding-hash post is accepted; the settlement
+        // report (the merchant's hash) answers 503.
+        if (path.endsWith('/machine-payments/evidence')) {
+          return body?.txHash === MERCHANT_TX
+            ? respond(503, { error: 'settlement_unobservable' })
+            : respond(202, { evidence: { id: 'ev_1' } })
+        }
+        if (path.endsWith('/status')) return respond(200, statusBody({ settlement_scheme: 'eip3009' }))
+        return respond(404, { error: 'unexpected route' })
+      })
+
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      try {
+        const pending = handlers().haven_report_x402_outcome({
+          payment_id: 'pay_x402',
+          outcome: 'accepted',
+          merchant_status: 200,
+          settlement_tx_hash: MERCHANT_TX,
+          payment_header: PAYMENT_HEADER,
+        })
+        await vi.advanceTimersByTimeAsync(8_000)
+        const result = ok<{
+          settlement_evidence: Record<string, unknown>
+          next_tool?: string
+          next_arguments?: Record<string, unknown>
+          reason?: string
+        }>(await pending)
+        expect(result.data.settlement_evidence).toMatchObject({ recorded: false, outcome: 'retryable', status_code: 503 })
+        // The header reached the settlement report it proves.
+        const settlementPost = evidencePosts().find((c) => c.body?.txHash === MERCHANT_TX)
+        expect(settlementPost?.body?.paymentProofHeader).toBe(PAYMENT_HEADER)
+        // next_arguments byte-identical to the header-less case: the header
+        // is the agent's to add, never prefilled.
+        expect(result.data.next_tool).toBe('mcp__haven__haven_report_settlement_evidence')
+        expect(result.data.next_arguments).toEqual({ payment_id: 'pay_x402', settlement_tx_hash: MERCHANT_TX })
+        expect(result.data.reason).toContain(
+          'adding payment_header: the exact payment_header you sent the merchant',
+        )
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
     it('a REJECTED outcome ignores attached evidence with a warning and still sweeps', async () => {
       stubFetch(HAPPY_ROUTES)
       const result = ok<{

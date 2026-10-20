@@ -4,6 +4,22 @@
  */
 
 /**
+ * "17 May 2026" — the ONE long-date rule (en-GB, day month year, #4166).
+ * The app's dates were rendered in two voices — `passkeyLabels` said
+ * "October 16, 2026" (en-US) while the account page said "16 October 2026"
+ * (en-GB) for the same instant. en-GB is the app's dominant voice
+ * (`CompanyDetailsCard`, sub-budget, analytics), so it is the rule here, and
+ * both surfaces read it.
+ */
+export function formatLongDate(date: string | Date): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(typeof date === 'string' ? new Date(date) : date)
+}
+
+/**
  * `0x1234…abcd` — the ONE address truncation rule (6 + ellipsis + 4).
  * Render addresses through `<Address>` (components/haven) where possible;
  * this is the underlying rule for plain-string contexts (#853).

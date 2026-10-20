@@ -14,11 +14,14 @@
  *   account holds money; an empty account makes Receive primary and Send
  *   disabled.
  * - **Summary card.** Three columns in one card, stacking on a phone:
- *   Balance (one figure), Holdings (each token with its full-precision
- *   amount under a small "Amount" label; one token shows no value, a
+ *   Balance (one figure), Holdings (a header row — "Holdings" left, a small
+ *   "Amount" label right — with each token's mark and symbol on the left and
+ *   its full-precision amount right-aligned; one token shows no value, a
  *   non-USD display currency shows the rate, two or more show values —
  *   `lib/account-holdings.ts` owns those rules), and Last 30 days (Money in
- *   and Money out only — `hooks/useAccountMoneyFlow.ts`).
+ *   and Money out side by side — `hooks/useAccountMoneyFlow.ts`). The
+ *   side-by-side figures and the right-aligned amounts are mockup v9
+ *   (#4166): the three columns' contents then end at about the same height.
  * - **Agents tab.** Every active agent drawn with #4096's shared `AgentRow`
  *   from the same dashboard overview the dashboard reads (filtered by
  *   `accountId`), plus one budget-snapshot summary line
@@ -101,7 +104,7 @@ import { getExplorerUrlOrNull, resolveChainOrNull, DEFAULT_CHAIN_ID } from '@/li
 // #3127 (finding 6): the shared formatter — this page's inline copy was the
 // third drift site that let /accounts render `kr13,000.50` while this page
 // rendered `13 000,50 kr` for the same figure.
-import { formatFiat, truncate, timeAgo } from '@/lib/format'
+import { formatFiat, formatLongDate, truncate, timeAgo } from '@/lib/format'
 import { isTestnetChain } from '@/lib/marketplace'
 import { holdingRows, holdingRateLine } from '@/lib/account-holdings'
 import { agentSpendSummaryLine } from '@/lib/agent-spend-summary'
@@ -114,12 +117,6 @@ type AccountTab = 'activity' | 'agents' | 'security'
 
 function accountTabFromUrl(raw: string | null): AccountTab {
   return raw === 'agents' || raw === 'security' ? raw : 'activity'
-}
-
-/** "12 May 2026" — deterministic, so the account page and its tests agree. */
-function formatCreatedDate(iso: string): string {
-  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
-    .format(new Date(iso))
 }
 
 export default function AccountDetailClient() {
@@ -483,10 +480,17 @@ export default function AccountDetailClient() {
             )}
           </section>
 
-          {/* Holdings — the token rules live in lib/account-holdings.ts. */}
+          {/* Holdings — the token rules live in lib/account-holdings.ts. The
+              mockup-v9 anatomy (#4166): "Holdings" on the left of the header
+              row with a small "Amount" column label on the right, and each
+              token's full-precision amount right-aligned under it — the
+              amount no longer runs inline after the symbol. The mark is a
+              quiet monogram disc (the token's initial), not a brand logo. */}
           <section aria-label="Holdings" className="p-5 sm:p-6">
-            <p className="text-sm font-medium text-[var(--v2-ink-2)]">Holdings</p>
-            <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Amount</p>
+            <div className="flex items-baseline justify-between">
+              <p className="text-sm font-medium text-[var(--v2-ink-2)]">Holdings</p>
+              <p className="text-xs text-[var(--v2-ink-3)]">Amount</p>
+            </div>
             {portfolioLoading ? (
               <div className="mt-3 space-y-2" role="status" aria-busy="true" aria-label="Loading holdings">
                 <div className="h-4 w-32 rounded bg-[var(--v2-surface-2)] animate-pulse" />
@@ -500,28 +504,42 @@ export default function AccountDetailClient() {
                   const rateLine = holdingRateLine(row, currency)
                   return (
                     <li key={row.symbol}>
-                      <p className="text-sm text-[var(--v2-ink)]">
-                        <span className="font-medium">{row.symbol}</span>{' '}
-                        <span className="font-mono v2-tabular">{row.amount}</span>
-                        {/* #3295: this token's read failed — the amount is
-                            the last-known balance, and the row says how old
-                            it is. Never an unmarked figure. */}
-                        {row.balanceFreshness && (
-                          <span className="ml-2">
-                            <BalanceFreshnessIndicator freshness={row.balanceFreshness} size="compact" />
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span
+                            aria-hidden="true"
+                            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--v2-surface-2)] text-xs font-semibold text-[var(--v2-ink-2)]"
+                          >
+                            {row.symbol.charAt(0)}
                           </span>
-                        )}
-                      </p>
+                          <span className="min-w-0 truncate text-sm font-medium text-[var(--v2-ink)]">
+                            {row.symbol}
+                          </span>
+                        </span>
+                        <span className="font-mono text-sm text-[var(--v2-ink)] v2-tabular">
+                          {row.amount}
+                          {/* #3295: this token's read failed — the amount is
+                              the last-known balance, and the row says how old
+                              it is. Never an unmarked figure. */}
+                          {row.balanceFreshness && (
+                            <span className="ml-2">
+                              <BalanceFreshnessIndicator freshness={row.balanceFreshness} size="compact" />
+                            </span>
+                          )}
+                        </span>
+                      </div>
                       {/* One token shows no value (it would repeat the
                           balance); a non-USD display currency shows the
-                          rate instead; two or more each show their value. */}
+                          rate instead; two or more each show their value.
+                          The secondary line aligns with the symbol, under
+                          the mark. */}
                       {row.value !== null ? (
-                        <p className="mt-0.5 text-sm text-[var(--v2-ink-2)] v2-tabular">
+                        <p className="mt-0.5 pl-8 text-sm text-[var(--v2-ink-2)] v2-tabular">
                           {formatFiat(row.value, currency)}
                         </p>
                       ) : null}
                       {rateLine ? (
-                        <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">{rateLine}</p>
+                        <p className="mt-0.5 pl-8 text-xs text-[var(--v2-ink-3)]">{rateLine}</p>
                       ) : null}
                     </li>
                   )
@@ -530,7 +548,10 @@ export default function AccountDetailClient() {
             )}
           </section>
 
-          {/* Last 30 days — Money in and Money out, nothing else (#4097). */}
+          {/* Last 30 days — Money in and Money out SIDE BY SIDE (#4166,
+              mockup v9), not stacked: the card's three columns then end at
+              about the same height instead of the figures hanging below the
+              label in one long column. */}
           <section aria-label="Last 30 days" className="p-5 sm:p-6">
             <p className="text-sm font-medium text-[var(--v2-ink-2)]">Last 30 days</p>
             {moneyFlow.loading ? (
@@ -551,7 +572,7 @@ export default function AccountDetailClient() {
                 </Button>
               </div>
             ) : (
-              <div className="mt-2 space-y-3">
+              <div className="mt-2 grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-xs text-[var(--v2-ink-3)]">Money in</p>
                   <p className="mt-0.5">
@@ -564,21 +585,22 @@ export default function AccountDetailClient() {
                     <Amount amount={moneyFlow.moneyOut} currency={currency} approx={moneyFlow.approxOut} />
                   </p>
                 </div>
-                {/* #4165: rows the totals could not value are said in words,
-                    never folded into a "≈" — the mark means converted. */}
-                {moneyFlow.unpriced ? (
-                  <p className="text-xs text-[var(--v2-ink-3)]">{UNPRICED_TOTALS_NOTE}</p>
-                ) : null}
-                {/* #2882: the feed is capped at the explorer window, so the
-                    figures may not cover the full 30 days — the partial-data
-                    qualifier instead of a completeness claim. */}
-                {moneyFlow.partial ? (
-                  <p className="text-xs text-[var(--v2-ink-3)]">
-                    Figures cover the history Haven could load, which may not cover the full 30 days.
-                  </p>
-                ) : null}
               </div>
             )}
+            {/* #4165: rows the totals could not value are said in words,
+                never folded into a "≈" — the mark means converted. Below the
+                side-by-side figures (#4166), full width like the qualifier. */}
+            {!moneyFlow.loading && !moneyFlow.error && moneyFlow.unpriced ? (
+              <p className="mt-2 text-xs text-[var(--v2-ink-3)]">{UNPRICED_TOTALS_NOTE}</p>
+            ) : null}
+            {/* #2882: the feed is capped at the explorer window, so the
+                figures may not cover the full 30 days — the partial-data
+                qualifier instead of a completeness claim. */}
+            {!moneyFlow.loading && !moneyFlow.error && moneyFlow.partial ? (
+              <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
+                Figures cover the history Haven could load, which may not cover the full 30 days.
+              </p>
+            ) : null}
           </section>
         </div>
       </Card>
@@ -745,7 +767,7 @@ export default function AccountDetailClient() {
               </div>
               <div>
                 <p className="text-xs text-[var(--v2-ink-3)] mb-1">Created</p>
-                <p className="text-sm text-[var(--v2-ink)]">{formatCreatedDate(account.created_at)}</p>
+                <p className="text-sm text-[var(--v2-ink)]">{formatLongDate(account.created_at)}</p>
               </div>
             </div>
           </Card>

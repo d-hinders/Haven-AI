@@ -53,14 +53,17 @@ type AmountReading = { text: string; lines: number }
  * trap `transaction-row.mobile.spec.ts` documents. The voice pattern is the
  * same file's AMOUNT_TEXT minus the now-gone `≈ ` prefix (kept out: a list
  * row that renders `≈` again must fail this guard, not silently match it),
- * recognising the direction sign and every `formatFiat` voice (the SEK
- * group/decimal separators are NBSP). INNERMOST matches only: an element
- * that CONTAINS another match is a wrapper.
+ * recognising the direction sign and every `formatFiat` voice: SUFFIX-style
+ * (`12.50 USDC`, `134,50 kr`) and PREFIX-style (`$12.50`, `€134,50`) — the
+ * served user's fiat strikes as a currency-code symbol BEFORE the digits
+ * (#4166's fixture serves USD, which `formatFiatDisplay` renders
+ * prefix-style). The SEK group/decimal separators are NBSP. INNERMOST
+ * matches only: an element that CONTAINS another match is a wrapper.
  */
 async function readAmounts(page: Page): Promise<AmountReading[]> {
   return page.evaluate(() => {
     const visible = (el: Element) => el.getClientRects().length > 0
-    const AMOUNT_TEXT = /^[-+]?[\d.,\u00a0\u202f ]+\s*(?:USDC|ETH|USD|EUR|SEK|kr|€|\$)\s*$/u
+    const AMOUNT_TEXT = /^(?:[-+]?[\d.,\u00a0\u202f ]+\s*(?:USDC|ETH|USD|EUR|SEK|kr|€|\$)|[-+]?[$€]\s?[\d.,\u00a0\u202f ]+)\s*$/u
 
     const matches = Array.from(document.querySelectorAll('tbody *')).filter((el) => {
       if (!visible(el)) return false
@@ -150,14 +153,17 @@ for (const width of WIDTHS) {
     await dismissMobileSidebar(page)
 
     // Wait for the overridden row to actually render before measuring.
+    // The voice follows the served user's currency — `-$76,543.21`
+    // (prefix) or `76 543,21 kr` (suffix) — so match the digits with the
+    // group/decimal separators left open.
     await expect
-      .poll(async () => (await readAmounts(page)).some((a) => a.text.includes('76 543,21')), {
+      .poll(async () => (await readAmounts(page)).some((a) => /76[ ,\u00a0\u202f]?543[.,]21/.test(a.text)), {
         timeout: 15_000,
       })
       .toBe(true)
 
     const amounts = await readAmounts(page)
-    const long = amounts.find((a) => a.text.includes('76 543,21'))
+    const long = amounts.find((a) => /76[ ,\u00a0\u202f]?543[.,]21/.test(a.text))
     expect(long, JSON.stringify(amounts)).toBeTruthy()
     expect(long!.lines, `"${long!.text}" @ ${width}`).toBe(1)
 

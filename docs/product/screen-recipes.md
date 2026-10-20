@@ -36,6 +36,7 @@ covers:
   - packages/backend/src/routes/agents.ts
   - packages/frontend/src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx
   - packages/frontend/src/hooks/useTransactionsFeed.ts
+  - packages/frontend/src/hooks/useUnfilteredTransactionTotal.ts
   - packages/connect/src/**
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/rails/sweep.ts
@@ -715,17 +716,23 @@ Use for full lists of payments and account activity.
 
 Structure:
 1. Page header with concise description.
-2. Filter controls, all applied on the server (#4095), so the rows, the
-   count and the CSV are the same set: search (committed after a pause in
-   typing, Enter at once), Account (shown disabled when there is only one
-   account), Initiator, Token, Direction,
+2. The [List controls](design-system.md#list-controls--listtoolbar-facetmenu-periodpicker-4110)
+   toolbar (#4111), filtering on the server (#4095), so the rows, the count
+   and the CSV are the same set: search, then the Account, Initiator, Token,
+   Direction and Network facets (each hidden while it has a single option)
    and Period (Last 7 / 30 / 90 days, All time, or a custom range), with
-   Export CSV in the same bar. Active filters show as removable chips. This
-   bar moves onto the [List controls](design-system.md#list-controls--listtoolbar-facetmenu-periodpicker-4110) pattern with #4111 (and, once the account
-   page's planned Activity tab ships, #4130); build new list filters on that pattern, not on this bar.
+   Export CSV in the actions slot. The status row carries a removable chip
+   per active filter, Clear filters, and the standard count — "{n}
+   transactions", or "{shown} of {total} transactions" filtered, both server
+   figures. The URL keeps the keys it had before #4111 except search,
+   written as `q` with the old `search` still read; the export request builds its own API
+   parameters, apart from the URL codec. Sorting stays on the column
+   headers. The account page's planned Activity tab moves with #4130.
 3. The full-page `TransactionsTable` variant for `/transactions`; card/compact
    variants are valid for scoped histories on account and agent detail.
-4. Empty state inside the table that preserves the current filters.
+4. A filtered list with no rows shows the standard no-match state
+   (`ListNoMatch`) where the rows were, below the toolbar; the table's own
+   empty state covers a history with nothing in it yet.
 
 Money and risk clarity:
 - **List rows show the user's currency, never the token (#3805, #3811).** The
@@ -758,7 +765,7 @@ Money and risk clarity:
   `total` counts what was returned, not what the account holds. When the
   response reports `truncated`, every
   claim on the screen softens together — the page subtitle ("Recent activity"
-  rather than "All activity"), a caveat line inside the count row, and the
+  rather than "All activity"), a caveat line beneath the toolbar's count, and the
   end-of-list string ("End of what's loaded" rather than "You've reached the
   end"). Softening one and leaving the others is worse than softening none:
   the louder claim is the one the reader believes. The same rule binds any

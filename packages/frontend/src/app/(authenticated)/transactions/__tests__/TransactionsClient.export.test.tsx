@@ -6,28 +6,37 @@
  * checked either state. This is the test half; the render half is recorded as
  * unverified in the PR body.
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiRequestError } from '@/lib/api'
 
-const { mockGetText, mockDownloadCsv } = vi.hoisted(() => ({
+const { mockGetText, mockGet, mockDownloadCsv, urlState } = vi.hoisted(() => ({
   mockGetText: vi.fn(),
+  mockGet: vi.fn(),
   mockDownloadCsv: vi.fn(),
+  // Reached through the account deep link by default, which seeds the
+  // account filter; the export request must carry the same key (#2913).
+  urlState: { query: 'accountId=safe-1' },
 }))
 
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
-  return { ...actual, api: { getText: (...a: unknown[]) => mockGetText(...a) } }
+  return {
+    ...actual,
+    api: {
+      getText: (...a: unknown[]) => mockGetText(...a),
+      // Only the unfiltered total behind "{shown} of {total}" (#4111).
+      get: (...a: unknown[]) => mockGet(...a),
+    },
+  }
 })
 vi.mock('@/lib/transaction-csv', () => ({
   downloadCsv: (...a: unknown[]) => mockDownloadCsv(...a),
   buildCsvFilename: () => 'haven-transactions-20260911.csv',
 }))
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ replace: vi.fn() }),
-  // Reached through the account deep link, which seeds the account filter;
-  // the export request must carry the same key (#2913).
-  useSearchParams: () => new URLSearchParams('accountId=safe-1'),
+  usePathname: () => '/transactions',
+  useSearchParams: () => new URLSearchParams(urlState.query),
 }))
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => ({
@@ -71,13 +80,14 @@ const TX = {
 }
 
 const { feedState } = vi.hoisted(() => ({
-  feedState: { partialFailure: false, truncated: false },
+  feedState: { partialFailure: false, truncated: false, empty: false },
 }))
 
 vi.mock('@/hooks/useTransactionsFeed', () => ({
+  browserTimeZone: () => 'Europe/Stockholm',
   useTransactionsFeed: () => ({
-    transactions: [TX],
-    total: 1,
+    transactions: feedState.empty ? [] : [TX],
+    total: feedState.empty ? 0 : 1,
     loadingInitial: false,
     loadingMore: false,
     hasMore: false,
@@ -94,10 +104,22 @@ const TransactionsClient = (await import('../TransactionsClient')).default
 
 beforeEach(() => {
   mockGetText.mockReset()
+  mockGet.mockReset()
+  mockGet.mockResolvedValue({ total: 40 })
   mockDownloadCsv.mockReset()
+  urlState.query = 'accountId=safe-1'
+  window.history.replaceState(null, '', '/transactions')
   feedState.partialFailure = false
   feedState.truncated = false
+  feedState.empty = false
 })
+
+async function exportNoticeRegion(): Promise<HTMLElement> {
+  const headline = await screen.findByText(/^Nothing to export/)
+  const region = headline.closest<HTMLElement>('[role="status"]')
+  expect(region).not.toBeNull()
+  return region!
+}
 
 function exportButton(): HTMLElement {
   return screen.getByRole('button', { name: /export csv/i })
@@ -125,8 +147,9 @@ describe('TransactionsClient — CSV export (#2871)', () => {
     mockGetText.mockResolvedValue('\ufeffsettled_at\r\n"x"')
     render(<TransactionsClient />)
 
-    // The network select only renders with accounts on 2+ chains; the scope
-    // it would show is what the export request carries, so read it there.
+    // The Network facet only shows with accounts on 2+ chains (one option
+    // hides it); the scope it would show is what the export request carries,
+    // so read it there.
     fireEvent.click(exportButton())
     await waitFor(() => expect(mockGetText).toHaveBeenCalledTimes(1))
     expect(mockGetText).toHaveBeenCalledWith(expect.not.stringContaining('chainId='))
@@ -177,7 +200,9 @@ describe('TransactionsClient — CSV export (#2871)', () => {
 
     fireEvent.click(exportButton())
 
-    const notice = await screen.findByRole('status')
+    // The toolbar's count is a status region too (#4111); the notice is the
+    // one carrying the export's words.
+    const notice = await exportNoticeRegion()
     expect(notice).toHaveTextContent('Nothing to export')
     expect(notice).toHaveTextContent('No transactions match these filters')
     expect(mockDownloadCsv).not.toHaveBeenCalled()
@@ -194,7 +219,9 @@ describe('TransactionsClient — CSV export (#2871)', () => {
 
     fireEvent.click(exportButton())
 
-    const notice = await screen.findByRole('status')
+    // The toolbar's count is a status region too (#4111); the notice is the
+    // one carrying the export's words.
+    const notice = await exportNoticeRegion()
     expect(notice).toHaveTextContent('Some accounts failed to load')
     expect(notice).not.toHaveTextContent('No transactions match these filters')
     expect(mockDownloadCsv).not.toHaveBeenCalled()
@@ -218,9 +245,9 @@ describe('TransactionsClient — CSV export (#2871)', () => {
     fireEvent.click(exportButton())
     await screen.findByRole('alert')
 
-    // The direction filter is a dropdown, not a select: open it, pick Outgoing.
-    fireEvent.click(screen.getByRole('button', { name: /direction:/i }))
-    fireEvent.click(screen.getByRole('button', { name: /^outgoing$/i }))
+    // The direction filter is a facet menu (#4111): open it, pick Outgoing.
+    fireEvent.click(screen.getByRole('button', { name: /^direction:/i }))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /^outgoing$/i }))
 
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
   })
@@ -250,5 +277,139 @@ describe('TransactionsClient — CSV export (#2871)', () => {
       screen.queryByText(/Counts and exports cover the transactions loaded here/i),
     ).toBeNull()
     expect(screen.getByText('All activity across your accounts.')).toBeInTheDocument()
+  })
+})
+
+describe('TransactionsClient — URL and export params (#4111)', () => {
+  it('sends the search term, and every other filter, on the export request', async () => {
+    urlState.query =
+      'q=savings&accountId=safe-1&agentId=agent-1&tokenKey=8453%3A0xusdc&direction=out&chainId=8453&period=30d'
+    mockGetText.mockResolvedValue('\ufeffsettled_at\r\n"x"')
+    render(<TransactionsClient />)
+
+    fireEvent.click(exportButton())
+    await waitFor(() => expect(mockGetText).toHaveBeenCalledTimes(1))
+    const url = String(mockGetText.mock.calls[0][0])
+    const params = new URL(url, 'https://haven.test').searchParams
+    // The URL says `q`; the API is read as `search` — the codec and the API
+    // param builder are separate, so the rename cannot drop it from the file.
+    expect(params.get('search')).toBe('savings')
+    expect(params.has('q')).toBe(false)
+    expect(params.get('accountId')).toBe('safe-1')
+    expect(params.get('agentId')).toBe('agent-1')
+    expect(params.get('tokenKey')).toBe('8453:0xusdc')
+    expect(params.get('direction')).toBe('out')
+    expect(params.get('chainId')).toBe('8453')
+    expect(params.get('period')).toBe('30d')
+  })
+
+  it('sends a custom range with the time zone it is cut in', async () => {
+    urlState.query = 'from=2026-09-01&to=2026-09-30'
+    mockGetText.mockResolvedValue('\ufeffsettled_at\r\n"x"')
+    render(<TransactionsClient />)
+
+    fireEvent.click(exportButton())
+    await waitFor(() => expect(mockGetText).toHaveBeenCalledTimes(1))
+    const params = new URL(String(mockGetText.mock.calls[0][0]), 'https://haven.test').searchParams
+    expect(params.get('from')).toBe('2026-09-01')
+    expect(params.get('to')).toBe('2026-09-30')
+    expect(params.get('tz')).toBe('Europe/Stockholm')
+    expect(params.has('period')).toBe(false)
+  })
+
+  it('applies a legacy ?search= link and rewrites the address to q', async () => {
+    urlState.query = 'search=savings&accountId=safe-1'
+    window.history.replaceState(null, '', '/transactions?search=savings&accountId=safe-1')
+    mockGetText.mockResolvedValue('\ufeffsettled_at\r\n"x"')
+    render(<TransactionsClient />)
+
+    // Applied: the field shows it and the export carries it.
+    expect(screen.getByRole('searchbox', { name: 'Search transactions' })).toHaveValue('savings')
+    // Rewritten: the URL names the search `q` and the old key is gone, while
+    // the key it does not rename keeps its value.
+    await waitFor(() => expect(window.location.search).toContain('q=savings'))
+    const params = new URLSearchParams(window.location.search)
+    expect(params.has('search')).toBe(false)
+    expect(params.get('accountId')).toBe('safe-1')
+
+    fireEvent.click(exportButton())
+    await waitFor(() => expect(mockGetText).toHaveBeenCalledTimes(1))
+    expect(mockGetText).toHaveBeenCalledWith(expect.stringContaining('search=savings'))
+  })
+
+  it('keeps every other key in its old name and format when a filter changes', async () => {
+    urlState.query = 'accountId=safe-1&period=7d'
+    window.history.replaceState(null, '', '/transactions?accountId=safe-1&period=7d')
+    render(<TransactionsClient />)
+
+    fireEvent.click(screen.getByRole('button', { name: /^direction:/i }))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /^incoming$/i }))
+
+    await waitFor(() => expect(window.location.search).toContain('direction=in'))
+    const params = new URLSearchParams(window.location.search)
+    expect(params.get('accountId')).toBe('safe-1')
+    expect(params.get('period')).toBe('7d')
+  })
+
+  it('reads the standard count: unfiltered, then filtered against the unfiltered total', async () => {
+    urlState.query = ''
+    const { unmount } = render(<TransactionsClient />)
+    expect(screen.getByTestId('list-toolbar-count')).toHaveTextContent(/^1 transaction$/)
+    // Unfiltered, the feed's total is the figure: nothing extra is read.
+    expect(mockGet).not.toHaveBeenCalled()
+    unmount()
+
+    urlState.query = 'accountId=safe-1'
+    render(<TransactionsClient />)
+    await waitFor(() =>
+      expect(screen.getByTestId('list-toolbar-count')).toHaveTextContent(/^1 of 40 transactions$/),
+    )
+    // Both numbers are server figures: the unfiltered one comes from one
+    // filter-free read.
+    expect(mockGet).toHaveBeenCalledTimes(1)
+    expect(mockGet).toHaveBeenCalledWith('/transactions?offset=0&limit=1')
+  })
+
+  it('shows the standard no-match state, and its Clear filters returns to the default', async () => {
+    feedState.empty = true
+    urlState.query = 'q=zzz&direction=in'
+    window.history.replaceState(null, '', '/transactions?q=zzz&direction=in')
+    render(<TransactionsClient />)
+
+    expect(screen.getByText('No transactions match these filters')).toBeInTheDocument()
+    expect(
+      screen.getByText('Try a different search, or clear filters to see everything.'),
+    ).toBeInTheDocument()
+    // The toolbar stays, so the cause stays editable.
+    expect(screen.getByTestId('list-toolbar')).toBeInTheDocument()
+
+    // Two Clear filters: the toolbar's and the no-match state's. Either one
+    // returns to the page default — no search, every facet All, All time.
+    const noMatch = screen.getByTestId('transactions-no-match')
+    fireEvent.click(within(noMatch).getByRole('button', { name: 'Clear filters' }))
+    await waitFor(() => expect(window.location.search).toBe(''))
+    expect(screen.getByRole('searchbox', { name: 'Search transactions' })).toHaveValue('')
+  })
+
+  it('drops a chainId that is not a network id instead of showing it as a filter', async () => {
+    urlState.query = 'chainId=abc'
+    window.history.replaceState(null, '', '/transactions?chainId=abc')
+    render(<TransactionsClient />)
+
+    await waitFor(() => expect(window.location.search).toBe(''))
+    expect(screen.queryByRole('button', { name: /^Remove Network/ })).toBeNull()
+    // Unfiltered once repaired: the count is the plain total.
+    await waitFor(() =>
+      expect(screen.getByTestId('list-toolbar-count')).toHaveTextContent(/^1 transaction$/),
+    )
+  })
+
+  it('shows only the direction half the Direction filter leaves open', () => {
+    urlState.query = 'direction=out'
+    render(<TransactionsClient />)
+
+    const page = document.body.textContent ?? ''
+    expect(page).toMatch(/0\s*sent/)
+    expect(page).not.toMatch(/\d\s*received/)
   })
 })

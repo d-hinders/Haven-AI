@@ -79,8 +79,61 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-10-19"
+last-verified: "2026-10-20"
 ---
+
+> **Re-verified (#4123, 2026-10-20, the retryable settlement-evidence reasons
+> name `payment_header`):** reason text only, in two covered files under
+> `packages/mcp-server/src/tools/**`. When an EIP-3009 merchant settlement
+> report comes back retryable (Haven could not read the transaction yet), the
+> three hosted reasons that told the agent to report "the same hash" again
+> now also tell it to add `payment_header`, which the backend requires before
+> it judges the hash (#3925; without it a verbatim retry is refused once with
+> `SETTLEMENT_PROOF_HEADER_MISSING`):
+>
+> - **`haven_settle_mcp_tool` / `haven_complete_mcp_tool`**, eip3009 settled
+>   arm (`paid-mcp-completion.ts`, `settlementEvidenceReason`): "Call
+>   next_tool (haven_report_settlement_evidence) shortly with next_arguments,
+>   adding payment_header: the exact payment_header you passed to this
+>   call." These tools sent the merchant the header the agent
+>   passed them, as the missing-header arm beside it already says.
+> - **`haven_report_x402_outcome`**, folded evidence (`plain-http-x402.ts`,
+>   `evidenceReason`): "Call next_tool (haven_report_settlement_evidence)
+>   shortly with next_arguments, adding payment_header: the exact
+>   payment_header you sent the merchant." Unconditional: a pending erc7710
+>   report is refused before the evidence report (`erc7710OutcomeRefusal`),
+>   and a confirmed one, which does reach it, cannot come back retryable —
+>   the backend answers 503 only for `settlement_unobservable` (the
+>   pending-erc7710 seam or the eip3009 branch), and the confirmed-erc7710
+>   attach path answers 202/409. Even a stray 503 leaves the text harmless:
+>   the report tool it names drops the header on any non-eip3009 payment.
+> - **`haven_report_settlement_evidence`**, `SETTLEMENT_PENDING`
+>   (`classifySettlementEvidenceReport`): "Report it again shortly with
+>   haven_report_settlement_evidence and the same hash — on an EIP-3009
+>   payment adding payment_header: the exact payment_header you sent the
+>   merchant — or poll next_tool." Scoped to EIP-3009 because an erc7710
+>   report reaches this arm too: the backend's erc7710 seam answers 503 on an
+>   unreadable chain.
+>
+> `next_tool`, `next_action` and `next_arguments` are byte-identical on all
+> three, so `next-arguments-corpus.json` does not move. That is deliberate:
+> `check-stale-client-compat.mjs` validates the corpus against `origin/main`'s
+> tools/list snapshot, where `haven_report_settlement_evidence` takes only
+> `payment_id` and `settlement_tx_hash` with `additionalProperties: false`, so
+> a prefilled `payment_header` waits until #4061's schema is on `main`. No tool
+> description, input schema, `tools-list.snapshot.json` entry or contract
+> fingerprint moves, and `packages/sdk/src/tool-descriptions.ts` is untouched
+> (the description budget is at its cap) — so its
+> `haven_report_settlement_evidence` description still says "report the same
+> hash again shortly" for `SETTLEMENT_PENDING` (`tool-descriptions.ts:267`), a
+> known fourth copy left for the post-promotion `payment_header` prefill
+> follow-up. No Supported Runtime Manifest row,
+> channel, dist-tag, release step, expected-context version or consent surface
+> moves; the hosted surface picks this up on deploy, and an older local MCP or
+> signer is unaffected. Ship before the next `dev → main` promotion, so the
+> header requirement and this guidance reach prod together. The #3764 block
+> below stays as written. `last-verified` is bumped to 2026-10-20 for this
+> note. Nothing else in this document was re-verified.
 
 > **Re-verified unchanged (#4094, 2026-10-19, a `ci.yml` comment names the
 > merged Receive dialog):** the only covered file this diff touches is

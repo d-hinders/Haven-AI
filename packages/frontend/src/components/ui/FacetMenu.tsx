@@ -57,7 +57,8 @@ export interface FacetMenuProps {
  *   it for a single-select facet whose every value is a real choice
  *   ("Archived: Hidden / Shown"); its `defaultValue` is the unfiltered view.
  *
- * Why menu roles, superseding `AgentListToolbar`'s toggle-button group:
+ * Why menu roles, superseding the toggle-button group the Agents list used
+ * before #4113 (`AgentListToolbar`, deleted):
  * that header rejected a listbox because each option was its own focusable
  * button, and `role="option"` forbids interactive content inside an option.
  * A menu item IS the control, so the conflict is gone, and the trigger's

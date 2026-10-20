@@ -4320,7 +4320,7 @@ export const SCENARIOS = {
 
   'half-revoked-agents': {
     description:
-      'Half-revoked agents (#3542) — a REVOKED agent and an ARCHIVED agent whose budget delegation is still live on-chain: the /agents list card with Finish revoking, the collapsed Removed toggle carrying its warning, the expanded Removed group, both agent detail pages with the warning callout above the budget card, and the account page summary that no longer says "Access revoked"',
+      'Half-revoked agents (#3542) — a REVOKED agent and an ARCHIVED agent whose budget delegation is still live on-chain: the /agents list card with Finish revoking, the hidden-archived callout carrying its warning (#4113), the archived card once Show archived is pressed, both agent detail pages with the warning callout above the budget card, and the account page summary that no longer says "Access revoked"',
     api(apiPath, method) {
       if (apiPath === '/agents' && method === 'GET') {
         return {

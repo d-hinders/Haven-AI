@@ -32,6 +32,7 @@ covers:
   - packages/frontend/src/hooks/useAgentListFilters.ts
   - packages/frontend/src/lib/agent-list-filters.ts
   - packages/frontend/src/hooks/useAgentPanelState.ts
+  - packages/frontend/src/lib/half-revoked.ts
   - packages/backend/src/routes/agents.ts
   - packages/frontend/src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx
   - packages/frontend/src/hooks/useTransactionsFeed.ts
@@ -41,7 +42,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-10-17"
+last-verified: "2026-10-20"
 ---
 
 # Haven Screen Recipes

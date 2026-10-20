@@ -102,7 +102,7 @@ covers:
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
-last-verified: 2026-10-17
+last-verified: 2026-10-20
 ---
 
 # Haven Design System
@@ -2469,7 +2469,7 @@ Clean output of the census today is **`UNCLASSIFIED: 0`** and **`OFF-SCALE: 0`**
 ### Arrows
 
 - **The marketing exemption in the first bullet covers this whole section, including these arrow rules.** `components/brand`, `components/marketing`, the landing page, `/how-it-works`, `/developers` and `/for-agents` are intentionally bespoke and exempt from every icon rule here (#874). The authoritative list is `MARKETING_SURFACES` in `packages/frontend/scripts/design-lint.mjs` — read it there; this sentence is a pointer, not a copy.
-- **In a gated surface, an arrow that is an affordance comes from lucide.** A control's trailing arrow (`Button`'s `trailingIcon`, which renders lucide `ArrowRight` for you), a list/row chevron, a disclosure marker, anything that animates (`ErrorBoundary`'s `group-open:rotate-90`, `AgentPanel`'s removed-agents toggle). Never a raw glyph — it cannot be rotated, sized on the icon scale, or stroked at 1.5, and it lands wherever the label's typeface puts it rather than where the icon system does.
+- **In a gated surface, an arrow that is an affordance comes from lucide.** A control's trailing arrow (`Button`'s `trailingIcon`, which renders lucide `ArrowRight` for you), a list/row chevron, a disclosure marker, anything that animates (`ErrorBoundary`'s `group-open:rotate-90`). Never a raw glyph — it cannot be rotated, sized on the icon scale, or stroked at 1.5, and it lands wherever the label's typeface puts it rather than where the icon system does.
 - **Exactly one gated file may render a raw arrow:** `components/haven/TransactionMovement.tsx`, the `From <a> → To <b>` movement line (the one-file allowlist is pinned by [`packages/frontend/src/__tests__/design-system-arrows-allowlist.test.ts`](../../packages/frontend/src/__tests__/design-system-arrows-allowlist.test.ts), #2680). The glyph joins two operands the way a colon would — `aria-hidden`, on the text baseline at the run's own size and weight, with the words `From` and `To` carrying the direction. A lucide glyph would sit at a fixed pixel size beside text it must match, and since #1774 it is nested *inside* the `From` half to stop it wrapping alone, so there is no separable icon slot to fill. **Every other raw arrow in a gated surface is a defect**, whatever it is called.
 
   **Why a one-file allowlist and not a rule of thumb.** This section has now been wrong three times in the same way, and the shape is worth keeping:

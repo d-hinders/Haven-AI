@@ -1,4 +1,13 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+/**
+ * #4097 — the account page as the full record of one account: header (badges
+ * in `meta`, Send/Receive primacy), the three-column summary card (Balance /
+ * Holdings / Last 30 days), the tab row (?tab= owned here), the Agents tab
+ * (active agents, hidden revoked count), and the Security & details tab
+ * (AccountSignersCard + Account details). The removals are asserted too: no
+ * off-ramp panel, no "Agent access" card, no "Token balances" table, no
+ * "Advanced account details", no TransactionsTable.
+ */
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 
@@ -7,16 +16,25 @@ const mockUseAccounts = vi.fn()
 const mockUsePreferences = vi.fn()
 const mockUseContacts = vi.fn()
 const mockUseAgents = vi.fn()
-const mockUseSafeDetails = vi.fn()
 const mockUsePortfolio = vi.fn()
 const mockUseBalances = vi.fn()
 const mockUseTransactionsFeed = vi.fn()
+const mockUseDashboardOverview = vi.fn()
+const mockUseBudgetRemaining = vi.fn()
+const mockUseAttentionDismissals = vi.fn()
+const mockUseAccountSigners = vi.fn()
+const mockUseAccountMoneyFlow = vi.fn()
 
 const mockRouterPush = vi.fn()
+const mockRouterReplace = vi.fn()
+
+/** The ?tab= value useSearchParams hands the page; set per test. */
+let tabParam: string | null = null
 
 vi.mock('next/navigation', () => ({
   useParams: () => ({ accountId: 'safe-1' }),
-  useRouter: () => ({ push: mockRouterPush }),
+  useRouter: () => ({ push: mockRouterPush, replace: mockRouterReplace }),
+  useSearchParams: () => new URLSearchParams(tabParam ? { tab: tabParam } : {}),
 }))
 
 vi.mock('@/context/AuthContext', () => ({
@@ -39,14 +57,6 @@ vi.mock('@/hooks/useAgents', () => ({
   useAgents: () => mockUseAgents(),
 }))
 
-vi.mock('@/hooks/useSafeDetails', () => ({
-  useSafeDetails: () => mockUseSafeDetails(),
-}))
-
-// The `useRetiredRailOwnerAccess` mock lived here; removed by #2673 with the
-// hook itself (#2413 deleted it) — it mocked a module that no longer exists,
-// so it propped nothing up.
-
 vi.mock('@/hooks/usePortfolio', () => ({
   usePortfolio: () => mockUsePortfolio(),
 }))
@@ -59,11 +69,35 @@ vi.mock('@/hooks/useTransactionsFeed', () => ({
   useTransactionsFeed: () => mockUseTransactionsFeed(),
 }))
 
-vi.mock('@/components/transactions/TransactionsTable', () => ({
-  default: () => <div>Transactions table</div>,
+vi.mock('@/hooks/useDashboardOverview', () => ({
+  useDashboardOverview: () => mockUseDashboardOverview(),
+}))
+
+vi.mock('@/hooks/useBudgetRemaining', () => ({
+  useBudgetRemaining: () => mockUseBudgetRemaining(),
+}))
+
+vi.mock('@/hooks/useAttentionDismissals', () => ({
+  useAttentionDismissals: () => mockUseAttentionDismissals(),
+}))
+
+vi.mock('@/hooks/useAccountSigners', () => ({
+  useAccountSigners: () => mockUseAccountSigners(),
+}))
+
+vi.mock('@/hooks/useAccountMoneyFlow', () => ({
+  useAccountMoneyFlow: () => mockUseAccountMoneyFlow(),
 }))
 
 vi.mock('@/components/ReceiveDialog', () => ({
+  default: () => null,
+}))
+
+vi.mock('@/components/DelegationSendModal', () => ({
+  default: () => null,
+}))
+
+vi.mock('@/components/transactions/TransactionDetailPanel', () => ({
   default: () => null,
 }))
 
@@ -92,8 +126,8 @@ vi.mock('@/components/ConfirmDialog', () => ({
 }))
 
 vi.mock('@/components/AccountSignersCard', () => ({
-  default: (props: { accountAddress?: string; agentId?: string }) => (
-    <div data-testid="account-signers-card" data-safe-address={props.accountAddress} data-agent-id={props.agentId}>
+  default: (props: { accountAddress?: string }) => (
+    <div data-testid="account-signers-card" data-safe-address={props.accountAddress}>
       Backup &amp; recovery
     </div>
   ),
@@ -101,18 +135,19 @@ vi.mock('@/components/AccountSignersCard', () => ({
 
 import AccountDetailClient from '../AccountDetailClient'
 import { ApiRequestError } from '@/lib/api'
+import type { DashboardOverviewResponse } from '@/types/dashboard'
 
 const SAFE = {
   id: 'safe-1',
   name: 'Main account',
   account_address: '0x1111111111111111111111111111111111111111',
-  chain_id: 100,
+  chain_id: 8453,
   is_default: true,
   created_at: '2026-05-12T00:00:00Z',
   account_type: 'delegator_hybrid' as const,
 }
 
-/** Minimal aggregated row — the truncation cases only need the count line to render. */
+/** Minimal aggregated row — the truncation cases only need the count line. */
 function txRow() {
   return {
     hash: '0xabc',
@@ -134,9 +169,44 @@ function txRow() {
   }
 }
 
+/** A zeroed dashboard overview with `agents` and `agentCount` overridable. */
+function overview(
+  overrides: Partial<Pick<DashboardOverviewResponse, 'agents' | 'agentCount'>> = {},
+): DashboardOverviewResponse {
+  const zeroWindow = {
+    gross: { usd: 0, eur: 0, sek: 0 },
+    net: { usd: 0, eur: 0, sek: 0 },
+    approx: false,
+    payments: 0,
+    distinctMerchants: 0,
+    budgetStops: 0,
+  }
+  return {
+    totals: { usd: 0, eur: 0 },
+    change: { available: false, usdAmount: 0, eurAmount: 0, usdPercent: 0, eurPercent: 0 },
+    actionableApprovals: 0,
+    pendingApprovals: 0,
+    onboardingProgress: { hasFirstAgentPayment: false },
+    agents: [],
+    agentCount: { active: 0, paused: 0, pending_approval: 0 },
+    accounts: [],
+    spend: {
+      scope: 'mainnet',
+      d7: { ...zeroWindow, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+      d30: { ...zeroWindow, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+      topMerchant7d: null,
+      failedIntents7d: 0,
+      balance_by_day: [],
+    },
+    spotRates: {},
+    ...overrides,
+  } as DashboardOverviewResponse
+}
+
 describe('AccountDetailClient', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    tabParam = null
 
     mockUseAuth.mockReturnValue({
       user: {
@@ -152,6 +222,7 @@ describe('AccountDetailClient', () => {
     mockUseAccounts.mockReturnValue({
       renameAccount: vi.fn(),
       removeAccount: vi.fn(),
+      setDefault: vi.fn(),
       loading: false,
     })
     mockUsePreferences.mockReturnValue({ currency: 'USD' })
@@ -161,47 +232,17 @@ describe('AccountDetailClient', () => {
       resolveAddress: vi.fn(),
     })
     mockUseAgents.mockReturnValue({
-      agents: [
-        {
-          id: 'agent-1',
-          name: 'Research agent',
-          account_id: 'safe-1',
-          status: 'active',
-          account_type: 'delegator_hybrid',
-          allowances: [
-            {
-              id: 'allowance-1',
-              agent_id: 'agent-1',
-              token_address: '0x0000000000000000000000000000000000000000',
-              // USDC.e on Gnosis has 6 decimals — raw 100_000_000 = 100.
-              // This exercises the decimals formatter we extracted into
-              // lib/allowance-format.ts; the old code dumped the raw bigint
-              // straight into the label, which is the bug the PR fixes.
-              token_symbol: 'USDC.e',
-              allowance_amount: '100000000',
-              reset_period_min: 1440,
-            },
-          ],
-        },
-      ],
+      agents: [],
       loading: false,
       error: null,
       refetch: vi.fn(),
     })
-    mockUseSafeDetails.mockReturnValue({
-      details: {
-        address: SAFE.account_address,
-        owners: ['0x5555555555555555555555555555555555555555'],
-        threshold: 1,
-        nonce: 1,
-      },
-      loading: false,
-      error: null,
-    })
     mockUsePortfolio.mockReturnValue({
       totalUsd: 42,
       totalEur: 39,
-      breakdown: [],
+      breakdown: [
+        { symbol: 'USDC', balance: '42000000', formatted: '42.00', usdValue: 42, eurValue: 39, sekValue: 400 },
+      ],
       loading: false,
       error: null,
       refetch: vi.fn(),
@@ -214,16 +255,47 @@ describe('AccountDetailClient', () => {
     mockUseTransactionsFeed.mockReturnValue({
       transactions: [],
       loadingInitial: false,
+      loadingMore: false,
       error: null,
       total: 0,
       hasMore: false,
       truncated: false,
+      loadMore: vi.fn(),
+      refresh: vi.fn(),
+    })
+    mockUseDashboardOverview.mockReturnValue({
+      data: overview(),
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    mockUseBudgetRemaining.mockReturnValue({ data: null, loading: false })
+    mockUseAttentionDismissals.mockReturnValue({ dismissedIds: [], dismiss: vi.fn() })
+    mockUseAccountSigners.mockReturnValue({
+      signers: { account_address: SAFE.account_address, passkeys: [{ key_id: 'k1', created_at: '2026-05-12T00:00:00Z' }], owner_address: null },
+      loadError: false,
+      busy: false,
+      ready: true,
+      passkeyElsewhere: false,
+      enrollBackupPasskey: vi.fn(),
+      enrollOwnerWallet: vi.fn(),
+      removePasskey: vi.fn(),
+      removeOwner: vi.fn(),
+      reload: vi.fn(),
+    })
+    mockUseAccountMoneyFlow.mockReturnValue({
+      moneyIn: 120,
+      moneyOut: 45,
+      approx: false,
+      loading: false,
+      error: null,
+      partial: false,
       refresh: vi.fn(),
     })
   })
 
   afterEach(() => {
-    vi.useRealTimers()
+    tabParam = null
   })
 
   // #4028 — the way back to the accounts list exists in every state of the
@@ -260,202 +332,358 @@ describe('AccountDetailClient', () => {
     })
   })
 
-  it('leads with wallet control, agent access, and advanced account details', () => {
+  it('renders header, summary card, and tabs, and no other cards', () => {
     render(<AccountDetailClient />)
 
     expect(screen.getByRole('heading', { level: 1, name: 'Main account' })).toBeInTheDocument()
-    expect(screen.getByText('Control the funds, agent access, and recent activity for this Haven wallet.')).toBeInTheDocument()
+    // The summary card's three columns.
     expect(screen.getByText('$42.00')).toBeInTheDocument()
-    // #2413: the "Required approvals" line went with the Safe-details read
-    // that fed it — and it was already inert here, because that read was gated
-    // to the retired rail. Delegation signers are shown by AccountSignersCard.
-    expect(screen.queryByText(/approver required/)).not.toBeInTheDocument()
-    expect(screen.getByTestId('account-signers-card')).toBeInTheDocument()
-    expect(screen.getByText('Agent access')).toBeInTheDocument()
-    expect(screen.getByText('Research agent')).toBeInTheDocument()
-    expect(screen.getByText('100.00 USDC.e per day · No activity yet')).toBeInTheDocument()
-    expect(screen.getByText('Advanced account details')).toBeInTheDocument()
-    // The Safe-owner "Approvers" list went with the same read (#2413).
-    expect(screen.queryByText('Approvers')).not.toBeInTheDocument()
+    expect(screen.getByText('Holdings')).toBeInTheDocument()
+    expect(screen.getByText('Last 30 days')).toBeInTheDocument()
+    expect(screen.getByText('Money in')).toBeInTheDocument()
+    expect(screen.getByText('Money out')).toBeInTheDocument()
+    // The tab row.
+    expect(screen.getByRole('tab', { name: /Activity/ })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /Agents/ })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /Security & details/ })).toBeInTheDocument()
+    // #4097 removals: none of the old cards render.
+    expect(screen.queryByText('Agent access')).not.toBeInTheDocument()
+    expect(screen.queryByText('Token balances')).not.toBeInTheDocument()
+    expect(screen.queryByText('Advanced account details')).not.toBeInTheDocument()
+    expect(screen.queryByText('Transaction history')).not.toBeInTheDocument()
+    expect(screen.queryByText('Receiving USDC')).not.toBeInTheDocument()
   })
 
-  it('does not show a zero balance when portfolio data fails', () => {
-    mockUsePortfolio.mockReturnValue({
-      totalUsd: 0,
-      totalEur: 0,
-      breakdown: [],
-      loading: false,
-      error: 'Balances are temporarily unavailable.',
-      refetch: vi.fn(),
+  describe('header badges and button primacy (#4097)', () => {
+    it('shows no badges on Base mainnet with one account', () => {
+      render(<AccountDetailClient />)
+      expect(screen.queryByText('Test network')).not.toBeInTheDocument()
+      expect(screen.queryByText('Default account')).not.toBeInTheDocument()
     })
 
-    render(<AccountDetailClient />)
-
-    expect(screen.getByText('Unavailable')).toBeInTheDocument()
-    expect(screen.queryByText('$0.00')).not.toBeInTheDocument()
-    expect(screen.getByText('Balances could not load')).toBeInTheDocument()
-  })
-
-  it('does not claim there are no agents while agent access is loading', () => {
-    mockUseAgents.mockReturnValue({
-      agents: [],
-      loading: true,
-      error: null,
-      refetch: vi.fn(),
-    })
-
-    render(<AccountDetailClient />)
-
-    expect(screen.queryByText('No agents connected')).not.toBeInTheDocument()
-  })
-
-  it('shows a retry state when agent access cannot be verified', () => {
-    mockUseAgents.mockReturnValue({
-      agents: [],
-      loading: false,
-      error: 'Could not load agents',
-      refetch: vi.fn(),
-    })
-
-    render(<AccountDetailClient />)
-
-    expect(screen.getByText('Agent access could not load')).toBeInTheDocument()
-    expect(screen.queryByText('No agents connected')).not.toBeInTheDocument()
-  })
-
-  it('keeps readable agent records visible when a refresh fails', () => {
-    mockUseAgents.mockReturnValue({
-      agents: [
-        {
-          id: 'legacy-agent-1',
-          name: 'Historical agent',
-          account_id: 'safe-1',
-          status: 'revoked',
-          account_type: 'legacy_safe',
-          allowances: [],
-        },
-      ],
-      loading: false,
-      error: 'Could not refresh agents',
-      refetch: vi.fn(),
-    })
-
-    render(<AccountDetailClient />)
-
-    expect(screen.getByText('Historical agent')).toBeInTheDocument()
-    expect(screen.getByRole('alert')).toHaveTextContent('last successful agent records')
-    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
-    expect(screen.queryByText('No agents connected')).not.toBeInTheDocument()
-  })
-
-  it('shows last-activity metadata for agents', () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-06-01T12:00:00Z'))
-    mockUseAgents.mockReturnValue({
-      agents: [
-        {
-          id: 'agent-1',
-          name: 'Research agent',
-          account_id: 'safe-1',
-          status: 'active',
-          account_type: 'delegator_hybrid',
-          mcp_last_seen_at: '2026-06-01T10:00:00Z',
-          allowances: [
-            {
-              id: 'allowance-1',
-              agent_id: 'agent-1',
-              token_address: '0x0000000000000000000000000000000000000000',
-              token_symbol: 'USDC.e',
-              allowance_amount: '100000000',
-              reset_period_min: 1440,
-            },
+    it('shows the test network badge on a testnet chain, and the default badge only with two accounts', () => {
+      mockUseAuth.mockReturnValue({
+        ...mockUseAuth(),
+        user: {
+          ...mockUseAuth().user,
+          accounts: [
+            { ...SAFE, chain_id: 84532 },
+            { ...SAFE, id: 'safe-2', name: 'Second', chain_id: 8453, is_default: false },
           ],
         },
-      ],
-      loading: false,
-      error: null,
-      refetch: vi.fn(),
+      })
+      render(<AccountDetailClient />)
+      expect(screen.getByText('Test network')).toBeInTheDocument()
+      expect(screen.getByText('Default account')).toBeInTheDocument()
     })
 
-    render(<AccountDetailClient />)
+    it('Send is primary once the account holds money', () => {
+      render(<AccountDetailClient />)
+      const send = screen.getByRole('button', { name: 'Send' })
+      expect(send).not.toBeDisabled()
+    })
 
-    expect(screen.getByText('100.00 USDC.e per day · Last activity 2h ago')).toBeInTheDocument()
-    expect(screen.queryByText('Connected')).not.toBeInTheDocument()
+    it('an empty account makes Receive primary and disables Send', () => {
+      mockUsePortfolio.mockReturnValue({
+        totalUsd: 0,
+        totalEur: 0,
+        breakdown: [
+          { symbol: 'USDC', balance: '0', formatted: '0.00', usdValue: 0, eurValue: 0, sekValue: 0 },
+        ],
+        loading: false,
+        error: null,
+        refetch: vi.fn(),
+      })
+      render(<AccountDetailClient />)
+
+      expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: 'Receive' })).not.toBeDisabled()
+      // The empty account renders its empty holdings and zero figures.
+      expect(screen.getByText('No tokens yet')).toBeInTheDocument()
+      expect(screen.getByText('$0.00')).toBeInTheDocument()
+    })
   })
 
-  // #3542 (D): "Access revoked" is false while a budget delegation is still
-  // redeemable on-chain. The summary was decided from `status` before the
-  // allowances (a view of ACTIVE rows) were ever read.
-  describe('half-revoked agents (#3542)', () => {
-    function withAgent(overrides: Record<string, unknown>) {
+  describe('the tab row owns ?tab= (#4097)', () => {
+    it('Activity is the default tab', () => {
+      render(<AccountDetailClient />)
+      expect(screen.getByRole('tab', { name: /Activity/ })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.getByRole('heading', { name: 'Activity' })).toBeInTheDocument()
+    })
+
+    it('?tab=agents selects the Agents tab', () => {
+      tabParam = 'agents'
+      render(<AccountDetailClient />)
+      expect(screen.getByRole('tab', { name: /Agents/ })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.queryByRole('heading', { name: 'Activity' })).not.toBeInTheDocument()
+    })
+
+    it('?tab=security selects the Security & details tab', () => {
+      tabParam = 'security'
+      render(<AccountDetailClient />)
+      expect(screen.getByRole('tab', { name: /Security & details/ })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.getByRole('heading', { name: 'Who can approve' })).toBeInTheDocument()
+    })
+
+    it('an unknown tab value falls back to Activity', () => {
+      tabParam = 'bogus'
+      render(<AccountDetailClient />)
+      expect(screen.getByRole('tab', { name: /Activity/ })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.getByRole('heading', { name: 'Activity' })).toBeInTheDocument()
+    })
+
+    it('clicking a tab writes ?tab= to the URL; the default tab has no parameter', async () => {
+      render(<AccountDetailClient />)
+      fireEvent.click(screen.getByRole('tab', { name: /Security & details/ }))
+      await waitFor(() =>
+        expect(mockRouterReplace).toHaveBeenCalledWith('/accounts/safe-1?tab=security', { scroll: false }),
+      )
+      fireEvent.click(screen.getByRole('tab', { name: /Agents/ }))
+      await waitFor(() =>
+        expect(mockRouterReplace).toHaveBeenCalledWith('/accounts/safe-1?tab=agents', { scroll: false }),
+      )
+    })
+
+    it('returning to Activity from another tab writes the bare account URL', async () => {
+      // The URL says security; clicking Activity then owns the canonical
+      // default address (no ?tab= parameter).
+      tabParam = 'security'
+      render(<AccountDetailClient />)
+      fireEvent.click(screen.getByRole('tab', { name: /^Activity/ }))
+      await waitFor(() =>
+        expect(mockRouterReplace).toHaveBeenCalledWith('/accounts/safe-1', { scroll: false }),
+      )
+    })
+  })
+
+  describe('the Agents tab (#4097)', () => {
+    function agentOverview() {
+      return overview({
+        agents: [
+          {
+            id: 'agent-1',
+            name: 'Research agent',
+            status: 'active',
+            accountId: 'safe-1',
+            accountName: 'Main account',
+            accountChainId: 8453,
+            allowances: [],
+            budgets: [
+              {
+                id: 'budget-1',
+                delegationHash: '0xabc',
+                chainId: 8453,
+                tokenAddress: '0x' + 'aa'.repeat(20),
+                tokenSymbol: 'USDC',
+                decimals: 6,
+                budgetAtomic: '5000000',
+                periodSeconds: 86_400,
+                startDate: '2026-10-01T00:00:00Z',
+                expiresAt: '2026-11-01T00:00:00Z',
+                periodEnd: '2026-10-20T00:00:00Z',
+              },
+            ],
+            receivedSubBudgets: [],
+            stats: {
+              d7: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+              d30: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+              lastPaymentAt: null,
+              lastCounterparty: null,
+            },
+          },
+        ],
+        agentCount: { active: 1, paused: 0, pending_approval: 0 },
+      })
+    }
+
+    it('lists the account agents and carries the count on the tab', () => {
+      mockUseDashboardOverview.mockReturnValue({
+        data: agentOverview(),
+        loading: false,
+        error: null,
+        refetch: vi.fn(),
+      })
+      tabParam = 'agents'
+      render(<AccountDetailClient />)
+
+      expect(screen.getByText('Research agent')).toBeInTheDocument()
+      // The tab count: 1 agent, rendered beside the tab label.
+      const tab = screen.getByRole('tab', { name: /Agents/ })
+      expect(within(tab).getByText('1')).toBeInTheDocument()
+      // The budget snapshot line.
+      expect(
+        screen.getByText('1 agent can spend up to 5.00 USDC per day from this account.'),
+      ).toBeInTheDocument()
+    })
+
+    it('empty Agents tab offers Connect agent', () => {
+      tabParam = 'agents'
+      render(<AccountDetailClient />)
+
+      // `Button href` renders a link — the empty tab's action routes to the
+      // Agents page, where the connect flow lives.
+      expect(screen.getByRole('link', { name: 'Connect agent' })).toHaveAttribute('href', '/agents')
+    })
+
+    it('revoked agents are not listed; the hidden count links to the revoked facet', () => {
+      mockUseDashboardOverview.mockReturnValue({
+        data: agentOverview(),
+        loading: false,
+        error: null,
+        refetch: vi.fn(),
+      })
       mockUseAgents.mockReturnValue({
         agents: [
           {
-            id: 'agent-9',
+            id: 'agent-2',
             name: 'Old agent',
             account_id: 'safe-1',
             status: 'revoked',
             account_type: 'delegator_hybrid',
-            mcp_last_seen_at: null,
             allowances: [],
-            ...overrides,
           },
         ],
         loading: false,
         error: null,
         refetch: vi.fn(),
       })
-    }
-
-    it('revoked + live budget: says the budget is still active, links to the agent, offers no action', () => {
-      withAgent({ live_delegation_count: 1 })
+      tabParam = 'agents'
       render(<AccountDetailClient />)
 
-      // Short enough for 390px, and in warning tone rather than plain grey.
-      const line = screen.getByText('Budget still active on-chain')
-      expect(line.className).toContain('--v2-warning')
-      // The badge no longer paints a live budget in the danger red.
-      expect(screen.getByText('Revoked').className).toContain('--v2-warning')
-      expect(screen.queryByText(/Access revoked/)).not.toBeInTheDocument()
-      const row = screen.getByRole('link', { name: /Old agent/ })
-      expect(row).toHaveAttribute('href', '/agents/agent-9')
-      expect(screen.queryByRole('button', { name: /Finish revoking/ })).not.toBeInTheDocument()
+      expect(screen.queryByText('Old agent')).not.toBeInTheDocument()
+      expect(screen.getByText(/1 revoked agent not listed/)).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'View' })).toHaveAttribute('href', '/agents?status=revoked')
     })
 
-    it('archived + live budget: same', () => {
-      withAgent({ status: 'revoked', archived_at: '2026-06-01T00:00:00Z', live_delegation_count: 2 })
+    it('with two or more accounts the revoked link narrows by account', () => {
+      mockUseAuth.mockReturnValue({
+        ...mockUseAuth(),
+        user: {
+          ...mockUseAuth().user,
+          accounts: [SAFE, { ...SAFE, id: 'safe-2', name: 'Second' }],
+        },
+      })
+      mockUseAgents.mockReturnValue({
+        agents: [
+          {
+            id: 'agent-2',
+            name: 'Old agent',
+            account_id: 'safe-1',
+            status: 'revoked',
+            account_type: 'delegator_hybrid',
+            allowances: [],
+          },
+        ],
+        loading: false,
+        error: null,
+        refetch: vi.fn(),
+      })
+      tabParam = 'agents'
       render(<AccountDetailClient />)
-      expect(screen.getByText(/Budget still active/)).toBeInTheDocument()
+
+      expect(screen.getByRole('link', { name: 'View' })).toHaveAttribute(
+        'href',
+        '/agents?status=revoked&account=safe-1',
+      )
     })
 
-    it('revoked + count 0: unchanged — still "Access revoked"', () => {
-      withAgent({ live_delegation_count: 0 })
+    it('does not claim agents are gone while the overview is loading', () => {
+      mockUseDashboardOverview.mockReturnValue({ data: null, loading: true, error: null, refetch: vi.fn() })
+      tabParam = 'agents'
       render(<AccountDetailClient />)
-      expect(screen.getByText(/Access revoked/)).toBeInTheDocument()
-      expect(screen.queryByText(/Budget still active/)).not.toBeInTheDocument()
+
+      expect(screen.queryByText('No agents connected')).not.toBeInTheDocument()
+      expect(screen.getByRole('status', { name: 'Loading agents' })).toBeInTheDocument()
     })
   })
 
-  // #1089: backup & recovery is an account capability — it must work before
-  // any agent exists, not gate on one.
-  /**
-   * #2413 deleted the #1989 fork this comment used to describe: the legacy
-   * branch had no account left to render, so the paired legacy-absence /
-   * delegation-presence test went with it. Its POSITIVE half is restored
-   * below rather than dropped — without it nothing in this file asserts the
-   * account's spend affordances render at all, which is exactly the coverage
-   * hole a fork-deletion is prone to leaving. Scoped to what the fixture can
-   * evidence: Connect agent is not asserted here, because this fixture's
-   * account has agents and the button belongs to the empty state.
-   */
+  describe('Security & details tab (#4097)', () => {
+    it('hosts AccountSignersCard and the account details', () => {
+      tabParam = 'security'
+      render(<AccountDetailClient />)
+
+      expect(screen.getByRole('heading', { name: 'Who can approve' })).toBeInTheDocument()
+      const card = screen.getByTestId('account-signers-card')
+      expect(card).toHaveAttribute('data-safe-address', SAFE.account_address)
+      expect(screen.getByRole('heading', { name: 'Account details' })).toBeInTheDocument()
+      expect(screen.getByText('0x1111…1111')).toBeInTheDocument()
+      expect(screen.getByText('Base')).toBeInTheDocument()
+      expect(screen.getByText('12 May 2026')).toBeInTheDocument()
+    })
+
+    it('one signer: the Security tab carries the warning dot', () => {
+      render(<AccountDetailClient />)
+      const tab = screen.getByRole('tab', { name: /Security & details/ })
+      expect(within(tab).getByText('Needs attention')).toBeInTheDocument()
+    })
+
+    it('two or more signers: no warning dot', () => {
+      mockUseAccountSigners.mockReturnValue({
+        ...mockUseAccountSigners(),
+        signers: {
+          account_address: SAFE.account_address,
+          passkeys: [
+            { key_id: 'k1', created_at: '2026-05-12T00:00:00Z' },
+            { key_id: 'k2', created_at: '2026-06-01T00:00:00Z' },
+          ],
+          owner_address: null,
+        },
+      })
+      render(<AccountDetailClient />)
+      const tab = screen.getByRole('tab', { name: /Security & details/ })
+      expect(within(tab).queryByText('Needs attention')).not.toBeInTheDocument()
+    })
+
+    it('an unknown signer read shows no dot rather than a false warning', () => {
+      mockUseAccountSigners.mockReturnValue({
+        ...mockUseAccountSigners(),
+        signers: null,
+        loadError: true,
+      })
+      render(<AccountDetailClient />)
+      const tab = screen.getByRole('tab', { name: /Security & details/ })
+      expect(within(tab).queryByText('Needs attention')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('Last 30 days (#4097)', () => {
+    it('renders Money in and Money out as two figures', () => {
+      render(<AccountDetailClient />)
+      expect(screen.getByText('$120.00')).toBeInTheDocument()
+      expect(screen.getByText('$45.00')).toBeInTheDocument()
+    })
+
+    it('carries the partial-data indicator when the feed is capped', () => {
+      mockUseAccountMoneyFlow.mockReturnValue({
+        ...mockUseAccountMoneyFlow(),
+        partial: true,
+      })
+      render(<AccountDetailClient />)
+      expect(
+        screen.getByText('Figures cover the history Haven could load, which may not cover the full 30 days.'),
+      ).toBeInTheDocument()
+    })
+
+    it('shows a retry when the window read failed', () => {
+      mockUseAccountMoneyFlow.mockReturnValue({
+        ...mockUseAccountMoneyFlow(),
+        moneyIn: 0,
+        moneyOut: 0,
+        error: 'explorer down',
+      })
+      render(<AccountDetailClient />)
+      expect(screen.getByText('Haven could not load the last 30 days.')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+    })
+  })
+
   it('offers the account spend affordances it renders', () => {
     render(<AccountDetailClient />)
 
     expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
-    // TWO Receive buttons (#4094): the header's quick action and the
-    // empty-state's funding action (the pre-rename "Deposit address").
-    const receiveButtons = screen.getAllByRole('button', { name: 'Receive' })
-    expect(receiveButtons).toHaveLength(2)
+    expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
+    tabParam = 'security'
+    render(<AccountDetailClient />)
     expect(screen.getByTestId('account-signers-card')).toBeInTheDocument()
   })
 
@@ -472,7 +700,7 @@ describe('AccountDetailClient', () => {
           409,
         ),
       )
-    mockUseAccounts.mockReturnValue({ renameAccount: vi.fn(), removeAccount, loading: false })
+    mockUseAccounts.mockReturnValue({ renameAccount: vi.fn(), removeAccount, setDefault: vi.fn(), loading: false })
 
     render(<AccountDetailClient />)
 
@@ -485,8 +713,8 @@ describe('AccountDetailClient', () => {
     expect(refusal).toHaveTextContent(/still has a budget/i)
     // Pending grants block the unlink too, so the copy must not say "active".
     expect(refusal).not.toHaveTextContent(/active budget/i)
-    // "Backup & recovery" on this same page is signer replacement, not the sweep
-    // this refusal is about — the copy must not borrow that word as a noun.
+    // The Security & details tab is signer replacement, not the sweep this
+    // refusal is about — the copy must not borrow that word as a noun.
     expect(refusal).not.toHaveTextContent(/a recovery/i)
     expect(refusal).toHaveTextContent(/Agents page/i)
 
@@ -507,7 +735,7 @@ describe('AccountDetailClient', () => {
   // dialog session with nothing failing.
   it('does not carry a refusal into the next time the dialog is opened', async () => {
     const removeAccount = vi.fn().mockRejectedValue(new ApiRequestError('nope', 409))
-    mockUseAccounts.mockReturnValue({ renameAccount: vi.fn(), removeAccount, loading: false })
+    mockUseAccounts.mockReturnValue({ renameAccount: vi.fn(), removeAccount, setDefault: vi.fn(), loading: false })
 
     render(<AccountDetailClient />)
 
@@ -530,7 +758,7 @@ describe('AccountDetailClient', () => {
 
   it('reports a non-refusal unlink failure without blaming a budget', async () => {
     const removeAccount = vi.fn().mockRejectedValue(new ApiRequestError('boom', 500))
-    mockUseAccounts.mockReturnValue({ renameAccount: vi.fn(), removeAccount, loading: false })
+    mockUseAccounts.mockReturnValue({ renameAccount: vi.fn(), removeAccount, setDefault: vi.fn(), loading: false })
 
     render(<AccountDetailClient />)
 
@@ -551,7 +779,7 @@ describe('AccountDetailClient', () => {
 
   it('navigates away when unlinking succeeds', async () => {
     const removeAccount = vi.fn().mockResolvedValue(undefined)
-    mockUseAccounts.mockReturnValue({ renameAccount: vi.fn(), removeAccount, loading: false })
+    mockUseAccounts.mockReturnValue({ renameAccount: vi.fn(), removeAccount, setDefault: vi.fn(), loading: false })
 
     render(<AccountDetailClient />)
 
@@ -581,27 +809,27 @@ describe('AccountDetailClient', () => {
       error: null,
       refetch: vi.fn(),
     })
+    tabParam = 'security'
 
     render(<AccountDetailClient />)
 
     const card = screen.getByTestId('account-signers-card')
     expect(card).toHaveAttribute('data-safe-address', SAFE.account_address)
-    expect(card).not.toHaveAttribute('data-agent-id')
   })
 
   // #2882: this surface reads the same capped feed as /transactions and made
   // the louder claim — "N transactions for this Haven wallet" from a total
-  // that counts only what the explorer window returned. The mock above now
-  // carries `truncated`, without which every case renders the un-truncated
-  // branch and a regression here would pass silently.
+  // that counts only what the explorer window returned.
   it('does not claim a complete history when the feed is capped', () => {
     mockUseTransactionsFeed.mockReturnValue({
       transactions: [txRow()],
       loadingInitial: false,
+      loadingMore: false,
       error: null,
       total: 47,
       hasMore: true,
       truncated: true,
+      loadMore: vi.fn(),
       refresh: vi.fn(),
     })
 
@@ -616,10 +844,12 @@ describe('AccountDetailClient', () => {
     mockUseTransactionsFeed.mockReturnValue({
       transactions: [txRow()],
       loadingInitial: false,
+      loadingMore: false,
       error: null,
       total: 3,
       hasMore: false,
       truncated: false,
+      loadMore: vi.fn(),
       refresh: vi.fn(),
     })
 

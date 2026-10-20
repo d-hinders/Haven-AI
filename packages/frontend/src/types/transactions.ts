@@ -154,13 +154,11 @@ export type BalanceItem = ApiSchema<'BalanceItem'> & { chainId?: number }
 
 export type BalancesResponse = ApiSchema<'BalancesResponse'>
 
-/** The receive ledger row (`GET /receive/{accountAddress}`, #3333). */
-export type ReceiveLedgerTransfer = ApiSchema<'ReceiveLedgerTransfer'>
-
-export type ReceiveLedgerResponse = ApiSchema<'ReceiveLedgerResponse'>
-
-export type OffRampDestination = ApiSchema<'OffRampDestination'>
-
-export type OffRampPrepareResponse = ApiSchema<'OffRampPrepareResponse'>
+// #4097: the receive-ledger and off-ramp wire aliases are removed here —
+// #3333's off-ramp panel and its ledger hook were their last frontend user.
+// The backend routes stay (#3333); the generated
+// `ApiSchema<'…'>` source of truth in @haven_ai/core is unchanged, so a
+// future cash-out surface re-declares an alias rather than a hand-written
+// shape (the wire-type ratchet's rule, #1447).
 export type PortfolioBreakdown = ApiSchema<'PortfolioBreakdown'>
 export type PortfolioResponse = ApiSchema<'PortfolioResponse'>

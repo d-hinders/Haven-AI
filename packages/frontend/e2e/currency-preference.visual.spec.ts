@@ -182,10 +182,12 @@ test.describe('currency preference renders SEK (#3127 finding 8)', () => {
       await expect(main).toHaveCount(1)
       await expect(page.getByRole('heading', { name: 'Operations', exact: true })).toBeVisible({ timeout: 60_000 })
 
-      // The headline and the token row both price from the portfolio fixture's
-      // SEK figures (`totalSek`/`sekValue: 13450`), never a USD value relabelled.
-      await expect(main.getByText('13 450,00 kr')).toHaveCount(2)
-      await expect(main.getByText('Value (SEK)')).toHaveCount(1)
+      // #4097: the summary card's Balance prices from the portfolio fixture's
+      // `totalSek` — never a USD value relabelled. The fixture holds ONE
+      // token, so Holdings shows no value (it would repeat the balance) and
+      // instead carries the implied rate: 13 450 kr over 1250 USDC.
+      await expect(main.getByText('13 450,00 kr')).toHaveCount(1)
+      await expect(main.getByText('1 USDC = 10,76 kr')).toHaveCount(1)
 
       await expectNoSkeletons(main, `/accounts/[id] (SEK, ${vp.name})`)
       await settleFonts(page)

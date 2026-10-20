@@ -351,6 +351,52 @@ describe('AccountActivityTab — rows and the detail panel (#4098)', () => {
     fireEvent.keyDown(rows[1], { key: ' ' })
     expect(screen.getByTestId('detail-panel')).toHaveTextContent('panel:0xdef')
   })
+
+  it('#4099: names a transfer between own accounts on both sides, and says "by you" for a recorded owner send', () => {
+    const main = '0x' + 'aa'.repeat(20)
+    const reserve = '0x' + 'dd'.repeat(20)
+    const ownAccounts = new Map([
+      [`${main}:8453`, 'Main'],
+      [`${reserve}:8453`, 'Reserve'],
+    ])
+    const transfer = { from: main, to: reserve }
+
+    // Sending side: Main's ledger.
+    feedMock.mockImplementation(() => ({
+      ...DEFAULT_FEED,
+      transactions: [tx({ ...transfer, hash: '0x01', direction: 'out', initiatedBy: 'human' })],
+      total: 1,
+    }))
+    const { unmount } = renderTab({ accountNamesByAddress: ownAccounts })
+    let row = ledgerRows()[0]
+    expect(row).toHaveTextContent('Payment sent by you')
+    expect(row).toHaveTextContent(/From Main\s*→\s*To Reserve/)
+    expect(row).not.toHaveTextContent('New recipient')
+    unmount()
+
+    // Receiving side: Reserve's ledger, the same transfer inbound.
+    feedMock.mockImplementation(() => ({
+      ...DEFAULT_FEED,
+      transactions: [
+        tx({
+          ...transfer,
+          hash: '0x01',
+          direction: 'in',
+          accountId: 'safe-2',
+          accountAddress: reserve,
+          accountName: 'Reserve',
+        }),
+      ],
+      total: 1,
+    }))
+    renderTab({ accountId: 'safe-2', accountNamesByAddress: ownAccounts })
+    row = ledgerRows()[0]
+    // The movement line prints its own "From": the sender goes in bare, so
+    // the row never reads "From From Main".
+    expect(row).toHaveTextContent(/From Main\s*→\s*To Reserve/)
+    expect(row).not.toHaveTextContent('From From')
+    expect(row).not.toHaveTextContent('Deposit')
+  })
 })
 
 describe('AccountActivityTab — CSV export (#4098)', () => {

@@ -3459,10 +3459,12 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 
 > **Re-verified #4120 (2026-10-20 — one shared post-funding merchant-answer
 > decision; the hosted hash rule becomes the local rule).** The diff touches
-> two files in this document's coverage list, `packages/sdk/src/client.ts` and
-> `packages/sdk/src/merchant-completion.ts`, plus the new
-> `packages/sdk/src/merchant-answer.ts` that now holds the decision both call,
-> and none of its authority, custody or signing surfaces. On the D1 input — a
+> one file in this document's coverage list, `packages/sdk/src/client.ts`, and
+> none of its authority, custody or signing surfaces. The shared decision the
+> diff extracts now lives in a new SDK module (`merchant-answer.ts`) that both
+> the hosted call and the local retry call; that module and the local-path
+> twin in `merchant-completion.ts` are outside this document's coverage list,
+> as the #4062 note above already records for the twin. On the D1 input — a
 > `PAYMENT-RESPONSE` header with no transaction (or an empty header) beside a
 > `_meta` settlement that has one — the HOSTED path now behaves as the local
 > path always has: an `isError` answer beside a `_meta` settlement is accepted

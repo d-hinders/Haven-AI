@@ -12,7 +12,7 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -135,6 +135,18 @@ describe('releases, matched generously because a stale assignee misleads', () =>
 
 describe('the channel number is single-sourced (#3182)', () => {
   const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8')
+  // Every Markdown file of the ship-next skill, not only SKILL.md: text moved
+  // into references/ (#4173) would otherwise leave both guards below blind.
+  const SHIP_NEXT = '../../.agents/skills/ship-next/'
+  const shipNextDocs = readdirSync(new URL(SHIP_NEXT, import.meta.url), { recursive: true })
+    .filter((p) => p.endsWith('.md'))
+    .sort()
+    .map((p) => SHIP_NEXT + p.split(path.sep).join('/'))
+
+  test('the ship-next file list reaches references/ (positive control for the two guards below)', () => {
+    assert.ok(shipNextDocs.includes(`${SHIP_NEXT}SKILL.md`), shipNextDocs.join(', '))
+    assert.ok(shipNextDocs.includes(`${SHIP_NEXT}references/waiting-on-ci.md`), shipNextDocs.join(', '))
+  })
 
   test('every coordination module re-exports the one constant', async () => {
     const [{ CHANNEL_ISSUE: c1 }, { CHANNEL_ISSUE: c2 }] = await Promise.all([import('./claim-collision.mjs'), import('./release-on-merge.mjs')])
@@ -154,7 +166,8 @@ describe('the channel number is single-sourced (#3182)', () => {
   })
 
   test('the shared-surface list is written once, in AGENTS.md (#3182 acceptance)', () => {
-    const files = ['../../AGENTS.md', '../../.agents/skills/ship-next/SKILL.md', '../../.github/workflows/claim-assignee.yml', './claim-assignee.mjs']
+    // Mutation: put `packages/mcp-server/src/tools*` into ship-next's references/waiting-on-ci.md → red.
+    const files = ['../../AGENTS.md', ...shipNextDocs, '../../.github/workflows/claim-assignee.yml', './claim-assignee.mjs']
     const hits = files.filter((f) => read(f).includes('packages/mcp-server/src/tools*'))
     assert.deepEqual(hits, ['../../AGENTS.md'])
   })
@@ -163,10 +176,11 @@ describe('the channel number is single-sourced (#3182)', () => {
     // The first cut of this test matched the URL form only and stayed green
     // over five bare `#1289` live-rule sentences (review of #3182). Bare
     // mentions are the ones agents read, so every LINE that carries one must
-    // also say what it is. Mutation: put `coordinate in #1289` back → red.
+    // also say what it is. Mutation: put `coordinate in #1289` back, in SKILL.md
+    // or in any ship-next references/ file → red.
     const { RETIRED_CHANNEL_ISSUES } = await import('./coordination-channel.mjs')
     for (const old of RETIRED_CHANNEL_ISSUES) {
-      for (const f of ['../../AGENTS.md', '../../.agents/skills/ship-next/SKILL.md']) {
+      for (const f of ['../../AGENTS.md', ...shipNextDocs]) {
         const offenders = read(f)
           .split('\n')
           .filter((l) => new RegExp(`(?:#|issues/)${old}\\b`).test(l) && !/predecessor|history/i.test(l))

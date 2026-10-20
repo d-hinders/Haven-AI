@@ -87,6 +87,8 @@ export function useListMenu() {
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const focusOnOpen = useRef<FocusTarget>('checked')
   const [shift, setShift] = useState(0)
+  const shiftRef = useRef(0)
+  const [measureTick, setMeasureTick] = useState(0)
   const baseId = useId()
   const menuId = `${baseId}-menu`
   const triggerId = `${baseId}-trigger`
@@ -103,6 +105,7 @@ export function useListMenu() {
 
   const close = useCallback((returnFocus: boolean) => {
     setOpenRaw(false)
+    shiftRef.current = 0
     setShift(0)
     if (returnFocus) triggerRef.current?.focus()
   }, [])
@@ -119,18 +122,29 @@ export function useListMenu() {
     [items],
   )
 
-  // Measure and clamp, then move focus in — before paint, so the panel never
-  // flashes past the edge.
+  // Measure and clamp before paint, so the panel never flashes past the edge.
+  // Re-run on `remeasure()`, for a panel whose content changes size while
+  // open (PeriodPicker's custom-range form). The rect is read with the
+  // current shift taken back out, so a re-measure starts from the panel's
+  // natural position rather than compounding.
   useLayoutEffect(() => {
     if (!open) return
     const panel = panelRef.current
-    if (panel && typeof window !== 'undefined') {
-      const rect = panel.getBoundingClientRect()
-      const viewport = document.documentElement.clientWidth || window.innerWidth
-      setShift(menuShift(rect, viewport))
-    }
-    focusItem(focusOnOpen.current)
+    if (!panel || typeof window === 'undefined') return
+    const rect = panel.getBoundingClientRect()
+    const natural = { left: rect.left - shiftRef.current, right: rect.right - shiftRef.current }
+    const viewport = document.documentElement.clientWidth || window.innerWidth
+    const next = menuShift(natural, viewport)
+    shiftRef.current = next
+    setShift(next)
+  }, [open, measureTick])
+
+  // Then move focus in.
+  useLayoutEffect(() => {
+    if (open) focusItem(focusOnOpen.current)
   }, [open, focusItem])
+
+  const remeasure = useCallback(() => setMeasureTick((n) => n + 1), [])
 
   // Close on a pointer press outside the trigger and the panel.
   useEffect(() => {
@@ -201,6 +215,7 @@ export function useListMenu() {
     open,
     close,
     focusItem,
+    remeasure,
     menuId,
     triggerId,
     triggerRef,

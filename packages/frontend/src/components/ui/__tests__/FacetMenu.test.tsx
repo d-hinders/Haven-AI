@@ -226,6 +226,34 @@ describe('PeriodPicker', () => {
     expect(screen.getAllByRole('menuitemradio').map((r) => r.textContent)).toEqual(['Last 7 days', 'Last 30 days', 'Last 90 days'])
   })
 
+  it('without All time, the default does not tint; a change does', async () => {
+    const user = userEvent.setup()
+    render(<PeriodPicker value={{ preset: '30d' }} onChange={() => {}} allowAllTime={false} defaultValue={{ preset: '30d' }} />)
+    expect(screen.getByRole('button', { name: 'Period: Last 30 days' })).toHaveAttribute('data-active', 'false')
+    render(<PeriodPicker value={{ preset: '7d' }} onChange={() => {}} allowAllTime={false} defaultValue={{ preset: '30d' }} />)
+    expect(screen.getByRole('button', { name: 'Period: Last 7 days' })).toHaveAttribute('data-active', 'true')
+    await user.click(screen.getByRole('button', { name: 'Period: Last 7 days' }))
+  })
+
+  it('re-clamps the panel when the wider custom-range form replaces the list (#4110 review)', async () => {
+    const user = userEvent.setup()
+    // The list view fits (8..216); the form, growing left from the same right
+    // edge, would start at -66 in a 375px viewport.
+    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const isPanel = this.id.endsWith('-menu')
+      const custom = isPanel && this.querySelector('form') !== null
+      const left = !isPanel ? 0 : custom ? -66 : 8
+      return { left, right: isPanel ? 216 : 0, top: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect
+    })
+    Object.defineProperty(document.documentElement, 'clientWidth', { configurable: true, value: 375 })
+    render(<Period allowCustom />)
+    await user.click(screen.getByRole('button', { name: 'Period: All time' }))
+    expect(screen.getByRole('menu').style.transform).toBe('')
+    await user.click(screen.getByRole('menuitemradio', { name: 'Custom range' }))
+    expect(screen.getByRole('group', { name: 'Custom range' }).style.transform).toBe('translateX(74px)')
+    spy.mockRestore()
+  })
+
   it('a custom range applies only once both dates are valid', async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()

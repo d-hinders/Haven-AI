@@ -5,7 +5,7 @@ import { FilterPill } from '@haven_ai/ui/FilterPill'
 import { Icon } from '@/components/ui/Icon'
 import { allOptionLabel, facetValueLabel } from './list-controls-copy'
 import { listMenuItemClasses, listMenuPanelClasses, listTriggerClasses, useListMenu } from './list-menu'
-import type { FacetUrlSpec } from './list-url-codec'
+import { sameValues, type FacetUrlSpec } from './list-url-codec'
 
 export interface ListFacetOption {
   value: string
@@ -85,7 +85,9 @@ export function FacetMenu({ facet, value, onChange, allLabel = allOptionLabel, a
     )
   }
 
-  const active = value.length > 0 && allLabel !== null
+  // Active = differs from the page default (see ListToolbar); the Sort chip
+  // (`allLabel === null`) is a view choice and never tints.
+  const active = allLabel !== null && !sameValues(value, facet.defaultValue ?? [])
   const summary = facetValueLabel(value, facet.options, allLabel ?? allOptionLabel)
 
   const choose = (next: string[]) => {
@@ -101,7 +103,7 @@ export function FacetMenu({ facet, value, onChange, allLabel = allOptionLabel, a
 
   return (
     <div ref={menu.wrapperRef} className="relative inline-flex">
-      <button {...menu.triggerProps} className={listTriggerClasses(active)}>
+      <button {...menu.triggerProps} data-active={active} className={listTriggerClasses(active)}>
         <span className={active ? '' : 'text-[var(--v2-ink-3)]'}>{facet.label}:</span>
         {' '}
         <span className="font-medium">{summary}</span>

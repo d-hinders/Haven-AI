@@ -52,6 +52,24 @@ describe('useListUrlState', () => {
     expect(replace).toHaveBeenLastCalledWith(null, '', '/transactions?tab=activity&q=tea')
   })
 
+  it('re-seeds from the URL on back/forward, but not from its own writes', () => {
+    const { result, rerender } = renderHook(() => useListUrlState(SCHEMA, { filtering: 'server' }))
+    act(() => result.current[1]({ q: 'tea', facets: { direction: [] } }))
+    mockSearch.value = 'tab=activity&q=tea'
+    rerender()
+    expect(result.current[0].q).toBe('tea')
+    mockSearch.value = 'tab=activity&direction=in'
+    rerender()
+    expect(result.current[0]).toEqual({ q: '', facets: { direction: ['in'] } })
+  })
+
+  it('keeps the URL hash', () => {
+    window.history.replaceState(null, '', '/transactions?tab=activity&search=coffee#rows')
+    const { result } = renderHook(() => useListUrlState(SCHEMA, { filtering: 'server' }))
+    act(() => result.current[1]({ q: 'tea', facets: { direction: [] } }))
+    expect(replace).toHaveBeenLastCalledWith(null, '', '/transactions?tab=activity&q=tea#rows')
+  })
+
   it('browser: a facet change writes at once, carrying any pending search', () => {
     const { result } = renderHook(() => useListUrlState(SCHEMA, { filtering: 'browser' }))
     act(() => result.current[1]({ ...result.current[0], q: 'tea' }))

@@ -717,12 +717,12 @@ Structure:
 1. Page header with concise description.
 2. Filter controls, all applied on the server (#4095), so the rows, the
    count and the CSV are the same set: search (committed after a pause in
-   typing, Enter at once), Account (hidden with one account, and absent on
-   the account Activity tab, which fixes it), Initiator, Token, Direction,
+   typing, Enter at once), Account (shown disabled when there is only one
+   account), Initiator, Token, Direction,
    and Period (Last 7 / 30 / 90 days, All time, or a custom range), with
    Export CSV in the same bar. Active filters show as removable chips. This
-   bar moves onto the [List controls](design-system.md#list-controls--listtoolbar-facetmenu-periodpicker-4110) pattern with #4111 (and #4130 for the account
-   Activity tab); build new list filters on that pattern, not on this bar.
+   bar moves onto the [List controls](design-system.md#list-controls--listtoolbar-facetmenu-periodpicker-4110) pattern with #4111 (and, once the account
+   page's planned Activity tab ships, #4130); build new list filters on that pattern, not on this bar.
 3. The full-page `TransactionsTable` variant for `/transactions`; card/compact
    variants are valid for scoped histories on account and agent detail.
 4. Empty state inside the table that preserves the current filters.

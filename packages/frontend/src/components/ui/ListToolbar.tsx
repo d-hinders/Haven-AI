@@ -35,6 +35,8 @@ import {
   periodPresets,
   clearedListState,
   isAllTime,
+  samePeriod,
+  sameValues,
   type ListState,
   type ListUrlSchema,
   type PeriodPreset,
@@ -46,6 +48,8 @@ export interface ListToolbarSort {
 }
 
 export interface ListToolbarPeriod {
+  /** The page's default period. Omitted: All time. */
+  defaultValue?: PeriodValue
   presets?: readonly PeriodPreset[]
   allowAllTime?: boolean
   allowCustom?: boolean
@@ -96,7 +100,7 @@ function schemaOf(facets: ListFacet[], sort: ListToolbarSort | undefined, period
   return {
     facets,
     sort: sort ? { values: sort.options.map((o) => o.value), defaultValue: state.sort ?? sort.options[0]?.value ?? '' } : undefined,
-    period: period ? { presets: period.presets, allowAllTime: period.allowAllTime, allowCustom: period.allowCustom, defaultValue: state.period } : undefined,
+    period: period ? { presets: period.presets, allowAllTime: period.allowAllTime, allowCustom: period.allowCustom, defaultValue: period.defaultValue } : undefined,
   }
 }
 
@@ -137,7 +141,14 @@ export function ListToolbar({
 
   const setFacet = (id: string, values: string[]) => onChange({ ...state, facets: { ...state.facets, [id]: values } })
   const setPeriod = (next: PeriodValue) => onChange({ ...state, period: next })
-  const clearAll = () => onChange(clearedListState(state, schemaOf(facets, sort, period, state)))
+  // Bumped when the toolbar itself clears the search (Clear filters, the
+  // search chip), so the field drops its draft and any pending commit even
+  // when q was already empty and the value it watches did not change.
+  const [searchEpoch, setSearchEpoch] = useState(0)
+  const clearAll = () => {
+    setSearchEpoch((n) => n + 1)
+    onChange(clearedListState(state, schemaOf(facets, sort, period, state)))
+  }
 
   const allowAllTime = period?.allowAllTime ?? true
   const visibleFacets = facets.filter((f) => f.options.length > 1)
@@ -146,22 +157,38 @@ export function ListToolbar({
 
   const active: ActiveFilter[] = []
   if (state.q.trim()) {
-    active.push({ key: 'q', label: `“${state.q.trim()}”`, inSheet: false, clear: () => onChange({ ...state, q: '' }) })
+    active.push({ key: 'q', label: `“${state.q.trim()}”`, inSheet: false, clear: () => {
+      setSearchEpoch((n) => n + 1)
+      onChange({ ...state, q: '' })
+    } })
   }
-  // Every facet with a value gets a chip — including one hidden for having a
-  // single option, because then the chip is the only way out of the filter.
+  // A filter is ACTIVE when it differs from the page's default — the one rule
+  // for the chip, the trigger tint, "Filters (n)" and the count (#4110
+  // review): a page whose default is not All (Marketplace's network) opens
+  // unfiltered. Removing a chip returns that facet to the default.
+  // Every active facet gets a chip — including one hidden for having a single
+  // option, because then the chip is the only way out of the filter.
   for (const facet of facets) {
     const values = state.facets[facet.id] ?? []
-    if (values.length === 0) continue
+    const defaults = facet.defaultValue ?? []
+    if (sameValues(values, defaults)) continue
     active.push({
       key: facet.id,
       label: `${facet.label}: ${facetValueLabel(values, facet.options)}`,
-      inSheet: true,
-      clear: () => setFacet(facet.id, []),
+      // Only facets the sheet shows count on "Filters (n)": a pill facet
+      // sits outside the sheet, and a hidden one-option facet is in neither.
+      inSheet: facet.rendering !== 'pills' && facet.options.length > 1,
+      clear: () => setFacet(facet.id, [...defaults]),
     })
   }
-  if (period && allowAllTime && !isAllTime(state.period)) {
-    active.push({ key: 'period', label: `Period: ${periodLabel(state.period)}`, inSheet: true, clear: () => setPeriod({}) })
+  const periodDefault = period?.defaultValue ?? {}
+  if (period && !samePeriod(state.period, periodDefault)) {
+    active.push({
+      key: 'period',
+      label: `Period: ${periodLabel(state.period)}`,
+      inSheet: true,
+      clear: () => setPeriod({ ...periodDefault }),
+    })
   }
   const filtered = active.length > 0
   const sheetCount = active.filter((a) => a.inSheet).length
@@ -180,6 +207,7 @@ export function ListToolbar({
           value={state.q}
           filtering={filtering}
           description={searchDescription}
+          epoch={searchEpoch}
           onCommit={(q) => onChange({ ...state, q })}
         />
         {hasSheetContent && (
@@ -237,6 +265,7 @@ export function ListToolbar({
               onChange={setPeriod}
               presets={period.presets}
               allowAllTime={allowAllTime}
+              defaultValue={period.defaultValue}
               allowCustom={period.allowCustom}
             />
           )}
@@ -319,12 +348,14 @@ function ListSearchField({
   value,
   filtering,
   description,
+  epoch,
   onCommit,
 }: {
   noun: ListNoun
   value: string
   filtering: 'server' | 'browser'
   description?: string
+  epoch: number
   onCommit: (q: string) => void
 }) {
   const [draft, setDraft] = useState(value)
@@ -334,6 +365,14 @@ function ListSearchField({
   // filters, back/forward), which must reset the field and cancel a pending
   // commit — or a stale timer could re-add a term the user just removed.
   const committed = useRef(value)
+  // The LATEST commit callback. A debounced commit fires after later renders,
+  // and the page's callback closes over that render's whole list state — so
+  // calling the one captured at keystroke time would write back facets the
+  // user has since changed (a removed chip, Clear filters). #4110 review.
+  const onCommitRef = useRef(onCommit)
+  useEffect(() => {
+    onCommitRef.current = onCommit
+  }, [onCommit])
   const inputRef = useRef<HTMLInputElement>(null)
   const descriptionId = useId()
 
@@ -349,13 +388,23 @@ function ListSearchField({
     setDraft(value)
   }, [value, cancel])
 
+  // A clear issued by the toolbar: drop the draft and any pending commit.
+  const lastEpoch = useRef(epoch)
+  useEffect(() => {
+    if (epoch === lastEpoch.current) return
+    lastEpoch.current = epoch
+    cancel()
+    committed.current = value
+    setDraft(value)
+  }, [epoch, value, cancel])
+
   useEffect(() => cancel, [cancel])
 
   const commit = (next: string) => {
     cancel()
     if (next === committed.current) return
     committed.current = next
-    onCommit(next)
+    onCommitRef.current(next)
   }
 
   const handleChange = (next: string) => {
@@ -571,7 +620,7 @@ function FilterSheet({
 function SheetGroup({ legend, children }: { legend: string; children: ReactNode }) {
   return (
     <fieldset className="border-b border-[var(--v2-border)] py-2 last:border-b-0">
-      <legend className="px-2.5 pb-1 pt-2 v2-text-meta font-medium uppercase tracking-[0.06em] text-[var(--v2-ink-3)]">
+      <legend className="px-2.5 pb-1 pt-2 v2-text-meta font-medium text-[var(--v2-ink-3)]">
         {legend}
       </legend>
       {children}

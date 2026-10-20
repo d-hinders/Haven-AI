@@ -19,15 +19,19 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 import { dismissMobileSidebar, mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
 
 const EVIDENCE = process.env.LIST_CONTROLS_EVIDENCE === '1'
+/** `dark` renders the evidence run in the dark theme (paired captures). */
+const SCHEME = process.env.LIST_CONTROLS_SCHEME === 'dark' ? 'dark' : 'light'
 
 async function evidence(target: Page | Locator, name: string) {
   if (!EVIDENCE) return
-  await target.screenshot({ path: `.screenshots/list-controls-${name}.png`, animations: 'disabled' })
+  const suffix = SCHEME === 'dark' ? '-dark' : ''
+  await target.screenshot({ path: `.screenshots/list-controls-${name}${suffix}.png`, animations: 'disabled' })
 }
 
 async function open(page: Page, width: number, height: number) {
   await mockHavenApi(page)
   await seedAuthenticatedSession(page)
+  await page.emulateMedia({ colorScheme: SCHEME })
   await page.setViewportSize({ width, height })
   await page.goto('/design-system')
   await dismissMobileSidebar(page)

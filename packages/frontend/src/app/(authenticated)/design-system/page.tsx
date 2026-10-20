@@ -673,24 +673,34 @@ function ListControlsExample({
         count={loading ? null : { shown: rows.length, total: DS_LIST_AGENTS.length }}
         layout={layout}
       />
-      <Card hover={false} className="overflow-hidden">
-        {loading ? (
-          <div aria-busy="true">
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="flex items-center gap-3 border-b border-[var(--v2-border)] px-4 py-3 last:border-b-0">
-                <Skeleton className="h-8 w-8" />
-                <Skeleton className="h-3 w-40" />
-              </div>
-            ))}
+      {/* ListNoMatch sits where the rows were — in place of the list card, not inside it. */}
+      {!loading && rows.length === 0 ? (
+        <ListNoMatch noun={DS_LIST_NOUN} onClear={() => setState(clearedListState(state, { facets }))} />
+      ) : (
+        <Card hover={false} className="overflow-hidden">
+          <div className="divide-y divide-[var(--v2-border)]" aria-busy={loading || undefined}>
+            {loading
+              ? [0, 1, 2].map((i) => (
+                  <div key={i} className="flex items-center gap-3 px-4 py-3">
+                    <Skeleton className="h-4 w-40" />
+                    <Skeleton className="ml-auto h-5 w-14" />
+                  </div>
+                ))
+              : rows.map((row) => (
+                  <Row
+                    key={row.id}
+                    title={row.name}
+                    subtitle={row.budget === 'none' ? 'No budget' : 'Has a budget'}
+                    trailing={
+                      <StatusBadge tone={row.status === 'active' ? 'success' : 'neutral'}>
+                        {row.status[0].toUpperCase() + row.status.slice(1)}
+                      </StatusBadge>
+                    }
+                  />
+                ))}
           </div>
-        ) : rows.length === 0 ? (
-          <ListNoMatch noun={DS_LIST_NOUN} onClear={() => setState(clearedListState(state, { facets }))} />
-        ) : (
-          rows.map((row) => (
-            <Row key={row.id} density="compact" title={row.name} subtitle={row.budget === 'none' ? 'No budget' : 'Has a budget'} trailing={<StatusBadge tone={row.status === 'active' ? 'success' : 'neutral'}>{row.status[0].toUpperCase() + row.status.slice(1)}</StatusBadge>} />
-          ))
-        )}
-      </Card>
+        </Card>
+      )}
     </div>
   )
 }
@@ -783,7 +793,7 @@ function FacetPrimitivesExample() {
           value={network}
           onChange={setNetwork}
         />
-        <PeriodPicker value={period} onChange={setPeriod} allowAllTime={false} align="left" />
+        <PeriodPicker value={period} onChange={setPeriod} allowAllTime={false} defaultValue={{ preset: '30d' }} align="left" />
       </div>
     </div>
   )
@@ -2831,7 +2841,7 @@ export default function DesignSystemPage() {
           <ListControlsState label="Server-filtered — the search commits once per 300ms pause (Enter at once, Escape clears), so one request per pause. Export CSV sits in the actions slot; Period offers a custom range.">
             <ServerListControlsExample />
           </ListControlsState>
-          <ListControlsState label="FacetMenu and PeriodPicker on their own — a pill facet (toggle buttons, aria-pressed) for a short category list, a single-select menu whose default is not All, and the Analytics period: presets only, no All time. Menu rows draw RadioMark (menuitemradio) or CheckboxMark (menuitemcheckbox).">
+          <ListControlsState label="FacetMenu and PeriodPicker on their own — a pill facet (toggle buttons, aria-pressed) for a short category list, a single-select menu whose page default is not All (untinted at its default; tinted once changed), and the Analytics period: presets only, no All time, untinted at its 30-day default. Menu rows draw RadioMark (menuitemradio) or CheckboxMark (menuitemcheckbox).">
             <FacetPrimitivesExample />
           </ListControlsState>
         </div>

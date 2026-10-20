@@ -1,13 +1,13 @@
 'use client'
 
 import { ChevronDown } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Icon } from '@/components/ui/Icon'
 import { RadioMark } from './FacetMenu'
 import { allTimeLabel, customRangeLabel, customRangeHint, periodPresetLabels, periodLabel } from './list-controls-copy'
 import { listMenuItemClasses, listMenuPanelClasses, listTriggerClasses, useListMenu } from './list-menu'
-import { periodPresets, isAllTime, isIsoDate, type PeriodPreset, type PeriodValue } from './list-url-codec'
+import { periodPresets, isAllTime, isIsoDate, samePeriod, type PeriodPreset, type PeriodValue } from './list-url-codec'
 
 export interface PeriodPickerProps {
   value: PeriodValue
@@ -16,6 +16,12 @@ export interface PeriodPickerProps {
   presets?: readonly PeriodPreset[]
   /** Offer "All time" (the absent filter). Default true; Analytics passes false. */
   allowAllTime?: boolean
+  /**
+   * The page's default period, which does not tint the trigger. Omitted: All
+   * time when it is offered; without All time (Analytics) the current value
+   * is its own default, since there is nothing to clear it to.
+   */
+  defaultValue?: PeriodValue
   /** Offer a custom from/to range. Default false — only where the backend takes dates. */
   allowCustom?: boolean
   align?: 'left' | 'right'
@@ -49,6 +55,7 @@ export function PeriodPicker({
   presets = periodPresets,
   allowAllTime = true,
   allowCustom = false,
+  defaultValue,
   align = 'right',
   label = 'Period',
 }: PeriodPickerProps) {
@@ -63,6 +70,12 @@ export function PeriodPicker({
   useEffect(() => {
     if (!menu.open) setCustom(false)
   }, [menu.open])
+
+  // The custom form is wider than the list: clamp it to the viewport again.
+  const { remeasure } = menu
+  useLayoutEffect(() => {
+    if (menu.open) remeasure()
+  }, [custom, menu.open, remeasure])
 
   useEffect(() => {
     if (custom) fromRef.current?.focus()
@@ -91,11 +104,11 @@ export function PeriodPicker({
   }
   if (allowCustom) rows.push({ key: 'custom', label: customRangeLabel, checked: isCustom, onSelect: openCustom })
 
-  const active = allowAllTime ? !isAllTime(value) : true
+  const active = !samePeriod(value, defaultValue ?? (allowAllTime ? {} : value))
 
   return (
     <div ref={menu.wrapperRef} className="relative inline-flex">
-      <button {...menu.triggerProps} className={listTriggerClasses(active)}>
+      <button {...menu.triggerProps} data-active={active} className={listTriggerClasses(active)}>
         <span className={active ? '' : 'text-[var(--v2-ink-3)]'}>{label}:</span>
         {' '}
         <span className="font-medium">{periodLabel(value)}</span>
@@ -113,7 +126,15 @@ export function PeriodPicker({
           aria-label={custom ? customRangeLabel : undefined}
           onKeyDown={(event) => {
             // The custom form is fields, not menu items: Tab and the arrow
-            // keys belong to the date inputs. Escape still closes.
+            // keys belong to the date inputs. Escape still closes, and a Tab
+            // that carries focus out of the form closes it too.
+            if (custom && event.key === 'Tab') {
+              const panel = event.currentTarget
+              requestAnimationFrame(() => {
+                if (!panel.contains(document.activeElement)) menu.close(false)
+              })
+              return
+            }
             if (custom && event.key !== 'Escape') return
             menu.onPanelKeyDown(event)
           }}

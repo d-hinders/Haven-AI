@@ -5,6 +5,7 @@ import {
   isIsoDate,
   parseListState,
   rollingWindow,
+  sameValues,
   serializeListState,
   type ListUrlSchema,
 } from '../list-url-codec'
@@ -143,10 +144,22 @@ describe('serializeListState', () => {
 })
 
 describe('clearedListState', () => {
-  it('clears search, facets and the period to All, and keeps the sort', () => {
+  it('returns search, facets and the period to the page default, and keeps the sort', () => {
     const state = parseListState(p('q=x&status=active&sort=seen'), AGENTS)
     expect(clearedListState(state, AGENTS)).toEqual({ q: '', facets: { status: [], budget: [] }, sort: 'seen' })
-    expect(clearedListState(parseListState(p('chainId=84532'), MARKET), MARKET).facets.chainId).toEqual([])
+    // Marketplace: the default is the user's chain, not All.
+    expect(clearedListState(parseListState(p('chainId=84532'), MARKET), MARKET).facets.chainId).toEqual(['8453'])
+    const analytics: ListUrlSchema = { period: { allowAllTime: false, defaultValue: { preset: '30d' } } }
+    expect(clearedListState(parseListState(p('period=7d'), analytics), analytics).period).toEqual({ preset: '30d' })
+    expect(clearedListState(parseListState(p('period=7d'), TX), TX).period).toEqual({})
+  })
+})
+
+describe('sameValues', () => {
+  it('compares as sets, symmetrically', () => {
+    expect(sameValues(['a', 'b'], ['b', 'a'])).toBe(true)
+    expect(sameValues(['a', 'b'], ['a', 'a'])).toBe(false)
+    expect(sameValues(['a', 'a'], ['a', 'b'])).toBe(false)
   })
 })
 

@@ -72,7 +72,8 @@ export function useListUrlState(
       if (nextSearch === base) return
       lastWritten.current = nextSearch
       try {
-        window.history.replaceState(null, '', nextSearch ? `${pathname}?${nextSearch}` : pathname)
+        const hash = window.location.hash
+        window.history.replaceState(null, '', `${nextSearch ? `${pathname}?${nextSearch}` : pathname}${hash}`)
       } catch {
         // A URL that stays in step is a convenience, never worth a thrown render.
       }

@@ -2082,6 +2082,14 @@ never repeated inside a parent card.
    the count on the right. Sort is a view choice, not a filter: it gets no chip
    and Clear filters keeps it.
 
+**Active means "differs from the page's default".** One rule decides the
+trigger's tint, the chip, the count on **Filters (n)**, and whether the count
+reads "{shown} of {total}". A page whose default is not All (Marketplace's
+network, Analytics' 30 days) opens untinted and unfiltered. Removing a chip
+returns that filter to the default; **Clear filters** returns the whole list to
+its default view. Choosing All on a facet whose default is something else is a
+filter in its own right ("Network: All").
+
 Below `sm` (640 px) the facet row collapses into a **Filters (n)** button that
 opens a bottom sheet: every facet, Sort and Period as native radio and checkbox
 rows, 44 px tall. **Filters in the sheet apply live, as on desktop.** The footer
@@ -2129,7 +2137,7 @@ presets only, with no All time.
   it on the checked row; Arrow Up opens it on the last. Arrows move with wrap,
   Home and End jump, Escape closes with focus back on the trigger, and Tab
   leaves the menu. The system focus ring applies (`focus-visible.visual.spec.ts`
-  covers the triggers). Menu roles supersede the Agents list.s toggle-button
+  covers the triggers). Menu roles supersede the Agents list's toggle-button
   facets: its listbox objection was that `role="option"` forbids an interactive
   control inside an option, and a menu item *is* the control.
 - **Menus never extend past the viewport.** An opened panel is measured and
@@ -2150,7 +2158,7 @@ re-seeds it. The codec's rules:
   the user's chain); an explicit `all` means All;
 - multi-select values are comma-joined, the `lib/agent-list-filters.ts`
   encoding, so existing links keep parsing;
-- params it does not own (Agents' `setup`, the account page's `tab`) are never
+- params it does not own (Agents' `setup`, a page's tab key) are never
   touched;
 - a legacy key is read as an alias and never written (Transactions' `search`
   reads as `q`).
@@ -2169,7 +2177,8 @@ backend.
 | No match | "No {things} match these filters" / "Try a different search, or clear filters to see everything." + Clear filters |
 | Period | "Last 7 days", "Last 30 days", "Last 90 days", "All time", "Custom range" |
 | Clear | "Clear filters" |
-| Phone | "Filters (n)"; footer "Show {n} {things}" |
+| Search chip | the term in curly quotes, “savings” |
+| Phone | "Filters" with a count badge; its accessible name is "Filters (n)". Footer "Show {n} {things}" |
 
 On a server-paged list both count numbers come from the server: a count never
 mixes loaded rows with a server total. The count is a polite live region.

@@ -138,6 +138,49 @@ describe('ListToolbar — search', () => {
     expect(field).toHaveValue('')
   })
 
+  it('a pending search commit does not undo a facet change made before it fires (#4110 review)', () => {
+    vi.useFakeTimers()
+    function Server() {
+      const [state, setState] = useState<ListState>({ ...EMPTY, facets: { ...EMPTY.facets, status: ['active'] } })
+      return (
+        <>
+          <ListToolbar noun={noun} state={state} onChange={setState} filtering="server" facets={FACETS} count={{ shown: 1, total: 3 }} />
+          <output data-testid="state">{JSON.stringify(state)}</output>
+        </>
+      )
+    }
+    render(<Server />)
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search agents' }), { target: { value: 'foo' } })
+    act(() => vi.advanceTimersByTime(100))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Status: Active' }))
+    act(() => vi.advanceTimersByTime(300))
+    const state = JSON.parse(screen.getByTestId('state').textContent!) as ListState
+    expect(state.q).toBe('foo')
+    expect(state.facets.status).toEqual([])
+  })
+
+  it('Clear filters cancels a pending search commit even when q was empty (#4110 review)', () => {
+    vi.useFakeTimers()
+    function Server() {
+      const [state, setState] = useState<ListState>({ ...EMPTY, facets: { ...EMPTY.facets, status: ['active'] } })
+      return (
+        <>
+          <ListToolbar noun={noun} state={state} onChange={setState} filtering="server" facets={FACETS} count={{ shown: 1, total: 3 }} />
+          <output data-testid="state">{JSON.stringify(state)}</output>
+        </>
+      )
+    }
+    render(<Server />)
+    const field = screen.getByRole('searchbox', { name: 'Search agents' })
+    fireEvent.change(field, { target: { value: 'f' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
+    act(() => vi.advanceTimersByTime(1000))
+    const state = JSON.parse(screen.getByTestId('state').textContent!) as ListState
+    expect(state.q).toBe('')
+    expect(state.facets.status).toEqual([])
+    expect(field).toHaveValue('')
+  })
+
   it('carries the search description for screen readers', () => {
     render(<ListToolbar noun={noun} state={EMPTY} onChange={() => {}} filtering="browser" count={null} searchDescription="By name or address" />)
     expect(screen.getByRole('searchbox', { name: 'Search agents' })).toHaveAccessibleDescription('By name or address')
@@ -208,6 +251,80 @@ describe('ListToolbar — facets, chips and count', () => {
   it('renders the actions slot', () => {
     render(<BrowserList extra={{ actions: <button type="button">Export CSV</button> }} />)
     expect(screen.getByRole('button', { name: 'Export CSV' })).toBeInTheDocument()
+  })
+})
+
+describe('ListToolbar — page defaults', () => {
+  // Marketplace-shaped: the network facet defaults to the user's chain.
+  const NETWORK: ListFacet = {
+    id: 'chainId',
+    label: 'Network',
+    defaultValue: ['8453'],
+    options: [
+      { value: '8453', label: 'Base' },
+      { value: '84532', label: 'Base Sepolia' },
+    ],
+  }
+  const CATEGORY: ListFacet = {
+    id: 'category',
+    label: 'Category',
+    rendering: 'pills',
+    options: [
+      { value: 'ai', label: 'AI' },
+      { value: 'data', label: 'Data' },
+    ],
+  }
+
+  function Market() {
+    const [state, setState] = useState<ListState>({ q: '', facets: { chainId: ['8453'], category: [] }, period: { preset: '30d' } })
+    return (
+      <ListToolbar
+        noun={noun}
+        state={state}
+        onChange={setState}
+        filtering="browser"
+        facets={[NETWORK, CATEGORY]}
+        period={{ defaultValue: { preset: '30d' } }}
+        count={{ shown: 3, total: 3 }}
+      />
+    )
+  }
+
+  it('at the page default nothing is active: no tint, no chip, an unfiltered count', () => {
+    render(<Market />)
+    expect(screen.getByRole('button', { name: 'Network: Base' })).toHaveAttribute('data-active', 'false')
+    expect(screen.getByRole('button', { name: 'Period: Last 30 days' })).toHaveAttribute('data-active', 'false')
+    expect(screen.queryByRole('button', { name: /^Remove/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('3 agents')
+    expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument()
+  })
+
+  it('All on a non-All default is a filter; its chip and Clear filters return to the default', async () => {
+    const user = userEvent.setup()
+    render(<Market />)
+    await user.click(screen.getByRole('button', { name: 'Network: Base' }))
+    await user.click(screen.getByRole('menuitemradio', { name: 'All' }))
+    expect(screen.getByRole('button', { name: 'Network: All' })).toHaveAttribute('data-active', 'true')
+    await user.click(screen.getByRole('button', { name: 'Remove Network: All' }))
+    expect(screen.getByRole('button', { name: 'Network: Base' })).toHaveAttribute('data-active', 'false')
+
+    await user.click(screen.getByRole('button', { name: 'Period: Last 30 days' }))
+    await user.click(screen.getByRole('menuitemradio', { name: 'Last 7 days' }))
+    await user.click(screen.getByRole('button', { name: 'Network: Base' }))
+    await user.click(screen.getByRole('menuitemradio', { name: 'Base Sepolia' }))
+    expect(screen.getByRole('button', { name: 'Filters (2)' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Clear filters' }))
+    expect(screen.getByRole('button', { name: 'Network: Base' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Period: Last 30 days' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Remove/ })).not.toBeInTheDocument()
+  })
+
+  it('a pill facet gets a chip but does not count on "Filters (n)" — it is not in the sheet', async () => {
+    const user = userEvent.setup()
+    render(<Market />)
+    await user.click(screen.getByRole('button', { name: 'Data', pressed: false }))
+    expect(screen.getByRole('button', { name: 'Remove Category: Data' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument()
   })
 })
 

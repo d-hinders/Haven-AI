@@ -12,8 +12,8 @@
  * - **Multi-select values are comma-joined** (`status=active,paused`), the
  *   encoding `lib/agent-list-filters.ts` has shipped since #3165, so existing
  *   Agents links keep parsing.
- * - **Keys this codec does not own are never touched** — the account page's
- *   `tab`, Agents' `setup` hand-off. Serialize starts from the current
+ * - **Keys this codec does not own are never touched** — Agents' `setup`
+ *   hand-off, a page's tab key. Serialize starts from the current
  *   params and only sets or deletes its own keys.
  * - **Legacy aliases are read, never written.** Transactions has read `search`
  *   since #4095; it parses as `q` and is removed on the next write, so a link
@@ -108,13 +108,14 @@ function firstOf(params: URLSearchParams, keys: readonly string[]): string | nul
   return null
 }
 
-function sameValues(a: readonly string[], b: readonly string[]): boolean {
-  if (a.length !== b.length) return false
-  const set = new Set(a)
-  return b.every((v) => set.has(v))
+/** Same set of values, order and duplicates aside. */
+export function sameValues(a: readonly string[], b: readonly string[]): boolean {
+  const sa = new Set(a)
+  const sb = new Set(b)
+  return sa.size === sb.size && [...sb].every((v) => sa.has(v))
 }
 
-function samePeriod(a: PeriodValue | undefined, b: PeriodValue | undefined): boolean {
+export function samePeriod(a: PeriodValue | undefined, b: PeriodValue | undefined): boolean {
   return (a?.preset ?? '') === (b?.preset ?? '') && (a?.from ?? '') === (b?.from ?? '') && (a?.to ?? '') === (b?.to ?? '')
 }
 
@@ -224,16 +225,18 @@ export function defaultListState(schema: ListUrlSchema): ListState {
 }
 
 /**
- * The state "Clear filters" goes to: search empty, every facet All, the
- * period All time when the list offers it (else its default). Sort is a view
- * choice, not a filter, so it is kept.
+ * The state "Clear filters" goes to: the page's default view — search empty,
+ * every facet and the period at the page default (All / All time unless the
+ * page says otherwise). Sort is a view choice, not a filter, so it is kept.
+ * "Filtered" is always measured against this same default (#4110 review),
+ * so a cleared list never reads as filtered.
  */
 export function clearedListState(state: ListState, schema: ListUrlSchema): ListState {
   const facets: Record<string, string[]> = {}
-  for (const spec of schema.facets ?? []) facets[spec.id] = []
+  for (const spec of schema.facets ?? []) facets[spec.id] = [...(spec.defaultValue ?? [])]
   const next: ListState = { q: '', facets }
   if (schema.sort) next.sort = state.sort ?? schema.sort.defaultValue
-  if (schema.period) next.period = (schema.period.allowAllTime ?? true) ? {} : { ...(schema.period.defaultValue ?? {}) }
+  if (schema.period) next.period = { ...(schema.period.defaultValue ?? {}) }
   return next
 }
 

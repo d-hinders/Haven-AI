@@ -8,13 +8,15 @@ vi.mock('@/components/WalletConnectAction', () => ({
   default: () => <button type="button">Connect wallet</button>,
 }))
 
-const { mockGet, mockGrant, mockRevoke, mockReload, mockBudgetsError, mockTaskBudgets, mockTrees, mockReceivedGrants, mockHookArgs, mockToast, mockSigner } =
+const { mockGet, mockGrant, mockEdit, mockRevoke, mockReload, mockBudgetsError, mockTaskBudgets, mockTrees, mockReceivedGrants, mockHookArgs, mockToast, mockSigner } =
   vi.hoisted(() => ({
   // #3812: whether this device can sign, and whether the signer set is known.
   mockSigner: { ready: true, signersLoading: false, signersError: null as string | null, passkeyElsewhere: false },
   mockHookArgs: vi.fn(),
   mockGet: vi.fn(),
   mockGrant: vi.fn(),
+  // #4154: the edit flow's activate-then-Stop, one call as in the hook.
+  mockEdit: vi.fn(),
   mockRevoke: vi.fn(),
   mockReload: vi.fn(),
   mockBudgetsError: vi.fn(() => false),
@@ -37,6 +39,7 @@ vi.mock('@/hooks/useDelegationBudget', () => ({
     return {
     budgets: mockGet(),
     grant: mockGrant,
+    editBudget: mockEdit,
     editStopSet: (hash: string, slot: { tokenAddress: string; recipientAddress?: string | null }, nowSec: number) =>
       budgetSlot.slotOccupantHashesForEdit(mockGet() as never, hash, slot, nowSec),
     isOwnAttemptedGrant: () => false,
@@ -111,6 +114,7 @@ beforeEach(() => {
   mockReceivedGrants.mockReset()
   mockReceivedGrants.mockReturnValue(null)
   mockGrant.mockReset()
+  mockEdit.mockReset()
   mockRevoke.mockReset()
   mockReload.mockReset()
   mockBudgetsError.mockReturnValue(false)
@@ -1255,5 +1259,155 @@ describe('DelegationBudgetCard received budgets (#3988)', () => {
     mockReceivedGrants.mockReturnValue([])
     render(<DelegationBudgetCard {...PROPS} />)
     expect(screen.getByText('The agent can start paying within it.')).toBeTruthy()
+  })
+})
+
+/**
+ * #4154: between the edit's two approvals the old row reads `replaced`, and
+ * the card's background poll showed "An old budget has not been stopped"
+ * behind the still-open modal. The notice now stands down for the slot the
+ * edit flow owns, and only while it owns it — any close that leaves the old
+ * budget enabled shows it at once.
+ */
+describe('DelegationBudgetCard — no replaced-budget flash during an edit (#4154)', () => {
+  const OLD_HASH = '0x' + 'ab'.repeat(32)
+  const NEW_HASH = '0x' + 'be'.repeat(32)
+  const OTHER = '0x' + 'dd'.repeat(20)
+  const NOTICE = 'An old budget has not been stopped'
+
+  function deferred<T>() {
+    let resolve!: (v: T) => void
+    const promise = new Promise<T>((r) => {
+      resolve = r
+    })
+    return { promise, resolve }
+  }
+
+  /** The old row `replaced`, the new one live — what a poll sees after approval 1. */
+  const afterActivate = (extra: Record<string, unknown>[] = []) => [
+    budget({ delegation_hash: NEW_HASH, budget_atomic: '10000000' }),
+    budget({ delegation_hash: OLD_HASH, status: 'replaced', is_live: false }),
+    ...extra.map((o) => budget(o)),
+  ]
+
+  /** Opens the edit on the live budget and signs approval 1; the edit resolves when the test says. */
+  async function startEdit() {
+    const edit = deferred<unknown>()
+    mockEdit.mockReturnValue(edit.promise)
+    mockGet.mockReturnValue([budget({ delegation_hash: OLD_HASH })])
+    const view = render(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit budget 5 USDC per day' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit budget' })
+    fireEvent.change(within(dialog).getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Approve new budget' }))
+    await waitFor(() => expect(mockEdit).toHaveBeenCalled())
+    return { view, edit, dialog }
+  }
+
+  it('the old row reading `replaced` mid-edit shows no notice behind the open modal', async () => {
+    const { view, edit } = await startEdit()
+    // The background poll lands between the two approvals.
+    mockGet.mockReturnValue(afterActivate())
+    view.rerender(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.getByRole('dialog', { name: 'Edit budget' })).toBeTruthy()
+    expect(screen.queryByText(NOTICE)).toBeNull()
+    await act(async () => edit.resolve({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: true }))
+  })
+
+  it('a replaced row in ANOTHER slot keeps its notice while the modal is open', async () => {
+    const { view, edit } = await startEdit()
+    mockGet.mockReturnValue(
+      afterActivate([{ delegation_hash: '0x' + '07'.repeat(32), recipient_address: OTHER, status: 'replaced', is_live: false, budget_atomic: '3000000' }]),
+    )
+    view.rerender(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.getAllByText(NOTICE)).toHaveLength(1)
+    expect(screen.getByText(/The 3 USDC per day budget to 0xdddd…dddd was replaced/)).toBeTruthy()
+    await act(async () => edit.resolve({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: true }))
+  })
+
+  it('a leftover `replaced` row in the SAME slot that this edit does not Stop keeps its notice while the modal is open', async () => {
+    // An earlier abandoned edit left A `replaced` in B's slot. Editing B
+    // Stops only B (the Stop set is the slot's LIVE rows), so A's warning is
+    // genuine the whole time.
+    const LEFTOVER = '0x' + '0a'.repeat(32)
+    const edit = deferred<unknown>()
+    mockEdit.mockReturnValue(edit.promise)
+    mockGet.mockReturnValue([
+      budget({ delegation_hash: OLD_HASH }),
+      budget({ delegation_hash: LEFTOVER, status: 'replaced', is_live: false, budget_atomic: '3000000' }),
+    ])
+    const view = render(<DelegationBudgetCard {...PROPS} />)
+    expect(await screen.findByText(NOTICE)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Edit budget 5 USDC per day' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit budget' })
+    // Already on the form step, before any approval.
+    expect(screen.getAllByText(NOTICE)).toHaveLength(1)
+    fireEvent.change(within(dialog).getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Approve new budget' }))
+    await waitFor(() => expect(mockEdit).toHaveBeenCalled())
+    mockGet.mockReturnValue(afterActivate([{ delegation_hash: LEFTOVER, status: 'replaced', is_live: false, budget_atomic: '3000000' }]))
+    view.rerender(<DelegationBudgetCard {...PROPS} />)
+    // B's own `replaced` row is hidden; A's stays.
+    expect(screen.getAllByText(NOTICE)).toHaveLength(1)
+    expect(screen.getByText(/The 3 USDC per day budget to 0xcccc…cccc was replaced/)).toBeTruthy()
+    await act(async () => edit.resolve({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: true }))
+  })
+
+  it('closing with the Stop not done shows the notice at once — no reload needed', async () => {
+    const { view, edit } = await startEdit()
+    mockGet.mockReturnValue(afterActivate())
+    view.rerender(<DelegationBudgetCard {...PROPS} />)
+    await act(async () =>
+      edit.resolve({ ok: false, reason: 'revoke_unfinished', newDelegationHash: NEW_HASH, unstoppedDelegationHashes: [OLD_HASH], moved: false }),
+    )
+    // The modal's own step-2 screen says it first…
+    const dialog = await screen.findByRole('dialog', { name: 'Edit budget' })
+    expect(within(dialog).getByText('New budget is live — one step left')).toBeTruthy()
+    expect(screen.queryByText(NOTICE)).toBeNull()
+    // …and the card says it the moment the modal is gone.
+    // The footer Close (the header has its own ✕, also named Close).
+    const closes = within(dialog).getAllByRole('button', { name: 'Close' })
+    fireEvent.click(closes[closes.length - 1])
+    expect(screen.queryByRole('dialog', { name: 'Edit budget' })).toBeNull()
+    expect(screen.getByText(NOTICE)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Stop old budget 5 USDC per day' })).toBeTruthy()
+  })
+
+  it('a finished edit shows no notice while the reload after close settles, nor after it reads the row revoked', async () => {
+    const { view, edit } = await startEdit()
+    mockGet.mockReturnValue(afterActivate())
+    view.rerender(<DelegationBudgetCard {...PROPS} />)
+    await act(async () => edit.resolve({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: true }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit budget' })
+    await within(dialog).findByText('Budget updated')
+    const reloadAfterClose = deferred<void>()
+    mockReload.mockReset()
+    mockReload.mockReturnValue(reloadAfterClose.promise)
+    // The list the card holds still predates the Stop.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }))
+    expect(mockReload).toHaveBeenCalled()
+    expect(screen.queryByText(NOTICE)).toBeNull()
+    mockGet.mockReturnValue([
+      budget({ delegation_hash: NEW_HASH, budget_atomic: '10000000' }),
+      budget({ delegation_hash: OLD_HASH, status: 'revoked', is_live: false }),
+    ])
+    await act(async () => reloadAfterClose.resolve())
+    view.rerender(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.queryByText(NOTICE)).toBeNull()
+  })
+
+  it('a finished edit whose reload still reads the row `replaced` shows the notice — the server has the last word', async () => {
+    const { view, edit } = await startEdit()
+    mockGet.mockReturnValue(afterActivate())
+    view.rerender(<DelegationBudgetCard {...PROPS} />)
+    await act(async () => edit.resolve({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: true }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit budget' })
+    await within(dialog).findByText('Budget updated')
+    mockReload.mockReset()
+    mockReload.mockResolvedValue(undefined)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }))
+    expect(await screen.findByText(NOTICE)).toBeTruthy()
   })
 })

@@ -71,6 +71,12 @@ interface Props {
   /** Fires after the edit landed (success or partial), mirroring #1090. */
   onBudgetChange?: () => void
   /**
+   * #4154: fires when the edit is FINISHED — the new budget is live and every
+   * old row of the slot is stopped (the `done` step). Not on a partial
+   * (`revoke_unfinished`): the parent must then show the old budget at once.
+   */
+  onFinished?: () => void
+  /**
    * #3933: the limits the owner typed into a NEW-budget form whose (token,
    * recipient) slot turned out to hold this budget. The backend refuses a
    * plain grant there, so the form routes here instead: the edit opens with
@@ -147,6 +153,7 @@ export default function EditBudgetModal({
   tokens,
   budget,
   onBudgetChange,
+  onFinished,
   prefill,
   merchant,
 }: Props) {
@@ -331,6 +338,7 @@ export default function EditBudgetModal({
     setOutcome(result)
     if (result.ok) {
       setStep('done')
+      onFinished?.()
       onBudgetChange?.()
     } else if (result.reason === 'cancelled') {
       // A dismissed signature is "not yet" (same treatment BudgetGrantAction
@@ -350,7 +358,7 @@ export default function EditBudgetModal({
         onBudgetChange?.()
       }
     }
-  }, [budget.delegation_hash, budget.recipient_address, budget.token_address, changes, editBudget, input, onBudgetChange])
+  }, [budget.delegation_hash, budget.recipient_address, budget.token_address, changes, editBudget, input, onBudgetChange, onFinished])
 
   // #3933: finish a replace whose Stop did not land — the same per-hash revoke
   // the card's Stop uses, once per row still enabled (a re-key pair is two),
@@ -381,8 +389,9 @@ export default function EditBudgetModal({
       ...(outcome.earlierLimits ? { earlierLimits: true as const } : {}),
     })
     setStep('done')
+    onFinished?.()
     onBudgetChange?.()
-  }, [budget.delegation_hash, onBudgetChange, outcome, revoke])
+  }, [budget.delegation_hash, onBudgetChange, onFinished, outcome, revoke])
 
   // Round 2 review findings R2-2 / design 2: a merchant-STALE build refusal
   // gets plain copy naming the way out (Stop, then fund again) instead of the

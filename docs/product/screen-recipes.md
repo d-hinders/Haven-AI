@@ -492,7 +492,7 @@ Structure:
 1. Header with the count and the primary action (Connect agent), plus Labels and
    Organizations.
 2. Toolbar: the [List controls](design-system.md#list-controls--listtoolbar-facetmenu-periodpicker-4110)
-   pattern (`ListToolbar`, #4113), browser-filtered: search ("Search agents";
+   pattern (#4113), browser-filtered: search ("Search agents";
    name, description and delegate address, as its screen-reader description),
    the multi-select facets from the page's registry (Status, Budget, and
    Account and Organization when registered), **Archived** (single-select,
@@ -510,7 +510,7 @@ Structure:
    shown, keep their archived treatment (Restore to list, no operational
    actions).
 5. A filter that empties the list shows the pattern's no-match state
-   (`ListNoMatch`) where the cards were, and the toolbar stays. An UNFILTERED
+   where the cards were, and the toolbar stays. An UNFILTERED
    list can be empty too — every agent archived — and there Clear filters
    would change nothing, so it says "All your agents are archived" and offers
    Show archived instead. The `not recorded` MCP note above the list follows
@@ -558,8 +558,8 @@ of an empty state (see Connect And Approve Agent for the inline container).
   refused on-chain."
 
 Rules:
-- Filter state lives in the URL through the pattern's codec (`useListUrlState`; `?q=…&status=active,paused&budget=none&archived=shown&sort=seen`; the comma is percent-encoded on the wire), so a view is shareable and survives reload; `?setup=` and other parameters on the page are preserved in both directions (closing the setup modal drops only `setup`). The cards follow every keystroke and only a search's URL write waits for a 300 ms pause. No `archived` key means Hidden. Unknown values for the fixed facets (Status, Budget, Archived) are dropped from a pasted link; Account and Organization ids are kept until their options load, so a shared link survives the fetch.
-- A facet is registered as data (`AgentFacet` in `lib/agent-list-filters.ts`: id, options, predicate, match mode, and optionally selection, default and `allLabel`; `toListFacet` hands it to `ListToolbar`), so the labels facet (#3167), the organization facet (#3164) and the account facet (#3719) plug in without a toolbar change. The account facet is registered only when the user has more than one account; its options use the same `name · chain` shape as the card. Facet counts answer "how many if I pick this" — a facet's own selection is excluded from its counts, and the multi-select rows show them.
+- Filter state lives in the URL through the pattern's URL codec (`?q=…&status=active,paused&budget=none&archived=shown&sort=seen`; the comma is percent-encoded on the wire), so a view is shareable and survives reload; `?setup=` and other parameters on the page are preserved in both directions (closing the setup modal drops only `setup`). The cards follow every keystroke and only a search's URL write waits for a 300 ms pause. No `archived` key means Hidden. Unknown values for the fixed facets (Status, Budget, Archived) are dropped from a pasted link; Account and Organization ids are kept until their options load, so a shared link survives the fetch.
+- A facet is registered as data (`AgentFacet` in `lib/agent-list-filters.ts`: id, options, predicate, match mode, and optionally selection, default and `allLabel`; `toListFacet` hands it to the toolbar), so the labels facet (#3167), the organization facet (#3164) and the account facet (#3719) plug in without a toolbar change. The account facet is registered only when the user has more than one account; its options use the same `name · chain` shape as the card. Facet counts answer "how many if I pick this" — a facet's own selection is excluded from its counts, and the multi-select rows show them.
 - The budget facet offers what `GET /agents` can prove about authority (#3988): recurring, one-time, received, none. The first two are the agent's OWN budget cap (a zero cap is no authority, #3897); `received` marks a grant holder — an agent spending through an open sub-budget another agent granted it, which the server verifies against the whole redemption chain (`receivedSubBudgets[].open`) and which never classifies as `none`. Exhausted, near-limit and pending-signature still need a server field and are not offered, because an option that can never match reads as "no agent is near its limit".
 - Sort keys: name, recently seen (`mcp_last_seen_at`, never-seen last), newest, largest budget (largest single allowance in its own token units — the row carries no price, so this is deliberately unit-blind; a grant holder, whose amount the row does not carry, ranks above zero-capped agents but below any known positive amount).
 - Filtering is client-side over the loaded list; the API is unpaginated, so this holds until an account has enough agents for `GET /agents` itself to need paging.

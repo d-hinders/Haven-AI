@@ -119,9 +119,11 @@ Any remaining matches should be deliberate technical disclosure, developer copy,
 
 - Compare the rendered screen with the documented
   [Patterns](design-system.md#patterns): a page that rebuilds one instead of
-  using it is a `should-fix`, and a composition the catalog does not show is a
-  **new pattern** that needs its own earlier, owner-approved design-system
-  slice (#4109).
+  using it is a `should-fix`. A composition with no shipped instance and no
+  `/design-system` entry is a **new pattern** that needs its own earlier,
+  owner-approved design-system slice (#4109); extracting a shape the product
+  already ships, on the diff that writes its second copy, is absorption and
+  stays in the same PR.
 - Inspect `/design-system` when adding or changing shared UI patterns — and be
   clear what that buys. The page is a rendering of a component's APPEARANCE, not
   a test of its behaviour, and a showcase copy held permanently open (today only

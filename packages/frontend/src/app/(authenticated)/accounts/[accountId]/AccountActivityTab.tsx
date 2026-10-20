@@ -6,30 +6,30 @@
  * page used to carry.
  *
  * What the tab owns, top to bottom:
- * - the upgraded `FilterBar` from #4095 — search, Initiator, Token,
- *   Direction, Period and Export CSV in one bar, with the Account chip
- *   HIDDEN because this page fixes the account (`hideAccountChip` was built
- *   for exactly this surface);
- * - filters that live in the URL NEXT TO `?tab=activity` (#4097's shell
- *   makes Activity the default tab, so a filtered link is
- *   `/accounts/<id>?search=…` and reproduces the view on any machine);
- * - a result line that never lies about scope — the Transactions page's own
- *   line: "N transactions" from the server, or "Showing X of Y" while more
- *   pages remain, with `total` and the in/out totals both taken from the
- *   SERVER over the filtered set (#4095) — never summed off whatever page
- *   happens to be loaded — and a qualifier, not a completeness claim, when
- *   the feed is capped at the explorer window (#2882);
+ * - the standard list toolbar (#4130, epic #4108) — `ListToolbar` with the
+ *   Transactions page's facets WITHOUT Account (the page fixes the account,
+ *   so there is nothing to choose; the Network facet lists this account's
+ *   one chain and hides itself by the one-option rule), `PeriodPicker` with
+ *   the custom range, and Export CSV in the actions slot. The interim
+ *   `FilterBar` this tab shipped with is gone from the codebase;
+ * - filters that live in the URL through the list-controls codec, NEXT TO
+ *   the page's own `?tab=` (the codec leaves `tab` alone) — a filtered link
+ *   is `/accounts/<id>?q=…` and reproduces the view on any machine;
+ * - a count that never lies about scope — the standard count from the
+ *   SERVER over the filtered set (and, filtered, the account's unfiltered
+ *   total as the denominator), never summed off whatever page happens to
+ *   be loaded — with the #2882 qualifier when the feed is capped at the
+ *   explorer window;
  * - rows grouped by day in #4096's ledger mode (`TransactionActivityRow`
  *   with `onOpen`, `TransactionActivityDayHeader`), "Load more" for the next
  *   page, and the shared `TransactionDetailPanel` on row open — click or
  *   Enter/Space, the row is a whole-row button;
- * - two distinct empty states: "No activity yet" with a Receive button for
- *   an account with no history, and "No activity matches these filters" /
- *   "Adjust or clear filters to widen the history." with a way to clear
- *   them when a filter matches nothing.
+ * - two distinct empty states: the standard no-match state when a filter
+ *   matches nothing, and "No activity yet" with a Receive button for an
+ *   account with no history.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import { Amount, type AmountCurrency } from '@/components/haven/Amount'
 import {
   TransactionActivityDayHeader,
@@ -39,13 +39,27 @@ import {
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
-import FilterBar from '@/components/transactions/FilterBar'
+import { ListNoMatch, ListToolbar } from '@/components/ui/ListToolbar'
+import type { ListFacet } from '@/components/ui/FacetMenu'
+import type { ListCount, ListNoun } from '@/components/ui/list-controls-copy'
+import {
+  clearedListState,
+  isAllTime,
+  type ListState,
+  type ListUrlSchema,
+} from '@/components/ui/list-url-codec'
+import { useListUrlState } from '@/components/ui/useListUrlState'
 import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
 import { useActivityMoneyTotals } from '@/hooks/useActivityMoneyTotals'
+import { useUnfilteredTransactionTotal } from '@/hooks/useUnfilteredTransactionTotal'
 import { useTransactionFilters } from '@/hooks/useTransactionFilters'
 import { browserTimeZone, transactionFilterParams, useTransactionsFeed } from '@/hooks/useTransactionsFeed'
 import { api } from '@/lib/api'
-import { hasActiveTransactionFilters, parseTransactionFilters } from '@/lib/transaction-filters'
+import { agentStatusPresentation } from '@/lib/payment-status'
+import {
+  transactionChainName,
+  transactionTokenLabel,
+} from '@/lib/transaction-filters'
 import {
   buildCsvFilename,
   downloadCsv,
@@ -65,6 +79,12 @@ import type { AggregatedTransaction, TransactionFilterState } from '@/types/tran
 interface AccountActivityTabProps {
   /** The account whose ledger this is — fixed by the page, never a filter. */
   accountId: string
+  /**
+   * The account's chain (#4130): the Network facet's one option. A facet
+   * with a single possible value hides itself — there is nothing to choose
+   * — and its URL `values` keep a foreign `chainId` out of the feed.
+   */
+  chainId: number
   /** The user's display currency — the one the feed's fiat figures strike. */
   currency: AmountCurrency
   /** Contact resolution for the panel's counterparty names. */
@@ -78,6 +98,56 @@ interface AccountActivityTabProps {
    * totals re-read the feed instead of waiting for the next poll.
    */
   refreshKey?: number
+}
+
+const transactionNoun: ListNoun = { one: 'transaction', other: 'transactions' }
+
+/**
+ * The tab's URL keys (#4130, the list-controls codec), alongside the page's
+ * own `tab` — the codec never touches keys it does not own. Every key keeps
+ * the name it had under `FilterBar`, except search: it is written as `q`
+ * now, and the old `search` key is still READ, so a link from before the
+ * move keeps its search. `accountId` is deliberately absent — the page
+ * fixes the account, so the parameter is not a filter here and a stray one
+ * is dropped on arrival.
+ */
+function activityUrlSchema(chainId: number): ListUrlSchema {
+  return {
+    search: { aliases: ['search'] },
+    facets: [
+      { id: 'agentId' },
+      { id: 'tokenKey' },
+      { id: 'direction', values: ['in', 'out'] },
+      // The account's one chain: the only value the feed may be narrowed
+      // by, so a stale link's anything else reads as no filter.
+      { id: 'chainId', values: [String(chainId)] },
+    ],
+    period: { allowCustom: true },
+  }
+}
+
+/**
+ * The toolbar's state as the filters the feed and the export send. There is
+ * no `accountId` here: the page fixes the account, and the feed filters get
+ * it merged in — the fixed account can never masquerade as a user-applied
+ * filter (#4098's rule, unchanged).
+ */
+function listStateToFilters(state: ListState): TransactionFilterState {
+  const first = (id: string): string | undefined => state.facets[id]?.[0]
+  const direction = first('direction')
+  const chainId = Number(first('chainId'))
+  const search = state.q.trim()
+  const period = state.period ?? {}
+  return {
+    agentId: first('agentId'),
+    tokenKey: first('tokenKey'),
+    direction: direction === 'in' || direction === 'out' ? direction : undefined,
+    chainId: Number.isInteger(chainId) && chainId > 0 ? chainId : undefined,
+    search: search || undefined,
+    period: period.preset,
+    from: period.from && period.to ? period.from : undefined,
+    to: period.from && period.to ? period.to : undefined,
+  }
 }
 
 /** One feed row in the ledger — #4096's ledger mode, the page's own copy. */
@@ -114,28 +184,49 @@ function ActivityLedgerRow({
 
 export default function AccountActivityTab({
   accountId,
+  chainId,
   currency,
   resolveAddress,
   accountNamesByAddress,
   onReceive,
   refreshKey = 0,
 }: AccountActivityTabProps) {
-  const router = useRouter()
   const searchParams = useSearchParams()
   const [selectedTx, setSelectedTx] = useState<AggregatedTransaction | null>(null)
   const [exporting, setExporting] = useState(false)
   const [exportNotice, setExportNotice] = useState<ExportNotice | null>(null)
-  const [filters, setFilters] = useState<TransactionFilterState>(() => {
-    // The page fixes the account, so a stray `accountId` query param is not
-    // a filter here — dropped rather than honoured, the same way the hidden
-    // Account chip refuses to present it as one.
-    const seeded = parseTransactionFilters(searchParams)
-    return { ...seeded, accountId: undefined }
-  })
 
-  // The feed and its totals read the account's ledger with every FilterBar
-  // dimension applied — server-side since #4095 — so the rows, the count
-  // line, the in/out totals and the CSV export all describe ONE set.
+  // #4130: every filter dimension lives in the URL through the list-controls
+  // codec — a shared link (or a refresh) lands on the same filtered ledger
+  // the sender saw (#4095/#4098), and back/forward re-seeds it. The codec
+  // writes only its own keys, so the page's `tab` rides along untouched.
+  // Memoised on the one dynamic input: the schema must be referentially
+  // stable or a pending search commit would be re-parsed away on re-render.
+  const urlSchema = useMemo(() => activityUrlSchema(chainId), [chainId])
+  const [listState, setListState] = useListUrlState(urlSchema, { filtering: 'server' })
+
+  // One repair, on arrival: a stray `accountId` query param is not a filter
+  // here — the page fixes the account, so the parameter is dropped rather
+  // than honoured, the same way the tab's facet set refuses to present one.
+  // (The codec only sets or deletes its OWN keys, so this is done by hand.)
+  const hasStrayAccountKey = searchParams?.has('accountId') ?? false
+  useEffect(() => {
+    if (!hasStrayAccountKey || typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    params.delete('accountId')
+    const next = params.toString()
+    try {
+      window.history.replaceState(null, '', `${window.location.pathname}${next ? `?${next}` : ''}`)
+    } catch {
+      // A URL that stays in step is a convenience, never worth a thrown render.
+    }
+  }, [hasStrayAccountKey])
+
+  const filters = useMemo(() => listStateToFilters(listState), [listState])
+
+  // The feed and its totals read the account's ledger with every toolbar
+  // dimension applied — server-side since #4095 — so the rows, the count,
+  // the in/out totals and the CSV export all describe ONE set.
   const feedFilters = useMemo<TransactionFilterState>(
     () => ({ ...filters, accountId }),
     [filters, accountId],
@@ -153,40 +244,87 @@ export default function AccountActivityTab({
     refresh: refreshFeed,
   } = useTransactionsFeed(feedFilters, 25)
   const moneyTotals = useActivityMoneyTotals(feedFilters, currency)
-  const {
-    accounts: filterAccounts,
-    agents,
-    tokens,
-    loading: filtersLoading,
-    error: filtersError,
-  } = useTransactionFilters()
+  const { agents, tokens, error: filtersError } = useTransactionFilters()
 
-  const hasActiveFilters = hasActiveTransactionFilters(filters)
+  // Active means "differs from the page default" (#4110): no search, every
+  // facet All, All time — the same rule the toolbar applies to its chips.
+  const hasActiveFilters =
+    listState.q.trim() !== '' ||
+    Object.values(listState.facets).some((values) => values.length > 0) ||
+    !isAllTime(listState.period)
 
-  const handleFilterChange = (nextFilters: TransactionFilterState) => {
-    // The account is fixed by the page; no filter change may move it.
-    const normalized = { ...nextFilters, accountId: undefined }
-    setFilters(normalized)
+  const unfilteredTotal = useUnfilteredTransactionTotal({
+    filtered: hasActiveFilters,
+    feedTotal: total,
+    feedLoading: loadingInitial,
+    accountId,
+  })
+
+  // Agents in the order the bar has listed them since #4095: active, paused,
+  // the rest; a status other than Active is named, since a revoked agent's
+  // history still lives here.
+  const agentRank = (status: string) => (status === 'active' ? 0 : status === 'paused' ? 1 : 2)
+  const sortedAgents = [...agents].sort(
+    (a, b) => agentRank(a.status) - agentRank(b.status) || a.name.localeCompare(b.name),
+  )
+
+  // The Transactions page's facets (#4111) WITHOUT Account: the page fixes
+  // the account, so there is no Account facet to hide — a filter that could
+  // not be chosen has no trigger, no chip and no URL key here. Network
+  // carries this account's single chain and hides itself (one option).
+  const facets: ListFacet[] = [
+    {
+      id: 'agentId',
+      label: 'Initiator',
+      options: [
+        { value: 'user', label: 'User (manual)' },
+        ...sortedAgents.map((agent) => ({
+          value: agent.id,
+          label:
+            agent.status === 'active'
+              ? agent.name
+              : `${agent.name} (${agentStatusPresentation(agent.status).label})`,
+        })),
+      ],
+    },
+    {
+      id: 'tokenKey',
+      label: 'Token',
+      options: tokens.map((token) => ({ value: token.key, label: transactionTokenLabel(token) })),
+    },
+    {
+      id: 'direction',
+      label: 'Direction',
+      options: [
+        { value: 'in', label: 'Incoming' },
+        { value: 'out', label: 'Outgoing' },
+      ],
+    },
+    {
+      id: 'chainId',
+      label: 'Network',
+      options: [{ value: String(chainId), label: transactionChainName(chainId) }],
+    },
+  ]
+
+  const handleListChange = (next: ListState) => {
+    setListState(next)
+    // Both notices name the filters as the thing to change; leaving one up
+    // once the user has makes it assert something no longer true.
     setExportNotice(null)
-    // #4095/#4098: every filter dimension lives in the URL next to the tab —
-    // a shared link (or a refresh) lands on the same filtered ledger the
-    // sender saw. Activity is the default tab (#4097), so it carries no
-    // `tab` parameter of its own.
-    const query = transactionFilterParams(normalized).toString()
-    router.replace(
-      query ? `/accounts/${encodeURIComponent(accountId)}?${query}` : `/accounts/${encodeURIComponent(accountId)}`,
-      { scroll: false },
-    )
   }
 
+  // Clear filters returns to the page default, the same state the toolbar's
+  // own Clear filters reaches.
   const handleClearFilters = () => {
-    handleFilterChange({})
+    handleListChange(clearedListState(listState, urlSchema))
   }
 
   // The backend generates the file (#2871): it sees the whole filtered
   // result set, where the browser only ever had the pages it had loaded.
-  // Every filter the bar applies goes on the query — the same param
-  // spelling the page URL and the list request use (#4095) — plus the
+  // Every filter the toolbar applies goes on the query — in the API's
+  // parameter spelling (`transactionFilterParams`, the same builder the list
+  // request uses — the URL writes search as `q` since #4130) — plus the
   // fixed account and the `tz` the server cuts a custom range's calendar
   // days in, so the file and the on-screen rows agree.
   const handleExportCsv = async () => {
@@ -228,11 +366,25 @@ export default function AccountActivityTab({
   }
 
   // Gated on the server's total for the FETCHED filter scope. Since #4095
-  // every FilterBar dimension rides the list request, so `total` counts
+  // every filter dimension rides the list request, so `total` counts
   // exactly the set the export will write: an enabled button cannot produce
   // a no-row file unless an explorer leg failed, and that outage has its
   // own notice below.
   const canExport = !loadingInitial && total > 0
+
+  // #4130: the standard count, both numbers from the server. Unfiltered it
+  // is the feed's total; filtered, "{shown} of {total}" against the
+  // ACCOUNT's unfiltered total — never loaded rows against a server figure.
+  const count: ListCount | null = loadingInitial
+    ? null
+    : !hasActiveFilters
+      ? { shown: total, total }
+      : // Unknown, or for a moment behind the polled feed: no figure rather
+        // than "26 of 25".
+        unfilteredTotal === null || unfilteredTotal < total
+        ? null
+        : { shown: total, total: unfilteredTotal }
+  const showNoMatch = hasActiveFilters && !loadingInitial && !error && transactions.length === 0
 
   // The page bumps `refreshKey` after a send or receive lands; the ledger
   // and its totals re-read rather than waiting for the next poll. The guard
@@ -247,19 +399,34 @@ export default function AccountActivityTab({
 
   return (
     <div>
-      <FilterBar
-        filters={filters}
-        accounts={filterAccounts}
-        agents={agents}
-        tokens={tokens}
-        loading={filtersLoading}
-        error={filtersError}
-        onChange={handleFilterChange}
-        hideAccountChip
-        onExport={() => void handleExportCsv()}
-        exporting={exporting}
-        canExport={canExport}
+      <ListToolbar
+        noun={transactionNoun}
+        state={listState}
+        onChange={handleListChange}
+        filtering="server"
+        facets={facets}
+        period={{ allowCustom: true }}
+        searchDescription="by name, agent or address"
+        count={count}
+        actions={
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void handleExportCsv()}
+            disabled={!canExport || exporting}
+            aria-busy={exporting}
+            className="min-h-11 w-full sm:min-h-0 sm:w-auto"
+          >
+            {exporting ? 'Preparing…' : 'Export CSV'}
+          </Button>
+        }
       />
+
+      {filtersError && (
+        <p role="alert" className="mt-2 text-xs text-[var(--v2-danger)]">
+          {filtersError}
+        </p>
+      )}
 
       {exportNotice && (
         <div
@@ -288,107 +455,77 @@ export default function AccountActivityTab({
         </div>
       )}
 
-      {/* ── The result line: the count, then the money it moved. Both come
-          from the server over the filtered set — never off the loaded page. */}
-      <div className="mt-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-        <p className="text-sm text-[var(--v2-ink-3)]">
-          {!loadingInitial && total === 0 ? null : loadingInitial ? (
-            'Loading activity…'
-          ) : (
-            // The Transactions page's result line (#4098's owner decision):
-            // the loaded-page position "Showing X of Y" while more pages
-            // remain, otherwise the server's count as "N transactions".
-            // Filtered or not, `total` is the server's count of the filtered
-            // set — the line describes the same set the rows and the CSV do.
-            hasMore ? (
-              <>
-                Showing{' '}
-                <span className="v2-tabular">{transactions.length.toLocaleString('en-US')}</span> of{' '}
-                <span className="v2-tabular">{total.toLocaleString('en-US')}</span>
-              </>
-            ) : (
-              <>
-                <span className="v2-tabular">{total.toLocaleString('en-US')}</span>{' '}
-                transaction{total !== 1 ? 's' : ''}
-              </>
-            )
-          )}
-          {/* #2882: `total` counts what the explorers returned, not what the
-              wallet holds — each source is read only up to a fixed page
-              budget. This qualifies the count, hedged on purpose: the feed
-              stops at the budget when a source has more, and a failed leg is
-              unknown rather than capped, so "may not be" is true in every
-              state at no cost. */}
-          {!loadingInitial && truncated && (
-            <span className="block text-xs">
-              Counts and totals cover the history Haven could load, which may not be your full history.
-            </span>
-          )}
+      {/* ── The money the filtered set moved, from the same server-side walk
+          the toolbar's count describes. Hidden while loading and after a
+          failed read — no figure is better than a wrong one; the feed's own
+          error state carries the retry story. */}
+      {!loadingInitial && !moneyTotals.loading && !moneyTotals.error && total > 0 && (
+        <p className="mt-3 text-sm text-[var(--v2-ink-2)]">
+          Money in{' '}
+          <Amount amount={moneyTotals.moneyIn} currency={currency} approx={moneyTotals.approx} /> ·
+          Money out{' '}
+          <Amount amount={moneyTotals.moneyOut} currency={currency} approx={moneyTotals.approx} />
         </p>
-        {/* In/out for the filtered set, from the same server-side walk the
-            count describes. Hidden while loading and after a failed read —
-            no figure is better than a wrong one; the feed's own error state
-            carries the retry story. */}
-        {!loadingInitial && !moneyTotals.loading && !moneyTotals.error && total > 0 && (
-          <p className="text-sm text-[var(--v2-ink-2)]">
-            Money in{' '}
-            <Amount amount={moneyTotals.moneyIn} currency={currency} approx={moneyTotals.approx} />{' '}
-            · Money out{' '}
-            <Amount amount={moneyTotals.moneyOut} currency={currency} approx={moneyTotals.approx} />
-          </p>
-        )}
-      </div>
+      )}
+      {/* #2882: `total` counts what the explorers returned, not what the
+          wallet holds — each source is read only up to a fixed page budget.
+          This qualifies the toolbar's count, hedged on purpose: the feed
+          stops at the budget when a source has more, and a failed leg is
+          unknown rather than capped, so "may not be" is true in every state
+          at no cost. */}
+      {!loadingInitial && truncated && (
+        <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
+          Counts and totals cover the history Haven could load, which may not be your full history.
+        </p>
+      )}
 
-      <Card hover={false} className="mt-3">
-        {loadingInitial ? (
-          <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-label="Loading activity">
-            {[0, 1, 2].map((item) => (
-              <div key={item} className="flex items-center gap-3 px-5 py-3.5">
-                <div className="h-9 w-9 rounded-[10px] bg-[var(--v2-surface-2)] animate-pulse" />
-                <div className="min-w-0 flex-1">
-                  <div className="h-3.5 w-40 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                  <div className="mt-1.5 h-2.5 w-48 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+      {showNoMatch ? (
+        // The standard no-match state (#4110): it sits where the rows were —
+        // in place of the list card, not inside it (an EmptyState is its own
+        // surface) — and leaves the toolbar in place, so the cause stays
+        // editable.
+        <div className="mt-3" data-testid="activity-no-match">
+          <ListNoMatch noun={transactionNoun} onClear={handleClearFilters} />
+        </div>
+      ) : (
+        <Card hover={false} className="mt-3">
+          {loadingInitial ? (
+            <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-label="Loading activity">
+              {[0, 1, 2].map((item) => (
+                <div key={item} className="flex items-center gap-3 px-5 py-3.5">
+                  <div className="h-9 w-9 rounded-[10px] bg-[var(--v2-surface-2)] animate-pulse" />
+                  <div className="min-w-0 flex-1">
+                    <div className="h-3.5 w-40 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                    <div className="mt-1.5 h-2.5 w-48 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        ) : error ? (
-          <div className="p-6">
-            <EmptyState
-              title="Activity could not load"
-              body={error}
-              className="py-8"
-              action={
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    void refreshFeed()
-                    void moneyTotals.refresh()
-                  }}
-                >
-                  Try again
-                </Button>
-              }
-            />
-          </div>
-        ) : transactions.length === 0 ? (
-          <div className="p-6">
-            {/* Two empty states, deliberately distinct: a filter that
-                matches nothing is one chip away from everything, while an
-                account with no history has a next action of its own. */}
-            {hasActiveFilters ? (
+              ))}
+            </div>
+          ) : error ? (
+            <div className="p-6">
               <EmptyState
-                title="No activity matches these filters"
-                body="Adjust or clear filters to widen the history."
+                title="Activity could not load"
+                body={error}
                 className="py-8"
                 action={
-                  <Button variant="ghost" size="sm" onClick={handleClearFilters}>
-                    Clear filters
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      void refreshFeed()
+                      void moneyTotals.refresh()
+                    }}
+                  >
+                    Try again
                   </Button>
                 }
               />
-            ) : (
+            </div>
+          ) : transactions.length === 0 ? (
+            <div className="p-6">
+              {/* An account with no history has a next action of its own;
+                  a filter that matches nothing is the no-match state above
+                  and never reaches here. */}
               <EmptyState
                 title="No activity yet"
                 body="Inbound and outbound payments for this Haven wallet will appear here."
@@ -399,34 +536,34 @@ export default function AccountActivityTab({
                   </Button>
                 }
               />
-            )}
-          </div>
-        ) : (
-          <div className="divide-y divide-[var(--v2-border)] v2-animate-fade-in">
-            {transactionDayGroups(transactions, (tx) => new Date(tx.timestamp * 1000).toISOString()).map((day) => (
-              <div key={day.dayKey}>
-                <TransactionActivityDayHeader label={day.label} />
-                {day.items.map((tx, index) => (
-                  <ActivityLedgerRow
-                    key={`${tx.accountId}:${tx.hash}:${tx.type}:${index}`}
-                    tx={tx}
-                    resolveAddress={resolveAddress}
-                    accountNamesByAddress={accountNamesByAddress}
-                    onOpen={() => setSelectedTx(tx)}
-                  />
-                ))}
-              </div>
-            ))}
-            {hasMore ? (
-              <div className="flex justify-center px-5 py-4">
-                <Button variant="ghost" size="sm" onClick={() => void loadMore()} disabled={loadingMore}>
-                  {loadingMore ? 'Loading…' : 'Load more'}
-                </Button>
-              </div>
-            ) : null}
-          </div>
-        )}
-      </Card>
+            </div>
+          ) : (
+            <div className="divide-y divide-[var(--v2-border)] v2-animate-fade-in">
+              {transactionDayGroups(transactions, (tx) => new Date(tx.timestamp * 1000).toISOString()).map((day) => (
+                <div key={day.dayKey}>
+                  <TransactionActivityDayHeader label={day.label} />
+                  {day.items.map((tx, index) => (
+                    <ActivityLedgerRow
+                      key={`${tx.accountId}:${tx.hash}:${tx.type}:${index}`}
+                      tx={tx}
+                      resolveAddress={resolveAddress}
+                      accountNamesByAddress={accountNamesByAddress}
+                      onOpen={() => setSelectedTx(tx)}
+                    />
+                  ))}
+                </div>
+              ))}
+              {hasMore ? (
+                <div className="flex justify-center px-5 py-4">
+                  <Button variant="ghost" size="sm" onClick={() => void loadMore()} disabled={loadingMore}>
+                    {loadingMore ? 'Loading…' : 'Load more'}
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          )}
+        </Card>
+      )}
 
       <TransactionDetailPanel
         transaction={selectedTx}

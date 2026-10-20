@@ -66,6 +66,7 @@ covers:
   - packages/frontend/e2e/table-container-collapse.spec.ts
   - packages/frontend/e2e/transaction-title-measure.spec.ts
   - packages/frontend/scripts/design-lint.mjs
+  - packages/frontend/design-lint-baseline.json
   - packages/frontend/scripts/evidence-viewports.mjs
   - packages/frontend/scripts/full-page-capture.mjs
   - packages/frontend/src/__tests__/compiled-colour-utilities.test.ts
@@ -2230,6 +2231,24 @@ mixes loaded rows with a server total. The count is a polite live region.
 `ListNoMatch` sits where the rows were and never replaces the toolbar. A list
 with *nothing yet* keeps its own empty state ("No contacts yet").
 
+#### Design-lint guard (#4129)
+
+A hand-built list control cannot ship quietly: `design-lint`
+(`npm run design:lint -w packages/frontend`) flags one in `src/app` and
+`src/components` by its tells — a search field (`type="search"`, or a
+placeholder containing the word "search"), a hand-rolled Filters trigger
+(the `SlidersHorizontal` glyph outside the family), or a direct `<FilterPill>`
+use. `aria-haspopup` was measured and rejected as the signal: it appears 0
+times in the hand-built toolbars and it DOES appear in `Sidebar`,
+`WalletButton`, `DropdownMenu` and `TransactionActivityRow`. The rule is NOT
+silenced by `design-lint-disable-line` — the baseline
+(`packages/frontend/design-lint-baseline.json`) is the only way to carry this
+debt. When the rule fires on your diff, delete the hand-built control and
+render `ListToolbar`; an intentional exception is a hand edit to the baseline
+in its own reviewed commit, and the ratchet only ever shrinks. `packages/ops`
+is exempt (owner decision 2026-10-20), as are `packages/ui/src`, the
+`FilterPill` shim, and the `/design-system` demos.
+
 ### Transaction tables
 
 Use `components/transactions/TransactionsTable.tsx` for full transaction history routes. It is a semantic sortable table:
@@ -2445,7 +2464,7 @@ The public website (epic [#3572](https://github.com/d-hinders/Haven-AI/issues/35
 
 | px | Class | Where it is used (the built precedent, not a preference) |
 |---|---|---|
-| 12 | `h-3 w-3` | A glyph in a run of the product's **smallest type** — a disclosure chevron before a `<summary>`, a trailing arrow after a 12 px link label, a copy glyph after a mono address, a sort caret in a table header — including when that glyph is wrapped in its own small button, as long as it sits **inside** the type run rather than beside it. It is **not** the rung for a remove/dismiss control on a data row; that is 14, per [#1923](https://github.com/d-hinders/Haven-AI/issues/1923) below. Mostly `text-xs`, but **not exclusively, and the exception is the point**: `Table`'s header is `text-[11px]`, `FilterBar`'s is `text-sm`. Read it as *the dense-affordance rung*, not as a `text-xs` lookup |
+| 12 | `h-3 w-3` | A glyph in a run of the product's **smallest type** — a disclosure chevron before a `<summary>`, a trailing arrow after a 12 px link label, a copy glyph after a mono address, a sort caret in a table header — including when that glyph is wrapped in its own small button, as long as it sits **inside** the type run rather than beside it. It is **not** the rung for a remove/dismiss control on a data row; that is 14, per [#1923](https://github.com/d-hinders/Haven-AI/issues/1923) below. Mostly `text-xs`, but **not exclusively, and the exception is the point**: `Table`'s header is `text-[11px]`, and the `ListToolbar` pattern's `FacetMenu` rows are `text-sm`. Read it as *the dense-affordance rung*, not as a `text-xs` lookup |
 | 14 | `h-3.5 w-3.5` | The default beside `text-sm`; the **block-leading indicator** on a banner or callout (`flex items-start` + `mt-0.5` + `flex-shrink-0`) whatever the body type is — it aligns to the first line's cap height, not to the em box; and the glyph in a **remove / dismiss control on a data row**, whether its box is a fixed `h-6 w-6` or padding-only `p-1` ([#1923](https://github.com/d-hinders/Haven-AI/issues/1923), below) |
 | 16 | `h-4 w-4` | Beside `text-base`, and the icon in a **32–36 px tile** (`h-8 w-8` / `h-9 w-9`) |
 | 20 | `h-5 w-5` | A standalone icon with no container, and `EmptyState`'s icon slot — which is literally `h-5 w-5` inside a 40 px halo, so a call site that passes anything else is fighting the primitive |

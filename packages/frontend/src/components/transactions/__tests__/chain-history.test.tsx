@@ -10,7 +10,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { LocaleProvider } from '@/context/LocaleContext'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
 import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
-import FilterBar from '@/components/transactions/FilterBar'
 import NetworkPill from '@/components/NetworkPill'
 import { getChainConfig } from '@/lib/chains'
 import type { AggregatedTransaction } from '@/types/transactions'
@@ -92,33 +91,9 @@ describe('rows on a chain the registry does not know', () => {
     expect(screen.queryByRole('link', { name: /0xabc123/ })).toBeNull()
   })
 
-  it('filter bar names a selected token on an unknown chain generically', () => {
-    render(
-      <FilterBar
-        filters={{ tokenKey: 't' }}
-        onChange={vi.fn()}
-        accounts={[]}
-        agents={[]}
-        tokens={[{ key: 't', symbol: 'FOO', chainId: 999999, isNative: false } as never]}
-        loading={false}
-        error={null}
-      />,
-    )
-    expect(screen.getAllByText(/FOO \(Chain 999999\)/).length).toBeGreaterThan(0)
-  })
-
-  it('filter bar names a chain-100 token with the Gnosis name', () => {
-    render(
-      <FilterBar
-        filters={{ tokenKey: 't' }}
-        onChange={vi.fn()}
-        accounts={[]}
-        agents={[]}
-        tokens={[{ key: 't', symbol: 'USDC.e', chainId: 100, isNative: false } as never]}
-        loading={false}
-        error={null}
-      />,
-    )
-    expect(screen.getAllByText(/USDC\.e \(Gnosis\)/).length).toBeGreaterThan(0)
-  })
+  // The two token-naming behaviours this file used to pin through
+  // `FilterBar` ("names a selected token on an unknown chain generically" /
+  // "names a chain-100 token with the Gnosis name") moved to the account
+  // Activity tab's tests with #4130, which retargeted them onto the
+  // `ListToolbar` Token facet the tab now renders.
 })

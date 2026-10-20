@@ -189,6 +189,17 @@ function flushSearchCommit() {
   })
 }
 
+/** The ledger's whole-row buttons (#4096's ledger mode). */
+function ledgerRows(): HTMLElement[] {
+  return screen
+    .getAllByRole('button')
+    .filter(
+      (element) =>
+        element.getAttribute('aria-haspopup') === 'dialog' &&
+        element.closest('[data-testid="list-toolbar"]') === null,
+    )
+}
+
 describe('AccountActivityTab — filters in the URL (#4098/#4130)', () => {
   it('seeds the filters from the URL and sends them to the feed with the fixed account', () => {
     urlQuery.value = 'search=coffee&direction=in'
@@ -456,15 +467,9 @@ describe('AccountActivityTab — rows and the detail panel (#4098)', () => {
 
     // #4096's ledger mode: every row is a whole-row button (aria-haspopup
     // dialog). The toolbar's phone "Filters" button carries the same
-    // attribute, so the count is taken over the ledger's rows only —
-    // anything not inside the toolbar. Mouse first…
-    const rows = screen
-      .getAllByRole('button')
-      .filter(
-        (element) =>
-          element.getAttribute('aria-haspopup') === 'dialog' &&
-          element.closest('[data-testid="list-toolbar"]') === null,
-      )
+    // attribute, so ledgerRows() excludes anything inside the toolbar.
+    // Mouse first…
+    const rows = ledgerRows()
     expect(rows.length).toBe(2)
     fireEvent.click(rows[0])
     expect(screen.getByTestId('detail-panel')).toHaveTextContent('panel:0xabc')

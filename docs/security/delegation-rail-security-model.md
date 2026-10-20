@@ -1688,7 +1688,11 @@ making it unrecoverable.
   way to finish. It is per slot: it does not bound open-plus-pinned or
   shared-payTo authority. Grants left enabled by replaces before #3933 stay
   enabled until the owner stops them; the agent page flags any `replaced`,
-  unexpired row with that finish action. The owner-facing copy follows the
+  unexpired row with that finish action — except, since #4154, the rows an
+  edit flow will Stop while its modal is open (that modal's own
+  `revoke_unfinished` screen names them) and, after a finished edit, until
+  the reload on close settles; any other close shows the flag at once. Display
+  timing only. The owner-facing copy follows the
   rule (#3971): an `unconfirmed` grant no longer warns that a retry adds a
   second budget — the retry re-reads the attempt, and build/activate refuse
   a second live budget in the slot — and the fund-merchant warning counts

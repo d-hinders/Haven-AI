@@ -15,7 +15,7 @@ function agent(overrides: Partial<Agent>): Agent {
 
 /**
  * #3542: one predicate every surface reads, so the list card, the detail page,
- * the account page and the Removed toggle cannot disagree about which agents
+ * the account page and the /agents hidden-archived callout cannot disagree about which agents
  * are half-revoked.
  */
 describe('isHalfRevoked', () => {

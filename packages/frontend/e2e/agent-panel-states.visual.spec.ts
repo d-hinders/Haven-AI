@@ -134,30 +134,60 @@ test.describe('agent panel empty states and card banners', () => {
     await expect(card).toHaveScreenshot('agentcard-half-revoked-desktop.png', SNAPSHOT_OPTIONS)
   })
 
-  test('removed group — the collapsed toggle warns, the expanded card offers Finish revoking', async ({ page }) => {
+  test('hidden archived agents — the callout warns, Show archived reveals the card with Finish revoking', async ({ page }) => {
+    // #4113 replaced the "Removed (n)" disclosure with an "Archived: Hidden"
+    // toolbar facet; #3542's warning moved from the toggle to this callout.
     const agent = agentState({
       status: 'revoked',
       archived_at: '2026-06-01T00:00:00Z',
       live_delegation_count: 1,
     })
-    await seedAgents(page, [agent])
+    await seedAgents(page, [agentState({ id: 'agent-live', name: 'Atlas' }), agent])
     await page.goto('/agents')
     await settle(page)
 
-    const toggle = page.getByRole('button', { name: /Removed/ })
-    await expect(toggle).toContainText('1 still has an active budget')
-    await expect(toggle).toHaveScreenshot('agentpanel-removed-toggle-warning-desktop.png', SNAPSHOT_OPTIONS)
-    // Collapsed means not rendered (#3829): the panel stays in the DOM for
-    // `aria-controls`, but computes to `display: none`.
-    const removedPanel = page.locator('#removed-agent-list')
-    await expect(removedPanel).toHaveCount(1)
-    await expect(removedPanel).toBeHidden()
+    const callout = page.getByTestId('hidden-active-budget-callout')
+    await expect(callout).toHaveCount(1)
+    await expect(callout).toContainText('1 archived agent still has an active budget')
+    await expect(callout).toHaveScreenshot('agentpanel-hidden-active-budget-callout-desktop.png', SNAPSHOT_OPTIONS)
+    await expect(page.getByRole('link', { name: agent.name })).toHaveCount(0)
 
-    await toggle.click()
-    await expect(removedPanel).toBeVisible()
-    const card = page.getByRole('group', { name: 'Removed agents' }).getByTestId('agent-card')
-    await expect(card.getByRole('button', { name: `Finish revoking ${agent.name}` })).toHaveCount(1)
+    await callout.getByRole('button', { name: 'Show archived', exact: true }).click()
+    await expect(callout).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Archived: Shown', exact: true })).toHaveCount(1)
+    const card = page.getByTestId('agent-card').filter({ has: page.getByRole('button', { name: `Finish revoking ${agent.name}` }) })
+    await expect(card).toHaveCount(1)
     await expect(card).toHaveScreenshot('agentcard-half-removed-desktop.png', SNAPSHOT_OPTIONS)
   })
+
+  /**
+   * #4113: the Agents page's list controls — `ListToolbar` as the page wires
+   * it, which no baseline covered before (`AgentListToolbar` had none). The
+   * facets come from the page's registry, so this pins the page's own
+   * declaration (Status, Budget, Archived, Sort: Name) on the shared pattern.
+   */
+  for (const viewport of [
+    { slug: 'desktop', width: 1280, height: 900 },
+    { slug: 'mobile', width: 375, height: 812 },
+  ]) {
+    test(`agents list toolbar — ${viewport.slug}`, async ({ page }) => {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height })
+      await seedAgents(page, [
+        agentState({ id: 'agent-a', name: 'Atlas' }),
+        agentState({ id: 'agent-b', name: 'Research assistant', status: 'paused' }),
+        agentState({ id: 'agent-c', name: 'Old agent', status: 'revoked', archived_at: '2026-06-01T00:00:00Z' }),
+      ])
+      await page.goto('/agents?status=active')
+      // Not `settle`: the User menu it waits on is desktop chrome, absent at 375px.
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const toolbar = page.getByTestId('list-toolbar')
+      await expect(toolbar).toHaveCount(1)
+      await expect(page.getByTestId('list-toolbar-count')).toHaveText('1 of 2 agents')
+      await expect(toolbar.getByRole('button', { name: 'Remove Status: Active', exact: true })).toHaveCount(1)
+      await expect(toolbar).toHaveScreenshot(`agentpanel-list-toolbar-${viewport.slug}.png`, SNAPSHOT_OPTIONS)
+    })
+  }
 
 })

@@ -174,7 +174,7 @@ export function ListToolbar({
     if (sameValues(values, defaults)) continue
     active.push({
       key: facet.id,
-      label: `${facet.label}: ${facetValueLabel(values, facet.options)}`,
+      label: `${facet.label}: ${facetValueLabel(values, facet.options, facet.allLabel ?? allOptionLabel)}`,
       // Only facets the sheet shows count on "Filters (n)": a pill facet
       // sits outside the sheet, and a hidden one-option facet is in neither.
       inSheet: facet.rendering !== 'pills' && facet.options.length > 1,
@@ -547,7 +547,7 @@ function FilterSheet({
             const multi = facet.selection === 'multi'
             return (
               <SheetGroup key={facet.id} legend={facet.label}>
-                {!multi && (
+                {!multi && facet.allLabel !== null && (
                   <label className={SHEET_ROW_CLASSES}>
                     <input
                       type="radio"
@@ -556,7 +556,7 @@ function FilterSheet({
                       onChange={() => onFacet(facet.id, [])}
                       className={SHEET_INPUT_CLASSES}
                     />
-                    <span className="flex-1">{allOptionLabel}</span>
+                    <span className="flex-1">{facet.allLabel ?? allOptionLabel}</span>
                   </label>
                 )}
                 {facet.options.map((option) => {

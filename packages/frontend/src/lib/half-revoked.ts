@@ -2,7 +2,7 @@ import type { Agent } from '@/hooks/useAgents'
 
 /**
  * #3542: a "half-revoked" agent has had its Haven credential ended (revoked) or
- * been filed under Removed (archived), but a budget delegation of its is still
+ * been archived (Remove), but a budget delegation of its is still
  * redeemable on-chain. `POST /agents/:id/revoke` only flips `agents.status`; the
  * budget stays spendable until the owner signs `revoke-all`.
  *
@@ -11,7 +11,7 @@ import type { Agent } from '@/hooks/useAgents'
  * NOT a substitute: it is projected from ACTIVE rows only and misses `replaced`.
  *
  * One predicate for every surface (list card, detail page, account page, the
- * Removed toggle), so they cannot disagree about which agents qualify.
+ * /agents hidden-archived callout), so they cannot disagree about which agents qualify.
  */
 export function isHalfRevoked(agent: Agent): boolean {
   const ended = agent.status === 'revoked' || agent.archived_at != null

@@ -2103,8 +2103,8 @@ site for x402, the receipt/contact name the backend resolved, "Deposit" for
 inbound — or "From <account>" for money that came from another of the user's
 own accounts (#4099) — "New recipient" when nothing resolves, "Agent payment" when an x402
 row carries no resource URL, and "Returned from <agent>" for sweeps. The
-subtitle is the agent's name; "From My account" appears only when the user
-has more than one account. A confirmed row carries no status badge — its
+subtitle is the agent's name; on a send it adds "From <account>", the account
+the money left (#4117), only when the user has more than one account. A confirmed row carries no status badge — its
 direction is already the amount's sign and tone; only "Pending" and "Failed"
 name a state (#3897). The shared screens (`TransactionsTable`,
 `TransactionDetailPanel`) pass no mode and keep the truncated address until

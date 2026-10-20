@@ -659,7 +659,9 @@ group under user-local day headings, at most eight rows over the rolling
 last seven days. The title is the counterparty through `counterpartyLabel`'s
 no-address mode (merchant site, receipt name, "Deposit" or — for a transfer
 from another of the user's own accounts — "From <account>" (#4099), "New
-recipient" — never a truncated address); the subtitle is the agent's name; a group of N
+recipient" — never a truncated address); the subtitle is the agent's name, plus
+"From <account>" — the account the money left — on a send when the user has
+more than one account (#4117); a group of N
 renders "×N" ("×N+" when the count is a floor). The 5-row `transactions`
 preview is removed from the wire (#3858) — no dashboard surface reads it.
 

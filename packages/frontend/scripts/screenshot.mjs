@@ -6689,7 +6689,7 @@ export const SCENARIOS = {
   },
   'dashboard-own-account-transfer': {
     description:
-      '#4099: a transfer between two of the user\'s own accounts on the dashboard\'s Activity card — the send reads "Savings" (the receiving account), the money arriving reads "From Savings" (the sending account, not "Deposit"; owner decision 2026-10-20), and an outside deposit on the same day still reads "Deposit". The shared fixture has one account and no inbound row, so none of the three is reachable from a route capture.',
+      '#4099: a transfer between two of the user\'s own accounts on the dashboard\'s Activity card — the send reads "Savings" (the receiving account), the money arriving reads "From Savings" (the sending account, not "Deposit"; owner decision 2026-10-20), and an outside deposit on the same day still reads "Deposit". #4117: every send\'s subtitle names the account the money left ("From Operating wallet"), never a fixed "From My account". The shared fixture has one account and no inbound row, so none of this is reachable from a route capture.',
     api(apiPath) {
       const savings = {
         ...FIXTURE_ACCOUNT,
@@ -6712,10 +6712,11 @@ export const SCENARIOS = {
             // The money arriving in Operating wallet from Savings: named by the sender.
             { ...plainTransfer, direction: 'in', to: FIXTURE_ACCOUNT.account_address, merchantName: 'Savings', sumAtomic: '50000000', approxAmount: '538.0000', latestAt: at(60) },
             // Operating wallet's own send to Savings: named by the receiver.
-            { ...plainTransfer, direction: 'out', to: savings.account_address, merchantName: 'Savings', sumAtomic: '20000000', approxAmount: '215.2000', latestAt: at(120) },
+            { ...plainTransfer, direction: 'out', to: savings.account_address, merchantName: 'Savings', fromAccountName: FIXTURE_ACCOUNT.name, sumAtomic: '20000000', approxAmount: '215.2000', latestAt: at(120) },
             // An outside deposit the same day: still the generic word.
             { ...plainTransfer, direction: 'in', to: FIXTURE_ACCOUNT.account_address, merchantName: null, sumAtomic: '10000000', approxAmount: '107.6000', latestAt: at(180) },
-            base,
+            // The agent's x402 payment, sent from the same account (#4117).
+            { ...base, fromAccountName: FIXTURE_ACCOUNT.name },
           ],
         }
       }
@@ -6730,6 +6731,11 @@ export const SCENARIOS = {
       // Positive controls: the money arriving reads "From Savings", the send "Savings".
       await page.getByText('From Savings', { exact: true }).first().waitFor({ timeout: 30_000 })
       await page.getByText('Savings', { exact: true }).first().waitFor({ timeout: 10_000 })
+      // #4117: the send's subtitle names the account the money left.
+      await page.getByText(`From ${FIXTURE_ACCOUNT.name}`, { exact: true }).first().waitFor({ timeout: 10_000 })
+      if (await page.getByText('From My account', { exact: false }).count()) {
+        throw new Error('#4117: a fixed "From My account" subtitle rendered')
+      }
       // Negative control: the outside deposit keeps "Deposit".
       await page.getByText('Deposit', { exact: true }).first().waitFor({ timeout: 10_000 })
       await shoot(page.locator('main').first(), 'page')

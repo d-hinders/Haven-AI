@@ -186,11 +186,12 @@ as a label, not as an example in brackets, not as subtext (owner decision,
 2026-10-20, on [#4093](https://github.com/d-hinders/Haven-AI/issues/4093)).
 Platform names are false on some devices and change with the device; the
 passkey is the one fact that holds everywhere. When a familiar anchor helps,
-point at the device's screen lock, which every passkey device has.
+point at the device's screen lock, hedged with “usually”: a passkey can also
+live on a security key, a password manager or another phone.
 
 Preferred:
 - “Use a passkey”
-- “Approve with your passkey, using your device's screen lock.”
+- “Approve with your passkey, usually your device's screen lock.”
 - “One passkey prompt”
 - “Create a secure passkey to approve actions in your Haven account”
 - “Fastest option. Creates a secure passkey.”
@@ -232,7 +233,7 @@ Credential rows (signer lists, “ways to approve”):
 Action copy names the passkey, with the screen-lock anchor as subtext when one
 helps:
 
-- Button “Add a backup passkey” with subtext “Approve with your passkey, using
+- Button “Add a backup passkey” with subtext “Approve with your passkey, usually
   your device's screen lock.”
 - “Create account with a passkey”
 - “Waiting for your passkey…” / “The passkey prompt was cancelled.”
@@ -758,8 +759,8 @@ passkey prompt and no new passkey. Before that prompt it states three facts,
 each as an outcome:
 
 ```text
-Secured by the passkey you use next. Your device asks for it once, with its
-screen lock, and it becomes the only way to approve actions in the new account.
+Secured by the passkey you use next. Your device asks for it once, and it
+becomes the only way to approve actions in the new account.
 
 Backups don't carry over. A backup passkey or wallet on another account
 doesn't protect this one, so add one on the new account's page.

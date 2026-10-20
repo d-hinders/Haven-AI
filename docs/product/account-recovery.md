@@ -87,8 +87,8 @@ it stops appearing once you add a backup, and you can add one at any time from
 On your account page, open the **Security & details** tab and choose one,
 under **Backup & recovery**:
 
-- **Add a backup passkey** — creates a second passkey (approve with your
-  device's screen lock). On the same device it's a second credential; on a
+- **Add a backup passkey** — creates a second passkey (usually approved with
+  your device's screen lock). On the same device it's a second credential; on a
   *different* device (your phone as well as your laptop) it's true device
   redundancy. One prompt, no transaction
   you pay for.

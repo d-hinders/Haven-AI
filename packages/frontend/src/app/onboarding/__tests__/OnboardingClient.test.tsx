@@ -288,6 +288,8 @@ describe('OnboardingClient (#1162)', () => {
     // Precondition — without it the assertions below could pass vacuously.
     expect(screen.getByLabelText('Network')).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Create your Haven account' })).toBeTruthy()
+    // #4168: the intro names the passkey, never a biometric.
+    expect(screen.getByText(/Your passkey approves everything/)).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: 'report-blocked' }))
 

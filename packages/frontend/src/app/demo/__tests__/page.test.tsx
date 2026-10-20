@@ -69,7 +69,7 @@ describe('/demo page', () => {
     // (design review round 4).
     expect(screen.getAllByText(/Test funds only/)).toHaveLength(1)
     expect(screen.getByText(/works best on a laptop/)).toBeInTheDocument()
-    expect(screen.getByText(/passkey-capable device/)).toBeInTheDocument()
+    expect(screen.getByText(/A device that can create a passkey/)).toBeInTheDocument()
     // "harness" jargon dropped (design review round 4, nit 6).
     expect(pageText).not.toMatch(/harness/i)
     expect(screen.getByText(/One AI agent, such as Claude Code, Codex, or Hermes/)).toBeInTheDocument()

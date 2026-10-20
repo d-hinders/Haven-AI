@@ -3507,15 +3507,17 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > `last-verified` is bumped to 2026-10-16 for exactly this coverage.
 
 > **Re-verified unchanged (#4168, 2026-10-20 — say "passkey", never a
-> platform name):** this diff is copy only. It touches two covered files:
+> platform name):** this diff is copy only. It touches three covered files:
 > `components/AccountSignersCard.tsx` (the "Add a backup passkey" subtext now
-> reads "Approve with your passkey, using your device's screen lock.") and
+> reads "Approve with your passkey, usually your device's screen lock."),
 > `components/NewAccountDialog.tsx` (the first fact drops the platform list:
-> "Your device asks for it once, with its screen lock, …"). No signing step,
+> "Your device asks for it once, and it becomes …") and
+> `components/DelegationSendModal.tsx` (module JSDoc only: "a dismissed
+> passkey prompt is a neutral cancel"). No signing step,
 > signer-set gate, `pickSigningPath` branch or passkey ceremony is added,
 > removed or reordered; the owner still approves with their own passkey or
 > wallet, and the new account's only signer is still the passkey the
 > assertion picks. No new spender, no authority grant, no custody change.
-> Scope of this re-read: the two strings above and §5 (copy rules), which
+> Scope of this re-read: the three edits above and §5 (copy rules), which
 > quotes no platform name; nothing else in this document was re-read for it,
 > and `last-verified` is not bumped.

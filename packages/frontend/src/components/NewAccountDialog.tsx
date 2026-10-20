@@ -471,8 +471,7 @@ function NewAccountDialogBody({
         <ul className="space-y-2 text-sm text-[var(--v2-ink-2)]" data-testid="new-account-facts">
           <li>
             <span className="font-medium text-[var(--v2-ink)]">Secured by the passkey you use next.</span> Your
-            device asks for it once, with its screen lock, and it becomes the only way to approve actions in the new
-            account.
+            device asks for it once, and it becomes the only way to approve actions in the new account.
           </li>
           <li>
             <span className="font-medium text-[var(--v2-ink)]">Backups don&rsquo;t carry over.</span> A backup

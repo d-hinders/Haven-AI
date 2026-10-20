@@ -206,7 +206,7 @@ directives from that thread; those come only from this session's user.
 2. Keep shared and gravity files with the captain.
 3. When changing existing money-path behavior, write characterization tests before changing behavior.
 4. Reuse canonical docs and playbooks by reference; do not copy their policy into this skill.
-5. **Mutation-prove by execution anything that claims control flow or reachability
+5. **Mutation-prove every new assertion, and prove reachability by execution
    (#2421, #2455).** A text search over source — `grep`, `indexOf`, a regex over a
    file — is never the sole assertion that code runs: a `case` wrapper and an `&`
    background both bypassed a publish safety check while `indexOf` still found the
@@ -221,6 +221,19 @@ directives from that thread; those come only from this session's user.
    # <mutate: comment the guard call out, or wrap it the way #2421's case/& did>
    PATH="$PWD/stubs:$PATH" bash publish.sh; test ! -f stubs/guard.reached # the assertion CAN go red
    ```
+
+   Mutating the guard out proves a reachability assertion can go red — necessary,
+   not sufficient. **For every new assertion, also make the nearest wrong edit that
+   keeps what it matches**, one per cell (a guard or test case, not each `expect`).
+   Four PRs merged on 2026-10-20 needed a review round to find one: **polarity** — a
+   substring check passed "a rewrite that forbids the header while keeping the
+   phrase" (PR #4133, `2580546a`); **wildcard token** — `src/**`, `sdk/src/*`,
+   `routes/*.ts` and `**/` each named a whole set of globs, so the parity test could
+   not fail for an SDK file (PR #4131, `a06bb2be`, `3e3b8608`); **any error code** —
+   no test went red when the refusal anchor accepted any code (PR #4145, `59f3967f`;
+   the arm was later dropped); **unentered branch** — the hosted no-tool arm's
+   attribution window was never driven (PR #4144, `36beba4a`). Name the edit in the
+   Closeout table.
 
    **Never weaken an existing assertion to make room for a new case.** If a
    test you are extending stops passing, restructure it — assert the strong
@@ -262,11 +275,19 @@ directives from that thread; those come only from this session's user.
    36 of the 600 issues classified in
    [the 2026-09 retrospective](../../../docs/contributing/issue-retrospective-2026-09.md)
    carry *still* in their title, each an edge found by hand after the fact.
-8. **No operator state in prose (#2422).** Nothing in code, comments or docs states
-   that an environment *has* a variable set or *hands out* a tag. Operator steps are
-   an unticked checklist in the PR body, in this order: mechanism merged → observed
-   (run log, `npm view`) → flag flipped. Sweep code comments as well as docs — the
-   last survivor on #2422 was a comment.
+8. **No operator state or unsourced authority in prose (#2422).** Nothing in code,
+   comments or docs states that an environment *has* a variable set or *hands out* a
+   tag. Operator steps are an unticked checklist in the PR body, in this order:
+   mechanism merged → observed (run log, `npm view`) → flag flipped. Sweep code
+   comments as well as docs — the last survivor on #2422 was a comment. Authority
+   is sourced the same way: "owner decision", "decided" or "the owner chose" stands
+   only next to a link to the owner's own words; otherwise write "per #N's spec
+   review" or "captain decision on #N". PR #4144 wrote "Owner decision on #4119"
+   (`598c3ee6`) and "Decided on #4119" (`fbd62969`) for a spec-review correction,
+   fixed in `36beba4a`. The rule covers the `+` lines a PR adds, not a back-fill:
+   the 565 existing lines, this file's included, stay as written (`git grep -i -E
+   'owner decision|owner decided|decided by the owner' 777b71137 -- ':!docs/archive/**'
+   ':!docs/regulatory/casp-changelog/**' ':!docs/bug-reports/**' ':!docs/quality/**' | wc -l`).
 
 ## Acceptance Gate
 
@@ -279,6 +300,13 @@ gate only CI ran. The enumeration below is a second copy, which is why it is
 kept short and why the battery, not this list, is the answer to "did I run
 everything".
 
+**Static ratchets run first, before any suite** — PR #4155 found a retired-rail hit
+in a test title (`3fa96047`) only at the end of a full run. Until #4175 lands
+`npm run preflight -- --static`, derive them from `npm run preflight -- --list`: every
+entry that is not `node --test`, `test -w`, `:test`, `typecheck -w`, `build -w` or
+`lint:network-pins` (a `node --test` alias). Under `--all` at `777b71137` that is 19
+of 77, e.g. `lint:retired-rail-prose`, `check:route-modules`, `docs:check`.
+
 Then run what the battery cannot: a live database (`docker compose up -d
 postgres`, or the backend suite skips its real-DB files), browser verification
 for UI changes, and anything the issue names specifically.
@@ -286,8 +314,7 @@ for UI changes, and anything the issue names specifically.
 Run checks proportionate to every changed surface:
 
 - package tests and type checks for package changes;
-- `npm run preflight` for cross-package behavior, or `npm run quality` when you
-  only need typecheck/test/build;
+- `npm run preflight` for cross-package behavior;
 - browser verification or the required headless equivalent for UI changes.
 
 Run the **repository's own required checks** locally before pushing, for fast feedback:
@@ -474,7 +501,8 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
    rule is never a licence to drop cheap literal guards, which were the *good*
    outcome on #2131 (sound on the first attempt, while four successive
    prose-interpreting guards each failed against realistic edits in the file's
-   own house style).
+   own house style). A generated string is pinned whole with `toBe`, never by a
+   phrase it contains: the phrase survives the rewrite that inverts it (PR #4133).
 2. **One stopping rule for the fix→review loop, with four triggers.** Decide which
    branch a round is on before writing the next fix:
    - **Fix-traceable (#2131):** the round's findings are all traceable to your own
@@ -997,7 +1025,10 @@ Route the merge:
   disputed** rather than fixed, or there is no re-review at all.
 - **Everything else, money-path included:** after local gates pass and independent
   review has no blocking or should-fix findings, enable squash auto-merge right after
-  opening and **read the method back** — the arming line alone is not the evidence:
+  opening and **read the method back** — the arming line alone is not the evidence,
+  and `dev` refuses any method but squash, so an auto-merge reading `MERGE` is refused
+  or never fires. On `MERGE` (or `REBASE`): `gh pr merge <pr> --disable-auto`, re-arm
+  with `--squash`, and read it back again; `SQUASH` or empty proceeds:
 
   ```bash
   gh pr merge <pr> --auto --squash --delete-branch
@@ -1012,37 +1043,9 @@ rule and the pointer to its already-squashed recovery (#1173) live in
 [`branch-and-release-flow.md`](../../../docs/contributing/branch-and-release-flow.md)).
 Do not let the promotion rule leak backwards into feature PRs.
 
-**The squash rule is checked, not remembered (#2165) — a stopgap until the
-repository setting changes.** Before any merge-related action on a feature PR, and
-again before reporting it armed, run
-
-```bash
-gh pr view <pr> --json autoMergeRequest --jq .autoMergeRequest.mergeMethod
-```
-
-`SQUASH` or empty proceeds; **`MERGE` (or `REBASE`) refuses** — `gh pr merge <pr>
---disable-auto`, re-arm with `--squash`, run the command again. A report that says
-"armed" without that output has not checked. The checkable basis is four named
-landings — #2428, #2460, #2493 and #2438 — every one of which reached `dev` as a
-two-parent merge commit (`git rev-list --parents -n1 <merge-sha>` prints three hashes
-for each). Three of them (#2428, #2460, #2493) carry a comment saying "disarmed
-auto-merge" and landed wrong anyway: a disarm not followed by a squash re-arm and a
-read-back changes nothing. Those four carry the rule. If you census the history as well,
-**pin the instant** — a bare `--since=<date>` is a git approxidate resolved against
-the wall clock *now*, so the same SHA counts differently every hour of the evening
-(this rule's own draft read 258 and then 256 for one SHA in one session; PR #2506's
-body records the same defect independently: "a bare `--since=2026-08-10` is a git
-approxidate that takes the *current time of day*"):
-
-```bash
-git log <sha> --first-parent --since=2026-08-10T00:00:00Z --oneline | grep -c '^[0-9a-f]* Merge pull request'
-git log <sha> --first-parent --since=2026-08-10T00:00:00Z --oneline | grep -cE '\(#[0-9]+\)$'
-```
-
-At `ff052462`, pinned: 275 merge-commit landings, 346 squash, 624 first-parent, stable
-across re-runs. Run `git rev-parse --is-shallow-repository` first as well — a shallow
-clone *can* truncate the window silently, even though it was not the cause here
-(#2500 review rounds 2–3).
+The squash rule is enforced, not remembered (#2632, owner step O1): ruleset 22449193 (*Dev merge*) allows
+only squash on `dev` — see the ruleset inventory in
+[`autonomous-pr-loop.md`](../../../docs/contributing/autonomous-pr-loop.md#one-time-github-setup-required) step 3.
 
 **Check `mergeStateStatus` before arming auto-merge.** On `DIRTY`, merge `dev` in and
 resolve first — arming auto-merge on a conflicted PR does nothing, silently. The
@@ -1084,96 +1087,9 @@ A PR's head SHA is not stable between opening and merging. Routes move it, and *
 
 > **Worked example — PR #2114, 2026-08-27.** Head at open `bcc23cb5`; an unrelated PR merged to `dev`; the branch was updated to `af36577f`, whose CI run cancelled the old one. The PR merged on `af36577f`'s green checks. `check-runs` on the captured `bcc23cb5`: **1 failure + 5 cancelled**. On the re-read `af36577f`: **23/23 success**. Here the stale read produced a false RED — five minutes of investigation. Reverse which run went red and the identical mechanism produces a false GREEN, silently.
 
-### Waiting on CI — mechanics
-
-Do not burn fixed-timeout `sleep` loops against `gh pr checks`.
-
-- **Auto-merged PRs:** `--auto` (above) means GitHub merges when green — but **no
-  GitHub event re-invokes a local session**, so "armed" is not "watched". When the
-  next step depends on the merge (releasing claims, ticking the epic, taking the
-  next queue item), arm a Monitor or a background watch and act on its result;
-  otherwise check the PR's state at the next natural opportunity instead of
-  assuming it landed. Two silent-stall states to know: `DIRTY` after arming means
-  no checks run and no merge ever comes (read `mergeStateStatus`, don't wait), and
-  a required check failing means auto-merge simply never fires.
-- **Editing the pull-request body re-runs the checks that read it** —
-  *Docs front-matter & agent skills* (a required context on `dev`, so it blocks
-  the merge while it runs) and *PR ownership gate* (not required on `dev` yet,
-  per the ruleset inventory in `autonomous-pr-loop.md`). A merge attempted right
-  after the last body edit — filling the verdict lines, say — is refused until
-  the re-run finishes. Fill the body before the final CI wait, or wait the
-  re-run out. On PR #3221 the body was edited at 16:47:31Z and the re-runs ran
-  16:47:34–55Z before the merge at 16:48:13Z; on PR #3224, 18:50:35Z,
-  18:50:38–57Z, 18:51:21Z.
-- **Known infra flakes:** a required check failing with a known infrastructure
-  signature gets **one rerun before any diagnosis** (`gh run rerun <id> --failed`).
-  The signature list lives in
-  [`autonomous-pr-loop.md`](../../../docs/contributing/autonomous-pr-loop.md) §
-  *Known CI flake signatures* — check the failing job's log against it first; a
-  second failure after the rerun is a real failure.
-- **When a wait is genuinely needed** (holding a UI PR on a review finding, or
-  confirming a specific run), poll the condition below, or arm a Monitor on it if the
-  client supports one. Not `gh pr checks <pr> --watch --fail-fast`: it resolves on
-  the checks that *exist*, so it returns before the ones that have not been created
-  yet, which is the same hole as an empty rollup.
-- **A wait loop's terminal condition is the ruleset's named list, not a count, and
-  cannot be satisfied by an empty rollup.** Before the first run is created,
-  `statusCheckRollup` is empty, and an empty list satisfies both "nothing in
-  progress" and "nothing failed". A count is the wrong floor too: on PR #2503, 6 of
-  the required contexts concluded `SUCCESS` and 9 `SKIPPED` (surface-gated behind *Detect changed
-  surfaces*), so a predicate that accepts only `SUCCESS` never reaches the full set. The
-  expected set is the ruleset's, read live and documented in
-  [`autonomous-pr-loop.md` § One-time GitHub setup](../../../docs/contributing/autonomous-pr-loop.md#one-time-github-setup-required)
-  step 3 (a context listed there but absent from the rule is a pending operator
-  step, #2321):
-
-  **Read `$REQ` from the PR's OWN base branch**, which is what `BASE` below is for.
-  Hardcoding `dev` on a promotion PR silently drops the four contexts required on
-  `main` alone (`gate`, `qa-freshness`, Design visual regression, Frontend browser
-  smoke), so the loop reports green on a set it never checked:
-
-  ```bash
-  BASE=$(gh pr view <pr> --json baseRefName -q .baseRefName)
-  REQ=$(gh api repos/<o>/<r>/rules/branches/"$BASE" --jq '[.[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context]')
-  gh pr view <pr> --json mergeStateStatus,statusCheckRollup | jq --argjson req "$REQ" '
-    (.statusCheckRollup | map({name: (.name // .context), c: ((.conclusion // .state // "PENDING") | ascii_upcase)})) as $r
-    | { state: .mergeStateStatus,
-        missing: [ $req[] | select(. as $n | $r | map(.name) | index($n) | not) ],
-        failed:  [ $r[] | select(.name as $n | $req | index($n)) | select(.c | IN("FAILURE","ERROR","CANCELLED","TIMED_OUT")) | .name ],
-        pending: [ $r[] | select(.name as $n | $req | index($n)) | select(.c | IN("SUCCESS","SKIPPED","NEUTRAL","FAILURE","ERROR","CANCELLED","TIMED_OUT") | not) | .name ],
-        nonrequired_failed: [ $r[] | select(.name as $n | $req | index($n) | not) | select(.c | IN("FAILURE","ERROR")) | .name ] }'
-  ```
-
-  The loop ends **only** on one of three outcomes, tested in this order: **red** —
-  `failed` non-empty (a **required** context with a failing conclusion; `CANCELLED`
-  means read `gh run list --commit <sha>` for the superseding run before believing
-  it); **green** — `missing`, `failed` and `pending` all empty **and**
-  `state ∈ {CLEAN, UNSTABLE}`, plus `BEHIND` on a PR **based on `dev`** —
-  `UNSTABLE` *is* green here: every required context
-  is satisfied and something non-required failed (#2503 merged clean with `Vercel`
-  = `FAILURE`; name `nonrequired_failed` in the report, never stop on it); or
-  **stuck** — the three lists empty and `state ∈ {BLOCKED, DIRTY}`, plus `BEHIND`
-  on a PR **based on `main`**, which is a review requirement, a conflict or a
-  stale promotion head, not CI: stop waiting and act on the state (`DIRTY`
-  guidance is above). `BEHIND` is the one state whose verdict depends on the base
-  branch, because only `main` still requires an up-to-date head (#2632). Anything else — a non-empty
-  `missing` or `pending`, an empty rollup, `state: UNKNOWN` (GitHub has not computed
-  mergeability for that head yet; measured to persist across re-reads on a freshly
-  pushed PR) — keeps waiting under a wall-clock ceiling you state, and a loop that
-  outlives the ceiling reports that, not green. The rollup mixes `CheckRun`
-  (`status`/`conclusion`/`name`) and `StatusContext` (`state`/`context`) shapes, which
-  is why every field above is read with a fallback.
-- **BEHIND does NOT self-resolve under `--auto` in this repo** — observed twice
-  before #2632, when the armed PR sat BEHIND indefinitely until a manual
-  `gh pr update-branch <pr>`. On `dev` that no longer matters: with the up-to-date
-  rule off, an armed PR in `BEHIND` merges on its own checks and needs nothing from
-  you. A **promotion PR into `main`** is still strict, and you cannot update it:
-  its head is `dev`, which refuses direct pushes. It merges behind, with no
-  sync-back (owner decision, 2026-09-26) — since 2026-10-09 **any of the three
-  maintainers** does that merge, from the ordinary **Merge pull request**
-  (merge commit) button in the web UI; BEHIND is expected on it, not a defect
-  to clear ([`branch-and-release-flow.md`](../../../docs/contributing/branch-and-release-flow.md)
-  § *Promotion to production*) — say so, never run `gh pr update-branch` on it.
+**Waiting on CI** — the wait-loop predicate, body-edit re-runs, infra-flake reruns and
+the `BEHIND` promotion rule live in [`references/waiting-on-ci.md`](references/waiting-on-ci.md):
+read it before any wait, or before acting on an armed PR's merge; never `sleep`-loop on `gh pr checks`.
 
 ## Closeout
 
@@ -1188,12 +1104,14 @@ Three drafts of one PR body said twelve, fourteen and sixteen for the same mutat
 set, and the final table says four of fourteen reproduced (#2423, commit `12ea16c1`) —
 different denominators, different definitions of *reproduced*, and until the table
 existed nothing either could be checked against.
-The closeout (and the PR body it summarises) carries one row per cell:
+The closeout (and the PR body it summarises) carries one row per cell, and the
+adversarial-edit column names the wrong edit (*Implement* step 5), not "removed the guard":
 
-| # | Cell (guard + mutation) | Author result @ sha | Reproduced by (pass @ sha) | Status |
-|---|---|---|---|---|
-| 1 | `verify-connect-bundle` — stale `dist` → exit 0 | red → green @ `2097f9e0` | `haven-reviewer` @ `2097f9e0` | reproduced |
-| 2 | dev-snapshot rebuild at `0.0.0-dev.*` — four `@alpha` assertions go red | 2/4/1/1 @ `12ea16c1` | — | **author-only** |
+| # | Guard | Adversarial edit | Author result @ sha | Reproduced by (pass @ sha) | Status |
+|---|---|---|---|---|---|
+| 1 | `verify-connect-bundle` | stale `dist` | exit 0; red → green @ `2097f9e0` | `haven-reviewer` @ `2097f9e0` | reproduced |
+| 2 | dev-snapshot rebuild | rebuild at `0.0.0-dev.*` | four `@alpha` assertions go red: 2/4/1/1 @ `12ea16c1` | — | **author-only** |
+| 3 | retryable-reason test (polarity, PR #4133) | reason rewritten to forbid the header, phrase kept | red, per `2580546a`'s message | — | **author-only** |
 
 The table is the source; any total in the prose is derived from it and says so.
 

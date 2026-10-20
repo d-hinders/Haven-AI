@@ -28,6 +28,7 @@
 import { exec } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { promisify } from 'node:util'
+import { deepFind, parseMaybeJson } from './json-reading.js'
 import { bareToolName } from './tools.js'
 import type { AgentRunLog, RecordedToolCall, ServerRole } from './types.js'
 
@@ -144,27 +145,6 @@ interface ToolResultBlock {
   content?: Array<{ type?: string; text?: string }> | string
 }
 type ContentBlock = ToolUseBlock | ToolResultBlock | { type: 'text'; text?: string } | { type: string }
-
-function parseMaybeJson(text: string): unknown {
-  const trimmed = text.trim()
-  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return undefined
-  try {
-    return JSON.parse(trimmed) as unknown
-  } catch {
-    return undefined
-  }
-}
-
-/** Deep-search a parsed payload for one field's value (any JSON type). */
-function deepFind(obj: unknown, key: string): unknown {
-  if (typeof obj !== 'object' || obj === null) return undefined
-  for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
-    if (k === key && (typeof v === 'string' || typeof v === 'boolean')) return v
-    const hit = deepFind(v, key)
-    if (hit !== undefined) return hit
-  }
-  return undefined
-}
 
 /**
  * The hosted MCP failure envelope names the condition with a SCREAMING_SNAKE

@@ -13,7 +13,11 @@ name: Agent evals — Claude Code lane
 #     The evals job below declares `environment: agent-evals`, so every run
 #     waits for the owner's approval before any secret exists on the runner.
 #   - Never put a token in the command template, a log line, or an artifact.
-#     The token travels only as an env var inherited by `claude`.
+#     The token travels only as an env var inherited by `claude`. The ONE
+#     artifact built from the session streams (owner decision 2026-10-20,
+#     #4137) is redacted first by packages/qa-agent/src/evals/redact-sessions.ts,
+#     fail-closed: it uploads only when the scan of the redacted copy is clean,
+#     keeps 3 days, and the raw `claude-sessions` files never upload.
 #   - Not a required check on `dev` or `main` (no push trigger; not wired
 #     into dev-gate.yml) — and deliberately so: a spend-incurring suite must
 #     never block a promotion.
@@ -67,7 +71,12 @@ jobs:
       group: agent-evals-claude-code
       cancel-in-progress: false
     steps:
+      # No git token left in .git/config: nothing in this job talks to the
+      # remote after checkout (only a local `git rev-parse`), and the token is
+      # not among the secrets the transcript redactor loads (#4137).
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Decide the slice
         id: slice
@@ -173,8 +182,9 @@ jobs:
       # proves the subscription token works and, when it does not, prints
       # claude's own reason (auth, usage limit, model access) instead of five
       # identical "claude exited 1" trials (pilot run #5, 2026-10-19). Prints
-      # only the result fields, never the token. Session streams are NOT
-      # uploaded: this repo is public and they carry full tool results.
+      # only the result fields, never the token. The session streams are
+      # uploaded ONLY as the redacted, scanned copy below (#4137): this repo
+      # is public and the raw streams carry full tool results.
       - name: Check the Claude Code login (one turn, no tools)
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -242,3 +252,42 @@ jobs:
             evals-report.json.summary.txt
             evals-report.json.sessions.json
           if-no-files-found: warn
+
+      # #4137 (owner decision 2026-10-20): the per-trial session streams, as a
+      # REDACTED, fail-closed copy. The redactor writes to a staging directory,
+      # rescans the copy with every rule class, and moves it to the upload
+      # directory only on a clean scan; `clean=true` is the upload's gate. An
+      # empty required secret refuses with no output. A scan hit fails the
+      # job (the redactor is wrong) and uploads nothing; the report above has
+      # already uploaded. `always()`: the run step exits 1 whenever a task
+      # fails. Every `secrets.*` this workflow references is passed here, by
+      # name (guarded by scripts/ci/agent-evals-workspace-deps.test.mjs); the
+      # two fallbacks are redacted only when set as secrets, so the variables
+      # of the same name stay readable. The upload must stay the VERY NEXT
+      # step, and no other step may touch the staging or upload directory.
+      - name: Redact the session transcripts (fail-closed)
+        id: redact
+        if: always()
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          AGENT_EVALS_API_KEY: ${{ secrets.AGENT_EVALS_API_KEY }}
+          AGENT_EVALS_DELEGATE_KEY: ${{ secrets.AGENT_EVALS_DELEGATE_KEY }}
+          QA_RPC_URL_BASE_SEPOLIA: ${{ secrets.QA_RPC_URL_BASE_SEPOLIA }}
+          QA_HOSTED_MCP_URL: ${{ secrets.QA_HOSTED_MCP_URL }}
+          AGENT_EVALS_HAVEN_API_URL: ${{ secrets.AGENT_EVALS_HAVEN_API_URL }}
+        run: >-
+          npm run evals:redact -w packages/qa-agent --
+          --in-prefix="$RUNNER_TEMP/claude-sessions"
+          --stage="$RUNNER_TEMP/eval-transcripts-staging"
+          --out="$RUNNER_TEMP/eval-transcripts-redacted"
+          --required=CLAUDE_CODE_OAUTH_TOKEN,AGENT_EVALS_API_KEY,AGENT_EVALS_DELEGATE_KEY,QA_RPC_URL_BASE_SEPOLIA
+          --optional=QA_HOSTED_MCP_URL,AGENT_EVALS_HAVEN_API_URL
+
+      - name: Upload the redacted session transcripts
+        if: always() && steps.redact.outputs.clean == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-evals-sessions-${{ github.run_id }}
+          path: ${{ runner.temp }}/eval-transcripts-redacted
+          retention-days: 3
+          if-no-files-found: ignore

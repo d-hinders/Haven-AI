@@ -15,7 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isAddress, parseUnits, formatUnits } from 'viem'
 import type { Address } from 'viem'
 import { useDelegationBudget, type DelegationBudget, type GrantInput, type GrantResult } from '@/hooks/useDelegationBudget'
-import { findOccupyingBudget, occupiesSlot, replacedButEnabledBudgets } from '@/lib/budget-slot'
+import { findOccupyingBudget, occupiesSlot, replacedButEnabledBudgets, slotOccupantHashesForEdit } from '@/lib/budget-slot'
 import { useTaskBudgets, type TaskBudget } from '@/hooks/useTaskBudgets'
 import { useReceivedSubBudgets, useSubBudgetTrees, type ReceivedSubBudgetGrant, type SubBudgetTree } from '@/hooks/useSubBudgets'
 import BudgetGrantAction from './BudgetGrantAction'
@@ -126,10 +126,44 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
     prefill: { budgetAtomic: string; periodSeconds: number }
   } | null>(null)
 
+  // #4154: the rows an edit flow owns while it settles. Between the edit's
+  // two approvals the old row reads `replaced`, and a background poll can
+  // show it here before the second approval has had its chance — so the
+  // replaced-budget notice stands down for the rows that edit will Stop while
+  // the modal is open (its own `revoke_unfinished` screen names them if the
+  // Stop does not land). The set is the edit's Stop set SNAPSHOT when the
+  // modal opens: those rows are still live then, and a `replaced` row already
+  // in the slot (an earlier abandoned edit) is not in it and keeps its
+  // notice. A FINISHED edit keeps the suppression only until a fresh reload
+  // after close settles — the list held at close may predate the Stop. Any
+  // other close shows the notice at once.
+  const budgetsRef = useRef(budgets)
+  budgetsRef.current = budgets
+  const editingHashes = useMemo(
+    () =>
+      editing
+        ? slotOccupantHashesForEdit(
+            budgetsRef.current ?? [],
+            editing.delegation_hash,
+            { tokenAddress: editing.token_address, recipientAddress: editing.recipient_address },
+            Math.floor(Date.now() / 1000),
+          ).map((h) => h.toLowerCase())
+        : null,
+    [editing],
+  )
+  const editFinished = useRef(false)
+  const [settlingHashes, setSettlingHashes] = useState<string[] | null>(null)
+
   const handleEditClosed = useCallback(() => {
+    if (editFinished.current && editingHashes) {
+      const hashes = editingHashes
+      setSettlingHashes(hashes)
+      void Promise.resolve(reload()).finally(() => setSettlingHashes((current) => (current === hashes ? null : current)))
+    }
+    editFinished.current = false
     setEditing(null)
     setEditPrefill(null)
-  }, [])
+  }, [editingHashes, reload])
 
   const [token, setToken] = useState(tokens[0]?.address ?? '')
   const [amount, setAmount] = useState('')
@@ -410,7 +444,13 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
   // #3933: old budgets a replace retired in Haven but nobody stopped on-chain.
   // Row-level, from this list (every status) — never `live_delegation_count`.
   // A retired agent's "Finish revoking" (revoke-all) already covers them.
-  const stillEnabled = retired ? [] : replacedButEnabledBudgets(budgets, nowSec)
+  // #4154: minus the rows an open edit flow owns, and those a just-finished
+  // one owns until its reload settles — both, so reopening Edit inside that
+  // window does not bring the flash back.
+  const flowHashes = [...(editingHashes ?? []), ...(settlingHashes ?? [])]
+  const stillEnabled = retired
+    ? []
+    : replacedButEnabledBudgets(budgets, nowSec).filter((b) => !flowHashes.includes(b.delegation_hash.toLowerCase()))
   // #3933: the live budget the form's current input would collide with — the
   // submit then opens the edit flow, and the hint says what that does.
   const formSlotMatch = grantInput && !budgetsError ? findOccupyingBudget(budgets, grantInput, nowSec) : null
@@ -745,6 +785,9 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
           onBudgetChange={() => {
             void reload()
             onBudgetChange?.()
+          }}
+          onFinished={() => {
+            editFinished.current = true
           }}
         />
       ) : null}

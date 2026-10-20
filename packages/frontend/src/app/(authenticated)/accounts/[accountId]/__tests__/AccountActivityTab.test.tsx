@@ -584,7 +584,34 @@ describe('AccountActivityTab — the facet set (#4130)', () => {
     expect(screen.queryByRole('button', { name: /^Network:/ })).not.toBeInTheDocument()
   })
 
-  it('#4099: names a transfer between own accounts on both sides, and says "by you" for a recorded owner send', () => {
+  it('#4166: the row leads with who was paid and carries the agent as the subtitle — no "Agent payment by", no movement line', () => {
+    feedMock.mockImplementation(() => ({
+      ...DEFAULT_FEED,
+      transactions: [
+        tx({
+          hash: '0x01',
+          direction: 'out',
+          source: 'x402',
+          x402ResourceUrl: 'https://research.example/report',
+          agentName: 'Research agent',
+        }),
+      ],
+      total: 1,
+    }))
+    renderTab()
+    const row = ledgerRows()[0]
+    // Merchant first, as on the dashboard — the shared `transactionTitle`
+    // ("Agent payment by …") is untouched, this row just doesn't use it.
+    expect(row).toHaveTextContent('research.example')
+    expect(row).not.toHaveTextContent('Agent payment by')
+    // The agent is the subtitle; the movement line is gone — the page fixes
+    // the account, so "From Main account →" repeated the page on every row.
+    expect(row).toHaveTextContent('Research agent')
+    expect(row).not.toHaveTextContent(/From Main/)
+    expect(row).not.toHaveTextContent(/→/)
+  })
+
+  it('#4099: names a transfer between own accounts on both sides, with no "From <this account>" segment', () => {
     const main = '0x' + 'aa'.repeat(20)
     const reserve = '0x' + 'dd'.repeat(20)
     const ownAccounts = new Map([
@@ -593,7 +620,7 @@ describe('AccountActivityTab — the facet set (#4130)', () => {
     ])
     const transfer = { from: main, to: reserve }
 
-    // Sending side: Main's ledger.
+    // Sending side: Main's ledger — the title is who was paid (Reserve).
     feedMock.mockImplementation(() => ({
       ...DEFAULT_FEED,
       transactions: [tx({ ...transfer, hash: '0x01', direction: 'out', initiatedBy: 'human' })],
@@ -601,12 +628,14 @@ describe('AccountActivityTab — the facet set (#4130)', () => {
     }))
     const { unmount } = renderTab({ accountNamesByAddress: ownAccounts })
     let row = ledgerRows()[0]
-    expect(row).toHaveTextContent('Payment sent by you')
-    expect(row).toHaveTextContent(/From Main\s*→\s*To Reserve/)
+    expect(row).toHaveTextContent('Reserve')
+    expect(row).not.toHaveTextContent('Payment sent by you')
+    expect(row).not.toHaveTextContent(/From Main/)
     expect(row).not.toHaveTextContent('New recipient')
     unmount()
 
-    // Receiving side: Reserve's ledger, the same transfer inbound.
+    // Receiving side: Reserve's ledger, the same transfer inbound — the
+    // counterparty-first title names the sending account.
     feedMock.mockImplementation(() => ({
       ...DEFAULT_FEED,
       transactions: [
@@ -623,11 +652,9 @@ describe('AccountActivityTab — the facet set (#4130)', () => {
     }))
     renderTab({ accountId: 'safe-2', accountNamesByAddress: ownAccounts })
     row = ledgerRows()[0]
-    // The movement line prints its own "From": the sender goes in bare, so
-    // the row never reads "From From Main".
-    expect(row).toHaveTextContent(/From Main\s*→\s*To Reserve/)
-    expect(row).not.toHaveTextContent('From From')
+    expect(row).toHaveTextContent('From Main')
     expect(row).not.toHaveTextContent('Deposit')
+    expect(row).not.toHaveTextContent(/→/)
   })
 })
 

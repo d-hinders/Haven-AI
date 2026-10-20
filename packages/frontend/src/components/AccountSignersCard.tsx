@@ -86,18 +86,17 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
   const onlyOneWay = wayCount < 2
 
   return (
-    <Card hover={false} className="mt-6 p-5 md:p-6">
+    // #4166: the section's ONE heading and intro ("Who can approve" and the
+    // keep-at-least-two sentence) live on the page above this card — the card
+    // used to repeat both under a second "Backup & recovery" heading. Every
+    // flow the card owns is unchanged; only the duplicated chrome is gone.
+    <Card hover={false} className="p-5 md:p-6">
       <div>
-        <h2 className="text-base font-semibold text-[var(--v2-ink)]">Backup &amp; recovery</h2>
-        <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
-          These are the ways this account can be approved. Keep at least two, so a lost device never
-          means a lost account.
-        </p>
         {/* #3825: a signer is its own object; the full list — every passkey and
             wallet, with all the accounts each approves — lives in Settings. */}
         <Link
           href="/settings#signers"
-          className="mt-1 inline-flex items-center gap-1 text-sm font-medium text-[var(--v2-brand)] hover:underline"
+          className="inline-flex items-center gap-1 text-sm font-medium text-[var(--v2-brand)] hover:underline"
         >
           All your passkeys and wallets in Settings
           <Icon icon={ArrowRight} className="h-3.5 w-3.5" />

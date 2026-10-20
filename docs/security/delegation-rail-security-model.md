@@ -1214,6 +1214,21 @@ account — including one with zero agents — and no longer duplicated on the
 agent page. The agent-scoped route
 stays live server-side (it is the same shared implementation below, just
 resolved differently) but has no remaining frontend caller.
+
+> **Re-verified unchanged (#4166, 2026-10-20, one heading per section):** this
+> diff is presentation chrome only. `components/AccountSignersCard.tsx` drops
+> its own "Backup & recovery" heading and intro — the account page's Security
+> & details section already carries the one heading ("Who can approve") and
+> the one keep-at-least-two sentence, and the card repeated both — and loses
+> the `mt-6` offset the duplicate heading implied. Every flow the card owns is
+> untouched: add a passkey, add a wallet, remove (the `wayCount < 2`
+> last-way gate and both consequence confirmations), the "Lost a device?"
+> recovery entry and the #3825 Settings link. The card remains the ONLY
+> surface that can change signers or run recovery; nothing about authority,
+> signing or the routes above moved. Scope of this re-read: this paragraph and
+> the card. The rest of this document was not re-read for it;
+> `last-verified` already reads 2026-10-20 and is left as is — this note is
+> the scope.
 The two surfaces differ only in how the account is resolved: agent lookup
 versus an owner-scoped `(address, chain)` lookup on `smart_accounts`. Authority
 rules, the last-signer refusal (§7), the calldata encoding and the signed-op

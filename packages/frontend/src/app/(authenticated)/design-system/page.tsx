@@ -3707,7 +3707,7 @@ export default function DesignSystemPage() {
               // shown on this illustration so the line has a rendered state.
               accountName="Operating wallet"
               signingWith={{
-                label: 'Passkey \u00b7 added March 3, 2026',
+                label: 'Passkey \u00b7 added 3 March 2026',
                 keyId: DS_PASSKEY_KEY_ID,
                 onThisDevice: true,
               }}
@@ -3741,7 +3741,7 @@ export default function DesignSystemPage() {
             <WalletPopover
               primary={{ label: 'Haven account', address: DS_HYBRID_ACCOUNT, chainName: 'Base Sepolia' }}
               signingWith={{
-                label: 'Passkey \u00b7 added March 3, 2026',
+                label: 'Passkey \u00b7 added 3 March 2026',
                 keyId: DS_PASSKEY_KEY_ID,
                 onThisDevice: false,
               }}

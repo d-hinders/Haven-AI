@@ -512,7 +512,7 @@ describe('WalletButton', () => {
     expect(within(dialog).getByText('Approving with')).toBeInTheDocument()
     // #1679: the credential is named by kind + enrollment date, never
     // positionally ("Backup 1") and never by platform brand.
-    expect(within(dialog).getByText('Passkey · added May 10, 2026')).toBeInTheDocument()
+    expect(within(dialog).getByText('Passkey · added 10 May 2026')).toBeInTheDocument()
     // The block identifies the credential by truncated key id, never an address:
     expect(within(dialog).getByText('0x2222…2222')).toBeInTheDocument()
     // #1952: the matched rendering must NOT carry the fallback's words, or the
@@ -584,7 +584,7 @@ describe('WalletButton', () => {
     const marker = within(dialog).getByText('No passkey enrolled on this device')
     expect(marker).toBeInTheDocument()
     expect(within(dialog).getByText('Approving with')).toBeInTheDocument()
-    expect(within(dialog).getByText('Passkey · added March 3, 2026')).toBeInTheDocument()
+    expect(within(dialog).getByText('Passkey · added 3 March 2026')).toBeInTheDocument()
     expect(within(dialog).getByText('0x1111…1111')).toBeInTheDocument()
     expect(
       within(dialog).getByText('Your browser may ask you to choose a different one.'),
@@ -602,7 +602,7 @@ describe('WalletButton', () => {
     // The second key is not the one signing: naming it here would be the same
     // defect wearing different copy.
     expect(within(dialog).queryByText('0x2222…2222')).not.toBeInTheDocument()
-    expect(within(dialog).queryByText('Passkey · added May 10, 2026')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('Passkey · added 10 May 2026')).not.toBeInTheDocument()
   })
 
   it('Hybrid dropdown: names no credential when the signer set is empty (#1952)', () => {

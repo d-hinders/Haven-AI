@@ -193,7 +193,7 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
               ) : null}
             </div>
             <p className="mt-1.5 text-xs text-[var(--v2-ink-muted)]">
-              Approve with Face ID, Touch ID, Windows Hello, or your device PIN.
+              Approve with your passkey, using your device&rsquo;s screen lock.
             </p>
           </div>
 

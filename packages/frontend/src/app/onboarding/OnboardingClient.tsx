@@ -216,7 +216,7 @@ export default function OnboardingClient() {
                   <p className="text-sm text-[var(--v2-ink-2)] leading-relaxed">
                     {creating
                       ? 'Setting up your account. Stay on this tab, it takes a few seconds.'
-                      : 'Your face or fingerprint approves everything: budgets, agents, changes. No wallet, no seed phrase, nothing to install.'}
+                      : 'Your passkey approves everything: budgets, agents, changes. No wallet, no seed phrase, nothing to install.'}
                   </p>
                 )}
               </div>

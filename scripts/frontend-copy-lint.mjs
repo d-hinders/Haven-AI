@@ -285,6 +285,14 @@ export const BANNED = [
   ['no signature yet', "'No approval yet'"],
   ['sign new budget', "'Approve new budget'"],
   ['you sign once', "'You approve once'"],
+  // Say passkey, never a platform name (copy-guidelines.md, owner decision
+  // 2026-10-20, #4168). Measured before adding: every hit in the scanned set
+  // was reworded in the same change, so no baseline entry. A biometric
+  // ("your face or fingerprint") has no unambiguous literal and is left to
+  // review.
+  ['face id', "'passkey' ('one passkey prompt')"],
+  ['touch id', "'passkey' ('one passkey prompt')"],
+  ['windows hello', "'passkey' ('your device's screen lock')"],
   ['spending policies', 'agent rules'],
   ['spending policy', 'agent rule'],
   ['policy engine', 'agent rules'],

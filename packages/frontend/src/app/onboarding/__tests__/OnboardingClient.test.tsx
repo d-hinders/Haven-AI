@@ -295,6 +295,6 @@ describe('OnboardingClient (#1162)', () => {
       expect(screen.getByRole('heading', { name: 'Finish on another device' })).toBeTruthy(),
     )
     expect(screen.queryByLabelText('Network')).toBeNull()
-    expect(screen.queryByText(/Your face or fingerprint approves everything/)).toBeNull()
+    expect(screen.queryByText(/Your passkey approves everything/)).toBeNull()
   })
 })

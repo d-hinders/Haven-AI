@@ -5,7 +5,7 @@
  *
  * One signature moves funds account → recipient (sponsored — no gas for the
  * user, and it works even before the account's first on-chain action).
- * Outcome language throughout; a dismissed Face ID sheet is a neutral
+ * Outcome language throughout; a dismissed passkey prompt is a neutral
  * cancel, never an error (#1076/#1085 discipline).
  */
 

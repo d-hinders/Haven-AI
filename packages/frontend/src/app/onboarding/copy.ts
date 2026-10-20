@@ -13,4 +13,4 @@
  */
 
 export const PASSKEY_REQUIRED_MESSAGE =
-  "This browser can't create a passkey, and Haven needs one. Open Haven in Safari, Chrome, or Edge on a device with Face ID, Touch ID, Windows Hello, or a device PIN."
+  "This browser can't create a passkey, and Haven needs one. Open Haven in Safari, Chrome, or Edge on a device with a screen lock."

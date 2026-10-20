@@ -17,6 +17,12 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
+- **The agent runbook says "a passkey", never a platform name (#4168).** Step 1
+  of the sequence and the signup hand-off script in `HAVEN_AGENT_RUNBOOK_MD`
+  drop "(Face ID / Touch ID)" after "a passkey", following the copy rule that
+  user-facing text names the passkey only. Wording only; no API change, no
+  update needed.
+
 - **Hosted paid calls now accept a merchant answer whose `PAYMENT-RESPONSE`
   header carries no transaction beside a `_meta` settlement that has one
   (#4120).** The post-funding merchant-answer decision is now one shared

@@ -184,7 +184,7 @@ npm run dev
 
 1. Go to [http://localhost:3000](http://localhost:3000)
 2. Click **Get Early Access** → create an account
-3. Pick your network, then **create the account with a passkey** — one Face ID / Touch ID prompt
+3. Pick your network, then **create the account with a passkey** — one passkey prompt
 4. You'll land on the dashboard with your Haven wallet address
 
 > **One onboarding path, no transaction.** Signup provisions a counterfactual passkey-owned

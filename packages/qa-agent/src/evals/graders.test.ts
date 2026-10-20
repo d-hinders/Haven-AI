@@ -348,3 +348,62 @@ describe('over-budget-check-status-no-retry — graded on what the agent can act
     expect(task.instruction).not.toMatch(/payment status/i)
   })
 })
+
+// Owner decision 2026-10-20: the plain-HTTP x402 task grades Haven's part
+// only. The agent sends the paid request itself (Haven never does) and the
+// Claude Code lane has no HTTP tool, so `submitted` is where Haven's part ends.
+describe('haven_payment_submitted — Haven signed and submitted the payment', () => {
+  const statusProbe = (status: string, amount?: string) => async () => ({ ok: true as const, status, ...(amount ? { amountAtomic: amount } : {}) })
+  const paid = log([
+    call(`${DEV_PREFIX}haven_pay_x402_quote`, { result: { ok: true, paymentId: 'pay_1' } }),
+    call(`${DEV_PREFIX}haven_submit`, { args: { payment_id: 'pay_1', settlement_scheme: 'erc7710' } }),
+  ])
+
+  it('passes on submitted and on settled statuses, without reporting spend for a submitted one', async () => {
+    const { havenPaymentSubmitted } = await import('./graders.js')
+    const submitted = await havenPaymentSubmitted(paid, { probePaymentStatus: statusProbe('submitted', '1000') })
+    expect(submitted.pass).toBe(true)
+    expect(submitted.settledSpendAtomic).toBeUndefined()
+    const confirmed = await havenPaymentSubmitted(paid, { probePaymentStatus: statusProbe('confirmed', '1000') })
+    expect(confirmed.pass).toBe(true)
+    expect(confirmed.settledSpendAtomic).toBeUndefined()
+  })
+
+  it('fails on failed or expired payments', async () => {
+    const { havenPaymentSubmitted } = await import('./graders.js')
+    for (const status of ['failed', 'expired']) {
+      expect((await havenPaymentSubmitted(paid, { probePaymentStatus: statusProbe(status) })).pass).toBe(false)
+    }
+  })
+
+  it('fails without an erc7710 haven_submit (EIP-3009 bridge: submitted is only the funding leg)', async () => {
+    const { havenPaymentSubmitted } = await import('./graders.js')
+    const bridge = log([
+      call(`${DEV_PREFIX}haven_pay_x402_quote`, { result: { ok: true, paymentId: 'pay_1' } }),
+      call(`${DEV_PREFIX}haven_submit`, { args: { payment_id: 'pay_1', settlement_scheme: 'eip3009' } }),
+    ])
+    const r = await havenPaymentSubmitted(bridge, { probePaymentStatus: statusProbe('submitted') })
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('erc7710')
+  })
+
+  it('fails while the payment is still awaiting a signature', async () => {
+    const { havenPaymentSubmitted } = await import('./graders.js')
+    const r = await havenPaymentSubmitted(paid, { probePaymentStatus: statusProbe('pending_signature') })
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('not submitted by Haven')
+  })
+
+  it('payment_status_settled still rejects submitted (the x402 catalog task keeps requiring settlement)', async () => {
+    const r = await paymentStatusSettled(paid, { probePaymentStatus: statusProbe('submitted') })
+    expect(r.pass).toBe(false)
+  })
+
+  it('the plain-HTTP task file uses it, and no longer asks for the response body', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { fileURLToPath } = await import('node:url')
+    const task = JSON.parse(readFileSync(fileURLToPath(new URL('./tasks/x402-plain-http-request-mode.json', import.meta.url)), 'utf8')) as EvalTask
+    expect(task.graders.map((g) => g.name)).toEqual(['x402_request_mode_replay', 'haven_payment_submitted'])
+    expect(task.instruction).not.toMatch(/response body/)
+  })
+})

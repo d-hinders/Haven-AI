@@ -302,3 +302,29 @@ describe('failure details never carry the observer URL into the public report', 
     expect(trace).toEqual(['(unknown tool) ✗ (unrecognised code)'])
   })
 })
+
+// haven_payment_submitted passes on an unredeemed erc7710 payment that moved
+// no money. If it were counted as a settlement grader, the next trial would
+// wait for a budget decrease that never comes and time out.
+describe('haven_payment_submitted is not a settlement grader', () => {
+  it('a trial passing only on it does not make the next trial wait for a budget decrease', async () => {
+    const seen: Array<boolean | undefined> = []
+    const t: EvalTask = { ...TASK, graders: [{ name: 'tool_called', options: { name: 'haven_get_agent' } }] }
+    await runSuite({
+      tasks: [t],
+      resolveForTrial: async (_task, _trial, prior) => {
+        seen.push(prior?.settled)
+        return resolved()
+      },
+      adapter: fakeAdapter('fake', async () => logWith([{ name: 'haven_get_agent' }])),
+      trials: 2,
+    })
+    const { readFileSync } = await import('node:fs')
+    const { fileURLToPath } = await import('node:url')
+    const src = readFileSync(fileURLToPath(new URL('./runner.ts', import.meta.url)), 'utf8')
+    const set = src.match(/const SETTLEMENT_GRADERS = new Set\(\[([^\]]*)\]\)/)?.[1] ?? ''
+    expect(set).toContain('payment_status_settled')
+    expect(set).not.toContain('haven_payment_submitted')
+    expect(seen[1]).toBe(false)
+  })
+})

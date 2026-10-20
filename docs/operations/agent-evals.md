@@ -303,6 +303,17 @@ wall time per session. The CLI exits non-zero if any task failed any trial.
   is the outcome there, not a transfer from the agent's account. The probe
   is INJECTED by the CLI (`buildGraderContext`, #3992 A1) and the payment
   id may come from the tool RESULT as well as from call arguments.
+- `haven_payment_submitted` (the plain-HTTP x402 task) grades **Haven's part
+  only** (owner decision 2026-10-20): every payment the log produced reads
+  back as `submitted` or further. On a plain-HTTP paywall the agent itself
+  sends the paid request with the payment header (Haven never does), and the
+  Claude Code lane has no HTTP tool, so `submitted` is where Haven's part
+  ends. It also requires a `haven_submit` with `settlement_scheme: "erc7710"`
+  in the log: on the EIP-3009 bridge `submitted` is only the funding leg, so
+  `QA_EVAL_X402_TARGET` must offer erc7710 (the dev demo merchant does). It
+  never reports spend and is not a settlement grader, so the next trial does
+  not wait for a budget decrease. The catalog task keeps
+  `payment_status_settled`.
 
 ## Lane 2: Claude Code headless (#3959)
 

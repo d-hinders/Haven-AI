@@ -82,6 +82,38 @@ covers:
 last-verified: "2026-10-20"
 ---
 
+> **Contract change (#4107, 2026-10-20, one new hosted tool):
+> `haven_check_token_safety`.** The hosted surface gains ONE strict-input
+> tool (strict set 27 → 28, surface 29 → 30 tools): an advisory pre-trade
+> token-safety check against the x402-data-api operator's (Grey Ridge) FREE
+> preview endpoint — input `token` (0x Base address or operator demo alias),
+> `side` (default buy), `notional_usd` (default 100, ≤ 1,000,000). It makes
+> NO payment: the operator's PAID `/gate/swap` resource is reachable only
+> through the existing `haven_quote_x402` → `haven_pay_x402_quote` rail, and
+> the success payload carries no payment field — the CASP record is
+> `docs/regulatory/casp-changelog/2026-10-20-4107.md`.
+> - **Every failure is an explicit non-pass.** Transport, timeout, redirect,
+>   non-JSON, operator error, shape mismatch and over-cap bodies all refuse
+>   with `TOKEN_SAFETY_CHECK_UNAVAILABLE` (502) and an omitted-tool next
+>   step; a guard outage can neither spend (this tool cannot) nor read as a
+>   pass.
+> - **Version skew is safe in both directions.** An older hosted server
+>   simply lacks the tool (an agent calling it gets unknown-tool, the same
+>   as any not-yet-shipped name); an older CLIENT tolerates one more
+>   `tools/list` row. The consent-hash surface this doc tracks is the
+>   SIGNER's — the local MCP, the signer and the connector are untouched,
+>   and no signer tool, schema or consent surface moves.
+> - **Companions moved in the same commit:** `tools-list.snapshot.json`
+>   regenerated (+31 lines, one tool row; `next-arguments-corpus.json`
+>   unchanged — the new refusal's next step is an omitted-tool reason), the
+>   description-size ratchet re-measured at 32,578 bytes over 30 tools (mean
+>   pin 1085.94, shrink-only from here), and the registry/census/strict-input
+>   fixtures updated with it.
+>
+> `last-verified` is re-stamped to 2026-10-20 for this note (the #4123 and
+> #4121 notes below already hold that date); this block is the scope.
+> Nothing else in this document was re-verified.
+
 > **Re-verified unchanged (#4121, 2026-10-20, a `ci.yml` comment counts the
 > qa-agent test files that import the built signer):** the only covered file
 > this diff touches is `.github/workflows/ci.yml`, and the change inside it is

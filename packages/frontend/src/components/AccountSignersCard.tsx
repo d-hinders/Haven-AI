@@ -193,7 +193,7 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
               ) : null}
             </div>
             <p className="mt-1.5 text-xs text-[var(--v2-ink-muted)]">
-              Approve with your passkey, usually your device&rsquo;s screen lock.
+              Approve with your passkey (usually your device&rsquo;s screen lock).
             </p>
           </div>
 

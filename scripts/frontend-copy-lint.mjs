@@ -292,7 +292,7 @@ export const BANNED = [
   // review.
   ['face id', "'passkey' ('one passkey prompt')"],
   ['touch id', "'passkey' ('one passkey prompt')"],
-  ['windows hello', "'passkey' ('your device's screen lock')"],
+  ['windows hello', "'passkey' ('usually your device's screen lock')"],
   ['spending policies', 'agent rules'],
   ['spending policy', 'agent rule'],
   ['policy engine', 'agent rules'],

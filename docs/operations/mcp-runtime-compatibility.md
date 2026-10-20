@@ -6209,7 +6209,7 @@ to call next in structured fields, and those fields are typed end to end
 > passkey", never a platform name).** The diff touches one covered file,
 > `packages/sdk/src/agent-guidance.ts`: step 1 of the sequence and the
 > "Before signup" hand-off script in `HAVEN_AGENT_RUNBOOK_MD` drop
-> "(Face ID / Touch ID)" after "a passkey" (owner copy rule,
+> the platform names after "a passkey" (owner copy rule,
 > `docs/product/copy-guidelines.md`). Wording only: no `haven_*` tool,
 > schema, strict-input list, `next_tool` value, expected-context version or
 > signer contract changes. The CLI copy and the nine agent-skills step files

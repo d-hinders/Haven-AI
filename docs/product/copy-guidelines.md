@@ -191,7 +191,7 @@ live on a security key, a password manager or another phone.
 
 Preferred:
 - “Use a passkey”
-- “Approve with your passkey, usually your device's screen lock.”
+- “Approve with your passkey (usually your device's screen lock).”
 - “One passkey prompt”
 - “Create a secure passkey to approve actions in your Haven account”
 - “Fastest option. Creates a secure passkey.”
@@ -233,8 +233,8 @@ Credential rows (signer lists, “ways to approve”):
 Action copy names the passkey, with the screen-lock anchor as subtext when one
 helps:
 
-- Button “Add a backup passkey” with subtext “Approve with your passkey, usually
-  your device's screen lock.”
+- Button “Add a backup passkey” with subtext “Approve with your passkey
+  (usually your device's screen lock).”
 - “Create account with a passkey”
 - “Waiting for your passkey…” / “The passkey prompt was cancelled.”
 

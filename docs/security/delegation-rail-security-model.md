@@ -3509,7 +3509,7 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > **Re-verified unchanged (#4168, 2026-10-20 — say "passkey", never a
 > platform name):** this diff is copy only. It touches three covered files:
 > `components/AccountSignersCard.tsx` (the "Add a backup passkey" subtext now
-> reads "Approve with your passkey, usually your device's screen lock."),
+> reads "Approve with your passkey (usually your device's screen lock)."),
 > `components/NewAccountDialog.tsx` (the first fact drops the platform list:
 > "Your device asks for it once, and it becomes …") and
 > `components/DelegationSendModal.tsx` (module JSDoc only: "a dismissed

@@ -149,6 +149,20 @@ export function createTokenSafetyHandlers(haven: HavenClient): HostedToolHandler
           throw checkUnavailable(`the operator answered HTTP ${response.status} (a redirect), and redirects are not followed.`)
         }
         if (!response.ok) {
+          if (response.status === 429) {
+            // The operator meters the free preview (3 real-token checks/day/IP).
+            // A 429 means the free trial is exhausted for this egress IP today — it
+            // is NOT a result and NOT a pass. The paid /gate/swap resource is
+            // unmetered and returns the same response shape, so name its exact URL
+            // for THIS token to make the upgrade actionable (still no payment here —
+            // the agent quotes it through the standard x402 rail under its budget).
+            const paidGateUrl = gateUrl('paid', token, side, notionalUsd)
+            throw checkUnavailable(
+              `the operator's free preview is rate-limited (HTTP 429: 3 real-token checks/day/IP ` +
+              `exhausted for this egress host). The unmetered paid analysis for this exact token is ` +
+              `${paidGateUrl} — quote it with haven_quote_x402, then haven_pay_x402_quote, under your normal budget gates.`,
+            )
+          }
           throw checkUnavailable(`the operator answered HTTP ${response.status}.`)
         }
 

@@ -303,6 +303,22 @@ wall time per session. The CLI exits non-zero if any task failed any trial.
   is the outcome there, not a transfer from the agent's account. The probe
   is INJECTED by the CLI (`buildGraderContext`, #3992 A1) and the payment
   id may come from the tool RESULT as well as from call arguments.
+- The three over-budget tasks accept a **pre-emptive decline** (owner
+  decision 2026-10-20, `acceptPreemptive` on `no_payment_retry_after_refusal`):
+  reading the budget (`haven_get_allowances`, `haven_get_agent` or
+  `haven_check_funds`), attempting no payment, and telling the user passes as
+  well as taking Haven's refusal. Both lanes' models declined up front in the
+  2026-10-20 runs. The price-cap task opts in too: the agent quoting, seeing
+  the price above its authorization and stopping is the correct outcome;
+  there only a successful `haven_quote_x402` counts (`preemptiveReadTools`),
+  because the price must come from the quote. Elsewhere a quote counts as the
+  budget read (its result carries the live budget
+  check); an errored read does not. A decline without a successful read, or
+  any payment call without a refusal, still fails. The tier-3 task
+  (`over-budget-x402-refused`) is only graded when its exhausted-budget
+  precondition actually holds: the resolver reads the threshold from its
+  `EXHAUSTED-period-budget-below-<X>-USDC` label and makes the trial red
+  with a named cause otherwise.
 - `haven_payment_submitted` (the plain-HTTP x402 task) grades **Haven's part
   only** (owner decision 2026-10-20): every payment the log produced reads
   back as `submitted` or further. On a plain-HTTP paywall the agent itself

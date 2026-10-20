@@ -103,7 +103,12 @@ Run the battery, not a list you assembled from memory:
 npm run preflight          # the gates your diff can redden
 npm run preflight -- --list  # what it would run, and which CI job owns each
 npm run preflight:all      # every gate, regardless of diff
+npm run preflight -- --static  # only the static ratchets, then stop
 ```
+
+Static ratchets run first. A timeout-shaped red, with the load average above the
+CPU count before the gate started, is re-run alone at the end; green alone exits 3,
+not 0, with a list to quote in the PR body. An unknown flag exits 2.
 
 **`npm run quality` is not this.** It chains `typecheck && test:unit && build`.
 That covers most of the 32 per-package gates the battery knows (every

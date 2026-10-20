@@ -155,7 +155,12 @@ not, and cannot be.
 npm run preflight            # the gates this diff can redden
 npm run preflight -- --list  # the plan, without running it
 npm run preflight:all        # every gate
+npm run preflight -- --static  # only the static ratchets, then stop
 ```
+
+Static ratchets run first. A timeout-shaped red, with the load average above the
+CPU count before the gate started, is re-run alone at the end; green alone exits 3,
+not 0, with a list to quote in the PR body. An unknown flag exits 2.
 
 The table below is the **smallest reliable set for fast iteration** — what to
 re-run in a tight loop while you are still changing code. It is deliberately

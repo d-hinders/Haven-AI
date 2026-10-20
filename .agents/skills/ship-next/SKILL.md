@@ -301,11 +301,8 @@ kept short and why the battery, not this list, is the answer to "did I run
 everything".
 
 **Static ratchets run first, before any suite** — PR #4155 found a retired-rail hit
-in a test title (`3fa96047`) only at the end of a full run. Until #4175 lands
-`npm run preflight -- --static`, derive them from `npm run preflight -- --list`: every
-entry that is not `node --test`, `test -w`, `:test`, `typecheck -w`, `build -w` or
-`lint:network-pins` (a `node --test` alias). Under `--all` at `777b71137` that is 19
-of 77, e.g. `lint:retired-rail-prose`, `check:route-modules`, `docs:check`.
+in a test title (`3fa96047`) only at the end of a full run. Run them alone with
+`npm run preflight -- --static` (#4175); the battery also orders them first.
 
 Then run what the battery cannot: a live database (`docker compose up -d
 postgres`, or the backend suite skips its real-DB files), browser verification

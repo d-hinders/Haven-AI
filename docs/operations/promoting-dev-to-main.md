@@ -282,10 +282,21 @@ so this is a rule to point at rather than a question to ask the release runner.
       ```
 
       Every line must be ✓: the chain id, a JSON-RPC batch of 10, the `pending`
-      block tag, `eth_sendRawTransaction` accepted as a method, and a burst of 20
-      without a 429. At the defaults it makes 32 read calls (1 + a batch of 10 +
-      1 + a burst of 20) plus one transaction signed by a fresh zero-balance key,
-      which the node refuses for funds and can never mine. The burst deliberately
+      block tag, `eth_getLogs` over the last 500 blocks (#4118),
+      `eth_sendRawTransaction` accepted as a method, and a burst of 20 without a
+      429. At the defaults it makes 34 read calls (1 + a batch of 10 + 1 + 2 for
+      the `eth_getLogs` line, its own head and the query, + a burst of 20) plus
+      one transaction signed by a fresh zero-balance key, which the node refuses
+      for funds and can never mine. The 500 is the widest batch the backend's
+      settlement sweepers ask for, pinned to their constants by the probe's
+      self-test; a narrower `--logs-range` is justified only in that variable's
+      row of the provider table in
+      [dev-environment.md](./dev-environment.md) → *Two Base Sepolia RPCs*.
+      Alchemy's free tier serves 10 blocks per call, which broke both sweepers
+      (#4012). Prod's primary is an app on the same Alchemy account; whether it
+      carries the same cap has not been measured, so this line may fail
+      there until the plan serves 500 blocks or the owner records an accepted
+      exception beside the one above. The burst deliberately
       spends up to 20 requests of the key's per-second budget: against a key the
       live mainnet relayer already uses, run it off-peak or with a smaller
       `--burst`. A failing line means the endpoint cannot carry Haven's traffic —

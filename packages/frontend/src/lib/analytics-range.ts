@@ -38,6 +38,60 @@ export const ANALYTICS_RANGE_OPTIONS: ReadonlyArray<{ value: AnalyticsRangeValue
 ]
 
 /**
+ * The URL key the Analytics page mirrors its period onto, the same `period`
+ * key the list-controls codec writes for the list toolbars (#4116): one name
+ * for "which rolling window is this surface showing" everywhere.
+ */
+export const ANALYTICS_PERIOD_URL_PARAM = 'period'
+
+/**
+ * The range a `?period=` on the address bar asks for, or `null` when there is
+ * none or it is not a value the endpoint accepts.
+ *
+ * The URL is the sharable half of the choice — a link that carries `?period=7d`
+ * opens on Last 7 days regardless of what the device last stored — but it is
+ * read through the same `isAnalyticsRangeValue` gate as storage: a stale or
+ * hand-edited parameter must fall back, never reach the wire as a guaranteed
+ * 400. It is read inside the `useState` initialiser like the stored value, so
+ * the FIRST request already carries it and no second fetch is spent.
+ */
+export function readUrlAnalyticsRange(): AnalyticsRangeValue | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const value = new URLSearchParams(window.location.search).get(ANALYTICS_PERIOD_URL_PARAM)
+    return isAnalyticsRangeValue(value) ? value : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Mirror the choice onto the address bar with `replaceState` — no history
+ * entry per change, the posture `useListUrlState` set (#4110) — so a reload
+ * or a shared link reopens the window the reader is looking at. Only the
+ * `period` key is written: params the page does not own are left untouched,
+ * and a write that throws (a frozen history in an embedded context) is
+ * swallowed, because the URL is a convenience while the state and the stored
+ * key already hold the selection.
+ */
+export function writeUrlAnalyticsRange(value: AnalyticsRangeValue): void {
+  if (!isAnalyticsRangeValue(value)) return
+  if (typeof window === 'undefined') return
+  try {
+    const params = new URLSearchParams(window.location.search)
+    params.set(ANALYTICS_PERIOD_URL_PARAM, value)
+    const search = params.toString()
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${search ? `?${search}` : ''}${window.location.hash}`,
+    )
+  } catch {
+    // See the docblock: the URL mirrors the choice, it is not the source of it.
+  }
+}
+
+/**
  * The one predicate that says whether a value may be trusted as a range.
  *
  * The server validates the same enum and answers 400 on anything else

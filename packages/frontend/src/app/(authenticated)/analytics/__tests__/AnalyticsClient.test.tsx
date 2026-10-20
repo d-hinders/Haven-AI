@@ -1,6 +1,6 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 
 /**
@@ -91,6 +91,20 @@ function preferences(currency: 'USD' | 'EUR' | 'SEK' = 'USD') {
   mockUsePreferences.mockReturnValue({ currency, setCurrency: vi.fn(), saving: false })
 }
 
+/** The response-owned window caption: the copy of "Last N days" that is NOT
+ *  the picker trigger's value span inside a button (#4116). */
+function rangeCaption() {
+  return screen
+    .getAllByText('Last 30 days', { exact: true })
+    .find((el: Element) => !el.closest('button'))
+}
+
+/** Put the address bar back the way jsdom found it; a URL period seeded by one
+ *  test must not leak into the next render's initialiser. */
+afterEach(() => {
+  window.history.replaceState(null, '', '/')
+})
+
 beforeEach(() => {
   preferences()
   mockUseAnalyticsOverview.mockReset()
@@ -127,8 +141,25 @@ describe('Analytics — the header the capture harness waits on', () => {
     render(<AnalyticsClient />)
     // The caption is the endpoint's `range.days`, not the control's label, so
     // a server that resolved the request to a different window than the one
-    // asked for is what the reader is told.
-    expect(screen.getByText('Last 30 days')).toBeTruthy()
+    // asked for is what the reader is told. The picker trigger carries the
+    // same words (inside a button); `rangeCaption` finds the response-owned
+    // caption outside it.
+    expect(rangeCaption()).toBeTruthy()
+  })
+
+  it('renders the period as the list-controls menu button, presets only', () => {
+    // #4116: the SegmentedControl wrapper is gone; the header carries the one
+    // Period control the lists use. Presets only — no All time and no custom
+    // range — because the endpoint takes a rolling `range`, not dates.
+    render(<AnalyticsClient />)
+    const trigger = screen.getByRole('button', { name: 'Period: Last 30 days' })
+    expect(trigger).toHaveAttribute('aria-haspopup', 'menu')
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    // The response-owned caption and the trigger's value span share the exact
+    // words; exactly one caption exists outside the button.
+    const copies = screen.getAllByText('Last 30 days', { exact: true })
+    expect(copies).toHaveLength(2)
+    expect(copies.filter((el) => !el.closest('button'))).toHaveLength(1)
   })
 })
 
@@ -173,7 +204,7 @@ describe('Analytics — loading', () => {
     expect(skeleton.children[0].children.length).toBe(4) // the four tiles
     expect(skeleton.children[1].children.length).toBe(4) // header bar plus three rows
     expect(skeleton.querySelectorAll('[class*="rounded-"]').length).toBeGreaterThan(4)
-    expect(screen.getByText('Last 30 days')).toBeTruthy()
+    expect(rangeCaption()).toBeTruthy()
   })
 })
 
@@ -434,10 +465,22 @@ describe('Analytics — the window the reader chose', () => {
     render(<AnalyticsClient />)
     expect(mockUseAnalyticsOverview).toHaveBeenCalledTimes(1)
     expect(mockUseAnalyticsOverview).toHaveBeenLastCalledWith('90d', 'usd')
-    expect(screen.getByText('Last 30 days')).toBeTruthy() // the response owns the caption
+    expect(screen.getByRole('button', { name: 'Period: Last 90 days' })).toBeTruthy()
+    expect(rangeCaption()).toBeTruthy() // the response owns the caption
   })
 
-  it('falls back to the default when nothing is stored', () => {
+  it('asks for the URL period on the FIRST request, ahead of the stored choice', () => {
+    // A link that carries `?period=7d` opens on Last 7 days on any device —
+    // the sharable half of the choice outranks the device's own, and both are
+    // read in the initialiser so the first request already carries it (#4116).
+    window.localStorage.setItem(ANALYTICS_RANGE_STORAGE_KEY, '90d')
+    window.history.replaceState(null, '', '/analytics?period=7d')
+    render(<AnalyticsClient />)
+    expect(mockUseAnalyticsOverview).toHaveBeenLastCalledWith('7d', 'usd')
+    expect(screen.getByRole('button', { name: 'Period: Last 7 days' })).toBeTruthy()
+  })
+
+  it('falls back to the default when nothing is stored and the URL carries no period', () => {
     render(<AnalyticsClient />)
     expect(mockUseAnalyticsOverview).toHaveBeenLastCalledWith('30d', 'usd')
   })
@@ -451,20 +494,47 @@ describe('Analytics — the window the reader chose', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  it('remembers the window the reader picks, for this device', async () => {
+  it('ignores a URL period the endpoint would answer 400 to, and falls back to the device', () => {
+    // The URL is read through the same gate as storage: a stale or hand-edited
+    // `?period=` is a fallback, never a guaranteed 400 on the wire.
+    window.localStorage.setItem(ANALYTICS_RANGE_STORAGE_KEY, '90d')
+    window.history.replaceState(null, '', '/analytics?period=180d')
     render(<AnalyticsClient />)
-    const group = screen.getByRole('radiogroup', { name: 'Analytics date range' })
-    await userEvent.click(within(group).getByRole('radio', { name: '7 days' }))
-    expect(window.localStorage.getItem(ANALYTICS_RANGE_STORAGE_KEY)).toBe('7d')
-    expect(mockUseAnalyticsOverview).toHaveBeenLastCalledWith('7d', 'usd')
+    expect(mockUseAnalyticsOverview).toHaveBeenLastCalledWith('90d', 'usd')
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  it('offers exactly the three windows the endpoint documents, and marks the chosen one', () => {
+  it('remembers the window the reader picks, for this device and in the URL', async () => {
+    window.history.replaceState(null, '', '/analytics')
     render(<AnalyticsClient />)
-    const group = screen.getByRole('radiogroup', { name: 'Analytics date range' })
-    const radios = within(group).getAllByRole('radio')
-    expect(radios.map((r) => r.textContent)).toEqual(['7 days', '30 days', '90 days'])
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Period: Last 30 days' }))
+    await user.click(screen.getByRole('menuitemradio', { name: 'Last 7 days' }))
+    expect(window.localStorage.getItem(ANALYTICS_RANGE_STORAGE_KEY)).toBe('7d')
+    expect(mockUseAnalyticsOverview).toHaveBeenLastCalledWith('7d', 'usd')
+    // The URL mirrors the choice, so a reload or a shared link reopens it —
+    // and it is a replaceState write, so the back button still leaves the page.
+    expect(window.location.search).toBe('?period=7d')
+    expect(screen.getByRole('button', { name: 'Period: Last 7 days' })).toBeTruthy()
+  })
+
+  it('offers exactly the three windows the endpoint documents, and marks the chosen one', async () => {
+    render(<AnalyticsClient />)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Period: Last 30 days' }))
+    const radios = screen.getAllByRole('menuitemradio')
+    expect(radios.map((r) => r.textContent)).toEqual(['Last 7 days', 'Last 30 days', 'Last 90 days'])
     expect(radios.map((r) => r.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false'])
+  })
+
+  it('offers no All time and no custom range — the endpoint takes a rolling range', async () => {
+    render(<AnalyticsClient />)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Period: Last 30 days' }))
+    const labels = screen.getAllByRole('menuitemradio').map((r) => r.textContent)
+    expect(labels).not.toContain('All time')
+    expect(labels).not.toContain('Custom range')
+    expect(screen.queryByRole('menuitemradio', { name: 'All time' })).toBeNull()
   })
 })
 

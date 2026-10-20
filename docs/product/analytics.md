@@ -14,6 +14,8 @@ covers:
   - packages/frontend/src/components/analytics/AgentsTable.tsx
   - packages/frontend/src/lib/analytics-format.ts
   - packages/frontend/src/lib/analytics-series.ts
+  - packages/frontend/src/lib/analytics-range.ts
+  - packages/frontend/src/components/ui/PeriodPicker.tsx
   - packages/frontend/src/components/analytics/BalanceSection.tsx
   - packages/backend/src/routes/analytics-overview.ts
   - packages/backend/src/infra/repositories/analytics.ts
@@ -38,6 +40,29 @@ the page describes the same range, the same currency and the same set of
 payments — one loading state, one "based on N payments" basis. The endpoint
 (#2946), the page shell (#2947), the chart primitives (#2948) and their wiring
 (#2949, #3051) have all shipped; this doc describes what renders.
+
+## Choosing the window
+
+The header carries the one `PeriodPicker` the list controls ship (#4110,
+#4116) — presets only, **Last 7 days / Last 30 days / Last 90 days** (the same
+wording as the response-owned caption, `rangeCaption`), no All time and no
+custom range, because the endpoint takes a rolling `range`, not dates. The
+choice lives in two places, read once in that order on every mount:
+
+- **The URL is the source when it carries `?period=`.** A shared link opens on
+  the window it names, on any device.
+- **Otherwise the device's stored choice applies** (`haven.analytics.range`),
+  which is a returning reader's default. A value the endpoint would answer 400
+  to is ignored on either surface — one bad string in a link or a store falls
+  back to the default without an error, never a page of failure copy.
+
+Picking a period writes both: the stored key for this device (as since #2947)
+and the URL, with a `replaceState` — no history entry per change — so a reload
+or a shared link reopens the window on screen. The values on the wire stay the
+endpoint's `7d` / `30d` / `90d` (`analytics-range.test.ts` rejects a bare `7`).
+The header also carries the caption "Last 30 days" from the response's own
+`range.days` — the window the request was answered for, not the one asked for;
+the tiles' comparison text ("vs previous 30 days") is unchanged by any of this.
 
 ## What each figure means
 

@@ -9,7 +9,7 @@
 // "No label `flashblocks`"; and its rate limits arrived as scenario failures.
 // Run this against a candidate endpoint BEFORE it goes into a variable:
 //
-//   node scripts/ci/rpc-conformance.mjs --url "$CANDIDATE_RPC_URL" --chain <id> [--batch 10] [--burst 20]
+//   node scripts/ci/rpc-conformance.mjs --url "$CANDIDATE_RPC_URL" --chain <id> [--batch 10] [--burst 20] [--logs-range 500]
 //
 // One line per capability, pass (✓) or fail (✗); exit 1 on any failure.
 //
@@ -17,6 +17,23 @@
 //                8453 Base): a Sepolia URL pasted into RPC_URL_BASE fails here
 //   batch        a JSON-RPC batch of N eth_blockNumber calls all succeed
 //   pending tag  eth_getTransactionCount(<addr>, "pending") answers
+//   logs <R>     eth_getLogs over the last R blocks answers (#4118): the head
+//                from its own eth_blockNumber call, then fromBlock =
+//                max(0, head − R + 1), toBlock = head, filtered on the same
+//                0x…01 address as the pending tag. R defaults to 500, the
+//                widest batch the backend's settlement sweepers ask for
+//                (EIP3009_LOG_BATCH_BLOCKS, SWEEP_LOG_BATCH_BLOCKS; a test
+//                pins it to them). Alchemy's free tier serves 10 blocks, which
+//                broke both sweepers (#4012) and the QA observer (PR #4086).
+//                Any refusal fails, and the detail carries the provider's text,
+//                which names its cap. It needs no chain id, so it runs even
+//                when `chain id` failed. A narrower --logs-range is for a
+//                variable whose reader asks for less, justified in that
+//                variable's row of the provider table in dev-environment.md
+//                (the QA observer reads 10-block windows: --logs-range 10).
+//                Limitation: the filter keeps the result empty, so this
+//                measures the RANGE cap only — a result-count cap that a real
+//                token query might hit is not tested.
 //   send raw tx  eth_sendRawTransaction is ACCEPTED as a method: a transaction
 //                signed by an in-process throwaway key with a zero balance is
 //                refused for funds/nonce/gas — the node validated it — never
@@ -42,6 +59,9 @@ import { scrub } from './qa-retry.mjs'
 export const DEFAULT_BATCH = 10
 export const DEFAULT_BURST = 20
 export const MAX_BURST = 50
+/** The sweepers' widest eth_getLogs batch; pinned to their constants by the self-test. */
+export const DEFAULT_LOGS_RANGE = 500
+export const MAX_LOGS_RANGE = 10_000
 const TIMEOUT_MS = 10_000
 
 /**
@@ -86,10 +106,13 @@ async function post(url, payload, fetchImpl) {
 }
 
 const call = (id, method, params = []) => ({ jsonrpc: '2.0', id, method, params })
+const hex = (n) => `0x${n.toString(16)}`
+/** The ecrecover precompile, read by the pending tag and the log filter: it emits no logs, so the eth_getLogs result stays empty. */
+const PROBE_ADDRESS = '0x0000000000000000000000000000000000000001'
 const errText = (e) => (e && typeof e === 'object' ? `${e.code ?? ''} ${e.message ?? ''}`.trim() : String(e))
 
-/** The five checks, in order. Each returns { name, ok, detail }. `sign` builds a signed raw tx. */
-export async function probe({ url, chain, batch = DEFAULT_BATCH, burst = DEFAULT_BURST, fetchImpl = fetch, sign }) {
+/** The six checks, in order. Each returns { name, ok, detail }. `sign` builds a signed raw tx. */
+export async function probe({ url, chain, batch = DEFAULT_BATCH, burst = DEFAULT_BURST, logsRange = DEFAULT_LOGS_RANGE, fetchImpl = fetch, sign }) {
   const results = []
   const record = (name, ok, detail) => results.push({ name, ok, detail: redact(detail, url) })
   const guard = async (name, fn) => {
@@ -126,9 +149,22 @@ export async function probe({ url, chain, batch = DEFAULT_BATCH, burst = DEFAULT
   })
 
   await guard('pending tag', async () => {
-    const r = await post(url, call(1, 'eth_getTransactionCount', ['0x0000000000000000000000000000000000000001', 'pending']), fetchImpl)
+    const r = await post(url, call(1, 'eth_getTransactionCount', [PROBE_ADDRESS, 'pending']), fetchImpl)
     if (r.status !== 200 || typeof r.body?.result !== 'string') return record('pending tag', false, `HTTP ${r.status}: ${errText(r.body?.error ?? r.body)}`)
     record('pending tag', true, `nonce ${Number.parseInt(r.body.result, 16)}`)
+  })
+
+  // Its own head, not the batch's answers, and no chain id: it stands alone.
+  const logs = `logs ${logsRange}`
+  await guard(logs, async () => {
+    const h = await post(url, call(1, 'eth_blockNumber'), fetchImpl)
+    if (h.status !== 200 || typeof h.body?.result !== 'string') return record(logs, false, `no head: HTTP ${h.status}: ${errText(h.body?.error ?? h.body)}`)
+    const head = Number.parseInt(h.body.result, 16)
+    if (!Number.isSafeInteger(head) || head < 0) return record(logs, false, `unreadable head ${JSON.stringify(h.body.result)}`)
+    const from = Math.max(0, head - logsRange + 1)
+    const r = await post(url, call(1, 'eth_getLogs', [{ address: PROBE_ADDRESS, fromBlock: hex(from), toBlock: hex(head) }]), fetchImpl)
+    if (r.status !== 200 || !Array.isArray(r.body?.result)) return record(logs, false, `eth_getLogs over ${head - from + 1} blocks refused: HTTP ${r.status}: ${errText(r.body?.error ?? r.body)}`)
+    record(logs, true, `eth_getLogs over ${head - from + 1} blocks answered (${from}..${head})`)
   })
 
   await guard('send raw tx', async () => {
@@ -164,7 +200,7 @@ export async function throwawaySign(chainId) {
   return w.signTransaction({ to: w.address, value: 0n, nonce: 0, gasLimit: 21000n, maxFeePerGas: 1_000_000_000n, maxPriorityFeePerGas: 1_000_000n, chainId, type: 2 })
 }
 
-/** Parse --batch/--burst/--chain strictly: a typo must not become a vacuous pass (NaN sends nothing). */
+/** Parse --batch/--burst/--logs-range/--chain strictly: a typo must not become a vacuous pass (NaN sends nothing). */
 export function parseArgs(args) {
   const arg = (flag) => (args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined)
   const int = (flag, fallback, min, max) => {
@@ -183,6 +219,7 @@ export function parseArgs(args) {
     chain: int('--chain', undefined, 1, Number.MAX_SAFE_INTEGER),
     batch: int('--batch', DEFAULT_BATCH, 2, 100),
     burst: int('--burst', DEFAULT_BURST, 1, MAX_BURST),
+    logsRange: int('--logs-range', DEFAULT_LOGS_RANGE, 1, MAX_LOGS_RANGE),
   }
 }
 
@@ -205,7 +242,7 @@ if (isMain) {
     opts = parseArgs(process.argv.slice(2))
   } catch (err) {
     console.error(`rpc-conformance: ${err.message}`)
-    console.error('usage: rpc-conformance.mjs --url <endpoint> --chain <id> [--batch 2..100] [--burst 1..50]  (the URL is never printed)')
+    console.error('usage: rpc-conformance.mjs --url <endpoint> --chain <id> [--batch 2..100] [--burst 1..50] [--logs-range 1..10000]  (the URL is never printed)')
     process.exit(2)
   }
   const results = await probe({ ...opts, sign: throwawaySign })

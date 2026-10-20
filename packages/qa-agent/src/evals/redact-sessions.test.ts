@@ -183,7 +183,7 @@ describe('redactSessionText: what is kept', () => {
     })
   }
 
-  it('re-serializes the nested envelope in place, and the tool flow stays readable', () => {
+  it('re-serializes the nested envelope in place, and the tool flow is still legible', () => {
     const raw = lineAt('nested-text', { ...CANARIES['payment-header'].obj, ...SURVIVORS })
     const { text } = redactSessionText(raw, { secrets: secrets() })
     const line = JSON.parse(text)

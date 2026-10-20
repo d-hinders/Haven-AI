@@ -9,7 +9,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { decide, apply, fetchInputs, fetchCandidates, fetchChannel, prFromPayload, AUTO_RELEASE_MARK, CLOSE_WINDOW_MS, decideRefs, decideClose, claimsToRelease, refsReleaseLine, closeReleaseLine, prepareMerge, applyMerge, prepareClose, applyPerClaimant, fetchRefsInputs } from './release-on-merge.mjs'
+import { decide, apply, fetchInputs, fetchCandidates, fetchChannel, prFromPayload, AUTO_RELEASE_MARK, CLOSE_WINDOW_MS, decideRefs, decideClose, claimsToRelease, refsReleaseLine, closeReleaseLine, prepareMerge, applyMerge, prepareClose, applyPerClaimant, fetchRefsInputs, closerFromTimeline, closeDeferral, CLOSE_EVENT_TOLERANCE_MS, EPIC_LABEL } from './release-on-merge.mjs'
 import { parse, botReleaseClaimants } from './claim-assignee.mjs'
 import { parseRefsRefs } from './operator-verify-close-guard.mjs'
 import { readFileSync } from 'node:fs'
@@ -465,6 +465,11 @@ describe('the Refs grammar (Path A candidates, the close guard\'s family)', () =
     assert.deepEqual(parseRefsRefs('Refs d-hinders/Haven-AI#43'), [], 'no repo given: a qualified reference is dropped')
   })
 
+  test('a quoted, fenced or inline-code `Refs #N` is documentation, not a reference (the lines parse() reads)', () => {
+    assert.deepEqual(parseRefsRefs('> Refs #11\nUse `Refs #12`, not `Closes`.\n```\nRefs #13\n```\n~~~\nRefs #14\n~~~\nRefs #15'), [15])
+    assert.deepEqual(parseRefsRefs('  > Refs #11 (quoted reply)'), [])
+  })
+
   test('placeholders, branch refs and prose without a number are not references', () => {
     assert.deepEqual(parseRefsRefs('Refs #NNN — operator-verify mode. Use `Refs`, not `Closes`. git push refs/heads/dev'), [])
     assert.deepEqual(parseRefsRefs('Refs: epic #4022, blocked-by #4024 satisfied'), [])
@@ -747,7 +752,10 @@ describe('the double fire: Path B defers to the merge path by the merge path\'s 
     assert.equal(decideClose(closeArgs({ closer: { ...closer, baseRefName: 'main' } })).releases.length, 1, 'a promotion closes nothing on GitHub')
     assert.equal(decideClose(closeArgs({ closer: { ...closer, merged: false } })).releases.length, 1)
     assert.equal(decideClose(closeArgs({ closer: { ...closer, repository: 'other/repo' } })).releases.length, 1)
-    assert.equal(decideClose(closeArgs({ closer: { kind: 'Commit' } })).releases.length, 1, 'a direct commit: the merge path never sees it')
+    // A Commit closer is the squash merge's when a merged PR carries it (the #4176 review blocker) — deferred:
+    assert.equal(decideClose(closeArgs({ closer: { kind: 'Commit', oid: '022ad59f', pullRequests: [{ ...closer, kind: undefined }] } })).releases.length, 0, 'a squash commit of a merged PR: the merge path owns it')
+    // …and a direct push (no PR carries the commit) is not a merge the merge path ever sees:
+    assert.equal(decideClose(closeArgs({ closer: { kind: 'Commit', oid: 'abc', pullRequests: [] } })).releases.length, 1, 'a direct push: the merge path never sees it')
     assert.equal(decideClose(closeArgs({ closer: null })).releases.length, 1, 'a hand close')
   })
 })
@@ -785,7 +793,7 @@ describe('Path B through an injected gh', () => {
 
   test('a merge-caused close read from the timeline is deferred and posts nothing', async () => {
     const { gh, calls } = closeGh({
-      node: { state: 'CLOSED', closedAt: '2026-10-20T19:58:01Z', assignees: { nodes: [] }, timelineItems: { nodes: [{ closer: { __typename: 'PullRequest', number: 4181, merged: true, mergedAt: '2026-10-20T19:58:00Z', baseRefName: 'dev', repository: { nameWithOwner: 'd-hinders/Haven-AI' } } }] } },
+      node: { state: 'CLOSED', closedAt: '2026-10-20T19:58:01Z', assignees: { nodes: [] }, timelineItems: { nodes: [{ createdAt: '2026-10-20T19:58:02Z', closer: { __typename: 'PullRequest', number: 4181, merged: true, mergedAt: '2026-10-20T19:58:00Z', baseRefName: 'dev', repository: { nameWithOwner: 'd-hinders/Haven-AI' } } }] } },
       comments: { [CHANNEL_ISSUE]: [claim] },
     })
     const d = await prepareClose({ ev: ev(), gh, repo: 'd-hinders/Haven-AI' })
@@ -838,6 +846,7 @@ describe('the close workflow (#4176) is shaped as the spec requires', () => {
   test('checks out the DEFAULT branch, never the PR path\'s base ref (empty on an issues event)', () => {
     assert.match(body, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/)
     assert.doesNotMatch(body, /pull_request\.base\.ref/)
+    assert.match(body, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}\n\s+persist-credentials: false\n/)
   })
 
   test('reads the event from the file, never interpolated into the script', () => {
@@ -850,5 +859,159 @@ describe('the close workflow (#4176) is shaped as the spec requires', () => {
     for (const f of ['qa-failure-issue.mjs', 'qa-balance-issue.mjs', 'dev-push-health.mjs', 'guard-freshness.mjs']) assert.ok(yml.includes(f), f)
     assert.match(yml, /first:50/)
     assert.match(yml, /rate limit/)
+  })
+})
+
+describe('#4176 review: a Commit closer, the closed event tied to THIS close, staged reads', () => {
+  // Real #2268 data (read-only GraphQL, 2026-10-20): its second closed event
+  // has closer Commit 7f7102ff, associated PR #2314 merged into dev at
+  // 2026-08-31T19:03:57Z, event at 19:03:58Z. Its third closed event (the hand
+  // close that stands today) has closer null, event == closedAt 2026-09-02T10:13:48Z.
+  const node2268MergeClose = {
+    state: 'CLOSED', closedAt: '2026-08-31T19:03:58Z', assignees: { nodes: [{ login: 'AntonioSaaranen' }] },
+    timelineItems: { nodes: [{ createdAt: '2026-08-31T19:03:58Z', closer: { __typename: 'Commit', oid: '7f7102ff754f1aec62b4dc2a1c45ab8786cb70ce', associatedPullRequests: { nodes: [{ number: 2314, merged: true, mergedAt: '2026-08-31T19:03:57Z', baseRefName: 'dev', repository: { nameWithOwner: 'd-hinders/Haven-AI' } }] } } }] },
+  }
+  const node2268HandClose = {
+    state: 'CLOSED', closedAt: '2026-09-02T10:13:48Z', assignees: { nodes: [{ login: 'AntonioSaaranen' }] },
+    timelineItems: { nodes: [{ createdAt: '2026-09-02T10:13:48Z', closer: null }] },
+  }
+  const claim = said('AntonioSaaranen', '🔒 CLAIM #2268 — branch `x`', '2026-08-31T10:00:00Z', 2268)
+
+  test('closerFromTimeline reads a Commit closer with its associated pull requests', () => {
+    assert.deepEqual(closerFromTimeline(node2268MergeClose), { kind: 'Commit', oid: '7f7102ff754f1aec62b4dc2a1c45ab8786cb70ce', pullRequests: [{ number: 2314, merged: true, mergedAt: '2026-08-31T19:03:57Z', baseRefName: 'dev', repository: 'd-hinders/Haven-AI' }] })
+    assert.equal(closerFromTimeline(node2268HandClose), null, 'a null closer tied to this close is a hand close')
+  })
+
+  test('the #2314 → #2268 squash close (closer = commit 7f7102ff) is deferred to the merge path', () => {
+    const issue = { number: 2268, state: 'closed', closedAt: node2268MergeClose.closedAt, assignees: ['AntonioSaaranen'], author: 'AntonioSaaranen', authorAssociation: 'OWNER' }
+    const reason = closeDeferral({ issue, closer: closerFromTimeline(node2268MergeClose), defaultBranch: 'dev', repo: 'd-hinders/Haven-AI' })
+    assert.match(reason, /closed by the merge of PR #2314 into `dev` \(2026-08-31T19:03:57Z\) via its commit `7f7102ff` — the merge path releases it/)
+    assert.deepEqual(decideClose({ issue, sender: { login: 'AntonioSaaranen', type: 'User' }, closer: closerFromTimeline(node2268MergeClose), defaultBranch: 'dev', repo: 'd-hinders/Haven-AI', comments: [claim] }).releases, [])
+  })
+
+  test('the later #2268 hand close (closer null, same second) is Path B\'s and releases', () => {
+    const issue = { number: 2268, state: 'closed', closedAt: node2268HandClose.closedAt, assignees: ['AntonioSaaranen'], author: 'AntonioSaaranen', authorAssociation: 'OWNER' }
+    const d = decideClose({ issue, sender: { login: 'd-hinders', type: 'User' }, closer: closerFromTimeline(node2268HandClose), defaultBranch: 'dev', repo: 'd-hinders/Haven-AI', comments: [claim] })
+    assert.equal(d.releases.length, 1)
+  })
+
+  test('a closed event more than 10 s from closedAt is not THIS close: unreadable, nothing posted — null closer included', () => {
+    const shifted = (node, ms) => ({ ...node, timelineItems: { nodes: [{ ...node.timelineItems.nodes[0], createdAt: new Date(Date.parse(node.closedAt) + ms).toISOString() }] } })
+    assert.deepEqual(closerFromTimeline(shifted(node2268HandClose, CLOSE_EVENT_TOLERANCE_MS + 1000)), { unreadable: true })
+    assert.deepEqual(closerFromTimeline(shifted(node2268HandClose, -(CLOSE_EVENT_TOLERANCE_MS + 1000))), { unreadable: true })
+    assert.equal(closerFromTimeline(shifted(node2268HandClose, CLOSE_EVENT_TOLERANCE_MS)), null, 'at the tolerance it is still this close')
+    assert.deepEqual(closerFromTimeline({ ...node2268HandClose, timelineItems: { nodes: [{ closer: null }] } }), { unreadable: true }, 'no event time')
+    const issue = { number: 2268, state: 'closed', closedAt: node2268HandClose.closedAt, assignees: ['AntonioSaaranen'], author: 'AntonioSaaranen', authorAssociation: 'OWNER' }
+    const d = decideClose({ issue, sender: { login: 'd-hinders', type: 'User' }, closer: closerFromTimeline(shifted(node2268HandClose, 60_000)), defaultBranch: 'dev', repo: 'd-hinders/Haven-AI', comments: [claim] })
+    assert.deepEqual(d.releases, [])
+    assert.match(d.skipped[0].reason, /could not be tied to this close/)
+  })
+
+  // A recorder that counts every read the close run makes.
+  const counting = (node, comments = {}) => {
+    const calls = []
+    const gh = async (args) => {
+      calls.push(args)
+      if (args[0] === 'api' && args[1] === 'graphql') return JSON.stringify(node)
+      if (args[0] === 'api' && args.includes('--paginate')) {
+        const n = Number(args[args.length - 1].match(/issues\/(\d+)\//)[1])
+        return JSON.stringify([(comments[n] ?? []).map(rest)])
+      }
+      return ''
+    }
+    const count = () => ({
+      timeline: calls.filter((a) => a[1] === 'graphql').length,
+      channel: calls.filter((a) => a.includes('--paginate') && a[a.length - 1].includes(`/issues/${CHANNEL_ISSUE}/comments`)).length,
+      all: calls.length,
+    })
+    return { gh, count }
+  }
+  const ev = (over = {}) => ({ action: 'closed', issue: { number: 2268, user: { login: 'AntonioSaaranen' }, author_association: 'OWNER' }, sender: { login: 'AntonioSaaranen', type: 'User' }, repository: { default_branch: 'dev' }, ...over })
+
+  test('call counts: a non-collaborator closing their own issue makes 0 reads; a deferred merge close makes 1 timeline read and 0 channel reads', async () => {
+    const own = counting(node2268HandClose)
+    const d1 = await prepareClose({ ev: ev({ issue: { number: 2268, user: { login: 'stranger' }, author_association: 'NONE' }, sender: { login: 'stranger', type: 'User' } }), gh: own.gh, repo: 'd-hinders/Haven-AI' })
+    assert.deepEqual(d1.releases, [])
+    assert.deepEqual(own.count(), { timeline: 0, channel: 0, all: 0 })
+
+    const merged = counting(node2268MergeClose, { [CHANNEL_ISSUE]: [claim] })
+    const d2 = await prepareClose({ ev: ev(), gh: merged.gh, repo: 'd-hinders/Haven-AI' })
+    assert.deepEqual(d2.releases, [])
+    assert.deepEqual(merged.count(), { timeline: 1, channel: 0, all: 1 })
+
+    const untied = counting({ ...node2268HandClose, timelineItems: { nodes: [{ createdAt: '2026-09-01T00:00:00Z', closer: null }] } })
+    await prepareClose({ ev: ev(), gh: untied.gh, repo: 'd-hinders/Haven-AI' })
+    assert.deepEqual(untied.count(), { timeline: 1, channel: 0, all: 1 })
+
+    const hand = counting(node2268HandClose, { 2268: [claim] })
+    const d3 = await prepareClose({ ev: ev({ sender: { login: 'd-hinders', type: 'User' } }), gh: hand.gh, repo: 'd-hinders/Haven-AI' })
+    assert.equal(d3.releases.length, 1)
+    assert.deepEqual(hand.count(), { timeline: 1, channel: 1, all: 3 }, 'only a close that may release reads both threads')
+  })
+})
+
+describe('#4176 review: only the workflows\' account can release, and epics are skipped', () => {
+  const philip = said('PhilipEriksson', '🔒 CLAIM #3815 — branch `feat/3815-x`', '2026-10-09T10:00:00Z', 3815)
+  const line = closeReleaseLine({ issue: 3815, claimants: ['PhilipEriksson'], closer: 'd-hinders' })
+  const base = { issue: { number: 3815, state: 'closed', closedAt: '2026-10-19T08:52:58Z', assignees: [], author: 'd-hinders', authorAssociation: 'OWNER' }, sender: { login: 'd-hinders', type: 'User' }, closer: null, defaultBranch: 'dev', repo: 'd-hinders/Haven-AI' }
+
+  test('a `vercel[bot]` line in the Path B shape is not the workflow\'s: the claim is still released by this run', () => {
+    const vercel = { ...botSaid(line, '2026-10-19T08:53:00Z', 3815), author: 'vercel[bot]' }
+    assert.equal(decideClose({ ...base, comments: [philip, vercel] }).releases[0].body, line)
+    assert.equal(decideClose({ ...base, comments: [philip, botSaid(line, '2026-10-19T08:53:00Z', 3815)] }).releases.length, 0, 'the workflow\'s own line does count')
+  })
+
+  test('a collaborator writing the shape about someone else releases nothing', () => {
+    const daniel = said('d-hinders', line, '2026-10-19T08:53:00Z', 3815)
+    assert.equal(decideClose({ ...base, comments: [philip, daniel] }).releases[0].body, line)
+  })
+
+  test('Path A skips an issue labelled `epic` (captain decision on the review)', () => {
+    const pr = { ...mergedPr, number: 4131, author: 'AntonioSaaranen', authorType: 'User', base: 'dev', defaultBranch: 'dev' }
+    const claim = said('AntonioSaaranen', '🔒 CLAIM #3957 — epic', '2026-10-01T00:00:00Z', 3957)
+    const epic = { number: 3957, state: 'open', assignees: ['AntonioSaaranen'], labels: ['area:qa', 'Epic'] }
+    const d = decideRefs({ pr, refsIssues: [epic], commentsByIssue: { 3957: [claim] } })
+    assert.deepEqual(d.releases, [])
+    assert.match(d.skipped[0].reason, /labelled `epic`/)
+    assert.equal(EPIC_LABEL, 'epic')
+    assert.equal(decideRefs({ pr, refsIssues: [{ ...epic, labels: ['area:qa'] }], commentsByIssue: { 3957: [claim] } }).releases.length, 1, 'the same issue without the label is released')
+  })
+
+  test('fetchRefsInputs reads the labels and reads no comments for an epic', async () => {
+    const calls = []
+    const gh = async (args) => {
+      calls.push(args)
+      if (args[1] === 'graphql') {
+        const q = args.find((a) => a.startsWith('query=')) ?? ''
+        if (/commits\(/.test(q)) return JSON.stringify({ nodes: [], pageInfo: { hasNextPage: false } })
+        return JSON.stringify({ title: 't', body: 'Refs #3957\nRefs #4122' })
+      }
+      if (args.includes('--paginate')) return JSON.stringify([[]])
+      const n = Number(args[1].split('/').pop())
+      return JSON.stringify({ state: 'open', closed_at: null, assignees: [], labels: n === 3957 ? [{ name: 'epic' }] : [] })
+    }
+    const r = await fetchRefsInputs({ gh, repo: 'o/r', prNumber: 1 })
+    assert.deepEqual(r.refsIssues.map((i) => [i.number, i.labels]), [[3957, ['epic']], [4122, []]])
+    assert.deepEqual(Object.keys(r.commentsByIssue).map(Number), [4122])
+  })
+
+  test('only the issues the merge RELEASED are excluded: an open closing candidate that is also `Refs`ed is Path A\'s', async () => {
+    const claim = said('AntonioSaaranen', '🔒 CLAIM #4122 — y', '2026-10-20T08:00:01Z', 4122)
+    const gh = async (args) => {
+      if (args[1] === 'graphql') {
+        const q = args.find((a) => a.startsWith('query=')) ?? ''
+        if (/closingIssuesReferences/.test(q)) return JSON.stringify({ title: 't', closingIssuesReferences: { nodes: [{ number: 4122 }] } })
+        if (/commits\(/.test(q)) return JSON.stringify({ nodes: [], pageInfo: { hasNextPage: false } })
+        return JSON.stringify({ title: 't', body: 'Refs #4122' })
+      }
+      if (args.includes('--paginate')) {
+        const n = Number(args[args.length - 1].match(/issues\/(\d+)\//)[1])
+        return JSON.stringify([n === 4122 ? [rest(claim)] : []])
+      }
+      return JSON.stringify({ state: 'open', closed_at: null, assignees: [{ login: 'AntonioSaaranen' }], labels: [] })
+    }
+    const prepared = await prepareMerge({ pr: { ...mergedPr, number: 4131, author: 'AntonioSaaranen', authorType: 'User' }, gh, repo: 'o/r', log: () => {} })
+    assert.deepEqual(prepared.decision.releases, [], 'GitHub did not close it')
+    assert.deepEqual(prepared.refs.releases.map((r) => r.issue), [4122])
   })
 })

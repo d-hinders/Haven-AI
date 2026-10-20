@@ -286,15 +286,29 @@ const REFS_REF = /\brefs?\b\s*:?\s*(?:https?:\/\/github\.com\/([\w.-]+\/[\w.-]+)
  * Every issue number this text references with `Refs` (no closing keyword),
  * deduplicated, in order. `repo` is `owner/name`; without it, a qualified
  * reference is dropped.
+ *
+ * Unlike `parseClosingRefs` — which must match what GitHub matches, prose and
+ * all — this reads only text the author is USING, not quoting: the lines
+ * `claim-assignee.mjs`' `parse()` reads (no fenced block, no `>` quote), with
+ * inline code spans blanked. "Write `Refs #N`, not `Closes`" documents the
+ * convention; it is not a reference, and nothing here releases on it.
  */
 export function parseRefsRefs(body, { repo = null } = {}) {
   const seen = []
   const self = String(repo ?? '').toLowerCase()
-  for (const match of String(body ?? '').matchAll(REFS_REF)) {
-    const qualifier = (match[1] ?? match[2] ?? '').toLowerCase()
-    if (qualifier && qualifier !== self) continue
-    const n = Number(match[3])
-    if (!seen.includes(n)) seen.push(n)
+  let inFence = false
+  for (const line of String(body ?? '').split(/\r?\n/)) {
+    if (/^\s*(?:```|~~~)/.test(line)) {
+      inFence = !inFence
+      continue
+    }
+    if (inFence || /^\s*>/.test(line)) continue
+    for (const match of line.replace(/`[^`]*`/g, ' ').matchAll(REFS_REF)) {
+      const qualifier = (match[1] ?? match[2] ?? '').toLowerCase()
+      if (qualifier && qualifier !== self) continue
+      const n = Number(match[3])
+      if (!seen.includes(n)) seen.push(n)
+    }
   }
   return seen
 }

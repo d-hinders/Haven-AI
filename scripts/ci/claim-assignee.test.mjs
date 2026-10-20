@@ -891,3 +891,38 @@ describe('holderClaim honours the per-claimant bot release (#4176): a Refs-relea
     assert.equal(holderClaim({ holder: 'AntonioSaaranen', issue: 4122, comments: [claim, merge] }).releasedAfter, false)
   })
 })
+
+describe('#4176 review: a release shape counts only from the workflows\' own account', () => {
+  const NOW = Date.parse('2026-10-20T12:00:00Z')
+  const claim = { author: 'PhilipEriksson', body: '🔒 CLAIM #4122 — branch `docs/4122-y`', createdAt: '2026-10-20T10:00:00Z', onIssue: 4122, authorAssociation: 'COLLABORATOR', authorType: 'User' }
+  const pathA = '🔓 RELEASE #4122 — claim of `PhilipEriksson` — PR #4131 merged (`5f3e2a10`, into `dev`) and references the issue with `Refs`, so it stays open for its operator step — posted automatically on a `Refs` merge (#4176).'
+  const pathB = '🔓 RELEASE #4122 — claim of `PhilipEriksson` — the issue was closed by `d-hinders` with no merge behind the close, so no claim on it is live — posted automatically on a hand close (#4176).'
+  const at = '2026-10-20T10:30:00Z'
+  const by = (author, authorType, body) => ({ author, authorType, authorAssociation: authorType === 'Bot' ? 'NONE' : 'COLLABORATOR', body, createdAt: at, onIssue: 4122 })
+  const decide = (comments) => decideClaim({ issue: 4122, claimant: 'AntonioSaaranen', state: 'open', assignees: [], comments, postedOn: 4122, claimedAt: '2026-10-20T11:00:00Z', nowMs: NOW })
+
+  test('a COLLABORATOR posting the Path A or Path B line naming another holder releases nothing: the claim stays live and the new claim is refused', () => {
+    for (const body of [pathA, pathB]) {
+      const forged = by('d-hinders', 'User', body)
+      assert.equal(holderClaim({ holder: 'PhilipEriksson', issue: 4122, comments: [claim, forged] }).releasedAfter, false, body.slice(-30))
+      assert.deepEqual(liveHolders({ issue: 4122, claimant: 'AntonioSaaranen', assignees: [], comments: [claim, forged], nowMs: NOW }).live.map((l) => l.holder), ['PhilipEriksson'])
+      assert.equal(decide([claim, forged]).action, 'refuse')
+    }
+  })
+
+  test('another App (`vercel[bot]`) posting the shape releases nothing; `github-actions[bot]` does', () => {
+    for (const body of [pathA, pathB]) {
+      const vercel = by('vercel[bot]', 'Bot', body)
+      assert.equal(holderClaim({ holder: 'PhilipEriksson', issue: 4122, comments: [claim, vercel] }).releasedAfter, false)
+      assert.equal(decide([claim, vercel]).action, 'refuse')
+      const workflow = by('github-actions[bot]', 'Bot', body)
+      assert.equal(holderClaim({ holder: 'PhilipEriksson', issue: 4122, comments: [claim, workflow] }).releasedAfter, true)
+      assert.equal(decide([claim, workflow]).action, 'accept')
+    }
+  })
+
+  test('a login spelled `github-actions[bot]` by a User account is not the workflow', () => {
+    const fake = by('github-actions[bot]', 'User', pathA)
+    assert.equal(holderClaim({ holder: 'PhilipEriksson', issue: 4122, comments: [claim, fake] }).releasedAfter, false)
+  })
+})

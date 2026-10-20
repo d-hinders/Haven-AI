@@ -233,7 +233,9 @@ export function botReleaseLine(line) {
  * @param {number|null} [o.onIssue]     the issue the comment was posted on
  * @param {number} [o.channelIssue]     the standing coordination channel (`coordination-channel.mjs`)
  * @param {string} [o.authorType]       GitHub's `user.type`; 'Bot' narrows the
- *                                      grammar to the merge-time release only
+ *                                      grammar to the workflows' release shapes
+ *                                      only (`botReleaseLine`: the merge-time
+ *                                      line and the two per-claimant lines)
  * @returns {{claim: number[], release: number[]}} issue numbers, disjoint —
  *          a number that both claims and releases in one comment counts as a
  *          release, since that is the safe direction.

@@ -29,13 +29,23 @@ name: Release the claim on close
 # ## It defers to the merge path
 #
 # A merge that closes an issue fires the merge workflow's pull-request `closed`
-# event AND `issues: closed` within seconds, and neither run would see the other's line in time. So this
-# job mirrors the merge path's exact rule and skips an issue whose closer — read
-# from the issue timeline's closed event, never by re-reading a PR — is a pull
-# request merged into the default branch with `closed_at` within five minutes
-# after its `merged_at`. Every other close is this job's: by hand, by a direct
-# commit, by a merge outside the window. If the timeline cannot be read, nothing
-# is released (a merge-caused close cannot be ruled out).
+# event AND `issues: closed` within seconds, and neither run would see the
+# other's line in time. So this job mirrors the merge path's exact rule and
+# skips an issue whose closer — read from the issue timeline's closed event,
+# never by re-reading a PR — is a pull request merged into the default branch
+# with `closed_at` within five minutes after its `merged_at`. When the closing
+# keyword sat in the title or a commit, GitHub records the squash COMMIT as the
+# closer (11 of the last 100 closed issues at #4176's review, e.g. #2314 →
+# #2268 via `7f7102ff`); its associated pull requests are read and the same
+# rule applies. Every other close is this job's: by hand, by a direct push (a
+# commit no pull request carries), by a merge outside the window. If the closed
+# event cannot be read, or its time is more than 10 s from the issue's
+# `closed_at` (so it is not provably THIS close), nothing is released.
+#
+# The reads are staged so a close that cannot release costs little: the
+# payload gate (bot close, non-collaborator author's own close) reads nothing;
+# the deferral reads only the timeline (one GraphQL call); only a close that
+# may release reads both threads' comments (~16 REST pages with the channel).
 #
 # Past the merge path's `closingIssuesReferences(first:50)` cap: an issue linked
 # only from a PR body beyond the fiftieth reference is closed by GitHub, not
@@ -95,6 +105,9 @@ jobs:
           # The default branch, named explicitly. Not the merge workflow's
           # pull-request base ref, which does not exist on this event.
           ref: ${{ github.event.repository.default_branch }}
+          # The job only reads its own script; the token never needs to
+          # outlive the checkout.
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'

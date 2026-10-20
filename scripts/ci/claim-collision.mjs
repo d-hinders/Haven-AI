@@ -106,6 +106,20 @@ export function sameLogin(a, b) {
   return String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase()
 }
 
+/** The account the claim-release workflows post as (`GITHUB_TOKEN`). */
+export const WORKFLOW_BOT = 'github-actions[bot]'
+
+/**
+ * Is this comment the claim-release workflows' own? Only then is a
+ * per-claimant release shape honoured (#4176): another installed App
+ * (`vercel[bot]`, a coding agent) posting the same text releases nothing, and
+ * neither does a person — a collaborator writing the shape about someone
+ * else is reporting, not releasing.
+ */
+export function isWorkflowBotComment(c) {
+  return String(c?.authorType ?? 'User') === 'Bot' && sameLogin(c?.author, WORKFLOW_BOT)
+}
+
 /**
  * `branch feat/x` / `branch \`feat/x\`` out of a claim line, if present. The
  * token must contain a `/` — every branch this repo names has a prefix
@@ -163,15 +177,15 @@ export function holderClaim({ holder, issue, comments, channelIssue = CHANNEL_IS
   let firstClaim = null
   let releasedAfter = false
   let lastActivityAt = null
-  const isBot = (c) => String(c.authorType ?? 'User') === 'Bot'
   const mine = comments
-    .filter((c) => sameLogin(c.author, holder) || isBot(c))
+    .filter((c) => sameLogin(c.author, holder) || isWorkflowBotComment(c))
     .slice()
     .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
   for (const c of mine) {
-    if (isBot(c)) {
-      // A bot release that NAMES this holder (#4176's per-claimant shapes)
-      // ends their hold. It matters for the `Refs`-merge release, which leaves
+    if (isWorkflowBotComment(c)) {
+      // A workflow release that NAMES this holder (#4176's per-claimant
+      // shapes, posted as `github-actions[bot]` — no other author) ends their
+      // hold. It matters for the `Refs`-merge release, which leaves
       // the issue OPEN: without it the collision check would report the
       // released author as holding for up to a day. A bot line is never a
       // claim and never activity. The merge-time line (#3177) names nobody and

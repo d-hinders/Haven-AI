@@ -94,6 +94,14 @@
 // assignees are untouched. Nothing is posted when the author holds no
 // unreleased claim of #N, or #N is not open. Measured on 2026-10-20: eight
 // stale claims backfilled by hand on #3193, every one from a `Refs`-only PR.
+// Captain decision on #4176's review: an issue labelled `epic` is skipped — a
+// slice's `Refs #<epic>` (#3957 was referenced by 14 of the last 100 merged
+// PRs) must not release the epic's claim at the first slice's merge; an epic
+// is tracked through its slices and its claim ends when it closes (Path B).
+// Excluded are only the issues THIS merge released; a closing candidate the
+// merge did not close (a keyword GitHub ignored) stays a `Refs` candidate.
+// The `Refs` grammar reads only text in use: no fenced block, no `>` quote, no
+// inline code span.
 // The candidates live in `fetchRefsInputs`, NOT in `fetchCandidates`: the PR
 // ownership gate imports `fetchCandidates`, and a `Refs` number there would
 // fail the gate for every PR that `Refs` somebody else's issue.
@@ -104,9 +112,12 @@
 // `issues: closed`. A close a merge did not cause releases every collaborator's
 // unreleased claim on the issue (`decideClose`). It defers to the merge path by
 // mirroring that path's rule exactly — a closer PR (the timeline's closed
-// event) merged into the default branch, `closed_at` within CLOSE_WINDOW_MS
-// after `merged_at` — because both events fire within seconds and neither run
-// sees the other's line in time.
+// event; for a keyword in the title or a commit GitHub records the squash
+// COMMIT, and its associated pull requests are read) merged into the default
+// branch, `closed_at` within CLOSE_WINDOW_MS after `merged_at` — because both
+// events fire within seconds and neither run sees the other's line in time. A
+// closed event more than 10 s from `closed_at` is not tied to this close, and
+// nothing is released on it.
 //
 // Limits, stated rather than guarded:
 //   - `closingIssuesReferences(first:50)` truncates body-linked references at
@@ -149,7 +160,7 @@
 // merges today still gets its channel copy.
 
 import { parse, REFS_RELEASE_MARK, CLOSE_RELEASE_MARK } from './claim-assignee.mjs'
-import { holderClaim, readComments, sameLogin, TRUSTED_ASSOCIATIONS } from './claim-collision.mjs'
+import { holderClaim, readComments, sameLogin, isWorkflowBotComment, TRUSTED_ASSOCIATIONS } from './claim-collision.mjs'
 import { CHANNEL_ISSUE } from './coordination-channel.mjs'
 import { parseClosingRefs, parseRefsRefs, commitsFromGraphQL } from './operator-verify-close-guard.mjs'
 
@@ -261,7 +272,8 @@ export function decide({ pr, closingIssues, channelBodies = [], channelIssue = C
 // ---------------------------------------------------------------------------
 
 const isTrustedPerson = (c) => TRUSTED_ASSOCIATIONS.has(String(c?.authorAssociation ?? '').toUpperCase()) && String(c?.authorType ?? 'User') !== 'Bot'
-const isBotComment = (c) => String(c?.authorType ?? 'User') === 'Bot'
+// Only the workflows' own account can have posted a release line (#4176 review).
+const isBotComment = isWorkflowBotComment
 
 /**
  * Which claimants of `issue` still hold an unreleased claim, per thread.
@@ -321,6 +333,10 @@ export function claimsToRelease({ issue, comments, only = null, channelIssue = C
   return { onIssue, onChannel }
 }
 
+/** Captain decision on #4176's review: Path A skips epics. */
+export const EPIC_LABEL = 'epic'
+const isEpic = (issue) => (issue?.labels ?? []).some((l) => String(l).toLowerCase() === EPIC_LABEL)
+
 const claimantList = (logins) => `${logins.length === 1 ? 'claim' : 'claims'} of ${logins.map((l) => `\`${l}\``).join(', ')}`
 
 /** Path A's line. Pinned by test; `botReleaseClaimants` parses it. */
@@ -342,8 +358,8 @@ export function closeReleaseLine({ issue, claimants, closer }) {
  *
  * @param {object} o
  * @param {object} o.pr                 as for `decide`
- * @param {{number:number, state?:string, assignees?:string[], isPullRequest?:boolean, unreadable?:boolean}[]} o.refsIssues
- *        from `fetchRefsInputs` — closing candidates already excluded
+ * @param {{number:number, state?:string, assignees?:string[], labels?:string[], isPullRequest?:boolean, unreadable?:boolean}[]} o.refsIssues
+ *        from `fetchRefsInputs` — the merge path's releases already excluded
  * @param {Record<number, object[]>} o.commentsByIssue  each open issue's comments (`readComments`)
  * @param {object[]} [o.channelComments] the channel's comments (`readComments`)
  * @returns {{releases: {issue:number, body:string|null, unassign:string[]}[], channel: {body:string}|null, skipped: {issue:number, reason:string}[]}}
@@ -379,6 +395,14 @@ export function decideRefs({ pr, refsIssues, commentsByIssue = {}, channelCommen
       skipped.push({ issue: n, reason: `GitHub reports it ${issue.state ?? 'unknown'} — a \`Refs\` release is for an issue that stays open; a closed one was released when it closed` })
       continue
     }
+    if (isEpic(issue)) {
+      // Captain decision on #4176's review: a slice's `Refs #<epic>` must not
+      // release the epic's claim at the first slice's merge. An epic is
+      // tracked through its slices and closes when they are done; its claim
+      // is released at that close (Path B) or by hand.
+      skipped.push({ issue: n, reason: `is labelled \`${EPIC_LABEL}\` — a slice's \`Refs\` does not release an epic's claim` })
+      continue
+    }
     const comments = [...(commentsByIssue[n] ?? []), ...(channelComments ?? [])]
     const { onIssue, onChannel } = claimsToRelease({ issue: n, comments, only: [pr.author], channelIssue })
     if (onIssue.length === 0 && onChannel.length === 0) {
@@ -393,35 +417,88 @@ export function decideRefs({ pr, refsIssues, commentsByIssue = {}, channelCommen
 }
 
 /**
+ * The pull requests a closer stands for: the closer itself when GitHub
+ * recorded a pull request, or — when the closing keyword sat in the title or a
+ * commit message — the squash commit's associated pull requests. Measured on
+ * #4176's review: 11 of the last 100 closed issues carry a `Commit` closer,
+ * every one 1–2 s after a merge into `dev` (#2314 → #2268 via `7f7102ff`,
+ * #4180 → #4165 via `7297053c`). A commit with no associated pull request is a
+ * direct push, which the merge path never sees.
+ */
+function closerPulls(closer) {
+  if (closer?.kind === 'PullRequest') return [closer]
+  if (closer?.kind === 'Commit') return Array.isArray(closer.pullRequests) ? closer.pullRequests : []
+  return []
+}
+
+/**
+ * Path B's gate on the EVENT PAYLOAD alone — decided before any read, so a
+ * close that cannot release anything costs no API call. Returns a skip reason,
+ * or null when the close may release.
+ *
+ * Only a collaborator's close counts. GitHub lets two kinds of account close
+ * an issue: a collaborator with triage access or more, and the issue's own
+ * author. A close by the author is honoured only when the author is a
+ * collaborator (`author_association`); a close by anyone else needed triage
+ * access to happen at all. A bot or App close is not a hand close (a
+ * `GITHUB_TOKEN` close never fires this event anyway).
+ */
+export function closePayloadGate({ number, isPullRequest = false, author = '', authorAssociation = 'NONE', sender, channelIssue = CHANNEL_ISSUE }) {
+  if (number === channelIssue) return 'is the coordination channel — never released'
+  if (isPullRequest) return 'is a pull request — the merge path owns those'
+  if (String(sender?.type ?? '') !== 'User') return `closed by ${sender?.login ?? 'an unknown account'} (${sender?.type ?? 'no type'}), not by a person — not a hand close`
+  if (sameLogin(sender.login, author) && !TRUSTED_ASSOCIATIONS.has(String(authorAssociation ?? '').toUpperCase())) {
+    return `closed by its own author ${sender.login}, who is not a collaborator (${authorAssociation ?? 'NONE'}) — a collaborator's claim is not released on that close`
+  }
+  return null
+}
+
+/**
+ * Path B's deferral to the merge path, decided from the timeline read alone
+ * (before any comment is read). Returns a skip reason, or null when this close
+ * is Path B's.
+ *
+ * It mirrors the merge path's exact rule: a closer pull request — recorded as
+ * the closer, or associated with the closing commit — merged into the default
+ * branch of this repository, with `closed_at` within [`merged_at`,
+ * `merged_at` + CLOSE_WINDOW_MS], makes the close the merge path's. Both events
+ * fire within seconds and neither run would see the other's line in time.
+ * Every other close is this path's: by hand, by a direct push (a commit with
+ * no associated pull request), by a merge outside the window.
+ */
+export function closeDeferral({ issue, closer, defaultBranch, repo = null }) {
+  if (closer === undefined || closer?.unreadable) return 'the timeline\'s closed event could not be tied to this close — a merge-caused close cannot be ruled out, so nothing is released (the merge path may own it)'
+  for (const pull of closerPulls(closer)) {
+    if (pull?.merged !== true) continue
+    if (repo && pull.repository && String(pull.repository).toLowerCase() !== String(repo).toLowerCase()) continue
+    // The merge path's rule, verbatim: a merge into a non-default branch closes
+    // nothing there, and the window opens AT the merge.
+    const intoDefault = !defaultBranch || pull.baseRefName === defaultBranch
+    const mergedAtMs = Date.parse(pull.mergedAt ?? '')
+    const closedAtMs = Date.parse(issue?.closedAt ?? '')
+    const inWindow = Number.isFinite(mergedAtMs) && Number.isFinite(closedAtMs) && closedAtMs >= mergedAtMs && closedAtMs <= mergedAtMs + CLOSE_WINDOW_MS
+    if (intoDefault && inWindow) return `closed by the merge of PR #${pull.number} into \`${pull.baseRefName}\` (${pull.mergedAt})${closer.kind === 'Commit' ? ` via its commit \`${String(closer.oid ?? '').slice(0, 8)}\`` : ''} — the merge path releases it`
+  }
+  return null
+}
+
+/**
  * Path B: an issue closed with no merge behind the close releases every
  * collaborator's unreleased claim on it, and — only when it released one —
  * unassigns everyone still assigned (no claim on a CLOSED issue is live; the
  * merge path's rule). With no claim to release it posts nothing and leaves the
  * assignees alone: an unassign is always explained by a release line beside
  * it, and an assignee nobody claimed is a person's tracking decision.
- *
- * It DEFERS to the merge path by mirroring that path's exact rule: an issue
- * whose close was caused by a pull request (the timeline's closed event names
- * it as the closer) merged into the default branch, with `closed_at` within
- * [`merged_at`, `merged_at` + CLOSE_WINDOW_MS], is the merge path's — both
- * events fire within seconds and neither run would see the other's line in
- * time. Every other close (by hand, by a direct commit, by a merge outside the
- * window) is this path's.
- *
- * Only a collaborator's close counts. GitHub lets two kinds of account close
- * an issue: a collaborator with triage access or more, and the issue's own
- * author. A close by the author is honoured only when the author is a
- * collaborator (`author_association`); a close by anyone else needed triage
- * access to happen at all. A bot or App close is not a hand close and is
- * skipped (a `GITHUB_TOKEN` close never fires this event anyway).
+ * The gates are `closePayloadGate` and `closeDeferral`; see those.
  *
  * @param {object} o
  * @param {{number:number, state:string, closedAt:string|null, assignees:string[], author:string, authorAssociation:string, isPullRequest?:boolean}} o.issue
  *        read back from GitHub, except `author` / `authorAssociation`, which
  *        come from the event
  * @param {{login:string, type:string}} o.sender     who closed it (the event's `sender`)
- * @param {{kind:'PullRequest', number:number, merged:boolean, mergedAt:string|null, baseRefName:string|null, repository:string|null}|{kind:'Commit'}|{unreadable:true}|null} o.closer
- *        the latest closed event's closer, from the issue timeline
+ * @param {{kind:'PullRequest', number:number, merged:boolean, mergedAt:string|null, baseRefName:string|null, repository:string|null}|{kind:'Commit', oid?:string, pullRequests:object[]}|{unreadable:true}|null} o.closer
+ *        the closer of the closed event that IS this close (`closerFromTimeline`);
+ *        null for a hand close
  * @param {string|null} o.defaultBranch
  * @param {string|null} [o.repo]        owner/name — a closer PR must be in it
  * @param {object[]} o.comments         the issue's comments and the channel's (`readComments`)
@@ -431,25 +508,11 @@ export function decideClose({ issue, sender, closer, defaultBranch, repo = null,
   const n = Number(issue?.number)
   const skip = (reason) => ({ releases: [], channel: null, skipped: Number.isInteger(n) && n > 0 ? [{ issue: n, reason }] : [] })
   if (!Number.isInteger(n) || n <= 0) return { releases: [], channel: null, skipped: [] }
-  if (n === channelIssue) return skip('is the coordination channel — never released')
-  if (issue.isPullRequest) return skip('is a pull request — the merge path owns those')
+  const gated = closePayloadGate({ number: n, isPullRequest: issue.isPullRequest === true, author: issue.author, authorAssociation: issue.authorAssociation, sender, channelIssue })
+  if (gated) return skip(gated)
   if (String(issue.state ?? '').toLowerCase() !== 'closed') return skip(`GitHub reports it ${issue.state ?? 'unknown'} now — reopened since the close, so its claims are live`)
-
-  if (String(sender?.type ?? '') !== 'User') return skip(`closed by ${sender?.login ?? 'an unknown account'} (${sender?.type ?? 'no type'}), not by a person — not a hand close`)
-  if (sameLogin(sender.login, issue.author) && !TRUSTED_ASSOCIATIONS.has(String(issue.authorAssociation ?? '').toUpperCase())) {
-    return skip(`closed by its own author ${sender.login}, who is not a collaborator (${issue.authorAssociation ?? 'NONE'}) — a collaborator's claim is not released on that close`)
-  }
-
-  if (closer === undefined || closer?.unreadable) return skip('the timeline\'s closed event could not be read — a merge-caused close cannot be ruled out, so nothing is released (the merge path may own it)')
-  if (closer?.kind === 'PullRequest' && closer.merged === true && (!repo || !closer.repository || String(closer.repository).toLowerCase() === String(repo).toLowerCase())) {
-    // The merge path's rule, verbatim: a merge into a non-default branch closes
-    // nothing there, and the window opens AT the merge.
-    const intoDefault = !defaultBranch || closer.baseRefName === defaultBranch
-    const mergedAtMs = Date.parse(closer.mergedAt ?? '')
-    const closedAtMs = Date.parse(issue.closedAt ?? '')
-    const inWindow = Number.isFinite(mergedAtMs) && Number.isFinite(closedAtMs) && closedAtMs >= mergedAtMs && closedAtMs <= mergedAtMs + CLOSE_WINDOW_MS
-    if (intoDefault && inWindow) return skip(`closed by the merge of PR #${closer.number} into \`${closer.baseRefName}\` (${closer.mergedAt}) — the merge path releases it`)
-  }
+  const deferred = closeDeferral({ issue, closer, defaultBranch, repo })
+  if (deferred) return skip(deferred)
 
   const { onIssue, onChannel } = claimsToRelease({ issue: n, comments, channelIssue })
   if (onIssue.length === 0 && onChannel.length === 0) return skip('no unreleased collaborator claim on it — nothing posted, assignees left as they are')
@@ -547,7 +610,7 @@ async function readCommitMessages({ gh, vars }) {
 }
 
 /** Read EVERY candidate back: state, when it closed, who is assigned now. */
-async function readBack({ gh, repo, numbers }) {
+async function readBack({ gh, repo, numbers, labels = false }) {
   const out = []
   for (const n of numbers) {
     try {
@@ -558,6 +621,8 @@ async function readBack({ gh, repo, numbers }) {
         state: issue?.state ?? 'unknown',
         closedAt: issue?.closed_at ?? null,
         ...(issue?.pull_request ? { isPullRequest: true } : {}),
+        // Path A only: `fetchCandidates`' output (the ownership gate's input) is unchanged.
+        ...(labels ? { labels: (issue?.labels ?? []).map((l) => (typeof l === 'string' ? l : l?.name)).filter(Boolean) } : {}),
       })
     } catch {
       out.push({ number: n, assignees: [], unreadable: true })
@@ -570,10 +635,12 @@ const REFS_QUERY = 'query($owner:String!,$name:String!,$number:Int!){ repository
 
 /**
  * Path A's candidates (#4176): the issues the PR references with `Refs` in its
- * title, body or any commit message, MINUS every closing candidate (`exclude`,
- * the numbers `fetchCandidates` returned) — an issue the PR also closes is the
- * merge path's, so each issue is released by one path only. Read back like the
- * closing candidates, and for each OPEN one, its comments with authors.
+ * title, body or any commit message, MINUS every issue the merge path released
+ * (`exclude`, the issues `decide()` released) — an issue this merge closed is
+ * the merge path's, so each issue is released by one path only. A closing
+ * candidate the merge did NOT close (a keyword GitHub ignored, so the issue is
+ * still open) stays a `Refs` candidate. Read back like the closing candidates,
+ * with labels, and for each OPEN, non-epic one, its comments with authors.
  *
  * A separate function on purpose: `pr-ownership-gate.mjs` imports
  * `fetchCandidates`, and a `Refs` number in that set would fail the gate for
@@ -589,10 +656,10 @@ export async function fetchRefsInputs({ gh, repo, prNumber, exclude = [] }) {
   for (const text of texts) {
     for (const n of parseRefsRefs(text, { repo })) if (!numbers.includes(n) && !exclude.includes(n)) numbers.push(n)
   }
-  const refsIssues = await readBack({ gh, repo, numbers })
+  const refsIssues = await readBack({ gh, repo, numbers, labels: true })
   const commentsByIssue = {}
   for (const issue of refsIssues) {
-    if (issue.unreadable || issue.isPullRequest || String(issue.state).toLowerCase() !== 'open' || issue.number === CHANNEL_ISSUE) continue
+    if (issue.unreadable || issue.isPullRequest || String(issue.state).toLowerCase() !== 'open' || issue.number === CHANNEL_ISSUE || isEpic(issue)) continue
     commentsByIssue[issue.number] = await readComments({ gh, repo, issue: issue.number })
   }
   return { refsIssues, commentsByIssue }
@@ -612,44 +679,69 @@ export async function fetchChannel({ gh, repo, channelIssue = CHANNEL_ISSUE }) {
   return { channelBodies }
 }
 
-const CLOSE_QUERY = 'query($owner:String!,$name:String!,$number:Int!){ repository(owner:$owner,name:$name){ issue(number:$number){ state closedAt assignees(first:100){ nodes{ login } } timelineItems(itemTypes:[CLOSED_EVENT], last:1){ nodes{ ... on ClosedEvent{ createdAt closer{ __typename ... on PullRequest{ number merged mergedAt baseRefName repository{ nameWithOwner } } } } } } } } }'
+const CLOSE_PULL = 'number merged mergedAt baseRefName repository{ nameWithOwner }'
+const CLOSE_QUERY = `query($owner:String!,$name:String!,$number:Int!){ repository(owner:$owner,name:$name){ issue(number:$number){ state closedAt assignees(first:100){ nodes{ login } } timelineItems(itemTypes:[CLOSED_EVENT], last:1){ nodes{ ... on ClosedEvent{ createdAt closer{ __typename ... on PullRequest{ ${CLOSE_PULL} } ... on Commit{ oid associatedPullRequests(first:5){ nodes{ ${CLOSE_PULL} } } } } } } } } } }`
 
 /**
- * Path B's reads: the issue read back (state, `closedAt`, assignees) with the
- * closer of its LATEST closed event — the pull request or commit GitHub
- * recorded as causing the close, null for a hand close — from the issue
- * timeline, never by re-reading a PR; then the issue's comments and the
- * channel's, with authors. A failed issue read throws (the CLI logs and
- * releases nothing); a timeline with no closed event yet reads as
- * `{ unreadable: true }`, which `decideClose` refuses to release on.
+ * How far the latest closed event's `createdAt` may sit from the issue's
+ * `closedAt` and still be read as THIS close. Measured: 0–1 s (#4165 0 s,
+ * #4173 1 s). Further apart, the event is some other close (a stale timeline,
+ * a race with a reopen), and its closer says nothing about this one.
  */
-export async function fetchCloseInputs({ gh, repo, issueNumber, channelIssue = CHANNEL_ISSUE }) {
+export const CLOSE_EVENT_TOLERANCE_MS = 10_000
+
+const pullFrom = (p) => ({
+  number: p?.number,
+  merged: p?.merged === true,
+  mergedAt: p?.mergedAt ?? null,
+  baseRefName: p?.baseRefName ?? null,
+  repository: p?.repository?.nameWithOwner ?? null,
+})
+
+/**
+ * The closer of the closed event that IS this close, from the GraphQL issue
+ * node. `{ unreadable: true }` when there is no closed event, or when its time
+ * is more than CLOSE_EVENT_TOLERANCE_MS from `closedAt` — a null closer is a
+ * hand close only when the event is tied to this close. A `Commit` closer
+ * carries its associated pull requests (`closeDeferral` reads them).
+ */
+export function closerFromTimeline(node) {
+  const event = node?.timelineItems?.nodes?.[0] ?? null
+  if (!event) return { unreadable: true }
+  const eventMs = Date.parse(event.createdAt ?? '')
+  const closedMs = Date.parse(node?.closedAt ?? '')
+  if (!Number.isFinite(eventMs) || !Number.isFinite(closedMs) || Math.abs(eventMs - closedMs) > CLOSE_EVENT_TOLERANCE_MS) return { unreadable: true }
+  const c = event.closer
+  if (!c) return null
+  if (c.__typename === 'PullRequest') return { kind: 'PullRequest', ...pullFrom(c) }
+  if (c.__typename === 'Commit') return { kind: 'Commit', oid: c.oid ?? null, pullRequests: (c.associatedPullRequests?.nodes ?? []).map(pullFrom) }
+  return { kind: String(c.__typename ?? 'unknown') }
+}
+
+/**
+ * Path B's first read: the issue read back (state, `closedAt`, assignees) and
+ * the closer of its latest closed event, from the issue timeline — never by
+ * re-reading a PR. One GraphQL call. A failed read throws (the CLI logs and
+ * releases nothing).
+ */
+export async function fetchCloseTimeline({ gh, repo, issueNumber }) {
   const [owner, name] = repo.split('/')
   const vars = ['-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `number=${issueNumber}`]
   const node = parseJsonStrict(await gh(['api', 'graphql', ...vars, '-f', `query=${CLOSE_QUERY}`, '--jq', '.data.repository.issue']), `issue #${issueNumber}`)
-  const event = node?.timelineItems?.nodes?.[0] ?? null
-  let closer
-  if (!event) closer = { unreadable: true }
-  else if (!event.closer) closer = null
-  else if (event.closer.__typename === 'PullRequest') {
-    closer = {
-      kind: 'PullRequest',
-      number: event.closer.number,
-      merged: event.closer.merged === true,
-      mergedAt: event.closer.mergedAt ?? null,
-      baseRefName: event.closer.baseRefName ?? null,
-      repository: event.closer.repository?.nameWithOwner ?? null,
-    }
-  } else closer = { kind: String(event.closer.__typename ?? 'unknown') }
   const issue = {
     number: issueNumber,
     state: String(node?.state ?? 'unknown').toLowerCase(),
     closedAt: node?.closedAt ?? null,
     assignees: (node?.assignees?.nodes ?? []).map((a) => a.login),
   }
+  return { issue, closer: closerFromTimeline(node) }
+}
+
+/** Path B's second read, only for a close that is not skipped or deferred: both threads' comments. */
+export async function fetchCloseComments({ gh, repo, issueNumber, channelIssue = CHANNEL_ISSUE }) {
   const comments = [...(await readComments({ gh, repo, issue: issueNumber }))]
   if (issueNumber !== channelIssue) comments.push(...(await readComments({ gh, repo, issue: channelIssue })))
-  return { issue, closer, comments }
+  return { comments }
 }
 
 /**
@@ -809,7 +901,7 @@ export async function prepareMerge({ pr, gh, repo, channelIssue = CHANNEL_ISSUE,
   let refsError = null
   if (pr.authorType === undefined || pr.authorType === 'User') {
     try {
-      refsInputs = await fetchRefsInputs({ gh, repo, prNumber: pr.number, exclude: closingIssues.map((c) => c.number) })
+      refsInputs = await fetchRefsInputs({ gh, repo, prNumber: pr.number, exclude: first.releases.map((r) => r.issue) })
     } catch (e) {
       refsError = String(e?.message ?? e)
       log(`could not read this merge's \`Refs\` references — no \`Refs\` release (release by hand if you claimed): ${refsError}`)
@@ -838,19 +930,25 @@ export async function applyMerge({ decision, refs, channelBodies }, { gh, repo, 
 }
 
 /**
- * One close run (Path B, the `issues: closed` job). `ev` is the event payload.
- * A close by a bot or App is decided from the payload alone and reads nothing.
+ * One close run (Path B, the `issues: closed` job), in three stages so that a
+ * close that cannot release costs as little as possible:
+ *   1. the payload gate (`closePayloadGate`): no read at all;
+ *   2. the timeline read and the deferral (`closeDeferral`): one GraphQL call;
+ *   3. only then both threads' comments (~16 REST pages with the channel).
+ * `ev` is the event payload.
  */
 export async function prepareClose({ ev, gh, repo, channelIssue = CHANNEL_ISSUE }) {
   const number = Number(ev?.issue?.number)
   const sender = { login: ev?.sender?.login ?? '', type: ev?.sender?.type ?? '' }
   const defaultBranch = ev?.repository?.default_branch ?? null
   const fromPayload = { number, state: 'closed', isPullRequest: Boolean(ev?.issue?.pull_request), author: ev?.issue?.user?.login ?? '', authorAssociation: ev?.issue?.author_association ?? 'NONE' }
-  if (!Number.isInteger(number) || number <= 0 || fromPayload.isPullRequest || number === channelIssue || sender.type !== 'User') {
-    return decideClose({ issue: fromPayload, sender, closer: null, defaultBranch, repo, comments: [], channelIssue })
-  }
-  const { issue, closer, comments } = await fetchCloseInputs({ gh, repo, issueNumber: number, channelIssue })
-  return decideClose({ issue: { ...issue, author: fromPayload.author, authorAssociation: fromPayload.authorAssociation }, sender, closer, defaultBranch, repo, comments, channelIssue })
+  const decideWith = (issue, closer, comments) => decideClose({ issue, sender, closer, defaultBranch, repo, comments, channelIssue })
+  if (!Number.isInteger(number) || number <= 0 || closePayloadGate({ ...fromPayload, sender, channelIssue })) return decideWith(fromPayload, null, [])
+  const { issue: readBackIssue, closer } = await fetchCloseTimeline({ gh, repo, issueNumber: number })
+  const issue = { ...readBackIssue, author: fromPayload.author, authorAssociation: fromPayload.authorAssociation }
+  if (issue.state !== 'closed' || closeDeferral({ issue, closer, defaultBranch, repo })) return decideWith(issue, closer, [])
+  const { comments } = await fetchCloseComments({ gh, repo, issueNumber: number, channelIssue })
+  return decideWith(issue, closer, comments)
 }
 
 // ---------------------------------------------------------------------------

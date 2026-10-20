@@ -444,13 +444,13 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
   // #3933: old budgets a replace retired in Haven but nobody stopped on-chain.
   // Row-level, from this list (every status) — never `live_delegation_count`.
   // A retired agent's "Finish revoking" (revoke-all) already covers them.
-  // #4154: minus the rows an open (or just-finished) edit flow owns.
-  const flowHashes = editingHashes ?? settlingHashes
+  // #4154: minus the rows an open edit flow owns, and those a just-finished
+  // one owns until its reload settles — both, so reopening Edit inside that
+  // window does not bring the flash back.
+  const flowHashes = [...(editingHashes ?? []), ...(settlingHashes ?? [])]
   const stillEnabled = retired
     ? []
-    : replacedButEnabledBudgets(budgets, nowSec).filter(
-        (b) => !flowHashes || !flowHashes.includes(b.delegation_hash.toLowerCase()),
-      )
+    : replacedButEnabledBudgets(budgets, nowSec).filter((b) => !flowHashes.includes(b.delegation_hash.toLowerCase()))
   // #3933: the live budget the form's current input would collide with — the
   // submit then opens the edit flow, and the hint says what that does.
   const formSlotMatch = grantInput && !budgetsError ? findOccupyingBudget(budgets, grantInput, nowSec) : null

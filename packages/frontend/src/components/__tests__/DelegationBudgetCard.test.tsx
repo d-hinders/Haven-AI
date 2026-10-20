@@ -1398,6 +1398,45 @@ describe('DelegationBudgetCard — no replaced-budget flash during an edit (#415
     expect(screen.queryByText(NOTICE)).toBeNull()
   })
 
+  it("a step-2 Stop finished from the modal's own screen counts as finished too", async () => {
+    const { view, edit } = await startEdit()
+    mockGet.mockReturnValue(afterActivate())
+    view.rerender(<DelegationBudgetCard {...PROPS} />)
+    await act(async () =>
+      edit.resolve({ ok: false, reason: 'revoke_unfinished', newDelegationHash: NEW_HASH, unstoppedDelegationHashes: [OLD_HASH], moved: false }),
+    )
+    const dialog = await screen.findByRole('dialog', { name: 'Edit budget' })
+    mockRevoke.mockResolvedValue({ ok: true })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Stop old budget' }))
+    await within(dialog).findByText('Budget updated')
+    expect(mockRevoke).toHaveBeenCalledWith(OLD_HASH)
+    const reloadAfterClose = deferred<void>()
+    mockReload.mockReset()
+    mockReload.mockReturnValue(reloadAfterClose.promise)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }))
+    expect(mockReload).toHaveBeenCalled()
+    expect(screen.queryByText(NOTICE)).toBeNull()
+    await act(async () => reloadAfterClose.resolve())
+  })
+
+  it('reopening Edit before the reload after a finished edit settles does not bring the flash back', async () => {
+    const { view, edit } = await startEdit()
+    mockGet.mockReturnValue(afterActivate())
+    view.rerender(<DelegationBudgetCard {...PROPS} />)
+    await act(async () => edit.resolve({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: true }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit budget' })
+    await within(dialog).findByText('Budget updated')
+    const reloadAfterClose = deferred<void>()
+    mockReload.mockReset()
+    mockReload.mockReturnValue(reloadAfterClose.promise)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }))
+    // Straight back into Edit on the NEW budget, the stale list still in hand.
+    fireEvent.click(screen.getByRole('button', { name: 'Edit budget 10 USDC per day' }))
+    await screen.findByRole('dialog', { name: 'Edit budget' })
+    expect(screen.queryByText(NOTICE)).toBeNull()
+    await act(async () => reloadAfterClose.resolve())
+  })
+
   it('a finished edit whose reload still reads the row `replaced` shows the notice — the server has the last word', async () => {
     const { view, edit } = await startEdit()
     mockGet.mockReturnValue(afterActivate())

@@ -6704,7 +6704,8 @@ export const SCENARIOS = {
       if (apiPath === '/dashboard/overview') {
         const [base] = FIXTURE_OVERVIEW.activity
         const at = (secondsBefore) => new Date(Date.parse(base.latestAt) - secondsBefore * 1000).toISOString()
-        const plainTransfer = { ...base, agentId: null, agentName: null, source: null, x402ResourceUrl: null }
+        // Single, exact payments: the fixture group's floored count would read "×3+" on rows that are one transfer each.
+        const plainTransfer = { ...base, count: 1, countIsFloor: undefined, agentId: null, agentName: null, source: null, x402ResourceUrl: null }
         return {
           ...FIXTURE_OVERVIEW,
           activity: [

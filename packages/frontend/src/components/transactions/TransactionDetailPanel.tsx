@@ -165,12 +165,13 @@ export default function TransactionDetailPanel({
   )
 
   // #3811: the headline is the user's currency — book-time `convertedAmount`
-  // plain, serve-time `approxAmount` with `≈`, an unknown valuation as an em
+  // plain, serve-time `approxAmount` with `≈` when the conversion changes the
+  // number (#4165: never for USDC shown in USD), an unknown valuation as an em
   // dash — and the token amount stays beside it (owner decision, #3811): the
   // drawer is where users verify a payment, so the exact on-chain figure is
   // on the same glance as the valuation. The currency figure carries the
   // sign; the token amount reads signless beside it.
-  const fiat = transactionFiat(tx)
+  const fiat = transactionFiat(tx, 'detail')
 
   return (
     <SidePanel

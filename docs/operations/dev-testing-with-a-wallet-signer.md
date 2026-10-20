@@ -30,7 +30,7 @@ the passkey you create stays reachable. (Not `haven-ai-frontend.vercel.app`,
 which is production.)
 
 1. **Sign up** with email + password, then create your account with a passkey
-   (Face ID, Touch ID, Windows Hello, or your device PIN).
+   (usually approved with your device's screen lock).
 2. **Account page → Backup & recovery → add a wallet.** Paste your wallet's
    address and approve with your passkey. You supply the address only — the wallet
    doesn't need to be connected, and you pay no gas.

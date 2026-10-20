@@ -39,6 +39,19 @@ test('flags owner signing phrasings: owner money actions say approve (copy-guide
   assert.equal(findCopyIssues('const s = "the agent signs the payment with its own key"\n').length, 0)
 })
 
+test('flags platform names: say passkey, never Face ID / Touch ID / Windows Hello (#4168)', () => {
+  for (const phrase of [
+    'One Face ID prompt creates an account',
+    'Face ID or Touch ID. You stay in control.',
+    'Approve with your device PIN or Windows Hello',
+  ]) {
+    assert.ok(findCopyIssues(`const s = "${phrase}"\n`).length > 0, `expected a flag for: ${phrase}`)
+  }
+  assert.equal(findCopyIssues('const s = "One passkey prompt creates an account"\n').length, 0)
+  // A line that must quote the old wording carries the marker.
+  assert.equal(findCopyIssues('- "a second Face ID" <!-- copy-lint-ignore -->\n').length, 0)
+})
+
 test('does NOT flag a bare generic word', () => {
   // "Safe", "owner", "deploy" must never trip the lint (only multi-word phrases).
   assert.equal(findCopyIssues('const safe = useSafe(); const owner = a.owner\n').length, 0)

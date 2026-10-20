@@ -529,29 +529,47 @@ describe('the transactions table renders the user currency (#3811)', () => {
   })
 })
 
-describe('transactionFiat (#3811)', () => {
-  it('prefers book-time convertedAmount, plain', () => {
+describe('transactionFiat (#3811, #4165)', () => {
+  it('prefers book-time convertedAmount, plain — even in the detail panel', () => {
     expect(
-      transactionFiat({
-        convertedAmount: '134.5000',
-        convertedCurrency: 'SEK',
-        approxAmount: '99.00',
-        approxCurrency: 'USD',
-      }),
+      transactionFiat(
+        {
+          convertedAmount: '134.5000',
+          convertedCurrency: 'SEK',
+          approxAmount: '99.00',
+          approxCurrency: 'USD',
+          chainId: 8453,
+          asset: 'USDC',
+        },
+        'detail',
+      ),
     ).toEqual({ amount: 134.5, currency: 'SEK', approx: false })
   })
 
-  it('falls back to the serve-time approxAmount with the ≈ mark', () => {
-    expect(
-      transactionFiat({ convertedAmount: null, convertedCurrency: undefined, approxAmount: '12.25', approxCurrency: 'USD' }),
-    ).toEqual({ amount: 12.25, currency: 'USD', approx: true })
+  it('marks a serve-time figure in another currency ≈ in the detail panel, never in a row', () => {
+    const sek = { convertedAmount: null, approxAmount: '134.50', approxCurrency: 'SEK' as const, chainId: 8453, asset: 'USDC' }
+    expect(transactionFiat(sek, 'detail')).toEqual({ amount: 134.5, currency: 'SEK', approx: true })
+    expect(transactionFiat(sek, 'row')).toEqual({ amount: 134.5, currency: 'SEK', approx: false })
   })
 
-  it('prices an unknown valuation as null — never 0', () => {
-    expect(transactionFiat({ convertedAmount: null, approxAmount: null })).toEqual({
+  it('never marks USDC shown in USD — the figure is dollars', () => {
+    const usd = { convertedAmount: null, approxAmount: '12.25', approxCurrency: 'USD' as const, chainId: 8453, asset: 'USDC' }
+    expect(transactionFiat(usd, 'detail')).toEqual({ amount: 12.25, currency: 'USD', approx: false })
+    // `tokenSymbol` wins over `asset` when the feed serves both.
+    expect(transactionFiat({ ...usd, asset: '0xabc', tokenSymbol: 'USDC' }, 'detail').approx).toBe(false)
+  })
+
+  it('keeps the mark for a token that floats, even in USD', () => {
+    expect(
+      transactionFiat({ convertedAmount: null, approxAmount: '30.00', approxCurrency: 'USD', chainId: 8453, asset: 'ETH' }, 'detail'),
+    ).toEqual({ amount: 30, currency: 'USD', approx: true })
+  })
+
+  it('prices an unknown valuation as null — never 0, and never marked', () => {
+    expect(transactionFiat({ convertedAmount: null, approxAmount: null }, 'detail')).toEqual({
       amount: null,
       currency: 'SEK',
-      approx: true,
+      approx: false,
     })
   })
 })

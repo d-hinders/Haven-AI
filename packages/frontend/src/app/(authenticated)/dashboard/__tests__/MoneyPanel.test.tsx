@@ -71,7 +71,11 @@ function agent(id: string, name: string, d30NetUsd: number): DashboardAgentPrevi
 
 function overview(overrides: {
   d30NetUsd: number
+  d30NetSek?: number
   d30Approx?: boolean
+  /** #4165: the server's per-currency "≈" decision; omitted = an older backend. */
+  d30ApproxByCurrency?: { usd: boolean; eur: boolean; sek: boolean }
+  d30UnpricedByCurrency?: { usd: boolean; eur: boolean; sek: boolean }
   agents: DashboardAgentPreview[]
 }): DashboardOverviewResponse {
   return {
@@ -102,8 +106,10 @@ function overview(overrides: {
       },
       d30: {
         gross: { usd: 0, eur: 0, sek: 0 },
-        net: { usd: overrides.d30NetUsd, eur: 0, sek: 0 },
+        net: { usd: overrides.d30NetUsd, eur: 0, sek: overrides.d30NetSek ?? 0 },
         approx: overrides.d30Approx ?? false,
+        ...(overrides.d30ApproxByCurrency ? { approxByCurrency: overrides.d30ApproxByCurrency } : {}),
+        ...(overrides.d30UnpricedByCurrency ? { unpricedByCurrency: overrides.d30UnpricedByCurrency } : {}),
         payments: 0,
         distinctMerchants: 0,
         budgetStops: 0,
@@ -134,7 +140,48 @@ describe('MoneyPanel — spending breakdown reconciles with the headline (#3807 
     expect(row).toHaveTextContent('$16.79')
   })
 
-  it('marks the remainder ≈ when the window it is derived from is re-priced', () => {
+  it('re-priced USDC in USD carries no ≈ — on the total or the remainder (#4165)', () => {
+    render(
+      <MoneyPanel
+        {...baseProps}
+        overview={overview({
+          d30NetUsd: 51.76,
+          d30Approx: true,
+          d30ApproxByCurrency: { usd: false, eur: true, sek: true },
+          agents: [agent('a1', 'Research agent', 17.485), agent('a2', 'Data-feed agent', 17.485)],
+        })}
+      />,
+    )
+
+    const row = screen.getByText('Agents since removed').closest('div')
+    expect(row).not.toHaveTextContent('\u2248')
+    expect(screen.queryByTitle("Converted at today's rate")).not.toBeInTheDocument()
+  })
+
+  it('marks the total and the remainder ≈ in another currency, where the conversion changes the number', () => {
+    render(
+      <MoneyPanel
+        {...baseProps}
+        currency="SEK"
+        overview={overview({
+          d30NetUsd: 51.76,
+          d30NetSek: 556.94,
+          d30Approx: true,
+          d30ApproxByCurrency: { usd: false, eur: true, sek: true },
+          agents: [agent('a1', 'Research agent', 0), agent('a2', 'Data-feed agent', 0)].map((row) => ({
+            ...row,
+            stats: { ...row.stats, d30: { ...row.stats.d30, net: { usd: 0, eur: 0, sek: 188.14 } } },
+          })),
+        })}
+      />,
+    )
+
+    const row = screen.getByText('Agents since removed').closest('div')
+    expect(row).toHaveTextContent('\u2248')
+    expect(screen.getAllByTitle("Converted at today's rate").length).toBeGreaterThan(1)
+  })
+
+  it('falls back to the provenance flag when an older backend sends no per-currency decision', () => {
     render(
       <MoneyPanel
         {...baseProps}
@@ -148,6 +195,28 @@ describe('MoneyPanel — spending breakdown reconciles with the headline (#3807 
 
     const row = screen.getByText('Agents since removed').closest('div')
     expect(row).toHaveTextContent('\u2248')
+  })
+
+  it('an unpriced 30-day total says so in words, and with nothing priced reads "—", never "$0.00" (#4165)', () => {
+    render(
+      <MoneyPanel
+        {...baseProps}
+        overview={overview({
+          d30NetUsd: 0,
+          d30Approx: true,
+          d30ApproxByCurrency: { usd: false, eur: false, sek: false },
+          d30UnpricedByCurrency: { usd: true, eur: false, sek: false },
+          agents: [],
+        })}
+      />,
+    )
+
+    expect(screen.getByText('Some amounts couldn’t be valued and aren’t included.')).toBeInTheDocument()
+    // The spend half's headline — not the balance half, which has its own $0.00.
+    const spending = screen.getByText('Agent spending, last 30 days').parentElement!
+    expect(spending).not.toHaveTextContent('$0.00')
+    expect(within(spending).getByText('\u2014')).toBeInTheDocument()
+    expect(spending).not.toHaveTextContent('\u2248')
   })
 
   it('renders no remainder row when the agent rows already account for the total', () => {

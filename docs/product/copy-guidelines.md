@@ -178,14 +178,21 @@ Avoid:
 - “You sign once to give …”
 - “Waiting for your signature…”, “Signature was cancelled.”
 
-### Use “passkey” but anchor it in familiar actions
+### Say “passkey”, never a platform or biometric name
 
-It is okay to mention passkeys. Say “passkey” first, then connect it to familiar
-examples such as Face ID, Touch ID, Windows Hello, or a device PIN.
+It is okay to mention passkeys. Say “passkey”, and nothing else, for the thing
+the user approves with: no platform or biometric names, in any position — not
+as a label, not as an example in brackets, not as subtext (owner decision,
+2026-10-20, on [#4093](https://github.com/d-hinders/Haven-AI/issues/4093)).
+Platform names are false on some devices and change with the device; the
+passkey is the one fact that holds everywhere. When a familiar anchor helps,
+point at the device's screen lock, hedged with “usually”: a passkey can also
+live on a security key, a password manager or another phone.
 
 Preferred:
 - “Use a passkey”
-- “Approve with Face ID, Touch ID, Windows Hello, or your device PIN”
+- “Approve with your passkey (usually your device's screen lock).”
+- “One passkey prompt”
 - “Create a secure passkey to approve actions in your Haven account”
 - “Fastest option. Creates a secure passkey.”
 - “Continue with a passkey”
@@ -203,11 +210,11 @@ device or browser the user should return to and give a concrete recovery action.
 
 ### Name credentials “passkey”, never a platform brand ([#1679](https://github.com/d-hinders/Haven-AI/issues/1679))
 
-A platform name is an anchor, never the *name* of a credential. “Face ID /
-Touch ID” as a row label is wrong three ways: it inverts the anchor rule above,
-it is false on Windows and Android, and any positional variant (“Face ID for
-the first key, Backup N for the rest”) silently misnames the surviving key
-after a recovery removes the original.
+A platform name is never the *name* of a credential. A platform brand as a row
+label is wrong three ways: it breaks the passkey-only rule above, it is false
+on other platforms, and any positional variant (a brand for the first key,
+“Backup N” for the rest) silently misnames the surviving key after a recovery
+removes the original.
 
 Credential rows (signer lists, “ways to approve”):
 
@@ -223,20 +230,25 @@ Credential rows (signer lists, “ways to approve”):
   which one. When the wallet is the one connected on this device, the row may
   name the connector: “Browser wallet · MetaMask”.
 
-Action copy keeps the anchor pattern — passkey first, familiar examples second,
-ideally as subtext:
+Action copy names the passkey, with the screen-lock anchor as subtext when one
+helps:
 
-- Button “Add a backup passkey” with subtext “Approve with Face ID, Touch ID,
-  Windows Hello, or your device PIN”
+- Button “Add a backup passkey” with subtext “Approve with your passkey
+  (usually your device's screen lock).”
 - “Create account with a passkey”
 - “Waiting for your passkey…” / “The passkey prompt was cancelled.”
 
-Avoid:
+Avoid — a platform or biometric name in any position (copy lint enforces the
+three platform names in product copy):
 
-- “Face ID / Touch ID” as a row label or credential name
-- “Add a backup with Face ID / Touch ID”
-- “Waiting for Face ID or Touch ID...”
-- “a second Face ID” (say “a backup passkey”)
+- “Face ID / Touch ID” as a row label or credential name <!-- copy-lint-ignore -->
+- “Add a backup with Face ID / Touch ID” <!-- copy-lint-ignore -->
+- “Waiting for Face ID or Touch ID...” <!-- copy-lint-ignore -->
+- “a second Face ID” (say “a backup passkey”) <!-- copy-lint-ignore -->
+- “Approve with Face ID, Touch ID, Windows Hello, or your device PIN” <!-- copy-lint-ignore -->
+- “One Face ID prompt” (say “one passkey prompt”) <!-- copy-lint-ignore -->
+- “Your face or fingerprint approves everything” (say “Your passkey approves
+  everything”)
 
 User-editable credential nicknames are deliberately deferred (#1679) — date +
 kind is enough at two or three credentials; revisit if users accumulate more.
@@ -344,7 +356,7 @@ Welcome, Ada
 
 Create your Haven account
 
-Your face or fingerprint approves everything — budgets, agents, changes.
+Your passkey approves everything — budgets, agents, changes.
 No wallet, no seed phrase, nothing to install.
 
 Network
@@ -378,7 +390,7 @@ Preferred:
 
 ```text
 This browser can't create a passkey, and Haven needs one. Open Haven in Safari,
-Chrome, or Edge on a device with Face ID, Touch ID, Windows Hello, or a device PIN.
+Chrome, or Edge on a device with a screen lock.
 ```
 
 Avoid:
@@ -734,7 +746,7 @@ procedure: its shared label copy lives in `lib/label-copy.ts` and is named in
 4. Explain control and safety in plain language.
 5. Avoid crypto jargon in onboarding unless it is necessary.
 6. Use “Haven account” and “Haven wallet” consistently.
-7. Mention passkeys first, then use the user's biometric or device PIN as a familiar example.
+7. Say “passkey”; never name a platform or biometric (Face ID, Touch ID, Windows Hello, a fingerprint). <!-- copy-lint-ignore -->
 8. Use “rules” and “budgets” for agent spending controls.
 9. Keep advanced details available, but not central.
 10. Prefer confidence over over-explanation.
@@ -747,9 +759,8 @@ passkey prompt and no new passkey. Before that prompt it states three facts,
 each as an outcome:
 
 ```text
-Secured by the passkey you use next. Your device asks for it once (Face ID,
-Touch ID, Windows Hello, or your device PIN), and it becomes the only way to
-approve actions in the new account.
+Secured by the passkey you use next. Your device asks for it once, and it
+becomes the only way to approve actions in the new account.
 
 Backups don't carry over. A backup passkey or wallet on another account
 doesn't protect this one, so add one on the new account's page.

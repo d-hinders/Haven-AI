@@ -288,6 +288,8 @@ describe('OnboardingClient (#1162)', () => {
     // Precondition — without it the assertions below could pass vacuously.
     expect(screen.getByLabelText('Network')).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Create your Haven account' })).toBeTruthy()
+    // #4168: the intro names the passkey, never a biometric.
+    expect(screen.getByText(/Your passkey approves everything/)).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: 'report-blocked' }))
 
@@ -295,6 +297,6 @@ describe('OnboardingClient (#1162)', () => {
       expect(screen.getByRole('heading', { name: 'Finish on another device' })).toBeTruthy(),
     )
     expect(screen.queryByLabelText('Network')).toBeNull()
-    expect(screen.queryByText(/Your face or fingerprint approves everything/)).toBeNull()
+    expect(screen.queryByText(/Your passkey approves everything/)).toBeNull()
   })
 })

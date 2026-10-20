@@ -30,6 +30,7 @@ export function TransactionActivityRow({
   countLabel,
   fiat,
   onOpen,
+  insetDivider = false,
 }: {
   title: string
   description?: ReactNode
@@ -45,7 +46,8 @@ export function TransactionActivityRow({
    * Currency mode (#3805, #3810): the row's figure is ALREADY a fiat
    * valuation server-side (book-time `convertedAmount`, or #3824's
    * `approxAmount`), so the amount renders through <Amount>'s currency mode —
-   * `≈` for serve-time, an em dash for an unknown valuation. Omitted for
+   * an em dash for an unknown valuation, and `approx` as the caller's
+   * `shouldMarkApprox` answer for a row, which is never a mark (#4165). Omitted for
    * token-denominated rows (the transactions table) — the default keeps every
    * existing caller byte-identical.
    */
@@ -83,6 +85,14 @@ export function TransactionActivityRow({
    * interaction of their own.
    */
   onOpen?: () => void
+  /**
+   * Same-day divider (#4165, owner decision 2026-10-20 on #4093): a hairline
+   * in `--v2-border-subtle` along the row's top edge, inset to start at the
+   * text column (after the direction mark) and end at the row's padding. A
+   * ledger passes it for every row after the first in a day group; the day
+   * groups themselves keep their full-width `--v2-border` separation.
+   */
+  insetDivider?: boolean
 }) {
   const isCompact = density === 'compact'
   // Compact density pins the row to 72px so the dashboard's agents and
@@ -107,6 +117,14 @@ export function TransactionActivityRow({
   // is variable-height (a wrapping <TransactionMovement>, an optional status
   // badge), so any fixed value is a new overlap waiting for the first string
   // long enough to exceed it.
+  // The inset is the row's own geometry — padding, the mark (32px compact,
+  // 36px comfortable) and the 12px gap — so the hairline starts exactly where
+  // the title does at every breakpoint.
+  const dividerClass = insetDivider
+    ? ` before:pointer-events-none before:absolute before:top-0 before:h-px before:bg-[var(--v2-border-subtle)] before:content-[''] before:right-4 sm:before:right-5 ${
+        isCompact ? 'before:left-[60px] sm:before:left-[64px]' : 'before:left-[64px] sm:before:left-[68px]'
+      }`
+    : ''
   const containerPadding = isCompact
     ? 'gap-3 px-4 py-3 sm:px-5 sm:py-0 sm:h-[72px]'
     : 'gap-3 px-4 py-4 sm:px-5'
@@ -131,7 +149,8 @@ export function TransactionActivityRow({
   return (
     <div
       {...interactiveProps}
-      className={`grid transition-colors hover:bg-[var(--v2-surface-hover)] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${containerPadding}${onOpen ? ' cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80' : ''}`}
+      data-inset-divider={insetDivider ? '' : undefined}
+      className={`relative grid transition-colors hover:bg-[var(--v2-surface-hover)] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${containerPadding}${dividerClass}${onOpen ? ' cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80' : ''}`}
     >
       {/* `items-start` below `sm`, centred at `sm` and up (#1833 review).
           Centring the mark against the WHOLE text block reads correctly while

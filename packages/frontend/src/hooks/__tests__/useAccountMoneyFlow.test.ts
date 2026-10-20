@@ -81,7 +81,7 @@ describe('useAccountMoneyFlow (#4097)', () => {
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.moneyIn).toBe(10)
     expect(result.current.moneyOut).toBe(4)
-    expect(result.current.approx).toBe(false)
+    expect(result.current.approxIn).toBe(false)
     expect(result.current.partial).toBe(false)
     expect(mockApiGet).toHaveBeenCalledTimes(1)
   })
@@ -98,7 +98,7 @@ describe('useAccountMoneyFlow (#4097)', () => {
     expect(result.current.moneyOut).toBe(3)
   })
 
-  it('marks the totals approx when a row was priced at serve time', async () => {
+  it('a serve-time USDC row in USD is summed WITHOUT ≈ — USDC is dollars (#4165)', async () => {
     mockApiGet.mockResolvedValue(
       page([
         tx({ direction: 'in', convertedAmount: '10.00', timestamp: NOW_SEC - DAY }),
@@ -109,10 +109,34 @@ describe('useAccountMoneyFlow (#4097)', () => {
     const { result } = renderHook(() => useAccountMoneyFlow('safe-1', 'USD'))
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.moneyIn).toBe(15)
-    expect(result.current.approx).toBe(true)
+    expect(result.current.approxIn).toBe(false)
+    expect(result.current.unpriced).toBe(false)
   })
 
-  it('a row with no usable price contributes nothing and marks the totals approx', async () => {
+  it('marks the totals ≈ when a row was priced at serve time in another currency (SEK)', async () => {
+    mockApiGet.mockResolvedValue(
+      page([
+        tx({ direction: 'in', convertedAmount: '107.60', convertedCurrency: 'SEK', timestamp: NOW_SEC - DAY }),
+        tx({ direction: 'in', convertedAmount: null, approxAmount: '53.80', approxCurrency: 'SEK', timestamp: NOW_SEC - DAY }),
+      ]),
+    )
+    const { result } = renderHook(() => useAccountMoneyFlow('safe-1', 'SEK'))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.moneyIn).toBeCloseTo(161.4)
+    expect(result.current.approxIn).toBe(true)
+  })
+
+  it('marks only the direction that converted — an empty Money in never reads "≈ 0,00 kr"', async () => {
+    mockApiGet.mockResolvedValue(
+      page([tx({ direction: 'out', convertedAmount: null, approxAmount: '145.26', approxCurrency: 'SEK', timestamp: NOW_SEC - DAY })]),
+    )
+    const { result } = renderHook(() => useAccountMoneyFlow('safe-1', 'SEK'))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.approxIn).toBe(false)
+    expect(result.current.approxOut).toBe(true)
+  })
+
+  it('a row with no usable price contributes nothing and says so — unpriced, not ≈ (#4165)', async () => {
     mockApiGet.mockResolvedValue(
       page([
         tx({ direction: 'in', convertedAmount: '10.00', timestamp: NOW_SEC - DAY }),
@@ -122,7 +146,22 @@ describe('useAccountMoneyFlow (#4097)', () => {
     const { result } = renderHook(() => useAccountMoneyFlow('safe-1', 'USD'))
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.moneyIn).toBe(10)
-    expect(result.current.approx).toBe(true)
+    expect(result.current.approxIn).toBe(false)
+    expect(result.current.unpriced).toBe(true)
+  })
+
+  it('a direction with nothing priceable totals null ("—"), never 0 (#4165)', async () => {
+    mockApiGet.mockResolvedValue(
+      page([
+        tx({ direction: 'out', convertedAmount: null, approxAmount: null, timestamp: NOW_SEC - DAY }),
+        tx({ direction: 'in', convertedAmount: '10.00', timestamp: NOW_SEC - DAY }),
+      ]),
+    )
+    const { result } = renderHook(() => useAccountMoneyFlow('safe-1', 'USD'))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.moneyOut).toBeNull()
+    expect(result.current.moneyIn).toBe(10)
+    expect(result.current.unpriced).toBe(true)
   })
 
   it('pages forward and stops once a page crosses the window start', async () => {

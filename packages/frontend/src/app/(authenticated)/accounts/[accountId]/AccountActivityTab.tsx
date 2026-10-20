@@ -50,6 +50,7 @@ import {
 } from '@/components/ui/list-url-codec'
 import { useListUrlState } from '@/components/ui/useListUrlState'
 import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
+import { UNPRICED_TOTALS_NOTE } from '@/lib/money-flow-tally'
 import { useActivityMoneyTotals } from '@/hooks/useActivityMoneyTotals'
 import { useUnfilteredTransactionTotal } from '@/hooks/useUnfilteredTransactionTotal'
 import { useTransactionFilters } from '@/hooks/useTransactionFilters'
@@ -156,14 +157,17 @@ function ActivityLedgerRow({
   resolveAddress,
   accountNamesByAddress,
   onOpen,
+  insetDivider,
 }: {
   tx: AggregatedTransaction
   resolveAddress: (address: string) => string | null
   accountNamesByAddress: Map<string, string>
   onOpen: () => void
+  /** #4165: the same-day inset hairline, on every row after a day's first. */
+  insetDivider: boolean
 }) {
   const badge = transactionStatus(tx) ?? tx.statusBadge
-  const fiat = transactionFiat(tx)
+  const fiat = transactionFiat(tx, 'row')
   return (
     <TransactionActivityRow
       title={transactionTitle(tx)}
@@ -175,9 +179,10 @@ function ActivityLedgerRow({
       statusTone={badge?.tone}
       timestamp={timeAgo(tx.timestamp * 1000)}
       direction={tx.direction}
-      fiat={{ amount: fiat.amount, currency: fiat.currency, approx: fiat.approx }}
+      fiat={fiat}
       density="compact"
       onOpen={onOpen}
+      insetDivider={insetDivider}
     />
   )
 }
@@ -460,12 +465,19 @@ export default function AccountActivityTab({
           failed read — no figure is better than a wrong one; the feed's own
           error state carries the retry story. */}
       {!loadingInitial && !moneyTotals.loading && !moneyTotals.error && total > 0 && (
-        <p className="mt-3 text-sm text-[var(--v2-ink-2)]">
-          Money in{' '}
-          <Amount amount={moneyTotals.moneyIn} currency={currency} approx={moneyTotals.approx} /> ·
-          Money out{' '}
-          <Amount amount={moneyTotals.moneyOut} currency={currency} approx={moneyTotals.approx} />
-        </p>
+        <>
+          <p className="mt-3 text-sm text-[var(--v2-ink-2)]">
+            Money in{' '}
+            <Amount amount={moneyTotals.moneyIn} currency={currency} approx={moneyTotals.approxIn} /> ·
+            Money out{' '}
+            <Amount amount={moneyTotals.moneyOut} currency={currency} approx={moneyTotals.approxOut} />
+          </p>
+          {/* #4165: rows the totals could not value are said in words, never
+              folded into a "≈" — the mark means converted, nothing else. */}
+          {moneyTotals.unpriced ? (
+            <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{UNPRICED_TOTALS_NOTE}</p>
+          ) : null}
+        </>
       )}
       {/* #2882: `total` counts what the explorers returned, not what the
           wallet holds — each source is read only up to a fixed page budget.
@@ -549,6 +561,7 @@ export default function AccountActivityTab({
                       resolveAddress={resolveAddress}
                       accountNamesByAddress={accountNamesByAddress}
                       onOpen={() => setSelectedTx(tx)}
+                      insetDivider={index > 0}
                     />
                   ))}
                 </div>

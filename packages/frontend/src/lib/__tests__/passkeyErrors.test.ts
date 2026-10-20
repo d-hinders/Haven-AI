@@ -18,7 +18,7 @@ describe('isPasskeyCancellation', () => {
 
   it('matches the real ox SignFailedError wrapping a NotAllowedError cause', () => {
     // This is what `WebAuthnP256.sign` actually throws when the user
-    // dismisses the Face ID sheet: SignFailedError with the DOMException as
+    // dismisses the passkey prompt: SignFailedError with the DOMException as
     // its `cause`.
     const err = new SignFailedError({
       cause: new DOMException(

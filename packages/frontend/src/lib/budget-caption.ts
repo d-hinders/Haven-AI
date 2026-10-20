@@ -1,4 +1,4 @@
-import { currentPeriodBounds } from '@haven_ai/core'
+import { currentPeriodBounds, shouldMarkApprox } from '@haven_ai/core'
 import { formatAllowanceAmount, getTokenDecimals } from './allowance-format'
 import { formatFiatDisplay } from './format'
 
@@ -122,8 +122,9 @@ export function nextRefillAt(startSec: number, periodSeconds: number, nowMs: num
 // Token mode is the budget card's voice: the delegation's own units, always
 // two decimals ("1.25 of 5.00 USDC"). Currency mode is everywhere else: a
 // rate supplied by the caller converts the token amounts to the display
-// currency, and the caption carries ONE leading "≈" because a spot rate is an
-// estimate. An unknown rate falls back to token mode.
+// currency, and the caption carries at most ONE leading "≈" — only where the
+// one rule (`shouldMarkApprox`, #4165) says the conversion changes the number,
+// so USDC in USD carries none. An unknown rate falls back to token mode.
 
 export type BudgetRate = { currency: 'USD' | 'EUR' | 'SEK'; /** Fiat per one token unit. */ perToken: number }
 
@@ -157,13 +158,22 @@ function fiatValue(atomic: string, symbol: string, rate: BudgetRate, chainId: nu
   return formatFiatDisplay(human * rate.perToken, rate.currency)
 }
 
+/** "≈" when the one rule says the conversion changes the number (#4165), else nothing. */
+function approxPrefix(symbol: string, chainId: number | null | undefined, rate: BudgetRate): string {
+  return shouldMarkApprox({ repriced: true, chainId, tokenSymbol: symbol, displayCurrency: rate.currency, kind: 'total' })
+    ? '≈'
+    : ''
+}
+
 /**
- * One budget amount in the mode `options` selects: token units, or "≈" fiat —
- * the "≈" marks the estimate a spot rate always is.
+ * One budget amount in the mode `options` selects: token units, or fiat —
+ * marked "≈" where the conversion changes the number.
  */
 export function budgetAmount(atomic: string, symbol: string, options: BudgetAmountOptions = {}): string {
   const { chainId = null, rate } = options
-  return rate ? `≈${fiatValue(atomic, symbol, rate, chainId)}` : `${tokenAmount(atomic, symbol, chainId)} ${symbol}`.trim()
+  return rate
+    ? `${approxPrefix(symbol, chainId, rate)}${fiatValue(atomic, symbol, rate, chainId)}`
+    : `${tokenAmount(atomic, symbol, chainId)} ${symbol}`.trim()
 }
 
 // ── The caption ─────────────────────────────────────────────────────────────
@@ -212,8 +222,8 @@ export interface BudgetCaptionOptions {
   /** Currency mode; absent or unresolvable → token mode. */
   rate?: BudgetRate | null
   /**
-   * #3908: `'row'` is the dashboard agent row's compact meter caption, as the
-   * mockup draws it — "≈$0.40 of $1.00 · per day · refills in 5h". The bar
+   * #3908: `'row'` is the shared agent row's compact meter caption — "1.20
+   * of 3.00 USDC · per day · refills in 5h" (token mode since #4165). The bar
    * already shows usage, so "used this period" gives way to the period word.
    * Default `'full'` keeps every other surface's wording.
    */
@@ -254,9 +264,10 @@ function usedPercentOf(usedAtomic: string, budgetAtomic: string): number | null 
 function meterCaption(row: BudgetCaptionRow, options: BudgetCaptionOptions): string {
   const { nowMs, timeZone, rate, style = 'full' } = options
   const figures = rate
-    ? // Currency mode: ONE leading "≈" for the caption — a spot rate is an
-      // estimate, and the estimate covers the line, not each figure.
-      `≈${fiatValue(row.usedAtomic ?? '0', row.symbol, rate, row.chainId)} of ${fiatValue(row.budgetAtomic, row.symbol, rate, row.chainId)}`
+    ? // Currency mode: at most ONE leading "≈" for the caption — the estimate
+      // covers the line, not each figure — and only where the one rule says
+      // the conversion changes the number (#4165): USDC in USD carries none.
+      `${approxPrefix(row.symbol, row.chainId, rate)}${fiatValue(row.usedAtomic ?? '0', row.symbol, rate, row.chainId)} of ${fiatValue(row.budgetAtomic, row.symbol, rate, row.chainId)}`
     : // The dashboard row (#3910) joins the cap and its symbol with a no-break
       // space: its amounts segment may wrap at its own spaces, and "3.00" /
       // "USDC" must not land on separate lines. Other surfaces keep a plain one.

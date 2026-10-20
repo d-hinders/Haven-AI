@@ -5210,7 +5210,7 @@ export const SCENARIOS = {
 
       await page.getByRole('heading', { name: 'Backup & recovery' }).waitFor({ timeout: 15_000 })
       // The wallet row is first; this opens the confirmation for the remaining
-      // Face ID / Touch ID without executing any signer change.
+      // passkey without executing any signer change.
       await page.getByRole('button', { name: 'Remove', exact: true }).nth(1).click()
       const dialog = page.getByRole('dialog')
       await dialog.getByRole('heading', { name: 'Remove this approval?' }).waitFor({ timeout: 15_000 })

@@ -18,8 +18,10 @@
  * - **The spending figures are #3803's NET definition** (`spend.d30.net`) —
  *   the same booked-or-repriced, sweep-netted numbers the analytics page
  *   shows, so the two surfaces cannot disagree. `≈` marks a window whose
- *   NULL-booked rows were priced at today's rate (owner decision 1): a
- *   re-priced total is never shown as booked.
+ *   NULL-booked rows were priced at today's rate (owner decision 1) where the
+ *   conversion changes the number — the server's per-currency
+ *   `approxByCurrency` (#4165), so re-priced USDC in USD carries none — and a
+ *   bucket it could not price says so in words (`unpricedByCurrency`).
  * - **The sparkline is #3805's**, fed from `spend.balance_by_day`: a day with
  *   no snapshot is skipped, never zero, and the line connects across it
  *   (#3897) in a dense 30-day window; fewer than 3 measured days renders the
@@ -38,6 +40,7 @@ import { BalanceFreshnessIndicator } from '@/components/haven'
 import PasskeyOtherDeviceNotice from '@/components/PasskeyOtherDeviceNotice'
 import { PageHeader } from '@haven_ai/ui/PageHeader'
 import { formatFiat, currencyLocale, SUB_CENT_THRESHOLD } from '@/lib/format'
+import { UNPRICED_TOTALS_NOTE } from '@/lib/money-flow-tally'
 import {
   buildDashboardSummary,
   type DashboardSummaryAgent,
@@ -253,12 +256,18 @@ export default function MoneyPanel({
     ? balanceSparkPoints(spend.balance_by_day, currency)
     : []
 
+  // #4165: the server's per-currency "≈" decision and unpriced flag. A
+  // backend older than #4165 sends neither; the provenance `approx` is the
+  // fallback, which only ever shows MORE marks, never a missing one.
+  const spendApprox = d30 ? (d30.approxByCurrency?.[bucket] ?? d30.approx) : false
+  const spendUnpriced = d30?.unpricedByCurrency?.[bucket] ?? false
+
   const perAgentSpend = (overview?.agents ?? [])
     .map((agent: DashboardAgentPreview) => ({
       id: agent.id,
       name: agent.name,
       value: agent.stats.d30.net[bucket],
-      approx: agent.stats.d30.approx,
+      approx: agent.stats.d30.approxByCurrency?.[bucket] ?? agent.stats.d30.approx,
     }))
     .filter((row) => row.value > 0)
     .sort((a, b) => b.value - a.value)
@@ -320,12 +329,22 @@ export default function MoneyPanel({
         ) : unavailable ? (
           <p className="text-2xl font-semibold tracking-tight text-[var(--v2-ink-3)] v2-tabular">—</p>
         ) : d30 ? (
-          <Amount
-            amount={d30.net[bucket]}
-            currency={currency}
-            approx={d30.approx}
-            size="lg"
-          />
+          <>
+            {/* #4165: the server applies the one "≈" rule per currency
+                (`approxByCurrency`, so USDC in USD never marks), and a
+                bucket it could not price says so in words. With every
+                re-priced row unpriced and nothing booked, the total is
+                unknown — "—", never "$0.00". */}
+            <Amount
+              amount={spendUnpriced && d30.net[bucket] === 0 ? null : d30.net[bucket]}
+              currency={currency}
+              approx={spendApprox}
+              size="lg"
+            />
+            {spendUnpriced ? (
+              <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{UNPRICED_TOTALS_NOTE}</p>
+            ) : null}
+          </>
         ) : null}
       </div>
 
@@ -380,7 +399,7 @@ export default function MoneyPanel({
                 <span className="min-w-0 truncate">Agents since removed</span>
               </dt>
               <dd className="v2-tabular shrink-0">
-                <Amount amount={unattributedValue} currency={currency} approx={d30?.approx} />
+                <Amount amount={unattributedValue} currency={currency} approx={spendApprox} />
               </dd>
             </div>
           ) : null}

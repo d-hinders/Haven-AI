@@ -142,9 +142,11 @@ const DEFAULT_FEED = {
 }
 
 const DEFAULT_TOTALS = {
-  moneyIn: 10,
-  moneyOut: 4,
-  approx: false,
+  moneyIn: 10 as number | null,
+  moneyOut: 4 as number | null,
+  approxIn: false,
+  approxOut: false,
+  unpriced: false,
   loading: false,
   error: null,
   partial: false,
@@ -504,6 +506,37 @@ describe('AccountActivityTab — rows and the detail panel (#4098)', () => {
 
     expect(screen.getByText(/Money in/)).toBeInTheDocument()
     expect(screen.getByText(/Money out/)).toBeInTheDocument()
+  })
+
+  it('says in words when some rows could not be valued, and shows "—" for an unknown total (#4165)', () => {
+    totalsMock.mockImplementation(() => ({ ...DEFAULT_TOTALS, moneyOut: null, unpriced: true, refresh: vi.fn() }))
+    renderTab()
+
+    expect(screen.getByText('Some amounts couldn’t be valued and aren’t included.')).toBeInTheDocument()
+    expect(screen.getByText(/Money out/)).toHaveTextContent('Money out —')
+    expect(screen.queryByText(/\u2248/)).not.toBeInTheDocument()
+  })
+
+  it('rows never carry "≈", even a serve-time SEK row (#3950, #4165)', () => {
+    feedMock.mockImplementation(() => ({
+      ...DEFAULT_FEED,
+      transactions: [tx({ convertedAmount: null, approxAmount: '134.50', approxCurrency: 'SEK' })],
+      total: 1,
+      loadMore: vi.fn(),
+      refresh: vi.fn(),
+    }))
+    renderTab({ currency: 'SEK' })
+
+    expect(ledgerRows()[0]).not.toHaveTextContent('\u2248')
+  })
+
+  it('separates same-day rows with an inset hairline; the first row of a day has none (#4165)', () => {
+    renderTab()
+
+    const rows = ledgerRows()
+    // DEFAULT_FEED's two rows share one timestamp, so one day group.
+    expect(rows[0]).not.toHaveAttribute('data-inset-divider')
+    expect(rows[1]).toHaveAttribute('data-inset-divider')
   })
 
   it('hides the totals while they load — no figure beats a wrong one', () => {

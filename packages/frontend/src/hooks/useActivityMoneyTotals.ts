@@ -21,15 +21,13 @@
  * `PAGE_LIMIT` until `hasMore` turns false or a page comes back empty —
  * the server has already applied every filter and the paging window.
  *
- * A row's fiat figure is the feed's own conversion (#3127): book-time
- * `convertedAmount` struck in the user's preferred currency, or a serve-time
- * `approxAmount` (#3824) when no book-time price was captured. A row priced
- * in ANOTHER currency is not summed — mixing currencies into one figure would
- * invent an exchange rate — and neither is a row with no usable price; both
- * mark the total `approx` instead, the same honesty mark the dashboard's
- * spending figure carries (#3803). FAILED rows are excluded from both
- * totals: a failed payment moved no money, and "Money out" claims what left
- * the account.
+ * A row is priced and summed by `lib/money-flow-tally.ts` (#4165), the one
+ * tally this hook shares with the 30-day summary (`useAccountMoneyFlow`), so
+ * the account page's two money figures cannot disagree about what a row is
+ * worth. A row priced in ANOTHER currency is not summed — mixing currencies
+ * would invent an exchange rate — and neither is a row with no usable price:
+ * both count as `unpriced`, said in words, never as a "≈". FAILED rows are
+ * excluded: a failed payment moved no money.
  *
  * ## Partial data
  *
@@ -44,18 +42,23 @@ import { api } from '@/lib/api'
 import { transactionFeedQuery } from '@/hooks/useTransactionsFeed'
 import type { AmountCurrency } from '@/components/haven/Amount'
 import type { AggregatedTransaction, TransactionFilterState, TransactionsFeedResponse } from '@/types/transactions'
+import { emptyFlowTally, flowFigures, tallyRow, type FlowTally } from '@/lib/money-flow-tally'
 
 const PAGE_LIMIT = 100
 
 export interface ActivityMoneyTotals {
-  moneyIn: number
-  moneyOut: number
+  /** null when the set had inbound rows and none could be valued ("—"). */
+  moneyIn: number | null
+  moneyOut: number | null
+  /** The "≈" decision per total (`shouldMarkApprox`, kind `total`), set only by that direction's rows. */
+  approxIn: boolean
+  approxOut: boolean
   /**
-   * True when at least one row in the filtered set was priced at serve time,
-   * in another currency, or not at all — the totals then carry the `≈` mark,
-   * never a bare figure claiming exactness.
+   * Some rows in the filtered set could not be valued in the display
+   * currency (no price, or priced in another currency); the caller says so
+   * in words rather than hanging a "≈" on the figure.
    */
-  approx: boolean
+  unpriced: boolean
   loading: boolean
   error: string | null
   /**
@@ -70,64 +73,28 @@ export interface ActivityMoneyTotals {
 }
 
 interface FlowTotals {
-  moneyIn: number
-  moneyOut: number
-  approx: boolean
+  tally: FlowTally
   partial: boolean
 }
 
-/**
- * One row's contribution to a direction total, priced like the feed prices
- * it — the same rules `useAccountMoneyFlow` sums the 30-day window by
- * (#4097), so the account page's two money figures cannot disagree about
- * what a row is worth. Book-time first (#3127); a foreign-currency triple
- * is not silently summed.
- */
-function rowFiat(
-  tx: AggregatedTransaction,
-  currency: AmountCurrency,
-): { amount: number; approx: boolean } | null {
-  if (tx.convertedAmount != null && tx.convertedCurrency === currency) {
-    const amount = Number(tx.convertedAmount)
-    if (Number.isFinite(amount)) return { amount, approx: false }
-  }
-  // Serve-time (#3824): today's rate, marked. `approxCurrency` is the
-  // backend's documented default when a producer omits it beside a present
-  // amount, so it matches the display currency unless the row says otherwise.
-  if (tx.approxAmount != null && (tx.approxCurrency ?? currency) === currency) {
-    const amount = Number(tx.approxAmount)
-    if (Number.isFinite(amount)) return { amount, approx: true }
-  }
-  // No usable price in the display currency: the row exists in the filtered
-  // set but adds no claimed figure — and the total must not claim exactness.
-  return null
+function emptyTotals(): FlowTotals {
+  return { tally: emptyFlowTally(), partial: false }
 }
 
-/** Sum one page's rows into the running totals. */
+/** Tally one page's rows into the running totals. */
 function sumPage(
   rows: readonly AggregatedTransaction[],
   currency: AmountCurrency,
   totals: FlowTotals,
 ): void {
-  for (const tx of rows) {
-    // A failed payment moved no money; the totals claim what actually moved.
-    if (tx.isError) continue
-    const fiat = rowFiat(tx, currency)
-    if (!fiat) {
-      totals.approx = true
-      continue
-    }
-    if (fiat.approx) totals.approx = true
-    if (tx.direction === 'in') totals.moneyIn += fiat.amount
-    else if (tx.direction === 'out') totals.moneyOut += fiat.amount
-  }
+  for (const tx of rows) tallyRow(tx, currency, totals.tally)
 }
 
 export function useActivityMoneyTotals(
   filters: TransactionFilterState,
   currency: AmountCurrency,
 ): ActivityMoneyTotals {
-  const [totals, setTotals] = useState<FlowTotals>({ moneyIn: 0, moneyOut: 0, approx: false, partial: false })
+  const [totals, setTotals] = useState<FlowTotals>(emptyTotals)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const requestIdRef = useRef(0)
@@ -136,7 +103,7 @@ export function useActivityMoneyTotals(
     const requestId = ++requestIdRef.current
     setLoading(true)
     setError(null)
-    const next: FlowTotals = { moneyIn: 0, moneyOut: 0, approx: false, partial: false }
+    const next = emptyTotals()
     try {
       let offset = 0
       // Page until the FILTERED feed ends. The server applied every filter
@@ -174,9 +141,7 @@ export function useActivityMoneyTotals(
   }, [fetchTotals])
 
   return {
-    moneyIn: totals.moneyIn,
-    moneyOut: totals.moneyOut,
-    approx: totals.approx,
+    ...flowFigures(totals.tally),
     loading,
     error,
     partial: totals.partial,

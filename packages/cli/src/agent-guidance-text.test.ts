@@ -113,8 +113,11 @@ describe('haven guide text (#2525)', () => {
     // `haven budget show <agentId> --hashes` (HASH_DISCOVERY_HINT), instead
     // of `haven agents show <agentId>`, which prints none. All-ASCII edit,
     // so bytes and units move together. Lands at 11703/11608.
-    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(11703)
-    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(11608)
+    // #4168: -42 bytes / -42 units — the account step and the signup hand-off
+    // script say "a passkey", dropping " (Face ID / Touch ID)" (21 ASCII
+    // characters) from each. Lands at 11661/11566.
+    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(11661)
+    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(11566)
   })
 
   it('names the command that actually prints the revoke hash (#3892)', () => {

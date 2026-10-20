@@ -204,7 +204,7 @@ export function ListToolbar({
       data-testid="list-toolbar"
       className="flex flex-col gap-3 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-3 shadow-card sm:p-4"
     >
-      <div className="flex flex-wrap items-center gap-2" data-testid="list-toolbar-top">
+      <div className="flex flex-wrap items-center gap-2">
         <ListSearchField
           noun={noun}
           value={state.q}

@@ -1160,16 +1160,17 @@ test.describe('driven focus-state visual regression', () => {
   // whatever the modality — and then reaches the target by a real Tab.
   // `.focus()` is never used on the target itself (see the header).
   //
-  // Each capture is the ROW holding the trigger, never the trigger itself:
-  // the ring is `ring-2` + `ring-offset-2`, painted outside the element's
-  // box, so an element-clipped capture crops away the very pixels it pins
-  // (the #4110 design review counted 62 ring pixels left against a
-  // 50-pixel tolerance). Every other capture in this file has room around
-  // its control for the same reason.
+  // Each capture is a PADDED CLIP around the trigger, never the element
+  // itself: the ring is `ring-2` + `ring-offset-2`, painted outside the
+  // element's box, so an element-clipped capture crops away the very pixels
+  // it pins (the #4110 design review counted 62 ring pixels left against a
+  // 50-pixel tolerance), and a containing row is no better when the trigger
+  // sits flush with the row's edge.
+  const RING_CLIP_PADDING = 10
   const listTriggers = [
-    { slug: 'facet', section: 'ds-list-controls-default', row: 'list-toolbar-facets', from: 'searchbox', target: /^Status:/ },
-    { slug: 'filters', section: 'ds-list-controls-phone', row: 'list-toolbar-top', from: 'searchbox', target: /^Filters/ },
-    { slug: 'period', section: 'ds-list-controls-primitives', row: 'ds-list-controls-primitives-row', from: /^Network:/, target: /^Period:/ },
+    { slug: 'facet', section: 'ds-list-controls-default', from: 'searchbox', target: /^Status:/ },
+    { slug: 'filters', section: 'ds-list-controls-phone', from: 'searchbox', target: /^Filters/ },
+    { slug: 'period', section: 'ds-list-controls-primitives', from: /^Network:/, target: /^Period:/ },
   ] as const
 
   for (const trigger of listTriggers) {
@@ -1192,9 +1193,17 @@ test.describe('driven focus-state visual regression', () => {
       await expectFocusedAndIndicated(page, target, `List controls · ${trigger.slug}`)
       await expect(target).toHaveAttribute('aria-haspopup', /menu|dialog/)
       await expect(target).toHaveAttribute('aria-expanded', 'false')
-      const row = section.getByTestId(trigger.row)
-      await expect(row).toHaveCount(1)
-      await expect(row).toHaveScreenshot(`focus-list-controls-${trigger.slug}-desktop.png`, SNAPSHOT_OPTIONS)
+      const box = await target.boundingBox()
+      if (!box) throw new Error(`List controls · ${trigger.slug}: the focused trigger has no box`)
+      await expect(page).toHaveScreenshot(`focus-list-controls-${trigger.slug}-desktop.png`, {
+        ...SNAPSHOT_OPTIONS,
+        clip: {
+          x: box.x - RING_CLIP_PADDING,
+          y: box.y - RING_CLIP_PADDING,
+          width: box.width + 2 * RING_CLIP_PADDING,
+          height: box.height + 2 * RING_CLIP_PADDING,
+        },
+      })
     })
   }
 })

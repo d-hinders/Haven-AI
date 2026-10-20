@@ -290,20 +290,32 @@ const REFS_REF = /\brefs?\b\s*:?\s*(?:https?:\/\/github\.com\/([\w.-]+\/[\w.-]+)
  * Unlike `parseClosingRefs` — which must match what GitHub matches, prose and
  * all — this reads only text the author is USING, not quoting: the lines
  * `claim-assignee.mjs`' `parse()` reads (no fenced block, no `>` quote), with
- * inline code spans blanked. "Write `Refs #N`, not `Closes`" documents the
- * convention; it is not a reference, and nothing here releases on it.
+ * inline code spans (one backtick or a longer run, ``like this``) and HTML
+ * comments (`<!-- … -->`, across lines too — the PR template's guidance lives
+ * in them) blanked. "Write `Refs #N`, not `Closes`" documents the convention;
+ * it is not a reference, and nothing here releases on it.
+ *
+ * Known gap, stated rather than guessed: a 4-space INDENTED code block is
+ * still read. Markdown makes such a line code only after a blank line and
+ * outside a list, and a nested list item's continuation is indented the same
+ * way — telling them apart needs a Markdown parser, and a wrong guess would
+ * drop a real reference. The cost of the gap is bounded: Path A releases only
+ * the PR author's OWN claim, on an issue the author wrote down.
  */
 export function parseRefsRefs(body, { repo = null } = {}) {
   const seen = []
   const self = String(repo ?? '').toLowerCase()
   let inFence = false
-  for (const line of String(body ?? '').split(/\r?\n/)) {
+  // HTML comments first, over the whole text (they span lines); newlines are
+  // kept so the line structure below is unchanged.
+  const text = String(body ?? '').replace(/<!--[\s\S]*?(?:-->|$)/g, (m) => m.replace(/[^\n]/g, ' '))
+  for (const line of text.split(/\r?\n/)) {
     if (/^\s*(?:```|~~~)/.test(line)) {
       inFence = !inFence
       continue
     }
     if (inFence || /^\s*>/.test(line)) continue
-    for (const match of line.replace(/`[^`]*`/g, ' ').matchAll(REFS_REF)) {
+    for (const match of line.replace(/(`+)[^`]*?\1/g, ' ').matchAll(REFS_REF)) {
       const qualifier = (match[1] ?? match[2] ?? '').toLowerCase()
       if (qualifier && qualifier !== self) continue
       const n = Number(match[3])

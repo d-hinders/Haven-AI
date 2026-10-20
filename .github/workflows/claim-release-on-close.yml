@@ -37,8 +37,10 @@ name: Release the claim on close
 # keyword sat in the title or a commit, GitHub records the squash COMMIT as the
 # closer (11 of the last 100 closed issues at #4176's review, e.g. #2314 →
 # #2268 via `7f7102ff`); its associated pull requests are read and the same
-# rule applies. Every other close is this job's: by hand, by a direct push (a
-# commit no pull request carries), by a merge outside the window. If the closed
+# rule applies. A commit closer with NO merged associated pull request fails
+# closed (the association may lag the merge by the second this run reads it;
+# a real direct push to dev needs a ruleset bypass): nothing is released. Every
+# other close is this job's: by hand, or by a merge outside the window. If the closed
 # event cannot be read, or its time is more than 10 s from the issue's
 # `closed_at` (so it is not provably THIS close), nothing is released.
 #

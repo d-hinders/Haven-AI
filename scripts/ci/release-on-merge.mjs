@@ -117,7 +117,8 @@
 // branch, `closed_at` within CLOSE_WINDOW_MS after `merged_at` — because both
 // events fire within seconds and neither run sees the other's line in time. A
 // closed event more than 10 s from `closed_at` is not tied to this close, and
-// nothing is released on it.
+// nothing is released on it; nor on a commit closer with no merged associated
+// pull request (fails closed: the association may lag the merge).
 //
 // Limits, stated rather than guarded:
 //   - `closingIssuesReferences(first:50)` truncates body-linked references at
@@ -422,8 +423,8 @@ export function decideRefs({ pr, refsIssues, commentsByIssue = {}, channelCommen
  * commit message — the squash commit's associated pull requests. Measured on
  * #4176's review: 11 of the last 100 closed issues carry a `Commit` closer,
  * every one 1–2 s after a merge into `dev` (#2314 → #2268 via `7f7102ff`,
- * #4180 → #4165 via `7297053c`). A commit with no associated pull request is a
- * direct push, which the merge path never sees.
+ * #4180 → #4165 via `7297053c`). A commit with no MERGED associated pull
+ * request is not read as a direct push: see `closeDeferral`.
  */
 function closerPulls(closer) {
   if (closer?.kind === 'PullRequest') return [closer]
@@ -463,8 +464,15 @@ export function closePayloadGate({ number, isPullRequest = false, author = '', a
  * branch of this repository, with `closed_at` within [`merged_at`,
  * `merged_at` + CLOSE_WINDOW_MS], makes the close the merge path's. Both events
  * fire within seconds and neither run would see the other's line in time.
- * Every other close is this path's: by hand, by a direct push (a commit with
- * no associated pull request), by a merge outside the window.
+ * Every other close is this path's: by hand (a null closer tied to this
+ * close), by a merge outside the window or into another branch.
+ *
+ * It FAILS CLOSED on a `Commit` closer with no merged associated pull request.
+ * Nothing proves `associatedPullRequests` is populated a second or two after
+ * the merge, when this run reads it; if it lagged, a squash close would read as
+ * a direct push and get a second line. And `dev`'s rules require a pull
+ * request, so a real direct push needs a ruleset bypass — skipping it costs
+ * one release a human can post by hand.
  */
 export function closeDeferral({ issue, closer, defaultBranch, repo = null }) {
   if (closer === undefined || closer?.unreadable) return 'the timeline\'s closed event could not be tied to this close — a merge-caused close cannot be ruled out, so nothing is released (the merge path may own it)'
@@ -478,6 +486,9 @@ export function closeDeferral({ issue, closer, defaultBranch, repo = null }) {
     const closedAtMs = Date.parse(issue?.closedAt ?? '')
     const inWindow = Number.isFinite(mergedAtMs) && Number.isFinite(closedAtMs) && closedAtMs >= mergedAtMs && closedAtMs <= mergedAtMs + CLOSE_WINDOW_MS
     if (intoDefault && inWindow) return `closed by the merge of PR #${pull.number} into \`${pull.baseRefName}\` (${pull.mergedAt})${closer.kind === 'Commit' ? ` via its commit \`${String(closer.oid ?? '').slice(0, 8)}\`` : ''} — the merge path releases it`
+  }
+  if (closer?.kind === 'Commit' && !closerPulls(closer).some((p) => p?.merged === true)) {
+    return `a commit (\`${String(closer.oid ?? '').slice(0, 8)}\`) closed it and no merge can be ruled out — its pull request may not be associated yet, so nothing is released (release by hand if it was a direct push)`
   }
   return null
 }

@@ -470,6 +470,17 @@ describe('the Refs grammar (Path A candidates, the close guard\'s family)', () =
     assert.deepEqual(parseRefsRefs('  > Refs #11 (quoted reply)'), [])
   })
 
+  test('a double-backtick span and an HTML comment (one line or several) are not references either', () => {
+    assert.deepEqual(parseRefsRefs('Use ``Refs #12`` here, and ``a `Refs #13` b``.\nRefs #20'), [20])
+    assert.deepEqual(parseRefsRefs('<!-- Refs #14 -->\nRefs #21 <!-- Refs #15 --> and Refs #22'), [21, 22])
+    assert.deepEqual(parseRefsRefs('<!--\nTemplate: Refs #16\n-->\nRefs #23'), [23])
+    assert.deepEqual(parseRefsRefs('Refs #24\n<!-- unterminated\nRefs #17'), [24], 'an unclosed comment runs to the end, as GitHub renders it')
+  })
+
+  test('known gap, pinned so it is a decision: a 4-space indented code line IS still read', () => {
+    assert.deepEqual(parseRefsRefs('Text.\n\n    Refs #18\n'), [18])
+  })
+
   test('placeholders, branch refs and prose without a number are not references', () => {
     assert.deepEqual(parseRefsRefs('Refs #NNN — operator-verify mode. Use `Refs`, not `Closes`. git push refs/heads/dev'), [])
     assert.deepEqual(parseRefsRefs('Refs: epic #4022, blocked-by #4024 satisfied'), [])
@@ -754,8 +765,14 @@ describe('the double fire: Path B defers to the merge path by the merge path\'s 
     assert.equal(decideClose(closeArgs({ closer: { ...closer, repository: 'other/repo' } })).releases.length, 1)
     // A Commit closer is the squash merge's when a merged PR carries it (the #4176 review blocker) — deferred:
     assert.equal(decideClose(closeArgs({ closer: { kind: 'Commit', oid: '022ad59f', pullRequests: [{ ...closer, kind: undefined }] } })).releases.length, 0, 'a squash commit of a merged PR: the merge path owns it')
-    // …and a direct push (no PR carries the commit) is not a merge the merge path ever sees:
-    assert.equal(decideClose(closeArgs({ closer: { kind: 'Commit', oid: 'abc', pullRequests: [] } })).releases.length, 1, 'a direct push: the merge path never sees it')
+    // …and a commit with no merged PR associated FAILS CLOSED (round-2 review): the association may
+    // lag the merge (probe P1c: the #4165 shape with an empty association), and a real direct push
+    // to dev needs a ruleset bypass.
+    for (const pullRequests of [[], [{ ...closer, kind: undefined, merged: false }], undefined]) {
+      const d = decideClose(closeArgs({ closer: { kind: 'Commit', oid: '7297053c6965', pullRequests } }))
+      assert.deepEqual(d.releases, [], JSON.stringify(pullRequests))
+      assert.match(d.skipped[0].reason, /a commit \(`7297053c`\) closed it and no merge can be ruled out/)
+    }
     assert.equal(decideClose(closeArgs({ closer: null })).releases.length, 1, 'a hand close')
   })
 })

@@ -191,7 +191,31 @@ function paymentIdFrom(call: RecordedToolCall): string | undefined {
  * the backend status (backed by the settlement evidence) is the outcome.
  * Fails when the log claims success but the probe cannot confirm.
  */
+const SETTLED_STATUSES = ['confirmed', 'settled', 'completed']
+
+/**
+ * `haven_payment_submitted` — Haven's part of a plain-HTTP x402 purchase is
+ * done: every payment the log produced reads back as signed and submitted
+ * (or further). Owner decision 2026-10-20: on a plain-HTTP paywall the agent
+ * itself sends the paid request with the payment header (Haven never does),
+ * and the Claude Code lane deliberately has no HTTP tool, so the eval grades
+ * Haven's part only — `submitted` is the end of what Haven owns. Same probe
+ * and the same every-id rule as `payment_status_settled`.
+ */
+export async function havenPaymentSubmitted(log: AgentRunLog, ctx: GraderContext): Promise<GraderResult> {
+  return paymentStatusIn(log, ctx, ['submitted', ...SETTLED_STATUSES], 'submitted by Haven')
+}
+
 export async function paymentStatusSettled(log: AgentRunLog, ctx: GraderContext): Promise<GraderResult> {
+  return paymentStatusIn(log, ctx, SETTLED_STATUSES, 'settled')
+}
+
+async function paymentStatusIn(
+  log: AgentRunLog,
+  ctx: GraderContext,
+  accepted: string[],
+  label: string,
+): Promise<GraderResult> {
   const probe = ctx.probePaymentStatus
   if (!probe) return fail('no backend probe injected — a status grader without a backend proves nothing')
   // Ids come from call arguments AND from tool RESULTS (#3992 A1): the
@@ -219,11 +243,11 @@ export async function paymentStatusSettled(log: AgentRunLog, ctx: GraderContext)
     )
   }
   const unsettledStatuses = results.filter(
-    (r): r is { id: string; ok: true; status: string } => r.ok && !['confirmed', 'settled', 'completed'].includes(r.status),
+    (r): r is { id: string; ok: true; status: string } => r.ok && !accepted.includes(r.status),
   )
   if (unsettledStatuses.length > 0) {
     return fail(
-      `payment(s) not settled: ${unsettledStatuses.map((r) => `${r.id} is ${r.status}`).join(', ')}`,
+      `payment(s) not ${label}: ${unsettledStatuses.map((r) => `${r.id} is ${r.status}`).join(', ')}`,
     )
   }
   // #4091: when the probe read EVERY confirmed payment's amount, the passing
@@ -234,11 +258,14 @@ export async function paymentStatusSettled(log: AgentRunLog, ctx: GraderContext)
   // waiting for any decrease — it never invents a spend size it cannot see.
   const confirmed = results.filter((r): r is { id: string; ok: true; status: string; amountAtomic?: string } => r.ok)
   const amounts = confirmed.map((r) => r.amountAtomic)
-  if (amounts.every((a): a is string => a !== undefined)) {
+  // Only a SETTLED payment is spend; a submitted-not-redeemed one moved
+  // nothing yet, so it never feeds the consistency guard's deduction.
+  const allSettled = confirmed.every((r) => SETTLED_STATUSES.includes(r.status))
+  if (allSettled && amounts.every((a): a is string => a !== undefined)) {
     const total = amounts.reduce((acc, a) => acc + BigInt(a), 0n)
-    return { ...pass(`${results.length} payment(s) confirmed settled by the backend: ${results.map((r) => r.id).join(', ')}`), settledSpendAtomic: total.toString() }
+    return { ...pass(`${results.length} payment(s) confirmed ${label} by the backend: ${results.map((r) => r.id).join(', ')}`), settledSpendAtomic: total.toString() }
   }
-  return pass(`${results.length} payment(s) confirmed settled by the backend: ${results.map((r) => r.id).join(', ')}`)
+  return pass(`${results.length} payment(s) confirmed ${label} by the backend: ${results.map((r) => r.id).join(', ')}`)
 }
 
 /**
@@ -298,6 +325,7 @@ export function toolCalled(log: AgentRunLog, options: { name: string; after?: st
 export const GRADERS: Record<GraderName, (log: AgentRunLog, ctx: GraderContext, options: Record<string, unknown>) => Promise<GraderResult> | GraderResult> = {
   transfer_settled: (log, ctx) => transferSettled(log, ctx),
   payment_status_settled: (log, ctx) => paymentStatusSettled(log, ctx),
+  haven_payment_submitted: (log, ctx) => havenPaymentSubmitted(log, ctx),
   no_payment_retry_after_refusal: (log, _ctx, options) => noPaymentRetryAfterRefusal(log, options),
   agent_status_before_payment: (log) => agentStatusBeforePayment(log),
   x402_request_mode_replay: (log) => x402RequestModeReplay(log),

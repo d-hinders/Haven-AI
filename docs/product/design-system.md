@@ -2206,6 +2206,24 @@ mixes loaded rows with a server total. The count is a polite live region.
 `ListNoMatch` sits where the rows were and never replaces the toolbar. A list
 with *nothing yet* keeps its own empty state ("No contacts yet").
 
+#### Design-lint guard (#4129)
+
+A hand-built list control cannot ship quietly: `design-lint`
+(`npm run design:lint -w packages/frontend`) flags one in `src/app` and
+`src/components` by its tells — a search field (`type="search"`, or a
+placeholder containing the word "search"), a hand-rolled Filters trigger
+(the `SlidersHorizontal` glyph outside the family), or a direct `<FilterPill>`
+use. `aria-haspopup` was measured and rejected as the signal: it appears 0
+times in the hand-built toolbars and it DOES appear in `Sidebar`,
+`WalletButton`, `DropdownMenu` and `TransactionActivityRow`. The rule is NOT
+silenced by `design-lint-disable-line` — the baseline
+(`packages/frontend/design-lint-baseline.json`) is the only way to carry this
+debt. When the rule fires on your diff, delete the hand-built control and
+render `ListToolbar`; an intentional exception is a hand edit to the baseline
+in its own reviewed commit, and the ratchet only ever shrinks. `packages/ops`
+is exempt (owner decision 2026-10-20), as are `packages/ui/src`, the
+`FilterPill` shim, and the `/design-system` demos.
+
 ### Transaction tables
 
 Use `components/transactions/TransactionsTable.tsx` for full transaction history routes. It is a semantic sortable table:

@@ -27,7 +27,6 @@ import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { GRADER_OPTION_KEYS, GRADERS } from './graders.js'
-import { canonicalErrorCode } from './hermes.js'
 import { ALL_TOOL_NAMES, HOSTED_TOOLS, PAYMENT_TOOLS, SIGNER_TOOLS } from './tools.js'
 import type { EvalTask, GraderName, ResolvedTask } from './types.js'
 
@@ -68,19 +67,11 @@ export function fractionOfRemaining(remaining: bigint, fraction: string): bigint
  * One grader's options (#4136). Every grader's option keys are closed
  * (`GRADER_OPTION_KEYS`): a grader ignores a key it does not read, so a
  * misspelt key is a check that silently does not run — a false pass, and so
- * is a wrongly typed value, so the value types are checked too. For
- * `tool_called` the loader also checks what the grader cannot: `name` and
- * `after` are known tool names, `after` and `afterRefusal` never go
- * together, and `afterRefusal` names the same refusal as the task's
- * `no_payment_retry_after_refusal` (its `errorCode`, default
- * `delegation_budget_exceeded`) — two graders anchored on different refusals
- * would grade two different runs.
+ * is a wrongly typed value, so the value types are checked too. Tool names
+ * (`tool_called`'s `name` / `after`, `preemptiveReadTools`) must be known
+ * bare names (`ALL_TOOL_NAMES`).
  */
-function validateGraderOptions(
-  grader: { name: GraderName; options?: unknown },
-  graders: ReadonlyArray<{ name: string; options?: unknown }>,
-  file: string,
-): string | null {
+function validateGraderOptions(grader: { name: GraderName; options?: unknown }, file: string): string | null {
   const { name, options } = grader
   if (options === undefined) {
     return name === 'tool_called' ? `${file}: tool_called needs options.name — the tool it grades` : null
@@ -98,44 +89,33 @@ function validateGraderOptions(
     )
   }
   const o = options as Record<string, unknown>
-  // Value types (#4136): a wrongly typed value is as silent as a misspelt
-  // key — `probePaymentTools: "true"` is not `=== true`, so the signer check
-  // never runs; a non-array `mustMention` crashes or matches nothing.
+  // Value types: a wrongly typed value is as silent as a misspelt key —
+  // `probePaymentTools: "true"` is not `=== true`, so the signer check never
+  // runs; a non-array `mustMention` crashes or matches nothing.
   const nonEmptyString = (v: unknown): boolean => typeof v === 'string' && v.length > 0
-  for (const key of ['errorCode', 'afterRefusal', 'name', 'after'] as const) {
+  const isToolName = (v: unknown): boolean => typeof v === 'string' && ALL_TOOL_NAMES.includes(v)
+  for (const key of ['errorCode', 'name', 'after'] as const) {
     if (key in o && !nonEmptyString(o[key])) {
       return `${file}: ${name} options.${key} must be a non-empty string, got ${JSON.stringify(o[key])}`
     }
   }
-  if ('probePaymentTools' in o && typeof o.probePaymentTools !== 'boolean') {
-    return `${file}: ${name} options.probePaymentTools must be a boolean, got ${JSON.stringify(o.probePaymentTools)} — any other value silently disables the signer check`
+  for (const key of ['probePaymentTools', 'acceptPreemptive'] as const) {
+    if (key in o && typeof o[key] !== 'boolean') {
+      return `${file}: ${name} options.${key} must be a boolean, got ${JSON.stringify(o[key])} — any other value silently does not apply the option`
+    }
   }
   if ('mustMention' in o && (!Array.isArray(o.mustMention) || !o.mustMention.every(nonEmptyString))) {
     return `${file}: ${name} options.mustMention must be an array of non-empty strings, got ${JSON.stringify(o.mustMention)}`
   }
+  if ('preemptiveReadTools' in o && (!Array.isArray(o.preemptiveReadTools) || o.preemptiveReadTools.length === 0 || !o.preemptiveReadTools.every(isToolName))) {
+    return `${file}: ${name} options.preemptiveReadTools must be a non-empty array of known bare tool names (tools.ts ALL_TOOL_NAMES), got ${JSON.stringify(o.preemptiveReadTools)}`
+  }
   if (name !== 'tool_called') return null
-  const isToolName = (v: unknown): boolean => typeof v === 'string' && ALL_TOOL_NAMES.includes(v)
   if (!isToolName(o.name)) {
     return `${file}: tool_called options.name must be a known bare tool name (tools.ts ALL_TOOL_NAMES), got ${JSON.stringify(o.name)}`
   }
   if (o.after !== undefined && !isToolName(o.after)) {
     return `${file}: tool_called options.after must be a known bare tool name (tools.ts ALL_TOOL_NAMES), got ${JSON.stringify(o.after)}`
-  }
-  if (o.after !== undefined && o.afterRefusal !== undefined) {
-    return `${file}: tool_called takes after OR afterRefusal, not both — one anchors on a tool call, the other on a refusal`
-  }
-  if (typeof o.afterRefusal === 'string') {
-    const refusalGrader = graders.find((g) => g.name === 'no_payment_retry_after_refusal')
-    if (refusalGrader) {
-      const pinned = (refusalGrader.options as { errorCode?: unknown } | undefined)?.errorCode
-      const expected = typeof pinned === 'string' ? pinned : 'delegation_budget_exceeded'
-      if (canonicalErrorCode(o.afterRefusal) !== canonicalErrorCode(expected)) {
-        return (
-          `${file}: tool_called afterRefusal "${o.afterRefusal}" differs from no_payment_retry_after_refusal's errorCode ` +
-          `"${expected}" — both graders must anchor on the same refusal`
-        )
-      }
-    }
   }
   return null
 }
@@ -169,7 +149,7 @@ export function validateTask(raw: unknown, file: string): string | null {
     if (typeof g?.name !== 'string') return `${file}: every grader needs a string name`
     // Own keys only: `in` would accept Object.prototype names ("constructor").
     if (!Object.hasOwn(GRADERS, g.name)) return `${file}: unknown grader "${g.name}" — the registry is closed; extend graders.ts deliberately`
-    const optionsError = validateGraderOptions(g as { name: GraderName; options?: unknown }, graders as Array<{ name: string; options?: unknown }>, file)
+    const optionsError = validateGraderOptions(g as { name: GraderName; options?: unknown }, file)
     if (optionsError) return optionsError
   }
   const source = t.source as Record<string, unknown> | undefined
@@ -195,6 +175,9 @@ export function validateTask(raw: unknown, file: string): string | null {
     const requires = t.requires
     if (!Array.isArray(requires) || !requires.some((r) => typeof r === 'string' && r.startsWith('EXHAUSTED'))) {
       return `${file}: tier 3 must declare its exhausted-budget precondition in "requires" (an EXHAUSTED-… entry) — the tier exists for tasks whose setup IS a spent budget`
+    }
+    if (exhaustedThresholdAtomic(t as unknown as EvalTask) === undefined) {
+      return `${file}: tier 3's EXHAUSTED requires entry must read EXHAUSTED-period-budget-below-<X>-USDC — the resolver verifies that bound at run time, and a label it cannot parse would switch the check off`
     }
     if (t.expectTransfer) {
       return `${file}: tier 3 expects an exhausted budget — it cannot also expect a transfer_settled outcome`
@@ -391,3 +374,17 @@ export const TOOL_COUNTS = {
   signer: SIGNER_TOOLS.length,
   payment: PAYMENT_TOOLS.length,
 } as const
+
+/**
+ * The threshold a tier-3 task's `EXHAUSTED-period-budget-below-<X>-USDC`
+ * precondition names, in atomic USDC (6 decimals). Undefined when the task
+ * declares no such bound.
+ */
+export function exhaustedThresholdAtomic(task: EvalTask): bigint | undefined {
+  if (task.tier !== 3) return undefined
+  for (const r of task.requires) {
+    const m = /^EXHAUSTED-period-budget-below-(\d+)(?:\.(\d{1,6}))?-USDC$/.exec(r)
+    if (m) return BigInt(m[1]!) * 1_000_000n + BigInt((m[2] ?? '').padEnd(6, '0') || '0')
+  }
+  return undefined
+}

@@ -84,6 +84,8 @@ const PINNED_TOOL_NAMES: readonly HostedToolName[] = [
   'haven_get_task_budget',
   // #3723: the signed bundle's read — the receipt endpoint's own response.
   'haven_get_receipt',
+  // #4107: the advisory token-safety check.
+  'haven_check_token_safety',
 ]
 
 /** A complete synthetic registry for the injectable detection-logic tests. */

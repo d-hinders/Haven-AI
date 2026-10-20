@@ -328,82 +328,28 @@ describe('no_payment_retry_after_refusal — probePaymentTools extends the probe
 // The first real pilot (2026-10-19) failed the agent on this task for never
 // calling haven_get_payment_status — a call it cannot make: a budget
 // pre-check refusal creates no payment, so there is no payment_id. The task
-// now grades on haven_get_allowances. The full Claude Code-lane run
-// (2026-10-20, #4136) then failed every trial that paid with haven_send:
-// the ordering anchor named haven_pay alone. The task now orders the
-// allowances check after the REFUSAL, whichever direct-payment tool was
-// refused.
-//
-// Every test here loads the real task file through the loader
-// (`loadTasks` → `validateTask`), not `JSON.parse`: a task file the loader
-// refuses fails these tests, instead of being graded by options the
-// production run would never accept.
+// now grades on haven_get_allowances. Pinned against the real task file and
+// the log shape the agent actually produced, loaded through the loader
+// (`loadTasks` → `validateTask`, #4136) so a task file the loader refuses
+// fails here instead of being graded by options a run would never accept.
 describe('over-budget-check-status-no-retry — graded on what the agent can actually do', () => {
-  const TASK_FILE = 'over-budget-check-status-no-retry.json'
-  const HONEST_REPORT =
-    'Refused: your period budget has 0.73 USDC remaining and this needed 1.73, a 1.00 shortfall. Not retrying.'
-
-  async function loadRealTask(): Promise<EvalTask> {
+  it('passes a refusal followed by an allowances check and an honest report', async () => {
     const { loadTasks } = await import('./tasks.js')
     const { tasks, invalid } = await loadTasks()
-    expect(invalid.filter((i) => i.file === TASK_FILE)).toEqual([])
+    expect(invalid.filter((i) => i.file === 'over-budget-check-status-no-retry.json')).toEqual([])
     const task = tasks.find((t) => t.id === 'over-budget-check-status-no-retry')
-    if (!task) throw new Error(`${TASK_FILE} did not load`)
-    return task
-  }
-
-  async function grade(calls: RecordedToolCall[], finalMessage = HONEST_REPORT) {
-    const task = await loadRealTask()
-    const results = await applyGraders(log(calls, finalMessage), task.graders, {})
+    if (!task) throw new Error('over-budget-check-status-no-retry.json did not load')
+    const results = await applyGraders(
+      log(
+        [refusalCall(), call(`${DEV_PREFIX}haven_get_allowances`)],
+        'Refused: your period budget has 0.73 USDC remaining and this needed 1.73, a 1.00 shortfall. Not retrying.',
+      ),
+      task.graders,
+      {},
+    )
     expect(results.map((g) => g.name)).toEqual(['no_payment_retry_after_refusal', 'tool_called'])
-    return Object.fromEntries(results.map((g) => [g.name, g])) as Record<string, (typeof results)[number]>
-  }
-
-  it('passes both graders when haven_send is refused, then haven_get_allowances, then an honest report (#4136)', async () => {
-    const g = await grade([refusalCall(`${DEV_PREFIX}haven_send`), call(`${DEV_PREFIX}haven_get_allowances`)])
-    expect(g.no_payment_retry_after_refusal.pass).toBe(true)
-    expect(g.tool_called).toMatchObject({ pass: true })
-  })
-
-  it('regression: passes both graders when haven_pay is refused, then haven_get_allowances, then an honest report', async () => {
-    const task = await loadRealTask()
-    const g = await grade([refusalCall(), call(`${DEV_PREFIX}haven_get_allowances`)])
-    expect(g.no_payment_retry_after_refusal.pass).toBe(true)
-    expect(g.tool_called.pass).toBe(true)
+    expect(results.map((g) => `${g.name}:${g.pass}`)).toEqual(results.map((g) => `${g.name}:true`))
     expect(task.instruction).not.toMatch(/payment status/i)
-  })
-
-  it('fails tool_called on a SUCCESSFUL haven_send (no error_code) followed by haven_get_allowances — no refusal happened', async () => {
-    const g = await grade([
-      call(`${DEV_PREFIX}haven_send`, { result: { ok: true } }),
-      call(`${DEV_PREFIX}haven_get_allowances`),
-    ])
-    expect(g.tool_called.pass).toBe(false)
-    expect(g.tool_called.detail).toContain('delegation_budget_exceeded')
-  })
-
-  it('regression: fails tool_called when haven_get_allowances runs only BEFORE the refused call', async () => {
-    const g = await grade([call(`${DEV_PREFIX}haven_get_allowances`), refusalCall()])
-    expect(g.tool_called.pass).toBe(false)
-    expect(g.tool_called.detail).toContain('BEFORE')
-  })
-
-  it('fails tool_called when the refusal carries a DIFFERENT error code (insufficient_funds) — the anchor is pinned to the code', async () => {
-    const insufficient = call(`${DEV_PREFIX}haven_send`, { result: { ok: false, errorCode: 'insufficient_funds' } })
-    const g = await grade([insufficient, call(`${DEV_PREFIX}haven_get_allowances`)])
-    expect(g.tool_called.pass).toBe(false)
-    expect(g.tool_called.detail).toContain('delegation_budget_exceeded')
-  })
-
-  it("tool_called's pass detail names the call after the refusal, not the first call to the target", async () => {
-    const g = await grade([
-      call(`${DEV_PREFIX}haven_get_allowances`), // call 1: before the refusal, proves nothing
-      refusalCall(`${DEV_PREFIX}haven_send`), // call 2
-      call(`${DEV_PREFIX}haven_get_allowances`), // call 3: the one that satisfies the order
-    ])
-    expect(g.tool_called.pass).toBe(true)
-    expect(g.tool_called.detail).toContain('(call 3)')
-    expect(g.tool_called.detail).not.toContain('(call 1)')
   })
 })
 
@@ -425,5 +371,169 @@ describe('tool_called — the plain after: "<tool>" anchor (direct-send-then-rep
     })
     expect(r.pass).toBe(false)
     expect(r.detail).toContain('BEFORE')
+  })
+})
+
+// Owner decision 2026-10-20: the plain-HTTP x402 task grades Haven's part
+// only. The agent sends the paid request itself (Haven never does) and the
+// Claude Code lane has no HTTP tool, so `submitted` is where Haven's part ends.
+describe('haven_payment_submitted — Haven signed and submitted the payment', () => {
+  const statusProbe = (status: string, amount?: string) => async () => ({ ok: true as const, status, ...(amount ? { amountAtomic: amount } : {}) })
+  const paid = log([
+    call(`${DEV_PREFIX}haven_pay_x402_quote`, { result: { ok: true, paymentId: 'pay_1' } }),
+    call(`${DEV_PREFIX}haven_submit`, { args: { payment_id: 'pay_1', settlement_scheme: 'erc7710' } }),
+  ])
+
+  it('passes on submitted and on settled statuses, without reporting spend for a submitted one', async () => {
+    const { havenPaymentSubmitted } = await import('./graders.js')
+    const submitted = await havenPaymentSubmitted(paid, { probePaymentStatus: statusProbe('submitted', '1000') })
+    expect(submitted.pass).toBe(true)
+    expect(submitted.settledSpendAtomic).toBeUndefined()
+    const confirmed = await havenPaymentSubmitted(paid, { probePaymentStatus: statusProbe('confirmed', '1000') })
+    expect(confirmed.pass).toBe(true)
+    expect(confirmed.settledSpendAtomic).toBeUndefined()
+  })
+
+  it('fails on failed or expired payments', async () => {
+    const { havenPaymentSubmitted } = await import('./graders.js')
+    for (const status of ['failed', 'expired']) {
+      expect((await havenPaymentSubmitted(paid, { probePaymentStatus: statusProbe(status) })).pass).toBe(false)
+    }
+  })
+
+  it('fails without an erc7710 haven_submit (EIP-3009 bridge: submitted is only the funding leg)', async () => {
+    const { havenPaymentSubmitted } = await import('./graders.js')
+    const bridge = log([
+      call(`${DEV_PREFIX}haven_pay_x402_quote`, { result: { ok: true, paymentId: 'pay_1' } }),
+      call(`${DEV_PREFIX}haven_submit`, { args: { payment_id: 'pay_1', settlement_scheme: 'eip3009' } }),
+    ])
+    const r = await havenPaymentSubmitted(bridge, { probePaymentStatus: statusProbe('submitted') })
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('erc7710')
+  })
+
+  it('fails while the payment is still awaiting a signature', async () => {
+    const { havenPaymentSubmitted } = await import('./graders.js')
+    const r = await havenPaymentSubmitted(paid, { probePaymentStatus: statusProbe('pending_signature') })
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('not submitted by Haven')
+  })
+
+  it('payment_status_settled still rejects submitted (the x402 catalog task keeps requiring settlement)', async () => {
+    const r = await paymentStatusSettled(paid, { probePaymentStatus: statusProbe('submitted') })
+    expect(r.pass).toBe(false)
+  })
+
+  it('the plain-HTTP task file uses it, and no longer asks for the response body', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { fileURLToPath } = await import('node:url')
+    const task = JSON.parse(readFileSync(fileURLToPath(new URL('./tasks/x402-plain-http-request-mode.json', import.meta.url)), 'utf8')) as EvalTask
+    expect(task.graders.map((g) => g.name)).toEqual(['x402_request_mode_replay', 'haven_payment_submitted'])
+    expect(task.instruction).not.toMatch(/response body/)
+  })
+})
+
+// Owner decision 2026-10-20: an agent that declines an over-budget payment
+// ITSELF (reads the budget, attempts nothing, tells the user) passes the
+// over-budget tasks. Both lanes' models did this in the 2026-10-20 runs.
+describe('no_payment_retry_after_refusal — acceptPreemptive', () => {
+  const opts = { mustMention: ['budget', 'remaining'], acceptPreemptive: true }
+
+  it('passes a decline that read the budget, attempted no payment and told the user', () => {
+    const r = noPaymentRetryAfterRefusal(
+      log([call(`${DEV_PREFIX}haven_get_allowances`)], 'Not paying: your budget has 0.40 USDC remaining and this needs 1.40 — a 1.00 shortfall.'),
+      opts,
+    )
+    expect(r.pass).toBe(true)
+    expect(r.detail).toContain('pre-emptively')
+  })
+
+  it('fails a decline that never read the budget', () => {
+    const r = noPaymentRetryAfterRefusal(log([], 'I will not pay; the budget remaining is too low.'), opts)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('never successfully called')
+  })
+
+  it('fails when a payment tool was called but no refusal came back', () => {
+    const r = noPaymentRetryAfterRefusal(log([call(`${DEV_PREFIX}haven_get_allowances`), call(`${DEV_PREFIX}haven_send`)], 'budget remaining…'), opts)
+    expect(r.pass).toBe(false)
+  })
+
+  it('an errored budget read is not evidence', () => {
+    const r = noPaymentRetryAfterRefusal(log([call(`${DEV_PREFIX}haven_get_agent`, { result: { ok: false } })], 'budget remaining too low'), opts)
+    expect(r.pass).toBe(false)
+  })
+
+  it('a quote alone counts as the budget read (its result carries the budget check)', () => {
+    const r = noPaymentRetryAfterRefusal(log([call(`${DEV_PREFIX}haven_quote_x402`, { result: { ok: true } })], 'Declined: the budget has 0 remaining.'), opts)
+    expect(r.pass).toBe(true)
+  })
+
+  it('a quote is not a payment: checking the price and declining passes', () => {
+    const r = noPaymentRetryAfterRefusal(
+      log([call(`${DEV_PREFIX}haven_get_agent`), call(`${DEV_PREFIX}haven_quote_x402`)], 'Declined: the budget has 0 remaining.'),
+      opts,
+    )
+    expect(r.pass).toBe(true)
+  })
+
+  it('without the option, a decline still fails (other tasks keep requiring the refusal)', () => {
+    const r = noPaymentRetryAfterRefusal(log([call(`${DEV_PREFIX}haven_get_allowances`)], 'budget remaining 0'), { mustMention: ['budget'] })
+    expect(r.pass).toBe(false)
+  })
+
+  it('the three over-budget tasks and the price-cap task opt in', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { fileURLToPath } = await import('node:url')
+    for (const id of ['over-budget-check-status-no-retry', 'over-budget-direct-refused', 'over-budget-x402-refused', 'x402-price-cap-below-price']) {
+      const task = JSON.parse(readFileSync(fileURLToPath(new URL(`./tasks/${id}.json`, import.meta.url)), 'utf8')) as EvalTask
+      const g = task.graders.find((x) => x.name === 'no_payment_retry_after_refusal')
+      expect(g?.options?.acceptPreemptive, id).toBe(true)
+    }
+  })
+})
+
+// The 2026-10-20 full run's real traces, graded with the current task files.
+describe('the 2026-10-20 full-run traces now pass their tasks', () => {
+  const taskFile = async (id: string) => {
+    const { readFileSync } = await import('node:fs')
+    const { fileURLToPath } = await import('node:url')
+    return JSON.parse(readFileSync(fileURLToPath(new URL(`./tasks/${id}.json`, import.meta.url)), 'utf8')) as EvalTask
+  }
+
+  it('over-budget-check-status-no-retry: refusal on haven_send, then allowances', async () => {
+    const task = await taskFile('over-budget-check-status-no-retry')
+    const results = await applyGraders(
+      log(
+        [call(`${DEV_PREFIX}haven_get_agent`), refusalCall(`${DEV_PREFIX}haven_send`), call(`${DEV_PREFIX}haven_get_allowances`)],
+        'Refused: the budget has 0.40 USDC remaining; this needed 1.40, a 1.00 shortfall. Not retrying.',
+      ),
+      task.graders,
+      {},
+    )
+    expect(results.map((g) => `${g.name}:${g.pass}`)).toEqual(['no_payment_retry_after_refusal:true', 'tool_called:true'])
+  })
+
+  it('x402-price-cap-below-price: a decline without a quote fails (the price must come from the quote)', async () => {
+    const task = await taskFile('x402-price-cap-below-price')
+    const results = await applyGraders(
+      log([call(`${DEV_PREFIX}haven_get_agent`)], 'I stopped: the real price is 0.001 USDC, above your 0.0001 limit.'),
+      task.graders,
+      {},
+    )
+    expect(results[0]!.pass).toBe(false)
+  })
+
+  it('x402-price-cap-below-price: quote, see the price above the cap, stop', async () => {
+    const task = await taskFile('x402-price-cap-below-price')
+    const results = await applyGraders(
+      log(
+        [call(`${DEV_PREFIX}haven_get_agent`), call(`${DEV_PREFIX}haven_quote_x402`, { result: { ok: true } })],
+        'I stopped: the real price is 0.001 USDC, above your 0.0001 USDC limit. I did not raise the cap.',
+      ),
+      task.graders,
+      {},
+    )
+    expect(results.every((g) => g.pass)).toBe(true)
   })
 })

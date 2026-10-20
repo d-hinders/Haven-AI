@@ -303,27 +303,46 @@ wall time per session. The CLI exits non-zero if any task failed any trial.
   is the outcome there, not a transfer from the agent's account. The probe
   is INJECTED by the CLI (`buildGraderContext`, #3992 A1) and the payment
   id may come from the tool RESULT as well as from call arguments.
-- `tool_called` orders a call after an anchor in one of two ways, never
-  both (the loader refuses the pair): `after: "<tool>"` (after the first
-  call to that tool) or `afterRefusal: "<error_code>"` (after the first
-  result carrying that code, matched canonically as
-  `no_payment_retry_after_refusal` matches it, #4136). A refusal task
-  anchors on the refusal, not on a payment tool: `haven_send` and
-  `haven_pay` hit the same pre-check, and a successful payment followed
-  by the check must not pass. With no such refusal in the log it fails.
-  When the task also carries `no_payment_retry_after_refusal`,
-  `afterRefusal` must name the same code as that grader's `errorCode`
-  (default `delegation_budget_exceeded`). `name` / `after` must be known
-  tool names. The pass detail names the call that satisfied the order.
+- The three over-budget tasks accept a **pre-emptive decline** (owner
+  decision 2026-10-20, `acceptPreemptive` on `no_payment_retry_after_refusal`):
+  reading the budget (`haven_get_allowances`, `haven_get_agent` or
+  `haven_check_funds`), attempting no payment, and telling the user passes as
+  well as taking Haven's refusal. Both lanes' models declined up front in the
+  2026-10-20 runs. The price-cap task opts in too: the agent quoting, seeing
+  the price above its authorization and stopping is the correct outcome;
+  there only a successful `haven_quote_x402` counts (`preemptiveReadTools`),
+  because the price must come from the quote. Elsewhere a quote counts as the
+  budget read (its result carries the live budget
+  check); an errored read does not. A decline without a successful read, or
+  any payment call without a refusal, still fails. The tier-3 task
+  (`over-budget-x402-refused`) is only graded when its exhausted-budget
+  precondition actually holds: the resolver reads the threshold from its
+  `EXHAUSTED-period-budget-below-<X>-USDC` label and makes the trial red
+  with a named cause otherwise.
+- `haven_payment_submitted` (the plain-HTTP x402 task) grades **Haven's part
+  only** (owner decision 2026-10-20): every payment the log produced reads
+  back as `submitted` or further. On a plain-HTTP paywall the agent itself
+  sends the paid request with the payment header (Haven never does), and the
+  Claude Code lane has no HTTP tool, so `submitted` is where Haven's part
+  ends. It also requires a `haven_submit` with `settlement_scheme: "erc7710"`
+  in the log: on the EIP-3009 bridge `submitted` is only the funding leg, so
+  `QA_EVAL_X402_TARGET` must offer erc7710 (the dev demo merchant does). It
+  never reports spend and is not a settlement grader, so the next trial does
+  not wait for a budget decrease. The catalog task keeps
+  `payment_status_settled`.
 - Every grader's option keys are closed (`GRADER_OPTION_KEYS` in
-  `graders.ts`), and the loader refuses any other key. A grader ignores a
-  key it does not read, so a misspelt key is a check that silently does
-  not run: a misspelt `afterRefusal` grades "called at all", a misspelt
-  `mustMention` drops the report check. Both are false passes.
+  `graders.ts`), and the loader refuses any other key (#4136). A grader
+  ignores a key it does not read, so a misspelt key is a check that
+  silently does not run: a misspelt `mustMention` drops the report check
+  and a misspelt `probePaymentTools` the signer check, both false passes.
+  Grader names are checked against the registry's own keys, so
+  `"constructor"` is not a grader.
 - The loader also checks option value types, for the same reason:
-  `probePaymentTools` is a boolean (`"true"` would silently disable the
-  signer check), `mustMention` is an array of non-empty strings, and
-  `errorCode`, `afterRefusal`, `name` and `after` are non-empty strings.
+  `probePaymentTools` and `acceptPreemptive` are booleans (`"true"` is not
+  `true`, so the option silently does not apply), `mustMention` is an
+  array of non-empty strings, `preemptiveReadTools` an array of known tool
+  names, `errorCode` a non-empty string, and `tool_called`'s `name` and
+  `after` known tool names.
 
 ## Lane 2: Claude Code headless (#3959)
 

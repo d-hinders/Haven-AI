@@ -57,7 +57,7 @@ describe('the starter task set (read from disk)', () => {
   it('every referenced grader exists in the closed registry', async () => {
     const { tasks } = await loadTasks(TASKS_DIR)
     for (const t of tasks) {
-      for (const g of t.graders) expect(g.name).toMatch(/^(transfer_settled|payment_status_settled|no_payment_retry_after_refusal|agent_status_before_payment|x402_request_mode_replay|tool_called)$/)
+      for (const g of t.graders) expect(g.name).toMatch(/^(transfer_settled|payment_status_settled|haven_payment_submitted|no_payment_retry_after_refusal|agent_status_before_payment|x402_request_mode_replay|tool_called)$/)
     }
   })
 
@@ -141,7 +141,7 @@ describe('validateTask — the coherence rules', () => {
 })
 
 describe('validateTask — grader options are closed (#4136)', () => {
-  // An over-budget base that carries both graders the option rules touch.
+  // An over-budget base that carries both graders with options.
   const base = {
     id: 'test-task',
     title: 'T',
@@ -150,15 +150,16 @@ describe('validateTask — grader options are closed (#4136)', () => {
     requires: [],
     amount: { rule: 'remaining_period_budget', delta_atomic: '1000000' },
     graders: [
-      { name: 'no_payment_retry_after_refusal', options: { mustMention: ['budget'] } },
-      { name: 'tool_called', options: { name: 'haven_get_allowances', afterRefusal: 'delegation_budget_exceeded' } },
+      { name: 'no_payment_retry_after_refusal', options: { mustMention: ['budget'], acceptPreemptive: true } },
+      { name: 'tool_called', options: { name: 'haven_get_allowances' } },
     ],
     expectTransfer: false,
     source: { kind: 'scenario', ref: 'x.ts', note: 'n' },
   }
   const withGraders = (graders: unknown[]) => ({ ...structuredClone(base), graders })
+  const refusalGrader = (options: Record<string, unknown>) => withGraders([{ name: 'no_payment_retry_after_refusal', options }])
 
-  it('accepts the well-formed base (afterRefusal agreeing with the default errorCode)', () => {
+  it('accepts the well-formed base', () => {
     expect(validateTask(structuredClone(base), 'x.json')).toBeNull()
   })
 
@@ -169,40 +170,10 @@ describe('validateTask — grader options are closed (#4136)', () => {
     expect(validateTask(t, 'x.json')).toContain('unknown option key(s) "misspeltKey"')
   })
 
-  it('rejects the misspellings that would each be a false pass: mustMention, probePaymentTools, afterRefusal', () => {
-    expect(validateTask(withGraders([{ name: 'no_payment_retry_after_refusal', options: { mustMentions: ['budget'] } }]), 'x.json'))
-      .toContain('"mustMentions"')
-    expect(validateTask(withGraders([{ name: 'no_payment_retry_after_refusal', options: { probePaymentTool: true } }]), 'x.json'))
-      .toContain('"probePaymentTool"')
-    expect(validateTask(withGraders([{ name: 'tool_called', options: { name: 'haven_get_allowances', afterRefusel: 'delegation_budget_exceeded' } }]), 'x.json'))
-      .toContain('"afterRefusel"')
-  })
-
-  it('rejects after together with afterRefusal', () => {
-    const t = withGraders([
-      base.graders[0],
-      { name: 'tool_called', options: { name: 'haven_get_allowances', after: 'haven_pay', afterRefusal: 'delegation_budget_exceeded' } },
-    ])
-    expect(validateTask(t, 'x.json')).toContain('after OR afterRefusal, not both')
-  })
-
-  it("rejects an afterRefusal that differs from the task's no_payment_retry_after_refusal errorCode (explicit and default)", () => {
-    const explicit = withGraders([
-      { name: 'no_payment_retry_after_refusal', options: { errorCode: 'PRICE_EXCEEDS_MAX' } },
-      base.graders[1],
-    ])
-    expect(validateTask(explicit, 'x.json')).toContain('differs from no_payment_retry_after_refusal')
-    const byDefault = withGraders([
-      base.graders[0],
-      { name: 'tool_called', options: { name: 'haven_get_allowances', afterRefusal: 'PRICE_EXCEEDS_MAX' } },
-    ])
-    expect(validateTask(byDefault, 'x.json')).toContain('"delegation_budget_exceeded"')
-    // The comparison is canonical, as the graders' own refusal match is.
-    const sameCodeOtherSpelling = withGraders([
-      { name: 'no_payment_retry_after_refusal', options: { errorCode: 'PRICE_EXCEEDS_MAX' } },
-      { name: 'tool_called', options: { name: 'haven_get_allowances', afterRefusal: 'price_exceeds_max' } },
-    ])
-    expect(validateTask(sameCodeOtherSpelling, 'x.json')).toBeNull()
+  it('rejects the misspellings that would each silently drop a check: mustMention, probePaymentTools, acceptPreemptive', () => {
+    expect(validateTask(refusalGrader({ mustMentions: ['budget'] }), 'x.json')).toContain('"mustMentions"')
+    expect(validateTask(refusalGrader({ probePaymentTool: true }), 'x.json')).toContain('"probePaymentTool"')
+    expect(validateTask(refusalGrader({ acceptPremptive: true }), 'x.json')).toContain('"acceptPremptive"')
   })
 
   it('rejects a grader named after an Object.prototype key ("constructor"), with and without options', () => {
@@ -217,9 +188,10 @@ describe('validateTask — grader options are closed (#4136)', () => {
     ['no_payment_retry_after_refusal', 'errorCode', 'delegation_budget_exceeded'],
     ['no_payment_retry_after_refusal', 'mustMention', ['budget']],
     ['no_payment_retry_after_refusal', 'probePaymentTools', true],
+    ['no_payment_retry_after_refusal', 'acceptPreemptive', true],
+    ['no_payment_retry_after_refusal', 'preemptiveReadTools', ['haven_quote_x402']],
     ['tool_called', 'name', 'haven_get_allowances'],
     ['tool_called', 'after', 'haven_submit'],
-    ['tool_called', 'afterRefusal', 'delegation_budget_exceeded'],
   ]
 
   it.each(WELL_TYPED)('accepts %s option %s with a well-typed value', (grader, key, value) => {
@@ -233,10 +205,16 @@ describe('validateTask — grader options are closed (#4136)', () => {
     expect(WELL_TYPED.map(([g, k]) => `${g}.${k}`).sort()).toEqual(listed.sort())
   })
 
-  it('rejects a non-boolean probePaymentTools — "true" would silently disable the signer check', () => {
+  it.each(['probePaymentTools', 'acceptPreemptive'])('rejects a non-boolean %s — "true" would silently not apply the option', (key) => {
     for (const value of ['true', 1, null]) {
-      expect(validateTask(withGraders([{ name: 'no_payment_retry_after_refusal', options: { probePaymentTools: value } }]), 'x.json'))
-        .toContain('options.probePaymentTools must be a boolean')
+      expect(validateTask(refusalGrader({ [key]: value }), 'x.json')).toContain(`options.${key} must be a boolean`)
+    }
+  })
+
+  it('rejects a preemptiveReadTools that is not a non-empty array of known tool names', () => {
+    for (const value of ['haven_quote_x402', [], ['haven_quote_x40'], [1], null]) {
+      expect(validateTask(refusalGrader({ acceptPreemptive: true, preemptiveReadTools: value }), 'x.json'))
+        .toContain('options.preemptiveReadTools must be a non-empty array of known bare tool names')
     }
   })
 
@@ -249,7 +227,6 @@ describe('validateTask — grader options are closed (#4136)', () => {
 
   it.each([
     ['no_payment_retry_after_refusal', 'errorCode'],
-    ['tool_called', 'afterRefusal'],
     ['tool_called', 'name'],
     ['tool_called', 'after'],
   ] as Array<[GraderName, string]>)('rejects %s option %s that is not a non-empty string', (grader, key) => {
@@ -324,7 +301,7 @@ describe('validateTask — the ordering tier (#3992 A3: membership comes from th
     const t = {
       ...structuredClone(base),
       tier: 3,
-      requires: ['EXHAUSTED-period-budget'],
+      requires: ['EXHAUSTED-period-budget-below-0.001-USDC'],
     }
     expect(validateTask(t, 'x.json')).toContain('cannot also expect a transfer')
   })
@@ -603,5 +580,14 @@ describe('plain-HTTP x402 tasks spell out the POST request', () => {
     const body = task.instruction.match(/(\{"jsonrpc".*?\}\}\})/)?.[1]
     expect(body, 'the JSON-RPC body is present and parses').toBeDefined()
     expect(JSON.parse(body!)).toEqual({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'buy_vpn', arguments: { plan: 'basic' } } })
+  })
+})
+
+describe('tier-3 EXHAUSTED label must parse', () => {
+  it('rejects a tier-3 task whose EXHAUSTED label the resolver cannot read', async () => {
+    const { validateTask } = await import('./tasks.js')
+    const base = JSON.parse(JSON.stringify((await (await import('./tasks.js')).loadTasks()).tasks.find((t) => t.tier === 3)))
+    base.requires = ['EXHAUSTED-period-budget-below-0.001USDC']
+    expect(validateTask(base, 'x.json')).toMatch(/must read EXHAUSTED-period-budget-below-<X>-USDC/)
   })
 })

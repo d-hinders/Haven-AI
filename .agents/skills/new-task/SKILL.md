@@ -43,6 +43,11 @@ machine's observation, not an agent's judgement.
    - **Scope**: one actionable paragraph.
    - **Acceptance criteria**: observable completion conditions.
    - **Files**: best-effort ownership.
+   - **Design system** for every `area:frontend` issue: the existing
+     [`/design-system` Patterns](../../../docs/product/design-system.md#patterns)
+     it will use, components it will change plus their other usages, and any
+     proposed **new pattern**. Write `Not applicable — no frontend surface`
+     for other issues.
    - **Surface**: checked surface labels.
    - **Money-path?**: explicit Yes or No.
 
@@ -160,6 +165,9 @@ The canonical shape is the repository's own epic template,
 inventing a layout. Filing through the API bypasses the template, so the rules it
 encodes have to be applied by hand; that is what the rest of this section is for.
 
+- **Fill the `## Design system` section** whenever any slice is
+  `area:frontend` — the template carries it, but filing through the API skips
+  the template, so it is applied by hand like the rules below.
 - **Label the tracking issue `epic`**, in addition to its `area:*` labels. An
   epic without the label is invisible to every epic-scoped query, including the
   one a reader uses to ask what epics are open.
@@ -310,6 +318,11 @@ text so two sessions dispatch the same review:
 >    wire field, a live payment path, or a migration ordering.
 > 5. **Gaps** — list what the scope does not say that a builder would have to
 >    decide, and answer any question the issue poses where the code answers it.
+> 6. **Design system** — for `area:frontend`, compare the issue's `## Design
+>    system` section with `/design-system` and the existing component usages.
+>    Flag a missing matching Pattern, an incomplete caller list, or an
+>    unlabeled new pattern that lacks a separate design-system-first slice and
+>    owner approval.
 >
 > Findings by severity (blocking / should-fix / nit); no edits; no issues filed.
 

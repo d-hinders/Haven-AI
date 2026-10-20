@@ -21,6 +21,11 @@ Use this workflow for:
 - any request that explicitly says to use the defined Haven agents
 - any non-trivial Haven product work where discovery, bounded implementation, or review would materially improve speed or quality, even if the user did not explicitly ask for agents
 
+For UX feedback, iteration, or mockups, route the plan through
+[`UX iteration and mockups`](../SKILL.md#ux-iteration-and-mockups) before
+assigning implementation slices. The design-system slice precedes any page
+that consumes a proposed new pattern.
+
 Recommend roles only when they materially help:
 - `haven-explorer` for read-only discovery
 - `haven-ui-worker` for bounded frontend slices

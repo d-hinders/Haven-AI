@@ -30,6 +30,12 @@ import {
   reconcileOutcomeFailed,
   findOutcomePendingIntents,
 } from '../../../infra/repositories/payment-intents.js'
+// Static, not `await import()` inside the status-surface test (#4126): this
+// module's graph (fee, transactions, x402, openapi, ethers) costs ~3.5 s to
+// cold-load, which a dynamic import charged to that one test's 5 s timeout —
+// it timed out under machine load while the read itself takes ~10 ms. Loaded
+// here, the cost lands in collection, which no test timeout bounds.
+import { getAgentPaymentStatus } from '../agent-payment-status.js'
 
 let seq = 0
 
@@ -133,7 +139,6 @@ describeDb('#3564 — outcome-pending booking and chain reconciliation', () => {
   })
 
   it('the booked row reads as OUTCOME PENDING on the status surface — check_status_later, never failed', async () => {
-    const { getAgentPaymentStatus } = await import('../agent-payment-status.js')
     const owner = await seedOwner()
     const id = await seedIntent(owner)
     await bookSubmittedOutcomePending({ userOpHash: `0x${'ab'.repeat(32)}`, intentId: id, agentId: owner.agentId })

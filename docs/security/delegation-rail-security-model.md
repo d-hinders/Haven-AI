@@ -1164,8 +1164,9 @@ anything else exists — which is when the backup-signer recommendation
 (#908→#1153) matters most.
 **The frontend now uses the account-scoped surface exclusively (#1089):**
 `AccountSignersCard` is the single home for backup & recovery, rendered on the
-account page for any `delegator_hybrid` account — including one with zero
-agents — and no longer duplicated on the agent page. The agent-scoped route
+account page's **Security & details** tab (#4097) for any `delegator_hybrid`
+account — including one with zero agents — and no longer duplicated on the
+agent page. The agent-scoped route
 stays live server-side (it is the same shared implementation below, just
 resolved differently) but has no remaining frontend caller.
 The two surfaces differ only in how the account is resolved: agent lookup

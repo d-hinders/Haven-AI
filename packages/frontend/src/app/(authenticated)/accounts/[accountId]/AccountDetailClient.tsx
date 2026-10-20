@@ -1,19 +1,74 @@
 'use client'
 
+/**
+ * The account detail page (#4097, epic #4093): the FULL RECORD of one Haven
+ * account — header, one summary card (Balance / Holdings / Last 30 days),
+ * and one tab row (Activity · Agents · Security & details). The dashboard
+ * stays the inbox and the summary; this page repeats none of it.
+ *
+ * ## What lives where (owner decisions, 2026-10-19 mockup review)
+ *
+ * - **Header.** The "Test network" and "Default account" badges sit in
+ *   `PageHeader`'s `meta` line, not in `actions` — testnets only, and the
+ *   default badge only with two or more accounts. Send is primary once the
+ *   account holds money; an empty account makes Receive primary and Send
+ *   disabled.
+ * - **Summary card.** Three columns in one card, stacking on a phone:
+ *   Balance (one figure), Holdings (each token with its full-precision
+ *   amount under a small "Amount" label; one token shows no value, a
+ *   non-USD display currency shows the rate, two or more show values —
+ *   `lib/account-holdings.ts` owns those rules), and Last 30 days (Money in
+ *   and Money out only — `hooks/useAccountMoneyFlow.ts`).
+ * - **Agents tab.** Every active agent drawn with #4096's shared `AgentRow`
+ *   from the same dashboard overview the dashboard reads (filtered by
+ *   `accountId`), plus one budget-snapshot summary line
+ *   (`lib/agent-spend-summary.ts`). Revoked agents are not listed; one line
+ *   says how many are hidden and links to the Agents page's revoked facet.
+ * - **Security & details tab.** The ONLY place in the app that can add or
+ *   remove a signer or run recovery: `AccountSignersCard` renders here
+ *   (Settings' `SignersSection` lists signers without add/remove flows).
+ *   With one signer the tab carries the warning dot and the card its
+ *   warning; Account details (address, network, created date) sit below.
+ *
+ * ## Removed with this slice (#4097)
+ *
+ * - The #3333 "Receiving USDC" off-ramp panel and the receive-ledger hook
+ *   behind it — cash-out returns later as a saved destination inside Send,
+ *   when a merchant partner needs it.
+ * - The "Agent access" card (superseded by the Agents tab), the "Token
+ *   balances" table (superseded by Holdings), "Advanced account details"
+ *   (superseded by Account details in the Security tab), and the 10-row
+ *   `TransactionsTable` preview (the Activity tab renders the feed through
+ *   the shared `TransactionActivityRow` instead; #4098 owns that tab).
+ *
+ * ## Tab ownership
+ *
+ * The page owns `?tab=` (`activity` default, `agents`, `security`); an
+ * unknown value falls back to Activity. `Tabs` itself is URL-blind (#4096),
+ * so the mapping and the URL write live here.
+ */
+
 import { EllipsisVertical, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import { useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useRef, useState, type FormEvent } from 'react'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { useAuth, type SmartAccount } from '@/context/AuthContext'
 import { useBalances } from '@/hooks/useBalances'
 import { useTransactionsFeed } from '@/hooks/useTransactionsFeed'
 import { usePortfolio } from '@/hooks/usePortfolio'
 import { usePreferences } from '@/hooks/usePreferences'
 import { useContacts } from '@/hooks/useContacts'
-import { useAgents, type Agent } from '@/hooks/useAgents'
+import { useAgents } from '@/hooks/useAgents'
 import { useAccounts } from '@/hooks/useAccounts'
+import { useDashboardOverview } from '@/hooks/useDashboardOverview'
+import { useBudgetRemaining } from '@/hooks/useBudgetRemaining'
+import { useAttentionDismissals } from '@/hooks/useAttentionDismissals'
+import { useAccountSigners } from '@/hooks/useAccountSigners'
+import { useAccountMoneyFlow } from '@/hooks/useAccountMoneyFlow'
 import { ApiRequestError } from '@/lib/api'
-import TransactionsTable from '@/components/transactions/TransactionsTable'
+import type { AggregatedTransaction } from '@/types/transactions'
+import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
 import DelegationSendModal from '@/components/DelegationSendModal'
 import AccountSignersCard from '@/components/AccountSignersCard'
 import ReceiveFundsModal from '@/components/ReceiveFundsModal'
@@ -29,90 +84,71 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/DropdownMenu'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { Tabs } from '@/components/ui/Tabs'
 import { BackLink } from '@haven_ai/ui/BackLink'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { InlineAlert } from '@/components/ui/InlineAlert'
-import { Row } from '@/components/ui/Row'
-import { StatusBadge, type StatusTone } from '@/components/ui/StatusBadge'
+import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { ExternalDetailsLink } from '@/components/haven'
-import { BalanceFreshnessIndicator } from '@/components/haven'
-import { ReceivePanel } from '@/components/haven'
+import { Tooltip } from '@/components/ui/Tooltip'
 import { useToast } from '@/components/ui/Toast'
-import { getExplorerUrlOrNull, DEFAULT_CHAIN_ID } from '@/lib/chains'
+import {
+  AgentRow,
+  Amount,
+  BalanceFreshnessIndicator,
+  ExternalDetailsLink,
+  TransactionActivityRow,
+  TransactionActivityDayHeader,
+  transactionDayGroups,
+} from '@/components/haven'
+import {
+  transactionFiat,
+  transactionMovement,
+  transactionStatus,
+  transactionTitle,
+} from '@/lib/transaction-presentation'
+import { getExplorerUrlOrNull, resolveChainOrNull, DEFAULT_CHAIN_ID } from '@/lib/chains'
 // #3127 (finding 6): the shared formatter — this page's inline copy was the
 // third drift site that let /accounts render `kr13,000.50` while this page
 // rendered `13 000,50 kr` for the same figure.
-import { formatFiat, truncate } from '@/lib/format'
-import { formatAllowanceForToken } from '@/lib/allowance-format'
-// #3844: the period words are the budget caption helper's (#3806) — the same
-// mapping every budget meter reads, so no surface can disagree about a period
-// length. The local roller this used to carry is gone.
-import { budgetPeriodLabel } from '@/lib/budget-period'
-import { agentReceivedBudgetLine, hasConfiguredAllowances } from '@/lib/agent-budget'
-import { agentStatusPresentation } from '@/lib/payment-status'
-import { isHalfRevoked } from '@/lib/half-revoked'
-import { formatAgentLastActivity } from '@/lib/agent-last-seen'
-import { nonZeroBreakdown } from '@/lib/portfolio-breakdown'
+import { formatFiat, truncate, timeAgo } from '@/lib/format'
 import { isTestnetChain } from '@/lib/marketplace'
-import { Tooltip } from '@/components/ui/Tooltip'
+import { holdingRows, holdingRateLine } from '@/lib/account-holdings'
+import { agentSpendSummaryLine } from '@/lib/agent-spend-summary'
+import { computeAttentionItems } from '@/lib/dashboard-attention'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 
-function agentBudgetSummary(agent: Agent, chainId: number | null): string {
-  // #3542: "Access revoked" is false while a budget delegation is still
-  // redeemable on-chain — checked before status, and before the allowances,
-  // which are a view of ACTIVE rows only. The row links to the agent page,
-  // which is where the budget is ended; nothing here acts.
-  if (isHalfRevoked(agent)) return 'Budget still active on-chain'
-  if (agent.status === 'revoked') return 'Access revoked'
-  // #3988: the budget question is the shared helper's, not an
-  // `allowances.length` copy — a zero cap is no authority, and an open
-  // RECEIVED sub-budget is (so a grant holder never reads "No budget" here).
-  if (!hasConfiguredAllowances(agent)) {
-    return agentReceivedBudgetLine(agent) ?? 'No budget'
-  }
-  if ((agent.allowances ?? []).length > 1) return `${agent.allowances.length} agent budgets`
+/** The page's tabs; `activity` is the default and the unknown-value fallback. */
+type AccountTab = 'activity' | 'agents' | 'security'
 
-  const allowance = agent.allowances[0]
-  const amount = formatAllowanceForToken(
-    allowance.allowance_amount,
-    chainId,
-    allowance.token_symbol,
-  )
-  return `${amount} ${allowance.token_symbol} ${budgetPeriodLabel(allowance.reset_period_min)}`
+function accountTabFromUrl(raw: string | null): AccountTab {
+  return raw === 'agents' || raw === 'security' ? raw : 'activity'
 }
 
-function agentAccessSummary(agent: Agent, chainId: number | null): ReactNode {
-  const activity = formatAgentLastActivity(agent.mcp_last_seen_at)
-  if (!isHalfRevoked(agent)) return `${agentBudgetSummary(agent, chainId)} · ${activity}`
-  // #3542: warning tone for the half-revoked line, so the status badge beside
-  // it does not outweigh it. Short enough to fit at 390px without truncating.
-  return (
-    <>
-      <span className="font-medium text-[var(--v2-warning)]">{agentBudgetSummary(agent, chainId)}</span>
-      {` · ${activity}`}
-    </>
-  )
+/** "12 May 2026" — deterministic, so the account page and its tests agree. */
+function formatCreatedDate(iso: string): string {
+  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+    .format(new Date(iso))
 }
-
-/** Half-revoked agents get a warning badge: a red "Revoked" understates a live budget. */
-function agentBadgeTone(agent: Agent, base: StatusTone): StatusTone {
-  return isHalfRevoked(agent) ? 'warning' : base
-}
-
 
 export default function AccountDetailClient() {
   const params = useParams()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const accountId = params.accountId as string
+  const activeTab = accountTabFromUrl(searchParams.get('tab'))
 
   const { user, loading: authLoading, passkeys = [] } = useAuth()
   const { renameAccount, removeAccount, setDefault, loading: accountsLoading } = useAccounts()
   const { toast } = useToast()
   const { currency } = usePreferences()
-  const { contacts, error: contactsError, resolveAddress } = useContacts()
-  const { agents, loading: agentsLoading, error: agentsError, refetch: refetchAgents } = useAgents()
+  const { resolveAddress } = useContacts()
+  const { agents } = useAgents()
+  const { data: overview, loading: overviewLoading, error: overviewError, refetch: refetchOverview } =
+    useDashboardOverview()
+  const { data: budgetRemaining, loading: budgetRemainingLoading } = useBudgetRemaining()
+  const { dismissedIds: serverDismissedIds } = useAttentionDismissals({ accounts: overview?.accounts })
 
   // Find this account from user's list
   const account = user?.accounts?.find((s) => s.id === accountId)
@@ -121,21 +157,63 @@ export default function AccountDetailClient() {
   const accountExplorerHref = accountAddress ? getExplorerUrlOrNull(chainId, 'address', accountAddress) : null
 
   const accountNamesByAddress = new Map<string, string>()
-  for (const account of user?.accounts ?? []) {
+  for (const acct of user?.accounts ?? []) {
     accountNamesByAddress.set(
-      `${account.account_address.toLowerCase()}:${account.chain_id}`,
-      account.name,
+      `${acct.account_address.toLowerCase()}:${acct.chain_id}`,
+      acct.name,
     )
   }
 
-  // Build linked-agent list
-  const linkedAgents = agents.filter((a) => a.account_id === accountId)
+  // ── Security tab dot (#4097): the SAME read the card's warning uses ──────
+  // The dashboard's "No backup signer" attention item is funded/mainnet-gated
+  // by the server (#1205), but the tab dot must fire for ANY account with one
+  // signer — an unfunded single-signer account still shows the card's warning
+  // above its list, and the dot follows the warning, not the nag rule. This
+  // is a second read of the same endpoint the card makes below; the signers
+  // read is small and the alternative (prop-drilling the card's state out of
+  // its own hook) would restructure a flow this slice must not touch.
+  const { signers: accountSigners, loadError: signersLoadError } = useAccountSigners(
+    accountAddress ?? '',
+    chainId,
+    user?.email ?? '',
+  )
+  const signerCount = accountSigners
+    ? accountSigners.passkeys.length + (accountSigners.owner_address ? 1 : 0)
+    : null
+  const onlyOneWayToApprove = signerCount !== null && signerCount < 2 && !signersLoadError
 
+  // ── The Agents tab's data (#4096 rule: the dashboard overview is the one
+  // source — it lists every non-revoked agent with its live budgets, so the
+  // tab filters it by account; the revoked count comes from `useAgents`,
+  // the one list that still carries revoked rows).
+  const accountAgents = (overview?.agents ?? []).filter((agent) => agent.accountId === accountId)
+  const revokedOnAccount = agents.filter(
+    (agent) => agent.account_id === accountId && agent.status === 'revoked',
+  )
+  const hiddenRevokedCount = revokedOnAccount.length
+  const multiAccount = (user?.accounts?.length ?? 0) > 1
+  const revokedAgentsHref = multiAccount
+    ? `/agents?status=revoked&account=${encodeURIComponent(accountId)}`
+    : '/agents?status=revoked'
 
-  // #2413: the deposit gate was about retired accounts, which no longer
-  // render. Every account reachable here is a live delegation account whose
-  // owner can move funds out, so Receive is unconditional again.
+  const accountNames = Object.fromEntries((user?.accounts ?? []).map((acct) => [acct.id, acct.name]))
+  // #3871: rows render only once the badge inputs have settled — `null`
+  // budget reads with the load still running is the pending state; a
+  // definitively failed first load renders the rows without the ≥90% badge,
+  // exactly as the dashboard's `budgetRemainingReady` treats it.
+  const agentsListPending =
+    accountAgents.length > 0 && budgetRemaining === null && budgetRemainingLoading
+  const attentionItems =
+    overview && !overviewLoading
+      ? computeAttentionItems({
+          overview,
+          budgetRemaining: budgetRemaining ?? null,
+          accountNames,
+          dismissedIds: new Set(serverDismissedIds),
+        })
+      : []
 
+  // ── Balance / Holdings (#4097) ────────────────────────────────────────────
   const {
     totalUsd,
     totalEur,
@@ -147,37 +225,45 @@ export default function AccountDetailClient() {
   } = usePortfolio(accountAddress, { chainId })
 
   const {
-    balances,
     error: balancesError,
     refetch: refetchBalances,
   } = useBalances(accountAddress, { chainId })
 
-  const {
-    transactions,
-    loadingInitial: txLoading,
-    error: txError,
-    total,
-    hasMore,
-    truncated,
-    refresh: refetchTx,
-  } = useTransactionsFeed({ accountId }, 10)
-
   // SEK (#3127): the portfolio hook now exposes the wire's `totalSek`, so the
-  // headline and per-token rows read the SEK figures the endpoint prices —
-  // never a USD value relabelled "kr".
+  // headline reads the SEK figures the endpoint prices — never a USD value
+  // relabelled "kr".
   const totalFiat = currency === 'EUR' ? totalEur : currency === 'SEK' ? totalSek : totalUsd
   const formattedTotal = formatFiat(totalFiat, currency)
   const balanceUnavailable = Boolean(portfolioError || balancesError)
   // #3295: a token whose balance read failed renders its last-known value
   // with the stale indicator beside it — the headline carries the same
-  // marker when any token under it is degraded. "Unavailable" (the word)
-  // stays reserved for the WHOLE-portfolio failure states above; per-token
-  // unavailability shows inside the token row instead of erasing the row.
+  // marker when any token under it is degraded.
   const degradedFreshness = breakdown.find((item) => item.balanceFreshness)?.balanceFreshness
-  // #4021: the LIST hides zero-raw-balance rows (a filler ETH 0 renders
-  // nowhere), while the headline's freshness marker keeps reading the FULL
-  // breakdown above — hiding an unavailable filler row must not drop it.
-  const visibleBalances = nonZeroBreakdown(breakdown)
+  const holdings = holdingRows(breakdown, currency)
+  // #4097: "holds money" is the Holdings signal — any token with a non-zero
+  // raw balance (a held but unpriced token counts; unpriced is not
+  // worthless). While the read is in flight or unavailable the buttons keep
+  // today's behaviour (Send primary) rather than flipping mid-load.
+  const holdingsKnown = !portfolioLoading && !balanceUnavailable
+  const accountHoldsMoney = !holdingsKnown || holdings.length > 0
+
+  // ── Last 30 days (#4097) ─────────────────────────────────────────────────
+  const moneyFlow = useAccountMoneyFlow(accountId, currency)
+
+  // ── The Activity tab's feed (#4098 owns the tab's final shape; until then
+  // it renders the account's existing feed through the shared ledger row).
+  const {
+    transactions,
+    loadingInitial: txLoading,
+    loadingMore: txLoadingMore,
+    error: txError,
+    total,
+    hasMore,
+    truncated,
+    loadMore,
+    refresh: refetchTx,
+  } = useTransactionsFeed({ accountId }, 25)
+  const [selectedTx, setSelectedTx] = useState<AggregatedTransaction | null>(null)
   const [renameOpen, setRenameOpen] = useState(false)
   const [removeOpen, setRemoveOpen] = useState(false)
   const [removing, setRemoving] = useState(false)
@@ -191,11 +277,21 @@ export default function AccountDetailClient() {
     refetchBalances()
     refetchPortfolio()
     void refetchTx()
+    // The send's own row enters the rolling 30-day window the moment it
+    // confirms, so the Money out figure refreshes with the same beat.
+    void moneyFlow.refresh()
   }
 
-  const handleBalancesRefresh = () => {
-    refetchBalances()
-    refetchPortfolio()
+  const handleTabChange = (tab: AccountTab) => {
+    if (tab === activeTab) return
+    // `activity` is the default and carries no parameter — the URL stays
+    // shareable and the default tab is the canonical address.
+    router.replace(
+      tab === 'activity'
+        ? `/accounts/${encodeURIComponent(accountId)}`
+        : `/accounts/${encodeURIComponent(accountId)}?tab=${tab}`,
+      { scroll: false },
+    )
   }
 
   const handleRename = async (name: string) => {
@@ -221,10 +317,10 @@ export default function AccountDetailClient() {
   //    mirror `STILL_ENABLED_DELEGATION_STATUSES`), so a
   //    grant that was never activated, or one replaced but not yet disabled,
   //    blocks the unlink too.
-  //  - "recovering funds", not "a recovery" — this page already renders a
-  //    "Backup & recovery" card (`AccountSignersCard`), which is signer
-  //    replacement and has nothing to do with the sweep this refusal means.
-  //    The phrasing follows the sweep screen's own vocabulary instead.
+  //  - "recovering funds", not "a recovery" — this page's Security &
+  //    details tab hosts signer replacement (`AccountSignersCard`), which
+  //    has nothing to do with the sweep this refusal means. The phrasing
+  //    follows the sweep screen's own vocabulary instead.
   const handleRemoveConfirmed = async () => {
     if (!account) return
     setRemoving(true)
@@ -287,39 +383,59 @@ export default function AccountDetailClient() {
     )
   }
 
+  const tabItems: Array<{ value: AccountTab; label: string; count?: number; warningDot?: boolean }> = [
+    { value: 'activity', label: 'Activity' },
+    // Only the Agents tab carries a count (owner decision). A zero count is
+    // carried too: the count is the tab's own number, not an alert.
+    { value: 'agents', label: 'Agents', count: accountAgents.length },
+    {
+      value: 'security',
+      label: 'Security & details',
+      // The dot fires for any one-signer account (see the hook read above) —
+      // the same condition the card's in-tab warning reads.
+      warningDot: onlyOneWayToApprove,
+    },
+  ]
+
   return (
     <div className="max-w-5xl space-y-6">
       <PageHeader
         back={{ href: '/accounts', label: 'Accounts' }}
         title={account.name}
-        subtitle={
-          'Control the funds, agent access, and recent activity for this Haven wallet.'
+        meta={
+          <>
+            {/* #4097: the badges moved out of `actions` into the meta line —
+                they describe the account, they are not actions. The default
+                badge needs a second account to mean anything (#4021), and
+                the network marker stays testnets-only (epic #3801: no
+                network marker on Base). */}
+            {account.is_default && multiAccount ? (
+              <StatusBadge tone="brand">Default account</StatusBadge>
+            ) : null}
+            {isTestnetChain(chainId) ? <StatusBadge>Test network</StatusBadge> : null}
+          </>
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            {account.is_default && (user?.accounts?.length ?? 0) > 1 ? (
-              <StatusBadge tone="brand">Default</StatusBadge>
-            ) : null}
-            {isTestnetChain(chainId) ? (
-              // #4021: no chain name on a primary surface (epic #3801) — the
-              // same "Test network" wording /dashboard's MoneyPanel uses,
-              // testnets only, mainnet renders no network marker at all.
-              <StatusBadge>Test network</StatusBadge>
-            ) : null}
             {accountAddress && (
               <>
                 {/* #1083 gave Send to BOTH rails. #1989 (epic #1440) took it
                     back off the legacy Safe rail: that path signed a Safe
                     transaction through `SendModal`, which is deleted with the
                     rail. Delegation accounts keep the sponsored owner-send.
-                    Hidden rather than disabled, per #1079. #2413 then made
-                    the legacy case unreachable here entirely: the account
-                    list is delegation-only, so no legacy account renders
-                    this page and nothing below is rail-gated. */}
-                <Button onClick={() => setSendOpen(true)}>
+                    #4097: Send is primary once the account holds money; an
+                    empty account makes Receive the primary and disables Send. */}
+                <Button
+                  onClick={() => setSendOpen(true)}
+                  variant={accountHoldsMoney ? 'primary' : 'ghost'}
+                  disabled={!accountHoldsMoney}
+                >
                   Send
                 </Button>
-                <Button variant="ghost" onClick={() => setReceiveOpen(true)}>
+                <Button
+                  variant={accountHoldsMoney ? 'ghost' : 'primary'}
+                  onClick={() => setReceiveOpen(true)}
+                >
                   Receive
                 </Button>
               </>
@@ -341,7 +457,7 @@ export default function AccountDetailClient() {
                 <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
                   Rename
                 </DropdownMenuItem>
-                {!account.is_default && (user?.accounts?.length ?? 0) > 1 ? (
+                {!account.is_default && multiAccount ? (
                   <DropdownMenuItem
                     onSelect={() => {
                       void setDefault(account.id)
@@ -361,320 +477,385 @@ export default function AccountDetailClient() {
         }
       />
 
-      <Card hover={false} elevation="raised" className="overflow-hidden">
-        <Card.Header padding="none" className="px-5 py-5 sm:px-6">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-xs font-medium uppercase tracking-widest text-[var(--v2-ink-3)]">Total balance</p>
-              {portfolioLoading ? (
-                <Skeleton className="mt-3 h-9 w-44" />
-              ) : balanceUnavailable ? (
-                <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink-3)] v2-tabular">
-                  Unavailable
-                </p>
-              ) : (
-                <div className="mt-2 flex flex-wrap items-baseline gap-3">
-                  <p className="text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
-                    {formattedTotal}
+      {/* ── The summary card: three columns, stacking on a phone (#4097). */}
+      <Card elevation="raised" hover={false} className="overflow-hidden">
+        <div className="grid md:grid-cols-3 md:divide-x md:divide-[var(--v2-border)]">
+          {/* Balance */}
+          <section aria-label="Balance" className="p-5 sm:p-6">
+            <p className="text-sm font-medium text-[var(--v2-ink-2)]">Balance</p>
+            {portfolioLoading ? (
+              <div className="mt-3 h-9 w-44 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+            ) : balanceUnavailable ? (
+              <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink-3)] v2-tabular">
+                Unavailable
+              </p>
+            ) : (
+              <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
+                {formattedTotal}
+              </p>
+            )}
+            {/* #3295: the headline figure is the last-known balance when the
+                live read failed — a subtle indicator says how old it is. */}
+            {degradedFreshness && (
+              <div className="mt-2">
+                <BalanceFreshnessIndicator freshness={degradedFreshness} />
+              </div>
+            )}
+          </section>
+
+          {/* Holdings — the token rules live in lib/account-holdings.ts. */}
+          <section aria-label="Holdings" className="p-5 sm:p-6">
+            <p className="text-sm font-medium text-[var(--v2-ink-2)]">Holdings</p>
+            <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Amount</p>
+            {portfolioLoading ? (
+              <div className="mt-3 space-y-2" role="status" aria-busy="true" aria-label="Loading holdings">
+                <div className="h-4 w-32 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                <div className="h-4 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+              </div>
+            ) : holdings.length === 0 ? (
+              <p className="mt-2 text-sm text-[var(--v2-ink-3)]">No tokens yet</p>
+            ) : (
+              <ul className="mt-2 space-y-2">
+                {holdings.map((row) => {
+                  const rateLine = holdingRateLine(row, currency)
+                  return (
+                    <li key={row.symbol}>
+                      <p className="text-sm text-[var(--v2-ink)]">
+                        <span className="font-medium">{row.symbol}</span>{' '}
+                        <span className="font-mono v2-tabular">{row.amount}</span>
+                        {/* #3295: this token's read failed — the amount is
+                            the last-known balance, and the row says how old
+                            it is. Never an unmarked figure. */}
+                        {row.balanceFreshness && (
+                          <span className="ml-2">
+                            <BalanceFreshnessIndicator freshness={row.balanceFreshness} size="compact" />
+                          </span>
+                        )}
+                      </p>
+                      {/* One token shows no value (it would repeat the
+                          balance); a non-USD display currency shows the
+                          rate instead; two or more each show their value. */}
+                      {row.value !== null ? (
+                        <p className="mt-0.5 text-sm text-[var(--v2-ink-2)] v2-tabular">
+                          {formatFiat(row.value, currency)}
+                        </p>
+                      ) : null}
+                      {rateLine ? (
+                        <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">{rateLine}</p>
+                      ) : null}
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </section>
+
+          {/* Last 30 days — Money in and Money out, nothing else (#4097). */}
+          <section aria-label="Last 30 days" className="p-5 sm:p-6">
+            <p className="text-sm font-medium text-[var(--v2-ink-2)]">Last 30 days</p>
+            {moneyFlow.loading ? (
+              <div className="mt-3 space-y-2" role="status" aria-busy="true" aria-label="Loading the last 30 days">
+                <div className="h-4 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                <div className="h-4 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+              </div>
+            ) : moneyFlow.error ? (
+              <div className="mt-2">
+                <p className="text-sm text-[var(--v2-ink-3)]">Haven could not load the last 30 days.</p>
+                <Button
+                  className="mt-2"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => void moneyFlow.refresh()}
+                >
+                  Try again
+                </Button>
+              </div>
+            ) : (
+              <div className="mt-2 space-y-3">
+                <div>
+                  <p className="text-xs text-[var(--v2-ink-3)]">Money in</p>
+                  <p className="mt-0.5">
+                    <Amount amount={moneyFlow.moneyIn} currency={currency} approx={moneyFlow.approx} />
                   </p>
-                  {degradedFreshness && (
-                    <BalanceFreshnessIndicator freshness={degradedFreshness} />
-                  )}
                 </div>
-              )}
-            </div>
-            <p className="max-w-sm text-sm leading-relaxed text-[var(--v2-ink-2)]">
-              Sum of all tokens held by this Haven wallet, converted to {currency}.
-            </p>
-          </div>
-        </Card.Header>
-
-        <div className="p-4 sm:p-5">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <h2 className="text-base font-semibold text-[var(--v2-ink)]">Token balances</h2>
-            <Button
-              type="button"
-              variant="tertiary"
-              size="sm"
-              onClick={handleBalancesRefresh}
-            >
-              Refresh
-            </Button>
-          </div>
-          {portfolioLoading ? (
-            <div role="status" aria-busy="true" aria-label="Loading token balances" className="space-y-2">
-              {[0, 1, 2].map((item) => (
-                <div key={item} className="grid grid-cols-3 gap-4 px-2 py-2">
-                  <Skeleton className="h-4 w-16" />
-                  <Skeleton className="h-4 w-20 justify-self-end" />
-                  <Skeleton className="h-4 w-24 justify-self-end" />
+                <div>
+                  <p className="text-xs text-[var(--v2-ink-3)]">Money out</p>
+                  <p className="mt-0.5">
+                    <Amount amount={moneyFlow.moneyOut} currency={currency} approx={moneyFlow.approx} />
+                  </p>
                 </div>
-              ))}
-            </div>
-          ) : balancesError || portfolioError ? (
-            <EmptyState
-              title="Balances could not load"
-              body={portfolioError ?? balancesError}
-              className="py-8"
-              action={<Button variant="ghost" size="sm" onClick={handleBalancesRefresh}>Try again</Button>}
-            />
-          ) : visibleBalances.length === 0 ? (
-            <EmptyState
-              title="No token balances yet"
-              body="Deposit funds to see tokens in this Haven wallet."
-              className="py-8"
-              action={accountAddress ? <Button size="sm" onClick={() => setReceiveOpen(true)}>Deposit address</Button> : null}
-            />
-          ) : (
-            <>
-              <div className="grid grid-cols-3 gap-4 text-xs text-[var(--v2-ink-3)] mb-2 px-2">
-                <span>Asset</span>
-                <span className="text-right">Balance</span>
-                <span className="text-right">
-                  Value ({currency})
-                </span>
+                {/* #2882: the feed is capped at the explorer window, so the
+                    figures may not cover the full 30 days — the partial-data
+                    qualifier instead of a completeness claim. */}
+                {moneyFlow.partial ? (
+                  <p className="text-xs text-[var(--v2-ink-3)]">
+                    Figures cover the history Haven could load, which may not cover the full 30 days.
+                  </p>
+                ) : null}
               </div>
-              {visibleBalances.map((item) => {
-                const fiatValue = currency === 'EUR' ? item.eurValue : currency === 'SEK' ? item.sekValue : item.usdValue
-                return (
-                  <div
-                    key={item.symbol}
-                    className="grid grid-cols-3 gap-4 px-2 py-2 rounded-md hover:bg-[var(--v2-surface)] transition-colors"
-                  >
-                    <span className="text-sm text-[var(--v2-ink)]">{item.symbol}</span>
-                    <span className="text-sm text-[var(--v2-ink-2)] text-right font-mono v2-tabular">
-                      {item.formatted}
-                      {/* #3295: this token's read failed — the figure is the
-                          last-known balance, and the row says how old it is.
-                          Never an unmarked zero: an entry that has never been
-                          read shows "Unavailable" beside the filler. */}
-                      {item.balanceFreshness && (
-                        <span className="ml-2">
-                          <BalanceFreshnessIndicator freshness={item.balanceFreshness} size="compact" />
-                        </span>
-                      )}
-                    </span>
-                    <span className="text-sm text-[var(--v2-ink)] text-right v2-tabular">
-                      {formatFiat(fiatValue ?? 0, currency)}
-                    </span>
-                  </div>
-                )
-              })}
-            </>
-          )}
+            )}
+          </section>
         </div>
       </Card>
 
-      <Card hover={false}>
-        <div className="px-5 pt-5 sm:px-6 sm:pt-6">
-          <div className="flex items-center gap-3">
-            <h2 className="text-base font-semibold text-[var(--v2-ink)]">Agent access</h2>
-            <Button
-              href="/agents"
-              variant="tertiary"
-              size="sm"
-              trailingIcon
-            >
-              View all agents
-            </Button>
-          </div>
-          <p className="mt-1 max-w-2xl pb-5 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-            Agents can request payments from this Haven wallet when their status and agent budget allow it.
-          </p>
-        </div>
-
-        {agentsLoading ? (
-          <div role="status" aria-busy="true" aria-label="Loading agent access">
-            <Card.Section divided>
-              {[0, 1, 2].map((item) => (
-                <div key={item} className="px-4 py-3.5">
-                  <Skeleton className="h-4 w-32" />
-                  <Skeleton className="mt-2 h-3 w-24" />
-                </div>
-              ))}
-            </Card.Section>
-          </div>
-        ) : agentsError && linkedAgents.length > 0 ? (
-          <>
-            <div className="border-t border-warning/30 px-5 py-3 text-sm text-[var(--v2-ink-2)]">
-              <div className="flex flex-wrap items-center justify-between gap-3" role="alert">
-                <span>Showing the last successful agent records. Try again to refresh them.</span>
-                <Button variant="ghost" size="sm" onClick={() => refetchAgents()}>Try again</Button>
-              </div>
-            </div>
-            <Card.Section divided>
-              {linkedAgents.map((agent) => {
-                const status = agentStatusPresentation(agent.status)
-                return (
-                  <Row
-                    key={agent.id}
-                    href={`/agents/${agent.id}`}
-                    title={agent.name}
-                    subtitle={agentAccessSummary(agent, chainId)}
-                    trailing={
-                      agent.status === 'active'
-                        ? undefined
-                        : <StatusBadge tone={agentBadgeTone(agent, status.tone)}>{status.label}</StatusBadge>
-                    }
-                  />
-                )
-              })}
-            </Card.Section>
-          </>
-        ) : agentsError ? (
-          <div className="border-t border-[var(--v2-border)]">
-            <EmptyState
-              title="Agent access could not load"
-              body={
-                'Haven could not verify which agents can request payments from this wallet.'
-              }
-              className="py-8"
-              action={<Button variant="ghost" size="sm" onClick={() => refetchAgents()}>Try again</Button>}
-            />
-          </div>
-        ) : linkedAgents.length > 0 ? (
-          <Card.Section divided>
-            {linkedAgents.map((agent) => {
-              const status = agentStatusPresentation(agent.status)
-              return (
-                <Row
-                  key={agent.id}
-                  href={`/agents/${agent.id}`}
-                  title={agent.name}
-                  subtitle={agentAccessSummary(agent, chainId)}
-                  trailing={
-                    agent.status === 'active'
-                      ? undefined
-                      : <StatusBadge tone={agentBadgeTone(agent, status.tone)}>{status.label}</StatusBadge>
-                  }
-                />
-              )
-            })}
-          </Card.Section>
-        ) : (
-          <div className="border-t border-[var(--v2-border)]">
-            <EmptyState
-              title="No agents connected"
-              body={
-                'Connect an agent when you want it to request payments from this Haven wallet.'
-              }
-              className="py-8"
-              action={
-                <Button href="/agents" size="sm">Connect agent</Button>
-              }
-            />
-          </div>
-        )}
-      </Card>
-
-      {/* #1089: backup & recovery is an account capability, not an agent one —
-          it works from the moment the account exists, with no agent required. */}
-      <AccountSignersCard
-        accountAddress={account.account_address}
-        chainId={chainId}
-        userEmail={user?.email ?? ''}
+      {/* ── The tab row (#4096's Tabs; the page owns ?tab=). */}
+      <Tabs
+        tabs={tabItems}
+        value={activeTab}
+        onChange={handleTabChange}
+        ariaLabel="Account"
       />
 
-      {/* Account info */}
-      <Card hover={false} className="p-5 sm:p-6">
-        <div className="mb-5 flex items-center justify-between gap-3">
-          <h2 className="text-base font-semibold text-[var(--v2-ink)]">
-            Advanced account details
-          </h2>
-        </div>
-
-        {/* #2413: single-column now. This was `sm:grid-cols-2` for the Address
-            / Required-approvals pair; with the approvals block deleted, the
-            two-column rule left the lone remaining child in column 1 and a
-            dead half-card to its right at `sm:` and above. Caught by the
-            rendered design pass, on a route the screenshot set did not cover. */}
-        <div className="grid grid-cols-1 gap-6">
-          {/* Address */}
-          <div>
-            <p className="text-xs text-[var(--v2-ink-3)] mb-1">Haven wallet address</p>
-            <div className="flex items-center gap-3">
-              {accountAddress ? (
-                <Tooltip label={accountAddress} mono>
-                  <span className="text-sm font-mono text-[var(--v2-ink)]">
-                    {truncate(accountAddress)}
-                  </span>
-                </Tooltip>
-              ) : (
-                <span className="text-sm font-mono text-[var(--v2-ink)]">—</span>
-              )}
-              {accountAddress && <CopyButton value={accountAddress} label="address" />}
-              {accountExplorerHref && <ExternalDetailsLink href={accountExplorerHref} label="Open wallet address externally" />}
+      {/* ── Activity tab (#4098 owns its final shape; until then the account's
+          existing feed, rendered through the shared ledger row). */}
+      {activeTab === 'activity' ? (
+        <div>
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <div className="flex items-center gap-3">
+                <h2 className="text-base font-semibold text-[var(--v2-ink)]">Activity</h2>
+                {!txLoading && total > 0 ? (
+                  <Button
+                    href={`/transactions?accountId=${encodeURIComponent(accountId)}`}
+                    variant="tertiary"
+                    size="sm"
+                    trailingIcon
+                  >
+                    View all
+                  </Button>
+                ) : null}
+              </div>
+              <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
+                {txLoading
+                  ? 'Loading activity...'
+                  : truncated
+                    ? // #2882: `total` is what the explorers returned, not what
+                      // the wallet holds — the flat count must not claim more
+                      // when the feed is capped.
+                      `${total} recent transaction${total !== 1 ? 's' : ''} for this Haven wallet`
+                    : `${total} transaction${total !== 1 ? 's' : ''} for this Haven wallet`}
+              </p>
             </div>
+            {!txLoading && transactions.length > 0 ? (
+              <p className="text-xs text-[var(--v2-ink-3)]">
+                Showing <span className="v2-tabular">{transactions.length}</span> of <span className="v2-tabular">{total}</span>
+                {truncated ? ' loaded' : null}
+              </p>
+            ) : null}
           </div>
-          {/* #2413: "Required approvals" and "Approvers" lived here. Both were
-              fed by the account-details read that this slice deletes, and both
-              were already inert for a delegation account — the hook behind
-              them was gated to the retired rail. Delegation signers are shown
-              by AccountSignersCard above, which is the live control. */}
+          <Card hover={false}>
+            {txLoading ? (
+              <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-label="Loading activity">
+                {[0, 1, 2].map((item) => (
+                  <div key={item} className="flex items-center gap-3 px-5 py-3.5">
+                    <div className="h-9 w-9 rounded-[10px] bg-[var(--v2-surface-2)] animate-pulse" />
+                    <div className="min-w-0 flex-1">
+                      <div className="h-3.5 w-40 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                      <div className="mt-1.5 h-2.5 w-48 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : txError ? (
+              <div className="p-6">
+                <EmptyState
+                  title="Activity could not load"
+                  body={txError}
+                  className="py-8"
+                  action={<Button variant="ghost" size="sm" onClick={() => void refetchTx()}>Try again</Button>}
+                />
+              </div>
+            ) : transactions.length === 0 ? (
+              <div className="p-6">
+                <EmptyState
+                  title="No activity yet"
+                  body="Inbound and outbound payments for this Haven wallet will appear here."
+                  className="py-8"
+                  action={
+                    <Button href={`/transactions?accountId=${encodeURIComponent(accountId)}`} variant="ghost" size="sm">
+                      Open transactions
+                    </Button>
+                  }
+                />
+              </div>
+            ) : (
+              <div className="divide-y divide-[var(--v2-border)] v2-animate-fade-in">
+                {transactionDayGroups(transactions, (tx) => new Date(tx.timestamp * 1000).toISOString()).map((day) => (
+                  <div key={day.dayKey}>
+                    {/* The window the account page paginates has no boundary
+                        that cuts a day; #4098 owns the partial-day rule. */}
+                    <TransactionActivityDayHeader label={day.label} />
+                    {day.items.map((tx, index) => (
+                      <ActivityLedgerRow
+                        key={`${tx.accountId}:${tx.hash}:${tx.type}:${index}`}
+                        tx={tx}
+                        resolveAddress={resolveAddress}
+                        accountNamesByAddress={accountNamesByAddress}
+                        onOpen={() => setSelectedTx(tx)}
+                      />
+                    ))}
+                  </div>
+                ))}
+                {hasMore ? (
+                  <div className="flex justify-center px-5 py-4">
+                    <Button variant="ghost" size="sm" onClick={() => void loadMore()} disabled={txLoadingMore}>
+                      {txLoadingMore ? 'Loading…' : 'Load more'}
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </Card>
         </div>
-      </Card>
+      ) : null}
 
-      {/* Full transaction history */}
-      <div>
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <div className="flex items-center gap-3">
-              <h2 className="text-base font-semibold text-[var(--v2-ink)]">Transaction history</h2>
-              {!txLoading && total > 0 ? (
-                <Button
-                  href={`/transactions?accountId=${encodeURIComponent(accountId)}`}
-                  variant="tertiary"
-                  size="sm"
-                  trailingIcon
-                >
-                  View all
-                </Button>
-              ) : null}
+      {/* ── Agents tab: the budget snapshot line, the shared agent rows, the
+          hidden revoked count (#4097). */}
+      {activeTab === 'agents' ? (
+        <div className="space-y-4">
+          {/* #3871's rule, carried to this surface: the classification the
+              row badges read is still in flight, so the first rows render is
+              fully classified — never a frame a later poll would reorder. */}
+          {overviewLoading || agentsListPending ? (
+            <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card overflow-hidden">
+              <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-label="Loading agents">
+                {[0, 1, 2].map((item) => (
+                  <div key={item} className="flex items-center gap-3 px-5 py-3.5">
+                    <div className="h-8 w-8 rounded-full bg-[var(--v2-surface-2)] animate-pulse" />
+                    <div className="min-w-0 flex-1">
+                      <div className="h-3.5 w-36 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                      <div className="mt-1.5 h-2.5 w-48 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-            <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
-              {txLoading
-                ? 'Loading activity...'
-                : truncated
-                  ? // #2882: `total` is what the explorers returned, not what
-                    // the wallet holds — each source is capped at a window.
-                    // The flat count is a stronger completeness claim than
-                    // anything on /transactions, so it must not be made here
-                    // when the feed is capped.
-                    `${total} recent transaction${total !== 1 ? 's' : ''} for this Haven wallet`
-                  : `${total} transaction${total !== 1 ? 's' : ''} for this Haven wallet`}
-            </p>
-          </div>
-          {!txLoading && transactions.length > 0 ? (
-            <p className="text-xs text-[var(--v2-ink-3)]">
-              Showing <span className="v2-tabular">{transactions.length}</span> of <span className="v2-tabular">{total}</span>
-              {truncated ? ' loaded' : null}
+          ) : overviewError && accountAgents.length === 0 ? (
+            <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card overflow-hidden">
+              <div className="p-6">
+                <EmptyState
+                  size="compact"
+                  title="Agents could not load"
+                  body="Haven could not verify which agents are connected right now."
+                  className="py-8"
+                  action={<Button variant="ghost" size="sm" onClick={() => void refetchOverview()}>Try again</Button>}
+                />
+              </div>
+            </div>
+          ) : accountAgents.length === 0 ? (
+            <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card overflow-hidden">
+              <div className="p-6">
+                <EmptyState
+                  size="compact"
+                  title="No agents connected"
+                  body="Connect an agent when you want it to request payments from this Haven wallet."
+                  className="py-8"
+                  action={
+                    <Button href="/agents" size="sm">Connect agent</Button>
+                  }
+                />
+              </div>
+            </div>
+          ) : (
+            <>
+              <p className="max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
+                {agentSpendSummaryLine(accountAgents, currency, overview?.spotRates)}
+              </p>
+              <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card overflow-hidden">
+                <div className="divide-y divide-[var(--v2-border)] v2-animate-fade-in">
+                  {accountAgents.map((agent) => (
+                    <AgentRow
+                      key={agent.id}
+                      agent={agent}
+                      budgetRemaining={budgetRemaining ?? null}
+                      attentionItems={attentionItems}
+                      spotRates={overview?.spotRates}
+                      currency={currency}
+                      accountNames={accountNames}
+                      accountCount={user?.accounts?.length ?? 0}
+                      nowMs={Date.now()}
+                    />
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+          {/* Revoked agents are not listed; one line says how many are hidden
+              and links to the Agents page's revoked facet — the account facet
+              only exists with two or more accounts (lib/agent-list-filters
+              registers it then), so the link narrows by account only then. */}
+          {hiddenRevokedCount > 0 ? (
+            <p className="text-sm text-[var(--v2-ink-3)]">
+              {hiddenRevokedCount} revoked {hiddenRevokedCount === 1 ? 'agent' : 'agents'} not listed.{' '}
+              <Link
+                href={revokedAgentsHref}
+                className="font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
+              >
+                View
+              </Link>
             </p>
           ) : null}
         </div>
-        <Card hover={false}>
-          <TransactionsTable
-            transactions={transactions}
-            loading={txLoading}
-            error={txError}
-            onRefresh={() => void refetchTx()}
-            resolveAddress={resolveAddress}
-            accountNamesByAddress={accountNamesByAddress}
-            hasActiveFilters={false}
-            variant="card"
-            emptyState={{
-              title: 'No activity yet',
-              body: 'Inbound and outbound payments for this Haven wallet will appear here.',
-            }}
-          />
-        </Card>
-        {transactions.length > 0 && hasMore ? (
-          <div className="mt-5 flex justify-center">
-            <Button href={`/transactions?accountId=${encodeURIComponent(accountId)}`} variant="ghost">
-              View all
-            </Button>
+      ) : null}
+
+      {/* ── Security & details tab: the ONLY place that changes the signer
+          set, plus the account's own details (#4097). */}
+      {activeTab === 'security' ? (
+        <div className="space-y-6">
+          <div>
+            <h2 className="text-base font-semibold text-[var(--v2-ink)]">Who can approve</h2>
+            <p className="mt-1 max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
+              The ways this account can be approved. Keep at least two, so a lost device never
+              means a lost account.
+            </p>
           </div>
-        ) : null}
-      </div>
+          {/* #1089: backup & recovery is an account capability, not an agent
+              one — it works from the moment the account exists, with no agent
+              required. Every flow the card owns (add a backup passkey, add a
+              wallet, remove a signer, "Lost a device?") is reachable here and
+              nowhere else; Settings' SignersSection lists without acting. */}
+          <AccountSignersCard
+            accountAddress={account.account_address}
+            chainId={chainId}
+            userEmail={user?.email ?? ''}
+          />
+
+          {/* Account details */}
+          <Card hover={false} className="p-5 sm:p-6">
+            <h2 className="mb-5 text-base font-semibold text-[var(--v2-ink)]">Account details</h2>
+            <div className="grid gap-6 sm:grid-cols-2">
+              <div>
+                <p className="text-xs text-[var(--v2-ink-3)] mb-1">Haven wallet address</p>
+                <div className="flex items-center gap-3">
+                  {accountAddress ? (
+                    <Tooltip label={accountAddress} mono>
+                      <span className="text-sm font-mono text-[var(--v2-ink)]">
+                        {truncate(accountAddress)}
+                      </span>
+                    </Tooltip>
+                  ) : (
+                    <span className="text-sm font-mono text-[var(--v2-ink)]">—</span>
+                  )}
+                  {accountAddress && <CopyButton value={accountAddress} label="address" />}
+                  {accountExplorerHref && (
+                    <ExternalDetailsLink href={accountExplorerHref} label="Open wallet address externally" />
+                  )}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-[var(--v2-ink-3)] mb-1">Network</p>
+                <p className="text-sm text-[var(--v2-ink)]">
+                  {resolveChainOrNull(chainId)?.name ?? `Chain ${chainId}`}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-[var(--v2-ink-3)] mb-1">Created</p>
+                <p className="text-sm text-[var(--v2-ink)]">{formatCreatedDate(account.created_at)}</p>
+              </div>
+            </div>
+          </Card>
+        </div>
+      ) : null}
 
       {/*
         Mount the modal only while open so its wallet hooks
@@ -696,12 +877,6 @@ export default function AccountDetailClient() {
         account={account}
         onClose={() => setReceiveOpen(false)}
       />
-      {accountAddress && (
-        <ReceivePanel
-          accountAddress={accountAddress}
-          chainId={chainId}
-        />
-      )}
       {renameOpen && (
         <RenameModal
           account={account}
@@ -729,7 +904,46 @@ export default function AccountDetailClient() {
         confirmLabel={removeError?.retryable ? 'Try again' : 'Remove account'}
         loading={removing}
       />
+      <TransactionDetailPanel
+        transaction={selectedTx}
+        open={selectedTx !== null}
+        onClose={() => setSelectedTx(null)}
+        resolveAddress={resolveAddress}
+        accountNamesByAddress={accountNamesByAddress}
+      />
     </div>
+  )
+}
+
+/** One feed row in the Activity tab's ledger (#4096's ledger mode). */
+function ActivityLedgerRow({
+  tx,
+  resolveAddress,
+  accountNamesByAddress,
+  onOpen,
+}: {
+  tx: AggregatedTransaction
+  resolveAddress: (address: string) => string | null
+  accountNamesByAddress: Map<string, string>
+  onOpen: () => void
+}) {
+  const badge = transactionStatus(tx) ?? tx.statusBadge
+  const fiat = transactionFiat(tx)
+  return (
+    <TransactionActivityRow
+      title={transactionTitle(tx)}
+      description={transactionMovement(tx, resolveAddress, accountNamesByAddress, { noAddress: true })}
+      value={tx.valueFormatted}
+      asset={tx.tokenSymbol}
+      failed={tx.isError}
+      status={badge?.label}
+      statusTone={badge?.tone}
+      timestamp={timeAgo(tx.timestamp * 1000)}
+      direction={tx.direction}
+      fiat={{ amount: fiat.amount, currency: fiat.currency, approx: fiat.approx }}
+      density="compact"
+      onOpen={onOpen}
+    />
   )
 }
 

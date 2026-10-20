@@ -807,7 +807,9 @@ call this mode WITHOUT the mark and render the figure inside a
 `whitespace-nowrap` cell, so a money figure never wraps or truncates — the
 auto-layout column widens to the figure's min-content instead. The mark
 stays where it explains something: the detail panel (why the two figures
-differ) and the dashboard's activity row. Unknown — `null` or a non-finite
+differ) and the dashboard's activity row. Since #4097 the account page renders
+its feed through the `TransactionActivityRow` ledger, not `TransactionsTable`
+(that table's callers are `/transactions` and the agent page). Unknown — `null` or a non-finite
 value —
 renders `—` in `--v2-ink-3`, never `0,00 kr`: existing callers turned unknown
 into zero, and this mode must not.
@@ -2056,7 +2058,11 @@ Use `components/transactions/TransactionsTable.tsx` for full transaction history
   already reshaping. If a real need appears, it belongs with that epic.
 - Empty state renders inside the table with the correct column span.
 
-Use `TransactionActivityRow` for compact dashboard, account detail, or agent detail previews.
+Use `TransactionActivityRow` for compact dashboard previews and, in its ledger mode
+(#4096), a full day-grouped transaction ledger — the account page's Activity tab is
+its first consumer (#4097), one row per transaction opening the shared
+`TransactionDetailPanel`. Agent detail keeps `TransactionsTable` for its compact
+card-nested history.
 
 **Merchant-first titles (#3810).** The dashboard's activity list reads
 `counterpartyLabel` in `lib/transaction-presentation.tsx` with the opt-in

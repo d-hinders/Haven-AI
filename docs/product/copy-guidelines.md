@@ -333,7 +333,8 @@ recovery as a separate action where relevant.
 
 Onboarding is **one screen and passkey-only** (#1162). There is no sign-in method
 to choose, so there is no copy for choosing one — a wallet is something the user
-adds to an existing account later (Backup & recovery on the account's page),
+adds to an existing account later (Backup & recovery, in the Security &
+details tab on the account's page),
 described in that surface's copy rather than here.
 
 Preferred:

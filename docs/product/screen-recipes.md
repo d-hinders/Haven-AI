@@ -860,20 +860,53 @@ Money and risk clarity:
 
 Use for a Haven account or wallet detail surface.
 
-Structure:
-1. Header with account name, network, and key actions.
-2. Balance card.
-3. Agent access or budgets connected to this account.
-4. Scoped transaction history.
-5. Advanced details section for Haven wallet address and explorer link. Show
-   modules only if a real advanced module-management surface exists. (A
-   required-approval-threshold element belonged here until
+Structure (#4097, epic #4093 — the page is the full record of one account;
+the dashboard stays the inbox and the summary, and this page repeats none of
+it):
+
+1. Header with the account name, its badges in the metadata line, and key
+   actions. "Test network" shows on testnets only (no network marker on
+   Base); "Default account" shows only with two or more accounts. Send is
+   primary once the account holds money; an empty account makes Receive
+   primary and disables Send.
+2. One summary card, three columns stacking on a phone:
+   - **Balance** — one figure in the user's currency.
+   - **Holdings** — each token with its amount at full precision under a
+     small "Amount" label. One token shows no value (it would repeat the
+     balance); a non-USD display currency shows the rate instead ("1 USDC =
+     9,50 kr"); two or more tokens each show their value.
+   - **Last 30 days** — Money in and Money out as two figures, the rolling
+     `[now − 30×24h, now)` window read from the account's transaction feed.
+     When the feed is capped at its explorer window the figures carry the
+     partial-data qualifier instead of claiming completeness (#2882).
+3. One tab row, owned by the page's `?tab=` (Activity default, Agents,
+   Security & details). Only the Agents tab carries a count; Security &
+   details carries a warning dot when only one signer can approve.
+   - **Activity** — the account's transaction feed (#4098 owns this tab's
+     final shape).
+   - **Agents** — one budget-snapshot summary line, then every active agent
+     drawn with the shared agent row (#4096). Revoked agents are not listed;
+     one line says how many are hidden and links to the Agents page's
+     revoked facet.
+   - **Security & details** — "Who can approve": the ONLY place in the app
+     that can add or remove a signer or run recovery (`AccountSignersCard`
+     renders here; Settings' Signers section lists signers without add or
+     remove flows). With one signer a warning sits above the list and the
+     tab carries its dot. Account details below: short address with copy and
+     explorer link, network, created date.
+
+   (A required-approval-threshold element belonged on this page until
    [#2848](https://github.com/d-hinders/Haven-AI/issues/2848) removed it: the
    approvers surface it described was already deleted by
    [#1989](https://github.com/d-hinders/Haven-AI/issues/1989), and no live
    screen renders a threshold. The delegation rail's `AccountSignersCard` is a
    different concept — the account's signer set, not a Safe owner threshold —
    and is not a substitute for it.)
+
+Removed with #4097: the #3333 "Receiving USDC" off-ramp panel (cash-out
+returns later as a saved destination inside Send, when a merchant partner
+needs it), the "Agent access" card, the "Token balances" table, "Advanced
+account details", and the 10-row transactions preview.
 
 Money and risk clarity:
 - Primary UX uses `Haven account` or `Haven wallet`.

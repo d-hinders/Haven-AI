@@ -79,11 +79,13 @@ signup.** Signup is one screen and one passkey prompt (#1162). The prompt to add
 a backup appears on the dashboard after money arrives, because before that
 there is nothing to protect and no reason for the question. It is dismissible,
 it stops appearing once you add a backup, and you can add one at any time from
-**Backup & recovery** on your account page.
+**Backup & recovery**, in the **Security & details** tab on your account page
+(#4097).
 
 ## Add a backup (do this early)
 
-On your account page, open **Backup & recovery** and choose one:
+On your account page, open the **Security & details** tab and choose one,
+under **Backup & recovery**:
 
 - **Add a backup passkey** — creates a second passkey (approve with Face ID,
   Touch ID, Windows Hello, or your device PIN). On the
@@ -122,7 +124,8 @@ already has (#4024). Ways to approve belong to **one account each**:
 
 1. Open Haven on a device that still has a working signer (your backup passkey,
    or the wallet you enrolled).
-2. Go to **Backup & recovery** on your account page.
+2. Go to **Backup & recovery**, in the **Security & details** tab on your
+   account page.
 3. **Add a replacement** for the device you lost (a new passkey on the device
    you're on now), so you're back to two ways to approve.
 4. **Remove** the lost signer from the list.

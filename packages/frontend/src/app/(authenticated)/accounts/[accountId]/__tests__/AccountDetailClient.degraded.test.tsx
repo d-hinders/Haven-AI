@@ -1,7 +1,11 @@
 /**
  * #3295 — the /accounts/[id] detail screen under a degraded portfolio read,
- * on the RENDERED screen (AC 3). `usePortfolio` feeds both the headline and
- * the token table, so its mock is the seam.
+ * on the RENDERED screen (AC 3). `usePortfolio` feeds the summary card's
+ * Balance and Holdings columns, so its mock is the seam.
+ *
+ * #4097: the token table became the Holdings column — the same freshness
+ * markers, now beside each token's amount, with the headline carrying the
+ * aggregated marker as before.
  */
 import { render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -14,14 +18,20 @@ const mockUsePortfolio = vi.fn()
 const mockUsePreferences = vi.fn()
 const mockUseContacts = vi.fn()
 const mockUseAgents = vi.fn()
-
-vi.mock('@/context/AuthContext', () => ({
-  useAuth: () => mockUseAuth(),
-}))
+const mockUseDashboardOverview = vi.fn()
+const mockUseBudgetRemaining = vi.fn()
+const mockUseAttentionDismissals = vi.fn()
+const mockUseAccountSigners = vi.fn()
+const mockUseAccountMoneyFlow = vi.fn()
 
 vi.mock('next/navigation', () => ({
   useParams: () => ({ accountId: 'account-1' }),
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}))
+
+vi.mock('@/context/AuthContext', () => ({
+  useAuth: () => mockUseAuth(),
 }))
 
 vi.mock('@/hooks/useAccounts', () => ({
@@ -52,12 +62,28 @@ vi.mock('@/hooks/useAgents', () => ({
   useAgents: () => mockUseAgents(),
 }))
 
-vi.mock('@/components/AccountSignersCard', () => ({
-  default: () => <div data-testid="signers-card" />,
+vi.mock('@/hooks/useDashboardOverview', () => ({
+  useDashboardOverview: () => mockUseDashboardOverview(),
 }))
 
-vi.mock('@/components/transactions/TransactionsTable', () => ({
-  default: () => <div data-testid="transactions-table" />,
+vi.mock('@/hooks/useBudgetRemaining', () => ({
+  useBudgetRemaining: () => mockUseBudgetRemaining(),
+}))
+
+vi.mock('@/hooks/useAttentionDismissals', () => ({
+  useAttentionDismissals: () => mockUseAttentionDismissals(),
+}))
+
+vi.mock('@/hooks/useAccountSigners', () => ({
+  useAccountSigners: () => mockUseAccountSigners(),
+}))
+
+vi.mock('@/hooks/useAccountMoneyFlow', () => ({
+  useAccountMoneyFlow: () => mockUseAccountMoneyFlow(),
+}))
+
+vi.mock('@/components/AccountSignersCard', () => ({
+  default: () => <div data-testid="signers-card" />,
 }))
 
 vi.mock('@/components/DelegationSendModal', () => ({
@@ -65,6 +91,10 @@ vi.mock('@/components/DelegationSendModal', () => ({
 }))
 
 vi.mock('@/components/ReceiveFundsModal', () => ({
+  default: () => null,
+}))
+
+vi.mock('@/components/transactions/TransactionDetailPanel', () => ({
   default: () => null,
 }))
 
@@ -122,10 +152,36 @@ function mockBaseState() {
   mockUseTransactionsFeed.mockReturnValue({
     transactions: [],
     loadingInitial: false,
+    loadingMore: false,
     error: null,
     total: 0,
     hasMore: false,
     truncated: false,
+    loadMore: vi.fn(),
+    refresh: vi.fn(),
+  })
+  mockUseDashboardOverview.mockReturnValue({ data: null, loading: false, error: null, refetch: vi.fn() })
+  mockUseBudgetRemaining.mockReturnValue({ data: null, loading: false })
+  mockUseAttentionDismissals.mockReturnValue({ dismissedIds: [], dismiss: vi.fn() })
+  mockUseAccountSigners.mockReturnValue({
+    signers: null,
+    loadError: false,
+    busy: false,
+    ready: true,
+    passkeyElsewhere: false,
+    enrollBackupPasskey: vi.fn(),
+    enrollOwnerWallet: vi.fn(),
+    removePasskey: vi.fn(),
+    removeOwner: vi.fn(),
+    reload: vi.fn(),
+  })
+  mockUseAccountMoneyFlow.mockReturnValue({
+    moneyIn: 0,
+    moneyOut: 0,
+    approx: false,
+    loading: false,
+    error: null,
+    partial: false,
     refresh: vi.fn(),
   })
 }
@@ -153,8 +209,7 @@ describe('AccountDetailClient — degraded balance reads (#3295)', () => {
         },
         // #4021: the fresh second holding has a NON-ZERO raw balance (an
         // unpriced one — fiat 0), so it still renders and proves the fresh
-        // row carries no marker. The old fixture paired ETH balance '0' with
-        // a non-zero fiat value; a zero raw balance now renders nowhere.
+        // row carries no marker.
         { symbol: 'ETH', balance: '20000000000000000', formatted: '0.02', usdValue: 0, eurValue: 0, sekValue: 0 },
       ],
       loading: false,
@@ -169,11 +224,11 @@ describe('AccountDetailClient — degraded balance reads (#3295)', () => {
     expect(screen.getAllByText(/as of /).length).toBeGreaterThan(0)
     expect(screen.queryByText('Unavailable')).not.toBeInTheDocument()
 
-    // The degraded TOKEN row shows its own indicator beside the figure.
-    const row = screen.getByText('1200.00').closest('div.grid') as HTMLElement
+    // The degraded TOKEN row shows its own indicator beside the amount.
+    const row = screen.getByText('1200.00').closest('li') as HTMLElement
     expect(within(row).getByText(/as of /)).toBeInTheDocument()
     // The fresh token row carries none.
-    const ethRow = screen.getByText('0.02').closest('div.grid') as HTMLElement
+    const ethRow = screen.getByText('0.02').closest('li') as HTMLElement
     expect(within(ethRow).queryByText(/as of /)).not.toBeInTheDocument()
   })
 
@@ -202,6 +257,7 @@ describe('AccountDetailClient — degraded balance reads (#3295)', () => {
     // #4021: the filler row is hidden — a zero RAW balance renders nowhere,
     // on this page exactly as on the overview card.
     expect(screen.queryByText('0.00')).not.toBeInTheDocument()
+    expect(screen.getByText('No tokens yet')).toBeInTheDocument()
     // But the headline's freshness marker reads the FULL breakdown (#3295):
     // hiding the row must not drop the "Unavailable" the total owes.
     expect(screen.getByText('Unavailable')).toBeInTheDocument()
@@ -209,13 +265,13 @@ describe('AccountDetailClient — degraded balance reads (#3295)', () => {
     expect(screen.queryByText(/as of /)).not.toBeInTheDocument()
   })
 
-  it('a clean read renders no indicator anywhere', () => {
+  it('a clean read renders no indicator anywhere, and one token shows no value', () => {
     mockUsePortfolio.mockReturnValue({
       totalUsd: 500,
       totalEur: 460,
       totalSek: 5200,
       breakdown: [
-        { symbol: 'USDC', balance: '400000000', formatted: '400.00', usdValue: 400, eurValue: 368, sekValue: 4160 },
+        { symbol: 'USDC', balance: '400000000', formatted: '400.00', usdValue: 500, eurValue: 368, sekValue: 4160 },
         // #4021: the filler token carries no fiat value — a zero raw balance
         // is zero, not an unpriced holding, and its row renders nowhere.
         { symbol: 'ETH', balance: '0', formatted: '0.00', usdValue: 0, eurValue: 0, sekValue: 0 },
@@ -229,5 +285,9 @@ describe('AccountDetailClient — degraded balance reads (#3295)', () => {
     expect(screen.getByText('$500.00')).toBeInTheDocument()
     expect(screen.queryByText(/as of /)).not.toBeInTheDocument()
     expect(screen.queryByText('Unavailable')).not.toBeInTheDocument()
+    // One visible token: the amount renders, no value repeats the balance
+    // (#4097's single-token rule — the only $500.00 is the balance).
+    expect(screen.getByText('400.00')).toBeInTheDocument()
+    expect(screen.getAllByText('$500.00')).toHaveLength(1)
   })
 })

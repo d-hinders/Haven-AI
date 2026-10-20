@@ -63,8 +63,15 @@ export function useAccountSigners(accountAddress: string, chainId: number, userE
   }, [accountAddress, chainId])
 
   useEffect(() => {
+    // #4097: no address yet means the caller is still resolving its account
+    // (the account page reads this hook for the Security tab's dot while
+    // auth hydration is still running). Fetching with an empty path would
+    // ask the backend for `/accounts/hybrid//signers` and read the 404 as
+    // a signer-set failure. Every existing caller passes a resolved
+    // address, so this guard changes nothing for them.
+    if (!accountAddress) return
     void reload()
-  }, [reload])
+  }, [reload, accountAddress])
 
   // Device decision, not account-shape decision (the multi-signer fix): an
   // account with both an owner and passkeys signs with whichever is reachable

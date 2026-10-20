@@ -153,7 +153,6 @@
   "docs/operations/dev-environment.md": [
     "packages/backend/src/rails/delegation-contracts.ts",
     "packages/demo-merchant-mcp/src/erc7710.test.ts",
-    "packages/frontend/src/components/AuthenticatedShell.tsx",
     "packages/qa-agent/src/scenarios/x402-erc7710-settle.ts"
   ],
   "docs/operations/mainnet-canary.md": [

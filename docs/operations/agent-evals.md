@@ -308,8 +308,12 @@ wall time per session. The CLI exits non-zero if any task failed any trial.
   back as `submitted` or further. On a plain-HTTP paywall the agent itself
   sends the paid request with the payment header (Haven never does), and the
   Claude Code lane has no HTTP tool, so `submitted` is where Haven's part
-  ends. It never reports spend, since a submitted payment has moved nothing.
-  The catalog task keeps `payment_status_settled`.
+  ends. It also requires a `haven_submit` with `settlement_scheme: "erc7710"`
+  in the log: on the EIP-3009 bridge `submitted` is only the funding leg, so
+  `QA_EVAL_X402_TARGET` must offer erc7710 (the dev demo merchant does). It
+  never reports spend and is not a settlement grader, so the next trial does
+  not wait for a budget decrease. The catalog task keeps
+  `payment_status_settled`.
 
 ## Lane 2: Claude Code headless (#3959)
 

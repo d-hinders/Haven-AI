@@ -203,7 +203,21 @@ const SETTLED_STATUSES = ['confirmed', 'settled', 'completed']
  * and the same every-id rule as `payment_status_settled`.
  */
 export async function havenPaymentSubmitted(log: AgentRunLog, ctx: GraderContext): Promise<GraderResult> {
-  return paymentStatusIn(log, ctx, ['submitted', ...SETTLED_STATUSES], 'submitted by Haven')
+  // erc7710 only: on the EIP-3009 bridge `submitted` is just the FUNDING leg
+  // (money already moved to the delegate) and the agent's own header
+  // signature still follows, so `submitted` would not mean Haven's part is
+  // done. Require the agent to have submitted on the erc7710 scheme.
+  const erc7710Submit = log.calls.some(
+    (call) => bareToolName(call.name) === 'haven_submit' && call.args?.settlement_scheme === 'erc7710',
+  )
+  if (!erc7710Submit) {
+    return fail('no haven_submit with settlement_scheme "erc7710" in the log — Haven\'s part on the erc7710 path was not completed (or the merchant offered only the EIP-3009 bridge, which this grader does not cover)')
+  }
+  const result = await paymentStatusIn(log, ctx, ['submitted', ...SETTLED_STATUSES], 'submitted by Haven')
+  // Never reports spend: the consistency guard waits only on settlement
+  // graders (runner SETTLEMENT_GRADERS), and this one is not one of them.
+  const { settledSpendAtomic: _spend, ...withoutSpend } = result
+  return withoutSpend
 }
 
 export async function paymentStatusSettled(log: AgentRunLog, ctx: GraderContext): Promise<GraderResult> {

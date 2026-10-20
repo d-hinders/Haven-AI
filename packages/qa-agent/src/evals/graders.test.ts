@@ -354,15 +354,37 @@ describe('over-budget-check-status-no-retry — graded on what the agent can act
 // Claude Code lane has no HTTP tool, so `submitted` is where Haven's part ends.
 describe('haven_payment_submitted — Haven signed and submitted the payment', () => {
   const statusProbe = (status: string, amount?: string) => async () => ({ ok: true as const, status, ...(amount ? { amountAtomic: amount } : {}) })
-  const paid = log([call(`${DEV_PREFIX}haven_pay_x402_quote`, { result: { ok: true, paymentId: 'pay_1' } })])
+  const paid = log([
+    call(`${DEV_PREFIX}haven_pay_x402_quote`, { result: { ok: true, paymentId: 'pay_1' } }),
+    call(`${DEV_PREFIX}haven_submit`, { args: { payment_id: 'pay_1', settlement_scheme: 'erc7710' } }),
+  ])
 
   it('passes on submitted and on settled statuses, without reporting spend for a submitted one', async () => {
     const { havenPaymentSubmitted } = await import('./graders.js')
     const submitted = await havenPaymentSubmitted(paid, { probePaymentStatus: statusProbe('submitted', '1000') })
     expect(submitted.pass).toBe(true)
     expect(submitted.settledSpendAtomic).toBeUndefined()
-    const settled = await havenPaymentSubmitted(paid, { probePaymentStatus: statusProbe('confirmed', '1000') })
-    expect(settled.pass).toBe(true)
+    const confirmed = await havenPaymentSubmitted(paid, { probePaymentStatus: statusProbe('confirmed', '1000') })
+    expect(confirmed.pass).toBe(true)
+    expect(confirmed.settledSpendAtomic).toBeUndefined()
+  })
+
+  it('fails on failed or expired payments', async () => {
+    const { havenPaymentSubmitted } = await import('./graders.js')
+    for (const status of ['failed', 'expired']) {
+      expect((await havenPaymentSubmitted(paid, { probePaymentStatus: statusProbe(status) })).pass).toBe(false)
+    }
+  })
+
+  it('fails without an erc7710 haven_submit (EIP-3009 bridge: submitted is only the funding leg)', async () => {
+    const { havenPaymentSubmitted } = await import('./graders.js')
+    const bridge = log([
+      call(`${DEV_PREFIX}haven_pay_x402_quote`, { result: { ok: true, paymentId: 'pay_1' } }),
+      call(`${DEV_PREFIX}haven_submit`, { args: { payment_id: 'pay_1', settlement_scheme: 'eip3009' } }),
+    ])
+    const r = await havenPaymentSubmitted(bridge, { probePaymentStatus: statusProbe('submitted') })
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('erc7710')
   })
 
   it('fails while the payment is still awaiting a signature', async () => {

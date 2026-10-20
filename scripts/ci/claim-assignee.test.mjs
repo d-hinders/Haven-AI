@@ -137,6 +137,8 @@ describe('the channel number is single-sourced (#3182)', () => {
   const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8')
   // Every Markdown file of the ship-next skill, not only SKILL.md: text moved
   // into references/ (#4173) would otherwise leave both guards below blind.
+  // It walks the filesystem, so untracked `.md` files in a worktree count too;
+  // only `.md` is read, so `agents/openai.yaml` is excluded.
   const SHIP_NEXT = '../../.agents/skills/ship-next/'
   const shipNextDocs = readdirSync(new URL(SHIP_NEXT, import.meta.url), { recursive: true })
     .filter((p) => p.endsWith('.md'))

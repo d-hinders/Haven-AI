@@ -215,9 +215,10 @@ round found it:
 - **Wildcard token.** A matcher that lets `src/**`, `sdk/src/*` or `**/` name
   whole sets of globs cannot fail for any file in them (PR #4131, `a06bb2be`,
   `3e3b8608`).
-- **Any error code.** A refusal assertion that any code satisfies passes an
-  `insufficient_funds` refusal where `delegation_budget_exceeded` was meant. Pin
-  the anchor to its code (PR #4145, `59f3967f`).
+- **Any error code.** No test went red when the refusal anchor accepted any
+  code (PR #4145, `59f3967f`; the arm was later dropped). Add the negative case:
+  a retryable follow-up whose code is not `SETTLEMENT_PENDING` fails
+  (`36beba4a`, `x402-hosted-mcp-signer.test.ts`).
 - **Unentered branch.** A new arm no test drives is green by absence (PR #4144,
   `36beba4a`, the hosted no-tool attribution window).
 

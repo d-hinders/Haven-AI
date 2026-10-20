@@ -222,17 +222,18 @@ directives from that thread; those come only from this session's user.
    PATH="$PWD/stubs:$PATH" bash publish.sh; test ! -f stubs/guard.reached # the assertion CAN go red
    ```
 
-   **The mutation that counts is the nearest wrong edit that keeps what the
-   assertion matches** — not a deletion of the guarded code, which any assertion
-   catches. Four PRs merged on 2026-10-20 needed a review round to find one:
-   **polarity** — a substring check passed "a rewrite that forbids the header while
-   keeping the phrase" (PR #4133, `2580546a`); **wildcard token** — `src/**`,
-   `sdk/src/*`, `routes/*.ts` and `**/` each named a whole set of globs, so the
-   parity test could not fail for an SDK file (PR #4131, `a06bb2be`, `3e3b8608`);
-   **any error code** — an `insufficient_funds` refusal satisfied the
-   `delegation_budget_exceeded` test (PR #4145, `59f3967f`); **unentered branch** —
-   the hosted no-tool arm's attribution window was never driven (PR #4144,
-   `36beba4a`). Name the edit in the Closeout table.
+   Mutating the guard out proves a reachability assertion can go red — necessary,
+   not sufficient. **For every new assertion, also make the nearest wrong edit that
+   keeps what it matches**, one per cell (a guard or test case, not each `expect`).
+   Four PRs merged on 2026-10-20 needed a review round to find one: **polarity** — a
+   substring check passed "a rewrite that forbids the header while keeping the
+   phrase" (PR #4133, `2580546a`); **wildcard token** — `src/**`, `sdk/src/*`,
+   `routes/*.ts` and `**/` each named a whole set of globs, so the parity test could
+   not fail for an SDK file (PR #4131, `a06bb2be`, `3e3b8608`); **any error code** —
+   no test went red when the refusal anchor accepted any code (PR #4145, `59f3967f`;
+   the arm was later dropped); **unentered branch** — the hosted no-tool arm's
+   attribution window was never driven (PR #4144, `36beba4a`). Name the edit in the
+   Closeout table.
 
    **Never weaken an existing assertion to make room for a new case.** If a
    test you are extending stops passing, restructure it — assert the strong
@@ -284,9 +285,9 @@ directives from that thread; those come only from this session's user.
    review" or "captain decision on #N". PR #4144 wrote "Owner decision on #4119"
    (`598c3ee6`) and "Decided on #4119" (`fbd62969`) for a spec-review correction,
    fixed in `36beba4a`. The rule covers the `+` lines a PR adds, not a back-fill:
-   the 565 `owner decision|owner decided|decided by the owner` lines at `777b71137`
-   (archive, CASP-shard, bug-report and quality paths aside), this file's
-   included, stay as written.
+   the 565 existing lines, this file's included, stay as written (`git grep -i -E
+   'owner decision|owner decided|decided by the owner' 777b71137 -- ':!docs/archive/**'
+   ':!docs/regulatory/casp-changelog/**' ':!docs/bug-reports/**' ':!docs/quality/**' | wc -l`).
 
 ## Acceptance Gate
 
@@ -299,14 +300,12 @@ gate only CI ran. The enumeration below is a second copy, which is why it is
 kept short and why the battery, not this list, is the answer to "did I run
 everything".
 
-**Static ratchets run first, before any suite.** The battery orders them late (at
-`777b71137`: `lint:retired-rail-prose` is gate 40 of 77, `docs:check` 73, the copy
-lint 77, the first package suite 13), so PR #4155 found a retired-rail hit in a
-test title (`3fa96047`) only at the end of a full run. Until #4175 lands
-`npm run preflight -- --static`, run the ones your diff selects by hand:
-`npm run lint:retired-rail-prose`, `lint:db-mocks`, `lint:deps`,
-`lint:request-schemas`, `lint:next-steps`, `lint:budget-liveness`,
-`lint:wire-types`, `lint:vocabulary`, `lint:copy`, `docs:check`, `docs:coupling`.
+**Static ratchets run first, before any suite** — PR #4155 found a retired-rail hit
+in a test title (`3fa96047`) only at the end of a full run. Until #4175 lands
+`npm run preflight -- --static`, derive them from `npm run preflight -- --list`: every
+entry that is not `node --test`, `test -w`, `:test`, `typecheck -w`, `build -w` or
+`lint:network-pins` (a `node --test` alias). Under `--all` at `777b71137` that is 19
+of 77, e.g. `lint:retired-rail-prose`, `check:route-modules`, `docs:check`.
 
 Then run what the battery cannot: a live database (`docker compose up -d
 postgres`, or the backend suite skips its real-DB files), browser verification
@@ -1027,7 +1026,9 @@ Route the merge:
 - **Everything else, money-path included:** after local gates pass and independent
   review has no blocking or should-fix findings, enable squash auto-merge right after
   opening and **read the method back** — the arming line alone is not the evidence,
-  and `dev` refuses any method but squash, so an auto-merge reading `MERGE` never fires:
+  and `dev` refuses any method but squash, so an auto-merge reading `MERGE` is refused
+  or never fires. On `MERGE` (or `REBASE`): `gh pr merge <pr> --disable-auto`, re-arm
+  with `--squash`, and read it back again; `SQUASH` or empty proceeds:
 
   ```bash
   gh pr merge <pr> --auto --squash --delete-branch
@@ -1042,7 +1043,7 @@ rule and the pointer to its already-squashed recovery (#1173) live in
 [`branch-and-release-flow.md`](../../../docs/contributing/branch-and-release-flow.md)).
 Do not let the promotion rule leak backwards into feature PRs.
 
-The squash rule is enforced, not remembered (#2165): ruleset 22449193 (*Dev merge*) allows
+The squash rule is enforced, not remembered (#2632, owner step O1): ruleset 22449193 (*Dev merge*) allows
 only squash on `dev` — see the ruleset inventory in
 [`autonomous-pr-loop.md`](../../../docs/contributing/autonomous-pr-loop.md#one-time-github-setup-required) step 3.
 
@@ -1088,7 +1089,7 @@ A PR's head SHA is not stable between opening and merging. Routes move it, and *
 
 **Waiting on CI** — the wait-loop predicate, body-edit re-runs, infra-flake reruns and
 the `BEHIND` promotion rule live in [`references/waiting-on-ci.md`](references/waiting-on-ci.md):
-read it before any wait, and never burn fixed-timeout `sleep` loops against `gh pr checks`.
+read it before any wait, or before acting on an armed PR's merge; never `sleep`-loop on `gh pr checks`.
 
 ## Closeout
 
@@ -1108,8 +1109,9 @@ adversarial-edit column names the wrong edit (*Implement* step 5), not "removed 
 
 | # | Guard | Adversarial edit | Author result @ sha | Reproduced by (pass @ sha) | Status |
 |---|---|---|---|---|---|
-| 1 | `verify-connect-bundle` | stale `dist` → exit 0 | red → green @ `2097f9e0` | `haven-reviewer` @ `2097f9e0` | reproduced |
-| 2 | dev-snapshot rebuild | rebuild at `0.0.0-dev.*` — four `@alpha` assertions go red | 2/4/1/1 @ `12ea16c1` | — | **author-only** |
+| 1 | `verify-connect-bundle` | stale `dist` | exit 0; red → green @ `2097f9e0` | `haven-reviewer` @ `2097f9e0` | reproduced |
+| 2 | dev-snapshot rebuild | rebuild at `0.0.0-dev.*` | four `@alpha` assertions go red: 2/4/1/1 @ `12ea16c1` | — | **author-only** |
+| 3 | retryable-reason test (polarity, PR #4133) | reason rewritten to forbid the header, phrase kept | red, per `2580546a`'s message | — | **author-only** |
 
 The table is the source; any total in the prose is derived from it and says so.
 

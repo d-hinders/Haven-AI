@@ -44,9 +44,9 @@ Before changing product UI, read these sources in order:
 
 If `/design-system` exists, inspect it before editing UX and reuse the visual language shown there.
 
-### Pattern Absorption
+### Design System First
 
-Start with an existing [`/design-system` Pattern](docs/product/design-system.md#patterns). If none fits, extend the design system first in a separate slice, label the proposal as a **new pattern**, and obtain owner approval before a product page consumes it.
+Start with an existing [`/design-system` Pattern](docs/product/design-system.md#patterns). If none fits, extend the design system first in a separate slice, label the proposal as a **new pattern**, and obtain owner approval before a product page consumes it. Extracting a shape that already ships twice into a primitive is Pattern Absorption, not a new pattern, and stays in the same PR.
 
 ## UI Implementation Rules
 

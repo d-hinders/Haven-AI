@@ -117,6 +117,11 @@ Any remaining matches should be deliberate technical disclosure, developer copy,
 
 ## Final Verification
 
+- Compare the rendered screen with the documented
+  [Patterns](design-system.md#patterns): a page that rebuilds one instead of
+  using it is a `should-fix`, and a composition the catalog does not show is a
+  **new pattern** that needs its own earlier, owner-approved design-system
+  slice (#4109).
 - Inspect `/design-system` when adding or changing shared UI patterns — and be
   clear what that buys. The page is a rendering of a component's APPEARANCE, not
   a test of its behaviour, and a showcase copy held permanently open (today only

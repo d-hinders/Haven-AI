@@ -50,7 +50,7 @@ old YAML `scope:` field demanded. The **🔁 Loop task** issue template
 - **Files** — the file(s) the change should own (best-effort).
 - **Design system** — for `area:frontend`, the existing `/design-system`
   Patterns it uses, every changed component and its other usages, and any
-  proposed new Pattern's separate, earlier design-system slice for owner
+  proposed **new pattern**'s separate, earlier design-system slice for owner
   approval.
 - **Surface** — which `area:*` / `money-path` label(s) apply, so `ship-next`
   loads the right playbook (see `docs/contributing/ship-playbooks/README.md`).

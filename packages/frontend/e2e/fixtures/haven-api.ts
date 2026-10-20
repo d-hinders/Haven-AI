@@ -76,6 +76,64 @@ export const testUserSek = {
   currency_preference: 'SEK',
 } as const
 
+/**
+ * The currency preference of the user this page's fixture session is serving
+ * (#4166). The backend strikes serve-time amounts (`approxAmount`) in the
+ * user's `currency_preference`, but the fixture pinned `approxCurrency:
+ * 'SEK'` onto rows served to the `currency_preference: 'USD'` session — so
+ * every USD page photographed rows in kr (the
+ * `balance-freshness-account-detail-desktop.png` defect). The auth handlers
+ * set this from the user they answer (`mockHavenApi` → `testUser`, the SEK
+ * overlay → `testUserSek`), and the row builders below strike at serve time.
+ * Set at fixture-registration time, which is per-page: Playwright workers run
+ * tests sequentially, so the value never races.
+ */
+let servedCurrencyPreference: 'USD' | 'EUR' | 'SEK' = 'USD'
+
+/**
+ * The fixture's rate story (#3824): 1 USDC ≈ $1 (the USD peg — `totals.usd`
+ * prices USDC at par), ≈ €0.92, ≈ 10.76 kr (the same story `totals.sek`
+ * tells). Serve-time amounts are struck from the token amount with the
+ * served user's rate.
+ */
+const FIXTURE_USDC_RATES: Record<'USD' | 'EUR' | 'SEK', number> = {
+  USD: 1,
+  EUR: 0.92,
+  SEK: 10.76,
+}
+
+/**
+ * A fixture row's serve-time fields (#3824), struck in the SERVED user's
+ * currency (#4166) — the backend's documented behaviour the fixture used to
+ * contradict. `usdcBase` is the token amount the row's story prices.
+ */
+function serveTimeApprox(usdcBase: number): {
+  approxAmount: string
+  approxCurrency: 'USD' | 'EUR' | 'SEK'
+} {
+  return {
+    approxAmount: (usdcBase * FIXTURE_USDC_RATES[servedCurrencyPreference]).toFixed(4),
+    approxCurrency: servedCurrencyPreference,
+  }
+}
+
+/** `serveTimeApprox` for the agent-activity wire's snake_case row (#4166). */
+function serveTimeApproxSnake(usdcBase: number): {
+  approx_amount: string
+  approx_currency: 'USD' | 'EUR' | 'SEK'
+} {
+  const strike = serveTimeApprox(usdcBase)
+  return { approx_amount: strike.approxAmount, approx_currency: strike.approxCurrency }
+}
+
+/** Re-strike a camelCase row's serve-time fields in the served currency. */
+function withServedApprox<T extends object>(
+  row: T,
+  usdcBase: number,
+): T & { approxAmount: string; approxCurrency: 'USD' | 'EUR' | 'SEK' } {
+  return { ...row, ...serveTimeApprox(usdcBase) }
+}
+
 export const testAgent = {
   id: 'agent-e2e',
   name: 'Research agent',
@@ -255,12 +313,14 @@ export const dashboardTransaction = {
   to: testRecipientAddress,
   value: '12500000',
   valueFormatted: '12.50',
-  // #3824: the serve-time amount for a row without book-time fiat — today's
-  // rate (~10.76 SEK/USD, the same story `totals.sek` tells) in the served
-  // default currency. `convertedAmount` stays absent on this row: the two
-  // provenances never ride together.
-  approxAmount: '134.5000',
-  approxCurrency: 'SEK' as const,
+  // #3824: the serve-time amount for a row without book-time fiat — struck
+  // in the SERVED user's currency (#4166): the USD session this fixture
+  // serves by default prices 12.50 USDC at par, the SEK overlay at the
+  // fixture's ~10.76 kr/USD story (the same story `totals.sek` tells).
+  // `convertedAmount` stays absent on this row: the two provenances never
+  // ride together. The `/transactions` handler re-strikes per served user.
+  approxAmount: '12.5000',
+  approxCurrency: 'USD' as const,
   asset: 'USDC',
   decimals: 6,
   direction: 'out' as const,
@@ -311,9 +371,10 @@ export const x402UnrecordedSettlementTransaction = {
   to: testRecipientAddress,
   value: '1000000',
   valueFormatted: '1.00',
-  // #3824: serve-time amount, same rule and rate story as `dashboardTransaction`.
-  approxAmount: '10.7600',
-  approxCurrency: 'SEK' as const,
+  // #3824: serve-time amount, same rule and rate story as `dashboardTransaction`
+  // — struck per served user (#4166); the const carries the USD strike.
+  approxAmount: '1.0000',
+  approxCurrency: 'USD' as const,
   asset: 'USDC',
   decimals: 6,
   direction: 'out' as const,
@@ -648,8 +709,10 @@ export const dashboardOverview = {
       activityType: null,
       direction: 'out' as const,
       status: 'confirmed' as const,
-      approxAmount: '134.5000',
-      approxCurrency: 'SEK' as const,
+      // #3824: the serve-time strike, per served user (#4166) — the handler
+      // re-strikes; the const carries the USD session's figures.
+      approxAmount: '12.5000',
+      approxCurrency: 'USD' as const,
     },
   ],
   // #3944: the two empty-state facts. The fixture renders activity rows, so
@@ -928,16 +991,19 @@ export async function mockHavenApi(page: Page) {
     const method = request.method()
 
     if (method === 'POST' && path === '/auth/login') {
+      servedCurrencyPreference = testUser.currency_preference as 'USD' | 'EUR' | 'SEK'
       await fulfillJson(route, { token: 'e2e-token', user: testUser })
       return
     }
 
     if (method === 'POST' && path === '/auth/signup') {
+      servedCurrencyPreference = testUser.currency_preference as 'USD' | 'EUR' | 'SEK'
       await fulfillJson(route, { token: 'e2e-token', user: testUser })
       return
     }
 
     if (method === 'GET' && path === '/auth/me') {
+      servedCurrencyPreference = testUser.currency_preference as 'USD' | 'EUR' | 'SEK'
       await fulfillJson(route, testUser)
       return
     }
@@ -948,7 +1014,12 @@ export async function mockHavenApi(page: Page) {
     }
 
     if (method === 'GET' && path === '/dashboard/overview') {
-      await fulfillJson(route, dashboardOverview)
+      await fulfillJson(route, {
+        ...dashboardOverview,
+        // #4166: the grouped-activity rows' serve-time strike follows the
+        // served user's currency, like every other approx-valued row.
+        activity: dashboardOverview.activity.map((group) => withServedApprox(group, 12.5)),
+      })
       return
     }
 
@@ -1193,7 +1264,11 @@ export async function mockHavenApi(page: Page) {
     // visible changes for both.
     if (method === 'GET' && path === '/transactions') {
       await fulfillJson(route, {
-        transactions: [dashboardTransaction, x402UnrecordedSettlementTransaction],
+        // #4166: the serve-time strike follows the served user's currency.
+        transactions: [
+          withServedApprox(dashboardTransaction, 12.5),
+          withServedApprox(x402UnrecordedSettlementTransaction, 1),
+        ],
         total: 2,
         offset: 0,
         limit: 25,
@@ -1209,7 +1284,8 @@ export async function mockHavenApi(page: Page) {
 
     if (method === 'GET' && path.startsWith('/transactions/')) {
       await fulfillJson(route, {
-        transactions: [dashboardTransaction],
+        // #4166: the serve-time strike follows the served user's currency.
+        transactions: [withServedApprox(dashboardTransaction, 12.5)],
         total: 1,
         page: 1,
         limit: 10,
@@ -1441,10 +1517,14 @@ export async function mockHavenApi(page: Page) {
  * Everything else falls through to the shared fixture untouched.
  */
 export async function serveSekUser(page: Page) {
+  // #4166: the SEK session's rows are struck in SEK — the served user's
+  // preference, per the auth answer below.
+  servedCurrencyPreference = testUserSek.currency_preference
   await page.route('**/api/**', async (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname.replace(/^\/api/, '')
     if (request.method() === 'GET' && path === '/auth/me') {
+      servedCurrencyPreference = testUserSek.currency_preference
       await fulfillJson(route, testUserSek)
       return
     }
@@ -1794,11 +1874,10 @@ export async function serveAgentDetailResponses(
             token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
             amount_raw: '25000000',
             amount: '25.00',
-            // #3824: the serve-time amount at today's rate in the user's
-            // preference — 25 USDC ≈ 269.00 SEK at the fixture's ~10.76
-            // SEK/USD story.
-            approx_amount: '269.0000',
-            approx_currency: 'SEK',
+            // #3824: the serve-time amount at the served user's rate in their
+            // preference (#4166) — 25 USDC ≈ 269.00 SEK at the fixture's
+            // ~10.76 SEK/USD story; the USD session prices it at par.
+            ...serveTimeApproxSnake(25),
             to: testRecipientAddress,
             reason: null,
             status: 'confirmed',

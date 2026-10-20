@@ -342,6 +342,47 @@ describe('AccountDetailClient', () => {
     expect(screen.queryByText('Receiving USDC')).not.toBeInTheDocument()
   })
 
+  describe('the summary card to mockup v9 (#4166)', () => {
+    it('Holdings renders a header row — column label left, "Amount" label right — and right-aligned amounts', () => {
+      render(<AccountDetailClient />)
+      // The header row: "Holdings" and the small "Amount" column label share
+      // one justified row — "Amount" is no longer a second line under the
+      // title.
+      const section = screen.getByRole('region', { name: 'Holdings' })
+      const headerRow = within(section).getByText('Holdings').closest('div')
+      expect(headerRow).toHaveClass('justify-between')
+      expect(within(headerRow as HTMLElement).getByText('Amount')).toBeInTheDocument()
+      // The token amount is its own right-aligned cell in a justified row —
+      // not inline text after the symbol ("USDC 8.225255", the old shape).
+      const amount = within(section).getByText('42.00')
+      expect(amount).toHaveClass('font-mono')
+      const row = amount.closest('div')
+      expect(row).toHaveClass('justify-between')
+      expect(within(row as HTMLElement).getByText('USDC')).toBeInTheDocument()
+    })
+
+    it('Money in and Money out sit side by side in a two-column grid', () => {
+      render(<AccountDetailClient />)
+      const section = screen.getByRole('region', { name: 'Last 30 days' })
+      const grid = within(section).getByText('Money in').closest('.grid')
+      expect(grid).not.toBeNull()
+      expect(grid).toHaveClass('grid-cols-2')
+    })
+
+    it('the Security & details tab carries ONE heading and ONE intro sentence', () => {
+      tabParam = 'security'
+      render(<AccountDetailClient />)
+      // The section's only heading is the page's; the card's repeated
+      // "Backup & recovery" heading and its duplicate intro are gone
+      // (the mocked card here renders neither).
+      const headings = screen.getAllByRole('heading').map((h) => h.textContent)
+      expect(headings).toContain('Who can approve')
+      expect(headings).not.toContain('Backup & recovery')
+      // The intro sentence renders exactly once.
+      expect(screen.getAllByText(/Keep at least two, so a lost device never/).length).toBe(1)
+    })
+  })
+
   describe('header badges and button primacy (#4097)', () => {
     it('shows no badges on Base mainnet with one account', () => {
       render(<AccountDetailClient />)

@@ -21,7 +21,8 @@
  *   be loaded — with the #2882 qualifier when the feed is capped at the
  *   explorer window;
  * - rows grouped by day in #4096's ledger mode (`TransactionActivityRow`
- *   with `onOpen`, `TransactionActivityDayHeader`), "Load more" for the next
+ *   with `onOpen`, `TransactionActivityDayHeader`), merchant-first row
+ *   titles with the agent as the subtitle (#4166), "Load more" for the next
  *   page, and the shared `TransactionDetailPanel` on row open — click or
  *   Enter/Space, the row is a whole-row button;
  * - two distinct empty states: the standard no-match state when a filter
@@ -69,10 +70,9 @@ import {
   type ExportNotice,
 } from '@/lib/transaction-csv'
 import {
+  counterpartyLabel,
   transactionFiat,
-  transactionMovement,
   transactionStatus,
-  transactionTitle,
 } from '@/lib/transaction-presentation'
 import { timeAgo } from '@/lib/format'
 import type { AggregatedTransaction, TransactionFilterState } from '@/types/transactions'
@@ -90,7 +90,10 @@ interface AccountActivityTabProps {
   currency: AmountCurrency
   /** Contact resolution for the panel's counterparty names. */
   resolveAddress: (address: string) => string | null
-  /** The user's own accounts by address, for "to your <name>" movement lines. */
+  /**
+   * The user's own accounts by address — `counterpartyLabel`'s own-account
+   * map, naming a transfer between accounts (#4099).
+   */
   accountNamesByAddress: Map<string, string>
   /** Opens the page's Receive dialog — the empty account's way forward. */
   onReceive: () => void
@@ -151,7 +154,20 @@ function listStateToFilters(state: ListState): TransactionFilterState {
   }
 }
 
-/** One feed row in the ledger — #4096's ledger mode, the page's own copy. */
+/**
+ * One feed row in the ledger — #4096's ledger mode, the account page's own
+ * copy (#4166): the title is WHO WAS PAID — `counterpartyLabel` in the
+ * dashboard's no-address mode, the merchant or counterparty first — with the
+ * agent as the subtitle, exactly the dashboard row's anatomy. The shared
+ * `transactionTitle` ("Agent payment by …") stays untouched for
+ * `/transactions`, the agent page and the detail panel.
+ *
+ * The movement line is gone with it: the page fixes the account, so its
+ * "From <this account> →" half repeated the page on every row (#4166 — done
+ * here in the row's props, not in the shared helper). What the movement line
+ * used to say is carried by the row itself — the counterparty is the title,
+ * the fixed account is the page — and the agent moves into the subtitle.
+ */
 function ActivityLedgerRow({
   tx,
   resolveAddress,
@@ -170,8 +186,8 @@ function ActivityLedgerRow({
   const fiat = transactionFiat(tx, 'row')
   return (
     <TransactionActivityRow
-      title={transactionTitle(tx)}
-      description={transactionMovement(tx, resolveAddress, accountNamesByAddress, { noAddress: true })}
+      title={counterpartyLabel(tx, resolveAddress, accountNamesByAddress, { noAddress: true })}
+      description={tx.agentName ?? undefined}
       value={tx.valueFormatted}
       asset={tx.tokenSymbol}
       failed={tx.isError}

@@ -932,11 +932,18 @@ it):
    primary and disables Send.
 2. One summary card, three columns stacking on a phone:
    - **Balance** — one figure in the user's currency.
-   - **Holdings** — each token with its amount at full precision under a
-     small "Amount" label. One token shows no value (it would repeat the
-     balance); a non-USD display currency shows the rate instead ("1 USDC =
-     9,50 kr"); two or more tokens each show their value.
-   - **Last 30 days** — Money in and Money out as two figures, the rolling
+   - **Holdings** — a header row: the column label on the left and a small
+     "Amount" label on the right (#4166, mockup v9); each token row carries a
+     quiet monogram mark and the symbol on the left with its full-precision
+     amount right-aligned under the "Amount" label — never inline after the
+     symbol. One token shows no value (it would repeat the balance); a
+     non-USD display currency shows the rate instead ("1 USDC = 9,50 kr");
+     two or more tokens each show their value. The header row is the summary
+     card's own anatomy — it is not a shared pattern.
+   - **Last 30 days** — Money in and Money out SIDE BY SIDE (#4166, mockup
+     v9), not stacked, so the three columns' contents end at about the same
+     height (the acceptance bar: at 1280 px the columns' content blocks
+     differ by at most 24 px), as two figures in the rolling
      `[now − 30×24h, now)` window read from the account's transaction feed.
      When the feed is capped at its explorer window the figures carry the
      partial-data qualifier instead of claiming completeness (#2882).
@@ -949,12 +956,14 @@ it):
      drawn with the shared agent row (#4096). Revoked agents are not listed;
      one line says how many are hidden and links to the Agents page's
      revoked facet.
-   - **Security & details** — "Who can approve": the ONLY place in the app
-     that can add or remove a signer or run recovery (`AccountSignersCard`
-     renders here; Settings' Signers section lists signers without add or
-     remove flows). With one signer a warning sits above the list and the
-     tab carries its dot. Account details below: short address with copy and
-     explorer link, network, created date.
+   - **Security & details** — "Who can approve": the section carries ONE
+     heading and ONE intro sentence (#4166 — the card no longer repeats
+     them); it is the ONLY place in the app that can add or remove a signer
+     or run recovery (`AccountSignersCard` renders here; Settings' Signers
+     section lists signers without add or remove flows). With one signer a
+     warning sits above the list and the tab carries its dot. Account
+     details below: short address with copy and explorer link, network,
+     created date.
 
    (A required-approval-threshold element belonged on this page until
    [#2848](https://github.com/d-hinders/Haven-AI/issues/2848) removed it: the

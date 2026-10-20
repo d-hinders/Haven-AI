@@ -136,6 +136,8 @@ test.describe('transactions list controls — 375px', () => {
     const sheet = page.getByRole('dialog', { name: 'Filters' })
     await expect(sheet).toBeVisible()
     await expectInsideViewport(page, sheet, 'Filter sheet')
+    // The top groups, long Initiator names included, before any scrolling.
+    await evidence(page, 'sheet-top-375')
 
     // Every facet this page declares is in the sheet — Network included,
     // which sat outside the bar as a separate select before #4111.
@@ -183,7 +185,9 @@ test.describe('transactions list controls — desktop menus', () => {
       const panel = page.locator(`[id="${await trigger.getAttribute('aria-controls')}"]`)
       await expect(panel).toBeVisible()
       await expectInsideViewport(page, panel, `${label} menu @ 640px`)
-      if (label === 'Initiator') await evidence(page, 'initiator-menu-640')
+      if (label === 'Initiator' || label === 'Account') {
+        await evidence(page, `${label.toLowerCase()}-menu-640`)
+      }
       await page.keyboard.press('Escape')
       await expect(trigger).toBeFocused()
     }
@@ -196,5 +200,33 @@ test.describe('transactions list controls — desktop menus', () => {
     expect(new URL(page.url()).searchParams.has('search')).toBe(false)
     expect(new URL(page.url()).searchParams.get('direction')).toBe('out')
     await evidence(page, 'filtered-desktop')
+  })
+
+  test('a filtered search with no rows shows the standard no-match state in place of the list', async ({ page }) => {
+    await mockHavenApi(page)
+    await serveTwoNetworkAccounts(page)
+    // An empty feed for the filtered read, answered after the shared mocks.
+    await page.route('**/api/transactions?*', async (route) => {
+      const url = new URL(route.request().url())
+      if (url.searchParams.get('search') !== 'zzz') return route.fallback()
+      await route.fulfill({
+        json: { transactions: [], total: 0, offset: 0, limit: 25, hasMore: false, partialFailure: false, failedAccountIds: [], truncated: false },
+      })
+    })
+    await seedAuthenticatedSession(page)
+    await page.emulateMedia({ colorScheme: SCHEME })
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.goto('/transactions?q=zzz')
+    await dismissMobileSidebar(page)
+
+    const noMatch = page.getByTestId('transactions-no-match')
+    await expect(noMatch).toContainText('No transactions match these filters')
+    await expect(noMatch).toContainText('Try a different search, or clear filters to see everything.')
+    await expect(page.getByTestId('list-toolbar')).toBeVisible()
+    await evidence(page, 'no-match-desktop')
+
+    await noMatch.getByRole('button', { name: 'Clear filters' }).click()
+    await expect(noMatch).toBeHidden()
+    await expect(page).not.toHaveURL(/[?&]q=/)
   })
 })

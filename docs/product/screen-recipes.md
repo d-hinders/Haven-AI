@@ -36,6 +36,7 @@ covers:
   - packages/backend/src/routes/agents.ts
   - packages/frontend/src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx
   - packages/frontend/src/hooks/useTransactionsFeed.ts
+  - packages/frontend/src/hooks/useUnfilteredTransactionTotal.ts
   - packages/connect/src/**
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/rails/sweep.ts
@@ -723,8 +724,8 @@ Structure:
    Export CSV in the actions slot. The status row carries a removable chip
    per active filter, Clear filters, and the standard count — "{n}
    transactions", or "{shown} of {total} transactions" filtered, both server
-   figures. The URL keeps `FilterBar`'s keys except search, written as `q`
-   with the old `search` still read; the export request builds its own API
+   figures. The URL keeps the keys it had before #4111 except search,
+   written as `q` with the old `search` still read; the export request builds its own API
    parameters, apart from the URL codec. Sorting stays on the column
    headers. The account page's planned Activity tab moves with #4130.
 3. The full-page `TransactionsTable` variant for `/transactions`; card/compact

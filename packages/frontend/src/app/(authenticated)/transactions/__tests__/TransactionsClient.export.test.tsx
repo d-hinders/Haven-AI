@@ -6,7 +6,7 @@
  * checked either state. This is the test half; the render half is recorded as
  * unverified in the PR body.
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiRequestError } from '@/lib/api'
 
@@ -111,6 +111,7 @@ beforeEach(() => {
   window.history.replaceState(null, '', '/transactions')
   feedState.partialFailure = false
   feedState.truncated = false
+  feedState.empty = false
 })
 
 async function exportNoticeRegion(): Promise<HTMLElement> {
@@ -146,8 +147,9 @@ describe('TransactionsClient — CSV export (#2871)', () => {
     mockGetText.mockResolvedValue('\ufeffsettled_at\r\n"x"')
     render(<TransactionsClient />)
 
-    // The network select only renders with accounts on 2+ chains; the scope
-    // it would show is what the export request carries, so read it there.
+    // The Network facet only shows with accounts on 2+ chains (one option
+    // hides it); the scope it would show is what the export request carries,
+    // so read it there.
     fireEvent.click(exportButton())
     await waitFor(() => expect(mockGetText).toHaveBeenCalledTimes(1))
     expect(mockGetText).toHaveBeenCalledWith(expect.not.stringContaining('chainId='))
@@ -383,9 +385,31 @@ describe('TransactionsClient — URL and export params (#4111)', () => {
 
     // Two Clear filters: the toolbar's and the no-match state's. Either one
     // returns to the page default — no search, every facet All, All time.
-    const clears = screen.getAllByRole('button', { name: 'Clear filters' })
-    fireEvent.click(clears[clears.length - 1])
+    const noMatch = screen.getByTestId('transactions-no-match')
+    fireEvent.click(within(noMatch).getByRole('button', { name: 'Clear filters' }))
     await waitFor(() => expect(window.location.search).toBe(''))
     expect(screen.getByRole('searchbox', { name: 'Search transactions' })).toHaveValue('')
+  })
+
+  it('drops a chainId that is not a network id instead of showing it as a filter', async () => {
+    urlState.query = 'chainId=abc'
+    window.history.replaceState(null, '', '/transactions?chainId=abc')
+    render(<TransactionsClient />)
+
+    await waitFor(() => expect(window.location.search).toBe(''))
+    expect(screen.queryByRole('button', { name: /^Remove Network/ })).toBeNull()
+    // Unfiltered once repaired: the count is the plain total.
+    await waitFor(() =>
+      expect(screen.getByTestId('list-toolbar-count')).toHaveTextContent(/^1 transaction$/),
+    )
+  })
+
+  it('shows only the direction half the Direction filter leaves open', () => {
+    urlState.query = 'direction=out'
+    render(<TransactionsClient />)
+
+    const page = document.body.textContent ?? ''
+    expect(page).toMatch(/0\s*sent/)
+    expect(page).not.toMatch(/\d\s*received/)
   })
 })

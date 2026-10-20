@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 import type { TransactionsFeedResponse } from '@/types/transactions'
 
@@ -9,7 +9,7 @@ interface Options {
   filtered: boolean
   /** The feed's own server `total` for the scope it fetched. */
   feedTotal: number
-  /** Changes with the filters; a failed read is retried when it does. */
+  /** Changes with the filters; the figure is re-read when it does. */
   retryKey: string
 }
 
@@ -20,13 +20,18 @@ interface Options {
  * numbers are server figures, never loaded rows against a server total.
  *
  * Unfiltered, the feed's own `total` IS that number, and nothing extra is
- * fetched. Once filtered, one `limit=1` read with no filters asks for it,
- * kept while the list stays filtered and dropped when it is cleared, so the
- * next filtered view reads a fresh figure. (The feed's total is not reused
- * for it: for one render after a filter change it still describes the
- * previous scope.) A failed read answers `null` and is retried on the next
- * filter change, so the count shows its loading state rather than a figure
- * it cannot back.
+ * fetched. Filtered, one `limit=1` read with no filters asks for it. It is
+ * read again whenever the filtered feed's total moves — the feed polls, so a
+ * new payment that matches the filter must move the denominator too, or the
+ * count reads "26 of 25" — and on every filter change. Re-reads after the
+ * first pass `fresh=1`, the cache bypass the feed's own poll uses. The last
+ * known figure stays up while a re-read is in flight. (The feed's total is
+ * never reused for it: for one render after a filter change it still
+ * describes the previous scope.)
+ *
+ * `null` means unknown: before the first answer, after a failed read, and
+ * when the read reports a partial failure (its total would be short). The
+ * count then shows its loading state rather than a figure it cannot back.
  */
 export function useUnfilteredTransactionTotal({
   filtered,
@@ -34,26 +39,30 @@ export function useUnfilteredTransactionTotal({
   retryKey,
 }: Options): number | null {
   const [fetchedTotal, setFetchedTotal] = useState<number | null>(null)
+  const hasRead = useRef(false)
 
   useEffect(() => {
-    if (!filtered) setFetchedTotal(null)
-  }, [filtered])
-
-  useEffect(() => {
-    if (!filtered || fetchedTotal !== null) return
+    if (!filtered) {
+      hasRead.current = false
+      setFetchedTotal(null)
+      return
+    }
     let cancelled = false
+    const query = hasRead.current ? 'offset=0&limit=1&fresh=1' : 'offset=0&limit=1'
+    hasRead.current = true
     api
-      .get<TransactionsFeedResponse>('/transactions?offset=0&limit=1')
+      .get<TransactionsFeedResponse>(`/transactions?${query}`)
       .then((data) => {
-        if (!cancelled) setFetchedTotal(data.total ?? 0)
+        if (cancelled) return
+        setFetchedTotal(data.partialFailure ? null : (data.total ?? 0))
       })
       .catch(() => {
-        // Stays null: the count shows its loading state, never a guess.
+        if (!cancelled) setFetchedTotal(null)
       })
     return () => {
       cancelled = true
     }
-  }, [filtered, fetchedTotal, retryKey])
+  }, [filtered, feedTotal, retryKey])
 
   return filtered ? fetchedTotal : feedTotal
 }

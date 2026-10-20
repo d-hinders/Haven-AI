@@ -200,14 +200,21 @@ export default function TransactionsClient() {
   const [listState, setListState] = useListUrlState(transactionsUrlSchema, { filtering: 'server' })
   const filters = useMemo(() => listStateToFilters(listState), [listState])
 
-  // A link from before #4111 names the search `search`. It is read as `q`
-  // already; rewriting the address once makes the URL converge on one name.
+  // Two links are repaired once, on arrival. One from before #4111 names the
+  // search `search`: it is read as `q` already, and rewriting the address
+  // makes the URL converge on one name. One whose `chainId` is not a positive
+  // integer was ignored by the reader before #4111; the codec keeps unknown
+  // values for facets whose options load late, so it is dropped here rather
+  // than raising a "Network" chip over an unfiltered feed.
   const hasLegacySearchKey = searchParams?.has('search') ?? false
+  const invalidChainId =
+    listState.facets.chainId?.length === 1 && listStateToFilters(listState).chainId === undefined
   useEffect(() => {
-    if (hasLegacySearchKey) setListState(listState)
-    // Once per legacy link: the rewrite removes the key it keys on.
+    if (!hasLegacySearchKey && !invalidChainId) return
+    setListState(invalidChainId ? { ...listState, facets: { ...listState.facets, chainId: [] } } : listState)
+    // Once per bad link: the rewrite removes what it keys on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasLegacySearchKey])
+  }, [hasLegacySearchKey, invalidChainId])
 
   const {
     accounts,
@@ -433,7 +440,9 @@ export default function TransactionsClient() {
     ? null
     : !hasActiveFilters
       ? { shown: total, total }
-      : unfilteredTotal === null
+      : // Unknown, or for a moment behind the polled feed: no figure rather
+        // than "26 of 25".
+        unfilteredTotal === null || unfilteredTotal < total
         ? null
         : { shown: total, total: unfilteredTotal }
   const showNoMatch = hasActiveFilters && !loadingInitial && !error && transactions.length === 0
@@ -508,22 +517,28 @@ export default function TransactionsClient() {
       {(showSummary || (!loadingInitial && truncated)) && (
         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--v2-ink-3)]">
           {showSummary ? (
+            // A Direction filter already fixes one half, so only the other
+            // is shown — never "0 received" under Direction: Outgoing.
             <>
-              <span>
-                <span className="v2-tabular font-medium text-[var(--v2-success)]">{summary.received}</span> received
-              </span>
-              <span aria-hidden="true">·</span>
-              <span>
-                <span className="v2-tabular font-medium text-[var(--v2-debit)]">{summary.sent}</span> sent
-              </span>
-              {summary.failed > 0 ? (
-                <>
-                  <span aria-hidden="true">·</span>
-                  <span>
+              {[
+                filters.direction !== 'out' ? (
+                  <span key="received">
+                    <span className="v2-tabular font-medium text-[var(--v2-success)]">{summary.received}</span> received
+                  </span>
+                ) : null,
+                filters.direction !== 'in' ? (
+                  <span key="sent">
+                    <span className="v2-tabular font-medium text-[var(--v2-debit)]">{summary.sent}</span> sent
+                  </span>
+                ) : null,
+                summary.failed > 0 ? (
+                  <span key="failed">
                     <span className="v2-tabular font-medium text-[var(--v2-danger)]">{summary.failed}</span> failed
                   </span>
-                </>
-              ) : null}
+                ) : null,
+              ]
+                .filter((part) => part !== null)
+                .flatMap((part, i) => (i === 0 ? [part] : [<span key={`sep-${i}`} aria-hidden="true">·</span>, part]))}
               {hasMore ? <span className="text-[var(--v2-ink-3)]">(loaded results)</span> : null}
             </>
           ) : null}
@@ -547,12 +562,16 @@ export default function TransactionsClient() {
         </div>
       )}
 
-      <Card hover={false} className="mt-3">
-        {showNoMatch ? (
-          // The standard no-match state (#4110): it sits where the rows were
-          // and leaves the toolbar in place, so the cause stays editable.
+      {showNoMatch ? (
+        // The standard no-match state (#4110): it sits where the rows were —
+        // in place of the list card, not inside it (an EmptyState is its own
+        // surface) — and leaves the toolbar in place, so the cause stays
+        // editable.
+        <div className="mt-3" data-testid="transactions-no-match">
           <ListNoMatch noun={transactionNoun} onClear={handleClearFilters} />
-        ) : (
+        </div>
+      ) : (
+        <Card hover={false} className="mt-3">
           <TransactionsTable
             transactions={transactions}
             loading={loadingInitial}
@@ -565,8 +584,8 @@ export default function TransactionsClient() {
             variant="page"
             onSelect={setSelectedTx}
           />
-        )}
-      </Card>
+        </Card>
+      )}
 
       <TransactionDetailPanel
         transaction={selectedTx}

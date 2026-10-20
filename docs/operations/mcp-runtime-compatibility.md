@@ -82,6 +82,22 @@ covers:
 last-verified: "2026-10-20"
 ---
 
+> **Re-verified unchanged (#4121, 2026-10-20, a `ci.yml` comment counts the
+> qa-agent test files that import the built signer):** the only covered file
+> this diff touches is `.github/workflows/ci.yml`, and the change inside it is
+> comments only: the `qa_agent_checks` comment above `Run QA agent unit tests`
+> now says 3 files cannot resolve `@haven_ai/signer` without its `dist/`
+> (`src/evals/tools.test.ts` joined the two hosted-signer scenarios), where it
+> said 2. No step, job, env value, literal or condition moves. The covered
+> `tools-list.snapshot.json` and the signer's `toolSchemas` are READ by that
+> new qa-agent test, never edited, so no tool, argument, input schema,
+> description, channel, dist-tag, release step or consent surface moves. The
+> change classifier gains a file arm that also routes `qa_agent` for a
+> snapshot change; the `mcp_server` job it already ran is unchanged.
+> `last-verified` is not re-stamped for this note: its 2026-10-20 is the
+> #4123 note's stamp below, and this block is the scope. Nothing else in this
+> document was re-verified.
+
 > **Re-verified (#4123, 2026-10-20, the retryable settlement-evidence reasons
 > name `payment_header`):** reason text only, in two covered files under
 > `packages/mcp-server/src/tools/**`. When an EIP-3009 merchant settlement

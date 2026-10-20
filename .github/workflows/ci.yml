@@ -431,8 +431,11 @@ jobs:
       # Measured on a clean tree (2026-09-15, dev 9a6ee132): 24 files / 344
       # tests pass with NO env, secrets, network or database — nothing reads
       # QA_*, DATABASE_URL or a chain endpoint, so no HAVEN_SKIP_DB_TESTS is
-      # needed. vitest fails fast without the sibling dists above (2 files
-      # cannot resolve @haven_ai/signer), which is why the builds precede it.
+      # needed. vitest fails fast without the sibling dists above (3 files
+      # cannot resolve @haven_ai/signer, measured 2026-10-20: the two hosted
+      # signer scenarios and, since #4121, src/evals/tools.test.ts, which
+      # compares the graders' signer tool list with the built toolSchemas),
+      # which is why the builds precede it.
       - name: Run QA agent unit tests
         run: npm run test -w packages/qa-agent
 

@@ -118,7 +118,7 @@ export default function DemoPage() {
               <Card className="p-4" hover={false}>
                 <p className="text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">Before you start</p>
                 <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-[var(--v2-ink-2)]">
-                  <li>A passkey-capable device (Face ID, Touch ID, Windows Hello, or a device PIN).</li>
+                  <li>A device that can create a passkey (one with a screen lock).</li>
                   <li>One AI agent, such as Claude Code, Codex, or Hermes.</li>
                   <li>About 10 minutes.</li>
                 </ul>

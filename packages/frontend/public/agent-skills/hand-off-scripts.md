@@ -4,7 +4,7 @@ Send these as your own message, `<host>` replaced by the host you fetched this f
 
 **Before signup** (step 1):
 
-> I can do everything except the parts that need your signature. Please open `<host>/signup?next=/agents&via=agent` — name, email, password, then a passkey (Face ID / Touch ID) or a wallet. That is your account's key: I should not have it, and I will never ask for your password. Already have one? `<host>/login?next=/agents`.
+> I can do everything except the parts that need your signature. Please open `<host>/signup?next=/agents&via=agent` — name, email, password, then a passkey or a wallet. That is your account's key: I should not have it, and I will never ask for your password. Already have one? `<host>/login?next=/agents`.
 
 **At the passkey step:**
 

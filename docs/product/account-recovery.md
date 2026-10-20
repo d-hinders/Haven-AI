@@ -27,11 +27,11 @@ do; Haven only prepares the on-chain operations.
 
 ## The model in one line
 
-An account has one or more **ways to approve** it — a passkey (Face ID / Touch
-ID) and/or a connected wallet. Any enrolled signer can add or remove other
-signers. So a **backup** signer is the whole recovery story: if you lose the
-device holding your primary passkey, the backup can remove the lost one and
-enroll a replacement.
+An account has one or more **ways to approve** it — a passkey and/or a
+connected wallet. Any enrolled signer can add or remove other signers. So a
+**backup** signer is the whole recovery story: if you lose the device holding
+your primary passkey, the backup can remove the lost one and enroll a
+replacement.
 
 ## Not the same thing: replacing an agent's key
 
@@ -87,10 +87,10 @@ it stops appearing once you add a backup, and you can add one at any time from
 On your account page, open the **Security & details** tab and choose one,
 under **Backup & recovery**:
 
-- **Add a backup passkey** — creates a second passkey (approve with Face ID,
-  Touch ID, Windows Hello, or your device PIN). On the
-  same device it's a second credential; on a *different* device (your phone as
-  well as your laptop) it's true device redundancy. One prompt, no transaction
+- **Add a backup passkey** — creates a second passkey (usually approved with
+  your device's screen lock). On the same device it's a second credential; on a
+  *different* device (your phone as well as your laptop) it's true device
+  redundancy. One prompt, no transaction
   you pay for.
 - **Add a wallet** — enrols a browser wallet address as an owner. Useful if you
   already keep a hardware or browser wallet. Adding a wallet is reversible:

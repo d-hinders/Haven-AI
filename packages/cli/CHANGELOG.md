@@ -17,6 +17,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
+- `haven guide` says "a passkey", never a platform name (#4168). Its copy of
+  the agent runbook drops "(Face ID / Touch ID)" from the account step and
+  the signup hand-off script, regenerated from the SDK runbook. Wording only;
+  no update needed.
 - `haven budget grant` and `haven budget revoke` now say "approve" instead of
   "sign" in what they print: "Open this link and approve", "Waiting for your
   approval", "Approved and active", "one approval, sponsored", "The budget

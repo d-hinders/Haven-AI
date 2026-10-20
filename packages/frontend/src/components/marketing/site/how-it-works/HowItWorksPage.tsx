@@ -148,7 +148,7 @@ export function HowItWorksPage() {
           <SiteSplit>
             <SiteCopy eyebrow="1 · Your account" title="An account only you control." titleId="how-account">
               <SiteLede>
-                One Face ID prompt creates a Haven account you own outright. No seed phrase, no credit card. Add USDC
+                One passkey prompt creates a Haven account you own outright. No seed phrase, no credit card. Add USDC
                 when your agents need it, and a backup passkey when you like.
               </SiteLede>
             </SiteCopy>

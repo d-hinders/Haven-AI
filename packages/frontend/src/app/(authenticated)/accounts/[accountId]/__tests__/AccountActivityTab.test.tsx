@@ -370,7 +370,7 @@ describe('AccountActivityTab — rows and the detail panel (#4098)', () => {
     const { unmount } = renderTab({ accountNamesByAddress: ownAccounts })
     let row = ledgerRows()[0]
     expect(row).toHaveTextContent('Payment sent by you')
-    expect(row).toHaveTextContent('Reserve')
+    expect(row).toHaveTextContent(/From Main\s*→\s*To Reserve/)
     expect(row).not.toHaveTextContent('New recipient')
     unmount()
 
@@ -391,7 +391,10 @@ describe('AccountActivityTab — rows and the detail panel (#4098)', () => {
     }))
     renderTab({ accountId: 'safe-2', accountNamesByAddress: ownAccounts })
     row = ledgerRows()[0]
-    expect(row).toHaveTextContent('From Main')
+    // The movement line prints its own "From": the sender goes in bare, so
+    // the row never reads "From From Main".
+    expect(row).toHaveTextContent(/From Main\s*→\s*To Reserve/)
+    expect(row).not.toHaveTextContent('From From')
     expect(row).not.toHaveTextContent('Deposit')
   })
 })

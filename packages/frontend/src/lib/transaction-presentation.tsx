@@ -79,10 +79,34 @@ export function transactionMovement(
   }
 
   const counterparty = counterpartyLabel(tx, resolveAddress, accountNamesByAddress, options)
-  const from = tx.direction === 'in' ? counterparty : tx.accountName
+  // The movement line prints its own "From", so an own-account sender goes in
+  // bare — `counterpartyLabel`'s "From <account>" is the dashboard's title.
+  const ownSender =
+    options?.noAddress && tx.direction === 'in'
+      ? ownAccountSenderName(tx, accountNamesByAddress)
+      : null
+  const from = tx.direction === 'in' ? (ownSender ?? counterparty) : tx.accountName
   const to = tx.direction === 'in' ? tx.accountName : counterparty
 
   return <TransactionMovement from={from} to={to} />
+}
+
+/**
+ * The name of the user's own account an inbound row came from (#4099): the
+ * server-resolved name when one rode along, else the chain-keyed own-account
+ * map entry for `tx.from`. Own accounts only — a contact never names a
+ * deposit. Null for every other deposit.
+ */
+function ownAccountSenderName(
+  tx: Pick<CounterpartyFields, 'from' | 'chainId'>,
+  accountNamesByAddress?: Map<string, string>,
+  resolvedName?: string | null,
+): string | null {
+  return (
+    resolvedName ||
+    accountNamesByAddress?.get(`${tx.from.toLowerCase()}:${tx.chainId}`) ||
+    null
+  )
 }
 
 /**
@@ -135,8 +159,7 @@ export function counterpartyLabel(
     // map — chain-keyed only, never a contact. Every other deposit stays
     // "Deposit".
     if (tx.direction === 'in') {
-      const senderAccount = accountNamesByAddress?.get(`${tx.from.toLowerCase()}:${tx.chainId}`)
-      const sender = options.resolvedName ?? senderAccount
+      const sender = ownAccountSenderName(tx, accountNamesByAddress, options.resolvedName)
       return sender ? `From ${sender}` : 'Deposit'
     }
 

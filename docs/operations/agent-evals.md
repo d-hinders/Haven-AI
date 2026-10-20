@@ -344,7 +344,11 @@ envelope reader, so every grader applies unmodified.
 **Where the credentials live (money-path).** The subscription token and this
 lane's eval-agent keys are secrets of the protected **`agent-evals` GitHub
 environment** (owner = required reviewer) — NEVER repository secrets, NEVER
-in code, fixtures or artifacts. Every job in `.github/workflows/agent-evals.yml`
+in code or fixtures. The one exception to "environment only" is the observer
+RPC URL, `QA_RPC_URL_BASE_SEPOLIA`, a **repository** secret shared with
+`qa-dev.yml` and `qa-balances.yml`. No secret goes into an artifact: the only
+artifact built from the session streams is the redacted, scanned copy (see
+*The session transcripts artifact* below). Every job in `.github/workflows/agent-evals.yml`
 declares that environment, so each run waits
 for the owner's approval before any secret reaches a runner. The env
 inventory:
@@ -356,6 +360,7 @@ inventory:
 | `AGENT_EVALS_DELEGATE_KEY` | env secret | this lane's delegate private key |
 | `AGENT_EVALS_HAVEN_API_URL` | var (or secret) | the dev backend URL |
 | `AGENT_EVALS_RECIPIENT` / `AGENT_EVALS_AGENT_ACCOUNT` / `AGENT_EVALS_X402_TARGET` | vars | the graders' address/URL fixtures (same roles as the `QA_EVAL_*` env) |
+| `QA_RPC_URL_BASE_SEPOLIA` | repo secret | the observer RPC URL, which embeds the provider key; shared with `qa-dev.yml` and `qa-balances.yml`, so it is NOT an `agent-evals` environment secret |
 | `QA_X402_BINDING_SIGNER` | repo var | the public address the signer verifies x402 bindings against, passed as `HAVEN_X402_BINDING_SIGNER`; the job fails before any session when it is unset |
 
 **Token rotation.** The token does not refresh on its own (reportedly about
@@ -391,9 +396,61 @@ turn on the eval's model with no MCP servers, and fails with Claude's own
 reason (an invalid or expired token, the plan's usage limit, model access)
 when it does not work, instead of every task failing as "claude exited 1". An
 adapter failure quotes the session's `result` text for the same reason. The
-raw session streams are deliberately not uploaded: this repository is public,
-so artifacts are downloadable by anyone, and the streams carry full tool
-results.
+raw session streams are never uploaded: this repository is public, and they
+carry full tool results. They upload only as the redacted copy below.
+
+**The session transcripts artifact (#4137, owner decision 2026-10-20).** After
+the report upload, the job redacts the per-trial streams
+(`$RUNNER_TEMP/claude-sessions.<task>.trial<N>.jsonl`) with
+`packages/qa-agent/src/evals/redact-sessions.ts` (`npm run evals:redact -w
+packages/qa-agent`) and uploads the result as
+`agent-evals-sessions-<run_id>`, kept for **3 days**. It is fail-closed:
+
+- The step passes the redactor every `secrets.*` the workflow references, by
+  name. **Required:** `CLAUDE_CODE_OAUTH_TOKEN`, `AGENT_EVALS_API_KEY`,
+  `AGENT_EVALS_DELEGATE_KEY`, `QA_RPC_URL_BASE_SEPOLIA`; when any is empty the
+  redactor writes nothing and the step reports `clean=false`. **Optional:**
+  `QA_HOSTED_MCP_URL` and `AGENT_EVALS_HAVEN_API_URL`, the `vars.X || secrets.X`
+  fallbacks, redacted only when set as secrets (today they are variables,
+  which are kept). The step prints how many secrets it loaded, by name.
+- It redacts into a staging directory, prints a per-class count of what it
+  found in the raw input (numbers only, the positive control), then rescans
+  the staged copy with an independent detector for every class. Only a clean
+  scan moves the files to the upload directory and sets `clean=true`, and the
+  upload step is gated on `steps.redact.outputs.clean == 'true'`.
+- A scan hit means the redactor is wrong: nothing moves, the step prints
+  `::error::` with each class and its count (never a value), and the job
+  fails. The report artifact has already uploaded.
+- A line that fails `JSON.parse` (a stream cut off by a timeout's SIGKILL)
+  takes the string rules; it is never copied raw.
+
+Each redaction replaces the whole value, prefix included, with
+`[REDACTED:<class>]`:
+
+| Class | What goes |
+|---|---|
+| `secret-exact` | each loaded secret value, raw and JSON-escaped; the delegate key case-insensitively, with and without `0x` (it has a tx hash's shape, so only its exact value goes) |
+| `rpc-key` | the key-bearing segments of a URL-shaped secret (path segments and query values of 12+ characters, the `secretSegments` rule); the host stays, so the URL keeps its shape |
+| `agent-key` | any `sk_agent_…` key, this agent's or another's |
+| `anthropic-key` | any `sk-ant-…` value |
+| `auth-header` | `Authorization` values and `Bearer …` anywhere; header names case-insensitive |
+| `payment-header` | `payment_header`, `PAYMENT-SIGNATURE`, `X-PAYMENT` values |
+| `siwx-header` | `sign_in_with_x_header`, `SIGN-IN-WITH-X` values |
+| `signature` | `signature` (and `*_signature`) string values, and any `0x` + 130-hex (65-byte) signature anywhere |
+| `b64-json` | `eyJ…` base64-JSON blobs (x402 headers, JWTs) |
+| `merchant-body` | the merchant's paid response: every string and number inside the `result` of a paid-completion envelope (the object that carries `payment_id`), and any `merchant_body` value. Keys, nesting, booleans and MCP block `type`s stay |
+
+**Reading a transcript.** Download it with `gh run download <run_id> -n
+agent-evals-sessions-<run_id>` (a signed-in account; the artifact list itself
+is public). Each file is one trial's `claude -p` stream-JSON, one object per
+line. A hosted tool result is a `tool_result` whose `text` holds the hosted
+envelope, re-serialized after redaction. Kept on purpose: tool names, the
+`tool_use` / `tool_result` order, `next_tool_name`, `code` / `error_code`,
+`payment_id`, idempotency keys, addresses, tx hashes, amounts, the agent's
+text and the variable URLs (hosted MCP, backend, merchants). A marker says
+which class removed a value. A line that was cut off mid-way stays cut off;
+when it held a paid-completion envelope, everything from the merchant
+`result` to the end of the line is one `merchant-body` marker.
 
 **What the report does show for a failure.** The job summary lists every
 failed trial with a **tool trace**: the session's tool calls in order, as bare
@@ -475,7 +532,10 @@ check on `dev` or `main`.
 Every run writes a per-task table (pass rate, pass^k, median wall time per
 session) plus total cost, model and hosted MCP provenance to the GitHub job
 summary (`evals-report.json.summary.md` → `$GITHUB_STEP_SUMMARY`); the full
-JSON report and the per-session cost evidence are uploaded as artifacts.
+JSON report and the per-session cost evidence are uploaded as artifacts
+(default retention), and the redacted session transcripts as a separate
+3-day artifact, only when their scan is clean (see *The session transcripts
+artifact* above).
 
 ## The Hermes lane as actually run (verified live 2026-10-15)
 

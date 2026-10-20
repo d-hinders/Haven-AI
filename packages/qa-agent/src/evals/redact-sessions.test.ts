@@ -1,0 +1,403 @@
+/**
+ * #4137: the session-transcript redactor. Every value below is SYNTHETIC,
+ * with the real shapes (`sk_agent_…`, `sk-ant-…`, a 64-hex key, `0x` + 130
+ * hex, `eyJ…` base64, an RPC URL with a key segment). None is a real secret.
+ *
+ * The fixture plants a canary for each rule class in each position a stream
+ * can carry it: the line's own JSON (a `tool_use` input), a nested-JSON
+ * `text` block of a `tool_result` (the hosted envelope, pretty-printed as
+ * `toMcpResult` writes it), a bare-string `tool_result`, and a line cut off
+ * mid-way (SIGKILL) that fails `JSON.parse`.
+ */
+
+import { mkdtemp, readdir, readFile, writeFile, mkdir } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { describe, expect, it } from 'vitest'
+import { deepFind } from './json-reading.js'
+import {
+  REDACTION_CLASSES,
+  loadSecrets,
+  marker,
+  redactSessionText,
+  runRedaction,
+  scanSessionText,
+  urlKeySegments,
+  type LoadedSecrets,
+  type RedactionClass,
+} from './redact-sessions.js'
+
+// ── Synthetic secrets (the four REQUIRED names) ────────────────────────────
+
+const OAUTH = 'sk-ant-oat01-SYNTHETICoauthTOKEN0123456789abcdefghijklmnopqrstuvwxyz-TESTONLY'
+const API_KEY = 'sk_agent_SYNTHETICapiKEY0123456789abcdefTESTONLY'
+const DELEGATE_HEX = 'a7'.repeat(32)
+const DELEGATE = `0x${DELEGATE_HEX}`
+const RPC_KEY = 'SynthRpcKey0123456789abcdefXYZ'
+const RPC = `https://base-sepolia.g.alchemy.com/v2/${RPC_KEY}`
+
+const REQUIRED = ['CLAUDE_CODE_OAUTH_TOKEN', 'AGENT_EVALS_API_KEY', 'AGENT_EVALS_DELEGATE_KEY', 'QA_RPC_URL_BASE_SEPOLIA']
+const OPTIONAL = ['QA_HOSTED_MCP_URL', 'AGENT_EVALS_HAVEN_API_URL']
+const ENV: Record<string, string> = {
+  CLAUDE_CODE_OAUTH_TOKEN: OAUTH,
+  AGENT_EVALS_API_KEY: API_KEY,
+  AGENT_EVALS_DELEGATE_KEY: DELEGATE,
+  QA_RPC_URL_BASE_SEPOLIA: RPC,
+}
+
+// ── What must survive ──────────────────────────────────────────────────────
+
+const HOSTED_MCP_URL = 'https://haven-mcp-dev.example.test/v1'
+const TX_HASH = `0x${'5c'.repeat(32)}`
+const PAYMENT_ID = '09bf4190-7b15-4088-8f2f-0ec58b71b29a'
+const SURVIVORS = {
+  payment_id: PAYMENT_ID,
+  tx_hash: TX_HASH,
+  error_code: 'delegation_budget_exceeded',
+  next_tool_name: 'haven_get_payment_status',
+  hosted_mcp_url: HOSTED_MCP_URL,
+  idempotency_key: 'x402q:6f328174-0000-4000-8000-000000000000',
+  to: `0x${'12'.repeat(20)}`,
+  amount: '1000',
+}
+
+// ── Canaries, one per class (foreign values unless the class is a loaded secret) ──
+
+const B64_PAYMENT = Buffer.from('payment-canary-synthetic-0123456789').toString('base64') // not eyJ: isolates the class
+const B64_SIWX = Buffer.from('siwx-canary-synthetic-0123456789').toString('base64')
+const B64_JSON = Buffer.from(JSON.stringify({ transaction: TX_HASH, synthetic: 'b64-canary' })).toString('base64')
+const JWT = 'eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJzeW50aGV0aWMtY2FuYXJ5In0.c3ludGhldGljLXNpZw'
+const SIG_130 = `0x${'cd'.repeat(65)}`
+const SIG_KEYED = `0x${'be'.repeat(40)}` // 80 hex: only the key rule can see it
+
+interface Canary {
+  /** Strings that must not survive. */
+  needles: string[]
+  /** The fields planted in each position. */
+  obj: Record<string, unknown>
+}
+
+const CANARIES: Record<RedactionClass, Canary> = {
+  'secret-exact': {
+    needles: [DELEGATE_HEX, DELEGATE_HEX.toUpperCase()],
+    obj: { note: `key ${DELEGATE} and ${DELEGATE_HEX.toUpperCase()} again` },
+  },
+  'rpc-key': { needles: [RPC_KEY], obj: { error: `HTTP request failed. URL: ${RPC} status 429` } },
+  'agent-key': { needles: ['sk_agent_'], obj: { note: 'a foreign key sk_agent_FOREIGNsynthetic9876543210zyxw appeared' } },
+  'anthropic-key': { needles: ['sk-ant-'], obj: { note: 'a foreign token sk-ant-api03-FOREIGNsynthetic_0123456789-abc' } },
+  'auth-header': {
+    needles: ['hv_tok_synthetic_0123456789', 'hv_tok_synthetic_bearer_9876543210'],
+    obj: { headers: { Authorization: 'Token hv_tok_synthetic_0123456789' }, note: 'retry with Bearer hv_tok_synthetic_bearer_9876543210 now' },
+  },
+  'payment-header': {
+    needles: [B64_PAYMENT],
+    obj: { payment_header: B64_PAYMENT, retry_headers: { 'PAYMENT-SIGNATURE': B64_PAYMENT, 'X-PAYMENT': B64_PAYMENT } },
+  },
+  'siwx-header': { needles: [B64_SIWX], obj: { sign_in_with_x_header: B64_SIWX, headers: { 'SIGN-IN-WITH-X': B64_SIWX } } },
+  signature: { needles: [SIG_KEYED, SIG_130.slice(2)], obj: { signature: SIG_KEYED, note: `signed ${SIG_130} ok` } },
+  'b64-json': { needles: [B64_JSON.slice(0, 24), 'eyJhbGciOiJub25l'], obj: { payment_response: B64_JSON, note: `link ?t=${JWT}` } },
+  'merchant-body': {
+    needles: ['MERCHANT-PAID-CANARY'],
+    obj: {
+      payment_id: PAYMENT_ID,
+      settled: true,
+      result: {
+        content: [{ type: 'text', text: 'MERCHANT-PAID-CANARY your vpn config' }],
+        structuredContent: { summary: { product_name: 'MERCHANT-PAID-CANARY-product', seats: 3 }, wg_config: 'MERCHANT-PAID-CANARY-wg' },
+        isError: false,
+      },
+      merchant_body: 'MERCHANT-PAID-CANARY-body',
+    },
+  },
+}
+
+const POSITIONS = ['top', 'nested-text', 'bare-string', 'unparseable'] as const
+type Position = (typeof POSITIONS)[number]
+
+function envelope(data: Record<string, unknown>) {
+  return { contract_fingerprint: 'fp_synthetic', server_version: '0.0.0-test', success: true, data }
+}
+
+function lineAt(position: Position, obj: Record<string, unknown>): string {
+  const nested = JSON.stringify({
+    type: 'user',
+    message: { content: [{ type: 'tool_result', tool_use_id: 'tu_1', is_error: false, content: [{ type: 'text', text: JSON.stringify(envelope(obj), null, 2) }] }] },
+  })
+  switch (position) {
+    case 'top':
+      return JSON.stringify({ type: 'assistant', message: { model: 'claude-sonnet-5-5', content: [{ type: 'tool_use', id: 'tu_1', name: 'mcp__haven-eval__haven_submit', input: obj }] } })
+    case 'nested-text':
+      return nested
+    case 'bare-string':
+      return JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu_1', content: JSON.stringify(envelope(obj)) }] } })
+    case 'unparseable':
+      return nested.slice(0, -9)
+  }
+}
+
+function secrets(env: Record<string, string> = ENV, optional = OPTIONAL): LoadedSecrets {
+  const loaded = loadSecrets(env, REQUIRED, optional)
+  if (!loaded.ok) throw new Error(`fixture secrets refused: ${loaded.missing.join(', ')}`)
+  return loaded.secrets
+}
+
+/** The acceptance grep on #4137, as a regex. */
+const ACCEPTANCE_GREP = /sk_agent_|sk-ant-|Bearer [A-Za-z0-9]|"payment_header":"[^[]|PAYMENT-SIGNATURE":"[^[]|eyJ[A-Za-z0-9_-]{20,}|0x[0-9a-fA-F]{130}/g
+
+const ALL_SECRET_VALUES = [OAUTH, API_KEY, DELEGATE, DELEGATE_HEX, RPC, RPC_KEY]
+
+describe('redactSessionText: every class, every position', () => {
+  for (const cls of REDACTION_CLASSES) {
+    for (const position of POSITIONS) {
+      it(`${cls} at ${position}: no canary survives, and the class marker replaces it`, () => {
+        const raw = lineAt(position, CANARIES[cls].obj)
+        if (position === 'unparseable') expect(() => JSON.parse(raw)).toThrow()
+        for (const needle of CANARIES[cls].needles) expect(raw.toLowerCase()).toContain(needle.toLowerCase())
+        const { text, counts } = redactSessionText(raw, { secrets: secrets() })
+        for (const needle of CANARIES[cls].needles) expect(text.toLowerCase()).not.toContain(needle.toLowerCase())
+        expect(text).toContain(marker(cls))
+        expect(counts[cls]).toBeGreaterThan(0)
+      })
+    }
+  }
+})
+
+describe('redactSessionText: what is kept', () => {
+  for (const position of POSITIONS) {
+    it(`keeps the tx hash, payment_id, error_code, next_tool_name, idempotency key, address, amount and hosted MCP URL at ${position}`, () => {
+      const raw = lineAt(position, { ...SURVIVORS, note: `called ${HOSTED_MCP_URL} for ${TX_HASH}` })
+      const { text, counts } = redactSessionText(raw, { secrets: secrets() })
+      for (const value of Object.values(SURVIVORS)) expect(text).toContain(value)
+      expect(Object.values(counts).every((n) => n === 0)).toBe(true)
+      if (position !== 'unparseable') expect(JSON.parse(text)).toEqual(JSON.parse(raw))
+    })
+  }
+
+  it('re-serializes the nested envelope in place, and the tool flow stays readable', () => {
+    const raw = lineAt('nested-text', { ...CANARIES['payment-header'].obj, ...SURVIVORS })
+    const { text } = redactSessionText(raw, { secrets: secrets() })
+    const line = JSON.parse(text)
+    const block = line.message.content[0]
+    expect(block).toMatchObject({ type: 'tool_result', tool_use_id: 'tu_1', is_error: false })
+    const inner = JSON.parse(block.content[0].text)
+    expect(deepFind(inner, 'payment_id')).toBe(PAYMENT_ID)
+    expect(deepFind(inner, 'next_tool_name')).toBe('haven_get_payment_status')
+    expect(inner.data.retry_headers['PAYMENT-SIGNATURE']).toBe(marker('payment-header'))
+    // Pretty-printed as toMcpResult writes it.
+    expect(block.content[0].text).toContain('\n  "contract_fingerprint"')
+  })
+
+  it('strips only the merchant body content: keys, nesting, flags and MCP block types stay', () => {
+    const raw = lineAt('nested-text', CANARIES['merchant-body'].obj)
+    const { text } = redactSessionText(raw, { secrets: secrets() })
+    const data = JSON.parse(JSON.parse(text).message.content[0].content[0].text).data
+    const M = marker('merchant-body')
+    expect(data.payment_id).toBe(PAYMENT_ID)
+    expect(data.settled).toBe(true)
+    expect(data.merchant_body).toBe(M)
+    expect(data.result).toEqual({
+      content: [{ type: 'text', text: M }],
+      structuredContent: { summary: { product_name: M, seats: M }, wg_config: M },
+      isError: false,
+    })
+  })
+
+  it('keeps the stream result line (the agent text), flags and a tool_use input without a merchant result', () => {
+    const raw = [
+      JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: JSON.stringify({ requires_signature: true, signature: null, settled: false }) }] } }),
+      JSON.stringify({ type: 'result', subtype: 'success', result: 'Paid 0.001 USDC, payment ' + PAYMENT_ID, total_cost_usd: 0.05 }),
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu_2', name: 'mcp__haven-eval__haven_complete_mcp_tool', input: { payment_id: PAYMENT_ID } }] } }),
+    ].join('\n')
+    expect(redactSessionText(raw, { secrets: secrets() }).text).toBe(raw)
+  })
+
+  it('a URL-shaped secret keeps its shape: only the key segment goes', () => {
+    const { text } = redactSessionText(JSON.stringify({ e: `fetch ${RPC} failed` }), { secrets: secrets() })
+    expect(text).toContain(`https://base-sepolia.g.alchemy.com/v2/${marker('rpc-key')}`)
+    expect(urlKeySegments(RPC)).toEqual([RPC_KEY])
+    expect(urlKeySegments('https://lb.drpc.example/ogrpc?network=base&dkey=Dk0123456789abcdef')).toEqual(['Dk0123456789abcdef'])
+  })
+
+  it('an optional fallback is redacted only when set as a secret', () => {
+    const tenantKey = 'tenantSecretSegment0123456789'
+    const unset = redactSessionText(JSON.stringify({ u: HOSTED_MCP_URL }), { secrets: secrets() })
+    expect(unset.text).toContain(HOSTED_MCP_URL)
+    const set = secrets({ ...ENV, QA_HOSTED_MCP_URL: `${HOSTED_MCP_URL}/${tenantKey}` })
+    expect(set.loaded).toContain('QA_HOSTED_MCP_URL')
+    const { text } = redactSessionText(JSON.stringify({ u: `${HOSTED_MCP_URL}/${tenantKey}` }), { secrets: set })
+    expect(text).toContain(`${HOSTED_MCP_URL}/${marker('rpc-key')}`)
+    expect(text).not.toContain(tenantKey)
+  })
+
+  it('the loaded API key and OAuth token go as exact values, prefix included', () => {
+    const raw = JSON.stringify({ note: `${API_KEY} / ${OAUTH}` })
+    const { text } = redactSessionText(raw, { secrets: secrets() })
+    expect(text).toBe(JSON.stringify({ note: `${marker('secret-exact')} / ${marker('secret-exact')}` }))
+  })
+
+  it('header names match case-insensitively', () => {
+    const raw = JSON.stringify({ h: { authorization: 'abc123token', 'payment-signature': B64_PAYMENT, 'x-payment': B64_PAYMENT, 'Sign-In-With-X': B64_SIWX } })
+    const { text } = redactSessionText(raw, { secrets: secrets() })
+    expect(JSON.parse(text).h).toEqual({
+      authorization: marker('auth-header'),
+      'payment-signature': marker('payment-header'),
+      'x-payment': marker('payment-header'),
+      'Sign-In-With-X': marker('siwx-header'),
+    })
+  })
+
+  it('a nested text that fails to parse takes the string rules, JSON-escaped forms included', () => {
+    const broken = `{"payment_header": "${B64_PAYMENT}", "data": ${JSON.stringify(`${API_KEY} ${SIG_130}`)}`
+    const raw = JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: [{ type: 'text', text: broken }] }] } })
+    const { text } = redactSessionText(raw, { secrets: secrets() })
+    for (const needle of [B64_PAYMENT, API_KEY, SIG_130]) expect(text).not.toContain(needle)
+  })
+})
+
+describe('scanSessionText: the independent detectors', () => {
+  for (const cls of REDACTION_CLASSES) {
+    it(`reports ${cls} in raw input at every position`, () => {
+      for (const position of POSITIONS) {
+        expect(scanSessionText(lineAt(position, CANARIES[cls].obj), secrets())[cls], position).toBeGreaterThan(0)
+      }
+    })
+  }
+
+  it('finds nothing in redacted output, nor in the survivors', () => {
+    const raw = REDACTION_CLASSES.flatMap((cls) => POSITIONS.map((p) => lineAt(p, CANARIES[cls].obj)))
+      .concat(POSITIONS.map((p) => lineAt(p, SURVIVORS)))
+      .join('\n')
+    const { text } = redactSessionText(raw, { secrets: secrets() })
+    expect(scanSessionText(text, secrets())).toEqual(Object.fromEntries(REDACTION_CLASSES.map((c) => [c, 0])))
+    expect(text.match(ACCEPTANCE_GREP)).toBeNull()
+  })
+})
+
+// ── The pipeline: refuse, stage, scan, move ────────────────────────────────
+
+async function fixtureRun() {
+  const root = await mkdtemp(join(tmpdir(), 'redact-4137-'))
+  const inPrefix = join(root, 'claude-sessions')
+  const lines = REDACTION_CLASSES.flatMap((cls) => POSITIONS.filter((p) => p !== 'unparseable').map((p) => lineAt(p, CANARIES[cls].obj)))
+  await writeFile(`${inPrefix}.task-a.trial1.jsonl`, `${lines.join('\n')}\n${lineAt('top', SURVIVORS)}\n`)
+  // The SIGKILL-truncated trial: every class on cut-off lines.
+  await writeFile(`${inPrefix}.task-b.trial1.jsonl`, REDACTION_CLASSES.map((cls) => lineAt('unparseable', CANARIES[cls].obj)).join('\n'))
+  await writeFile(join(root, 'unrelated.jsonl'), 'not a session file')
+  const githubOutput = join(root, 'github-output')
+  await writeFile(githubOutput, '')
+  const logs: string[] = []
+  return {
+    root,
+    stageDir: join(root, 'stage'),
+    outDir: join(root, 'upload'),
+    githubOutput,
+    logs,
+    opts: { inPrefix, stageDir: join(root, 'stage'), outDir: join(root, 'upload'), required: REQUIRED, optional: OPTIONAL, githubOutput, log: (l: string) => logs.push(l) },
+  }
+}
+
+async function ls(dir: string): Promise<string[] | 'missing'> {
+  try {
+    return (await readdir(dir)).sort()
+  } catch {
+    return 'missing'
+  }
+}
+
+describe('runRedaction', () => {
+  it('a clean run stages, scans and moves every session file; the positive control counts every class', async () => {
+    const f = await fixtureRun()
+    const result = await runRedaction({ ...f.opts, env: ENV })
+    expect(result.clean).toBe(true)
+    expect(await ls(f.outDir)).toEqual(['claude-sessions.task-a.trial1.jsonl', 'claude-sessions.task-b.trial1.jsonl'])
+    expect(await ls(f.stageDir)).toEqual([])
+    expect(await readFile(f.githubOutput, 'utf8')).toBe('clean=true\n')
+    for (const cls of REDACTION_CLASSES) expect(result.rawCounts[cls], cls).toBeGreaterThan(0)
+    expect(Object.values(result.scanCounts).every((n) => n === 0)).toBe(true)
+    for (const name of await readdir(f.outDir)) {
+      const out = await readFile(join(f.outDir, name), 'utf8')
+      expect(out.match(ACCEPTANCE_GREP)).toBeNull()
+      for (const cls of REDACTION_CLASSES) for (const needle of CANARIES[cls].needles) expect(out.toLowerCase()).not.toContain(needle.toLowerCase())
+      expect(out).toContain(PAYMENT_ID)
+    }
+    // Names and counts are printed; no value ever is.
+    const logged = f.logs.join('\n')
+    expect(logged).toContain('loaded 4 secret(s): CLAUDE_CODE_OAUTH_TOKEN, AGENT_EVALS_API_KEY, AGENT_EVALS_DELEGATE_KEY, QA_RPC_URL_BASE_SEPOLIA')
+    expect(logged).toContain('optional, not set (nothing to redact): QA_HOSTED_MCP_URL, AGENT_EVALS_HAVEN_API_URL')
+    expect(logged).toMatch(/payment-header: [1-9]/)
+    for (const value of ALL_SECRET_VALUES) expect(logged).not.toContain(value)
+  })
+
+  for (const name of REQUIRED) {
+    it(`refuses and writes nothing when ${name} is empty`, async () => {
+      for (const empty of ['', '   ']) {
+        const f = await fixtureRun()
+        const result = await runRedaction({ ...f.opts, env: { ...ENV, [name]: empty } })
+        expect(result.clean).toBe(false)
+        expect(result.refused).toEqual([name])
+        expect(await ls(f.stageDir)).toBe('missing')
+        expect(await ls(f.outDir)).toBe('missing')
+        expect(await readFile(f.githubOutput, 'utf8')).toBe('clean=false\n')
+        expect(f.logs.join('\n')).toContain(`required secret(s) empty: ${name}`)
+      }
+    })
+  }
+
+  it('a fallback URL set as a secret with no key-bearing segment is kept whole, with a warning by name', async () => {
+    const f = await fixtureRun()
+    await writeFile(`${f.opts.inPrefix}.task-c.trial1.jsonl`, lineAt('nested-text', SURVIVORS))
+    const result = await runRedaction({ ...f.opts, env: { ...ENV, QA_HOSTED_MCP_URL: HOSTED_MCP_URL } })
+    expect(result.clean).toBe(true)
+    expect(f.logs).toContain('::warning::redact-sessions: QA_HOSTED_MCP_URL is a URL with no key-bearing segment, so it is kept as it is')
+    expect(await readFile(join(f.outDir, 'claude-sessions.task-c.trial1.jsonl'), 'utf8')).toContain(HOSTED_MCP_URL)
+  })
+
+  it('refuses when no required names are given at all', async () => {
+    const f = await fixtureRun()
+    const result = await runRedaction({ ...f.opts, required: [], env: ENV })
+    expect(result.clean).toBe(false)
+    expect(await ls(f.outDir)).toBe('missing')
+  })
+
+  it('refuses when the upload directory already holds files', async () => {
+    const f = await fixtureRun()
+    await mkdir(f.outDir)
+    await writeFile(join(f.outDir, 'stale.jsonl'), 'x')
+    const result = await runRedaction({ ...f.opts, env: ENV })
+    expect(result.clean).toBe(false)
+    expect(await ls(f.outDir)).toEqual(['stale.jsonl'])
+  })
+
+  it('an unparseable line never appears raw in the output', async () => {
+    const f = await fixtureRun()
+    await runRedaction({ ...f.opts, env: ENV })
+    const out = await readFile(join(f.outDir, 'claude-sessions.task-b.trial1.jsonl'), 'utf8')
+    const rawLines = REDACTION_CLASSES.map((cls) => lineAt('unparseable', CANARIES[cls].obj))
+    const outLines = out.split('\n')
+    expect(outLines).toHaveLength(rawLines.length)
+    for (const [i, raw] of rawLines.entries()) expect(outLines[i]).not.toBe(raw)
+  })
+
+  it('no session files at all is a clean, empty run', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'redact-4137-empty-'))
+    const result = await runRedaction({ inPrefix: join(root, 'claude-sessions'), stageDir: join(root, 's'), outDir: join(root, 'u'), required: REQUIRED, optional: OPTIONAL, env: ENV, log: () => {} })
+    expect(result).toMatchObject({ clean: true, files: [] })
+  })
+
+  // B2: a rule that stops redacting is caught by the scan, which runs every
+  // class's own detector: nothing moves, the class is named, clean=false.
+  for (const cls of REDACTION_CLASSES) {
+    it(`with ${cls} redaction disabled, the scan reports ${cls}, moves nothing and sets clean=false`, async () => {
+      const f = await fixtureRun()
+      const result = await runRedaction({ ...f.opts, env: ENV, disabled: new Set([cls]) })
+      expect(result.clean).toBe(false)
+      expect(result.scanCounts[cls]).toBeGreaterThan(0)
+      expect(await ls(f.outDir)).toBe('missing')
+      expect(await ls(f.stageDir)).toBe('missing')
+      expect(await readFile(f.githubOutput, 'utf8')).toBe('clean=false\n')
+      const errors = f.logs.filter((l) => l.startsWith('::error::'))
+      expect(errors.some((l) => l.includes(`scan hit after redaction: ${cls}: `))).toBe(true)
+      for (const value of ALL_SECRET_VALUES) expect(f.logs.join('\n')).not.toContain(value)
+    })
+  }
+})

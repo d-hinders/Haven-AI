@@ -134,3 +134,109 @@ test('agent-evals is triggered by workflow_dispatch only', () => {
     .map((line) => line.trim().match(/^['"]?([a-z_]+)['"]?:/)?.[1] ?? line.trim())
   assert.deepEqual(triggers, ['workflow_dispatch'])
 })
+
+// ── #4137: the session transcripts upload only as a redacted, scanned copy ──
+//
+// Owner decision 2026-10-20: a redacted artifact, fail-closed, 3 days. The
+// redactor (packages/qa-agent/src/evals/redact-sessions.ts) stages, rescans
+// and moves only on a clean scan, and sets `clean`; these guards keep the
+// workflow wired to that: the gate on `clean`, the retention, no raw upload,
+// every secret passed to the redactor, the environment and the allowlist.
+
+/** Every step as its live lines, split at the `      - ` step markers. */
+const steps = (() => {
+  const jobSteps = live.findIndex((line) => /^\s{4}steps:\s*$/.test(line))
+  const out = []
+  for (const line of live.slice(jobSteps + 1)) {
+    if (/^\s{6}- /.test(line)) out.push([line])
+    else if (out.length) out[out.length - 1].push(line)
+  }
+  return out
+})()
+const stepNamed = (re) => steps.find((s) => s.some((line) => new RegExp(`^\\s{6}- name: ${re.source}`).test(line)))
+const fieldOf = (step, key) => step.find((line) => new RegExp(`^\\s+(- )?${key}:`).test(line))?.replace(new RegExp(`^\\s+(- )?${key}:\\s*`), '').trim()
+const uploadSteps = steps.filter((s) => s.some((line) => /uses: actions\/upload-artifact@/.test(line)))
+
+/** An upload step's `path:` entries, single-line or block. */
+function uploadPaths(step) {
+  const i = step.findIndex((line) => /^\s+path:/.test(line))
+  if (i === -1) return []
+  const inline = step[i].replace(/^\s+path:\s*/, '').trim()
+  if (inline !== '|' && inline !== '>' && inline !== '') return [inline]
+  const indent = step[i].match(/^\s*/)[0].length
+  const block = []
+  for (const line of step.slice(i + 1)) {
+    if (line.trim() === '') continue
+    if (line.match(/^\s*/)[0].length <= indent) break
+    block.push(line.trim())
+  }
+  return block
+}
+
+const redact = stepNamed(/Redact the session transcripts/)
+const sessionsUpload = uploadSteps.find((s) => s.some((line) => /name: agent-evals-sessions-\$\{\{ github\.run_id \}\}/.test(line)))
+const redactRun = redact ? redact.slice(redact.findIndex((line) => /^\s+run:/.test(line))).join(' ') : ''
+const listFlag = (flag) => (redactRun.match(new RegExp(`--${flag}=([A-Z0-9_,]+)`))?.[1] ?? '').split(',').filter(Boolean)
+
+test('the redact step runs always() with id redact, and the sessions upload is gated on its clean scan', () => {
+  assert.ok(redact, 'agent-evals.yml has no "Redact the session transcripts" step — update this guard')
+  assert.equal(fieldOf(redact, 'id'), 'redact')
+  assert.equal(fieldOf(redact, 'if'), 'always()', 'the redact step must run even when the eval step failed (it exits 1 whenever a task fails)')
+  assert.match(redactRun, /npm run evals:redact -w packages\/qa-agent --/, 'the redact step no longer runs the qa-agent redactor')
+  assert.ok(sessionsUpload, 'agent-evals.yml has no agent-evals-sessions-<run_id> upload — update this guard')
+  assert.equal(fieldOf(sessionsUpload, 'if'), "always() && steps.redact.outputs.clean == 'true'", 'the sessions upload is not gated on the redactor clean scan')
+  assert.ok(steps.indexOf(redact) < steps.indexOf(sessionsUpload), 'the sessions upload runs before the redactor')
+})
+
+test('the sessions upload keeps 3 days and uploads the redactor upload directory only', () => {
+  assert.ok(sessionsUpload, 'no sessions upload step — update this guard')
+  assert.equal(fieldOf(sessionsUpload, 'retention-days'), '3')
+  const out = redactRun.match(/--out="\$RUNNER_TEMP\/([^"]+)"/)?.[1]
+  assert.ok(out, 'the redactor has no --out="$RUNNER_TEMP/..." upload directory')
+  assert.deepEqual(uploadPaths(sessionsUpload), [`\${{ runner.temp }}/${out}`])
+  const stage = redactRun.match(/--stage="\$RUNNER_TEMP\/([^"]+)"/)?.[1]
+  assert.ok(stage && stage !== out, 'the redactor must stage into a directory other than the upload directory')
+})
+
+test('no upload path names the raw claude-sessions streams', () => {
+  assert.ok(uploadSteps.length >= 2, 'expected the report and sessions uploads — update this guard')
+  for (const step of uploadSteps) {
+    for (const p of uploadPaths(step)) assert.ok(!/claude-sessions/.test(p), `an upload path names the raw session streams: ${p}`)
+  }
+})
+
+test('every secret the workflow references is passed to the redactor, by name', () => {
+  assert.ok(redact, 'no redact step — update this guard')
+  const referenced = [...new Set([...live.join('\n').matchAll(/secrets\.([A-Z0-9_]+)/g)].map((m) => m[1]))].sort()
+  const required = listFlag('required')
+  const optional = listFlag('optional')
+  assert.ok(required.length > 0, 'the redactor gets no --required secret names')
+  for (const name of referenced) {
+    assert.ok(required.includes(name) || optional.includes(name), `secrets.${name} is referenced but not passed to the redactor (--required or --optional)`)
+    assert.ok(
+      redact.some((line) => new RegExp(`^\\s+${name}: \\$\\{\\{ secrets\\.${name} \\}\\}\\s*$`).test(line)),
+      `the redact step env does not set ${name} from secrets.${name}`,
+    )
+  }
+  // Optional is only for a `vars.X || secrets.X` fallback: a secret the job
+  // reads directly must be REQUIRED, so an empty one refuses.
+  const direct = referenced.filter((name) => live.some((line) => line.includes(`secrets.${name}`) && !line.includes(`vars.${name} || secrets.${name}`) && !redact.includes(line)))
+  for (const name of direct) assert.ok(required.includes(name), `secrets.${name} is read directly, so it must be --required, not --optional`)
+  for (const name of ['CLAUDE_CODE_OAUTH_TOKEN', 'AGENT_EVALS_API_KEY', 'AGENT_EVALS_DELEGATE_KEY', 'QA_RPC_URL_BASE_SEPOLIA']) {
+    assert.ok(required.includes(name), `${name} must be a required redactor secret`)
+  }
+})
+
+test('the evals job keeps environment: agent-evals', () => {
+  const job = live.findIndex((line) => /^\s{2}claude-code-evals:\s*$/.test(line))
+  assert.notEqual(job, -1, 'the claude-code-evals job is gone — update this guard')
+  const end = live.findIndex((line, i) => i > job && /^\s{4}steps:\s*$/.test(line))
+  assert.ok(live.slice(job, end).some((line) => /^\s{4}environment: agent-evals\s*$/.test(line)), 'the evals job no longer declares environment: agent-evals')
+})
+
+test('the claude tool allowlist is unchanged', () => {
+  assert.ok(live.some((line) => /^\s+--allowedTools mcp__haven-eval mcp__haven-signer-eval\s*$/.test(line)), 'the --allowedTools line changed')
+  const DENY =
+    'Bash,BashOutput,KillShell,Read,Edit,Write,NotebookEdit,Glob,Grep,WebFetch,WebSearch,TodoWrite,Task,SlashCommand,ExitPlanMode,Skill,Workflow,ToolSearch,Monitor,CronCreate,CronDelete,CronList,ScheduleWakeup,SendMessage,ListAgents,TaskStop,EnterWorktree,ExitWorktree,PushNotification'
+  assert.ok(live.some((line) => line.trim() === `--disallowedTools ${DENY}`), 'the --disallowedTools list changed')
+})

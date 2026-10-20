@@ -801,8 +801,8 @@ function FacetPrimitivesExample() {
 
 /**
  * A single-select facet with no "All" row (`allLabel: null`, #4113): every
- * value is a real choice, and the default is the unfiltered view. Agents'
- * Archived facet; Marketplace's test merchants are the same shape.
+ * value is a real choice, and the default is the unfiltered view: Agents'
+ * Archived facet.
  */
 function NoAllFacetExample() {
   const [archived, setArchived] = useState<string[]>(['hidden'])

@@ -322,6 +322,16 @@ describe('AgentPanel hidden archived agents with a live budget (#3542)', () => {
     expect(screen.getByRole('button', { name: 'Finish revoking Old agent' })).toBeVisible()
   })
 
+  it('with every agent archived, one Show archived on screen: the empty state owns it, the callout still warns', () => {
+    setAgents([halfRevokedArchived()])
+    render(<AgentPanel />)
+    expect(callout()).toHaveTextContent('1 archived agent still has an active budget')
+    expect(within(callout()!).queryByRole('button', { name: 'Show archived' })).toBeNull()
+    expect(screen.getAllByRole('button', { name: 'Show archived' })).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Show archived' }))
+    expect(screen.getByRole('button', { name: 'Finish revoking Old agent' })).toBeVisible()
+  })
+
   it('is absent when no archived agent has a live budget', () => {
     setAgents([
       agent(),

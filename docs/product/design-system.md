@@ -2114,7 +2114,7 @@ this layout in a narrow container on a wide screen.
 - A facet with **one possible value is hidden**. If it carries a value anyway
   (from a URL), its chip still shows, because the chip is the only way out.
 - **`allLabel`** names a single-select facet's "no filter" row (#4113). A
-  string renames it (Marketplace's "Test merchants: Shown"). `null` drops it,
+  string renames it ("Shown" in place of "All"). `null` drops it,
   for a facet whose every value is a real choice: Agents' **Archived: Hidden /
   Shown**. A facet without All needs a `defaultValue`, which is its unfiltered
   view: untinted, no chip, no Clear filters, and no URL key; an explicit `all`

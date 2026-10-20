@@ -108,6 +108,9 @@ export default function AgentPanel() {
     [listFilters.facets, listFilters.counts],
   )
   const archivedAreHidden = archivedHidden(listFilters.state)
+  // An untouched list emptied by Archived: Hidden alone — every agent is
+  // archived. Clear filters would change nothing there (#4113).
+  const everyAgentArchived = agents.length > 0 && listFilters.filtered.length === 0 && !listFilters.active
   const showArchived = useCallback(
     () =>
       listFilters.setState({
@@ -322,9 +325,13 @@ export default function AgentPanel() {
           {archivedAreHidden && removedHalfRevokedCount > 0 && (
             <div className="mb-4" data-testid="hidden-active-budget-callout">
               <ApprovalRequiredBanner title={hiddenActiveBudgetTitle(removedHalfRevokedCount)} tone="warning" density="compact">
-                <Button variant="ghost" size="sm" className="mt-1" onClick={showArchived}>
-                  Show archived
-                </Button>
+                {/* With every agent archived, the empty state below already
+                    offers Show archived; one button on screen, not two. */}
+                {everyAgentArchived ? null : (
+                  <Button variant="ghost" size="sm" className="mt-1" onClick={showArchived}>
+                    Show archived
+                  </Button>
+                )}
               </ApprovalRequiredBanner>
             </div>
           )}
@@ -453,7 +460,7 @@ export default function AgentPanel() {
                   archived — and Clear filters would change nothing there, so
                   it says what is hidden and offers the one way to see it. */}
               {listFilters.filtered.length === 0 &&
-                (listFilters.active ? (
+                (!everyAgentArchived ? (
                   <ListNoMatch noun={agentNoun} onClear={listFilters.reset} />
                 ) : (
                   <EmptyState

@@ -39,9 +39,10 @@ export function transactionTitle(tx: AggregatedTransaction): string {
 
 /**
  * Who initiated the row (#2097). "You" is reserved for human-initiated
- * payments (`initiatedBy === 'human'`); agent rows render the agent identity;
- * inbound rows carry no initiator; and missing attribution renders as
- * explicit "Unknown" — never "You".
+ * payments (`initiatedBy === 'human'`, an owner send recorded at submit,
+ * #4099); agent rows render the agent identity; inbound rows carry no
+ * initiator, bar an agent's delegate sweep; and missing attribution renders
+ * as explicit "Unknown" — never "You".
  */
 export function transactionInitiator(tx: AggregatedTransaction): string {
   // Delegate sweeps are agent-attributed regardless of direction — they read
@@ -93,7 +94,9 @@ export function transactionMovement(
  * surfaces, so every `truncate()` fallback is replaced by calm copy — a sweep
  * reads "Returned from <agent>", an x402 row without a recorded resource URL
  * falls back to its source title ("Agent payment"), an inbound row reads
- * "Deposit", and an address nothing resolves (no own-account name, no
+ * "Deposit" unless the backend named its sender (`resolvedName` — only a
+ * transfer from another of the user's own accounts, #4099), and an address
+ * nothing resolves (no own-account name, no
  * contact, no pre-resolved counterparty name) reads "New recipient" rather
  * than `0xA873…DD35`. `options.resolvedName` carries a name resolved
  * server-side for the counterparty (the activity groups' `merchantName`,
@@ -123,7 +126,10 @@ export function counterpartyLabel(
         'Agent payment'
       )
     }
-    if (tx.direction === 'in') return 'Deposit'
+    // #4099: a server-resolved sender name (a transfer from another of the
+    // user's own accounts) beats the generic word; every other deposit
+    // carries none and stays "Deposit".
+    if (tx.direction === 'in') return options.resolvedName ?? 'Deposit'
 
     const address = tx.to
     const addressKey = address.toLowerCase()

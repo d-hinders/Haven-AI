@@ -47,14 +47,17 @@ type ActivityGroup = ApiSchema<'DashboardActivityGroup'>
  * Merchant first means the TITLE is the counterparty — read through
  * `counterpartyLabel`'s no-address mode, so a raw address can never surface
  * here: the merchant's site for x402, the receipt/contact name the backend
- * resolved (`merchantName`), "Deposit" for inbound, "New recipient" when
+ * resolved (`merchantName`), "Deposit" for inbound — or the sending
+ * account's name when the money came from another of the user's own accounts
+ * (#4099) — "New recipient" when
  * nothing resolves, "Agent payment" for an x402 row without a resource URL,
  * "Returned from <agent>" for sweeps. The SUBTITLE is the agent's name; the
  * movement's "From My account" half is dropped when the user has exactly one
  * account (everything necessarily comes from it) and shown when there are
- * several. Inbound rows name no origin: a group does not carry which account
- * received, so "To My account" would be a guess — the "Deposit" title and
- * the success tone carry the direction already.
+ * several. Inbound rows name no receiving account: a group does not carry
+ * which account received, so "To My account" would be a guess — the title
+ * ("Deposit", or the sending own account) and the success tone carry the
+ * direction already.
  */
 export function ActivitySection({
   activity,

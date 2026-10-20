@@ -236,13 +236,15 @@ export function activityOutcome(tx: {
 
 /**
  * The counterparty half of the group key. Inbound rows are deposits: no
- * counterparty beyond the day. Outbound x402 rows name the RESOURCE when one
- * was recorded (the sharpest per-payment counterparty identity — two
- * resources at one merchant are two activity rows), else the merchant
- * address. Every other outbound row groups by the far-side address.
+ * counterparty beyond the day — except a transfer from another of the user's
+ * own accounts (#4099), which keys on that account so it can carry its name.
+ * Outbound x402 rows name the RESOURCE when one was recorded (the sharpest
+ * per-payment counterparty identity — two resources at one merchant are two
+ * activity rows), else the merchant address. Every other outbound row groups
+ * by the far-side address.
  */
-function counterpartyKey(tx: EnrichedTransaction): string {
-  if (tx.direction === 'in') return 'deposit'
+function counterpartyKey(tx: EnrichedTransaction, fromOwnAccount: boolean): string {
+  if (tx.direction === 'in') return fromOwnAccount ? `own:${tx.from.toLowerCase()}` : 'deposit'
   if (tx.source === 'x402' && tx.x402ResourceUrl) return tx.x402ResourceUrl
   return tx.to.toLowerCase()
 }
@@ -269,8 +271,10 @@ export interface DashboardActivityGroup {
   to: string
   /**
    * Contact or receipt-merchant name for the counterparty, else the name of
-   * the user's own account an outbound transfer went to (#4099); null
-   * otherwise, and always null on deposits.
+   * the user's own account on the other side of a transfer between two of
+   * their accounts (#4099) — the receiving account on the sender's row, the
+   * sending account on the receiver's; null otherwise. Null on every other
+   * deposit.
    */
   merchantName: string | null
   activityType: string | null
@@ -302,12 +306,12 @@ export interface BuildActivityGroupsParams {
   resolveMerchantName?: (address: string) => string | null
   /**
    * #4099: the name of one of the user's OWN accounts at `address` on
-   * `chainId` (`ownAccountNameResolver`), or null. Names the SENDING side of
-   * a transfer between two own accounts by the receiving account. The
-   * receiving side stays a deposit here: naming it needs the frontend's
-   * inbound label to read `merchantName` first, so it ships with #4099's
-   * frontend half — a named inbound group the client still renders as
-   * "Deposit" would show the day's deposits twice.
+   * `chainId` (`ownAccountNameResolver`), or null. Names both sides of a
+   * transfer between two own accounts: the sender's row by the receiving
+   * account, the receiver's row by the sending one. The receiving side keys
+   * its own group (`counterpartyKey`), so it never merges into — or renames —
+   * the day's other deposits; the client's no-address inbound label reads
+   * `merchantName` before "Deposit" (#4099 frontend half).
    */
   resolveOwnAccountName?: (address: string, chainId: number) => string | null
 }
@@ -359,6 +363,10 @@ export async function buildActivityGroups(
     resolveOwnAccountName,
   } = params
 
+  /** The sending own account's name on an inbound row, when there is one (#4099). */
+  const ownSenderName = (tx: EnrichedTransaction): string | null =>
+    tx.direction === 'in' ? (resolveOwnAccountName?.(tx.from, tx.chainId) ?? null) : null
+
   // One instant comparison, no tz: the rolling window `[now − 168h, now)` is
   // the same predicate the route's `spend.d7` SQL applies to `confirmed_at`
   // (`isInsideActivityWindow`), so the header and the card can never
@@ -373,7 +381,7 @@ export async function buildActivityGroups(
       tx.agentId ?? '',
       tx.chainId,
       tx.tokenAddress?.toLowerCase() ?? 'native',
-      counterpartyKey(tx),
+      counterpartyKey(tx, ownSenderName(tx) !== null),
       day,
       activityOutcome(tx),
       tx.activityType ?? '',
@@ -411,14 +419,14 @@ export async function buildActivityGroups(
         x402ResourceUrl: sample.x402ResourceUrl ?? null,
         to: sample.to,
         // Contacts and receipts first, then the user's own accounts (#4099)
-        // — the export's order. Deposits stay unnamed (see
-        // `resolveOwnAccountName`).
+        // — the export's order. A deposit is named only when it came from
+        // another own account; its group holds that sender alone.
         merchantName:
           sample.direction === 'out'
             ? (resolveMerchantName?.(sample.to) ??
               resolveOwnAccountName?.(sample.to, sample.chainId) ??
               null)
-            : null,
+            : ownSenderName(sample),
         activityType: sample.activityType ?? null,
         direction: sample.direction,
         status: activityOutcome(sample),

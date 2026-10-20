@@ -247,6 +247,34 @@ describe('counterpartyLabel no-address mode (#3810)', () => {
     expect(label).not.toContain('…')
   })
 
+  it('#4099: an inbound row reads the server-resolved sender — a transfer from an own account', () => {
+    const named = counterpartyLabel(tx({ direction: 'in', from: UNKNOWN }), undefined, undefined, {
+      noAddress: true,
+      resolvedName: 'Reserve',
+    })
+    expect(named).toBe('Reserve')
+
+    // No name from the server — every other deposit — is still "Deposit".
+    for (const resolvedName of [null, undefined]) {
+      expect(
+        counterpartyLabel(tx({ direction: 'in', from: UNKNOWN }), undefined, undefined, {
+          noAddress: true,
+          resolvedName,
+        }),
+      ).toBe('Deposit')
+    }
+
+    // A sweep keeps its own title even if a name rode along.
+    expect(
+      counterpartyLabel(
+        tx({ direction: 'in', from: UNKNOWN, activityType: 'delegate_sweep', agentName: 'Research assistant' }),
+        undefined,
+        undefined,
+        { noAddress: true, resolvedName: 'Reserve' },
+      ),
+    ).toBe('Returned from Research assistant')
+  })
+
   it('prefers the server-resolved counterparty name, then the client lookups', () => {
     const resolved = counterpartyLabel(
       tx({ direction: 'out', source: 'direct', to: UNKNOWN }),

@@ -12,9 +12,11 @@ import type { StatusTone } from '@/components/ui/StatusBadge'
 
 /**
  * Who initiated a transaction (#2097). `'agent'` = agent-initiated (always
- * carries `agentName` too); `'human'` = user/dashboard-initiated (reserved —
- * nothing sets it today); `'unknown'` = outbound raw transfer with no agent
- * attribution. Direction `'in'` rows carry no `initiatedBy`.
+ * carries `agentName` too); `'human'` = an owner send from the dashboard,
+ * recorded at submit (#4099; earlier owner sends stay `'unknown'`);
+ * `'unknown'` = outbound raw transfer with no agent attribution or owner
+ * record. Direction `'in'` rows carry no `initiatedBy`, bar an agent's
+ * delegate sweep (`'agent'`).
  *
  * Declared here as a frontend-only extension because the OpenAPI field lands
  * in the same PR (#2097): the generated wire type in `@haven_ai/core`
@@ -39,9 +41,10 @@ export type Transaction = ApiSchema<'TransactionBase'> & {
 export interface AggregatedTransaction extends ApiSchema<'Transaction'> {
   /**
    * Who initiated the payment (#2097). `'agent'` → agent-initiated (always
-   * accompanied by `agentName`); `'human'` → user/dashboard-initiated
-   * (reserved — nothing sets it today); `'unknown'` → outbound raw transfer
-   * with no agent attribution. Direction `'in'` rows carry no `initiatedBy`.
+   * accompanied by `agentName`); `'human'` → an owner send from the
+   * dashboard, recorded at submit (#4099); `'unknown'` → outbound raw
+   * transfer with no agent attribution or owner record. Direction `'in'`
+   * rows carry no `initiatedBy`, bar an agent's delegate sweep.
    * Rendering contract: "You" / "Payment sent by you" is RESERVED for
    * `'human'`; a missing value renders as explicit "Unknown" — never "You".
    * Frontend-only extension of the wire schema (see `Transaction`) — the

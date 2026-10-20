@@ -8,7 +8,33 @@
  * the URL side: what a shared link carries, and which values a link may
  * carry without landing the feed on a server 400.
  */
+import { resolveChainOrNull } from '@/lib/chains'
 import type { TransactionFilterState } from '@/types/transactions'
+
+/** The full chain name a Network facet option carries: "Base Chain". */
+export function transactionChainName(chainId: number): string {
+  return resolveChainOrNull(chainId)?.name ?? `Chain ${chainId}`
+}
+
+/** The short chain name the option labels carry: "Base", not "Base Chain". */
+export function transactionChainLabel(chainId: number): string {
+  const chain = resolveChainOrNull(chainId)
+  return chain ? chain.name.replace(/\s+Chain$/, '') : `Chain ${chainId}`
+}
+
+/**
+ * A Token facet option's label. Native tokens name their chain, so two
+ * networks' natives never read as the same asset.
+ */
+export function transactionTokenLabel(token: {
+  symbol: string
+  chainId: number
+  isNative: boolean
+}): string {
+  return token.isNative
+    ? `Native ${token.symbol} (${transactionChainLabel(token.chainId)})`
+    : `${token.symbol} (${transactionChainLabel(token.chainId)})`
+}
 
 /** `YYYY-MM-DD` — the custom range's calendar-date shape, as the API takes it. */
 const CALENDAR_DATE_RE = /^\d{4}-\d{2}-\d{2}$/

@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useContacts } from '@/hooks/useContacts'
-import { resolveChainOrNull } from '@/lib/chains'
 import { agentStatusPresentation } from '@/lib/payment-status'
 import { useTransactionFilters } from '@/hooks/useTransactionFilters'
 import { browserTimeZone, useTransactionsFeed } from '@/hooks/useTransactionsFeed'
@@ -13,10 +12,14 @@ import {
   buildTransactionScopeSubtitle,
   buildTransactionSummary,
 } from '@/lib/transaction-scope'
+import {
+  transactionChainName,
+  transactionChainLabel,
+  transactionTokenLabel,
+} from '@/lib/transaction-filters'
 import type {
   AggregatedTransaction,
   TransactionFilterState,
-  TransactionFilterTokenOption,
 } from '@/types/transactions'
 import { buildCsvFilename, downloadCsv } from '@/lib/transaction-csv'
 import { api, ApiRequestError } from '@/lib/api'
@@ -98,22 +101,6 @@ function exportFailureNotice(err: unknown): ExportNotice {
  */
 function hasCsvRecords(csv: string): boolean {
   return csv.replace(/^\uFEFF/, '').includes('\r\n')
-}
-
-function chainName(chainId: number): string {
-  return resolveChainOrNull(chainId)?.name ?? `Chain ${chainId}`
-}
-
-/** The short chain name the option labels carry: "Base", not "Base Chain". */
-function chainLabel(chainId: number): string {
-  const chain = resolveChainOrNull(chainId)
-  return chain ? chain.name.replace(/\s+Chain$/, '') : `Chain ${chainId}`
-}
-
-function tokenLabel(token: TransactionFilterTokenOption): string {
-  return token.isNative
-    ? `Native ${token.symbol} (${chainLabel(token.chainId)})`
-    : `${token.symbol} (${chainLabel(token.chainId)})`
 }
 
 const transactionNoun: ListNoun = { one: 'transaction', other: 'transactions' }
@@ -272,7 +259,7 @@ export default function TransactionsClient() {
         value: account.id,
         // Two accounts can share a name across networks; the network tells
         // them apart, as the token options already do.
-        label: accountChainCount > 1 ? `${account.name} (${chainLabel(account.chainId)})` : account.name,
+        label: accountChainCount > 1 ? `${account.name} (${transactionChainLabel(account.chainId)})` : account.name,
       })),
     },
     {
@@ -292,7 +279,7 @@ export default function TransactionsClient() {
     {
       id: 'tokenKey',
       label: 'Token',
-      options: tokens.map((token) => ({ value: token.key, label: tokenLabel(token) })),
+      options: tokens.map((token) => ({ value: token.key, label: transactionTokenLabel(token) })),
     },
     {
       id: 'direction',
@@ -306,7 +293,7 @@ export default function TransactionsClient() {
     {
       id: 'chainId',
       label: 'Network',
-      options: chainIds.map((id) => ({ value: String(id), label: chainName(id) })),
+      options: chainIds.map((id) => ({ value: String(id), label: transactionChainName(id) })),
     },
   ]
 

@@ -591,6 +591,7 @@ export default function AccountDetailClient() {
       {activeTab === 'activity' ? (
         <AccountActivityTab
           accountId={accountId}
+          chainId={chainId}
           currency={currency}
           resolveAddress={resolveAddress}
           accountNamesByAddress={accountNamesByAddress}

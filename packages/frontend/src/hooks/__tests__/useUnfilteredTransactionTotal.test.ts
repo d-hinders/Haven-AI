@@ -81,4 +81,20 @@ describe('useUnfilteredTransactionTotal', () => {
     rerender({ filtered: true, feedTotal: 2, feedLoading: false })
     await waitFor(() => expect(result.current).toBe(40))
   })
+
+  it('scopes the read to one account when the page fixes it (#4130)', async () => {
+    mockGet.mockResolvedValue({ total: 5 })
+    const { result } = renderHook(() =>
+      useUnfilteredTransactionTotal({
+        filtered: true,
+        feedTotal: 3,
+        feedLoading: false,
+        accountId: 'safe-1',
+      }),
+    )
+    await waitFor(() => expect(result.current).toBe(5))
+    // The unscooped read would count every account's transactions and read
+    // "3 of 40" on a 40-row ledger.
+    expect(mockGet).toHaveBeenCalledWith('/transactions?offset=0&limit=1&accountId=safe-1')
+  })
 })

@@ -11,13 +11,22 @@ interface Options {
   feedTotal: number
   /** The feed is loading a new scope; its `total` is not an answer yet. */
   feedLoading: boolean
+  /**
+   * The account the list is scoped to (#4130). The account Activity tab's
+   * denominator is the ACCOUNT's unfiltered total — an unscooped read would
+   * count every account's transactions and read "3 of 40" on a 40-row
+   * ledger. Omitted on the all-accounts Transactions page.
+   */
+  accountId?: string
 }
 
 /**
- * The server's count of ALL transactions, for the filtered count's
- * "{shown} of {total}" (#4111, the list-controls count rule in
- * `components/ui/list-controls-copy.ts`): on a server-paged list both
+ * The server's count of ALL transactions in the list's scope, for the
+ * filtered count's "{shown} of {total}" (#4111, the list-controls count rule
+ * in `components/ui/list-controls-copy.ts`): on a server-paged list both
  * numbers are server figures, never loaded rows against a server total.
+ * The scope is every account on the Transactions page, or one account on
+ * the account Activity tab (`accountId`, #4130).
  *
  * Unfiltered, the feed's own `total` IS that number, and nothing extra is
  * fetched. Filtered, one `limit=1` read with no filters asks for it, each
@@ -37,6 +46,7 @@ export function useUnfilteredTransactionTotal({
   filtered,
   feedTotal,
   feedLoading,
+  accountId,
 }: Options): number | null {
   const [fetchedTotal, setFetchedTotal] = useState<number | null>(null)
 
@@ -47,8 +57,14 @@ export function useUnfilteredTransactionTotal({
     }
     if (feedLoading) return
     let cancelled = false
+    // The read carries the same account scope the filtered feed does (#4130):
+    // without it the denominator counts every account and the count reads
+    // "3 of 40" on a 40-row ledger.
+    const query = accountId
+      ? `/transactions?offset=0&limit=1&accountId=${encodeURIComponent(accountId)}`
+      : '/transactions?offset=0&limit=1'
     api
-      .get<TransactionsFeedResponse>('/transactions?offset=0&limit=1')
+      .get<TransactionsFeedResponse>(query)
       .then((data) => {
         if (cancelled) return
         setFetchedTotal(data.partialFailure ? null : (data.total ?? 0))
@@ -59,7 +75,7 @@ export function useUnfilteredTransactionTotal({
     return () => {
       cancelled = true
     }
-  }, [filtered, feedTotal, feedLoading])
+  }, [filtered, feedTotal, feedLoading, accountId])
 
   return filtered ? fetchedTotal : feedTotal
 }

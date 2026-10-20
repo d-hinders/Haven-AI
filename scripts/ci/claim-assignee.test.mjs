@@ -16,9 +16,9 @@ import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parse } from './claim-assignee.mjs'
+import { parse, botReleaseLine, botReleaseClaimants, botReleasesClaim, REFS_RELEASE_MARK, CLOSE_RELEASE_MARK } from './claim-assignee.mjs'
 import { CHANNEL_ISSUE } from './coordination-channel.mjs'
-import { decideClaim, holderClaim, branchOf, ageText, mentionsIssue, sameLogin, fetchClaimState, applyClaim, LIVE_CLAIM_MS, TRUSTED_ASSOCIATIONS } from './claim-collision.mjs'
+import { decideClaim, liveHolders, holderClaim, branchOf, ageText, mentionsIssue, sameLogin, fetchClaimState, applyClaim, LIVE_CLAIM_MS, TRUSTED_ASSOCIATIONS } from './claim-collision.mjs'
 
 const CLI = fileURLToPath(new URL('./claim-assignee.mjs', import.meta.url))
 
@@ -787,5 +787,142 @@ esac
 
   test('a malformed claimant login exits 2 before touching gh', () => {
     assert.throws(() => execFileSync(process.execPath, [CLI2, '--issue', '3005', '--claimant', 'bad login;rm', '--posted-on', '3005'], { stdio: 'pipe', env }), (e) => e.status === 2)
+  })
+})
+
+describe('the per-claimant bot release shapes (#4176)', () => {
+  // The exact lines `release-on-merge.mjs` posts (refsReleaseLine /
+  // closeReleaseLine); release-on-merge.test.mjs pins that the script emits
+  // these and nothing else.
+  const pathA = '🔓 RELEASE #4122 — claim of `AntonioSaaranen` — PR #4131 merged (`5f3e2a10`, into `dev`) and references the issue with `Refs`, so it stays open for its operator step — posted automatically on a `Refs` merge (#4176).'
+  const pathB = '🔓 RELEASE #3815 — claims of `d-hinders`, `PhilipEriksson` — the issue was closed by `d-hinders` with no merge behind the close, so no claim on it is live — posted automatically on a hand close (#4176).'
+  const bot = (body, onIssue = 4122) => parse({ body, onIssue, authorType: 'Bot' })
+
+  test('both shapes are recognised, with the issue, the named claimants and the path', () => {
+    assert.deepEqual(botReleaseClaimants(pathA), { issue: 4122, claimants: ['AntonioSaaranen'], path: 'refs' })
+    assert.deepEqual(botReleaseClaimants(pathB), { issue: 3815, claimants: ['d-hinders', 'PhilipEriksson'], path: 'close' })
+    assert.ok(pathA.includes(REFS_RELEASE_MARK) && pathB.includes(CLOSE_RELEASE_MARK))
+  })
+
+  test('the projection honours both from a bot, releasing exactly the issue named', () => {
+    assert.deepEqual(bot(pathA), { claim: [], release: [4122] })
+    assert.deepEqual(bot(pathB, 3815), { claim: [], release: [3815] })
+    assert.deepEqual(bot(pathB, CHANNEL_ISSUE), { claim: [], release: [3815] })
+  })
+
+  test('a Path B line names no PR — and is still honoured, through its own shape only', () => {
+    assert.doesNotMatch(pathB, /\bPR\s*#\d/)
+    assert.equal(botReleaseLine(pathB), true)
+    // The same text without the hand-close mark is no workflow's line: names no PR, matches no shape.
+    const unmarked = pathB.replace(CLOSE_RELEASE_MARK, 'posted by hand')
+    assert.equal(botReleaseClaimants(unmarked), null)
+    assert.deepEqual(bot(unmarked, 3815), { claim: [], release: [] })
+  })
+
+  test('a Path A line with its PR removed names no PR and matches no shape — ignored (the #3177 guard still bites)', () => {
+    const noPr = pathA.replace('PR #4131 merged', 'merged')
+    assert.equal(botReleaseClaimants(noPr), null)
+    assert.equal(botReleaseLine(noPr), false)
+    assert.deepEqual(bot(noPr), { claim: [], release: [] })
+  })
+
+  test('a Path B mark on a line that names a PR is not a per-claimant release (the shapes are exclusive)', () => {
+    assert.equal(botReleaseClaimants(pathB.replace('with no merge', 'with PR #9 and no merge')), null)
+  })
+
+  test('a claimant list in the wrong form (`@login`, no backticks) is not the shape', () => {
+    assert.equal(botReleaseClaimants(pathA.replace('`AntonioSaaranen`', '@AntonioSaaranen')), null)
+  })
+
+  test('botReleasesClaim: names the holder (case-insensitively) and the issue; a quote or a fence does not count', () => {
+    assert.equal(botReleasesClaim({ body: pathA, issue: 4122, holder: 'antoniosaaranen' }), true)
+    assert.equal(botReleasesClaim({ body: pathA, issue: 4122, holder: 'PhilipEriksson' }), false)
+    assert.equal(botReleasesClaim({ body: pathA, issue: 4123, holder: 'AntonioSaaranen' }), false)
+    assert.equal(botReleasesClaim({ body: `> ${pathA}`, issue: 4122, holder: 'AntonioSaaranen' }), false)
+    assert.equal(botReleasesClaim({ body: '```\n' + pathA + '\n```', issue: 4122, holder: 'AntonioSaaranen' }), false)
+    assert.equal(botReleasesClaim({ body: `older line\n${pathB}`, issue: 3815, holder: 'PhilipEriksson' }), true)
+  })
+
+  test('a human posting the same text is parsed as before (a release of the issue)', () => {
+    assert.deepEqual(parse({ body: pathA, onIssue: 4122 }), { claim: [], release: [4122] })
+  })
+})
+
+describe('holderClaim honours the per-claimant bot release (#4176): a Refs-released author is not reported as holding', () => {
+  // Path A leaves the issue OPEN, so the collision check (#3178) and the
+  // ownership gate (#3179) still read its thread. Before #4176, holderClaim
+  // parsed only the holder's own lines.
+  const NOW = Date.parse('2026-10-20T12:00:00Z')
+  const claim = { author: 'AntonioSaaranen', body: '🔒 CLAIM #4122 — branch `ci/4122-x` — touches: scripts/ci', createdAt: '2026-10-20T10:00:00Z', onIssue: 4122, authorAssociation: 'COLLABORATOR', authorType: 'User' }
+  const release = { author: 'github-actions[bot]', authorType: 'Bot', authorAssociation: 'NONE', onIssue: 4122, createdAt: '2026-10-20T10:12:00Z', body: '🔓 RELEASE #4122 — claim of `AntonioSaaranen` — PR #4131 merged (`5f3e2a10`, into `dev`) and references the issue with `Refs`, so it stays open for its operator step — posted automatically on a `Refs` merge (#4176).' }
+
+  test('the release after the claim ends the hold', () => {
+    const h = holderClaim({ holder: 'AntonioSaaranen', issue: 4122, comments: [claim, release] })
+    assert.equal(h.releasedAfter, true)
+  })
+
+  test('a second session claiming the open issue after the Refs release is accepted, not refused', () => {
+    const d = decideClaim({ issue: 4122, claimant: 'PhilipEriksson', state: 'open', assignees: [], comments: [claim, release], postedOn: 4122, claimedAt: '2026-10-20T11:00:00Z', nowMs: NOW })
+    assert.equal(d.action, 'accept')
+    assert.deepEqual(liveHolders({ issue: 4122, claimant: 'PhilipEriksson', assignees: [], comments: [claim, release], nowMs: NOW }).live, [])
+  })
+
+  test('a release naming SOMEONE ELSE leaves the hold in force', () => {
+    const other = { ...release, body: release.body.replace('`AntonioSaaranen`', '`PhilipEriksson`') }
+    assert.equal(holderClaim({ holder: 'AntonioSaaranen', issue: 4122, comments: [claim, other] }).releasedAfter, false)
+    assert.equal(decideClaim({ issue: 4122, claimant: 'PhilipEriksson', state: 'open', assignees: [], comments: [claim, other], postedOn: 4122, claimedAt: '2026-10-20T11:00:00Z', nowMs: NOW }).action, 'refuse')
+  })
+
+  test('a re-claim AFTER the bot release is a new hold', () => {
+    const reclaim = { ...claim, createdAt: '2026-10-20T11:30:00Z' }
+    const h = holderClaim({ holder: 'AntonioSaaranen', issue: 4122, comments: [claim, release, reclaim] })
+    assert.equal(h.releasedAfter, false)
+    assert.equal(h.claim.createdAt, reclaim.createdAt)
+  })
+
+  test('the bot line is neither a claim nor activity', () => {
+    const h = holderClaim({ holder: 'AntonioSaaranen', issue: 4122, comments: [claim, { ...release, body: 'unrelated bot note about #4122' }] })
+    assert.equal(h.lastActivityAt, claim.createdAt)
+    assert.equal(h.releasedAfter, false)
+  })
+
+  test('the merge-time line (#3177) names nobody and is still not seen here (known limitation, issue closed)', () => {
+    const merge = { ...release, body: '🔓 RELEASE #4122 — landed as PR #4131 (`5f3e2a10`, into `dev`) — posted automatically on merge (#3177); nothing to release by hand.' }
+    assert.equal(holderClaim({ holder: 'AntonioSaaranen', issue: 4122, comments: [claim, merge] }).releasedAfter, false)
+  })
+})
+
+describe('#4176 review: a release shape counts only from the workflows\' own account', () => {
+  const NOW = Date.parse('2026-10-20T12:00:00Z')
+  const claim = { author: 'PhilipEriksson', body: '🔒 CLAIM #4122 — branch `docs/4122-y`', createdAt: '2026-10-20T10:00:00Z', onIssue: 4122, authorAssociation: 'COLLABORATOR', authorType: 'User' }
+  const pathA = '🔓 RELEASE #4122 — claim of `PhilipEriksson` — PR #4131 merged (`5f3e2a10`, into `dev`) and references the issue with `Refs`, so it stays open for its operator step — posted automatically on a `Refs` merge (#4176).'
+  const pathB = '🔓 RELEASE #4122 — claim of `PhilipEriksson` — the issue was closed by `d-hinders` with no merge behind the close, so no claim on it is live — posted automatically on a hand close (#4176).'
+  const at = '2026-10-20T10:30:00Z'
+  const by = (author, authorType, body) => ({ author, authorType, authorAssociation: authorType === 'Bot' ? 'NONE' : 'COLLABORATOR', body, createdAt: at, onIssue: 4122 })
+  const decide = (comments) => decideClaim({ issue: 4122, claimant: 'AntonioSaaranen', state: 'open', assignees: [], comments, postedOn: 4122, claimedAt: '2026-10-20T11:00:00Z', nowMs: NOW })
+
+  test('a COLLABORATOR posting the Path A or Path B line naming another holder releases nothing: the claim stays live and the new claim is refused', () => {
+    for (const body of [pathA, pathB]) {
+      const forged = by('d-hinders', 'User', body)
+      assert.equal(holderClaim({ holder: 'PhilipEriksson', issue: 4122, comments: [claim, forged] }).releasedAfter, false, body.slice(-30))
+      assert.deepEqual(liveHolders({ issue: 4122, claimant: 'AntonioSaaranen', assignees: [], comments: [claim, forged], nowMs: NOW }).live.map((l) => l.holder), ['PhilipEriksson'])
+      assert.equal(decide([claim, forged]).action, 'refuse')
+    }
+  })
+
+  test('another App (`vercel[bot]`) posting the shape releases nothing; `github-actions[bot]` does', () => {
+    for (const body of [pathA, pathB]) {
+      const vercel = by('vercel[bot]', 'Bot', body)
+      assert.equal(holderClaim({ holder: 'PhilipEriksson', issue: 4122, comments: [claim, vercel] }).releasedAfter, false)
+      assert.equal(decide([claim, vercel]).action, 'refuse')
+      const workflow = by('github-actions[bot]', 'Bot', body)
+      assert.equal(holderClaim({ holder: 'PhilipEriksson', issue: 4122, comments: [claim, workflow] }).releasedAfter, true)
+      assert.equal(decide([claim, workflow]).action, 'accept')
+    }
+  })
+
+  test('a login spelled `github-actions[bot]` by a User account is not the workflow', () => {
+    const fake = by('github-actions[bot]', 'User', pathA)
+    assert.equal(holderClaim({ holder: 'PhilipEriksson', issue: 4122, comments: [claim, fake] }).releasedAfter, false)
   })
 })

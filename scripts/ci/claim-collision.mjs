@@ -92,7 +92,7 @@
 // read in full (~14 REST pages today) because staleness needs the old claim,
 // not just the recent ones.
 
-import { parse } from './claim-assignee.mjs'
+import { parse, botReleasesClaim } from './claim-assignee.mjs'
 import { CHANNEL_ISSUE } from './coordination-channel.mjs'
 
 export { CHANNEL_ISSUE }
@@ -104,6 +104,20 @@ export const TRUSTED_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR'])
 /** GitHub logins are case-insensitive; every comparison here goes through this. */
 export function sameLogin(a, b) {
   return String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase()
+}
+
+/** The account the claim-release workflows post as (`GITHUB_TOKEN`). */
+export const WORKFLOW_BOT = 'github-actions[bot]'
+
+/**
+ * Is this comment the claim-release workflows' own? Only then is a
+ * per-claimant release shape honoured (#4176): another installed App
+ * (`vercel[bot]`, a coding agent) posting the same text releases nothing, and
+ * neither does a person — a collaborator writing the shape about someone
+ * else is reporting, not releasing.
+ */
+export function isWorkflowBotComment(c) {
+  return String(c?.authorType ?? 'User') === 'Bot' && sameLogin(c?.author, WORKFLOW_BOT)
 }
 
 /**
@@ -164,13 +178,22 @@ export function holderClaim({ holder, issue, comments, channelIssue = CHANNEL_IS
   let releasedAfter = false
   let lastActivityAt = null
   const mine = comments
-    .filter((c) => sameLogin(c.author, holder))
+    .filter((c) => sameLogin(c.author, holder) || isWorkflowBotComment(c))
     .slice()
     .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
   for (const c of mine) {
-    // Only the holder's OWN lines are parsed here, so the merge-time bot
-    // release (#3177) is not seen — it does not need to be: that workflow
-    // unassigns everyone itself, and a closed issue is skipped before this.
+    if (isWorkflowBotComment(c)) {
+      // A workflow release that NAMES this holder (#4176's per-claimant
+      // shapes, posted as `github-actions[bot]` — no other author) ends their
+      // hold. It matters for the `Refs`-merge release, which leaves
+      // the issue OPEN: without it the collision check would report the
+      // released author as holding for up to a day. A bot line is never a
+      // claim and never activity. The merge-time line (#3177) names nobody and
+      // is still not seen here — that workflow unassigns everyone itself, and
+      // a closed issue is skipped before this.
+      if (claim && botReleasesClaim({ body: c.body, issue, holder })) releasedAfter = true
+      continue
+    }
     const r = parse({ body: c.body, onIssue: c.onIssue ?? null, channelIssue })
     if (r.claim.includes(issue)) {
       claim = c
@@ -320,7 +343,13 @@ function parseJsonStrict(text, what) {
   return JSON.parse(t)
 }
 
-async function readComments({ gh, repo, issue }) {
+/**
+ * Every comment of one thread, with what the holder rule needs: author,
+ * `createdAt`, the thread it was posted on, `author_association` and
+ * `user.type`. Shared with `release-on-merge.mjs` (#4176), so both read claims
+ * the same way.
+ */
+export async function readComments({ gh, repo, issue }) {
   const pages = parseJsonStrict(await gh(['api', '--paginate', '--slurp', `repos/${repo}/issues/${issue}/comments?per_page=100`]), `comments of #${issue}`) ?? []
   const out = []
   for (const page of Array.isArray(pages) ? pages : []) {

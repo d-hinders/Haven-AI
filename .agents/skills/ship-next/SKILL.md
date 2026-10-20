@@ -147,16 +147,20 @@ canonical copy of the protocol (#3182); this skill states the workflow around
 it and does not repeat the list. Giving up a claim you should not have made is
 a withdrawal, defined in AGENTS.md § *Release what you drop*.
 
-The release is automatic on merge (#3177): `claim-release-on-merge.yml` posts
-`🔓 RELEASE` on every issue the merged PR closed (GitHub's linked references
-plus the closing keywords in title and commits, released only if GitHub closed
-it by that merge) and unassigns everyone; it repeats the line on #3193 when a
-claim for that issue is anywhere in the channel. Release by hand only when you abandon the work, or
-when the PR keeps the issue open in operator-verify mode (`Refs #N`) — then
-every place you claimed:
+The release is automatic on merge, including a `Refs`-only merge, and on any
+later close. On merge (#3177), `claim-release-on-merge.yml` posts `🔓 RELEASE`
+on every issue the merged PR closed (GitHub's linked references plus the closing
+keywords in title and commits, released only if GitHub closed it by that merge)
+and unassigns everyone; it repeats the line on #3193 when a claim for that issue
+is anywhere in the channel. On a `Refs`-only merge (#4176, operator-verify mode)
+the same run releases your claim, and only yours, on each issue the PR
+references with `Refs #N`: the issue stays open for its operator step. On any
+other close (#4176), `claim-release-on-close.yml` releases every unreleased
+claim on the issue. Release by hand only when you abandon the work — then every
+place you claimed:
 
 ```text
-🔓 RELEASE #<issue> — <landed as PR #N | abandoned: reason>
+🔓 RELEASE #<issue> — abandoned: <reason>
 ```
 
 A PR closed without merging releases nothing; that claim is still live.

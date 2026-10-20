@@ -704,3 +704,20 @@ describe('budgetPreflightMessage — stop at run start on a spent budget', () =>
     expect(budgetPreflightMessage([{ tier: 1 }], { error: 'could not read the agent\'s budget (HTTP 502)' })).toBeUndefined()
   })
 })
+
+// Pin the coupling to readOnchainBudget's real wording, not a hand-written string.
+describe('budgetPreflightMessage — with the real budget reader', () => {
+  it('stops on the exhausted read readOnchainBudget actually produces', async () => {
+    const { readOnchainBudget } = await import('../lib/delegation-budget.js')
+    const { budgetPreflightMessage } = await import('./cli.js')
+    const api = {
+      getAllowances: async () => ({
+        ok: true,
+        status: 200,
+        data: { allowances: [{ token_symbol: 'USDC', configured_amount: '3.00', onchain: { remaining: '0', remaining_is_from_chain: true } }] },
+      }),
+    } as never
+    const read = await readOnchainBudget(api, 'USDC', 'floor')
+    expect(budgetPreflightMessage([{ tier: 1 }], read)).toMatch(/period budget is already spent/)
+  })
+})

@@ -205,8 +205,11 @@ unattended start.
   run start: when paying tasks are selected and the budget read says it is
   exhausted, it stops before any agent session (exit 3) and writes one
   message to the job summary. To run again in the same period, edit the eval
-  agent's budget on the dev dashboard (same amount and period). That issues a
-  new delegation whose period starts now; the agent and its keys stay the
+  agent's budget on the dev dashboard. The edit dialog only accepts a real
+  change (e.g. the amount by 0.01 USDC, or the period), and it needs two
+  passkey approvals: activate the new budget, then retire the old one. That
+  issues a new delegation whose period starts when it is built, so the full
+  amount is available; the agent, its delegate key and its API key stay the
   same.
 
 ## Running the suite
@@ -286,7 +289,10 @@ Other flags:
 The output is a JSON report plus a `<out>.summary.txt` readable summary:
 per-task pass rate, pass^k (all k trials — except the drainer, marked
 `k=1 (drains budget)`), the executed order, the model identity triple, and
-wall time per session. The CLI exits non-zero if any task failed any trial.
+wall time per session. The CLI exits 1 if any task failed any trial, 2 on a
+configuration or setup error, and 3 when it did not run because the period
+budget was already spent (only the summary files are written then; wrappers
+should treat 3 as "not run" and skip any comparison).
 
 ## Grader semantics (pinned, do not soften)
 

@@ -127,7 +127,7 @@ export function budgetPreflightMessage(
   return (
     'The eval agent\'s period budget is already spent, so no task that pays can run. ' +
     'A full run drains it on purpose (the "spend everything" task), so a second run in the same period finds it empty. ' +
-    'Wait for the next period refill, or edit the eval agent\'s budget on the dev dashboard (same amount and period) to start a new period now, then run again. ' +
+    'Wait for the next period refill, or edit the eval agent\'s budget on the dev dashboard to start a new period now (the dashboard needs a real change, e.g. the amount by 0.01 USDC, and two passkey approvals), then run again. ' +
     `Budget read: ${read.error}`
   )
 }

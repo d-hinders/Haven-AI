@@ -458,3 +458,21 @@ describe('anyTaskUsesTarget — the single-invocation target config (#3958 AC: o
     if ('resolved' in r) expect(r.resolved.instruction).toContain('https://demo-merchant.example')
   })
 })
+
+// {target} is the demo merchant's MCP endpoint, which answers 405 to a GET by
+// design and 402 only to a POSTed JSON-RPC tools/call. "Fetch {target}" failed
+// every trial of the first full run (2026-10-20); the plain-HTTP x402 tasks
+// must spell out the request.
+describe('plain-HTTP x402 tasks spell out the POST request', () => {
+  it.each(['x402-plain-http-request-mode', 'x402-price-cap-below-price'])('%s names method, headers and the tools/call body', async (id) => {
+    const { readFileSync } = await import('node:fs')
+    const { fileURLToPath } = await import('node:url')
+    const task = JSON.parse(readFileSync(fileURLToPath(new URL(`./tasks/${id}.json`, import.meta.url)), 'utf8')) as { instruction: string }
+    expect(task.instruction).toContain('POST {target}')
+    expect(task.instruction).toContain('Content-Type: application/json')
+    expect(task.instruction).toContain('Accept: application/json, text/event-stream')
+    const body = task.instruction.match(/(\{"jsonrpc".*?\}\}\})/)?.[1]
+    expect(body, 'the JSON-RPC body is present and parses').toBeDefined()
+    expect(JSON.parse(body!)).toEqual({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'buy_vpn', arguments: { plan: 'basic' } } })
+  })
+})

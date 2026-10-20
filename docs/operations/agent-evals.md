@@ -222,7 +222,11 @@ Env the run needs (all dev/testnet):
   `x402-price-cap-below-price`); required only when the loaded task set
   renders `{target}`, and checked before the first agent session. With
   `QA_EVAL_RECIPIENT` + `QA_EVAL_X402_TARGET` set, ONE suite invocation
-  covers all 10 tasks — no per-task config or task filter needed.
+  covers all 10 tasks — no per-task config or task filter needed. On dev it
+  is the demo merchant's MCP endpoint (`…/mcp`), which answers **405 to a
+  GET** and **402 only to a POSTed JSON-RPC `tools/call`**, so both task
+  instructions spell out that POST request (`buy_vpn`, basic plan, 0.001
+  USDC).
 - `QA_EVAL_AGENT_ACCOUNT` — the eval agent's **smart account** address (the
   payer the chain probe accepts; not the delegate EOA). The Claude Code lane's
   `AGENT_EVALS_AGENT_ACCOUNT` (below) holds the same role, and the daily

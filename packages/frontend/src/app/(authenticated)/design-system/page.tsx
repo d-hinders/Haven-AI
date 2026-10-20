@@ -2811,24 +2811,24 @@ export default function DesignSystemPage() {
         <div className="max-w-xl">
           <Card hover={false} className="overflow-hidden">
             <div className="divide-y divide-[var(--v2-border)]">
-            {transactionDayGroups(DS_LEDGER_ROWS, (row) => row.at).map((group) => (
-              <div key={group.dayKey}>
-                <TransactionActivityDayHeader label={group.label} />
-                {group.items.map((row, index) => (
-                  <TransactionActivityRow
-                    key={row.id}
-                    insetDivider={index > 0}
-                    direction="out"
-                    title={row.title}
-                    description={row.description}
-                    value={row.value}
-                    asset="USDC"
-                    timestamp={timeAgo(row.at)}
-                    onOpen={() => setDsLedgerOpened(row.title)}
-                  />
-                ))}
-              </div>
-            ))}
+              {transactionDayGroups(DS_LEDGER_ROWS, (row) => row.at).map((group) => (
+                <div key={group.dayKey}>
+                  <TransactionActivityDayHeader label={group.label} />
+                  {group.items.map((row, index) => (
+                    <TransactionActivityRow
+                      key={row.id}
+                      insetDivider={index > 0}
+                      direction="out"
+                      title={row.title}
+                      description={row.description}
+                      value={row.value}
+                      asset="USDC"
+                      timestamp={timeAgo(row.at)}
+                      onOpen={() => setDsLedgerOpened(row.title)}
+                    />
+                  ))}
+                </div>
+              ))}
             </div>
           </Card>
           <p className="mt-3 text-xs text-[var(--v2-ink-3)]">

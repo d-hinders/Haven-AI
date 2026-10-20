@@ -2,6 +2,8 @@
 owner: "@d-hinders"
 status: current
 covers:
+  - packages/core/src/approx-mark.ts
+  - packages/frontend/src/lib/money-flow-tally.ts
   - packages/frontend/src/app/globals.css
   - packages/frontend/src/components/connect-agent/ConnectSteps.tsx
   - packages/frontend/src/components/ui/DialogActions.tsx
@@ -1001,9 +1003,9 @@ renders through § Amount: currency mode with `approx` from the
 wire's per-currency `spend.d30.approxByCurrency` (#4165) — the server applies
 the one "≈" rule, so a total re-priced at today's rate carries the `≈` only
 where the conversion changes the number (never USDC in USD), and a booked
-total never does. A bucket the server could not price
-(`unpricedByCurrency`) carries the unpriced line instead, and `—` when
-nothing in it was priced. The four KPI tiles and
+total never does. A bucket with rows the server could not price
+(`unpricedByCurrency`) also carries the unpriced line — never a "≈" for
+it — and reads `—` when its priced net is zero. The four KPI tiles and
 their `metrics.*` wire fields are gone with this panel: agent counts live
 in the agents section (#3809), the spend total is the analytics page's own
 #3803 net figure, and "Successful transactions" counted receives, so it
@@ -1582,8 +1584,8 @@ caption line ([#3989](https://github.com/d-hinders/Haven-AI/issues/3989)), the b
 budget" line ([#3803](https://github.com/d-hinders/Haven-AI/issues/3803)).
 
 The props deliberately stay the dashboard-overview wire shapes (`DashboardAgent`,
-`DashboardBudgetRemaining`, the #3803 spot rates, and the user's display currency
-through `CURRENCY_KEY`) rather than a narrowed summary: the account page reads the SAME
+`DashboardBudgetRemaining`) — the caption reads in the budget's own token, with no
+rate (#4165) — rather than a narrowed summary: the account page reads the SAME
 dashboard overview — it lists all agents — and passes its slices straight through, so
 both surfaces draw the identical row and a second projection of the wire never exists
 for the caption pipeline to re-derive. `AgentBudget` is exported beside the row for a

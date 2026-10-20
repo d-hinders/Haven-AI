@@ -12,9 +12,9 @@
  * Sums are in TOKEN units when every budget shares one token (the mockup's
  * "27.01 USDC"), because that is what the user set and no conversion can
  * round it; mixed-token accounts are summed in the display currency through
- * the same #3803 spot rates the dashboard's meters read, so the two
- * surfaces cannot disagree about a price. A missing rate never produces a
- * guessed figure — the line falls back to the count.
+ * the #3803 spot rates (the agent rows beside it read in their own token
+ * since #4165, so this line is the only converted figure). A missing rate
+ * never produces a guessed figure — the line falls back to the count.
  */
 import type { DashboardAgent } from '@/components/haven'
 import { hasPositiveCap } from '@/lib/dashboard-attention'

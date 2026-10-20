@@ -242,6 +242,52 @@ describe('payment_status_settled', () => {
     expect(r.pass).toBe(false)
     expect(r.detail).toContain('not settled')
   })
+
+  // Regression (the 2026-10-20 #4091 acceptance run): a lookup-only trial
+  // (x402-plain-http-request-mode: 13 quotes + get_payment_status /
+  // get_receipt of the catalog's settled 7f36c1a9) must neither probe nor
+  // pass on a payment it did not create — the phantom settledSpendAtomic it
+  // produced made the consistency guard wait for a drop already in its
+  // baseline (budget consistency timeout on all 3 successor tasks).
+  it('a lookup-only trial does not probe or pass on a payment it merely looked up', async () => {
+    const probed: string[] = []
+    const STALE = '7f36c1a9-8c36-4872-b90e-6af5b3b7819b'
+    const lookupOnly = log([
+      ...Array.from({ length: 13 }, () => call(`${DEV_PREFIX}haven_quote_mcp_tool`)),
+      call(`${DEV_PREFIX}haven_get_payment_status`, { args: { payment_id: STALE } }),
+      call(`${DEV_PREFIX}haven_get_payment_status`, { result: { ok: true } }),
+      call(`${DEV_PREFIX}haven_get_receipt`, { args: { id: STALE } }),
+      call(`${DEV_PREFIX}haven_list_receipts`, { result: { ok: true } }),
+    ])
+    const r = await paymentStatusSettled(lookupOnly, {
+      probePaymentStatus: async (id) => {
+        probed.push(id)
+        return { ok: true as const, status: 'settled', amountAtomic: '1000' }
+      },
+    })
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('no payment_id')
+    expect(probed).toEqual([])
+  })
+
+  it('only the CREATED payment is probed; a stale id in lookup args is ignored alongside it', async () => {
+    const probed: string[] = []
+    const r = await paymentStatusSettled(
+      log([
+        call(`${DEV_PREFIX}haven_get_payment_status`, { args: { payment_id: 'stale-previous-task' } }),
+        call(`${DEV_PREFIX}haven_pay_mcp_tool`, { result: { ok: true, paymentId: 'p-created' } }),
+        call(`${DEV_PREFIX}haven_get_receipt`, { args: { id: 'stale-previous-task' } }),
+      ]),
+      {
+        probePaymentStatus: async (id) => {
+          probed.push(id)
+          return { ok: true as const, status: 'settled', amountAtomic: '1000' }
+        },
+      },
+    )
+    expect(r.pass).toBe(true)
+    expect(probed).toEqual(['p-created'])
+  })
 })
 
 describe('x402_request_mode_replay', () => {

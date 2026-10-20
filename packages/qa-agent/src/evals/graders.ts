@@ -184,7 +184,7 @@ function paymentIdFrom(call: RecordedToolCall): string | undefined {
 }
 
 /**
- * `payment_status_settled` — the payment id the log produced reads back
+ * `payment_status_settled` — a payment the trial CREATED reads back
  * settled/confirmed from the dev backend. The x402 counterpart of
  * `transfer_settled`: an erc7710 redemption is submitted by the merchant's
  * facilitator, so the agent's account may emit no Transfer of its own and
@@ -194,14 +194,28 @@ function paymentIdFrom(call: RecordedToolCall): string | undefined {
 export async function paymentStatusSettled(log: AgentRunLog, ctx: GraderContext): Promise<GraderResult> {
   const probe = ctx.probePaymentStatus
   if (!probe) return fail('no backend probe injected — a status grader without a backend proves nothing')
-  // Ids come from call arguments AND from tool RESULTS (#3992 A1): the
-  // adapters keep `payment_id` out of result envelopes as a field, so the
-  // result-borne id arrives through `result.paymentId`.
+  // Ids come from PAYMENT-CREATING calls only (the PAYMENT_TOOLS list —
+  // haven_send / haven_pay* / the x402 purchase flows), read from their
+  // call arguments AND tool RESULTS (#3992 A1): the adapters keep
+  // `payment_id` out of result envelopes as a field, so the result-borne id
+  // arrives through `result.paymentId`. A payment id seen in a lookup
+  // tool's ARGUMENTS (`haven_get_payment_status` / `haven_get_receipt` /
+  // `haven_list_receipts`) or in a bare result of a non-creating call is a
+  // payment the agent merely LOOKED UP — typically a previous task's — and
+  // is NOT spend this trial produced. Counting it made a lookup-only trial
+  // pass on a stale id and fed the #4091 consistency guard a phantom spend
+  // (the 2026-10-20 acceptance run: x402-plain-http-request-mode made zero
+  // payment calls, probed the catalog's settled 7f36c1a9, and the guard
+  // then waited for a 1000 drop that was already in its baseline).
   const ids = log.calls
+    .filter((call) => isPaymentTool(call.name))
     .map((call) => call.result?.paymentId ?? paymentIdFrom(call))
     .filter((id): id is string => Boolean(id))
   if (ids.length === 0) {
-    return fail('no payment_id anywhere in the log — the run cannot be tied to a backend payment object')
+    return fail(
+      'no payment_id was produced by any payment-creating call in the log — the run cannot be tied to a backend payment object ' +
+        '(a payment the agent merely looked up is not spend this run produced)',
+    )
   }
   // Check every id the log produced; ANY unsettled one fails the trial (a
   // retry that left a stranded pending payment is exactly what these tasks

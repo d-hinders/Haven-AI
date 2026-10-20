@@ -606,6 +606,76 @@ describe('#4091: the guard deducts the ACTUAL settled spend, flagged or not', ()
     expect(trials[1].pass).toBe(true)
     expect(trials[1].detail ?? '').not.toContain('budget consistency timeout')
   })
+
+  // The exact 2026-10-20 acceptance-run shape: the prior trial (plain-http)
+  // made ZERO payment calls — only quotes + get_payment_status/get_receipt
+  // of the catalog's settled 7f36c1a9 — yet its grader passed on the stale
+  // id (settledSpendAtomic 1000), so the successor's resolve waited for a
+  // 1000 drop that was already in its baseline: budget consistency timeout.
+  // A lookup-only trial must derive NO spend: its grader fails (nothing was
+  // created) and the successor resolves with no wait at all.
+  it('a lookup-only prior trial (only quotes + status/receipt of a stale id) derives NO spend — the successor resolves with no wait', async () => {
+    const STALE = '7f36c1a9-8c36-4872-b90e-6af5b3b7819b'
+    const lookupOnlyTask = fixedAmountTask('x402-plain-http-request-mode', {
+      amount: { rule: 'fraction_of_remaining', fraction: '1/4' },
+      graders: [{ name: 'payment_status_settled' }],
+      expectTransfer: false,
+    })
+    const successor = fixedAmountTask('x402-price-cap-below-price', {
+      amount: { rule: 'fraction_of_remaining', fraction: '1/4' },
+      graders: [{ name: 'payment_status_settled' }],
+      expectTransfer: false,
+    })
+    let remaining = 1_264_625n
+    const resolver = createPerTrialResolver({
+      readBudget: async () => ({ remaining }),
+      blockNumber: async () => 1,
+      consistencyTimeoutMs: 30,
+      consistencyPollMs: 5,
+      sleep: async () => {},
+    })
+    const probed: string[] = []
+    const report = await runSuite({
+      tasks: [lookupOnlyTask, successor],
+      resolveForTrial: resolver.resolve,
+      adapter: {
+        name: 'fake',
+        runTask: async (resolved, trial) => {
+          if (resolved.task.id === 'x402-plain-http-request-mode') {
+            // 13 quotes + status/receipt lookups of the CATALOG's payment —
+            // the agent never created one.
+            return log(resolved.task.id, trial, [
+              ...Array.from({ length: 13 }, () => call(`${DEV_PREFIX}haven_quote_mcp_tool`)),
+              call(`${DEV_PREFIX}haven_get_payment_status`, { args: { payment_id: STALE } }),
+              call(`${DEV_PREFIX}haven_get_receipt`, { args: { id: STALE } }),
+            ], 'The API returned 402; I checked the previous payment instead.')
+          }
+          remaining -= 1_000n
+          return log(resolved.task.id, trial, [
+            call(`${DEV_PREFIX}haven_pay_mcp_tool`, { result: { ok: true, paymentId: `p-${trial}` } }),
+          ], 'Bought the product.')
+        },
+      },
+      trials: 1,
+      graderContext: {
+        probePaymentStatus: async (id: string) => {
+          probed.push(id)
+          return { ok: true as const, status: 'settled', amountAtomic: '1000' }
+        },
+      },
+    })
+    const plainHttp = report.tasks[0].trials[0]
+    // The stale id is NEVER probed as this trial's own evidence...
+    expect(probed).not.toContain(STALE)
+    // ...and the lookup-only trial does not pass on it (it created nothing).
+    expect(plainHttp.pass).toBe(false)
+    expect(plainHttp.detail).toContain('no payment_id')
+    // The successor resolves without the phantom-drop wait...
+    const successorTrials = report.tasks[1].trials[0]
+    expect(successorTrials.detail ?? '').not.toContain('budget consistency timeout')
+    // ...and grades its own created payment.
+    expect(successorTrials.pass).toBe(true)
+  })
 })
 
 // ── A3: ordering tiers, the once-only drainer ──────────────────────────────

@@ -81,8 +81,9 @@ defect is tracked.
   method and a burst. The dev and promotion runbooks make it a required step
   before any RPC variable changes (`docs/operations/dev-environment.md` around
   line 603; `docs/operations/promoting-dev-to-main.md` around line 281).
-  - Alchemy passed all five on 2026-09-29 and again after the swap on
-    2026-10-01 (#3489's closing comments).
+  - #3489's body records that Alchemy passed all five checks on
+    2026-09-29 (not quoted output). Its 2026-10-01 comment carries the
+    post-swap probe output, ending `✓ all 5 checks passed`.
   - Alchemy's free tier caps `eth_getLogs` at a 10-block range.
 - **Incident 1, #4012** (filed and closed 2026-10-16). Both x402 settlement
   sweepers asked for 500-block batches and were refused on every tick:
@@ -118,10 +119,10 @@ defect is tracked.
   Then one read-only run against the current dev endpoint, which should fail
   today unless `ETH_GETLOGS_MAX_BLOCK_RANGE` is honoured.
 
-### C2 — qa-dev's EIP-3009 legs prove both on-chain legs but never that Haven recorded the merchant settlement, and stayed green for the five days the hosted settle path's record was refused
+### C2 — qa-dev's EIP-3009 legs prove both on-chain legs but never that Haven recorded the merchant settlement, and the hosted leg passed on every scheduled run's first attempt while the hosted settle path's record was refused
 
-- **Observed.** `02-hosted-mcp-signer`
-  (`packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts`) drives
+- **Observed.** The `x402-hosted-mcp-signer` scenario
+  (`packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts:128`) drives
   `haven_settle_mcp_tool`, which calls the SDK's `completeX402MerchantCall`
   (`packages/mcp-server/src/tools/paid-mcp-completion.ts:581`). It asserts:
   - the funding and merchant receipts, both `status === 1`;
@@ -146,17 +147,28 @@ defect is tracked.
   expect the header. Its first commit characterizes the same refusal for the
   hosted report tools. The gap was found by a hand-run testnet purchase on
   2026-10-19 (#4061), not by qa-dev.
-- **qa-dev during the gap.** Scheduled runs at SHAs after `bd808304c` and
-  before `a6f90d5fd`, read at the `money-flow` job level:
+- **qa-dev during the gap.** Five scheduled runs at SHAs after `bd808304c`
+  and before `a6f90d5fd`, read from each run's `money-flow` job log
+  (`gh -R d-hinders/Haven-AI run view <run> --job <job> --log`):
   - 38704137304 (10-15, `c939b7880`), 39014696813 (10-17), 39109631766
-    (10-18) and 39225180146 (10-19 08:46Z): `success`, with
-    `02-hosted-mcp-signer … PASS`;
-  - 38871441969 (10-16): `failure` on RPC-shaped errors in other legs.
+    (10-18) and 39225180146 (10-19 08:46Z): job `success`, with
+    `• x402-hosted-mcp-signer … PASS` on attempt 1. The 10-15 run passed
+    overall on attempt 2/2; the other three passed on attempt 1/2.
+  - 38871441969 (10-16, job 116876251507): job `failure`.
+    - On attempt 1 the leg PASSED; only `x402-catalog-guided-purchase`
+      failed (`CALL_EXCEPTION`, missing revert data).
+    - On attempt 2 the leg FAILED: `hosted haven_settle_mcp_tool refused:
+      MERCHANT_REJECTED_AFTER_FUNDING` (HTTP 402). `x402-erc7710-hosted`
+      (treasury −0.002, merchant +0.001), `x402-catalog-guided-purchase`
+      again, and `merchant-locked-budget` (activate 502, could not deploy)
+      failed with it.
 
-  So the leg passed four times while the path it drives had its merchant
-  settlement record refused. Whether the passive sweep later recorded those
-  four settlements is not determinable from the logs: the leg prints nothing
-  about evidence, and dev was not queried.
+  So the leg passed on the first attempt of all five runs while the path it
+  drives had its merchant settlement record refused. Its one failure, on
+  10-16 attempt 2, was a merchant refusal, not an evidence check. Whether
+  the passive sweep later recorded those settlements is not determinable
+  from the logs: the leg prints nothing about evidence, and dev was not
+  queried.
 - **Expected benefit.** The settlement record the accounting feed books
   under (#3767) and that receipts headline (#3763) becomes a gated
   qa-dev property, so a backend tightening that refuses a real client is red
@@ -187,7 +199,8 @@ defect is tracked.
   (`git log --format=%h 399b1c00f..595b43c07 -- packages/sdk/src/merchant-completion.ts | wc -l`
   → 17). 15 of them also touched `client.ts` (a `comm -12` of the two logs →
   15), including both money-path fixes of 2026-10-19:
-  - #4074 (#4062): `client.ts` +16, `merchant-completion.ts` +35;
+  - #4074 (#4062): `client.ts` +15/−1, `merchant-completion.ts` +30/−5
+    (`git show --numstat --format= d633cd1d4 -- packages/sdk/src/client.ts packages/sdk/src/merchant-completion.ts`);
   - #4075 (#4061): "both paid-retry paths".
 - **By execution (M4, M5 in §5).**
   - Disabling the guard in `merchant-completion.ts` turns the SDK's #4062
@@ -212,7 +225,7 @@ defect is tracked.
 
 ### C4 — the eval graders' tool lists are hand copies, and the test that claims to catch drift compares each copy to its own length
 
-- **Observed.** `packages/qa-agent/src/evals/tools.ts:22-56` copies the 29
+- **Observed.** `packages/qa-agent/src/evals/tools.ts:22-62` copies the 29
   hosted tools "verbatim from `tools-list.snapshot.json`" and the 5 signer
   tools from `packages/signer/src/consent.ts`. `tools.test.ts:1-7` says a
   tool "added upstream without landing in `tools.ts` fails HERE". The test
@@ -228,9 +241,11 @@ defect is tracked.
   copy is a retry the grader cannot see, so the trial is a false pass. The
   repo has a recorded incident of this class: the connect runtime manifest's
   hand mirror drifted and broke the consent screen (the 2026-08-14 ledger
-  entry). The local MCP's list, the only other copy
-  (`git grep -l "'haven_submit_catalog_entry'"` → 5 files: the snapshot, two
-  hosted modules, `packages/mcp/src/tools.ts`, `evals/tools.ts`), is
+  entry). The tool name appears outside tests in 5 files
+  (`git grep -l -e "'haven_submit_catalog_entry'" -e '"haven_submit_catalog_entry"' 595b43c07 -- ':!*test*'`
+  → 5; the single-quote pattern alone → 4, since the snapshot is JSON): the
+  snapshot, two hosted modules, `packages/mcp/src/tools.ts` and
+  `evals/tools.ts`. The local MCP's list, the only other copy, is
   parity-tested. No eval incident yet.
 - **Scope.** One PR: derive `HOSTED_TOOLS` from the snapshot JSON (or assert
   set equality with it) and `SIGNER_TOOLS` from `registeredSignerToolNames()`.
@@ -247,10 +262,15 @@ defect is tracked.
   zone (`DATE_TRUNC('month', NOW())`, `:305`). Dead code, and a deletion
   rather than a fix.
 - The Postgres session `TimeZone` is never pinned
-  (`rg -n -i "timezone|options" packages/backend/src/db.ts` → 0). #4084 (open) fixes its one known consequence and reserves
-  migration 115. The census of session-zone-dependent SQL in backend source
-  is small: `CURRENT_DATE` 0 live uses, `INTERVAL 'N days'` 1 (the #4084
-  site), and `date_trunc` without `AT TIME ZONE` 1 (the dead function above).
+  (`rg -n -i "timezone|options" packages/backend/src/db.ts` → 0). #4084
+  (open) tracks the one live site and reserves migration 115. This scan's own
+  census of session-zone-dependent SQL in backend source found 2 sites, one
+  of them in a dead function:
+  - `CURRENT_DATE`: 0 live hits (2 comments);
+  - `INTERVAL '7 days'`: 1, in migration 106, the #4084 site;
+  - `date_trunc` without `AT TIME ZONE`: 1, `dashboard.ts:305`, inside the
+    caller-less `sumMonthlyPaymentSpend` above.
+
   Context for #4084, not new.
 - An instrument hazard for block 1, recorded in §6. Deleting the only clause
   that references a bind parameter makes Postgres refuse the statement, so
@@ -344,8 +364,15 @@ defect is tracked.
     across three eval suites. Diagnosis: *weak test* (C4).
   - Every restore was checked with `git diff --quiet`. The SDK `dist` was
     rebuilt from the restored source, and the hosted suite re-ran green
-    (58 / 58). 24 census files were not mutated (the budget is 4–6; seven
-    were run, M5 and M7 being a diagnosis and a probe).
+    (58 / 58). Seven mutations were run against a budget of 4–6; M5 and M7
+    were a diagnosis and a probe.
+  - Census files exercised: the suites run cover 8 of the 31 census test
+    files (cross-tenant-writes, owner-transfers,
+    settlement-transfer-verifier, eip3009-settlement-evidence,
+    client-boundaries, x402-erc7710-evidence, mcp-x402-native-profile,
+    paid-mcp-completion). Derived by intersecting the census script's output
+    with the run list. So **23 of 31 were not exercised**. The handshake and
+    the three eval suites run are outside the census.
 - **block 2 (`covers:` completeness)** → examined. The reference loop under
   `bash` with `set -f` → 20 raw misses over 8 contract docs, 2 of them glob
   strings. Each of the other 18 was confirmed with
@@ -413,9 +440,12 @@ defect is tracked.
   - Of the 8 failures with a failed job: visual regression 6, frontend checks
     and lint 2, browser smoke 1 (in a visual failure). 5 failures had no
     failed job.
-  - qa-dev at the job level is in §3. Scheduled runs 10-15 → 10-19 → 4
-    `money-flow` success (10-15 on attempt 2/2) and 1 failure (10-16,
-    RPC-shaped).
+  - qa-dev at the job level is in §3. Scheduled runs 10-15 → 10-19: 4
+    `money-flow` success (10-15 on attempt 2/2) and 1 failure (10-16, job
+    116876251507). In that failure, attempt 1 failed only
+    `x402-catalog-guided-purchase` (`CALL_EXCEPTION`). Attempt 2 failed four
+    legs, including `x402-hosted-mcp-signer` on
+    MERCHANT_REJECTED_AFTER_FUNDING (C2).
   - `agent-evals`: 14 runs on 10-19 (§3).
 - **comment archaeology** →
   `git grep -c -w -E 'TODO|FIXME|HACK|XXX' 595b43c07 -- 'packages/*/src/*'`
@@ -423,6 +453,16 @@ defect is tracked.
   (C2).
 - **live exercise** → not taken (tree scan by brief). No runtime identity
   was needed.
+- **SKILL step 3's unnumbered probes** →
+  - fat controllers: not examined. No route-size census this run.
+  - data-layer coverage: not examined as a census. Only the db-mock gauge was
+    re-read (block 3), and three real-DB suites were run for block 1.
+  - validation / contract enforcement: partial. Read only where C2's
+    #3925 → #4061 chain crosses it (a backend requirement its hosted consumer
+    could not meet). No request-validation census.
+  - cross-package duplication: partial. Two probes, C3 (the SDK's two
+    completion copies) and C4 (hosted tool-list copies, 5 files). No
+    repo-wide duplication census.
 - **novelty** → tracker read for each candidate: C1 (`getLogs`,
   `rpc-conformance` searches), C2 (#4061's record; no issue names the qa-dev
   gap), C3 (`completeX402MerchantCall` and `merchant-completion` searches),

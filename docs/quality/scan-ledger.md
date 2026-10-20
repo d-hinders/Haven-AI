@@ -1563,8 +1563,10 @@ an open epic, and each defect is tracked.
 
 **Improvement candidates (one PR each), pending owner decision:**
 - C1 — the RPC conformance probe checks five capabilities and not
-  `eth_getLogs` range (a grep of the probe for `getLogs` → 0). The Alchemy
-  swap passed the probe on 2026-09-29 and 2026-10-01. The free tier's 10-block
+  `eth_getLogs` range (a grep of the probe for `getLogs` → 0). Alchemy's
+  probe pass is recorded in the swap issue's body for 2026-09-29, and the
+  post-swap 2026-10-01 output there reads "all 5 checks passed". The free
+  tier's 10-block
   log cap then broke the x402 settlement sweepers (#4012: 76–80
   `chainsUnavailable` per tick, 16.4M of a 30M-CU monthly pool by
   mid-month) and the QA harness's transfer probe (#4086: the eval pilot
@@ -1576,8 +1578,10 @@ an open epic, and each defect is tracked.
   Haven never observes that settlement. From #3925's landing (2026-10-14) to
   #4075 (2026-10-19), the hosted settle path's settlement report carried no
   header and was refused (tree at the parent of #4075; #4075's SDK commit).
-  The leg passed on four scheduled runs in that interval. #4061 was found by
-  a hand-run purchase.
+  The hosted signer leg passed on the first attempt of all five scheduled
+  runs in that interval. Four runs' jobs succeeded. On 10-16 the job failed:
+  the leg failed on attempt 2 only, on a merchant refusal after funding, not
+  on an evidence check. #4061 was found by a hand-run purchase.
 - C3 — the SDK makes the post-funding merchant-answer decision twice (the
   hosted path in the client facade, 267 lines; the local path in the
   merchant-completion module, 187 lines). Of 17 commits to the second since
@@ -1593,7 +1597,8 @@ an open epic, and each defect is tracked.
   (2026-08-14 entry).
 - Notes, not proposed: a month-to-date spend reader with no caller and
   calendar-month SQL in the session zone; the unpinned session time zone
-  (tracked as #4084, whose census of zone-dependent live SQL is 2 sites); a
+  (#4084 tracks the one live site; the scan's census found 2, one of them
+  in a dead function); a
   block-1 hazard in which deleting the only clause that references a bind
   parameter reddens on a SQL error, not the guard.
 
@@ -1617,7 +1622,9 @@ is open, and its fix #4075 has landed.
   verifier pairing 1 of 7; SDK local-path #4062 guard 1 of 46; grader
   unsettled filter 1 of 25), **1 caught only across a package boundary** (C3,
   90 / 90 green in the SDK, 1 of 58 in the hosted suite), **1 survivor** (C4,
-  79 / 79, *weak test*). 24 census files were not mutated.
+  79 / 79, *weak test*). The suites run cover 8 of the 31 census test files
+  (the census output intersected with the run list), so 23 of 31 were not
+  exercised.
 - block 2 (`covers:` completeness) → examined. The reference loop under bash
   with `set -f`, each miss confirmed with the strict gate → 18 across 6 of 8
   (unchanged since 09-25); 2 raw misses were glob strings.
@@ -1649,12 +1656,19 @@ is open, and its fix #4075 has landed.
   regression is 6 of the 8 failures with a failed job.
   - qa-dev at the `money-flow` job level: of the newest 30 runs, it ran in 6
     (5 success, all on attempt 1/2; 1 failure) and was gate-skipped in 24.
-  - Scheduled runs 10-15 → 10-19: 4 success, 1 RPC-shaped failure.
+  - Scheduled runs 10-15 → 10-19: 4 success and 1 failure (10-16). In the
+    failure, attempt 1 failed only the catalog-guided purchase
+    (`CALL_EXCEPTION`); attempt 2 failed four legs, the hosted signer leg
+    among them.
   - `agent-evals` on 10-19: 14 runs (1 success, 9 failure, 3 cancelled, 1 in
     progress).
 - comment archaeology → TODO / FIXME / HACK / XXX → 0 (control `import` →
   2,057 files).
 - live exercise → not taken (a tree scan by brief).
+- SKILL step 3's unnumbered probes → fat controllers: not examined.
+  Data-layer coverage: not examined as a census (db-mock gauge only).
+  Validation and contract enforcement: partial (only the #3925 → #4061
+  chain). Cross-package duplication: partial (the C3 and C4 probes only).
 - Novelty: the tracker was searched per candidate. The ledger and bug
   reports were grepped for C3's surface. Bug-report bodies were not otherwise
   re-read.

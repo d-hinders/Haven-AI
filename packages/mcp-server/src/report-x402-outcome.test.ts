@@ -786,8 +786,11 @@ describe('haven_report_x402_outcome', () => {
         // is the agent's to add, never prefilled.
         expect(result.data.next_tool).toBe('mcp__haven__haven_report_settlement_evidence')
         expect(result.data.next_arguments).toEqual({ payment_id: 'pay_x402', settlement_tx_hash: MERCHANT_TX })
-        expect(result.data.reason).toContain(
-          'adding payment_header: the exact payment_header you sent the merchant',
+        // The whole reason, so the instruction's polarity is pinned too.
+        expect(result.data.reason).toBe(
+          'Recorded. The settlement hash could not be verified yet (the chain read failed, or the ' +
+            'transaction is not mined). Call next_tool (haven_report_settlement_evidence) shortly ' +
+            'with next_arguments, adding payment_header: the exact payment_header you sent the merchant.',
         )
       } finally {
         vi.useRealTimers()

@@ -198,7 +198,7 @@ function settlementEvidenceReason(outcome: EvidenceReportOutcome | undefined): s
     return (
       'The purchase is complete and the merchant settlement was reported, but Haven could not ' +
       'verify it on-chain just yet (the chain was unreachable or the transaction is not mined). ' +
-      'Call next_tool (haven_report_settlement_evidence) again shortly with next_arguments, adding ' +
+      'Call next_tool (haven_report_settlement_evidence) shortly with next_arguments, adding ' +
       'payment_header: the exact payment_header you passed to this call.'
     )
   }

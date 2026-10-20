@@ -680,3 +680,44 @@ describe('tier-3 precondition is checked at resolve time', () => {
     await expect(resolver.resolve(tier3, 1)).rejects.toThrow(/tier-3 precondition not met: remaining budget 300000/)
   })
 })
+
+// 2026-10-20, run 39428253905: a second full run in the same budget period
+// started on an empty budget and produced 28 identical resolve failures.
+describe('budgetPreflightMessage — stop at run start on a spent budget', () => {
+  const exhausted = { error: 'the USDC budget is already exhausted (remaining 0 of 3.00) — every amount would be refused' }
+
+  it('stops when paying tasks are selected and the budget is exhausted, saying what to do', async () => {
+    const { budgetPreflightMessage } = await import('./cli.js')
+    const msg = budgetPreflightMessage([{ tier: 1 }, { tier: 3 }], exhausted)
+    expect(msg).toMatch(/period budget is already spent/)
+    expect(msg).toMatch(/edit the eval agent's budget/)
+  })
+
+  it('lets a run go ahead with budget left, or when only tier-3 tasks are selected', async () => {
+    const { budgetPreflightMessage } = await import('./cli.js')
+    expect(budgetPreflightMessage([{ tier: 1 }], { remaining: 1_000_000n })).toBeUndefined()
+    expect(budgetPreflightMessage([{ tier: 3 }], exhausted)).toBeUndefined()
+  })
+
+  it('does not stop on other read errors (they surface per trial with their own cause)', async () => {
+    const { budgetPreflightMessage } = await import('./cli.js')
+    expect(budgetPreflightMessage([{ tier: 1 }], { error: 'could not read the agent\'s budget (HTTP 502)' })).toBeUndefined()
+  })
+})
+
+// Pin the coupling to readOnchainBudget's real wording, not a hand-written string.
+describe('budgetPreflightMessage — with the real budget reader', () => {
+  it('stops on the exhausted read readOnchainBudget actually produces', async () => {
+    const { readOnchainBudget } = await import('../lib/delegation-budget.js')
+    const { budgetPreflightMessage } = await import('./cli.js')
+    const api = {
+      getAllowances: async () => ({
+        ok: true,
+        status: 200,
+        data: { allowances: [{ token_symbol: 'USDC', configured_amount: '3.00', onchain: { remaining: '0', remaining_is_from_chain: true } }] },
+      }),
+    } as never
+    const read = await readOnchainBudget(api, 'USDC', 'floor')
+    expect(budgetPreflightMessage([{ tier: 1 }], read)).toMatch(/period budget is already spent/)
+  })
+})

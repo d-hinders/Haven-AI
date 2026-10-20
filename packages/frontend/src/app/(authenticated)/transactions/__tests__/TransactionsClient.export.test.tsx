@@ -19,10 +19,18 @@ vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
   return { ...actual, api: { getText: (...a: unknown[]) => mockGetText(...a) } }
 })
-vi.mock('@/lib/transaction-csv', () => ({
-  downloadCsv: (...a: unknown[]) => mockDownloadCsv(...a),
-  buildCsvFilename: () => 'haven-transactions-20260911.csv',
-}))
+vi.mock('@/lib/transaction-csv', async () => {
+  // #4098 moved `hasCsvRecords` and `exportFailureNotice` into this module
+  // (shared with the account Activity tab); the real implementations stay in
+  // play here — only the browser download is stubbed, exactly what this
+  // test cannot do in jsdom.
+  const actual = await vi.importActual<typeof import('@/lib/transaction-csv')>('@/lib/transaction-csv')
+  return {
+    ...actual,
+    downloadCsv: (...a: unknown[]) => mockDownloadCsv(...a),
+    buildCsvFilename: () => 'haven-transactions-20260911.csv',
+  }
+})
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn() }),
   // Reached through the account deep link, which seeds the account filter;
@@ -74,21 +82,30 @@ const { feedState } = vi.hoisted(() => ({
   feedState: { partialFailure: false, truncated: false },
 }))
 
-vi.mock('@/hooks/useTransactionsFeed', () => ({
-  useTransactionsFeed: () => ({
-    transactions: [TX],
-    total: 1,
-    loadingInitial: false,
-    loadingMore: false,
-    hasMore: false,
-    error: null,
-    partialFailure: feedState.partialFailure,
-    truncated: feedState.truncated,
-    failedAccountIds: [],
-    loadMore: vi.fn(),
-    refresh: vi.fn(),
-  }),
-}))
+vi.mock('@/hooks/useTransactionsFeed', async () => {
+  // #4098 moved the URL/export param spelling (`transactionFilterParams`)
+  // into this module; the real serializer stays in play so the export
+  // request this test asserts is the one production builds.
+  const actual = await vi.importActual<typeof import('@/hooks/useTransactionsFeed')>(
+    '@/hooks/useTransactionsFeed',
+  )
+  return {
+    ...actual,
+    useTransactionsFeed: () => ({
+      transactions: [TX],
+      total: 1,
+      loadingInitial: false,
+      loadingMore: false,
+      hasMore: false,
+      error: null,
+      partialFailure: feedState.partialFailure,
+      truncated: feedState.truncated,
+      failedAccountIds: [],
+      loadMore: vi.fn(),
+      refresh: vi.fn(),
+    }),
+  }
+})
 
 const TransactionsClient = (await import('../TransactionsClient')).default
 

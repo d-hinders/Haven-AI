@@ -6,15 +6,16 @@ import { useAuth } from '@/context/AuthContext'
 import { useContacts } from '@/hooks/useContacts'
 import { resolveChainOrNull } from '@/lib/chains'
 import { useTransactionFilters } from '@/hooks/useTransactionFilters'
-import { browserTimeZone, useTransactionsFeed } from '@/hooks/useTransactionsFeed'
+import { browserTimeZone, transactionFilterParams, useTransactionsFeed } from '@/hooks/useTransactionsFeed'
+import { hasActiveTransactionFilters, parseTransactionFilters } from '@/lib/transaction-filters'
 import { Select } from '@/components/ui/Select'
 import {
   buildTransactionScopeSubtitle,
   buildTransactionSummary,
 } from '@/lib/transaction-scope'
 import type { AggregatedTransaction, TransactionFilterState } from '@/types/transactions'
-import { buildCsvFilename, downloadCsv } from '@/lib/transaction-csv'
-import { api, ApiRequestError } from '@/lib/api'
+import { buildCsvFilename, downloadCsv, exportFailureNotice, hasCsvRecords, type ExportNotice } from '@/lib/transaction-csv'
+import { api } from '@/lib/api'
 import FilterBar from '@/components/transactions/FilterBar'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
 import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
@@ -24,136 +25,17 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { PageHeader } from '@/components/ui/PageHeader'
 
 /**
- * What the export tells the user when it does not hand back a file.
- *
- * Two tones, because two different things happen: `error` is a refusal, and
- * `info` is the export succeeding over an empty result set — which is not a
- * failure and must not be painted as one.
- *
- * The headline/detail split mirrors the partial-failure banner already on
- * this screen: a short first line, the specifics beneath.
+ * The export helpers this page and the account Activity tab (#4098) share —
+ * `ExportNotice`, `exportFailureNotice`, `hasCsvRecords` — live in
+ * `lib/transaction-csv.ts`, the URL seed and the active-filter switch in
+ * `lib/transaction-filters.ts`, and the URL/export param spelling in
+ * `useTransactionsFeed.transactionFilterParams`, all shared since #4098 so
+ * the two surfaces cannot drift. What is left here is what this page alone
+ * decides.
  */
-interface ExportNotice {
-  tone: 'error' | 'info'
-  headline: string
-  detail?: string
-}
-
-/**
- * What to show the user when an export fails.
- *
- * The refusal that matters is the row cap: the backend's `details` carries the
- * count, the limit and the way out ("narrow the filters"), and `message` is
- * only the three-word summary — so `details` is read where the route sends
- * one, via the `body` escape hatch `ApiRequestError` exists for. Every other
- * status gets a written sentence rather than a passthrough: the remaining
- * refusals on this route are validation strings for query parameters the UI
- * builds itself, and a 500 would otherwise surface Fastify's
- * "Internal Server Error" as product copy.
- */
-function exportFailureNotice(err: unknown): ExportNotice {
-  if (err instanceof ApiRequestError) {
-    const details = (err.body as { details?: unknown } | undefined)?.details
-    if (err.status === 413 && typeof details === 'string' && details.length > 0) {
-      return { tone: 'error', headline: err.message, detail: details }
-    }
-  }
-  return {
-    tone: 'error',
-    headline: 'The export could not be generated.',
-    detail: 'Try again in a moment.',
-  }
-}
-
-/**
- * Does this CSV body carry any record, or only the header?
- *
- * The export applies the same filters the list applies — server-side, since
- * #4095 — so the file and the table agree by construction; what this still
- * catches is the empty result set, which is read back off the body and
- * reported rather than silently handed to the user as a header-only file.
- *
- * This reads the body because it has to: the route sends the count in
- * `X-Export-Row-Count`, but the backend's CORS registration sets no
- * `exposedHeaders`, so no browser client can read it. The test below is exact
- * rather than heuristic — the backend's `toCsv` joins lines with CRLF and
- * writes no trailing terminator (pinned by `domain/__tests__/csv.test.ts`:
- * `toCsv(columns, [])` is the bare header), so a record-free body contains no
- * CRLF and any record guarantees one. A CRLF inside a quoted field cannot
- * cause a false positive, since such a field only exists inside a record.
- */
-function hasCsvRecords(csv: string): boolean {
-  return csv.replace(/^\uFEFF/, '').includes('\r\n')
-}
 
 function chainName(chainId: number): string {
   return resolveChainOrNull(chainId)?.name ?? `Chain ${chainId}`
-}
-
-/** `YYYY-MM-DD` — the custom range's calendar-date shape, as the API takes it. */
-const CALENDAR_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
-
-/**
- * A calendar date that EXISTS — the same roundtrip the server's period parser
- * applies (`Date.UTC` clamps `2026-02-31` forward to March 3, so shape alone
- * is not existence).
- */
-function isRealCalendarDate(value: string): boolean {
-  if (!CALENDAR_DATE_RE.test(value)) return false
-  const [year, month, dayOfMonth] = value.split('-').map(Number)
-  const asUtc = new Date(Date.UTC(year, month - 1, dayOfMonth))
-  return (
-    asUtc.getUTCFullYear() === year &&
-    asUtc.getUTCMonth() === month - 1 &&
-    asUtc.getUTCDate() === dayOfMonth
-  )
-}
-
-/**
- * Read a custom `from`/`to` pair off the URL, or nothing.
- *
- * Both dates must exist, be well-formed and ordered — the server refuses a
- * lone, non-existent or reversed pair with a 400, and a shared/deployed link
- * must not land the user on a broken feed. Degrading to "no Period filter"
- * keeps the page honest about what it can honour.
- */
-function customRangeFromParams(
-  fromParam: string | null,
-  toParam: string | null,
-): { from?: string; to?: string } {
-  if (
-    fromParam !== null &&
-    toParam !== null &&
-    isRealCalendarDate(fromParam) &&
-    isRealCalendarDate(toParam) &&
-    fromParam <= toParam
-  ) {
-    return { from: fromParam, to: toParam }
-  }
-  return {}
-}
-
-/**
- * Serialize the filter state for the page URL and the export request — the
- * same dimensions, the same spellings, so the address bar names exactly what
- * the server filtered (#4095).
- */
-function filtersToParams(filters: TransactionFilterState): URLSearchParams {
-  const params = new URLSearchParams()
-  if (filters.accountId) params.set('accountId', filters.accountId)
-  if (filters.agentId) params.set('agentId', filters.agentId)
-  if (filters.tokenKey) params.set('tokenKey', filters.tokenKey)
-  if (filters.direction) params.set('direction', filters.direction)
-  if (filters.chainId !== undefined) params.set('chainId', String(filters.chainId))
-  const search = filters.search?.trim()
-  if (search) params.set('search', search)
-  if (filters.period) {
-    params.set('period', filters.period)
-  } else if (filters.from && filters.to) {
-    params.set('from', filters.from)
-    params.set('to', filters.to)
-  }
-  return params
 }
 
 export default function TransactionsClient() {
@@ -164,22 +46,11 @@ export default function TransactionsClient() {
   const [selectedTx, setSelectedTx] = useState<AggregatedTransaction | null>(null)
   const [exporting, setExporting] = useState(false)
   const [exportNotice, setExportNotice] = useState<ExportNotice | null>(null)
-  const [filters, setFilters] = useState<TransactionFilterState>(() => {
-    const direction = searchParams.get('direction')
-    const period = searchParams.get('period')
-    const chainId = Number(searchParams.get('chainId'))
-    return {
-      accountId: searchParams.get('accountId') ?? undefined,
-      agentId: searchParams.get('agentId') ?? undefined,
-      tokenKey: searchParams.get('tokenKey') ?? undefined,
-      direction: direction === 'in' || direction === 'out' ? direction : undefined,
-      chainId: Number.isInteger(chainId) && chainId > 0 ? chainId : undefined,
-      search: searchParams.get('search') ?? undefined,
-      period:
-        period === '7d' || period === '30d' || period === '90d' ? period : undefined,
-      ...customRangeFromParams(searchParams.get('from'), searchParams.get('to')),
-    }
-  })
+  const [filters, setFilters] = useState<TransactionFilterState>(() =>
+    // #4098: the URL seed is shared with the account Activity tab — same
+    // validation, same drop rules for values the server would refuse.
+    parseTransactionFilters(searchParams),
+  )
   const {
     accounts,
     agents,
@@ -203,16 +74,7 @@ export default function TransactionsClient() {
 
   const userAccounts = user?.accounts ?? []
   const hasAccounts = userAccounts.length > 0
-  const hasActiveFilters = Boolean(
-    filters.accountId ||
-      filters.agentId ||
-      filters.tokenKey ||
-      filters.direction ||
-      filters.chainId !== undefined ||
-      filters.search?.trim() ||
-      filters.period ||
-      (filters.from && filters.to),
-  )
+  const hasActiveFilters = hasActiveTransactionFilters(filters)
 
   // Every network by default; the network dropdown narrows to one (#620).
   // There is no active chain to follow since #3719.
@@ -270,7 +132,7 @@ export default function TransactionsClient() {
 
     // #4095: every filter dimension lives in the URL — a shared link (or a
     // refresh) lands on the same filtered feed the sender saw.
-    const query = filtersToParams(nextFilters).toString()
+    const query = transactionFilterParams(nextFilters).toString()
     router.replace(query ? `/transactions?${query}` : '/transactions', { scroll: false })
   }
 
@@ -280,12 +142,12 @@ export default function TransactionsClient() {
 
   // The backend generates the file (#2871): it sees the whole filtered result
   // set, where the browser only ever had the pages it had loaded. Every
-  // filter the bar applies goes on the query — the same `filtersToParams` the
+  // filter the bar applies goes on the query — the same param spelling the
   // page URL and the list request use (#4095), plus the `tz` the server cuts
   // a custom range's calendar days in — so the file and the on-screen rows
   // agree.
   const handleExportCsv = async () => {
-    const params = filtersToParams(filters)
+    const params = transactionFilterParams(filters)
     if (filters.from && filters.to) params.set('tz', browserTimeZone())
 
     setExporting(true)

@@ -67,7 +67,8 @@ export function fractionOfRemaining(remaining: bigint, fraction: string): bigint
 /**
  * One grader's options (#4136). Every grader's option keys are closed
  * (`GRADER_OPTION_KEYS`): a grader ignores a key it does not read, so a
- * misspelt key is a check that silently does not run — a false pass. For
+ * misspelt key is a check that silently does not run — a false pass, and so
+ * is a wrongly typed value, so the value types are checked too. For
  * `tool_called` the loader also checks what the grader cannot: `name` and
  * `after` are known tool names, `after` and `afterRefusal` never go
  * together, and `afterRefusal` names the same refusal as the task's
@@ -96,8 +97,23 @@ function validateGraderOptions(
       `an ignored key is a check that silently does not run`
     )
   }
-  if (name !== 'tool_called') return null
   const o = options as Record<string, unknown>
+  // Value types (#4136): a wrongly typed value is as silent as a misspelt
+  // key — `probePaymentTools: "true"` is not `=== true`, so the signer check
+  // never runs; a non-array `mustMention` crashes or matches nothing.
+  const nonEmptyString = (v: unknown): boolean => typeof v === 'string' && v.length > 0
+  for (const key of ['errorCode', 'afterRefusal', 'name', 'after'] as const) {
+    if (key in o && !nonEmptyString(o[key])) {
+      return `${file}: ${name} options.${key} must be a non-empty string, got ${JSON.stringify(o[key])}`
+    }
+  }
+  if ('probePaymentTools' in o && typeof o.probePaymentTools !== 'boolean') {
+    return `${file}: ${name} options.probePaymentTools must be a boolean, got ${JSON.stringify(o.probePaymentTools)} — any other value silently disables the signer check`
+  }
+  if ('mustMention' in o && (!Array.isArray(o.mustMention) || !o.mustMention.every(nonEmptyString))) {
+    return `${file}: ${name} options.mustMention must be an array of non-empty strings, got ${JSON.stringify(o.mustMention)}`
+  }
+  if (name !== 'tool_called') return null
   const isToolName = (v: unknown): boolean => typeof v === 'string' && ALL_TOOL_NAMES.includes(v)
   if (!isToolName(o.name)) {
     return `${file}: tool_called options.name must be a known bare tool name (tools.ts ALL_TOOL_NAMES), got ${JSON.stringify(o.name)}`
@@ -108,10 +124,7 @@ function validateGraderOptions(
   if (o.after !== undefined && o.afterRefusal !== undefined) {
     return `${file}: tool_called takes after OR afterRefusal, not both — one anchors on a tool call, the other on a refusal`
   }
-  if (o.afterRefusal !== undefined) {
-    if (typeof o.afterRefusal !== 'string' || o.afterRefusal.length === 0) {
-      return `${file}: tool_called options.afterRefusal must be the refusal's error-code string (e.g. "delegation_budget_exceeded")`
-    }
+  if (typeof o.afterRefusal === 'string') {
     const refusalGrader = graders.find((g) => g.name === 'no_payment_retry_after_refusal')
     if (refusalGrader) {
       const pinned = (refusalGrader.options as { errorCode?: unknown } | undefined)?.errorCode
@@ -154,7 +167,8 @@ export function validateTask(raw: unknown, file: string): string | null {
   if (!Array.isArray(graders) || graders.length === 0) return `${file}: graders must be a non-empty array`
   for (const g of graders) {
     if (typeof g?.name !== 'string') return `${file}: every grader needs a string name`
-    if (!(g.name in GRADERS)) return `${file}: unknown grader "${g.name}" — the registry is closed; extend graders.ts deliberately`
+    // Own keys only: `in` would accept Object.prototype names ("constructor").
+    if (!Object.hasOwn(GRADERS, g.name)) return `${file}: unknown grader "${g.name}" — the registry is closed; extend graders.ts deliberately`
     const optionsError = validateGraderOptions(g as { name: GraderName; options?: unknown }, graders as Array<{ name: string; options?: unknown }>, file)
     if (optionsError) return optionsError
   }

@@ -12,6 +12,7 @@ import {
   applyGraders,
   noPaymentRetryAfterRefusal,
   paymentStatusSettled,
+  toolCalled,
   transferSettled,
   x402RequestModeReplay,
 } from './graders.js'
@@ -387,6 +388,13 @@ describe('over-budget-check-status-no-retry — graded on what the agent can act
     expect(g.tool_called.detail).toContain('BEFORE')
   })
 
+  it('fails tool_called when the refusal carries a DIFFERENT error code (insufficient_funds) — the anchor is pinned to the code', async () => {
+    const insufficient = call(`${DEV_PREFIX}haven_send`, { result: { ok: false, errorCode: 'insufficient_funds' } })
+    const g = await grade([insufficient, call(`${DEV_PREFIX}haven_get_allowances`)])
+    expect(g.tool_called.pass).toBe(false)
+    expect(g.tool_called.detail).toContain('delegation_budget_exceeded')
+  })
+
   it("tool_called's pass detail names the call after the refusal, not the first call to the target", async () => {
     const g = await grade([
       call(`${DEV_PREFIX}haven_get_allowances`), // call 1: before the refusal, proves nothing
@@ -396,5 +404,26 @@ describe('over-budget-check-status-no-retry — graded on what the agent can act
     expect(g.tool_called.pass).toBe(true)
     expect(g.tool_called.detail).toContain('(call 3)')
     expect(g.tool_called.detail).not.toContain('(call 1)')
+  })
+})
+
+describe('tool_called — the plain after: "<tool>" anchor (direct-send-then-report-remaining)', () => {
+  it('passes when the target follows the anchor tool, and names the satisfying call', () => {
+    const r = toolCalled(
+      log([call(`${DEV_PREFIX}haven_get_allowances`), call(`${DEV_PREFIX}haven_submit`), call(`${DEV_PREFIX}haven_get_allowances`)]),
+      { name: 'haven_get_allowances', after: 'haven_submit' },
+    )
+    expect(r.pass).toBe(true)
+    expect(r.detail).toContain('(call 3)')
+    expect(r.detail).not.toContain('(call 1)')
+  })
+
+  it('fails when the target ran only before the anchor tool', () => {
+    const r = toolCalled(log([call(`${DEV_PREFIX}haven_get_allowances`), call(`${DEV_PREFIX}haven_submit`)]), {
+      name: 'haven_get_allowances',
+      after: 'haven_submit',
+    })
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('BEFORE')
   })
 })

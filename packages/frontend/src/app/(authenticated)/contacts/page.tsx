@@ -1,12 +1,11 @@
 'use client'
 
 import { Monogram } from '@/components/ui/Monogram'
-import { Check, Copy, Info, Pencil, Search, Trash2, Users } from 'lucide-react'
+import { Check, Copy, Info, Pencil, Trash2, Users } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import { useId, useState, type FormEvent, type MouseEvent } from 'react'
+import { useEffect, useId, useState, type FormEvent, type MouseEvent } from 'react'
 import { useContacts, type Contact } from '@/hooks/useContacts'
 import { useContactChains } from '@/hooks/useContactChains'
-import { useChainScope } from '@/hooks/useChainScope'
 import { resolveChainOrNull } from '@/lib/chains'
 import { ApiRequestError } from '@/lib/api'
 import { isValidAddress } from '@/lib/format'
@@ -16,8 +15,13 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { ListNoMatch, ListToolbar } from '@/components/ui/ListToolbar'
+import type { ListFacet } from '@/components/ui/FacetMenu'
+import type { ListNoun } from '@/components/ui/list-controls-copy'
+import { clearedListState, type ListState, type ListUrlSchema } from '@/components/ui/list-url-codec'
+import { useListUrlState } from '@/components/ui/useListUrlState'
+import type { ChainScope } from '@/hooks/useChainScope'
 
 // Per-chain dot colour for the "Used on" badges (Base blue, Base Sepolia amber
 // to flag the testnet; any other chain falls back to neutral grey).
@@ -335,13 +339,27 @@ function DeleteConfirm({ contact, onConfirm, onClose }: DeleteConfirmProps) {
   )
 }
 
+const contactNoun: ListNoun = { one: 'contact', other: 'contacts' }
+
+/**
+ * The page URL's keys (#4115, epic #4108). Contacts carried no URL state
+ * before, so there are no legacy aliases: search is `q`, network is
+ * `chainId` — the same network key every page uses. The chain facet lists no
+ * `values`: its options derive from contacts' activity and load
+ * asynchronously, so a value read before they arrive must survive.
+ */
+const contactsUrlSchema: ListUrlSchema = {
+  facets: [{ id: 'chainId' }],
+}
+
 export default function ContactsPage() {
   const { contacts, loading, error, refetch, addContact, updateContact, deleteContact } = useContacts()
   const { chainsByAddress } = useContactChains()
-  // Contacts always show every chain; the network dropdown is an optional
-  // manual filter only (#634, epic #625).
-  const { scope, setScope } = useChainScope()
-  const [search, setSearch] = useState('')
+  // #4115: the controls ride the list-controls pattern, and their state is
+  // the URL — a shared link (or a refresh) lands on the same filtered list
+  // the sender saw, and back/forward re-seeds it. Filtering runs in the
+  // browser: the contact list is small, unpaged and already in memory.
+  const [listState, setListState] = useListUrlState(contactsUrlSchema, { filtering: 'browser' })
   const [showAdd, setShowAdd] = useState(false)
   const [editTarget, setEditTarget] = useState<Contact | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Contact | null>(null)
@@ -349,19 +367,57 @@ export default function ContactsPage() {
   const chainsFor = (address: string): number[] =>
     chainsByAddress.get(address.toLowerCase()) ?? []
 
-  // Chains present across all contacts' activity — the options for the filter.
+  // The URL's `chainId` is the network scope the page's own state held
+  // before #4115 (#634, epic #625): every chain unless one is picked. A
+  // value that is not a network id is dropped here, as #4111 drops it on
+  // Transactions — it would otherwise raise a "Network" chip over an
+  // unfiltered list.
+  const chainId = Number(listState.facets.chainId?.[0])
+  const invalidChainId = listState.facets.chainId?.length === 1 && !(Number.isInteger(chainId) && chainId > 0)
+  useEffect(() => {
+    if (!invalidChainId) return
+    setListState({ ...listState, facets: { ...listState.facets, chainId: [] } })
+    // Once per bad link: the rewrite removes what it keys on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invalidChainId])
+  const scope: ChainScope = invalidChainId || listState.facets.chainId?.length !== 1 ? 'all' : chainId
+
+  // Chains present across all contacts' activity — the options for the facet.
+  // The toolbar hides a facet with one option, and an empty option list while
+  // the chains load is hidden with it.
   const filterableChains = Array.from(
     new Set(contacts.flatMap((c) => chainsFor(c.address))),
   ).sort((a, b) => a - b)
 
+  const facets: ListFacet[] = [
+    {
+      id: 'chainId',
+      label: 'Network',
+      options: filterableChains.map((id) => ({ value: String(id), label: chainName(id) })),
+    },
+  ]
+
   const filtered = contacts.filter((contact) => {
+    const q = listState.q.trim().toLowerCase()
     const matchesSearch =
-      contact.name.toLowerCase().includes(search.toLowerCase()) ||
-      contact.address.toLowerCase().includes(search.toLowerCase())
+      contact.name.toLowerCase().includes(q) ||
+      contact.address.toLowerCase().includes(q)
     if (!matchesSearch) return false
     if (scope === 'all') return true
     return chainsFor(contact.address).includes(scope)
   })
+
+  // Clear filters returns to the page default, the same state the toolbar's
+  // own Clear filters reaches.
+  const handleClearFilters = () => {
+    setListState(clearedListState(listState, contactsUrlSchema))
+  }
+
+  // The standard no-match state (#4110): it sits where the rows were — in
+  // place of the list card, not inside it — and leaves the toolbar in place,
+  // so the cause stays editable. A list with NOTHING yet keeps the page's own
+  // "No saved recipients yet" empty state below.
+  const showNoMatch = !loading && !error && contacts.length > 0 && filtered.length === 0
 
   return (
     <div className="max-w-5xl">
@@ -376,34 +432,16 @@ export default function ContactsPage() {
       />
 
       {contacts.length > 0 && (
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
-          <div className="relative flex-1">
-            <label htmlFor="contacts-search" className="sr-only">Search contacts</label>
-            <Icon icon={Search} className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--v2-ink-3)]" />
-            <Input
-              id="contacts-search"
-              type="text"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search by name or address"
-              className="pl-9"
-            />
-          </div>
-          {filterableChains.length > 1 && (
-            <Select
-              aria-label="Filter contacts by network"
-              value={scope === 'all' ? 'all' : String(scope)}
-              onChange={(e) => setScope(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-              className="sm:max-w-[200px]"
-            >
-              <option value="all">All networks</option>
-              {filterableChains.map((id) => (
-                <option key={id} value={String(id)}>
-                  {chainName(id)}
-                </option>
-              ))}
-            </Select>
-          )}
+        <div className="mb-4">
+          <ListToolbar
+            noun={contactNoun}
+            state={listState}
+            onChange={setListState}
+            filtering="browser"
+            facets={facets}
+            searchDescription="by name or address"
+            count={loading ? null : { shown: filtered.length, total: contacts.length }}
+          />
         </div>
       )}
 
@@ -452,20 +490,10 @@ export default function ContactsPage() {
         </div>
       )}
 
-      {!loading && !error && contacts.length > 0 && filtered.length === 0 && (
-        <EmptyState
-          title="No matching contacts"
-          body={
-            scope !== 'all' && !search
-              ? `No saved recipients have activity on ${chainName(scope)}.`
-              : `No saved recipients match "${search}".`
-          }
-          action={
-            <Button variant="ghost" onClick={() => { setSearch(''); setScope('all') }}>
-              Clear filters
-            </Button>
-          }
-        />
+      {showNoMatch && (
+        <div data-testid="contacts-no-match">
+          <ListNoMatch noun={contactNoun} onClear={handleClearFilters} />
+        </div>
       )}
 
       {!loading && !error && contacts.length === 0 && (

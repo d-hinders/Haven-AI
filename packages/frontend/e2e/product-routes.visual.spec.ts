@@ -85,10 +85,15 @@
  *
  * `/settings` and `/contacts` are deferred rather than rejected — nothing is
  * wrong with them, they are simply lower-traffic, and every added baseline is
- * re-blessed forever. `/settings` is the cheapest next candidate: it measured
- * as the most render-complete and most deterministic authenticated route in the
- * repo (1,407 chars at the time of that measurement — see the note in the
- * table — zero console errors, no chain call, no wall-clock text).
+ * re-blessed forever. `/contacts` leaves the deferred list with #4115 (list
+ * controls 6/7): the page's controls changed what the screen shows, which is
+ * exactly the trigger a baseline exists for, and it measured deterministically
+ * in this harness (no chain call, no wall-clock text). It ships MOBILE-only
+ * for the same reasons as `/agents` and `/accounts` below. `/settings` is the
+ * cheapest next candidate: it measured as the most render-complete and most
+ * deterministic authenticated route in the repo (1,407 chars at the time of
+ * that measurement — see the note in the table — zero console errors, no
+ * chain call, no wall-clock text).
  *
  * ── Everything NOT listed above still has NO baseline ────────────────────────
  *
@@ -503,6 +508,30 @@ const ROUTES: ProductRoute[] = [
     anchor: (page: Page) => page.getByRole('heading', { name: 'Accounts', exact: true }),
     frozenRelativeTime: 'Last payment 17d ago',
     serve: serveTwoAccounts,
+  },
+
+  /**
+   * #4115: the contacts list moved onto `ListToolbar` — the route the #2318
+   * audit deferred ("179 chars, 0 console errors, none" in the table above)
+   * gets its first whole-screen baseline on the change that altered what the
+   * screen shows. The shared fixture serves one contact ("Research vendor",
+   * `testRecipientAddress`), whose only activity is on 8453, so the Network
+   * facet has one option and photographs hidden — the toolbar with search and
+   * the count is what the baseline pins. MOBILE-only by decision, per the
+   * #2733/#2817 reasoning above.
+   *
+   * No `frozenRelativeTime` by measurement: a contact row renders its name,
+   * its address and the "Used on" badges — no relative timestamp anywhere,
+   * so there is no literal to pin. The freeze stays on as cheap insurance,
+   * as on `/agents`.
+   */
+  {
+    path: '/contacts',
+    slug: 'contacts',
+    viewports: ['mobile'],
+    /** Measured at 390 on this harness: 192 characters. */
+    minChars: 150,
+    anchor: (page: Page) => page.getByRole('heading', { name: 'Contacts', exact: true }),
   },
 ]
 

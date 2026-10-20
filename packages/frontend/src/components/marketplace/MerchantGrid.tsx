@@ -248,6 +248,7 @@ export function MerchantGrid({
       {
         id: 'verified',
         label: 'Verified',
+        allLabel: null,
         values: [VERIFIED_ANY, VERIFIED_ONLY],
         defaultValue: [VERIFIED_ANY],
         options: [
@@ -258,6 +259,7 @@ export function MerchantGrid({
       {
         id: 'test',
         label: 'Test merchants',
+        allLabel: null,
         values: [TEST_SHOWN, TEST_HIDDEN],
         defaultValue: [testMerchantsDefaultOn ? TEST_SHOWN : TEST_HIDDEN],
         options: [

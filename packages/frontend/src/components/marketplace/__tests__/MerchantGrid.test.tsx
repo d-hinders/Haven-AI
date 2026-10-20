@@ -410,6 +410,22 @@ describe('MerchantGrid', () => {
     expect(screen.queryByText('Data Co')).toBeNull()
   })
 
+  it('the Verified and Test facets enumerate every state — no default "All" row renders in either menu', () => {
+    render(<MerchantGrid merchants={[merchant()]} loading={false} error={null} onSubmit={vi.fn()} />)
+
+    // chooseFacet can't catch a stray "All" row (it matches a unique name), so
+    // open each menu and pin that FacetMenu's default "All" row is absent —
+    // the facets carry `allLabel: null` (#4113 view-choice shape).
+    chooseFacet(/^Verified: /, 'Any')
+    fireEvent.click(screen.getByRole('button', { name: /^Verified: / }))
+    expect(screen.queryByRole('menuitemradio', { name: 'All' })).toBeNull()
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Verified only' }))
+
+    fireEvent.click(screen.getByRole('button', { name: /^Test merchants: / }))
+    expect(screen.queryByRole('menuitemradio', { name: 'All' })).toBeNull()
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Shown' }))
+  })
+
   it('renders the ListToolbar with the search field (leading icon) inside it', () => {
     render(<MerchantGrid merchants={[merchant()]} loading={false} error={null} onSubmit={vi.fn()} />)
     const toolbar = screen.getByTestId('list-toolbar')

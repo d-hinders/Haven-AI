@@ -315,8 +315,7 @@ for UI changes, and anything the issue names specifically.
 Run checks proportionate to every changed surface:
 
 - package tests and type checks for package changes;
-- `npm run preflight` for cross-package behavior, or `npm run quality` when you
-  only need typecheck/test/build;
+- `npm run preflight` for cross-package behavior;
 - browser verification or the required headless equivalent for UI changes.
 
 Run the **repository's own required checks** locally before pushing, for fast feedback:
@@ -1027,7 +1026,8 @@ Route the merge:
   disputed** rather than fixed, or there is no re-review at all.
 - **Everything else, money-path included:** after local gates pass and independent
   review has no blocking or should-fix findings, enable squash auto-merge right after
-  opening and **read the method back** — the arming line alone is not the evidence:
+  opening and **read the method back** — the arming line alone is not the evidence,
+  and `dev` refuses any method but squash, so an auto-merge reading `MERGE` never fires:
 
   ```bash
   gh pr merge <pr> --auto --squash --delete-branch
@@ -1042,37 +1042,9 @@ rule and the pointer to its already-squashed recovery (#1173) live in
 [`branch-and-release-flow.md`](../../../docs/contributing/branch-and-release-flow.md)).
 Do not let the promotion rule leak backwards into feature PRs.
 
-**The squash rule is checked, not remembered (#2165) — a stopgap until the
-repository setting changes.** Before any merge-related action on a feature PR, and
-again before reporting it armed, run
-
-```bash
-gh pr view <pr> --json autoMergeRequest --jq .autoMergeRequest.mergeMethod
-```
-
-`SQUASH` or empty proceeds; **`MERGE` (or `REBASE`) refuses** — `gh pr merge <pr>
---disable-auto`, re-arm with `--squash`, run the command again. A report that says
-"armed" without that output has not checked. The checkable basis is four named
-landings — #2428, #2460, #2493 and #2438 — every one of which reached `dev` as a
-two-parent merge commit (`git rev-list --parents -n1 <merge-sha>` prints three hashes
-for each). Three of them (#2428, #2460, #2493) carry a comment saying "disarmed
-auto-merge" and landed wrong anyway: a disarm not followed by a squash re-arm and a
-read-back changes nothing. Those four carry the rule. If you census the history as well,
-**pin the instant** — a bare `--since=<date>` is a git approxidate resolved against
-the wall clock *now*, so the same SHA counts differently every hour of the evening
-(this rule's own draft read 258 and then 256 for one SHA in one session; PR #2506's
-body records the same defect independently: "a bare `--since=2026-08-10` is a git
-approxidate that takes the *current time of day*"):
-
-```bash
-git log <sha> --first-parent --since=2026-08-10T00:00:00Z --oneline | grep -c '^[0-9a-f]* Merge pull request'
-git log <sha> --first-parent --since=2026-08-10T00:00:00Z --oneline | grep -cE '\(#[0-9]+\)$'
-```
-
-At `ff052462`, pinned: 275 merge-commit landings, 346 squash, 624 first-parent, stable
-across re-runs. Run `git rev-parse --is-shallow-repository` first as well — a shallow
-clone *can* truncate the window silently, even though it was not the cause here
-(#2500 review rounds 2–3).
+The squash rule is enforced, not remembered (#2165): ruleset 22449193 (*Dev merge*) allows
+only squash on `dev` — see the ruleset inventory in
+[`autonomous-pr-loop.md`](../../../docs/contributing/autonomous-pr-loop.md#one-time-github-setup-required) step 3.
 
 **Check `mergeStateStatus` before arming auto-merge.** On `DIRTY`, merge `dev` in and
 resolve first — arming auto-merge on a conflicted PR does nothing, silently. The

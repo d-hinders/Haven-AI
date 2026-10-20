@@ -385,7 +385,9 @@ Structure:
    row) with a network dropdown beside it (only offered when more than one
    chain is listed, starting on the user's own network); then category pills
    with "Verified only" and "Show test merchants" beside them. Test content
-   has one control — the checkbox — and no category pill.
+   has one control — the checkbox — and no category pill. These move onto the
+   [List controls](design-system.md#list-controls--listtoolbar-facetmenu-periodpicker-4110) pattern with #4114 (category stays a pill facet; the network
+   facet's default stays the user's chain), gaining URL state.
 3. Merchant page: header (monogram/logo, name, category, website, networks,
    Verified — with the funding action, when shown, below the text until
    `xl` and on its right-hand side from there),
@@ -493,6 +495,10 @@ Structure:
 3. The card grid, filtered and sorted by the toolbar.
 4. Zero-result state inside the list area (`No agents match these filters`) owning the reset action — the bar's own reset steps back so the screen offers one — and the toolbar stays visible so the user can see what they filtered on. The `not recorded` MCP note above the list follows the filtered set: a filter that hides the only unrecorded card hides the note.
 5. Removed agents stay behind their own toggle and are never in the filtered set.
+
+The toolbar above moves onto the
+[List controls](design-system.md#list-controls--listtoolbar-facetmenu-periodpicker-4110) pattern with #4113, which replaces the toggle-button facets with menu
+facets and the sort select with a Sort chip. New list controls use the pattern.
 
 First agent (#4065): a user with no agents — archived and revoked rows count as
 agents, so this is `agents.length === 0` — gets the connect flow inline instead
@@ -709,7 +715,14 @@ Use for full lists of payments and account activity.
 
 Structure:
 1. Page header with concise description.
-2. Filter controls for account, status, type, and time where useful.
+2. Filter controls, all applied on the server (#4095), so the rows, the
+   count and the CSV are the same set: search (committed after a pause in
+   typing, Enter at once), Account (shown disabled when there is only one
+   account), Initiator, Token, Direction,
+   and Period (Last 7 / 30 / 90 days, All time, or a custom range), with
+   Export CSV in the same bar. Active filters show as removable chips. This
+   bar moves onto the [List controls](design-system.md#list-controls--listtoolbar-facetmenu-periodpicker-4110) pattern with #4111 (and, once the account
+   page's planned Activity tab ships, #4130); build new list filters on that pattern, not on this bar.
 3. The full-page `TransactionsTable` variant for `/transactions`; card/compact
    variants are valid for scoped histories on account and agent detail.
 4. Empty state inside the table that preserves the current filters.

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { Agent } from '@/hooks/useAgents'
 import type { SmartAccount } from '@/context/AuthContext'
+import { parseListState, serializeListState } from '@/components/ui/list-url-codec'
 import {
+  ARCHIVED_FACET,
   BUDGET_FACET,
   BUILT_IN_FACETS,
   DEFAULT_SORT,
@@ -12,13 +14,25 @@ import {
   budgetStateOf,
   compareAgents,
   facetCounts,
+  agentListUrlSchema,
+  archivedHidden,
   isFilterActive,
   largestAllowance,
   matchesSearch,
-  readFilterState,
-  writeFilterState,
+  toAgentFilterState,
+  toListFacet,
   type AgentFacet,
+  type AgentListFilterState,
 } from '@/lib/agent-list-filters'
+
+// The `/agents` URL through the list-controls codec (#4113), as the page reads
+// and writes it — the two helpers the tests below used to call directly.
+function readFilterState(search: URLSearchParams, facets: AgentFacet[]): AgentListFilterState {
+  return toAgentFilterState(parseListState(search, agentListUrlSchema(facets)))
+}
+function writeFilterState(search: URLSearchParams, state: AgentListFilterState, facets: AgentFacet[]): URLSearchParams {
+  return serializeListState(state, agentListUrlSchema(facets), search)
+}
 
 function agent(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -207,8 +221,14 @@ describe('URL codec', () => {
   it('round-trips q, facets and a non-default sort; drops defaults', () => {
     const state = { q: 'inv', facets: { status: ['paused', 'active'], budget: [] }, sort: 'seen' as const }
     const params = writeFilterState(new URLSearchParams('setup=first'), state, BUILT_IN_FACETS)
-    expect(params.toString()).toBe('setup=first&q=inv&sort=seen&status=paused%2Cactive')
-    expect(readFilterState(params, BUILT_IN_FACETS)).toEqual({ q: 'inv', facets: { status: ['paused', 'active'] }, sort: 'seen' })
+    // #4113: the key order is the codec's (search, facets, sort); the keys
+    // and their formats are the ones #3165 shipped.
+    expect(params.toString()).toBe('setup=first&q=inv&status=paused%2Cactive&sort=seen')
+    const read = readFilterState(params, BUILT_IN_FACETS)
+    expect(read.q).toBe('inv')
+    expect(read.sort).toBe('seen')
+    expect(read.facets.status).toEqual(['paused', 'active'])
+    expect(read.facets.archived).toEqual(['hidden'])
   })
   it('preserves unrelated parameters and removes cleared keys', () => {
     const params = writeFilterState(new URLSearchParams('setup=first&status=active&q=x'), EMPTY_FILTER_STATE, BUILT_IN_FACETS)
@@ -216,10 +236,19 @@ describe('URL codec', () => {
   })
   it('drops unknown facet values, unknown sort keys and unknown facet keys on read', () => {
     const state = readFilterState(new URLSearchParams('status=active,bogus&sort=bogus&colour=red'), BUILT_IN_FACETS)
-    expect(state).toEqual({ q: '', facets: { status: ['active'] }, sort: DEFAULT_SORT })
+    expect(state.facets.status).toEqual(['active'])
+    expect(state.sort).toBe(DEFAULT_SORT)
+    expect(state.facets).not.toHaveProperty('colour')
   })
-  it('a facet whose every value is unknown is absent, not an empty array', () => {
-    expect(readFilterState(new URLSearchParams('status=bogus'), BUILT_IN_FACETS).facets).toEqual({})
+  it('a facet whose every value is unknown reads as its default, not as a filter', () => {
+    expect(readFilterState(new URLSearchParams('status=bogus'), BUILT_IN_FACETS).facets.status).toEqual([])
+  })
+  it('account and organization ids survive before their options load (#4113)', () => {
+    // Neither facet is registered yet (no accounts / organizations fetched):
+    // a shared link must keep its filter until they arrive.
+    const state = readFilterState(new URLSearchParams('account=acc-1&organization=org-1,top_level'), BUILT_IN_FACETS)
+    expect(state.facets.account).toEqual(['acc-1'])
+    expect(state.facets.organization).toEqual(['org-1', 'top_level'])
   })
   it('a facet id may not shadow q or sort', () => {
     const rogue: AgentFacet = { id: 'q', label: 'Rogue', match: 'any', options: [{ value: 'x', label: 'x' }], predicate: () => true }
@@ -229,10 +258,15 @@ describe('URL codec', () => {
 })
 
 describe('isFilterActive', () => {
+  const facets = [...BUILT_IN_FACETS, ARCHIVED_FACET]
   it('sort alone is not a filter', () => {
-    expect(isFilterActive({ ...EMPTY_FILTER_STATE, sort: 'seen' })).toBe(false)
-    expect(isFilterActive({ ...EMPTY_FILTER_STATE, q: ' ' })).toBe(false)
-    expect(isFilterActive({ ...EMPTY_FILTER_STATE, facets: { status: ['active'] } })).toBe(true)
+    expect(isFilterActive({ ...EMPTY_FILTER_STATE, sort: 'seen' }, facets)).toBe(false)
+    expect(isFilterActive({ ...EMPTY_FILTER_STATE, q: ' ' }, facets)).toBe(false)
+    expect(isFilterActive({ ...EMPTY_FILTER_STATE, facets: { status: ['active'] } }, facets)).toBe(true)
+  })
+  it('Archived: Hidden is the default, not a filter; Shown is one (#4113)', () => {
+    expect(isFilterActive({ ...EMPTY_FILTER_STATE, facets: { archived: ['hidden'] } }, facets)).toBe(false)
+    expect(isFilterActive({ ...EMPTY_FILTER_STATE, facets: { archived: ['shown'] } }, facets)).toBe(true)
   })
   it('STATUS_FACET covers every status the wire type declares', () => {
     expect(STATUS_FACET.options.map((o) => o.value).sort()).toEqual(['active', 'paused', 'pending_approval', 'revoked'])
@@ -260,5 +294,52 @@ describe('accountFacet (#3719)', () => {
     expect(facet.predicate(onBase, 'acc-base')).toBe(true)
     expect(facet.predicate(onTest, 'acc-base')).toBe(false)
     expect(facet.predicate(unassigned, 'acc-base')).toBe(false)
+  })
+})
+
+describe('the Archived facet (#4113)', () => {
+  const archivedActive = agent({ id: 'x1', name: 'Xavier', status: 'active', archived_at: '2026-10-01T00:00:00Z' } as Partial<Agent>)
+  const archivedRevoked = agent({ id: 'x2', name: 'Yolanda', status: 'revoked', archived_at: '2026-10-01T00:00:00Z' } as Partial<Agent>)
+  const facets = [...BUILT_IN_FACETS, ARCHIVED_FACET]
+  const list = [alpha, bravo, charlie, archivedActive, archivedRevoked]
+  const names = (state: AgentListFilterState) => applyAgentListFilters(list, state, facets).map((a) => a.name)
+
+  it('hides archived agents by default — absent, or an explicit hidden', () => {
+    expect(names(EMPTY_FILTER_STATE)).toEqual(['Alpha', 'Bravo', 'charlie'])
+    expect(names({ ...EMPTY_FILTER_STATE, facets: { archived: ['hidden'] } })).toEqual(['Alpha', 'Bravo', 'charlie'])
+  })
+  it('Shown lists them alongside the others', () => {
+    expect(names({ ...EMPTY_FILTER_STATE, facets: { archived: ['shown'] } })).toEqual(['Alpha', 'Bravo', 'charlie', 'Xavier', 'Yolanda'])
+  })
+  it('Status: Revoked still matches a revoked agent that is NOT archived — the two facets are independent', () => {
+    // Hidden (the default): only the unarchived revoked agent.
+    expect(names({ ...EMPTY_FILTER_STATE, facets: { status: ['revoked'] } })).toEqual(['charlie'])
+    // Shown: the archived revoked one joins it; the archived ACTIVE one does not.
+    expect(names({ ...EMPTY_FILTER_STATE, facets: { status: ['revoked'], archived: ['shown'] } })).toEqual(['charlie', 'Yolanda'])
+  })
+  it('counts: Status counts honour the Archived selection', () => {
+    expect(facetCounts(list, EMPTY_FILTER_STATE, facets).status.revoked).toBe(1)
+    expect(facetCounts(list, { ...EMPTY_FILTER_STATE, facets: { archived: ['shown'] } }, facets).status.revoked).toBe(2)
+  })
+  it('its URL key round-trips, and its absence means Hidden', () => {
+    expect(readFilterState(new URLSearchParams(''), BUILT_IN_FACETS).facets.archived).toEqual(['hidden'])
+    const shown = writeFilterState(new URLSearchParams('setup=first'), { ...EMPTY_FILTER_STATE, facets: { archived: ['shown'] } }, BUILT_IN_FACETS)
+    expect(shown.toString()).toBe('setup=first&archived=shown')
+    expect(readFilterState(shown, BUILT_IN_FACETS).facets.archived).toEqual(['shown'])
+    // The default is never written; `all` and unknown values read as it.
+    expect(writeFilterState(new URLSearchParams(), { ...EMPTY_FILTER_STATE, facets: { archived: ['hidden'] } }, BUILT_IN_FACETS).toString()).toBe('')
+    expect(readFilterState(new URLSearchParams('archived=all'), BUILT_IN_FACETS).facets.archived).toEqual(['hidden'])
+    expect(readFilterState(new URLSearchParams('archived=bogus'), BUILT_IN_FACETS).facets.archived).toEqual(['hidden'])
+  })
+  it('archivedHidden reads the default when the key is absent', () => {
+    expect(archivedHidden({ facets: {} })).toBe(true)
+    expect(archivedHidden({ facets: { archived: ['shown'] } })).toBe(false)
+  })
+  it('draws as a single-select facet with no All row and no counts', () => {
+    const facet = toListFacet(ARCHIVED_FACET, { hidden: 3, shown: 5 })
+    expect(facet).toMatchObject({ id: 'archived', selection: 'single', allLabel: null, defaultValue: ['hidden'] })
+    expect(facet.options.map((o) => o.count)).toEqual([undefined, undefined])
+    // A multi-select facet carries its counts.
+    expect(toListFacet(STATUS_FACET, { active: 2 }).options.map((o) => o.count)).toEqual([2, 0, 0, 0])
   })
 })

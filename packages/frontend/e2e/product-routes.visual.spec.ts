@@ -439,12 +439,13 @@ const ROUTES: ProductRoute[] = [
   },
   {
     // #3165: the list toolbar with a search term and a status facet applied,
-    // read from the URL — the shareable-view contract in one frame.
+    // read from the URL — the shareable-view contract in one frame. On
+    // ListToolbar since #4113: its count is the pattern's.
     path: '/agents?q=research&status=active',
     slug: 'agents-list-filtered',
     minChars: 200,
     viewports: ['mobile'],
-    anchor: (page: Page) => page.getByTestId('agent-list-count'),
+    anchor: (page: Page) => page.getByTestId('list-toolbar-count'),
   },
   {
     path: '/agents/agent-research',

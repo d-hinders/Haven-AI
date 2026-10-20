@@ -328,6 +328,108 @@ describe('ListToolbar — page defaults', () => {
   })
 })
 
+describe('ListToolbar — a facet with no All row (allLabel: null, #4113)', () => {
+  // Agents-shaped: archived agents are hidden by default, shown on request.
+  const ARCHIVED: ListFacet = {
+    id: 'archived',
+    label: 'Archived',
+    selection: 'single',
+    allLabel: null,
+    defaultValue: ['hidden'],
+    options: [
+      { value: 'hidden', label: 'Hidden' },
+      { value: 'shown', label: 'Shown' },
+    ],
+  }
+
+  function Agents({ onChange }: { onChange?: (s: ListState) => void }) {
+    const [state, setState] = useState<ListState>({ q: '', facets: { archived: ['hidden'] } })
+    return (
+      <ListToolbar
+        noun={noun}
+        state={state}
+        onChange={(next) => {
+          setState(next)
+          onChange?.(next)
+        }}
+        filtering="browser"
+        facets={[ARCHIVED]}
+        count={{ shown: 3, total: 3 }}
+      />
+    )
+  }
+
+  it('the menu offers only the real choices; the default is untinted, chip-free and unfiltered', async () => {
+    const user = userEvent.setup()
+    render(<Agents />)
+    const trigger = screen.getByRole('button', { name: 'Archived: Hidden' })
+    expect(trigger).toHaveAttribute('data-active', 'false')
+    expect(screen.queryByRole('button', { name: /^Remove/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Clear filters' })).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('3 agents')
+
+    await user.click(trigger)
+    expect(screen.getAllByRole('menuitemradio').map((r) => r.textContent)).toEqual(['Hidden', 'Shown'])
+  })
+
+  it('Shown is a filter: its chip reads the option, and removing it returns to the default', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    render(<Agents onChange={onChange} />)
+    await user.click(screen.getByRole('button', { name: 'Archived: Hidden' }))
+    await user.click(screen.getByRole('menuitemradio', { name: 'Shown' }))
+    expect(screen.getByRole('button', { name: 'Archived: Shown' })).toHaveAttribute('data-active', 'true')
+    expect(screen.getByRole('button', { name: 'Filters (1)' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Remove Archived: Shown' }))
+    expect(onChange).toHaveBeenLastCalledWith({ q: '', facets: { archived: ['hidden'] } })
+    expect(screen.getByRole('button', { name: 'Archived: Hidden' })).toHaveAttribute('data-active', 'false')
+
+    await user.click(screen.getByRole('button', { name: 'Archived: Hidden' }))
+    await user.click(screen.getByRole('menuitemradio', { name: 'Shown' }))
+    await user.click(screen.getByRole('button', { name: 'Clear filters' }))
+    expect(onChange).toHaveBeenLastCalledWith({ q: '', facets: { archived: ['hidden'] } })
+  })
+
+  it('the phone sheet draws no All radio for it, and its radios apply live', async () => {
+    const user = userEvent.setup()
+    render(<Agents />)
+    await user.click(screen.getByRole('button', { name: 'Filters' }))
+    const sheet = screen.getByRole('dialog', { name: 'Filters' })
+    const group = within(sheet).getByRole('group', { name: 'Archived' })
+    expect(within(group).getAllByRole('radio').map((r) => r.closest('label')?.textContent)).toEqual(['Hidden', 'Shown'])
+    expect(within(group).getByRole('radio', { name: 'Hidden', checked: true })).toBeInTheDocument()
+    await user.click(within(group).getByRole('radio', { name: 'Shown' }))
+    expect(screen.getByRole('button', { name: 'Remove Archived: Shown' })).toBeInTheDocument()
+  })
+
+  it('a string allLabel renames the All row in the menu, the sheet and the chip', async () => {
+    const user = userEvent.setup()
+    const TEST: ListFacet = {
+      id: 'test',
+      label: 'Test merchants',
+      allLabel: 'Shown',
+      defaultValue: ['hide'],
+      options: [
+        { value: 'hide', label: 'Hidden' },
+        { value: 'only', label: 'Only test' },
+      ],
+    }
+    function Market() {
+      const [state, setState] = useState<ListState>({ q: '', facets: { test: ['hide'] } })
+      return <ListToolbar noun={noun} state={state} onChange={setState} filtering="browser" facets={[TEST]} count={{ shown: 1, total: 1 }} />
+    }
+    render(<Market />)
+    await user.click(screen.getByRole('button', { name: 'Test merchants: Hidden' }))
+    expect(screen.getAllByRole('menuitemradio').map((r) => r.textContent)).toEqual(['Shown', 'Hidden', 'Only test'])
+    await user.click(screen.getByRole('menuitemradio', { name: 'Shown' }))
+    expect(screen.getByRole('button', { name: 'Remove Test merchants: Shown' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Filters (1)' }))
+    const group = within(screen.getByRole('dialog', { name: 'Filters' })).getByRole('group', { name: 'Test merchants' })
+    expect(within(group).getByRole('radio', { name: 'Shown', checked: true })).toBeInTheDocument()
+  })
+})
+
 describe('ListToolbar — period without All time', () => {
   it('with no declared default, the current period raises no chip and the count stays unfiltered', () => {
     render(

@@ -31,8 +31,10 @@ export interface FacetMenuProps {
   value: readonly string[]
   onChange: (next: string[]) => void
   /**
-   * Single-select only: the label of the "no filter" row, listed first.
-   * `null` drops the row — the Sort chip, where something is always chosen.
+   * Overrides the facet's own `allLabel`. `null` here means a VIEW choice —
+   * the Sort chip: no "no filter" row, and the trigger never tints. A facet
+   * that merely has no All (`facet.allLabel === null`) still tints when it
+   * differs from its default.
    */
   allLabel?: string | null
   /** Which edge of the trigger the menu hangs from. Clamped to the viewport either way. */
@@ -51,6 +53,9 @@ export interface FacetMenuProps {
  *   (`aria-pressed`, the `FilterPill` primitive) for a short category list.
  *   Pills are not menu items.
  * - A facet with one possible value is hidden — there is nothing to choose.
+ * - `facet.allLabel` renames the "no filter" row, or (`null`, #4113) drops
+ *   it for a single-select facet whose every value is a real choice
+ *   ("Archived: Hidden / Shown"); its `defaultValue` is the unfiltered view.
  *
  * Why menu roles, superseding `AgentListToolbar`'s toggle-button group:
  * that header rejected a listbox because each option was its own focusable
@@ -58,15 +63,18 @@ export interface FacetMenuProps {
  * A menu item IS the control, so the conflict is gone, and the trigger's
  * `aria-haspopup="menu"` tells a screen reader what opens.
  */
-export function FacetMenu({ facet, value, onChange, allLabel = allOptionLabel, align = 'left' }: FacetMenuProps) {
+export function FacetMenu({ facet, value, onChange, allLabel: allLabelOverride, align = 'left' }: FacetMenuProps) {
   const menu = useListMenu()
   const multi = facet.selection === 'multi'
+  const viewChoice = allLabelOverride === null
+  const allLabel = allLabelOverride !== undefined ? allLabelOverride : facet.allLabel !== undefined ? facet.allLabel : allOptionLabel
 
   if (facet.options.length <= 1) return null
 
   if (facet.rendering === 'pills') {
     const toggle = (v: string) => {
-      if (!multi) return onChange(value.includes(v) ? [] : [v])
+      // A facet without All cannot be deselected back to `[]`.
+      if (!multi) return onChange(value.includes(v) && allLabel !== null ? [] : [v])
       onChange(value.includes(v) ? value.filter((x) => x !== v) : [...value, v])
     }
     return (
@@ -86,8 +94,8 @@ export function FacetMenu({ facet, value, onChange, allLabel = allOptionLabel, a
   }
 
   // Active = differs from the page default (see ListToolbar); the Sort chip
-  // (`allLabel === null`) is a view choice and never tints.
-  const active = allLabel !== null && !sameValues(value, facet.defaultValue ?? [])
+  // (the `allLabel={null}` override) is a view choice and never tints.
+  const active = !viewChoice && !sameValues(value, facet.defaultValue ?? [])
   const summary = facetValueLabel(value, facet.options, allLabel ?? allOptionLabel)
 
   const choose = (next: string[]) => {

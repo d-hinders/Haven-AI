@@ -176,3 +176,24 @@ describe('helpers', () => {
     expect(rollingWindow('90d', now).from.toISOString()).toBe('2026-07-22T12:00:00.000Z')
   })
 })
+
+describe('a facet with no All (allLabel: null, #4113)', () => {
+  const schema = {
+    facets: [{ id: 'archived', allLabel: null, defaultValue: ['hidden'], values: ['hidden', 'shown'] }],
+  }
+
+  it('absent, `all` and unknown values all read as the default', () => {
+    expect(parseListState(new URLSearchParams(''), schema).facets.archived).toEqual(['hidden'])
+    expect(parseListState(new URLSearchParams('archived=all'), schema).facets.archived).toEqual(['hidden'])
+    expect(parseListState(new URLSearchParams('archived=nope'), schema).facets.archived).toEqual(['hidden'])
+    expect(parseListState(new URLSearchParams('archived=shown'), schema).facets.archived).toEqual(['shown'])
+  })
+
+  it('the default and an empty selection are never written; other keys are kept', () => {
+    const at = (values: string[]) =>
+      serializeListState({ q: '', facets: { archived: values } }, schema, new URLSearchParams('setup=first&archived=shown')).toString()
+    expect(at(['hidden'])).toBe('setup=first')
+    expect(at([])).toBe('setup=first')
+    expect(at(['shown'])).toBe('setup=first&archived=shown')
+  })
+})

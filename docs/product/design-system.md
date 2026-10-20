@@ -2113,6 +2113,13 @@ this layout in a narrow container on a wide screen.
   items.
 - A facet with **one possible value is hidden**. If it carries a value anyway
   (from a URL), its chip still shows, because the chip is the only way out.
+- **`allLabel`** names a single-select facet's "no filter" row (#4113). A
+  string renames it (Marketplace's "Test merchants: Shown"). `null` drops it,
+  for a facet whose every value is a real choice: Agents' **Archived: Hidden /
+  Shown**. A facet without All needs a `defaultValue`, which is its unfiltered
+  view: untinted, no chip, no Clear filters, and no URL key; an explicit `all`
+  in the URL reads as that default. Its phone-sheet group has no All radio.
+  The Sort chip is not this: it is a view choice and never tints.
 - A **Sort chip** appears only on lists without sortable column headers. Tables
   that sort by header (`TransactionsTable`) keep header sort.
 
@@ -2158,7 +2165,8 @@ re-seeds it. The codec's rules:
   `from` / `to` for a custom range. The network facet is `chainId` on every
   page;
 - **no key means the page's default** (not always All: Marketplace defaults to
-  the user's chain); an explicit `all` means All;
+  the user's chain); an explicit `all` means All, except on a facet without
+  All (`allLabel: null`), where it reads as the default;
 - multi-select values are comma-joined, the `lib/agent-list-filters.ts`
   encoding, so existing links keep parsing;
 - params it does not own (Agents' `setup`, a page's tab key) are never

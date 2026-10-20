@@ -29,7 +29,6 @@ covers:
   - packages/frontend/src/components/settings/CompanyDetailsCard.tsx
   - packages/frontend/src/app/(authenticated)/transactions/TransactionsClient.tsx
   - packages/frontend/src/components/AgentPanel.tsx
-  - packages/frontend/src/components/agent-panel/AgentListToolbar.tsx
   - packages/frontend/src/hooks/useAgentListFilters.ts
   - packages/frontend/src/lib/agent-list-filters.ts
   - packages/frontend/src/hooks/useAgentPanelState.ts
@@ -492,14 +491,36 @@ Use for `/agents`: every managed agent as a card, with the list controls above i
 Structure:
 1. Header with the count and the primary action (Connect agent), plus Labels and
    Organizations.
-2. Toolbar: free-text search (name, description, delegate address; a clear button appears while it has text), one dropdown per facet (a group of toggle buttons with a check mark and a count each; Escape or a click outside closes it; below `sm` the panel spans the toolbar's width), a sort select, and — only while a filter is on — a count line, `12 of 27 agents shown`, with `Clear filters` beside it. At rest the header chip already carries the count, so the bar shows none.
-3. The card grid, filtered and sorted by the toolbar.
-4. Zero-result state inside the list area (`No agents match these filters`) owning the reset action — the bar's own reset steps back so the screen offers one — and the toolbar stays visible so the user can see what they filtered on. The `not recorded` MCP note above the list follows the filtered set: a filter that hides the only unrecorded card hides the note.
-5. Removed agents stay behind their own toggle and are never in the filtered set.
+2. Toolbar: the [List controls](design-system.md#list-controls--listtoolbar-facetmenu-periodpicker-4110)
+   pattern (`ListToolbar`, #4113), browser-filtered: search ("Search agents";
+   name, description and delegate address, as its screen-reader description),
+   the multi-select facets from the page's registry (Status, Budget, and
+   Account and Organization when registered), **Archived** (single-select,
+   Hidden / Shown, no All row, Hidden by default), and a **Sort: Name** chip.
+   Its status row carries a removable chip per active filter, Clear filters and
+   the count — "3 agents", or "1 of 3 agents" while filtered. Below `sm` the
+   facets and the sort sit in the pattern's Filters sheet. The page adds no
+   control or string to it.
+3. A warning callout under the toolbar (#3542, carried over by #4113) while
+   archived agents are hidden and at least one still has a budget redeemable
+   on-chain (`isHalfRevoked`): "1 archived agent still has an active budget"
+   (plural for more), with **Show archived**, which sets Archived to Shown. A
+   hidden group never hides redeemable spend authority.
+4. The card grid, filtered and sorted by the toolbar. Archived cards, once
+   shown, keep their archived treatment (Restore to list, no operational
+   actions).
+5. A filter that empties the list shows the pattern's no-match state
+   (`ListNoMatch`) where the cards were, and the toolbar stays. An UNFILTERED
+   list can be empty too — every agent archived — and there Clear filters
+   would change nothing, so it says "All your agents are archived" and offers
+   Show archived instead. The `not recorded` MCP note above the list follows
+   the filtered set: a filter that hides the only unrecorded card hides the
+   note, and so does Archived: Hidden.
 
-The toolbar above moves onto the
-[List controls](design-system.md#list-controls--listtoolbar-facetmenu-periodpicker-4110) pattern with #4113, which replaces the toggle-button facets with menu
-facets and the sort select with a Sort chip. New list controls use the pattern.
+Archived agents (`archived_at` set, #1402) and Status "Revoked" are separate
+axes: a revoked agent that is not archived is listed, and matched by Status:
+Revoked, under the default Hidden. The "Removed (n)" disclosure below the list
+is gone (owner decision, 2026-10-20).
 
 First agent (#4065): a user with no agents — archived and revoked rows count as
 agents, so this is `agents.length === 0` — gets the connect flow inline instead
@@ -537,8 +558,8 @@ of an empty state (see Connect And Approve Agent for the inline container).
   refused on-chain."
 
 Rules:
-- Filter state lives in the URL (`?q=…&status=active,paused&budget=none&sort=seen`; the comma is percent-encoded on the wire), so a view is shareable and survives reload; `?setup=` and other parameters on the page are preserved in both directions (closing the setup modal drops only `setup`). Writes use `history.replaceState` with a `null` state (Next treats its own `__NA`-marked state as an internal write and would not re-sync `useSearchParams`), so the URL never lags a keystroke. Unknown values in a pasted link are dropped, never applied silently.
-- A facet is registered as data (`AgentFacet` in `lib/agent-list-filters.ts`: id, options, predicate, match mode), so the labels facet (#3167), the organization facet (#3164) and the account facet (#3719) plug in without a toolbar change. The account facet is registered only when the user has more than one account; its options use the same `name · chain` shape as the card. Facet counts answer "how many if I pick this" — a facet's own selection is excluded from its counts.
+- Filter state lives in the URL through the pattern's codec (`useListUrlState`; `?q=…&status=active,paused&budget=none&archived=shown&sort=seen`; the comma is percent-encoded on the wire), so a view is shareable and survives reload; `?setup=` and other parameters on the page are preserved in both directions (closing the setup modal drops only `setup`). The cards follow every keystroke and only a search's URL write waits for a 300 ms pause. No `archived` key means Hidden. Unknown values for the fixed facets (Status, Budget, Archived) are dropped from a pasted link; Account and Organization ids are kept until their options load, so a shared link survives the fetch.
+- A facet is registered as data (`AgentFacet` in `lib/agent-list-filters.ts`: id, options, predicate, match mode, and optionally selection, default and `allLabel`; `toListFacet` hands it to `ListToolbar`), so the labels facet (#3167), the organization facet (#3164) and the account facet (#3719) plug in without a toolbar change. The account facet is registered only when the user has more than one account; its options use the same `name · chain` shape as the card. Facet counts answer "how many if I pick this" — a facet's own selection is excluded from its counts, and the multi-select rows show them.
 - The budget facet offers what `GET /agents` can prove about authority (#3988): recurring, one-time, received, none. The first two are the agent's OWN budget cap (a zero cap is no authority, #3897); `received` marks a grant holder — an agent spending through an open sub-budget another agent granted it, which the server verifies against the whole redemption chain (`receivedSubBudgets[].open`) and which never classifies as `none`. Exhausted, near-limit and pending-signature still need a server field and are not offered, because an option that can never match reads as "no agent is near its limit".
 - Sort keys: name, recently seen (`mcp_last_seen_at`, never-seen last), newest, largest budget (largest single allowance in its own token units — the row carries no price, so this is deliberately unit-blind; a grant holder, whose amount the row does not carry, ranks above zero-capped agents but below any known positive amount).
 - Filtering is client-side over the loaded list; the API is unpaginated, so this holds until an account has enough agents for `GET /agents` itself to need paging.

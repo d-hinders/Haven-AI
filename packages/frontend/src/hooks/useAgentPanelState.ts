@@ -61,7 +61,6 @@ export function useAgentPanelState() {
   const [organizationsManagerOpen, setOrganizationsManagerOpen] = useState(false)
   const [busyAgentId, setBusyAgentId] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<AgentBusyAction>(null)
-  const [showRemovedAgents, setShowRemovedAgents] = useState(false)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
 
   // #4065: the inline first-agent flow. It shows for a user with no agents —
@@ -321,8 +320,6 @@ export function useAgentPanelState() {
     handleArchive,
     handleRestore,
     revokeAgentCredential: revokeAgent,
-    showRemovedAgents,
-    setShowRemovedAgents,
     toastMessage,
     refetchAgents: refetch,
   }

@@ -1,6 +1,6 @@
 'use client'
 
-import { ChevronRight, CircleAlert, Clock, LoaderCircle, Network, Plus, Tag } from 'lucide-react'
+import { Archive, CircleAlert, Clock, LoaderCircle, Network, Plus, Tag } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useCallback, useMemo, useState } from 'react'
 import { useAuth } from '@/context/AuthContext'
@@ -8,9 +8,18 @@ import { setupIdFromSearch } from '@/lib/discovery'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { useAgentPanelState } from '@/hooks/useAgentPanelState'
 import { useAgentListFilters } from '@/hooks/useAgentListFilters'
-import { BUILT_IN_FACETS, accountFacet } from '@/lib/agent-list-filters'
+import {
+  ARCHIVED_FACET,
+  BUILT_IN_FACETS,
+  SORT_OPTIONS,
+  accountFacet,
+  archivedHidden,
+  toListFacet,
+} from '@/lib/agent-list-filters'
 import { organizationFacet } from '@/lib/agent-organizations'
-import { AgentListToolbar } from './agent-panel/AgentListToolbar'
+import { ListNoMatch, ListToolbar } from './ui/ListToolbar'
+import type { ListNoun } from './ui/list-controls-copy'
+import { ApprovalRequiredBanner } from './haven/ApprovalRequiredBanner'
 import { AgentOrganizationTree } from './agent-panel/AgentOrganizationTree'
 import ConnectAgentModal from './ConnectAgentModal'
 import LabelsManagerModal from './LabelsManagerModal'
@@ -24,6 +33,18 @@ import { EmptyState } from './ui/EmptyState'
 import { Skeleton } from './ui/Skeleton'
 import { InlineAgentSetup } from './connect-agent/InlineAgentSetup'
 
+const agentNoun: ListNoun = { one: 'agent', other: 'agents' }
+
+/**
+ * #3542's guarantee, carried from the "Removed" toggle it lived on (#4113):
+ * a hidden group never hides spend authority that is still redeemable.
+ */
+export function hiddenActiveBudgetTitle(n: number): string {
+  return n === 1
+    ? '1 archived agent still has an active budget'
+    : `${n} archived agents still have an active budget`
+}
+
 /**
  * The agents panel's shell: header, list layout, empty states, and modals.
  *
@@ -32,7 +53,6 @@ import { InlineAgentSetup } from './connect-agent/InlineAgentSetup'
  * `./agent-panel/`.
  */
 export default function AgentPanel() {
-  const removedAgentsPanelId = 'removed-agent-list'
   const panel = useAgentPanelState()
   const {
     accountAddress,
@@ -46,8 +66,9 @@ export default function AgentPanel() {
     refetchAgents,
   } = panel
 
-  // #3165: search / facets / sort over the managed list, state in the URL.
-  // Reads `visibleAgents` only; removed agents stay behind their own toggle.
+  // #3165: search / facets / sort over the list, state in the URL — on the
+  // list-controls pattern since #4113. Reads EVERY agent: archived ones are
+  // hidden by the Archived facet (default Hidden), not by a separate toggle.
   // #3164 registers the organization facet (a plain data value over the
   // fetched tree) ALONGSIDE the built-ins — the toolbar, the URL codec and
   // the counts pick it up without any of them knowing what an org is.
@@ -69,8 +90,8 @@ export default function AgentPanel() {
     () => [...BUILT_IN_FACETS, ...accountFacets, ...orgFacets],
     [accountFacets, orgFacets],
   )
-  // #3542: removed agents whose budget delegation is still live. Same predicate
-  // as the cards, so the toggle and the marker inside it cannot disagree.
+  // #3542: archived agents whose budget delegation is still live. Same
+  // predicate as the cards, so the callout and the cards cannot disagree.
   const removedHalfRevokedCount = useMemo(
     () => removedAgents.filter(isHalfRevoked).length,
     [removedAgents],
@@ -81,7 +102,20 @@ export default function AgentPanel() {
     () => void refetchAgents({ silent: true }),
     [refetchAgents],
   )
-  const listFilters = useAgentListFilters(visibleAgents, allFacets)
+  const listFilters = useAgentListFilters(agents, allFacets)
+  const toolbarFacets = useMemo(
+    () => listFilters.facets.map((facet) => toListFacet(facet, listFilters.counts[facet.id])),
+    [listFilters.facets, listFilters.counts],
+  )
+  const archivedAreHidden = archivedHidden(listFilters.state)
+  const showArchived = useCallback(
+    () =>
+      listFilters.setState({
+        ...listFilters.state,
+        facets: { ...listFilters.state.facets, [ARCHIVED_FACET.id]: ['shown'] },
+      }),
+    [listFilters],
+  )
 
   // The tree's selected row IS the organization facet's selection (one
   // source of truth, URL-mirrored by the filter state).
@@ -266,17 +300,33 @@ export default function AgentPanel() {
             />
           )}
 
-          {visibleAgents.length > 0 && (
-            <AgentListToolbar
-              state={listFilters.state}
-              onChange={listFilters.setState}
-              onReset={listFilters.reset}
-              facets={listFilters.facets}
-              counts={listFilters.counts}
-              shown={listFilters.filtered.length}
-              total={visibleAgents.length}
-              active={listFilters.active}
-            />
+          {agents.length > 0 && (
+            <div className="mb-4">
+              <ListToolbar
+                noun={agentNoun}
+                state={listFilters.state}
+                onChange={listFilters.setState}
+                filtering="browser"
+                facets={toolbarFacets}
+                sort={{ options: SORT_OPTIONS }}
+                searchDescription="by name, description or delegate address"
+                count={{ shown: listFilters.filtered.length, total: listFilters.total }}
+              />
+            </div>
+          )}
+
+          {/* #3542, carried over from the Removed toggle (#4113): hiding
+              archived agents must never hide a budget that can still be
+              spent on-chain. Only while they are hidden; "Shown" puts the
+              cards, with their own Finish revoking marker, on screen. */}
+          {archivedAreHidden && removedHalfRevokedCount > 0 && (
+            <div className="mb-4" data-testid="hidden-active-budget-callout">
+              <ApprovalRequiredBanner title={hiddenActiveBudgetTitle(removedHalfRevokedCount)} tone="warning" density="compact">
+                <Button variant="ghost" size="sm" className="mt-1" onClick={showArchived}>
+                  Show archived
+                </Button>
+              </ApprovalRequiredBanner>
+            </div>
           )}
 
           {agentsError && agents.length > 0 ? (
@@ -387,36 +437,38 @@ export default function AgentPanel() {
                 component stays.
 
                 The predicate reads the cards that are RENDERED, not every agent
-                Haven holds: removed agents are collapsed behind a toggle, so
-                counting them while they are hidden would put a note above the list
-                explaining a label that is nowhere on the page. Expanding Removed
-                reveals both together, which is the honest pairing. The same rule
-                makes it the FILTERED list (#3165), not every visible agent: a
-                filter that hides the only `not recorded` card hides the note.
+                Haven holds: the FILTERED list (#3165), so a filter that hides
+                the only `not recorded` card hides the note — and so do
+                archived agents while "Archived: Hidden" (#4113); "Shown"
+                reveals both together, which is the honest pairing.
               */}
-              {hasUnrecordedMcpServerName([
-                ...listFilters.filtered,
-                ...(panel.showRemovedAgents ? removedAgents : []),
-              ]) && (
+              {hasUnrecordedMcpServerName(listFilters.filtered) && (
                 <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
                   {MCP_NOT_RECORDED_NOTE}
                 </p>
               )}
 
-              {/* Managed agents */}
-              {visibleAgents.length > 0 && listFilters.filtered.length === 0 && (
-                <EmptyState
-                  size="compact"
-                  tone="neutral"
-                  title="No agents match these filters"
-                  body="Widen the search or clear a filter to see your agents again."
-                  action={
-                    <Button size="sm" variant="tertiary" onClick={listFilters.reset}>
-                      Clear filters
-                    </Button>
-                  }
-                />
-              )}
+              {/* #4113: the pattern's no-match state when a filter emptied the
+                  list. An untouched list can be empty too — every agent
+                  archived — and Clear filters would change nothing there, so
+                  it says what is hidden and offers the one way to see it. */}
+              {listFilters.filtered.length === 0 &&
+                (listFilters.active ? (
+                  <ListNoMatch noun={agentNoun} onClear={listFilters.reset} />
+                ) : (
+                  <EmptyState
+                    size="compact"
+                    tone="neutral"
+                    icon={<Icon icon={Archive} className="h-5 w-5" />}
+                    title="All your agents are archived"
+                    body="Archived agents are hidden from this list. Show them to restore one or review its history."
+                    action={
+                      <Button size="sm" variant="ghost" onClick={showArchived}>
+                        Show archived
+                      </Button>
+                    }
+                  />
+                ))}
 
               {listFilters.filtered.length > 0 && (
                 <div className="grid items-start gap-4 lg:grid-cols-2">
@@ -442,63 +494,6 @@ export default function AgentPanel() {
                   })}
                 </div>
               )}
-
-              {/* #1402: Removed = ARCHIVED agents (archived_at set). History
-                  stays readable; Restore returns list placement only. */}
-              {removedAgents.length > 0 && (
-                <div className="pt-1">
-                  <button
-                    type="button"
-                    onClick={() => panel.setShowRemovedAgents((prev) => !prev)}
-                    aria-expanded={panel.showRemovedAgents}
-                    aria-controls={removedAgentsPanelId}
-                    className="inline-flex min-h-11 items-center gap-2 rounded-md px-1 text-xs text-[var(--v2-ink-2)] transition-colors hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)]"
-                  >
-                    <Icon
-                      icon={ChevronRight}
-                      className={`h-3 w-3 transition-transform ${panel.showRemovedAgents ? 'rotate-90' : ''}`}
-                    />
-                    Removed
-                    <span className="text-[var(--v2-ink-3)] v2-tabular">({removedAgents.length})</span>
-                    {/* #3542: a collapsed group must not hide an agent whose budget
-                        is still redeemable on-chain. Nothing extra when none is. */}
-                    {removedHalfRevokedCount > 0 && (
-                      <span className="text-[var(--v2-warning)]">
-                        · {removedHalfRevokedCount}{' '}
-                        {removedHalfRevokedCount === 1 ? 'still has' : 'still have'} an active budget
-                      </span>
-                    )}
-                  </button>
-                </div>
-              )}
-
-              <div
-                id={removedAgentsPanelId}
-                hidden={!panel.showRemovedAgents}
-                role="group"
-                aria-label="Removed agents"
-                // The class must toggle too (#3829): `.grid` and preflight's
-                // `[hidden]` rule share specificity and the utility is emitted
-                // later, so `grid` alone keeps the collapsed panel on screen.
-                className={panel.showRemovedAgents ? 'grid items-start gap-4 lg:grid-cols-2' : 'hidden'}
-              >
-                {removedAgents.map((agent) => (
-                  <AgentCard
-                    key={agent.id}
-                    agent={agent}
-                    onPause={panel.handlePause}
-                    onResume={panel.handleResume}
-                    onRevokeCredential={panel.revokeAgentCredential}
-                    onArchive={panel.handleArchive}
-                    onRestore={panel.handleRestore}
-                    onMoveToOrganization={panel.handleAgentMoved}
-                    onBudgetEnded={handleBudgetEnded}
-                    busyAction={panel.busyAgentId === agent.id ? panel.busyAction : null}
-                    chainId={agent.account_chain_id ?? DEFAULT_CHAIN_ID}
-                    organizations={panel.organizations}
-                  />
-                ))}
-              </div>
 
             </div>
           )}

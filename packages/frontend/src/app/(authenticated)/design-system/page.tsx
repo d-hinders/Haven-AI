@@ -799,6 +799,33 @@ function FacetPrimitivesExample() {
   )
 }
 
+/**
+ * A single-select facet with no "All" row (`allLabel: null`, #4113): every
+ * value is a real choice, and the default is the unfiltered view. Agents'
+ * Archived facet; Marketplace's test merchants are the same shape.
+ */
+function NoAllFacetExample() {
+  const [archived, setArchived] = useState<string[]>(['hidden'])
+  return (
+    <div className="flex flex-wrap items-center gap-2" data-testid="ds-list-controls-no-all">
+      <FacetMenu
+        facet={{
+          id: 'archived',
+          label: 'Archived',
+          allLabel: null,
+          defaultValue: ['hidden'],
+          options: [
+            { value: 'hidden', label: 'Hidden' },
+            { value: 'shown', label: 'Shown' },
+          ],
+        }}
+        value={archived}
+        onChange={setArchived}
+      />
+    </div>
+  )
+}
+
 function ListControlsState({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="space-y-2">
@@ -2843,6 +2870,9 @@ export default function DesignSystemPage() {
           </ListControlsState>
           <ListControlsState label="FacetMenu and PeriodPicker on their own — a pill facet (toggle buttons, aria-pressed) for a short category list, a single-select menu whose page default is not All (untinted at its default; tinted once changed), and the Analytics period: presets only, no All time, untinted at its 30-day default. Menu rows draw RadioMark (menuitemradio) or CheckboxMark (menuitemcheckbox).">
             <FacetPrimitivesExample />
+          </ListControlsState>
+          <ListControlsState label="No All row — a single-select facet whose every value is a real choice (allLabel: null): Agents' Archived, Hidden by default. The default is untinted and raises no chip; Shown is a filter, and removing its chip returns to Hidden. A string allLabel renames the All row instead.">
+            <NoAllFacetExample />
           </ListControlsState>
         </div>
       </Section>

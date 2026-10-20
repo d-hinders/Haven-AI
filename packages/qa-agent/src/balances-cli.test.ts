@@ -3,7 +3,7 @@
  * naming the variable (never a missing row) and a non-zero exit; a read
  * failure yields `unknown` and exit zero.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { ethers } from 'ethers'
 import { CdpFaucetError } from './lib/faucet.js'
 import {
@@ -392,13 +392,23 @@ describe('qa:balances merchant claim confirmation (#3896)', () => {
   })
 
   it('waitForClaims cuts off a hung receipt read at the cap', async () => {
-    const t0 = Date.now()
-    const unconfirmed = await waitForClaims([nextHash()], {
-      getTransactionReceipt: () => new Promise(() => {}),
-    } as never, { capAt: Date.now() + 100 })
-    expect(unconfirmed).toBe(1)
-    expect(Date.now() - t0).toBeLessThan(1_000)
-  }, 5_000)
+    // Faked clock (the repo-wide x402-scenario pattern). A real-timer
+    // wall-clock assertion here measured the CI runner, not the code: on a
+    // contended runner the 100 ms deadline fired ~3 s late and the cap went
+    // red (#3963) — one failed run on a sha that passed it five other times.
+    // With faked timers the property is exact: the never-settling read is
+    // provably not awaited once the simulated clock reaches the cap.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    try {
+      const wait = waitForClaims([nextHash()], {
+        getTransactionReceipt: () => new Promise(() => {}),
+      } as never, { capAt: Date.now() + 100 })
+      await vi.advanceTimersByTimeAsync(100)
+      expect(await wait).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 
   it('waitForClaims keeps at most 5 receipt reads in flight', async () => {
     let inFlight = 0

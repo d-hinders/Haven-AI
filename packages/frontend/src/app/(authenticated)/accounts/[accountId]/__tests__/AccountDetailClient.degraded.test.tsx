@@ -82,6 +82,12 @@ vi.mock('@/hooks/useAccountMoneyFlow', () => ({
   useAccountMoneyFlow: () => mockUseAccountMoneyFlow(),
 }))
 
+// The Activity tab has its own suite (AccountActivityTab.test.tsx); the
+// degraded-path tests stub it so they exercise the shell only.
+vi.mock('../AccountActivityTab', () => ({
+  default: () => <div data-testid="account-activity-tab" />,
+}))
+
 vi.mock('@/components/AccountSignersCard', () => ({
   default: () => <div data-testid="signers-card" />,
 }))

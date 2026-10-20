@@ -6,6 +6,7 @@
  * used to build the CSV from whatever page the table had loaded. What is left
  * here is the download shim.
  */
+import { ApiRequestError } from '@/lib/api'
 
 /**
  * Trigger a download of `csv` under `filename`.
@@ -34,4 +35,66 @@ export function buildCsvFilename(now: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0')
   const stamp = `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}`
   return `haven-transactions-${stamp}.csv`
+}
+
+/**
+ * Whether a CSV body carries at least one record. Shared since #4098: the
+ * transactions page and the account Activity tab both read the body because
+ * they have to — the route sends the count in `X-Export-Row-Count`, but the
+ * backend's CORS registration sets no `exposedHeaders`, so no browser client
+ * can read it.
+ *
+ * The test is exact rather than heuristic — the backend's `toCsv` joins lines
+ * with CRLF and writes no trailing terminator (pinned by
+ * `domain/__tests__/csv.test.ts`: `toCsv(columns, [])` is the bare header),
+ * so a record-free body contains no CRLF and any record guarantees one. A
+ * CRLF inside a quoted field cannot cause a false positive, since such a
+ * field only exists inside a record.
+ */
+export function hasCsvRecords(csv: string): boolean {
+  return csv.replace(/^\uFEFF/, '').includes('\r\n')
+}
+
+/**
+ * What the export tells the user when it does not hand back a file.
+ *
+ * Two tones, because two different things happen: `error` is a refusal, and
+ * `info` is the export succeeding over an empty result set — which is not a
+ * failure and must not be painted as one.
+ *
+ * The headline/detail split mirrors the partial-failure banner already on
+ * the exports' screens: a short first line, the specifics beneath. Shared
+ * between the transactions page (#4095) and the account Activity tab (#4098)
+ * so the refusal copy cannot drift between the two surfaces that can export.
+ */
+export interface ExportNotice {
+  tone: 'error' | 'info'
+  headline: string
+  detail?: string
+}
+
+/**
+ * What to show the user when an export fails.
+ *
+ * The refusal that matters is the row cap: the backend's `details` carries the
+ * count, the limit and the way out ("narrow the filters"), and `message` is
+ * only the three-word summary — so `details` is read where the route sends
+ * one, via the `body` escape hatch `ApiRequestError` exists for. Every other
+ * status gets a written sentence rather than a passthrough: the remaining
+ * refusals on this route are validation strings for query parameters the UI
+ * builds itself, and a 500 would otherwise surface Fastify's
+ * "Internal Server Error" as product copy.
+ */
+export function exportFailureNotice(err: unknown): ExportNotice {
+  if (err instanceof ApiRequestError) {
+    const details = (err.body as { details?: unknown } | undefined)?.details
+    if (err.status === 413 && typeof details === 'string' && details.length > 0) {
+      return { tone: 'error', headline: err.message, detail: details }
+    }
+  }
+  return {
+    tone: 'error',
+    headline: 'The export could not be generated.',
+    detail: 'Try again in a moment.',
+  }
 }

@@ -89,6 +89,14 @@ vi.mock('@/hooks/useAccountMoneyFlow', () => ({
   useAccountMoneyFlow: () => mockUseAccountMoneyFlow(),
 }))
 
+// The Activity tab is its own component with its own suite
+// (AccountActivityTab.test.tsx). The shell tests stub it and assert only the
+// shell's side: it mounts on the active tab and the page keeps no feed of
+// its own.
+vi.mock('../AccountActivityTab', () => ({
+  default: () => <div data-testid="account-activity-tab" />,
+}))
+
 vi.mock('@/components/ReceiveDialog', () => ({
   default: () => null,
 }))
@@ -145,28 +153,6 @@ const SAFE = {
   is_default: true,
   created_at: '2026-05-12T00:00:00Z',
   account_type: 'delegator_hybrid' as const,
-}
-
-/** Minimal aggregated row — the truncation cases only need the count line. */
-function txRow() {
-  return {
-    hash: '0xabc',
-    type: 'erc20' as const,
-    from: '0x' + 'bb'.repeat(20),
-    to: SAFE.account_address,
-    value: '1000000',
-    valueFormatted: '1.00',
-    asset: 'USDC',
-    decimals: 6,
-    direction: 'in' as const,
-    timestamp: 1_778_240_999,
-    blockNumber: 1,
-    isError: false,
-    chainId: SAFE.chain_id,
-    accountId: SAFE.id,
-    accountAddress: SAFE.account_address,
-    accountName: SAFE.name,
-  }
 }
 
 /** A zeroed dashboard overview with `agents` and `agentCount` overridable. */
@@ -408,14 +394,14 @@ describe('AccountDetailClient', () => {
     it('Activity is the default tab', () => {
       render(<AccountDetailClient />)
       expect(screen.getByRole('tab', { name: /Activity/ })).toHaveAttribute('aria-selected', 'true')
-      expect(screen.getByRole('heading', { name: 'Activity' })).toBeInTheDocument()
+      expect(screen.getByTestId('account-activity-tab')).toBeInTheDocument()
     })
 
     it('?tab=agents selects the Agents tab', () => {
       tabParam = 'agents'
       render(<AccountDetailClient />)
       expect(screen.getByRole('tab', { name: /Agents/ })).toHaveAttribute('aria-selected', 'true')
-      expect(screen.queryByRole('heading', { name: 'Activity' })).not.toBeInTheDocument()
+      expect(screen.queryByTestId('account-activity-tab')).not.toBeInTheDocument()
     })
 
     it('?tab=security selects the Security & details tab', () => {
@@ -429,7 +415,7 @@ describe('AccountDetailClient', () => {
       tabParam = 'bogus'
       render(<AccountDetailClient />)
       expect(screen.getByRole('tab', { name: /Activity/ })).toHaveAttribute('aria-selected', 'true')
-      expect(screen.getByRole('heading', { name: 'Activity' })).toBeInTheDocument()
+      expect(screen.getByTestId('account-activity-tab')).toBeInTheDocument()
     })
 
     it('clicking a tab writes ?tab= to the URL; the default tab has no parameter', async () => {
@@ -817,45 +803,14 @@ describe('AccountDetailClient', () => {
     expect(card).toHaveAttribute('data-safe-address', SAFE.account_address)
   })
 
-  // #2882: this surface reads the same capped feed as /transactions and made
-  // the louder claim — "N transactions for this Haven wallet" from a total
-  // that counts only what the explorer window returned.
-  it('does not claim a complete history when the feed is capped', () => {
-    mockUseTransactionsFeed.mockReturnValue({
-      transactions: [txRow()],
-      loadingInitial: false,
-      loadingMore: false,
-      error: null,
-      total: 47,
-      hasMore: true,
-      truncated: true,
-      loadMore: vi.fn(),
-      refresh: vi.fn(),
-    })
-
+  // #4098: the tab owns the ledger — its own suite covers the truncated
+  // honesty rule (the #2882 qualification) and the count line. The shell
+  // renders the tab and keeps no feed of its own.
+  it('renders the Activity tab and keeps no provisional feed of its own', () => {
     render(<AccountDetailClient />)
 
-    expect(screen.getByText(/47 recent transactions for this Haven wallet/i)).toBeInTheDocument()
-    expect(screen.queryByText(/^47 transactions for this Haven wallet$/i)).toBeNull()
-    expect(screen.getByText(/loaded/i)).toBeInTheDocument()
-  })
-
-  it('states the plain count when the feed is complete', () => {
-    mockUseTransactionsFeed.mockReturnValue({
-      transactions: [txRow()],
-      loadingInitial: false,
-      loadingMore: false,
-      error: null,
-      total: 3,
-      hasMore: false,
-      truncated: false,
-      loadMore: vi.fn(),
-      refresh: vi.fn(),
-    })
-
-    render(<AccountDetailClient />)
-
-    expect(screen.getByText(/3 transactions for this Haven wallet/i)).toBeInTheDocument()
-    expect(screen.queryByText(/recent transactions for this Haven wallet/i)).toBeNull()
+    expect(screen.getByTestId('account-activity-tab')).toBeInTheDocument()
+    expect(screen.queryByText(/for this Haven wallet/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/recent transactions/i)).not.toBeInTheDocument()
   })
 })

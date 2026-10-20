@@ -42,12 +42,15 @@ interface UseTransactionsFeedReturn {
   refresh: () => Promise<void>
 }
 
-function toQueryString(
-  filters: TransactionFilterState,
-  offset: number,
-  limit: number,
-  fresh = false,
-): string {
+/**
+ * Serialize the filter state into its URL/export spelling (#4095) — the same
+ * dimensions, the same spellings the page URL carries, WITHOUT the
+ * request-only extras (`tz`, paging). The account page's Activity tab (#4098)
+ * uses this for BOTH its URL and its CSV export request, so the address bar
+ * names exactly what the server filtered and the file names exactly what the
+ * on-screen rows show — including the fixed `accountId` the page pins.
+ */
+export function transactionFilterParams(filters: TransactionFilterState): URLSearchParams {
   const params = new URLSearchParams()
   if (filters.accountId) params.set('accountId', filters.accountId)
   if (filters.agentId) params.set('agentId', filters.agentId)
@@ -65,8 +68,26 @@ function toQueryString(
   } else if (filters.from && filters.to) {
     params.set('from', filters.from)
     params.set('to', filters.to)
-    params.set('tz', browserTimeZone())
   }
+  return params
+}
+
+/**
+ * One feed page's REQUEST query: the filter dimensions above, the `tz` the
+ * server cuts a custom range's calendar days in, and the paging window.
+ * Exported since #4098 — the account Activity tab's in/out totals walk the
+ * SAME server-filtered feed page by page, and a second copy of this
+ * serialization would be one edit away from counting a different set than
+ * the list shows.
+ */
+export function transactionFeedQuery(
+  filters: TransactionFilterState,
+  offset: number,
+  limit: number,
+  fresh = false,
+): string {
+  const params = transactionFilterParams(filters)
+  if (!filters.period && filters.from && filters.to) params.set('tz', browserTimeZone())
   params.set('offset', String(offset))
   params.set('limit', String(limit))
   if (fresh) params.set('fresh', '1')
@@ -153,7 +174,7 @@ export function useTransactionsFeed(
 
       try {
         const data = await api.get<TransactionsFeedResponse>(
-          `/transactions?${toQueryString(filtersForRequest, offset, effectiveLimit, fresh)}`,
+          `/transactions?${transactionFeedQuery(filtersForRequest, offset, effectiveLimit, fresh)}`,
         )
         if (requestId !== requestIdRef.current) return
 

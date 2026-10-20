@@ -38,6 +38,13 @@
  * amounts, the agent's text, and the variable URLs (the hosted MCP URL, the
  * backend URL, the merchant URLs). A URL-shaped secret keeps its shape: only
  * its key-bearing segments go.
+ *
+ * The agent's own assistant text and the stream's `{"type":"result"}` line
+ * are kept even when they restate paid content (owner decision 2026-10-20).
+ * One fail-safe cut still reaches them: a string that literally quotes a
+ * JSON `"result":` key, or the `Merchant response:` label, is cut from that
+ * point, because the scanner flags the same shapes and not cutting would
+ * fail the run instead.
  */
 
 import { mkdir, readdir, readFile, rename, rm, writeFile, appendFile } from 'node:fs/promises'

@@ -471,8 +471,15 @@ form it does not know: percent-encoded or hex-encoded, split across lines or
 strings, reversed or otherwise transformed, or a mixed-case rendering of the
 delegate key inside base64. The agent under test cannot produce such forms on
 its own (it has no Bash, file or web tool, only the two Haven servers), so
-they could only come from a server's own output. The agent's own text is kept
-as it is, so it can restate a merchant's paid content in its own words.
+they could only come from a server's own output.
+
+Owner decision (Antonio, 2026-10-20): the hosted paid bodies are stripped,
+but the agent's own assistant text and the stream's `{"type":"result"}` line
+are kept, even when they restate what the merchant delivered. That summary is
+a known residual of this artifact. One fail-safe cut still reaches agent
+text: a string that literally quotes a JSON `"result":` key, or the
+`Merchant response:` label, is cut from that point to its end, because the
+scanner flags the same shapes and leaving them would fail the run instead.
 
 **What the report does show for a failure.** The job summary lists every
 failed trial with a **tool trace**: the session's tool calls in order, as bare

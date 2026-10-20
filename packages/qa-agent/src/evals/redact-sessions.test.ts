@@ -499,6 +499,18 @@ describe('merchant-body: haven_complete_mcp_tool and refusal echoes', () => {
   }
 })
 
+it('keeps the agent text: a plain-prose purchase summary survives unchanged (owner decision 2026-10-20)', () => {
+  const summary = `I bought the basic VPN plan for 0.001 USDC (payment ${PAYMENT_ID}, settlement ${TX_HASH}). The merchant confirmed the purchase and sent the config.`
+  const raw = [
+    JSON.stringify({ type: 'assistant', message: { model: 'claude-sonnet-5-5', content: [{ type: 'text', text: summary }] } }),
+    JSON.stringify({ type: 'result', subtype: 'success', result: summary, total_cost_usd: 0.05 }),
+  ].join('\n')
+  const { text, counts } = redactSessionText(raw, { secrets: secrets() })
+  expect(text).toBe(raw)
+  expect(Object.values(counts).every((n) => n === 0)).toBe(true)
+  expect(scanSessionText(text, secrets())).toEqual(Object.fromEntries(REDACTION_CLASSES.map((c) => [c, 0])))
+})
+
 describe('the scan does not reuse the redactor needles', () => {
   const raw = lineAt('nested-text', { ...CANARIES['secret-exact'].obj, ...CANARIES['rpc-key'].obj })
 

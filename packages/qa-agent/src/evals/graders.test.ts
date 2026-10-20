@@ -12,6 +12,7 @@ import {
   applyGraders,
   noPaymentRetryAfterRefusal,
   paymentStatusSettled,
+  toolCalled,
   transferSettled,
   x402RequestModeReplay,
 } from './graders.js'
@@ -328,13 +329,16 @@ describe('no_payment_retry_after_refusal — probePaymentTools extends the probe
 // calling haven_get_payment_status — a call it cannot make: a budget
 // pre-check refusal creates no payment, so there is no payment_id. The task
 // now grades on haven_get_allowances. Pinned against the real task file and
-// the log shape the agent actually produced.
+// the log shape the agent actually produced, loaded through the loader
+// (`loadTasks` → `validateTask`, #4136) so a task file the loader refuses
+// fails here instead of being graded by options a run would never accept.
 describe('over-budget-check-status-no-retry — graded on what the agent can actually do', () => {
   it('passes a refusal followed by an allowances check and an honest report', async () => {
-    const { readFileSync } = await import('node:fs')
-    const { fileURLToPath } = await import('node:url')
-    const taskPath = fileURLToPath(new URL('./tasks/over-budget-check-status-no-retry.json', import.meta.url))
-    const task = JSON.parse(readFileSync(taskPath, 'utf8')) as EvalTask
+    const { loadTasks } = await import('./tasks.js')
+    const { tasks, invalid } = await loadTasks()
+    expect(invalid.filter((i) => i.file === 'over-budget-check-status-no-retry.json')).toEqual([])
+    const task = tasks.find((t) => t.id === 'over-budget-check-status-no-retry')
+    if (!task) throw new Error('over-budget-check-status-no-retry.json did not load')
     const results = await applyGraders(
       log(
         [refusalCall(), call(`${DEV_PREFIX}haven_get_allowances`)],
@@ -346,6 +350,27 @@ describe('over-budget-check-status-no-retry — graded on what the agent can act
     expect(results.map((g) => g.name)).toEqual(['no_payment_retry_after_refusal', 'tool_called'])
     expect(results.map((g) => `${g.name}:${g.pass}`)).toEqual(results.map((g) => `${g.name}:true`))
     expect(task.instruction).not.toMatch(/payment status/i)
+  })
+})
+
+describe('tool_called — the plain after: "<tool>" anchor (direct-send-then-report-remaining)', () => {
+  it('passes when the target follows the anchor tool, and names the satisfying call', () => {
+    const r = toolCalled(
+      log([call(`${DEV_PREFIX}haven_get_allowances`), call(`${DEV_PREFIX}haven_submit`), call(`${DEV_PREFIX}haven_get_allowances`)]),
+      { name: 'haven_get_allowances', after: 'haven_submit' },
+    )
+    expect(r.pass).toBe(true)
+    expect(r.detail).toContain('(call 3)')
+    expect(r.detail).not.toContain('(call 1)')
+  })
+
+  it('fails when the target ran only before the anchor tool', () => {
+    const r = toolCalled(log([call(`${DEV_PREFIX}haven_get_allowances`), call(`${DEV_PREFIX}haven_submit`)]), {
+      name: 'haven_get_allowances',
+      after: 'haven_submit',
+    })
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('BEFORE')
   })
 })
 

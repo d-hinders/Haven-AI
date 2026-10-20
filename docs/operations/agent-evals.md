@@ -346,6 +346,19 @@ should treat 3 as "not run" and skip any comparison).
   never reports spend and is not a settlement grader, so the next trial does
   not wait for a budget decrease. The catalog task keeps
   `payment_status_settled`.
+- Every grader's option keys are closed (`GRADER_OPTION_KEYS` in
+  `graders.ts`), and the loader refuses any other key (#4136). A grader
+  ignores a key it does not read, so a misspelt key is a check that
+  silently does not run: a misspelt `mustMention` drops the report check
+  and a misspelt `probePaymentTools` the signer check, both false passes.
+  Grader names are checked against the registry's own keys, so
+  `"constructor"` is not a grader.
+- The loader also checks option value types, for the same reason:
+  `probePaymentTools` and `acceptPreemptive` are booleans (`"true"` is not
+  `true`, so the option silently does not apply), `mustMention` is an
+  array of non-empty strings, `preemptiveReadTools` an array of known tool
+  names, `errorCode` a non-empty string, and `tool_called`'s `name` and
+  `after` known tool names.
 
 ## Lane 2: Claude Code headless (#3959)
 

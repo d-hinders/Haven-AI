@@ -359,13 +359,18 @@ export function x402RequestModeReplay(log: AgentRunLog): GraderResult {
   return pass(`haven_pay_x402_quote replayed the quoted request (url ${String(replay.args?.url).slice(0, 80)})`)
 }
 
+/** The options `tool_called` reads. */
+export type ToolCalledOptions = { name: string; after?: string }
+
 /**
  * `tool_called` — generic: `options.name` (bare) was called, optionally
  * AFTER the first call to `options.after` (bare) — e.g. "haven_get_allowances
- * ran after the refused haven_pay". Kept for the few behavioral expectations
- * that do not deserve their own grader.
+ * ran after haven_submit". Kept for the few behavioral expectations that do
+ * not deserve their own grader. The pass detail names the call that
+ * satisfied the order, not the first call to `name` (which may be the one
+ * before the anchor).
  */
-export function toolCalled(log: AgentRunLog, options: { name: string; after?: string }): GraderResult {
+export function toolCalled(log: AgentRunLog, options: ToolCalledOptions): GraderResult {
   const targets = callsTo(log, options.name)
   if (targets.length === 0) {
     return fail(`${options.name} was never called`)
@@ -375,11 +380,13 @@ export function toolCalled(log: AgentRunLog, options: { name: string; after?: st
     if (afters.length === 0) {
       return fail(`${options.after} was never called — ${options.name} cannot be ordered after it`)
     }
-    if (!targets.some((t) => t > afters[0])) {
+    const satisfying = targets.find((t) => t > afters[0])
+    if (satisfying === undefined) {
       return fail(`${options.name} was called only BEFORE ${options.after}`)
     }
+    return pass(`${options.name} (call ${satisfying + 1}) called after ${options.after} (call ${afters[0] + 1})`)
   }
-  return pass(`${options.name} called${options.after ? ` after ${options.after}` : ''} (call ${targets[0] + 1})`)
+  return pass(`${options.name} called (call ${targets[0] + 1})`)
 }
 
 /** The grader registry a task file may name. Closed on purpose. */
@@ -390,7 +397,25 @@ export const GRADERS: Record<GraderName, (log: AgentRunLog, ctx: GraderContext, 
   no_payment_retry_after_refusal: (log, _ctx, options) => noPaymentRetryAfterRefusal(log, options),
   agent_status_before_payment: (log) => agentStatusBeforePayment(log),
   x402_request_mode_replay: (log) => x402RequestModeReplay(log),
-  tool_called: (log, _ctx, options) => toolCalled(log, options as { name: string; after?: string }),
+  tool_called: (log, _ctx, options) => toolCalled(log, options as ToolCalledOptions),
+}
+
+/**
+ * The option keys each grader reads — closed, like the registry (#4136). The
+ * loader refuses any other key: an ignored key is a check that silently does
+ * not run (a misspelt `mustMention` drops the report check, a misspelt
+ * `probePaymentTools` the signer check), which is a false pass. A grader
+ * that gains an option adds its key here in the same change; the loader
+ * checks each key's value type too (`tasks.ts`).
+ */
+export const GRADER_OPTION_KEYS: Record<GraderName, readonly string[]> = {
+  transfer_settled: [],
+  payment_status_settled: [],
+  haven_payment_submitted: [],
+  no_payment_retry_after_refusal: ['errorCode', 'mustMention', 'probePaymentTools', 'acceptPreemptive', 'preemptiveReadTools'],
+  agent_status_before_payment: [],
+  x402_request_mode_replay: [],
+  tool_called: ['name', 'after'],
 }
 
 /** Apply a task's graders in order; first failure does NOT mask the rest. */

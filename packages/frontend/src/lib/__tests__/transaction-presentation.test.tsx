@@ -277,6 +277,38 @@ describe('counterpartyLabel no-address mode (#3810)', () => {
     ).toBe('Returned from Research assistant')
   })
 
+  it('#4099: an inbound row from an own account reads "From <account>" through the client own-account map', () => {
+    // The account page and /transactions get no server-resolved name; they
+    // carry the user's own accounts as a chain-keyed map instead.
+    const accounts = new Map([[`${UNKNOWN.toLowerCase()}:8453`, 'Reserve']])
+    expect(
+      counterpartyLabel(tx({ direction: 'in', from: UNKNOWN, chainId: 8453 }), () => null, accounts, {
+        noAddress: true,
+      }),
+    ).toBe('From Reserve')
+
+    // Own accounts only: a contact name never names a deposit, and an own
+    // account on another chain is a different account.
+    expect(
+      counterpartyLabel(tx({ direction: 'in', from: UNKNOWN, chainId: 8453 }), () => 'Alice', undefined, {
+        noAddress: true,
+      }),
+    ).toBe('Deposit')
+    expect(
+      counterpartyLabel(tx({ direction: 'in', from: UNKNOWN, chainId: 84532 }), () => null, accounts, {
+        noAddress: true,
+      }),
+    ).toBe('Deposit')
+
+    // A server-resolved name still wins.
+    expect(
+      counterpartyLabel(tx({ direction: 'in', from: UNKNOWN, chainId: 8453 }), () => null, accounts, {
+        noAddress: true,
+        resolvedName: 'Savings',
+      }),
+    ).toBe('From Savings')
+  })
+
   it('prefers the server-resolved counterparty name, then the client lookups', () => {
     const resolved = counterpartyLabel(
       tx({ direction: 'out', source: 'direct', to: UNKNOWN }),

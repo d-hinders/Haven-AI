@@ -94,9 +94,9 @@ export function transactionMovement(
  * surfaces, so every `truncate()` fallback is replaced by calm copy — a sweep
  * reads "Returned from <agent>", an x402 row without a recorded resource URL
  * falls back to its source title ("Agent payment"), an inbound row reads
- * "Deposit" — or "From <account>" when the backend named its sender
- * (`resolvedName`, only a transfer from another of the user's own accounts,
- * #4099) — and an address
+ * "Deposit" — or "From <account>" when its sender is another of the user's
+ * own accounts (the backend's `resolvedName`, else the chain-keyed
+ * `accountNamesByAddress` entry, #4099) — and an address
  * nothing resolves (no own-account name, no
  * contact, no pre-resolved counterparty name) reads "New recipient" rather
  * than `0xA873…DD35`. `options.resolvedName` carries a name resolved
@@ -130,10 +130,14 @@ export function counterpartyLabel(
     // #4099 (owner decision, 2026-10-20): a server-resolved sender name — only
     // a transfer from another of the user's own accounts — reads "From
     // <account>", so the title says the money LEFT that account (a bare name
-    // reads as the account that received it). Every other deposit carries
-    // none and stays "Deposit".
+    // reads as the account that received it). Screens without a server name
+    // (the account page, /transactions) look the sender up in the own-account
+    // map — chain-keyed only, never a contact. Every other deposit stays
+    // "Deposit".
     if (tx.direction === 'in') {
-      return options.resolvedName ? `From ${options.resolvedName}` : 'Deposit'
+      const senderAccount = accountNamesByAddress?.get(`${tx.from.toLowerCase()}:${tx.chainId}`)
+      const sender = options.resolvedName ?? senderAccount
+      return sender ? `From ${sender}` : 'Deposit'
     }
 
     const address = tx.to

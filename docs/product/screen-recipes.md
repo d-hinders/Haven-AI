@@ -505,7 +505,8 @@ Structure:
 3. A warning callout under the toolbar (#3542, carried over by #4113) while
    archived agents are hidden and at least one still has a budget redeemable
    on-chain (`isHalfRevoked`): "1 archived agent still has an active budget"
-   (plural for more), with **Show archived**, which sets Archived to Shown. A
+   (plural for more), with **Show archived**, which sets Archived to Shown
+   (omitted when every agent is archived, where the empty state offers it). A
    hidden group never hides redeemable spend authority.
 4. The card grid, filtered and sorted by the toolbar. Archived cards, once
    shown, keep their archived treatment (Restore to list, no operational

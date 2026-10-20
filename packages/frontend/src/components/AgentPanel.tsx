@@ -97,7 +97,7 @@ export default function AgentPanel() {
     [removedAgents],
   )
   // After Finish revoking lands, the server's own count is the truth — refetch
-  // quietly (no skeleton) so the marker and the toggle warning clear in place.
+  // quietly (no skeleton) so the marker and the hidden-archived callout clear in place.
   const handleBudgetEnded = useCallback(
     () => void refetchAgents({ silent: true }),
     [refetchAgents],

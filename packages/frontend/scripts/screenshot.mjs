@@ -1015,7 +1015,7 @@ export const FIXTURE_ORGANIZATIONS = [
 
 /**
  * #3542: the two HALF-REVOKED agents — credential ended in Haven (revoked) or
- * filed under Removed (archived), while the budget delegation is still
+ * been archived (Remove), while the budget delegation is still
  * redeemable on-chain, so `live_delegation_count` is 1 on each.
  *
  * Deliberately NOT part of `FIXTURE_AGENTS`: that list feeds the dashboard

@@ -937,7 +937,7 @@ export default function AgentDetailClient({ agentId }: Props) {
           onRevokeCredential={() => revokeAgent(currentAgent.id)}
           onArchive={async () => {
             await archiveAgent(currentAgent.id)
-            // The agent now lives under Removed on the list — land the user
+            // The agent is now archived, hidden from the list (#4113) — land the user
             // there rather than on a page whose actions just disappeared.
             router.push('/agents')
           }}

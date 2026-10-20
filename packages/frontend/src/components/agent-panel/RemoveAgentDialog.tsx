@@ -33,7 +33,8 @@ const LIVE_DELEGATION_STATUSES: ReadonlySet<string> = new Set(STILL_ENABLED_DELE
  *      error says the agent was NOT removed. (A dead credential next to a
  *      live on-chain budget is the state nobody should be able to create.)
  *   2. Revoke the agent — the credential stops working immediately.
- *   3. Archive (#1401) — the agent moves to Removed; history stays readable.
+ *   3. Archive (#1401) — the agent is archived (hidden from the list until
+ *      Archived: Shown, #4113); history stays readable.
  *
  * Retry-safety: a remove that failed at step 2/3 leaves the agent revoked
  * (and visibly un-archived in the primary list). Re-running skips what is
@@ -71,7 +72,7 @@ export function RemoveAgentDialog({
   onBudgetEnded?: () => void
   /** POST /agents/:id/revoke via the caller's state (kills the API key). */
   onRevokeCredential: () => Promise<void>
-  /** POST /agents/:id/archive via the caller's state (files under Removed). */
+  /** POST /agents/:id/archive via the caller's state (archives it). */
   onArchive: () => Promise<void>
   onClose: () => void
 }) {
@@ -226,8 +227,9 @@ export function RemoveAgentDialog({
                 </li>
                 <li>
                   <span className="font-medium text-[var(--v2-ink)]">Its history stays.</span> The agent
-                  moves to Removed, where every payment and record remains readable. You can restore it
-                  to the list later, but restoring never brings back its ability to spend.
+                  is archived: hidden from the list, where every payment and record remains readable
+                  (choose Archived: Shown to see it). You can restore it to the list later, but
+                  restoring never brings back its ability to spend.
                 </li>
               </ul>
           </>
@@ -275,8 +277,8 @@ export function RemoveAgentDialog({
               {finish
                 ? 'The budget has ended, but the credential could not be stopped. Choose Finish revoking to retry.'
                 : cannotEndBudgetHere
-                  ? 'The agent could not be moved to Removed, and its budget may still be active on the account it was removed from.'
-                  : 'The agent can no longer spend, but it could not be moved to Removed. Choose Finish removal to retry.'}
+                  ? 'The agent could not be archived, and its budget may still be active on the account it was removed from.'
+                  : 'The agent can no longer spend, but it could not be archived. Choose Finish removal to retry.'}
             </InlineAlert>
           )}
           {/* #1437: the backend refuses an oversized batch by naming the
